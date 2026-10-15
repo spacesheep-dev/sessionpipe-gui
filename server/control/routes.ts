@@ -25,10 +25,14 @@ export function secretEquals(a: string | undefined, b: string): boolean {
 const unauthorized = (error: string) => new HttpError(401, { reason: "unauthorized", error });
 const notFound = () => new HttpError(404, { reason: "not_found" });
 
-/** The origin a machine reached us on, for the pairing url the terminal prints. */
+/** The origin a machine reached us on, for the pairing url the terminal prints and the
+ *  WebAuthn origin check. Through a trusted proxy (ctx.remote.forwarded) the proxy's
+ *  X-Forwarded-Host and -Proto name the origin the browser saw. */
 export function requestOrigin(ctx: Ctx): string {
-  const host = ctx.req.headers.host;
-  const proto = ctx.req.headers["x-forwarded-proto"] === "https" ? "https" : "http";
+  const h = ctx.req.headers;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)?.split(",")[0]?.trim();
+  const host = (ctx.remote.forwarded ? one(h["x-forwarded-host"]) : undefined) ?? h.host;
+  const proto = one(h["x-forwarded-proto"]) === "https" ? "https" : "http";
   return host ? `${proto}://${host}` : "http://localhost";
 }
 

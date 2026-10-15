@@ -195,6 +195,28 @@ The daemon and the sinks keep using plain http.
 | ![The trust page on a phone](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/phone-trust.png) | ![The board on a phone](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/phone-board.png) | ![A session on a phone](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/phone-session.png) |
 |---|---|---|
 
+### From anywhere
+
+Outside your Wi-Fi the GUI needs an https address phones already trust. The simplest one
+is [Tailscale](https://tailscale.com): no port forwarding, no certificate to install, and
+the receiver stays off the public internet. On the receiver machine:
+
+```sh
+tailscale serve --bg 7373                                   # https://<machine>.<tailnet>.ts.net → this port
+sessionpipe-gui --public-url https://<machine>.<tailnet>.ts.net   # remembered; --no-public-url forgets
+```
+
+The setup page's optional step 6 does the same with a click once it sees Tailscale
+running. The url's host becomes the passkeys' rp id, so use that one address on the
+Wi-Fi too; passkeys made for `<machine>.local` are made again on first use. Behind the
+proxy the server trusts `X-Forwarded-For` on loopback connections only: a phone coming
+through it still needs the UI key, and the setup actions still answer only to this
+machine. Any https reverse proxy that sets `X-Forwarded-For`, `-Proto` and `-Host` works
+the same way; a public tunnel (Cloudflare, ngrok) does too, but then the UI key and the
+sink token are all that stand between the internet and your sessions, so put an access
+layer in front. Machines elsewhere on the tailnet push and pair through the same url:
+`sessionpipe connect https://<machine>.<tailnet>.ts.net`.
+
 ### Settings and skins
 
 ![The appearance popover: system, dark or light; the skin; the text size](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/appearance.png)

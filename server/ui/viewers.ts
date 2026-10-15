@@ -9,6 +9,8 @@ import type { Viewer } from "../../shared/api.js";
 export interface ViewerSource {
   ip: string;
   loopback: boolean;
+  /** Came through the trusted reverse proxy (--public-url): from anywhere, not the LAN. */
+  forwarded?: boolean;
   userAgent?: string;
 }
 
@@ -63,6 +65,7 @@ export class ViewerRegistry {
       id,
       ip: src.loopback ? "this machine" : plainIp(src.ip),
       loopback: src.loopback,
+      ...(src.forwarded ? { forwarded: true } : {}),
       ...describeViewer(src.userAgent, src.loopback),
       connectedAt: now,
       lastSeenAt: now,

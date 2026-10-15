@@ -90,6 +90,7 @@ async function boot(tmp: string, o: Partial<SetupDeps> & { tlsOn?: boolean; exec
     return { code: 0, stdout: "", stderr: "" };
   };
   let port = 0;
+  let publicUrl: string | undefined = o.publicUrl?.();
   // The harness probes read the temp home as a Linux disk, so this Mac's /Applications stays out of it.
   const env = { PATH: `${o.env?.PATH ?? path.join(tmp, "nowhere")}:/usr/bin:/bin`, HOME: tmp };
   registerSetup(router, {
@@ -99,8 +100,9 @@ async function boot(tmp: string, o: Partial<SetupDeps> & { tlsOn?: boolean; exec
       ({
         uiKey: "ui-key",
         storage: { dir: path.join(tmp, "state") },
-        control: { rpId: "localhost", enabled: true, machines: 0 },
+        control: { rpId: publicUrl ? new URL(publicUrl).hostname : "localhost", enabled: true, machines: 0 },
         tls: undefined,
+        ...(publicUrl ? { remote: { url: publicUrl, host: new URL(publicUrl).hostname } } : {}),
       }) as never,
     viewers,
     tls: () => null,
@@ -122,6 +124,12 @@ async function boot(tmp: string, o: Partial<SetupDeps> & { tlsOn?: boolean; exec
     askDaemon: o.askDaemon ?? (async () => ({ name: "test-box", version: "0.8.0", receivers: [] })),
     opensslPresent: () => true,
     tlsDir: path.join(tmp, "tls"),
+    publicUrl: () => publicUrl,
+    setPublicUrl: (u) => {
+      if (u !== undefined && !/^https:\/\/[^/]+$/.test(u)) throw new Error(`--public-url must be https: ${u}`);
+      publicUrl = u;
+    },
+    tailscale: o.tailscale ?? (async () => ({ installed: false, running: false, serving: null })),
   });
   const server = http.createServer((req, res) => void router.handle(req, res));
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -504,5 +512,69 @@ describe.skipIf(!HAVE_OPENSSL)("TLS mode turned on while running", () => {
     const again = await fetchJson(`${app.url}${SETUP_ROUTES.tlsOn}`, { method: "POST" });
     expect(again.status).toBe(200);
     expect(app.tls?.caFingerprint).toBe((r.body.tls as { caFingerprint: string }).caFingerprint);
+  });
+});
+
+describe("from anywhere (--public-url)", () => {
+  it("status carries the tailscale probe and no public url; POST /remote sets one, a bad one is 400, /remote/off forgets it", async () => {
+    const t = tempDir();
+    const tmp = t.dir;
+    const b = await boot(tmp, {
+      tailscale: async () => ({
+        installed: true,
+        running: true,
+        dnsName: "test-box.tail1234.ts.net",
+        ips: ["100.64.0.9"],
+        serving: false,
+      }),
+    });
+    try {
+      const status = async () => (await (await fetch(`${b.url}${SETUP_ROUTES.status}`)).json()) as SetupStatus;
+      let s = await status();
+      expect(s.remote).toEqual({
+        tailscale: {
+          installed: true,
+          running: true,
+          dnsName: "test-box.tail1234.ts.net",
+          ips: ["100.64.0.9"],
+          serving: false,
+        },
+        viewers: 0,
+      });
+
+      const bad = await fetch(`${b.url}${SETUP_ROUTES.remote}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: "http://test-box.tail1234.ts.net" }),
+      });
+      expect(bad.status).toBe(400);
+      expect(((await bad.json()) as { reason: string }).reason).toBe("bad_url");
+
+      const ok = await fetch(`${b.url}${SETUP_ROUTES.remote}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: "https://test-box.tail1234.ts.net" }),
+      });
+      expect(ok.status).toBe(200);
+      const j = (await ok.json()) as { ok: boolean; rpId: string; remote: { url: string } };
+      expect(j.rpId).toBe("test-box.tail1234.ts.net");
+      expect(j.remote.url).toBe("https://test-box.tail1234.ts.net");
+      s = await status();
+      expect(s.remote.publicUrl).toBe("https://test-box.tail1234.ts.net");
+
+      // A LAN address may not set it: the route is for this machine only.
+      const lan = await fetch(`${b.url}${SETUP_ROUTES.remoteOff}`, {
+        method: "POST",
+        headers: { "x-spgui-test-remote": "192.168.7.20" },
+      });
+      expect(lan.status).toBe(403);
+
+      expect((await fetch(`${b.url}${SETUP_ROUTES.remoteOff}`, { method: "POST" })).status).toBe(200);
+      s = await status();
+      expect(s.remote.publicUrl).toBeUndefined();
+    } finally {
+      await b.close();
+      t.cleanup();
+    }
   });
 });

@@ -1,12 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
-// Owned by: onboarding. What makes each of the five steps green, from the server's facts
-// and this page's own (its origin, whether passkeys can work here). Shared by the page,
-// the rail's dot and the first-run redirect so they never disagree.
+// Owned by: onboarding. What makes each of the five steps green (and the optional sixth,
+// the GUI from anywhere), from the server's facts and this page's own (its origin, whether
+// passkeys can work here). Shared by the page, the rail's dot and the first-run redirect so
+// they never disagree.
 import type { SetupStatus } from "@shared/api";
 import { passkeysAvailable } from "../control/webauthn";
 
-export type StepKey = "sessions" | "secure" | "pair" | "phone" | "try";
-export const STEP_ORDER: StepKey[] = ["sessions", "secure", "pair", "phone", "try"];
+export type StepKey = "sessions" | "secure" | "pair" | "phone" | "try" | "remote";
+export const STEP_ORDER: StepKey[] = ["sessions", "secure", "pair", "phone", "try", "remote"];
+/** The steps that are never "needs you", never count for the rail's dot or the first-run
+ *  redirect, and are not needed for "You're set": step 6 only. */
+export const OPTIONAL_STEPS: ReadonlySet<StepKey> = new Set<StepKey>(["remote"]);
+export const REQUIRED_STEPS: StepKey[] = STEP_ORDER.filter((k) => !OPTIONAL_STEPS.has(k));
+
+/** The public https url a trusted reverse proxy serves (`--public-url`), when set. `remote`
+ *  is absent on an older server. */
+export function publicUrl(s: SetupStatus): string | undefined {
+  return s.remote?.publicUrl || undefined;
+}
 
 /** Whether this page is on the https origin TLS mode serves. */
 export function onHttpsOrigin(s: SetupStatus): boolean {
@@ -18,9 +29,15 @@ export function onHttpsOrigin(s: SetupStatus): boolean {
   }
 }
 
-/** Step 2: TLS on, the system trusts the CA (or cannot say), and passkeys work right here. */
+/** A secure origin exists: TLS on with a CA the system trusts (or cannot judge), or a public
+ *  https url, whose certificate browsers already trust. */
+function secureOrigin(s: SetupStatus): boolean {
+  return (s.tls.on && s.tls.caTrusted !== false) || !!publicUrl(s);
+}
+
+/** Step 2: a secure origin exists, and passkeys work right here. */
 export function secureHere(s: SetupStatus): boolean {
-  return s.tls.on && s.tls.caTrusted !== false && passkeysAvailable(s.tls.rpId);
+  return secureOrigin(s) && passkeysAvailable(s.tls.rpId);
 }
 
 export function stepsDone(s: SetupStatus, tried: boolean): Record<StepKey, boolean> {
@@ -28,20 +45,21 @@ export function stepsDone(s: SetupStatus, tried: boolean): Record<StepKey, boole
     sessions: s.events.total > 0,
     secure: secureHere(s),
     pair: s.daemon.pairedHere && s.daemon.online,
-    phone: s.tls.on && s.viewers.phones > 0,
+    phone: (s.tls.on || !!publicUrl(s)) && s.viewers.phones > 0,
     try: s.tried.delivered > 0 || tried,
+    remote: !!publicUrl(s),
   };
 }
 
 /** The three facts a brand-new machine lacks: what sends `/` to `/setup` once. */
 export function needsSetup(s: SetupStatus): boolean {
-  return s.events.total === 0 || !s.tls.on || !s.daemon.pairedHere;
+  return s.events.total === 0 || !(s.tls.on || publicUrl(s)) || !s.daemon.pairedHere;
 }
 
 /** What the rail's "Setup" entry waits for: the durable facts (a phone on the stream
- *  comes and goes, so it is not one of them). */
+ *  comes and goes, so it is not one of them; step 6 is optional, so neither is it). */
 export function setupComplete(s: SetupStatus): boolean {
-  return s.events.total > 0 && s.tls.on && s.tls.caTrusted !== false && s.daemon.pairedHere && s.tried.delivered > 0;
+  return s.events.total > 0 && secureOrigin(s) && s.daemon.pairedHere && s.tried.delivered > 0;
 }
 
 /** Does a session's machine name mean this machine? */

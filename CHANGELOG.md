@@ -6,6 +6,17 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **From anywhere.** `--public-url https://<name>` puts the GUI behind a trusted https
+  reverse proxy on the same machine; the setup page's optional sixth step finds Tailscale,
+  shows the `tailscale serve --bg 7373` line and sets the url in one click. The url's host
+  is the passkeys' rp id, so one name works on the Wi-Fi and away; the proxy's
+  `X-Forwarded-*` headers are trusted on loopback connections only, a visitor through it
+  needs the UI key like any other device, and the setup actions stay for this machine.
+  `Info.remote` carries the `sink add` and `connect` lines for a machine elsewhere;
+  `--no-public-url` forgets it.
+
 ### Fixed
 
 - A session that ended and started again (Claude Code resumed, a compaction restart, a

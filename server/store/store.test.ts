@@ -15,6 +15,8 @@ import { Session, SID, tempDir } from "../../test/events.js";
 import { Store } from "./store.js";
 
 const KEY = sessionKey("claude-code", SID);
+/** A time a minute ago plus `s` seconds: fixtures dated by hand go "done" by silence a day later. */
+const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString();
 let tmp: { dir: string; cleanup: () => void };
 let store: Store;
 
@@ -569,7 +571,7 @@ describe("permission twins", () => {
           ...base,
           id: "01K00000000000000000000012",
           type: "turn.started",
-          time: "2026-10-14T23:17:01.000Z",
+          time: at(1),
           harness: { name: "claude-code", event: "UserPromptSubmit" },
           session: sess(1),
           data: {},
@@ -578,7 +580,7 @@ describe("permission twins", () => {
           ...base,
           id: "01K00000000000000000000013",
           type: "attention.needed",
-          time: "2026-10-14T23:17:02.000Z",
+          time: at(2),
           harness: { name: "claude-code", event: "PermissionRequest" },
           session: sess(2),
           data: { attention_id: "perm-273e341ed1d104b1", kind: "permission", tool: "Bash", message: "Bash cat > x" },
@@ -587,7 +589,7 @@ describe("permission twins", () => {
           ...base,
           id: "01K00000000000000000000014",
           type: "attention.needed",
-          time: "2026-10-14T23:17:08.000Z",
+          time: at(8),
           harness: { name: "claude-code", event: "Notification" },
           session: sess(3),
           data: { attention_id: "notif-1792019828511", kind: "permission" },

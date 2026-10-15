@@ -84,7 +84,10 @@ export function Connect() {
       {setup.local !== false && (
         <p className="page-note connect-setup">
           First time here? <Link to="/setup">Setup →</Link>
-          <span>five steps: your sessions, the secure address, pairing, your phone, a first message.</span>
+          <span>
+            five steps: your sessions, the secure address, pairing, your phone, a first message; a sixth, optional, for
+            the road.
+          </span>
         </p>
       )}
       {error && <p className="page-note is-err">{error}</p>}
@@ -129,6 +132,38 @@ export function Connect() {
             )}
           </ul>
         </div>
+        {info?.remote && (
+          <div className="connect-remote" data-connect-remote>
+            <h3>From anywhere</h3>
+            <ul className="urls">
+              <li>
+                <code className="url">{phoneUrl(info.remote.url)}</code>
+                <CopyButton text={phoneUrl(info.remote.url)} small />
+              </li>
+            </ul>
+            <div className="cmd">
+              <pre className="cmd-text">
+                <code>
+                  {reveal ? info.remote.sinkCommand : withMaskedToken(info.remote.sinkCommand, info.sinkToken)}
+                </code>
+              </pre>
+              <CopyButton text={info.remote.sinkCommand} label="Copy sink line" small />
+            </div>
+            <div className="cmd">
+              <pre className="cmd-text">
+                <code>
+                  {reveal ? info.remote.connectCommand : withMaskedToken(info.remote.connectCommand, info.sinkToken)}
+                </code>
+              </pre>
+              <CopyButton text={info.remote.connectCommand} label="Copy pair line" small />
+            </div>
+            <p className="sect-note">
+              Through the https proxy on the receiver machine, <code>{info.remote.host}</code>, from any network.
+              Passkeys are made for rp id <code>{info.control.rpId}</code>: a device that signed on the{" "}
+              <code>.local</code> name makes a new one here on first use.
+            </p>
+          </div>
+        )}
       </section>
 
       <section className="sect sect--passkeys">
@@ -389,3 +424,5 @@ const trustHref = (info: Info): string => {
 };
 
 const mask = (t: string) => (t.length <= 8 ? "••••" : `${t.slice(0, 4)}…${t.slice(-3)}`);
+/** A command line with the sink token masked, as the LAN sink line shows it before Reveal. */
+const withMaskedToken = (cmd: string, token: string) => (token ? cmd.replace(token, mask(token)) : cmd);

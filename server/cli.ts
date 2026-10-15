@@ -46,7 +46,12 @@ usage: sessionpipe-gui [options]
                     remembered in config.json until --no-tls
   --no-tls          turn TLS mode off again (remembered)
   --rp-id HOST      WebAuthn rp id control passkeys are made for (default localhost;
-                    with --tls, this machine's <name>.local)
+                    with --tls, this machine's <name>.local; with --public-url, its host)
+  --public-url URL  reached from anywhere: the https origin a reverse proxy on this
+                    machine serves (Tailscale: "tailscale serve --bg 7373", then
+                    https://<name>.<tailnet>.ts.net); remembered until --no-public-url.
+                    Passkeys are made for its host; the proxy's X-Forwarded-* are trusted
+  --no-public-url   forget the public url (remembered)
   --test-door       loopback-only test door for the conformance runner
   --themes-dir DIR  where views (themes) are installed (default <state>/themes)
   --plugins-dir DIR where plugins are installed (default <state>/plugins)
@@ -122,6 +127,8 @@ interface Args {
   replay?: string;
   speed?: number;
   rpId?: string;
+  /** `--public-url URL` a string; `--no-public-url` null; neither undefined (the remembered one). */
+  publicUrl?: string | null;
   testDoor: boolean;
   open: boolean;
   quiet: boolean;
@@ -184,6 +191,12 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
       case "--speed":
         a.speed = Number(next());
         if (!Number.isFinite(a.speed) || a.speed < 0) fail("--speed needs a number ≥ 0");
+        break;
+      case "--public-url":
+        a.publicUrl = next();
+        break;
+      case "--no-public-url":
+        a.publicUrl = null;
         break;
       case "--rp-id":
         a.rpId = next();
@@ -264,6 +277,11 @@ async function banner(app: App): Promise<string> {
     );
     lines.push(`  trust   ${info.urls.lan[0] ?? info.urls.local}${ROUTES.trust}   CA ${info.tls.caFingerprint}`);
   }
+  if (info.remote) {
+    lines.push(
+      `  anywhere ${info.remote.url}/?${UI_KEY_PARAM}=${info.uiKey}   (through your proxy; passkeys; rp id ${info.control.rpId})`,
+    );
+  }
   // With TLS on the QR opens the trust page (plain http), which installs the CA and then
   // forwards to the https origin: a fresh phone never meets a certificate warning first.
   const phoneUrl = info.urls.lan[0]
@@ -281,6 +299,11 @@ async function banner(app: App): Promise<string> {
   }
   lines.push("  from another machine:");
   lines.push(`    ${info.sinkCommand}`);
+  if (info.remote) {
+    lines.push("  from a machine anywhere (through the proxy):");
+    lines.push(`    ${info.remote.sinkCommand}`);
+    lines.push(`    ${info.remote.connectCommand}`);
+  }
   lines.push("");
   if (info.sources.outbox) {
     lines.push(`  outbox  tailing ${info.sources.outbox.path} (${info.sources.outbox.sessions} sessions)`);
@@ -579,6 +602,7 @@ async function main(): Promise<void> {
       replay: parsed.replay,
       speed: parsed.speed,
       rpId: parsed.rpId,
+      publicUrl: parsed.publicUrl,
       testDoor: parsed.testDoor,
       quiet: parsed.quiet,
       themesDir: parsed.themesDir,

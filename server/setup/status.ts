@@ -19,6 +19,7 @@ import type { ViewerRegistry } from "../ui/viewers.js";
 import type { HarnessDetector } from "./harnesses.js";
 import { type Exec, findCli, sameMachine } from "./local.js";
 import type { Pairer } from "./pairer.js";
+import type { TailscaleProbe } from "./tailscale.js";
 
 export type Lookup = (host: string) => Promise<{ address: string }>;
 
@@ -124,6 +125,9 @@ export interface StatusDeps {
   lookup: Lookup;
   askDaemon: AskDaemon;
   opensslPresent: () => boolean;
+  /** `--public-url`, when set. */
+  publicUrl: () => string | undefined;
+  tailscale: TailscaleProbe;
   /** The registry's harnesses on this disk (`harnesses.ts`), its probes cached across polls. */
   harnesses: HarnessDetector;
 }
@@ -140,10 +144,11 @@ export async function buildStatus(d: StatusDeps): Promise<SetupStatus> {
   const tls = d.tls();
   const material = tls ?? readCerts(d.tlsDir);
   const hostname = tls?.hostname ?? localHostname(d.hostname);
-  const [caTrusted, mdns, daemon] = await Promise.all([
+  const [caTrusted, mdns, daemon, tailscale] = await Promise.all([
     d.platform === "darwin" && material ? caTrustedOnMac(d.exec, material) : Promise.resolve(null),
     lookupWithTimeout(hostname, 1500, d.lookup),
     d.askDaemon(daemonSocketPath(spRoot, d.env, d.platform)),
+    d.tailscale(),
   ]);
 
   // The machine's name: what the daemon says when it answers, else this host's.
@@ -175,7 +180,9 @@ export async function buildStatus(d: StatusDeps): Promise<SetupStatus> {
     }
   }
 
-  const phones = d.viewers.list().filter((v) => !v.loopback && (v.device === "phone" || v.device === "tablet")).length;
+  const allViewers = d.viewers.list();
+  const phones = allViewers.filter((v) => !v.loopback && (v.device === "phone" || v.device === "tablet")).length;
+  const publicUrl = d.publicUrl();
   const delivered = d.control.activity(1000).filter((a) => a.outcome === "delivered").length;
 
   return {
@@ -213,6 +220,11 @@ export async function buildStatus(d: StatusDeps): Promise<SetupStatus> {
     },
     viewers: { phones },
     tried: { delivered },
+    remote: {
+      ...(publicUrl ? { publicUrl } : {}),
+      tailscale,
+      viewers: allViewers.filter((v) => v.forwarded).length,
+    },
     platform: d.platform,
     uiKey: d.uiKey(),
   };

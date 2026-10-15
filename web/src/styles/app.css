@@ -1669,6 +1669,24 @@
   color: var(--fg-3);
   font-size: var(--text-md);
 }
+/* The phone section's "From anywhere" block (Info.remote): the public url and the two
+   lines a machine elsewhere needs, under the LAN addresses, a hairline above. */
+.connect-remote {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: var(--hairline) solid var(--line);
+}
+/* The list's flex basis is for the row beside the QR code; stacked here it would be a height. */
+.connect-remote .urls {
+  flex: none;
+}
+.connect-remote h3 {
+  font-size: var(--text-md);
+  font-weight: 500;
+  line-height: 1.3;
+}
 .url {
   flex: 1;
   min-width: 0;

@@ -38,6 +38,7 @@ export function serveStream(ctx: Ctx, deps: StreamDeps): void {
   const me = deps.viewers.add({
     ip: ctx.remote.ip,
     loopback: ctx.remote.loopback,
+    forwarded: ctx.remote.forwarded,
     userAgent: Array.isArray(ua) ? ua[0] : ua,
   });
   write({ kind: "snapshot", snapshot: { ...deps.snapshot(), viewers: deps.viewers.list(me) } });

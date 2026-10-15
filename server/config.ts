@@ -14,6 +14,9 @@ export interface GuiConfig {
   createdAt: string;
   /** TLS mode on by default (`--tls` persists true, `--no-tls` false); absent = off. */
   tls?: boolean;
+  /** The https origin a trusted reverse proxy on this machine serves from anywhere
+   *  (`--public-url`, remembered; `--no-public-url` forgets). Also the passkeys' rp id. */
+  publicUrl?: string;
   /** Extensions turned off, as `<kind>:<id>` (`view:canvas`): the way a bundled one, which
    *  cannot be removed, is hidden. Honoured by the registries and the rail. */
   disabled?: string[];
@@ -52,6 +55,7 @@ export function readGuiConfig(dir: string): GuiConfig {
     createdAt: typeof cfg.createdAt === "string" ? cfg.createdAt : new Date().toISOString(),
   };
   if (typeof cfg.tls === "boolean") full.tls = cfg.tls;
+  if (typeof cfg.publicUrl === "string" && cfg.publicUrl) full.publicUrl = cfg.publicUrl;
   if (Array.isArray(cfg.disabled)) full.disabled = cfg.disabled.filter((d): d is string => typeof d === "string");
   if (Array.isArray(cfg.enabled)) full.enabled = cfg.enabled.filter((d): d is string => typeof d === "string");
   if (!complete) writeGuiConfig(dir, full);
@@ -74,6 +78,16 @@ export function rotateSinkToken(dir: string, cfg: GuiConfig): GuiConfig {
 export function setTlsPreference(dir: string, cfg: GuiConfig, on: boolean): GuiConfig {
   const next = { ...cfg, tls: on };
   if (cfg.tls !== on) writeGuiConfig(dir, next);
+  return next;
+}
+
+/** Remember `--public-url <url>`, or forget it (`undefined`), so a plain start keeps the choice. */
+export function setPublicUrl(dir: string, cfg: GuiConfig, url: string | undefined): GuiConfig {
+  if (cfg.publicUrl === url) return cfg;
+  const next = { ...cfg };
+  if (url) next.publicUrl = url;
+  else delete next.publicUrl;
+  writeGuiConfig(dir, next);
   return next;
 }
 

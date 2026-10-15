@@ -6,7 +6,7 @@ import https from "node:https";
 import type net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_PORT, type Info, ROUTES } from "../shared/api.js";
+import { DEFAULT_PORT, type Info, type RemoteInfo, ROUTES } from "../shared/api.js";
 import {
   defaultStateDir,
   type GuiConfig,
@@ -15,6 +15,7 @@ import {
   rotateSinkToken,
   setDisabled,
   setEnabled,
+  setPublicUrl,
   setTlsPreference,
 } from "./config.js";
 import { type Control, createControl } from "./control/index.js";
@@ -56,6 +57,10 @@ export interface AppOptions {
   /** The rp id control passkeys are made for (CONTROL.md §2); "localhost" by default,
    *  the `.local` hostname when `tls` is on. */
   rpId?: string;
+  /** The https origin a trusted reverse proxy on this machine serves from anywhere
+   *  (`--public-url`): remembered in config.json; `null` forgets it; undefined keeps the
+   *  remembered one. Sets the rp id and makes the router trust X-Forwarded-* from loopback. */
+  publicUrl?: string | null;
   /** TLS mode: the same port also answers https with a certificate from the GUI's own
    *  local CA (server/tls), so passkeys work from a phone. Needs `openssl`. */
   tls?: boolean;
@@ -93,6 +98,10 @@ export interface App {
   readonly tls: TlsMaterial | null;
   /** The WebAuthn rp id right now ("localhost", or `<name>.local` with TLS mode). */
   readonly rpId: string;
+  /** `--public-url`, normalised (no trailing slash), when set. */
+  readonly publicUrl: string | undefined;
+  /** Set or forget it at runtime; remembered in config.json. Throws on a bad url. */
+  setPublicUrl(url: string | undefined): void;
   /** Turn TLS mode on without a restart: certificates made if needed, the https side
    *  attached to the running listener, the rp id switched, `tls: true` remembered.
    *  Throws TlsError (no openssl). A no-op when already on. */
@@ -115,6 +124,32 @@ export interface App {
   close(): Promise<void>;
 }
 
+/** `--public-url`: an https origin, nothing after the host and port. The host is what
+ *  passkeys are bound to, so a path or query would only mislead. */
+export function normalizePublicUrl(raw: string): string {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    throw new Error(`--public-url: not a url: ${raw}`);
+  }
+  if (u.protocol !== "https:") throw new Error(`--public-url must be https (passkeys need a secure origin): ${raw}`);
+  if (u.username || u.password) throw new Error("--public-url: no credentials in the url");
+  if ((u.pathname !== "/" && u.pathname !== "") || u.search || u.hash)
+    throw new Error(`--public-url is an origin, https://host[:port], nothing after it: ${raw}`);
+  return u.origin;
+}
+
+/** Info.remote: how a machine elsewhere pushes events and pairs through the proxy. */
+function remoteInfo(url: string, sinkToken: string): RemoteInfo {
+  return {
+    url,
+    host: new URL(url).hostname,
+    sinkCommand: `sessionpipe sink add ${url} --tier 3 --token ${sinkToken}`,
+    connectCommand: `sessionpipe connect ${url}`,
+  };
+}
+
 export async function createApp(opts: AppOptions = {}): Promise<App> {
   const startedAt = new Date().toISOString();
   const stateDir = opts.stateDir ?? defaultStateDir();
@@ -125,7 +160,14 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   let tls: TlsMaterial | null = opts.tls
     ? ensureCerts(path.join(stateDir, "tls"), { hostname: opts.tlsHostname, addresses: lanAddresses() })
     : null;
-  let rpId = opts.rpId ?? tls?.hostname ?? "localhost";
+  // --public-url: given → remembered; null → forgotten; undefined → the remembered one.
+  if (opts.publicUrl !== undefined)
+    config = setPublicUrl(stateDir, config, opts.publicUrl === null ? undefined : normalizePublicUrl(opts.publicUrl));
+  let publicUrl: string | undefined = config.publicUrl ? normalizePublicUrl(config.publicUrl) : undefined;
+  const publicHost = (): string | undefined => (publicUrl ? new URL(publicUrl).hostname : undefined);
+  const chooseRpId = (): string => opts.rpId ?? publicHost() ?? tls?.hostname ?? "localhost";
+  let rpId = chooseRpId();
+  router.trustProxy = () => publicUrl !== undefined;
   const uiKey = (): string => config.uiKey;
   const uiAuth = uiAuthFor(uiKey);
 
@@ -188,7 +230,12 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       version: packageVersion(),
       startedAt,
       port,
-      urls: { local: `http://localhost:${port}`, lan, ...(tls ? { https: httpsUrl()! } : {}) },
+      urls: {
+        local: `http://localhost:${port}`,
+        lan,
+        ...(tls ? { https: httpsUrl()! } : {}),
+        ...(publicUrl ? { public: publicUrl } : {}),
+      },
       sinkCommand: `sessionpipe sink add ${base} --tier 3 --token ${config.sinkToken}`,
       sinkToken: config.sinkToken,
       uiKey: config.uiKey,
@@ -201,6 +248,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       wellKnown: wellKnown(control),
       control: { enabled: true, rpId, machines: control.machines().size },
       hostname: os.hostname().replace(/\.(local|lan|home)$/i, ""),
+      ...(publicUrl ? { remote: remoteInfo(publicUrl, config.sinkToken) } : {}),
       ...(tls
         ? {
             tls: {
@@ -300,9 +348,16 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     httpsServer = makeHttps(m);
     listener.setHttps(httpsServer);
     tls = m;
-    rpId = opts.rpId ?? m.hostname;
+    rpId = chooseRpId();
     config = setTlsPreference(stateDir, config, true);
     return m;
+  };
+  /** The setup page's "Use https://…" and "Stop using it": at runtime, remembered. */
+  const applyPublicUrl = (url: string | undefined): void => {
+    const next = url ? normalizePublicUrl(url) : undefined;
+    publicUrl = next;
+    rpId = chooseRpId();
+    config = setPublicUrl(stateDir, config, next);
   };
 
   const setup = registerSetup(router, {
@@ -317,6 +372,8 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     outbox,
     outboxPath: opts.outboxPath,
     testDoor: opts.testDoor ?? false,
+    publicUrl: () => publicUrl,
+    setPublicUrl: applyPublicUrl,
   });
   router.fallback = staticFiles(opts.webDir ?? webDir(), { uiAuth, uiKey });
 
@@ -343,6 +400,10 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       return rpId;
     },
     enableTls,
+    get publicUrl() {
+      return publicUrl;
+    },
+    setPublicUrl: applyPublicUrl,
     router,
     store,
     control,

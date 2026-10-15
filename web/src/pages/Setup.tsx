@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: onboarding. /setup: a first run in five steps, each green when this machine
-// has done its part, with one action each. The facts come from GET /api/ui/setup/status
-// every two seconds (this machine only), so a step turns green by itself the moment the
-// outbox gets its first event, the CA is trusted, the daemon polls, a phone connects, a
-// message comes back delivered. Everything an action does is explained next to it.
+// has done its part, with one action each, and an optional sixth (the GUI from anywhere
+// through a trusted https proxy) that is never "needs you". The facts come from GET
+// /api/ui/setup/status every two seconds (this machine only), so a step turns green by
+// itself the moment the outbox gets its first event, the CA is trusted, the daemon polls, a
+// phone connects, a message comes back delivered. Everything an action does is explained
+// next to it.
 import type { HarnessStatus, SessionSummary, SetupStatus } from "@shared/api";
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Ago, CopyButton, HarnessGlyph, Spinner, Toggle } from "../components/bits";
@@ -19,7 +21,16 @@ import { useAppState, useStore } from "../data/hooks";
 import { sessionTitle } from "../lib/format";
 import { Link, navigate } from "../lib/router";
 import { markSetupSeen, refreshSetup, SetupError, setupApi, type TrustResult, useSetupStatus } from "../setup/api";
-import { onHttpsOrigin, STEP_ORDER, type StepKey, sameMachineName, stepsDone } from "../setup/steps";
+import {
+  OPTIONAL_STEPS,
+  onHttpsOrigin,
+  publicUrl,
+  REQUIRED_STEPS,
+  STEP_ORDER,
+  type StepKey,
+  sameMachineName,
+  stepsDone,
+} from "../setup/steps";
 import "./setup.css";
 
 export const INSTALL = "npx sessionpipe install";
@@ -37,6 +48,7 @@ export function Setup() {
     let first = true;
     for (const k of STEP_ORDER) {
       if (done?.[k]) out[k] = "done";
+      else if (OPTIONAL_STEPS.has(k)) out[k] = "todo";
       else {
         out[k] = first ? "needs" : "todo";
         first = false;
@@ -44,7 +56,7 @@ export function Setup() {
     }
     return out;
   }, [done]);
-  const allDone = !!done && STEP_ORDER.every((k) => done[k]);
+  const allDone = !!done && REQUIRED_STEPS.every((k) => done[k]);
 
   const skip = () => {
     markSetupSeen();
@@ -56,8 +68,8 @@ export function Setup() {
       <header className="setup-head">
         <h1>Set up sessionpipe gui</h1>
         <p className="setup-lead">
-          Five steps, each green once this machine has done its part. The page checks every two seconds, so a step turns
-          green by itself. Nothing leaves your network.
+          Five steps, each green once this machine has done its part, and an optional sixth for the road. The page
+          checks every two seconds, so a step turns green by itself. Nothing leaves your network.
         </p>
       </header>
       {state.local === false && (
@@ -75,6 +87,7 @@ export function Setup() {
           <PairStep s={s} mark={marks.pair} secure={done.secure} />
           <PhoneStep s={s} mark={marks.phone} />
           <TryStep s={s} mark={marks.try} ready={done.secure && done.pair} onDelivered={() => setTried(true)} />
+          <RemoteStep s={s} mark={marks.remote} />
         </ol>
       )}
       {s && done && (
@@ -123,6 +136,7 @@ function Step({
   what,
   children,
   why,
+  optional = false,
 }: {
   k: StepKey;
   n: number;
@@ -131,8 +145,10 @@ function Step({
   what: string;
   children?: React.ReactNode;
   why?: React.ReactNode;
+  /** Never "needs you": a quiet "optional" stands where that word would go. */
+  optional?: boolean;
 }) {
-  const label = mark === "done" ? "done" : mark === "needs" ? "needs you" : "later";
+  const label = mark === "done" ? "done" : mark === "needs" ? "needs you" : optional ? "optional" : "later";
   return (
     <li className={`step step--${mark}`} data-step={k} data-mark={mark}>
       <span className={`step-mark step-mark--${mark}`} role="img" aria-label={label}>
@@ -156,12 +172,13 @@ function Step({
           <span className="step-n num">{n}</span>
           {title}
           {mark === "needs" && <span className="step-needs">needs you</span>}
+          {optional && mark !== "done" && <span className="step-optional">optional</span>}
         </h2>
         <p className="step-what">{what}</p>
         {children}
         {why && (
           <details className="step-why">
-            <summary>{mark === "done" ? "details" : "why isn't this green?"}</summary>
+            <summary>{mark === "done" || optional ? "details" : "why isn't this green?"}</summary>
             <div className="step-why-body">{why}</div>
           </details>
         )}
@@ -920,6 +937,199 @@ function TryStep({
             </ol>
           )}
         </form>
+      )}
+    </Step>
+  );
+}
+
+// ---------- 6 · from anywhere (optional) ----------
+
+/** The port a proxy on this machine forwards to: the one TLS mode names, else this page's. */
+function listenPort(s: SetupStatus): string {
+  try {
+    const p = new URL(s.tls.httpsUrl).port;
+    if (p) return p;
+  } catch {
+    // fall through
+  }
+  return location.port || "7373";
+}
+
+function RemoteStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
+  const store = useStore();
+  const r = s.remote;
+  const ts = r?.tailscale;
+  const url = publicUrl(s);
+  const port = listenPort(s);
+  const [busy, setBusy] = useState<"on" | "off" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const act = async (what: "on" | "off", run: () => Promise<unknown>) => {
+    setBusy(what);
+    setError(null);
+    try {
+      await run();
+      // The rp id changed under the running server: every cached fact about it is stale.
+      resetInfoCache();
+      await store.transport.info().catch(() => undefined);
+      await refreshSetup();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const use = (u: string) => act("on", () => setupApi.remoteOn(u));
+  const stop = () => act("off", () => setupApi.remoteOff());
+
+  const dnsUrl = ts?.dnsName ? `https://${ts.dnsName}` : null;
+  const serveCmd = `tailscale serve --bg ${port}`;
+  const proxyNote = (
+    <p className="step-note">
+      Any other https proxy works too: run it on this machine, point it at port <code>{port}</code> and let it forward{" "}
+      <code>X-Forwarded-For</code>; then <code>sessionpipe-gui --public-url https://&lt;its name&gt;</code>.
+    </p>
+  );
+
+  let body: React.ReactNode;
+  if (mark === "done" && url) {
+    body = (
+      <div className="step-action step-action--col">
+        <div className="cmd">
+          <pre className="step-cmd">
+            <code>{url}</code>
+          </pre>
+          <CopyButton text={url} label="Copy" small />
+        </div>
+        <p className="step-note">
+          {r?.viewers === 0 || r?.viewers === undefined
+            ? "No device has come through it yet."
+            : `${r.viewers} ${r.viewers === 1 ? "device" : "devices"} came through it.`}{" "}
+          Passkeys are made for <code>{s.tls.rpId}</code> now; a browser that signed on the <code>.local</code> name
+          makes a new one on first use.
+        </p>
+        {ts?.serving === false && (
+          <p className="step-note step-note--err">
+            <code>tailscale serve</code> is not forwarding to port {port} yet: <code>{serveCmd}</code> on this machine.
+          </p>
+        )}
+        <p className="step-note">
+          <button
+            type="button"
+            className="step-link"
+            onClick={() => void stop()}
+            disabled={busy !== null}
+            data-action="remote-off"
+          >
+            {busy === "off" ? "Stopping…" : "Stop using it"}
+          </button>
+          <span> · the rp id goes back to {s.tls.on ? s.tls.hostname : "localhost"}.</span>
+        </p>
+      </div>
+    );
+  } else if (!r || !ts) {
+    body = (
+      <div className="step-action step-action--col">
+        <p className="step-note">
+          This server does not report Tailscale yet; start it with <code>--public-url</code> once it does.
+        </p>
+        {proxyNote}
+      </div>
+    );
+  } else if (!ts.installed) {
+    body = (
+      <div className="step-action step-action--col">
+        <p className="step-note">
+          Tailscale is not installed here: get it at{" "}
+          <a href="https://tailscale.com/download" className="step-a" target="_blank" rel="noreferrer">
+            tailscale.com/download
+          </a>
+          , sign in, and this step continues by itself.
+        </p>
+        {proxyNote}
+      </div>
+    );
+  } else if (!ts.running) {
+    body = (
+      <div className="step-action step-action--col">
+        <p className="step-note">Tailscale is installed but not connected: open it and sign in.</p>
+        {proxyNote}
+      </div>
+    );
+  } else if (!dnsUrl) {
+    body = (
+      <div className="step-action step-action--col">
+        <p className="step-note">
+          Tailscale is connected but has no MagicDNS name for this machine yet. Turn on MagicDNS and HTTPS certificates
+          in the tailnet's DNS settings, then this step continues by itself.
+        </p>
+        {proxyNote}
+      </div>
+    );
+  } else {
+    body = (
+      <div className="step-action step-action--col">
+        <p className="step-note">In a terminal on this machine, once (Tailscale remembers it across restarts):</p>
+        <div className="cmd">
+          <pre className="step-cmd">
+            <code>{serveCmd}</code>
+          </pre>
+          <CopyButton text={serveCmd} label="Copy" small />
+        </div>
+        <div className="step-action">
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => void use(dnsUrl)}
+            disabled={busy !== null}
+            data-action="remote-on"
+          >
+            {busy === "on" ? "Switching…" : `Use ${dnsUrl}`}
+          </button>
+          <span className="step-note">
+            {ts.serving === false ? "The serve is not forwarding here yet; run the command first. " : ""}
+            Passkeys made for <code>{s.tls.hostname}</code> will be made again for this name on first use.
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Step
+      k="remote"
+      n={6}
+      mark={mark}
+      optional
+      title="From anywhere"
+      what="Outside your Wi-Fi the GUI needs an https address that phones already trust. Tailscale gives one with no port forwarding; any https proxy that forwards X-Forwarded-For works."
+      why={
+        <Facts
+          rows={[
+            ["public url", url ?? "none"],
+            ["rp id", s.tls.rpId],
+            [
+              "tailscale",
+              !ts
+                ? "not reported by this server"
+                : !ts.installed
+                  ? "not installed"
+                  : !ts.running
+                    ? "installed, not connected"
+                    : `connected${ts.ips?.length ? ` · ${ts.ips.join(", ")}` : ""}`,
+            ],
+            ["dns name", ts?.dnsName ?? "—"],
+            ["serving this port", ts ? yesNo(ts.serving) : "unknown"],
+            ["viewers through it", String(r?.viewers ?? 0)],
+          ]}
+        />
+      }
+    >
+      {body}
+      {error && (
+        <p className="step-note step-note--err" role="alert">
+          {error}
+        </p>
       )}
     </Step>
   );

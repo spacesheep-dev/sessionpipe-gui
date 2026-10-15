@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* The setup page: one column of five rows, a mark in the gutter, one action each. The
-   same tokens and rules as app.css: hairlines, 400/500/600, amber only on the step that
-   needs the person, green (--ok) only on a check mark. */
+/* The setup page: one column of six rows (the sixth optional), a mark in the gutter, one
+   action each. The same tokens and rules as app.css: hairlines, 400/500/600, amber only on
+   the step that needs the person, green (--ok) only on a check mark. */
 
 .setup {
   max-width: 720px;
@@ -95,6 +95,12 @@
   font-size: var(--text-sm);
   font-weight: 500;
 }
+/* Step 6's word where "needs you" would stand: quiet, never amber. */
+.step-optional {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
 .step--done .step-title {
   color: var(--fg-2);
 }
@@ -129,6 +135,22 @@
 }
 .step-gate {
   color: var(--fg-3);
+}
+/* A plain link, or a button that reads as one, inside a note. */
+.step-a,
+.step-link {
+  color: var(--fg-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-size: inherit;
+}
+.step-a:hover,
+.step-link:hover {
+  color: var(--fg);
+}
+.step-link:disabled {
+  color: var(--fg-4);
+  text-decoration: none;
 }
 .step-wait {
   display: inline-flex;

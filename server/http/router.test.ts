@@ -43,3 +43,39 @@ describe("gzip", () => {
     server.close();
   });
 });
+
+describe("trusted proxy", () => {
+  async function probe(trust: boolean, headers: Record<string, string>) {
+    const r = new Router();
+    r.trustProxy = () => trust;
+    r.get("/who", (ctx) => ({ status: 200, json: ctx.remote }));
+    const server = createServer((req, res) => void r.handle(req, res));
+    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+    const port = (server.address() as { port: number }).port;
+    try {
+      return (await (await fetch(`http://127.0.0.1:${port}/who`, { headers })).json()) as {
+        ip: string;
+        loopback: boolean;
+        forwarded: boolean;
+      };
+    } finally {
+      server.closeAllConnections?.();
+      await new Promise<void>((ok) => server.close(() => ok()));
+    }
+  }
+
+  it("ignores X-Forwarded-For unless the router trusts a proxy", async () => {
+    const r = await probe(false, { "x-forwarded-for": "100.64.0.9" });
+    expect(r).toMatchObject({ loopback: true, forwarded: false });
+  });
+
+  it("with a trusted proxy, a loopback connection is the first forwarded address", async () => {
+    const r = await probe(true, { "x-forwarded-for": "100.64.0.9, 10.0.0.1" });
+    expect(r).toEqual({ ip: "100.64.0.9", loopback: false, forwarded: true });
+  });
+
+  it("a forwarded loopback address stays this machine; no header stays loopback", async () => {
+    expect(await probe(true, { "x-forwarded-for": "127.0.0.1" })).toMatchObject({ loopback: true, forwarded: false });
+    expect(await probe(true, {})).toMatchObject({ loopback: true, forwarded: false });
+  });
+});

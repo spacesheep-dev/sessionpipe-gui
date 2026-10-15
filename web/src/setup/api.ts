@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: onboarding. The browser's side of /api/ui/setup: one shared poller for the
-// status (fast while the setup page is open, slow for the rail's dot), the four actions,
+// status (fast while the setup page is open, slow for the rail's dot), the six actions,
 // and the per-device "seen" flag that keeps the first-run redirect to once.
-import type { SetupStatus } from "@shared/api";
+import type { RemoteInfo, SetupStatus } from "@shared/api";
 import { ROUTES } from "@shared/api";
 import { useEffect, useSyncExternalStore } from "react";
 
@@ -73,11 +73,20 @@ export interface TrustResult {
   error?: string;
 }
 
+/** POST /remote: the public url is set and remembered, and the rp id switches to its host now. */
+export interface RemoteOnResult {
+  ok: true;
+  remote: RemoteInfo;
+  rpId: string;
+}
+
 export const setupApi = {
   tlsOn: () => post<TlsOnResult>("/tls/on"),
   tlsTrust: () => post<TrustResult>("/tls/trust"),
   pair: (folders: string[]) => post<{ started: boolean; active?: boolean }>("/pair", { folders }),
   pairCancel: () => post<{ cancelled: boolean }>("/pair/cancel"),
+  remoteOn: (url: string) => post<RemoteOnResult>("/remote", { url }),
+  remoteOff: () => post<{ ok: true }>("/remote/off"),
 };
 
 // ---------- the shared poller ----------

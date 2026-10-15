@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
-// The first-run page: five steps with the right marks on the demo server (sessions green,
-// TLS off → "Turn on"), step 2 further along on the TLS instance, the this-machine guard
+// The first-run page: six steps with the right marks on the demo server (sessions green,
+// TLS off → "Turn on", the optional sixth quiet), step 2 further along on the TLS instance, the this-machine guard
 // (a LAN address → 403, through the test door's remote-address header), the one-time
 // redirect from / and its dismissal, and the https link the pairing page and the pending
 // list offer when passkeys cannot work on the origin the daemon printed.
@@ -15,12 +15,15 @@ const STATUS = "/api/ui/setup/status";
 const CONTROL = "/api/sessionpipe/v1/control";
 
 test.describe("setup on the demo server (TLS off)", () => {
-  test("five steps: sessions green, secure needs you with Turn on, the rest wait", async ({ page }) => {
+  test("six steps: sessions green, secure needs you with Turn on, the rest wait, the sixth optional", async ({
+    page,
+  }) => {
     await openPage(page, "/setup");
     await expect(page.getByRole("heading", { name: "Set up sessionpipe gui" })).toBeVisible();
     const steps = page.locator("li.step");
-    await expect(steps).toHaveCount(5);
-    await expect(steps.nth(0)).toHaveAttribute("data-step", "sessions");
+    await expect(steps).toHaveCount(6);
+    for (const [i, k] of ["sessions", "secure", "pair", "phone", "try", "remote"].entries())
+      await expect(steps.nth(i)).toHaveAttribute("data-step", k);
     await expect(steps.nth(0)).toHaveAttribute("data-mark", "done", { timeout: 15_000 });
     await expect(steps.nth(1)).toHaveAttribute("data-mark", "needs");
     await expect(steps.nth(1).getByRole("button", { name: "Turn on" })).toBeVisible();
@@ -30,6 +33,11 @@ test.describe("setup on the demo server (TLS off)", () => {
     await expect(steps.nth(3).getByRole("img", { name: "QR code for your phone" })).toBeVisible();
     await expect(steps.nth(4)).toHaveAttribute("data-mark", "todo");
     await expect(steps.nth(4)).toContainText("finish steps 2 and 3 first");
+    // Step 6 is optional: "todo", never "needs you", the word "optional" in its heading instead.
+    await expect(steps.nth(5)).toHaveAttribute("data-mark", "todo");
+    await expect(steps.nth(5).locator(".step-title")).toContainText("From anywhere");
+    await expect(steps.nth(5).locator(".step-optional")).toHaveText("optional");
+    await expect(steps.nth(5).locator(".step-needs")).toHaveCount(0);
     await expect(page.locator("[data-setup-done]")).toHaveCount(0);
     await expect(page.locator("[data-setup-skip]")).toBeVisible();
     // The rail shows the entry with its dot while steps remain.
@@ -60,6 +68,45 @@ test.describe("setup on the demo server (TLS off)", () => {
     expect(s.daemon.pairedHere).toBe(false);
     expect(typeof s.viewers.phones).toBe("number");
     expect(typeof s.tried.delivered).toBe("number");
+  });
+
+  test("step 6 shows Tailscale's state on this machine and its actions are this machine's", async ({
+    page,
+    request,
+  }) => {
+    const s = (await (await request.get(STATUS)).json()) as {
+      remote?: { publicUrl?: string; tailscale: { installed: boolean; running: boolean; dnsName?: string } };
+    };
+    // TODO(server): drop the skip once /api/ui/setup/status reports `remote` (the server side of step 6).
+    test.skip(!s.remote, "the server does not report `remote` yet");
+    const r = s.remote!;
+    for (const p of ["/remote", "/remote/off"]) {
+      const lan = await request.post(`${TLS_HTTP}/api/ui/setup${p}`, {
+        headers: { "x-spgui-test-remote": "192.168.1.9", "content-type": "application/json" },
+        data: { url: "https://box.tail1234.ts.net" },
+      });
+      expect(lan.status(), p).toBe(403);
+    }
+    await openPage(page, "/setup");
+    const step = page.locator("li.step[data-step=remote]");
+    await expect(step).toBeVisible();
+    if (r.publicUrl) {
+      await expect(step).toHaveAttribute("data-mark", "done");
+      await expect(step).toContainText(r.publicUrl);
+    } else if (!r.tailscale.installed) {
+      await expect(step.getByRole("link", { name: "tailscale.com/download" })).toHaveAttribute(
+        "href",
+        "https://tailscale.com/download",
+      );
+      await expect(step).toContainText("X-Forwarded-For");
+    } else if (!r.tailscale.running) {
+      await expect(step).toContainText("installed but not connected");
+    } else if (r.tailscale.dnsName) {
+      await expect(step).toContainText("tailscale serve --bg");
+      await expect(step.getByRole("button", { name: `Use https://${r.tailscale.dnsName}` })).toBeEnabled();
+    }
+    await step.locator("summary").click();
+    await expect(step.locator(".step-facts")).toContainText("tailscale");
   });
 
   test.describe("first run", () => {

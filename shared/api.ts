@@ -269,6 +269,8 @@ export interface Viewer {
   /** Remote address as seen by the server; "this machine" when loopback. */
   ip: string;
   loopback: boolean;
+  /** Came through the trusted https proxy (`Info.remote`): from outside the LAN. */
+  forwarded?: boolean;
   device: "phone" | "tablet" | "laptop" | "desktop" | "unknown";
   /** Short human label from the user agent, e.g. "iPhone · Safari", "Mac · Chrome". */
   label: string;
@@ -453,8 +455,9 @@ export interface Info {
   startedAt: string;
   port: number;
   /** `local` and `lan` are plain http (sinks, the daemon, the trust page); `https` is
-   *  the one secure origin, present with TLS mode on (`Info.tls`). */
-  urls: { local: string; lan: string[]; https?: string };
+   *  the secure origin TLS mode serves (`Info.tls`); `public` the one a trusted reverse
+   *  proxy on this machine serves from anywhere (`Info.remote`). */
+  urls: { local: string; lan: string[]; https?: string; public?: string };
   /** The `sessionpipe sink add …` line for another machine, with the LAN URL and the token. */
   sinkCommand: string;
   sinkToken: string;
@@ -477,6 +480,23 @@ export interface Info {
    *  `.home` suffix. A session whose `machine` matches runs here, so a file path on this
    *  machine means something to it. Absent on older servers. */
   hostname?: string;
+  /** Reached from anywhere (`--public-url`): a trusted https reverse proxy on this machine,
+   *  Tailscale's `tailscale serve` for one, forwards to the port. Absent when not set up. */
+  remote?: RemoteInfo;
+}
+
+/** The GUI from outside the LAN. The proxy terminates https with a certificate browsers
+ *  already trust, so no CA to install; it runs on this machine and forwards to the port,
+ *  and the server trusts its `X-Forwarded-For` / `-Proto` / `-Host` on connections from
+ *  loopback (so a visitor is never mistaken for this machine). The rp id is the url's host,
+ *  so passkeys made for the `.local` name must be made again under this one. */
+export interface RemoteInfo {
+  /** The https origin, e.g. `https://laptop.tail1234.ts.net`; `Info.control.rpId` is its host. */
+  url: string;
+  host: string;
+  /** For a machine elsewhere: push events, and pair control, through the same url. */
+  sinkCommand: string;
+  connectCommand: string;
 }
 
 // ---------- attachments (images sent beside a control prompt; shared/attachments.ts) ----------
@@ -594,6 +614,17 @@ export interface SetupStatus {
   viewers: { phones: number };
   /** Control messages that reached `delivered` (step 5 turns green after the first one). */
   tried: { delivered: number };
+  /** Step 6, optional: the GUI from anywhere through a trusted https proxy (`Info.remote`). */
+  remote: {
+    /** `--public-url`, when set (also remembered in config.json). */
+    publicUrl?: string;
+    /** Tailscale on this machine, the proxy the setup page recommends: `tailscale status`
+     *  answered (`running`), this node's MagicDNS name without the trailing dot, and whether
+     *  `tailscale serve` already forwards to this port (null when it could not tell). */
+    tailscale: { installed: boolean; running: boolean; dnsName?: string; ips?: string[]; serving: boolean | null };
+    /** Browsers on the stream that came through the proxy (a forwarded address). */
+    viewers: number;
+  };
   platform: string | string;
   uiKey: string;
 }

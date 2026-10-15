@@ -11,8 +11,10 @@ export interface Ctx {
   res: ServerResponse;
   url: URL;
   params: Record<string, string>;
-  /** Remote address, and whether it is this machine. */
-  remote: { ip: string; loopback: boolean };
+  /** Remote address, and whether it is this machine. `forwarded`: the address came from a
+   *  trusted proxy's X-Forwarded-For (Router.trustProxy), so the visitor is not this machine
+   *  even though the socket is loopback. */
+  remote: { ip: string; loopback: boolean; forwarded: boolean };
   /** The raw body, read once and cached. Rejects with { status: 413 } over `maxBytes`. */
   body: (maxBytes?: number) => Promise<Buffer>;
   /** The body parsed as JSON. Rejects with { status: 400 } on bad JSON. */
@@ -78,10 +80,25 @@ export class Router {
     return null;
   }
 
+  /** Whether a reverse proxy on this machine (Tailscale's `tailscale serve`, --public-url)
+   *  forwards to us: then a connection from loopback carrying X-Forwarded-For is the
+   *  visitor it names, never this machine. A header on a non-loopback socket is ignored,
+   *  and a forwarded loopback address stays loopback (the proxy's own machine). */
+  trustProxy: () => boolean = () => false;
+
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://local");
-    const ip = req.socket.remoteAddress ?? "";
-    const ctx = makeCtx(req, res, url, ip);
+    let ip = req.socket.remoteAddress ?? "";
+    let forwarded = false;
+    if (isLoopback(ip) && this.trustProxy()) {
+      const xff = req.headers["x-forwarded-for"];
+      const first = (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0]?.trim();
+      if (first && !isLoopback(first)) {
+        ip = first;
+        forwarded = true;
+      }
+    }
+    const ctx = makeCtx(req, res, url, ip, forwarded);
     const m = this.match(req.method ?? "GET", url.pathname);
     try {
       const reply = m ? await m.handler({ ...ctx, params: m.params }) : await this.fallback(ctx);
@@ -151,7 +168,7 @@ export function send(res: ServerResponse, r: Reply, req?: IncomingMessage): void
   res.end(body);
 }
 
-function makeCtx(req: IncomingMessage, res: ServerResponse, url: URL, ip: string): Ctx {
+function makeCtx(req: IncomingMessage, res: ServerResponse, url: URL, ip: string, forwarded = false): Ctx {
   let raw: Promise<Buffer> | null = null;
   let limit = Number.POSITIVE_INFINITY;
   const body = (maxBytes = 1024 * 1024): Promise<Buffer> => {
@@ -179,7 +196,7 @@ function makeCtx(req: IncomingMessage, res: ServerResponse, url: URL, ip: string
     res,
     url,
     params: {},
-    remote: { ip, loopback: isLoopback(ip) },
+    remote: { ip, loopback: isLoopback(ip), forwarded },
     body,
     json: async <T>(maxBytes?: number) => {
       const b = await body(maxBytes);
