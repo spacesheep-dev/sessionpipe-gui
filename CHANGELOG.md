@@ -6,6 +6,17 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **A failed send clears.** A message the machine could not take (`unsupported`, `expired`,
+  `failed`, `refused`) stays under the composer for five minutes, or until a later send
+  gets through, or until its ×; a delivery for two. Dismissals are per device. *Show* lists
+  everything the session carried.
+- **The composer on a phone.** With the keyboard up the composer follows the visual
+  viewport, the tab bar and the context line's explanation step aside, and the field reads
+  at 16 px so iOS does not zoom into it. The session header wraps the machine and branch
+  under the title instead of squeezing it out; a turn's tool fold is a thumb-sized row.
+
 ## [0.1.0] - 2026-10-15
 
 The first public release: a sessionpipe receiver with a face.

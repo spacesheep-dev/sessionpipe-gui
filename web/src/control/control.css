@@ -21,6 +21,13 @@
   resize: none;
   field-sizing: content;
 }
+/* WebKit zooms the page into a field whose text is under 16 px; on a phone the field
+   reads at 16 px or the body size, whichever is larger, so focusing it never zooms. */
+@media (max-width: 839px) {
+  .ctl-ask textarea {
+    font-size: max(16px, var(--text-md));
+  }
+}
 .ctl-ask textarea:focus-visible {
   outline: var(--focus-width, 2px) solid var(--fg);
   outline-offset: 1px;
@@ -112,6 +119,38 @@
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   flex: none;
+}
+/* The × on a settled row: a quiet mark with a row-sized hit area, bleeding into the
+   row's 8 px padding so the head keeps its height. */
+.ctl-act-x {
+  flex: none;
+  align-self: center;
+  display: inline-grid;
+  place-items: center;
+  width: var(--row-sm);
+  height: var(--row-sm);
+  margin: -8px 0;
+  border-radius: var(--radius);
+  color: var(--fg-3);
+  font-size: var(--text-md);
+  line-height: 1;
+}
+.ctl-act-x:hover {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+.ctl-act-x:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--fg);
+  outline-offset: -2px;
+}
+/* "2 earlier messages · show" under the rows. */
+.ctl-acts-more {
+  padding: 6px 0 2px;
+  border-top: var(--hairline) solid var(--line);
+  font-size: var(--text-sm);
+}
+.ctl-acts-more .ctl-link {
+  color: var(--fg-3);
 }
 .ctl-act-state {
   display: flex;

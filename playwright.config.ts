@@ -79,7 +79,8 @@ export default defineConfig({
   webServer: [
     {
       // serve.mjs installs the fixture themes with the CLI, then runs dist/cli.js with these args.
-      command: `node test/e2e/serve.mjs --port ${E2E_PORT} --state "${stateDir}" --no-outbox --demo --speed 20 --quiet`,
+      // --test-door (loopback only) lets mobile.spec.ts pair a machine and ack a send.
+      command: `node test/e2e/serve.mjs --port ${E2E_PORT} --state "${stateDir}" --no-outbox --demo --speed 20 --test-door --quiet`,
       url: `${E2E_BASE}/api/ui/info`,
       reuseExistingServer: false,
       timeout: 30_000,
