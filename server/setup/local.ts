@@ -8,6 +8,7 @@ import { execFile } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { machineKey } from "../../shared/machine.js";
 import { isLoopback } from "../http/net.js";
 
 /** Every address of this machine's interfaces, IPv4 and IPv6, zone ids dropped. */
@@ -28,15 +29,9 @@ export function isThisMachine(ip: string, addresses: string[] = ownAddresses()):
 }
 
 /** Does a machine name (what the daemon calls itself; `session.machine` in events) name
- *  this host? Case-insensitive, with or without the `.local` suffix. */
+ *  this host? Case-insensitive, with or without the `.local` suffix (shared/machine.ts). */
 export function sameMachine(name: string | undefined, hostname: string): boolean {
-  if (!name) return false;
-  const norm = (s: string) =>
-    s
-      .trim()
-      .toLowerCase()
-      .replace(/\.local\.?$/, "");
-  return norm(name) === norm(hostname);
+  return !!name && machineKey(name) === machineKey(hostname);
 }
 
 export interface CliInfo {

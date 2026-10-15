@@ -4,6 +4,7 @@
 // happens, and a `: ping` comment every 15 s so proxies and phones keep the connection.
 // Each stream is one Viewer in the registry for as long as it stays open.
 import type { Snapshot, StreamMessage } from "../../shared/api.js";
+import { machineEntry } from "../../shared/machine.js";
 import type { Control } from "../control/index.js";
 import type { Ctx } from "../http/router.js";
 import type { Store } from "../store/store.js";
@@ -43,15 +44,17 @@ export function serveStream(ctx: Ctx, deps: StreamDeps): void {
   write({ kind: "snapshot", snapshot: { ...deps.snapshot(), viewers: deps.viewers.list(me) } });
   const offStore = deps.store.subscribe((m) => {
     if (m.kind === "machine") {
-      const control = deps.control.machines().get(m.machine.name);
+      const control = machineEntry(deps.control.machines(), m.machine.name)?.[1];
       write({ kind: "machine", machine: control ? { ...m.machine, control } : m.machine });
     } else write(m);
   });
   // A machine message from control carries only what the daemon told it; the store's
-  // reading of that machine (sessions, versions) wins when it has one.
+  // reading of that machine (sessions, versions) wins when it has one: the snapshot row
+  // this daemon was merged into, by its id (the names may differ by a `.local`).
   const offControl = deps.control.subscribe((m) => {
     if (m.kind === "machine") {
-      const known = deps.snapshot().machines.find((x) => x.name === m.machine.name);
+      const id = m.machine.control?.machineId;
+      const known = id ? deps.snapshot().machines.find((x) => x.control?.machineId === id) : undefined;
       write({ kind: "machine", machine: known ?? m.machine });
     } else write(m);
   });

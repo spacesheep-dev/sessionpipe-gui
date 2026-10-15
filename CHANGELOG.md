@@ -6,6 +6,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Machines.** A daemon that paired as `<name>.local` (the CLI's `control pair` sent the
+  raw hostname while its events say `<name>`) is the same machine as its sessions: one
+  card, paired, and the session composer no longer asks to pair it.
+
 ## [0.1.0] - 2026-10-15
 
 The first public release: a sessionpipe receiver with a face.

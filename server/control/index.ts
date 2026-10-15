@@ -42,7 +42,8 @@ export interface Control {
   /** Machine routes (pair, hello, poll, ack, off) under ROUTES.control, and the UI's
    *  /api/ui/control/* routes. */
   register(router: Router): void;
-  /** Paired machines, keyed by the daemon's `name` (the same name events carry in session.machine). */
+  /** Paired machines, keyed by the daemon's `name` as it sent it. Events carry the same
+   *  name in session.machine, give or take a `.local` suffix: join through shared/machine.ts. */
   machines(): Map<string, MachineControl>;
   activity(limit?: number): ControlActivity[];
   subscribe(l: (m: StreamMessage) => void): () => void;

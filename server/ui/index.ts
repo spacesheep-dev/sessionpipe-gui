@@ -14,6 +14,7 @@ import {
   sessionKey,
   UI_KEY_PARAM,
 } from "../../shared/api.js";
+import { machineEntry } from "../../shared/machine.js";
 import type { Control } from "../control/index.js";
 import type { Ctx, Handler, Reply, Router } from "../http/router.js";
 import type { Store } from "../store/store.js";
@@ -47,15 +48,17 @@ export interface UiDeps {
 }
 
 /** The store's snapshot with what control knows about each machine merged in, plus
- *  machines control paired that sent no event yet. */
+ *  machines control paired that sent no event yet. A daemon that named itself
+ *  `<name>.local` while the events say `<name>` is that machine (shared/machine.ts). */
 export function snapshotWithControl(store: Store, control: Control): Snapshot {
   const snap = store.snapshot();
   const paired = control.machines();
   const seen = new Set<string>();
   for (const m of snap.machines) {
-    seen.add(m.name);
-    const c = paired.get(m.name);
-    if (c) m.control = c;
+    const hit = machineEntry(paired, m.name);
+    if (!hit) continue;
+    seen.add(hit[0]);
+    m.control = hit[1];
   }
   for (const [name, c] of paired) {
     if (seen.has(name)) continue;

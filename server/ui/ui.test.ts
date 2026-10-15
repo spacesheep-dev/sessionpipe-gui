@@ -15,9 +15,12 @@ import {
 import type { ColorThemesResponse } from "../../shared/color-theme.js";
 import { Session, tempDir } from "../../test/events.js";
 import { type App, createApp } from "../app.js";
+import type { Control } from "../control/index.js";
 import { lanAddresses } from "../http/net.js";
 import type { Ctx } from "../http/router.js";
+import type { Store } from "../store/store.js";
 import { uiAuth } from "./auth.js";
+import { snapshotWithControl } from "./index.js";
 import { describeViewer } from "./viewers.js";
 
 let app: App;
@@ -55,6 +58,40 @@ describe("uiAuth", () => {
     expect(uiAuth(fakeCtx({ query: "?k=nope" }), "key")).toBe(false);
     expect(uiAuth(fakeCtx({}), "key")).toBe(false);
     expect(uiAuth(fakeCtx({ cookie: "" }), "")).toBe(false);
+  });
+});
+
+describe("snapshotWithControl", () => {
+  it("joins a daemon named <name>.local to the sessions' machine <name>, and nothing else", () => {
+    const row = (name: string, sessions: number) => ({
+      name,
+      lastAt: "2026-10-15T10:00:00.000Z",
+      harnesses: {},
+      sessions,
+      working: 0,
+      needsYou: 0,
+    });
+    const control = (machineId: string) => ({ machineId, online: true, keys: [], queued: 0 });
+    const store = {
+      snapshot: () => ({
+        at: "2026-10-15T10:00:01.000Z",
+        sessions: [],
+        machines: [row("Foo", 2), row("Bar", 1)],
+        stats: { events: 3, sessions: 3, machines: 2, eventsLastMinute: 0, storageBytes: 0, uptimeS: 1 },
+      }),
+    } as unknown as Store;
+    // The CLI's `control pair` sent the raw hostname; its hook events strip the suffix.
+    const paired = new Map([
+      ["Foo.local", control("m_foo00000000000000001")],
+      ["Foobar", control("m_foobar0000000000000001")],
+    ]);
+    const snap = snapshotWithControl(store, { machines: () => paired } as unknown as Control);
+    expect(snap.machines.map((m) => [m.name, m.sessions, m.control?.machineId])).toEqual([
+      ["Foo", 2, "m_foo00000000000000001"],
+      ["Bar", 1, undefined],
+      ["Foobar", 0, "m_foobar0000000000000001"],
+    ]);
+    expect(snap.stats.machines).toBe(3);
   });
 });
 
