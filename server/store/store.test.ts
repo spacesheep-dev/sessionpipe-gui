@@ -525,6 +525,10 @@ describe("tier upgrade", () => {
 
 describe("permission twins", () => {
   it("keeps the answerable prompt open when the notification about it arrives", async () => {
+    // The events below carry fixed times; the clock must sit near them, or a day after
+    // they were written every state here reads done (DONE_AFTER_MS).
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-14T23:18:00.000Z"));
     const { Store } = await import("./store.js");
     const { mkdtempSync } = await import("node:fs");
     const os = await import("node:os");
