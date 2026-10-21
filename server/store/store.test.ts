@@ -533,6 +533,10 @@ describe("permission twins", () => {
       tickMs: 3600_000,
       statsMs: 3600_000,
     });
+    // Dated from now: the store reads a session silent for DONE_AFTER_MS as done, whatever
+    // its attentions, so fixed dates would make this fail once they are a day old.
+    const t0 = Date.now() - 60_000;
+    const at = (s: number) => new Date(t0 + s * 1000).toISOString();
     const base = { protocol: 1 as const, tier: 3 as const, privacy: { rulesets: ["secrets@1"], pii: false } };
     const sess = (seq: number) => ({ id: "tw-1", seq, machine: "m1" });
     store.ingest(
@@ -541,7 +545,7 @@ describe("permission twins", () => {
           ...base,
           id: "01K00000000000000000000011",
           type: "session.started",
-          time: "2026-10-14T23:17:00.000Z",
+          time: at(0),
           harness: { name: "claude-code", event: "SessionStart" },
           session: sess(0),
           data: { source: "startup" },
@@ -550,7 +554,7 @@ describe("permission twins", () => {
           ...base,
           id: "01K00000000000000000000012",
           type: "turn.started",
-          time: "2026-10-14T23:17:01.000Z",
+          time: at(1),
           harness: { name: "claude-code", event: "UserPromptSubmit" },
           session: sess(1),
           data: {},
@@ -559,7 +563,7 @@ describe("permission twins", () => {
           ...base,
           id: "01K00000000000000000000013",
           type: "attention.needed",
-          time: "2026-10-14T23:17:02.000Z",
+          time: at(2),
           harness: { name: "claude-code", event: "PermissionRequest" },
           session: sess(2),
           data: { attention_id: "perm-273e341ed1d104b1", kind: "permission", tool: "Bash", message: "Bash cat > x" },
@@ -568,7 +572,7 @@ describe("permission twins", () => {
           ...base,
           id: "01K00000000000000000000014",
           type: "attention.needed",
-          time: "2026-10-14T23:17:08.000Z",
+          time: at(8),
           harness: { name: "claude-code", event: "Notification" },
           session: sess(3),
           data: { attention_id: "notif-1792019828511", kind: "permission" },
@@ -587,7 +591,7 @@ describe("permission twins", () => {
           ...base,
           id: "01K00000000000000000000015",
           type: "tool.started",
-          time: "2026-10-14T23:17:20.000Z",
+          time: at(20),
           harness: { name: "claude-code", event: "PreToolUse" },
           session: sess(4),
           data: { tool: "Bash" },
@@ -596,7 +600,7 @@ describe("permission twins", () => {
           ...base,
           id: "01K00000000000000000000016",
           type: "attention.needed",
-          time: "2026-10-14T23:17:30.000Z",
+          time: at(30),
           harness: { name: "claude-code", event: "Notification" },
           session: sess(5),
           data: { attention_id: "notif-2", kind: "permission" },

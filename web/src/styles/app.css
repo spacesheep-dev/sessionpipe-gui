@@ -1295,7 +1295,9 @@
 
 .sess-ctl {
   position: sticky;
-  bottom: calc(var(--tabbar) + env(safe-area-inset-bottom));
+  /* `--keyboard` is the part of the layout viewport a phone's keyboard covers, set on
+     <html> by lib/composing.ts while the composer has focus (0 otherwise). */
+  bottom: calc(var(--keyboard, 0px) + var(--tabbar) + env(safe-area-inset-bottom));
   z-index: 5;
   margin-top: 8px;
   padding: 8px var(--gutter) 10px;
@@ -3678,6 +3680,45 @@
   }
   .chat-ai {
     margin-right: 0;
+  }
+}
+/* ---------- a phone with the keyboard up (html[data-composing], lib/composing.ts) ---------- */
+
+@media (max-width: 839px) {
+  /* The tab bar steps aside, the composer sits on the visible bottom edge, and the context
+     line keeps only its links. */
+  html[data-composing] .tabbar {
+    display: none;
+  }
+  html[data-composing] .sess-ctl {
+    bottom: calc(var(--keyboard, 0px) + env(safe-area-inset-bottom));
+  }
+  html[data-composing] .ctl-context-why {
+    display: none;
+  }
+  /* What little room is left goes to the field: the messages under it keep to three rows. */
+  html[data-composing] .ctl-acts {
+    max-height: calc(3 * var(--row));
+  }
+  /* The title row: the "where" line wraps under the title instead of squeezing it out. */
+  .sess-head-row {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .sess-head-row .sess-where {
+    flex: 0 0 100%;
+  }
+  /* The folded tools of a turn: a row a thumb opens. */
+  .chat-tools-sum {
+    min-height: var(--row-sm);
+  }
+  /* A tap focuses the chat's field with the ring on (a text field always shows it), a
+     rectangle inside the rounded pill; the pill's border carries the focus instead. */
+  .ctl--chat .ctl-ask textarea:focus-visible {
+    outline: none;
+  }
+  .ctl--chat .ctl-ask:focus-within {
+    border-color: var(--fg);
   }
 }
 

@@ -6,6 +6,7 @@
 import type { InstalledTheme } from "@shared/theme-api";
 import { type CSSProperties, Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { useAnswerableCount, useAppState } from "../data/hooks";
+import { useComposing } from "../lib/composing";
 import { useFocusTrap } from "../lib/focus";
 import { useGlobalKeys } from "../lib/keys";
 import { Link, navigate, type Route, usePath } from "../lib/router";
@@ -326,6 +327,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   const nav = navItems(useThemes().themes, { setup: showSetup, simple });
   const phone = useMedia("(max-width: 839px)");
   useResize();
+  useComposing();
   // Boot: the last visit's tabs when the URL carries none.
   useEffect(() => {
     restoreSplit();

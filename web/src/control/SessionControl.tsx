@@ -59,20 +59,23 @@ export function SessionControl({
     secure && !!rp && !!control && !control.keys.some((k) => storedPasskeys(rp).some((s) => s.id === k.id));
 
   const machine = session.machine ?? "the machine";
+  // With the keyboard up on a phone the explanation hides and the links stay (app.css, html[data-composing]).
   return (
     <>
       {chat && (
         <p className="ctl-context">
-          {control ? (
-            <>
-              Messages go to <strong>{machine}</strong>, which picks this session up there. Sending asks for your
-              passkey once a day.
-            </>
-          ) : (
-            <>
-              Pair <strong>{machine}</strong> to message this session from here.
-            </>
-          )}{" "}
+          <span className="ctl-context-why">
+            {control ? (
+              <>
+                Messages go to <strong>{machine}</strong>, which picks this session up there. Sending asks for your
+                passkey once a day.
+              </>
+            ) : (
+              <>
+                Pair <strong>{machine}</strong> to message this session from here.
+              </>
+            )}{" "}
+          </span>
           {control && secure && grant.exp === null && (
             <>
               <button type="button" className="ctl-link" onClick={() => void unlockNow()}>
