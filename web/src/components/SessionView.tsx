@@ -423,6 +423,25 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
   const parent = s.parentId ? `${s.harness}:${s.parentId}` : null;
   const control = s.machine ? machines.get(s.machine)?.control : undefined;
   const kids = children.length ? children : childrenFromStore(store, key);
+  const launcher = s.launchedBy ? store.get().sessions.get(s.launchedBy) : undefined;
+  const launched = launchedFromStore(store, key);
+  const launchLinks = (
+    <>
+      {s.launchedBy &&
+        (launcher ? (
+          <Link to={sessionPath(launcher.harness, launcher.id)} className="chip chip--plain">
+            ↰ launched by {sessionTitle(launcher)}
+          </Link>
+        ) : (
+          <span className="chip chip--plain">↰ launched by a session not on this receiver</span>
+        ))}
+      {launched.map((l) => (
+        <Link key={l.key} to={sessionPath(l.harness, l.id)} className="chip chip--plain">
+          ↳ launched {sessionTitle(l)}
+        </Link>
+      ))}
+    </>
+  );
 
   return (
     <div
@@ -440,9 +459,12 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
             <h1 className="sess-title">{sessionTitle(s)}</h1>
             <StateBadge state={s.state} since={s.stateSince} />
             {chat && (
-              <span className="sess-where ellipsis">
-                {[s.machine, repoBranch(s) || s.cwd].filter(Boolean).join(" · ")}
-              </span>
+              <>
+                <span className="sess-where ellipsis">
+                  {[s.machine, repoBranch(s) || s.cwd].filter(Boolean).join(" · ")}
+                </span>
+                {launchLinks}
+              </>
             )}
           </div>
         )}
@@ -465,6 +487,7 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
                 ↰ parent session
               </Link>
             )}
+            {launchLinks}
             {s.url && (
               <a href={s.url} target="_blank" rel="noreferrer noopener" className="chip chip--link">
                 open in {s.harness === "claude-code" ? "claude.ai" : "harness"} ↗
@@ -608,6 +631,12 @@ function childrenFromStore(store: ReturnType<typeof useStore>, key: string): Ses
   const out: SessionSummary[] = [];
   const { harness, id } = { harness: key.slice(0, key.indexOf(":")), id: key.slice(key.indexOf(":") + 1) };
   for (const s of store.get().sessions.values()) if (s.harness === harness && s.parentId === id) out.push(s);
+  return out;
+}
+
+function launchedFromStore(store: ReturnType<typeof useStore>, key: string): SessionSummary[] {
+  const out: SessionSummary[] = [];
+  for (const s of store.get().sessions.values()) if (s.launchedBy === key) out.push(s);
   return out;
 }
 

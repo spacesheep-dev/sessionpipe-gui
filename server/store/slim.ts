@@ -58,6 +58,7 @@ function internEvent(ev: SlimEvent): SlimEvent {
     "title_source",
     "account_id",
     "parent_id",
+    "launched_by",
   ] as const)
     internField(out.session, k);
   if (ev.privacy && Array.isArray(ev.privacy.rulesets))

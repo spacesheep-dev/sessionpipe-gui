@@ -50,6 +50,8 @@ export interface ProtocolSession {
   url?: string;
   account_id?: string;
   parent_id?: string | null;
+  /** The session that started this one, `<harness>:<id>` (PROTOCOL.md §3); not a subagent. */
+  launched_by?: string;
 }
 
 /** The GUI's reading of a session's state (spec §1: made from the facts, never sent).
@@ -103,6 +105,8 @@ export interface SessionSummary {
   url?: string;
   accountId?: string;
   parentId?: string | null;
+  /** The session that launched this one, as a session key; never read as a subagent. */
+  launchedBy?: SessionKey;
 
   state: SessionState;
   /** When the current state began (ISO). */

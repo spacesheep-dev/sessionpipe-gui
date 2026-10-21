@@ -436,6 +436,7 @@ export class World {
       url: block.url,
       accountId: block.account_id,
       parentId: block.parent_id ?? null,
+      launchedBy: block.launched_by,
       state,
       stateSince,
       startedAt,

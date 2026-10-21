@@ -214,6 +214,8 @@ export function coalesceSession(s: SessionSummary, ev: ProtocolEvent): void {
   if (acc) s.accountId = acc;
   if (typeof b.parent_id === "string" && b.parent_id) s.parentId = b.parent_id;
   else if (b.parent_id === null && s.parentId === undefined) s.parentId = null;
+  const launcher = str(b.launched_by);
+  if (launcher) s.launchedBy = launcher;
   const title = str(b.title);
   if (title) {
     const src = b.title_source && TITLE_RANK[b.title_source] ? b.title_source : undefined;

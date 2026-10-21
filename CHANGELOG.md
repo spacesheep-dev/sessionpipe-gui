@@ -6,6 +6,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A session another session launched (`session.launched_by`, sessionpipe PR #115) says so on its
+  page with a link to the launcher, and the launcher's page links what it launched. Neither is
+  read as a subagent: no nesting, no muted toasts, no "N subagents" count.
+
 ## [0.1.0] - 2026-10-15
 
 The first public release: a sessionpipe receiver with a face.

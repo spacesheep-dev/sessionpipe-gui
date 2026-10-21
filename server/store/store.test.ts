@@ -148,6 +148,16 @@ describe("readings", () => {
     ]);
   });
 
+  it("keeps the launcher a launched session names; a later event without it changes nothing", () => {
+    const launched = new Session("launched-1");
+    const launcher = sessionKey("claude-code", "launcher-1");
+    store.ingest([launched.ev("session.started", {}, { session: { launched_by: launcher } })], "http");
+    store.ingest([launched.ev("turn.started", { turn_id: "t1" })], "http");
+    const s = store.session(sessionKey("claude-code", "launched-1"))!;
+    expect(s.launchedBy).toBe(launcher);
+    expect(s.parentId ?? null).toBeNull();
+  });
+
   it("keeps progress until its transcript or the turn's end; snippets are cut", () => {
     const s = new Session();
     store.ingest([s.ev("session.started"), s.ev("turn.started", { turn_id: "t1" })], "http");
