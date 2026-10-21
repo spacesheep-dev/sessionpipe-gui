@@ -2,7 +2,8 @@
 // Owned by: onboarding. Tailscale on this machine, as far as the setup page's "From
 // anywhere" step needs: installed, connected, this node's MagicDNS name, and whether
 // `tailscale serve` already forwards to our port. Read from the `tailscale` CLI alone
-// (`status --json`, `serve status`): nothing is changed, no key is read. The probe is
+// (`status --json`, `serve status`); the one thing that changes anything is
+// `serveTailscale` (`serve --bg <port>`), the phone page's one click. The probe is
 // cached for a few seconds because the status is polled every two.
 import { accessSync, constants } from "node:fs";
 import path from "node:path";
@@ -77,7 +78,50 @@ export async function probeTailscale(
   return out;
 }
 
-export type TailscaleProbe = () => Promise<TailscaleStatus>;
+/** `fresh` skips the cache: right after `serveTailscale`, so `serving` tells the truth. */
+export type TailscaleProbe = (o?: { fresh?: boolean }) => Promise<TailscaleStatus>;
+
+export class TailscaleError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** The last few lines of what a command printed, for an error a person reads. */
+export function stderrTail(r: { stderr: string; stdout: string; code: number | null }, lines = 6): string {
+  const text = (r.stderr.trim() || r.stdout.trim()).split("\n").filter(Boolean);
+  const tail = text.slice(-lines).join("\n");
+  return tail || `tailscale exited ${r.code ?? "without a code"}`;
+}
+
+/** `tailscale serve --bg <port>`: https://<MagicDNS name> on the tailnet forwards to our
+ *  port, remembered by tailscaled across restarts. Skipped when a probe already shows the
+ *  port served. Answers the fresh status; throws TailscaleError (409 when Tailscale is not
+ *  there or not connected, 502 when the CLI refused) with the CLI's own last lines. */
+export async function serveTailscale(
+  exec: Exec,
+  bin: string | null,
+  port: number,
+  probe: TailscaleProbe,
+  timeoutMs = 15_000,
+): Promise<TailscaleStatus> {
+  const before = await probe({ fresh: true });
+  if (!bin || !before.installed) throw new TailscaleError(409, "Tailscale is not installed on this machine.");
+  if (!before.running)
+    throw new TailscaleError(409, "Tailscale is installed but not connected: open the app and sign in.");
+  if (!before.dnsName) throw new TailscaleError(409, "Tailscale gave this machine no MagicDNS name yet.");
+  if (!before.serving) {
+    const r = await exec(bin, ["serve", "--bg", String(port)], { timeoutMs });
+    if (r.code !== 0) throw new TailscaleError(502, stderrTail(r));
+  }
+  const after = await probe({ fresh: true });
+  if (!after.serving)
+    throw new TailscaleError(502, "tailscale serve returned, but `serve status` does not show this port yet.");
+  return after;
+}
 
 /** The probe the status route calls: one `tailscale` run per `ttlMs` at most. */
 export function createTailscaleProbe(
@@ -87,9 +131,9 @@ export function createTailscaleProbe(
   const ttl = opts.ttlMs ?? 10_000;
   let at = 0;
   let last: Promise<TailscaleStatus> | null = null;
-  return () => {
+  return (o = {}) => {
     const now = Date.now();
-    if (last && now - at < ttl) return last;
+    if (last && !o.fresh && now - at < ttl) return last;
     at = now;
     const bin = findTailscale(opts.env, opts.platform, opts.home);
     last = probeTailscale(exec, bin, opts.port()).catch(() => NOT_INSTALLED);

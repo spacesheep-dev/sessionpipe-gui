@@ -21,13 +21,13 @@ import os from "node:os";
 import path from "node:path";
 import { type Info, ROUTES } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
-import type { Handler, Reply, Router } from "../http/router.js";
+import type { Reply, Router } from "../http/router.js";
 import type { OutboxSource } from "../sources/outbox.js";
 import type { Store } from "../store/store.js";
 import { opensslAvailable, readCerts, TlsError, type TlsMaterial } from "../tls/certs.js";
 import type { ViewerRegistry } from "../ui/viewers.js";
 import { createHarnessDetector, type HarnessFs, realHarnessFs } from "./harnesses.js";
-import { type Exec, execDefault, findCli, isThisMachine } from "./local.js";
+import { type Exec, execDefault, findCli, thisMachineOnly } from "./local.js";
 import { Pairer, type SpawnFn } from "./pairer.js";
 import { type AskDaemon, askDaemonDefault, buildStatus, caTrustedOnMac, type Lookup } from "./status.js";
 import { createTailscaleProbe, type TailscaleProbe } from "./tailscale.js";
@@ -98,24 +98,7 @@ export function registerSetup(router: Router, deps: SetupDeps): { pairer: Pairer
   const pairer = new Pairer(deps.spawn);
   const harnesses = createHarnessDetector(deps.harnessFs ?? realHarnessFs(home, env, platform));
 
-  const local =
-    (h: Handler): Handler =>
-    (ctx) => {
-      let ip = ctx.remote.ip;
-      if (deps.testDoor) {
-        const over = ctx.req.headers["x-spgui-test-remote"];
-        if (typeof over === "string" && over) ip = over;
-      }
-      if (!isThisMachine(ip))
-        return {
-          status: 403,
-          json: {
-            reason: "local_only",
-            error: `Setup acts on the machine running sessionpipe-gui: open http://localhost:${deps.port()}/setup there.`,
-          },
-        };
-      return h(ctx);
-    };
+  const local = thisMachineOnly({ testDoor: deps.testDoor ?? false, port: deps.port });
 
   const tailscale = deps.tailscale ?? createTailscaleProbe(exec, { env, platform, home, port: deps.port });
 

@@ -42,16 +42,17 @@ client against a receiver you can see into.
 |---|---|---|
 | `shared/api.ts` | core (change by agreement) | Every wire type and route |
 | `server/http/router.ts`, `net.ts` | core | `Router`, `Ctx`, `Reply`, `HttpError`, `isLoopback`, `lanAddresses` |
-| `server/app.ts` | server-core | `createApp(opts): App` — the only composition root |
+| `server/app.ts` | server-core | `createApp(opts): App` — the only composition root; `Info.control.origins`, the origins the rp id is valid for; one Tailscale probe shared by setup and phone |
 | `server/config.ts` | server-core | state dir, sink token, UI key |
 | `server/store/*` | server-core | `Store`: `ingest(events, source) → IngestResult`, `snapshot()`, `session(key)`, `sessionDetail(key, after, limit)`, `feed(query)`, `forget(key)`, `subscribe(listener)`, `stats()`, `close()` |
 | `server/receiver/*` | server-core | `registerReceiver(router, deps)`: well-known, events, errors per HTTP.md §2 |
 | `server/sources/outbox.ts` | server-core | `startOutboxSource(store, opts) → { stop }` |
 | `server/ui/*` | server-core | `registerUi(router, deps)`: info, snapshot, stream (SSE), session, feed, forget, rotate token, demo toggle; `staticFiles(dir)` fallback |
 | `server/cli.ts` | server-core | flags, banner with LAN URL + QR + `sink add` line, `--open`, `--tls`, `tls status/trust/reset`, `--public-url` |
-| `server/setup/tailscale.ts` | onboarding | `tailscale status --json` / `serve status` probe for the "From anywhere" step, cached across the 2 s polls |
+| `server/setup/tailscale.ts` | onboarding | `tailscale status --json` / `serve status` probe for the "From anywhere" step, cached across the 2 s polls (`fresh` skips the cache); `serveTailscale`: `tailscale serve --bg <port>`, skipped when already served, `TailscaleError` with the CLI's last lines |
+| `server/phone/*` | onboarding | `registerPhone(router, deps)`: `/api/ui/phone` (`PhoneInfo`: LAN QR, rp id, public url, the Tailscale probe, trusted keys, pending device requests), `POST /tailscale` (this machine: serve, then the public url), `GET /device/:id` (`PhoneDeviceState`, from control's device requests), `POST /trust-check` (`https` true when the request came over TLS) |
 | `server/tls/*` | tls | `ensureCerts(dir, opts) → TlsMaterial`, `createDualListener({http, https})`, `registerTrust(router, deps)`: `/trust`, `/ca.crt` |
-| `server/control/*` | control | `registerControl(router, deps)`: pair/hello/poll/ack/off, queues, keys, early verify, test door; `ControlState` the UI reads (`machines()`, `activity()`) |
+| `server/control/*` | control | `registerControl(router, deps)`: pair/hello/poll/ack/off, queues, keys, early verify, test door; `ControlState` the UI reads (`machines()`, `activity()`, `pendingDevices()`, `deviceRequest(id)`) |
 | `server/conformance/*` | control | runner CLI + vitest that boots `createApp` in-process and runs every delivery fixture |
 | `server/demo/*` | demo | `startDemo(store, opts) → { stop }`: realistic synthetic sessions through `store.ingest(…, "demo")` |
 | `server/extensions/*` | platform | `ExtensionKind { kind, noun, manifestFile, dir, validate }`, `scanKind`, `addExtension/linkExtension/removeExtension/formatEntries`: the folder layout, scan and installer every kind shares |
@@ -103,6 +104,10 @@ function names above.
 | POST `/skins/reload` | loopback: re-read the skins and color-themes folders → `{ skins }` |
 | `/skins/:id/*` | a package's own files (uiAuth): fonts `immutable`, `.json`/`.css` `no-cache` |
 | POST `/themes/:id/disable`, `/enable` | loopback: a bundled (or any) view hidden from the rail and `/t/:id`; remembered in `config.json` `disabled` |
+| GET `/phone` | `PhoneInfo`: the LAN url with the UI key as a PNG data URI, the rp id, `publicUrl`, Tailscale (installed, running, MagicDNS `name`, `serving`), the keys the paired machines trust, the device requests waiting |
+| POST `/phone/tailscale` | this machine: `tailscale serve --bg <port>` unless `serve status` already names the port, then the public url `https://<name>` the way `/setup/remote` sets it → `PhoneInfo`; 409 / 502 `{ error }` with the CLI's last lines |
+| GET `/phone/device/:id` | `PhoneDeviceState` for a device request: `pending` · `trusted` (the `key.add` was delivered; `machine` names who) · `refused` (the machine said no, the approving page rejected it, or no such id) · `expired` |
+| POST `/phone/trust-check` | `{ https, rpId }`: `https` true when this very request came over TLS or through the trusted proxy |
 
 ## Running
 

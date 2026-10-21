@@ -9,6 +9,7 @@ import { accessSync, constants, existsSync, readFileSync, realpathSync } from "n
 import os from "node:os";
 import path from "node:path";
 import { isLoopback } from "../http/net.js";
+import type { Handler } from "../http/router.js";
 
 /** Every address of this machine's interfaces, IPv4 and IPv6, zone ids dropped. */
 export function ownAddresses(): string[] {
@@ -25,6 +26,28 @@ export function isThisMachine(ip: string, addresses: string[] = ownAddresses()):
   if (isLoopback(ip)) return true;
   const p = plainIp(ip);
   return addresses.some((a) => plainIp(a) === p);
+}
+
+/** The guard every route that acts on this machine wears (the setup actions, the phone
+ *  page's Tailscale click): 403 `local_only` for anyone else, UI key or not. With the test
+ *  door on, `x-spgui-test-remote` stands in for the remote address (e2e). */
+export function thisMachineOnly(o: { testDoor: boolean; port: () => number }): (h: Handler) => Handler {
+  return (h) => (ctx) => {
+    let ip = ctx.remote.ip;
+    if (o.testDoor) {
+      const over = ctx.req.headers["x-spgui-test-remote"];
+      if (typeof over === "string" && over) ip = over;
+    }
+    if (!isThisMachine(ip))
+      return {
+        status: 403,
+        json: {
+          reason: "local_only",
+          error: `Setup acts on the machine running sessionpipe-gui: open http://localhost:${o.port()}/setup there.`,
+        },
+      };
+    return h(ctx);
+  };
 }
 
 /** Does a machine name (what the daemon calls itself; `session.machine` in events) name

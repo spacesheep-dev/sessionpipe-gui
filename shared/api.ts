@@ -472,7 +472,11 @@ export interface Info {
    *  uploaded from the composer, ROUTES.ui.attachments). Absent on older servers. */
   storage: { dir: string; bytes: number; attachments?: number };
   wellKnown: Record<string, unknown>;
-  control: { enabled: boolean; rpId: string; machines: number };
+  /** `origins`: the browser origins passkeys made for `rpId` work on, so a visitor on the
+   *  wrong address can be sent to the right one: the public url when it set the rp id,
+   *  `https://<rpId>:<port>` for the TLS name, `http://localhost:<port>` only when the rp
+   *  id is `localhost`. Absent on older servers. */
+  control: { enabled: boolean; rpId: string; machines: number; origins?: string[] };
   /** TLS mode (`--tls`): the same port also answers https with a certificate from the
    *  GUI's own local CA, so passkeys work from a phone. Absent on older servers. */
   tls?: TlsInfo;
@@ -629,6 +633,74 @@ export interface SetupStatus {
   uiKey: string;
 }
 
+// ---------- phone (connecting a phone; GET /api/ui/phone, server/phone) ----------
+
+/** Everything the "connect a phone" flow needs in one read, polled while the page is open.
+ *  `lan` is "see it on your phone": the plain-http LAN url with the UI key (the trust page
+ *  first when TLS is on), as a QR. The rest is "send from your phone": a passkey on a real
+ *  https origin, through Tailscale (`tailscale serve` → `publicUrl`) or the local CA
+ *  (`tls`), and the devices the paired machines trust or that wait to be. */
+export interface PhoneInfo {
+  lan: {
+    url: string;
+    /** A `data:image/png;base64,…` URI of the url, for an <img>. */
+    qr: string;
+  };
+  /** The rp id passkeys are made for right now (`Info.control.rpId`). */
+  rpId: string;
+  /** TLS mode is on (the local CA path is available). */
+  tls: boolean;
+  /** `--public-url`, when set: the https origin a phone opens from anywhere. */
+  publicUrl: string | null;
+  tailscale: {
+    installed: boolean;
+    running: boolean;
+    /** This node's MagicDNS host (`laptop.tail1234.ts.net`), when connected. */
+    name: string | null;
+    /** `tailscale serve` already forwards to this port. */
+    serving: boolean;
+  };
+  /** The passkeys the paired machine(s) trust, as the GUI sees them: one row per key id. */
+  trusted: PhoneTrustedKey[];
+  /** Device requests waiting for a trusted device's approval, newest first. */
+  pending: PhonePendingDevice[];
+}
+
+export interface PhoneTrustedKey {
+  id: string;
+  /** The name given at enrolment; "" when none was. */
+  name: string;
+  addedAt: string;
+}
+
+export interface PhonePendingDevice {
+  /** The device request id (ROUTES.ui.phone + `/device/:id` reads it back). */
+  id: string;
+  name: string;
+  /** The six digits shown on both ends. */
+  digits: string;
+  since: string;
+}
+
+/** GET /api/ui/phone/device/:id: what the phone polls after making its passkey. `pending`
+ *  until a trusted device's `key.add` is delivered (`trusted`), refused by the machine or
+ *  rejected on the approving device (`refused`), or ten minutes pass (`expired`). An id
+ *  the server does not know reads `refused`. `machine` is the name of the machine that
+ *  trusts it, once one does. */
+export interface PhoneDeviceState {
+  state: "pending" | "trusted" | "refused" | "expired";
+  digits: string;
+  machine: string | null;
+}
+
+/** POST /api/ui/phone/trust-check: `https` is true when the request itself arrived over
+ *  TLS (or through the trusted https proxy), which is the proof that the phone's trust of
+ *  the CA, or its Tailscale route, works. */
+export interface PhoneTrustCheck {
+  https: boolean;
+  rpId: string;
+}
+
 // ---------- control (phase 2; shapes fixed now so both sides can plan) ----------
 
 export type ControlKind = "prompt" | "permission.answer" | "cancel" | "start" | "key.add";
@@ -728,6 +800,10 @@ export const ROUTES = {
      *  with what is installed. POST /api/ui/extras/:id/install (loopback): install one
      *  from npm; streams text/plain and ends with a line `ok` or `failed`. */
     extras: "/api/ui/extras",
+    /** Connecting a phone (server/phone): GET → PhoneInfo; POST /tailscale (loopback:
+     *  `tailscale serve --bg <port>`, then the public url, → PhoneInfo, or { error });
+     *  GET /device/:id → PhoneDeviceState; POST /trust-check → PhoneTrustCheck. */
+    phone: "/api/ui/phone",
   },
   /** GET / DELETE /attachments/<id>.<ext>, UI key: the uploaded image itself (served
    *  `private, immutable`), and taking it back. */

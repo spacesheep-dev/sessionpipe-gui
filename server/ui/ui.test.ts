@@ -67,7 +67,7 @@ describe("UI API", () => {
       sinkToken: app.config().sinkToken,
       uiKey: app.config().uiKey,
       sources: { http: true, outbox: null, demo: false },
-      control: { enabled: true, rpId: "localhost" },
+      control: { enabled: true, rpId: "localhost", origins: [`http://localhost:${app.port}`] },
     });
     expect(info.urls.local).toBe(`http://localhost:${app.port}`);
     expect(info.sinkCommand).toMatch(/^sessionpipe sink add http:\/\/[\d.]+:\d+ --tier 3 --token spg_/);

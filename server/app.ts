@@ -24,9 +24,12 @@ import { registerExtras } from "./extensions/extras.js";
 import { bundledDirs } from "./extensions/kind.js";
 import { lanAddresses } from "./http/net.js";
 import { Router } from "./http/router.js";
+import { registerPhone } from "./phone/index.js";
 import { PluginHost, PluginRegistry, PluginSettings, registerPlugins } from "./plugins/index.js";
 import { registerReceiver, wellKnown } from "./receiver/index.js";
 import { registerSetup } from "./setup/index.js";
+import { execDefault } from "./setup/local.js";
+import { createTailscaleProbe } from "./setup/tailscale.js";
 import { registerSkins, SkinRegistry } from "./skins/index.js";
 import { type OutboxSource, startOutboxSource } from "./sources/outbox.js";
 import { staticFiles, webDir } from "./static.js";
@@ -167,6 +170,15 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   const publicHost = (): string | undefined => (publicUrl ? new URL(publicUrl).hostname : undefined);
   const chooseRpId = (): string => opts.rpId ?? publicHost() ?? tls?.hostname ?? "localhost";
   let rpId = chooseRpId();
+  /** The browser origins passkeys for the rp id work on (Info.control.origins). */
+  const origins = (): string[] => {
+    const out: string[] = [];
+    if (publicUrl && publicHost() === rpId) out.push(publicUrl);
+    if (tls && tls.hostname === rpId) out.push(`https://${rpId}:${port}`);
+    if (rpId === "localhost") out.push(`http://localhost:${port}`);
+    if (!out.length) out.push(`https://${rpId}:${port}`);
+    return out;
+  };
   router.trustProxy = () => publicUrl !== undefined;
   const uiKey = (): string => config.uiKey;
   const uiAuth = uiAuthFor(uiKey);
@@ -246,7 +258,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       },
       storage: { dir: stateDir, bytes: stats.storageBytes + attachments.bytes(), attachments: attachments.bytes() },
       wellKnown: wellKnown(control),
-      control: { enabled: true, rpId, machines: control.machines().size },
+      control: { enabled: true, rpId, machines: control.machines().size, origins: origins() },
       hostname: os.hostname().replace(/\.(local|lan|home)$/i, ""),
       ...(publicUrl ? { remote: remoteInfo(publicUrl, config.sinkToken) } : {}),
       ...(tls
@@ -360,6 +372,12 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     config = setPublicUrl(stateDir, config, next);
   };
 
+  const tailscale = createTailscaleProbe(execDefault, {
+    env: process.env,
+    platform: process.platform,
+    home: os.homedir(),
+    port: () => port,
+  });
   const setup = registerSetup(router, {
     store,
     control,
@@ -374,6 +392,16 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     testDoor: opts.testDoor ?? false,
     publicUrl: () => publicUrl,
     setPublicUrl: applyPublicUrl,
+    tailscale,
+  });
+  registerPhone(router, {
+    control,
+    info,
+    uiAuth,
+    port: () => port,
+    setPublicUrl: applyPublicUrl,
+    tailscale,
+    testDoor: opts.testDoor ?? false,
   });
   router.fallback = staticFiles(opts.webDir ?? webDir(), { uiAuth, uiKey });
 

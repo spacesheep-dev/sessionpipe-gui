@@ -16,6 +16,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   needs the UI key like any other device, and the setup actions stay for this machine.
   `Info.remote` carries the `sink add` and `connect` lines for a machine elsewhere;
   `--no-public-url` forgets it.
+- **A phone in one read.** `GET /api/ui/phone` gathers what connecting a phone needs: the
+  LAN QR, the rp id and the origins it is valid for (`Info.control.origins`, so a browser on
+  the wrong address is sent to the right one instead of being asked for a new passkey),
+  Tailscale's state, the trusted passkeys and the device requests waiting. One click
+  (`POST /api/ui/phone/tailscale`, this machine only) runs `tailscale serve --bg` and sets
+  the public url; a phone polls `GET /api/ui/phone/device/:id` while the laptop approves
+  its passkey, and proves https works with `POST /api/ui/phone/trust-check`.
 
 ### Fixed
 

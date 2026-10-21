@@ -47,6 +47,7 @@ describe("--public-url", () => {
     const dir = a.stateDir;
     expect(a.rpId).toBe("laptop.tail1234.ts.net");
     const info = a.info();
+    expect(info.control.origins).toEqual([PUBLIC]);
     expect(info.urls.public).toBe(PUBLIC);
     expect(info.remote).toEqual({
       url: PUBLIC,

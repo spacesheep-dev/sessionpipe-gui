@@ -156,6 +156,7 @@ describe.skipIf(!HAVE_OPENSSL)("TLS mode in the app", () => {
   it("Info.tls and the well-known carry the .local rp id and the https url", async () => {
     const info = JSON.parse((await get(`${base}${ROUTES.ui.info}`)).body) as Info;
     expect(info.control.rpId).toBe("test-box.local");
+    expect(info.control.origins).toEqual([`https://test-box.local:${app.port}`]);
     expect(info.urls.https).toBe(`https://test-box.local:${app.port}`);
     expect(info.tls).toMatchObject({
       on: true,

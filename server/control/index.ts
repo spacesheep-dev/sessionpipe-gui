@@ -19,7 +19,7 @@ import {
 } from "../../shared/api.js";
 import type { Ctx, Router } from "../http/router.js";
 import { registerMachineRoutes } from "./routes.js";
-import { ControlState, toActivity, WAIT_MAX_S } from "./state.js";
+import { ControlState, type DeviceRequestRow, toActivity, WAIT_MAX_S } from "./state.js";
 import { registerTestDoor } from "./testdoor.js";
 import { registerUiRoutes } from "./ui.js";
 
@@ -48,6 +48,11 @@ export interface Control {
   subscribe(l: (m: StreamMessage) => void): () => void;
   /** Pairings still waiting for a person, newest first (the setup page shows this machine's inline). */
   pendingPairings(): { code: string; check: string; expiresAt: string; machine: string; machineId: string }[];
+  /** Device requests a trusted device could still approve, newest first (the phone page). */
+  pendingDevices(): { id: string; name: string; digits: string; since: string }[];
+  /** One device request as the phone reads it back; undefined when rejected or never made.
+   *  `machine` is the name of the machine the `key.add` went to, once it did. */
+  deviceRequest(id: string): { status: DeviceRequestRow["status"]; digits: string; machine?: string } | undefined;
   /** The `control` member of the well-known file (HTTP.md §1). */
   wellKnown(): {
     wait_max_s: number;
@@ -115,6 +120,16 @@ export function createControl(deps: ControlDeps): Control {
         machine: machine.name,
         machineId: machine.id,
       })),
+    pendingDevices: () =>
+      state
+        .pendingDeviceRequests()
+        .map((d) => ({ id: d.requestId, name: d.name, digits: d.check, since: d.createdAt })),
+    deviceRequest: (id) => {
+      const d = state.deviceRequest(id);
+      if (!d) return undefined;
+      const machine = d.machineId ? state.machine(d.machineId)?.name : undefined;
+      return { status: d.status, digits: d.check, ...(machine ? { machine } : {}) };
+    },
     subscribe(l) {
       listeners.add(l);
       return () => listeners.delete(l);
