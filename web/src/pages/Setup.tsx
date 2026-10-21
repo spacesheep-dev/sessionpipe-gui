@@ -700,14 +700,13 @@ function PhoneStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
   const store = useStore();
   const qr = store.transport.qrUrl();
   const [broken, setBroken] = useState(false);
-  const name = s.daemon.name ?? s.tls.hostname.replace(/\.local$/, "");
   return (
     <Step
       k="phone"
       n={4}
       mark={mark}
       title="Your phone"
-      what="The same board on your phone, over the same Wi-Fi; the QR code signs it in and walks it through trusting the certificate."
+      what="The same board on your phone, over the same Wi-Fi; the QR code signs it in. Sending from it has a page of its own."
       why={
         <>
           <Facts
@@ -745,28 +744,18 @@ function PhoneStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
               {s.viewers.phones === 1 ? "A phone is" : `${s.viewers.phones} phones are`} on the stream over https.
             </p>
           ) : (
-            <ol className="step-list">
-              <li>Scan the code with the phone's camera (same Wi-Fi). It opens the trust page.</li>
-              <li>
-                Tap <strong>Download the certificate</strong>, allow it, then Settings →{" "}
-                <strong>Profile Downloaded</strong> → Install.
-              </li>
-              <li>
-                Settings → General → About → <strong>Certificate Trust Settings</strong>: turn on{" "}
-                <em>sessionpipe-gui local CA</em>.
-              </li>
-              <li>Back on the trust page, tap the https address. The board opens, signed in.</li>
-            </ol>
-          )}
-          {!s.tls.on && mark !== "done" && (
-            <p className="step-note step-note--err">
-              Turn on the secure address first (step 2); over plain http the phone can look but not sign.
+            <p className="step-note">
+              Scan the code with the phone's camera (same Wi-Fi): the board opens, signed in.
+              {!s.tls.on && " Over plain http the phone can look but not sign."}
             </p>
           )}
           <p className="step-note">
-            To send from the phone it needs its own passkey: on the phone open <code>/add-device</code> (“Add this
-            device”), then approve its six digits on <Link to="/machines">Machines</Link> here, from a device {name}{" "}
-            already trusts.
+            To send from the phone, open{" "}
+            <Link to="/phone" className="step-a" data-phone-link>
+              Your phone
+            </Link>
+            : one page, on the laptop and on the phone, that gets it an https address it trusts and its own passkey,
+            approved here with six digits.
           </p>
         </div>
       </div>

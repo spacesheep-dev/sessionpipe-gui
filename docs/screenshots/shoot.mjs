@@ -40,6 +40,8 @@ const DEFAULT_LIGHT = [
   "appearance.png",
   "connect.png",
   "phone-session.png",
+  "phone-wifi-desktop.png",
+  "phone-waiting-phone.png",
 ];
 const LIGHT = new Set(
   typeof args.light === "string"
@@ -473,6 +475,125 @@ const phoneSimple = {
   },
 };
 
+// ---------- /phone: each lane state from demo data, the routes answered in the page ----------
+
+/** PhoneInfo for one state of the page (the same scenes web/src/mock/phone.ts knows). */
+function phoneInfo(scene, rp = "studio-mac.local") {
+  const serving = scene === "serving";
+  const ts = scene === "tailscale" || serving;
+  const at = Date.now();
+  return {
+    lan: { url: "http://192.168.1.20:7373/?k=uik_demo0000000000000000", qr: `${BASE}/api/ui/qr.svg` },
+    rpId: serving ? "studio-mac.tail1234.ts.net" : rp,
+    tls: true,
+    publicUrl: serving ? "https://studio-mac.tail1234.ts.net" : null,
+    tailscale: ts
+      ? { installed: true, running: true, name: "studio-mac.tail1234.ts.net", serving }
+      : { installed: false, running: false, name: null, serving: false },
+    trusted: scene === "trusted" ? [{ id: "k1", name: "iPhone", addedAt: new Date(at - 95_000).toISOString() }] : [],
+    pending:
+      scene === "waiting"
+        ? [{ id: "req1", name: "iPhone", digits: "482913", since: new Date(at - 20_000).toISOString() }]
+        : [],
+  };
+}
+
+/** Answers the phone routes in the page with one scene; `side: "phone"` makes the page read
+ *  as the phone's own view (the setup status says "not this machine"). The phone's https
+ *  states are shot on the TLS instance, whose rp id is `localhost`, so `rp` names it then. */
+async function stubPhone(page, scene, side = "laptop", rp = "studio-mac.local") {
+  const info = phoneInfo(scene, rp);
+  const origin = info.publicUrl ?? (rp === "localhost" ? TLS : "https://studio-mac.local:7373");
+  await page.route("**/api/ui/phone", (r) => r.fulfill({ json: info }));
+  await page.route("**/api/ui/phone/device/*", (r) =>
+    r.fulfill({
+      json:
+        scene === "trusted"
+          ? { state: "trusted", digits: "482913", machine: "studio-mac" }
+          : { state: "pending", digits: "482913", machine: null },
+    }),
+  );
+  await page.route("**/api/ui/info", async (r) => {
+    const real = await (await r.fetch()).json();
+    await r.fulfill({ json: { ...real, control: { ...real.control, rpId: info.rpId, origins: [origin] } } });
+  });
+  await page.route("**/api/ui/control/devices", (r) =>
+    r.fulfill({
+      json: {
+        devices: info.pending.map((p) => ({
+          requestId: p.id,
+          check: p.digits,
+          key: { id: "c1", alg: -7, spki: "" },
+          name: p.name,
+          device: "iPhone · Safari",
+          fromIp: "192.168.1.31",
+          createdAt: p.since,
+          expiresAt: new Date(Date.parse(p.since) + 600_000).toISOString(),
+          status: "pending",
+        })),
+      },
+    }),
+  );
+  if (side === "phone")
+    await page.route("**/api/ui/setup/status", (r) => r.fulfill({ status: 403, json: { reason: "not_this_machine" } }));
+}
+
+/** A phone that reloaded mid-wait: the request it filed is remembered for the tab. */
+const WAITING_REQUEST = JSON.stringify({
+  requestId: "req1",
+  check: "482913",
+  key: { id: "c1", alg: -7, spki: "" },
+  name: "iPhone",
+  device: "iPhone · Safari",
+  fromIp: "192.168.1.31",
+  createdAt: new Date().toISOString(),
+  expiresAt: new Date(Date.now() + 600_000).toISOString(),
+  status: "pending",
+});
+
+async function phoneShot(page, file, scene, side, path = "/phone", rp) {
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await stubPhone(page, scene, side, rp);
+  await open(page, path);
+  await page.locator(".phone-page .steps, .ctl-hint[data-wrong-origin]").first().waitFor({ timeout: 20_000 });
+  await sleep(600);
+  // Step 3 is the point of these two; on the laptop it sits under the Wi-Fi lane's steps.
+  if (scene === "waiting" || scene === "trusted")
+    await page.evaluate(() => document.querySelector("[data-phone-step='3']")?.scrollIntoView({ block: "end" }));
+  await shot(page, file);
+}
+
+const phoneDesktop = {
+  "phone-tailscale-desktop.png": (page) => phoneShot(page, "phone-tailscale-desktop.png", "tailscale", "laptop"),
+  "phone-wifi-desktop.png": (page) => phoneShot(page, "phone-wifi-desktop.png", "wifi", "laptop"),
+  "phone-waiting-desktop.png": (page) => phoneShot(page, "phone-waiting-desktop.png", "waiting", "laptop"),
+  "phone-trusted-desktop.png": (page) => phoneShot(page, "phone-trusted-desktop.png", "trusted", "laptop"),
+  "phone-wrong-origin-desktop.png": (page) =>
+    phoneShot(page, "phone-wrong-origin-desktop.png", "wifi", "laptop", sessionPath(needsKey)),
+};
+// The phone's own waits happen on the https origin: here the TLS instance, whose rp id is localhost.
+const phonePhone = {
+  "phone-tailscale-phone.png": (page) => phoneShot(page, "phone-tailscale-phone.png", "serving", "phone"),
+  "phone-wifi-phone.png": (page) => phoneShot(page, "phone-wifi-phone.png", "wifi", "phone"),
+  "phone-waiting-phone.png": async (page) => {
+    await page.context().addInitScript((v) => sessionStorage.setItem("sessionpipe.device-request", v), WAITING_REQUEST);
+    await phoneShot(page, "phone-waiting-phone.png", "waiting", "phone", `${TLS}/phone`, "localhost");
+    await page.evaluate(() => sessionStorage.removeItem("sessionpipe.device-request"));
+  },
+  "phone-trusted-phone.png": async (page) => {
+    await page.context().addInitScript((v) => sessionStorage.setItem("sessionpipe.device-request", v), WAITING_REQUEST);
+    await phoneShot(page, "phone-trusted-phone.png", "trusted", "phone", `${TLS}/phone`, "localhost");
+    await page
+      .locator("[data-added]")
+      .waitFor({ timeout: 10_000 })
+      .catch(() => log("phone: trusted did not land"));
+    await shot(page, "phone-trusted-phone.png");
+    await page.evaluate(() => sessionStorage.removeItem("sessionpipe.device-request"));
+  },
+  "phone-wrong-origin-phone.png": (page) =>
+    phoneShot(page, "phone-wrong-origin-phone.png", "wifi", "phone", sessionPath(needsKey)),
+};
+
 /** Runs each group's shots, one context per appearance that any of them wants. */
 async function runGroup(kind, mode, shots, after) {
   for (const scheme of ["dark", "light"]) {
@@ -490,6 +611,8 @@ async function runGroup(kind, mode, shots, after) {
 await runGroup("desktop", "advanced", desktopAdvanced, THEMES ? themesExtras : null);
 await runGroup("desktop", "simple", desktopSimple);
 await runGroup("phone", "simple", phoneSimple);
+await runGroup("desktop", "advanced", phoneDesktop);
+await runGroup("phone", "simple", phonePhone);
 
 // The GIF: six seconds of the board, recorded at 1×, cut from the moment a needs-you card
 // is on the board, so the accent reads on the surface it is shot on.

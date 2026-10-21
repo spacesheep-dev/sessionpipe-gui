@@ -5,6 +5,7 @@
 // a trusted device's key.add). Same-origin fetch, JSON both ways, errors by code.
 import type { ControlActivity, Info, MachineControl, TlsInfo } from "@shared/api";
 import { ROUTES } from "@shared/api";
+import { sendingOriginOf, wrongOrigin } from "./origin";
 
 const BASE = ROUTES.ui.control;
 
@@ -141,8 +142,11 @@ export const controlApi = {
 };
 
 let rpIdPromise: Promise<string> | null = null;
+let rpCache: string | undefined;
 let tlsCache: TlsInfo | null | undefined;
 let uiKeyCache: string | undefined;
+let originCache: string | null | undefined;
+let originsCache: string[] | undefined;
 
 /** The rp id this receiver makes passkeys for (Info.control.rpId), fetched once. The
  *  same read remembers Info.tls for `tlsInfo()`. */
@@ -153,7 +157,10 @@ export function rpId(): Promise<string> {
       .then((i) => {
         tlsCache = i.tls ?? null;
         uiKeyCache = i.uiKey || undefined;
-        return i.control?.rpId ?? "localhost";
+        originCache = sendingOriginOf(i);
+        originsCache = i.control?.origins;
+        rpCache = i.control?.rpId ?? "localhost";
+        return rpCache;
       })
       .catch((e) => {
         rpIdPromise = null;
@@ -167,7 +174,19 @@ export function rpId(): Promise<string> {
  *  Info.tls changed under us. The next `rpId()` / `tlsInfo()` reads again. */
 export function resetInfoCache(): void {
   rpIdPromise = null;
+  rpCache = undefined;
   tlsCache = undefined;
+  originCache = undefined;
+  originsCache = undefined;
+}
+
+/** The wrong-origin guard for this very page (control/origin.ts): the https origin
+ *  sending works at when `location.hostname` is not under the rp id, else null.
+ *  Synchronous from the cached Info, like `tlsInfo()`; null before the first read lands. */
+export function wrongOriginHere(): string | null {
+  if (originCache === undefined) void rpId().catch(() => {});
+  if (typeof location === "undefined") return null;
+  return wrongOrigin(location, rpCache, originsCache, originCache ?? null);
 }
 
 /** Info.tls as last read (by `rpId()`): null when the server has no TLS mode on,
@@ -182,12 +201,26 @@ export function tlsInfo(): TlsInfo | null | undefined {
  *  Null when TLS is off or we are already on that origin. */
 export function httpsPath(pathWithSearch: string): string | null {
   const tls = tlsInfo();
-  if (!tls?.on || typeof location === "undefined") return null;
-  const base = new URL(tls.httpsUrl);
-  if (location.host === base.host && location.protocol === "https:") return null;
+  if (!tls?.on) return null;
+  return originPath(tls.httpsUrl, pathWithSearch);
+}
+
+/** `pathWithSearch` on `origin`, with the UI key so the page is let in; null when this
+ *  page is already there. */
+export function originPath(origin: string, pathWithSearch: string): string | null {
+  if (typeof location === "undefined") return null;
+  const base = new URL(origin);
+  if (location.host === base.host && location.protocol === base.protocol) return null;
   const u = new URL(pathWithSearch, base);
   if (uiKeyCache && !u.searchParams.has("k")) u.searchParams.set("k", uiKeyCache);
   return u.toString();
+}
+
+/** This very page where sending works, when this is the wrong address (`wrongOriginHere`). */
+export function wrongOriginHref(): string | null {
+  const wrong = wrongOriginHere();
+  if (!wrong || typeof location === "undefined") return null;
+  return originPath(wrong, location.pathname + location.search + location.hash);
 }
 
 /** This very page on the https origin (see `httpsPath`). */

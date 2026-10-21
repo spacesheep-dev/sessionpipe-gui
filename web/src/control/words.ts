@@ -2,7 +2,8 @@
 // Owned by: control-web. A carried message's lifecycle and a refusal's code, in words a
 // person reads under the strip (CONTROL.md §5, §10).
 import type { ControlActivity, ControlKind, ControlOutcome } from "@shared/api";
-import { ControlError } from "./api";
+import { ControlError, wrongOriginHere } from "./api";
+import { wrongOriginWords } from "./origin";
 import { webauthnError } from "./webauthn";
 
 export const KIND_LABEL: Record<ControlKind, string> = {
@@ -39,8 +40,17 @@ export const REFUSAL_WORDS: Record<string, string> = {
   start_limit: "the machine is already starting as many sessions as it allows",
 };
 
-export const refusalWords = (code: string | undefined): string =>
-  (code && REFUSAL_WORDS[code]) ?? (code ? code.replace(/_/g, " ") : "refused");
+/** The wrong-origin guard's line, e.g. "Sending works from https://studio-mac.local:7373;
+ *  open it there." A passkey is bound to its origin, so a page elsewhere is never offered
+ *  "add this device": that would make a key the right address cannot see. */
+export const WRONG_ORIGIN = wrongOriginWords;
+
+export const refusalWords = (code: string | undefined): string => {
+  // A refused key on the wrong address is the address, not the key: say so, with the way out.
+  const wrong = code === "untrusted_key" ? wrongOriginHere() : null;
+  if (wrong) return WRONG_ORIGIN(wrong);
+  return (code && REFUSAL_WORDS[code]) ?? (code ? code.replace(/_/g, " ") : "refused");
+};
 
 /** The step the message is at. The receiver keeps `taken` as the outcome once a taken ack
  *  landed and lets later progress acks grow `reply` (server/control/state.ts), so a taken

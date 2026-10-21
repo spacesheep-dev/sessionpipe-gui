@@ -402,6 +402,13 @@
   color: var(--fg-2);
 }
 
+/* The wrong-origin guard's line in the strip's hint: the address is the way out. */
+.ctl-origin-link {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 /* The "this browser is not trusted" line under the strip, with its way out. */
 .ctl-untrusted {
   font-size: var(--text-sm);

@@ -9,6 +9,7 @@ import { ControlStrip } from "../components/ControlStrip";
 import { useAppState } from "../data/hooks";
 import { Link } from "../lib/router";
 import { ActivityList } from "./Activity";
+import { wrongOriginHere } from "./api";
 import { obtainGrant } from "./daykey";
 import { useSessionSend } from "./useSend";
 import { insecureHint, storedPasskeys } from "./webauthn";
@@ -57,6 +58,9 @@ export function SessionControl({
   // at /add-device, where a trusted device vouches for this one (CONTROL.md §2).
   const untrustedHere =
     secure && !!rp && !!control && !control.keys.some((k) => storedPasskeys(rp).some((s) => s.id === k.id));
+  // The wrong address (control/origin.ts): a passkey made here could never sign at the rp
+  // id, so no "add this device" is offered; the one line names where sending works.
+  const wrong = wrongOriginHere();
 
   const machine = session.machine ?? "the machine";
   return (
@@ -81,7 +85,7 @@ export function SessionControl({
               {" · "}
             </>
           )}
-          <Link to="/add-device">New phone or laptop? Add it</Link>
+          {wrong ? null : <Link to="/add-device">New phone or laptop? Add it</Link>}
           {unlock && <span className="ctl-context-note"> · {unlock}</span>}
         </p>
       )}

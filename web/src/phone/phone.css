@@ -1,0 +1,126 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The /phone page: the setup page's rows (setup.css) and the pairing page's digits and
+   notes (control.css), plus the lane block, its chip and the recommended word. Phone-width
+   first: one column, the QR above its text; the same tokens and rules, no new colour. */
+
+.phone-page {
+  max-width: 720px;
+  gap: 28px;
+}
+.phone-page h1 {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.ph-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 6px;
+}
+.ph-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 280px;
+}
+.ph-url code {
+  overflow-wrap: anywhere;
+}
+.qr--phone {
+  min-height: 0;
+}
+/* A state word in a heading: muted, with a dot once it means "on". */
+.ph-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+.ph-chip--on {
+  color: var(--fg-2);
+}
+.ph-chip--on::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg);
+}
+.ph-lane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+.ph-lane-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+.ph-reco {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+.ph-os {
+  margin: 4px 0 -4px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--fg-2);
+}
+.ph-other {
+  margin-top: 8px;
+  font-size: var(--text-sm);
+  color: var(--fg-3);
+}
+.ph-other summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.ph-other summary:hover {
+  color: var(--fg);
+}
+.ph-other-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 0 0 12px;
+  border-left: var(--hairline) solid var(--line);
+  margin-top: 6px;
+}
+.ph-other-body .ph-lane {
+  margin-top: 0;
+}
+.ph-trusted {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: var(--hairline) solid var(--line);
+  font-size: var(--text-md);
+}
+.ph-trusted li {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  border-bottom: var(--hairline) solid var(--line);
+}
+.phone-page .pending {
+  margin-top: 4px;
+}
+
+@media (min-width: 640px) {
+  .ph-row {
+    flex-direction: row;
+    gap: 20px;
+  }
+}

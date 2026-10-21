@@ -18,6 +18,7 @@ export type Route =
   | { name: "theme"; id: string }
   | { name: "pair"; code: string }
   | { name: "add-device" }
+  | { name: "phone" }
   | { name: "missing"; path: string };
 
 const listeners = new Set<() => void>();
@@ -47,6 +48,7 @@ export function parseRoute(pathWithSearch: string): Route {
   if (path === "/settings") return { name: "settings" };
   if (path === "/shortcuts") return { name: "shortcuts" };
   if (path === "/add-device") return { name: "add-device" };
+  if (path === "/phone") return { name: "phone" };
   const t = /^\/t\/([^/]+)\/?$/.exec(path);
   if (t?.[1]) return { name: "theme", id: decodeURIComponent(t[1]) };
   if (path === "/pair") {

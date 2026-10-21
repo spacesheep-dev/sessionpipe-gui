@@ -6,7 +6,7 @@
 import type { Attention, MachineControl, SessionSummary, Suggestion } from "@shared/api";
 import { type KeyboardEvent, useState } from "react";
 import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachments";
-import { httpsHere } from "../control/api";
+import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
 
 export type ControlAction =
   | { kind: "prompt"; text: string }
@@ -79,7 +79,10 @@ export function ControlStrip({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const paired = !!control;
-  const httpsHref = blocked ? httpsHere() : null;
+  // The wrong address (control/origin.ts): the hint is the one line naming where sending
+  // works, as a link to this very page there; never an offer to add a device.
+  const wrong = blocked ? wrongOriginHere() : null;
+  const httpsHref = blocked ? (wrong ? wrongOriginHref() : httpsHere()) : null;
   const enabled = paired && !!onSend && !blocked;
   // Images beside the message (control/Attachments.tsx): paperclip, paste, drop, the phone's picker.
   const att = useAttachments({ machine: session.machine, enabled });
@@ -260,9 +263,19 @@ export function ControlStrip({
           </button>
         )}
       </div>
-      <p className="ctl-hint">
-        {hint}
-        {blocked && httpsHref ? (
+      <p className="ctl-hint" data-wrong-origin={wrong ? "" : undefined}>
+        {wrong ? (
+          <>
+            Sending works from{" "}
+            <a className="ctl-origin-link" href={httpsHref ?? wrong}>
+              {wrong}
+            </a>
+            ; open it there.
+          </>
+        ) : (
+          hint
+        )}
+        {blocked && !wrong && httpsHref ? (
           <a className="ctl-open-https" href={httpsHref}>
             Open on {new URL(httpsHref).host} →
           </a>

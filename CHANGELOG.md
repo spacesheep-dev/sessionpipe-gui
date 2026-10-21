@@ -8,6 +8,14 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Added
 
+- **Your phone.** `/phone` (and setup step 4) gets a phone onto the board and sending from
+  it in three steps, on the laptop and on the phone itself: the Wi-Fi QR; one recommended
+  way to an https address the phone trusts (Tailscale in one click when it runs here, else
+  the same Wi-Fi with the local CA, the iPhone and Android steps and a Check from the
+  phone), the rest under "Other ways"; then "Send from this phone", six digits, one Approve
+  on the laptop, no reload anywhere. A page on the wrong address (http://localhost while
+  passkeys live at the `.local` name) now says "Sending works from https://…; open it
+  there." instead of offering to add a device.
 - **From anywhere.** `--public-url https://<name>` puts the GUI behind a trusted https
   reverse proxy on the same machine; the setup page's optional sixth step finds Tailscale,
   shows the `tailscale serve --bg 7373` line and sets the url in one click. The url's host

@@ -8,58 +8,25 @@
 import { useEffect, useState } from "react";
 import { Link } from "../lib/router";
 import { ms, useNow } from "../lib/time";
-import { ControlError, controlApi, type DeviceRequest, httpsHere } from "./api";
+import { controlApi, httpsHere } from "./api";
 import { useRpId } from "./hooks";
-import {
-  guessDeviceName,
-  insecureHint,
-  passkeysAvailable,
-  registerPasskey,
-  type StoredPasskey,
-  storedPasskeys,
-  webauthnError,
-} from "./webauthn";
+import { NAME_MAX, useDeviceRequest } from "./useDeviceRequest";
+import { guessDeviceName, insecureHint, passkeysAvailable } from "./webauthn";
 import { refusalWords } from "./words";
 import "./control.css";
-
-const POLL_MS = 2000;
-export const NAME_MAX = 40;
-
-type Phase =
-  | { k: "idle" }
-  | { k: "busy"; what: string }
-  | { k: "waiting"; d: DeviceRequest }
-  | { k: "added"; d: DeviceRequest }
-  | { k: "failed"; d: DeviceRequest }
-  | { k: "expired"; d: DeviceRequest }
-  | { k: "rejected"; d: DeviceRequest };
-
-function requestErrorWords(e: unknown): string {
-  if (e instanceof ControlError) {
-    if (e.reason === "bad_key") return "This passkey is in a shape the machine cannot use; make a new one.";
-    if (e.status === 401) return "This page lost its key. Open the GUI again from the link or QR on the Mac.";
-    return e.detail ?? e.reason;
-  }
-  return webauthnError(e);
-}
 
 export function AddDevicePage() {
   const rp = useRpId();
   const secure = passkeysAvailable(rp);
   const now = useNow();
-  const [known, setKnown] = useState<StoredPasskey[]>([]);
+  const { phase, error, known, ask } = useDeviceRequest(rp);
   const [name, setName] = useState(guessDeviceName());
-  const [phase, setPhase] = useState<Phase>({ k: "idle" });
-  const [error, setError] = useState<string | null>(null);
   const [paired, setPaired] = useState<number | null>(null);
   const httpsHref = secure ? null : httpsHere();
 
   useEffect(() => {
-    if (!rp) return;
-    const list = storedPasskeys(rp);
-    setKnown(list);
-    if (list[0]?.name) setName(list[0].name);
-  }, [rp]);
+    if (known[0]?.name) setName(known[0].name);
+  }, [known]);
 
   useEffect(() => {
     let on = true;
@@ -71,57 +38,6 @@ export function AddDevicePage() {
       on = false;
     };
   }, []);
-
-  // While waiting, ask every two seconds how the request stands.
-  const waitingId = phase.k === "waiting" ? phase.d.requestId : null;
-  useEffect(() => {
-    if (!waitingId) return;
-    let on = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const tick = async () => {
-      try {
-        const d = await controlApi.device(waitingId);
-        if (!on) return;
-        if (d.status === "added") setPhase({ k: "added", d });
-        else if (d.status === "failed") setPhase({ k: "failed", d });
-        else if (d.status === "expired") setPhase({ k: "expired", d });
-        else setPhase({ k: "waiting", d });
-      } catch (e) {
-        if (!on) return;
-        if (e instanceof ControlError && e.status === 404) {
-          setPhase((p) => (p.k === "waiting" ? { k: "rejected", d: p.d } : p));
-          return;
-        }
-        // a dropped connection: the next tick tries again
-      }
-      if (on) timer = setTimeout(tick, document.visibilityState === "hidden" ? POLL_MS * 3 : POLL_MS);
-    };
-    timer = setTimeout(tick, POLL_MS);
-    return () => {
-      on = false;
-      if (timer) clearTimeout(timer);
-    };
-  }, [waitingId]);
-
-  const ask = async (fresh: boolean) => {
-    if (!rp) return;
-    setError(null);
-    const deviceName = name.trim().slice(0, NAME_MAX) || guessDeviceName();
-    try {
-      let key: StoredPasskey | undefined = fresh ? undefined : known[0];
-      if (!key) {
-        setPhase({ k: "busy", what: "Making a passkey on this device…" });
-        key = await registerPasskey(rp, deviceName);
-        setKnown(storedPasskeys(rp));
-      }
-      setPhase({ k: "busy", what: "Asking to be trusted…" });
-      const d = await controlApi.deviceRequest({ key: { id: key.id, alg: key.alg, spki: key.spki }, name: deviceName });
-      setPhase({ k: "waiting", d });
-    } catch (e) {
-      setError(requestErrorWords(e));
-      setPhase({ k: "idle" });
-    }
-  };
 
   const d = "d" in phase ? phase.d : null;
   const left = d ? ms(d.expiresAt) - now : 0;
@@ -222,7 +138,7 @@ export function AddDevicePage() {
           className="pair-form"
           onSubmit={(e) => {
             e.preventDefault();
-            void ask(false);
+            void ask(name);
           }}
         >
           <label>
@@ -242,7 +158,7 @@ export function AddDevicePage() {
               {known.length ? `Add this device with its passkey “${known[0]?.name ?? "here"}”` : "Add this device"}
             </button>
             {known.length > 0 && secure && (
-              <button type="button" className="btn btn--ghost btn--sm" onClick={() => void ask(true)}>
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => void ask(name, true)}>
                 make a new passkey instead
               </button>
             )}

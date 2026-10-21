@@ -3,6 +3,7 @@
 // the whole app runs with `npx vite --config web/vite.config.ts` and no server. Add
 // `&empty=1` for the first-run board.
 import type { Transport } from "../data/transport";
+import { installPhoneMock } from "./phone";
 import { review } from "./review";
 import { World } from "./world";
 
@@ -11,6 +12,7 @@ const latency = <T>(v: T, ms = 60): Promise<T> => new Promise((r) => setTimeout(
 export function createMockTransport(): Transport {
   const world = new World({ empty: new URLSearchParams(location.search).get("empty") === "1" });
   (window as unknown as { __sessionpipeMock?: World }).__sessionpipeMock = world;
+  installPhoneMock(new URLSearchParams(location.search), () => world.info());
   return {
     openStream(h) {
       let stop: (() => void) | null = null;

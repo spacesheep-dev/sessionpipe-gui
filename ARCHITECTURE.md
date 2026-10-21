@@ -62,7 +62,9 @@ client against a receiver you can see into.
 | `web/src/lib/skins.ts`, `theme.ts` | platform | applies a skin to `<html>` (tokens per scheme, `--font-ui`/`--font-mono`, `--radius`, `--hairline`, `data-density`, `@font-face`, the stylesheet); the per-device choice under `sessionpipe-gui.skin` (migrated once from `sessionpipe-gui.colorTheme`) |
 | `web/src/themes/host/*` | platform | loads a theme at `/t/:id` and builds its `ThemeApi` (`shared/theme-api.ts`) |
 | `web/src/plugins/*` | platform | the Plugins section of the Views page: the list from `/api/ui/plugins`, the settings form made from each manifest, Reload; suggestions reach the control strip through `AppState.suggestions` |
-| `web/*` | web | the app; `web/src/mock/` a mock stream so it runs with no server |
+| `web/src/phone/*` | phone-web | `/phone`: one page, laptop side and phone side (`state.ts`, pure and tested), three steps from `GET /api/ui/phone` polled every 2 s; the lane it recommends (Tailscale here, else the same Wi-Fi with the local CA), the phone's own passkey request through `control/useDeviceRequest.ts`, the laptop's Approve through `control/PendingDevices.tsx` |
+| `web/src/control/origin.ts` | control-web | the wrong-origin guard: a page whose origin is not in `Info.control.origins` (or under the rp id on an older server) gets the one line "Sending works from <origin>; open it there." (`words.ts WRONG_ORIGIN`, `insecureHint`, `refusalWords("untrusted_key")`) and is never offered to add a device |
+| `web/*` | web | the app; `web/src/mock/` a mock stream so it runs with no server (`?phone=<scene>&side=phone` for the phone page's scenes) |
 
 A module touches only its own paths; a change it needs elsewhere is a request to the
 owner (in a PR comment or an issue). `server/app.ts` wires modules by the exact

@@ -3,8 +3,9 @@
 // (CONTROL.md §2, §3.2): making a passkey for the receiver's rp id, and asserting over a
 // 32-byte challenge with it. The passkeys this browser made are remembered per rp id
 // (credential id, alg, SPKI) in localStorage, so a later approval or grant can name them.
-import { type Assertion, controlApi, type TrustedKey, tlsInfo } from "./api";
+import { type Assertion, controlApi, type TrustedKey, tlsInfo, wrongOriginHere } from "./api";
 import { b64url, fromB64url, randomBytes } from "./bytes";
+import { wrongOriginWords } from "./origin";
 
 export const ES256 = -7;
 export const RS256 = -257;
@@ -12,9 +13,13 @@ export const RS256 = -257;
 /** Why no control affordance can work here: passkeys need a secure context. */
 export const INSECURE_HINT = "passkeys need https or localhost: open this page on the machine running sessionpipe-gui";
 
-/** The hint for this page: with TLS mode on, the one origin passkeys work on (the
- *  `.local` rp id makes http://localhost stop signing too); otherwise INSECURE_HINT. */
+/** The hint for this page. On the wrong address (not under the rp id, while a sending
+ *  origin exists) it is the guard's one line, control/origin.ts; with TLS mode on, the one
+ *  origin passkeys work on (the `.local` rp id makes http://localhost stop signing too);
+ *  otherwise INSECURE_HINT. */
 export function insecureHint(): string {
+  const wrong = wrongOriginHere();
+  if (wrong) return wrongOriginWords(wrong);
   const tls = tlsInfo();
   if (!tls?.on) return INSECURE_HINT;
   return `passkeys work only at ${tls.httpsUrl} (TLS mode); the Setup page gets you there`;

@@ -23,6 +23,16 @@ takes them all in one run (about two minutes).
 | `phone-board.png` | dark | `/` | The phone viewport, Simple mode |
 | `phone-session.png` | light | `/s/…` | The phone viewport, Simple mode |
 | `phone-trust.png` | dark | `/trust` | The TLS instance's trust page on the phone viewport |
+| `phone-tailscale-desktop.png` | dark | `/phone` | The laptop side with Tailscale running here: the one button, the chip |
+| `phone-wifi-desktop.png` | light | `/phone` | The laptop side, no Tailscale: the trust QR and both phones' steps |
+| `phone-waiting-desktop.png` | dark | `/phone` | A phone asking to be trusted: its six digits and Approve at step 3 |
+| `phone-trusted-desktop.png` | dark | `/phone` | The phone trusted: step 3 green, the trusted list |
+| `phone-wrong-origin-desktop.png` | dark | `/s/…` | The composer on the wrong address: the one line naming where sending works |
+| `phone-tailscale-phone.png` | dark | `/phone` | The phone side with Tailscale serving: the address and the app line |
+| `phone-wifi-phone.png` | dark | `/phone` | The phone side on iPhone: its own steps and Check |
+| `phone-waiting-phone.png` | light | `/phone` | The phone waiting for the laptop, its six digits |
+| `phone-trusted-phone.png` | dark | `/phone` | The phone trusted: "Open the board" |
+| `phone-wrong-origin-phone.png` | dark | `/s/…` | The composer at phone width on the wrong address |
 
 The scheme column is the script's default split: `--scheme dark|light` sets the appearance
 every shot gets (dark), and `--light a.png,b.png` names the shots taken in light instead
@@ -43,6 +53,11 @@ that machine through the ordinary events route: a prompt, two tools, a transcrip
 open `Bash` permission. That session is forgotten and re-posted on every run so the prompt
 is always newer than the machine's hello. Everything else on the board is the demo
 generator's.
+
+The `/phone` shots answer the phone routes (`/api/ui/phone*`, the info's `control` block, the
+device list) in the page with fixed demo scenes, since a lane state depends on Tailscale and
+on a real phone: no real address, name or key reaches them. The phone-side waits are seeded
+through the tab's remembered device request, which a reload mid-wait also uses.
 
 The trust page names the machine the GUI runs on (its mDNS name). Before that one capture
 the script replaces that name in the page's text nodes with `studio-mac`, so the shot

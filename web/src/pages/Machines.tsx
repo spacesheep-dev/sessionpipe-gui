@@ -125,9 +125,9 @@ function MachineBlock({ m, now, lanUrl }: { m: MachineSummary; now: number; lanU
                 <details className="machine-add-phone">
                   <summary>+ Add a phone</summary>
                   <span>
-                    On the phone, open the GUI at <span className="mono">{httpsUrl}</span> and tap{" "}
-                    <strong>Add this device</strong>; approve it here when its six digits show up. Only a device the
-                    machine already trusts can vouch for one.
+                    <Link to="/phone">Your phone</Link> walks it through: an https address it trusts (
+                    <span className="mono">{httpsUrl}</span>), then <strong>Send from this phone</strong>; approve its
+                    six digits here. Only a device the machine already trusts can vouch for one.
                   </span>
                 </details>
               </span>

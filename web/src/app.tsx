@@ -20,6 +20,7 @@ import { SessionPage } from "./pages/Session";
 import { Setup } from "./pages/Setup";
 import { Shortcuts } from "./pages/Shortcuts";
 import { Themes } from "./pages/Themes";
+import { PhonePage } from "./phone/PhonePage";
 import { markSetupSeen, setupSeen, useSetupStatus } from "./setup/api";
 import { needsSetup } from "./setup/steps";
 import { fetchThemes, useThemes } from "./themes/host/registry";
@@ -36,6 +37,7 @@ const TITLES: Record<string, string> = {
   session: "Session",
   pair: "Pair a machine",
   "add-device": "Add this device",
+  phone: "Your phone",
   themes: "Views",
   settings: "Settings",
   shortcuts: "Keyboard shortcuts",
@@ -110,6 +112,7 @@ export function App() {
       {route.name === "theme" && <ThemePage key={route.id} id={route.id} />}
       {route.name === "pair" && <PairPage key={route.code} code={route.code} />}
       {route.name === "add-device" && <AddDevicePage />}
+      {route.name === "phone" && <PhonePage />}
       {route.name === "missing" && (
         <>
           <p className="page-note" data-missing>
