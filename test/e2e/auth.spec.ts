@@ -3,6 +3,7 @@
 // UI auth seen from the LAN: no key is a 401 page, `?k=` sets the cookie and redirects,
 // the cookie then opens the board. Needs a LAN IPv4 on this machine; skipped otherwise.
 import { expect, test } from "@playwright/test";
+import { seenSetup } from "../../playwright.config.js";
 import { INFO } from "./helpers.js";
 
 interface Info {
@@ -19,6 +20,7 @@ test.describe("auth from a non-loopback address", () => {
     const info = (await (await request.get(INFO)).json()) as Info;
     const lan = info.urls.lan[0];
     test.skip(!lan, "this machine reports no LAN IPv4 address (GET /api/ui/info urls.lan is empty)");
+    if (!lan) return;
     expect(info.uiKey).toMatch(/\S{8,}/);
 
     const api = await playwright.request.newContext({ baseURL: lan });
@@ -55,8 +57,11 @@ test.describe("auth from a non-loopback address", () => {
       await api.dispose();
     }
 
-    // A browser follows the redirect and lands on the live board, cookie set.
-    const ctx = await browser.newContext({ baseURL: lan });
+    // A browser follows the redirect and lands on the live board, cookie set. The LAN
+    // address is one of this machine's own, so the first-run redirect to /setup would
+    // meet it like any local browser: this one has seen the setup page, as the suite's
+    // other contexts have (playwright.config.ts).
+    const ctx = await browser.newContext({ baseURL: lan, storageState: { cookies: [], origins: [seenSetup(lan)] } });
     try {
       const page = await ctx.newPage();
       await page.goto(`/?k=${encodeURIComponent(info.uiKey)}`);

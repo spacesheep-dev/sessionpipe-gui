@@ -19,7 +19,7 @@ export const SETUP_SEEN_KEY = "sessionpipe-gui.setup.seen";
 /** The suite describes the full interface; Simple mode (the default for a device that has not
  *  chosen) is exercised by settings.spec.ts on purpose. */
 export const SETTINGS_KEY = "sessionpipe-gui.settings";
-const seenSetup = (origin: string) => ({
+export const seenSetup = (origin: string) => ({
   origin,
   localStorage: [
     { name: SETUP_SEEN_KEY, value: "1" },
