@@ -6,6 +6,11 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A session that ended and started again (Claude Code resumed, a compaction restart, a
+  harness reopened after a reboot) is live again on the board instead of staying "done".
+
 ## [0.1.0] - 2026-10-15
 
 The first public release: a sessionpipe receiver with a face.

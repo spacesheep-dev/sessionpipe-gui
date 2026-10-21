@@ -199,6 +199,21 @@ describe("readings", () => {
     expect(sum.counts.attentions).toBe(2);
   });
 
+  it("comes back from done when the session starts again", () => {
+    const s = new Session();
+    store.ingest([s.ev("session.started"), s.ev("turn.started"), s.ev("session.ended", { reason: "other" })], "http");
+    expect(store.session(KEY)!.state).toBe("done");
+    store.ingest([s.ev("session.started", { source: "resume" })], "http");
+    let sum = store.session(KEY)!;
+    expect(sum.state).toBe("idle");
+    expect(sum.endedAt).toBeUndefined();
+    store.ingest([s.ev("turn.started", { prompt_chars: 12 })], "http");
+    sum = store.session(KEY)!;
+    expect(sum.state).toBe("working");
+    store.ingest([s.ev("session.ended", { reason: "exit" })], "http");
+    expect(store.session(KEY)!.state).toBe("done");
+  });
+
   it("is done on session.ended and for a backfill-only session", () => {
     const s = new Session();
     store.ingest([s.ev("session.started"), s.ev("turn.started"), s.ev("session.ended", { reason: "exit" })], "http");

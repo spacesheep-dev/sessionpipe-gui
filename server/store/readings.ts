@@ -309,6 +309,10 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
 
   switch (ev.type) {
     case "session.started":
+      // A session that ended and came back (Claude Code's resume, a compaction restart,
+      // a harness reopened after a reboot) is live again, not done for good.
+      rec.ended = false;
+      s.endedAt = undefined;
       break;
     case "session.ended":
       rec.ended = true;
