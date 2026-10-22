@@ -470,7 +470,10 @@ describe("the queue", () => {
     expect(act.ackedAt).toBeDefined();
     expect(JSON.stringify(act)).not.toContain(signed.csig);
     off();
-    expect(seen.map((s) => (s.kind === "control" ? s.message.outcome : s.kind))).toEqual([undefined, "delivered"]);
+    // Only the command's own frames: a machine's poll state is sent 300 ms after a poll
+    // (server/control/index.ts), so on a slow runner one can land inside this window.
+    const outcomes = seen.flatMap((s) => (s.kind === "control" ? [s.message.outcome] : []));
+    expect(outcomes).toEqual([undefined, "delivered"]);
     const ui = await call(b.url, "GET", `${UI}/activity?limit=5`);
     expect((ui.body.activity as { id: string }[]).some((a) => a.id === w.id)).toBe(true);
   });
