@@ -69,5 +69,13 @@ export function wrongOrigin(
 ): string | null {
   if (!target || onSendingOrigin(loc, rp, origins)) return null;
   if (target.replace(/\/$/, "").toLowerCase() === loc.origin.toLowerCase()) return null;
+  // A loopback origin is the server's own machine: from a page on any other host it names
+  // the visitor's machine instead, so there is nowhere honest to point (the plain-http hint
+  // says what is true there).
+  const targetHost = hostOf(target);
+  if (targetHost && isLoopback(targetHost) && !isLoopback(loc.hostname.toLowerCase())) return null;
   return target;
 }
+
+const isLoopback = (host: string): boolean =>
+  host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || host === "::1" || /^127\./.test(host);

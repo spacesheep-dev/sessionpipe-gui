@@ -64,6 +64,13 @@ describe("wrongOrigin", () => {
     expect(wrongOrigin(at("https://localhost:7373"), "localhost", undefined, "https://localhost:7373")).toBeNull();
     expect(wrongOrigin(at("http://localhost:7373"), "studio-mac.local", origins, null)).toBeNull();
   });
+  it("never points a page on another host at a loopback origin", () => {
+    const local = "http://localhost:7373";
+    expect(wrongOrigin(at("http://192.168.1.20:7373"), "localhost", [local], local)).toBeNull();
+    expect(wrongOrigin(at("http://studio-mac.local:7373"), "localhost", [local], local)).toBeNull();
+    // On the machine itself, 127.0.0.1 is still pointed at the rp id's localhost.
+    expect(wrongOrigin(at("http://127.0.0.1:7373"), "localhost", [local], local)).toBe(local);
+  });
   it("words the one line with the address", () => {
     expect(wrongOriginWords(target)).toBe("Sending works from https://studio-mac.local:7373; open it there.");
   });
