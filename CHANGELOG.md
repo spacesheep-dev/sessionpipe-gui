@@ -8,6 +8,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Added
 
+- **Colour labels.** Right-click any session, then "Label ▸", to give it one of seven
+  colours; "Edit labels…" names them. A label is one dot wherever the session appears, the
+  board and the feed filter by it (`label:red`), and every device sees the same labels.
+- **Subagents you can watch.** A parent row says how many subagents run and opens a tree of
+  what each is doing; the session page shows each agent under the turn that started it,
+  with its tools and result; an agent opens beside its parent as its own tab.
+- **Canvas views.** One click lays the canvas out by machine, harness, repo, state or
+  label; *My layout* keeps your own areas and notes, the same on every device.
+
 - **Your phone.** `/phone` (and setup step 4) gets a phone onto the board and sending from
   it in three steps, on the laptop and on the phone itself: the Wi-Fi QR; one recommended
   way to an https address the phone trusts (Tailscale in one click when it runs here, else
