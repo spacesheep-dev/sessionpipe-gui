@@ -1,0 +1,444 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- board ---------- */
+
+/* One grouped list, gutter to gutter, like Mail's or Linear's: rows, not cards. The list
+   reaches 12 px past the gutter so a row's highlight (inset 4 px, --radius) has room and
+   its glyph still lines up with the page title. A container, so a narrow column (the
+   split open, a phone) folds a row into three lines. */
+.board-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -12px;
+  container: board / inline-size;
+}
+
+/* Section headers: a 28 px band that sticks under the page bar (--sticky-top is the
+   bar's measured height), opaque, a hairline below, edge to edge like the bar. The count
+   is a plain number a step after the label. */
+.group {
+  display: flex;
+  flex-direction: column;
+}
+.group + .group {
+  margin-top: 16px;
+}
+.group-head {
+  position: sticky;
+  top: var(--sticky-top, var(--bar));
+  z-index: calc(var(--z-sticky) - 1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  margin: 0 calc(12px - var(--gutter));
+  padding: 0 var(--gutter);
+  background: var(--bg);
+  border-bottom: var(--hairline) solid var(--line);
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* Text is never fg-4 (a mark tier, under 4.5:1); the count is the meta tier. */
+.group-count {
+  color: var(--fg-3);
+  font-weight: 400;
+}
+/* Done folds away behind a disclosure: the chevron turns as it opens. */
+.group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  color: inherit;
+  font: inherit;
+}
+.group-toggle:focus-visible {
+  outline-offset: -2px;
+  border-radius: var(--radius-inner);
+}
+.group-caret {
+  margin-left: -4px;
+  color: var(--fg-4);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.group-toggle[aria-expanded="true"] .group-caret {
+  transform: rotate(90deg);
+}
+@media (hover: hover) {
+  .group-toggle:hover,
+  .group-toggle:hover .group-caret {
+    color: var(--fg);
+  }
+}
+
+/* The rows of a group (the class is the e2e hook from the grid it used to be). */
+.grid {
+  display: flex;
+  flex-direction: column;
+  padding-top: 4px;
+}
+
+/* A row: the glyph in a 16 px lead, the title and one time on line 1, what the session is
+   doing on line 2 with the machine and repo trailing; Advanced adds the counts before the
+   time. A reserved slot at the end takes "Open beside" on hover, so nothing moves. */
+.card {
+  position: relative;
+}
+.card-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 0 4px;
+  border-radius: var(--radius);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+/* Hairlines between rows, inset to the text, gone next to a highlighted row. */
+.card + .card > .card-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 36px;
+  right: 0;
+  border-top: var(--hairline) solid var(--line);
+  pointer-events: none;
+}
+.card-link {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 28px auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "lead title title foot time"
+    ".    tool  line  meta meta";
+  align-content: center;
+  row-gap: 2px;
+  min-height: calc(var(--row-sm) * 2 - 12px);
+  padding: 8px 0 8px 8px;
+  color: inherit;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.card-link:focus-visible {
+  outline: none;
+}
+
+.card-title {
+  grid-area: title;
+  min-width: 0;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+}
+.card--done .card-title {
+  color: var(--fg-2);
+}
+/* The state, its request and the time are one element (the e2e contract); its parts
+   take their places in the row's grid. */
+.card-status {
+  display: contents;
+}
+.card-state {
+  grid-area: lead;
+  display: flex;
+  justify-content: center;
+  width: 16px;
+  align-self: center;
+}
+.card-time {
+  grid-area: time;
+  justify-self: end;
+  min-width: 8ch;
+  margin-left: 12px;
+  text-align: right;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+/* Line 2: a tool name (or the kind of prompt) in the UI font, then the command in mono
+   or the latest text, one line. */
+.card-tool,
+.card-kind {
+  grid-area: tool;
+  margin-right: 8px;
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+.card-kind::first-letter {
+  text-transform: uppercase;
+}
+.card-kind {
+  display: inline-block;
+}
+.card-line {
+  grid-area: line;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+.card-attn,
+.card-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-attn {
+  color: var(--fg-2);
+}
+.card-attn.mono {
+  font-size: calc(var(--text-sm) * 0.95);
+}
+.card-flags {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  color: var(--fg-3);
+}
+.card-flags .is-err,
+.sess-flags .is-err {
+  color: var(--err);
+}
+.card-meta {
+  grid-area: meta;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 280px;
+  min-width: 0;
+  margin-left: 16px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+}
+.card-meta .glyph-wrap {
+  flex: none;
+  color: var(--fg-4);
+}
+/* Positioned, so the screen-reader-only branch after a long repo is clipped with the line
+   instead of standing out past the row and widening the page. */
+.card-where {
+  position: relative;
+  min-width: 0;
+}
+/* Advanced: turns and tools as two right-aligned columns before the time; errors only
+   when there are some, and only those in red. */
+.card-foot {
+  grid-area: foot;
+  display: flex;
+  gap: 12px;
+  margin-left: 16px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+.card-foot > span {
+  min-width: 8ch;
+  text-align: right;
+}
+.card-foot .is-err,
+.sess-counts .is-err {
+  color: var(--err);
+}
+/* The store's flags on the session page (SessionView): one muted line. */
+.sess-flags {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* "Open beside": the reserved trailing slot, faded in on hover; never on touch. */
+.card-beside {
+  flex: none;
+  margin: 0 4px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.card-row:hover .card-beside,
+.card[aria-current="true"] .card-beside,
+.card-beside:focus-visible {
+  opacity: 1;
+}
+
+/* Hover, selected, pressed: an inset rounded fill. Selected is the keyboard cursor and
+   the row whose session is open in the panel; the ring is only for the keyboard. */
+@media (hover: hover) {
+  .card-row:hover {
+    background: var(--hover);
+  }
+}
+.card[aria-current="true"] > .card-row,
+.card[data-open] > .card-row,
+.card[data-menu-open] > .card-row {
+  background: var(--sel);
+}
+.card-row:active {
+  background: var(--press);
+  transition: none;
+}
+.card-row:has(.card-link:focus-visible) {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: -2px;
+}
+.card:is([aria-current="true"], [data-open], :has(> .card-row:hover)) > .card-row::before,
+.card:not(:has(.card-kids)):is([aria-current="true"], [data-open], :has(> .card-row:hover)) + .card > .card-row::before,
+.card:has(.card-kids > li:last-child > .kid:hover) + .card > .card-row::before {
+  border-top-color: transparent;
+}
+
+/* Subagents: single-line child rows at the title's start, on a 1 px tree guide drawn
+   from the parent's glyph. */
+.card-kids {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+}
+.card-kids > li {
+  position: relative;
+}
+.card:has(> .card-kids) > .card-row::after {
+  content: "";
+  position: absolute;
+  top: 28px;
+  bottom: 0;
+  left: 16px;
+  border-left: var(--hairline) solid var(--line-2);
+  pointer-events: none;
+}
+.card-kids > li::before,
+.card-kids > li::after {
+  content: "";
+  position: absolute;
+  left: 20px;
+  border-color: var(--line-2);
+  border-style: solid;
+  border-width: 0;
+  pointer-events: none;
+}
+.card-kids > li::before {
+  top: 0;
+  bottom: 0;
+  border-left-width: var(--hairline);
+}
+.card-kids > li:last-child::before {
+  bottom: 50%;
+}
+.card-kids > li::after {
+  top: 50%;
+  width: 10px;
+  border-top-width: var(--hairline);
+}
+.kid {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--row-sm);
+  margin: 0 4px;
+  padding: 0 36px 0 36px;
+  border-radius: var(--radius);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+  transition: background-color var(--dur-fast) var(--ease-out);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.kid:focus-visible {
+  outline-offset: -2px;
+}
+@media (hover: hover) {
+  .kid:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+}
+[data-menu-open] > .kid {
+  background: var(--sel);
+  color: var(--fg);
+}
+.kid:active {
+  background: var(--press);
+  transition: none;
+}
+.kid-title {
+  flex: 1;
+  min-width: 0;
+}
+.kid-tool {
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+}
+.kid-state {
+  color: var(--fg-3);
+}
+
+/* The first run: the empty state where the first row would be. */
+.board-empty code {
+  color: var(--fg-2);
+}
+
+/* A narrow column (the split open, a phone): three lines, the title and time, then what
+   it is doing, then where it runs and the counts. */
+@container board (max-width: 640px) {
+  .card-link {
+    grid-template-columns: 28px auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "lead title title time"
+      ".    tool  line  line"
+      ".    meta  meta  foot";
+  }
+  .card-meta {
+    justify-self: start;
+    /* Its area, not its text: a long repo or branch is cut, never widens the row. */
+    max-width: 100%;
+    margin-left: 0;
+  }
+  .card-foot > span {
+    min-width: 0;
+  }
+}
+
+/* Touch: taller rows, no hover affordances, the beside slot given back. */
+@media (hover: none) {
+  .card-beside {
+    display: none;
+  }
+  .card-link {
+    padding-right: 8px;
+  }
+  .kid {
+    padding-right: 8px;
+  }
+}
+@media (max-width: 839px) {
+  .card-link {
+    min-height: 64px;
+    row-gap: 3px;
+  }
+  .kid {
+    min-height: 40px;
+  }
+}
+
+/* The " · " between flags on the session page (FlagLine). */
+.sep {
+  color: var(--fg-4);
+  white-space: pre;
+}

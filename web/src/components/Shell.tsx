@@ -1,22 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
-// The frame: a slim rail on wide screens, a bottom tab bar on phones. Carries the
-// connection indicator, the theme switch, and one entry per installed theme plugin
-// (web/src/themes/host), routed to /t/<id>. The tab bar holds the first four pages and
-// a More tab whose sheet lists the rest (installed views, then the quick settings).
+// The window: a sidebar on the chrome ground (a labelled source list when there is room,
+// a compact icon rail otherwise), a bottom tab bar on phones. Carries the connection
+// indicator, the display popover, and one entry per installed theme plugin
+// (web/src/themes/host), routed to /t/<id>. The tab bar holds the first four pages and a
+// More tab whose sheet lists the rest (pages, installed views, Display and Settings).
+// Every sidebar entry has a right-click menu, and so does the sidebar itself (appearance,
+// skin, mode); MenuHost here is the one context-menu policy for the whole app.
 import type { InstalledTheme } from "@shared/theme-api";
 import { type CSSProperties, Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { useAnswerableCount, useAppState } from "../data/hooks";
 import { useFocusTrap } from "../lib/focus";
 import { useGlobalKeys } from "../lib/keys";
+import { linkItems } from "../lib/menus";
 import { Link, navigate, type Route, usePath } from "../lib/router";
-import { useSimple } from "../lib/settings";
-import { useShortcut } from "../lib/shortcuts";
+import { getSettings as getAppSettings, setMode, useSimple } from "../lib/settings";
+import { hintFor, useShortcut, useShortcutMap } from "../lib/shortcuts";
+import { getSkins, isPlain } from "../lib/skins";
 import { restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
+import { getDisplaySettings as getDisplay, setSkin, setTheme } from "../lib/theme";
 import { useNow } from "../lib/time";
 import { useSetupStatus } from "../setup/api";
 import { setupComplete } from "../setup/steps";
-import { useThemes } from "../themes/host/registry";
+import { reloadThemes, setThemeDisabled, useThemes } from "../themes/host/registry";
 import { Mark } from "./Brand";
+import { MenuHost, type MenuList, useContextMenu } from "./ContextMenu";
+import { openPalette } from "./Palette";
 import { GearIcon, QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
 import { ShortcutHelp } from "./ShortcutHelp";
@@ -224,10 +232,133 @@ function NavGlyph({ n }: { n: NavItem }) {
 /** How many pages sit on the phone's tab bar before More. */
 const TABS = 4;
 
-/** The fifth tab: a quiet sheet with the entries the bar has no room for (installed views
- *  under an "Experimental views" hairline, any further page, then Display), in the same
- *  rows as the quick settings. Carries aria-current when the active page is inside. */
-function MoreTab({ items, active }: { items: NavItem[]; active: string }) {
+const loopback = () => ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+
+/** The keymap action that goes to a nav item, for its chord in a menu and a tooltip. */
+function navAction(n: NavItem, views: NavItem[]): string | undefined {
+  if (n.key.startsWith("t:")) {
+    const i = views.findIndex((v) => v.key === n.key);
+    return i >= 0 && i < 9 ? `nav.view${i + 1}` : undefined;
+  }
+  return `nav.${n.key}`;
+}
+
+/** A sidebar entry's menu: open it (with its keys), in a new window, copy its link; a
+ *  view adds managing, disabling and reloading the views (on the receiver machine). */
+function navMenu(n: NavItem, action: string | undefined): MenuList {
+  const view = n.key.startsWith("t:") ? n.key.slice(2) : null;
+  const local = loopback();
+  const onlyHere = local ? false : "Only on the machine running the receiver";
+  return [
+    { label: "Open", action, run: () => navigate(n.to) },
+    ...linkItems(n.to),
+    view && { sep: true },
+    view && { label: "Manage views…", action: "nav.views", run: () => navigate("/themes") },
+    view && { label: "Disable view", disabled: onlyHere, run: () => setThemeDisabled(view, true) },
+    view && { label: "Reload views", disabled: onlyHere, run: () => reloadThemes() },
+  ];
+}
+
+/** The sidebar's own menu (its background and its brand): the appearance, the skin, the
+ *  mode, and the ways into Settings. */
+function railMenu(): MenuList {
+  const d = getDisplay();
+  const skins = getSkins().skins.filter((k) => !k.error && !isPlain(k));
+  const appearance = (v: "auto" | "light" | "dark", label: string) => ({
+    label,
+    radio: true,
+    checked: d.appearance === v,
+    run: () => setTheme(v),
+  });
+  return [
+    {
+      label: "Appearance",
+      items: [appearance("auto", "System"), appearance("light", "Light"), appearance("dark", "Dark")],
+    },
+    {
+      label: "Skin",
+      items: skins.map((k) => ({ label: k.name, radio: true, checked: d.skin.id === k.id, run: () => setSkin(k) })),
+    },
+    {
+      label: "Mode",
+      items: [
+        { label: "Simple", radio: true, checked: simpleNow(), run: () => setMode("simple") },
+        { label: "Advanced", radio: true, checked: !simpleNow(), run: () => setMode("advanced") },
+      ],
+    },
+    { sep: true },
+    { label: "Command palette…", action: "palette.toggle", run: openPalette },
+    {
+      label: "Display…",
+      run: () => document.querySelector<HTMLButtonElement>("nav.rail button[aria-label='Quick settings']")?.click(),
+    },
+    { label: "Settings…", run: () => navigate("/settings") },
+    { label: "Keyboard shortcuts", action: "nav.shortcuts", run: () => navigate("/shortcuts") },
+  ];
+}
+/** Read at menu time, not render time. */
+const simpleNow = (): boolean => getAppSettings().mode === "simple";
+
+/** One page in the sidebar, the rail or the tab bar, with its menu and (in the rail) a
+ *  tooltip that names its keys. */
+function NavEntry({
+  n,
+  active,
+  action,
+  needs,
+  tip,
+}: {
+  n: NavItem;
+  active: boolean;
+  action: string | undefined;
+  needs: number;
+  tip: boolean;
+}) {
+  const menu = useContextMenu(() => navMenu(n, action), { title: () => n.label });
+  const keys = action ? hintFor(action) : "";
+  return (
+    <Link
+      to={n.to}
+      className={`nav-link ${active ? "nav-link--on" : ""}`}
+      aria-current={active ? "page" : undefined}
+      data-nav={n.key}
+      data-tip={tip ? (keys ? `${n.label}   ${keys}` : n.label) : undefined}
+      {...menu}
+    >
+      <NavGlyph n={n} />
+      <span className="nav-label">{n.label}</span>
+      {n.key === "inbox" && needs > 0 ? (
+        <span className="nav-badge num" role="img" aria-label={`${needs} need you`}>
+          {needs}
+        </span>
+      ) : null}
+      {n.key === "setup" ? <span className="nav-dot" role="img" aria-label="steps to go" /> : null}
+    </Link>
+  );
+}
+
+function MoreRow({ n, active, action }: { n: NavItem; active: string; action: string | undefined }) {
+  const menu = useContextMenu(() => navMenu(n, action), { title: () => n.label });
+  return (
+    <li>
+      <Link
+        to={n.to}
+        className="more-row"
+        aria-current={active === n.key ? "page" : undefined}
+        data-nav={n.key}
+        {...menu}
+      >
+        <NavGlyph n={n} />
+        <span className="more-row-name">{n.label}</span>
+      </Link>
+    </li>
+  );
+}
+
+/** The fifth tab: a sheet with the entries the bar has no room for, as grouped lists:
+ *  the pages, the installed views, then Display and Settings. Carries aria-current when
+ *  the active page is inside. */
+function MoreTab({ items, active, views }: { items: NavItem[]; active: string; views: NavItem[] }) {
   const [open, setOpen] = useState(false);
   const [display, setDisplay] = useState(false);
   const inside = items.some((n) => n.key === active);
@@ -236,17 +367,8 @@ function MoreTab({ items, active }: { items: NavItem[]; active: string }) {
   // A route change closes the sheet, whichever tab was tapped.
   useEffect(() => setOpen(false), [active]);
   const plugins = items.filter((n) => n.key.startsWith("t:"));
-  const plain = plugins.filter((n) => !n.experimental);
-  const experimental = plugins.filter((n) => n.experimental);
   const pages = items.filter((n) => !n.key.startsWith("t:"));
-  const row = (n: NavItem) => (
-    <li key={n.key}>
-      <Link to={n.to} className="more-row" aria-current={active === n.key ? "page" : undefined} data-nav={n.key}>
-        <NavGlyph n={n} />
-        <span className="more-row-name">{n.label}</span>
-      </Link>
-    </li>
-  );
+  const row = (n: NavItem) => <MoreRow key={n.key} n={n} active={active} action={navAction(n, views)} />;
   return (
     <div className="more">
       <button
@@ -269,15 +391,15 @@ function MoreTab({ items, active }: { items: NavItem[]; active: string }) {
         <>
           <button type="button" className="more-scrim" aria-label="Close" onClick={() => setOpen(false)} data-dismiss />
           <div className="more-sheet" role="dialog" aria-modal="true" aria-label="More" ref={sheetRef}>
+            <span className="more-grab" aria-hidden="true" />
+            {pages.length > 0 && <ul className="more-list">{pages.map(row)}</ul>}
+            {plugins.length > 0 && (
+              <div className="more-sect">
+                <div className="more-group">Views</div>
+                <ul className="more-list">{plugins.map(row)}</ul>
+              </div>
+            )}
             <ul className="more-list">
-              {plain.map(row)}
-              {experimental.length > 0 && (
-                <li>
-                  <div className="more-group">Experimental views</div>
-                </li>
-              )}
-              {experimental.map(row)}
-              {pages.map(row)}
               <li>
                 <button
                   type="button"
@@ -293,7 +415,6 @@ function MoreTab({ items, active }: { items: NavItem[]; active: string }) {
                     <GearIcon size={20} />
                   </span>
                   <span className="more-row-name">Display</span>
-                  <span className="more-row-hint">appearance · theme · text size</span>
                 </button>
               </li>
               <li>
@@ -302,7 +423,6 @@ function MoreTab({ items, active }: { items: NavItem[]; active: string }) {
                     <SlidersIcon size={20} />
                   </span>
                   <span className="more-row-name">Settings</span>
-                  <span className="more-row-hint">mode · lens · data</span>
                 </Link>
               </li>
             </ul>
@@ -314,8 +434,17 @@ function MoreTab({ items, active }: { items: NavItem[]; active: string }) {
   );
 }
 
+/** The sidebar's two forms: the labelled one from 1200 px (1360 with the panel open). */
+function useSideForm(splitOpen: boolean): boolean {
+  const wide = useMedia("(min-width: 1200px)");
+  const wider = useMedia("(min-width: 1360px)");
+  return wider || (wide && !splitOpen);
+}
+
 export function Shell({ route, children }: { route: Route; children: ReactNode }) {
   useGlobalKeys();
+  // Tooltips and menus show the live keys: re-render when the keymap changes.
+  useShortcutMap();
   const active = route.name === "session" ? "board" : route.name === "theme" ? `t:${route.id}` : route.name;
   const needs = useAnswerableCount();
   // The Setup entry, with its amber dot, while this machine (and only from this machine:
@@ -332,17 +461,18 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   }, []);
   const splitOpen = useSplitKey() !== null;
   const splitWidth = useSplitWidth();
+  const side = useSideForm(splitOpen && !phone);
+  const railMenuProps = useContextMenu(railMenu, { title: () => "sessionpipe gui" });
   // A route change moves focus to the page (not on the first paint, where Tab must start
   // at the skip link) and says the page's name through the live region.
   const mainRef = useRef<HTMLElement>(null);
   const [announce, setAnnounce] = useState("");
   const path = usePath().split("?")[0] ?? "/";
-  const firstPath = useRef(true);
+  // The path last seen, not a first-run flag: StrictMode runs the effect twice on mount.
+  const lastPath = useRef(path);
   useEffect(() => {
-    if (firstPath.current) {
-      firstPath.current = false;
-      return;
-    }
+    if (lastPath.current === path) return;
+    lastPath.current = path;
     mainRef.current?.focus({ preventScroll: true });
     const t = setTimeout(
       () => setAnnounce(document.title.replace(/ · sessionpipe gui$/, "").replace(/^\(\d+\) /, "")),
@@ -360,26 +490,15 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     });
   }
   const shellStyle = { "--split-width": `${splitOpen && !phone ? splitWidth : 0}px` } as CSSProperties;
-  const links = nav.map((n) => (
-    <Link
-      key={n.key}
-      to={n.to}
-      className={`nav-link ${active === n.key ? "nav-link--on" : ""}`}
-      aria-current={active === n.key ? "page" : undefined}
-      data-nav={n.key}
-    >
-      <NavGlyph n={n} />
-      <span className="nav-label">{n.label}</span>
-      {n.key === "inbox" && needs > 0 ? (
-        <span className="nav-badge num" role="img" aria-label={`${needs} need you`}>
-          {needs}
-        </span>
-      ) : null}
-      {n.key === "setup" ? <span className="nav-dot" role="img" aria-label="steps to go" /> : null}
-    </Link>
-  ));
+  const entry = (n: NavItem, tip: boolean) => (
+    <NavEntry key={n.key} n={n} active={active === n.key} action={navAction(n, views)} needs={needs} tip={tip} />
+  );
+  const firstView = nav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
   return (
-    <div className={`shell ${splitOpen && !phone ? "shell--split" : ""}`} style={shellStyle}>
+    <div
+      className={`shell ${splitOpen && !phone ? "shell--split" : ""} ${side && !phone ? "shell--side" : ""}`}
+      style={shellStyle}
+    >
       {/* biome-ignore lint/a11y/useValidAnchor: a real in-page link to #main; the handler only keeps the hash out of the URL */}
       <a
         href="#main"
@@ -394,32 +513,47 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       <div className="sr-only" aria-live="polite" aria-atomic="true" data-announcer>
         {announce}
       </div>
-      <nav className="rail" aria-label="Pages">
+      <nav className="rail" aria-label="Pages" {...railMenuProps}>
         <Link to="/" className="rail-brand" title="sessionpipe gui">
           <Mark size={20} />
+          <span className="rail-word" aria-hidden="true">
+            sessionpipe
+          </span>
           <span className="sr-only">sessionpipe gui</span>
         </Link>
         <div className="rail-nav">
           {nav.map((n, i) => (
             <Fragment key={n.key}>
-              {n.experimental && !nav[i - 1]?.experimental ? (
-                /* A hairline only; the word lives in the tooltip. data-nav keeps the divider's name for the tests. */
-                <hr
-                  className="rail-group"
-                  data-nav="experimental"
-                  title="Experimental views"
-                  aria-label="Experimental views"
-                />
+              {i === firstView ? (
+                <div className="rail-section" aria-hidden="true">
+                  Views
+                </div>
               ) : null}
-              {links[i]}
+              {n.experimental && !nav[i - 1]?.experimental ? (
+                <>
+                  {/* A hairline in the rail; in the sidebar the label below. data-nav keeps the divider's name for the tests. */}
+                  <hr
+                    className="rail-group"
+                    data-nav="experimental"
+                    title="Experimental views"
+                    aria-label="Experimental views"
+                  />
+                  <div className="rail-section" aria-hidden="true">
+                    Experimental
+                  </div>
+                </>
+              ) : null}
+              {entry(n, !side)}
             </Fragment>
           ))}
         </div>
         <div className="rail-foot">
+          <ConnectionPill />
           <Link
             to="/themes"
             className={`theme-btn ${route.name === "themes" ? "nav-link--on" : ""}`}
             data-tip="Views"
+            data-tip-side="top"
             aria-label="Views"
             aria-current={route.name === "themes" ? "page" : undefined}
           >
@@ -437,12 +571,12 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
               {PLUG_ICON}
             </svg>
           </Link>
-          <ConnectionPill />
           <QuickSettings placement="rail" />
           <Link
             to="/settings"
             className={`theme-btn ${route.name === "settings" ? "nav-link--on" : ""}`}
             data-tip="Settings"
+            data-tip-side="top"
             aria-label="Settings"
             aria-current={route.name === "settings" ? "page" : undefined}
             data-nav="settings"
@@ -455,11 +589,12 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {children}
       </main>
       <nav className="tabbar" aria-label="Pages">
-        {links.slice(0, TABS)}
-        <MoreTab items={nav.slice(TABS)} active={active} />
+        {nav.slice(0, TABS).map((n) => entry(n, false))}
+        <MoreTab items={nav.slice(TABS)} active={active} views={views} />
       </nav>
       <SessionPanel phone={phone} />
       <ShortcutHelp />
+      <MenuHost />
     </div>
   );
 }

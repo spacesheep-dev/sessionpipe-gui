@@ -19,7 +19,7 @@ async function openWorking(page: Page): Promise<string> {
 }
 
 const lens = (page: Page, tier: 0 | 1 | 2 | 3) =>
-  page.locator("fieldset.seg label.seg-opt").filter({ hasText: new RegExp(`^${tier}$`) });
+  page.locator(".lens fieldset.seg label.seg-opt").filter({ hasText: new RegExp(`^${tier}$`) });
 
 /** A long tier-1 session: `turns` prompts, each with two tools, sent in batches of 50. */
 async function postLongSession(
@@ -99,7 +99,7 @@ test.describe("session page", () => {
 
     // The last turn is on screen and the page sits at the bottom.
     const lastTurn = page.locator("ol.timeline li.turn").last();
-    await expect(lastTurn.locator(".turn-n")).toHaveText(`turn ${long.turns}`);
+    await expect(lastTurn.locator(".turn-n")).toHaveText(`Turn ${long.turns}`);
     await expect(lastTurn.locator(".marker--end")).toBeInViewport();
     const s1 = await scrollState(page);
     expect(s1.max).toBeGreaterThan(200);
@@ -114,7 +114,7 @@ test.describe("session page", () => {
     await page.evaluate(() => window.scrollTo(0, 0));
     const anchorTurn = page.locator("ol.timeline li.turn").nth(1);
     const anchorLabel = (await anchorTurn.locator(".turn-n").textContent())!;
-    expect(anchorLabel).toMatch(/^turn \d+$/);
+    expect(anchorLabel).toMatch(/^Turn \d+$/);
     const yBefore = (await anchorTurn.locator(".turn-head").boundingBox())!.y;
     const turnsBefore = await page.locator("ol.timeline li.turn").count();
     await older.click();
@@ -139,7 +139,7 @@ test.describe("session page", () => {
     const first = expandable.first();
     await first.locator("summary").click();
     await expect(first).toHaveAttribute("open", "");
-    await expect(first.locator(".tool-io .tool-io-label").first()).toHaveText(/input|output|error/);
+    await expect(first.locator(".tool-io .tool-io-label").first()).toHaveText(/^(Input|Output|Error)$/);
     await expect(first.locator(".tool-io pre").first()).toBeVisible();
 
     // Lens 0: presence only, no tool rows; the hint says how many were hidden.
@@ -159,7 +159,7 @@ test.describe("session page", () => {
       errorsAt1,
     );
     // Whatever opens at tier 1 holds the error alone: no input, no output.
-    await expect(page.locator("li.tool .tool-io-label", { hasNotText: /^error$/ })).toHaveCount(0);
+    await expect(page.locator("li.tool .tool-io-label", { hasNotText: /^Error$/ })).toHaveCount(0);
   });
 
   test("follow toggles and back returns to the board", async ({ page }) => {

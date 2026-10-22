@@ -1,0 +1,168 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- keyboard: skip link, tooltips on focus, the chord hint, kbd chips ---------- */
+
+/* The first tab stop on the page; off screen until focused. */
+.skip {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: var(--z-skip);
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: var(--hairline) solid var(--line);
+  background: var(--bg-2);
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  transform: translateY(-200%);
+}
+.skip:focus-visible {
+  transform: none;
+  box-shadow: var(--shadow-pop);
+}
+.main:focus-visible {
+  outline: none;
+}
+
+/* A tooltip that also opens on keyboard focus (the icon-only buttons on the rail and the
+   panel). `data-tip` is the text; `data-tip-side` picks where it sits. It waits half a
+   second under the pointer, as an OS tooltip does, and never shows over its own open
+   popover or on touch. The tip is drawn, not spoken: its empty alt text keeps it out of
+   the button's accessible name, which would otherwise change under the pointer. */
+[data-tip] {
+  position: relative;
+}
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: var(--z-tip);
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 3px 8px;
+  border-radius: var(--radius-inner);
+  border: var(--hairline) solid var(--line);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-pop);
+  color: var(--fg);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  line-height: var(--lh);
+  white-space: pre;
+  pointer-events: none;
+  /* Not drawn until it shows: a hidden tip near the right edge must not widen the
+     page's (or a bar's) scroll area. */
+  display: none;
+}
+[data-tip][data-tip-side="bottom"]::after {
+  left: auto;
+  right: 0;
+  top: calc(100% + 6px);
+  transform: none;
+}
+[data-tip][data-tip-side="top"]::after {
+  left: 50%;
+  top: auto;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+}
+[data-tip]:hover::after {
+  display: block;
+  animation: tip-in var(--dur-fast) var(--ease-out) 500ms both;
+}
+[data-tip]:focus-visible::after {
+  display: block;
+  animation: none;
+}
+@supports (content: "" / "") {
+  [data-tip]::after {
+    content: attr(data-tip) / "";
+  }
+}
+@keyframes tip-in {
+  from {
+    opacity: 0;
+  }
+}
+[data-tip][aria-expanded="true"]::after {
+  display: none;
+}
+@media (hover: none) {
+  [data-tip]::after {
+    display: none;
+  }
+}
+
+/* The first key of a sequence while the second is awaited. */
+.chord-hint {
+  position: fixed;
+  z-index: var(--z-toast);
+  left: 50%;
+  bottom: calc(var(--tabbar) + env(safe-area-inset-bottom) + 16px);
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: var(--radius-pop);
+  border: var(--hairline) solid var(--line);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  box-shadow: var(--shadow-pop);
+  animation: rise var(--dur) var(--ease-out) both;
+}
+@media (min-width: 840px) {
+  .chord-hint {
+    bottom: 16px;
+  }
+}
+
+/* A shortcut reads as one quiet string, the way a macOS menu shows it: "G B", "⇧↵",
+   "⌘K". No keycap boxes, except in the Shortcuts editor, where a key is a control. */
+.keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-3);
+}
+.keys kbd,
+.chord-hint kbd {
+  display: inline;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-transform: capitalize;
+}
+.chord-hint kbd {
+  color: var(--fg);
+  font-weight: 500;
+}
+/* A key the browser may take first: its tooltip says so. It reads like any other key; a
+   fainter tier would drop it under 4.5:1. */
+.keys--soft {
+  color: var(--fg-3);
+}
+/* The Shortcuts page's own keys: real caps, because there a key is something you click. */
+.sc-lede kbd,
+.sc-rec-field kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--radius-inner);
+  border: var(--hairline) solid var(--line-2);
+  background: var(--raised);
+  box-shadow: var(--shadow-sm);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  line-height: 1;
+}

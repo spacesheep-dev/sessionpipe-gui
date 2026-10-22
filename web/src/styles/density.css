@@ -1,0 +1,22 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- density (a skin's shape.density; lib/skins.ts sets the attribute) ---------- */
+
+/* The three row heights move together, and the padding between settings rows with them. */
+html[data-density="compact"] {
+  --row-sm: 28px;
+  --row: 32px;
+  --row-lg: 36px;
+  --row-pad: 4px;
+}
+html[data-density="default"] {
+  --row-sm: 32px;
+  --row: 36px;
+  --row-lg: 40px;
+  --row-pad: 8px;
+}
+html[data-density="comfortable"] {
+  --row-sm: 36px;
+  --row: 40px;
+  --row-lg: 44px;
+  --row-pad: 12px;
+}

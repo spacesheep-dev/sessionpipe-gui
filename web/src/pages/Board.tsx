@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
-// The board: every session grouped by state, needs_you first. Filters by machine,
-// harness and text; done sessions collapsed with a count. Empty state points to Connect.
+// The board: every session in one grouped list, needs_you first, under sticky section
+// headers. Filters by machine, harness and text in the page bar; done sessions folded
+// behind a disclosure with a count. Empty, waiting and no-match states sit where the
+// first row would be. A right-click on the page's empty space has the view options.
 import type { SessionState, SessionSummary } from "@shared/api";
 import { SESSION_STATES } from "@shared/api";
-import { useMemo, useState } from "react";
-import { Wordmark } from "../components/Brand";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { ChipSelect, HarnessGlyph, SearchInput } from "../components/bits";
+import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
 import { LensChip, LensNote } from "../components/LensChip";
-import { PALETTE_KEY } from "../components/Palette";
-import { cardHides, SessionCard } from "../components/SessionCard";
+import { PageBar } from "../components/PageBar";
+import { cardHides, lensMenu, SessionCard, useBackgroundMenu, useStickyTop } from "../components/SessionCard";
 import { useAppState, useSessionTree } from "../data/hooks";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
-import { useListNav } from "../lib/keys";
+import { focusSearch, useListNav } from "../lib/keys";
 import { Link, sessionPath } from "../lib/router";
-import { useAppSettings, useLens } from "../lib/settings";
+import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
+import { useSplitKey } from "../lib/split";
 
 const matches = (s: SessionSummary, q: string) => {
   if (!q) return true;
@@ -38,6 +41,46 @@ const matches = (s: SessionSummary, q: string) => {
     .every((w) => hay.includes(w));
 };
 
+/** The board's view options: the page's right-click menu, its "⋯" and (Show done) the
+ *  Done header's. Built when a menu opens, from the state of the last render. */
+function viewItems(o: {
+  filtered: boolean;
+  clear: () => void;
+  showDone: boolean;
+  setShowDone: (v: boolean) => void;
+  beside: boolean;
+  lens: Lens;
+  simple: boolean;
+}): MenuList {
+  return [
+    { label: "Find…", action: "search.focus", run: () => void focusSearch() },
+    o.filtered && { label: "Clear filters", run: o.clear },
+    { label: "Show done sessions", checked: o.showDone, run: () => o.setShowDone(!o.showDone) },
+    { sep: true },
+    {
+      label: "Open sessions",
+      items: [
+        { label: "As a page", radio: true, checked: !o.beside, run: () => setSettings({ openSessions: "page" }) },
+        {
+          label: "Beside the page",
+          radio: true,
+          checked: o.beside,
+          run: () => setSettings({ openSessions: "beside" }),
+        },
+      ],
+    },
+    ...lensMenu(o.lens, o.simple),
+    { sep: true },
+    {
+      label: "Mode",
+      items: [
+        { label: "Simple", radio: true, checked: o.simple, run: () => setMode("simple") },
+        { label: "Advanced", radio: true, checked: !o.simple, run: () => setMode("advanced") },
+      ],
+    },
+  ];
+}
+
 export function Board() {
   const { roots, childrenOf, all } = useSessionTree();
   const { snapshotAt, connection } = useAppState();
@@ -49,6 +92,9 @@ export function Board() {
   const { mode, openSessions } = useAppSettings();
   const simple = mode === "simple";
   const beside = openSessions === "beside";
+  const openKey = useSplitKey();
+  const page = useRef<HTMLDivElement>(null);
+  useStickyTop(page);
 
   const machines = useMemo(() => [...new Set(all.map((s) => s.machine).filter((m): m is string => !!m))].sort(), [all]);
   const harnesses = useMemo(() => [...new Set(all.map((s) => s.harness))].sort(), [all]);
@@ -81,154 +127,164 @@ export function Board() {
   const cursorKey = ordered[cursor]?.key;
   const hiddenByLens = useMemo(() => ordered.reduce((n, s) => n + cardHides(s, lens), 0), [ordered, lens]);
 
-  if (snapshotAt && all.length === 0) return <EmptyBoard />;
-  if (!snapshotAt)
-    return (
-      <p className="page-note">
-        {connection === "live" || connection === "connecting"
-          ? "Waiting for the first snapshot…"
-          : "No connection to the receiver yet."}
-      </p>
-    );
+  const filtered = !!(q || machine || harness);
+  const clear = useCallback(() => {
+    setQ("");
+    setMachine("");
+    setHarness("");
+  }, []);
+  const view = () => viewItems({ filtered, clear, showDone, setShowDone, beside, lens, simple });
+  const pageMenu = useBackgroundMenu(view, { title: () => "Board" });
+  const doneMenu = useContextMenu(() => [
+    { label: "Show done sessions", checked: showDone, run: () => setShowDone((v) => !v) },
+  ]);
 
-  const filtered = q || machine || harness;
   const doneCount = groups.get("done")!.length;
+  const loaded = !!snapshotAt;
+  const empty = loaded && all.length === 0;
+
+  const row = (s: SessionSummary) => (
+    <SessionCard
+      key={s.key}
+      s={s}
+      children={childrenOf.get(s.key)}
+      cursor={s.key === cursorKey ? cursor : undefined}
+      lens={lens}
+      simple={simple}
+      openBeside={beside}
+      open={s.key === openKey}
+      onlyMachine={setMachine}
+      onlyHarness={setHarness}
+    />
+  );
 
   return (
-    <div className="page board">
-      <div className="toolbar">
-        <SearchInput value={q} onChange={setQ} placeholder={`Search sessions · ${PALETTE_KEY} for everything`} />
-        <LensChip />
-        <div className="filters">
-          {machines.length > 1 && (
-            <ChipSelect value={machine} options={machines} onChange={setMachine} all="all machines" label="Machine" />
-          )}
-          {harnesses.length > 1 && (
-            <ChipSelect
-              value={harness}
-              options={harnesses.map((h) => h)}
-              onChange={setHarness}
-              all="all harnesses"
-              label="Harness"
-              optionLabel={(h) => harnessMark(h).label}
-              icon={(h) => <HarnessGlyph name={h} size="sm" />}
-            />
-          )}
-          {filtered && (
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm"
-              onClick={() => {
-                setQ("");
-                setMachine("");
-                setHarness("");
-              }}
-            >
-              clear
-            </button>
-          )}
-        </div>
-      </div>
+    <div className="page board" ref={page} {...pageMenu}>
+      <PageBar
+        title="Board"
+        tools={
+          empty ? null : (
+            <>
+              <SearchInput value={q} onChange={setQ} placeholder="Search" label="Search sessions" />
+              <LensChip />
+              {machines.length > 1 && (
+                <ChipSelect
+                  value={machine}
+                  options={machines}
+                  onChange={setMachine}
+                  all="All machines"
+                  label="Machine"
+                />
+              )}
+              {harnesses.length > 1 && (
+                <ChipSelect
+                  value={harness}
+                  options={harnesses}
+                  onChange={setHarness}
+                  all="All harnesses"
+                  label="Harness"
+                  optionLabel={(h) => harnessMark(h).label}
+                  icon={(h) => <HarnessGlyph name={h} size="sm" />}
+                />
+              )}
+              {filtered && (
+                <button type="button" className="btn btn--ghost btn--sm" onClick={clear}>
+                  Clear
+                </button>
+              )}
+            </>
+          )
+        }
+        actions={<MoreButton build={view} label="View options" title={() => "Board"} />}
+      />
 
       <LensNote lens={lens} hidden={hiddenByLens} />
 
-      {visible.length === 0 && (
-        <p className="page-note">
-          Nothing matches{q ? ` “${q}”` : ""}
-          {harness ? ` in ${harnessMark(harness).label}` : ""}
-          {machine ? ` on ${machine}` : ""}.
-        </p>
-      )}
+      {!loaded ? (
+        connection === "live" || connection === "connecting" ? (
+          <div className="skeleton" role="status" aria-label="Loading sessions">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="skeleton-row" />
+            ))}
+          </div>
+        ) : (
+          <div className="state">
+            <p className="state-title">No connection to the receiver</p>
+            <p className="state-text">The board fills in as soon as the stream is back.</p>
+          </div>
+        )
+      ) : empty ? (
+        <div className="state board-empty">
+          <p className="state-title">No sessions yet</p>
+          <p className="state-text">
+            A session shows up the moment an agent fires a hook: run <code>npx sessionpipe install</code> here, or point
+            another machine at this one.
+          </p>
+          <Link to="/connect" className="btn btn--primary">
+            Open Connect
+          </Link>
+        </div>
+      ) : visible.length === 0 ? (
+        <div className="state">
+          <p className="state-title">
+            Nothing matches{q ? ` “${q}”` : ""}
+            {harness ? ` in ${harnessMark(harness).label}` : ""}
+            {machine ? ` on ${machine}` : ""}
+          </p>
+          <p className="state-text">Try fewer words, or another machine or harness.</p>
+          <button type="button" className="btn" onClick={clear}>
+            Clear filters
+          </button>
+        </div>
+      ) : (
+        <div className="board-list">
+          {SESSION_STATES.filter((st) => st !== "done").map((st) => {
+            const list = groups.get(st)!;
+            if (list.length === 0) return null;
+            return (
+              <section
+                key={st}
+                className={`group group--${st}`}
+                aria-label={`${list.length} ${STATE_HEADING[st](list.length)}`}
+              >
+                <h2 className="group-head" title={STATE_HINT[st]}>
+                  {STATE_HEADING[st](list.length)}
+                  <span className="group-count num">{list.length}</span>
+                </h2>
+                <div className="grid">{list.map(row)}</div>
+              </section>
+            );
+          })}
 
-      {SESSION_STATES.filter((st) => st !== "done").map((st) => {
-        const list = groups.get(st)!;
-        if (list.length === 0) return null;
-        return (
-          <section
-            key={st}
-            className={`group group--${st}`}
-            aria-label={`${list.length} ${STATE_HEADING[st](list.length)}`}
-          >
-            <h2 className="group-head" title={STATE_HINT[st]}>
-              {STATE_HEADING[st](list.length)}
-              <span className="group-count num">{list.length}</span>
-            </h2>
-            <div className="grid">
-              {list.map((s) => (
-                <SessionCard
-                  key={s.key}
-                  s={s}
-                  children={childrenOf.get(s.key)}
-                  cursor={s.key === cursorKey ? cursor : undefined}
-                  lens={lens}
-                  simple={simple}
-                  openBeside={beside}
-                />
-              ))}
-            </div>
-          </section>
-        );
-      })}
-
-      {doneCount > 0 && (
-        <section className="group group--done" aria-label={`${doneCount} done`}>
-          <h2 className="group-head">
-            <button
-              type="button"
-              className="group-toggle"
-              onClick={() => setShowDone((v) => !v)}
-              aria-expanded={showDone}
-              title={STATE_HINT.done}
-            >
-              Done
-              <span className="group-count num">{doneCount}</span>
-              <span className="group-caret" aria-hidden="true">
-                {showDone ? "▾" : "▸"}
-              </span>
-            </button>
-          </h2>
-          {showDone && (
-            <div className="grid grid--done">
-              {groups.get("done")!.map((s) => (
-                <SessionCard
-                  key={s.key}
-                  s={s}
-                  children={childrenOf.get(s.key)}
-                  cursor={s.key === cursorKey ? cursor : undefined}
-                  lens={lens}
-                  simple={simple}
-                  openBeside={beside}
-                />
-              ))}
-            </div>
+          {doneCount > 0 && (
+            <section className="group group--done" aria-label={`${doneCount} done`}>
+              <h2 className="group-head" {...doneMenu}>
+                <button
+                  type="button"
+                  className="group-toggle"
+                  onClick={() => setShowDone((v) => !v)}
+                  aria-expanded={showDone}
+                  title={STATE_HINT.done}
+                >
+                  Done
+                  <span className="group-count num">{doneCount}</span>
+                  <svg className="group-caret" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                    <path
+                      d="M6 4l4 4-4 4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </h2>
+              {showDone && <div className="grid grid--done">{groups.get("done")!.map(row)}</div>}
+            </section>
           )}
-        </section>
+        </div>
       )}
-    </div>
-  );
-}
-
-function EmptyBoard() {
-  return (
-    <div className="page empty">
-      <Wordmark />
-      <h1 className="empty-title">Nothing here yet</h1>
-      <p className="empty-lede">Sessions appear the moment an agent fires a hook. Three ways to get the first one:</p>
-      <ol className="empty-ways">
-        <li>
-          <strong>This machine.</strong> Run <code>npx sessionpipe install</code> once; the GUI tails the local outbox
-          with nothing else to configure.
-        </li>
-        <li>
-          <strong>Another machine.</strong> Point its sink here with the one line on the Connect page.
-        </li>
-        <li>
-          <strong>Demo mode.</strong> Synthetic sessions to look around with, on and off from the Connect page.
-        </li>
-      </ol>
-      <Link to="/connect" className="btn btn--primary btn--lg">
-        Open Connect
-      </Link>
     </div>
   );
 }

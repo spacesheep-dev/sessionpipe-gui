@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // The side panel: sessions open beside the current page, as tabs (`?s=<key>,…&t=<i>`).
 // 44 % of the width by default, resizable at its left edge, remembered per device; a
-// full-height sheet on phones. A tab strip (text tabs, a state dot, an underline on the
-// active one), then the active session's header, then the bodies: every tab keeps its
-// own scroller mounted up to MOUNTED_MAX, so its scroll position and loaded pages
-// survive a switch. Opening from a rectangle morphs a ghost of it into the panel.
+// page sheet on phones. The head first, as tall as the page bar so their hairlines make
+// one rule (the state glyph, the title, a quiet status word, "⋯", Open as page, Close);
+// with two tabs or more, window tabs under it; then the bodies: every tab keeps its own
+// scroller mounted up to MOUNTED_MAX, so its scroll position and loaded pages survive a
+// switch. Tabs and the head have their own menus. Opening from a rectangle morphs a
+// ghost of it into the panel.
 import type { SessionKey, SessionSummary } from "@shared/api";
 import { splitKey } from "@shared/api";
 import {
@@ -18,13 +20,16 @@ import {
   useRef,
   useState,
 } from "react";
-import { useAppState } from "../data/hooks";
+import { useAppState, useStore } from "../data/hooks";
 import { focusTab, tablistKey } from "../lib/focus";
 import { sessionTitle } from "../lib/format";
-import { Link, sessionPath } from "../lib/router";
+import { sessionItems, sessionMenuSubtitle } from "../lib/menus";
+import { Link, navigate, sessionPath } from "../lib/router";
+import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import {
   activateTab,
+  closeOthers,
   closeSplit,
   closeTab,
   cycleTab,
@@ -38,8 +43,10 @@ import {
   useSplit,
   useSplitWidth,
 } from "../lib/split";
-import { HarnessGlyph, StateBadge } from "./bits";
-import { SessionView } from "./SessionView";
+import { TIER_LABEL } from "../lib/tier";
+import { StateDot } from "./bits";
+import { type MenuList, MoreButton, useContextMenu } from "./ContextMenu";
+import { answerItems, SessionView, STATUS_WORD } from "./SessionView";
 
 const MOTION_MS = 240;
 const reduced = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
@@ -272,6 +279,43 @@ export function SessionPanel({ phone }: { phone: boolean }) {
   const labels = tabLabels(shown, summary);
   const title = s ? sessionTitle(s) : "Session";
   const bodies = open ? mounted : [];
+  const store = useStore();
+  const { mode } = useAppSettings();
+  const lens = useLens() ?? 3;
+  /** The active tab's view, for the items that reach its strip (Allow, Deny). */
+  const activeBody = () => panelRef.current?.querySelector<HTMLElement>(".panel-body:not(.panel-body--off)") ?? null;
+  const pagePath = (k: SessionKey) => sessionPath(splitKey(k).harness, splitKey(k).id);
+  const lensItems: MenuList =
+    mode === "simple"
+      ? []
+      : [
+          {
+            label: "Tier lens",
+            items: ([0, 1, 2, 3] as const).map((t) => ({
+              label: `${t} · ${TIER_LABEL[t].charAt(0).toUpperCase()}${TIER_LABEL[t].slice(1)}`,
+              radio: true,
+              checked: lens === t,
+              run: () => setTierLens(t),
+            })),
+          },
+        ];
+  // The head's "⋯": the panel's own actions first, then the session's menu.
+  const headMenu = (): MenuList => {
+    if (!activeKey) return [];
+    const cur = summary(activeKey);
+    return [
+      { label: "Open as page", action: "session.openPage", run: () => navigate(pagePath(activeKey)) },
+      { label: "Close panel", action: "panel.close", run: closeSplit },
+      { sep: true },
+      ...lensItems,
+      { sep: true },
+      ...(cur ? sessionItems(cur, { store, surface: "panel", answer: answerItems(activeBody(), cur) }) : []),
+    ];
+  };
+  const headProps = useContextMenu(headMenu, {
+    title: () => title,
+    subtitle: () => (s ? sessionMenuSubtitle(s) : ""),
+  });
 
   return (
     <aside
@@ -321,19 +365,47 @@ export function SessionPanel({ phone }: { phone: boolean }) {
           );
         })}
       </div>
-      <header className="panel-head">
-        {s && <HarnessGlyph name={s.harness} size="sm" />}
+      <header className="panel-head" {...headProps}>
+        {s && <StateDot state={s.state} />}
         <h2 className="panel-title ellipsis" title={title}>
           {title}
         </h2>
-        {s && <StateBadge state={s.state} since={s.stateSince} />}
-        {activeKey && (
-          <Link
-            to={sessionPath(splitKey(activeKey).harness, splitKey(activeKey).id)}
-            className="theme-btn panel-btn"
-            aria-label="Open as page"
-            data-tip="Open as page · o"
+        {s && <span className="panel-status">{STATUS_WORD[s.state]}</span>}
+        <span className="panel-actions">
+          <MoreButton build={headMenu} title={() => title} className="panel-btn" />
+          {activeKey && (
+            <Link
+              to={sessionPath(splitKey(activeKey).harness, splitKey(activeKey).id)}
+              className="icon-btn panel-btn panel-open"
+              aria-label="Open as page"
+              data-tip="Open as page · o"
+              data-tip-side="bottom"
+            >
+              <svg
+                viewBox="0 0 20 20"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8 4H4.5A1.5 1.5 0 0 0 3 5.5v10A1.5 1.5 0 0 0 4.5 17h10a1.5 1.5 0 0 0 1.5-1.5V12" />
+                <path d="M11 3h6v6" />
+                <path d="M17 3l-7.5 7.5" />
+              </svg>
+            </Link>
+          )}
+          <button
+            type="button"
+            className="icon-btn panel-btn panel-close"
+            onClick={closeSplit}
+            aria-label="Close panel"
+            data-tip="Close · x"
             data-tip-side="bottom"
+            data-dismiss
           >
             <svg
               viewBox="0 0 20 20"
@@ -343,89 +415,153 @@ export function SessionPanel({ phone }: { phone: boolean }) {
               stroke="currentColor"
               strokeWidth="1.5"
               strokeLinecap="round"
-              strokeLinejoin="round"
               aria-hidden="true"
             >
-              <path d="M8 4H4.5A1.5 1.5 0 0 0 3 5.5v10A1.5 1.5 0 0 0 4.5 17h10a1.5 1.5 0 0 0 1.5-1.5V12" />
-              <path d="M11 3h6v6" />
-              <path d="M17 3l-7.5 7.5" />
+              <path d="M5 5l10 10M15 5L5 15" />
             </svg>
-          </Link>
-        )}
-        <button
-          type="button"
-          className="theme-btn panel-btn"
-          onClick={closeSplit}
-          aria-label="Close panel"
-          data-tip="Close · x"
-          data-tip-side="bottom"
-          data-dismiss
-        >
-          <svg
-            viewBox="0 0 20 20"
-            width="16"
-            height="16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            aria-hidden="true"
-          >
-            <path d="M5 5l10 10M15 5L5 15" />
-          </svg>
-        </button>
+            <span className="panel-done" aria-hidden="true">
+              Done
+            </span>
+          </button>
+        </span>
       </header>
-      <div className="tabs" role="tablist" aria-label="Open sessions" ref={stripRef}>
-        {shown.map((k, i) => {
-          const sm = summary(k);
-          const isActive = k === activeKey;
-          return (
-            <div
-              key={k}
-              className={`tab ${isActive ? "tab--active" : ""} ${dragging === k ? "tab--dragging" : ""}`}
-              role="tab"
-              aria-selected={isActive}
-              tabIndex={isActive ? 0 : -1}
-              data-tab-key={k}
-              title={labels[i]}
-              onPointerDown={(e) => onTabDown(e, i)}
-              onAuxClick={(e) => onTabAux(e, i)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  activateTab(i);
-                  return;
-                }
-                tablistKey(e, shown.length, i, {
-                  activate: (n) => {
-                    activateTab(n);
-                    focusTab(stripRef.current, n);
-                  },
-                  close: (n) => {
-                    closeTab(n);
-                    focusTab(stripRef.current, Math.min(n, shown.length - 2));
-                  },
-                });
-              }}
-            >
-              <span className={`tab-dot tab-dot--${sm?.state ?? "idle"}`} aria-hidden="true" />
-              <span className="tab-title">{labels[i]}</span>
-              <button
-                type="button"
-                className="tab-close"
-                aria-label={`Close ${labels[i]}`}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTab(i);
-                }}
-              >
-                ×
-              </button>
-            </div>
-          );
-        })}
+      <div
+        className={`tabs ${shown.length < 2 ? "tabs--single" : ""}`}
+        role="tablist"
+        aria-label="Open sessions"
+        ref={stripRef}
+      >
+        {shown.map((k, i) => (
+          <PanelTab
+            key={k}
+            k={k}
+            index={i}
+            count={shown.length}
+            label={labels[i]!}
+            session={summary(k)}
+            active={k === activeKey}
+            dragging={dragging === k}
+            onPointerDown={(e) => onTabDown(e, i)}
+            onAuxClick={(e) => onTabAux(e, i)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                activateTab(i);
+                return;
+              }
+              tablistKey(e, shown.length, i, {
+                activate: (n) => {
+                  activateTab(n);
+                  focusTab(stripRef.current, n);
+                },
+                close: (n) => {
+                  closeTab(n);
+                  focusTab(stripRef.current, Math.min(n, shown.length - 2));
+                },
+              });
+            }}
+            menu={() => {
+              const cur = summary(k);
+              const isActive = k === activeKey;
+              return [
+                { label: "Close tab", action: isActive ? "panel.closeTab" : undefined, run: () => closeTab(i) },
+                shown.length > 1 && { label: "Close other tabs", run: () => closeOthers(i) },
+                { label: "Close panel", action: "panel.close", run: closeSplit },
+                { sep: true },
+                !phone && { label: "Move tab left", disabled: i === 0 || undefined, run: () => moveTab(i, i - 1) },
+                !phone && {
+                  label: "Move tab right",
+                  disabled: i === shown.length - 1 || undefined,
+                  run: () => moveTab(i, i + 1),
+                },
+                { sep: true },
+                {
+                  label: "Open as page",
+                  action: isActive ? "session.openPage" : undefined,
+                  run: () => navigate(pagePath(k)),
+                },
+                { sep: true },
+                ...(cur
+                  ? sessionItems(cur, {
+                      store,
+                      surface: "tab",
+                      answer: isActive ? answerItems(activeBody(), cur) : undefined,
+                    }).filter(
+                      // The tab is already beside: its own "Open as page" leads.
+                      (it) => !("label" in it && ["Open as page", "Open beside", "Preview"].includes(it.label)),
+                    )
+                  : []),
+              ];
+            }}
+          />
+        ))}
       </div>
     </aside>
+  );
+}
+
+/** One window tab: the state glyph, the title, × on hover; its menu closes, moves and
+ *  opens it, then the session's own items. */
+function PanelTab({
+  k,
+  index,
+  count,
+  label,
+  session,
+  active,
+  dragging,
+  onPointerDown,
+  onAuxClick,
+  onKeyDown,
+  menu,
+}: {
+  k: SessionKey;
+  index: number;
+  count: number;
+  label: string;
+  session: SessionSummary | undefined;
+  active: boolean;
+  dragging: boolean;
+  onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  onAuxClick: (e: ReactMouseEvent<HTMLDivElement>) => void;
+  onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => void;
+  menu: () => MenuList;
+}) {
+  const props = useContextMenu(menu, {
+    title: () => label,
+    subtitle: () => (session ? sessionMenuSubtitle(session) : ""),
+  });
+  return (
+    <div
+      className={`tab ${active ? "tab--active" : ""} ${dragging ? "tab--dragging" : ""}`}
+      role="tab"
+      aria-selected={active}
+      aria-setsize={count}
+      aria-posinset={index + 1}
+      tabIndex={active ? 0 : -1}
+      data-tab-key={k}
+      title={label}
+      onPointerDown={onPointerDown}
+      onAuxClick={onAuxClick}
+      onKeyDown={onKeyDown}
+      {...props}
+    >
+      <StateDot state={session?.state ?? "idle"} size={8} decorative />
+      <span className="tab-title">{label}</span>
+      <button
+        type="button"
+        className="tab-close"
+        aria-label={`Close ${label}`}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          closeTab(index);
+        }}
+      >
+        <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+          <path d="M3 3l6 6M9 3 3 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
   );
 }

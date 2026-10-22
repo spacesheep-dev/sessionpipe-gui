@@ -29,8 +29,8 @@ that runs it.
 ## Install
 
 Node 20 or newer. Three ways, one package, and everything official inside it: the
-Canvas and Office views, the Spacesheep Vivid and Paper Serif skins (beside the six
-built-in skins) and the ping-a-human Telegram plugin:
+Canvas and Office views, the two skins (Spacesheep and Paper) and the ping-a-human
+Telegram plugin:
 
 ```sh
 npx github:spacesheep-dev/sessionpipe-gui      # straight from GitHub: builds once on install, then runs
@@ -221,13 +221,12 @@ layer in front. Machines elsewhere on the tailnet push and pair through the same
 
 ![The appearance popover: system, dark or light; the skin; the text size](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/appearance.png)
 
-Appearance (system, dark, light), skin and text size are one tap from the rail and are
-kept per device. **Spacesheep** is the default skin, the colours of
-[spacesheep.dev](https://spacesheep.dev) in both schemes: it follows the appearance
-setting, which is why the pictures on this page come in a light and a dark version of the
-same palette. **Plain** is the stock tokens,
-tinted neutrals with amber as the only accent; Paper, Graphite, Ink and Sepia are single
-schemes. Settings (`/settings`) holds the rest: Simple or Advanced, the page to open on,
+Appearance (System, Light, Dark), skin and text size are one click from the sidebar
+(Display) and are kept per device. Two skins ship. **Spacesheep**, the default, is cool
+neutrals with the [spacesheep.dev](https://spacesheep.dev) flame as the one accent, for
+*needs you*, in both schemes: it follows the appearance setting, which is why the pictures
+on this page come in a light and a dark version. **Paper** is warm paper and ink, light
+only. A skin installed from outside (`sessionpipe-gui skin add`) lists after them. Settings (`/settings`) holds the rest: Simple or Advanced, the page to open on,
 the tier lens, notifications and sounds, the keymap, the installed views, skins and
 plugins, what is on disk, and the receiver's own numbers.
 
@@ -286,8 +285,8 @@ ES module that draws the board its own way on a page of the GUI, with a `ThemeAp
 the live state, control, storage and the keymap. A **skin** is tokens, fonts, radius,
 density and an optional stylesheet, no code. A **plugin** is server-side code in the
 receiver process that reacts to events: notifications, suggested answers. The official
-ones ship inside the GUI: Canvas, Office, Spacesheep Vivid, Paper Serif and ping-a-human
-(`sessionpipe-gui extras list`). A bundled extension cannot be removed, only turned off
+ones ship inside the GUI: Canvas, Office and ping-a-human (`sessionpipe-gui extras
+list`); the two skins are built in, and a skin installed from outside lists beside them. A bundled extension cannot be removed, only turned off
 (`view|skin|plugin disable <id>`, or the button on the Views page); an install of the same
 id overrides it. ping-a-human starts off and runs only after `plugin enable ping-a-human`
 (or Enable on the Views page), since a plugin may reach out of the machine; its Telegram

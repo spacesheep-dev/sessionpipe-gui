@@ -43,7 +43,7 @@ test.describe("select", () => {
     await expect(t).toHaveAttribute("aria-expanded", "true");
     const l = list(page);
     await expect(l).toBeVisible();
-    await expect(l.locator("[aria-selected=true]")).toHaveText("all harnesses");
+    await expect(l.locator("[aria-selected=true]")).toHaveText("All harnesses");
     // The list sits under the trigger and is a hairline popover, not a sheet.
     const tb = (await t.boundingBox())!;
     const lb = (await l.boundingBox())!;
@@ -85,7 +85,7 @@ test.describe("select", () => {
     test.skip(!!isMobile, "desktop project only");
     const t = trigger(page);
     await t.click();
-    const names = (await list(page).getByRole("option").allInnerTexts()).slice(1); // past "all harnesses"
+    const names = (await list(page).getByRole("option").allInnerTexts()).slice(1); // past "All harnesses"
     // A prefix that names exactly one row.
     let target = "";
     let prefix = "";

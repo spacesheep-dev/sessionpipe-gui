@@ -6,8 +6,9 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#fbfaf7",
-  "theme_color": "#fbfaf7",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "background_color": "#fcfcfd",
+  "theme_color": "#fcfcfd",
   "icons": [
     { "src": "/brand/mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
     { "src": "/brand/apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }

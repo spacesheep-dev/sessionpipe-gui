@@ -379,6 +379,74 @@ test("a prompt from the Session page reaches the daemon signed, and its reply co
   await expect(page.locator(".ctl-note")).toHaveCount(0);
 });
 
+test("a delivered prompt whose turn is in the chat folds to one line; one that went to a copy links both ways", async () => {
+  const box = page.getByLabel("Message for the next turn");
+  await box.fill("What is the coolest feature?");
+  await box.press("Enter");
+  const msg = await daemon.next();
+  const row = page.locator(`li[data-message="${msg.id}"]`);
+  await daemon.ack(msg.id, "taken", { mode: "resume" });
+  const start = events.ev("turn.started", { turn_id: "t-cool", prompt_chars: 120 });
+  await events.post(start);
+  // The reply stays while it is being written, and once delivered until its turn's words arrive.
+  await daemon.ack(msg.id, "progress", { reply: "The control", seq: 1, mode: "resume" });
+  await expect(row.locator(".ctl-act-reply")).toContainText("The control");
+  await daemon.ack(msg.id, "delivered", { mode: "resume", reply: "The control channel." });
+  await expect(row).toHaveAttribute("data-outcome", "delivered");
+  await expect(row.locator(".ctl-act-reply")).toContainText("The control channel.");
+  await events.post(
+    events.ev("turn.ended", { reason: "stop", ms: 900 }),
+    events.ev("turn.transcript", {
+      turn: 1,
+      user: "Message via localhost (sessionpipe control, signed on the sender's device):\n\nWhat is the coolest feature?",
+      assistant: "The control channel.",
+      at: start.time,
+    }),
+  );
+  await expect(row).toHaveAttribute("data-folded");
+  await expect(row.locator(".ctl-act-reply")).toHaveCount(0);
+  await expect(row).toContainText("What is the coolest feature?");
+  await expect(row).toContainText("delivered · resume");
+
+  // Claude Code's idle notice a minute later asks for nothing: the session stays idle.
+  await events.post(
+    events.ev("attention.needed", {
+      attention_id: "notif-idle",
+      kind: "idle",
+      message: "Claude is waiting for your input",
+    }),
+  );
+  await expect(page.locator(".sess-state >> visible=true")).toHaveText("Idle");
+  await expect(page.locator(".ctl-answer")).toHaveCount(0);
+
+  // The session is open in a terminal: the next prompt goes to a copy (a fork).
+  const COPY = "9e8d7c6b-5a49-4382-8170-6f5e4d3c2b1a";
+  await box.fill("Summarise the repo");
+  await box.press("Enter");
+  const fork = await daemon.next();
+  await daemon.ack(fork.id, "delivered", {
+    mode: "fork",
+    session: `claude-code:${COPY}`,
+    reply: "A receiver with a board.",
+  });
+  const forkRow = page.locator(`li[data-message="${fork.id}"]`);
+  await expect(forkRow).toContainText("delivered · fork");
+  await expect(forkRow).not.toHaveAttribute("data-folded");
+  await expect(forkRow.locator(".ctl-act-reply")).toContainText("A receiver with a board.");
+  const copy = new Events(base, sinkToken, COPY, MACHINE);
+  await copy.post(
+    copy.ev("session.started", { source: "resume" }),
+    copy.ev("turn.started", { prompt_chars: 90 }),
+    copy.ev("turn.ended", { reason: "stop", ms: 700 }),
+  );
+  await forkRow.getByRole("link", { name: "copy of this session" }).click();
+  await expect(page).toHaveURL(new RegExp(`/s/claude-code/${COPY}$`));
+  const original = page.locator(".sess-copy >> visible=true");
+  await expect(original).toHaveText("Copy of Control e2e");
+  await original.getByRole("link").click();
+  await expect(page).toHaveURL(new RegExp(`/s/claude-code/${SID}$`));
+});
+
 test("Allow on an open permission sends a permission.answer naming the attention", async () => {
   await events.post(
     events.ev("turn.started", { turn_id: "t2", prompt_chars: 20 }),
@@ -487,7 +555,7 @@ test("a notification-only permission (nothing the daemon can answer) says so, wi
 test("a session is started from /machines in one of the machine's folders", async () => {
   await page.goto("/machines");
   const block = page.getByRole("region", { name: MACHINE });
-  await expect(block).toContainText("paired");
+  await expect(block).toContainText(/paired/i);
   await expect(block).toContainText("daemon online");
   const form = block.getByRole("form", { name: `Start a session on ${MACHINE}` });
   // Custom selects (components/Select.tsx): the trigger carries its value in data-value.
@@ -607,9 +675,9 @@ test("a phone adds its own passkey: the paired browser approves with a key.add, 
   await expect(phone.locator("[data-added]")).toContainText("Done", { timeout: 10_000 });
   await expect(phone.locator("[data-added]")).toContainText("can now answer and send");
   await shot(phone, "add-device-added-phone");
-  await expect(page.locator(".pending-devices [data-outcome='delivered']")).toContainText("added");
+  await expect(page.locator(".pending-devices [data-outcome='delivered']")).toContainText(/added/i);
   const block = page.getByRole("region", { name: MACHINE });
-  await expect(block).toContainText("Devices that can answer");
+  await expect(block).toContainText("Devices");
   await expect(block).toContainText("Misha's iPhone");
   await expect(block).toContainText("(this one)");
   await shot(page, "machines-device-added-desktop");
@@ -658,18 +726,18 @@ test("over plain LAN http every control affordance says passkeys need https or l
   await p.goto(`${lan}/s/claude-code/${SID}?k=${info.uiKey}`);
   expect(await p.evaluate(() => window.isSecureContext)).toBe(false);
   await expect(p.getByLabel("Message for the next turn")).toBeDisabled();
-  await expect(p.locator(".ctl-hint")).toContainText("passkeys need https or localhost");
+  await expect(p.locator(".ctl-hint")).toContainText(/passkeys need https or localhost/i);
   await shot(p, "strip-insecure-desktop");
   const renewed = await daemon.pair();
   await p.goto(`${lan}/pair?code=${encodeURIComponent(renewed.code)}`);
   await expect(p.locator("[data-check]")).toHaveAttribute("data-check", renewed.check);
   await expect(p.getByRole("button", { name: "Approve with passkey" })).toBeDisabled();
-  await expect(p.locator(".pair-note--err")).toContainText("passkeys need https or localhost");
+  await expect(p.locator(".pair-note--err")).toContainText(/passkeys need https or localhost/i);
   await p.goto(`${lan}/machines`);
-  await expect(p.getByRole("region", { name: MACHINE })).toContainText("passkeys need https or localhost");
+  await expect(p.getByRole("region", { name: MACHINE })).toContainText(/passkeys need https or localhost/i);
   await p.goto(`${lan}/t/e2e-control`);
   await expect(p.locator("[data-theme-id='e2e-control'] [data-avail]")).toContainText(
-    "passkeys need https or localhost",
+    /passkeys need https or localhost/i,
   );
   await ctx.close();
 });

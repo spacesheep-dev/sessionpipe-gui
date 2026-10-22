@@ -14,9 +14,10 @@ import { ActivityRow } from "./Activity";
 import { uuid } from "./bytes";
 import { sendCommand } from "./command";
 import { useGrant, useMessage, useRpId } from "./hooks";
+import { sentence } from "./PendingDevices";
 import { insecureHint, passkeysAvailable } from "./webauthn";
 import { sendErrorWords } from "./words";
-import "./control.css";
+import "./pairing.css";
 
 export function StartSession({ m, c }: { m: MachineSummary; c: MachineControl }) {
   const rp = useRpId();
@@ -33,6 +34,7 @@ export function StartSession({ m, c }: { m: MachineSummary; c: MachineControl })
   const msg = useMessage(sent?.id ?? null);
   const folderId = useId();
   const harnessId = useId();
+  const messageId = useId();
 
   const canSend = secure && !!rp && !busy && !!harness && cwd.trim().startsWith("/") && !!text.trim();
 
@@ -60,99 +62,101 @@ export function StartSession({ m, c }: { m: MachineSummary; c: MachineControl })
   };
 
   return (
-    <div className="start">
-      <dt>start</dt>
-      <dd>
-        {!secure ? (
-          <span className="machine-ctl-row">{insecureHint()}</span>
-        ) : (
-          <form
-            className="start-form"
-            aria-label={`Start a session on ${m.name}`}
-            onSubmit={(e) => {
-              e.preventDefault();
-              void submit();
-            }}
-          >
-            <div className="start-row">
-              <label htmlFor={harnessId}>
-                harness
-                <Select<string>
-                  id={harnessId}
-                  value={harness}
-                  onChange={setHarness}
-                  disabled={busy}
-                  options={harnesses.map((h) => ({
-                    value: h,
-                    label: harnessMark(h).label,
-                    icon: <HarnessGlyph name={h} size="sm" />,
-                  }))}
-                />
-              </label>
-              <label htmlFor={folderId}>
-                folder
-                {c.folders && c.folders.length > 0 ? (
-                  <Select<string>
-                    id={folderId}
-                    value={cwd}
-                    onChange={setCwd}
-                    disabled={busy}
-                    className="mono"
-                    options={c.folders.map((f) => ({ value: f, label: f }))}
-                  />
-                ) : (
-                  <input
-                    id={folderId}
-                    type="text"
-                    value={cwd}
-                    onChange={(e) => setCwd(e.target.value)}
-                    placeholder="/absolute/path on the machine"
-                    className="mono"
-                    disabled={busy}
-                  />
-                )}
-              </label>
-            </div>
-            <label>
-              first message
-              <textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="What should the new session do?"
+    <li className="form-row form-row--stack machine-start" data-start-for={m.name}>
+      <span className="form-row-text">
+        <span className="form-label">Start a session</span>
+        {!secure && <span className="form-caption">{sentence(insecureHint())}</span>}
+      </span>
+      {secure && (
+        <form
+          className="start-form"
+          aria-label={`Start a session on ${m.name}`}
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <div className="start-row">
+            <div className="start-field">
+              <label htmlFor={harnessId}>Harness</label>
+              <Select<string>
+                id={harnessId}
+                value={harness}
+                onChange={setHarness}
                 disabled={busy}
-                maxLength={20_000}
+                options={harnesses.map((h) => ({
+                  value: h,
+                  label: harnessMark(h).label,
+                  icon: <HarnessGlyph name={h} size="sm" />,
+                }))}
               />
-            </label>
-            <div className="start-actions">
-              <button type="submit" className="btn" disabled={!canSend}>
-                {busy ? "Sending…" : c.online ? "Start session" : "Start when it comes online"}
-              </button>
-              <span className="ctl-hint">
-                {tap
-                  ? "Confirm with your passkey: it vouches for this browser for a day."
-                  : grant.exp === null
-                    ? "The first send of the day asks for your passkey once."
-                    : c.online
-                      ? `${m.name} is listening`
-                      : `${m.name} is offline; the start waits up to an hour`}
-              </span>
             </div>
-            {error && <p className="ctl-note ctl-note--err">{error}</p>}
-          </form>
-        )}
-        {sent && (
-          <ol className="start-acts" aria-label="Start sent">
-            {msg && <ActivityRow a={msg} machine={m.name} online={c.online} />}
-            {msg?.outcome === "delivered" && (
-              <li className="start-link">
-                <Link to={sessionPath(sent.harness, sent.sid)} className="start-open">
-                  Open the new session →
-                </Link>
-              </li>
-            )}
-          </ol>
-        )}
-      </dd>
-    </div>
+            <div className="start-field">
+              <label htmlFor={folderId}>Folder</label>
+              {c.folders && c.folders.length > 0 ? (
+                <Select<string>
+                  id={folderId}
+                  value={cwd}
+                  onChange={setCwd}
+                  disabled={busy}
+                  className="mono"
+                  options={c.folders.map((f) => ({ value: f, label: f }))}
+                />
+              ) : (
+                <input
+                  id={folderId}
+                  type="text"
+                  value={cwd}
+                  onChange={(e) => setCwd(e.target.value)}
+                  placeholder="/absolute/path on the machine"
+                  className="field mono"
+                  disabled={busy}
+                />
+              )}
+            </div>
+          </div>
+          <div className="start-field">
+            <label htmlFor={messageId}>First message</label>
+            <textarea
+              id={messageId}
+              className="field"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="What should the new session do?"
+              disabled={busy}
+              maxLength={20_000}
+              data-start-message
+            />
+          </div>
+          <div className="start-actions">
+            <button type="submit" className="btn btn--primary" disabled={!canSend}>
+              {busy ? "Sending…" : c.online ? "Start session" : "Start when it comes online"}
+            </button>
+            <span className="caption">
+              {tap
+                ? "Confirm with your passkey: it vouches for this browser for a day."
+                : grant.exp === null
+                  ? "The first send of the day asks for your passkey once."
+                  : c.online
+                    ? `${m.name} is listening.`
+                    : `${m.name} is offline; the start waits up to an hour.`}
+            </span>
+          </div>
+          {error && <p className="ctl-note ctl-note--err">{error}</p>}
+        </form>
+      )}
+      {sent && (
+        <ol className="start-acts" aria-label="Start sent">
+          {msg && <ActivityRow a={msg} machine={m.name} online={c.online} />}
+          {msg?.outcome === "delivered" && (
+            <li className="start-link">
+              <Link to={sessionPath(sent.harness, sent.sid)} className="start-open">
+                Open the new session
+              </Link>
+            </li>
+          )}
+        </ol>
+      )}
+    </li>
   );
 }

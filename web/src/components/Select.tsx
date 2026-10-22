@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The one custom select (house rule: no native <select> anywhere in the GUI). A
-// hairline trigger (36 px, or 28 px `sm`) and a listbox in a portal under document.body,
+// pop-up button (the toolbar's control height) and a listbox in a portal under document.body,
 // anchored below the trigger and flipped above when the room runs out; on a phone the
 // same list is a bottom sheet. The APG select-only combobox pattern: focus stays on the
 // trigger (role combobox), the list is role listbox, the row under the cursor is named by
@@ -65,7 +65,7 @@ export interface MultiSelectProps<T> extends CommonProps<T> {
 const PHONE = "(max-width: 599px)";
 const MAX_LIST_WIDTH = 320;
 const MAX_LIST_HEIGHT = 320;
-const GAP = 4;
+const GAP = 6;
 const EDGE = 8;
 
 function usePhone(): boolean {
@@ -398,6 +398,9 @@ function Picker<T>({
             onMouseMove={() => i !== cursor && !o.disabled && setCursor(i)}
             onClick={() => pick(i)}
           >
+            <span className="sel-opt-check" aria-hidden="true">
+              {on && <Check />}
+            </span>
             {hasIcons && (
               <span className="sel-opt-icon" aria-hidden="true">
                 {o.icon}
@@ -405,9 +408,6 @@ function Picker<T>({
             )}
             <span className="sel-opt-label ellipsis">{o.label}</span>
             {o.hint && <span className="sel-opt-hint">{o.hint}</span>}
-            <span className="sel-opt-check" aria-hidden="true">
-              {on && <Check />}
-            </span>
           </div>
         );
       })}

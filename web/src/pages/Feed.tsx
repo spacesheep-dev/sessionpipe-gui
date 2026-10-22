@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-// The feed: every event as it arrives, newest first, like `sessionpipe tail`. Pages from
-// GET /api/ui/events; live rows prepend from the stream unless paused.
+// The feed: every event as it arrives, newest first, like `sessionpipe tail`, laid out as
+// a log the way Console.app lays one out: time, session, type, detail, under sticky day
+// headers. Pages from GET /api/ui/events; live rows prepend from the stream unless
+// paused. A row's right-click opens its session, narrows the feed to it, or copies it.
 import type { FeedQuery, StoredEvent } from "@shared/api";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChipSelect, HarnessGlyph, Redacted, SearchInput, Spinner } from "../components/bits";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChipSelect, HarnessGlyph, Redacted, SearchInput } from "../components/bits";
+import { type MenuList, useContextMenu } from "../components/ContextMenu";
 import { LensChip, LensNote } from "../components/LensChip";
-import { BesideButton } from "../components/SessionCard";
+import { PageBar } from "../components/PageBar";
+import { BesideButton, lensMenu, useBackgroundMenu, useStickyTop } from "../components/SessionCard";
 import { useAppState, useStore } from "../data/hooks";
 import { eventSummary, harnessMark, sessionTitle, storedKey } from "../lib/format";
 import { useListNav } from "../lib/keys";
-import { Link, sessionPath } from "../lib/router";
+import { absoluteUrl, copyItem } from "../lib/menus";
+import { Link, navigate, sessionPath } from "../lib/router";
 import { useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import { openSplit } from "../lib/split";
@@ -33,6 +38,26 @@ const applyFilter = (e: StoredEvent, f: FeedQuery) =>
   (!f.type || e.type === f.type || e.type.startsWith(`${f.type}.`)) &&
   (!f.session || storedKey(e) === f.session) &&
   (!f.q || JSON.stringify(e).toLowerCase().includes(f.q.toLowerCase()));
+
+/** An event that is an error: a failed tool, a turn that ended in one, an error prompt.
+ *  Its type is the one thing in the feed drawn in red. */
+const isError = (e: StoredEvent): boolean =>
+  (e.type === "tool.ended" && e.data.ok === false) ||
+  (e.type === "turn.ended" && e.data.reason === "error") ||
+  (e.type === "attention.needed" && e.data.kind === "error");
+
+const sentence = (s: string) => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
+const desktop = () => typeof matchMedia === "function" && matchMedia("(min-width: 840px)").matches;
+
+/** What a row's menu needs from the page, read when the menu opens. */
+interface FeedMenuContext {
+  paused: boolean;
+  togglePause: () => void;
+  setSession: (k: string) => void;
+  setMachine: (m: string) => void;
+  setHarness: (h: string) => void;
+  setType: (t: string) => void;
+}
 
 export function Feed() {
   const store = useStore();
@@ -58,6 +83,8 @@ export function Feed() {
   );
   const filterRef = useRef(filter);
   filterRef.current = filter;
+  const page = useRef<HTMLDivElement>(null);
+  useStickyTop(page);
 
   const harnesses = useMemo(() => [...new Set([...sessions.values()].map((s) => s.harness))].sort(), [sessions]);
   const machines = useMemo(
@@ -124,6 +151,11 @@ export function Feed() {
     });
     setPaused(false);
   }, []);
+  const togglePause = useCallback(() => (paused ? resume() : setPaused(true)), [paused, resume]);
+  const showNew = () => {
+    resume();
+    window.scrollTo({ top: 0 });
+  };
 
   const older = useCallback(() => {
     if (!cursor) return;
@@ -144,7 +176,8 @@ export function Feed() {
   // The tier lens: rows a receiver at that tier would not have got leave; the rest lose
   // the fields it would not carry (lib/tier.ts).
   const lens = useLens();
-  const beside = useAppSettings().openSessions === "beside";
+  const { openSessions, mode } = useAppSettings();
+  const beside = openSessions === "beside";
   const rows = useMemo(
     () => (lens === null ? loaded : loaded.map((e) => atTier(e, lens)).filter((e): e is StoredEvent => e !== null)),
     [loaded, lens],
@@ -157,52 +190,78 @@ export function Feed() {
   const hrefs = useMemo(() => shown.map((e) => sessionPath(e.harness.name, e.session.id)), [shown]);
   const keys = useMemo(() => shown.map(storedKey), [shown]);
   const { cursor: cur } = useListNav(hrefs, true, keys);
-  useShortcut("feed.pause", () => (paused ? resume() : setPaused(true)));
+  useShortcut("feed.pause", () => togglePause());
   useShortcut("feed.new", () => {
     if (!paused) return false;
-    resume();
-    window.scrollTo({ top: 0 });
+    showNew();
   });
   // A row's day label changes at midnight, not every second (the page has 1500 rows).
   const now = useToday();
 
+  const filtered = !!(harness || machine || type || session || q);
+  const clearFilters = () => {
+    setHarness("");
+    setMachine("");
+    setType("");
+    setSession("");
+    setQ("");
+  };
+  const ctx = useRef<FeedMenuContext>({ paused, togglePause, setSession, setMachine, setHarness, setType });
+  ctx.current = { paused, togglePause, setSession, setMachine, setHarness, setType };
+  const bgMenu = useBackgroundMenu(
+    () => [
+      { label: paused ? "Resume" : "Pause the feed", action: "feed.pause", run: togglePause },
+      paused && pendingCount > 0 && { label: `Show ${pendingCount} new`, action: "feed.new", run: showNew },
+      filtered && { label: "Clear filters", run: clearFilters },
+      { sep: true },
+      ...lensMenu(lens, mode === "simple"),
+    ],
+    { title: () => "Feed" },
+  );
+
   let lastDay = "";
   return (
-    <div className="page feed">
-      <div className="toolbar">
-        <SearchInput value={q} onChange={setQ} placeholder="Search events" />
-        <LensChip />
-        <div className="filters">
-          <ChipSelect
-            value={harness}
-            options={harnesses}
-            onChange={setHarness}
-            all="all harnesses"
-            label="Harness"
-            optionLabel={(h) => harnessMark(h).label}
-            icon={(h) => <HarnessGlyph name={h} size="sm" />}
-          />
-          <ChipSelect value={machine} options={machines} onChange={setMachine} all="all machines" label="Machine" />
-          <ChipSelect value={type} options={TYPES} onChange={setType} all="all types" label="Type" />
-          <ChipSelect
-            value={session}
-            options={sessionOptions}
-            onChange={setSession}
-            all="all sessions"
-            label="Session"
-            optionLabel={sessionLabel}
-          />
+    <div className="page feed" ref={page} {...bgMenu}>
+      <PageBar
+        title="Feed"
+        tools={
+          <>
+            <SearchInput value={q} onChange={setQ} placeholder="Search" label="Search events" />
+            <ChipSelect
+              value={harness}
+              options={harnesses}
+              onChange={setHarness}
+              all="All harnesses"
+              label="Harness"
+              optionLabel={(h) => harnessMark(h).label}
+              icon={(h) => <HarnessGlyph name={h} size="sm" />}
+            />
+            <ChipSelect value={machine} options={machines} onChange={setMachine} all="All machines" label="Machine" />
+            <ChipSelect value={type} options={TYPES} onChange={setType} all="All types" label="Type" />
+            <ChipSelect
+              value={session}
+              options={sessionOptions}
+              onChange={setSession}
+              all="All sessions"
+              label="Session"
+              optionLabel={sessionLabel}
+            />
+            <LensChip />
+          </>
+        }
+        actions={
           <button
             type="button"
             className={`btn btn--sm feed-pause ${paused ? "btn--on" : "btn--ghost"}`}
             aria-pressed={paused}
-            onClick={() => (paused ? resume() : setPaused(true))}
+            onClick={togglePause}
+            title={paused ? "Resume the feed (space)" : "Pause the feed (space)"}
           >
             {paused ? "Resume" : "Pause"}
             {paused && pendingCount > 0 && <span className="pill-new num">{pendingCount} new</span>}
           </button>
-        </div>
-      </div>
+        }
+      />
 
       {error && <p className="page-note is-err">{error}</p>}
       <LensNote lens={lens} hidden={hiddenByLens} />
@@ -214,67 +273,43 @@ export function Feed() {
           lastDay = day;
           const s = sessions.get(storedKey(e));
           return (
-            <li
+            <FeedRow
               key={e.id}
-              className={`ev ev--${e.type.split(".")[0]}`}
-              data-cursor={String(i)}
-              aria-current={i === cur ? "true" : undefined}
-            >
-              {showDay && <span className="ev-day">{day}</span>}
-              <span className="ev-time num" title={new Date(e.time).toLocaleString()}>
-                {clock(e.time)}
-              </span>
-              <HarnessGlyph name={e.harness.name} size="sm" />
-              <Link
-                to={sessionPath(e.harness.name, e.session.id)}
-                className="ev-session ellipsis"
-                data-nav-item=""
-                title={e.session.id}
-                plainClick={
-                  beside
-                    ? () =>
-                        openSplit(storedKey(e), {
-                          from: document.querySelector(`[data-cursor="${i}"]`)?.getBoundingClientRect(),
-                        })
-                    : undefined
-                }
-                modClick={(o) =>
-                  openSplit(storedKey(e), {
-                    from: document.querySelector(`[data-cursor="${i}"]`)?.getBoundingClientRect(),
-                    background: o.background,
-                  })
-                }
-              >
-                {s ? sessionTitle(s) : (e.session.title ?? e.session.id.slice(0, 8))}
-              </Link>
-              {e.session.machine && <span className="ev-machine ellipsis">{e.session.machine}</span>}
-              <span className={`ev-type mono ev-type--${e.type.split(".")[0]}`}>{e.type}</span>
-              <span className="ev-sum ellipsis">
-                <Redacted text={eventSummary(e)} />
-              </span>
-              <span className="ev-tier num" title={`tier ${e.tier} · ${e.source}`}>
-                t{e.tier}
-              </span>
-              <BesideButton
-                className="ev-beside"
-                onClick={() =>
-                  openSplit(storedKey(e), {
-                    from: document.querySelector(`[data-cursor="${i}"]`)?.getBoundingClientRect(),
-                  })
-                }
-              />
-            </li>
+              e={e}
+              index={i}
+              current={i === cur}
+              day={showDay ? sentence(day) : undefined}
+              title={s ? sessionTitle(s) : (e.session.title ?? e.session.id.slice(0, 8))}
+              beside={beside}
+              ctx={ctx}
+            />
           );
         })}
       </ol>
-      {loading && (
-        <p className="page-note">
-          <Spinner /> loading…
-        </p>
+      {busy && shown.length === 0 ? (
+        <div className="skeleton feed-skeleton" role="status" aria-label="Loading events">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} className="skeleton-row" />
+          ))}
+        </div>
+      ) : loading ? (
+        <p className="page-note feed-more">Loading…</p>
+      ) : null}
+      {!busy && shown.length === 0 && (
+        <div className="state">
+          <p className="state-title">No events match.</p>
+          <p className="state-text">
+            {filtered ? "Try another filter, or clear the search." : "Events show up here as agents send them."}
+          </p>
+          {filtered && (
+            <button type="button" className="btn" onClick={clearFilters}>
+              Clear filters
+            </button>
+          )}
+        </div>
       )}
-      {!busy && shown.length === 0 && <p className="page-note">No events match.</p>}
       {!loading && cursor && (
-        <button type="button" className="btn btn--ghost more" onClick={older}>
+        <button type="button" className="btn btn--ghost feed-more" onClick={older}>
           Older events
         </button>
       )}
@@ -282,3 +317,97 @@ export function Feed() {
     </div>
   );
 }
+
+const FeedRow = memo(function FeedRow({
+  e,
+  index,
+  current,
+  day,
+  title,
+  beside,
+  ctx,
+}: {
+  e: StoredEvent;
+  index: number;
+  current: boolean;
+  day?: string;
+  title: string;
+  beside: boolean;
+  ctx: { current: FeedMenuContext };
+}) {
+  const key = storedKey(e);
+  const path = sessionPath(e.harness.name, e.session.id);
+  const kind = e.type.split(".")[0]!;
+  const rect = () => document.querySelector(`[data-cursor="${index}"]`)?.getBoundingClientRect();
+  const menu = useContextMenu(
+    (): MenuList => {
+      const c = ctx.current;
+      const wide = desktop();
+      const openPage = { label: "Open as page", action: beside ? undefined : "list.open", run: () => navigate(path) };
+      const openBeside = {
+        label: wide ? "Open beside" : "Preview",
+        action: beside ? "list.open" : "list.beside",
+        run: () => openSplit(key, { from: rect() }),
+      };
+      return [
+        ...(beside ? [openBeside, openPage] : [openPage, openBeside]),
+        wide && {
+          label: "Open in background tab",
+          action: "list.background",
+          run: () => openSplit(key, { background: true }),
+        },
+        wide && { label: "Open in new window", run: () => void window.open(absoluteUrl(path), "_blank", "noopener") },
+        { sep: true },
+        { label: "Show only this session", run: () => c.setSession(key) },
+        e.session.machine && { label: `Show only ${e.session.machine}`, run: () => c.setMachine(e.session.machine!) },
+        { label: `Show only ${harnessMark(e.harness.name).label}`, run: () => c.setHarness(e.harness.name) },
+        TYPES.includes(kind) && { label: `Show only ${kind} events`, run: () => c.setType(kind) },
+        { sep: true },
+        {
+          label: "Copy",
+          items: [
+            copyItem("Event as JSON", JSON.stringify(e, null, 2)),
+            copyItem("Summary", `${e.type} ${eventSummary(e)}`.trim()),
+            copyItem("Time (ISO)", e.time),
+            copyItem("Session ID", e.session.id),
+          ],
+        },
+        { sep: true },
+        { label: c.paused ? "Resume" : "Pause the feed", action: "feed.pause", run: c.togglePause },
+      ];
+    },
+    { title: () => title, subtitle: () => [e.type, clock(e.time)].join(" · ") },
+  );
+  return (
+    <>
+      {day && <li className="ev-day">{day}</li>}
+      <li
+        className={`ev ev--${kind}`}
+        data-cursor={String(index)}
+        aria-current={current ? "true" : undefined}
+        {...menu}
+      >
+        <span className="ev-time num" title={`${new Date(e.time).toLocaleString()} · tier ${e.tier} · ${e.source}`}>
+          {clock(e.time)}
+        </span>
+        <HarnessGlyph name={e.harness.name} size="sm" />
+        <Link
+          to={path}
+          className="ev-session ellipsis"
+          data-nav-item=""
+          title={`${title} · ${e.session.id}`}
+          plainClick={beside ? () => openSplit(key, { from: rect() }) : undefined}
+          modClick={(o) => openSplit(key, { from: rect(), background: o.background })}
+        >
+          {title}
+        </Link>
+        {e.session.machine && <span className="ev-machine ellipsis">{e.session.machine}</span>}
+        <span className={`ev-type mono ev-type--${kind} ${isError(e) ? "is-err" : ""}`}>{e.type}</span>
+        <span className="ev-sum ellipsis">
+          <Redacted text={eventSummary(e)} />
+        </span>
+        <BesideButton className="ev-beside" onClick={() => openSplit(key, { from: rect() })} />
+      </li>
+    </>
+  );
+});

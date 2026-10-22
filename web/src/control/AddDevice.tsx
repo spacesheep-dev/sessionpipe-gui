@@ -6,14 +6,16 @@
 // The machine verifies it like any command, adds the key and acks `delivered`; this page
 // polls until then. Nothing here is trusted on its own word.
 import { useEffect, useState } from "react";
-import { Link } from "../lib/router";
+import { BackButton, PageBar } from "../components/PageBar";
+import { back, Link } from "../lib/router";
 import { ms, useNow } from "../lib/time";
 import { controlApi, httpsHere } from "./api";
 import { useRpId } from "./hooks";
+import { sentence } from "./PendingDevices";
 import { NAME_MAX, useDeviceRequest } from "./useDeviceRequest";
 import { guessDeviceName, insecureHint, passkeysAvailable } from "./webauthn";
 import { refusalWords } from "./words";
-import "./control.css";
+import "./pairing.css";
 
 export function AddDevicePage() {
   const rp = useRpId();
@@ -44,14 +46,12 @@ export function AddDevicePage() {
   const digits = d?.check.padStart(6, "0");
 
   return (
-    <div className="page pair add-device">
-      <div>
-        <h1>Add this device</h1>
-        <p className="pair-lead">
-          A machine answers only to passkeys it trusts. This device makes its own, and a device the machine already
-          trusts (the Mac that paired) vouches for it: six digits here, the same six there, one tap to approve.
-        </p>
-      </div>
+    <div className="page page--doc page--grouped pair add-device">
+      <PageBar title="Add this device" back={<BackButton onClick={() => back("/machines")} label="Machines" />} />
+      <p className="caption pair-lead">
+        This device makes its own passkey, and one the machine already trusts vouches for it: the same six digits on
+        both, one tap to approve.
+      </p>
 
       {d && digits && (
         <div className="pair-check">
@@ -71,8 +71,8 @@ export function AddDevicePage() {
           {phase.k === "waiting" && (
             <span className={`pair-countdown ${left < 90_000 ? "is-soon" : ""}`}>
               {phase.d.status === "sent"
-                ? "Approved · waiting for the machine to add the key…"
-                : `Waiting for approval · ${countdown(left)} left`}
+                ? "Approved; waiting for the machine to add the key…"
+                : `Waiting for approval · expires in ${countdown(left)}`}
             </span>
           )}
         </div>
@@ -107,7 +107,7 @@ export function AddDevicePage() {
 
       {!secure && (
         <p className="pair-note pair-note--err">
-          {insecureHint()}
+          {sentence(insecureHint())}
           {httpsHref ? (
             <>
               {" "}
@@ -141,9 +141,11 @@ export function AddDevicePage() {
             void ask(name);
           }}
         >
-          <label>
-            What to call this device
+          <div className="pair-field">
+            <label htmlFor="add-device-name">What to call this device</label>
             <input
+              id="add-device-name"
+              className="field"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -152,23 +154,19 @@ export function AddDevicePage() {
               aria-label="Device name"
               placeholder={guessDeviceName()}
             />
-          </label>
+          </div>
           <div className="pair-actions">
             <button type="submit" className="btn btn--primary" disabled={!secure || !rp}>
               {known.length ? `Add this device with its passkey “${known[0]?.name ?? "here"}”` : "Add this device"}
             </button>
             {known.length > 0 && secure && (
-              <button type="button" className="btn btn--ghost btn--sm" onClick={() => void ask(name, true)}>
-                make a new passkey instead
+              <button type="button" className="btn btn--ghost" onClick={() => void ask(name, true)}>
+                Make a new passkey instead
               </button>
             )}
           </div>
         </form>
       ) : null}
-
-      <p className="page-note">
-        <Link to="/machines">← Machines</Link>
-      </p>
     </div>
   );
 }
@@ -176,5 +174,5 @@ export function AddDevicePage() {
 function countdown(msLeft: number): string {
   const s = Math.max(0, Math.ceil(msLeft / 1000));
   const m = Math.floor(s / 60);
-  return m > 0 ? `${m} m ${String(s % 60).padStart(2, "0")} s` : `${s} s`;
+  return `${m}:${String(s % 60).padStart(2, "0")}`;
 }

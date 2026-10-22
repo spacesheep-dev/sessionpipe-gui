@@ -1,4 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+/* Element defaults, and the app's behaviour as a native window: the chrome is not text
+   you can select, nothing shows the hand cursor but an inline link, a tap does not
+   flash, the window does not bounce. Content stays selectable. */
 
 *,
 *::before,
@@ -9,6 +12,9 @@
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  /* Thin themed scrollbars, the window's included. */
+  scrollbar-color: var(--line-2) transparent;
 }
 
 body {
@@ -17,9 +23,17 @@ body {
   color: var(--fg);
   font-family: var(--font-ui);
   font-size: var(--text-md);
-  line-height: 1.5;
+  line-height: var(--lh);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   overscroll-behavior-y: none;
+}
+
+/* A desktop window never rubber-bands. */
+@media (min-width: 840px) {
+  html {
+    overscroll-behavior: none;
+  }
 }
 
 h1,
@@ -47,8 +61,71 @@ button {
   background: none;
   border: 0;
   padding: 0;
-  cursor: pointer;
   touch-action: manipulation;
+}
+
+/* The cursor of an app: the arrow on everything you click, the hand only on a link in
+   running text. */
+button,
+summary,
+label,
+[role="button"],
+[role="tab"],
+[role="menuitem"],
+[role="menuitemradio"],
+[role="menuitemcheckbox"],
+[role="option"],
+[role="switch"],
+a {
+  cursor: default;
+}
+p a,
+li > a:not([class]),
+.md a,
+.link {
+  cursor: pointer;
+}
+
+/* Chrome is not text: buttons, tabs, menus, options, labels. Pages mark their own
+   chrome (bars, rows, section heads) the same way; content is left selectable. */
+button,
+summary,
+label,
+[role="tab"],
+[role="menu"],
+[role="listbox"],
+[role="switch"],
+.chrome {
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* Fields stay editable inside chrome (Safari would lock them otherwise). */
+input,
+textarea,
+[contenteditable] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* An element with its own right-click menu: no iOS callout or loupe on a long-press. */
+[data-menu] {
+  -webkit-touch-callout: none;
+}
+@media (pointer: coarse) {
+  [data-menu] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
+::selection {
+  background: color-mix(in oklch, var(--focus) 28%, transparent);
+}
+
+/* The browser's own checkboxes, radios and ranges take the ink, not the browser's blue:
+   there is no accent hue in the UI. */
+:root {
+  accent-color: var(--fg);
 }
 
 /* Mono sits a step under the text around it: 13 in body, 12 in a meta line. */
@@ -74,21 +151,18 @@ b {
 mark {
   background: var(--mark);
   color: var(--mark-fg);
-  border-radius: 3px;
+  border-radius: var(--radius-inner);
   padding: 0 2px;
 }
 
-/* One ring everywhere: 2 px of the foreground, off the edge. Nothing sets outline: none
-   without drawing a ring of its own (the search box, the prompt, the palette's input). */
+/* One ring everywhere, and only for the keyboard: 2 px of the focus colour, off the
+   edge. A text field shows a halo instead (shared.css), so nothing gets two. */
 :focus-visible {
-  outline: var(--focus-width, 2px) solid var(--fg);
+  outline: var(--focus-width) solid var(--focus);
   outline-offset: 2px;
 }
-
-@media (prefers-contrast: more) {
-  :root {
-    --focus-width: 3px;
-  }
+:focus:not(:focus-visible) {
+  outline: none;
 }
 
 .num {
@@ -118,7 +192,8 @@ mark {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-  .spinner {
+  .spinner,
+  .dot--working {
     animation-duration: 1.6s !important;
     animation-iteration-count: infinite !important;
   }

@@ -38,32 +38,35 @@
   font-size: var(--text-md);
 }
 
-.theme-error {
+/* The error page: the empty-state grammar (shared.css .state) at the top left, the
+   message in a mono well, the file under it. Red only on the glyph. */
+.theme-error.state {
   position: absolute;
   inset: 0;
   overflow: auto;
-  padding: 24px var(--gutter);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  padding: 32px var(--gutter);
+  max-width: none;
+  gap: 8px;
+}
+.theme-error > * {
   max-width: 72ch;
 }
-.theme-error h2 {
-  font-size: var(--text-xl);
-  font-weight: 600;
+.theme-error .theme-error-glyph {
   color: var(--err);
 }
 .theme-error-msg {
-  margin: 0;
-  padding: 12px 14px;
-  border: 1px solid var(--err-soft);
+  align-self: stretch;
+  margin: 8px 0 0;
+  padding: 10px 12px;
   border-radius: var(--radius);
-  background: var(--err-bg);
+  background: var(--bg-3);
   color: var(--fg);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   white-space: pre-wrap;
   word-break: break-word;
+  -webkit-user-select: text;
+  user-select: text;
 }
 .theme-error-file {
   display: flex;
@@ -77,14 +80,12 @@
   color: var(--fg-2);
   word-break: break-all;
 }
-.theme-error-help {
-  color: var(--fg-3);
-  font-size: var(--text-sm);
-}
 .theme-error-help a {
   color: var(--fg-2);
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+  cursor: pointer;
 }
 
 /* The divider on the rail above the first experimental view: a hairline, nothing else
@@ -109,74 +110,59 @@
   height: 20px;
 }
 
-/* ---------- /themes ---------- */
+/* ---------- /themes (the Views page) ---------- */
+/* Rows of the grouped form: the name, the version in the mark tier, its flags as quiet
+   words (no pills), one line of what it is; Open and Disable on the trailing edge. */
 
-.themes-list {
-  display: flex;
-  flex-direction: column;
-  border-top: var(--hairline) solid var(--line);
-}
-.themes-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 4px 16px;
-  padding: 12px 0;
-  border-bottom: var(--hairline) solid var(--line);
+.form-row.themes-row {
+  align-items: flex-start;
+  padding: 10px 0;
 }
 .themes-row-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  gap: 0 8px;
 }
 .themes-row-name {
-  font-size: var(--text-lg);
+  color: var(--fg);
+  font-size: var(--text-md);
   font-weight: 500;
 }
-.themes-row-ver,
-.themes-row-id {
-  color: var(--fg-3);
-  font-size: var(--text-xs);
-  font-family: var(--font-mono);
-}
-.themes-flag {
-  padding: 1px 8px;
-  border: var(--hairline) solid var(--line-2);
-  border-radius: var(--radius-pill);
+.themes-row-ver {
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
+.themes-flag {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  text-transform: capitalize;
+}
+.themes-flag + .themes-flag::before,
+.themes-row-ver + .themes-flag::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--fg-4);
+}
 .themes-flag--err {
-  border-color: var(--err-soft);
   color: var(--err);
 }
 .themes-row-meta {
-  grid-column: 1;
-  color: var(--fg-3);
-  font-size: var(--text-sm);
-  line-height: 1.5;
-  word-break: break-all;
-}
-.themes-row-meta code {
-  font-family: var(--font-mono);
+  max-width: 60ch;
 }
 .themes-row-err {
-  grid-column: 1 / -1;
   color: var(--err);
   font-size: var(--text-sm);
   font-family: var(--font-mono);
   white-space: pre-wrap;
 }
 .themes-row-open {
-  grid-row: 1;
-  grid-column: 2;
-  align-self: start;
-  display: flex;
+  flex: none;
   gap: 4px;
+  padding-top: 2px;
 }
 .themes-empty {
-  color: var(--fg-3);
-  font-size: var(--text-md);
+  padding: 8px 0;
 }
 .themes-tools {
   display: flex;
@@ -184,80 +170,43 @@
   align-items: center;
   flex-wrap: wrap;
 }
-.themes-trust {
-  max-width: 72ch;
-  color: var(--fg-2);
-  font-size: var(--text-md);
-  line-height: 1.5;
+.themes-tools:empty {
+  display: none;
 }
-
-/* ---------- /themes · Extras ---------- */
-
-.extras-list {
-  display: flex;
-  flex-direction: column;
-  border-top: var(--hairline) solid var(--line);
-  margin-bottom: 12px;
-}
-.extras-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 4px 16px;
-  padding: 12px 0;
-  border-bottom: var(--hairline) solid var(--line);
-}
-.extras-row-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-}
-.extras-row-name {
-  font-size: var(--text-lg);
-  font-weight: 500;
-}
-.extras-row-kind,
-.extras-row-size {
-  color: var(--fg-3);
-  font-size: var(--text-xs);
-  font-family: var(--font-mono);
-}
-.extras-row-act {
-  grid-row: 1;
-  grid-column: 2;
-  align-self: start;
-}
-.extras-row-meta {
-  grid-column: 1;
+.themes-tools .sect-note {
+  padding-top: 8px;
   color: var(--fg-3);
   font-size: var(--text-sm);
-  line-height: 1.5;
 }
-.extras-row-meta code,
-.extras-line {
+.themes .caption code {
   font-family: var(--font-mono);
-  color: var(--fg-2);
+  font-size: var(--text-xs);
 }
-.extras-tools {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
+.themes-trust {
+  max-width: 64ch;
+}
+.extras-line {
+  overflow-wrap: anywhere;
 }
 .extras-log {
-  grid-column: 1 / -1;
-  margin: 0;
+  margin: 8px 0 0;
   padding: 8px 10px;
-  border: var(--hairline) solid var(--line);
   border-radius: var(--radius);
-  background: var(--bg-2);
+  background: var(--bg-3);
   color: var(--fg-2);
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   white-space: pre-wrap;
   word-break: break-word;
 }
 .extras-log.is-err {
-  border-color: var(--err-soft);
   color: var(--err);
+}
+@media (max-width: 839px) {
+  .themes-row {
+    flex-wrap: wrap;
+  }
+  .themes-tools .sect-note {
+    padding: 8px 16px 0;
+  }
 }

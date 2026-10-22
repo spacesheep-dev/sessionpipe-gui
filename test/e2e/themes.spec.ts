@@ -147,7 +147,14 @@ test.describe("themes", () => {
     const counter = page.locator("[data-theme-row='e2e-counter']");
     await expect(counter.locator(".themes-row-name")).toHaveText("E2E Counter");
     await expect(counter.locator(".themes-row-ver")).toHaveText("0.1.0");
-    await expect(counter.locator(".themes-row-meta")).toContainText("fixtures");
+    await expect(counter.locator(".themes-row-meta")).toContainText("Counts sessions and events");
+    // The path is one right-click away, with the row's other real actions.
+    await counter.click({ button: "right" });
+    const menu = page.getByRole("menu");
+    await expect(menu.getByRole("menuitem", { name: "Copy path" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Disable" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
     await expect(counter.getByRole("link", { name: "Open" })).toHaveAttribute("href", "/t/e2e-counter");
     await expect(page.locator("[data-theme-row='e2e-broken'] .themes-flag")).toHaveText("experimental");
     await expect(page.locator(".cmd-text").first()).toContainText("sessionpipe-gui view add");

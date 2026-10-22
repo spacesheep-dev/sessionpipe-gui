@@ -3,13 +3,16 @@
 // it, in three steps, read on the laptop and on the phone itself (the same url, two sides,
 // phone/state.ts tells them apart). 1 · See it: the LAN QR with the key. 2 · Send: a passkey
 // needs an https address the phone trusts, so one lane is recommended (Tailscale when it is
-// on this machine, else the same Wi-Fi with the local CA) and the rest fold under "Other
-// ways". 3 · Trust: the phone makes its passkey and asks; the laptop approves the six digits
+// on this machine, else the same Wi-Fi with the local CA), the other one a segment away. 3 ·
+// Trust: the phone makes its passkey and asks; the laptop approves the six digits
 // (control/PendingDevices.tsx, the same request the inbox shows). The facts come from GET
-// /api/ui/phone every two seconds, so a step turns green by itself.
+// /api/ui/phone every two seconds, so a step turns done by itself. The checklist is the
+// setup page's (pages/Setup.tsx Step).
 import type { PhoneInfo } from "@shared/api";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
-import { Ago } from "../components/bits";
+import { Ago, CopyIconButton, Segmented } from "../components/bits";
+import { useContextMenu } from "../components/ContextMenu";
+import { PageBar } from "../components/PageBar";
 import { controlApi, type DeviceRequest, originPath, resetInfoCache, wrongOriginHref } from "../control/api";
 import { useRpId } from "../control/hooks";
 import { PendingDevices } from "../control/PendingDevices";
@@ -17,7 +20,9 @@ import { useDeviceRequest } from "../control/useDeviceRequest";
 import { guessDeviceName, passkeysAvailable } from "../control/webauthn";
 import { refusalWords } from "../control/words";
 import { useAppState, useStore } from "../data/hooks";
+import { copyText } from "../lib/menus";
 import { Link } from "../lib/router";
+import { type Mark, Step } from "../pages/Setup";
 import { useSetupStatus } from "../setup/api";
 import { phoneApi, pollPhoneDevice, usePhoneInfo } from "./api";
 import { Qr } from "./Qr";
@@ -36,10 +41,8 @@ import {
   trustUrl,
 } from "./state";
 import "../pages/setup.css";
-import "../control/control.css";
+import "../control/pairing.css";
 import "./phone.css";
-
-type Mark = "done" | "needs" | "todo";
 
 export function PhonePage() {
   const { info, missing, error, apply } = usePhoneInfo();
@@ -49,21 +52,29 @@ export function PhonePage() {
   const side = sideOf(setup.local, ua);
   const os = phoneOs(ua);
   const phones = phonesConnected(viewers);
+  // Every step is open but a finished first one; a person may fold any of them.
+  const [opened, setOpened] = useState<Partial<Record<1 | 2 | 3, boolean>>>({});
 
-  if (missing)
+  if (missing || !info)
     return (
-      <div className="page phone-page">
-        <h1>Your phone</h1>
-        <p className="pair-note" role="status">
-          This server has no phone page yet. The <Link to="/setup">Setup page</Link> walks a phone through it.
-        </p>
-      </div>
-    );
-  if (!info)
-    return (
-      <div className="page phone-page">
-        <h1>Your phone</h1>
-        <p className="page-note">{error ? `Last check failed: ${error}. Trying again.` : "Reading this machine…"}</p>
+      <div className="page page--doc page--grouped phone-page">
+        <PageBar title="Your phone" />
+        {missing ? (
+          <div className="state" role="status">
+            <span className="state-title">This server has no phone page yet</span>
+            <span className="state-text">
+              The <Link to="/setup">Setup page</Link> walks a phone through it.
+            </span>
+          </div>
+        ) : error ? (
+          <p className="page-note is-err">Last check failed: {error}. Trying again.</p>
+        ) : (
+          <div className="skeleton" role="status" aria-label="Reading this machine">
+            <div className="skeleton-row" />
+            <div className="skeleton-row" />
+            <div className="skeleton-row" />
+          </div>
+        )}
       </div>
     );
 
@@ -74,80 +85,53 @@ export function PhonePage() {
   const trusted = info.trusted.length > 0;
   const now = currentStep({ phones: side === "phone" ? 1 : phones, https: onHttps, trusted });
   const mark = (n: 1 | 2 | 3): Mark => (now === 0 || n < now ? "done" : n === now ? "needs" : "todo");
+  const doneCount = ([1, 2, 3] as const).filter((n) => mark(n) === "done").length;
+  const fold = (n: 1 | 2 | 3) => {
+    const dflt = n !== 1 || (side === "laptop" && phones === 0);
+    return {
+      open: opened[n] ?? dflt,
+      onToggle: () => setOpened((o) => ({ ...o, [n]: !(o[n] ?? dflt) })),
+    };
+  };
 
   return (
-    <div className="page phone-page" data-side={side} data-lane={pickLane(info)}>
-      <header className="setup-head">
-        <h1>Your phone</h1>
-        <p className="setup-lead">
-          {side === "laptop"
-            ? "See the board on your phone, then send from it. Three steps; this page checks every two seconds."
-            : "The board is already here. Two more steps and this phone can answer and send."}
-        </p>
-      </header>
+    <div className="page page--doc page--grouped phone-page" data-side={side} data-lane={pickLane(info)}>
+      <PageBar title="Your phone" meta={`${doneCount} of 3 done`} />
       {error && <p className="page-note is-err">Last check failed: {error}. Trying again.</p>}
       <ol className="steps">
-        <SeeStep info={info} side={side} phones={phones} mark={mark(1)} />
-        <SendStep info={info} side={side} os={os} step2={step2} onInfo={apply} mark={mark(2)} />
-        <TrustStep info={info} side={side} secure={onHttps} mark={mark(3)} />
+        <SeeStep info={info} side={side} phones={phones} mark={mark(1)} {...fold(1)} />
+        <SendStep info={info} side={side} os={os} step2={step2} onInfo={apply} mark={mark(2)} {...fold(2)} />
+        <TrustStep info={info} side={side} secure={onHttps} mark={mark(3)} {...fold(3)} />
       </ol>
     </div>
   );
 }
 
-// ---------- the row (the setup page's form, without its facts) ----------
+type Fold = { open: boolean; onToggle: () => void };
 
-function Step({
-  n,
-  mark,
-  title,
-  what,
-  chip,
-  children,
-}: {
-  n: number;
-  mark: Mark;
-  title: string;
-  what: ReactNode;
-  chip?: ReactNode;
-  children?: ReactNode;
-}) {
-  const label = mark === "done" ? "done" : mark === "needs" ? "now" : "later";
+/** An address as a row: its name, the url in mono with an ellipsis, a copy icon; the
+ *  row's menu copies it or opens it in a new window. */
+function AddressRow({ label, url }: { label: string; url: string }) {
+  const menu = useContextMenu(
+    () => [
+      { label: "Copy link", run: () => copyText(url) },
+      {
+        label: matchMedia("(max-width: 839px)").matches ? "Open" : "Open in new window",
+        run: () => void window.open(url, "_blank", "noopener"),
+      },
+    ],
+    { title: () => label, subtitle: () => url },
+  );
   return (
-    <li className={`step step--${mark}`} data-phone-step={n} data-mark={mark}>
-      <span className={`step-mark step-mark--${mark}`} role="img" aria-label={label}>
-        {mark === "done" ? (
-          <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
-            <path
-              d="M4.5 10.5l3.5 3.5 7.5-8"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        ) : (
-          <span className="step-dot" aria-hidden="true" />
-        )}
-      </span>
-      <div className="step-body">
-        <h2 className="step-title">
-          <span className="step-n num">{n}</span>
-          {title}
-          {chip}
-        </h2>
-        <p className="step-what">{what}</p>
-        {children}
-      </div>
+    <li className="form-row ph-address" {...menu}>
+      <span className="ph-address-label">{label}</span>
+      <code className="url-value ph-url" title={url}>
+        {url}
+      </code>
+      <CopyIconButton text={url} label={`Copy the ${label.toLowerCase()}`} />
     </li>
   );
 }
-
-/** A quiet state word in a heading: "connected", "running", "serving". */
-const Chip = ({ children, on = false }: { children: ReactNode; on?: boolean }) => (
-  <span className={`ph-chip ${on ? "ph-chip--on" : ""}`}>{children}</span>
-);
 
 // ---------- 1 · see it ----------
 
@@ -156,29 +140,48 @@ function SeeStep({
   side,
   phones,
   mark,
+  open,
+  onToggle,
 }: {
   info: PhoneInfo;
   side: "laptop" | "phone";
   phones: number;
   mark: Mark;
-}) {
+} & Fold) {
   if (side === "phone")
     return (
-      <Step n={1} mark="done" title="See it on your phone" what="You are reading it: this phone is on the board." />
+      <Step
+        attrs={{ "data-phone-step": 1 }}
+        mark="done"
+        needsLabel="now"
+        open={false}
+        onToggle={onToggle}
+        title="See it on your phone"
+        caption="You are reading it: this phone is on the board."
+      />
     );
   return (
     <Step
-      n={1}
+      attrs={{ "data-phone-step": 1 }}
       mark={mark}
+      needsLabel="now"
+      open={open}
+      onToggle={onToggle}
       title="See it on your phone"
-      what="Scan with the phone's camera, on the same Wi-Fi. The key in the address signs it in."
-      chip={phones > 0 ? <Chip on>{phones === 1 ? "connected" : `${phones} connected`}</Chip> : undefined}
+      caption={
+        phones > 0
+          ? `${phones === 1 ? "A phone is" : `${phones} phones are`} connected.`
+          : "Scan the code with the phone's camera, on the same Wi-Fi."
+      }
     >
       <div className="ph-row">
-        <Qr url={info.lan.url} src={info.lan.qr} alt="QR code with the Wi-Fi address and the UI key" />
-        <p className="step-note ph-url">
-          <code>{info.lan.url}</code>
-        </p>
+        <Qr url={info.lan.url} src={info.lan.qr} alt="QR code with the Wi-Fi address and the UI key" size={160} />
+        <div className="ph-col">
+          <ul className="form-list ph-addresses">
+            <AddressRow label="Wi-Fi address" url={info.lan.url} />
+          </ul>
+          <p className="caption">The key in the address signs the phone in.</p>
+        </div>
       </div>
     </Step>
   );
@@ -193,6 +196,8 @@ function SendStep({
   step2,
   onInfo,
   mark,
+  open,
+  onToggle,
 }: {
   info: PhoneInfo;
   side: "laptop" | "phone";
@@ -200,22 +205,25 @@ function SendStep({
   step2: "secure" | "wrong" | "plain" | null;
   onInfo: (info: PhoneInfo) => void;
   mark: Mark;
-}) {
+} & Fold) {
   const lane = pickLane(info);
-  const other: Lane = lane === "tailscale" ? "wifi" : "tailscale";
-  const laneBody = (l: Lane) =>
-    l === "tailscale" ? (
-      <TailscaleLane info={info} side={side} onInfo={onInfo} recommended={l === lane} />
-    ) : (
-      <WifiLane info={info} side={side} os={os} step2={step2} recommended={l === lane} />
-    );
+  const [chosen, setChosen] = useState<Lane>(lane);
   const wrongHref = wrongOriginHref();
+  const caption =
+    step2 === "wrong"
+      ? "This phone is on another address than the one that signs."
+      : step2 === "secure"
+        ? "This phone trusts this address; passkeys work here."
+        : "Sending needs a passkey, and a passkey needs an https address the phone trusts.";
   return (
     <Step
-      n={2}
+      attrs={{ "data-phone-step": 2 }}
       mark={mark}
+      needsLabel="now"
+      open={open}
+      onToggle={onToggle}
       title="Send from your phone"
-      what="Sending needs a passkey, and a passkey needs an https address your phone trusts."
+      caption={caption}
     >
       {step2 === "wrong" && sendingUrl(info) ? (
         <p className="pair-note" data-wrong-origin>
@@ -223,38 +231,56 @@ function SendStep({
         </p>
       ) : step2 === "secure" ? (
         <p className="step-note" data-secure>
-          This phone trusts <code>{location.host}</code>; passkeys work here.
+          This phone trusts <code>{location.host}</code>.
         </p>
       ) : (
         <>
-          <section
-            className="ph-lane"
-            data-lane={lane}
-            aria-label={lane === "tailscale" ? "Use Tailscale" : "Same Wi-Fi"}
-          >
-            {laneBody(lane)}
-          </section>
+          <div className="ph-lanes">
+            <Segmented<Lane>
+              value={chosen}
+              onChange={setChosen}
+              label="How the phone gets https"
+              options={[
+                { value: "tailscale", label: "Tailscale" },
+                { value: "wifi", label: "Same Wi-Fi" },
+              ]}
+            />
+          </div>
+          {(["tailscale", "wifi"] as const).map((l) => (
+            <section
+              key={l}
+              className="ph-lane"
+              data-lane={l}
+              aria-label={l === "tailscale" ? "Use Tailscale" : "Same Wi-Fi"}
+              hidden={chosen !== l}
+            >
+              {l === "tailscale" ? (
+                <TailscaleLane info={info} side={side} onInfo={onInfo} recommended={lane === "tailscale"} />
+              ) : (
+                <WifiLane info={info} side={side} os={os} step2={step2} recommended={lane === "wifi"} />
+              )}
+            </section>
+          ))}
           <details className="ph-other">
             <summary>Other ways</summary>
-            <div className="ph-other-body">
-              <section
-                className="ph-lane"
-                data-lane={other}
-                aria-label={other === "tailscale" ? "Use Tailscale" : "Same Wi-Fi"}
-              >
-                {laneBody(other)}
-              </section>
-              <p className="step-note">
-                <strong>spacesheep.dev</strong> · a hosted receiver with its own https address: point a sink at it and
-                open it on the phone; nothing to install or trust.
-              </p>
-            </div>
+            <p className="step-note">
+              <strong>spacesheep.dev</strong> is a hosted receiver with its own https address: point a sink at it and
+              open it on the phone; nothing to install or trust.
+            </p>
           </details>
         </>
       )}
     </Step>
   );
 }
+
+/** "Tailscale is running on the laptop · Recommended": the lane's one status line. */
+const LaneStatus = ({ children, recommended }: { children: ReactNode; recommended: boolean }) => (
+  <p className="caption ph-lane-status">
+    {children}
+    {recommended && <span className="ph-reco"> · Recommended</span>}
+  </p>
+);
 
 function TailscaleLane({
   info,
@@ -287,37 +313,33 @@ function TailscaleLane({
       setBusy(false);
     }
   };
-  const chip =
-    state === "serving" ? (
-      <Chip on>serving</Chip>
-    ) : state === "running" ? (
-      <Chip>running</Chip>
-    ) : state === "off" ? (
-      <Chip>not connected</Chip>
-    ) : (
-      <Chip>not installed</Chip>
-    );
+  const chip = (
+    <span className="ph-chip">
+      {state === "serving"
+        ? "serving"
+        : state === "running"
+          ? "running"
+          : state === "off"
+            ? "not connected"
+            : "not installed"}
+    </span>
+  );
   const phoneLine = "On the phone: the Tailscale app, signed into the same account.";
   return (
     <>
-      <h3 className="ph-lane-title">
-        Use Tailscale {chip}
-        {recommended && <span className="ph-reco">recommended</span>}
-      </h3>
+      <LaneStatus recommended={recommended}>Tailscale on the laptop: {chip}</LaneStatus>
       {state === "serving" && info.publicUrl ? (
         <div className="ph-row">
-          {side === "laptop" && <Qr url={info.publicUrl} alt="QR code with the Tailscale address" />}
+          {side === "laptop" && <Qr url={info.publicUrl} alt="QR code with the Tailscale address" size={160} />}
           <div className="ph-col">
-            <p className="step-note">
-              <code>{info.publicUrl}</code>
-            </p>
-            <p className="step-note">{phoneLine}</p>
+            <ul className="form-list ph-addresses">
+              <AddressRow label="Tailscale address" url={info.publicUrl} />
+            </ul>
+            <p className="caption">{phoneLine}</p>
             {side === "phone" && (
-              <p className="step-note">
-                <a className="btn btn--primary" href={originPath(info.publicUrl, "/phone") ?? info.publicUrl}>
-                  Open it here →
-                </a>
-              </p>
+              <a className="btn btn--primary btn--lg" href={originPath(info.publicUrl, "/phone") ?? info.publicUrl}>
+                Open it here
+              </a>
             )}
           </div>
         </div>
@@ -350,7 +372,7 @@ function TailscaleLane({
         <p className="step-note">Tailscale is installed on the laptop but not connected: open it and sign in.</p>
       ) : (
         <p className="step-note">
-          Tailscale is not on the laptop: get it at{" "}
+          Get it at{" "}
           <a className="step-a" href="https://tailscale.com/download" target="_blank" rel="noreferrer">
             tailscale.com/download
           </a>
@@ -431,6 +453,8 @@ function WifiLane({
   const https = sendingUrl(info);
   const [check, setCheck] = useState<"idle" | "busy" | "no" | "yes">("idle");
   const [checkError, setCheckError] = useState<string | null>(null);
+  // On the laptop, the steps for one phone at a time: iPhone unless the person picks Android.
+  const [shown, setShown] = useState<"iphone" | "android">(os === "android" ? "android" : "iphone");
   const run = async () => {
     setCheck("busy");
     setCheckError(null);
@@ -442,9 +466,9 @@ function WifiLane({
       setCheckError(e instanceof Error ? e.message : String(e));
     }
   };
-  const list = (which: "iphone" | "android") => (
-    <ol className="step-list" data-os={which}>
-      <li>{side === "laptop" ? "Open the trust page: scan the code." : "Open the trust page (the link above)."}</li>
+  const list = (which: "iphone" | "android", hidden = false) => (
+    <ol className="step-list" data-os={which} hidden={hidden}>
+      <li>{side === "laptop" ? "Open the trust page: scan the code." : "Open the trust page (the button above)."}</li>
       {(which === "iphone" ? IPHONE_STEPS : ANDROID_STEPS).map((s) => (
         <li key={s.id}>{s.body}</li>
       ))}
@@ -454,10 +478,10 @@ function WifiLane({
     </ol>
   );
   const checkRow = side === "phone" && (
-    <div className="step-action">
+    <div className="step-action ph-check">
       <button
         type="button"
-        className="btn btn--primary"
+        className="btn btn--primary btn--lg"
         disabled={check === "busy"}
         onClick={() => void run()}
         data-action="check"
@@ -470,7 +494,7 @@ function WifiLane({
             This phone is on the https address; passkeys work here.{" "}
             {https && (
               <a className="step-a" href={originPath(https, "/phone") ?? https}>
-                Continue →
+                Continue
               </a>
             )}
           </>
@@ -497,10 +521,7 @@ function WifiLane({
   );
   return (
     <>
-      <h3 className="ph-lane-title">
-        Same Wi-Fi
-        {recommended && <span className="ph-reco">recommended</span>}
-      </h3>
+      <LaneStatus recommended={recommended}>The phone installs this laptop's certificate once.</LaneStatus>
       {!info.tls ? (
         <p className="step-note step-note--err">
           Turn on the secure address first (<Link to="/setup">Setup</Link>, step 2); over plain http the phone can look
@@ -508,25 +529,32 @@ function WifiLane({
         </p>
       ) : side === "laptop" ? (
         <div className="ph-row">
-          <Qr url={trust} alt="QR code with the trust page's address" />
+          <Qr url={trust} alt="QR code with the trust page's address" size={160} />
           <div className="ph-col">
-            <p className="step-note">
-              The phone installs this laptop's certificate once. <code>{trust}</code>
-            </p>
-            <h4 className="ph-os">iPhone</h4>
-            {list("iphone")}
-            <h4 className="ph-os">Android</h4>
-            {list("android")}
+            {trust && (
+              <ul className="form-list ph-addresses">
+                <AddressRow label="Trust page" url={trust} />
+              </ul>
+            )}
+            <Segmented<"iphone" | "android">
+              value={shown}
+              onChange={setShown}
+              label="Steps for"
+              options={[
+                { value: "iphone", label: "iPhone" },
+                { value: "android", label: "Android" },
+              ]}
+            />
+            {list("iphone", shown !== "iphone")}
+            {list("android", shown !== "android")}
           </div>
         </div>
       ) : (
         <div className="ph-col">
           {step2 === "plain" && trust && (
-            <p className="step-note">
-              <a className="step-a" href={trust}>
-                Open the trust page →
-              </a>
-            </p>
+            <a className="btn btn--lg ph-trust-btn" href={trust}>
+              Open the trust page
+            </a>
           )}
           {os === "android" ? list("android") : list("iphone")}
           {checkRow}
@@ -543,25 +571,35 @@ function TrustStep({
   side,
   secure,
   mark,
+  open,
+  onToggle,
 }: {
   info: PhoneInfo;
   side: "laptop" | "phone";
   secure: boolean;
   mark: Mark;
-}) {
-  const what =
-    side === "laptop"
-      ? "The phone will ask to be trusted; this laptop approves its six digits. No reload needed anywhere."
-      : "This phone makes its own passkey and asks; your laptop approves the six digits.";
+} & Fold) {
+  const caption =
+    side === "phone"
+      ? secure
+        ? "This phone makes its own passkey and asks; your laptop approves the six digits."
+        : "After step 2."
+      : info.trusted.length > 0
+        ? `${info.trusted.map((t) => t.name).join(", ")} ${info.trusted.length === 1 ? "is" : "are"} trusted.`
+        : info.pending.length > 0
+          ? "A phone asks to be trusted: compare its six digits, then approve."
+          : "The phone will ask to be trusted; this laptop approves its six digits.";
   return (
-    <Step n={3} mark={mark} title="Trust the phone" what={what}>
-      {side === "laptop" ? (
-        <LaptopTrust info={info} />
-      ) : secure ? (
-        <PhoneTrust />
-      ) : (
-        <p className="step-note step-gate">After step 2.</p>
-      )}
+    <Step
+      attrs={{ "data-phone-step": 3 }}
+      mark={mark}
+      needsLabel="now"
+      open={open}
+      onToggle={onToggle}
+      title="Trust the phone"
+      caption={caption}
+    >
+      {side === "laptop" ? <LaptopTrust info={info} /> : secure ? <PhoneTrust /> : null}
     </Step>
   );
 }
@@ -584,17 +622,21 @@ function LaptopTrust({ info }: { info: PhoneInfo }) {
         </p>
       )}
       {info.trusted.length > 0 && (
-        <ul className="ph-trusted" aria-label="Trusted phones">
-          {info.trusted.map((t) => (
-            <li key={t.id}>
-              <span className="pending-name">{t.name}</span>
-              <span className="pending-meta">
-                {" "}
-                · trusted <Ago iso={t.addedAt} />
-              </span>
-            </li>
-          ))}
-        </ul>
+        <section className="form-group">
+          <div className="form-head">
+            <h3 className="section-label">Trusted phones</h3>
+          </div>
+          <ul className="form-list ph-trusted" aria-label="Trusted phones">
+            {info.trusted.map((t) => (
+              <li key={t.id} className="form-row">
+                <span className="form-label pending-name">{t.name}</span>
+                <span className="form-value pending-meta">
+                  Trusted <Ago iso={t.addedAt} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </div>
   );
@@ -622,7 +664,7 @@ function PhoneTrust() {
     <div className="ph-col" data-phase={phase.k}>
       {phase.k === "waiting" ? (
         <div className="pair-check" role="status">
-          <span className="pair-check-label">Waiting for your laptop · it shows the same digits</span>
+          <span className="pair-check-label">Waiting for your laptop: it shows the same digits</span>
           <div className="pair-digits num" role="img" aria-label={`check digits ${a} ${b}`} data-check={d?.check}>
             {a}
             <span className="pair-digits-gap" />
@@ -631,9 +673,8 @@ function PhoneTrust() {
         </div>
       ) : phase.k === "added" ? (
         <div className="pair-note pair-note--ok" role="status" data-added>
-          <strong>Trusted.</strong> This phone can now answer and send{d?.detail ? ` through ${d.detail}` : ""}.
-          <br />
-          <Link to="/">Open the board →</Link>
+          <strong>Trusted.</strong> This phone can now answer and send{d?.detail ? ` through ${d.detail}` : ""}.{" "}
+          <Link to="/">Open the board</Link>
         </div>
       ) : phase.k === "failed" ? (
         <div className="pair-note pair-note--err" role="alert">

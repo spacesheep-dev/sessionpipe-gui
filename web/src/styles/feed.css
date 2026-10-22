@@ -1,0 +1,207 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- feed ---------- */
+
+/* A log, laid out the way Console.app lays one out: one dense row per event in fixed
+   columns (time, session, machine, type, detail), sticky day headers, hairlines inset to
+   the text at low contrast. Colour is only red, on an error's type. The list reaches
+   past the gutter like the board's, so a row's inset highlight has room. */
+.feed-pause {
+  gap: 8px;
+}
+.pill-new {
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--needs);
+  color: var(--needs-ink);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 18px;
+}
+.rows {
+  list-style: none;
+  margin: 0 -12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  container: feed / inline-size;
+}
+/* A day: a section header that sticks under the page bar until the next day's covers it. */
+.ev-day {
+  position: sticky;
+  top: var(--sticky-top, var(--bar));
+  z-index: calc(var(--z-sticky) - 1);
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  margin: 16px calc(12px - var(--gutter)) 4px;
+  padding: 0 var(--gutter);
+  background: var(--bg);
+  border-bottom: var(--hairline) solid var(--line);
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.ev-day:first-child {
+  margin-top: 0;
+}
+.ev {
+  position: relative;
+  display: grid;
+  grid-template-columns: 64px 16px minmax(120px, 240px) 120px 168px minmax(0, 1fr) 28px;
+  grid-template-areas: "time glyph session machine type sum beside";
+  column-gap: 8px;
+  align-items: center;
+  min-height: var(--row-sm);
+  margin: 0 4px;
+  padding: 0 4px 0 8px;
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.ev + .ev::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 96px;
+  right: 0;
+  border-top: var(--hairline) solid color-mix(in oklch, var(--line) 65%, transparent);
+  pointer-events: none;
+}
+@media (hover: hover) {
+  .ev:hover {
+    background: var(--hover);
+  }
+}
+.ev[aria-current="true"],
+.ev[data-menu-open] {
+  background: var(--sel);
+}
+.ev:active {
+  background: var(--press);
+  transition: none;
+}
+.ev:has(.ev-session:focus-visible) {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: -2px;
+}
+.ev:is(:hover, [aria-current="true"])::before,
+.ev:is(:hover, [aria-current="true"]) + .ev::before {
+  border-top-color: transparent;
+}
+.ev-time {
+  grid-area: time;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+.ev .glyph-wrap {
+  grid-area: glyph;
+  align-self: center;
+  color: var(--fg-3);
+}
+.ev-session {
+  grid-area: session;
+  min-width: 0;
+  color: var(--fg);
+  font-weight: 500;
+}
+.ev-session:focus-visible {
+  outline: none;
+}
+.ev-machine {
+  grid-area: machine;
+  min-width: 0;
+  color: var(--fg-3);
+}
+.ev-type {
+  grid-area: type;
+  min-width: 0;
+  padding-top: 1px;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+  font-size: calc(var(--text-sm) * 0.95);
+}
+.ev-type.is-err {
+  color: var(--err);
+}
+.ev-sum {
+  grid-area: sum;
+  min-width: 0;
+  color: var(--fg-2);
+}
+.ev-beside {
+  grid-area: beside;
+  align-self: center;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.ev:hover .ev-beside,
+.ev[aria-current="true"] .ev-beside,
+.ev-beside:focus-visible {
+  opacity: 1;
+}
+.feed-more {
+  align-self: flex-start;
+}
+.feed-skeleton .skeleton-row {
+  height: var(--row-sm);
+}
+.feed-skeleton .skeleton-row::after {
+  display: none;
+}
+
+/* A mid-width column: the machine goes (it is in the row's menu and the session). */
+@container feed (max-width: 860px) {
+  .ev {
+    grid-template-columns: 64px 16px minmax(100px, 200px) 150px minmax(0, 1fr) 28px;
+    grid-template-areas: "time glyph session type sum beside";
+  }
+  .ev-machine {
+    display: none;
+  }
+}
+
+/* A phone, or a narrow split: a native two-line row, the session and its time, then the
+   type and the detail. */
+@container feed (max-width: 560px) {
+  .ev {
+    grid-template-columns: 16px auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "glyph session session time"
+      ".     type    sum     sum";
+    row-gap: 3px;
+    min-height: 52px;
+    padding: 8px;
+  }
+  .ev + .ev::before {
+    left: 32px;
+  }
+  .ev-time {
+    justify-self: end;
+    padding-left: 8px;
+    color: var(--fg-3);
+  }
+  .ev-type {
+    max-width: 22ch;
+  }
+  .ev-sum {
+    color: var(--fg-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ev-beside {
+    display: none;
+  }
+}
+@media (hover: none) {
+  .ev-beside {
+    visibility: hidden;
+  }
+}

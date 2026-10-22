@@ -1,37 +1,42 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* The command palette (web/src/components/Palette.tsx): a quiet scrim, one 560 px dialog
-   near the top, one input, sections parted by hairlines, rows of 14 px text. Matched
-   letters are underlined with a hairline; the only colour is the amber state dot a
-   permission row carries. */
+/* The command palette (web/src/components/Palette.tsx), as Spotlight and Raycast draw it:
+   a real scrim, one 640 px panel a fifth of the way down, a 48 px input with no ring and
+   a hairline under it, quiet section labels, 36 px rows (the status glyph, the title, its
+   meta, the age). A match is the title's own letters in the ink at 600, never an
+   underline; the cursor row is the selection fill, inset. On a phone it is a full-screen
+   sheet with Cancel and no key hints. The `?` help shares the frame (shortcuts.css). */
 
 .pal-scrim {
   position: fixed;
   inset: 0;
-  z-index: 40;
-  background: color-mix(in oklch, var(--bg) 55%, transparent);
+  z-index: var(--z-dialog);
+  background: var(--scrim);
   cursor: default;
+  animation: fade-in var(--dur) var(--ease-out) both;
 }
 .pal {
   position: fixed;
-  z-index: 41;
-  top: clamp(48px, 14vh, 160px);
+  z-index: calc(var(--z-dialog) + 1);
+  top: 20vh;
   left: 50%;
-  width: min(560px, calc(100vw - 32px));
-  max-height: min(70dvh, 560px);
+  width: min(640px, calc(100vw - 32px));
+  max-height: min(60dvh, 520px);
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: var(--hairline) solid var(--line-2);
-  border-radius: var(--radius);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-pop);
   background: var(--bg-2);
-  box-shadow: 0 12px 32px oklch(0 0 0 / 0.18);
+  box-shadow: var(--shadow-pop);
+  -webkit-user-select: none;
+  user-select: none;
   animation: pal-in var(--dur) var(--ease-out) both;
 }
 @keyframes pal-in {
   from {
     opacity: 0;
-    transform: translate(-50%, 6px);
+    transform: translate(-50%, 4px);
   }
   to {
     opacity: 1;
@@ -39,14 +44,15 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .pal {
+  .pal,
+  .pal-scrim {
     animation: none;
   }
 }
-@media (max-width: 839px) {
+@media (max-height: 560px) {
   .pal {
-    top: 8px;
-    max-height: calc(100dvh - var(--tabbar) - env(safe-area-inset-bottom) - 16px);
+    top: 24px;
+    max-height: calc(100dvh - 48px);
   }
 }
 
@@ -57,13 +63,15 @@
   align-items: center;
   gap: 10px;
   flex: none;
-  height: 44px;
-  padding: 0 12px;
+  height: 48px;
+  padding: 0 16px;
   border-bottom: var(--hairline) solid var(--line);
 }
 .pal-icon {
   flex: none;
-  color: var(--fg-4);
+  width: 16px;
+  height: 16px;
+  color: var(--fg-3);
 }
 .pal-head input {
   flex: 1;
@@ -72,38 +80,43 @@
   border: 0;
   background: none;
   outline: none;
-  font-size: var(--text-md);
+  color: var(--fg);
+  font-size: var(--text-lg);
 }
-/* The input's ring is the head's underline (an outline would clip inside the dialog). */
-.pal-head:focus-within {
-  box-shadow: inset 0 -2px 0 var(--fg);
+.pal-head input:focus-visible {
+  outline: none;
 }
 .pal-head input::placeholder {
   color: var(--fg-4);
 }
-.pal-head kbd,
-.pal-to {
-  flex: none;
-  padding: 0 5px;
-  border-radius: 4px;
-  border: var(--hairline) solid var(--line);
-  color: var(--fg-3);
-  font-size: var(--text-xs);
-  line-height: 18px;
+.pal-head input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
 }
 .pal-to {
+  flex: none;
   max-width: 40%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-ui);
-  font-size: var(--text-sm);
+  padding: 2px 8px;
+  border-radius: var(--radius-inner);
+  background: var(--bg-3);
   color: var(--fg-2);
+  font-size: var(--text-sm);
 }
 .pal-busy {
   flex: none;
   color: var(--fg-3);
   font-size: var(--text-sm);
+}
+/* The phone's way out; a desktop closes with Esc or the scrim. */
+.pal-cancel {
+  display: none;
+  flex: none;
+  min-height: 44px;
+  padding: 0 4px 0 8px;
+  color: var(--fg);
+  font-size: max(1rem, 16px);
 }
 
 /* ----- the list ----- */
@@ -111,50 +124,51 @@
 .pal-list {
   list-style: none;
   margin: 0;
-  padding: 4px 0;
+  padding: 4px 0 6px;
   overflow: auto;
   overscroll-behavior: contain;
 }
 .pal-section {
-  padding: 10px 12px 2px;
+  padding: 10px 16px 4px;
   color: var(--fg-3);
   font-size: var(--text-xs);
+  font-weight: 600;
 }
-.pal-list > .pal-section:not(:first-child) {
-  margin-top: 4px;
-  border-top: var(--hairline) solid var(--line);
+.pal-list > .pal-section:first-child {
+  padding-top: 6px;
 }
 .pal-empty {
-  padding: 12px;
+  padding: 16px;
   color: var(--fg-3);
   font-size: var(--text-md);
 }
 .pal-row {
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) auto;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   min-height: 36px;
-  padding: 6px 12px;
+  margin: 0 6px;
+  padding: 0 10px;
+  border-radius: var(--radius);
   color: var(--fg-2);
   cursor: default;
 }
 .pal-row[aria-selected="true"] {
-  background: var(--bg-3);
+  background: var(--sel);
   color: var(--fg);
 }
 .pal-row--busy {
   opacity: 0.6;
 }
-.pal-row .dot {
+.pal-row > .dot {
   justify-self: center;
-  width: 6px;
-  height: 6px;
 }
 .pal-glyph {
   justify-self: center;
   color: var(--fg-4);
   font-size: var(--text-sm);
+  line-height: 1;
 }
 .pal-main {
   min-width: 0;
@@ -163,7 +177,8 @@
   gap: 8px;
 }
 .pal-label {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -171,9 +186,11 @@
   font-size: var(--text-md);
 }
 .pal-label code {
+  font-family: var(--font-mono);
   font-size: 0.925em;
 }
 .pal-detail {
+  flex: 0 10 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -183,22 +200,20 @@
 }
 .pal-age {
   color: var(--fg-3);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
 }
-/* A hit: a hairline under the letter, the letter itself a step darker. No block. */
+/* A hit: the matched letters in the ink at 600. No underline, no block. */
 .pal-row u {
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-  text-decoration-color: var(--fg-3);
+  text-decoration: none;
   color: var(--fg);
+  font-weight: 600;
 }
 
 /* ----- notes, confirm, footer ----- */
 
 .pal-note {
   flex: none;
-  padding: 8px 12px;
+  padding: 8px 16px;
   border-top: var(--hairline) solid var(--line);
   color: var(--fg-3);
   font-size: var(--text-sm);
@@ -211,27 +226,97 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding: 12px;
-  color: var(--err);
+  padding: 16px;
+  color: var(--fg);
   font-size: var(--text-md);
+}
+.pal-confirm > span {
+  flex: 1 1 260px;
 }
 .pal-foot {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  align-items: center;
+  gap: 16px;
   flex: none;
-  padding: 6px 12px;
+  min-height: 32px;
+  padding: 0 16px;
   border-top: var(--hairline) solid var(--line);
   color: var(--fg-3);
   font-size: var(--text-xs);
 }
-.pal-foot kbd {
-  font-family: var(--font-ui);
-  font-size: inherit;
-  color: var(--fg-3);
+.pal-foot-key {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.pal-foot .keys kbd {
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+}
+.pal-foot-spring {
+  flex: 1 1 auto;
 }
 @media (hover: none) {
   .pal-foot {
     display: none;
+  }
+}
+
+/* ----- the phone: a full-screen sheet ----- */
+@media (max-width: 839px) {
+  .pal {
+    inset: 0;
+    top: 0;
+    left: 0;
+    width: 100%;
+    max-height: none;
+    height: 100dvh;
+    transform: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    animation: sheet-up var(--dur-slow) var(--ease-out) both;
+  }
+  .pal-head {
+    height: 52px;
+    padding: env(safe-area-inset-top) 12px 0 16px;
+    box-sizing: content-box;
+    border-bottom: 0;
+  }
+  .pal-head input {
+    height: 36px;
+    padding: 0 10px;
+    border-radius: var(--radius-pop);
+    background: var(--bg-3);
+    font-size: max(1rem, 16px);
+  }
+  .pal-head .pal-icon {
+    display: none;
+  }
+  .pal-cancel {
+    display: inline-flex;
+    align-items: center;
+  }
+  .pal-cancel:active {
+    opacity: 0.6;
+  }
+  .pal-list {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+  .pal-row {
+    min-height: 44px;
+    margin: 0 8px;
+  }
+  .pal-section {
+    padding: 14px 18px 6px;
+    font-size: var(--text-sm);
+  }
+  .pal-foot {
+    display: none;
+  }
+  .pal.sc-help {
+    width: 100%;
+    max-height: none;
   }
 }

@@ -8,9 +8,36 @@ import { StoreContext } from "./data/hooks";
 import { Store } from "./data/store";
 import { createHttpTransport } from "./data/transport";
 import { applySettings } from "./lib/theme";
+// The stylesheets, one per surface, in cascade order. They land after every component's
+// own CSS (select, menu, palette, control…), which is why they come after ./app: keep
+// this block where it is. tokens.css stays one file (themes/host/api.ts reads it); the
+// shared pieces come before the pages that use them; narrow.css and density.css patch
+// what precedes them and stay last.
 import "./styles/tokens.css";
 import "./styles/base.css";
-import "./styles/app.css";
+import "./styles/shell.css";
+import "./styles/shared.css";
+import "./styles/board.css";
+import "./styles/brand.css";
+import "./styles/session.css";
+import "./styles/feed.css";
+import "./styles/machines.css";
+import "./styles/connect.css";
+import "./styles/quick-settings.css";
+import "./styles/more.css";
+import "./styles/split.css";
+import "./styles/tabstrip.css";
+import "./styles/inbox.css";
+import "./styles/notifications.css";
+import "./styles/toasts.css";
+import "./styles/review.css";
+import "./styles/settings.css";
+import "./styles/lens.css";
+import "./styles/chat.css";
+import "./styles/keyboard.css";
+import "./styles/shortcuts.css";
+import "./styles/narrow.css";
+import "./styles/density.css";
 
 applySettings();
 

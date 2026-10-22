@@ -282,8 +282,11 @@ test.describe("split panel", () => {
       await expect.poll(() => tabKeys(page)).toEqual([b!.key]);
       expect(await activeKey(page)).toBe(b!.key);
       expect(splitParams(page)).toEqual({ s: b!.key, t: null });
-      // The last one closes the panel.
-      await tabs(page).nth(0).locator(".tab-close").click();
+      // One tab left: the strip folds into the head (the tab stays in the DOM). Closing that
+      // last tab (⌘W with focus in the panel) shuts the panel.
+      await expect(panel(page).locator("[role='tablist']")).toBeHidden();
+      await panel(page).getByRole("link", { name: "Open as page" }).focus();
+      await page.keyboard.press("ControlOrMeta+w");
       await expect(panel(page)).not.toHaveClass(/panel--open/);
       await expect(page).not.toHaveURL(/[?&]s=/);
     });

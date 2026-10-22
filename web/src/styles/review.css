@@ -1,0 +1,416 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- review ---------- */
+
+/* Files | Day: a segmented control in the page bar (the tablist keeps its tab roles). */
+.rv-tabs .rv-tab {
+  min-width: 56px;
+}
+.rv-tabs .rv-tab:focus-visible {
+  outline-offset: -1px;
+}
+
+/* Search hits: two-line rows like the board's, under the feed's sticky day headers
+   (feed.css .rows / .ev-day). The lead glyph says where it matched; the match is the
+   text's own ink at 600, no block of colour (amber is for "needs you" alone). */
+.review-search {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.review-hits .ev-row {
+  position: relative;
+  margin: 0 4px;
+}
+.review-hits .ev-row + .ev-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 36px;
+  right: 0;
+  border-top: var(--hairline) solid var(--line);
+  pointer-events: none;
+}
+.review-hits .ev-row:has(.hit:hover)::before,
+.review-hits .ev-row:has(.hit:hover) + .ev-row::before {
+  border-top-color: transparent;
+}
+.review-meta {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.review-foot {
+  flex-wrap: wrap;
+}
+.hit {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "field session time"
+    ".     snippet where";
+  align-content: center;
+  row-gap: 2px;
+  width: 100%;
+  min-height: calc(var(--row-sm) * 2 - 12px);
+  padding: 8px 8px 8px 8px;
+  border-radius: var(--radius);
+  color: inherit;
+  text-align: left;
+  line-height: var(--lh-tight);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .hit:hover {
+    background: var(--hover);
+  }
+}
+.hit:active {
+  background: var(--press);
+  transition: none;
+}
+.hit:focus-visible {
+  outline-offset: -2px;
+  background: var(--sel);
+}
+/* The row a right-click is about keeps the selected fill while its menu is up. */
+.hit[data-menu-open],
+.rv-path[data-menu-open],
+.rv-table tbody tr[data-menu-open] td {
+  background: var(--sel);
+}
+.hit-field {
+  grid-area: field;
+  display: flex;
+  justify-content: center;
+  width: 16px;
+  align-self: center;
+  color: var(--fg-4);
+}
+.hit-session {
+  grid-area: session;
+  min-width: 0;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+.hit-time {
+  grid-area: time;
+  justify-self: end;
+  margin-left: 12px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.hit-snippet {
+  grid-area: snippet;
+  min-width: 0;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.hit-snippet mark {
+  background: none;
+  color: var(--fg);
+  padding: 0;
+  border-radius: 0;
+  font-weight: 600;
+}
+.hit-snippet mark[title] {
+  /* a [redacted] placeholder keeps its own look */
+  background: var(--mark);
+  color: var(--mark-fg);
+  font-weight: 400;
+}
+.hit-where {
+  grid-area: where;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 16px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.hit-where .glyph-wrap {
+  color: var(--fg-4);
+}
+
+/* The toolbar of a tab: the range (or the day stepper) and one quiet fact at the right. */
+.rv-files,
+.rv-day-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.rv-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-height: var(--control);
+}
+.rv-head .page-note {
+  margin-left: auto;
+}
+
+/* Files: a section per repo under the board's sticky headers, one row per path: the path
+   in mono, the sessions that touched it as quiet text buttons, then when. */
+.rv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0 -12px;
+}
+.rv-paths {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 0;
+}
+.rv-path {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "file when"
+    "touched touched";
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: baseline;
+  min-height: var(--row);
+  margin: 0 4px;
+  padding: 8px;
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.rv-path + .rv-path::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 8px;
+  right: 0;
+  border-top: var(--hairline) solid var(--line);
+  pointer-events: none;
+}
+@media (hover: hover) {
+  .rv-path:hover {
+    background: var(--hover);
+  }
+}
+.rv-path:hover::before,
+.rv-path:hover + .rv-path::before {
+  border-top-color: transparent;
+}
+.rv-file {
+  grid-area: file;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  color: var(--fg);
+}
+.rv-file-text {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.rv-when {
+  grid-area: when;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+.rv-touched {
+  grid-area: touched;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.rv-sess {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rv-more {
+  flex: none;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.rv-sess {
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+@media (hover: hover) {
+  .rv-sess:hover {
+    color: var(--fg);
+  }
+}
+.rv-sess .num {
+  color: var(--fg-3);
+}
+@media (min-width: 840px) {
+  .rv-path {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) 15ch;
+    grid-template-areas: "file touched when";
+    align-content: center;
+    padding-block: 0;
+  }
+  .rv-when {
+    text-align: right;
+  }
+}
+
+/* Day: a stepper, then one native table with a sticky header, hairlines, numbers to
+   the right, the totals under a stronger rule. */
+.rv-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.rv-day {
+  min-width: 11ch;
+  text-align: center;
+  font-size: var(--text-md);
+  font-weight: 500;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.rv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+}
+.rv-table th,
+.rv-table td {
+  height: var(--row);
+  padding: 0 12px 0 0;
+  border-bottom: var(--hairline) solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+}
+.rv-table th {
+  position: sticky;
+  top: var(--sticky-top, var(--bar));
+  z-index: 1;
+  height: 28px;
+  background: var(--bg);
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.rv-table th.num,
+.rv-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.rv-table td.num:last-child,
+.rv-table th.num:last-child {
+  padding-right: 0;
+}
+.rv-table td.muted {
+  color: var(--fg-3);
+}
+@media (hover: hover) {
+  .rv-table tbody tr:hover td {
+    background: var(--hover);
+  }
+}
+.rv-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.rv-cell .glyph-wrap {
+  flex: none;
+  color: var(--fg-4);
+}
+.rv-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 500;
+  text-align: left;
+}
+@media (hover: hover) {
+  .rv-link:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+.rv-span {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  margin-left: 8px;
+  white-space: nowrap;
+}
+.rv-table tfoot td {
+  color: var(--fg-2);
+  border-bottom: 0;
+}
+.rv-table tfoot tr:first-child td {
+  border-top: var(--hairline) solid var(--line-2);
+}
+.rv-table tfoot .rv-kind {
+  display: inline-block;
+  min-width: 7ch;
+  margin-right: 8px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.rv-table tfoot .rv-kind::first-letter {
+  text-transform: uppercase;
+}
+.rv-table tfoot tr.rv-all td {
+  color: var(--fg);
+  font-weight: 600;
+  border-top: var(--hairline) solid var(--line-2);
+}
+@media (max-width: 839px) {
+  .rv-table .rv-col-wide {
+    display: none;
+  }
+  .hit-where {
+    display: none;
+  }
+  /* The day on a phone: the session and its turns and tools; the rest is a tap away. */
+  .rv-table .rv-col-opt,
+  .rv-table tbody .rv-span {
+    display: none;
+  }
+  .rv-table td:first-child .rv-link {
+    display: block;
+    max-width: calc(100vw - 2 * var(--gutter) - 160px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 24px;
+  }
+  .rv-table td {
+    height: 44px;
+  }
+  .rv-table .num:has(+ .rv-col-opt) {
+    padding-right: 0;
+  }
+  .hit {
+    min-height: 64px;
+  }
+}
+
+/* Pointer targets at least 24 px tall (WCAG 2.2 2.5.8): the quiet session buttons on the
+   Review page. The text keeps its size; only the hit area grows. */
+.rv-sess {
+  display: inline-block;
+  min-height: 24px;
+  line-height: 24px;
+}

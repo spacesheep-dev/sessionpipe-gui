@@ -1,0 +1,59 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- narrow widths: nothing scrolls sideways ---------- */
+
+/* Tool rows: the subject and the error are one ellipsised line whose min-content width
+   is bounded; the expanded pre wraps anywhere; the summary and the row itself never
+   exceed the column. */
+.tool,
+.marker,
+.tool--x > details > summary,
+.tool-main,
+.tool-io {
+  min-width: 0;
+}
+.tool-subject,
+.tool-err {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool-io pre {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.marker-msg,
+.marker-type {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Markdown inside a reply or a chat message: code and tables scroll inside themselves. */
+.reply,
+.chat-card,
+.ctl-act-reply {
+  min-width: 0;
+  max-width: 100%;
+}
+.reply .md-pre,
+.chat-card .md-pre,
+.ctl-act-reply .md-pre,
+.reply .md-table,
+.chat-card .md-table,
+.ctl-act-reply .md-table {
+  max-width: 100%;
+}
+/* The control bar and its line stay inside the column. */
+.ctl-ask,
+.ctl-foot,
+.ctl-untrusted {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ctl-ask textarea {
+  min-width: 0;
+}
+/* The safety net, after the fixes above: the panel body never scrolls sideways. */
+.panel-body {
+  overflow-x: hidden;
+}

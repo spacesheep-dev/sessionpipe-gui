@@ -39,9 +39,11 @@ test.describe("board", () => {
 
   test("a working card shows the tool it is running", async ({ page }) => {
     await openBoard(page);
-    // The status line of a working card: "● working  <tool>  <since>".
+    // The status of a working row: the glyph (its state word for assistive tech), the
+    // tool, and its time. The element lays its parts out across the row (display:
+    // contents), so the tool is what is visible.
     const status = page.locator("article.card--working .card-status:has(code)");
-    await expect(status.first()).toBeVisible({ timeout: 30_000 });
+    await expect(status.first().locator("code")).toBeVisible({ timeout: 30_000 });
     await expect(status.first().locator("code")).toHaveText(/^\S+$/);
     await expect(status.first().locator(".card-state")).toContainText("working");
     await expect(status.first().locator(".num").last()).toHaveText(/\d/);

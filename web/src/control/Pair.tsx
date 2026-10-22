@@ -7,11 +7,13 @@
 // the page without its frame, so the setup page can show the same approval inline.
 import { useEffect, useState } from "react";
 import { HarnessGlyph } from "../components/bits";
+import { BackButton, PageBar } from "../components/PageBar";
 import { harnessMark } from "../lib/format";
-import { Link } from "../lib/router";
+import { back } from "../lib/router";
 import { ms, useNow } from "../lib/time";
 import { ControlError, controlApi, httpsHere, type Pairing } from "./api";
 import { fromB64url } from "./bytes";
+import { sentence } from "./PendingDevices";
 import {
   assertPasskey,
   forgetPasskey,
@@ -23,7 +25,7 @@ import {
   storedPasskeys,
   webauthnError,
 } from "./webauthn";
-import "./control.css";
+import "./pairing.css";
 
 type Phase =
   | { k: "loading" }
@@ -65,11 +67,9 @@ function approveErrorWords(e: unknown, machine: string): string {
 
 export function PairPage({ code }: { code: string }) {
   return (
-    <div className="page pair">
+    <div className="page page--doc page--grouped pair">
+      <PageBar title="Pair a machine" back={<BackButton onClick={() => back("/machines")} label="Machines" />} />
       <PairBody code={code} />
-      <p className="page-note">
-        <Link to="/machines">← Machines</Link>
-      </p>
     </div>
   );
 }
@@ -160,13 +160,7 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
   };
 
   if (phase.k === "loading") return <p className="page-note">Looking up the pairing…</p>;
-  if (phase.k === "missing")
-    return (
-      <>
-        {!compact && <h1>Pair a machine</h1>}
-        <p className="pair-note pair-note--err">{phase.why}</p>
-      </>
-    );
+  if (phase.k === "missing") return <p className="pair-note pair-note--err">{phase.why}</p>;
 
   const p = phase.p;
   const m = p.machine;
@@ -180,13 +174,10 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
   return (
     <div className={`pair-body ${compact ? "pair-body--compact" : ""}`}>
       {!compact && (
-        <div>
-          <h1>Pair {m.name}</h1>
-          <p className="pair-lead">
-            A terminal on {m.name} asked to be controlled from here. Compare the six digits with the ones it printed,
-            then approve with a passkey.
-          </p>
-        </div>
+        <p className="caption pair-lead">
+          A terminal on {m.name} asked to be controlled from here. Compare the six digits with the ones it printed, then
+          approve with a passkey.
+        </p>
       )}
 
       <div className="pair-check">
@@ -203,49 +194,59 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
         </div>
         {phase.k !== "approved" && phase.k !== "rejected" && (
           <span className={`pair-countdown ${left < 90_000 ? "is-soon" : ""}`}>
-            {expired ? "This code expired." : `Code good for ${countdown(left)}`}
+            {expired ? "This code expired." : `Expires in ${countdown(left)}`}
           </span>
         )}
       </div>
 
-      <dl className="pair-facts">
-        <dt>machine</dt>
-        <dd>
-          {m.name} <span className="mono">· sessionpipe {m.version}</span>
-        </dd>
-        <dt>harnesses</dt>
-        <dd>
-          {m.harnesses.length
-            ? m.harnesses.map((h) => (
-                <span key={h} className="machine-harness">
-                  <HarnessGlyph name={h} size="sm" /> {harnessMark(h).label}{" "}
-                </span>
-              ))
-            : "none reported"}
-        </dd>
-        <dt>from</dt>
-        <dd className="mono">{p.fromIp}</dd>
-        {m.folders && m.folders.length > 0 && (
-          <>
-            <dt>folders</dt>
-            <dd className="mono">{m.folders.join("  ")}</dd>
-          </>
-        )}
-        {m.mode && (
-          <>
-            <dt>mode</dt>
-            <dd>{m.mode}</dd>
-          </>
-        )}
-        {m.accounts && m.accounts.length > 0 && (
-          <>
-            <dt>accounts</dt>
-            <dd>{m.accounts.map((a) => `${a.email} (${a.harness})`).join(", ")}</dd>
-          </>
-        )}
-        <dt>keys</dt>
-        <dd>{m.keys === 0 ? "none yet" : `${m.keys} trusted already`}</dd>
-      </dl>
+      <section className="form-group" aria-label="The machine">
+        <ul className="form-list pair-facts">
+          <li className="form-row form-row--kv">
+            <span className="form-key">Machine</span>
+            <span className="form-kv">
+              {m.name} <span className="pair-ver num">· sessionpipe {m.version}</span>
+            </span>
+          </li>
+          <li className="form-row form-row--kv">
+            <span className="form-key">Harnesses</span>
+            <span className="form-kv">
+              {m.harnesses.length
+                ? m.harnesses.map((h) => (
+                    <span key={h} className="machine-harness">
+                      <HarnessGlyph name={h} size="sm" /> {harnessMark(h).label}
+                    </span>
+                  ))
+                : "None reported"}
+            </span>
+          </li>
+          <li className="form-row form-row--kv">
+            <span className="form-key">From</span>
+            <span className="form-kv mono">{p.fromIp}</span>
+          </li>
+          {m.folders && m.folders.length > 0 && (
+            <li className="form-row form-row--kv">
+              <span className="form-key">Folders</span>
+              <span className="form-kv mono">{m.folders.join("  ")}</span>
+            </li>
+          )}
+          {m.mode && (
+            <li className="form-row form-row--kv">
+              <span className="form-key">Mode</span>
+              <span className="form-kv">{m.mode}</span>
+            </li>
+          )}
+          {m.accounts && m.accounts.length > 0 && (
+            <li className="form-row form-row--kv">
+              <span className="form-key">Accounts</span>
+              <span className="form-kv">{m.accounts.map((a) => `${a.email} (${a.harness})`).join(", ")}</span>
+            </li>
+          )}
+          <li className="form-row form-row--kv">
+            <span className="form-key">Keys</span>
+            <span className="form-kv">{m.keys === 0 ? "None yet" : `${m.keys} trusted already`}</span>
+          </li>
+        </ul>
+      </section>
 
       {phase.k === "approved" ? (
         <div className="pair-note pair-note--ok" role="status">
@@ -276,7 +277,7 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
           )}
           {!secure && (
             <div className="pair-note pair-note--err">
-              {insecureHint()}
+              {sentence(insecureHint())}
               {https && (
                 <p className="pair-https">
                   <a className="btn btn--primary" href={https}>
@@ -304,9 +305,11 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
               }}
             >
               {known.length === 0 && (
-                <label>
-                  What to call this device on {m.name}
+                <div className="pair-field">
+                  <label htmlFor="pair-device-name">What to call this device on {m.name}</label>
                   <input
+                    id="pair-device-name"
+                    className="field"
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -314,18 +317,18 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
                     autoComplete="off"
                     aria-label="Device name"
                   />
-                </label>
+                </div>
               )}
               <div className="pair-actions">
                 <button type="submit" className="btn btn--primary" disabled={!secure || expired}>
                   {known.length ? `Approve with passkey “${known[0]?.name ?? "this browser"}”` : "Approve with passkey"}
                 </button>
-                <button type="button" className="btn btn--ghost" onClick={() => void reject(p)} disabled={expired}>
+                <button type="button" className="btn" onClick={() => void reject(p)} disabled={expired}>
                   Reject
                 </button>
                 {known.length > 0 && secure && !expired && (
-                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => void approve(p, true)}>
-                    use a new passkey instead
+                  <button type="button" className="btn btn--ghost" onClick={() => void approve(p, true)}>
+                    Use a new passkey instead
                   </button>
                 )}
               </div>
@@ -340,5 +343,5 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
 function countdown(msLeft: number): string {
   const s = Math.max(0, Math.ceil(msLeft / 1000));
   const m = Math.floor(s / 60);
-  return m > 0 ? `${m} m ${String(s % 60).padStart(2, "0")} s` : `${s} s`;
+  return `${m}:${String(s % 60).padStart(2, "0")}`;
 }

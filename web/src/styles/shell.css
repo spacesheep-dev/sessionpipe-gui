@@ -1,0 +1,535 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- shell ---------- */
+/* The window: a sidebar on the chrome ground (a labelled source list from 1200 px, a
+   compact icon rail from 840 px), the page beside it, a bottom tab bar on phones. One
+   title band runs across the window: the sidebar's top, every page bar and the panel
+   head are --bar tall, so their hairlines make one rule. The chrome never scrolls with
+   the page and is not text. Mobile first. */
+
+.shell {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  /* Nothing may widen the mobile layout viewport: a wide row is clipped, never scrolled. */
+  overflow-x: clip;
+}
+
+/* The page column: not centred, no top padding (the page bar sits at the top edge). */
+.main {
+  width: 100%;
+  min-width: 0;
+  padding: 0 var(--gutter) calc(var(--tabbar) + env(safe-area-inset-bottom) + 24px);
+}
+/* A page with no bar of its own (pair, add a device) still starts below the edge. */
+.main > .page:not(:has(> .bar)) {
+  padding-top: 24px;
+}
+
+.rail {
+  display: none;
+}
+
+/* ----- the phone's tab bar ----- */
+
+.tabbar {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: var(--z-chrome);
+  display: flex;
+  height: calc(var(--tabbar) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--chrome);
+  border-top: var(--hairline) solid var(--line);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.nav-link {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: var(--tap);
+  padding: 0 2px;
+  color: var(--fg-3);
+  font-size: calc(var(--text-xs) - 1px);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  -webkit-user-select: none;
+  user-select: none;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+/* At most five tabs: the first four pages and More. */
+.tabbar .nav-link {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0;
+}
+.nav-glyph {
+  display: block;
+  flex: none;
+}
+.tabbar .nav-link:active {
+  opacity: 0.6;
+  transition: none;
+}
+.tabbar .nav-glyph {
+  width: 22px;
+  height: 22px;
+}
+/* A label never clips: it is one line, cut with an ellipsis if a plugin's name is long. */
+.nav-label {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-link--on {
+  color: var(--fg);
+}
+/* The Inbox count: amber, because it is the needs-you count. */
+.nav-badge {
+  position: absolute;
+  top: 3px;
+  left: calc(50% + 6px);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--needs);
+  color: var(--needs-ink);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* The Setup entry's amber dot: steps to go on this machine. */
+.nav-dot {
+  position: absolute;
+  top: 7px;
+  left: calc(50% + 8px);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--needs);
+}
+
+/* The stream: a dot and a word. Green only while live. */
+.conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.conn-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-4);
+}
+.conn--live .conn-dot {
+  background: var(--ok);
+}
+.conn--reconnecting .conn-dot,
+.conn--connecting .conn-dot {
+  background: var(--needs);
+}
+.conn--offline .conn-dot {
+  background: var(--err);
+}
+
+/* ----- the sidebar (desktop) ----- */
+
+@media (min-width: 840px) {
+  .shell {
+    grid-template-rows: none;
+    grid-template-columns: var(--rail) minmax(0, 1fr);
+  }
+  /* The labelled sidebar when there is room (Shell.tsx sets the class). */
+  .shell--side {
+    --rail: 220px;
+  }
+  .tabbar {
+    display: none;
+  }
+  .main {
+    padding: 0 var(--gutter) 48px;
+  }
+  /* The rail is sticky, so it is a stacking context of its own: it sits above the page
+     content (rows are positioned) for its popovers to be reachable. */
+  .rail {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-chrome);
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    border-right: var(--hairline) solid var(--line);
+    background: var(--chrome);
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  /* The top band: the mark (and in the sidebar the name), as tall as every page bar. */
+  .rail-brand {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: var(--bar);
+    border-bottom: var(--hairline) solid var(--line);
+    color: var(--fg);
+    font-size: var(--text-md);
+    font-weight: 600;
+  }
+  .rail-brand .mark {
+    display: block;
+  }
+  .rail-brand:focus-visible {
+    outline-offset: -2px;
+  }
+  .rail-word {
+    display: none;
+  }
+  /* The rail's tooltips stand out past its edge, so only the sidebar form scrolls. */
+  .rail-nav {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 6px;
+  }
+  /* Groups are spacing, not lines: Board and Inbox, Feed and Review, then the rest. */
+  .rail-nav > [data-nav="feed"],
+  .rail-nav > [data-nav="machines"] {
+    margin-top: 12px;
+  }
+  .rail .nav-link {
+    min-height: 52px;
+    gap: 4px;
+    border-radius: var(--radius);
+    color: var(--fg-2);
+    font-size: calc(var(--text-xs) - 1px);
+  }
+  .rail .nav-link:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+  .rail .nav-link:active {
+    background: var(--press);
+    transition: none;
+  }
+  .rail .nav-link--on,
+  .rail .nav-link--on:hover,
+  .rail .nav-link[data-menu-open] {
+    background: var(--sel);
+    color: var(--fg);
+  }
+  .rail .nav-link:focus-visible {
+    outline-offset: -2px;
+  }
+  .rail .nav-badge {
+    left: calc(50% + 7px);
+  }
+  /* The views: a hairline in the rail; in the sidebar a section label instead. */
+  .rail-group {
+    width: 32px;
+    margin: 10px auto;
+    border: 0;
+    border-top: var(--hairline) solid var(--line);
+  }
+  .rail-section {
+    display: none;
+  }
+  .rail-foot {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 0 12px;
+  }
+  .rail .conn {
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+
+  /* The sidebar form: a source list, icon and label on one row. */
+  .shell--side .rail-brand {
+    justify-content: flex-start;
+    padding: 0 16px;
+  }
+  .shell--side .rail-word {
+    display: inline;
+  }
+  .shell--side .rail-nav {
+    padding: 8px;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .shell--side .rail .nav-link {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 8px;
+    min-height: var(--side-row);
+    padding: 0 8px;
+    font-size: var(--text-md);
+    font-weight: 500;
+  }
+  .shell--side .rail .nav-glyph {
+    width: 18px;
+    height: 18px;
+    color: var(--fg-3);
+  }
+  .shell--side .rail .nav-link--on .nav-glyph {
+    color: var(--fg);
+  }
+  .shell--side .rail .nav-label {
+    flex: 1 1 auto;
+  }
+  .shell--side .rail .nav-badge,
+  .shell--side .rail .nav-dot {
+    position: static;
+    margin-left: auto;
+  }
+  .shell--side .rail-group {
+    display: none;
+  }
+  .shell--side .rail-section {
+    display: block;
+    margin: 16px 0 4px;
+    padding: 0 8px;
+    color: var(--fg-3);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    line-height: var(--lh-tight);
+  }
+  .shell--side .rail-foot {
+    flex-direction: row;
+    gap: 2px;
+    padding: 8px 8px 8px 16px;
+    border-top: var(--hairline) solid var(--line);
+  }
+  .shell--side .rail .conn {
+    flex-direction: row;
+    margin: 0 auto 0 0;
+  }
+  /* The rail's tooltips name the page and its keys; the sidebar's labels already do. */
+  .shell--side .rail .nav-link[data-tip]::after {
+    display: none;
+  }
+}
+
+/* Installed as an app with the title bar folded away (manifest display_override): the
+   window's own buttons sit in the sidebar's top band, as in Finder, and the bands drag
+   the window. In a browser tab none of this applies. */
+@media (display-mode: window-controls-overlay) {
+  .rail-brand,
+  .bar {
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+  .rail-brand .mark,
+  .bar button,
+  .bar a,
+  .bar input,
+  .bar label {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+  .shell--side .rail-brand {
+    padding-left: calc(env(titlebar-area-x, 0px) + 12px);
+  }
+  .shell:not(.shell--side) .rail-brand .mark {
+    visibility: hidden;
+  }
+}
+
+/* ----- the page bar (components/PageBar.tsx) ----- */
+
+/* The page's title band: sticky, opaque, a hairline below that lines up with the
+   sidebar's and the panel's. Title and meta at the left, the tools and actions at the
+   right; in a narrow column (the split open) the tools take a second row of their own. */
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 12px;
+  min-height: var(--bar);
+  margin: 0 calc(-1 * var(--gutter));
+  padding: 0 var(--gutter);
+  background: var(--bg);
+  border-bottom: var(--hairline) solid var(--line);
+  container-type: inline-size;
+  container-name: bar;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.bar-lead {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: var(--bar);
+}
+.bar-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+.bar-meta {
+  flex: none;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.bar-tools {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.bar-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.bar-tools + .bar-actions {
+  margin-left: 0;
+}
+.bar-back {
+  margin-left: -6px;
+}
+@container bar (max-width: 720px) {
+  .bar-tools {
+    order: 3;
+    flex: 1 0 100%;
+    justify-content: flex-start;
+    padding-bottom: 8px;
+  }
+  .bar-tools .search {
+    flex: 1 1 200px;
+    max-width: none;
+  }
+  .bar-tools + .bar-actions {
+    margin-left: auto;
+  }
+}
+
+/* The phone: a 44 px navigation bar whose title fades in once the large title under it
+   has scrolled away (PageBar watches it); the tools sit under the large title and
+   scroll with the page. */
+@media (max-width: 839px) {
+  .bar {
+    padding-top: env(safe-area-inset-top);
+    justify-content: space-between;
+    border-bottom-color: transparent;
+    transition: border-color var(--dur-fast) var(--ease-out);
+  }
+  .bar[data-collapsed] {
+    border-bottom-color: var(--line);
+  }
+  .bar-lead {
+    flex: 1 1 auto;
+    height: var(--bar);
+  }
+  .bar--inline .bar-title {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    max-width: 56%;
+    height: var(--bar);
+    line-height: var(--bar);
+    transform: translateX(-50%);
+    text-align: center;
+  }
+  .bar--large .bar-title {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    max-width: 56%;
+    height: var(--bar);
+    line-height: var(--bar);
+    transform: translateX(-50%);
+    text-align: center;
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out);
+  }
+  .bar--large[data-collapsed] .bar-title {
+    opacity: 1;
+  }
+  .bar-actions .icon-btn,
+  .bar-back {
+    width: 44px;
+    height: 44px;
+  }
+  .bar-actions {
+    margin-right: -10px;
+  }
+  .bar-below {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .page > .bar + .bar-below {
+    margin-top: -16px;
+  }
+  .bar-large {
+    color: var(--fg);
+    font-size: calc(var(--text-xl) * 1.55);
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .bar-sub {
+    margin-top: -10px;
+    color: var(--fg-3);
+    font-size: var(--text-sm);
+  }
+  .bar-below .bar-tools {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  /* The pop-ups after the search: one row that scrolls sideways, edge to edge. */
+  .bar-filters {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 calc(-1 * var(--gutter));
+    padding: 0 var(--gutter);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .bar-filters::-webkit-scrollbar {
+    display: none;
+  }
+  .bar-filters > * {
+    flex: none;
+  }
+}

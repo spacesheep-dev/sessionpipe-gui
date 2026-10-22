@@ -1,0 +1,77 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- the tier lens chip (shell) ---------- */
+
+/* A plain toolbar button in the page bar's tools, beside the filters; absent on view
+   routes and in Simple mode. An active lens takes the selection fill: no amber. */
+.lens-chip {
+  position: relative;
+  flex: none;
+  order: 2;
+}
+.lens-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control);
+  padding: 0 8px;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .lens-chip-btn:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+}
+.lens-chip-btn:active {
+  background: var(--press);
+}
+.lens-chip--on .lens-chip-btn,
+.lens-chip-btn[aria-expanded="true"] {
+  background: var(--sel);
+  color: var(--fg);
+}
+.toolbar > .filters {
+  order: 3;
+}
+.lens-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: var(--z-pop);
+  width: min(300px, calc(100vw - 24px));
+  padding: 12px;
+  border-radius: var(--radius-pop);
+  border: var(--hairline) solid var(--line);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: rise var(--dur) var(--ease-out) both;
+}
+/* The one line a page shows while the lens hides something. */
+.lens-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.lens-note-reset {
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.lens-note-reset:hover {
+  color: var(--fg);
+}

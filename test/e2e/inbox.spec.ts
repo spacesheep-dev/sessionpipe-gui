@@ -65,7 +65,8 @@ const readRow = async (page: Page) => {
       answer: await row.locator(".inbox-answer").getAttribute("data-answer", { timeout: 500 }),
       allowDisabled: await row.getByRole("button", { name: "Allow" }).isDisabled({ timeout: 500 }),
       denyDisabled: await row.getByRole("button", { name: "Deny" }).isDisabled({ timeout: 500 }),
-      note: await row.locator(".inbox-note").textContent({ timeout: 500 }),
+      // Why Allow / Deny are off is said once under the page bar, not on every row.
+      note: await page.locator(".inbox-reason").first().textContent({ timeout: 500 }),
       group: await row.locator("xpath=ancestor::section[1]").getAttribute("aria-label", { timeout: 500 }),
       title_: await page.title(),
       badge: await page.locator("nav.rail a[data-nav='inbox'] .nav-badge").textContent({ timeout: 500 }),
@@ -84,7 +85,7 @@ test.describe("inbox", () => {
     await expect(page.locator("nav.rail a[data-nav='inbox']")).toHaveAttribute("aria-current", "page");
     // With nothing open the page says so.
     if ((await page.locator(".inbox-row").count()) === 0)
-      await expect(page.locator(".inbox-empty")).toHaveText("nothing needs you");
+      await expect(page.locator(".inbox-empty .state-title")).toHaveText("Nothing needs you");
     // The demo asks for a permission every 6–20 s and keeps it open ~2 s; read the row in one go.
     let seen: Awaited<ReturnType<typeof readRow>> = null;
     await expect
@@ -107,7 +108,7 @@ test.describe("inbox", () => {
         answer: "unpaired",
         allowDisabled: true,
         denyDisabled: true,
-        note: expect.stringMatching(/^pair .+ to send messages$/),
+        note: expect.stringMatching(/pair .+ to send messages/),
         group: "Needs an answer",
         title_: expect.stringMatching(/^\(\d+\) Inbox · sessionpipe gui$/),
         badge: expect.stringMatching(/^[1-9]\d*$/),
@@ -182,7 +183,8 @@ test.describe("inbox", () => {
     await openPage(page, "/inbox");
     const toggle = page.locator(".inbox-head").getByRole("switch", { name: "Notify me" });
     await expect(toggle).toBeDisabled();
-    await expect(page.locator(".inbox-head .notify-hint")).toHaveText(/blocked/);
+    // Said once under the page bar, as a condition, not beside the switch.
+    await expect(page.locator(".page.inbox .notify-hint")).toHaveText(/blocked/);
   });
 
   test("a new prompt notifies a background tab, and the notification opens the inbox", async ({ page }) => {

@@ -1,0 +1,187 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- toasts (components/Toasts.tsx) ---------- */
+
+/* Notification banners, the OS's shape: top-right on a desktop under the title band and
+   left of an open panel, newest on top; just above the tab bar on a phone, newest
+   nearest it. The raised surface every floating thing has, no stripe: the amber dot is
+   the one signal that a prompt needs a person. */
+.toasts {
+  position: fixed;
+  z-index: var(--z-toast);
+  top: calc(var(--bar) + 8px);
+  right: calc(var(--split-width, 0px) + 16px);
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  gap: 8px;
+  width: min(360px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "mark main x"
+    ".    act  act";
+  column-gap: 8px;
+  padding: 12px 8px 12px 12px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-pop);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+  animation: rise var(--dur) var(--ease-out) both;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.toast-mark {
+  grid-area: mark;
+  display: flex;
+  justify-content: center;
+  padding-top: 4px;
+}
+/* The one amber mark: a prompt needs a person. An error turn gets the red one. */
+.toast-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--needs);
+}
+.toast-mark--error::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--err);
+}
+.toast-main {
+  grid-area: main;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  text-align: left;
+  color: inherit;
+  border-radius: var(--radius-inner);
+}
+.toast-main:disabled {
+  opacity: 1;
+}
+.toast-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.toast-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.toast-machine {
+  flex: none;
+  margin-left: auto;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.toast-body {
+  min-width: 0;
+  color: var(--fg-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.toast-tool {
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.toast-msg {
+  color: var(--fg-2);
+}
+.toast-msg.mono {
+  font-size: calc(var(--text-sm) * 0.95);
+}
+/* The ×: there on hover (always on touch), never in the way of the title. */
+.toast-x {
+  grid-area: x;
+  align-self: start;
+  width: 24px;
+  height: 24px;
+  margin: -4px 0 0 4px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.toast:hover .toast-x,
+.toast:focus-within .toast-x {
+  opacity: 1;
+}
+.toast-actions {
+  grid-area: act;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.toast-note {
+  min-width: 0;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.toast-note--err {
+  color: var(--err);
+}
+.toast-unlock {
+  pointer-events: auto;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  text-align: right;
+}
+@media (hover: none) {
+  .toast-x {
+    opacity: 1;
+  }
+}
+/* The phone: full width above the tab bar; the banner grows from the bar. */
+@media (max-width: 839px) {
+  .toasts {
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: calc(var(--tabbar) + env(safe-area-inset-bottom) + 8px);
+    width: auto;
+    flex-direction: column;
+  }
+  .toast {
+    padding: 12px;
+  }
+  .toast-x {
+    width: 32px;
+    height: 32px;
+    margin: -8px -4px 0 4px;
+  }
+  .toast-actions .btn {
+    flex: 1;
+  }
+  .toast-note {
+    flex-basis: 100%;
+  }
+  .toast-unlock {
+    text-align: left;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}

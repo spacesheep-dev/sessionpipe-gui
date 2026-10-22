@@ -1,92 +1,277 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* The control strip's extras, the activity under it, the pairing page and the start-a-
-   session form. Tokens from styles/tokens.css; the same quiet rules as app.css: one
-   typeface, 400/500/600, hairlines over boxes, amber only on a pending request's dot. */
+/* The control bar and the activity under it (the pairing page, pending pairings and
+   devices and the start-a-session form are pairing.css). Tokens from styles/tokens.css;
+   one typeface, 400/500/600, hairlines over boxes. */
 
-/* ---------- strip ---------- */
+/* ---------- the bar ---------- */
 
-.ctl-ask textarea {
-  flex: 1;
+.ctl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* An open permission: the question at the left, Deny and Allow at the right, and the
+   reason they cannot be used as one caption line under the question, so the question
+   keeps the width. The amber glyph is the bar's only colour. */
+.ctl-answer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 16px;
+  padding-bottom: 4px;
+}
+.ctl-q {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   min-width: 0;
-  min-height: 36px;
-  max-height: 160px;
-  padding: 8px 12px;
-  border-radius: var(--radius);
-  border: var(--hairline) solid var(--line-2);
-  background: transparent;
+  margin: 0;
   color: var(--fg);
-  font: inherit;
   font-size: var(--text-md);
-  line-height: 1.4;
-  resize: none;
-  field-sizing: content;
+  line-height: var(--lh);
 }
-.ctl-ask textarea:focus-visible {
-  outline: var(--focus-width, 2px) solid var(--fg);
-  outline-offset: 1px;
-  border-color: var(--fg-3);
+.ctl-q > .dot {
+  margin-top: 6px;
 }
-.ctl-ask textarea::placeholder {
-  color: var(--fg-4);
-}
-.ctl-ask textarea:disabled {
-  opacity: 0.6;
-}
-.ctl-answer + .ctl-answer {
-  margin-top: -2px;
-}
-.ctl-answer-msg {
-  color: var(--fg-3);
-  font-size: var(--text-sm);
+.ctl-q-text {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.ctl-tool {
+  font-weight: 600;
+}
+.ctl-cmd {
+  padding: 1px 6px;
+  border-radius: var(--radius-inner);
+  background: var(--bg-3);
+  color: var(--fg);
+  font-size: var(--text-sm);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.ctl-answer-msg {
+  color: var(--fg-2);
+  font-size: var(--text-sm);
 }
 /* Why the pair is gone or disabled, beside it, in muted text. */
 .ctl-answer-note {
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
-.ctl-cancel {
+.ctl-answer-btns {
+  display: flex;
+  gap: 8px;
   margin-left: auto;
 }
-.ctl-note {
-  font-size: var(--text-sm);
+.ctl-answer-btns .btn {
+  min-width: 72px;
+}
+/* Their places on the bar's grid: the reason under the question, the pair beside both. */
+.ctl-answer > .ctl-answer-note,
+.ctl-answer > .ctl-suggestion {
+  grid-column: 1;
+  padding-left: 16px;
+}
+.ctl-answer > .ctl-answer-btns {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+.ctl-answer + .ctl-answer {
+  padding-top: 8px;
+  border-top: var(--hairline) solid var(--line);
+}
+/* A plugin's suggestion is advice: neutral, like everything else on the bar. */
+.ctl .ctl-suggestion[data-suggestion] .ctl-suggestion-confirm {
+  border-color: transparent;
+  color: var(--fg);
+}
+
+/* The composer: one field that grows to six lines, with attach, stop and send inside
+   it; the focus halo is the field's, not the textarea's. */
+.ctl-ask {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 3px;
+  border: var(--hairline) solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.ctl-ask:focus-within {
+  border-color: color-mix(in oklch, var(--focus) 70%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+}
+.ctl--off .ctl-ask {
+  background: var(--bg);
+}
+.ctl-ask textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--control);
+  max-height: calc(6 * var(--lh) * var(--text-md) + 2 * ((var(--control) - var(--lh) * var(--text-md)) / 2));
+  margin: 0;
+  padding: calc((var(--control) - var(--lh) * var(--text-md)) / 2) 6px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-md);
+  line-height: var(--lh);
+  resize: none;
+  overflow-y: auto;
+}
+.ctl-ask textarea:focus,
+.ctl-ask textarea:focus-visible {
+  outline: none;
+}
+.ctl-ask textarea::placeholder {
   color: var(--fg-3);
+}
+.ctl-ask textarea:disabled::placeholder {
+  color: var(--fg-4);
+}
+/* Send fills with the ink once there is something to send. */
+.ctl-send.is-ready {
+  background: var(--fg);
+  color: var(--bg);
+}
+@media (hover: hover) {
+  .ctl-send.is-ready:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--fg), var(--bg) 14%);
+    color: var(--bg);
+  }
+}
+.ctl-send.is-ready:active:not(:disabled) {
+  background: color-mix(in oklch, var(--fg), var(--bg) 24%);
+}
+.ctl-cancel {
+  color: var(--fg-2);
+}
+
+/* One quiet line under the field: where messages go, what a send asks for, what is wrong. */
+.ctl-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin: 0;
+  padding: 0 4px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  line-height: var(--lh);
+}
+.ctl-foot:empty {
+  display: none;
+}
+.ctl-hint--quiet {
+  display: none;
+}
+.ctl-context strong {
+  color: var(--fg-2);
+  font-weight: 500;
+}
+.ctl-link,
+.ctl-open-https,
+.ctl-untrusted a {
+  margin-left: 8px;
+  color: var(--fg-2);
+  font: inherit;
+  font-weight: 500;
+  white-space: nowrap;
+}
+@media (hover: hover) {
+  .ctl-link:hover,
+  .ctl-open-https:hover,
+  .ctl-untrusted a:hover {
+    color: var(--fg);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+.ctl-context-note {
+  margin-left: 8px;
 }
 .ctl-note--err {
   color: var(--err);
 }
 
+/* A narrow bar (the panel): the question on its line, the reason and the pair under it. */
+@container ctl (max-width: 560px) {
+  .ctl-answer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ctl-answer > .ctl-answer-btns {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: end;
+    margin-top: 6px;
+  }
+}
+/* The phone: the question on its line, then Deny | Allow at equal widths, 44 px tall;
+   when sending is off here, the line under the field says why, and nothing else. */
+@media (max-width: 839px) {
+  .ctl-answer {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .ctl-answer > .ctl-answer-note {
+    padding-left: 0;
+  }
+  .ctl-q {
+    flex: none;
+  }
+  .ctl-answer-btns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    margin-left: 0;
+  }
+  .ctl-answer-btns .btn {
+    min-height: var(--control-lg);
+    font-size: var(--text-md);
+  }
+  .ctl-ask textarea {
+    font-size: max(1rem, 16px);
+  }
+  .ctl--blocked .ctl-context {
+    display: none;
+  }
+}
+
 /* ---------- activity ---------- */
 
+/* What became of each message: one row each under the field, hairlines between. */
 .ctl-acts {
   list-style: none;
-  margin: 4px 0 0;
+  margin: 4px auto 0;
   padding: 0;
-  max-width: 880px;
   display: flex;
   flex-direction: column;
+  max-height: 168px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 @media (max-width: 839px) {
-  /* The strip is sticky over the timeline on a phone: the messages under it scroll
-     inside a short box instead of pushing the timeline off the screen. */
+  /* The bar is docked over the timeline on a phone: the messages scroll inside a short box. */
   .ctl-acts {
-    max-height: 30vh;
-    overflow-y: auto;
-    overscroll-behavior: contain;
+    max-height: 25vh;
   }
 }
 .ctl-act {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 8px 0;
+  padding: 8px 4px;
   border-top: var(--hairline) solid var(--line);
+  color: var(--fg-3);
   font-size: var(--text-sm);
-  color: var(--fg-3);
-}
-.ctl-act--expired {
-  color: var(--fg-3);
 }
 .ctl-act-head {
   display: flex;
@@ -95,28 +280,30 @@
   min-width: 0;
 }
 .ctl-act-kind {
-  font-weight: 500;
-  color: var(--fg-2);
   flex: none;
+  color: var(--fg-2);
+  font-weight: 500;
 }
 .ctl-act-text {
-  color: var(--fg-3);
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
+  color: var(--fg-3);
 }
 .ctl-act-head time {
-  color: var(--fg-3);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
   flex: none;
+  margin-left: auto;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
 }
 .ctl-act-state {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  margin: 0;
   color: var(--fg-3);
 }
 .ctl-act--delivered .ctl-act-state {
@@ -127,36 +314,48 @@
 .ctl-act--unsupported .ctl-act-state {
   color: var(--err);
 }
-.ctl-act-pulse {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--fg);
-  animation: ctl-pulse 2.4s ease-in-out infinite;
+/* A message that went to a copy of the session: the copy is one click away. */
+.ctl-act-copy {
+  color: var(--fg-2);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.ctl-act-copy::before {
+  content: "·";
+  display: inline-block;
+  margin-right: 8px;
+  color: var(--fg-4);
+  font-weight: 400;
+}
+@media (hover: hover) {
+  .ctl-act-copy:hover {
+    color: var(--fg);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+/* Delivered, its turn in the chat above: one line, the reply being there already. */
+.ctl-act--folded {
+  padding-block: 6px;
+}
+.ctl-act--folded .ctl-act-text {
+  flex: 0 1 auto;
+}
+.ctl-act--folded .ctl-act-state {
   flex: none;
+  white-space: nowrap;
 }
-@keyframes ctl-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ctl-act-pulse {
-    animation: none;
-  }
+.ctl-act--folded .ctl-act-text + .ctl-act-state::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--fg-4);
 }
 .ctl-act-reply {
   margin: 4px 0 2px;
-  padding: 2px 0 2px 12px;
-  border-left: var(--hairline) solid var(--line-2);
+  padding: 0;
   color: var(--fg-2);
   font-size: var(--text-md);
-  line-height: 1.5;
-  white-space: pre-wrap;
+  line-height: var(--lh);
   overflow-wrap: anywhere;
 }
 .ctl-act-reply--tail {
@@ -167,349 +366,26 @@
   -webkit-line-clamp: 5;
 }
 
-/* ---------- pairing page ---------- */
+/* ---------- the composer's origin guard ---------- */
 
-.pair {
-  max-width: 560px;
-  gap: 24px;
-}
-.pair h1 {
-  font-size: var(--text-xl);
-  font-weight: 600;
-  line-height: 1.3;
-}
-.pair-lead {
-  margin-top: 4px;
-  color: var(--fg-3);
-  font-size: var(--text-sm);
-}
-.pair-check {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-items: flex-start;
-}
-.pair-check-label {
-  color: var(--fg-3);
-  font-size: var(--text-sm);
-}
-/* The one large thing on the page. */
-.pair-digits {
-  font-family: var(--font-mono);
-  font-size: 1.75rem;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  line-height: 1.2;
-  font-variant-numeric: tabular-nums;
-}
-.pair-digits-gap {
-  display: inline-block;
-  width: 0.5em;
-}
-.pair-facts {
-  margin: 0;
-  display: grid;
-  grid-template-columns: 96px 1fr;
-  gap: 8px 12px;
-  font-size: var(--text-md);
-}
-.pair-facts dt {
-  color: var(--fg-3);
-  font-size: var(--text-sm);
-  padding-top: 1px;
-}
-.pair-facts dd {
-  margin: 0;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  color: var(--fg-2);
-}
-.pair-note {
-  padding: 2px 0 2px 12px;
-  border-left: 2px solid var(--line-2);
-  color: var(--fg-2);
-  font-size: var(--text-md);
-  line-height: 1.5;
-}
-.pair-note + .pair-note {
-  margin-top: 8px;
-}
-.pair-note--ok {
-  border-left-color: var(--fg);
-  color: var(--fg);
-}
-.pair-note--err {
-  border-left-color: var(--err);
-  color: var(--err);
-}
-.pair-note--quiet {
-  color: var(--fg-3);
-}
-.pair-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.pair-form label,
-.start-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: var(--text-sm);
-  color: var(--fg-3);
-}
-.pair-form input,
-.start-form input,
-.start-form textarea {
-  height: 36px;
-  padding: 0 12px;
-  border-radius: var(--radius);
-  border: var(--hairline) solid var(--line-2);
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--text-md);
-}
-.pair-form input:focus-visible,
-.start-form input:focus-visible,
-.start-form textarea:focus-visible {
-  outline: var(--focus-width, 2px) solid var(--fg);
-  outline-offset: 1px;
-  border-color: var(--fg-3);
-}
-.pair-form input::placeholder,
-.start-form input::placeholder,
-.start-form textarea::placeholder {
-  color: var(--fg-4);
-}
-.start-form textarea {
-  height: auto;
-  min-height: 64px;
-  padding: 8px 12px;
-  resize: vertical;
-  line-height: 1.4;
-}
-.pair-actions,
-.start-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.pair-countdown {
-  color: var(--fg-3);
-  font-size: var(--text-sm);
-}
-/* The page's body, reused inline by the setup page. */
-.pair-body {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-.pair-body--compact {
-  gap: 16px;
-}
-.pair-https {
-  margin: 8px 0 0;
-}
-.pair-countdown.is-soon {
-  color: var(--fg-2);
-}
-
-/* ---------- pending pairings on /machines ---------- */
-
-.pending {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.pending h2 {
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--fg-2);
-}
-.pending-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  border-top: var(--hairline) solid var(--line);
-}
-.pending-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  min-height: 40px;
-  padding: 4px 0;
-  border-bottom: var(--hairline) solid var(--line);
-  font-size: var(--text-md);
-}
-.pending-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--needs);
-  flex: none;
-}
-.pending-name {
-  font-weight: 500;
-}
-.pending-digits {
-  font-family: var(--font-mono);
-  letter-spacing: 0.08em;
-  color: var(--fg-2);
-}
-.pending-meta {
-  color: var(--fg-3);
-  font-size: var(--text-sm);
-}
-.pending-link {
-  margin-left: auto;
-  min-height: 28px;
-  display: inline-flex;
-  align-items: center;
-  color: var(--fg);
-  font-weight: 500;
-}
-.pending-link:hover {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-/* ---------- devices asking to be trusted (on /machines, and a bar over a session) ---------- */
-
-.pending--bar {
-  margin-bottom: 12px;
-}
-.pending-actions {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.pending-wide {
-  flex-basis: 100%;
-}
-.pending-err {
-  color: var(--err);
-}
-.pending-item--settled {
-  color: var(--fg-3);
-}
-.pending-item--settled [data-outcome="delivered"] {
-  color: var(--fg-2);
-}
-
-/* The wrong-origin guard's line in the strip's hint: the address is the way out. */
+/* The wrong-origin guard's line in the bar's hint: the address is the way out. */
 .ctl-origin-link {
-  color: var(--fg);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-/* The "this browser is not trusted" line under the strip, with its way out. */
-.ctl-untrusted {
-  font-size: var(--text-sm);
-  color: var(--fg-3);
-}
-.ctl-untrusted a {
-  color: var(--fg);
-  font-weight: 500;
-}
-
-/* The devices line on /machines: "+ Add a phone" unfolds the instruction. */
-.machine-add-phone {
-  display: inline;
-}
-.machine-add-phone summary {
-  display: inline;
-  cursor: pointer;
-  color: var(--fg);
-  font-weight: 500;
-  list-style: none;
-}
-.machine-add-phone summary::-webkit-details-marker {
-  display: none;
-}
-.machine-add-phone[open] > span {
-  display: block;
-  margin-top: 4px;
   color: var(--fg-2);
-}
-
-/* ---------- start a session ---------- */
-
-.start {
-  display: grid;
-  grid-template-columns: 84px 1fr;
-  gap: 8px;
-  align-items: start;
-}
-.start-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 640px;
-}
-.start-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.start-row > label {
-  flex: 1 1 160px;
-  min-width: 0;
-}
-.start-form .sel,
-.start-form input {
-  width: 100%;
-  min-width: 0;
-}
-.start-acts {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-width: 640px;
-}
-.start-link {
-  font-size: var(--text-md);
-  padding-top: 8px;
-}
-.start-open {
-  color: var(--fg);
   font-weight: 500;
   text-decoration: underline;
+  text-decoration-color: var(--line-2);
   text-underline-offset: 2px;
 }
-@media (max-width: 480px) {
-  .pair-facts {
-    grid-template-columns: 1fr;
-    gap: 2px 0;
-  }
-  .pair-facts dd {
-    margin-bottom: 6px;
+@media (hover: hover) {
+  .ctl-origin-link:hover {
+    color: var(--fg);
   }
 }
 
-/* A plugin's suggested answer beside the pair: who said so, and one Confirm that signs
-   the ordinary answer. Advice only; it never sends by itself. */
-.ctl-suggestion {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--fg-2);
-  font-size: var(--text-sm);
-}
-.ctl-suggestion-text {
-  color: var(--fg-2);
-}
-.ctl-suggestion[data-suggestion="allow"] .ctl-suggestion-confirm {
-  border-color: var(--ok-soft, var(--line-2));
-  color: var(--ok, var(--fg));
-}
-.ctl-suggestion[data-suggestion="deny"] .ctl-suggestion-confirm {
-  border-color: var(--err-soft);
-  color: var(--err);
+/* The "this browser is not trusted" line under the bar, with its way out. */
+.ctl-untrusted {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
 }

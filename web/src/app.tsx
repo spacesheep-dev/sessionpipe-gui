@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect } from "react";
+import { PageBar } from "./components/PageBar";
 import { Palette } from "./components/Palette";
 import { Settings } from "./components/Settings";
 import { Shell } from "./components/Shell";
@@ -41,6 +42,7 @@ const TITLES: Record<string, string> = {
   themes: "Views",
   settings: "Settings",
   shortcuts: "Keyboard shortcuts",
+  missing: "Not found",
 };
 
 /** Once per page load: the app opened at its root lands on the page the device chose
@@ -113,16 +115,28 @@ export function App() {
       {route.name === "pair" && <PairPage key={route.code} code={route.code} />}
       {route.name === "add-device" && <AddDevicePage />}
       {route.name === "phone" && <PhonePage />}
-      {route.name === "missing" && (
-        <>
-          <p className="page-note" data-missing>
-            No page at {route.path}. <Link to="/">Board →</Link>
-          </p>
-          <Board />
-        </>
-      )}
+      {route.name === "missing" && <Missing path={route.path} />}
       <Palette />
       <Toasts />
     </Shell>
+  );
+}
+
+/** A path the app has no page for: an empty state where the page would be, and the way
+ *  back to the board. Nothing is rendered under it. */
+function Missing({ path }: { path: string }) {
+  return (
+    <div className="page missing">
+      <PageBar title="Not found" />
+      <div className="state" data-missing>
+        <p className="state-title">This page doesn't exist</p>
+        <p className="state-text">
+          No page at <code>{path}</code>.
+        </p>
+        <Link to="/" className="btn btn--primary">
+          Go to Board
+        </Link>
+      </div>
+    </div>
   );
 }

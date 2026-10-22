@@ -158,17 +158,21 @@ export function ThemePage({ id }: { id: string }) {
 
 function ErrorPanel({ title, message, url }: { title: string; message: string; url?: string }) {
   return (
-    <section className="theme-error" role="alert">
-      <h2>{title}</h2>
+    <section className="theme-error state" role="alert">
+      <svg className="state-glyph theme-error-glyph" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M12 7.5v5.5M12 16.2v.3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+      <h2 className="state-title">{title}</h2>
       <pre className="theme-error-msg">{message}</pre>
       {url && (
         <p className="theme-error-file">
-          <span>file</span> <code>{url}</code>
+          <span>File</span> <code>{url}</code>
         </p>
       )}
-      <p className="theme-error-help">
-        Fix the theme and reload the page, or manage themes on the <Link to="/themes">Themes</Link> page. A linked theme
-        reloads from its folder on every visit.
+      <p className="state-text theme-error-help">
+        Fix it and reload the page, or manage views on the <Link to="/themes">Views page</Link>. A linked view reloads
+        from its folder on every visit.
       </p>
     </section>
   );

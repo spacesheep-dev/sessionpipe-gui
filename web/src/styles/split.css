@@ -1,0 +1,218 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- split: a session beside the page ---------- */
+
+/* The page makes room for the panel; the panel itself is fixed on the right, a hairline
+   at its left edge and no shadow (it is part of the window, not floating over it). */
+.shell {
+  --split-width: 0px;
+  padding-right: var(--split-width);
+  transition: padding-right 240ms var(--ease-out);
+}
+.split-dragging .shell,
+.split-dragging .panel {
+  transition: none;
+}
+.split-dragging {
+  cursor: col-resize;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-panel);
+  width: var(--split-width);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-left: var(--hairline) solid var(--line);
+  transform: translateX(100%);
+  visibility: hidden;
+  transition:
+    transform 240ms var(--ease-out),
+    visibility 0s linear 240ms;
+}
+.panel--open {
+  transform: none;
+  visibility: visible;
+  transition: transform 240ms var(--ease-out);
+}
+/* The head reads first but sits last in the DOM, so Esc reaches a confirm inside the
+   body before the panel's own close (see lib/keys.ts: the first [data-dismiss] wins).
+   As tall as the page bar, so the two hairlines make one rule across the window. */
+.panel-head {
+  order: -2;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--bar);
+  padding: 0 8px 0 16px;
+  border-bottom: var(--hairline) solid var(--line);
+  background: var(--bg);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.panel-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+.panel-status {
+  flex: 0 4 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.panel-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+.panel-btn {
+  flex: none;
+}
+.panel-done {
+  display: none;
+}
+.panel-bodies {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.panel-body {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+/* Hidden in place (not display:none) so the scroll position survives a tab switch. */
+.panel-body--off {
+  visibility: hidden;
+  pointer-events: none;
+}
+.panel-grip {
+  position: absolute;
+  left: -4px;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  cursor: col-resize;
+  z-index: 3;
+  touch-action: none;
+}
+.panel-grip::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.panel-grip:hover::after,
+.panel-grip:focus-visible::after,
+.split-dragging .panel-grip::after {
+  background: var(--fg-4);
+}
+.panel-grip:focus-visible {
+  outline: none;
+}
+
+/* Inside the panel the view scrolls its own element: the gutters are the panel's, the
+   docked bar sits at the panel's bottom, and the view fills it so the bar does too. */
+.panel .session {
+  --gutter: 16px;
+  min-height: 100%;
+  padding: 0 var(--gutter);
+}
+.panel .session .sess-ctl {
+  bottom: 0;
+}
+
+/* Phones: a page sheet over everything, tab bar included. It covers the screen; its
+   surface starts a little below the top edge, rounded, on the scrim, with a grabber
+   and a 44 px head whose close reads "Done". */
+.panel--sheet {
+  inset: 0;
+  width: auto;
+  padding-top: calc(env(safe-area-inset-top) + 8px);
+  border-left: 0;
+  background: var(--scrim);
+  transform: translateY(100%);
+}
+.panel--sheet.panel--open {
+  transform: none;
+}
+.panel--sheet .panel-head {
+  position: relative;
+  height: calc(var(--bar) + 8px);
+  padding: 8px 4px 0 16px;
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+}
+.panel--sheet .panel-head::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: 36px;
+  height: 5px;
+  margin-left: -18px;
+  border-radius: var(--radius-pill);
+  background: var(--line-2);
+}
+.panel--sheet .panel-bodies {
+  background: var(--bg);
+}
+.panel--sheet .panel-body {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.panel--sheet .panel-open,
+.panel--sheet .panel-close svg {
+  display: none;
+}
+.panel--sheet .panel-close {
+  width: auto;
+  padding: 0 12px;
+}
+.panel--sheet .panel-done {
+  display: inline;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.panel--sheet .panel-status {
+  display: none;
+}
+
+/* The ghost that morphs a row (or a canvas window) into the panel. */
+.split-ghost {
+  position: fixed;
+  z-index: calc(var(--z-panel) + 1);
+  pointer-events: none;
+  transform-origin: 0 0;
+  border: var(--hairline) solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  will-change: transform, opacity;
+}
+@media (prefers-reduced-motion: reduce) {
+  .shell,
+  .panel,
+  .panel-body {
+    transition: none;
+  }
+}

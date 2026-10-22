@@ -42,7 +42,7 @@ test.describe("machines", () => {
       await expect(block.locator(".machine-last")).toHaveText(/(online|quiet) · last event/);
       await expect(block.locator(".machine-harness").first()).toBeVisible();
       await expect(block.locator(".machine-ver").first()).toHaveText(/^\d+\.\d+\.\d+$/);
-      await expect(block.locator(".unpaired")).toHaveText("not paired");
+      await expect(block.locator(".unpaired")).toHaveText("Not paired");
       await expect(block.locator(".machine-ctl-row code")).toHaveText(`sessionpipe control pair ${lan}`);
     }
     const versions = await page.locator(".machine-ver").allInnerTexts();

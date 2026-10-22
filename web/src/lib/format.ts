@@ -179,6 +179,16 @@ function span(from: string, to: string): string {
   return a.toDateString() === b.toDateString() ? `${day(a)} ${hm(a)} → ${hm(b)}` : `${day(a)} → ${day(b)}`;
 }
 
+/** An attention's message without the tool name it sometimes starts with ("Bash rm -rf
+ *  …"), for places that already show the tool beside it. */
+export function attentionMessage(a: { message?: string; tool?: string }): string | undefined {
+  const m = a.message;
+  if (!m || !a.tool) return m;
+  const t = a.tool.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rest = m.replace(new RegExp(`^${t}(:\\s*|\\s+)`), "");
+  return rest || m;
+}
+
 export function oneLine(s: string, max: number): string {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;

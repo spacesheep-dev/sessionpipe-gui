@@ -3,9 +3,11 @@
 // page is open), each with its six digits. This browser, when the machine trusts its
 // passkey, vouches for one with Approve: a signed `key.add` (session sessionpipe:keys)
 // carrying the device's key goes through the same path as any command (CONTROL.md §2);
-// the machine's `delivered` ack settles the request on the server. Shown on /machines and,
-// as a bar, at the top of a session page.
+// the machine's `delivered` ack settles the request on the server. Shown on /machines and
+// /phone: a row each, the digits large, Reject and Approve (and the same in its menu).
+import type { MachineSummary } from "@shared/api";
 import { useEffect, useState } from "react";
+import { useContextMenu } from "../components/ContextMenu";
 import { Select } from "../components/Select";
 import { useMachines } from "../data/hooks";
 import { ms, useNow } from "../lib/time";
@@ -14,9 +16,12 @@ import { sendCommand } from "./command";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
 import { insecureHint, passkeysAvailable } from "./webauthn";
 import { outcomeWords, sendErrorWords } from "./words";
-import "./control.css";
+import "./pairing.css";
 
 const POLL_MS = 3000;
+
+/** A hint from control/webauthn.ts as a sentence: its first letter upper-cased. */
+export const sentence = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 
 export function usePendingDevices(): DeviceRequest[] {
   const [list, setList] = useState<DeviceRequest[]>([]);
@@ -115,7 +120,7 @@ export function PendingDevices({ bar = false }: { bar?: boolean }) {
       className={`pending pending-devices ${bar ? "pending--bar" : ""}`}
       aria-label="Devices asking to be trusted"
     >
-      <h2>
+      <h2 className="section-label">
         {open.length === 0
           ? "A device was added"
           : open.length === 1
@@ -123,76 +128,134 @@ export function PendingDevices({ bar = false }: { bar?: boolean }) {
             : `${open.length} devices ask to be trusted`}
       </h2>
       <ul className="pending-list">
-        {open.map((d) => {
-          const left = Math.max(0, Math.ceil((ms(d.expiresAt) - now) / 1000));
-          const m = machineFor(d);
-          const err = errors[d.requestId];
-          return (
-            <li key={d.requestId} className="pending-item" data-device={d.requestId}>
-              <span className="pending-dot" aria-hidden="true" />
-              <span className="pending-name">
-                {d.name}
-                {d.name !== d.device && <span className="pending-meta"> · {d.device}</span>}
-              </span>
-              <span className="pending-digits num" title="The digits the device shows">
-                {d.check.slice(0, 3)} {d.check.slice(3)}
-              </span>
-              <span className="pending-meta">
-                from {d.fromIp} · {Math.floor(left / 60)} m {String(left % 60).padStart(2, "0")} s left
-              </span>
-              <span className="pending-actions">
-                {paired.length > 1 && (
-                  <Select<string>
-                    size="sm"
-                    align="end"
-                    aria-label="Machine to trust it on"
-                    value={m?.control?.machineId ?? ""}
-                    onChange={(id) => setTarget((t) => ({ ...t, [d.requestId]: id }))}
-                    disabled={!!busy}
-                    options={paired.map((p) => ({ value: p.control!.machineId, label: p.name }))}
-                  />
-                )}
-                <button
-                  type="button"
-                  className="btn btn--primary btn--sm"
-                  disabled={!secure || !rp || !m || !!busy}
-                  title={!secure ? insecureHint() : !m ? "pair a machine first" : `trust it on ${m.name}`}
-                  onClick={() => void approve(d)}
-                >
-                  {busy === d.requestId ? (tap ? "Confirm with your passkey…" : "Sending…") : "Approve"}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--ghost btn--sm"
-                  disabled={!!busy}
-                  onClick={() => void reject(d)}
-                >
-                  Reject
-                </button>
-              </span>
-              {!secure && <span className="pending-meta pending-wide">{insecureHint()}</span>}
-              {!m && secure && <span className="pending-meta pending-wide">pair a machine before adding devices</span>}
-              {err ? (
-                <span className="pending-meta pending-wide pending-err" role="alert">
-                  {err}
-                </span>
-              ) : null}
-            </li>
-          );
-        })}
+        {open.map((d) => (
+          <DeviceRow
+            key={d.requestId}
+            d={d}
+            left={Math.max(0, Math.ceil((ms(d.expiresAt) - now) / 1000))}
+            m={machineFor(d)}
+            paired={paired}
+            secure={secure}
+            rp={rp}
+            busy={busy}
+            tap={tap}
+            err={errors[d.requestId]}
+            onTarget={(id) => setTarget((t) => ({ ...t, [d.requestId]: id }))}
+            onApprove={() => void approve(d)}
+            onReject={() => void reject(d)}
+          />
+        ))}
         {settled.map((a) => (
           <li key={a.requestId} className="pending-item pending-item--settled" data-device={a.requestId}>
-            <span className="pending-name">{a.name}</span>
-            <span className="pending-meta" data-outcome={a.msg?.outcome ?? "queued"}>
-              {a.msg?.outcome === "delivered"
-                ? `added · ${a.machine} now answers to it; the device can answer and send`
-                : a.msg
-                  ? outcomeWords(a.msg, { machine: a.machine })
-                  : `queued · waiting for ${a.machine} to take it`}
+            <span className="pending-who">
+              <span className="pending-name">{a.name}</span>
+              <span className="pending-meta" data-outcome={a.msg?.outcome ?? "queued"}>
+                {a.msg?.outcome === "delivered"
+                  ? `Added: ${a.machine} now answers to it; the device can answer and send`
+                  : a.msg
+                    ? outcomeWords(a.msg, { machine: a.machine })
+                    : `Queued: waiting for ${a.machine} to take it`}
+              </span>
             </span>
           </li>
         ))}
       </ul>
     </section>
+  );
+}
+
+/** One device asking: who it is on two lines, its six digits large (the one earned
+ *  prominent thing in the app), when the request expires, Reject and Approve. Its menu
+ *  offers the same two. */
+function DeviceRow({
+  d,
+  left,
+  m,
+  paired,
+  secure,
+  rp,
+  busy,
+  tap,
+  err,
+  onTarget,
+  onApprove,
+  onReject,
+}: {
+  d: DeviceRequest;
+  left: number;
+  m: MachineSummary | undefined;
+  paired: MachineSummary[];
+  secure: boolean;
+  rp: string | null;
+  busy: string | null;
+  tap: boolean;
+  err: string | undefined;
+  onTarget: (id: string) => void;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const why = !secure
+    ? sentence(insecureHint())
+    : !rp
+      ? "Reading the receiver…"
+      : !m
+        ? "Pair a machine before adding devices."
+        : null;
+  const menu = useContextMenu(
+    () => [
+      { label: "Approve", run: onApprove, disabled: why ?? (busy ? "Busy" : undefined) },
+      { sep: true },
+      { label: "Reject", danger: true, run: onReject, disabled: busy ? "Busy" : undefined },
+    ],
+    { title: () => d.name, subtitle: () => `${d.check.slice(0, 3)} ${d.check.slice(3)}` },
+  );
+  return (
+    <li className="pending-item pending-item--device" data-device={d.requestId} {...menu}>
+      <span className="pending-who">
+        <span className="pending-name">{d.name}</span>
+        <span className="pending-meta">
+          {d.name !== d.device ? `${d.device} · ` : ""}from {d.fromIp}
+        </span>
+      </span>
+      <span className="pending-check">
+        <span className="pending-digits num" title="The digits the device shows">
+          {d.check.slice(0, 3)} {d.check.slice(3)}
+        </span>
+        <span className="pending-meta pending-expires num">
+          Expires in {Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}
+        </span>
+      </span>
+      <span className="pending-actions">
+        {paired.length > 1 && (
+          <Select<string>
+            size="sm"
+            align="end"
+            aria-label="Machine to trust it on"
+            value={m?.control?.machineId ?? ""}
+            onChange={onTarget}
+            disabled={!!busy}
+            options={paired.map((p) => ({ value: p.control!.machineId, label: p.name }))}
+          />
+        )}
+        <button type="button" className="btn" disabled={!!busy} onClick={onReject}>
+          Reject
+        </button>
+        <button
+          type="button"
+          className="btn btn--primary"
+          disabled={!!why || !!busy}
+          title={why ?? (m ? `Trust it on ${m.name}` : undefined)}
+          onClick={onApprove}
+        >
+          {busy === d.requestId ? (tap ? "Confirm with your passkey…" : "Sending…") : "Approve"}
+        </button>
+      </span>
+      {why && <span className="pending-meta pending-wide">{why}</span>}
+      {err ? (
+        <span className="pending-meta pending-wide pending-err" role="alert">
+          {err}
+        </span>
+      ) : null}
+    </li>
   );
 }

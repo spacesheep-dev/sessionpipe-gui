@@ -1,0 +1,654 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- the grouped form ---------- */
+/* The one form grammar of the document pages (Connect, Machines, Setup, Your phone,
+   Views, pairing) and the Settings window: a quiet section label, then rows; each row is
+   a label (with at most one caption line under it) at the left and its value or control
+   on one trailing edge, hairlines between the rows. A desktop page draws no box; on a
+   phone the rows sit in an inset group on the grouped ground, as iOS Settings does. */
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.form-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+  padding-bottom: 4px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.form-head .caption {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* The group's one line of explanation, under its rows. */
+.form-group > .caption {
+  margin-top: 8px;
+  max-width: 64ch;
+}
+.form-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.form-list > * + * {
+  border-top: var(--hairline) solid var(--line);
+}
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  min-height: var(--row-lg);
+  padding: var(--row-pad) 0;
+}
+.form-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.form-label {
+  color: var(--fg);
+  font-size: var(--text-md);
+  line-height: var(--lh-tight);
+}
+.form-caption {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+}
+.form-value {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--fg-2);
+  font-size: var(--text-md);
+  text-align: right;
+}
+.form-row[hidden] {
+  display: none;
+}
+/* A row whose content sits under its label: a well, a short form. */
+.form-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+/* Get Info: a key column in the meta tier, the value in the ink, left-aligned. */
+.form-key {
+  flex: none;
+  width: 136px;
+  align-self: baseline;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.form-kv {
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: baseline;
+  color: var(--fg);
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+.form-kv .mono,
+.form-kv code {
+  font-size: var(--text-sm);
+}
+.form-row--kv {
+  align-items: baseline;
+}
+.form-row--kv > .form-value {
+  align-self: center;
+}
+
+/* A literal line in a well with its copy icon inside, at the right. */
+.well-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 2px 2px 12px;
+  border-radius: var(--radius);
+  background: var(--bg-3);
+}
+.well-row > pre,
+.well-row > code {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 5px 0;
+  background: none;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.well-row > pre code {
+  font: inherit;
+}
+.well-row .icon-btn {
+  margin-top: 0;
+}
+/* An address as a row's value: mono, one line, an ellipsis, the copy icon after it. */
+.url-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+@media (max-width: 839px) {
+  /* The document pages read as iOS grouped lists: the page on the grouped ground, each
+     group an inset of cells, separators inset to the text. */
+  body:has(.page--grouped) {
+    background: var(--grouped-ground);
+  }
+  .page--grouped > .bar {
+    background: var(--grouped-ground);
+  }
+  /* A text button in a navigation bar, as iOS draws one: the words, no bezel. */
+  .page--grouped > .bar .bar-actions .btn {
+    border-color: transparent;
+    background: none;
+    box-shadow: none;
+    color: var(--fg);
+    font-size: max(1rem, 16px);
+    font-weight: 400;
+    padding: 0 10px;
+  }
+  .form-head {
+    padding: 0 16px 6px;
+  }
+  .form-group > .caption {
+    padding: 0 16px;
+  }
+  .form-list {
+    padding-left: 16px;
+    border-radius: var(--radius-pop);
+    background: var(--bg-2);
+    overflow: hidden;
+  }
+  .form-row {
+    min-height: 44px;
+    padding-right: 16px;
+  }
+  .form-row--kv {
+    flex-wrap: wrap;
+    gap: 2px 12px;
+  }
+  .form-key {
+    width: 112px;
+  }
+  .form-row--stack .well-row {
+    background: var(--bg-3);
+  }
+  /* A well straight on the grouped ground reads as a cell. */
+  .page--grouped > .form-group > .well-row {
+    background: var(--bg-2);
+  }
+}
+
+/* ---------- settings window (/settings) ---------- */
+
+/* A fixed-size window over a real scrim: the section list on the chrome ground at the
+   left, the pane at the right under a 44 px title bar with the section's name and the
+   close button. The pane is the macOS grouped form: inset groups on the grouped ground.
+   On a phone it is a full-screen sheet with the iOS Settings stack. */
+.settings-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.settings-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+  cursor: default;
+  animation: fade-in var(--dur) var(--ease-out) both;
+}
+.settings {
+  position: relative;
+  width: min(800px, 100%);
+  height: min(600px, calc(100dvh - 32px));
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  border-radius: var(--radius-pop);
+  border: var(--hairline) solid var(--line);
+  background: var(--grouped-ground);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  animation: rise var(--dur) var(--ease-out) both;
+}
+.settings:focus,
+.settings:focus-visible {
+  outline: none;
+}
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 8px;
+  border-right: var(--hairline) solid var(--line);
+  background: var(--chrome);
+  overflow: auto;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.settings-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.settings-tab {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--side-row);
+  padding: 0 8px;
+  border-radius: var(--radius);
+  text-align: left;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.settings-tab-glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--fg-2);
+}
+.settings-tab-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (hover: hover) {
+  .settings-tab:hover {
+    background: var(--hover);
+  }
+}
+.settings-tab:active {
+  background: var(--press);
+  transition: none;
+}
+.settings-tab[aria-selected="true"] {
+  background: var(--sel);
+}
+.settings-tab:focus-visible {
+  outline-offset: -2px;
+}
+/* The phone's disclosure chevron; the desktop list has none. */
+.settings-tab-chev {
+  display: none;
+}
+
+.settings-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.settings-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 8px 0 24px;
+  border-bottom: var(--hairline) solid var(--line);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.settings-bar-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.settings-back,
+.settings-done {
+  display: none;
+}
+.settings-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px 24px 32px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.settings-pane:focus-visible {
+  outline-offset: -2px;
+}
+
+/* An inset group: --bg-2 cells, hairlines inset to the text, one radius. */
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.settings-group-label {
+  padding: 0 12px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.settings-cells {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-pop);
+  border: var(--hairline) solid var(--line);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+.settings-group-note {
+  padding: 0 12px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+}
+.settings-group-note code,
+.settings-hint code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-2);
+}
+.settings-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  padding: 8px 12px;
+}
+.settings-row + .settings-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 0;
+  height: var(--hairline);
+  background: var(--line);
+}
+.settings-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.settings-label {
+  color: var(--fg);
+  font-size: var(--text-md);
+  line-height: var(--lh-tight);
+}
+.settings-row-ctl {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 60%;
+}
+.settings-hint {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+  overflow-wrap: anywhere;
+}
+.settings-hint a {
+  color: var(--fg-2);
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.settings-select {
+  font-weight: 500;
+}
+.settings-value {
+  color: var(--fg-2);
+  font-size: var(--text-md);
+  white-space: nowrap;
+}
+.settings-value small {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.settings-path {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.settings-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* The tiers: one row each, the number and name, what it carries as the caption. */
+.settings-tier-n {
+  display: inline-block;
+  min-width: 1.5em;
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+}
+/* A row that is a link out: the label in the ink, a trailing arrow in the meta tier. */
+.settings-link {
+  color: var(--fg);
+}
+.settings-link-mark {
+  color: var(--fg-3);
+}
+@media (hover: hover) {
+  a.settings-row:hover {
+    background: var(--hover);
+  }
+}
+a.settings-row:active {
+  background: var(--press);
+}
+a.settings-row:focus-visible {
+  outline-offset: -2px;
+}
+
+/* ----- the phone: a full-screen sheet and a navigation stack ----- */
+@media (max-width: 839px) {
+  .settings-wrap {
+    padding: 0;
+    place-items: stretch;
+  }
+  .settings {
+    width: 100%;
+    height: 100dvh;
+    grid-template-columns: minmax(0, 1fr);
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    animation: sheet-up var(--dur-slow) var(--ease-out) both;
+  }
+  .settings[data-view="list"] .settings-main {
+    display: none;
+  }
+  .settings[data-view="pane"] .settings-nav {
+    display: none;
+  }
+  .settings-nav {
+    padding: 0 16px calc(24px + env(safe-area-inset-bottom));
+    border-right: 0;
+    background: var(--grouped-ground);
+  }
+  .settings-nav-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    height: 44px;
+    margin: 0 -8px;
+    padding-top: env(safe-area-inset-top);
+    box-sizing: content-box;
+  }
+  .settings-nav-large {
+    padding: 4px 0 16px;
+    color: var(--fg);
+    font-size: calc(var(--text-xl) * 1.55);
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+  }
+  .settings-tabs {
+    gap: 0;
+    border-radius: var(--radius-pop);
+    background: var(--bg-2);
+    overflow: hidden;
+  }
+  .settings-tab {
+    position: relative;
+    gap: 12px;
+    min-height: 44px;
+    padding: 0 14px 0 16px;
+    border-radius: 0;
+    font-size: max(1rem, 16px);
+    font-weight: 400;
+  }
+  .settings-tab + .settings-tab::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 50px;
+    right: 0;
+    height: var(--hairline);
+    background: var(--line);
+  }
+  .settings-tab[aria-selected="true"] {
+    background: none;
+  }
+  .settings-tab-glyph,
+  .settings-tab-glyph svg {
+    width: 22px;
+    height: 22px;
+  }
+  .settings-tab-chev {
+    display: block;
+    flex: none;
+    width: 8px;
+    height: 12px;
+    background: var(--fg-4);
+    -webkit-mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 12'%3E%3Cpath d='M1.5 1.5 6 6l-4.5 4.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+      center / contain no-repeat;
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 12'%3E%3Cpath d='M1.5 1.5 6 6l-4.5 4.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+      center / contain no-repeat;
+  }
+  .settings-bar {
+    height: 44px;
+    padding: env(safe-area-inset-top) 4px 0;
+    box-sizing: content-box;
+    border-bottom: 0;
+    position: relative;
+  }
+  .settings-bar-title {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    max-width: 56%;
+    height: 44px;
+    line-height: 44px;
+    transform: translateX(-50%);
+    text-align: center;
+  }
+  .settings-x {
+    display: none;
+  }
+  .settings-back,
+  .settings-done {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    min-height: 44px;
+    padding: 0 8px;
+    color: var(--fg);
+    font-size: max(1rem, 16px);
+  }
+  .settings-done {
+    margin-left: auto;
+    font-weight: 600;
+  }
+  .settings-back:active,
+  .settings-done:active {
+    opacity: 0.6;
+  }
+  .settings-pane {
+    gap: 24px;
+    padding: 8px 16px calc(32px + env(safe-area-inset-bottom));
+  }
+  .settings-cells {
+    border: 0;
+  }
+  .settings-group-label,
+  .settings-group-note {
+    padding: 0 16px;
+  }
+  .settings-row {
+    flex-wrap: wrap;
+    padding: 10px 16px;
+  }
+  .settings-row + .settings-row::before {
+    left: 16px;
+  }
+  .settings-row-text {
+    flex: 1 1 160px;
+  }
+  .settings-row-ctl {
+    max-width: 100%;
+  }
+}
+@media (min-width: 840px) {
+  .settings-nav-bar,
+  .settings-nav-large {
+    display: none;
+  }
+}

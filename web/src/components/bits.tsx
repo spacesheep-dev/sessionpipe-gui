@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-// Small shared pieces: state marks, harness monograms, chips, ticking times, spinner,
-// copy button, redaction highlighting, search input, segmented control, chip select,
-// slider, switch. The select itself lives in Select.tsx.
+// Small shared pieces: the status glyph, harness monograms, chips, ticking times,
+// spinner, copy buttons (text and icon), redaction highlighting, the toolbar search,
+// segmented control, the toolbar pop-up (chip select), slider, switch. The select itself
+// lives in Select.tsx.
 import type { SessionState, Tier } from "@shared/api";
 import { type CSSProperties, type ReactNode, useEffect, useId, useState } from "react";
+import { copyText } from "../lib/clipboard";
 import { harnessMark, STATE_HINT, STATE_LABEL } from "../lib/format";
 import { HARNESS_ICONS } from "../lib/harnessIcons";
 import { ago, durCoarse, ms, since, tickFor, useNow } from "../lib/time";
 import { Select } from "./Select";
 
-/** `decorative` when the state's word is already visible beside it. */
+/** The status glyph (styles/shared.css `.dot`): the one signal a row shows for its state.
+ *  `decorative` when the state's word is already said beside it (visibly or sr-only). */
 export function StateDot({
   state,
-  size = 6,
+  size = 10,
   decorative = false,
 }: {
   state: SessionState;
@@ -173,6 +176,48 @@ export function CopyButton({ text, label = "Copy", small = false }: { text: stri
   );
 }
 
+/** Copy as a 28 px icon button (in a row, beside a well): the glyph turns into a check
+ *  for a moment and a live region says "Copied". */
+export function CopyIconButton({ text, label = "Copy" }: { text: string; label?: string }) {
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => setDone(false), 1200);
+    return () => clearTimeout(t);
+  }, [done]);
+  return (
+    <button
+      type="button"
+      className={`icon-btn ${done ? "icon-btn--done" : ""}`}
+      aria-label={label}
+      title={label}
+      onClick={() => void copyText(text).then(() => setDone(true))}
+    >
+      <svg
+        viewBox="0 0 16 16"
+        width="15"
+        height="15"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        aria-hidden="true"
+      >
+        {done ? (
+          <path d="M3.5 8.5 6.5 11.5 12.5 4.5" strokeLinecap="round" strokeLinejoin="round" />
+        ) : (
+          <>
+            <rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.5" />
+            <path d="M10.5 3.5V3A1.5 1.5 0 0 0 9 1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5" />
+          </>
+        )}
+      </svg>
+      <span className="sr-only" aria-live="polite">
+        {done ? "Copied" : ""}
+      </span>
+    </button>
+  );
+}
+
 const REDACTED = /(\[redacted\])/gi;
 
 /** Text with every `[redacted]` placeholder highlighted. */
@@ -195,14 +240,18 @@ export function Redacted({ text }: { text: string }) {
   );
 }
 
+/** The toolbar search field. The placeholder stays short ("Search"); `label` is the
+ *  accessible name when it should say more ("Search events"). */
 export function SearchInput({
   value,
   onChange,
   placeholder = "Search",
+  label,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  label?: string;
 }) {
   return (
     <label className="search">
@@ -216,7 +265,7 @@ export function SearchInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        aria-label={placeholder}
+        aria-label={label ?? placeholder}
         autoComplete="off"
         enterKeyHint="search"
       />

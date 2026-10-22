@@ -1,0 +1,41 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- notifications settings (components/NotificationsSettings.tsx) ---------- */
+
+/* The Settings window's grouped form (settings.css) with this section's own pieces: the
+   volume slider and its percentage, a sound's pop-up beside its Test, and the quiet
+   rows while sounds are off. */
+.ntf {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.ntf-pct {
+  min-width: 4ch;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  text-align: right;
+  white-space: nowrap;
+}
+.ntf-slider {
+  width: 140px;
+}
+.ntf-select {
+  min-width: 148px;
+}
+.ntf[data-sounds="off"] .ntf-row[data-kind] .settings-row-text {
+  opacity: 0.6;
+}
+.ntf-err {
+  color: var(--err);
+}
+.ntf-file {
+  max-width: 32ch;
+}
+@media (max-width: 839px) {
+  .ntf {
+    gap: 24px;
+  }
+  .ntf-slider {
+    width: 160px;
+  }
+}

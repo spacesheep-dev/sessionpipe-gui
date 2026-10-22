@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-// The control affordance on a session: Ask / Allow / Deny / Cancel. Disabled with a hint
-// until the machine paired and `onSend` is wired (web/src/control/SessionControl.tsx
-// signs and sends). Keep this component self-contained: everything it needs comes
-// through props.
+// The control affordance on a session, docked at the bottom of the view: an open
+// permission as one action bar (the question, Deny and Allow), then the composer, one
+// field that grows to six lines with attach, stop and send inside it, then one quiet
+// line of context under it. Disabled with its reason until the machine paired and
+// `onSend` is wired (web/src/control/SessionControl.tsx signs and sends). Keep this
+// component self-contained: everything it needs comes through props.
 import type { Attention, MachineControl, SessionSummary, Suggestion } from "@shared/api";
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
 import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachments";
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
+import { attentionMessage } from "../lib/format";
+import { Spinner, StateDot } from "./bits";
 
 export type ControlAction =
   | { kind: "prompt"; text: string }
@@ -38,14 +42,32 @@ export interface ControlStripProps {
   suggestions?: readonly Suggestion[];
   /** The textarea's placeholder; "Ask for the next turn…" by default. */
   placeholder?: string;
-  /** Simple mode's composer: rounded, a send glyph, the hint folded (SessionControl writes it above). */
+  /** Simple mode's composer: the hint folded unless something is wrong. */
   chat?: boolean;
+  /** More of the context line under the field (SessionControl's routing and passkey words). */
+  foot?: ReactNode;
 }
 
 function SendIcon() {
   return (
-    <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor" aria-hidden="true">
-      <path d="M2.5 3.2 18 10 2.5 16.8l1.9-5.6L12 10l-7.6-1.2z" />
+    <svg
+      viewBox="0 0 20 20"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      aria-hidden="true"
+    >
+      <path d="M10 16V4.5M5 9.5l5-5 5 5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+      <rect x="5.5" y="5.5" width="9" height="9" rx="1.5" fill="currentColor" />
     </svg>
   );
 }
@@ -61,6 +83,41 @@ export const preHello = (a: Attention, control: MachineControl | undefined): boo
  *  it (`notif-…`, nobody can answer). An older server leaves the field unset. */
 export const answerable = (a: Attention): boolean => a.answerable ?? !a.attentionId.startsWith("notif-");
 
+/** A shell tool, whose message is the command it wants to run. */
+const SHELL = /^(bash|shell|sh|zsh|powershell|run_shell_command|exec|terminal)$/i;
+
+/** "Allow Bash to run `npm run deploy`?", or "Allow Write?" with its message after it. */
+function Question({ a }: { a: Attention }) {
+  if (!a.tool)
+    return (
+      <>
+        Allow this?<span className="ctl-answer-msg"> {a.message ?? "a permission request"}</span>
+      </>
+    );
+  const msg = attentionMessage(a);
+  if (msg && SHELL.test(a.tool) && !/\b(permission|wants|needs)\b/i.test(msg))
+    return (
+      <>
+        Allow <span className="ctl-tool">{a.tool}</span> to run <code className="ctl-cmd">{msg}</code>?
+      </>
+    );
+  return (
+    <>
+      Allow <span className="ctl-tool">{a.tool}</span>?{msg ? <span className="ctl-answer-msg"> {msg}</span> : null}
+    </>
+  );
+}
+
+/** The textarea grows with its text up to six lines, then scrolls (CSS caps it). */
+function useGrow(ref: RefObject<HTMLTextAreaElement | null>, value: string) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [ref, value]);
+}
+
 export function ControlStrip({
   session,
   control,
@@ -75,9 +132,12 @@ export function ControlStrip({
   suggestions,
   placeholder = "Ask for the next turn…",
   chat = false,
+  foot,
 }: ControlStripProps) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
+  useGrow(field, text);
   const paired = !!control;
   // The wrong address (control/origin.ts): the hint is the one line naming where sending
   // works, as a link to this very page there; never an offer to add a device.
@@ -93,12 +153,23 @@ export function ControlStrip({
       : !onSend
         ? "sending arrives in the next release"
         : control?.online
-          ? `${session.machine} is listening · Enter sends, Shift+Enter for a new line`
+          ? `${session.machine} is listening`
           : `${session.machine} is offline; the message waits`;
+  // Why Allow / Deny are off, said on their own bar (the line under the field says the rest).
+  const offWhy = enabled
+    ? null
+    : !paired
+      ? `pair ${session.machine ?? "this machine"} to answer here`
+      : blocked
+        ? wrong
+          ? "answer it where sending works"
+          : "this page cannot sign an answer"
+        : "sending arrives in the next release";
   const permissions = (attentions ?? (attention ? [attention] : [])).filter((a) => a.kind === "permission");
   // The answerable prompt(s) only; a notification twin adds nothing. With no answerable one,
   // the notification is shown as what it is: a prompt waiting in the terminal.
   const open = permissions.some(answerable) ? permissions.filter(answerable) : permissions;
+  const canSend = enabled && !busy && !att.uploading && (!!text.trim() || att.items.length > 0);
 
   const run = (id: string, action: ControlAction, after?: () => void) => {
     if (!enabled || busy) return;
@@ -143,6 +214,16 @@ export function ControlStrip({
         const early = !terminal && preHello(a, control);
         const off = !enabled || !!busy || status === "sent" || early;
         const suggested = suggestions?.find((s) => s.attentionId === a.attentionId);
+        const shut = terminal || status === "closed";
+        const why = terminal
+          ? "waiting in the terminal"
+          : status === "closed"
+            ? "answered in the terminal, or expired"
+            : early
+              ? "raised before this machine was paired; answer it in its terminal"
+              : status === "sent"
+                ? `answer sent · waiting for ${session.machine ?? "the machine"}`
+                : offWhy;
         return (
           <div
             className="ctl-answer"
@@ -150,34 +231,42 @@ export function ControlStrip({
             data-attention={a.attentionId}
             data-answer={terminal ? "terminal" : (status ?? (early ? "pre-hello" : "open"))}
           >
-            <span className="ctl-q">
-              Allow {a.tool ? <code>{a.tool}</code> : "this"}?
-              {a.message ? (
-                <span className="ctl-answer-msg"> {a.message}</span>
-              ) : a.tool ? null : (
-                <span className="ctl-answer-msg"> a permission request</span>
-              )}
-            </span>
-            {terminal ? (
-              <span className="ctl-answer-note">waiting in the terminal</span>
-            ) : status === "closed" ? (
-              <span className="ctl-answer-note">answered in the terminal, or expired</span>
-            ) : (
-              <>
+            <p className="ctl-q">
+              <StateDot state="needs_you" size={8} decorative />
+              <span className="ctl-q-text">
+                <Question a={a} />
+              </span>
+            </p>
+            {why ? (
+              <span className="ctl-answer-note">{why}</span>
+            ) : suggested && !shut ? (
+              <span
+                className="ctl-suggestion"
+                data-suggestion={suggested.decision}
+                title={`Suggested by the ${suggested.plugin} plugin${suggested.note ? ` · ${suggested.note}` : ""}. Nothing is sent until you confirm with your passkey.`}
+              >
+                <span className="ctl-suggestion-text">
+                  {suggested.decision === "allow" ? "Allow" : "Deny"} suggested by {suggested.by}
+                </span>
                 <button
                   type="button"
-                  className="btn btn--allow"
+                  className="btn btn--sm btn--ghost ctl-suggestion-confirm"
                   disabled={off}
                   onClick={() =>
-                    run(`allow:${a.attentionId}`, {
+                    run(`${suggested.decision}:${a.attentionId}`, {
                       kind: "permission.answer",
                       attentionId: a.attentionId,
-                      allow: true,
+                      allow: suggested.decision === "allow",
+                      ...(suggested.note ? { note: suggested.note } : {}),
                     })
                   }
                 >
-                  {busy === `allow:${a.attentionId}` ? "Sending…" : "Allow"}
+                  Confirm
                 </button>
+              </span>
+            ) : null}
+            {!shut && (
+              <span className="ctl-answer-btns">
                 <button
                   type="button"
                   className="btn btn--deny"
@@ -192,40 +281,21 @@ export function ControlStrip({
                 >
                   {busy === `deny:${a.attentionId}` ? "Sending…" : "Deny"}
                 </button>
-                {early ? (
-                  <span className="ctl-answer-note">
-                    raised before this machine was paired; answer it in its terminal
-                  </span>
-                ) : status === "sent" ? (
-                  <span className="ctl-answer-note">answer sent · waiting for {session.machine ?? "the machine"}</span>
-                ) : suggested ? (
-                  <span
-                    className="ctl-suggestion"
-                    data-suggestion={suggested.decision}
-                    title={`Suggested by the ${suggested.plugin} plugin${suggested.note ? ` · ${suggested.note}` : ""}. Nothing is sent until you confirm with your passkey.`}
-                  >
-                    <span className="ctl-suggestion-text">
-                      {suggested.decision === "allow" ? "Allow" : "Deny"} suggested by {suggested.by}
-                    </span>
-                    <span aria-hidden="true"> · </span>
-                    <button
-                      type="button"
-                      className="btn btn--sm ctl-suggestion-confirm"
-                      disabled={off}
-                      onClick={() =>
-                        run(`${suggested.decision}:${a.attentionId}`, {
-                          kind: "permission.answer",
-                          attentionId: a.attentionId,
-                          allow: suggested.decision === "allow",
-                          ...(suggested.note ? { note: suggested.note } : {}),
-                        })
-                      }
-                    >
-                      Confirm
-                    </button>
-                  </span>
-                ) : null}
-              </>
+                <button
+                  type="button"
+                  className="btn btn--allow"
+                  disabled={off}
+                  onClick={() =>
+                    run(`allow:${a.attentionId}`, {
+                      kind: "permission.answer",
+                      attentionId: a.attentionId,
+                      allow: true,
+                    })
+                  }
+                >
+                  {busy === `allow:${a.attentionId}` ? "Sending…" : "Allow"}
+                </button>
+              </span>
             )}
           </div>
         );
@@ -234,6 +304,7 @@ export function ControlStrip({
       <div className="ctl-ask">
         <AttachButton att={att} disabled={!enabled || !!busy} />
         <textarea
+          ref={field}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKey}
@@ -243,45 +314,52 @@ export function ControlStrip({
           rows={1}
           enterKeyHint="send"
         />
-        <button
-          type="submit"
-          className={`btn ${enabled ? "btn--primary" : "btn--ghost"}`}
-          disabled={!enabled || !!busy || att.uploading || (!text.trim() && att.items.length === 0)}
-        >
-          {busy === "prompt" ? "Sending…" : chat ? <SendIcon /> : "Send"}
-          {chat && busy !== "prompt" && <span className="sr-only">Send</span>}
-        </button>
         {working && (
           <button
             type="button"
-            className="btn btn--ghost ctl-cancel"
+            className="icon-btn ctl-cancel"
             disabled={!enabled || !!busy}
             onClick={() => run("cancel", { kind: "cancel" })}
+            aria-label="Cancel"
             title="Stop the running turn"
           >
-            {busy === "cancel" ? "Sending…" : "Cancel"}
+            {busy === "cancel" ? <Spinner label="Sending" /> : <StopIcon />}
           </button>
         )}
+        <button
+          type="submit"
+          className={`icon-btn ctl-send ${canSend ? "is-ready" : ""}`}
+          disabled={!canSend}
+          aria-label="Send"
+        >
+          {busy === "prompt" ? <Spinner label="Sending" /> : <SendIcon />}
+        </button>
       </div>
-      <p className="ctl-hint" data-wrong-origin={wrong ? "" : undefined}>
-        {wrong ? (
-          <>
-            Sending works from{" "}
-            <a className="ctl-origin-link" href={httpsHref ?? wrong}>
-              {wrong}
+      <p className="ctl-foot">
+        <span
+          className={`ctl-hint ${chat && !blocked ? "ctl-hint--quiet" : ""}`}
+          data-wrong-origin={wrong ? "" : undefined}
+        >
+          {wrong ? (
+            <>
+              Sending works from{" "}
+              <a className="ctl-origin-link" href={httpsHref ?? wrong}>
+                {wrong}
+              </a>
+              ; open it there.
+            </>
+          ) : (
+            hint
+          )}
+          {blocked && !wrong && httpsHref ? (
+            <a className="ctl-open-https" href={httpsHref}>
+              Open on {new URL(httpsHref).host}
             </a>
-            ; open it there.
-          </>
-        ) : (
-          hint
-        )}
-        {blocked && !wrong && httpsHref ? (
-          <a className="ctl-open-https" href={httpsHref}>
-            Open on {new URL(httpsHref).host} →
-          </a>
-        ) : null}
+          ) : null}
+        </span>
+        {foot}
+        {note && <span className={`ctl-note ctl-note--${noteKind}`}>{note}</span>}
       </p>
-      {note && <p className={`ctl-note ctl-note--${noteKind}`}>{note}</p>}
     </form>
   );
 }

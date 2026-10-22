@@ -11,7 +11,7 @@ export function Qr({
   url,
   src,
   alt,
-  size = 168,
+  size = 160,
 }: {
   url: string | null;
   src?: string | null;

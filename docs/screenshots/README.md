@@ -39,9 +39,8 @@ every shot gets (dark), and `--light a.png,b.png` names the shots taken in light
 (`--light` with no list takes none in light). The themes repo's shots are always dark.
 
 The themes repo's shots (`sessionpipe-gui-themes/docs/screenshots/`: `canvas.png`,
-`office-iso.png`, `office-figures.png`, `spacesheep-vivid-dark.png`, `ping-a-human.png`)
-are taken in the same run from the same servers. The skins' own `preview.png` files are
-rendered by `packages/skin-paper-serif/scripts/preview.mjs` in that repo, not here.
+`office-iso.png`, `office-figures.png`, `ping-a-human.png`) are taken in the same run from
+the same servers.
 
 ## What the script adds to the demo
 

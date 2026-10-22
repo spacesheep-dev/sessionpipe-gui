@@ -20,7 +20,7 @@ test.describe("review", () => {
     await expect(hits(page).first()).toBeVisible({ timeout: 30_000 });
     const mark = hits(page).first().locator("mark").first();
     await expect(mark).toHaveText(/webhook/i);
-    // The mark is a hairline underline, not a block of colour.
+    // The mark is the text's own ink at 600, not a block of colour.
     expect(await mark.evaluate((el) => getComputedStyle(el).backgroundColor)).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
     await expect(page.locator(".review-meta")).toHaveText(/\d+ hits? · [\d,]+ events looked at · [\d.]+ ms/);
 
@@ -45,7 +45,7 @@ test.describe("review", () => {
     await expect(repos.first()).toBeVisible({ timeout: 30_000 });
     const heads = await repos.locator("h2.group-head").allInnerTexts();
     expect(heads.length).toBeGreaterThan(0);
-    for (const h of heads) expect(h).toMatch(/^acme\/\S+\s+\d+ paths? · \d+ sessions?$/);
+    for (const h of heads) expect(h).toMatch(/^acme\/\S+\s+\d+ files?$/);
     const path = repos.first().locator("li.rv-path").first();
     await expect(path.locator("code.rv-file")).toHaveText(/\S+\.\w+$/);
     await expect(path.locator("button.rv-sess").first()).toBeVisible();
@@ -60,7 +60,7 @@ test.describe("review", () => {
   test("the day view shows today's sessions with totals per machine and in all", async ({ page }) => {
     await openPage(page, "/review");
     await page.getByRole("tab", { name: "Day" }).click();
-    await expect(page.locator(".rv-day")).toHaveText("today");
+    await expect(page.locator(".rv-day")).toHaveText("Today");
     const rows = page.locator("table.rv-table tbody tr");
     await expect(rows.first()).toBeVisible({ timeout: 30_000 });
     const n = await rows.count();
@@ -74,9 +74,9 @@ test.describe("review", () => {
     await expect(page.locator("table.rv-table tfoot tr.rv-all")).toHaveText(new RegExp(`all\\s*${n} sessions?`));
     // Yesterday is reachable and empty on a fresh demo state; Today comes back.
     await page.getByRole("button", { name: "Previous day" }).click();
-    await expect(page.locator(".rv-day")).toHaveText("yesterday");
+    await expect(page.locator(".rv-day")).toHaveText("Yesterday");
     await page.getByRole("button", { name: "Today" }).click();
-    await expect(page.locator(".rv-day")).toHaveText("today");
+    await expect(page.locator(".rv-day")).toHaveText("Today");
     await expect(rows.first()).toBeVisible();
   });
 });

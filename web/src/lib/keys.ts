@@ -9,7 +9,7 @@ import { applyRoving } from "./focus";
 import { back, navigate, usePath } from "./router";
 import { cycleLens } from "./settings";
 import { installDispatcher, isTyping, registerHandler, useShortcut } from "./shortcuts";
-import { useSkins } from "./skins";
+import { isPlain, useSkins } from "./skins";
 import { openSplit } from "./split";
 import { setSkin, setTheme, useSettings } from "./theme";
 
@@ -79,7 +79,8 @@ export function useGlobalKeys(onBack: () => void = () => back("/")) {
     setTheme(next);
   });
   useShortcut("colorTheme.next", () => {
-    const all = skins.filter((s) => !s.error);
+    // The skins the Display popover lists: Plain is the unlisted base, never a step.
+    const all = skins.filter((s) => !s.error && !isPlain(s));
     const i = all.findIndex((s) => s.id === settings.skin.id);
     const next = all[(i + 1) % all.length];
     if (next) setSkin(next);

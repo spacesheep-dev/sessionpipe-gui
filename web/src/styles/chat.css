@@ -1,0 +1,139 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- session as a chat (Simple mode) ---------- */
+
+/* Messages, plainly: the time centred over each exchange, the person's prompt as a
+   bubble on the right (a fill, no border), the assistant's reply as prose on the page
+   under its mark and name, the tools of a turn one quiet disclosure line whose chevron
+   hangs in the gutter. No boxes around replies, no stripes. */
+.timeline--chat {
+  gap: 32px;
+}
+.turn--chat {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.chat-you {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.chat-time {
+  align-self: center;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.chat-bubble {
+  max-width: 70%;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: calc(var(--radius) + 6px);
+  background: var(--bg-3);
+  color: var(--fg);
+  font-size: var(--text-md);
+  line-height: var(--lh);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-bubble--hidden {
+  background: none;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.chat-ai {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.chat-ai > * {
+  max-width: 100%;
+}
+.chat-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.chat-card {
+  align-self: stretch;
+  color: var(--fg);
+}
+.chat-card .cut {
+  margin-top: 8px;
+}
+/* The tools of a turn: "Ran 4 tools", the usual rows when opened. */
+.chat-tools {
+  align-self: stretch;
+}
+.chat-tools-sum {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  margin-left: -22px;
+  padding: 0 8px 0 4px;
+  border-radius: var(--radius);
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  list-style: none;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.chat-tools-sum::-webkit-details-marker {
+  display: none;
+}
+.chat-tools-sum .chev {
+  flex: none;
+  color: var(--fg-3);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.chat-tools[open] > .chat-tools-sum .chev {
+  transform: rotate(90deg);
+}
+@media (hover: hover) {
+  .chat-tools-sum:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+}
+.chat-tools-sum:active {
+  background: var(--press);
+  transition: none;
+}
+.chat-tools-sum .is-err {
+  color: var(--err);
+}
+.chat-tools > .turn-items {
+  margin-top: 4px;
+}
+.chat-note,
+.chat-working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.chat-err {
+  margin: 0;
+  color: var(--err);
+  font-size: var(--text-sm);
+}
+@media (max-width: 839px) {
+  .chat-bubble {
+    max-width: 85%;
+  }
+  .chat-tools-sum {
+    margin-left: -4px;
+  }
+}

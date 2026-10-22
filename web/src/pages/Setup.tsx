@@ -4,11 +4,12 @@
 // through a trusted https proxy) that is never "needs you". The facts come from GET
 // /api/ui/setup/status every two seconds (this machine only), so a step turns green by
 // itself the moment the outbox gets its first event, the CA is trusted, the daemon polls, a
-// phone connects, a message comes back delivered. Everything an action does is explained
-// next to it.
+// phone connects, a message comes back delivered. A checklist (shared with /phone): one
+// glyph per step, the step to do now open, each action with its one caption beside it.
 import type { HarnessStatus, SessionSummary, SetupStatus } from "@shared/api";
-import { type FormEvent, useCallback, useEffect, useId, useMemo, useState } from "react";
-import { Ago, CopyButton, HarnessGlyph, Spinner, Toggle } from "../components/bits";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useState } from "react";
+import { Ago, CopyIconButton, HarnessGlyph, Spinner, Toggle } from "../components/bits";
+import { PageBar } from "../components/PageBar";
 import { Select } from "../components/Select";
 import { ActivityRow } from "../control/Activity";
 import { controlApi, httpsPath, resetInfoCache } from "../control/api";
@@ -36,8 +37,6 @@ import "./setup.css";
 export const INSTALL = "npx sessionpipe install";
 export const QUIT_CHROME = "Chrome keeps the old verdict until you quit and reopen it (⌘Q)";
 
-type Mark = "done" | "needs" | "todo";
-
 export function Setup() {
   const state = useSetupStatus(true);
   const s = state.status;
@@ -57,6 +56,13 @@ export function Setup() {
     return out;
   }, [done]);
   const allDone = !!done && REQUIRED_STEPS.every((k) => done[k]);
+  const doneCount = done ? REQUIRED_STEPS.filter((k) => done[k]).length : 0;
+  // Only the step to do now is open; a person may open or close any of them.
+  const [opened, setOpened] = useState<Partial<Record<StepKey, boolean>>>({});
+  const fold = (k: StepKey) => ({
+    open: opened[k] ?? marks[k] === "needs",
+    onToggle: () => setOpened((o) => ({ ...o, [k]: !(o[k] ?? marks[k] === "needs") })),
+  });
 
   const skip = () => {
     markSetupSeen();
@@ -64,121 +70,172 @@ export function Setup() {
   };
 
   return (
-    <div className="page setup">
-      <header className="setup-head">
-        <h1>Set up sessionpipe gui</h1>
-        <p className="setup-lead">
-          Five steps, each green once this machine has done its part, and an optional sixth for the road. The page
-          checks every two seconds, so a step turns green by itself. Nothing leaves your network.
-        </p>
-      </header>
+    <div className="page page--doc page--grouped setup">
+      <PageBar
+        title="Set up sessionpipe gui"
+        meta={done ? `${doneCount} of ${REQUIRED_STEPS.length} done` : undefined}
+        actions={
+          s && !allDone ? (
+            <button
+              type="button"
+              className="btn btn--ghost setup-skip-btn"
+              onClick={skip}
+              data-setup-skip
+              title="The sidebar keeps a Setup entry until the steps are done"
+            >
+              Skip
+            </button>
+          ) : undefined
+        }
+      />
       {state.local === false && (
-        <p className="pair-note" role="status">
-          Setup runs on the machine that runs sessionpipe-gui: open <code>http://localhost:7373/setup</code> there. This
-          device is a viewer; it gets step 4's treatment from that page.
+        <p className="page-note" role="status">
+          Setup runs on the machine that runs sessionpipe-gui: open <code>http://localhost:7373/setup</code> there.
         </p>
       )}
-      {state.local !== false && !s && <p className="page-note">Reading this machine…</p>}
+      {state.local !== false && !s && (
+        <div className="skeleton" role="status" aria-label="Reading this machine">
+          <div className="skeleton-row" />
+          <div className="skeleton-row" />
+          <div className="skeleton-row" />
+        </div>
+      )}
       {state.error && s && <p className="page-note is-err">Last check failed: {state.error}. Trying again.</p>}
       {s && done && (
         <ol className="steps">
-          <SessionsStep s={s} mark={marks.sessions} />
-          <SecureStep s={s} mark={marks.secure} />
-          <PairStep s={s} mark={marks.pair} secure={done.secure} />
-          <PhoneStep s={s} mark={marks.phone} />
-          <TryStep s={s} mark={marks.try} ready={done.secure && done.pair} onDelivered={() => setTried(true)} />
-          <RemoteStep s={s} mark={marks.remote} />
+          <SessionsStep s={s} mark={marks.sessions} {...fold("sessions")} />
+          <SecureStep s={s} mark={marks.secure} {...fold("secure")} />
+          <PairStep s={s} mark={marks.pair} secure={done.secure} {...fold("pair")} />
+          <PhoneStep s={s} mark={marks.phone} {...fold("phone")} />
+          <TryStep
+            s={s}
+            mark={marks.try}
+            ready={done.secure && done.pair}
+            onDelivered={() => setTried(true)}
+            {...fold("try")}
+          />
+          <RemoteStep s={s} mark={marks.remote} {...fold("remote")} />
         </ol>
       )}
-      {s && done && (
-        <p className="page-note setup-extras" data-setup-extras>
-          <span>
-            <strong>Optional · Extras.</strong> Canvas and Office are already in; Spacesheep Vivid, Paper Serif and the
-            ping-a-human Telegram plugin are one click each on the{" "}
-            <Link to="/themes" className="setup-extras-link">
-              Views page
-            </Link>
-            , or <code>sessionpipe-gui extras add all</code> in a terminal.
+      {s && allDone && (
+        <div className="setup-done" role="status" data-setup-done>
+          <span className="setup-done-text">
+            <span className="form-label">You're set</span>
+            <span className="caption">Sessions show up as they run, and your phone can read and answer.</span>
           </span>
+          <button type="button" className="btn btn--primary" onClick={skip}>
+            Open the board
+          </button>
+        </div>
+      )}
+      {s && done && (
+        <p className="caption setup-extras" data-setup-extras>
+          Canvas and Office are already in; the ping-a-human plugin is one click on the{" "}
+          <Link to="/themes" className="setup-extras-link">
+            Views page
+          </Link>
+          .
         </p>
       )}
-      {s &&
-        (allDone ? (
-          <div className="setup-done" role="status" data-setup-done>
-            <span>
-              <strong>You're set.</strong> Sessions show up as they run, your phone can read and answer, and this Mac's
-              daemon takes your messages.
-            </span>
-            <button type="button" className="btn btn--primary" onClick={skip}>
-              Open the board
-            </button>
-          </div>
-        ) : (
-          <p className="page-note setup-skip">
-            Not now?{" "}
-            <button type="button" className="setup-skip-btn" onClick={skip} data-setup-skip>
-              Skip setup
-            </button>
-            <span>· the rail keeps a Setup entry until the steps are green.</span>
-          </p>
-        ))}
     </div>
   );
 }
 
 // ---------- the row ----------
 
-function Step({
-  k,
-  n,
+export type Mark = "done" | "needs" | "todo";
+
+/** The status glyph in a step's 20 px lead: a check once done, the amber disc on the step
+ *  to do now, a hollow ring for the ones after it. One signal; no number beside it. */
+export function StepMark({ mark, label }: { mark: Mark; label: string }) {
+  return (
+    <span className={`step-mark step-mark--${mark}`} role="img" aria-label={label}>
+      {mark === "done" ? (
+        <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+          <path
+            d="M5 10.5l3.2 3.2L15 6.8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ) : (
+        <span className="step-dot" aria-hidden="true" />
+      )}
+    </span>
+  );
+}
+
+/** One step of a checklist (here and on /phone): the glyph, the title as the disclosure,
+ *  one caption that says where it stands, and the body under it while open. */
+export function Step({
   mark,
   title,
-  what,
+  caption,
   children,
   why,
+  whyLabel,
   optional = false,
+  open,
+  onToggle,
+  needsLabel = "needs you",
+  attrs,
 }: {
-  k: StepKey;
-  n: number;
   mark: Mark;
   title: string;
-  what: string;
-  children?: React.ReactNode;
-  why?: React.ReactNode;
-  /** Never "needs you": a quiet "optional" stands where that word would go. */
+  /** One line: the result once done, the gate while waiting, else what the step is for. */
+  caption?: ReactNode;
+  children?: ReactNode;
+  why?: ReactNode;
+  whyLabel?: string;
+  /** Never "needs you": a quiet "optional" stands beside the title. */
   optional?: boolean;
+  open: boolean;
+  onToggle: () => void;
+  needsLabel?: string;
+  attrs: Record<string, string | number>;
 }) {
-  const label = mark === "done" ? "done" : mark === "needs" ? "needs you" : optional ? "optional" : "later";
+  const body = useId();
+  const label = mark === "done" ? "done" : mark === "needs" ? needsLabel : optional ? "optional" : "later";
+  // A step with nothing under its caption is a plain row, not a disclosure.
+  const folds = !!children || !!why;
   return (
-    <li className={`step step--${mark}`} data-step={k} data-mark={mark}>
-      <span className={`step-mark step-mark--${mark}`} role="img" aria-label={label}>
-        {mark === "done" ? (
-          <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
-            <path
-              d="M4.5 10.5l3.5 3.5 7.5-8"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        ) : (
-          <span className="step-dot" aria-hidden="true" />
-        )}
-      </span>
-      <div className="step-body">
-        <h2 className="step-title">
-          <span className="step-n num">{n}</span>
-          {title}
-          {mark === "needs" && <span className="step-needs">needs you</span>}
-          {optional && mark !== "done" && <span className="step-optional">optional</span>}
-        </h2>
-        <p className="step-what">{what}</p>
+    <li
+      className={`step step--${mark}${folds ? "" : " step--flat"}`}
+      data-mark={mark}
+      data-open={(folds && open) || undefined}
+      {...attrs}
+    >
+      <div className="step-head">
+        <StepMark mark={mark} label={label} />
+        <div className="step-head-text">
+          <h2 className="step-title">
+            {folds ? (
+              <button
+                type="button"
+                className="step-toggle"
+                aria-expanded={open}
+                aria-controls={body}
+                onClick={onToggle}
+              >
+                {title}
+              </button>
+            ) : (
+              title
+            )}
+            {optional && <span className="step-optional">optional</span>}
+          </h2>
+          {caption && <p className="step-what">{caption}</p>}
+        </div>
+        {folds && <span className="step-chev" aria-hidden="true" />}
+      </div>
+      <div className="step-body" id={body} hidden={!folds || !open}>
         {children}
         {why && (
           <details className="step-why">
-            <summary>{mark === "done" || optional ? "details" : "why isn't this green?"}</summary>
+            <summary>{whyLabel ?? (mark === "done" || optional ? "Details" : "Why isn't this done?")}</summary>
             <div className="step-why-body">{why}</div>
           </details>
         )}
@@ -200,50 +257,81 @@ function Facts({ rows }: { rows: [string, React.ReactNode][] }) {
   );
 }
 
+/** A literal line to run, in a well with its copy icon. */
+function Cmd({ text, label = "Copy" }: { text: string; label?: string }) {
+  return (
+    <div className="well-row step-cmd">
+      <code>{text}</code>
+      <CopyIconButton text={text} label={label} />
+    </div>
+  );
+}
+
 const yesNo = (v: boolean | null | undefined) => (v === null || v === undefined ? "unknown" : v ? "yes" : "no");
+
+type Fold = { open: boolean; onToggle: () => void };
 
 // ---------- 1 · your sessions ----------
 
-/** One installed harness of the registry and where it stands: hooks on (with this
- *  machine's sessions), hooks off (the install command writes them), or no adapter yet. */
+/** One installed harness of the registry and where it stands, as one short word: hooks
+ *  on, hooks off (the install command writes them; the one state in amber), or no
+ *  adapter yet. The counts are its tooltip. */
 function HarnessRow({ h }: { h: HarnessStatus }) {
-  let status: React.ReactNode;
-  if (h.hooks === "on")
-    status = (
-      <>
-        hooks on · {h.sessions === 0 ? "no sessions yet" : `${h.sessions} ${h.sessions === 1 ? "session" : "sessions"}`}
-        {h.lastEventAt && (
-          <>
-            {" "}
-            · last <Ago iso={h.lastEventAt} />
-          </>
-        )}
-      </>
-    );
-  else if (h.hooks === "off") status = "hooks off · run the install command";
-  else status = "installed · sessionpipe support pending";
+  const status = h.hooks === "on" ? "Hooks on" : h.hooks === "off" ? "Hooks off" : "Not supported yet";
+  const detail =
+    h.hooks === "on"
+      ? `${h.sessions === 0 ? "No sessions yet" : `${h.sessions} ${h.sessions === 1 ? "session" : "sessions"}`}`
+      : h.hooks === "off"
+        ? "Run the install command again"
+        : "sessionpipe support is pending";
   return (
     <li
-      className={`step-harness${h.hooks === "off" ? " step-harness--needs" : ""}`}
+      className={`form-row step-harness step-harness--${h.hooks}`}
       data-harness={h.name}
       data-hooks={h.hooks}
+      title={detail}
     >
-      <HarnessGlyph name={h.name} size="sm" withLabel />
-      <span className="step-harness-status">{status}</span>
+      <span className="form-row-text">
+        <HarnessGlyph name={h.name} size="sm" withLabel />
+      </span>
+      <span className="form-value step-harness-status">
+        {h.hooks === "on" && h.lastEventAt ? (
+          <span className="step-harness-last">
+            <Ago iso={h.lastEventAt} />
+          </span>
+        ) : null}
+        {status}
+      </span>
     </li>
   );
 }
 
-function SessionsStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
+function SessionsStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark } & Fold) {
   const sp = s.sessionpipe;
   const installed = s.harnesses.filter((h) => h.installed);
   return (
     <Step
-      k="sessions"
-      n={1}
+      attrs={{ "data-step": "sessions" }}
       mark={mark}
+      open={open}
+      onToggle={onToggle}
       title="Your sessions"
-      what="The sessionpipe hooks write every session on this machine to an outbox; the board tails it."
+      caption={
+        mark === "done" ? (
+          <>
+            {s.events.total.toLocaleString()} events
+            {sp.outbox.sessions ? ` from ${sp.outbox.sessions} sessions` : ""}
+            {s.events.lastAt && (
+              <>
+                {" "}
+                · last <Ago iso={s.events.lastAt} />
+              </>
+            )}
+          </>
+        ) : (
+          "The hooks write each session on this machine to an outbox; the board reads it."
+        )
+      }
       why={
         <Facts
           rows={[
@@ -257,50 +345,31 @@ function SessionsStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
       }
     >
       {installed.length > 0 && (
-        <ul className="step-harnesses" aria-label="Harnesses on this machine">
+        <ul className="form-list step-harnesses" aria-label="Harnesses on this machine">
           {installed.map((h) => (
             <HarnessRow key={h.name} h={h} />
           ))}
         </ul>
       )}
-      {mark === "done" ? (
-        <p className="step-note">
-          {s.events.total.toLocaleString()} events
-          {sp.outbox.sessions ? ` from ${sp.outbox.sessions} sessions in the outbox` : ""}
-          {s.events.lastAt && (
-            <>
-              {" "}
-              · last <Ago iso={s.events.lastAt} />
-            </>
-          )}
-          .
-        </p>
-      ) : (
+      {mark !== "done" && (
         <div className="step-action step-action--col">
           {!sp.installed && (
             <>
-              <div className="cmd">
-                <pre className="step-cmd">
-                  <code>{INSTALL}</code>
-                </pre>
-                <CopyButton text={INSTALL} label="Copy" small />
-              </div>
+              <Cmd text={INSTALL} />
               <p className="step-note">
-                Run it in a terminal on this machine: it adds the hooks to Claude Code, Codex, Gemini CLI and
-                Antigravity and starts the outbox. Then start a fresh conversation anywhere: a harness reads its hooks
-                when a conversation starts (Antigravity its <code>hooks.json</code>), so one already open stays silent.
+                Run it in a terminal here: it adds the hooks to Claude Code, Codex, Gemini CLI and Antigravity. A
+                harness reads its hooks when a conversation starts, so start a fresh one.
               </p>
             </>
           )}
           {sp.installed && (
             <p className="step-note">
               sessionpipe {sp.version ?? ""} is installed. Start a fresh conversation (<code>claude</code> in any
-              project folder) and its first event lands here; a harness marked <em>hooks off</em> needs the install
-              command run again.
+              folder) and its first event lands here.
             </p>
           )}
           <p className="step-wait" role="status">
-            <Spinner label="waiting" /> waiting for the first event…
+            <Spinner label="waiting" /> Waiting for the first event…
           </p>
         </div>
       )}
@@ -335,7 +404,7 @@ function useHttpsProbe(url: string, enabled: boolean): { ok: boolean | null; aga
   return { ok, again: useCallback(() => setTick((n) => n + 1), []) };
 }
 
-function SecureStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
+function SecureStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark } & Fold) {
   const store = useStore();
   const mac = s.platform === "darwin";
   const here = onHttpsOrigin(s);
@@ -389,11 +458,24 @@ function SecureStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
 
   return (
     <Step
-      k="secure"
-      n={2}
+      attrs={{ "data-step": "secure" }}
       mark={mark}
+      open={open}
+      onToggle={onToggle}
       title="Secure address"
-      what="Passkeys sign your messages, and a passkey needs https on a name. The GUI makes its own local certificate authority for this port."
+      caption={
+        sub === "done" ? (
+          <>
+            Passkeys work here, on <code>{location.host}</code>
+          </>
+        ) : sub === "turnOn" ? (
+          "Passkeys sign your messages and need https on a name; the GUI makes its own certificate."
+        ) : sub === "trust" ? (
+          "Trust the GUI's certificate on this Mac."
+        ) : (
+          "Open the secure address in this browser."
+        )
+      }
       why={
         <>
           <Facts
@@ -425,7 +507,7 @@ function SecureStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
     >
       {sub === "done" && (
         <p className="step-note">
-          Passkeys work here: <code>{location.origin}</code>, rp id <code>{rp}</code>.
+          rp id <code>{rp}</code>.
         </p>
       )}
       {sub === "turnOn" && (
@@ -441,8 +523,8 @@ function SecureStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
           </button>
           <span className="step-note">
             {s.tls.opensslPresent
-              ? `Makes the certificates and adds https on this same port, now; remembered as --tls.`
-              : "Needs the openssl command (brew install openssl / apt install openssl), then try again."}
+              ? "Adds https on this same port, now; remembered as --tls."
+              : "Needs the openssl command (brew install openssl), then try again."}
           </span>
         </div>
       )}
@@ -460,10 +542,10 @@ function SecureStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
             </button>
             <span className="step-note">
               {busy === "trust"
-                ? "macOS is asking for your login password: it adds the CA to your keychain with “Always Trust” for SSL."
+                ? "macOS asks for your login password to add the CA to your keychain."
                 : here
-                  ? "You reached the secure address, but this Mac does not trust the certificate yet (the browser may have let you through a warning; passkeys refuse that)."
-                  : "Adds the GUI's CA to your login keychain and marks it trusted for SSL (macOS asks for your password)."}
+                  ? "You reached the secure address, but this Mac does not trust its certificate yet."
+                  : "Adds the GUI's CA to your login keychain, trusted for SSL."}
             </span>
           </div>
           {trust && !trust.trusted && (
@@ -485,25 +567,19 @@ function SecureStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
         <div className="step-action step-action--col">
           {!mac && (
             <p className="step-note">
-              Trust the CA on this machine first: <code>{s.tls.hostname}</code>'s <code>ca.crt</code> is under the state
-              dir's <code>tls/</code> folder. Debian/Ubuntu: <code>sudo update-ca-certificates</code>; Fedora:{" "}
-              <code>sudo trust anchor ca.crt</code>; Chrome and Firefox import it under Settings → Certificates →
-              Authorities.
+              Trust the CA on this machine first: <code>ca.crt</code> under the state dir's <code>tls/</code> folder
+              (Debian: <code>sudo update-ca-certificates</code>; Fedora: <code>sudo trust anchor ca.crt</code>).
             </p>
           )}
           <div className="step-action">
-            <a
-              className={`btn ${probe.ok === false ? "btn--ghost" : "btn--primary"}`}
-              href={openHref}
-              data-action="open-https"
-            >
+            <a className={`btn ${probe.ok === false ? "" : "btn--primary"}`} href={openHref} data-action="open-https">
               Open the secure address
             </a>
             <span className="step-note">
               {probe.ok === null
                 ? "Checking whether this browser trusts it…"
                 : probe.ok
-                  ? `This browser trusts ${s.tls.hostname}. The page continues there.`
+                  ? `This browser trusts ${s.tls.hostname}.`
                   : QUIT_CHROME}
             </span>
             {probe.ok === false && (
@@ -514,8 +590,7 @@ function SecureStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
           </div>
           {!s.tls.mdns.resolves && (
             <p className="step-note step-note--err">
-              This machine does not resolve its own name <code>{s.tls.hostname}</code>. macOS does by itself; on Linux
-              install avahi-daemon (or nss-mdns). Until then the https address works from other devices only.
+              This machine does not resolve its own name <code>{s.tls.hostname}</code>; on Linux install avahi-daemon.
             </p>
           )}
         </div>
@@ -531,7 +606,7 @@ function SecureStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
 
 // ---------- 3 · pair this machine ----------
 
-function PairStep({ s, mark, secure }: { s: SetupStatus; mark: Mark; secure: boolean }) {
+function PairStep({ s, mark, secure, open, onToggle }: { s: SetupStatus; mark: Mark; secure: boolean } & Fold) {
   const d = s.daemon;
   const name = d.name ?? s.tls.hostname.replace(/\.local$/, "");
   const [busy, setBusy] = useState(false);
@@ -582,10 +657,12 @@ function PairStep({ s, mark, secure }: { s: SetupStatus; mark: Mark; secure: boo
     />
   );
 
-  let body: React.ReactNode;
+  let caption: ReactNode = "Answer and prompt this machine's sessions from the board, signed with your passkey.";
+  let body: React.ReactNode = null;
   if (mark === "done") {
-    body = <p className="step-note">{name} is listening.</p>;
+    caption = `${name} is listening.`;
   } else if (d.pendingPairing) {
+    caption = "Compare the six digits with the terminal's, then approve.";
     body = (
       <div className="step-inline-pair">
         <PairBody key={d.pendingPairing.code} code={d.pendingPairing.code} compact />
@@ -597,6 +674,7 @@ function PairStep({ s, mark, secure }: { s: SetupStatus; mark: Mark; secure: boo
       </div>
     );
   } else if (d.pairing.active) {
+    caption = "Starting the pairing…";
     body = (
       <div className="step-action">
         <span className="step-wait" role="status">
@@ -608,17 +686,19 @@ function PairStep({ s, mark, secure }: { s: SetupStatus; mark: Mark; secure: boo
       </div>
     );
   } else if (d.pairedHere && !d.online) {
+    caption = d.running
+      ? "Paired; waiting for the daemon's next poll."
+      : "Paired, but the control daemon is not running.";
     body = (
       <div className="step-action step-action--col">
         <p className="step-note">
           {d.running ? (
             <>
-              Paired. Waiting for the daemon's next poll (it asks every 25 seconds)… <Spinner label="waiting" />
+              It asks every 25 seconds… <Spinner label="waiting" />
             </>
           ) : (
             <>
-              Paired, but the control daemon is not running. In a terminal: <code>sessionpipe control run</code>, or
-              pair again to reinstall it as a service.
+              In a terminal: <code>sessionpipe control run</code>, or pair again to reinstall it as a service.
             </>
           )}
         </p>
@@ -630,25 +710,26 @@ function PairStep({ s, mark, secure }: { s: SetupStatus; mark: Mark; secure: boo
       </div>
     );
   } else if (!secure) {
-    body = <p className="step-note step-gate">finish step 2 first — approving uses a passkey</p>;
+    caption = "Finish step 2 first: approving uses a passkey.";
   } else if (!s.sessionpipe.installed) {
-    body = (
-      <p className="step-note">
-        Install sessionpipe first (step 1): <code>{INSTALL}</code>.
-      </p>
-    );
+    caption = "Install sessionpipe first (step 1).";
+    body = <Cmd text={INSTALL} />;
   } else {
     body = (
       <div className="step-action step-action--col">
         {d.suggestedFolders.length > 0 && (
           <fieldset className="step-folders">
             <legend>Folders your messages may start or run sessions in</legend>
-            {d.suggestedFolders.map((f) => (
-              <label key={f}>
-                <input type="checkbox" checked={folders.has(f)} onChange={() => toggle(f)} />
-                <span className="mono">{f}</span>
-              </label>
-            ))}
+            <ul className="form-list">
+              {d.suggestedFolders.map((f) => (
+                <li key={f} className="form-row step-folder">
+                  <label>
+                    <input type="checkbox" checked={folders.has(f)} onChange={() => toggle(f)} />
+                    <span className="mono">{f}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
           </fieldset>
         )}
         <div className="step-action">
@@ -662,8 +743,7 @@ function PairStep({ s, mark, secure }: { s: SetupStatus; mark: Mark; secure: boo
             {busy ? "Starting…" : "Pair this Mac"}
           </button>
           <span className="step-note">
-            Runs <code>sessionpipe control pair</code> for you; the six digits appear right here to approve with your
-            passkey. The daemon is installed as a service so it keeps listening.
+            Runs <code>sessionpipe control pair</code>; the six digits appear here to approve with your passkey.
           </span>
         </div>
         {d.pairing.error && (
@@ -677,11 +757,12 @@ function PairStep({ s, mark, secure }: { s: SetupStatus; mark: Mark; secure: boo
 
   return (
     <Step
-      k="pair"
-      n={3}
+      attrs={{ "data-step": "pair" }}
       mark={mark}
+      open={open}
+      onToggle={onToggle}
       title="Pair this machine"
-      what="Pairing lets you answer and prompt sessions on this machine from the board: its daemon takes signed messages from your passkey."
+      caption={caption}
       why={why}
     >
       {body}
@@ -696,17 +777,22 @@ function PairStep({ s, mark, secure }: { s: SetupStatus; mark: Mark; secure: boo
 
 // ---------- 4 · your phone ----------
 
-function PhoneStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
+function PhoneStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark } & Fold) {
   const store = useStore();
   const qr = store.transport.qrUrl();
   const [broken, setBroken] = useState(false);
   return (
     <Step
-      k="phone"
-      n={4}
+      attrs={{ "data-step": "phone" }}
       mark={mark}
+      open={open}
+      onToggle={onToggle}
       title="Your phone"
-      what="The same board on your phone, over the same Wi-Fi; the QR code signs it in. Sending from it has a page of its own."
+      caption={
+        mark === "done"
+          ? `${s.viewers.phones === 1 ? "A phone is" : `${s.viewers.phones} phones are`} on the stream over https.`
+          : "The same board on your phone, over the same Wi-Fi."
+      }
       why={
         <>
           <Facts
@@ -721,9 +807,8 @@ function PhoneStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
             ]}
           />
           <p>
-            Android: Settings → Security → More security settings → Install a certificate → CA certificate, then the
-            https button. Android builds vary on <code>.local</code> names; a hosts entry or the router's DNS can stand
-            in.
+            Android: Settings → Security → Install a certificate → CA certificate. Android builds vary on{" "}
+            <code>.local</code> names; a hosts entry or the router's DNS can stand in.
           </p>
         </>
       }
@@ -731,7 +816,7 @@ function PhoneStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
       <div className="step-phone">
         <div className="qr">
           {qr && !broken ? (
-            <img src={qr} alt="QR code for your phone" width={168} height={168} onError={() => setBroken(true)} />
+            <img src={qr} alt="QR code for your phone" width={160} height={160} onError={() => setBroken(true)} />
           ) : (
             <div className="qr-none" role="img" aria-label="QR code unavailable">
               <span>QR</span>
@@ -739,23 +824,16 @@ function PhoneStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
           )}
         </div>
         <div className="step-phone-text">
-          {mark === "done" ? (
-            <p className="step-note">
-              {s.viewers.phones === 1 ? "A phone is" : `${s.viewers.phones} phones are`} on the stream over https.
-            </p>
-          ) : (
-            <p className="step-note">
-              Scan the code with the phone's camera (same Wi-Fi): the board opens, signed in.
-              {!s.tls.on && " Over plain http the phone can look but not sign."}
-            </p>
-          )}
           <p className="step-note">
-            To send from the phone, open{" "}
+            Scan it with the phone's camera on the same Wi-Fi: the board opens, signed in.
+            {!s.tls.on && " Over plain http the phone can look but not sign."}
+          </p>
+          <p className="step-note">
+            To send from the phone too, open{" "}
             <Link to="/phone" className="step-a" data-phone-link>
               Your phone
             </Link>
-            : one page, on the laptop and on the phone, that gets it an https address it trusts and its own passkey,
-            approved here with six digits.
+            : it gets an https address the phone trusts and its own passkey.
           </p>
         </div>
       </div>
@@ -770,12 +848,14 @@ function TryStep({
   mark,
   ready,
   onDelivered,
+  open,
+  onToggle,
 }: {
   s: SetupStatus;
   mark: Mark;
   ready: boolean;
   onDelivered: () => void;
-}) {
+} & Fold) {
   const store = useStore();
   const { sessions } = useAppState();
   const live = useMemo(
@@ -787,6 +867,7 @@ function TryStep({
   );
   const [key, setKey] = useState("");
   const sessionId = useId();
+  const messageId = useId();
   const chosen: SessionSummary | undefined = live.find((x) => x.key === key) ?? live[0];
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -842,11 +923,18 @@ function TryStep({
 
   return (
     <Step
-      k="try"
-      n={5}
+      attrs={{ "data-step": "try" }}
       mark={mark}
+      open={open}
+      onToggle={onToggle}
       title="Try it"
-      what="Send one message to a live session on this machine and watch the reply come back; the first send of the day asks for your passkey once."
+      caption={
+        mark === "done"
+          ? "A message reached a session and came back delivered."
+          : !ready
+            ? "Finish steps 2 and 3 first."
+            : "Send one message to a live session here and watch the reply come back."
+      }
       why={
         <Facts
           rows={[
@@ -857,31 +945,29 @@ function TryStep({
         />
       }
     >
-      {mark === "done" && <p className="step-note">A message reached a session and came back delivered.</p>}
-      {mark !== "done" && !ready && <p className="step-note step-gate">finish steps 2 and 3 first</p>}
       {mark !== "done" && ready && live.length === 0 && (
-        <div className="step-action step-action--col">
-          <p className="step-note">
-            No live session on this machine right now. Start one: <code>claude</code> in a project folder, and it
-            appears here within a second.
-          </p>
-          <div className="step-action">
+        <ul className="form-list">
+          <li className="form-row">
+            <span className="form-row-text">
+              <span className="form-label">Demo mode</span>
+              <span className="form-caption">
+                No live session here right now: start one (<code>claude</code> in a folder), or look around with
+                synthetic ones.
+              </span>
+            </span>
             <Toggle
               on={!!demoOn}
               onChange={(v) => void demo(v)}
               label="Demo mode"
               disabled={demoBusy || demoOn === null}
             />
-            <span className="step-note">
-              Demo mode fills the board with synthetic sessions to look around (they cannot be messaged).
-            </span>
-          </div>
-        </div>
+          </li>
+        </ul>
       )}
       {ready && live.length > 0 && (
         <form className="try-form" onSubmit={(e) => void send(e)} aria-label="Try a message">
-          <label htmlFor={sessionId}>
-            session
+          <div className="try-field">
+            <label htmlFor={sessionId}>Session</label>
             <Select<string>
               id={sessionId}
               value={chosen?.key ?? ""}
@@ -889,10 +975,12 @@ function TryStep({
               disabled={busy}
               options={live.map((x) => ({ value: x.key, label: sessionTitle(x), hint: x.state }))}
             />
-          </label>
-          <label>
-            message
+          </div>
+          <div className="try-field">
+            <label htmlFor={messageId}>Message</label>
             <textarea
+              id={messageId}
+              className="field"
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder="Say hello: what are you working on?"
@@ -900,7 +988,7 @@ function TryStep({
               disabled={busy || !canSign}
               maxLength={20_000}
             />
-          </label>
+          </div>
           <div className="step-action">
             <button type="submit" className="btn btn--primary" disabled={busy || !canSign || !text.trim()}>
               {busy ? "Sending…" : "Send"}
@@ -909,10 +997,10 @@ function TryStep({
               {tap
                 ? "Confirm with your passkey: it vouches for this browser for a day."
                 : !canSign
-                  ? "passkeys cannot sign on this origin"
+                  ? "Passkeys cannot sign on this origin."
                   : s.daemon.online
-                    ? `${chosen?.machine ?? "the machine"} is listening`
-                    : "the daemon is offline; the message waits"}
+                    ? `${chosen?.machine ?? "The machine"} is listening.`
+                    : "The daemon is offline; the message waits."}
             </span>
           </div>
           {error && (
@@ -944,7 +1032,7 @@ function listenPort(s: SetupStatus): string {
   return location.port || "7373";
 }
 
-function RemoteStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
+function RemoteStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark } & Fold) {
   const store = useStore();
   const r = s.remote;
   const ts = r?.tailscale;
@@ -975,45 +1063,41 @@ function RemoteStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
   const serveCmd = `tailscale serve --bg ${port}`;
   const proxyNote = (
     <p className="step-note">
-      Any other https proxy works too: run it on this machine, point it at port <code>{port}</code> and let it forward{" "}
-      <code>X-Forwarded-For</code>; then <code>sessionpipe-gui --public-url https://&lt;its name&gt;</code>.
+      Any other https proxy on this machine works too: point it at port <code>{port}</code>, let it forward{" "}
+      <code>X-Forwarded-For</code>, then <code>sessionpipe-gui --public-url https://&lt;its name&gt;</code>.
     </p>
   );
 
+  let caption: ReactNode = "An https address phones already trust, from outside your Wi-Fi.";
   let body: React.ReactNode;
   if (mark === "done" && url) {
+    caption = url;
     body = (
       <div className="step-action step-action--col">
-        <div className="cmd">
-          <pre className="step-cmd">
-            <code>{url}</code>
-          </pre>
-          <CopyButton text={url} label="Copy" small />
-        </div>
+        <Cmd text={url} />
         <p className="step-note">
           {r?.viewers === 0 || r?.viewers === undefined
             ? "No device has come through it yet."
             : `${r.viewers} ${r.viewers === 1 ? "device" : "devices"} came through it.`}{" "}
-          Passkeys are made for <code>{s.tls.rpId}</code> now; a browser that signed on the <code>.local</code> name
-          makes a new one on first use.
+          Passkeys are made for <code>{s.tls.rpId}</code> now.
         </p>
         {ts?.serving === false && (
           <p className="step-note step-note--err">
             <code>tailscale serve</code> is not forwarding to port {port} yet: <code>{serveCmd}</code> on this machine.
           </p>
         )}
-        <p className="step-note">
+        <div className="step-action">
           <button
             type="button"
-            className="step-link"
+            className="btn"
             onClick={() => void stop()}
             disabled={busy !== null}
             data-action="remote-off"
           >
             {busy === "off" ? "Stopping…" : "Stop using it"}
           </button>
-          <span> · the rp id goes back to {s.tls.on ? s.tls.hostname : "localhost"}.</span>
-        </p>
+          <span className="step-note">The rp id goes back to {s.tls.on ? s.tls.hostname : "localhost"}.</span>
+        </div>
       </div>
     );
   } else if (!r || !ts) {
@@ -1049,8 +1133,8 @@ function RemoteStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
     body = (
       <div className="step-action step-action--col">
         <p className="step-note">
-          Tailscale is connected but has no MagicDNS name for this machine yet. Turn on MagicDNS and HTTPS certificates
-          in the tailnet's DNS settings, then this step continues by itself.
+          Tailscale is connected but has no MagicDNS name for this machine yet: turn on MagicDNS and HTTPS certificates
+          in the tailnet's DNS settings.
         </p>
         {proxyNote}
       </div>
@@ -1058,13 +1142,8 @@ function RemoteStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
   } else {
     body = (
       <div className="step-action step-action--col">
-        <p className="step-note">In a terminal on this machine, once (Tailscale remembers it across restarts):</p>
-        <div className="cmd">
-          <pre className="step-cmd">
-            <code>{serveCmd}</code>
-          </pre>
-          <CopyButton text={serveCmd} label="Copy" small />
-        </div>
+        <p className="step-note">Once, in a terminal on this machine (Tailscale remembers it):</p>
+        <Cmd text={serveCmd} />
         <div className="step-action">
           <button
             type="button"
@@ -1076,8 +1155,7 @@ function RemoteStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
             {busy === "on" ? "Switching…" : `Use ${dnsUrl}`}
           </button>
           <span className="step-note">
-            {ts.serving === false ? "The serve is not forwarding here yet; run the command first. " : ""}
-            Passkeys made for <code>{s.tls.hostname}</code> will be made again for this name on first use.
+            {ts.serving === false ? "Run the command first. " : ""}Passkeys are made again for this name on first use.
           </span>
         </div>
       </div>
@@ -1086,12 +1164,13 @@ function RemoteStep({ s, mark }: { s: SetupStatus; mark: Mark }) {
 
   return (
     <Step
-      k="remote"
-      n={6}
+      attrs={{ "data-step": "remote" }}
       mark={mark}
+      open={open}
+      onToggle={onToggle}
       optional
       title="From anywhere"
-      what="Outside your Wi-Fi the GUI needs an https address that phones already trust. Tailscale gives one with no port forwarding; any https proxy that forwards X-Forwarded-For works."
+      caption={caption}
       why={
         <Facts
           rows={[

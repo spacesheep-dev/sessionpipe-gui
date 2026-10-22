@@ -1,0 +1,128 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- the tab strip ---------- */
+
+/* Window tabs under the panel's head, shown once two sessions are open (one tab is the
+   head itself). The active tab is the page's ground, the rest sit back on the chrome in
+   the meta tier, hairlines between; equal widths up to 200 px, × on hover. */
+.tabs {
+  order: -1;
+  display: flex;
+  align-items: stretch;
+  flex: none;
+  height: 32px;
+  border-bottom: var(--hairline) solid var(--line);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  background: var(--chrome);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+/* One tab: the strip stays in the DOM (keys, the tablist) but takes no room. */
+.tabs--single {
+  display: none;
+}
+.tabs--overflow {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 0;
+  min-width: 96px;
+  max-width: 200px;
+  padding: 0 4px 0 12px;
+  border-right: var(--hairline) solid var(--line);
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  cursor: default;
+  touch-action: pan-x;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .tab:not(.tab--active):hover {
+    background: var(--hover);
+    color: var(--fg-2);
+  }
+}
+.tab--active {
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: 500;
+}
+/* The active tab opens into the body under it: no hairline beneath it. */
+.tab--active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--bg);
+}
+.tab:focus-visible {
+  outline-offset: -2px;
+}
+.tab--dragging {
+  opacity: 0.6;
+}
+.tab .dot {
+  flex: none;
+}
+.tab-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The tab's close: a 24 px pointer target (WCAG 2.2 2.5.8), shown on hover and on the
+   active tab. */
+.tab-close {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-inner);
+  color: var(--fg-3);
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+.tab:hover .tab-close,
+.tab--active .tab-close,
+.tab-close:focus-visible {
+  opacity: 1;
+}
+@media (hover: hover) {
+  .tab-close:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+}
+.tab-close:active {
+  background: var(--press);
+}
+@media (hover: none) {
+  .tab-close {
+    opacity: 1;
+  }
+}
+/* The phone sheet: tabs scroll sideways at their own width. */
+.panel--sheet .tabs {
+  height: 36px;
+}
+.panel--sheet .tab {
+  flex: none;
+  max-width: 180px;
+}

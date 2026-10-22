@@ -59,7 +59,7 @@ test.describe("feed", () => {
     expect(new Set(await harnessOf())).toEqual(new Set(["Claude Code"]));
 
     await harness.click();
-    await page.getByRole("listbox", { name: "Harness" }).getByRole("option", { name: "all harnesses" }).click();
+    await page.getByRole("listbox", { name: "Harness" }).getByRole("option", { name: "All harnesses" }).click();
     await expect(harness).toHaveAttribute("data-value", "");
     await page.getByRole("searchbox", { name: "Search events" }).fill("session.started");
     await expect(page.locator("ol.rows")).toHaveAttribute("aria-busy", "false");

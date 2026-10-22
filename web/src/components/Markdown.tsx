@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Markdown as React, from the tree lib/markdown.ts builds. Every node becomes an element
 // or a text node, never injected HTML. Links open only for http(s) destinations; any
-// other destination shows as its text. Images are named ("[alt]"), never fetched.
-import { Fragment, type ReactNode, useMemo } from "react";
+// other destination shows as its text. Images are named ("[alt]"), never fetched. A
+// fenced block is a quiet well with its language and a copy button; a host that has
+// menus gives it one through CodeFrame (this module stays free of the app's router).
+import { type ComponentType, createContext, Fragment, type ReactNode, useContext, useMemo } from "react";
 import { type Block, type Inline, parseMarkdown } from "../lib/markdown";
-import { CopyButton, Redacted } from "./bits";
+import { CopyIconButton, Redacted } from "./bits";
 import "../styles/markdown.css";
 
 export function Markdown({ text, className }: { text: string; className?: string }) {
@@ -60,17 +62,7 @@ function renderBlock(b: Block, i: number): ReactNode {
       return <H key={i}>{renderInlines(b.children)}</H>;
     }
     case "code":
-      return (
-        <div key={i} className="md-pre">
-          <div className="md-pre-head">
-            <span className="md-pre-lang">{b.lang}</span>
-            <CopyButton text={b.text} small />
-          </div>
-          <pre className="md-code">
-            <code>{b.text}</code>
-          </pre>
-        </div>
-      );
+      return <CodeBlock key={i} lang={b.lang} text={b.text} />;
     case "list": {
       const items = b.items.map((item, j) => <li key={j}>{item.map(renderBlock)}</li>);
       return b.ordered ? (
@@ -107,4 +99,24 @@ function renderBlock(b: Block, i: number): ReactNode {
         </table>
       );
   }
+}
+
+/** How a host frames each fenced block: a `div.md-pre` around `children`, with whatever it
+ *  adds (SessionView's right-click "Copy code"). Without one, a plain div. */
+export const CodeFrame = createContext<ComponentType<{ text: string; children: ReactNode }> | null>(null);
+
+function CodeBlock({ lang, text }: { lang: string; text: string }) {
+  const Frame = useContext(CodeFrame);
+  const body = (
+    <>
+      <div className="md-pre-head">
+        <span className="md-pre-lang">{lang}</span>
+        <CopyIconButton text={text} label="Copy code" />
+      </div>
+      <pre className="md-code">
+        <code>{text}</code>
+      </pre>
+    </>
+  );
+  return Frame ? <Frame text={text}>{body}</Frame> : <div className="md-pre">{body}</div>;
 }

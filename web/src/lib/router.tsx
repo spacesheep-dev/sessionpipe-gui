@@ -91,6 +91,8 @@ function keepParams(to: string): string {
   return `${to}${to.includes("?") ? "&" : "?"}${qs}`;
 }
 const keepMock = keepParams;
+/** The href a link to `to` carries (the mock flag and the side panel kept). */
+export const hrefFor = keepParams;
 
 /** Pages this app pushed since it loaded; 0 means the page was opened by its URL, so there
  *  is nothing of ours behind it (a dialog closing then goes to its fallback, not away). */

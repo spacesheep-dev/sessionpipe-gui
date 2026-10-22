@@ -1,0 +1,92 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- machines ---------- */
+/* One grouped section per machine (the grouped form, settings.css): a header row with
+   the status glyph, the name at 600 and "online · last event 1 m" in the meta tier, then
+   Get Info rows. No box; on a phone each section is an inset group. */
+
+.machines {
+  gap: 32px;
+}
+.machine-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding-bottom: 4px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* Online is a filled disc, quiet a hollow ring: the glyph grammar, no green. */
+.online {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--fg-4);
+}
+.online--on {
+  border-color: var(--fg-2);
+  background: var(--fg-2);
+}
+.machine-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.machine-last {
+  margin-left: auto;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.machine-head .icon-btn {
+  margin-right: -6px;
+}
+.machine-facts .form-kv {
+  -webkit-user-select: text;
+  user-select: text;
+}
+.machine-sub {
+  color: var(--fg-3);
+}
+.machine-harnesses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.machine-harness {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.machine-ver {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.machine-folders {
+  color: var(--fg-2);
+}
+.paired {
+  color: var(--fg);
+}
+.unpaired {
+  color: var(--fg-3);
+}
+.machine-ctl-row {
+  max-width: 560px;
+}
+.machine-start .start-form {
+  margin-top: 4px;
+}
+@media (max-width: 839px) {
+  .machine-head {
+    padding: 0 16px 6px;
+  }
+  .machine-last {
+    font-size: var(--text-xs);
+  }
+}

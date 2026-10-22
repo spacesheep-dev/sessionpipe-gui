@@ -1,0 +1,264 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- inbox ---------- */
+
+/* The board's row grammar (board.css), in Mail's layout: the glyph in the lead, the
+   session and the prompt's age on line 1, the request on line 2 with the machine
+   trailing, and Allow / Deny in a reserved slot at the row's end, shown on hover or
+   selection with a pointer and always on touch. Section headers are the board's. */
+/* The conditions under the bar, one quiet line each, read as one block. */
+.inbox-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.inbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0 -12px;
+  container: inbox / inline-size;
+}
+.inbox-rows {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 0;
+  display: flex;
+  flex-direction: column;
+}
+.inbox-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 4px;
+  padding-right: 8px;
+  border-radius: var(--radius);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.inbox-row + .inbox-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 36px;
+  right: 0;
+  border-top: var(--hairline) solid var(--line);
+  pointer-events: none;
+}
+@media (hover: hover) {
+  .inbox-row:hover {
+    background: var(--hover);
+  }
+}
+.inbox-row[aria-current="true"],
+.inbox-row[data-menu-open] {
+  background: var(--sel);
+}
+.inbox-row:has(.inbox-main:active) {
+  background: var(--press);
+  transition: none;
+}
+.inbox-row:has(.inbox-main:focus-visible) {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: -2px;
+}
+.inbox-row:is(:hover, [aria-current="true"])::before,
+.inbox-row:is(:hover, [aria-current="true"]) + .inbox-row::before {
+  border-top-color: transparent;
+}
+.inbox-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "lead title age"
+    ".    what  where";
+  align-content: center;
+  row-gap: 2px;
+  min-height: calc(var(--row-sm) * 2 - 12px);
+  padding: 8px 0 8px 8px;
+  text-align: left;
+  color: inherit;
+  line-height: var(--lh-tight);
+}
+.inbox-main:focus-visible {
+  outline: none;
+}
+.inbox-lead {
+  grid-area: lead;
+  display: flex;
+  justify-content: center;
+  width: 16px;
+  align-self: center;
+}
+.inbox-title {
+  grid-area: title;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+.inbox-age {
+  grid-area: age;
+  justify-self: end;
+  margin-left: 12px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.inbox-what {
+  grid-area: what;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.inbox-kind,
+.inbox-tool {
+  flex: none;
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.inbox-kind {
+  display: inline-block;
+}
+.inbox-kind::first-letter {
+  text-transform: uppercase;
+}
+.inbox-msg {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-2);
+}
+.inbox-msg.mono {
+  font-size: calc(var(--text-sm) * 0.95);
+}
+.inbox-row--terminal .inbox-msg {
+  color: var(--fg-3);
+}
+.inbox-where {
+  grid-area: where;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 16px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.inbox-where .glyph-wrap {
+  color: var(--fg-4);
+}
+
+/* The trailing slot: Deny then Allow (the primary on the right, as in a macOS alert),
+   always reserving its room so the row never moves when they fade in. */
+.inbox-answer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 132px;
+}
+.inbox-answer .btn {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.inbox-row:hover .inbox-answer .btn,
+.inbox-row[aria-current="true"] .inbox-answer .btn,
+.inbox-row:focus-within .inbox-answer .btn {
+  opacity: 1;
+}
+.inbox-row:hover .inbox-answer .btn:disabled,
+.inbox-row[aria-current="true"] .inbox-answer .btn:disabled,
+.inbox-row:focus-within .inbox-answer .btn:disabled {
+  opacity: 0.45;
+}
+.inbox-answer--terminal {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.inbox-note {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.inbox-note--err {
+  color: var(--err);
+  white-space: normal;
+}
+
+/* "Notify me" (components/NotifyToggle.tsx): the switch and its name, in the page bar. */
+.notify {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+}
+.notify-hint {
+  color: var(--fg-3);
+}
+.inbox-head .notify {
+  margin-right: 4px;
+}
+.inbox-link {
+  color: var(--fg-2);
+}
+
+/* Touch: the buttons are always there, at their full size; a narrow column moves them
+   under the request. */
+@media (hover: none) {
+  .inbox-answer .btn {
+    opacity: 1;
+  }
+  .inbox-answer .btn:disabled {
+    opacity: 0.45;
+  }
+}
+@media (max-width: 839px) {
+  .inbox-main {
+    min-height: 64px;
+    row-gap: 3px;
+  }
+}
+@container inbox (max-width: 560px) {
+  .inbox-row {
+    flex-wrap: wrap;
+    padding-bottom: 0;
+  }
+  .inbox-answer {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+    padding: 0 0 12px 36px;
+  }
+  .inbox-answer:empty {
+    display: none;
+  }
+  .inbox-row--terminal .inbox-answer {
+    display: none;
+  }
+  .inbox-main {
+    grid-template-areas:
+      "lead title age"
+      ".    what  what"
+      ".    where where";
+  }
+  .inbox-where {
+    justify-self: start;
+    margin-left: 0;
+  }
+}

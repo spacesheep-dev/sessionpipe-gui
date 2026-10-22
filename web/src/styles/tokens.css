@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* Design tokens. One typeface (the system sans) and one mono. Neutrals carry the whole
-   interface; every neutral is tinted a little so nothing is pure grey. The muted tiers
-   stay readable: fg-2 is secondary body (≥ 7:1 on the page), fg-3 is meta (≥ 5:1),
-   fg-4 is for marks only (≥ 3:1). One accent: amber,
-   for "needs you" and nothing else. Working is the foreground with a live dot; stale,
-   idle and done are shades of muted text. Red only where there is an error. */
+   interface, all of one cool hue at low chroma, so nothing reads as tinted. The muted
+   tiers stay readable: fg-2 is secondary body (≥ 7:1 on the page), fg-3 is meta (≥ 5:1),
+   fg-4 is for marks only (≥ 3:1). One accent: amber, for "needs you" and nothing else;
+   red only where there is an error. Working, stale, idle and done are neutral tiers.
+   Every name here is public to views (themes/host/api.ts reads this file): keep it one
+   file, and keep every name. The design language is DESIGN-SPEC.md in the review folder. */
 
 :root {
   color-scheme: light dark;
@@ -14,64 +15,97 @@
   --font-display: var(--font-ui);
   --font-mono: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
 
-  /* The scale, in rem so the text-size setting multiplies it: 12 for mono stamps and
-     tier marks, 13 for meta, 14 for everything a person reads, 15 for card titles,
-     18 for page titles. Nothing is set below 12. */
+  /* The scale, in rem so the text-size setting multiplies it: 12 for tab labels and
+     badges, 13 for meta and toolbars, 14 for everything a person reads, 15 for the page
+     title, 18 only for the phone's large title (×1.55) and the pairing digits. */
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text-md: 0.875rem;
   --text-lg: 0.9375rem;
   --text-xl: 1.125rem;
+  --lh-tight: 1.25;
+  --lh: 1.45;
 
+  /* Three radii, all from the skin's one: controls and wells, items inside a menu, and
+     everything that floats; the phone sheet's top corners a step rounder. */
   --radius: 6px;
   --radius-sm: 6px;
   --radius-pill: 999px;
+  --radius-inner: max(0px, calc(var(--radius) - 2px));
+  --radius-pop: calc(var(--radius) + 4px);
+  --radius-sheet: calc(var(--radius) + 6px);
   /* Every rule and border that is a hairline today; a skin may make it 1.5 or 2. */
   --hairline: 1px;
   /* Row heights (and the padding between rows): the three heights the app uses. A skin's
-     density moves them (html[data-density], app.css). */
+     density moves them (html[data-density], density.css), and the controls with them. */
   --row-sm: 32px;
   --row: 36px;
   --row-lg: 40px;
   --row-pad: 8px;
+  /* Toolbar-sized controls: 28 on a desktop (buttons, fields, selects), 24 in a row,
+     32 for the large one. The phone takes touch sizes below. */
+  --control: calc(var(--row-sm) - 4px);
+  --control-sm: max(24px, calc(var(--row-sm) - 8px));
+  --control-lg: var(--row-sm);
+  /* A sidebar row, a menu item. */
+  --side-row: calc(var(--row-sm) - 4px);
+  --menu-row: calc(var(--row-sm) - 6px);
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
   --dur-fast: 120ms;
   --dur: 200ms;
-  --dur-slow: 360ms;
+  --dur-slow: 280ms;
 
   --tap: 44px;
-  --gutter: clamp(16px, 2.5vw, 32px);
+  --gutter: 24px;
   --rail: 72px;
-  --tabbar: 56px;
+  --tabbar: 50px;
+  /* The title band: the sidebar's top, every page bar, the panel head. */
+  --bar: 48px;
   --max: 1480px;
+  /* A document page's body (Connect, Setup, Views…), and the session's reading column. */
+  --measure: 720px;
+  --measure-read: 760px;
 
-  /* light: paper */
-  --bg: oklch(0.985 0.004 85);
-  --bg-2: oklch(0.998 0.002 85);
-  --bg-3: oklch(0.955 0.006 85);
-  --bg-4: oklch(0.925 0.008 85);
-  --line: oklch(0.88 0.008 85);
-  --line-2: oklch(0.8 0.01 85);
-  --fg: oklch(0.22 0.014 265);
-  --fg-2: oklch(0.42 0.016 265);
-  --fg-3: oklch(0.5 0.014 265);
-  --fg-4: oklch(0.64 0.01 265);
+  /* The stacking order, low to high. Menus sit over dialogs: they open inside them. */
+  --z-sticky: 10;
+  --z-chrome: 20;
+  --z-panel: 25;
+  --z-pop: 30;
+  --z-dialog: 40;
+  --z-toast: 45;
+  --z-menu: 60;
+  --z-tip: 70;
+  --z-skip: 80;
+  --focus-width: 2px;
 
-  --needs: oklch(0.72 0.15 65);
-  --needs-fg: oklch(0.5 0.12 60);
-  --needs-bg: oklch(0.965 0.03 82);
-  --needs-line: oklch(0.86 0.08 75);
+  /* light */
+  --bg: oklch(0.993 0.002 285);
+  --bg-2: oklch(1 0 0);
+  --bg-3: oklch(0.962 0.003 285);
+  --bg-4: oklch(0.928 0.004 285);
+  --line: oklch(0.912 0.004 285);
+  --line-2: oklch(0.85 0.006 285);
+  --fg: oklch(0.22 0.012 285);
+  --fg-2: oklch(0.4 0.012 285);
+  --fg-3: oklch(0.51 0.012 285);
+  --fg-4: oklch(0.62 0.01 285);
+
+  --needs: oklch(0.68 0.17 50);
+  --needs-fg: oklch(0.52 0.15 45);
+  /* A whisper of amber: a well at most, never a slab behind text. */
+  --needs-bg: oklch(0.975 0.014 60);
+  --needs-line: oklch(0.87 0.06 55);
   /* Text on a --needs fill (the unread badge, the "new" pill). */
-  --needs-ink: oklch(0.2 0.03 60);
-  /* State colours for views that colour-code (the canvas): working is cool, stale is
-     slate; idle and done stay neutral. Amber (--needs) remains the only warm accent. */
-  --state-working: oklch(0.6 0.11 200);
-  --state-working-bg: oklch(0.955 0.025 200);
-  --state-stale: oklch(0.6 0.05 280);
-  --state-stale-bg: oklch(0.955 0.015 280);
-  --state-idle: var(--fg-3);
+  --needs-ink: oklch(0.22 0.04 45);
+  /* The states views colour-code (the canvas) are neutral tiers: amber stays the one
+     accent. The names are kept for views and installed skins. */
+  --state-working: var(--fg-2);
+  --state-working-bg: var(--bg-3);
+  --state-stale: var(--fg-3);
+  --state-stale-bg: var(--bg-3);
+  --state-idle: var(--fg-4);
   --state-done: var(--fg-4);
 
   --work: var(--fg);
@@ -88,89 +122,131 @@
   --done: var(--line-2);
   --done-fg: var(--fg-4);
 
-  --ok: oklch(0.6 0.1 150);
-  --err: oklch(0.55 0.16 25);
-  --err-soft: oklch(0.6 0.09 25);
-  --err-bg: oklch(0.965 0.02 25);
-  --focus: oklch(0.5 0.02 265);
-  --mark: oklch(0.93 0.07 90);
-  --mark-fg: oklch(0.4 0.09 70);
+  --ok: oklch(0.6 0.12 155);
+  --err: oklch(0.55 0.19 27);
+  --err-soft: oklch(0.58 0.12 27);
+  --err-bg: oklch(0.97 0.015 25);
+  --focus: oklch(0.55 0.1 285);
+  --mark: oklch(0.93 0.1 95);
+  --mark-fg: oklch(0.38 0.08 70);
+  /* Read by nothing (skins set it): floating things use --shadow-pop. */
   --shadow: none;
   /* The QR code's ground and its "no network" text: paper and ink in both schemes, so a
      phone camera reads it. */
   --qr-bg: oklch(0.995 0.002 85);
   --qr-fg: oklch(0.6 0.01 265);
+
+  /* Surfaces derived from the skin's own ground and ink, so every skin gets them. */
+  --chrome: color-mix(in oklch, var(--bg) 95.5%, var(--fg));
+  --raised: var(--bg-2);
+  --hover: color-mix(in oklch, var(--fg) 5%, transparent);
+  --sel: color-mix(in oklch, var(--fg) 9%, transparent);
+  --press: color-mix(in oklch, var(--fg) 13%, transparent);
+  --scrim: oklch(0.2 0.01 285 / 0.24);
+  /* A switch's track off and on, and the knob of a switch or a slider: always light. */
+  --switch-off: var(--line-2);
+  --switch-on: var(--fg);
+  --knob: oklch(0.99 0 0);
+  /* The ground under a phone's grouped lists (sheets, Settings): cells sit on it in --bg-2. */
+  --grouped-ground: var(--bg-3);
+  /* One shadow for everything that floats (menus, popovers, sheets, dialogs, toasts),
+     and the 1 px lift under a raised control. */
+  --shadow-pop: 0 0 0 0.5px oklch(0 0 0 / 0.05), 0 2px 6px oklch(0 0 0 / 0.06), 0 12px 32px oklch(0 0 0 / 0.12);
+  --shadow-sm: 0 0.5px 1px oklch(0 0 0 / 0.12), 0 0 0 0.5px oklch(0 0 0 / 0.03);
+}
+
+/* The phone: touch-sized controls and the narrower gutter. */
+@media (max-width: 839px) {
+  :root {
+    --gutter: 16px;
+    --bar: 44px;
+    --control: 36px;
+    --control-sm: 32px;
+    --control-lg: 44px;
+  }
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: oklch(0.165 0.008 255);
-    --bg-2: oklch(0.195 0.009 255);
-    --bg-3: oklch(0.225 0.01 255);
-    --bg-4: oklch(0.27 0.011 255);
-    --line: oklch(0.27 0.01 255);
-    --line-2: oklch(0.35 0.012 255);
-    --fg: oklch(0.92 0.006 85);
-    --fg-2: oklch(0.8 0.008 85);
-    --fg-3: oklch(0.66 0.008 85);
-    --fg-4: oklch(0.5 0.008 255);
+    --bg: oklch(0.185 0.01 285);
+    --bg-2: oklch(0.225 0.011 285);
+    --bg-3: oklch(0.25 0.011 285);
+    --bg-4: oklch(0.3 0.012 285);
+    --line: oklch(0.29 0.01 285);
+    --line-2: oklch(0.36 0.012 285);
+    --fg: oklch(0.95 0.005 285);
+    --fg-2: oklch(0.8 0.01 285);
+    --fg-3: oklch(0.68 0.012 285);
+    --fg-4: oklch(0.56 0.012 285);
 
-    --needs: oklch(0.78 0.13 70);
-    --needs-fg: oklch(0.84 0.11 75);
-    --needs-bg: oklch(0.235 0.03 65);
-    --needs-line: oklch(0.4 0.07 65);
-    --needs-ink: oklch(0.2 0.03 60);
-    --state-working: oklch(0.75 0.1 200);
-    --state-working-bg: oklch(0.25 0.03 200);
-    --state-stale: oklch(0.66 0.05 280);
-    --state-stale-bg: oklch(0.24 0.02 280);
-    --state-idle: var(--fg-3);
-    --state-done: var(--fg-4);
+    --needs: oklch(0.77 0.145 55);
+    --needs-fg: oklch(0.83 0.11 60);
+    --needs-bg: oklch(0.235 0.03 50);
+    --needs-line: oklch(0.42 0.08 52);
+    --needs-ink: oklch(0.2 0.04 45);
 
-    --ok: oklch(0.7 0.1 150);
-    --err: oklch(0.7 0.14 25);
-    --err-soft: oklch(0.64 0.08 25);
-    --err-bg: oklch(0.25 0.03 25);
-    --focus: oklch(0.72 0.01 85);
-    --mark: oklch(0.38 0.07 85);
-    --mark-fg: oklch(0.92 0.08 90);
+    --ok: oklch(0.74 0.12 155);
+    --err: oklch(0.72 0.15 25);
+    --err-soft: oklch(0.68 0.09 25);
+    --err-bg: oklch(0.26 0.04 25);
+    --focus: oklch(0.72 0.09 285);
+    --mark: oklch(0.42 0.08 95);
+    --mark-fg: oklch(0.95 0.07 98);
+
+    --raised: var(--bg-4);
+    --switch-off: var(--bg-4);
+    --switch-on: var(--fg-3);
+    --grouped-ground: var(--bg);
+    --scrim: oklch(0 0 0 / 0.5);
+    --shadow-pop: 0 0 0 0.5px oklch(0 0 0 / 0.6), 0 2px 6px oklch(0 0 0 / 0.3), 0 16px 40px oklch(0 0 0 / 0.45);
+    --shadow-sm: 0 0.5px 1px oklch(0 0 0 / 0.45);
   }
 }
 
+/* The same dark set, word for word, when Dark is forced (Settings or a dark-only skin). */
 :root[data-theme="dark"] {
-  --bg: oklch(0.165 0.008 255);
-  --bg-2: oklch(0.195 0.009 255);
-  --bg-3: oklch(0.225 0.01 255);
-  --bg-4: oklch(0.27 0.011 255);
-  --line: oklch(0.27 0.01 255);
-  --line-2: oklch(0.35 0.012 255);
-  --fg: oklch(0.92 0.006 85);
-  --fg-2: oklch(0.8 0.008 85);
-  --fg-3: oklch(0.66 0.008 85);
-  --fg-4: oklch(0.5 0.008 255);
+  --bg: oklch(0.185 0.01 285);
+  --bg-2: oklch(0.225 0.011 285);
+  --bg-3: oklch(0.25 0.011 285);
+  --bg-4: oklch(0.3 0.012 285);
+  --line: oklch(0.29 0.01 285);
+  --line-2: oklch(0.36 0.012 285);
+  --fg: oklch(0.95 0.005 285);
+  --fg-2: oklch(0.8 0.01 285);
+  --fg-3: oklch(0.68 0.012 285);
+  --fg-4: oklch(0.56 0.012 285);
 
-  --needs: oklch(0.78 0.13 70);
-  --needs-fg: oklch(0.84 0.11 75);
-  --needs-bg: oklch(0.235 0.03 65);
-  --needs-line: oklch(0.4 0.07 65);
-  --needs-ink: oklch(0.2 0.03 60);
+  --needs: oklch(0.77 0.145 55);
+  --needs-fg: oklch(0.83 0.11 60);
+  --needs-bg: oklch(0.235 0.03 50);
+  --needs-line: oklch(0.42 0.08 52);
+  --needs-ink: oklch(0.2 0.04 45);
 
-  --ok: oklch(0.7 0.1 150);
-  --err: oklch(0.7 0.14 25);
-  --err-soft: oklch(0.64 0.08 25);
-  --err-bg: oklch(0.25 0.03 25);
-  --focus: oklch(0.72 0.01 85);
-  --mark: oklch(0.38 0.07 85);
-  --mark-fg: oklch(0.92 0.08 90);
+  --ok: oklch(0.74 0.12 155);
+  --err: oklch(0.72 0.15 25);
+  --err-soft: oklch(0.68 0.09 25);
+  --err-bg: oklch(0.26 0.04 25);
+  --focus: oklch(0.72 0.09 285);
+  --mark: oklch(0.42 0.08 95);
+  --mark-fg: oklch(0.95 0.07 98);
+
+  --raised: var(--bg-4);
+  --switch-off: var(--bg-4);
+  --switch-on: var(--fg-3);
+  --grouped-ground: var(--bg);
+  --scrim: oklch(0 0 0 / 0.5);
+  --shadow-pop: 0 0 0 0.5px oklch(0 0 0 / 0.6), 0 2px 6px oklch(0 0 0 / 0.3), 0 16px 40px oklch(0 0 0 / 0.45);
+  --shadow-sm: 0 0.5px 1px oklch(0 0 0 / 0.45);
 }
 
 /* More contrast asked for: hairlines a step darker, the muted tiers a step up, so the
-   meta text and the dividers read on every background. */
+   meta text and the dividers read on every background; a thicker ring. */
 @media (prefers-contrast: more) {
   :root {
     --line: var(--fg-4);
     --line-2: var(--fg-3);
     --fg-3: var(--fg-2);
     --fg-4: var(--fg-3);
+    --focus-width: 3px;
   }
 }

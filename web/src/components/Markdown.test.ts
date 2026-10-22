@@ -34,12 +34,12 @@ describe("Markdown", () => {
     expect(html).not.toContain("<script>");
   });
 
-  it("renders fenced code in a labelled box with a copy button", () => {
+  it("renders fenced code in a labelled well with a copy button", () => {
     const html = render("```ts\nconst a = 1;\n```");
     expect(html).toContain('class="md-pre"');
     expect(html).toContain('<span class="md-pre-lang">ts</span>');
     expect(html).toContain("<code>const a = 1;</code>");
-    expect(html).toContain(">Copy</button>");
+    expect(html).toContain('aria-label="Copy code"');
   });
 
   it("wraps everything in .md and adds the caller's class", () => {

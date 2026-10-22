@@ -7,7 +7,7 @@
 import type { InstalledPlugin, SettingField } from "@shared/plugin-api";
 import { isMasked } from "@shared/plugin-api";
 import { useEffect, useState } from "react";
-import { CopyButton } from "../components/bits";
+import { CopyIconButton } from "../components/bits";
 import { Select } from "../components/Select";
 import { fetchPlugins, reloadPlugins, savePluginSettings, setPluginEnabled, usePlugins } from "./registry";
 import "./plugins.css";
@@ -41,56 +41,48 @@ export function PluginsSection() {
   };
 
   return (
-    <section className="sect plugins" data-plugins>
-      <header className="sect-head">
-        <h2>Plugins</h2>
-        <p>
-          Server-side code that reacts to events: a message to your phone when a session needs you, a suggested answer
-          you confirm with one tap. A plugin runs inside the receiver process, with everything this machine has. Nothing
-          it does can answer a permission: only your passkey signs that.
-        </p>
-      </header>
+    <section className="form-group plugins" data-plugins aria-labelledby="views-plugins">
+      <div className="form-head">
+        <h2 className="section-label" id="views-plugins">
+          Plugins
+        </h2>
+        <button
+          type="button"
+          className="btn btn--sm btn--ghost"
+          onClick={() => void reload()}
+          disabled={!loopback || busy}
+          title={loopback ? "Stop, re-read and start every plugin" : "Only on the machine running the receiver"}
+          data-plugins-reload
+        >
+          {busy ? "Reloading…" : "Reload plugins"}
+        </button>
+      </div>
       {error && <p className="page-note is-err">{error}</p>}
       {demo && (
-        <p className="page-note">
-          Demo mode: plugins stay inactive, so a throwaway server never messages anyone about pretend sessions.
-        </p>
+        <p className="page-note">Demo mode: plugins stay inactive, so nobody is messaged about pretend sessions.</p>
       )}
       {loaded && plugins.length === 0 && !error && (
-        <p className="themes-empty">No plugins installed. Add one with the command below.</p>
+        <p className="state-text themes-empty">No plugins installed. Add one with the command below.</p>
       )}
       {plugins.length > 0 && (
-        <ul className="themes-list">
+        <ul className="form-list themes-list">
           {plugins.map((p) => (
             <PluginRow key={p.id} plugin={p} loopback={loopback} busy={busy} onNote={setNote} />
           ))}
         </ul>
       )}
       <div className="themes-tools">
-        <button
-          type="button"
-          className="btn btn--sm btn--ghost"
-          onClick={() => void reload()}
-          disabled={!loopback || busy}
-          title={loopback ? "Stop, re-read and start every plugin" : "Only from the machine running the receiver"}
-          data-plugins-reload
-        >
-          {busy ? "Reloading…" : "Reload plugins"}
-        </button>
         {note && <span className="sect-note">{note}</span>}
         {!loopback && <span className="sect-note">Reload and settings work on the receiver machine only.</span>}
       </div>
-      <div className="cmd">
-        <pre className="cmd-text">
-          <code>{PLUGIN_ADD_LINE}</code>
-        </pre>
-        <CopyButton text="sessionpipe-gui plugin add " label="Copy command" />
+      <div className="well-row cmd">
+        <code className="cmd-text">{PLUGIN_ADD_LINE}</code>
+        <CopyIconButton text="sessionpipe-gui plugin add " label="Copy command" />
       </div>
-      <p className="sect-note">
-        Also <code>plugin link &lt;folder&gt;</code>, <code>plugin remove &lt;id&gt;</code>, <code>plugin list</code>.
-        Then Reload. ping-a-human comes bundled and stays off until you enable it (the button above, or{" "}
-        <code>plugin enable ping-a-human</code>); a bundled plugin cannot be removed, only turned off. How to write one:{" "}
-        <code>docs/plugin-authoring.md</code> in the repository. Only install plugins you trust, from people you trust.
+      <p className="caption">
+        Server code that reacts to events, like a message to your phone when a session needs you. A plugin runs inside
+        the receiver process; nothing it does can answer a permission, only your passkey signs that. Only install
+        plugins you trust.
       </p>
     </section>
   );
@@ -120,29 +112,36 @@ function PluginRow({
       setToggling(false);
     }
   };
+  const flags = [p.disabled ? "disabled" : p.status, p.linked && "linked", p.bundled && "bundled"].filter(
+    (f): f is string => !!f,
+  );
   return (
-    <li className="themes-row plug-row" data-plugin-row={p.id} data-plugin-status={p.status}>
-      <div className="themes-row-head">
-        <span className="themes-row-name">{p.name || p.id}</span>
-        {p.version && <span className="themes-row-ver">{p.version}</span>}
-        <span className="themes-row-id">{p.id}</span>
-        {p.disabled ? (
-          <span className="themes-flag">disabled</span>
-        ) : (
-          <span className={`themes-flag plug-status plug-status--${p.status}`}>{p.status}</span>
-        )}
-        {p.linked && <span className="themes-flag">linked</span>}
-        {p.bundled && <span className="themes-flag">bundled</span>}
-        {!p.error && (
+    <li className="form-row themes-row plug-row" data-plugin-row={p.id} data-plugin-status={p.status}>
+      <span className="form-row-text">
+        <span className="themes-row-head">
+          <span className="themes-row-name">{p.name || p.id}</span>
+          {p.version && <span className="themes-row-ver num">{p.version}</span>}
+          {flags.map((f) => (
+            <span key={f} className={`themes-flag ${f === p.status ? `plug-status plug-status--${p.status}` : ""}`}>
+              {f}
+            </span>
+          ))}
+        </span>
+        {p.description && <span className="form-caption themes-row-meta">{p.description}</span>}
+        {p.error && <span className="themes-row-err">{p.error}</span>}
+        {p.settings && p.settings.length > 0 && <SettingsForm plugin={p} loopback={loopback} />}
+      </span>
+      {!p.error && (
+        <span className="form-value themes-row-open">
           <button
             type="button"
-            className={`btn btn--sm ${p.disabled && loopback ? "btn--primary" : "btn--ghost"}`}
+            className={`btn btn--sm ${p.disabled && loopback ? "" : "btn--ghost"}`}
             onClick={() => void toggle(!!p.disabled)}
             disabled={!loopback || busy || toggling}
             title={
               loopback
                 ? p.bundled
-                  ? "Bundled with the GUI: it cannot be removed, only turned off"
+                  ? "Bundled with the app: it cannot be removed, only turned off"
                   : "Turn it off without removing its files"
                 : "Only from the machine running the receiver"
             }
@@ -150,20 +149,8 @@ function PluginRow({
           >
             {toggling ? "…" : p.disabled ? "Enable" : "Disable"}
           </button>
-        )}
-      </div>
-      <div className="themes-row-meta">
-        {p.description && <span>{p.description} · </span>}
-        source <code>{p.bundled ? "bundled with the GUI" : (p.source ?? "unknown")}</code>
-        {p.dir && (
-          <>
-            {" "}
-            · <code>{p.dir}</code>
-          </>
-        )}
-      </div>
-      {p.error && <div className="themes-row-err">{p.error}</div>}
-      {p.settings && p.settings.length > 0 && <SettingsForm plugin={p} loopback={loopback} />}
+        </span>
+      )}
     </li>
   );
 }
@@ -226,7 +213,7 @@ function SettingsForm({ plugin: p, loopback }: { plugin: InstalledPlugin; loopba
       <div className="plug-form-foot">
         <button
           type="submit"
-          className={`btn btn--sm ${dirty && loopback ? "btn--primary" : "btn--ghost"}`}
+          className={`btn btn--sm ${dirty && loopback ? "btn--primary" : ""}`}
           disabled={!loopback || !dirty || saving}
           title={loopback ? undefined : "Settings are saved from the receiver machine only"}
         >

@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-// /shortcuts: the whole keymap as one grouped table (action, keys as chips, scope), each
-// chip a button that records a new binding in place (a chord, or two within 1.2 s; Esc
-// cancels, Backspace unbinds), with the conflicts named and refused: another action in a
-// scope that can be live at the same time, a prefix clash ("g" against "g b"), or a key
-// the browser owns. Reset per row, Reset all, Export / Import JSON, and two presets as
-// examples (Vim-style, Emacs-ish). A view plugin's registered keys are listed under its
-// name. The quick-settings Keyboard tab shows the short form (`KeyboardQuick`).
+// /shortcuts: the whole keymap, grouped under section headers (Go to, Everywhere, Lists,
+// Session…), each row an action and its keys as caps; a cap is a button that records a
+// new binding in place (a chord, or two within 1.2 s; Esc cancels, Backspace unbinds),
+// with the conflicts named and refused: another action in a scope that can be live at the
+// same time, a prefix clash ("g" against "g b"), or a key the browser owns. "Add another"
+// shows on the row's hover and in its menu; Reset per row, Export / Import / Reset all in
+// the bar's menu, and two presets as examples (Vim-style, Emacs-ish). A view plugin's
+// registered keys are listed under its name. Settings › Keyboard shows the short form.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Toggle } from "../components/bits";
+import { SearchInput, Toggle } from "../components/bits";
+import { MoreButton, useContextMenu } from "../components/ContextMenu";
+import { PageBar } from "../components/PageBar";
 import { groupActions, Keys } from "../components/ShortcutHelp";
-import { Link } from "../lib/router";
 import {
   type Action,
   activeKeys,
@@ -23,40 +25,37 @@ import {
   conflictFor,
   conflictWords,
   exportJson,
+  formatBinding,
   getPreset,
   importJson,
   isOverridden,
   PRESETS,
   resetAll,
   resetBinding,
-  type Scope,
   SEQUENCE_MS,
   setBinding,
   sharedWith,
   useShortcutMap,
 } from "../lib/shortcuts";
 
-const SCOPE_LABEL: Record<Scope, string> = {
-  global: "everywhere",
-  lists: "board · feed · inbox",
-  board: "board",
-  feed: "feed",
-  inbox: "inbox",
-  session: "session",
-  panel: "side panel",
-  review: "review",
-  machines: "machines",
-  palette: "palette",
-  views: "view",
-};
-
 export function Shortcuts() {
   const map = useShortcutMap();
   const preset = getPreset();
   const [note, setNote] = useState<{ text: string; err?: boolean } | null>(null);
+  const [q, setQ] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
-  const groups = useMemo(() => groupActions(allActions()), [map]);
   const overridden = Object.keys(map).filter(isOverridden).length;
+  const groups = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const list = allActions().filter(
+      (a) =>
+        !needle ||
+        a.label.toLowerCase().includes(needle) ||
+        a.group.toLowerCase().includes(needle) ||
+        (map[a.id] ?? []).some((k) => formatBinding(k).join(" ").toLowerCase().includes(needle)),
+    );
+    return groupActions(list);
+  }, [map, q]);
 
   const download = () => {
     const blob = new Blob([exportJson()], { type: "application/json" });
@@ -87,83 +86,95 @@ export function Shortcuts() {
     }
     if (fileRef.current) fileRef.current.value = "";
   };
+  const nothingToReset = overridden === 0 && !preset;
+  const doReset = () => {
+    resetAll();
+    setNote({ text: "Every shortcut is back to its default." });
+  };
 
   return (
-    <div className="page sc-page">
-      <header className="sc-head">
-        <div>
-          <h1 className="sc-title">Keyboard shortcuts</h1>
-          <p className="sc-lede">
-            Click a key to change it; press the new key, or two in a row. <kbd>esc</kbd> cancels, <kbd>⌫</kbd> unbinds.{" "}
-            <kbd>mod</kbd> is ⌘ on a Mac and Ctrl elsewhere. A key already used where both could be live is refused, as
-            is one the browser owns.
-          </p>
-        </div>
-        <div className="sc-tools">
-          <button type="button" className="btn btn--sm btn--ghost" onClick={download}>
-            Export
-          </button>
-          <button type="button" className="btn btn--sm btn--ghost" onClick={() => fileRef.current?.click()}>
-            Import
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/json,.json"
-            className="sr-only"
-            tabIndex={-1}
-            aria-hidden="true"
-            onChange={(e) => void onFile(e.target.files?.[0])}
+    <div className="page page--doc sc-page">
+      <PageBar
+        title="Keyboard shortcuts"
+        meta={overridden > 0 ? `${overridden} changed` : undefined}
+        tools={<SearchInput value={q} onChange={setQ} label="Search shortcuts" />}
+        actions={
+          <MoreButton
+            label="Shortcut actions"
+            title={() => "Keyboard shortcuts"}
+            build={() => [
+              { label: "Export…", run: download },
+              { label: "Import…", run: () => fileRef.current?.click() },
+              { sep: true },
+              {
+                label: "Reset all",
+                danger: true,
+                disabled: nothingToReset ? "Nothing is changed" : undefined,
+                run: doReset,
+              },
+            ]}
           />
-          <button
-            type="button"
-            className="btn btn--sm btn--ghost"
-            disabled={overridden === 0 && !preset}
-            onClick={() => {
-              resetAll();
-              setNote({ text: "Every shortcut is back to its default." });
-            }}
-          >
-            Reset all
-          </button>
-        </div>
-      </header>
-
-      <Presets onNote={(t, err) => setNote({ text: t, err })} />
+        }
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/json,.json"
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(e) => void onFile(e.target.files?.[0])}
+      />
+      <p className="caption sc-lede">
+        Click a key to change it, then press the new one, or two in a row. Esc cancels, ⌫ unbinds; mod is ⌘ on a Mac.
+      </p>
       {note && (
         <p className={`page-note sc-note ${note.err ? "is-err" : ""}`} role="status">
           {note.text}
         </p>
       )}
 
+      <Presets onNote={(t, err) => setNote({ text: t, err })} />
+
+      {groups.length === 0 && (
+        <div className="state">
+          <span className="state-title">No shortcut matches “{q.trim()}”</span>
+          <span className="state-text">Search by an action's name or by its keys.</span>
+        </div>
+      )}
       {groups.map((g) => (
         <section key={g.group} className="sc-group" aria-label={g.group}>
-          <h2 className="group-head">
+          <h2 className="sc-group-head">
             {g.group}
-            {g.actions[0]?.view && <span className="group-count">view</span>}
+            {g.actions[0]?.view && <span className="sc-group-tag">view</span>}
           </h2>
           <ul className="sc-table">
-            {g.actions.map((a) => (
-              <Row key={a.id} action={a} keys={map[a.id] ?? []} />
+            {g.actions.map((a, i) => (
+              <Row
+                key={a.id}
+                action={a}
+                keys={map[a.id] ?? []}
+                // "The n-th installed view" once, not nine times.
+                hint={a.hint && a.hint !== g.actions[i - 1]?.hint ? a.hint : undefined}
+              />
             ))}
           </ul>
         </section>
       ))}
-      <p className="page-note">
-        A view plugin lists its own keys here through <code>api.shortcuts.register</code> (docs/theme-authoring.md).
-      </p>
+      <div className="sc-foot">
+        <button type="button" className="btn" disabled={nothingToReset} onClick={doReset}>
+          Reset all
+        </button>
+        <span className="caption">
+          A view plugin lists its own keys here through <code>api.shortcuts.register</code>.
+        </span>
+      </div>
     </div>
   );
 }
 
-/** The two presets as switches; one on turns the other off. */
-export function Presets({
-  onNote,
-  compact = false,
-}: {
-  onNote?: (text: string, err?: boolean) => void;
-  compact?: boolean;
-}) {
+/** The two presets as switch rows; one on turns the other off. */
+export function Presets({ onNote }: { onNote?: (text: string, err?: boolean) => void }) {
   useShortcutMap();
   const current = getPreset();
   const pick = (id: string, on: boolean) => {
@@ -174,24 +185,30 @@ export function Presets({
     else onNote(`${PRESETS[id]?.name} is on; skipped ${r.skipped.map((s) => `${s.id} (${s.reason})`).join(", ")}.`);
   };
   return (
-    <div className={`sc-presets ${compact ? "sc-presets--compact" : ""}`}>
-      {Object.values(PRESETS).map((p) => (
-        <div key={p.id} className="sc-preset" data-preset={p.id}>
-          <Toggle on={current === p.id} onChange={(v) => pick(p.id, v)} label={`${p.name} preset`} />
-          <span className="sc-preset-text">
-            <span className="sc-preset-name">{p.name}</span>
-            {!compact && <span className="sc-preset-hint">{p.hint}</span>}
-          </span>
-        </div>
-      ))}
-    </div>
+    <section className="form-group sc-presets" aria-label="Presets">
+      <div className="form-head">
+        <h2 className="section-label">Presets</h2>
+      </div>
+      <ul className="form-list">
+        {Object.values(PRESETS).map((p) => (
+          <li key={p.id} className="form-row sc-preset" data-preset={p.id}>
+            <span className="form-row-text">
+              <span className="form-label">{p.name}</span>
+              <span className="form-caption">{p.hint.charAt(0).toUpperCase() + p.hint.slice(1)}.</span>
+            </span>
+            <Toggle on={current === p.id} onChange={(v) => pick(p.id, v)} label={`${p.name} preset`} />
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
-function Row({ action: a, keys }: { action: Action; keys: string[] }) {
+function Row({ action: a, keys, hint }: { action: Action; keys: string[]; hint?: string }) {
   /** Which chip is being re-recorded (its index), or `keys.length` for a new one. */
   const [recording, setRecording] = useState<number | null>(null);
   const returnTo = useRef<HTMLElement | null>(null);
+  const rowRef = useRef<HTMLLIElement>(null);
   const start = (i: number, from: HTMLElement) => {
     returnTo.current = from;
     setRecording(i);
@@ -214,12 +231,38 @@ function Row({ action: a, keys }: { action: Action; keys: string[] }) {
     setBinding(a.id, next.length === 0 ? null : [...new Set(next)]);
   };
   const shared = keys.flatMap((k) => sharedWith(a.id, k).map((o) => o.label));
+  const changed = isOverridden(a.id);
+  const menu = useContextMenu(
+    () => {
+      const row = rowRef.current;
+      const first = row?.querySelector<HTMLElement>("button.sc-key");
+      const add = row?.querySelector<HTMLElement>(".sc-add");
+      return [
+        first && { label: "Change key…", run: () => first.click() },
+        add && { label: "Add a key…", run: () => add.click() },
+        { sep: true },
+        {
+          label: "Reset to default",
+          disabled: isOverridden(a.id) ? undefined : "Already the default",
+          run: () => resetBinding(a.id),
+        },
+      ];
+    },
+    { title: () => a.label },
+  );
   return (
-    <li className="sc-row" data-action={a.id} data-overridden={isOverridden(a.id) || undefined}>
+    <li
+      ref={rowRef}
+      className="sc-row"
+      data-action={a.id}
+      data-overridden={changed || undefined}
+      data-recording={recording !== null || undefined}
+      {...menu}
+    >
       <span className="sc-row-label">
-        {a.label}
-        {a.hint && <span className="sc-row-hint">{a.hint}</span>}
-        {shared.length > 0 && <span className="sc-row-hint">also {[...new Set(shared)].join(", ")} elsewhere</span>}
+        <span className="sc-row-name">{a.label}</span>
+        {hint && <span className="sc-row-hint">{hint.charAt(0).toUpperCase() + hint.slice(1)}</span>}
+        {shared.length > 0 && <span className="sc-row-hint">Also {[...new Set(shared)].join(", ")} elsewhere</span>}
       </span>
       <span className="sc-row-keys">
         {keys.map((k, i) =>
@@ -247,7 +290,7 @@ function Row({ action: a, keys }: { action: Action; keys: string[] }) {
             </button>
           ),
         )}
-        {keys.length === 0 && recording === null && <span className="sc-unbound">unbound</span>}
+        {keys.length === 0 && recording === null && <span className="sc-unbound">None</span>}
         {recording === keys.length ? (
           <Recorder
             action={a}
@@ -263,30 +306,42 @@ function Row({ action: a, keys }: { action: Action; keys: string[] }) {
             className="sc-add"
             onClick={(e) => start(keys.length, e.currentTarget)}
             aria-label={`Add a key for ${a.label}`}
-            title="Add a key"
+            title="Add another key"
           >
-            +
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+              <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
           </button>
         )}
-      </span>
-      <span className="sc-row-scope">
-        <span className="sc-scope">{a.view ? a.group : SCOPE_LABEL[a.scope]}</span>
-        {isOverridden(a.id) && (
-          <button
-            type="button"
-            className="sc-reset"
-            onClick={() => resetBinding(a.id)}
-            aria-label={`Reset ${a.label} to its default`}
+        <button
+          type="button"
+          className="icon-btn sc-reset"
+          onClick={() => resetBinding(a.id)}
+          aria-label={`Reset ${a.label} to its default`}
+          title="Reset to default"
+          hidden={!changed}
+        >
+          <svg
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
           >
-            reset
-          </button>
-        )}
+            <path d="M3.5 8a4.5 4.5 0 1 0 1.3-3.2" />
+            <path d="M3.5 2.8v2.4h2.4" />
+          </svg>
+        </button>
       </span>
     </li>
   );
 }
 
-/** "press keys…": captures one chord, then waits SEQUENCE_MS for a second; a conflict is
+/** "Press keys…": captures one chord, then waits SEQUENCE_MS for a second; a conflict is
  *  shown and refused (the recorder stays open for another try). */
 function Recorder({
   action,
@@ -362,6 +417,12 @@ function Recorder({
 
   return (
     <span className="sc-recorder" data-recording>
+      {conflict && (
+        <span className="sc-conflict" id="sc-conflict" role="alert">
+          {conflictWords(conflict)} · try another
+        </span>
+      )}
+      {!conflict && soft && <span className="sc-soft">The browser may take this key first</span>}
       {/* biome-ignore lint/a11y/useSemanticElements: a key-capturing field has no native element */}
       <span
         ref={ref}
@@ -381,45 +442,9 @@ function Recorder({
             <Keys binding={bindingString([first])} /> <span className="sc-rec-then">then…</span>
           </>
         ) : (
-          "press keys…"
+          "Press keys…"
         )}
       </span>
-      {conflict && (
-        <span className="sc-conflict" id="sc-conflict" role="alert">
-          {conflictWords(conflict)} · try another
-        </span>
-      )}
-      {!conflict && soft && <span className="sc-soft">the browser may take this key first</span>}
     </span>
-  );
-}
-
-/** The quick-settings Keyboard tab: the presets, the keys most people want, the link. */
-export function KeyboardQuick() {
-  const map = useShortcutMap();
-  const show = ["palette.toggle", "search.focus", "help.toggle", "nav.board", "nav.inbox", "list.down", "list.open"];
-  return (
-    <div className="qs-row sc-quick">
-      <span className="qs-label">Keyboard</span>
-      <ul className="sc-quick-list">
-        {show.map((id) => {
-          const a = allActions().find((x) => x.id === id);
-          if (!a) return null;
-          const keys = map[id] ?? [];
-          return (
-            <li key={id}>
-              <span>{a.label}</span>
-              <span className="sc-row-keys">
-                {keys.length === 0 ? <span className="sc-unbound">unbound</span> : <Keys binding={keys[0]!} />}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
-      <Presets compact />
-      <p className="qs-note">
-        <Link to="/shortcuts">All shortcuts, and change any →</Link>
-      </p>
-    </div>
   );
 }

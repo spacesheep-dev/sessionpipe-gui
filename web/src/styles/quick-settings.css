@@ -1,0 +1,304 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- quick settings (Display) ---------- */
+/* A 260 px popover beside the sidebar's foot: Appearance as a segmented control, the
+   skins as a radio list (a check column, a small swatch, the name), the text size, then
+   one row to the Settings window. On a phone the same groups in a bottom sheet above the
+   tab bar. The lens chip's picker borrows .qs-row, .qs-label and .qs-note. */
+
+.qs {
+  position: relative;
+}
+/* On the tab bar the quick settings has no button of its own: the More sheet opens it. */
+.qs--tabbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+}
+
+.qs-pop {
+  position: fixed;
+  z-index: var(--z-pop);
+  width: 260px;
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  padding: 12px;
+  border-radius: var(--radius-pop);
+  border: var(--hairline) solid var(--line);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  -webkit-user-select: none;
+  user-select: none;
+  animation: rise var(--dur) var(--ease-out) both;
+}
+.qs--rail .qs-pop {
+  left: calc(var(--rail) + 8px);
+  bottom: 12px;
+}
+.qs-sect,
+.qs-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.qs-label {
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+.qs-sect .seg {
+  display: flex;
+  width: 100%;
+}
+.qs-note {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+}
+.qs-note code {
+  font-size: 0.925em;
+  color: var(--fg-2);
+}
+.qs-close {
+  align-self: flex-end;
+}
+
+/* The skins: menu rows with the check in a leading column. */
+.qs-themes {
+  list-style: none;
+  margin: 0 -4px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.qs-divider {
+  padding: 6px 8px 2px 28px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.qs-theme {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 16px 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--menu-row);
+  padding: 0 8px 0 4px;
+  border-radius: var(--radius-inner);
+  text-align: left;
+  color: var(--fg);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .qs-theme:hover:not(:disabled) {
+    background: var(--sel);
+  }
+}
+.qs-theme:active:not(:disabled) {
+  background: var(--press);
+  transition: none;
+}
+.qs-theme:focus-visible {
+  outline-offset: -2px;
+}
+.qs-theme:disabled {
+  opacity: 0.55;
+}
+.qs-check {
+  justify-self: center;
+  width: 10px;
+  height: 10px;
+}
+.qs-theme--on .qs-check {
+  background: var(--fg);
+  -webkit-mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.6 5.3 4 7.6 8.4 2.6' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.6 5.3 4 7.6 8.4 2.6' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+/* The skin's ground and ink, split on the diagonal. */
+.qs-swatch {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 var(--hairline) var(--line-2);
+}
+.qs-theme-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+}
+.qs-theme-hint {
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+
+/* The one row to the Settings window, a hairline above it. */
+.qs-foot {
+  margin: -2px -12px -12px;
+  padding: 4px;
+  border-top: var(--hairline) solid var(--line);
+}
+.qs-all {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: var(--menu-row);
+  padding: 0 8px 0 28px;
+  border-radius: var(--radius-inner);
+  color: var(--fg);
+  font-size: var(--text-sm);
+}
+@media (hover: hover) {
+  .qs-all:hover {
+    background: var(--sel);
+  }
+}
+.qs-all:active {
+  background: var(--press);
+}
+.qs-all:focus-visible {
+  outline-offset: -2px;
+}
+.qs-all-chev {
+  width: 6px;
+  height: 10px;
+  background: var(--fg-4);
+  -webkit-mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 12'%3E%3Cpath d='M1.5 1.5 6 6l-4.5 4.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 12'%3E%3Cpath d='M1.5 1.5 6 6l-4.5 4.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+.qs-grab,
+.qs-sheet-title,
+.qs-scrim {
+  display: none;
+}
+
+/* ----- the phone: a bottom sheet above the tab bar ----- */
+@media (max-width: 839px) {
+  .qs-scrim {
+    display: block;
+    position: fixed;
+    inset: 0 0 calc(var(--tabbar) + env(safe-area-inset-bottom)) 0;
+    z-index: var(--z-pop);
+    background: var(--scrim);
+    animation: fade-in var(--dur) var(--ease-out) both;
+  }
+  .qs--tabbar .qs-pop {
+    left: 0;
+    right: 0;
+    bottom: calc(var(--tabbar) + env(safe-area-inset-bottom));
+    width: auto;
+    max-height: calc(85dvh - var(--tabbar));
+    padding: 0 16px 20px;
+    gap: 20px;
+    border: 0;
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+    background: var(--grouped-ground);
+    animation: sheet-up var(--dur-slow) var(--ease-out) both;
+  }
+  .qs-grab {
+    display: block;
+    flex: none;
+    width: 36px;
+    height: 5px;
+    margin: 6px auto -8px;
+    border-radius: var(--radius-pill);
+    background: var(--line-2);
+  }
+  .qs-sheet-title {
+    display: block;
+    color: var(--fg);
+    font-size: var(--text-lg);
+    font-weight: 600;
+    text-align: center;
+  }
+  .qs--tabbar .qs-label {
+    padding: 0 16px;
+    font-size: var(--text-sm);
+    font-weight: 400;
+  }
+  .qs--tabbar .qs-note {
+    padding: 0 16px;
+  }
+  .qs--tabbar .seg {
+    height: 36px;
+    background: var(--bg-3);
+  }
+  .qs--tabbar .seg-opt {
+    height: 32px;
+  }
+  .qs--tabbar .qs-themes {
+    margin: 0;
+    border-radius: var(--radius-pop);
+    background: var(--bg-2);
+    overflow: hidden;
+  }
+  .qs--tabbar .qs-themes > li {
+    position: relative;
+  }
+  .qs--tabbar .qs-themes > li + li::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 66px;
+    right: 0;
+    height: var(--hairline);
+    background: var(--line);
+  }
+  .qs--tabbar .qs-theme {
+    grid-template-columns: 18px 22px minmax(0, 1fr) auto;
+    gap: 12px;
+    min-height: 44px;
+    padding: 0 16px;
+    border-radius: 0;
+  }
+  .qs--tabbar .qs-swatch {
+    width: 22px;
+    height: 22px;
+  }
+  .qs--tabbar .qs-theme-name {
+    font-size: max(1rem, 16px);
+  }
+  .qs--tabbar .qs-theme-hint {
+    font-size: var(--text-sm);
+  }
+  .qs--tabbar .qs-divider {
+    padding: 10px 16px 4px;
+    font-weight: 400;
+    font-size: var(--text-sm);
+  }
+  .qs--tabbar .qs-foot {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pop);
+    background: var(--bg-2);
+    overflow: hidden;
+  }
+  .qs--tabbar .qs-all {
+    min-height: 44px;
+    padding: 0 16px;
+    border-radius: 0;
+    font-size: max(1rem, 16px);
+  }
+  .qs--tabbar .qs-all-chev {
+    width: 8px;
+    height: 12px;
+  }
+}

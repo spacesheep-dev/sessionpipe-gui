@@ -9,7 +9,17 @@
 import type { ColorTheme } from "@shared/color-theme";
 import { skinSchemeFor } from "@shared/skin-api";
 import { useSyncExternalStore } from "react";
-import { applySkin, BUILTIN_SKINS, DEFAULT_SKIN, findSkin, type InstalledSkin, subscribeSkins } from "./skins";
+import {
+  applySkin,
+  BUILTIN_SKINS,
+  DEFAULT_SKIN,
+  DEFAULT_SKIN_ID,
+  findSkin,
+  getSkins,
+  type InstalledSkin,
+  PLAIN_SKIN_ID,
+  subscribeSkins,
+} from "./skins";
 
 export type Theme = "auto" | "light" | "dark";
 export type TextSize = 0.9 | 1 | 1.1 | 1.25;
@@ -52,6 +62,14 @@ export function skinFromColorTheme(ct: ColorTheme): InstalledSkin {
   };
 }
 
+/** A stored skin as it applies today: a built-in from this build's own list (so an update
+ *  shows at once), and Spacesheep for Plain or for a built-in this build no longer ships. */
+const current = (skin: InstalledSkin): InstalledSkin => {
+  if (skin.source !== "builtin") return skin;
+  if (skin.id === PLAIN_SKIN_ID) return DEFAULT_SKIN;
+  return BUILTIN_SKINS.find((b) => b.id === skin.id) ?? DEFAULT_SKIN;
+};
+
 const read = (): Settings => {
   let appearance: Theme = "auto";
   let skin: InstalledSkin = DEFAULT_SKIN;
@@ -62,7 +80,7 @@ const read = (): Settings => {
     const s = localStorage.getItem(KEY_SKIN);
     if (s) {
       const parsed: unknown = JSON.parse(s);
-      if (isSkin(parsed)) skin = parsed;
+      if (isSkin(parsed)) skin = current(parsed);
     } else {
       const old = localStorage.getItem(KEY_COLOR_OLD);
       if (old) {
@@ -143,9 +161,13 @@ if (typeof matchMedia === "function") {
 
 // When the list arrives with a newer copy of the applied skin (a linked skin edited, a
 // built-in changed by an update), apply that copy and store it.
+// A skin the list no longer has (a bundled one this version dropped, one uninstalled
+// elsewhere) falls back to the default, quietly.
 subscribeSkins(() => {
   const fresh = findSkin(settings.skin.id);
   if (fresh && !fresh.error && JSON.stringify(fresh) !== JSON.stringify(settings.skin)) setSkin(fresh);
+  else if (!fresh && getSkins().loaded && !getSkins().error && settings.skin.id !== DEFAULT_SKIN_ID)
+    setSkin(DEFAULT_SKIN);
 });
 
 const subscribe = (l: () => void) => {
@@ -154,6 +176,9 @@ const subscribe = (l: () => void) => {
     listeners.delete(l);
   };
 };
+
+/** The display settings now (for code outside render: a menu builder). */
+export const getDisplaySettings = (): Settings => settings;
 
 export function useSettings(): Settings {
   return useSyncExternalStore(

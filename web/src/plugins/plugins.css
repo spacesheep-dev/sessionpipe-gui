@@ -1,26 +1,17 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* The Plugins section of the Views page: rows share the view list's look (host.css);
-   this is the generated settings form. */
+   this is the generated settings form, under the row's caption, fields in the shared
+   text-field look. Status words stay quiet: red only for an error. */
 
-.plug-row {
-  grid-template-columns: 1fr;
-}
-.plug-status--active {
-  border-color: var(--ok-soft, var(--line-2));
-  color: var(--ok, var(--fg-2));
-}
 .plug-status--error {
-  border-color: var(--err-soft);
   color: var(--err);
 }
 .plug-form {
   display: grid;
   gap: 12px;
-  margin-top: 8px;
-  padding: 12px 14px;
-  border: var(--hairline) solid var(--line);
-  border-radius: var(--radius, 8px);
-  background: var(--bg-2, transparent);
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: var(--hairline) solid var(--line);
 }
 .plug-field {
   display: grid;
@@ -35,29 +26,41 @@
   align-items: center;
   column-gap: 8px;
 }
+.plug-field--check input {
+  accent-color: var(--fg);
+}
 .plug-help {
   color: var(--fg-3);
-  font-size: var(--text-xs);
-  line-height: 1.4;
+  font-size: var(--text-sm);
+  line-height: var(--lh);
 }
 .plug-field--check .plug-help {
   grid-column: 2;
 }
 .plug-label {
-  font-size: var(--text-sm);
   color: var(--fg-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 .plug-field input[type="text"],
 .plug-field input[type="password"],
 .plug-field input[type="number"] {
   width: 100%;
   max-width: 48ch;
-  padding: 6px 8px;
+  min-height: var(--control);
+  padding: 0 8px;
   border: var(--hairline) solid var(--line-2);
-  border-radius: var(--radius-sm, 6px);
-  background: var(--bg);
+  border-radius: var(--radius);
+  background: var(--bg-2);
   color: var(--fg);
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
+}
+.plug-field input[type="text"]:focus,
+.plug-field input[type="password"]:focus,
+.plug-field input[type="number"]:focus {
+  outline: none;
+  border-color: color-mix(in oklch, var(--focus) 70%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
 }
 .plug-field input:disabled {
   opacity: 0.6;
@@ -85,6 +88,10 @@
   gap: 6px;
   align-items: center;
   font-size: var(--text-sm);
+}
+.plug-option code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 .plug-form-foot {
   display: flex;

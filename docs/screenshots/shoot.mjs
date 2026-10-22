@@ -411,7 +411,7 @@ const desktopAdvanced = {
   },
 };
 
-/** The themes repo's own shots: the plugin's settings form and the board in Spacesheep Vivid. */
+/** The themes repo's own shot: the plugin's settings form. */
 async function themesExtras(page) {
   await open(page, "/themes");
   // The settings form alone: the row above it prints the plugin's source path on this machine.
@@ -420,16 +420,6 @@ async function themesExtras(page) {
   await form.scrollIntoViewIfNeeded();
   await sleep(500);
   await shot(page, "ping-a-human.png", { themes: true, locator: form });
-
-  await open(page, "/");
-  await page.locator("article.card").first().waitFor();
-  await page.getByRole("button", { name: "Quick settings" }).click();
-  await page.locator(".qs-pop").waitFor();
-  await page.locator(".qs-themes").getByText("Spacesheep Vivid", { exact: true }).click();
-  await page.keyboard.press("Escape");
-  await page.locator(".qs-pop").waitFor({ state: "hidden" });
-  await sleep(600);
-  await shot(page, "spacesheep-vivid-dark.png", { themes: true });
 }
 
 const desktopSimple = {

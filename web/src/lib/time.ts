@@ -107,7 +107,8 @@ export function dur(msTotal: number | undefined): string {
  *  that started a while ago, where a ticking second is noise. */
 export function durCoarse(msTotal: number | undefined): string {
   if (msTotal === undefined || Number.isNaN(msTotal)) return "";
-  if (msTotal < 60_000) return dur(msTotal);
+  // Whole seconds: a row's age never reads "0.0 s".
+  if (msTotal < 60_000) return `${Math.floor(Math.max(0, msTotal) / 1000)} s`;
   const m = Math.floor(msTotal / 60_000);
   if (m < 60) return `${m} m`;
   const h = Math.floor(m / 60);

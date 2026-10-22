@@ -5,9 +5,16 @@
 // (a LAN address → 403, through the test door's remote-address header), the one-time
 // redirect from / and its dismissal, and the https link the pairing page and the pending
 // list offer when passkeys cannot work on the origin the daemon printed.
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, test } from "@playwright/test";
 import { E2E_TLS_PORT, SETUP_SEEN_KEY } from "../../playwright.config.js";
 import { INFO, openPage } from "./helpers.js";
+
+/** Opens a folded step (only the step to do now starts open). */
+async function openStep(step: Locator) {
+  const toggle = step.locator(".step-toggle");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+}
 
 const TLS_HTTPS = `https://localhost:${E2E_TLS_PORT}`;
 const TLS_HTTP = `http://127.0.0.1:${E2E_TLS_PORT}`;
@@ -28,11 +35,13 @@ test.describe("setup on the demo server (TLS off)", () => {
     await expect(steps.nth(1)).toHaveAttribute("data-mark", "needs");
     await expect(steps.nth(1).getByRole("button", { name: "Turn on" })).toBeVisible();
     await expect(steps.nth(2)).toHaveAttribute("data-mark", "todo");
-    await expect(steps.nth(2)).toContainText("finish step 2 first");
+    await expect(steps.nth(2)).toContainText("Finish step 2 first");
     await expect(steps.nth(3)).toHaveAttribute("data-mark", "todo");
+    // Only the step to do now is open; the phone step opens on its title.
+    await openStep(steps.nth(3));
     await expect(steps.nth(3).getByRole("img", { name: "QR code for your phone" })).toBeVisible();
     await expect(steps.nth(4)).toHaveAttribute("data-mark", "todo");
-    await expect(steps.nth(4)).toContainText("finish steps 2 and 3 first");
+    await expect(steps.nth(4)).toContainText("Finish steps 2 and 3 first");
     // Step 6 is optional: "todo", never "needs you", the word "optional" in its heading instead.
     await expect(steps.nth(5)).toHaveAttribute("data-mark", "todo");
     await expect(steps.nth(5).locator(".step-title")).toContainText("From anywhere");
@@ -43,7 +52,7 @@ test.describe("setup on the demo server (TLS off)", () => {
     // The rail shows the entry with its dot while steps remain.
     await expect(page.locator(".rail [data-nav=setup]")).toBeVisible();
     await expect(page.locator(".rail [data-nav=setup] .nav-dot")).toBeVisible();
-    // "why isn't this green?" folds open to the facts.
+    // "Why isn't this done?" folds open to the facts.
     await steps.nth(1).locator("summary").click();
     await expect(steps.nth(1).locator(".step-facts")).toContainText("TLS mode");
     await expect(steps.nth(1).locator(".step-facts")).toContainText("off");
@@ -90,6 +99,7 @@ test.describe("setup on the demo server (TLS off)", () => {
     await openPage(page, "/setup");
     const step = page.locator("li.step[data-step=remote]");
     await expect(step).toBeVisible();
+    await openStep(step);
     if (r.publicUrl) {
       await expect(step).toHaveAttribute("data-mark", "done");
       await expect(step).toContainText(r.publicUrl);
@@ -131,7 +141,7 @@ test.describe("setup on the demo server (TLS off)", () => {
       expect(await page.evaluate((k) => localStorage.getItem(k), SETUP_SEEN_KEY)).toBe("1");
       // Connect offers the way back.
       await openPage(page, "/connect");
-      await expect(page.locator(".connect-setup")).toContainText("Setup");
+      await expect(page.locator(".connect-setup")).toContainText("Set up");
     });
   });
 });
@@ -145,6 +155,7 @@ test.describe("setup on the TLS instance", () => {
     await expect(secure).toBeVisible();
     await expect(secure.getByRole("button", { name: "Turn on" })).toHaveCount(0);
     const mark = await secure.getAttribute("data-mark");
+    await openStep(secure);
     if (mark === "done") {
       await expect(secure).toContainText("Passkeys work here");
     } else {
@@ -159,8 +170,13 @@ test.describe("setup on the TLS instance", () => {
     );
     // Step 3 is gated on step 2 unless step 2 is green.
     const pair = page.locator("li.step[data-step=pair]");
-    if (mark !== "done") await expect(pair).toContainText("finish step 2 first");
-    else await expect(pair.getByRole("button", { name: "Pair this Mac" }).or(pair.locator(".step-note"))).toBeVisible();
+    if (mark !== "done") await expect(pair).toContainText("Finish step 2 first");
+    else {
+      await openStep(pair);
+      await expect(
+        pair.getByRole("button", { name: "Pair this Mac" }).or(pair.locator(".step-what", { hasText: "is listening" })),
+      ).toBeVisible();
+    }
   });
 
   test("the daemon's http link offers the https origin on the pairing page and in the pending list", async ({

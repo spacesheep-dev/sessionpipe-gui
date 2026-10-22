@@ -94,12 +94,11 @@ them. Harnesses without a mark (the rest of the registry in sessionpipe's
 take a brand colour; the amber is still the only accent of the stock scheme.
 
 The default skin, **Spacesheep**, carries the colours of [spacesheep](https://spacesheep.dev)
-(the sheep's flame for *needs you*, its indigo for *working*, teal for *stale*, a ground
-tinted toward the brand's violet), read from the spacesheep clone's `theme.ts` and brand
-SVGs into oklch (`shared/skins-builtin.ts`; the palette notes are in the themes repo,
-`packages/color-themes/README.md`). It uses no logo or wordmark of spacesheep's: it is a
-colour palette, not a rebrand, and in it the flame orange takes the one accent slot amber
-has in Plain. The server-rendered pages (`/trust`, the 401 page) and the OG image keep the
+as a whisper: cool neutrals of the brand's indigo hue at low chroma, and the sheep's flame
+for *needs you*, the one accent; working, stale, idle and done are neutral tiers, red is
+for errors only (`shared/skins-builtin.ts`). It uses no logo or wordmark of spacesheep's:
+it is a colour palette, not a rebrand. The other shipped skin, **Paper**, is warm paper and
+ink, light only. The server-rendered pages (`/trust`, the 401 page) and the OG image keep the
 neutral stock palette for now.
 
 ## Trademark

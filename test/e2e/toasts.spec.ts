@@ -187,7 +187,7 @@ test.describe("toasts", () => {
     await expect(card).toHaveAttribute("data-toast", "error");
     await expect(card.locator(".toast-dot")).toHaveCount(0);
     await expect(card.locator(".toast-label")).toHaveText("error");
-    await expect(card.locator(".toast-msg")).toHaveText("the turn ended with an error: rate_limit");
+    await expect(card.locator(".toast-msg")).toHaveText("The turn ended with an error: rate_limit");
     await expect(card.getByRole("button", { name: "Allow" })).toHaveCount(0);
     await expect(card).toHaveCount(0, { timeout: 12_000 });
   });

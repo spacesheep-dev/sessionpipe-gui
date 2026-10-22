@@ -1,0 +1,201 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- connect ---------- */
+/* The grouped form (settings.css): the QR at 160 px beside its addresses, each row a
+   name, the url in mono and a copy icon; commands in wells; the token masked with its
+   three icon buttons. The QR stays on its own light ground so a camera reads it in both
+   schemes. */
+
+.connect {
+  gap: 32px;
+}
+.connect-phone {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+.connect-phone-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.qr {
+  flex: none;
+  padding: 4px;
+  border-radius: var(--radius);
+  background: var(--qr-bg);
+  line-height: 0;
+}
+.qr img {
+  display: block;
+  width: 160px;
+  height: 160px;
+}
+.qr-none {
+  display: grid;
+  place-content: center;
+  text-align: center;
+  width: 160px;
+  height: 160px;
+  color: var(--qr-fg);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+.qr-none small {
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+/* An address row: the name in the secondary tier, the url filling the row. */
+.url-row {
+  gap: 12px;
+}
+.url-label {
+  flex: none;
+  min-width: 88px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.url-row .url-value {
+  flex: 1 1 auto;
+}
+.urls-none {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.connect-remote {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+.connect-remote code,
+.connect .caption code,
+.connect .form-caption code,
+.sources code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.cmd {
+  max-width: 100%;
+}
+.connect-tier {
+  max-width: 240px;
+}
+.passkeys-fp {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-2);
+}
+.token-row {
+  gap: 12px;
+}
+.token-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.token-actions {
+  gap: 2px;
+}
+/* Rotate is destructive: red only under the pointer, as a menu's destructive item. */
+@media (hover: hover) {
+  .icon-btn--danger:hover:not(:disabled) {
+    color: var(--err);
+  }
+}
+.sources,
+.stats {
+  margin: 0;
+}
+.sources dd,
+.stats dd {
+  margin: 0;
+}
+.demo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.connect-dir {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+/* Simple mode's Connect: the fold. */
+.connect-advanced {
+  align-self: flex-start;
+  width: auto;
+  margin: -8px 0 -8px -8px;
+}
+.connect-advanced-chev {
+  width: 10px;
+  height: 10px;
+  background: currentColor;
+  -webkit-mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4.5 2.5 8 6l-3.5 3.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4.5 2.5 8 6l-3.5 3.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.connect-advanced[aria-expanded="true"] .connect-advanced-chev {
+  transform: rotate(90deg);
+}
+.connect-fold {
+  display: contents;
+}
+/* The fold is not a box, so its sections keep the page's measure themselves. */
+.connect-fold > * {
+  width: 100%;
+  max-width: var(--measure);
+}
+.connect-fold[hidden] {
+  display: none;
+}
+
+/* Connect: the async blocks keep their height while they load, so a late answer never
+   shortens the page under a reader (the browser would clamp the scroll). */
+.connect .qr {
+  min-height: 168px;
+}
+.sources,
+.stats {
+  min-height: 72px;
+}
+
+@media (max-width: 639px) {
+  .connect-phone {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
+  .connect-phone .qr {
+    align-self: center;
+  }
+}
+@media (max-width: 839px) {
+  .url-label {
+    min-width: 0;
+  }
+  .connect-phone-text .caption {
+    padding: 0 16px;
+  }
+  .connect-remote .well-row,
+  .sect--machine .well-row {
+    background: var(--bg-2);
+  }
+}

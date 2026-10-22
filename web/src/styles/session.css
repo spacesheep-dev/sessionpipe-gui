@@ -1,0 +1,554 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- session ---------- */
+
+/* The session page: its title bar, the transcript, then the control bar docked on the
+   bottom edge. The transcript and the control share one reading measure, centred in the
+   session column (the split can narrow it); the bars span the column. The page fills
+   the window, so the docked bar sits on the bottom edge however short the session. */
+.main:has(> .session) {
+  padding-bottom: 0;
+}
+.main > .session {
+  min-height: 100dvh;
+}
+@media (max-width: 839px) {
+  .main:has(> .session) {
+    padding-bottom: calc(var(--tabbar) + env(safe-area-inset-bottom));
+  }
+  .main > .session {
+    min-height: calc(100dvh - var(--tabbar) - env(safe-area-inset-bottom));
+  }
+}
+/* A row scrolled into view (a jump, the focused prompt) clears the bar and the docked
+   control (SessionView measures it). */
+html:has(.main > .session) {
+  scroll-padding-top: calc(var(--bar) + env(safe-area-inset-top) + 28px);
+  scroll-padding-bottom: calc(var(--sess-ctl-h, 120px) + 8px);
+}
+.session {
+  --tl-time: 56px;
+  /* Where a row's text starts: the time, then a 16 px glyph, with 8 px between. */
+  --tl-lead: calc(var(--tl-time) + 32px);
+  gap: 16px;
+}
+.session > :not(.bar):not(.bar-below):not(.sess-ctl) {
+  width: 100%;
+  max-width: var(--measure-read);
+  margin-left: auto;
+  margin-right: auto;
+}
+@media (max-width: 839px) {
+  .session {
+    --tl-time: 54px;
+  }
+}
+
+/* ----- the title bar (PageBar) ----- */
+
+/* The title gives way last: the meta ellipsises first, then the title. The lead takes
+   what is left beside the tools and actions (a zero basis, so it never wraps them). */
+.sess-bar .bar-lead {
+  flex: 1 1 0;
+}
+@media (min-width: 840px) {
+  .sess-bar .bar-title {
+    flex: 0 0 auto;
+    max-width: 60%;
+  }
+}
+.sess-bar .bar-tools {
+  flex: 0 1 auto;
+}
+.sess-bar .bar-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: 4px;
+}
+.sess-state {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+/* A copy of another session (a fork): the original, named and linked, in the same muted tier. */
+.sess-copy {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+}
+.sess-copy a {
+  color: var(--fg-2);
+  font-weight: 500;
+}
+@media (hover: hover) {
+  .sess-copy a:hover {
+    color: var(--fg);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+.sess-where,
+.sess-counts {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+}
+.sess-counts > * + *::before {
+  content: "·";
+  margin: 0 6px;
+  color: var(--fg-4);
+}
+.sess-counts .is-err {
+  color: var(--err);
+}
+/* The phone: the meta is the line under the navigation bar. */
+.session > .bar + .bar-below {
+  margin-top: -4px;
+}
+.session .bar-sub {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  margin-top: 0;
+}
+
+/* The lens: the segmented control in the bar's tools, what it hides beside it. */
+.lens {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.lens-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.lens .seg-opt {
+  min-width: 28px;
+  padding: 0 8px;
+}
+@media (max-width: 839px) {
+  .session > .bar-below .bar-tools {
+    display: none;
+  }
+}
+
+/* The Forget confirm: a popover under its button. */
+.sess-forget {
+  position: relative;
+  display: inline-flex;
+}
+.sess-confirm {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: var(--z-pop);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  padding: 12px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-pop);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-pop);
+  animation: rise var(--dur) var(--ease-out);
+  cursor: default;
+}
+.sess-confirm:focus {
+  outline: none;
+}
+.sess-confirm {
+  width: 280px;
+}
+.sess-confirm-title {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.sess-confirm-text {
+  margin: 0;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+}
+.sess-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+/* Follow, Forget and the lens live in "⋯" on a phone. */
+@media (max-width: 839px) {
+  .sess-bar .sess-desk {
+    display: none;
+  }
+}
+
+/* In the panel: the facts as one meta line under the panel's head. */
+.sess-sub {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  margin-top: 12px;
+  margin-bottom: -4px;
+  font-size: var(--text-sm);
+}
+.sess-flags {
+  gap: 12px;
+}
+.sess-skel {
+  padding-top: 8px;
+}
+
+/* ----- the timeline ----- */
+
+.older {
+  display: flex;
+  justify-content: center;
+  padding-bottom: 8px;
+}
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.turn {
+  display: flex;
+  flex-direction: column;
+}
+/* A turn's head is a section row, sticky under the title bar: its number, then when it
+   started and how long it ran, trailing. */
+.turn-head {
+  position: sticky;
+  top: calc(var(--bar) + env(safe-area-inset-top));
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  margin-bottom: 8px;
+  border-bottom: var(--hairline) solid var(--line);
+  background: var(--bg);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.session--panel .turn-head {
+  top: 0;
+}
+.turn-n {
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.turn--live .turn-n {
+  color: var(--fg);
+}
+.turn-facts {
+  display: flex;
+  gap: 12px;
+  margin-left: auto;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+/* The prompt is the turn's one filled block: a quiet well where the rows' text starts. */
+.prompt {
+  margin: 0 0 8px var(--tl-lead);
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  color: var(--fg);
+  font-size: var(--text-md);
+  line-height: var(--lh);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Where a message sent through sessionpipe came from, under its words. */
+.prompt-via {
+  display: block;
+  margin-top: 4px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  white-space: normal;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.prompt--hidden {
+  padding: 0;
+  background: none;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.turn-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* The reply: prose where the rows' text starts, no box and no rule. */
+.reply {
+  margin: 8px 0 8px var(--tl-lead);
+  color: var(--fg);
+}
+
+/* A row: the time, a 16 px glyph, the text, the duration trailing. */
+.tool,
+.marker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+}
+.tool:not(.tool--x) {
+  padding-right: 18px;
+}
+.tool--x > details {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.tool--x > details > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  margin: 0 -8px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  list-style: none;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.tool--x > details > summary::-webkit-details-marker {
+  display: none;
+}
+@media (hover: hover) {
+  .tool--x > details > summary:hover {
+    background: var(--hover);
+  }
+}
+.tool--x > details > summary:active {
+  background: var(--press);
+  transition: none;
+}
+.tool--x > details > summary:focus-visible {
+  outline-offset: -2px;
+}
+.tool .chev {
+  flex: none;
+  color: var(--fg-3);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.tool--x > details[open] > summary .chev {
+  transform: rotate(90deg);
+}
+.tool-time,
+.marker-time {
+  flex: none;
+  width: var(--tl-time);
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.tool-status,
+.marker-glyph {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.tool-status.is-err {
+  color: var(--err);
+}
+.tool-main,
+.marker-body {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.tool-name {
+  flex: none;
+  padding: 0;
+  background: none;
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.tool-subject {
+  min-width: 0;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.tool-agent {
+  flex: none;
+  color: var(--fg-3);
+}
+.tool-err {
+  min-width: 0;
+  color: var(--err);
+}
+.tool-dur {
+  flex: none;
+  margin-left: auto;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.tool-io {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 12px var(--tl-lead);
+}
+.tool-io-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.tool-io pre {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  color: var(--fg);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  max-height: 360px;
+  overflow: auto;
+}
+.tool-io pre.is-err {
+  color: var(--err);
+}
+.cut {
+  display: block;
+  margin-top: 4px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.cut-btn {
+  color: var(--fg-2);
+  font-weight: 500;
+}
+@media (hover: hover) {
+  .cut-btn:hover:not(:disabled) {
+    color: var(--fg);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+
+/* Markers: quiet rows; the attention one carries the amber glyph, nothing else. A
+   marker's text may wrap: the time and the glyph stay on its first line. */
+.marker {
+  align-items: flex-start;
+  color: var(--fg-3);
+}
+.marker > .marker-time,
+.marker > .marker-glyph {
+  height: 28px;
+  line-height: 28px;
+}
+.marker-body {
+  flex-wrap: wrap;
+  row-gap: 2px;
+  padding: 4px 0;
+}
+.marker-kind {
+  color: var(--fg);
+  font-weight: 500;
+}
+.marker--attn {
+  color: var(--fg-2);
+}
+.marker--attn code {
+  color: var(--fg);
+}
+.marker--end.is-err {
+  color: var(--err);
+}
+.marker-link {
+  color: var(--fg-2);
+  font-weight: 500;
+}
+@media (hover: hover) {
+  .marker-link:hover {
+    color: var(--fg);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+.marker-msg {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.marker-type {
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+
+/* A row a link or a Review hit opened the session on: a selection fill that fades. */
+.is-target {
+  border-radius: var(--radius);
+  animation: target-fade 1.6s var(--ease-out) forwards;
+}
+@keyframes target-fade {
+  from {
+    background-color: var(--sel);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+/* ----- the docked control bar ----- */
+
+/* Opaque on the bottom edge (above the tab bar on a phone), a hairline on top; its
+   contents keep the transcript's measure. */
+.sess-ctl {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  container: ctl / inline-size;
+  margin: auto calc(-1 * var(--gutter)) 0;
+  padding: 12px var(--gutter);
+  border-top: var(--hairline) solid var(--line);
+  background: var(--bg);
+}
+.sess-ctl > * {
+  max-width: var(--measure-read);
+  margin-left: auto;
+  margin-right: auto;
+}
+@media (max-width: 839px) {
+  .sess-ctl {
+    bottom: calc(var(--tabbar) + env(safe-area-inset-bottom));
+    padding: 8px var(--gutter);
+  }
+}

@@ -179,6 +179,14 @@ export function closeTab(index: number): void {
   commit({ tabs, active });
 }
 
+/** Keeps the tab at `index` and closes every other one (the tab's menu). */
+export function closeOthers(index: number): void {
+  const st = current();
+  const keep = st.tabs[index];
+  if (!keep || st.tabs.length < 2) return;
+  commit({ tabs: [keep], active: 0 });
+}
+
 export function moveTab(from: number, to: number): void {
   const st = current();
   if (from === to || from < 0 || to < 0 || from >= st.tabs.length || to >= st.tabs.length) return;

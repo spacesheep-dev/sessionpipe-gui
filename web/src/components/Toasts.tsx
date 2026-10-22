@@ -1,19 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
-// The toast stack: bottom-right on a desktop, under the top edge on a phone (the tab bar
-// has the bottom). One card per moment the stream brings after the first snapshot: an
-// attention opened (Allow / Deny right on the card when a control answer can reach it,
-// through control/useSend.ts), a turn that ended with an error, a control reply that
-// came back delivered from another device. A card click opens the session beside the
-// page. The list and its rules live in lib/toasts.ts.
+// The toast stack, as the OS's notification banners: top-right on a desktop (left of an
+// open panel), just above the tab bar on a phone. One banner per moment the stream
+// brings after the first snapshot: an attention opened (Allow / Deny right on it when a
+// control answer can reach it, through control/useSend.ts), a turn that ended with an
+// error, a control reply that came back delivered from another device. Two lines, the
+// session and what happened; a click opens the session beside the page, a right-click
+// has the rest. The list and its rules live in lib/toasts.ts.
 import type { ControlActivity, MachineControl, SessionKey, SessionSummary, StoredEvent } from "@shared/api";
-import { useEffect, useRef } from "react";
+import { type MutableRefObject, useEffect, useLayoutEffect, useRef } from "react";
 import { answerState, useSessionSend } from "../control/useSend";
 import { type OpenAttention, openAttentions, useAppState, useStore } from "../data/hooks";
-import { ATTENTION_LABEL, oneLine, sessionTitle } from "../lib/format";
+import { ATTENTION_LABEL, attentionMessage, oneLine, sessionTitle } from "../lib/format";
+import { copyItem } from "../lib/menus";
 import { installSoundUnlock, type SoundKind, useSounds } from "../lib/sounds";
 import { openSplit } from "../lib/split";
 import { dismissToast, isOwnSend, pruneAttentionToasts, pushToast, type Toast, useToasts } from "../lib/toasts";
 import { Redacted } from "./bits";
+import { type MenuList, useContextMenu } from "./ContextMenu";
+import { answerItems } from "./SessionCard";
 
 const attKey = (r: OpenAttention): string => `${r.session.key}|${r.attention.attentionId}`;
 
@@ -34,12 +38,12 @@ function attentionToast(r: OpenAttention): Toast {
     label: ATTENTION_LABEL[a.kind] ?? a.kind,
     tool: a.tool,
     body: a.message
-      ? oneLine(a.message, 160)
+      ? oneLine(attentionMessage(a) ?? a.message, 160)
       : a.tool
         ? undefined
         : r.answerable
-          ? "a permission request"
-          : "waiting in the terminal",
+          ? "A permission request"
+          : "Waiting in the terminal",
     sound: soundFor(r),
     at: Date.now(),
   };
@@ -55,7 +59,7 @@ function errorToast(e: StoredEvent, s: SessionSummary): Toast {
     title: sessionTitle(s),
     machine: s.machine,
     label: "error",
-    body: err ? `the turn ended with an error: ${err}` : "the turn ended with an error",
+    body: err ? `The turn ended with an error: ${err}` : "The turn ended with an error",
     sound: "error",
     at: Date.now(),
   };
@@ -71,7 +75,7 @@ function deliveredToast(a: ControlActivity, sessions: ReadonlyMap<SessionKey, Se
     title: s ? sessionTitle(s) : "a message",
     machine: s?.machine,
     label: "delivered",
-    body: a.reply ? oneLine(a.reply, 160) : `your ${a.kind} reached ${s?.machine ?? "the machine"}`,
+    body: a.reply ? oneLine(a.reply, 160) : `Your ${a.kind} reached ${s?.machine ?? "the machine"}`,
     sound: "done",
     at: Date.now(),
   };
@@ -156,6 +160,9 @@ export function Toasts() {
   );
 }
 
+/** A shell tool asks to run a command; any other asks to use its input. */
+const SHELL = /^(bash|shell|sh|zsh|exec|exec_command|run_terminal_cmd|run_shell_command|terminal)$/i;
+
 function ToastCard({
   toast: t,
   session,
@@ -172,6 +179,19 @@ function ToastCard({
     dismissToast(t.id);
   };
   const attention = t.attentionId ? session?.openAttentions.find((a) => a.attentionId === t.attentionId) : undefined;
+  const answerMenu = useRef<MenuList>([]);
+  const menu = useContextMenu(
+    () => [
+      t.session && { label: "Open beside", run: open },
+      ...answerMenu.current,
+      { sep: true },
+      { label: "Copy", items: [copyItem("Title", t.title), copyItem("Message", t.body)] },
+      { sep: true },
+      { label: "Dismiss", run: () => dismissToast(t.id) },
+    ],
+    { title: () => t.title, subtitle: () => t.machine ?? "" },
+  );
+  const verb = t.tool ? (SHELL.test(t.tool) ? " wants to run " : " wants to use ") : "";
   return (
     <div
       ref={ref}
@@ -181,7 +201,11 @@ function ToastCard({
       data-attention={t.attentionId}
       data-sticky={t.sticky ? "true" : undefined}
       role="status"
+      {...menu}
     >
+      <span className={`toast-mark toast-mark--${t.kind}`} aria-hidden="true">
+        {t.kind === "needs-you" && <span className="toast-dot" />}
+      </span>
       <button
         type="button"
         className="toast-main"
@@ -190,22 +214,24 @@ function ToastCard({
         title={t.session ? "Open the session beside this page" : undefined}
       >
         <span className="toast-top">
-          {t.kind === "needs-you" && <span className="toast-dot" aria-hidden="true" />}
           <span className="toast-title">{t.title}</span>
           {t.machine && <span className="toast-machine">{t.machine}</span>}
         </span>
         <span className="toast-body">
-          <span className="toast-label">{t.label}</span>
-          {t.tool && <code>{t.tool}</code>}
+          <span className="toast-label sr-only">{t.label}</span>
+          {t.tool && <code className="toast-tool">{t.tool}</code>}
+          {verb && <span className="toast-verb">{verb}</span>}
           {t.body && (
-            <span className="toast-msg">
+            <span className={`toast-msg ${t.tool ? "mono" : ""}`}>
               <Redacted text={t.body} />
             </span>
           )}
         </span>
       </button>
-      <button type="button" className="toast-x" aria-label="Dismiss" onClick={() => dismissToast(t.id)}>
-        ×
+      <button type="button" className="icon-btn toast-x" aria-label="Dismiss" onClick={() => dismissToast(t.id)}>
+        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+          <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
       </button>
       {t.answerable && session && attention && (
         <ToastAnswer
@@ -213,41 +239,54 @@ function ToastCard({
           session={session}
           attention={attention}
           control={session.machine ? control(session.machine) : undefined}
+          into={answerMenu}
         />
       )}
     </div>
   );
 }
 
-/** Allow / Deny on the card, through the same signed send as the session page and the
- *  inbox; the card leaves once an answer is out. */
+/** Allow / Deny on the banner, through the same signed send as the session page and the
+ *  inbox; the banner leaves once an answer is out. Its menu gets the same two. */
 function ToastAnswer({
   toast,
   session: s,
   attention: a,
   control,
+  into,
 }: {
   toast: Toast;
   session: SessionSummary;
   attention: NonNullable<SessionSummary["openAttentions"]>[number];
   control?: MachineControl;
+  into: MutableRefObject<MenuList>;
 }) {
   const send = useSessionSend(s, control, s.openAttentions);
-  const { reason, off, status, tag } = answerState(s, a, control, send);
+  const st = answerState(s, a, control, send);
+  const { reason, off, status, tag } = st;
   const answer = (allow: boolean) =>
     void send
       .onSend({ kind: "permission.answer", attentionId: a.attentionId, allow })
       .then(() => dismissToast(toast.id))
       .catch(() => {});
+  useLayoutEffect(() => {
+    into.current = status === "closed" ? [] : answerItems(a.tool, st, answer);
+  });
+  useEffect(
+    () => () => {
+      into.current = [];
+    },
+    [into],
+  );
   return (
     <span className="toast-actions" data-answer={tag}>
       {status !== "closed" && (
         <>
-          <button type="button" className="btn btn--sm btn--allow" disabled={off} onClick={() => answer(true)}>
-            Allow
-          </button>
           <button type="button" className="btn btn--sm btn--deny" disabled={off} onClick={() => answer(false)}>
             Deny
+          </button>
+          <button type="button" className="btn btn--sm btn--allow" disabled={off} onClick={() => answer(true)}>
+            Allow
           </button>
         </>
       )}

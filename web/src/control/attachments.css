@@ -1,43 +1,48 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* Images beside a prompt (control/Attachments.tsx): the paperclip, the tray of 64 px
-   thumbnails above the input, the drop highlight, and the thumbnails a sent prompt
-   shows in the activity list and the Session view. Hairlines, no boxes. */
+/* Images beside a prompt (control/Attachments.tsx): the paperclip inside the field, the
+   tray of 56 px thumbnails above it, the drop highlight, and the thumbnails a sent
+   prompt shows in the activity list and the Session view. Fills and hairlines, no
+   badges; the shared spinner while one uploads. */
 
+/* The paperclip: an icon button in the field (a label around the hidden picker). */
 .att-btn {
   flex: none;
-  width: 36px;
-  height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  width: var(--control);
+  height: var(--control);
   border-radius: var(--radius);
-  border: var(--hairline) solid var(--line-2);
-  background: transparent;
   color: var(--fg-3);
-  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
-.att-btn:hover:not(:disabled) {
-  color: var(--fg);
-  border-color: var(--fg-3);
+@media (hover: hover) {
+  .att-btn:not([aria-disabled="true"]):hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
 }
-.att-btn:focus-visible {
-  outline: 2px solid var(--fg-3);
-  outline-offset: 1px;
+.att-btn:not([aria-disabled="true"]):active {
+  background: var(--press);
+  transition: none;
 }
-.att-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
+.att-btn:has(input:focus-visible) {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: -2px;
+}
+.att-btn[aria-disabled="true"] {
+  opacity: 0.45;
 }
 .att-btn input {
   display: none;
 }
 
-/* The composer while a file is dragged over it. */
-.ctl--drop .ctl-ask textarea,
-.ctl--drop .att-btn {
-  border-color: var(--fg);
+/* The field while a file is dragged over it. */
+.ctl--drop .ctl-ask {
+  border-color: var(--fg-3);
   border-style: dashed;
+  background: var(--bg-3);
 }
 
 .att-tray {
@@ -46,34 +51,45 @@
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 12px;
 }
 .att-item {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  width: 64px;
+  gap: 4px;
+  width: 56px;
+}
+.att-frame {
+  position: relative;
+  display: block;
+  line-height: 0;
 }
 .att-thumb {
   display: block;
-  width: 64px;
-  height: 64px;
+  width: 56px;
+  height: 56px;
   object-fit: cover;
-  border-radius: 6px;
-  border: var(--hairline) solid var(--line-2);
+  border-radius: var(--radius-inner);
+  outline: var(--hairline) solid var(--line);
+  outline-offset: -1px;
   background: var(--bg-3);
 }
 .att-item--busy .att-thumb {
   opacity: 0.45;
 }
+.att-busy {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin: -6px 0 0 -6px;
+}
 .att-meta {
   display: flex;
   flex-direction: column;
-  font-size: var(--text-xs);
-  line-height: 1.3;
   color: var(--fg-3);
-  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--lh-tight);
   white-space: nowrap;
 }
 .att-meta > span {
@@ -83,78 +99,54 @@
 .att-item--err .att-meta {
   color: var(--err);
   white-space: normal;
-  font-family: var(--font-ui);
 }
-.att-x {
+.att-x.icon-btn {
   position: absolute;
-  top: -6px;
-  right: -6px;
+  top: -8px;
+  right: -8px;
   width: 20px;
   height: 20px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   border: var(--hairline) solid var(--line-2);
-  background: var(--bg);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-sm);
   color: var(--fg-2);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
 }
-.att-x:hover {
-  color: var(--fg);
-  border-color: var(--fg-3);
-}
-.att-spin {
+/* The 20 px face, a 24 px target. */
+.att-x.icon-btn::before {
+  content: "";
   position: absolute;
-  top: 24px;
-  left: 24px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 1.5px solid var(--line-2);
-  border-top-color: var(--fg);
-  animation: att-spin 0.8s linear infinite;
-}
-@keyframes att-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .att-spin {
-    animation: none;
-  }
+  inset: -3px;
 }
 .att-note {
-  font-size: var(--text-sm);
+  margin: 4px 0 0;
   color: var(--err);
+  font-size: var(--text-sm);
 }
 
 /* Thumbnails of a sent prompt (activity row, Session view). */
 .att-thumbs {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
+  gap: 8px;
+  margin-top: 8px;
 }
 .att-thumbs a {
   display: block;
   line-height: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-inner);
 }
 .att-thumbs a:focus-visible {
-  outline: 2px solid var(--fg-3);
-  outline-offset: 1px;
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: 2px;
 }
 .att-thumbs img {
   width: 64px;
   height: 64px;
   object-fit: cover;
-  border-radius: 6px;
-  border: var(--hairline) solid var(--line-2);
+  border-radius: var(--radius-inner);
+  outline: var(--hairline) solid var(--line);
+  outline-offset: -1px;
   background: var(--bg-3);
 }
 .att-thumbs--sm img {

@@ -27,6 +27,8 @@ import {
   useState,
 } from "react";
 import { Redacted } from "../components/bits";
+import { useContextMenu } from "../components/ContextMenu";
+import { copyItem } from "../lib/menus";
 import "./attachments.css";
 
 // ---------- the upload itself (also the theme api's control.attach) ----------
@@ -363,28 +365,7 @@ export function AttachmentTray({ att }: { att: AttachmentsHandle }) {
       {att.items.length > 0 && (
         <ul className="att-tray" aria-label="Images to send">
           {att.items.map((it) => (
-            <li
-              key={it.key}
-              className={`att-item ${it.error ? "att-item--err" : ""} ${!it.attachment && !it.error ? "att-item--busy" : ""}`}
-              data-attachment={it.attachment?.id ?? ""}
-              data-state={it.error ? "error" : it.attachment ? "ready" : "uploading"}
-            >
-              <img className="att-thumb" src={it.preview} alt="" />
-              {!it.attachment && !it.error && <span className="att-spin" aria-hidden="true" />}
-              {it.error ? (
-                <span className="att-meta" title={it.error}>
-                  {it.error}
-                </span>
-              ) : (
-                <span className="att-meta">
-                  <span>{it.attachment ? `${it.attachment.width}×${it.attachment.height}` : "uploading"}</span>
-                  <span>{mb(it.bytes)}</span>
-                </span>
-              )}
-              <button type="button" className="att-x" onClick={() => att.remove(it.key)} aria-label="Remove image">
-                ×
-              </button>
-            </li>
+            <TrayItem key={it.key} it={it} onRemove={() => att.remove(it.key)} />
           ))}
         </ul>
       )}
@@ -394,6 +375,49 @@ export function AttachmentTray({ att }: { att: AttachmentsHandle }) {
         </p>
       )}
     </div>
+  );
+}
+
+/** One image waiting to go; its menu copies its name or takes it back. */
+function TrayItem({ it, onRemove }: { it: PendingItem; onRemove: () => void }) {
+  const name =
+    it.file instanceof File && it.file.name
+      ? it.file.name
+      : it.attachment
+        ? `${it.attachment.id}.${it.attachment.ext}`
+        : "";
+  const menu = useContextMenu(() => [
+    copyItem("Copy name", name),
+    { sep: true },
+    { label: "Remove", danger: true, run: onRemove },
+  ]);
+  return (
+    <li
+      className={`att-item ${it.error ? "att-item--err" : ""} ${!it.attachment && !it.error ? "att-item--busy" : ""}`}
+      data-attachment={it.attachment?.id ?? ""}
+      data-state={it.error ? "error" : it.attachment ? "ready" : "uploading"}
+      {...menu}
+    >
+      <span className="att-frame">
+        <img className="att-thumb" src={it.preview} alt="" />
+        {!it.attachment && !it.error && <span className="spinner att-busy" aria-hidden="true" />}
+      </span>
+      {it.error ? (
+        <span className="att-meta" title={it.error}>
+          {it.error}
+        </span>
+      ) : (
+        <span className="att-meta num">
+          <span>{it.attachment ? `${it.attachment.width}×${it.attachment.height}` : "uploading"}</span>
+          <span>{mb(it.bytes)}</span>
+        </span>
+      )}
+      <button type="button" className="icon-btn att-x" onClick={onRemove} aria-label="Remove image">
+        <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+          <path d="M3 3l6 6M9 3 3 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </button>
+    </li>
   );
 }
 

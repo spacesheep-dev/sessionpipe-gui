@@ -34,6 +34,7 @@ import { ago, useNow } from "../lib/time";
 import { useThemes } from "../themes/host/registry";
 import { StateDot } from "./bits";
 import { answerable } from "./ControlStrip";
+import { noContextMenu } from "./QuickSettings";
 import "../styles/palette.css";
 
 /** The shortcut as this platform writes it, for hints. */
@@ -152,6 +153,16 @@ function Hit({ text, at }: { text: string; at: number[] | undefined }) {
 
 const Glyph = ({ children }: { children: string }) => (
   <span className="pal-glyph" aria-hidden="true">
+    {children}
+  </span>
+);
+
+/** One hint in the footer: the keys as a quiet string, then what they do. */
+const FootKey = ({ keys, children }: { keys: string; children: string }) => (
+  <span className="pal-foot-key">
+    <span className="keys">
+      <kbd>{keys}</kbd>
+    </span>
     {children}
   </span>
 );
@@ -371,7 +382,7 @@ function PaletteDialog() {
         detail: "every key, and change any",
         run: () => navigate("/shortcuts"),
       });
-      places.push({ label: "Display settings", detail: "appearance · theme · text size", run: openDisplaySettings });
+      places.push({ label: "Display settings", detail: "appearance, skin, text size", run: openDisplaySettings });
       places.push({ label: "Settings", detail: "mode · tier lens · data", run: () => navigate("/settings") });
       const rows: Item[] = [];
       for (const p of places) {
@@ -523,6 +534,7 @@ function PaletteDialog() {
         aria-label="Command palette"
         ref={dialogRef}
         onKeyDown={onKey}
+        onContextMenu={noContextMenu}
         data-mode={mode.kind}
       >
         {mode.kind === "forget" ? (
@@ -570,7 +582,13 @@ function PaletteDialog() {
               enterKeyHint={mode.kind === "prompt" ? "send" : "go"}
               disabled={busy === "prompt"}
             />
-            {busy === "prompt" ? <span className="pal-busy">Sending…</span> : <kbd title="Close">esc</kbd>}
+            {busy === "prompt" ? (
+              <span className="pal-busy">Sending…</span>
+            ) : (
+              <button type="button" className="pal-cancel" onClick={closePalette}>
+                Cancel
+              </button>
+            )}
           </div>
         )}
 
@@ -620,26 +638,15 @@ function PaletteDialog() {
         <div className="pal-foot" aria-hidden="true">
           {mode.kind === "search" ? (
             <>
-              <span>
-                <kbd>↑↓</kbd> move
-              </span>
-              <span>
-                <kbd>↵</kbd> open
-              </span>
-              <span>
-                <kbd>⇧↵</kbd> beside
-              </span>
-              <span>
-                <kbd>&gt;</kbd> actions
-              </span>
-              <span>
-                <kbd>#</kbd> go to
-              </span>
+              <FootKey keys="↑↓">Move</FootKey>
+              <FootKey keys="↵">Open</FootKey>
+              <FootKey keys="⇧↵">Beside</FootKey>
+              <span className="pal-foot-spring" />
+              <FootKey keys=">">Actions</FootKey>
+              <FootKey keys="#">Go to</FootKey>
             </>
           ) : (
-            <span>
-              <kbd>esc</kbd> back
-            </span>
+            <FootKey keys="esc">Back</FootKey>
           )}
         </div>
       </div>

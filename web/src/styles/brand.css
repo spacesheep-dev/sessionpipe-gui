@@ -1,0 +1,23 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- brand ---------- */
+
+/* The mark and the name (components/Brand.tsx): one line, the name in the UI face at
+   weight 500, "gui" a tier down. Used where a page stands alone, like the empty board. */
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+  font-size: var(--text-lg);
+  font-weight: 500;
+  line-height: 1;
+}
+.wordmark .mark {
+  flex: none;
+}
+.wordmark-gui {
+  color: var(--fg-3);
+}
+.empty .wordmark {
+  margin-bottom: 8px;
+}

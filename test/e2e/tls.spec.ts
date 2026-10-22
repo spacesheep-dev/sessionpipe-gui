@@ -86,8 +86,8 @@ test.describe("TLS mode", () => {
     await page.goto("/connect");
     const block = page.locator(".sect--passkeys");
     await expect(block).toBeVisible();
-    await expect(block).toContainText("TLS mode");
-    await expect(block).toContainText("on · rp id localhost");
+    await expect(block).toContainText("HTTPS");
+    await expect(block).toContainText("On · rp id localhost");
     await expect(block.locator(".passkeys-url code")).toHaveText(`${info.tls!.httpsUrl}/?k=${info.uiKey}`);
     await expect(block.locator(".passkeys-fp")).toHaveText(info.tls!.caFingerprint);
     await expect(block.locator(".passkeys-trust")).toHaveAttribute("href", /\/trust\?k=/);

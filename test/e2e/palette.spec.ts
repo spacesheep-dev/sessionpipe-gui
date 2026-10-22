@@ -34,14 +34,14 @@ test.describe("command palette", () => {
     await openBoard(page);
     const { title, href, fragment } = await firstCard(page);
     await open(page);
-    // The board's own search carries the hint.
-    await expect(page.locator("[data-search]")).toHaveAttribute("placeholder", /⌘K|Ctrl K/);
+    // The board's own search is a plain toolbar field; the palette is ⌘K (and in the rail's menu).
+    await expect(page.locator("[data-search]")).toHaveAttribute("placeholder", "Search");
     await expect(dialog(page).locator(".pal-section").first()).toHaveText("Sessions");
     await page.keyboard.type(fragment);
     const first = rows(page).first();
     await expect(first).toHaveAttribute("data-section", "Sessions");
     await expect(first.locator(".pal-label")).toHaveText(title);
-    // The matched letters are underlined, not blocked.
+    // The matched letters are marked (in the ink at 600), not blocked.
     await expect(first.locator("u").first()).toBeVisible();
     await expect(first).toHaveAttribute("aria-selected", "true");
     await page.keyboard.press("Enter");

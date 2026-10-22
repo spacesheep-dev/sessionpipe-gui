@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-// The curated extras on the Views page: the official views, skins and plugins. Every one
-// ships inside the GUI today, so each row says "bundled"; an entry that is not bundled
-// gets an Install button that works from the receiver machine (POST
+// The curated extras on the Views page: the official views and plugins. The bundled ones
+// are already the rows of the lists above, so only an entry that is not bundled gets a row
+// here, with an Install button that works from the receiver machine (POST
 // /api/ui/extras/:id/install, loopback only) and the one line that does the same from a
-// terminal anywhere.
+// terminal anywhere. With everything bundled the section is not drawn.
 import type { ExtraEntry, ExtrasResponse } from "@shared/api";
 import { ROUTES } from "@shared/api";
 import { useCallback, useEffect, useState } from "react";
 import { fetchSkins } from "../lib/skins";
 import { fetchPlugins } from "../plugins/registry";
 import { fetchThemes } from "../themes/host/registry";
-import { CopyButton } from "./bits";
+import { CopyIconButton } from "./bits";
 
 export const EXTRAS_ALL_LINE = "sessionpipe-gui extras add all";
 
@@ -60,82 +60,68 @@ export function Extras({ loopback }: { loopback: boolean }) {
     for (const row of rows ?? []) if (!row.bundled && !row.installed) await install(row);
   };
 
-  const todo = (rows ?? []).filter((r) => !r.bundled && !r.installed);
-  const installable = (rows ?? []).some((r) => !r.bundled);
+  // The bundled extras are the views and plugins listed above already: only what is not
+  // here yet gets a row of its own.
+  const available = (rows ?? []).filter((r) => !r.bundled);
+  const todo = available.filter((r) => !r.installed);
+  if (!error && available.length === 0) return null;
   return (
-    <section className="sect" data-extras>
-      <header className="sect-head">
-        <h2>Extras</h2>
-        <p>
-          The official views, skins and plugins, all inside the GUI already: Canvas and Office on the rail, Spacesheep
-          Vivid and Paper Serif in the appearance popover, ping-a-human under Plugins (off until you enable it).
-        </p>
-      </header>
-      {error && <p className="page-note is-err">{error}</p>}
-      {rows && (
-        <ul className="extras-list">
-          {rows.map((r) => (
-            <li key={r.id} className="extras-row" data-extra={r.id}>
-              <div className="extras-row-head">
-                <span className="extras-row-name">{r.name}</span>
-                <span className="extras-row-kind">{r.kind}</span>
-                <span className="extras-row-size">{r.size}</span>
-                {r.bundled && <span className="themes-flag">bundled</span>}
-                {!r.bundled && r.installed && <span className="themes-flag">installed</span>}
-              </div>
-              <div className="extras-row-act">
-                {!r.bundled && (
-                  <button
-                    type="button"
-                    className="btn btn--sm"
-                    onClick={() => void install(r)}
-                    disabled={!loopback || busy !== null}
-                    title={loopback ? `npm install ${r.npm}` : "Only from the machine running the receiver"}
-                    data-extra-install={r.id}
-                  >
-                    {busy === r.id ? "Installing…" : r.installed ? "Reinstall" : "Install"}
-                  </button>
-                )}
-              </div>
-              <div className="extras-row-meta">
-                {r.line}
-                {!r.bundled && (
-                  <>
-                    {" "}
-                    <code>{r.npm}</code>
-                  </>
-                )}
-              </div>
-              {log[r.id] && (
-                <pre className={`extras-log${log[r.id]?.endsWith("\nok") ? "" : " is-err"}`} data-extra-log={r.id}>
-                  {log[r.id]}
-                </pre>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {installable && (
-        <div className="extras-tools">
+    <section className="form-group" data-extras aria-labelledby="views-extras">
+      <div className="form-head">
+        <h2 className="section-label" id="views-extras">
+          Extras
+        </h2>
+        {available.length > 1 && (
           <button
             type="button"
             className="btn btn--sm"
             onClick={() => void installAll()}
             disabled={!loopback || busy !== null || todo.length === 0}
-            title={
-              loopback ? "Install every extra that is not there yet" : "Only from the machine running the receiver"
-            }
+            title={loopback ? "Install every extra that is not there yet" : "Only on the machine running the receiver"}
             data-extras-install-all
           >
             {todo.length === 0 ? "All installed" : `Install all (${todo.length})`}
           </button>
-          <span className="sect-note">
-            {loopback ? "From a terminal:" : "Buttons work on the receiver machine only. From its terminal:"}
-          </span>
-          <code className="extras-line">{EXTRAS_ALL_LINE}</code>
-          <CopyButton text={EXTRAS_ALL_LINE} label="Copy command" />
-        </div>
-      )}
+        )}
+      </div>
+      {error && <p className="page-note is-err">{error}</p>}
+      <ul className="form-list extras-list">
+        {available.map((r) => (
+          <li key={r.id} className="form-row extras-row" data-extra={r.id}>
+            <span className="form-row-text">
+              <span className="themes-row-head">
+                <span className="themes-row-name">{r.name}</span>
+                <span className="themes-row-ver">
+                  {r.kind} · {r.size}
+                </span>
+                {r.installed && <span className="themes-flag">installed</span>}
+              </span>
+              <span className="form-caption">{r.line}</span>
+              {log[r.id] && (
+                <pre className={`extras-log${log[r.id]?.endsWith("\nok") ? "" : " is-err"}`} data-extra-log={r.id}>
+                  {log[r.id]}
+                </pre>
+              )}
+            </span>
+            <span className="form-value">
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={() => void install(r)}
+                disabled={!loopback || busy !== null}
+                title={loopback ? `npm install ${r.npm}` : "Only on the machine running the receiver"}
+                data-extra-install={r.id}
+              >
+                {busy === r.id ? "Installing…" : r.installed ? "Reinstall" : "Install"}
+              </button>
+            </span>
+          </li>
+        ))}
+      </ul>
+      <div className="well-row cmd">
+        <code className="extras-line">{EXTRAS_ALL_LINE}</code>
+        <CopyIconButton text={EXTRAS_ALL_LINE} label="Copy command" />
+      </div>
     </section>
   );
 }
