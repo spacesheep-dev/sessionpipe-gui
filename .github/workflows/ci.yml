@@ -48,7 +48,7 @@ jobs:
       - name: Playwright (control channel)
         run: npx playwright test -c web/e2e/playwright.config.ts
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report
