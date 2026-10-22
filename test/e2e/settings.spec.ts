@@ -163,23 +163,23 @@ test.describe("settings dialog", () => {
   test("the lens chip cycles; at lens 1 the board hides snippets and says so", async ({ page }) => {
     await openBoard(page);
     const chip = page.locator(".lens-chip-btn");
-    await expect(chip).toHaveText("lens · all");
+    await expect(chip).toHaveText("All tiers");
     await expect(page.locator("article.card .card-text").first()).toBeVisible();
     await chip.click();
-    await expect(chip).toHaveText("lens · 0");
+    await expect(chip).toHaveText("Tier 0");
     await chip.click();
-    await expect(chip).toHaveText("lens · 1");
+    await expect(chip).toHaveText("Tier 1");
     await expect(page.locator("article.card .card-text")).toHaveCount(0);
     const note = page.locator("[data-lens-note]");
     await expect(note).toHaveText(/^tier 1 lens · \d+ hidden/);
     // `l` cycles too.
     await page.keyboard.press("l");
-    await expect(chip).toHaveText("lens · 2");
+    await expect(chip).toHaveText("Tier 2");
     await expect(page.locator("article.card .card-text").first()).toBeVisible();
     // The reset on the line brings everything back.
     await chip.click();
     await chip.click();
-    await expect(chip).toHaveText("lens · all");
+    await expect(chip).toHaveText("All tiers");
   });
 
   test("the session page's lens and the board's chip stay in sync", async ({ page }) => {
@@ -187,22 +187,22 @@ test.describe("settings dialog", () => {
     const chip = page.locator(".lens-chip-btn");
     await chip.click();
     await chip.click();
-    await expect(chip).toHaveText("lens · 1");
+    await expect(chip).toHaveText("Tier 1");
     await page.locator("article.card a.card-link").first().click();
     await expect(page.locator(".page.session")).toBeVisible();
     // A session page has the full control instead of the chip.
     await expect(chip).toHaveCount(0);
     const seg = page.locator(".lens fieldset.seg");
     await expect(seg.locator(".seg-on")).toHaveText("1");
-    await expect(page.locator(".lens-hint")).toContainText("actions");
+    await expect(page.locator(".lens-hint")).toContainText("Actions");
     await seg.locator("label.seg-opt", { hasText: /^2$/ }).click();
     await page.goBack();
-    await expect(chip).toHaveText("lens · 2");
+    await expect(chip).toHaveText("Tier 2");
     // Picked from the settings section as well.
     await openPage(page, "/settings?section=lens");
-    await dialog(page).locator("label.seg-opt", { hasText: /^all$/ }).click();
+    await dialog(page).locator("label.seg-opt", { hasText: /^All$/ }).click();
     await page.keyboard.press("Escape");
-    await expect(chip).toHaveText("lens · all");
+    await expect(chip).toHaveText("All tiers");
   });
 
   test("a view route has no lens chip and nothing covers the view's own controls", async ({ page }) => {

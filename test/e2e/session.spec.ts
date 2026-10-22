@@ -146,13 +146,13 @@ test.describe("session page", () => {
     await lens(page, 0).click();
     await expect(lens(page, 0)).toHaveClass(/seg-on/);
     await expect(page.locator("li.tool")).toHaveCount(0);
-    await expect(page.locator(".lens-hint")).toHaveText(/presence · \d+ hidden/);
+    await expect(page.locator(".lens-hint")).toHaveText(/Presence · \d+ hidden/);
     await expect(page.locator("ol.timeline li.turn").first()).toBeVisible();
 
     // Lens 1: tool names come back, but without input/output to expand.
     await lens(page, 1).click();
     await expect(page.locator("li.tool").first()).toBeVisible();
-    await expect(page.locator(".lens-hint")).toHaveText(/^actions/);
+    await expect(page.locator(".lens-hint")).toHaveText(/^Actions/);
     const expandableAt1 = await page.locator("li.tool.tool--x").count();
     const errorsAt1 = await page.locator("li.tool .tool-err").count();
     expect(expandableAt1, "at tier 1 only a failed tool has something to open (its error)").toBeLessThanOrEqual(

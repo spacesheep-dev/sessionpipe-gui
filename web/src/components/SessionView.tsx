@@ -68,7 +68,7 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** The state in a word, for the bar and the panel head; the colour is the glyph's alone. */
 export const STATUS_WORD: Record<SessionState, string> = {
-  needs_you: "Waiting for you",
+  needs_you: "Needs you",
   working: "Working",
   stale: "Stale",
   idle: "Idle",
@@ -881,7 +881,7 @@ function LensTools({ lens, hidden, maxTier }: { lens: Tier; hidden: number; maxT
         }))}
       />
       <span className="lens-hint">
-        {TIER_LABEL[lens]}
+        {cap(TIER_LABEL[lens])}
         {hidden > 0 ? ` · ${hidden} hidden` : ""}
         {lens > maxTier ? ` · arrived at tier ${maxTier}` : ""}
       </span>

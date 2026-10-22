@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// The tier lens, app-wide: a 28 px chip at the top right of the page ("lens · all",
-// "lens · 1"). A click cycles all → 0 → 1 → 2 → 3 → all, `l` does the same from anywhere;
+// The tier lens, app-wide: a toolbar chip at the top right of the page ("All tiers",
+// "Tier 1"), worded like the machine and harness filters beside it. A click cycles all → 0 → 1 → 2 → 3 → all, `l` does the same from anywhere;
 // a click held for a moment (or a right click) opens the picker, the same segmented
 // control the Session page has, with every tier's name. Hidden in Simple mode, where the
 // lens is always "all". Each page says what the lens took away ("tier 1 lens · 4 hidden")
@@ -15,7 +15,7 @@ const HOLD_MS = 450;
 
 export const LENS_OPTIONS = LENSES.map((l) => ({
   value: l === null ? "all" : String(l),
-  label: l === null ? "all" : String(l),
+  label: l === null ? "All" : String(l),
   title: l === null ? "Everything that arrived" : `${TIER_LABEL[l]}: ${TIER_HINT[l]}`,
 }));
 export const lensFromOption = (v: string): Lens => (v === "all" ? null : (Number(v) as Tier));
@@ -99,7 +99,7 @@ export function LensChip() {
         aria-haspopup="dialog"
         aria-expanded={open}
       >
-        lens · {lensLabel(tierLens)}
+        {tierLens === null ? "All tiers" : `Tier ${tierLens}`}
       </button>
       {open && (
         <div className="lens-pop" role="dialog" aria-label="Tier lens">

@@ -11,9 +11,10 @@ export const STATE_LABEL: Record<SessionState, string> = {
   done: "done",
 };
 
-/** Group headings on the board: "Needs you · 1", "Working · 3". */
+/** Group headings on the board: "Needs you · 1", "Working · 3". The state's name, the
+ *  same word the session bar and the machines use, whatever the count. */
 export const STATE_HEADING: Record<SessionState, (n: number) => string> = {
-  needs_you: (n) => (n === 1 ? "Needs you" : "Need you"),
+  needs_you: () => "Needs you",
   working: () => "Working",
   stale: () => "Stale",
   idle: () => "Idle",

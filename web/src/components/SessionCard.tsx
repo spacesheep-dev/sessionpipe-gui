@@ -203,8 +203,10 @@ export const SessionCard = memo(function SessionCard({
 
           {!simple && (
             <span className="card-foot num">
-              <span>{plural(s.counts.turns, "turn")}</span>
-              {showTools && <span>{plural(s.counts.tools, "tool")}</span>}
+              {/* A zero says nothing: its column stays, empty, so the columns still align. */}
+              {s.counts.turns > 0 ? <span>{plural(s.counts.turns, "turn")}</span> : <span aria-hidden="true" />}
+              {showTools &&
+                (s.counts.tools > 0 ? <span>{plural(s.counts.tools, "tool")}</span> : <span aria-hidden="true" />)}
               {/* The errors column keeps its width when there are none, so columns align. */}
               {showTools &&
                 (s.counts.toolErrors > 0 ? (

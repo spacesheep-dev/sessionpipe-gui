@@ -57,3 +57,42 @@
 .panel-body {
   overflow-x: hidden;
 }
+
+/* ---------- touch: every target a finger can hit ---------- */
+
+/* On a coarse pointer nothing a finger taps is under 44 px tall (Apple's and Material's
+   minimum). The look stays: rows grow their padding, small buttons keep their face and
+   only gain height. Last in the cascade so no surface's own min-height undercuts it. */
+@media (pointer: coarse) {
+  .group-toggle,
+  .tool,
+  .marker,
+  .tool--x > details > summary,
+  .chat-tools-sum,
+  .btn,
+  .btn--sm,
+  .cut-btn,
+  .rv-sess,
+  .notify,
+  .sel {
+    min-height: 44px;
+  }
+  .toast-x {
+    width: 44px;
+    height: 44px;
+  }
+  /* A feed row is one target, as a native list row is: its session link covers the row,
+     and "open beside" stays on top of it. */
+  .ev {
+    position: relative;
+  }
+  .ev-session::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+  .ev-beside {
+    position: relative;
+    z-index: 1;
+  }
+}

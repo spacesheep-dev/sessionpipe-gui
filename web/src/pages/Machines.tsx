@@ -117,7 +117,12 @@ function MachineBlock({ m, online, lanUrl }: { m: MachineSummary; online: boolea
           <span className="form-kv num">
             {m.sessions}
             {m.working > 0 && <span className="machine-sub"> · {m.working} working</span>}
-            {m.needsYou > 0 && <span className="machine-sub"> · {m.needsYou} need you</span>}
+            {m.needsYou > 0 && (
+              <span className="machine-sub">
+                {" "}
+                · {m.needsYou} {m.needsYou === 1 ? "needs" : "need"} you
+              </span>
+            )}
           </span>
         </li>
         <li className="form-row form-row--kv" hidden={simple}>
