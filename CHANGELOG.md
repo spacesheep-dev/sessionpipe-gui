@@ -32,8 +32,31 @@ All notable changes to `sessionpipe-gui`. The format follows
   the public url; a phone polls `GET /api/ui/phone/device/:id` while the laptop approves
   its passkey, and proves https works with `POST /api/ui/phone/trust-check`.
 
+### Changed
+
+- **A native app, not a web page.** One window shell (a sidebar and one title band), every
+  list a grouped list of plain rows with a single status glyph, no cards; iOS-style large
+  titles, sheets and tab bar on a phone. Fewer colours: neutrals, amber for needs-you, red
+  for an error.
+- **Right-click menus everywhere.** Session rows, tabs, messages, machines, paths and pages
+  open a menu of their real actions (Shift+F10 or the context-menu key from the keyboard;
+  a long-press opens the same items as an action sheet on touch).
+- A delivered message whose turn is already in the chat folds to one line instead of
+  repeating the reply; a background copy says "Copy of …" and links back, and the
+  original's row links to the copy.
+
+### Removed
+
+- The built-in Plain, Graphite, Ink and Sepia skins and the bundled Spacesheep Vivid and
+  Paper Serif: the GUI ships Spacesheep (the default) and Paper. A device that had picked
+  one of them gets Spacesheep; installing a skin from elsewhere still works.
+
 ### Fixed
 
+- "Claude is waiting for your input" no longer puts a session under "needs you"; it stays
+  idle and the inbox does not count it.
+- A message sent from the GUI showed beside the wrong turn (the second prompt read "hi")
+  when two transcripts arrived together; transcripts now land on the turn their time falls in.
 - A session that ended and started again (Claude Code resumed, a compaction restart, a
   harness reopened after a reboot) is live again on the board instead of staying "done".
 
