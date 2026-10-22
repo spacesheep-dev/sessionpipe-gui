@@ -352,7 +352,7 @@ const desktopAdvanced = {
   },
   "review.png": async (page) => {
     await open(page, "/review");
-    await page.getByPlaceholder(/Search transcripts/).fill("webhook");
+    await page.getByLabel(/Search transcripts/).fill("webhook");
     await page
       .locator(".rv-hit, .hit, [class*=hit]")
       .first()
