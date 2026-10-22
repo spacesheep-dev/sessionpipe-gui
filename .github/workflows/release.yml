@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # A `v*` tag runs the gates, packs the tarball and creates the GitHub Release from the
-# CHANGELOG section. The package carries Canvas, Office, Spacesheep Vivid, Paper Serif
-# and ping-a-human from the tracked bundled/ copy (refreshed with `npm run bundle:sync`
+# CHANGELOG section. The package carries Canvas, Office and ping-a-human from the
+# tracked bundled/ copy (refreshed with `npm run bundle:sync`
 # from a checkout of sessionpipe-gui-themes beside this repo, and committed), so the
 # workflow needs no second checkout and no token. Publishing to npm is off until the
 # repository variable PUBLISH_NPM is `true` (RELEASING.md: trusted publishing, the `npm`

@@ -2,8 +2,8 @@
 
 One package, `sessionpipe-gui`, installed from GitHub for now (`npx github:spacesheep-dev/sessionpipe-gui`,
 `npm i -g github:…`, or a clone); the npm package follows when the owner turns it on. It
-carries every official extension: Canvas, Office, Spacesheep Vivid, Paper Serif and
-ping-a-human, from the tracked copy in `bundled/`, refreshed from a checkout of
+carries every official extension: Canvas, Office and ping-a-human (the two skins are built
+in), from the tracked copy in `bundled/`, refreshed from a checkout of
 [sessionpipe-gui-themes](https://github.com/spacesheep-dev/sessionpipe-gui-themes) beside
 this repo with `npm run bundle:sync` (the themes repo stays the source of truth; commit the
 refreshed copy here). Nothing installs from npm: the `@sessionpipe-gui/*` packages need
@@ -43,7 +43,7 @@ npm i -g --prefix /tmp/x github:spacesheep-dev/sessionpipe-gui
 /tmp/x/bin/sessionpipe-gui --help | grep extras                       # the subcommand is there
 /tmp/x/bin/sessionpipe-gui --state /tmp/spgui-smoke --port 7399 --no-outbox --quiet &
 curl -s http://localhost:7399/api/ui/themes | grep -o '"id":"\(canvas\|office\)"'          # both views
-curl -s http://localhost:7399/api/ui/skins | grep -o '"id":"\(paper-serif\|spacesheep-vivid\)"'
+curl -s http://localhost:7399/api/ui/skins | grep -o '"id":"\(spacesheep\|paper\)"'               # the two skins
 curl -s http://localhost:7399/api/ui/plugins | grep -o '"disabled":true'                   # ping-a-human off
 kill %1; rm -rf /tmp/x /tmp/spgui-smoke
 ```

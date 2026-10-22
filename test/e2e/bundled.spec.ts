@@ -30,7 +30,6 @@ test.describe("bundled views", () => {
     await openPage(page, "/themes");
     const row = page.locator("[data-theme-row='e2e-bundled']");
     await expect(row.locator(".themes-flag")).toHaveText(["bundled"]);
-    await expect(row.locator(".themes-row-meta")).toContainText("bundled with the GUI");
     await row.locator("[data-toggle='e2e-bundled']").click();
     await expect(row.locator(".themes-flag")).toHaveText(["bundled", "disabled"]);
     await expect(row.getByRole("link", { name: "Open" })).toHaveCount(0);

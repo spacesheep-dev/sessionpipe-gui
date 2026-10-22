@@ -3,9 +3,9 @@
 // The web app is built separately by Vite into dist/web (see package.json).
 //
 // Bundled extensions: every official extension ships with the GUI (the views Canvas and
-// Office, the skins Spacesheep Vivid and Paper Serif, the plugin ping-a-human). Each is
-// copied into dist/bundled/<kind>/<id>/ from the themes repo's packages: built first with
-// its own `npm run build` when it has one (skins have no build), then exactly what its npm
+// Office, the plugin ping-a-human; the two skins are built in, shared/skins-builtin.ts). Each
+// is copied into dist/bundled/<kind>/<id>/ from the themes repo's packages: built first with
+// its own `npm run build` when it has one, then exactly what its npm
 // tarball would carry (package.json `files`, minus source maps). `--bundle-from <path>`
 // names that checkout (default: the sibling ../sessionpipe-gui-themes); when it is absent
 // the tracked copy in bundled/ is used instead, so a bare clone still ships everything.
@@ -33,7 +33,7 @@ function missing(msg) {
     return;
   }
   console.error(
-    `bundled extensions: ${msg}\n  a release ships Canvas, Office, Spacesheep Vivid, Paper Serif and ping-a-human: clone spacesheep-dev/sessionpipe-gui-themes beside this repo (or --bundle-from <path>) and \`npm ci && npm run build\` there; SPGUI_NO_BUNDLE=1 publishes without them on purpose`,
+    `bundled extensions: ${msg}\n  a release ships Canvas, Office and ping-a-human: clone spacesheep-dev/sessionpipe-gui-themes beside this repo (or --bundle-from <path>) and \`npm ci && npm run build\` there; SPGUI_NO_BUNDLE=1 publishes without them on purpose`,
   );
   process.exit(1);
 }
@@ -60,8 +60,6 @@ const options = {
 const BUNDLED = [
   { kind: "views", pkg: "packages/canvas", manifest: "theme.json" },
   { kind: "views", pkg: "packages/office", manifest: "theme.json" },
-  { kind: "skins", pkg: "packages/skin-spacesheep-vivid", manifest: "skin.json" },
-  { kind: "skins", pkg: "packages/skin-paper-serif", manifest: "skin.json" },
   { kind: "plugins", pkg: "packages/plugin-ping-a-human", manifest: "plugin.json" },
 ];
 
@@ -134,7 +132,7 @@ function bundleExtensions() {
       continue;
     }
     const pkgJson = JSON.parse(readFileSync(path.join(pkg, "package.json"), "utf8"));
-    // Views and the plugin build to dist/; a skin is files as they are.
+    // Views and the plugin build to dist/; a package with no build ships its files as they are.
     if (pkgJson.scripts?.build) {
       const r = spawnSync("npm", ["run", "build", "--silent"], { cwd: pkg, encoding: "utf8" });
       if (r.status !== 0) {

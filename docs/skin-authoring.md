@@ -168,13 +168,13 @@ came from in `source`. `--state DIR` (or `--skins-dir DIR`) chooses the folder. 
 server reads it at boot and on `POST /api/ui/skins/reload` (loopback: the appearance
 popover asks for it when opened on the receiver machine).
 
-Spacesheep Vivid and Paper Serif ship with the GUI (`dist/bundled/skins/<id>/`, copied
-from this repo at build time): listed after the person's own skins with `bundled: true`
-and `origin: "bundled"`, so `skin add` of a package with the same id overrides the bundled
-copy and `skin remove` of that install brings it back. A bundled skin cannot be removed:
-`sessionpipe-gui skin disable paper-serif` hides it from the popover (`skin:paper-serif`
-in `config.json` `disabled`; its files are not served meanwhile), `skin enable` shows it
-again. Any skin can be disabled the same way.
+The GUI ships two skins, built in (`shared/skins-builtin.ts`): Spacesheep, the default, in
+both schemes, and Paper, light only. No skin package ships with it. The folder
+`dist/bundled/skins/<id>/` still works for a distribution that wants one: a skin there is
+listed after the person's own with `bundled: true` and `origin: "bundled"`, `skin add` of
+the same id overrides it, and it cannot be removed, only hidden: `sessionpipe-gui skin
+disable <id>` (`skin:<id>` in `config.json` `disabled`; its files are not served
+meanwhile), `skin enable` shows it again. Any skin can be disabled the same way.
 
 A plain **color-theme file** still works: `<stateDir>/color-themes/<id>.json` with `id`,
 `name`, `scheme` (`dark` or `light`) and `tokens` ([`color-theme.example.json`](color-theme.example.json)).
@@ -185,10 +185,9 @@ fonts, shape or css. Turning one into a skin is adding `"kind": "skin"`, `"versi
 ## The preview
 
 `"preview": "preview.png"` names an image for listings; the GUI does not render it yet,
-READMEs do. The themes repo renders one with Playwright against a GUI in demo mode
-(`packages/skin-paper-serif/scripts/preview.mjs`): link the skin into a scratch state
-dir, start `sessionpipe-gui --demo` on a spare port, open the popover, pick the skin,
-screenshot the board at 1280 × 800.
+READMEs do. Render one with Playwright against a GUI in demo mode: link the skin into a
+scratch state dir, start `sessionpipe-gui --demo` on a spare port, open Display, pick the
+skin, screenshot the board at 1280 × 800.
 
 ## Choosing and storing
 

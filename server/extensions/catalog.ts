@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Owned by: platform. The curated extras: the official views, skins and plugins from
+// Owned by: platform. The curated extras: the official views and plugins from
 // sessionpipe-gui-themes, by id. Every one of them ships inside the GUI (scripts/build.mjs
 // copies them into dist/bundled/<kind>s/), so `sessionpipe-gui extras list` and the Views
 // page's Extras list are the whole picture and `extras add` has nothing left to install.
@@ -24,24 +24,6 @@ export const EXTRAS: readonly ExtraEntry[] = [
     npm: "@sessionpipe-gui/theme-office",
     line: "Every machine a room, every live session a person at a desk; posture is the state, amber marks who needs you.",
     size: "36 kB",
-    bundled: true,
-  },
-  {
-    id: "spacesheep-vivid",
-    kind: "skin",
-    name: "Spacesheep Vivid",
-    npm: "@sessionpipe-gui/skin-spacesheep-vivid",
-    line: "Spacesheep with the surfaces carrying the brand: deep indigo cards on violet-black, soft lavender on warm cream.",
-    size: "59 kB",
-    bundled: true,
-  },
-  {
-    id: "paper-serif",
-    kind: "skin",
-    name: "Paper Serif",
-    npm: "@sessionpipe-gui/skin-paper-serif",
-    line: "Warm paper, a bundled serif (Source Serif 4, OFL) for the interface text, square corners, roomier rows. Light only.",
-    size: "819 kB",
     bundled: true,
   },
   {

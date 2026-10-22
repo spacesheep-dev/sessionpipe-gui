@@ -86,9 +86,8 @@ skins (tokens, fonts, radius, density and an optional stylesheet; no code):
 
   sessionpipe-gui skin list|add|link|remove    the same verbs; folders under <state>/skins,
                                              picked in the page's quick settings; --skins-dir DIR
-  sessionpipe-gui skin disable|enable <id>   hide a skin from the popover (Spacesheep Vivid
-                                             and Paper Serif ship bundled and cannot be
-                                             removed) or show it again
+  sessionpipe-gui skin disable|enable <id>   hide an installed skin from the popover or
+                                             show it again
   Plain color-theme JSON files in <state>/color-themes/*.json still work and are listed
   with the skins; see docs/skin-authoring.md and docs/color-theme.example.json.
 

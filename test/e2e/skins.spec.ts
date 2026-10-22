@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
 // Skins: a fixture package is installed by test/e2e/serve.mjs with the real CLI before the
-// server starts. The list names it beside the built-ins, picking it in the appearance
-// popover sets its tokens, fonts, shape and density on <html>, a view inherits the tokens
-// by name, the choice survives a reload, and a device's old color-theme choice is
-// migrated to the skin key once.
+// server starts. The list names it beside the built-ins (the two shipped, Spacesheep and
+// Paper, and Plain, the internal base the UI never lists), picking it in Display sets its
+// tokens, fonts, shape and density on <html>, a view inherits the tokens by name, the
+// choice survives a reload, and a device's old color-theme choice is migrated once.
 import { expect, type Page, test } from "@playwright/test";
 import { openBoard, openPage } from "./helpers.js";
 
@@ -33,14 +33,7 @@ test.describe("skins", () => {
       ["spacesheep", "builtin"],
       ["plain", "builtin"],
     ]);
-    expect(skins.filter((s) => s.source === "builtin").map((s) => s.name)).toEqual([
-      "Spacesheep",
-      "Plain",
-      "Paper",
-      "Graphite",
-      "Ink",
-      "Sepia",
-    ]);
+    expect(skins.filter((s) => s.source === "builtin").map((s) => s.name)).toEqual(["Spacesheep", "Plain", "Paper"]);
     const fx = skins.find((s) => s.id === "e2e-skin")!;
     expect(fx).toMatchObject({ source: "skin", scheme: "both", url: "/skins/e2e-skin/" });
     expect(fx.error).toBeUndefined();
@@ -63,18 +56,19 @@ test.describe("skins", () => {
     // A fresh device is on Spacesheep, which follows the appearance (System → light here).
     await expect(root).toHaveAttribute("data-skin", "spacesheep");
     await expect(root).not.toHaveAttribute("data-theme", /./);
-    expect(await rootVar(page, "--bg")).toBe("oklch(0.975 0.007 85)");
+    expect(await rootVar(page, "--bg")).toBe("oklch(0.993 0.002 285)");
 
     const trigger = page.locator("nav.rail button[aria-label='Quick settings']");
     await trigger.click();
     const pop = page.getByRole("dialog", { name: "Quick settings" });
-    await expect(pop.locator(".qs-divider")).toHaveText(["Built-in", "Installed"]);
+    await expect(pop.locator(".qs-divider")).toHaveText(["Installed"]);
+    await expect(pop.locator("[data-skin='plain']")).toHaveCount(0);
     const broken = pop.locator("[data-skin='e2e-skin-broken']");
     await expect(broken).toBeDisabled();
     await expect(broken.locator(".qs-theme-hint")).toHaveText("broken");
     const row = pop.locator("[data-skin='e2e-skin']");
     await expect(row).toHaveAttribute("data-skin-source", "skin");
-    await expect(row.locator(".qs-strip i")).toHaveCount(5);
+    await expect(row.locator(".qs-swatch")).toHaveCount(1);
     await row.click();
     await expect(row).toHaveAttribute("aria-pressed", "true");
 
@@ -123,18 +117,17 @@ test.describe("skins", () => {
     expect(await rootVar(page, "--bg")).toBe("rgb(10, 20, 30)");
     expect(await page.evaluate(() => localStorage.getItem("sessionpipe-gui.skin"))).toContain('"id":"e2e-skin"');
 
-    // Back to Plain: nothing set, the scheme's own tokens; the extras are gone.
+    // Back to Spacesheep: its tokens, no fonts, shape or density of the fixture's; the extras are gone.
     await openBoard(page);
     await trigger.click();
-    await pop.locator("[data-skin='plain']").click();
-    await expect(root).toHaveAttribute("data-skin", "plain");
+    await pop.locator("[data-skin='spacesheep']").click();
+    await expect(root).toHaveAttribute("data-skin", "spacesheep");
     await expect(root).not.toHaveAttribute("data-density", /./);
-    expect(await rootVar(page, "--bg")).toBe("");
+    expect(await rootVar(page, "--bg")).toBe("oklch(0.185 0.01 285)");
     expect(await rootVar(page, "--font-ui")).toBe("");
     await expect(page.locator("style#skin-fonts")).toHaveCount(0);
     await expect(page.locator("link#skin-css")).toHaveCount(0);
     await pop.locator("label.seg-opt", { hasText: /^System$/ }).click();
-    await pop.locator("[data-skin='spacesheep']").click();
   });
 
   test("a device's old color-theme choice is migrated to the skin key once", async ({ page }) => {

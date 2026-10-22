@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The last look before `npm publish`: what the tarball would carry. Fails when a source
-// map slipped in, when a bundled extension (the two views, the two skins, the plugin) is
+// map slipped in, when a bundled extension (the two views, the plugin) is
 // missing (unless SPGUI_NO_BUNDLE=1), or when the bin, the web app or the README is not
 // there. Run by the release workflow after the build; by hand: `npm run pack:check`.
 import { spawnSync } from "node:child_process";
@@ -21,9 +21,6 @@ for (const must of ["dist/cli.js", "dist/index.js", "dist/web/index.html", "READ
 const BUNDLED = [
   "views/canvas/theme.json",
   "views/office/theme.json",
-  "skins/spacesheep-vivid/skin.json",
-  "skins/paper-serif/skin.json",
-  "skins/paper-serif/fonts/SourceSerif4Variable-Roman.woff2",
   "plugins/ping-a-human/plugin.json",
   "plugins/ping-a-human/dist/index.js",
 ];
@@ -43,4 +40,4 @@ if (problems.length) {
   for (const p of problems) console.error(`  ✘ ${p}`);
   process.exit(1);
 }
-console.log("  ✔ no source maps, bin + web app + bundled views, skins and plugin + README/LICENSE/NOTICE present");
+console.log("  ✔ no source maps, bin + web app + bundled views and plugin + README/LICENSE/NOTICE present");
