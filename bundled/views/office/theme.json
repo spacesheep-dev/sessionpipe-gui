@@ -1,7 +1,7 @@
 {
   "id": "office",
   "name": "Office",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Every machine a room, every live session a person at a desk: posture is the state, amber marks who needs you. An isometric floor by default, figures on request.",
   "entry": "dist/index.js",
   "style": "dist/index.css",

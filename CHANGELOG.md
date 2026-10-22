@@ -6,6 +6,11 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-23
+
+The native redesign: one window shell, grouped rows, right-click menus everywhere, and
+ways to organise the work (colour labels, subagents you can watch, canvas views).
+
 ### Added
 
 - **Colour labels.** Right-click any session, then "Label ▸", to give it one of seven
@@ -122,5 +127,6 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/spacesheep-dev/sessionpipe-gui/releases/tag/v0.1.0

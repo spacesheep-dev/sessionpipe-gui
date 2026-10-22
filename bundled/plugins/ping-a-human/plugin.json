@@ -1,7 +1,7 @@
 {
   "id": "ping-a-human",
   "name": "ping-a-human",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "kind": "plugin",
   "api": 1,
   "entry": "dist/index.js",

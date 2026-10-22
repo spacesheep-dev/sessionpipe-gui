@@ -4,7 +4,7 @@
 // copies them into dist/bundled/<kind>s/), so `sessionpipe-gui extras list` and the Views
 // page's Extras list are the whole picture and `extras add` has nothing left to install.
 // The npm name each would install from is kept for the day the packages are published;
-// nothing reads it today. Sizes are the packages as packed at 0.1.0, rounded.
+// nothing reads it today. Sizes are the packages as packed at 0.2.0, rounded.
 import type { ExtraEntry } from "../../shared/api.js";
 
 export const EXTRAS: readonly ExtraEntry[] = [
@@ -14,7 +14,7 @@ export const EXTRAS: readonly ExtraEntry[] = [
     name: "Canvas",
     npm: "@sessionpipe-gui/theme-canvas",
     line: "Every live session as a window on an infinite canvas; the Map draws devices, accounts, machines and repos around them.",
-    size: "39 kB",
+    size: "44 kB",
     bundled: true,
   },
   {
