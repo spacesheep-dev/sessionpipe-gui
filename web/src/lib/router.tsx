@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // A history router: pushState, no hash. `useRoute()` gives the parsed location; `navigate`
 // and `<Link>` move; the browser's back button works because we listen to popstate.
-import { type CSSProperties, type MouseEvent, type ReactNode, useMemo, useSyncExternalStore } from "react";
+import {
+  type CSSProperties,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+  useMemo,
+  useSyncExternalStore,
+} from "react";
 
 export type Route =
   | { name: "board" }
@@ -147,6 +154,12 @@ export function back(fallback = "/") {
 export const sessionPath = (harness: string, id: string) =>
   `/s/${encodeURIComponent(harness)}/${encodeURIComponent(id)}`;
 
+/** The query parameter that opens a session on one of its subagents (an AgentRun id). */
+export const AGENT_PARAM = "agent";
+/** A session's page opened on one subagent. */
+export const agentPath = (harness: string, id: string, agentId: string) =>
+  `${sessionPath(harness, id)}?${AGENT_PARAM}=${encodeURIComponent(agentId)}`;
+
 export function Link({
   to,
   children,
@@ -165,6 +178,8 @@ export function Link({
   /** Marks the item a list's roving tabindex walks (lib/keys.ts useListNav). */
   "data-nav-item"?: string;
   "aria-label"?: string;
+  "aria-expanded"?: boolean;
+  onKeyDown?: (e: KeyboardEvent<HTMLAnchorElement>) => void;
   style?: CSSProperties;
   tabIndex?: number;
   /** Shift- or Alt-click: open beside (the side panel); ⌘/ctrl-click: beside, as a

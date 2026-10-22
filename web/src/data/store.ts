@@ -3,16 +3,19 @@
 // useSyncExternalStore sees one new object per change. Sessions and machines are keyed;
 // recent events are a ring (newest first) the Feed page reads; control activity is kept
 // for the control engineer's strip.
-import type {
-  ControlActivity,
-  MachineSummary,
-  SessionKey,
-  SessionSummary,
-  Stats,
-  StoredEvent,
-  StreamMessage,
-  Suggestion,
-  Viewer,
+import {
+  type ControlActivity,
+  EMPTY_LABELS,
+  type Labels,
+  type LabelsPatch,
+  type MachineSummary,
+  type SessionKey,
+  type SessionSummary,
+  type Stats,
+  type StoredEvent,
+  type StreamMessage,
+  type Suggestion,
+  type Viewer,
 } from "@shared/api";
 import type { Transport } from "./transport";
 
@@ -35,6 +38,11 @@ export interface AppState {
   /** Plugins' suggested answers to open permissions (shared/plugin-api.ts); one per
    *  attention, kept only while that attention is open. Advice: a person confirms it. */
   suggestions: readonly Suggestion[];
+  /** The person's colour labels, the same on every device (server/ui/labels.ts). */
+  labels: Labels;
+  /** The newest ETag of each view's server-side state (`viewState` frames), so a mounted
+   *  view can re-read what another device wrote. */
+  viewStates: ReadonlyMap<string, string>;
   /** Counts every message, so a page can tell "something changed" cheaply. */
   version: number;
 }
@@ -52,6 +60,8 @@ const initial: AppState = {
   control: [],
   viewers: [],
   suggestions: [],
+  labels: EMPTY_LABELS,
+  viewStates: new Map(),
   version: 0,
 };
 
@@ -119,6 +129,7 @@ export class Store {
           stats: s.stats,
           viewers: s.viewers ?? [],
           suggestions: s.suggestions ?? [],
+          labels: s.labels ?? this.state.labels,
         });
         return;
       }
@@ -171,6 +182,17 @@ export class Store {
       case "viewers":
         this.set({ viewers: m.viewers });
         return;
+      case "labels":
+        // Whole documents, numbered: one older than what the page has (a frame overtaken by
+        // the answer to its own PATCH) changes nothing.
+        if (m.labels.rev >= this.state.labels.rev) this.set({ labels: m.labels });
+        return;
+      case "viewState": {
+        const viewStates = new Map(this.state.viewStates);
+        viewStates.set(m.id, m.etag);
+        this.set({ viewStates });
+        return;
+      }
       case "suggestion": {
         const s = m.suggestion;
         const suggestions = [
@@ -182,6 +204,34 @@ export class Store {
       }
       default:
         return;
+    }
+  }
+
+  /** Set or clear labels and label names: applied here at once, then the server's answer
+   *  (or the frame it sends every page) replaces it; on a refusal the page goes back to
+   *  what it had and the promise rejects with the server's reason. */
+  async patchLabels(p: LabelsPatch): Promise<Labels> {
+    const before = this.state.labels;
+    const sessions = { ...before.sessions };
+    for (const [k, c] of Object.entries(p.sessions ?? {})) {
+      if (c === null) delete sessions[k];
+      else sessions[k] = c;
+    }
+    const names = { ...before.names };
+    for (const [c, n] of Object.entries(p.names ?? {}) as [keyof Labels["names"], string | null][]) {
+      const t = n?.trim();
+      if (t) names[c] = t;
+      else delete names[c];
+    }
+    // The optimistic copy keeps the rev, so the server's answer (rev + 1) always wins.
+    this.set({ labels: { rev: before.rev, names, sessions } });
+    try {
+      const next = await this.transport.patchLabels(p);
+      if (next.rev >= this.state.labels.rev) this.set({ labels: next });
+      return next;
+    } catch (e) {
+      if (this.state.labels.rev === before.rev) this.set({ labels: before });
+      throw e;
     }
   }
 

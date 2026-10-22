@@ -2,6 +2,10 @@
 // Owned by: platform. The theme routes: the listing, the reload (loopback), per-theme
 // state (a JSON document ≤ 256 KB under <stateDir>/themes-state/<id>.json) and the
 // theme's own files at /themes/<id>/<file>. Everything needs uiAuth, like /api/ui.
+// The state carries an ETag (a hash of the document), so a view on two devices can
+// write with If-Match and merge instead of overwriting (412 `conflict`), and every write
+// is announced (`onState`) so the other devices re-read it.
+import { createHash } from "node:crypto";
 import { createReadStream, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { THEME_ID_RE, THEME_ROUTES } from "../../shared/theme-api.js";
@@ -37,7 +41,13 @@ export interface ThemeRouteDeps {
   stateDir: string;
   /** Remember a view as off (or on again) in config.json; the registry is rescanned after. */
   setDisabled?: (id: string, off: boolean) => void;
+  /** A view's state was written: its id and the new ETag (for the `viewState` frame). */
+  onState?: (id: string, etag: string) => void;
 }
+
+/** The ETag of a state document's text; `"0"` stands for "nothing stored yet". */
+export const stateEtag = (text: string | null): string =>
+  text === null ? '"0"' : `"${createHash("sha256").update(text).digest("base64url").slice(0, 16)}"`;
 
 export function registerThemes(router: Router, deps: ThemeRouteDeps): void {
   const guard =
@@ -81,6 +91,13 @@ export function registerThemes(router: Router, deps: ThemeRouteDeps): void {
   }
 
   const stateFile = (id: string): string => path.join(deps.stateDir, `${id}.json`);
+  const readState = (id: string): string | null => {
+    try {
+      return readFileSync(stateFile(id), "utf8");
+    } catch {
+      return null;
+    }
+  };
   const knownId = (ctx: Ctx): string | Reply => {
     const id = ctx.params.id ?? "";
     if (!THEME_ID_RE.test(id)) return { status: 400, json: { reason: "bad_id" } };
@@ -93,16 +110,17 @@ export function registerThemes(router: Router, deps: ThemeRouteDeps): void {
     guard((ctx): Reply => {
       const id = knownId(ctx);
       if (typeof id !== "string") return id;
-      let text: string;
-      try {
-        text = readFileSync(stateFile(id), "utf8");
-      } catch {
-        return { status: 204, text: "", headers: { "cache-control": "no-store" } };
-      }
+      const text = readState(id);
+      if (text === null)
+        return { status: 204, text: "", headers: { "cache-control": "no-store", etag: stateEtag(null) } };
       return {
         status: 200,
         text,
-        headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store",
+          etag: stateEtag(text),
+        },
       };
     }),
   );
@@ -126,12 +144,21 @@ export function registerThemes(router: Router, deps: ThemeRouteDeps): void {
         return { status: 400, json: { reason: "malformed" } };
       }
       if (value === undefined) return { status: 400, json: { reason: "malformed" } };
+      // Compare-and-set: another device wrote since this one read. The check and the
+      // write run without an await between them, so two writers cannot both pass.
+      const ifMatch = ctx.req.headers["if-match"];
+      const have = stateEtag(readState(id));
+      if (typeof ifMatch === "string" && ifMatch !== "*" && ifMatch !== have)
+        return { status: 412, json: { reason: "conflict" }, headers: { etag: have } };
       mkdirSync(deps.stateDir, { recursive: true, mode: 0o700 });
       const file = stateFile(id);
       const tmp = `${file}.${process.pid}.tmp`;
-      writeFileSync(tmp, JSON.stringify(value), { mode: 0o600 });
+      const text = JSON.stringify(value);
+      writeFileSync(tmp, text, { mode: 0o600 });
       renameSync(tmp, file);
-      return { status: 204, text: "" };
+      const etag = stateEtag(text);
+      if (etag !== have) deps.onState?.(id, etag);
+      return { status: 204, text: "", headers: { etag } };
     }),
   );
 

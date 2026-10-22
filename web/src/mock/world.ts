@@ -3,6 +3,7 @@
 // shape, spec PROTOCOL.md §2/§4) and derives SessionSummary / MachineSummary / Stats from
 // them with the same readings ARCHITECTURE.md gives the store, so the mock is the contract.
 import type {
+  AgentRun,
   Attention,
   DetailQuery,
   FeedPage,
@@ -19,6 +20,7 @@ import type {
   Tier,
 } from "@shared/api";
 import { DONE_AFTER_MS, SNIPPET_CHARS, STALE_AFTER_MS, sessionKey } from "@shared/api";
+import { AgentReading } from "./agents";
 
 // ---------- helpers ----------
 
@@ -173,7 +175,48 @@ interface SessionRec {
   turn: number;
   /** Live script state. */
   script: Script;
+  /** Background agents that finished and wait for their `<task-notification>` turn. */
+  notices: Notice[];
 }
+
+/** A background agent's report, as Claude Code hands it to the orchestrator. */
+interface Notice {
+  agentId: string;
+  callId: string;
+  description: string;
+  result: string;
+  followUp: string;
+}
+
+/** A subagent working inside its parent's session right now: its tools carry `agent_id`
+ *  and the spawning turn's `turn_id`; at `endAt` it stops and (in the background) leaves
+ *  a notice for the orchestrator's next turn. */
+interface LiveAgent {
+  r: SessionRec;
+  id: string;
+  type: string;
+  turnId: string;
+  notice?: Notice;
+  nextAt: number;
+  endAt: number;
+  tool?: string;
+  toolCallId?: string;
+  toolStartedAt?: number;
+  toolInput?: Record<string, unknown>;
+  toolExtra?: Record<string, unknown>;
+}
+
+/** The orchestrator's prompt when a background agent stops, in the recorded format. */
+const taskNotification = (n: Notice): string =>
+  [
+    "<task-notification>",
+    `<task-id>${n.agentId}</task-id>`,
+    `<tool-use-id>${n.callId}</tool-use-id>`,
+    "<status>completed</status>",
+    `<summary>Agent "${n.description}" finished</summary>`,
+    `<result>${n.result}</result>`,
+    "</task-notification>",
+  ].join("\n");
 
 type Script =
   | { kind: "none" }
@@ -192,18 +235,8 @@ type Script =
     }
   | { kind: "idle"; nextTurnAt: number }
   | { kind: "attention"; attentionId: string; clearAt: number; resume: Script }
-  | {
-      kind: "subagent";
-      nextAt: number;
-      endAt: number;
-      parentKey: SessionKey;
-      agentId: string;
-      agentType: string;
-      tool?: string;
-      toolCallId?: string;
-      toolStartedAt?: number;
-      toolInput?: Record<string, unknown>;
-    };
+  /** The `<task-notification>` turn: the harness's prompt, then the orchestrator's answer. */
+  | { kind: "notice"; endAt: number; startedAt: number; user: string; reply: string };
 
 export class World {
   sessions = new Map<SessionKey, SessionRec>();
@@ -213,6 +246,7 @@ export class World {
   sinkToken = `spg_${ulid().slice(4, 24).toLowerCase()}`;
   startedAt = Date.now() - 4 * 3600_000 - 123_000;
   private controlPollAt = Date.now() - 3000;
+  private liveAgents: LiveAgent[] = [];
   private attentionDueAt = Date.now() + 25_000;
   private controlKeys = [
     { id: "k_7f3a", alg: -7, name: "Misha’s iPhone", addedAt: iso(Date.now() - 6 * 86_400_000) },
@@ -263,6 +297,43 @@ export class World {
     return out;
   }
 
+  /** A child session (`parent_id`) is also its parent's agent (server/store/store.ts
+   *  syncChildAgent): one AgentRun by the child's id with `session` set and its state. */
+  private childAgents(r: SessionRec, list: AgentRun[], now: number): AgentRun[] {
+    const kids = this.children(r);
+    if (kids.length === 0) return list;
+    const out = [...list];
+    for (const k of kids) {
+      const c = this.summary(k, now);
+      const have = out.find((a) => a.id === c.id);
+      const ended = have?.state === "done" && (have.endedAt ?? "") >= c.lastAt;
+      const state: AgentRun["state"] = ended || c.state === "done" ? "done" : c.state === "stale" ? "stale" : "running";
+      const next: AgentRun = {
+        ...(have ?? {}),
+        id: c.id,
+        session: c.key,
+        state,
+        startedAt: have?.startedAt ?? c.startedAt,
+        lastAt: c.lastAt > (have?.lastAt ?? "") ? c.lastAt : (have?.lastAt ?? c.lastAt),
+        tools: c.counts.tools,
+        toolErrors: c.counts.toolErrors,
+        attributed: true,
+        recentTools: c.recentTools.slice(-4),
+        currentTool: c.currentTool
+          ? { tool: c.currentTool.tool, callId: c.currentTool.callId, since: c.currentTool.since }
+          : undefined,
+        endedAt: state === "done" ? (have?.endedAt ?? c.endedAt ?? c.lastAt) : undefined,
+      };
+      if (have) out.splice(out.indexOf(have), 1, next);
+      else out.push(next);
+    }
+    const open = out.filter((a) => a.state !== "done").sort((a, b) => (a.startedAt < b.startedAt ? -1 : 1));
+    const done = out
+      .filter((a) => a.state === "done")
+      .sort((a, b) => ((b.endedAt ?? b.lastAt) < (a.endedAt ?? a.lastAt) ? -1 : 1));
+    return [...open, ...done];
+  }
+
   summary(r: SessionRec, now: number): SessionSummary {
     const block: ProtocolSession = { id: r.id, seq: 0 };
     const counts = {
@@ -274,6 +345,7 @@ export class World {
       compactions: 0,
       filesChanged: 0,
       attentions: 0,
+      agentsRunning: 0,
     };
     let maxTier: Tier = 0;
     let live = false;
@@ -290,6 +362,7 @@ export class World {
     const recentTools: SessionSummary["recentTools"] = [];
     let source: SessionSummary["source"] = "outbox";
     let harnessVersion: string | undefined;
+    const agents = new AgentReading();
 
     for (const e of r.events) {
       for (const [k, v] of Object.entries(e.session) as [keyof ProtocolSession, unknown][]) {
@@ -305,6 +378,16 @@ export class World {
       const d = e.data;
       const hook = e.type !== "turn.progress" && e.type !== "turn.transcript" && e.type !== "attention.needed";
       if (hook && e.type !== "attention.cleared") open.clear();
+      // A subagent's own tool runs on its agent: never the session's current tool, and it
+      // does not reopen the orchestrator's turn (a background agent works on after it).
+      if (agents.apply(e)) {
+        live = true;
+        if (e.type === "tool.ended") {
+          counts.tools++;
+          if (d.ok === false) counts.toolErrors++;
+        }
+        continue;
+      }
       switch (e.type) {
         case "session.started":
           live = true;
@@ -355,7 +438,6 @@ export class World {
             tool: String(d.tool),
             callId: typeof d.call_id === "string" ? d.call_id : undefined,
             since: e.time,
-            agentId: typeof d.agent_id === "string" ? d.agent_id : undefined,
           };
           break;
         case "tool.ended": {
@@ -401,6 +483,9 @@ export class World {
     const lastMs = Date.parse(lastAt);
     let state: SessionSummary["state"];
     let stateSince: string;
+    // A subagent still running keeps its orchestrator working after the turn that
+    // launched it ended (readings.ts evaluateState).
+    const openAgent = agents.agents.find((a) => a.state !== "done");
     if (open.size > 0) {
       state = "needs_you";
       stateSince = [...open.values()][0]!.at;
@@ -410,19 +495,24 @@ export class World {
     } else if (!live || now - lastMs > DONE_AFTER_MS) {
       state = "done";
       stateSince = live ? iso(lastMs + DONE_AFTER_MS) : lastAt;
-    } else if (currentTurn) {
+    } else if (currentTurn || openAgent) {
       if (now - lastMs > STALE_AFTER_MS) {
         state = "stale";
         stateSince = iso(lastMs + STALE_AFTER_MS);
       } else {
         state = "working";
-        stateSince = currentTurn.since;
+        stateSince =
+          currentTurn && (!openAgent || currentTurn.since < openAgent.startedAt)
+            ? currentTurn.since
+            : openAgent!.startedAt;
       }
     } else {
       state = "idle";
       stateSince = lastTurnEnd ?? lastAt;
     }
 
+    const agentList = this.childAgents(r, agents.settle(now, state === "done", endedAt ?? lastAt), now);
+    counts.agentsRunning = agentList.filter((a) => a.state !== "done").length;
     return {
       key: r.key,
       harness: r.harness,
@@ -454,6 +544,7 @@ export class World {
       lastUser,
       lastAssistant,
       children: this.children(r).length,
+      agents: agentList,
       recentTools,
       flags: [],
       turnStats: { count: 0 },
@@ -550,7 +641,15 @@ export class World {
     if (!r) return null;
     const now = Date.now();
     const limit = Math.max(1, Math.min(500, q.limit ?? 500));
-    const sorted = [...r.events].sort((a, b) => a.session.seq - b.session.seq);
+    let sorted = [...r.events].sort((a, b) => a.session.seq - b.session.seq);
+    // One subagent's events: its own (agent_id) and the call that launched it.
+    if (q.agent) {
+      const run = this.summary(r, now).agents.find((a) => a.id === q.agent);
+      sorted = sorted.filter(
+        (e) =>
+          e.data.agent_id === q.agent || (!!run?.callId && e.type.startsWith("tool.") && e.data.call_id === run.callId),
+      );
+    }
     let page: StoredEvent[];
     if (q.tail || q.before !== undefined) {
       const below = q.tail ? Number.POSITIVE_INFINITY : q.before!;
@@ -640,6 +739,7 @@ export class World {
   private tick() {
     const now = Date.now();
     for (const r of [...this.sessions.values()]) this.step(r, now);
+    for (const a of [...this.liveAgents]) if (this.sessions.has(a.r.key)) this.stepAgent(a, now);
     if (now - this.lastStatsAt > 5000) {
       this.lastStatsAt = now;
       this.controlPollAt = now - Math.floor(rnd(500, 4000));
@@ -685,27 +785,18 @@ export class World {
           r.script = { ...s.resume, nextAt: now + 800 } as Script;
         }
         return;
-      case "idle":
-        if (now >= s.nextTurnAt) this.startTurn(r, now);
+      case "idle": {
+        // A background agent that finished reports back first, in a turn of its own.
+        const n = r.notices.shift();
+        if (n) this.noticeTurn(r, n, now);
+        else if (now >= s.nextTurnAt) this.startTurn(r, now);
         return;
-      case "subagent":
+      }
+      case "notice":
         if (now >= s.endAt) {
-          if (s.tool && s.toolCallId) this.endTool(r, s, now);
-          this.send(r, "turn.ended", { reason: "stop", ms: now - s.nextAt });
-          this.send(r, "session.ended", { reason: "other" });
-          const parent = this.sessions.get(s.parentKey);
-          if (parent) this.send(parent, "subagent.ended", { agent_id: s.agentId, agent_type: s.agentType });
-          r.script = { kind: "none" };
-          return;
-        }
-        if (now >= s.nextAt) {
-          if (s.tool) {
-            this.endTool(r, s, now);
-            s.nextAt = now + rnd(300, 1500);
-          } else {
-            this.startTool(r, s, now, s.agentId);
-            s.nextAt = now + rnd(600, 4000);
-          }
+          this.send(r, "turn.ended", { turn_id: `t_${r.turn}`, reason: "stop", ms: now - s.startedAt });
+          this.send(r, "turn.transcript", { turn: r.turn, user: s.user, assistant: s.reply, at: iso(now) });
+          r.script = { kind: "idle", nextTurnAt: now + rnd(20_000, 50_000) };
         }
         return;
       case "working":
@@ -749,9 +840,15 @@ export class World {
 
   private startTool(
     r: SessionRec,
-    s: { tool?: string; toolCallId?: string; toolStartedAt?: number; toolInput?: Record<string, unknown> },
+    s: {
+      tool?: string;
+      toolCallId?: string;
+      toolStartedAt?: number;
+      toolInput?: Record<string, unknown>;
+      toolExtra?: Record<string, unknown>;
+    },
     now: number,
-    agentId?: string,
+    extra?: Record<string, unknown>,
   ) {
     const tool = pick(TOOLS[r.harness] ?? ["Bash"]);
     const callId = `toolu_${ulid(now).slice(-10)}`;
@@ -760,15 +857,21 @@ export class World {
     s.toolCallId = callId;
     s.toolStartedAt = now;
     s.toolInput = input;
-    const data: Record<string, unknown> = { tool, call_id: callId };
-    if (agentId) data.agent_id = agentId;
+    s.toolExtra = extra;
+    const data: Record<string, unknown> = { tool, call_id: callId, ...extra };
     if (r.tier >= 3) data.input = input;
     this.send(r, "tool.started", data);
   }
 
   private endTool(
     r: SessionRec,
-    s: { tool?: string; toolCallId?: string; toolStartedAt?: number; toolInput?: Record<string, unknown> },
+    s: {
+      tool?: string;
+      toolCallId?: string;
+      toolStartedAt?: number;
+      toolInput?: Record<string, unknown>;
+      toolExtra?: Record<string, unknown>;
+    },
     now: number,
   ) {
     if (!s.tool) return;
@@ -776,6 +879,7 @@ export class World {
     const data: Record<string, unknown> = {
       tool: s.tool,
       call_id: s.toolCallId,
+      ...s.toolExtra,
       ms: now - (s.toolStartedAt ?? now),
       ok,
     };
@@ -796,6 +900,36 @@ export class World {
     }
     s.tool = undefined;
     s.toolCallId = undefined;
+    s.toolExtra = undefined;
+  }
+
+  /** One beat of a live subagent: its next tool, or its end (and a background one's
+   *  notice for the orchestrator). */
+  private stepAgent(a: LiveAgent, now: number) {
+    if (now >= a.endAt) {
+      if (a.tool) this.endTool(a.r, a, now);
+      this.send(a.r, "subagent.ended", { agent_id: a.id, agent_type: a.type });
+      if (a.notice) a.r.notices.push(a.notice);
+      this.liveAgents = this.liveAgents.filter((x) => x !== a);
+      return;
+    }
+    if (now < a.nextAt) return;
+    if (a.tool) {
+      this.endTool(a.r, a, now);
+      a.nextAt = now + rnd(1500, 4000);
+    } else {
+      this.startTool(a.r, a, now, { agent_id: a.id, turn_id: a.turnId });
+      a.nextAt = now + rnd(1500, 6000);
+    }
+  }
+
+  /** Claude Code's follow-up turn when a background agent stopped. */
+  private noticeTurn(r: SessionRec, n: Notice, now: number) {
+    r.turn++;
+    const user = taskNotification(n);
+    this.send(r, "turn.started", { turn_id: `t_${r.turn}`, prompt_chars: user.length });
+    if (r.tier >= 2) this.send(r, "turn.progress", { turn: r.turn, user, assistant: "", at: iso(now) });
+    r.script = { kind: "notice", endAt: now + rnd(4000, 8000), startedAt: now, user, reply: n.followUp };
   }
 
   private startTurn(r: SessionRec, now: number) {
@@ -864,6 +998,7 @@ export class World {
       seq: 0,
       turn: 0,
       script: { kind: "none" },
+      notices: [],
     };
     this.sessions.set(r.key, r);
     return r;
@@ -910,6 +1045,88 @@ export class World {
     return t + 1200;
   }
 
+  /** An Agent call that launches a subagent: its input (the description a person reads),
+   *  and for a background one the immediate "async_launched" output naming the agent. */
+  private launch(
+    r: SessionRec,
+    at: number,
+    a: { agentId: string; callId: string; description: string; type: string; turnId: string; background: boolean },
+  ) {
+    this.push(
+      r,
+      "tool.started",
+      {
+        tool: "Agent",
+        call_id: a.callId,
+        turn_id: a.turnId,
+        input: {
+          description: a.description,
+          subagent_type: a.type,
+          prompt: `${a.description}.`,
+          run_in_background: a.background,
+        },
+      },
+      at,
+    );
+    if (a.background)
+      this.push(
+        r,
+        "tool.ended",
+        {
+          tool: "Agent",
+          call_id: a.callId,
+          turn_id: a.turnId,
+          ms: 600,
+          ok: true,
+          output: { isAsync: true, status: "async_launched", agentId: a.agentId, description: a.description },
+        },
+        at + 600,
+      );
+  }
+
+  /** A subagent's past inside its parent: SubagentStart, its tools (stamped with its
+   *  agent_id and the spawning turn's turn_id; `failAt` fails one), and SubagentStop at
+   *  `endAt` when it already ended. Returns when it ended (or its last tool). */
+  private pastAgent(
+    r: SessionRec,
+    at: number,
+    a: { id: string; type: string; turnId: string; tools: number; failAt?: number; endAt?: number },
+  ): number {
+    let t = at;
+    this.push(r, "subagent.started", { agent_id: a.id, agent_type: a.type }, t);
+    for (let i = 0; i < a.tools; i++) {
+      t += rnd(2500, 6000);
+      const tool = pick(["Grep", "Read", "Glob", "Read"]);
+      const callId = `toolu_${a.id}_${i}`;
+      const input = TOOL_INPUTS[tool]?.() ?? {};
+      const extra = { agent_id: a.id, turn_id: a.turnId };
+      this.push(r, "tool.started", { tool, call_id: callId, ...extra, input }, t);
+      const ms = Math.round(rnd(80, 1800));
+      t += ms;
+      const ok = a.failAt !== i;
+      this.push(
+        r,
+        "tool.ended",
+        {
+          tool,
+          call_id: callId,
+          ...extra,
+          ms,
+          ok,
+          ...(ok ? {} : { error: "ENOENT: no such file" }),
+          input,
+          output: ok ? (TOOL_OUTPUTS[tool]?.() ?? "ok") : null,
+        },
+        t,
+      );
+    }
+    if (a.endAt !== undefined) {
+      t = Math.max(t + 500, a.endAt);
+      this.push(r, "subagent.ended", { agent_id: a.id, agent_type: a.type }, t);
+    }
+    return t;
+  }
+
   private seed() {
     const now = Date.now();
     const min = 60_000;
@@ -935,12 +1152,23 @@ export class World {
     t = this.pastTurn(s1, t + 30_000, PROMPTS[2]!, ASSISTANT_REPLIES[2]!, 4);
     t = this.pastTurn(s1, t + 20_000, PROMPTS[4]!, ASSISTANT_REPLIES[4]!, 2);
     {
-      // current turn, running
+      // The current turn, running: it launched an Explore agent in the background, which
+      // works inside this session (its tools carry agent_id) and reports back when done.
       const start = now - 3 * min;
       s1.turn++;
-      this.push(s1, "turn.started", { turn_id: `t_${s1.turn}`, prompt_chars: PROMPTS[0]!.length }, start);
+      const turnId = `t_${s1.turn}`;
+      this.push(s1, "turn.started", { turn_id: turnId, prompt_chars: PROMPTS[0]!.length }, start);
       this.push(s1, "turn.progress", { turn: s1.turn, user: PROMPTS[0], assistant: "", at: iso(start) }, start);
-      this.push(s1, "subagent.started", { agent_id: "ag_explore_1", agent_type: "Explore" }, start + 6000);
+      const explore = {
+        agentId: "ag_explore_1",
+        callId: "toolu_explore_1",
+        description: "Find where batches are bounded",
+        result:
+          "Batches are bounded in outbox/read.ts:41 (50 events) and outbox/send.ts:88 (256 KB); nothing else caps them.",
+        followUp: "The Explore agent found both bounds: 50 events in read.ts and 256 KB in send.ts.",
+      };
+      this.launch(s1, start + 5000, { ...explore, type: "Explore", turnId, background: true });
+      this.pastAgent(s1, start + 6000, { id: explore.agentId, type: "Explore", turnId, tools: 3 });
       this.push(
         s1,
         "turn.progress",
@@ -952,6 +1180,15 @@ export class World {
         },
         start + 40_000,
       );
+      this.liveAgents.push({
+        r: s1,
+        id: explore.agentId,
+        type: "Explore",
+        turnId,
+        notice: explore,
+        nextAt: now + 1500,
+        endAt: now + rnd(35_000, 60_000),
+      });
       s1.script = {
         kind: "working",
         nextAt: now + 1000,
@@ -960,33 +1197,6 @@ export class World {
         turnStartedAt: start,
         prompt: PROMPTS[0]!,
         turnEndsAt: now + rnd(70_000, 120_000),
-      };
-    }
-    // 2. its subagent, working
-    const s2 = this.add({
-      harness: "claude-code",
-      machine: "misha-air",
-      cwd: "~/spacesheep",
-      repo: "github.com/spacesheep-dev/spacesheep",
-      branch: "main",
-      model: "claude-fable-5-1",
-      title: "Explore: where batches are bounded",
-      tier: 3,
-      parent: s1,
-      id: `${s1.id}-ag_explore_1`,
-    });
-    {
-      const start = now - 3 * min + 6500;
-      this.push(s2, "session.started", { source: "startup" }, start);
-      s2.turn = 1;
-      this.push(s2, "turn.started", { turn_id: "t_1", prompt_chars: 180 }, start + 100);
-      s2.script = {
-        kind: "subagent",
-        nextAt: now + 500,
-        endAt: now + rnd(35_000, 60_000),
-        parentKey: s1.key,
-        agentId: "ag_explore_1",
-        agentType: "Explore",
       };
     }
     // 3. a finished subagent of s1
@@ -1013,6 +1223,125 @@ export class World {
         3,
       );
       this.push(s3, "session.ended", { reason: "other" }, end + 300);
+    }
+
+    // The three-agent scene (server/demo's "Search: review the BM25 cache"): one turn
+    // launches two agents in the background and one in the foreground. The foreground one
+    // (a tool of it failed) answered in the call's output; one background agent already
+    // reported back through a <task-notification> turn; the other is still working.
+    const sb = this.add({
+      harness: "claude-code",
+      machine: "studio-mini",
+      cwd: "~/code/search-api",
+      repo: "github.com/acme/search-api",
+      branch: "perf/bm25-cache",
+      model: "claude-fable-5-1",
+      title: "Search: review the BM25 cache",
+      titleSource: "custom",
+      tier: 3,
+    });
+    {
+      const start = now - 4 * min;
+      this.push(sb, "session.started", { source: "startup" }, start - 2000);
+      sb.turn++;
+      const turnId = `t_${sb.turn}`;
+      const prompt =
+        "Before I merge the BM25 cache, review it from three angles at once with subagents: correctness of the invalidation, the hot-path performance, and what the tests miss.";
+      this.push(sb, "turn.started", { turn_id: turnId, prompt_chars: prompt.length }, start);
+      this.push(sb, "turn.progress", { turn: sb.turn, user: prompt, assistant: "", at: iso(start) }, start);
+      const inval = {
+        agentId: "ag_inval",
+        callId: "toolu_inval",
+        description: "Check cache invalidation",
+        result:
+          "One stale path: bulkIndex() (src/index/bulk.ts:88) writes with skipHooks, so write.ts:52 never clears the cached score.",
+        followUp: "The invalidation review found one real hole: bulk indexing skips the hook that clears the cache.",
+      };
+      const perf = {
+        agentId: "ag_perf",
+        callId: "toolu_perf",
+        description: "Profile the scoring hot path",
+        result: "p99 drops from 21 ms to 6.4 ms with the cache warm; query tokenising is now the slowest step.",
+        followUp: "Performance holds up: p99 drops from 21 ms to 6.4 ms.",
+      };
+      this.launch(sb, start + 3000, { ...inval, type: "Explore", turnId, background: true });
+      this.pastAgent(sb, start + 4200, { id: inval.agentId, type: "Explore", turnId, tools: 3, endAt: start + 62_000 });
+      this.launch(sb, start + 5000, { ...perf, type: "general-purpose", turnId, background: true });
+      this.pastAgent(sb, start + 6000, { id: perf.agentId, type: "general-purpose", turnId, tools: 4, failAt: 1 });
+      // The foreground agent: its call stays open while it works, and its output is its result.
+      this.push(
+        sb,
+        "tool.started",
+        {
+          tool: "Agent",
+          call_id: "toolu_tests",
+          turn_id: turnId,
+          input: {
+            description: "List untested cache paths",
+            subagent_type: "general-purpose",
+            prompt: "List the BM25 cache's code paths no test reaches.",
+          },
+        },
+        start + 7000,
+      );
+      const testsEnd = this.pastAgent(sb, start + 7500, {
+        id: "ag_tests",
+        type: "general-purpose",
+        turnId,
+        tools: 3,
+        failAt: 1,
+        endAt: start + 40_000,
+      });
+      this.push(
+        sb,
+        "tool.ended",
+        {
+          tool: "Agent",
+          call_id: "toolu_tests",
+          turn_id: turnId,
+          ms: testsEnd - start - 7000,
+          ok: true,
+          output: {
+            status: "completed",
+            agentId: "ag_tests",
+            content: [{ type: "text", text: "Eviction (lines 22–27) and the size cap (line 41) have no tests." }],
+          },
+        },
+        testsEnd + 300,
+      );
+      const said =
+        "The coverage review is back: eviction (lines 22–27) and the size cap (line 41) have no tests. The invalidation and performance reviewers are still running in the background; I'll summarise them as they report.";
+      this.push(sb, "turn.ended", { turn_id: turnId, reason: "stop", ms: 50_000 }, start + 50_000);
+      this.push(
+        sb,
+        "turn.transcript",
+        { turn: sb.turn, user: prompt, assistant: said, at: iso(start + 50_000) },
+        start + 51_000,
+      );
+      // The invalidation agent reported back in a turn of the harness's own.
+      sb.turn++;
+      const note = taskNotification(inval);
+      const nStart = start + 64_000;
+      this.push(sb, "turn.started", { turn_id: `t_${sb.turn}`, prompt_chars: note.length }, nStart);
+      this.push(sb, "turn.progress", { turn: sb.turn, user: note, assistant: "", at: iso(nStart) }, nStart);
+      this.push(sb, "turn.ended", { turn_id: `t_${sb.turn}`, reason: "stop", ms: 6000 }, nStart + 6000);
+      this.push(
+        sb,
+        "turn.transcript",
+        { turn: sb.turn, user: note, assistant: inval.followUp, at: iso(nStart + 6000) },
+        nStart + 6500,
+      );
+      // The performance agent works on.
+      this.liveAgents.push({
+        r: sb,
+        id: perf.agentId,
+        type: "general-purpose",
+        turnId,
+        notice: perf,
+        nextAt: now + 2000,
+        endAt: now + rnd(60_000, 90_000),
+      });
+      sb.script = { kind: "idle", nextTurnAt: now + 10 * min };
     }
 
     // 4. needs you: permission, codex, tier 2

@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // React bindings for the store. One Store per page load, chosen in main.tsx (real or mock).
-import type { Attention, MachineSummary, SessionKey, SessionState, SessionSummary } from "@shared/api";
-import { SESSION_STATES } from "@shared/api";
+import type {
+  Attention,
+  LabelColor,
+  Labels,
+  MachineSummary,
+  SessionKey,
+  SessionState,
+  SessionSummary,
+} from "@shared/api";
+import { LABEL_DEFAULT_NAMES, SESSION_STATES } from "@shared/api";
 import { createContext, useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 // The one reading of `answerable` the strip and the inbox share (an older server leaves the field unset).
 import { answerable } from "../components/ControlStrip";
@@ -31,6 +39,27 @@ export function useSession(key: SessionKey): SessionSummary | undefined {
   const store = useStore();
   const read = useCallback(() => store.get().sessions.get(key), [store, key]);
   return useSyncExternalStore(store.subscribe, read, read);
+}
+
+/** The person's colour labels (the whole document: names and every session's). */
+export function useLabels(): Labels {
+  const store = useStore();
+  const read = useCallback(() => store.get().labels, [store]);
+  return useSyncExternalStore(store.subscribe, read, read);
+}
+
+/** One session's label and what it is called, or undefined: re-renders only when that
+ *  session's label (or that label's name) changes. */
+export function useLabel(key: SessionKey): { color: LabelColor; name: string } | undefined {
+  const store = useStore();
+  const readColor = useCallback(() => store.get().labels.sessions[key], [store, key]);
+  const color = useSyncExternalStore(store.subscribe, readColor, readColor);
+  const readName = useCallback(
+    () => (color ? (store.get().labels.names[color] ?? LABEL_DEFAULT_NAMES[color]) : undefined),
+    [store, color],
+  );
+  const name = useSyncExternalStore(store.subscribe, readName, readName);
+  return useMemo(() => (color && name ? { color, name } : undefined), [color, name]);
 }
 
 /** The machines map alone (it changes at most about once a second). */

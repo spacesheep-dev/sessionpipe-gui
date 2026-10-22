@@ -79,6 +79,33 @@ export function useSplitWidth(): number {
 
 const isKey = (k: string): k is SessionKey => k.includes(":");
 
+/** The separator of a tab that holds one subagent of a session: `<sessionKey>#<agentId>`
+ *  (ORGANIZE-SPEC.md §4.5). Its view is the session's, opened on that agent. */
+export const AGENT_TAB_SEP = "#";
+
+/** The tab of one agent of a session. */
+export const agentTabKey = (session: SessionKey, agentId: string): SessionKey =>
+  `${session}${AGENT_TAB_SEP}${agentId}` as SessionKey;
+
+/** A tab's session and, for an agent tab, the agent. */
+export function parseTab(tab: string): { session: SessionKey; agent?: string } {
+  const i = tab.indexOf(AGENT_TAB_SEP);
+  if (i < 0) return { session: tab as SessionKey };
+  return { session: tab.slice(0, i) as SessionKey, agent: tab.slice(i + 1) || undefined };
+}
+
+/** Where a new tab goes: an agent's right after its session's tab (and after that
+ *  session's other agent tabs), so the pair reads as one; anything else at the end. */
+function insertAt(tabs: readonly SessionKey[], key: SessionKey): number {
+  const { session, agent } = parseTab(key);
+  if (!agent) return tabs.length;
+  const parent = tabs.indexOf(session);
+  if (parent < 0) return tabs.length;
+  let i = parent + 1;
+  while (i < tabs.length && parseTab(tabs[i]!).session === session && parseTab(tabs[i]!).agent) i++;
+  return i;
+}
+
 /** Parses `s` and `t` as the URL carries them. */
 export function parseSplit(s: string | null, t: string | null): SplitState {
   const tabs = (s ?? "")
@@ -151,8 +178,10 @@ export function openSplit(key: SessionKey, opts: OpenSplitOptions = {}): void {
     return;
   }
   if (st.tabs.length === 0) pendingFrom = opts.from ?? null;
-  const tabs = [...st.tabs, key];
-  commit({ tabs, active: opts.background && st.tabs.length > 0 ? st.active : tabs.length - 1 });
+  const at = insertAt(st.tabs, key);
+  const tabs = [...st.tabs.slice(0, at), key, ...st.tabs.slice(at)];
+  const kept = st.tabs[st.active];
+  commit({ tabs, active: opts.background && kept ? tabs.indexOf(kept) : at });
 }
 
 export function activateTab(index: number): void {

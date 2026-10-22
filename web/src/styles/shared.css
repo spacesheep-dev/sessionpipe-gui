@@ -231,6 +231,40 @@
   vertical-align: -2px;
 }
 
+/* A colour label (LabelDot): one small dot beside the status glyph, never a stripe, a
+   fill or a tinted row. The colours are the skin's --label-* tokens; a hairline ring keeps
+   a pale one (yellow on paper) from melting into the ground. */
+.label-dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--label-c, var(--label-grey));
+  box-shadow: inset 0 0 0 0.5px color-mix(in oklch, var(--fg) 24%, transparent);
+}
+.label-dot--red {
+  --label-c: var(--label-red);
+}
+.label-dot--orange {
+  --label-c: var(--label-orange);
+}
+.label-dot--yellow {
+  --label-c: var(--label-yellow);
+}
+.label-dot--green {
+  --label-c: var(--label-green);
+}
+.label-dot--blue {
+  --label-c: var(--label-blue);
+}
+.label-dot--purple {
+  --label-c: var(--label-purple);
+}
+.label-dot--grey {
+  --label-c: var(--label-grey);
+}
+
 /* ----- buttons ----- */
 
 /* The secondary button, the default: a raised face with a hairline and a 1 px lift (a

@@ -20,6 +20,7 @@ import type { Store } from "../store/store.js";
 import { registerAttachments } from "./attachments.js";
 import { uiAuth } from "./auth.js";
 import { readColorThemes } from "./colorThemes.js";
+import { type LabelStore, registerLabels } from "./labels.js";
 import { cutPreview } from "./preview.js";
 import { registerProcessStats } from "./process.js";
 import { registerReview } from "./review.js";
@@ -44,6 +45,11 @@ export interface UiDeps {
   /** The plugin host (server/plugins): its open suggestions ride on the snapshot, its
    *  messages on the stream. */
   plugins?: { currentSuggestions(): Suggestion[]; subscribe(l: (m: StreamMessage) => void): () => void };
+  /** The person's colour labels (labels.ts): on the snapshot, on the stream, and their
+   *  own routes. */
+  labels?: LabelStore;
+  /** More stream messages from elsewhere (a view's state written, themes/routes.ts). */
+  broadcast?: { subscribe(l: (m: StreamMessage) => void): () => void };
 }
 
 /** The store's snapshot with what control knows about each machine merged in, plus
@@ -84,6 +90,7 @@ export function registerUi(router: Router, deps: UiDeps): void {
     ...snapshotWithControl(deps.store, deps.control),
     viewers: viewers.list(),
     ...(deps.plugins ? { suggestions: deps.plugins.currentSuggestions() } : {}),
+    ...(deps.labels ? { labels: deps.labels.get() } : {}),
   });
 
   router.get(
@@ -106,6 +113,7 @@ export function registerUi(router: Router, deps: UiDeps): void {
         viewers,
         pingMs: deps.pingMs,
         plugins: deps.plugins,
+        more: [deps.labels, deps.broadcast].filter((x) => x !== undefined),
       });
     }),
   );
@@ -133,6 +141,7 @@ export function registerUi(router: Router, deps: UiDeps): void {
         before: intParam(ctx, "before"),
         tail: p.get("tail") === "1",
         slim,
+        agent: p.get("agent") || undefined,
       });
       if (!detail) return { status: 404, json: { reason: "not_found" } };
       const preview = intParam(ctx, "preview");
@@ -166,6 +175,7 @@ export function registerUi(router: Router, deps: UiDeps): void {
   );
 
   registerReview(router, deps.store, guard);
+  if (deps.labels) registerLabels(router, deps.labels, guard);
 
   router.post(
     ROUTES.ui.rotateToken,

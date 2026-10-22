@@ -13,6 +13,7 @@
 import type {
   Attachment,
   ControlActivity,
+  LabelColor,
   MachineSummary,
   SessionDetail,
   SessionKey,
@@ -67,6 +68,14 @@ export interface ThemeSnapshot {
   /** Simple hides what most people never touch (collapse HUD extras into one menu, drop
    *  the style switch); advanced is everything. Absent on older hosts. */
   mode?: "simple" | "advanced";
+  /** The person's colour labels, the same everywhere in the app and on every device: a
+   *  session's colour, and what each colour is called (the person's name, else the
+   *  colour's own: "Red"). Draw a label as one small dot in `var(--label-<colour>)`
+   *  beside the state glyph, never as a fill or a stripe. Absent on older hosts. */
+  labels?: {
+    sessions: ReadonlyMap<SessionKey, LabelColor>;
+    names: Readonly<Record<LabelColor, string>>;
+  };
 }
 
 /** What a control call can do from this page. `ok: false` carries the reason the host
@@ -114,7 +123,17 @@ export interface ThemeApi {
   /** Per-theme JSON kept by the server (shared across devices), ≤ 256 KB. */
   storage: {
     get<T = unknown>(): Promise<T | null>;
+    /** Replaces the document, whatever another device wrote meanwhile. */
     set(value: unknown): Promise<void>;
+    /** Read, change, write, without losing another device's write: `change` gets the
+     *  stored document (null when none) and returns the new one; when another device
+     *  wrote in between, the host reads again and calls `change` again (a few times at
+     *  most, then rejects). Resolves with what was written. Keep `change` pure: it may
+     *  run more than once. Absent on older hosts. */
+    update?<T = unknown>(change: (current: T | null) => T): Promise<T>;
+    /** Another device (or another tab) wrote the document: the listener gets the new
+     *  value. This page's own writes are not echoed. Absent on older hosts. */
+    subscribe?(listener: (value: unknown) => void): () => void;
   };
   /** Per-device convenience storage (localStorage, namespaced); may be unavailable. */
   local: {
@@ -166,6 +185,39 @@ export interface ThemeApi {
     active(): Record<string, string[]>;
   };
 
+  /** The person's colour labels (`ThemeSnapshot.labels` reads them): set or clear one
+   *  session's or several at once; the change lands in `state` on every device. Absent
+   *  on older hosts. */
+  labels?: {
+    set(keys: SessionKey | readonly SessionKey[], color: LabelColor | null): Promise<void>;
+    /** Name a colour ("Urgent"); null or "" gives it back its own name. ≤ 32 characters. */
+    rename(color: LabelColor, name: string | null): Promise<void>;
+    /** Opens the host's "Edit labels" dialog (the names of all seven). */
+    edit(color?: LabelColor): void;
+  };
+
+  /** The host's own right-click menu, so a view's menus look and behave like every other
+   *  menu in the app (keyboard, type-ahead, submenus; an action sheet from the bottom on
+   *  touch). The host leaves right-clicks inside a view alone: the view calls
+   *  `preventDefault()` on its own `contextmenu` (and its own long-press) and opens one of
+   *  these. Absent on older hosts. */
+  menu?: {
+    /** Opens `items` at a point in viewport px. `source: "touch"` (or a phone) shows the
+     *  action sheet, `title` / `subtitle` heading it; `"keyboard"` highlights the first item. */
+    open(items: readonly ViewMenuItem[], at: { x: number; y: number }, opts?: ViewMenuOptions): void;
+    /** The menu a session has everywhere else (Open as page, Open beside, Label ▸, Open
+     *  parent, Subagents ▸, Copy ▸, Forget…), with the view's own items after the open
+     *  group (`answer`, e.g. Allow / Deny) and before Copy (`extra`). */
+    session(
+      key: SessionKey,
+      at: { x: number; y: number },
+      opts?: ViewMenuOptions & { answer?: readonly ViewMenuItem[]; extra?: readonly ViewMenuItem[] },
+    ): void;
+    /** The host's confirm: an alert on a desktop, an action sheet on a phone. True for
+     *  the action. Ask before anything destructive. */
+    confirm(o: { title: string; body?: string; action: string; danger?: boolean }): Promise<boolean>;
+  };
+
   /** The host's React and ReactDOM, for themes that want them without bundling their
    *  own. A theme built with JSX can map `react` and `react-dom` to these. */
   react?: { React: unknown; ReactDOM: unknown; createRoot: unknown };
@@ -182,6 +234,33 @@ export interface ThemeApi {
      *  "Claude Code"; null for a harness without one (draw the monogram then). */
     harnessIcon?(harness: string): { svg: string; name: string } | null;
   };
+}
+
+/** One row of a view's menu (ThemeApi.menu): an action, a submenu, a separator or a
+ *  heading. `keys` is a hint shown at the right ("⌫"); `action` names one of the view's
+ *  own registered shortcuts (its short id) or a host action ("label.red"), whose live
+ *  binding is shown instead. `disabled` as a string is the reason. `swatch` draws a
+ *  colour label's dot before the text. */
+export type ViewMenuItem =
+  | {
+      label: string;
+      run: () => void | Promise<void>;
+      keys?: string;
+      action?: string;
+      danger?: boolean;
+      disabled?: string | boolean;
+      checked?: boolean;
+      radio?: boolean;
+      swatch?: LabelColor;
+    }
+  | { label: string; items: readonly ViewMenuItem[]; disabled?: string | boolean }
+  | { sep: true }
+  | { heading: string };
+
+export interface ViewMenuOptions {
+  title?: string;
+  subtitle?: string;
+  source?: "mouse" | "keyboard" | "touch";
 }
 
 /** One key a view registers (ThemeApi.shortcuts). */
@@ -201,6 +280,10 @@ export interface OpenSessionOptions {
   from?: { x: number; y: number; width: number; height: number };
   /** With `split`: add the session as a tab without switching to it. */
   background?: boolean;
+  /** One of the session's subagents (an `AgentRun` id): the session opens on that
+   *  agent (its own tools, state and result), beside or as the page. A host without
+   *  agent views opens the session itself. */
+  agent?: string;
 }
 
 /** The module's default export. `mount` returns the function that unmounts. */

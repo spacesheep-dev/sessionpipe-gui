@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // The ThemeApi a mounted theme is handed (shared/theme-api.ts), built from what the
 // page already has: the store, the transport, the router, the format helpers, the
-// design tokens and the host's React. One instance per mount; `dispose()` drops the
-// store subscription when the theme unmounts.
-import { type SessionKey, type SessionSummary, type Stats, splitKey } from "@shared/api";
+// design tokens, the labels, the menus and the host's React. One instance per mount;
+// `dispose()` drops the store subscription when the theme unmounts.
+import {
+  LABEL_COLORS,
+  type LabelColor,
+  type Labels,
+  type SessionKey,
+  type SessionSummary,
+  type Stats,
+  splitKey,
+} from "@shared/api";
 import {
   type ConnectionState,
   type InstalledTheme,
@@ -11,18 +19,22 @@ import {
   THEME_ROUTES,
   type ThemeApi,
   type ThemeSnapshot,
+  type ViewMenuItem,
 } from "@shared/theme-api";
 import * as React from "react";
 import * as ReactDOM from "react-dom";
 import { createRoot } from "react-dom/client";
+import { confirmAction, type MenuItem, openMenu } from "../../components/ContextMenu";
 import { createControlApi } from "../../control/themeControl";
 import type { AppState, Store } from "../../data/store";
 import { harnessMark, repoBranch, sessionTitle } from "../../lib/format";
 import { harnessIconSvg } from "../../lib/harnessIcons";
-import { navigate, sessionPath } from "../../lib/router";
+import { labelName, requestLabelRename } from "../../lib/labels";
+import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../../lib/menus";
+import { agentPath, navigate, sessionPath } from "../../lib/router";
 import { type AppSettings, effectiveLens, getSettings, subscribeSettings } from "../../lib/settings";
 import { activeMap, registerViewActions } from "../../lib/shortcuts";
-import { openSplit } from "../../lib/split";
+import { agentTabKey, openSplit } from "../../lib/split";
 import { ago, dur } from "../../lib/time";
 import tokensCss from "../../styles/tokens.css?raw";
 
@@ -61,6 +73,34 @@ function watchScheme(onChange: () => void): () => void {
   };
 }
 
+/** The labels as a view reads them: a map, and every colour's name resolved. One object
+ *  per label document, so a snapshot made for another reason keeps the same one. */
+const viewLabels = new WeakMap<Labels, NonNullable<ThemeSnapshot["labels"]>>();
+function labelsFor(l: Labels): NonNullable<ThemeSnapshot["labels"]> {
+  let v = viewLabels.get(l);
+  if (!v) {
+    v = Object.freeze({
+      sessions: new Map(Object.entries(l.sessions)) as ReadonlyMap<SessionKey, LabelColor>,
+      names: Object.freeze(Object.fromEntries(LABEL_COLORS.map((c) => [c, labelName(l, c)]))) as Readonly<
+        Record<LabelColor, string>
+      >,
+    });
+    viewLabels.set(l, v);
+  }
+  return v;
+}
+
+/** A view's menu rows as the host's: a view's own shortcut id names its live binding. */
+function hostItems(items: readonly ViewMenuItem[], viewId: string): MenuItem[] {
+  const own = activeMap();
+  return items.map((i): MenuItem => {
+    if ("sep" in i || "heading" in i) return i;
+    if ("items" in i) return { label: i.label, disabled: i.disabled, items: hostItems(i.items, viewId) };
+    const scoped = i.action && `${viewId}:${i.action}` in own ? `${viewId}:${i.action}` : i.action;
+    return { ...i, action: scoped };
+  });
+}
+
 export function toSnapshot(
   s: AppState,
   scheme: "dark" | "light",
@@ -77,6 +117,7 @@ export function toSnapshot(
     viewers: s.viewers,
     tierLens: effectiveLens(settings),
     mode: settings.mode,
+    labels: labelsFor(s.labels),
   });
 }
 
@@ -124,6 +165,58 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
   });
 
   const statePath = `${THEME_ROUTES.state}/${encodeURIComponent(id)}/state`;
+  // The version of the stored document this page last read or wrote: a `viewState` frame
+  // with another one is another device's write.
+  let etag: string | null = null;
+  const readState = async (): Promise<{ value: unknown; etag: string | null }> => {
+    const res = await fetch(statePath, { headers: { accept: "application/json" } });
+    if (res.status === 204) return { value: null, etag: res.headers.get("etag") };
+    if (!res.ok) throw new Error(`theme storage: ${res.status} ${res.statusText}`);
+    return { value: await res.json(), etag: res.headers.get("etag") };
+  };
+  // Writes in flight: the frame announcing our own write can land before the PUT's
+  // answer names its ETag, so the check waits for them.
+  let writing = 0;
+  const writeState = async (value: unknown, ifMatch?: string | null): Promise<boolean> => {
+    writing++;
+    try {
+      const res = await fetch(statePath, {
+        method: "PUT",
+        headers: { "content-type": "application/json", ...(ifMatch ? { "if-match": ifMatch } : {}) },
+        body: JSON.stringify(value === undefined ? null : value),
+      });
+      if (res.status === 412) return false;
+      if (!res.ok) {
+        throw new Error(res.status === 413 ? "theme storage: value is over 256 KB" : `theme storage: ${res.status}`);
+      }
+      etag = res.headers.get("etag") ?? etag;
+      return true;
+    } finally {
+      writing--;
+      if (!writing) checkState();
+    }
+  };
+  const stateListeners = new Set<(value: unknown) => void>();
+  let seenState = store.get().viewStates.get(id);
+  const checkState = (): void => {
+    const next = store.get().viewStates.get(id);
+    if (writing || next === seenState) return;
+    seenState = next;
+    if (!next || next === etag || stateListeners.size === 0) return;
+    void readState()
+      .then((r) => {
+        etag = r.etag;
+        for (const l of stateListeners) {
+          try {
+            l(r.value);
+          } catch (e) {
+            console.error(`[theme ${id}] storage listener threw`, e);
+          }
+        }
+      })
+      .catch((e) => console.warn(`[theme ${id}] storage re-read failed`, e));
+  };
+  const unsubState = store.subscribe(checkState);
   /** The view's registered keys, removed on dispose. */
   const unregisters = new Set<() => void>();
   const localKey = (k: string) => `sessionpipe-gui.theme.${id}.${k}`;
@@ -155,30 +248,37 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
     },
     navigate: (path) => navigate(path),
     openSession(key: SessionKey, opts) {
+      // An agent beside is the panel's agent tab, right after its session's tab.
       if (opts?.split) {
-        openSplit(key, { from: opts.from, background: opts.background });
+        openSplit(opts.agent ? agentTabKey(key, opts.agent) : key, { from: opts.from, background: opts.background });
         return;
       }
       const { harness, id: sid } = splitKey(key);
-      navigate(sessionPath(harness, sid));
+      navigate(opts?.agent ? agentPath(harness, sid, opts.agent) : sessionPath(harness, sid));
     },
     tokens: TOKENS,
     storage: {
       async get<T = unknown>(): Promise<T | null> {
-        const res = await fetch(statePath, { headers: { accept: "application/json" } });
-        if (res.status === 204) return null;
-        if (!res.ok) throw new Error(`theme storage: ${res.status} ${res.statusText}`);
-        return (await res.json()) as T;
+        const r = await readState();
+        etag = r.etag;
+        return r.value as T | null;
       },
       async set(value: unknown): Promise<void> {
-        const res = await fetch(statePath, {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(value === undefined ? null : value),
-        });
-        if (!res.ok) {
-          throw new Error(res.status === 413 ? "theme storage: value is over 256 KB" : `theme storage: ${res.status}`);
+        await writeState(value);
+      },
+      async update<T = unknown>(change: (current: T | null) => T): Promise<T> {
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const r = await readState();
+          const next = change(r.value as T | null);
+          if (await writeState(next, r.etag ?? '"0"')) return next;
         }
+        throw new Error("theme storage: another device kept writing; try again");
+      },
+      subscribe(listener) {
+        stateListeners.add(listener);
+        return () => {
+          stateListeners.delete(listener);
+        };
       },
     },
     local: {
@@ -217,6 +317,37 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
         return out;
       },
     },
+    labels: {
+      async set(keys, color) {
+        const list = typeof keys === "string" ? [keys] : [...keys];
+        if (list.length) await store.patchLabels({ sessions: Object.fromEntries(list.map((k) => [k, color])) });
+      },
+      async rename(color, name) {
+        await store.patchLabels({ names: { [color]: name } });
+      },
+      edit: (color) => requestLabelRename(color),
+    },
+    menu: {
+      open(items, at, o = {}) {
+        openMenu(hostItems(items, id), at, o);
+      },
+      session(key, at, o = {}) {
+        const s = store.get().sessions.get(key);
+        if (!s) return;
+        const items = sessionItems(s, {
+          store,
+          surface: "page",
+          answer: o.answer ? hostItems(o.answer, id) : undefined,
+          extra: o.extra ? hostItems(o.extra, id) : undefined,
+        });
+        openMenu(items, at, {
+          title: o.title ?? sessionMenuTitle(s),
+          subtitle: o.subtitle ?? sessionMenuSubtitle(s),
+          source: o.source,
+        });
+      },
+      confirm: (o) => confirmAction(o),
+    },
     react: { React, ReactDOM, createRoot },
     format: {
       ago: (iso, now = Date.now()) => ago(iso, now),
@@ -232,6 +363,8 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
     api,
     dispose: () => {
       unsubStore();
+      unsubState();
+      stateListeners.clear();
       unsubSettings();
       unwatch();
       subscribers.clear();

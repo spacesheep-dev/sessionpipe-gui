@@ -63,10 +63,25 @@ export interface ToolStep {
   unnamed?: boolean;
   /** Claude Code asks before running this one: an attention.needed stays open first. */
   permission?: string;
-  /** The Agent tool: a subagent runs these steps in a child session before the next step. */
-  subagent?: { type: string; steps: ToolStep[] };
+  /** The Agent / Task tool launches a subagent that runs these steps. Claude Code runs it
+   *  inside the parent's session (`agent_id` on its tools): in the background when the
+   *  call's output says `async_launched` (the parent's turn ends first, and a
+   *  `<task-notification>` turn brings `result` back), otherwise while the call is open
+   *  (`result` is the call's output). Other harnesses run it as a child session with
+   *  `parent_id`, the spec's other shape. `think`: ms between its tools. */
+  subagent?: SubagentScript;
   /** The context fills up right after this step: context.compacted, then a compact restart. */
   compactAfter?: boolean;
+}
+
+export interface SubagentScript {
+  type: string;
+  steps: ToolStep[];
+  /** Its last message: the synchronous call's output, or the notification's <result>. */
+  result?: string;
+  /** What the orchestrator says when a background agent reports back. */
+  followUp?: string;
+  think?: [number, number];
 }
 
 export interface TurnScript {
@@ -243,6 +258,11 @@ export const CLAUDE_TURNS: readonly TurnScript[] = [
               ms: 3,
             },
           ],
+          think: [14_000, 4000],
+          result:
+            "Four places skip formatMoney(): src/invoices/render.ts:88 and src/reports/monthly.ts:41 (toFixed(2)), scripts/backfill-totals.ts:17, and web/src/components/Price.tsx, which builds its own Intl.NumberFormat.",
+          followUp:
+            "The sweep is back: besides the two in src/ it found scripts/backfill-totals.ts and Price.tsx. Want me to move those onto formatMoney() too?",
         },
       },
       {
@@ -1087,4 +1107,152 @@ export const SILENT_TURN: TurnScript = {
     },
   ],
   final: "",
+};
+
+/** Three reviewers at once (Claude Code): two in the background, one the orchestrator
+ *  waits for. The background ones outlive the turn that launched them and report back
+ *  through `<task-notification>` turns, as the recording (conformance/harness/claude-code)
+ *  has them; one of their tools fails. */
+export const PARALLEL_TURN: TurnScript = {
+  prompt:
+    "Before I merge the BM25 cache, review it from three angles at once with subagents: correctness of the invalidation, the hot-path performance, and what the tests miss.",
+  title: { text: "Search: review the BM25 cache", source: "custom" },
+  steps: [
+    {
+      tool: "Agent",
+      input: {
+        description: "Check cache invalidation",
+        prompt:
+          "Read src/rank/bm25-cache.ts and every caller. Find any path where an index write leaves a stale cached score. Report file:line and why.",
+        subagent_type: "Explore",
+      },
+      output: { isAsync: true, status: "async_launched", agentId: "", description: "Check cache invalidation" },
+      ms: 5,
+      say: "Three reviewers are on it: invalidation and performance in the background, test coverage while I wait.",
+      subagent: {
+        type: "Explore",
+        think: [16_000, 5000],
+        steps: [
+          {
+            tool: "Grep",
+            input: { pattern: "bm25Cache\\.(get|set|clear)", output_mode: "content", "-n": true },
+            output: grepLines(
+              "src/rank/bm25-cache.ts:14:  bm25Cache.set(key, score)\nsrc/index/write.ts:52:  bm25Cache.clear(docId)\nsrc/index/bulk.ts:88:  // TODO: bm25Cache",
+              3,
+            ),
+            ms: 38,
+          },
+          {
+            tool: "Read",
+            input: { file_path: "~/code/search-api/src/index/bulk.ts", offset: 70, limit: 40 },
+            output: read(
+              "/Users/dev/code/search-api/src/index/bulk.ts",
+              "export async function bulkIndex(docs: Doc[]) {\n  for (const d of docs) await writeDoc(d, { skipHooks: true });\n  // TODO: bm25Cache\n}\n",
+              120,
+            ),
+            ms: 4,
+          },
+          {
+            tool: "Grep",
+            input: { pattern: "skipHooks", output_mode: "files_with_matches" },
+            output: grepFiles(["src/index/bulk.ts", "src/index/write.ts", "scripts/reindex.ts"]),
+            ms: 29,
+          },
+        ],
+        result:
+          "One stale path: bulkIndex() (src/index/bulk.ts:88) writes with skipHooks, so write.ts:52 never clears the cached score. scripts/reindex.ts goes through the same path.",
+        followUp:
+          "The invalidation review found one real hole: bulk indexing skips the hook that clears the cache. I'll clear it per document in bulkIndex().",
+      },
+    },
+    {
+      tool: "Agent",
+      input: {
+        description: "Profile the scoring hot path",
+        prompt:
+          "Run the search benchmark with and without the cache and tell me the p50/p99 difference and where the remaining time goes.",
+        subagent_type: "general-purpose",
+      },
+      output: { isAsync: true, status: "async_launched", agentId: "", description: "Profile the scoring hot path" },
+      ms: 4,
+      subagent: {
+        type: "general-purpose",
+        think: [24_000, 6000],
+        steps: [
+          {
+            tool: "Bash",
+            input: { command: "npm run bench -- --filter score", description: "Benchmark scoring with the cache" },
+            output: bash("score/cached     p50 1.8 ms  p99 6.4 ms\nscore/uncached   p50 4.9 ms  p99 21.0 ms\n"),
+            ms: 31_000,
+          },
+          {
+            tool: "Bash",
+            input: { command: "npm run bench -- --filter score --profile", description: "Profile the cached path" },
+            ok: false,
+            error: "Error: --profile needs node --cpu-prof; run with NODE_OPTIONS=--cpu-prof",
+            output: bash("", "Error: --profile needs node --cpu-prof; run with NODE_OPTIONS=--cpu-prof\n"),
+            ms: 900,
+          },
+          {
+            tool: "Bash",
+            input: {
+              command: "NODE_OPTIONS=--cpu-prof npm run bench -- --filter score",
+              description: "Profile the cached path with a CPU profile",
+            },
+            output: bash("score/cached     p50 1.9 ms  p99 6.6 ms\nwrote CPU.20261022.cpuprofile\n"),
+            ms: 34_000,
+          },
+        ],
+        result:
+          "The cache cuts scoring p50 from 4.9 ms to 1.8 ms and p99 from 21 ms to 6.4 ms. What remains is tokenising the query (about 60% of the cached path).",
+        followUp:
+          "Performance holds up: p99 drops from 21 ms to 6.4 ms. Query tokenising is the next thing to look at.",
+      },
+    },
+    {
+      tool: "Agent",
+      input: {
+        description: "List untested cache paths",
+        prompt: "Compare src/rank/bm25-cache.ts with its tests and list the branches no test reaches.",
+        subagent_type: "general-purpose",
+      },
+      ms: 3,
+      subagent: {
+        type: "general-purpose",
+        think: [9000, 2500],
+        steps: [
+          {
+            tool: "Read",
+            input: { file_path: "~/code/search-api/src/rank/bm25-cache.test.ts" },
+            output: read(
+              "/Users/dev/code/search-api/src/rank/bm25-cache.test.ts",
+              "it('returns the cached score', …)\nit('misses after clear()', …)\n",
+              40,
+            ),
+            ms: 3,
+          },
+          {
+            tool: "Bash",
+            input: { command: "npx vitest run src/rank --coverage", description: "Coverage for the rank module" },
+            output: bash("bm25-cache.ts | 71.4 | 50 | 80 | 71.4 | 22-27,41\n"),
+            ms: 6200,
+          },
+        ],
+        result:
+          "Untested: the eviction branch (lines 22–27) and the size cap (line 41). Both caches paths that only run past 10 000 entries.",
+      },
+    },
+    {
+      tool: "Read",
+      input: { file_path: "~/code/search-api/src/rank/bm25-cache.ts" },
+      output: read(
+        "/Users/dev/code/search-api/src/rank/bm25-cache.ts",
+        "export const bm25Cache = new LruMap<string, number>({ max: 10_000 });\n",
+        58,
+      ),
+      ms: 3,
+    },
+  ],
+  final:
+    "The coverage review is back: eviction (lines 22–27) and the size cap (line 41) have no tests. The invalidation and performance reviewers are still running in the background; I'll summarise them as they report.",
 };

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Turns: a transcript lands on the turn it describes, by time, whatever number its sender
 // gave it; and a message sent from here finds its own turn, two in a row included.
-import type { StoredEvent } from "@shared/api";
+import type { AgentRun, StoredEvent } from "@shared/api";
 import { describe, expect, it } from "vitest";
 import { groupTurns, sentTurns, type Turn, turnPrompt, unframe } from "./turns";
 
@@ -188,5 +188,87 @@ describe("unframe", () => {
       via: "studio-mac.local:7373",
     });
     expect(unframe("Message via email please")).toEqual({ text: "Message via email please" });
+  });
+});
+
+describe("groupTurns: subagents", () => {
+  const agent = (over: Partial<AgentRun> = {}): AgentRun => ({
+    id: "ag1",
+    type: "Explore",
+    description: "Check cache invalidation",
+    callId: "c_launch",
+    turnId: "t1",
+    state: "done",
+    startedAt: iso(2),
+    lastAt: iso(30),
+    tools: 2,
+    toolErrors: 0,
+    attributed: true,
+    recentTools: [],
+    ...over,
+  });
+
+  it("makes the launching call the head of the agent's block, in the spawning turn", () => {
+    const ev = session();
+    const turns = groupTurns(
+      [
+        ev("turn.started", 1, { turn_id: "t1" }),
+        ev("tool.started", 2, { tool: "Agent", call_id: "c_launch", turn_id: "t1" }),
+        ev("tool.ended", 3, { tool: "Agent", call_id: "c_launch", turn_id: "t1", ok: true }),
+        ev("subagent.started", 3, { agent_id: "ag1", agent_type: "Explore" }),
+        ev("tool.started", 4, { tool: "Grep", call_id: "c1", agent_id: "ag1", turn_id: "t1" }),
+        ev("tool.ended", 5, { tool: "Grep", call_id: "c1", agent_id: "ag1", turn_id: "t1", ok: true }),
+      ],
+      [agent()],
+    );
+    const t1 = started(turns)[0]!;
+    expect(t1.items.map((i) => i.kind)).toEqual(["agent"]);
+    const block = t1.items[0]!;
+    if (block.kind !== "agent") throw new Error("not an agent");
+    expect(block.launch?.started?.data.call_id).toBe("c_launch");
+    expect(block.launch?.ended?.data.call_id).toBe("c_launch");
+    expect(block.started?.type).toBe("subagent.started");
+    expect(block.tools).toHaveLength(1);
+    expect(block.tools[0]!.ended?.data.tool).toBe("Grep");
+  });
+
+  it("homes a background agent's tools in its spawning turn, after that turn's Stop", () => {
+    const ev = session();
+    const turns = groupTurns(
+      [
+        ev("turn.started", 1, { turn_id: "t1" }),
+        ev("subagent.started", 2, { agent_id: "ag1", agent_type: "Explore" }),
+        ev("turn.ended", 3, { turn_id: "t1", reason: "stop" }),
+        ev("turn.started", 10, { turn_id: "t2" }),
+        // Claude Code stamps the spawning turn on the agent's tools.
+        ev("tool.started", 11, { tool: "Read", call_id: "c2", agent_id: "ag1", turn_id: "t1" }),
+        ev("tool.ended", 12, { tool: "Read", call_id: "c2", agent_id: "ag1", turn_id: "t1", ok: false }),
+        ev("subagent.ended", 13, { agent_id: "ag1" }),
+        ev("tool.started", 14, { tool: "Bash", call_id: "c3", turn_id: "t2" }),
+      ],
+      [agent({ callId: undefined })],
+    );
+    const [t1, t2] = started(turns);
+    const block = t1!.items.find((i) => i.kind === "agent");
+    if (block?.kind !== "agent") throw new Error("no agent block in turn 1");
+    expect(block.tools.map((t) => t.ended?.data.ok)).toEqual([false]);
+    expect(block.ended?.type).toBe("subagent.ended");
+    // The second turn keeps only its own tool.
+    expect(t2!.items.map((i) => (i.kind === "tool" ? i.started?.data.tool : i.kind))).toEqual(["Bash"]);
+  });
+
+  it("homes an agent by the summary's turn when its events name none", () => {
+    const ev = session();
+    const turns = groupTurns(
+      [
+        ev("turn.started", 1, { turn_id: "t1" }),
+        ev("turn.ended", 2, { turn_id: "t1" }),
+        ev("turn.started", 3, { turn_id: "t2" }),
+        ev("tool.started", 4, { tool: "Grep", call_id: "c9", agent_id: "ag1" }),
+      ],
+      [agent({ callId: undefined })],
+    );
+    expect(started(turns)[0]!.items.some((i) => i.kind === "agent")).toBe(true);
+    expect(started(turns)[1]!.items.some((i) => i.kind === "agent")).toBe(false);
   });
 });

@@ -95,6 +95,7 @@ var DONE_AFTER_MS = 24 * 36e5;
 var SESSION_STATES = ["needs_you", "working", "stale", "idle", "done"];
 var SLOW_TOOL_MS = 3 * 6e4;
 var COMPACTING_WINDOW_MS = 30 * 6e4;
+var EMPTY_LABELS = Object.freeze({ rev: 0, names: {}, sessions: {} });
 var ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
 
 // src/hooks.ts

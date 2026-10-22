@@ -306,6 +306,34 @@ describe("theme routes", () => {
     expect((await fetch(url(`${THEME_ROUTES.state}/broken/state`))).status).toBe(204);
   });
 
+  it("versions the state: an ETag on read and write, If-Match refuses a stale write with 412", async () => {
+    const state = url(`${THEME_ROUTES.state}/shipped/state`);
+    const empty = await fetch(state);
+    expect(empty.status).toBe(204);
+    expect(empty.headers.get("etag")).toBe('"0"');
+    const put = (body: unknown, ifMatch?: string) =>
+      fetch(state, {
+        method: "PUT",
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json", ...(ifMatch ? { "if-match": ifMatch } : {}) },
+      });
+    const first = await put({ n: 1 }, '"0"');
+    expect(first.status).toBe(204);
+    const etag = first.headers.get("etag")!;
+    expect(etag).toMatch(/^"[\w-]{16}"$/);
+    expect((await fetch(state)).headers.get("etag")).toBe(etag);
+    // A second device that read before the first write must merge, not overwrite.
+    const stale = await put({ n: 2 }, '"0"');
+    expect(stale.status).toBe(412);
+    expect(await stale.json()).toEqual({ reason: "conflict" });
+    expect(stale.headers.get("etag")).toBe(etag);
+    expect(await (await fetch(state)).json()).toEqual({ n: 1 });
+    expect((await put({ n: 3 }, etag)).status).toBe(204);
+    // Without If-Match a write is blind, as before.
+    expect((await put({ n: 4 })).status).toBe(204);
+    expect(await (await fetch(state)).json()).toEqual({ n: 4 });
+  });
+
   it("serves theme files with the right types and caching, and nothing outside", async () => {
     const js = await fetch(url("/themes/one/index.js"));
     expect(js.status).toBe(200);

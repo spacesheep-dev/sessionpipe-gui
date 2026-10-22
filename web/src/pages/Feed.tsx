@@ -7,12 +7,14 @@ import type { FeedQuery, StoredEvent } from "@shared/api";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChipSelect, HarnessGlyph, Redacted, SearchInput } from "../components/bits";
 import { type MenuList, useContextMenu } from "../components/ContextMenu";
+import { LabelChip, LabelDot, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
 import { PageBar } from "../components/PageBar";
 import { BesideButton, lensMenu, useBackgroundMenu, useStickyTop } from "../components/SessionCard";
-import { useAppState, useStore } from "../data/hooks";
+import { useAppState, useLabels, useStore } from "../data/hooks";
 import { eventSummary, harnessMark, sessionTitle, storedKey } from "../lib/format";
 import { useListNav } from "../lib/keys";
+import { type LabelFilter, labelPasses, labelQuery } from "../lib/labels";
 import { absoluteUrl, copyItem } from "../lib/menus";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { useAppSettings, useLens } from "../lib/settings";
@@ -67,6 +69,10 @@ export function Feed() {
   const [type, setType] = useState("");
   const [session, setSession] = useState("");
   const [q, setQ] = useState("");
+  const [label, setLabelFilter] = useState<LabelFilter>("");
+  const labels = useLabels();
+  // `label:` tokens filter here, on the page; the rest of the words go to the server.
+  const lq = useMemo(() => labelQuery(labels, q), [labels, q]);
   const [loaded, setRows] = useState<StoredEvent[]>([]);
   const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
@@ -78,8 +84,8 @@ export function Feed() {
   const pending = useRef<StoredEvent[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const filter = useMemo<FeedQuery>(
-    () => ({ harness, machine, type, session, q: q.trim() }),
-    [harness, machine, type, session, q],
+    () => ({ harness, machine, type, session, q: lq.rest }),
+    [harness, machine, type, session, lq.rest],
   );
   const filterRef = useRef(filter);
   filterRef.current = filter;
@@ -185,11 +191,17 @@ export function Feed() {
   const hiddenByLens = loaded.length - rows.length;
   // Belt and braces: never show a row the current filter would not have loaded, even
   // for the frame between a filter change and its fetch.
-  const shown = useMemo(() => rows.filter((e) => applyFilter(e, filter)), [rows, filter]);
+  const shown = useMemo(
+    () =>
+      rows.filter((e) => applyFilter(e, filter) && labelPasses(labels, storedKey(e), label) && lq.test(storedKey(e))),
+    [rows, filter, labels, label, lq],
+  );
   const busy = loading || loadedFor !== filter;
   const hrefs = useMemo(() => shown.map((e) => sessionPath(e.harness.name, e.session.id)), [shown]);
   const keys = useMemo(() => shown.map(storedKey), [shown]);
   const { cursor: cur } = useListNav(hrefs, true, keys);
+  // ⌥⌘1 … ⌥⌘7 label the session of the row under the cursor, ⌥⌘0 clears it.
+  useLabelKeys(() => (keys[cur] ? [keys[cur]!] : []));
   useShortcut("feed.pause", () => togglePause());
   useShortcut("feed.new", () => {
     if (!paused) return false;
@@ -198,8 +210,9 @@ export function Feed() {
   // A row's day label changes at midnight, not every second (the page has 1500 rows).
   const now = useToday();
 
-  const filtered = !!(harness || machine || type || session || q);
+  const filtered = !!(harness || machine || type || session || q || label);
   const clearFilters = () => {
+    setLabelFilter("");
     setHarness("");
     setMachine("");
     setType("");
@@ -246,6 +259,7 @@ export function Feed() {
               label="Session"
               optionLabel={sessionLabel}
             />
+            <LabelChip value={label} onChange={setLabelFilter} />
             <LensChip />
           </>
         }
@@ -272,6 +286,12 @@ export function Feed() {
           const showDay = day !== lastDay;
           lastDay = day;
           const s = sessions.get(storedKey(e));
+          // A subagent's event: its type after the session's name ("billing ↳ Explore").
+          const agentId = typeof e.data.agent_id === "string" ? e.data.agent_id : undefined;
+          const agent = agentId
+            ? (s?.agents?.find((a) => a.id === agentId)?.type ??
+              (typeof e.data.agent_type === "string" ? e.data.agent_type : "Subagent"))
+            : undefined;
           return (
             <FeedRow
               key={e.id}
@@ -280,6 +300,7 @@ export function Feed() {
               current={i === cur}
               day={showDay ? sentence(day) : undefined}
               title={s ? sessionTitle(s) : (e.session.title ?? e.session.id.slice(0, 8))}
+              agent={agent}
               beside={beside}
               ctx={ctx}
             />
@@ -324,6 +345,7 @@ const FeedRow = memo(function FeedRow({
   current,
   day,
   title,
+  agent,
   beside,
   ctx,
 }: {
@@ -332,6 +354,8 @@ const FeedRow = memo(function FeedRow({
   current: boolean;
   day?: string;
   title: string;
+  /** The subagent's type, when the event is one of its own. */
+  agent?: string;
   beside: boolean;
   ctx: { current: FeedMenuContext };
 }) {
@@ -399,7 +423,9 @@ const FeedRow = memo(function FeedRow({
           plainClick={beside ? () => openSplit(key, { from: rect() }) : undefined}
           modClick={(o) => openSplit(key, { from: rect(), background: o.background })}
         >
-          {title}
+          <LabelDot session={key} />
+          <span className="ev-title ellipsis">{title}</span>
+          {agent && <span className="ev-agent"> ↳ {agent}</span>}
         </Link>
         {e.session.machine && <span className="ev-machine ellipsis">{e.session.machine}</span>}
         <span className={`ev-type mono ev-type--${kind} ${isError(e) ? "is-err" : ""}`}>{e.type}</span>

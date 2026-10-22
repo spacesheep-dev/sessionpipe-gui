@@ -48,6 +48,13 @@ export const COLOR_TOKEN_NAMES = [
   "--shadow",
   "--qr-bg",
   "--qr-fg",
+  "--label-red",
+  "--label-orange",
+  "--label-yellow",
+  "--label-green",
+  "--label-blue",
+  "--label-purple",
+  "--label-grey",
 ] as const;
 
 export type ColorTokenName = (typeof COLOR_TOKEN_NAMES)[number];

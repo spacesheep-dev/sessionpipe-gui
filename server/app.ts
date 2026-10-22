@@ -41,6 +41,8 @@ import { registerTrust } from "./tls/trust.js";
 import { AttachmentStore } from "./ui/attachments.js";
 import { uiAuthFor } from "./ui/auth.js";
 import { registerUi } from "./ui/index.js";
+import { LabelStore } from "./ui/labels.js";
+import { Broadcast } from "./ui/stream.js";
 import { ViewerRegistry } from "./ui/viewers.js";
 
 export interface AppOptions {
@@ -294,7 +296,14 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       config = setEnabled(stateDir, config, `plugin:${id}`, on);
     },
   });
+  // The person's labels follow the store: a forgotten session loses its label.
+  const labels = new LabelStore(stateDir, (key) => store.sessionExists(key));
+  labels.follow(store);
+  // Stream messages that come from neither the store nor control: a view's state written.
+  const broadcast = new Broadcast();
   registerUi(router, {
+    labels,
+    broadcast,
     colorThemesDir: path.join(stateDir, "color-themes"),
     store,
     control,
@@ -316,6 +325,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     registry: themes,
     uiAuth,
     stateDir: path.join(stateDir, "themes-state"),
+    onState: (id, etag) => broadcast.emit({ kind: "viewState", id, etag }),
     setDisabled: (id, off) => {
       config = setDisabled(stateDir, config, `view:${id}`, off);
     },

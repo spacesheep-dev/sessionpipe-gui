@@ -320,3 +320,16 @@
     max-height: none;
   }
 }
+
+/* A session's colour label before its title; a subagent's "↳" before its name. */
+.pal-label > .label-dot {
+  margin-right: 6px;
+  vertical-align: 0.05em;
+}
+.pal-tree {
+  color: var(--fg-4);
+  font-size: var(--text-sm);
+}
+.pal-row > .label-dot {
+  justify-self: center;
+}

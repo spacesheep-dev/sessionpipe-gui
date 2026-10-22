@@ -144,9 +144,21 @@
 .card-state {
   grid-area: lead;
   display: flex;
+  align-items: center;
   justify-content: center;
   width: 16px;
   align-self: center;
+}
+/* A colour label: the person's dot 6 px after the glyph and 6 px before the title. The
+   lead widens for it on this row only, so the glyph column stays where it is. */
+.card-state:has(.label-dot) {
+  justify-content: flex-start;
+  gap: 6px;
+  width: auto;
+  padding: 0 6px 0 3px;
+}
+.card-link:has(.card-state .label-dot) {
+  grid-template-columns: minmax(28px, auto) auto minmax(0, 1fr) auto auto;
 }
 .card-time {
   grid-area: time;
@@ -201,6 +213,11 @@
 }
 .card-attn.mono {
   font-size: calc(var(--text-sm) * 0.95);
+}
+/* "2 subagents running": the parent's one trailing fact while any agent is open. */
+.card-agents {
+  flex: none;
+  color: var(--fg-3);
 }
 .card-flags {
   flex: none;
@@ -302,6 +319,32 @@
   border-top-color: transparent;
 }
 
+/* A parent with agents: a disclosure chevron in the gutter left of the glyph, turned
+   down while its agents show. */
+.card-disclose {
+  position: absolute;
+  top: 0;
+  left: -18px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 36px;
+  color: var(--fg-4);
+  border-radius: var(--radius-inner);
+}
+.card-disclose svg {
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.card-disclose[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+@media (hover: hover) {
+  .card-disclose:hover {
+    color: var(--fg);
+  }
+}
+
 /* Subagents: single-line child rows at the title's start, on a 1 px tree guide drawn
    from the parent's glyph. */
 .card-kids {
@@ -389,6 +432,49 @@
   color: var(--fg-3);
 }
 
+/* An agent row (§4.1): the 8 px agent glyph, "Type · description", then what it does
+   now; 32 px, 44 on a phone. The open one (its tab is the panel's) is selected. */
+.agent-row {
+  min-height: 32px;
+}
+[data-open] > .agent-row {
+  background: var(--sel);
+  color: var(--fg);
+}
+.agent-row > .dot {
+  margin: 0 1px;
+}
+.agent-text {
+  flex: 1;
+  min-width: 0;
+}
+.agent-type {
+  color: var(--fg);
+  font-weight: 500;
+}
+.agent-desc {
+  color: var(--fg-2);
+}
+.agent-now {
+  flex: none;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+.kid-more-btn {
+  min-height: 28px;
+  margin: 0 4px;
+  padding: 0 36px;
+  color: var(--fg-3);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+}
+@media (hover: hover) {
+  .kid-more-btn:hover {
+    color: var(--fg);
+  }
+}
+
 /* The first run: the empty state where the first row would be. */
 .board-empty code {
   color: var(--fg-2);
@@ -434,6 +520,15 @@
   }
   .kid {
     min-height: 40px;
+  }
+  .agent-row {
+    min-height: 44px;
+  }
+  /* The phone's gutter is 16 px: the chevron sits in it, clear of the screen's edge. */
+  .card-disclose {
+    left: -6px;
+    width: 14px;
+    height: 44px;
   }
 }
 

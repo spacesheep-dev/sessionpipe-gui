@@ -75,6 +75,11 @@
   gap: 8px;
   min-width: 0;
 }
+/* The session's colour label before its title (6 px). */
+.toast-top > .label-dot {
+  align-self: center;
+  margin-right: -2px;
+}
 .toast-title {
   min-width: 0;
   overflow: hidden;

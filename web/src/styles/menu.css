@@ -81,6 +81,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* A colour label's dot before its name (the Label submenu). */
+.menu-label .label-dot {
+  margin-right: 8px;
+  vertical-align: 0;
+}
 .menu-keys {
   padding-left: 16px;
   color: var(--fg-3);
@@ -262,4 +267,56 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 12px;
+}
+
+/* ----- Edit labels (components/LabelsDialog.tsx) ----- */
+
+/* The confirm's frame at 400 px: a grouped form of seven rows, each the label's dot (12 px
+   here) and its name; one Done. On a phone the same rows sit in a sheet. */
+.labels-dialog {
+  width: min(400px, calc(100vw - 32px));
+  gap: 12px;
+}
+.labels-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.labels-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+  padding: 4px 0;
+}
+/* Two classes: shared.css's 8 px .label-dot loads after this file. */
+.label-dot.labels-dot {
+  width: 12px;
+  height: 12px;
+}
+.labels-field {
+  width: 100%;
+}
+.labels-err {
+  grid-column: 2;
+  margin: 4px 0 0;
+  color: var(--err);
+  font-size: var(--text-sm);
+}
+.labels-sheet .labels-rows {
+  padding: 4px 16px;
+}
+.labels-sheet .labels-row {
+  min-height: 48px;
+}
+.labels-sheet .labels-row + .labels-row {
+  box-shadow: inset 0 var(--hairline) 0 var(--line);
+}
+.labels-sheet .labels-field {
+  min-height: 36px;
+  border-color: transparent;
+  background: transparent;
+  font-size: max(1rem, 16px);
 }

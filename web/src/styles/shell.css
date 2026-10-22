@@ -20,6 +20,15 @@
   min-width: 0;
   padding: 0 var(--gutter) calc(var(--tabbar) + env(safe-area-inset-bottom) + 24px);
 }
+/* A list page fills the column, so a right-click on the empty ground under a short list
+   still opens the page's own menu instead of nothing. */
+.main:has(> :is(.board, .inbox, .feed, .review)) {
+  display: flex;
+  flex-direction: column;
+}
+.main > :is(.board, .inbox, .feed, .review) {
+  flex: 1 0 auto;
+}
 /* A page with no bar of its own (pair, add a device) still starts below the edge. */
 .main > .page:not(:has(> .bar)) {
   padding-top: 24px;

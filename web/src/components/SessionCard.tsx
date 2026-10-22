@@ -6,7 +6,7 @@
 // on a tree guide. A right-click (a long-press on touch) opens the session's menu.
 // The class names are the e2e contract (`article.card`, `.card-status`, `.card-meta`…),
 // so they stay even though nothing here is a card any more.
-import type { SessionFlag, SessionSummary } from "@shared/api";
+import type { SessionFlag, SessionKey, SessionSummary } from "@shared/api";
 import {
   Fragment,
   type MutableRefObject,
@@ -17,9 +17,11 @@ import {
   useEffect,
   useLayoutEffect,
   useRef,
+  useState,
 } from "react";
 import { answerState, useSessionSend } from "../control/useSend";
 import { useAppState, useStore } from "../data/hooks";
+import { agentsFact, agentsShown, agentTabKey, setAgentsChoice } from "../lib/agents";
 import {
   ATTENTION_LABEL,
   attentionMessage,
@@ -33,8 +35,10 @@ import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menu
 import { Link, sessionPath } from "../lib/router";
 import { LENSES, type Lens, setTierLens } from "../lib/settings";
 import { openSplit } from "../lib/split";
+import { AgentRow, useAgentsOpen } from "./AgentRow";
 import { HarnessGlyph, Redacted, Since, StateDot } from "./bits";
 import { type MenuItem, type MenuList, useContextMenu } from "./ContextMenu";
+import { LabelDot } from "./LabelDot";
 
 interface SessionCardProps {
   s: SessionSummary;
@@ -48,6 +52,10 @@ interface SessionCardProps {
   openBeside?: boolean;
   /** The session is the panel's active tab: the row stays selected. */
   open?: boolean;
+  /** The panel's active tab, when it is one of this session's agents (that row is open). */
+  openTab?: string | null;
+  /** A search found one of its agents: they show, whatever the disclosure says. */
+  agentsMatch?: boolean;
   /** The board's filters, for the menu's "Show only …" (stable setters). */
   onlyMachine?: (m: string) => void;
   onlyHarness?: (h: string) => void;
@@ -72,6 +80,8 @@ const sameCard = (a: SessionCardProps, b: SessionCardProps): boolean =>
   a.simple === b.simple &&
   a.openBeside === b.openBeside &&
   a.open === b.open &&
+  a.openTab === b.openTab &&
+  a.agentsMatch === b.agentsMatch &&
   a.onlyMachine === b.onlyMachine &&
   a.onlyHarness === b.onlyHarness &&
   (a.children?.length ?? 0) === (b.children?.length ?? 0) &&
@@ -91,10 +101,23 @@ export const SessionCard = memo(function SessionCard({
   simple = false,
   openBeside = false,
   open = false,
+  openTab = null,
+  agentsMatch = false,
   onlyMachine,
   onlyHarness,
 }: SessionCardProps) {
   const store = useStore();
+  const agents = s.agents ?? [];
+  // A child session that is one of its agents shows once, as that agent's row.
+  const twins = new Set(agents.map((a) => a.session).filter(Boolean));
+  const kids = children?.filter((c) => !twins.has(c.key));
+  const chosen = useAgentsOpen(s);
+  const showAgents = agents.length > 0 && (chosen || agentsMatch);
+  const [allDone, setAllDone] = useState(false);
+  const toggleAgents = (to = !showAgents) => {
+    if (agents.length > 0 && to !== showAgents) setAgentsChoice(s.key, to);
+  };
+  const fact = agentsFact(s);
   const attention = s.openAttentions[0];
   const live = s.state === "working" || s.state === "needs_you";
   const showText = lens === null || lens >= 2;
@@ -137,6 +160,30 @@ export const SessionCard = memo(function SessionCard({
     >
       {attention?.kind === "permission" && <CardAnswer s={s} into={answer} />}
       <div className="card-row">
+        {agents.length > 0 && (
+          <button
+            type="button"
+            className="card-disclose"
+            aria-expanded={showAgents}
+            aria-label={showAgents ? "Hide subagents" : "Show subagents"}
+            tabIndex={-1}
+            onClick={(e) => {
+              e.preventDefault();
+              toggleAgents();
+            }}
+          >
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+              <path
+                d="M6 4l4 4-4 4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        )}
         <Link
           to={sessionPath(s.harness, s.id)}
           className="card-link"
@@ -144,6 +191,19 @@ export const SessionCard = memo(function SessionCard({
           modClick={beside}
           plainClick={openBeside ? () => beside() : undefined}
           data-nav-item=""
+          onKeyDown={
+            agents.length > 0
+              ? (e) => {
+                  // → opens the agents, ← folds them (Finder's list keys).
+                  if (e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+                  if (e.key === "ArrowRight" && !showAgents) toggleAgents(true);
+                  else if (e.key === "ArrowLeft" && showAgents) toggleAgents(false);
+                  else return;
+                  e.preventDefault();
+                }
+              : undefined
+          }
+          aria-expanded={agents.length > 0 ? showAgents : undefined}
         >
           <h3 className="card-title ellipsis">{sessionTitle(s)}</h3>
           {/* The state, the request and the time: one element for e2e, laid out across the
@@ -152,6 +212,7 @@ export const SessionCard = memo(function SessionCard({
             <span className="card-state">
               <StateDot state={s.state} decorative />
               <span className="sr-only">{STATE_LABEL[s.state]}</span>
+              <LabelDot session={s.key} />
             </span>
             {attention && (
               <span className={`card-kind ${attnTool ? "sr-only" : ""}`}>
@@ -187,6 +248,7 @@ export const SessionCard = memo(function SessionCard({
                 <Redacted text={oneLine(isLiveText ? tail(liveText, 300) : liveText, 300)} />
               </span>
             ) : null}
+            {fact && <span className="card-agents num">{fact}</span>}
             <Flags flags={s.flags} />
           </span>
 
@@ -219,9 +281,10 @@ export const SessionCard = memo(function SessionCard({
         </Link>
         <BesideButton onClick={() => beside()} />
       </div>
-      {children && children.length > 0 && (
-        <ul className="card-kids">
-          {children.map((c) => (
+      {(showAgents || (kids && kids.length > 0)) && (
+        <ul className="card-kids" aria-label={showAgents ? "Subagents" : undefined}>
+          {showAgents && <AgentRows s={s} openTab={openTab} all={allDone} onAll={() => setAllDone(true)} />}
+          {kids?.map((c) => (
             <KidRow key={c.key} c={c} onlyMachine={onlyMachine} onlyHarness={onlyHarness} />
           ))}
         </ul>
@@ -229,6 +292,39 @@ export const SessionCard = memo(function SessionCard({
     </article>
   );
 }, sameCard);
+
+/** How many finished agents show under a parent before "Show n more". */
+const DONE_SHOWN = 3;
+
+/** A parent's agents on the tree guide: the open ones, then the newest finished ones,
+ *  then "Show n more". */
+function AgentRows({
+  s,
+  openTab,
+  all,
+  onAll,
+}: {
+  s: SessionSummary;
+  openTab: string | null;
+  all: boolean;
+  onAll: () => void;
+}) {
+  const { shown, more } = agentsShown(s.agents, all ? Number.POSITIVE_INFINITY : DONE_SHOWN);
+  return (
+    <>
+      {shown.map((a) => (
+        <AgentRow key={a.id} s={s} a={a} open={openTab === (a.session ?? agentTabKey(s.key as SessionKey, a.id))} />
+      ))}
+      {more > 0 && (
+        <li className="kid-more">
+          <button type="button" className="kid-more-btn" onClick={onAll}>
+            Show {more} more
+          </button>
+        </li>
+      )}
+    </>
+  );
+}
 
 /** A subagent: one line under its parent, on the tree guide, with the session menu. */
 function KidRow({ c, ...only }: { c: SessionSummary } & Pick<SessionCardProps, "onlyMachine" | "onlyHarness">) {

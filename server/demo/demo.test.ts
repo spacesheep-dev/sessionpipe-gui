@@ -29,7 +29,10 @@ const SETTLE_MS = 90_000;
 
 const key = (e: ProtocolEvent) => `${e.harness.name}:${e.session.id}`;
 
-function run(seed = 7, minutes = 10, machines = 2): ProtocolEvent[] {
+/** The fixture run's seed: one whose first minutes play every scenario these tests read
+ *  (each model, no Antigravity resume in the first 12 minutes). */
+const SEED = 2;
+function run(seed = SEED, minutes = 10, machines = 2): ProtocolEvent[] {
   const sim = new Simulation({ seed, startAt: T0, speed: 1, machines });
   return sim.advance(minutes * 60_000);
 }
@@ -160,10 +163,28 @@ describe("Simulation: a 10-minute run", () => {
     expect([...open.values()].filter(settled).map((e) => `${e.harness.name} ${e.data.tool}`)).toEqual([]);
   });
 
-  it("runs subagents as child sessions with parent_id and agent_id", () => {
+  it("runs Claude Code's subagents inside the parent, as recorded, and Cursor's as child sessions", () => {
     const started = events.filter((e) => e.type === "subagent.started");
     expect(started.length).toBeGreaterThan(0);
-    for (const s of started) {
+    const inParent = started.filter((s) => s.harness.name === "claude-code");
+    const asChild = started.filter((s) => s.harness.name === "cursor");
+    expect(inParent.length).toBeGreaterThan(0);
+    expect(asChild.length).toBeGreaterThan(0);
+    for (const s of inParent) {
+      const agentId = s.data.agent_id as string;
+      // No session of its own: its tools ride on the parent's session with its agent_id.
+      expect(events.some((e) => e.session.id === agentId)).toBe(false);
+      const tools = events.filter((e) => e.type.startsWith("tool.") && e.data.agent_id === agentId);
+      for (const e of tools) {
+        expect(e.session.id).toBe(s.session.id);
+        expect(e.data.turn_id).toBeDefined();
+      }
+      const ended = events.find((e) => e.type === "subagent.ended" && e.data.agent_id === agentId);
+      if (!ended) continue; // still running when the run stops
+      expect(tools.length).toBeGreaterThan(0);
+      expect(ended.session.id).toBe(s.session.id);
+    }
+    for (const s of asChild) {
       const agentId = s.data.agent_id as string;
       const child = events.filter((e) => e.session.id === agentId);
       expect(child.length).toBeGreaterThan(2);
@@ -171,18 +192,53 @@ describe("Simulation: a 10-minute run", () => {
         expect(e.session.parent_id).toBe(s.session.id);
         if (e.type.startsWith("tool.")) expect(e.data.agent_id).toBe(agentId);
       }
-      const ended = events.find((e) => e.type === "subagent.ended" && e.data.agent_id === agentId) as ProtocolEvent;
-      expect(ended.session.id).toBe(s.session.id);
-      // The parent's agent tool (Claude Code's Agent, Cursor's Task) names the child in its output.
-      const agentTool = events.find(
+    }
+    // Each launch call names its agent: in the output when async (or a child), and the
+    // synchronous call's output is the agent's own last message.
+    for (const s of started) {
+      const agentId = s.data.agent_id as string;
+      const call = events.find(
         (e) =>
           e.type === "tool.ended" &&
           (e.data.tool === "Agent" || e.data.tool === "Task") &&
           JSON.stringify(e.data.output).includes(agentId),
       );
-      expect(agentTool, `${s.harness.name} ${agentId}`).toBeDefined();
-      expect(agentTool?.session.id).toBe(s.session.id);
+      if (!call && !events.some((e) => e.type === "subagent.ended" && e.data.agent_id === agentId)) continue;
+      expect(call, `${s.harness.name} ${agentId}`).toBeDefined();
+      expect(call?.session.id).toBe(s.session.id);
     }
+  });
+
+  it("brings a background agent back with a <task-notification> turn after the launching turn ended", () => {
+    const launch = events.find(
+      (e) => e.type === "tool.ended" && e.data.tool === "Agent" && (e.data.output as { isAsync?: boolean })?.isAsync,
+    ) as ProtocolEvent;
+    expect(launch).toBeDefined();
+    const agentId = (launch.data.output as { agentId: string }).agentId;
+    const mine = events.filter((e) => e.session.id === launch.session.id);
+    const at = (pred: (e: ProtocolEvent) => boolean) => mine.findIndex(pred);
+    const start = at((e) => e.type === "subagent.started" && e.data.agent_id === agentId);
+    const stop = at((e) => e.type === "turn.ended" && e.data.turn_id === launch.data.turn_id);
+    const firstTool = at((e) => e.type === "tool.started" && e.data.agent_id === agentId);
+    const end = at((e) => e.type === "subagent.ended" && e.data.agent_id === agentId);
+    const note = at(
+      (e) =>
+        e.type === "turn.transcript" &&
+        typeof e.data.user === "string" &&
+        e.data.user.startsWith("<task-notification>") &&
+        e.data.user.includes(`<task-id>${agentId}</task-id>`),
+    );
+    expect(start).toBeGreaterThan(at((e) => e === launch));
+    expect(stop).toBeGreaterThan(start);
+    expect(end).toBeGreaterThan(firstTool);
+    expect(note).toBeGreaterThan(end);
+    expect(mine[note]!.data.user).toMatch(/<result>[^<]+<\/result>/);
+    // The agent's tools carry the spawning turn's id, after that turn ended too.
+    expect(
+      mine
+        .filter((e) => e.data.agent_id === agentId && e.type === "tool.ended")
+        .every((e) => e.data.turn_id === launch.data.turn_id),
+    ).toBe(true);
   });
 
   it("covers every scenario in the first minutes", () => {
@@ -335,12 +391,12 @@ describe("Simulation: a 10-minute run", () => {
 
   it("is the same demo for the same seed, and another for another", () => {
     const strip = (list: ProtocolEvent[]) => list.map(({ id: _id, ...rest }) => rest);
-    expect(strip(run(7))).toEqual(strip(events));
+    expect(strip(run(SEED))).toEqual(strip(events));
     expect(strip(run(8))).not.toEqual(strip(events));
   });
 
   it("puts everything on one machine when asked for one", () => {
-    expect(new Set(run(7, 3, 1).map((e) => e.session.machine))).toEqual(new Set(["studio-mac"]));
+    expect(new Set(run(SEED, 3, 1).map((e) => e.session.machine))).toEqual(new Set(["studio-mac"]));
   });
 
   it("keeps cycling for an hour without running dry or piling up", () => {
@@ -357,7 +413,7 @@ describe("Simulation: a 10-minute run", () => {
 });
 
 describe("Antigravity and Cursor, as ADAPTERS.md maps them", () => {
-  const events = run(7, 12);
+  const events = run(SEED, 12);
   const of = (harness: string) => events.filter((e) => e.harness.name === harness && e.type !== "session.backfill");
   const sessionsOf = (harness: string) => {
     const by = new Map<string, ProtocolEvent[]>();

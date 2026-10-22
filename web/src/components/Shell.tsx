@@ -24,6 +24,7 @@ import { setupComplete } from "../setup/steps";
 import { reloadThemes, setThemeDisabled, useThemes } from "../themes/host/registry";
 import { Mark } from "./Brand";
 import { MenuHost, type MenuList, useContextMenu } from "./ContextMenu";
+import { LabelsDialog } from "./LabelsDialog";
 import { openPalette } from "./Palette";
 import { GearIcon, QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
@@ -594,6 +595,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       </nav>
       <SessionPanel phone={phone} />
       <ShortcutHelp />
+      <LabelsDialog />
       <MenuHost />
     </div>
   );

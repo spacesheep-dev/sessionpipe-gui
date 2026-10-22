@@ -414,3 +414,10 @@
   min-height: 24px;
   line-height: 24px;
 }
+
+/* A session's colour label: its dot just before the session's name (6 px to it). */
+.hit-session > .label-dot,
+.rv-sess > .label-dot {
+  margin-right: 6px;
+  vertical-align: 0.05em;
+}

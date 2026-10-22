@@ -355,6 +355,17 @@ export const ACTIONS: readonly Action[] = [
     keys: ["mod+enter"],
   },
 
+  // Mail's flag keys: ⌥⌘1 … ⌥⌘7 set a colour label on the item under the cursor (the
+  // selection on the canvas), ⌥⌘0 clears it. The order is LABEL_COLORS.
+  ...(["red", "orange", "yellow", "green", "blue", "purple", "grey"] as const).map((c, i) => ({
+    id: `label.${c}`,
+    label: `Label ${c}`,
+    group: "Labels",
+    scope: "lists" as const,
+    keys: [`mod+alt+${i + 1}`],
+  })),
+  { id: "label.none", label: "Remove the label", group: "Labels", scope: "lists", keys: ["mod+alt+0"] },
+
   { id: "feed.pause", label: "Pause / resume the feed", group: "Feed", scope: "feed", keys: ["space"] },
   { id: "feed.new", label: "Show what arrived while paused", group: "Feed", scope: "feed", keys: ["n"] },
 

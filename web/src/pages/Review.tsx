@@ -9,6 +9,7 @@ import { splitKey } from "@shared/api";
 import { type Dispatch, Fragment, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HarnessGlyph, Redacted, SearchInput, Segmented } from "../components/bits";
 import { useContextMenu } from "../components/ContextMenu";
+import { LabelDot } from "../components/LabelDot";
 import { PageBar } from "../components/PageBar";
 import { useBackgroundMenu, useStickyTop } from "../components/SessionCard";
 import { useStore } from "../data/hooks";
@@ -314,7 +315,10 @@ function HitRow({ hit, index, now }: { hit: SearchHit; index: number; now: numbe
         <FieldGlyph field={hit.field} />
         <span className="sr-only">{FIELD_NAME[hit.field] ?? hit.field}</span>
       </span>
-      <span className="hit-session ellipsis">{title}</span>
+      <span className="hit-session ellipsis">
+        <LabelDot session={s.key} />
+        {title}
+      </span>
       <span className="hit-time num" title={new Date(e.time).toLocaleString()}>
         {ago(e.time, now)}
       </span>
@@ -453,6 +457,7 @@ function PathRow({ p, repo, now }: { p: FilesPage["repos"][number]["paths"][numb
             title={`Open ${s.title} beside`}
             onClick={() => openAt(s.key, undefined)}
           >
+            <LabelDot session={s.key} />
             {s.title}
             {s.count > 1 && <span className="num"> ×{s.count}</span>}
           </button>
@@ -638,6 +643,7 @@ function DayRow({ s }: { s: Digest["sessions"][number] }) {
       <td>
         <span className="rv-cell">
           <HarnessGlyph name={s.harness} size="sm" />
+          <LabelDot session={s.key} />
           <button
             type="button"
             className="rv-link"

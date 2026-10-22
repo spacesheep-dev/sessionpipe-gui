@@ -3,6 +3,8 @@
 // protocol events to a SessionSummary, and the state machine over it. Nothing here
 // touches a file or a timer; store.ts drives it.
 import {
+  AGENTS_MAX,
+  type AgentRun,
   type Attention,
   type AttentionKind,
   COMPACTING_WINDOW_MS,
@@ -60,7 +62,25 @@ export interface Tracking {
   missing: Set<number>;
   /** Arrival time of the event that opened the first open hole. */
   missingSince?: string;
+  /** Agent / Task tool calls (the tools that launch a subagent), newest last, at most
+   *  AGENTS_MAX: what an AgentRun's description and launch call are read from. */
+  launches: Launch[];
 }
+
+/** One call of a tool that launches a subagent. */
+interface Launch {
+  callId?: string;
+  turnId?: string;
+  description?: string;
+  agentType?: string;
+  /** `output.agentId` once the call ended (tier 3), or the agent it was matched to. */
+  agentId?: string;
+}
+
+/** The tools that launch a subagent: Claude Code's Agent (Task before 2.1), Cursor's Task. */
+const LAUNCH_TOOLS = new Set(["Agent", "Task"]);
+/** An agent's own recent tools kept. */
+const AGENT_RECENT = 4;
 
 /** What the store keeps per session beyond the summary it serves. */
 export interface SessionRecord {
@@ -99,9 +119,11 @@ export function newRecord(harness: string, id: string, at: string, source: Event
         compactions: 0,
         filesChanged: 0,
         attentions: 0,
+        agentsRunning: 0,
       },
       openAttentions: [],
       children: 0,
+      agents: [],
       recentTools: [],
       flags: [],
       turnStats: { count: 0 },
@@ -119,6 +141,7 @@ export function newRecord(harness: string, id: string, at: string, source: Event
       seqLo: -1,
       seqHi: -1,
       missing: new Set(),
+      launches: [],
     },
   };
 }
@@ -268,6 +291,92 @@ function noteStart(t: Tracking, tool: string, at: string, ev: ProtocolEvent): vo
   if (t.starts.length > LOOP_WINDOW) t.starts.splice(0, t.starts.length - LOOP_WINDOW);
 }
 
+/** The text of a synchronous Agent call's output: a string, `result`, or the text parts
+ *  of `content`. Undefined for anything else (an async launch carries no result). */
+function agentResult(output: unknown): string | undefined {
+  if (typeof output === "string") return str(output);
+  if (!output || typeof output !== "object") return undefined;
+  const o = output as Record<string, unknown>;
+  if (o.isAsync === true || o.status === "async_launched") return undefined;
+  if (typeof o.result === "string") return str(o.result);
+  if (Array.isArray(o.content)) {
+    const text = o.content
+      .map((c) =>
+        c && typeof c === "object" && typeof (c as { text?: unknown }).text === "string"
+          ? (c as { text: string }).text
+          : "",
+      )
+      .join("\n");
+    return str(text);
+  }
+  return undefined;
+}
+
+/** The agent with this id, made (running, from `at`) when this is the first word of it. */
+function agentFor(s: SessionSummary, id: string, at: string): AgentRun {
+  let a = s.agents.find((x) => x.id === id);
+  if (!a) {
+    a = {
+      id,
+      state: "running",
+      startedAt: at,
+      lastAt: at,
+      tools: 0,
+      toolErrors: 0,
+      attributed: false,
+      recentTools: [],
+    };
+    s.agents = [...s.agents, a];
+  }
+  return a;
+}
+
+/** Open agents first (oldest start first), then ended ones newest first; at most AGENTS_MAX,
+ *  never dropping an open one. Also the live count. */
+export function settleAgents(s: SessionSummary): void {
+  const open = s.agents.filter((a) => a.state !== "done").sort((a, b) => (a.startedAt < b.startedAt ? -1 : 1));
+  const ended = s.agents
+    .filter((a) => a.state === "done")
+    .sort((a, b) => ((b.endedAt ?? b.lastAt) < (a.endedAt ?? a.lastAt) ? -1 : 1));
+  s.agents = [...open, ...ended.slice(0, Math.max(0, AGENTS_MAX - open.length))];
+  s.counts.agentsRunning = open.length;
+}
+
+/** Match a launch call and an agent both ways: the description and call id onto the
+ *  agent, the agent id onto the call. */
+function link(a: AgentRun, l: Launch): void {
+  l.agentId = a.id;
+  if (l.callId && !a.callId) a.callId = l.callId;
+  if (l.description && !a.description) a.description = l.description;
+  if (l.agentType && !a.type) a.type = l.agentType;
+  if (l.turnId && !a.turnId) a.turnId = l.turnId;
+}
+
+/** Claude Code tells the orchestrator a background agent finished with a prompt of its
+ *  own (`<task-notification>` … `<task-id>` … `<result>`), which reaches us as that turn's
+ *  user text at tier 2+. Its result is the agent's: the one place the protocol carries
+ *  it for an agent that ran in the background. */
+const TASK_NOTIFICATION = /^\s*<task-notification>[\s\S]*?<task-id>([^<\s]+)<\/task-id>/;
+const TASK_RESULT = /<result>([\s\S]*?)(?:<\/result>|$)/;
+function noteTaskNotification(s: SessionSummary, user: unknown): void {
+  if (typeof user !== "string") return;
+  const m = TASK_NOTIFICATION.exec(user);
+  if (!m) return;
+  const a = s.agents.find((x) => x.id === m[1]);
+  const result = str(TASK_RESULT.exec(user)?.[1]?.trim());
+  if (!a || !result || a.result) return;
+  s.agents = s.agents.map((x) => (x === a ? { ...a, result: cut(result, SNIPPET_CHARS) } : x));
+}
+
+/** Close every open agent: its session ended (or went silent for good). */
+function closeAgents(s: SessionSummary, at: string): void {
+  if (!s.agents.some((a) => a.state !== "done")) return;
+  s.agents = s.agents.map((a) =>
+    a.state === "done" ? a : { ...a, state: "done", endedAt: at, currentTool: undefined },
+  );
+  settleAgents(s);
+}
+
 export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: string, source: EventSource): void {
   const s = rec.summary;
   const t = rec.track;
@@ -337,6 +446,7 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       s.currentTool = undefined;
       s.progress = undefined;
       s.openAttentions = [];
+      closeAgents(s, at);
       break;
     case "turn.started": {
       s.counts.turns++;
@@ -372,6 +482,7 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       break;
     }
     case "turn.transcript": {
+      noteTaskNotification(s, d.user);
       const turn = num(d.turn);
       if (s.progress && (turn === undefined || turn >= s.progress.turn)) s.progress = undefined;
       s.lastUser = cut(d.user, SNIPPET_CHARS);
@@ -380,14 +491,63 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
     }
     case "tool.started": {
       const tool = str(d.tool);
+      const agentId = str(d.agent_id);
+      if (agentId) {
+        // A subagent's call: it runs on its agent, never as the orchestrator's tool, and
+        // it does not reopen the orchestrator's turn (an async agent works on after the
+        // turn that launched it ended).
+        const a = { ...agentFor(s, agentId, at) };
+        a.attributed = true;
+        a.lastAt = at;
+        if (a.state === "stale") a.state = "running";
+        if (tool) a.currentTool = { tool, callId: str(d.call_id), since: at };
+        a.turnId ??= str(d.turn_id);
+        s.agents = s.agents.map((x) => (x.id === agentId ? a : x));
+        settleAgents(s);
+        if (tool) noteStart(t, tool, at, ev);
+        break;
+      }
       if (tool) {
-        s.currentTool = { tool, callId: str(d.call_id), since: at, agentId: str(d.agent_id) };
+        s.currentTool = { tool, callId: str(d.call_id), since: at };
         noteStart(t, tool, at, ev);
+        if (LAUNCH_TOOLS.has(tool)) {
+          const input = (d.input && typeof d.input === "object" ? d.input : {}) as Record<string, unknown>;
+          t.launches.push({
+            callId: str(d.call_id),
+            turnId: str(d.turn_id) ?? s.currentTurn?.turnId,
+            description: str(input.description),
+            agentType: str(input.subagent_type),
+          });
+          if (t.launches.length > AGENTS_MAX) t.launches.splice(0, t.launches.length - AGENTS_MAX);
+        }
       }
       s.currentTurn ??= { turnId: str(d.turn_id), since: at };
       break;
     }
     case "tool.ended": {
+      const agentId = str(d.agent_id);
+      if (agentId) {
+        s.counts.tools++;
+        const ok = d.ok !== false;
+        if (!ok) s.counts.toolErrors++;
+        const a = { ...agentFor(s, agentId, at) };
+        a.attributed = true;
+        a.lastAt = at;
+        if (a.state === "stale") a.state = "running";
+        a.tools++;
+        if (!ok) a.toolErrors++;
+        const tool = str(d.tool) ?? "?";
+        const ms = num(d.ms);
+        a.recentTools = [...a.recentTools, { tool, ok, ...(ms !== undefined ? { ms } : {}) }].slice(-AGENT_RECENT);
+        const callId = str(d.call_id);
+        if (a.currentTool && ((callId && a.currentTool.callId === callId) || a.currentTool.tool === tool))
+          a.currentTool = undefined;
+        s.agents = s.agents.map((x) => (x.id === agentId ? a : x));
+        settleAgents(s);
+        for (const p of changedPaths(ev, s.cwd)) rec.files.add(p);
+        s.counts.filesChanged = rec.files.size;
+        break;
+      }
       s.counts.tools++;
       const ok = d.ok !== false;
       if (!ok) s.counts.toolErrors++;
@@ -417,6 +577,24 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       // event) never sent the start: the loop reading takes the end's input instead, so
       // "the same call over and over" is read for it too.
       if (!matched && tool !== "?") noteStart(t, tool, at, ev);
+      if (LAUNCH_TOOLS.has(tool)) {
+        // The launch call ended: its output names the agent (tier 3), and a synchronous
+        // call's output is the agent's result.
+        const callId = str(d.call_id);
+        const l = callId ? t.launches.find((x) => x.callId === callId) : undefined;
+        const out = d.output && typeof d.output === "object" ? (d.output as Record<string, unknown>) : undefined;
+        const named = str(out?.agentId) ?? l?.agentId;
+        if (l && named) l.agentId = named;
+        const a = named ? s.agents.find((x) => x.id === named) : undefined;
+        if (a) {
+          const next = { ...a };
+          if (l) link(next, l);
+          else if (callId) next.callId ??= callId;
+          const result = agentResult(d.output);
+          if (result) next.result = cut(result, SNIPPET_CHARS);
+          s.agents = s.agents.map((x) => (x.id === a.id ? next : x));
+        }
+      }
       s.currentTurn ??= { turnId: str(d.turn_id), since: at };
       // A write tool that succeeded changed the file its input names (the adapter sends
       // no files.changed for it); the same set as below, so the two never double-count.
@@ -451,10 +629,45 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       s.openAttentions = attentionId ? s.openAttentions.filter((x) => x.attentionId !== attentionId) : [];
       break;
     }
-    case "subagent.started":
+    case "subagent.started": {
       s.counts.subagents++;
+      const id = str(d.agent_id);
+      if (id) {
+        const a: AgentRun = {
+          ...agentFor(s, id, at),
+          state: "running",
+          startedAt: at,
+          lastAt: at,
+          endedAt: undefined,
+        };
+        const type = str(d.agent_type);
+        if (type) a.type = type;
+        a.turnId ??= s.currentTurn?.turnId;
+        // Its launch: the call whose output named it, else the newest one not matched yet
+        // (of its type when the call said one).
+        const open = t.launches.filter((l) => !l.agentId);
+        const l =
+          t.launches.find((x) => x.agentId === id) ??
+          [...open].reverse().find((x) => !x.agentType || !type || x.agentType === type) ??
+          open[open.length - 1];
+        if (l) link(a, l);
+        s.agents = s.agents.map((x) => (x.id === id ? a : x));
+        settleAgents(s);
+      }
       s.currentTurn ??= { since: at };
       break;
+    }
+    case "subagent.ended": {
+      const id = str(d.agent_id);
+      if (id) {
+        const a: AgentRun = { ...agentFor(s, id, at), state: "done", endedAt: at, lastAt: at, currentTool: undefined };
+        const type = str(d.agent_type);
+        if (type) a.type ??= type;
+        s.agents = s.agents.map((x) => (x.id === id ? a : x));
+        settleAgents(s);
+      }
+      break;
+    }
     case "session.heartbeat":
       s.currentTurn ??= { since: at };
       break;
@@ -479,8 +692,13 @@ export function evaluateState(rec: SessionRecord, now: number): { state: Session
   if (rec.ended) return { state: "done", since: s.endedAt ?? s.lastAt };
   if (!rec.live) return { state: "done", since: s.lastAt };
   if (silent >= DONE_AFTER_MS) return { state: "done", since: new Date(last + DONE_AFTER_MS).toISOString() };
-  if (s.currentTurn) {
-    if (silent < STALE_AFTER_MS) return { state: "working", since: s.currentTurn.since };
+  // A subagent still running keeps its orchestrator working, even after the turn that
+  // launched it ended (Claude Code's background agents report after the Stop).
+  const open = s.agents.find((a) => a.state !== "done");
+  if (s.currentTurn || open) {
+    const since =
+      s.currentTurn && (!open || s.currentTurn.since < open.startedAt) ? s.currentTurn.since : open!.startedAt;
+    if (silent < STALE_AFTER_MS) return { state: "working", since };
     return { state: "stale", since: new Date(last + STALE_AFTER_MS).toISOString() };
   }
   return { state: "idle", since: s.lastAt };
@@ -496,10 +714,32 @@ export function refreshState(rec: SessionRecord, now: number): boolean {
     s.currentTurn = undefined;
     s.currentTool = undefined;
   }
-  if (s.state === state && s.stateSince === since) return false;
+  const agents = refreshAgents(s, state, now);
+  if (s.state === state && s.stateSince === since) return agents;
   s.state = state;
   s.stateSince = since;
   return true;
+}
+
+/** An open agent silent for STALE_AFTER_MS reads stale (and running again when it next
+ *  speaks, in applyEvent); a session read done closes them all. True when any moved. A
+ *  child session's agent (`session` set) takes its state from the child (store.ts). */
+function refreshAgents(s: SessionSummary, state: SessionState, now: number): boolean {
+  if (!s.agents.some((a) => a.state !== "done" && !a.session)) return false;
+  if (state === "done") {
+    closeAgents(s, s.endedAt ?? s.lastAt);
+    return true;
+  }
+  let changed = false;
+  const next = s.agents.map((a) => {
+    if (a.state === "done" || a.session) return a;
+    const want = now - Date.parse(a.lastAt) >= STALE_AFTER_MS ? "stale" : "running";
+    if (want === a.state) return a;
+    changed = true;
+    return { ...a, state: want } as AgentRun;
+  });
+  if (changed) s.agents = next;
+  return changed;
 }
 
 /** The flags (shared/api.ts SessionFlag) read at `now`, in a fixed order by kind.

@@ -10,6 +10,8 @@ import type {
   FilesPage,
   FilesQuery,
   Info,
+  Labels,
+  LabelsPatch,
   SearchPage,
   SearchQuery,
   SessionDetail,
@@ -39,8 +41,14 @@ export interface Transport {
   demo(on: boolean): Promise<{ on: boolean }>;
   /** URL for the QR image, or null when there is none (mock). */
   qrUrl(): string | null;
+  /** The person's colour labels, and a merge into them (`null` clears); the change also
+   *  arrives as a `labels` stream frame on every page. */
+  labels(): Promise<Labels>;
+  patchLabels(p: LabelsPatch): Promise<Labels>;
 }
 
+/** Every StreamMessage kind: EventSource only delivers the named events listened for, so
+ *  a kind missing here never reaches the page (a test checks it against StreamMessage). */
 export const STREAM_KINDS = [
   "snapshot",
   "event",
@@ -50,7 +58,13 @@ export const STREAM_KINDS = [
   "stats",
   "control",
   "viewers",
-] as const;
+  "suggestion",
+  "labels",
+  "viewState",
+] as const satisfies readonly StreamMessage["kind"][];
+/** Fails to compile while a StreamMessage kind is missing from STREAM_KINDS. */
+const _everyKind: Exclude<StreamMessage["kind"], (typeof STREAM_KINDS)[number]> extends never ? true : never = true;
+void _everyKind;
 
 export class HttpError extends Error {
   constructor(
@@ -150,6 +164,7 @@ export function createHttpTransport(): Transport {
       if (q.limit !== undefined) p.set("limit", String(q.limit));
       if (q.slim) p.set("slim", "1");
       if (q.slim && q.preview !== undefined) p.set("preview", String(q.preview));
+      if (q.agent) p.set("agent", q.agent);
       const qs = p.toString();
       return get<SessionDetail>(`${ROUTES.ui.session}/${enc(harness)}/${enc(id)}${qs ? `?${qs}` : ""}`);
     },
@@ -166,5 +181,12 @@ export function createHttpTransport(): Transport {
     rotateToken: () => post<{ sinkToken: string }>(ROUTES.ui.rotateToken),
     demo: (on) => post<{ on: boolean }>(ROUTES.ui.demo, { on }),
     qrUrl: () => ROUTES.ui.qr,
+    labels: () => get<Labels>(ROUTES.ui.labels),
+    patchLabels: (p) =>
+      fetch(ROUTES.ui.labels, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify(p),
+      }).then((r) => json<Labels>(r)),
   };
 }

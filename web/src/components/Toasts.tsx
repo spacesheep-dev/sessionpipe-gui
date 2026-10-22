@@ -17,6 +17,7 @@ import { openSplit } from "../lib/split";
 import { dismissToast, isOwnSend, pruneAttentionToasts, pushToast, type Toast, useToasts } from "../lib/toasts";
 import { Redacted } from "./bits";
 import { type MenuList, useContextMenu } from "./ContextMenu";
+import { LabelDot } from "./LabelDot";
 import { answerItems } from "./SessionCard";
 
 const attKey = (r: OpenAttention): string => `${r.session.key}|${r.attention.attentionId}`;
@@ -214,6 +215,7 @@ function ToastCard({
         title={t.session ? "Open the session beside this page" : undefined}
       >
         <span className="toast-top">
+          {t.session && <LabelDot session={t.session} />}
           <span className="toast-title">{t.title}</span>
           {t.machine && <span className="toast-machine">{t.machine}</span>}
         </span>

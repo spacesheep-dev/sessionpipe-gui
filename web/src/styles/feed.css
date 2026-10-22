@@ -105,11 +105,30 @@
 .ev-session {
   grid-area: session;
   min-width: 0;
+  display: flex;
+  align-items: baseline;
   color: var(--fg);
   font-weight: 500;
 }
+/* The title gives way first, so a subagent's "↳ Explore" stays readable. */
+.ev-title {
+  min-width: 0;
+}
 .ev-session:focus-visible {
   outline: none;
+}
+/* The session's colour label, at the start of its cell; a subagent's type after the name. */
+.ev-session > .label-dot {
+  flex: none;
+  align-self: center;
+  margin-right: 6px;
+}
+.ev-agent {
+  flex: none;
+  padding-left: 0.3em;
+  color: var(--fg-3);
+  font-weight: 400;
+  white-space: nowrap;
 }
 .ev-machine {
   grid-area: machine;

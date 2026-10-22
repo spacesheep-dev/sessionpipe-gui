@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // GET /api/ui/stream: Server-Sent Events. The first frame is a snapshot, then every
-// store message, every control message and every change of who is connected as it
-// happens, and a `: ping` comment every 15 s so proxies and phones keep the connection.
+// store message, every control message, every change of who is connected, of the
+// labels and of a view's stored state as it happens, and a `: ping` comment every 15 s so proxies and phones keep the connection.
 // Each stream is one Viewer in the registry for as long as it stays open.
 import type { Snapshot, StreamMessage } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
@@ -19,6 +19,8 @@ export interface StreamDeps {
   pingMs?: number;
   /** The plugin host's own messages (suggestions), when plugins are on. */
   plugins?: { subscribe(l: (m: StreamMessage) => void): () => void };
+  /** Other sources forwarded as they are: label changes, view-state writes. */
+  more?: { subscribe(l: (m: StreamMessage) => void): () => void }[];
 }
 
 export function serveStream(ctx: Ctx, deps: StreamDeps): void {
@@ -58,6 +60,7 @@ export function serveStream(ctx: Ctx, deps: StreamDeps): void {
   });
   const offViewers = deps.viewers.subscribe(() => write({ kind: "viewers", viewers: deps.viewers.list(me) }));
   const offPlugins = deps.plugins?.subscribe(write);
+  const offMore = (deps.more ?? []).map((src) => src.subscribe(write));
   const ping = setInterval(() => {
     if (res.destroyed || res.writableEnded) return;
     res.write(": ping\n\n");
@@ -72,10 +75,34 @@ export function serveStream(ctx: Ctx, deps: StreamDeps): void {
     offControl();
     offViewers();
     offPlugins?.();
+    for (const off of offMore) off();
     deps.viewers.remove(me);
     if (!res.writableEnded) res.end();
   };
   res.on("close", cleanup);
   req.on("close", cleanup);
   req.on("error", cleanup);
+}
+
+/** A fan-out of stream messages for sources that have no subscription of their own
+ *  (a view's state written by the theme routes). */
+export class Broadcast {
+  private readonly listeners = new Set<(m: StreamMessage) => void>();
+
+  emit(m: StreamMessage): void {
+    for (const l of this.listeners) {
+      try {
+        l(m);
+      } catch (e) {
+        process.stderr.write(`[stream] listener: ${(e as Error).message}\n`);
+      }
+    }
+  }
+
+  subscribe(l: (m: StreamMessage) => void): () => void {
+    this.listeners.add(l);
+    return () => {
+      this.listeners.delete(l);
+    };
+  }
 }

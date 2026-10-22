@@ -216,3 +216,9 @@
     transition: none;
   }
 }
+
+/* An agent tab's head: the parent session's title as the quiet meta. */
+.panel-parent {
+  min-width: 0;
+  max-width: 40%;
+}

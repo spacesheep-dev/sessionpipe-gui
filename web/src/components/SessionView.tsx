@@ -9,7 +9,7 @@
 // name, the tools of a turn folded into one line. Replies render as markdown in both
 // modes. Every row of the timeline has its own right-click menu (long-press on touch);
 // the empty space around it has the view's options.
-import type { ControlActivity, SessionState, SessionSummary, StoredEvent, Tier } from "@shared/api";
+import type { AgentRun, ControlActivity, SessionState, SessionSummary, StoredEvent, Tier } from "@shared/api";
 import { sessionKey, splitKey } from "@shared/api";
 import {
   createContext,
@@ -28,6 +28,7 @@ import { PromptBody, promptParts } from "../control/Attachments";
 import { useControlActivity } from "../control/hooks";
 import { SessionControl } from "../control/SessionControl";
 import { useMachinesMap, useSession, useStore } from "../data/hooks";
+import { agentLabel, agentsFact, agentType, openAgent, taskNotification } from "../lib/agents";
 import { useFocusTrap } from "../lib/focus";
 import {
   ATTENTION_LABEL,
@@ -40,16 +41,18 @@ import {
   repoShort,
   sessionTitle,
 } from "../lib/format";
-import { absoluteUrl, copyItem, sessionItems } from "../lib/menus";
-import { back, Link, navigate, sessionPath } from "../lib/router";
+import { labelMenu } from "../lib/labels";
+import { absoluteUrl, agentItems, copyItem, sessionItems } from "../lib/menus";
+import { AGENT_PARAM, back, Link, navigate, sessionPath, useSearchParam } from "../lib/router";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
-import { openSplit } from "../lib/split";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { clock, dur, ms, useNow } from "../lib/time";
-import { type EventItem, groupTurns, sentTurns, type ToolItem, type Turn, unframe } from "../lib/turns";
+import { type AgentItem, type EventItem, groupTurns, sentTurns, type ToolItem, type Turn, unframe } from "../lib/turns";
+import { AgentGlyph, AgentNow, AgentText } from "./AgentRow";
 import { HarnessGlyph, Redacted, Segmented, Spinner, StateDot } from "./bits";
-import { confirmAction, type MenuItem, type MenuList, MoreButton, useContextMenu } from "./ContextMenu";
+import { confirmAction, type MenuItem, type MenuList, MoreButton, openMenu, useContextMenu } from "./ContextMenu";
+import { LabelDot, useLabelKeys } from "./LabelDot";
 import { CodeFrame, Markdown } from "./Markdown";
 import { BackButton, PageBar } from "./PageBar";
 
@@ -161,6 +164,13 @@ interface Timeline {
   working: boolean;
   root: RefObject<HTMLDivElement>;
   session: () => SessionSummary | undefined;
+  /** The session's subagents (its summary's). */
+  agents: readonly AgentRun[];
+  /** The agent the view was opened on (`?agent=`, an agent tab): its block opens. */
+  focus: string | null;
+  /** Scroll to an agent's block and open it (a "Subagent finished" row). */
+  showAgent: (id: string) => void;
+  mode: "page" | "panel";
 }
 const TimelineCtx = createContext<Timeline | null>(null);
 const useTimeline = () => useContext(TimelineCtx)!;
@@ -180,9 +190,14 @@ export interface SessionViewProps {
   onSession?: (s: SessionSummary) => void;
   /** After Forget succeeded; the page goes to the board by default. */
   onForgotten?: () => void;
+  /** The panel's agent tab: the view opens on this subagent's block. On a page it is the
+   *  URL's `?agent=`. */
+  agent?: string;
 }
 
-export function SessionView({ harness, id, mode, scrollRef, onSession, onForgotten }: SessionViewProps) {
+export function SessionView({ harness, id, mode, scrollRef, onSession, onForgotten, agent }: SessionViewProps) {
+  const pageAgent = useSearchParam(AGENT_PARAM);
+  const focusAgent = (mode === "page" ? pageAgent : agent) ?? null;
   const store = useStore();
   const key = sessionKey(harness, id);
   const live = useSession(key);
@@ -322,6 +337,26 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
     setTimeout(() => row.classList.remove("is-target"), 1600);
     return true;
   }, []);
+  /** Scroll to an agent's block (it opens itself: it is the focus, or was just asked). */
+  const [shownAgent, setShownAgent] = useState<string | null>(null);
+  const jumpToAgent = useCallback((agentId: string | null): boolean => {
+    if (!agentId) return false;
+    const block = rootRef.current?.querySelector<HTMLElement>(`[data-agent="${CSS.escape(agentId)}"]`);
+    if (!block) return false;
+    // Off at once, not at the next render: the follow effect of this same commit would
+    // otherwise scroll straight back to the bottom.
+    followRef.current = false;
+    setFollow(false);
+    block.scrollIntoView({ block: "start" });
+    return true;
+  }, []);
+  const showAgent = useCallback(
+    (agentId: string) => {
+      setShownAgent(agentId);
+      requestAnimationFrame(() => jumpToAgent(agentId));
+    },
+    [jumpToAgent],
+  );
   useEffect(() => {
     const onHash = () => jumpTo(hashSeq());
     window.addEventListener("hashchange", onHash);
@@ -335,7 +370,7 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
     if (events.length === 0) return;
     if (firstPaint.current) {
       firstPaint.current = false;
-      if (!jumpTo(hashSeq())) scrollTo(scrollHeight());
+      if (!jumpTo(hashSeq()) && !jumpToAgent(focusAgent)) scrollTo(scrollHeight());
       return;
     }
     const a = anchor.current;
@@ -350,7 +385,14 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
         if (Math.abs(scrollY() - want) > 1) scrollTo(want);
       }
     }
-  }, [events, scrollTo, scrollBy, scrollHeight, scrollY, jumpTo]);
+  }, [events, scrollTo, scrollBy, scrollHeight, scrollY, jumpTo, jumpToAgent, focusAgent]);
+  // Asked for another agent while open (a second "Open beside" on the same tab, the URL).
+  const lastFocus = useRef(focusAgent);
+  useEffect(() => {
+    if (focusAgent === lastFocus.current) return;
+    lastFocus.current = focusAgent;
+    if (focusAgent) requestAnimationFrame(() => jumpToAgent(focusAgent));
+  }, [focusAgent, jumpToAgent]);
 
   useEffect(() => {
     if (loading) return;
@@ -384,12 +426,13 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
     () => events.map((e) => atTier(e, lens)).filter((e): e is StoredEvent => e !== null),
     [events, lens],
   );
-  const turns = useMemo(() => groupTurns(visible), [visible]);
+  const agentRuns = s?.agents;
+  const turns = useMemo(() => groupTurns(visible, agentRuns), [visible, agentRuns]);
   const hidden = events.length - visible.length;
   // The delivered messages whose turn this view holds: their rows under the composer fold
   // to one line (control/Activity.tsx), the reply being right here. Matched on every
   // loaded event, whatever the lens leaves out; a copy's message is never here.
-  const allTurns = useMemo(() => (lens >= 3 ? turns : groupTurns(events)), [lens, turns, events]);
+  const allTurns = useMemo(() => (lens >= 3 ? turns : groupTurns(events, agentRuns)), [lens, turns, events, agentRuns]);
   const inChat = useCallback(
     (messages: readonly ControlActivity[]) => {
       const sent = messages
@@ -413,7 +456,7 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
   // To the very end (not "the last row into view": the docked control bar and the tab
   // bar would cover the last rows), on every new event while following.
   useEffect(() => {
-    if (!follow || !isLive) return;
+    if (!follow || !followRef.current || !isLive) return;
     scrollTo(scrollHeight());
   }, [follow, isLive, tailSeq, scrollTo, scrollHeight]);
   useEffect(() => {
@@ -510,6 +553,8 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
     keyOpts,
   );
   useShortcut("session.older", () => (inert() || !hasOlder || olderBusy ? false : void loadOlder()), keyOpts);
+  // ⌥⌘1 … ⌥⌘7 label this session, ⌥⌘0 clears it.
+  useLabelKeys(() => (inert() ? [] : [key]), keyOpts);
 
   const path = sessionPath(harness, id);
   const followItem = (): MenuItem | null =>
@@ -549,8 +594,12 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
       working: s?.state === "working",
       root: rootRef,
       session: () => sRef.current,
+      agents: agentRuns ?? [],
+      focus: shownAgent ?? focusAgent,
+      showAgent,
+      mode,
     }),
-    [path, s?.openAttentions, s?.state],
+    [path, s?.openAttentions, s?.state, agentRuns, shownAgent, focusAgent, showAgent, mode],
   );
 
   if (!s && loading) {
@@ -705,7 +754,12 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
           {mode === "page" ? (
             <PageBar
               back={<BackButton onClick={() => back("/")} />}
-              title={title}
+              title={
+                <>
+                  <BarLabel s={s} />
+                  {title}
+                </>
+              }
               titleClassName="sess-title"
               large={false}
               className="sess-bar"
@@ -763,7 +817,6 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
                     : `Turn ${t.n + turnOffset}`
                 }
                 lens={lens}
-                kids={kids}
                 liveTurn={s.currentTurn ? t === turns[turns.length - 1] : false}
                 fill={fill}
                 chat={chat}
@@ -818,10 +871,12 @@ function SessionMeta({
 }) {
   const repo = chat ? repoShort(s.repo) : repoBranch(s);
   const place = repo || (s.cwd ? basename(s.cwd) : "");
+  const fact = agentsFact(s);
   const state = withState && (
     <span className="sess-state">
       <StateDot state={s.state} decorative />
       {STATUS_WORD[s.state]}
+      {fact && <span className="sess-agents num"> · {fact}</span>}
     </span>
   );
   const copy = copyOf && (
@@ -915,7 +970,6 @@ function firstVisibleRow(root: HTMLElement | null, scroller: HTMLElement | null)
 function TurnBlock({
   turn,
   lens,
-  kids,
   liveTurn,
   fill,
   label,
@@ -924,7 +978,6 @@ function TurnBlock({
 }: {
   turn: Turn;
   lens: Tier;
-  kids: SessionSummary[];
   liveTurn: boolean;
   fill: Fill;
   label: string;
@@ -934,7 +987,9 @@ function TurnBlock({
 }) {
   // Only a running turn or a running tool shows a moving duration; the other blocks
   // (most of the page) have nothing to redraw each second.
-  const hasRunningTool = turn.items.some((i) => i.kind === "tool" && !i.ended);
+  const hasRunningTool = turn.items.some(
+    (i) => (i.kind === "tool" && !i.ended) || (i.kind === "agent" && i.tools.some((t) => !t.ended)),
+  );
   const now = useNow(liveTurn || hasRunningTool ? "fine" : "off");
   const transcript = [...turn.items].reverse().find((i) => i.kind === "event" && i.e.type === "turn.transcript") as
     | EventItem
@@ -955,6 +1010,8 @@ function TurnBlock({
       ? now - startMs
       : undefined;
   const startSeq = turn.start?.session.seq;
+  // Claude Code's own follow-up when a background agent stops: not a person's prompt.
+  const notice = taskNotification(prompt);
 
   if (chat)
     return (
@@ -966,6 +1023,7 @@ function TurnBlock({
         now={now}
         harness={harness}
         prompt={prompt}
+        notice={notice?.agentId}
         promptChars={promptChars}
         transcript={transcript}
         progress={progress}
@@ -977,7 +1035,9 @@ function TurnBlock({
     <li className={`turn ${liveTurn ? "turn--live" : ""} ${turn.n === 0 ? "turn--pre" : ""}`}>
       <TurnHead label={label} start={turn.start} elapsed={elapsed} running={liveTurn && !ended} />
       {turn.start &&
-        (prompt ? (
+        (notice ? (
+          <AgentNotice agentId={notice.agentId} seq={startSeq} />
+        ) : prompt ? (
           <Prompt text={prompt} seq={startSeq} />
         ) : (
           <p className="prompt prompt--hidden">
@@ -987,6 +1047,7 @@ function TurnBlock({
       <ol className="turn-items">
         {turn.items.map((it) => {
           if (it.kind === "tool") return <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} />;
+          if (it.kind === "agent") return <AgentBlock key={it.key} item={it} lens={lens} now={now} fill={fill} />;
           const e = it.e;
           if (e.type === "turn.progress") return null;
           if (e.type === "turn.transcript") {
@@ -995,8 +1056,7 @@ function TurnBlock({
           }
           if (e.type === "turn.ended") return <EndMarker key={it.key} e={e} />;
           if (e.type === "attention.needed") return <AttentionMarker key={it.key} e={e} />;
-          if (e.type === "subagent.started" || e.type === "subagent.ended")
-            return <AgentMarker key={it.key} e={e} kids={kids} />;
+          if (e.type === "subagent.started" || e.type === "subagent.ended") return <AgentMarker key={it.key} e={e} />;
           return <EventMarker key={it.key} e={e} />;
         })}
         {progress && String(progress.e.data.assistant ?? "").trim() && (
@@ -1139,17 +1199,13 @@ function AttentionMarker({ e }: { e: StoredEvent }) {
   );
 }
 
-function AgentMarker({ e, kids }: { e: StoredEvent; kids: SessionSummary[] }) {
-  const agentId = String(e.data.agent_id ?? "");
-  const kid = agentId ? kids.find((k) => k.id.includes(agentId)) : undefined;
-  const menu = useContextMenu(() =>
-    kid
-      ? [
-          { label: "Open subagent", run: () => navigate(sessionPath(kid.harness, kid.id)) },
-          { label: "Open subagent beside", run: () => openSplit(kid.key) },
-        ]
-      : [copyItem("Copy event as JSON", JSON.stringify(e, null, 2)), copyItem("Copy time", e.time)],
-  );
+/** A subagent.started / .ended the timeline could not put in an agent's block (it named
+ *  no agent): a quiet marker, as it came. */
+function AgentMarker({ e }: { e: StoredEvent }) {
+  const menu = useContextMenu(() => [
+    copyItem("Copy event as JSON", JSON.stringify(e, null, 2)),
+    copyItem("Copy time", e.time),
+  ]);
   return (
     <li className="marker marker--agent" data-seq={e.session.seq} {...menu}>
       <Lead time={e.time}>
@@ -1159,11 +1215,6 @@ function AgentMarker({ e, kids }: { e: StoredEvent; kids: SessionSummary[] }) {
         <span>
           {cap(String(e.data.agent_type ?? "subagent"))} {e.type === "subagent.started" ? "started" : "ended"}
         </span>
-        {kid && (
-          <Link to={sessionPath(kid.harness, kid.id)} className="marker-link">
-            Open
-          </Link>
-        )}
       </span>
     </li>
   );
@@ -1221,6 +1272,7 @@ function ChatTurn({
   now,
   harness,
   prompt,
+  notice,
   promptChars,
   transcript,
   progress,
@@ -1233,6 +1285,8 @@ function ChatTurn({
   now: number;
   harness: string;
   prompt: string | undefined;
+  /** The agent a `<task-notification>` prompt reports on: a quiet line, not a bubble. */
+  notice?: string;
   promptChars: number | undefined;
   transcript: EventItem | undefined;
   progress: EventItem | undefined;
@@ -1240,6 +1294,7 @@ function ChatTurn({
 }) {
   const { open, working } = useTimeline();
   const tools = turn.items.filter((i): i is ToolItem => i.kind === "tool");
+  const agentItems = turn.items.filter((i): i is AgentItem => i.kind === "agent");
   // The harness's idle notice ("waiting for your input") asked for nothing: no note.
   const notes = turn.items.filter(
     (i): i is EventItem =>
@@ -1253,12 +1308,14 @@ function ChatTurn({
   const replyText = replyItem ? String(replyItem.e.data.assistant ?? "").trim() : "";
   const busy = liveTurn && !ended && working;
   const startSeq = turn.start?.session.seq;
-  const agent = tools.length > 0 || !!replyText || busy || notes.length > 0 || !!endErr;
+  const agent = tools.length > 0 || agentItems.length > 0 || !!replyText || busy || notes.length > 0 || !!endErr;
   // Before the first turn there is nothing a chat shows (session markers stay out of it).
   if (!turn.start && !agent) return null;
   return (
     <li className={`turn turn--chat ${liveTurn ? "turn--live" : ""}`} data-seq={startSeq}>
-      {turn.start && (
+      {turn.start && notice ? (
+        <AgentNotice agentId={notice} seq={startSeq} />
+      ) : turn.start ? (
         <div className="chat-you">
           <time className="chat-time num" dateTime={turn.start.time}>
             {clock(turn.start.time).slice(0, 5)}
@@ -1271,7 +1328,7 @@ function ChatTurn({
             </p>
           )}
         </div>
-      )}
+      ) : null}
       {agent && (
         <div className="chat-ai">
           <span className="chat-meta">
@@ -1279,6 +1336,13 @@ function ChatTurn({
             {harnessMark(harness).label}
           </span>
           {tools.length > 0 && <ChatTools tools={tools} lens={lens} now={now} fill={fill} />}
+          {agentItems.length > 0 && (
+            <ol className="turn-items chat-agents">
+              {agentItems.map((it) => (
+                <AgentBlock key={it.key} item={it} lens={lens} now={now} fill={fill} />
+              ))}
+            </ol>
+          )}
           {notes.map((it) => (
             <p key={it.key} className="chat-note" data-seq={it.e.session.seq}>
               {cap(ATTENTION_LABEL[String(it.e.data.kind)] ?? String(it.e.data.kind))}
@@ -1402,7 +1466,6 @@ function ToolRow({ item, lens, now, fill }: { item: ToolItem; lens: Tier; now: n
   const input = lens >= 3 ? (item.ended?.data.input ?? item.started?.data.input) : undefined;
   const output = lens >= 3 ? item.ended?.data.output : undefined;
   const error = item.ended?.data.error as string | undefined;
-  const agent = typeof e.data.agent_id === "string";
   const expandable = input !== undefined || output !== undefined || !!error;
   const subject = toolSubject(input);
   const details = useRef<HTMLDetailsElement>(null);
@@ -1440,7 +1503,6 @@ function ToolRow({ item, lens, now, fill }: { item: ToolItem; lens: Tier; now: n
       </span>
       <span className="tool-main">
         <code className="tool-name">{tool}</code>
-        {agent && <span className="tool-agent">subagent</span>}
         {error ? (
           <span className="tool-err ellipsis">{error}</span>
         ) : subject ? (
@@ -1503,3 +1565,218 @@ const pretty = (v: unknown): string => {
     return String(v);
   }
 };
+
+/** The session's label beside the bar's title: its dot, which opens the Label menu at the
+ *  dot. Nothing when it has none (the "⋯" menu sets one). */
+function BarLabel({ s }: { s: SessionSummary }) {
+  const store = useStore();
+  return (
+    <span className="bar-label">
+      <button
+        type="button"
+        className="bar-label-btn"
+        aria-label="Label"
+        onClick={(e) => {
+          const items = labelMenu(store, [s.key]);
+          if ("items" in items) openMenu(tidyMenu(items.items), e.currentTarget.getBoundingClientRect());
+        }}
+      >
+        <LabelDot session={s.key} />
+      </button>
+    </span>
+  );
+}
+
+const tidyMenu = (list: MenuList): MenuItem[] => list.filter((i): i is MenuItem => !!i);
+
+/** An agent the timeline has no reading for (past the summary's AGENTS_MAX, or before it
+ *  arrived): what its own events say. */
+function runOf(item: AgentItem, agents: readonly AgentRun[]): AgentRun {
+  const known = agents.find((a) => a.id === item.id);
+  if (known) return known;
+  const first = item.started ?? item.launch?.started ?? item.tools[0]?.started ?? item.tools[0]?.ended;
+  const ended = item.tools.filter((t) => t.ended);
+  return {
+    id: item.id,
+    type: typeof item.started?.data.agent_type === "string" ? item.started.data.agent_type : undefined,
+    state: item.ended ? "done" : "running",
+    startedAt: first?.time ?? new Date().toISOString(),
+    endedAt: item.ended?.time,
+    lastAt: item.ended?.time ?? ended[ended.length - 1]?.ended?.time ?? first?.time ?? new Date().toISOString(),
+    tools: ended.length,
+    toolErrors: ended.filter((t) => t.ended!.data.ok === false).length,
+    attributed: item.tools.length > 0,
+    recentTools: [],
+  };
+}
+
+/** A page of an agent's tools that came before the loaded ones. */
+const AGENT_PAGE = 50;
+
+/** One subagent under the turn that spawned it: a disclosure group in the timeline, not a
+ *  box. Its head is the launching call's row (the agent glyph, "Type · description", what
+ *  it does now or how long it ran, Open beside); open, its own tool rows on the tree
+ *  guide, earlier ones a page at a time, then its result when the harness sent one. Open
+ *  while it runs, folded once done, unless the person or the URL opened it. */
+function AgentBlock({ item, lens, now, fill }: { item: AgentItem; lens: Tier; now: number; fill: Fill }) {
+  const store = useStore();
+  const { agents, focus, session, mode } = useTimeline();
+  const run = runOf(item, agents);
+  const focused = focus === item.id;
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? (focused || run.state !== "done");
+  const [older, setOlder] = useState<ToolItem[]>([]);
+  const [olderBusy, setOlderBusy] = useState(false);
+  const [olderDone, setOlderDone] = useState(false);
+  const tools = [...older, ...item.tools];
+  const missing = run.attributed && !run.session && !olderDone ? run.tools - tools.filter((t) => t.ended).length : 0;
+  // A focus that arrives later (another agent tab on the same view) opens it again.
+  useEffect(() => {
+    if (focused) setChosen(null);
+  }, [focused]);
+  const s = session();
+  const menu = useContextMenu(
+    () => {
+      const cur = session();
+      return cur
+        ? agentItems(cur, run, { extra: [{ label: open ? "Hide tools" : "Show tools", run: () => setChosen(!open) }] })
+        : null;
+    },
+    { title: () => agentLabel(run) },
+  );
+  const loadOlder = async () => {
+    const cur = session();
+    const first = tools.map((t) => (t.started ?? t.ended)!.session.seq).sort((a, b) => a - b)[0];
+    if (!cur || olderBusy) return;
+    setOlderBusy(true);
+    try {
+      const d = await store.transport.session(cur.harness, cur.id, {
+        agent: run.id,
+        ...(first !== undefined ? { before: first } : { tail: true }),
+        limit: AGENT_PAGE,
+        slim: true,
+        preview: LIST_PREVIEW,
+      });
+      // The page also carries the call that launched it: that is the block's head, not a row.
+      const page = groupTurns(d.events)
+        .flatMap((t) => t.items.flatMap((i) => (i.kind === "agent" ? i.tools : i.kind === "tool" ? [i] : [])))
+        .filter((t) => !run.callId || (t.started ?? t.ended)?.data.call_id !== run.callId);
+      const have = new Set(tools.map((t) => t.key));
+      setOlder((prev) => [...page.filter((t) => !have.has(t.key)), ...prev]);
+      if (!d.hasOlder || page.length === 0) setOlderDone(true);
+    } catch {
+      setOlderDone(true);
+    } finally {
+      setOlderBusy(false);
+    }
+  };
+  const startSeq = (item.launch?.started ?? item.launch?.ended ?? item.started)?.session.seq;
+  return (
+    <li className={`agent-block ${open ? "is-open" : ""}`} data-agent={item.id} data-seq={startSeq}>
+      <div className="agent-head" data-open={focused ? "" : undefined} {...menu}>
+        <span className="marker-time num">{clock(run.startedAt)}</span>
+        <button
+          type="button"
+          className="agent-toggle"
+          aria-expanded={open}
+          onClick={() => setChosen(!open)}
+          title={run.attributed || run.session ? undefined : "Codex doesn't report a subagent's tools separately"}
+        >
+          <span className="marker-glyph">
+            <AgentGlyph a={run} />
+          </span>
+          <AgentText a={run} />
+          <AgentNow a={run} />
+        </button>
+        {s && !(mode === "panel" && focused) && (
+          <button
+            type="button"
+            className="icon-btn agent-beside"
+            aria-label={`Open ${agentLabel(run)} beside`}
+            data-tip="Open beside"
+            onClick={() => openAgent(s, run, "beside")}
+          >
+            <svg
+              viewBox="0 0 20 20"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="2.5" y="4" width="15" height="12" rx="1.5" />
+              <path d="M11 4v12" />
+            </svg>
+          </button>
+        )}
+      </div>
+      {open && (tools.length > 0 || missing > 0) && (
+        <ol className="agent-items" aria-label={`${agentType(run)} tools`}>
+          {missing > 0 && (
+            <li className="agent-older">
+              <button
+                type="button"
+                className="btn btn--sm btn--ghost"
+                onClick={() => void loadOlder()}
+                disabled={olderBusy}
+              >
+                {olderBusy ? "Loading…" : `Earlier tools · ${missing}`}
+              </button>
+            </li>
+          )}
+          {tools.map((t) => (
+            <ToolRow key={t.key} item={t} lens={lens} now={now} fill={fill} />
+          ))}
+        </ol>
+      )}
+      {open && run.result && <AgentResult text={run.result} />}
+    </li>
+  );
+}
+
+/** The agent's last word, when the harness sent it: prose, six lines until asked for all. */
+function AgentResult({ text }: { text: string }) {
+  const [all, setAll] = useState(false);
+  const [long, setLong] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && !all) setLong(el.scrollHeight > el.clientHeight + 1);
+  }, [text, all]);
+  const menu = useContextMenu(() => [copyItem("Copy result", text)]);
+  return (
+    <div className="agent-result" {...menu}>
+      <span className="agent-result-label">Result</span>
+      <div className={`agent-result-text ${all ? "" : "is-clamped"}`} ref={ref}>
+        <Markdown text={text} />
+      </div>
+      {(long || all) && (
+        <button type="button" className="cut-btn agent-result-more" onClick={() => setAll((v) => !v)}>
+          {all ? "Show less" : "Show all"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Claude Code's `<task-notification>` turn: "Subagent finished: Explore · …" with the
+ *  agent glyph; a click goes to the agent's block. */
+function AgentNotice({ agentId, seq }: { agentId: string; seq?: number }) {
+  const { agents, showAgent } = useTimeline();
+  const run = agents.find((a) => a.id === agentId);
+  const menu = useContextMenu(() => [{ label: "Show the subagent", run: () => showAgent(agentId) }]);
+  return (
+    <div className="agent-notice" data-seq={seq} {...menu}>
+      <button type="button" className="agent-notice-btn" onClick={() => showAgent(agentId)}>
+        <span className="marker-glyph">
+          <AgentGlyph a={run ?? { state: "done" }} />
+        </span>
+        <span className="agent-notice-text ellipsis">
+          Subagent finished: {run ? agentLabel(run) : "a background agent"}
+        </span>
+      </button>
+    </div>
+  );
+}

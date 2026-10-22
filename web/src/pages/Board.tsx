@@ -8,15 +8,24 @@ import { SESSION_STATES } from "@shared/api";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { ChipSelect, HarnessGlyph, SearchInput } from "../components/bits";
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
+import { LabelChip, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
 import { PageBar } from "../components/PageBar";
 import { cardHides, lensMenu, SessionCard, useBackgroundMenu, useStickyTop } from "../components/SessionCard";
-import { useAppState, useSessionTree } from "../data/hooks";
+import { useAppState, useLabels, useSessionTree } from "../data/hooks";
+import { agentMatches } from "../lib/agents";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import { focusSearch, useListNav } from "../lib/keys";
+import { type LabelFilter, labelPasses, labelQuery, requestLabelRename } from "../lib/labels";
 import { Link, sessionPath } from "../lib/router";
 import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
 import { useSplitKey } from "../lib/split";
+
+/** Whether a search finds one of a session's agents (their type or what they were asked). */
+const agentsMatch = (s: SessionSummary, q: string): boolean => {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  return words.length > 0 && (s.agents ?? []).some((a) => words.every((w) => agentMatches(a, w)));
+};
 
 const matches = (s: SessionSummary, q: string) => {
   if (!q) return true;
@@ -56,6 +65,7 @@ function viewItems(o: {
     { label: "Find…", action: "search.focus", run: () => void focusSearch() },
     o.filtered && { label: "Clear filters", run: o.clear },
     { label: "Show done sessions", checked: o.showDone, run: () => o.setShowDone(!o.showDone) },
+    { label: "Edit labels…", run: () => requestLabelRename() },
     { sep: true },
     {
       label: "Open sessions",
@@ -87,6 +97,9 @@ export function Board() {
   const [q, setQ] = useState("");
   const [machine, setMachine] = useState("");
   const [harness, setHarness] = useState("");
+  const [label, setLabelFilter] = useState<LabelFilter>("");
+  const labels = useLabels();
+  const lq = useMemo(() => labelQuery(labels, q), [labels, q]);
   const [showDone, setShowDone] = useState(false);
   const lens = useLens();
   const { mode, openSessions } = useAppSettings();
@@ -105,9 +118,13 @@ export function Board() {
         (s) =>
           (!machine || s.machine === machine) &&
           (!harness || s.harness === harness) &&
-          (matches(s, q) || (childrenOf.get(s.key) ?? []).some((c) => matches(c, q))),
+          labelPasses(labels, s.key, label) &&
+          lq.test(s.key) &&
+          (matches(s, lq.rest) ||
+            agentsMatch(s, lq.rest) ||
+            (childrenOf.get(s.key) ?? []).some((c) => matches(c, lq.rest))),
       ),
-    [roots, machine, harness, q, childrenOf],
+    [roots, machine, harness, label, labels, lq, childrenOf],
   );
   const groups = useMemo(() => {
     const g = new Map<SessionState, SessionSummary[]>();
@@ -125,13 +142,16 @@ export function Board() {
   const keys = useMemo(() => ordered.map((s) => s.key), [ordered]);
   const { cursor } = useListNav(hrefs, true, keys);
   const cursorKey = ordered[cursor]?.key;
+  // ⌥⌘1 … ⌥⌘7 label the row under the cursor, ⌥⌘0 clears it.
+  useLabelKeys(() => (cursorKey ? [cursorKey] : []));
   const hiddenByLens = useMemo(() => ordered.reduce((n, s) => n + cardHides(s, lens), 0), [ordered, lens]);
 
-  const filtered = !!(q || machine || harness);
+  const filtered = !!(q || machine || harness || label);
   const clear = useCallback(() => {
     setQ("");
     setMachine("");
     setHarness("");
+    setLabelFilter("");
   }, []);
   const view = () => viewItems({ filtered, clear, showDone, setShowDone, beside, lens, simple });
   const pageMenu = useBackgroundMenu(view, { title: () => "Board" });
@@ -153,6 +173,8 @@ export function Board() {
       simple={simple}
       openBeside={beside}
       open={s.key === openKey}
+      openTab={s.agents?.length ? openKey : null}
+      agentsMatch={!!lq.rest && agentsMatch(s, lq.rest)}
       onlyMachine={setMachine}
       onlyHarness={setHarness}
     />
@@ -187,6 +209,7 @@ export function Board() {
                   icon={(h) => <HarnessGlyph name={h} size="sm" />}
                 />
               )}
+              <LabelChip value={label} onChange={setLabelFilter} />
               {filtered && (
                 <button type="button" className="btn btn--ghost btn--sm" onClick={clear}>
                   Clear

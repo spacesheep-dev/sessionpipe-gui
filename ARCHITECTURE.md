@@ -47,7 +47,7 @@ client against a receiver you can see into.
 | `server/store/*` | server-core | `Store`: `ingest(events, source) → IngestResult`, `snapshot()`, `session(key)`, `sessionDetail(key, after, limit)`, `feed(query)`, `forget(key)`, `subscribe(listener)`, `stats()`, `close()` |
 | `server/receiver/*` | server-core | `registerReceiver(router, deps)`: well-known, events, errors per HTTP.md §2 |
 | `server/sources/outbox.ts` | server-core | `startOutboxSource(store, opts) → { stop }` |
-| `server/ui/*` | server-core | `registerUi(router, deps)`: info, snapshot, stream (SSE), session, feed, forget, rotate token, demo toggle; `staticFiles(dir)` fallback |
+| `server/ui/*` | server-core | `registerUi(router, deps)`: info, snapshot, stream (SSE), session, feed, forget, rotate token, demo toggle; `staticFiles(dir)` fallback; `LabelStore` + `registerLabels` (`labels.ts`: `<stateDir>/labels.json`, GET / PATCH `/api/ui/labels`, `labels` frames, a forgotten session loses its label); `Broadcast` (`stream.ts`: stream messages from elsewhere, the theme routes' `viewState`) |
 | `server/cli.ts` | server-core | flags, banner with LAN URL + QR + `sink add` line, `--open`, `--tls`, `tls status/trust/reset`, `--public-url` |
 | `server/setup/tailscale.ts` | onboarding | `tailscale status --json` / `serve status` probe for the "From anywhere" step, cached across the 2 s polls (`fresh` skips the cache); `serveTailscale`: `tailscale serve --bg <port>`, skipped when already served, `TailscaleError` with the CLI's last lines |
 | `server/phone/*` | onboarding | `registerPhone(router, deps)`: `/api/ui/phone` (`PhoneInfo`: LAN QR, rp id, public url, the Tailscale probe, trusted keys, pending device requests), `POST /tailscale` (this machine: serve, then the public url), `GET /device/:id` (`PhoneDeviceState`, from control's device requests), `POST /trust-check` (`https` true when the request came over TLS) |
@@ -56,11 +56,12 @@ client against a receiver you can see into.
 | `server/conformance/*` | control | runner CLI + vitest that boots `createApp` in-process and runs every delivery fixture |
 | `server/demo/*` | demo | `startDemo(store, opts) → { stop }`: realistic synthetic sessions through `store.ingest(…, "demo")` |
 | `server/extensions/*` | platform | `ExtensionKind { kind, noun, manifestFile, dir, validate }`, `scanKind`, `addExtension/linkExtension/removeExtension/formatEntries`: the folder layout, scan and installer every kind shares |
-| `server/themes/*` | platform | the view kind (`<stateDir>/themes/<id>/theme.json`): `ThemeRegistry`, `/api/ui/themes`, per-theme state, `/themes/:id/*` static, `view add/link/remove/list` (`theme` alias) |
+| `server/themes/*` | platform | the view kind (`<stateDir>/themes/<id>/theme.json`): `ThemeRegistry`, `/api/ui/themes`, per-theme state (with an `etag`; `If-Match` → 412 `conflict`; every write a `viewState` frame through `onState`), `/themes/:id/*` static, `view add/link/remove/list` (`theme` alias) |
 | `server/plugins/*` | platform | the plugin kind (`<stateDir>/plugins/<id>/plugin.json`): `PluginRegistry`, `PluginHost` (import at boot / reload, `PluginApi`, suggestions), settings at `<stateDir>/plugins-settings/<id>.json` (0600, secrets masked on the wire), `/api/ui/plugins`, `/api/ui/plugins/reload` and `PUT …/:id/settings` (loopback), `plugin add/link/remove/list` |
 | `server/skins/*` | platform | the skin kind (`<stateDir>/skins/<id>/skin.json`): `SkinRegistry` (built-ins + packages + `<stateDir>/color-themes/*.json` as one list), `/api/ui/skins`, `/api/ui/skins/reload` (loopback), `/skins/:id/*` static (fonts immutable, json/css no-cache), `skin add/link/remove/list` |
 | `web/src/lib/skins.ts`, `theme.ts` | platform | applies a skin to `<html>` (tokens per scheme, `--font-ui`/`--font-mono`, `--radius`, `--hairline`, `data-density`, `@font-face`, the stylesheet); the per-device choice under `sessionpipe-gui.skin` (migrated once from `sessionpipe-gui.colorTheme`) |
-| `web/src/themes/host/*` | platform | loads a theme at `/t/:id` and builds its `ThemeApi` (`shared/theme-api.ts`) |
+| `web/src/themes/host/*` | platform | loads a theme at `/t/:id` and builds its `ThemeApi` (`shared/theme-api.ts`): the snapshot with `labels`, `labels.set/rename/edit`, `menu.open/session/confirm` (the host's own menu and confirm), `storage.update` (If-Match, retried) and `storage.subscribe` (another device's write, from `viewState` frames) |
+| `web/src/lib/labels.ts`, `components/LabelDot.tsx` | web | a label's name, `setLabel` / `renameLabel` (through `Store.patchLabels`: shown at once, put back on a refusal), the `Label` submenu every session menu carries (`labelMenu`, in `sessionItems`), the `label:` search value (`labelFromQuery`), the "Edit labels" request; `LabelDot` / `LabelSwatch` draw the one dot (`.label-dot`, `--label-*` tokens) |
 | `web/src/plugins/*` | platform | the Plugins section of the Views page: the list from `/api/ui/plugins`, the settings form made from each manifest, Reload; suggestions reach the control strip through `AppState.suggestions` |
 | `web/src/phone/*` | phone-web | `/phone`: one page, laptop side and phone side (`state.ts`, pure and tested), three steps from `GET /api/ui/phone` polled every 2 s; the lane it recommends (Tailscale here, else the same Wi-Fi with the local CA), the phone's own passkey request through `control/useDeviceRequest.ts`, the laptop's Approve through `control/PendingDevices.tsx` |
 | `web/src/control/origin.ts` | control-web | the wrong-origin guard: a page whose origin is not in `Info.control.origins` (or under the rp id on an older server) gets the one line "Sending works from <origin>; open it there." (`words.ts WRONG_ORIGIN`, `insecureHint`, `refusalWords("untrusted_key")`) and is never offered to add a device |
@@ -77,13 +78,28 @@ function names above.
 - `turn.progress` is kept only until its `turn.transcript` or the turn's end.
 - An attention is open from `attention.needed` until `attention.cleared` **or the
   session's next hook event** (CONTROL.md §7).
-- `currentTool` is the last `tool.started` without its `tool.ended` (by `call_id`,
+- `currentTool` is the orchestrator's last `tool.started` without its `tool.ended` (by `call_id`,
   else by name), cleared by any `turn.ended`.
 - State timers: a `working` session with no event for `STALE_AFTER_MS` becomes
   `stale`; anything silent for `DONE_AFTER_MS` becomes `done`. The store re-evaluates
   on a timer and emits `session` messages.
 - `session.forgotten` deletes the file and the index entry, then emits `forgotten`.
 - Subagent sessions (`parent_id` set) count toward the parent's `children`.
+- `agents` (`AgentRun`): the subagents a session ran, read the way Claude Code and Codex
+  send them, inside the parent's session. `subagent.started` opens one (its type; its
+  description and launch call from the newest Agent / Task call not matched yet, or the
+  one whose `output.agentId` names it), `subagent.ended` closes it, and a tool event
+  with `agent_id` is that agent's: it moves the agent's `currentTool`, counts and
+  `recentTools`, never the orchestrator's `currentTool` or turn. A synchronous Agent
+  call's output, or the `<task-notification>` turn Claude Code sends when a background
+  agent stops (tier 2+), is its `result`. An open agent keeps its session `working`
+  after the launching turn ended; one silent for `STALE_AFTER_MS` reads `stale`; the
+  session ending closes them all. A child session (`parent_id`) is merged in by id with
+  `session` set and its own state. `counts.agentsRunning` is the open ones;
+  `counts.subagents` stays the cumulative count. `DetailQuery.agent` pages one agent's
+  events (its `agent_id`, its `subagent.*`, its launch call).
+- Labels are not a reading: they are the person's (`server/ui/labels.ts`), kept beside
+  the store, never on a `SessionSummary`.
 
 ## UI API (all under `/api/ui`, JSON, see `ROUTES` in `shared/api.ts`)
 
@@ -91,8 +107,10 @@ function names above.
 |---|---|
 | GET `/info` | `Info` (sink token and UI key only to loopback or an authenticated UI) |
 | GET `/snapshot` | `Snapshot` |
-| GET `/stream` | SSE of `StreamMessage`; `event:` = kind, `data:` = JSON; first frame a snapshot (with plugins' open `suggestions`); a `suggestion` frame when a plugin suggests an answer; a `: ping` comment every 15 s |
-| GET `/sessions/:harness/:id?after=<seq>&limit=<n>` | `SessionDetail` (full events, read from disk) |
+| GET `/stream` | SSE of `StreamMessage`; `event:` = kind, `data:` = JSON; first frame a snapshot (with plugins' open `suggestions` and the `labels`); a `suggestion` frame when a plugin suggests an answer; a `labels` frame (the whole document, `rev` bumped) on every label change; a `viewState` frame (`id`, `etag`) when a view's state is written; a `: ping` comment every 15 s |
+| GET `/sessions/:harness/:id?after=<seq>&limit=<n>&agent=<id>` | `SessionDetail` (full events, read from disk); `agent` keeps one subagent's events |
+| GET `/labels` | `Labels`: `{ rev, names, sessions }` |
+| PATCH `/labels` | `LabelsPatch` (JSON only, 415 otherwise): a merge, `null` clears → `Labels`; 400 `malformed` / `bad_label` / `bad_name`, 404 `not_found` (a session the store does not know), 413 `too_many` / `too_large` |
 | GET `/events?limit&before&harness&machine&type&session&q` | `FeedPage`, newest first |
 | POST `/sessions/:harness/:id/forget` | 204; same effect as a `session.forgotten` event |
 | POST `/token/rotate` | `{ sinkToken }` (loopback only) |

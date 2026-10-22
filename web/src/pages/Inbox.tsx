@@ -10,14 +10,16 @@ import type { MachineControl } from "@shared/api";
 import { type MutableRefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Ago, HarnessGlyph, Redacted, StateDot } from "../components/bits";
 import { type MenuList, useContextMenu } from "../components/ContextMenu";
+import { LabelChip, LabelDot, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
 import { NotifyToggle } from "../components/NotifyToggle";
 import { PageBar } from "../components/PageBar";
 import { answerItems, lensMenu, useBackgroundMenu, useStickyTop } from "../components/SessionCard";
 import { answerState, useSessionSend } from "../control/useSend";
-import { type OpenAttention, useAppState, useOpenAttentions, useStore } from "../data/hooks";
+import { type OpenAttention, useAppState, useLabels, useOpenAttentions, useStore } from "../data/hooks";
 import { ATTENTION_LABEL, attentionMessage, oneLine, sessionTitle } from "../lib/format";
 import { useListNav } from "../lib/keys";
+import { type LabelFilter, labelPasses } from "../lib/labels";
 import { copyItem, sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { setNotifyPref, useNotifyPref } from "../lib/notify";
 import { Link, navigate, sessionPath } from "../lib/router";
@@ -28,7 +30,10 @@ import { openSplit } from "../lib/split";
 const rowKey = (r: OpenAttention) => `${r.session.key}|${r.attention.attentionId}`;
 
 export function Inbox() {
-  const rows = useOpenAttentions();
+  const all = useOpenAttentions();
+  const labels = useLabels();
+  const [label, setLabelFilter] = useState<LabelFilter>("");
+  const rows = useMemo(() => all.filter((r) => labelPasses(labels, r.session.key, label)), [all, labels, label]);
   const { machines, snapshotAt, connection } = useAppState();
   const answer = useMemo(() => rows.filter((r) => r.answerable), [rows]);
   const terminal = useMemo(() => rows.filter((r) => !r.answerable), [rows]);
@@ -36,6 +41,8 @@ export function Inbox() {
   const hrefs = useMemo(() => ordered.map((r) => sessionPath(r.session.harness, r.session.id)), [ordered]);
   const keys = useMemo(() => ordered.map((r) => r.session.key), [ordered]);
   const { cursor } = useListNav(hrefs, true, keys);
+  // ⌥⌘1 … ⌥⌘7 label the session under the cursor, ⌥⌘0 clears it.
+  useLabelKeys(() => (keys[cursor] ? [keys[cursor]!] : []));
   // The tier lens: attention messages and tool names travel at tier 1 (lib/tier.ts).
   const lens = useLens();
   const simple = useAppSettings().mode === "simple";
@@ -119,6 +126,7 @@ export function Inbox() {
         title="Inbox"
         className="inbox-head"
         meta={meta || undefined}
+        tools={<LabelChip value={label} onChange={setLabelFilter} />}
         actions={
           <>
             <NotifyToggle compact />
@@ -153,6 +161,14 @@ export function Inbox() {
             <p className="state-text">Prompts show up here as soon as the stream is back.</p>
           </div>
         )
+      ) : rows.length === 0 && label ? (
+        <div className="state">
+          <p className="state-title">Nothing with this label needs you</p>
+          <p className="state-text">Prompts from sessions with other labels are hidden.</p>
+          <button type="button" className="btn" onClick={() => setLabelFilter("")}>
+            Show all labels
+          </button>
+        </div>
       ) : rows.length === 0 ? (
         <div className="state inbox-empty">
           <p className="state-title">Nothing needs you</p>
@@ -220,6 +236,7 @@ function InboxRow({
       >
         <span className="inbox-lead">
           <StateDot state={row.answerable ? "needs_you" : s.state} decorative />
+          <LabelDot session={s.key} />
         </span>
         <span className="inbox-title">{sessionTitle(s)}</span>
         <span className="inbox-age">

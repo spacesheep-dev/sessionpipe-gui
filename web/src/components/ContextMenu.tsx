@@ -9,6 +9,8 @@
 // own page and a held Shift keep the browser's menu; anything else without a menu gets
 // nothing, as in a native app. `confirmAction` is the confirm sheet a destructive item
 // asks through. Item builders shared across surfaces live in lib/menus.ts.
+
+import type { LabelColor } from "@shared/api";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -41,6 +43,8 @@ export type MenuItem =
       /** A check (or, with `radio`, a bullet) in the lead column. */
       checked?: boolean;
       radio?: boolean;
+      /** A colour label's dot before the text (the "Label" submenu). */
+      swatch?: LabelColor;
     }
   | { label: string; items: MenuList; disabled?: string | boolean }
   | { sep: true }
@@ -637,7 +641,10 @@ function MenuPanel({
               <span className="menu-check" aria-hidden="true">
                 {leaf?.checked ? <Check radio={leaf.radio} /> : null}
               </span>
-              <span className="menu-label">{i.label}</span>
+              <span className="menu-label">
+                {leaf?.swatch ? <span className={`label-dot label-dot--${leaf.swatch}`} aria-hidden="true" /> : null}
+                {i.label}
+              </span>
               {keys ? (
                 <span className="menu-keys" aria-hidden="true">
                   {keys}
@@ -755,7 +762,12 @@ function ActionSheet({ req, onCloseAll }: { req: MenuRequest; onCloseAll: (resto
                   aria-description={reason(i.disabled)}
                   onClick={() => pick(i)}
                 >
-                  <span className="menu-label">{i.label}</span>
+                  <span className="menu-label">
+                    {isLeaf(i) && i.swatch ? (
+                      <span className={`label-dot label-dot--${i.swatch}`} aria-hidden="true" />
+                    ) : null}
+                    {i.label}
+                  </span>
                   {isLeaf(i) && i.checked ? (
                     <span className="menu-check">
                       <Check radio={i.radio} />

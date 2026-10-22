@@ -87,9 +87,20 @@
 .inbox-lead {
   grid-area: lead;
   display: flex;
+  align-items: center;
   justify-content: center;
   width: 16px;
   align-self: center;
+}
+/* A colour label: its dot 6 px after the glyph and 6 px before the title. */
+.inbox-lead:has(.label-dot) {
+  justify-content: flex-start;
+  gap: 6px;
+  width: auto;
+  padding: 0 6px 0 3px;
+}
+.inbox-main:has(.inbox-lead .label-dot) {
+  grid-template-columns: minmax(28px, auto) minmax(0, 1fr) auto;
 }
 .inbox-title {
   grid-area: title;

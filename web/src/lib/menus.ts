@@ -2,15 +2,17 @@
 // The context-menu items more than one surface shows, built once so a session's menu
 // reads the same on a board row, an inbox row, a panel tab, a toast and the session's own
 // "⋯": open (as a page, beside, in the background, in a new window), whatever the
-// surface can answer, go to the parent or a subagent, copy, forget. Only actions that
+// surface can answer, its colour label, go to the parent or a subagent, copy, forget. Only actions that
 // exist; a surface adds its own groups around these. Builders run when a menu opens, so
 // they read the current URL and settings, never a stale render.
-import type { SessionSummary } from "@shared/api";
+import type { AgentRun, SessionSummary } from "@shared/api";
 import type { MenuItem, MenuList } from "../components/ContextMenu";
 import { confirmAction, tidy } from "../components/ContextMenu";
 import type { Store } from "../data/store";
+import { agentGlyph, agentLabel, openAgent } from "./agents";
 import { copyText } from "./clipboard";
 import { harnessMark, repoBranch, sessionTitle } from "./format";
+import { labelMenu } from "./labels";
 import { hrefFor, navigate, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath } from "./router";
 import { getSettings } from "./settings";
 import { closeTab, openSplit, parseSplit } from "./split";
@@ -107,14 +109,28 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
     { sep: true },
     ...(ctx.answer ?? []),
     { sep: true },
+    labelMenu(ctx.store, [s.key]),
+    { sep: true },
     s.parentId && {
       label: "Open parent session",
       run: () => navigate(sessionPath(s.harness, s.parentId!)),
     },
-    kids.length > 0 && {
-      label: "Subagents",
-      items: kids.map((c) => ({ label: sessionTitle(c), run: () => navigate(sessionPath(c.harness, c.id)) })),
-    },
+    // Its subagents, read from its events (running first), each opening beside; a session
+    // whose summary carries none falls back to the child sessions the surface knows.
+    (s.agents?.length ?? 0) > 0
+      ? {
+          label: "Subagents",
+          items: s.agents.map((a) => ({
+            label: agentLabel(a),
+            checked: agentGlyph(a) === "working",
+            radio: true,
+            run: () => openAgent(s, a),
+          })),
+        }
+      : kids.length > 0 && {
+          label: "Subagents",
+          items: kids.map((c) => ({ label: sessionTitle(c), run: () => navigate(sessionPath(c.harness, c.id)) })),
+        },
     s.url && {
       label: `Open in ${harnessMark(s.harness).label}`,
       run: () => void window.open(s.url, "_blank", "noopener"),
@@ -142,3 +158,31 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
 export const sessionMenuTitle = (s: SessionSummary) => sessionTitle(s);
 export const sessionMenuSubtitle = (s: SessionSummary) =>
   [s.machine, repoBranch(s)].filter(Boolean).slice(0, 2).join(" · ");
+
+/** The menu of one subagent (a board's agent row, a session view's agent block, the
+ *  palette): open it beside or as a page, its parent when the surface is elsewhere, and
+ *  what can be copied. Only what the agent carries. */
+export function agentItems(
+  s: SessionSummary,
+  a: AgentRun,
+  opts: { parent?: boolean; extra?: MenuList } = {},
+): MenuItem[] {
+  return tidy([
+    // A phone opens an agent as the page on it: one item, not two that do the same.
+    desktop() && { label: "Open beside", run: () => openAgent(s, a, "beside") },
+    { label: "Open as page", run: () => openAgent(s, a, "page") },
+    { sep: true },
+    opts.parent && { label: "Open parent session", run: () => navigate(sessionPath(s.harness, s.id)) },
+    { sep: true },
+    ...(opts.extra ?? []),
+    { sep: true },
+    {
+      label: "Copy",
+      items: [
+        copyItem("Agent ID", a.id),
+        copyItem("Description", a.description ?? null),
+        copyItem("Result", a.result ?? null),
+      ],
+    },
+  ]);
+}

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // A session's events grouped by turn, as the timeline and the chat draw them, and which
-// of those turns a message sent from here became. Pure, so both are unit-tested.
-import type { StoredEvent } from "@shared/api";
+// of those turns a message sent from here became. A subagent's events (`agent_id`) are
+// one group inside the turn that spawned it, wherever they arrive (a background agent
+// works on after that turn's Stop). Pure, so both are unit-tested.
+import type { AgentRun, StoredEvent } from "@shared/api";
 
 export interface Turn {
   n: number;
@@ -10,9 +12,27 @@ export interface Turn {
 }
 export type Item =
   | { kind: "tool"; key: string; started?: StoredEvent; ended?: StoredEvent }
-  | { kind: "event"; key: string; e: StoredEvent };
+  | { kind: "event"; key: string; e: StoredEvent }
+  | AgentItem;
 export type EventItem = Extract<Item, { kind: "event" }>;
 export type ToolItem = Extract<Item, { kind: "tool" }>;
+
+/** One subagent in its spawning turn: the Agent / Task call that launched it (the block's
+ *  head), its subagent.started / .ended, and its own tool calls. */
+export interface AgentItem {
+  kind: "agent";
+  key: string;
+  id: string;
+  launch?: ToolItem;
+  started?: StoredEvent;
+  ended?: StoredEvent;
+  tools: ToolItem[];
+}
+
+/** The tools that launch a subagent (server/store/readings.ts LAUNCH_TOOLS). */
+const LAUNCH_TOOLS = new Set(["Agent", "Task"]);
+
+const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
 
 /** How far a transcript's `at` may sit outside a turn's span and still be that turn's. The
  *  sender stamps the exchange with its prompt's time (the sim with its end), and the hook
@@ -53,36 +73,100 @@ function transcriptHome(turns: Turn[], at: number): Turn | null | undefined {
   return bestD <= TRANSCRIPT_SLACK_MS ? best : undefined;
 }
 
-export function groupTurns(events: StoredEvent[]): Turn[] {
+/** Pairs a tool.ended with its tool.started among `open` (by call id, else by name), or
+ *  makes an ended-only item; returns the item when it is new. */
+function pairEnd(open: Map<string, ToolItem>, e: StoredEvent): ToolItem | null {
+  const id = typeof e.data.call_id === "string" ? e.data.call_id : undefined;
+  const item = (id ? open.get(id) : undefined) ?? open.get(`name:${e.data.tool}`);
+  if (item && !item.ended) {
+    item.ended = e;
+    if (id) open.delete(id);
+    open.delete(`name:${e.data.tool}`);
+    return null;
+  }
+  return { kind: "tool", key: `e:${e.id}`, ended: e };
+}
+
+function openTool(open: Map<string, ToolItem>, e: StoredEvent): ToolItem {
+  const id = String(e.data.call_id ?? `${e.data.tool}#${e.session.seq}`);
+  const item: ToolItem = { kind: "tool", key: `t:${e.session.seq}`, started: e };
+  open.set(id, item);
+  if (!e.data.call_id) open.set(`name:${e.data.tool}`, item);
+  return item;
+}
+
+/** The session's events as turns. `agents` (the summary's) name each subagent's launching
+ *  call and spawning turn, so its block sits where it was launched. */
+export function groupTurns(events: StoredEvent[], agents: readonly AgentRun[] = []): Turn[] {
   const turns: Turn[] = [];
   let cur: Turn = { n: 0, items: [] };
   turns.push(cur);
   let openTools = new Map<string, Extract<Item, { kind: "tool" }>>();
+  const byTurnId = new Map<string, Turn>();
+  const runs = new Map(agents.map((a) => [a.id, a]));
+  const byCall = new Map(agents.filter((a) => a.callId).map((a) => [a.callId!, a.id]));
+  const groups = new Map<string, { item: AgentItem; open: Map<string, ToolItem> }>();
+  /** An agent's group, made in its spawning turn (the turn its events name, else the one
+   *  the summary names, else the current one) the first time it is heard of. */
+  const group = (id: string, e: StoredEvent, at?: Turn) => {
+    let g = groups.get(id);
+    if (!g) {
+      const home = at ?? byTurnId.get(str(e.data.turn_id) ?? "") ?? byTurnId.get(runs.get(id)?.turnId ?? "") ?? cur;
+      g = { item: { kind: "agent", key: `a:${id}`, id, tools: [] }, open: new Map() };
+      home.items.push(g.item);
+      groups.set(id, g);
+    }
+    return g;
+  };
   for (const e of events) {
     if (e.type === "turn.started") {
       cur = { n: turns.length, start: e, items: [] };
       turns.push(cur);
       openTools = new Map();
+      const tid = str(e.data.turn_id);
+      if (tid) byTurnId.set(tid, cur);
+      continue;
+    }
+    const agentId = str(e.data.agent_id);
+    if (agentId && (e.type === "tool.started" || e.type === "tool.ended")) {
+      const g = group(agentId, e);
+      if (e.type === "tool.started") g.item.tools.push(openTool(g.open, e));
+      else {
+        const made = pairEnd(g.open, e);
+        if (made) g.item.tools.push(made);
+      }
+      continue;
+    }
+    if (agentId && (e.type === "subagent.started" || e.type === "subagent.ended")) {
+      const g = group(agentId, e);
+      if (e.type === "subagent.started") g.item.started ??= e;
+      else g.item.ended = e;
+      continue;
+    }
+    // The call that launched a known agent: the agent's block, at the call's place.
+    const launched =
+      (e.type === "tool.started" || e.type === "tool.ended") && LAUNCH_TOOLS.has(String(e.data.tool))
+        ? byCall.get(str(e.data.call_id) ?? "")
+        : undefined;
+    if (launched && e.type === "tool.started") {
+      const g = group(launched, e, groups.has(launched) ? undefined : cur);
+      const item = openTool(openTools, e);
+      g.item.launch ??= item;
+      continue;
+    }
+    if (launched && e.type === "tool.ended" && !openTools.has(String(e.data.call_id))) {
+      const g = group(launched, e, groups.has(launched) ? undefined : cur);
+      if (g.item.launch && !g.item.launch.ended) g.item.launch.ended = e;
+      else g.item.launch ??= { kind: "tool", key: `e:${e.id}`, ended: e };
       continue;
     }
     if (e.type === "tool.started") {
-      const id = String(e.data.call_id ?? `${e.data.tool}#${e.session.seq}`);
-      const item: Extract<Item, { kind: "tool" }> = { kind: "tool", key: `t:${e.session.seq}`, started: e };
-      cur.items.push(item);
-      openTools.set(id, item);
-      if (!e.data.call_id) openTools.set(`name:${e.data.tool}`, item);
+      cur.items.push(openTool(openTools, e));
       continue;
     }
     if (e.type === "tool.ended") {
-      const id = typeof e.data.call_id === "string" ? e.data.call_id : undefined;
-      const open = (id ? openTools.get(id) : undefined) ?? openTools.get(`name:${e.data.tool}`);
-      if (open && !open.ended) {
-        open.ended = e;
-        if (id) openTools.delete(id);
-        openTools.delete(`name:${e.data.tool}`);
-      } else {
-        cur.items.push({ kind: "tool", key: `e:${e.id}`, ended: e });
-      }
+      const made = pairEnd(openTools, e);
+      if (made) cur.items.push(made);
       continue;
     }
     if (e.type === "turn.transcript" && turns.length > 1) {

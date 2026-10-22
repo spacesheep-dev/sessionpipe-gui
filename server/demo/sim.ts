@@ -19,11 +19,12 @@ import {
   type HarnessName,
   MACHINE_NAMES,
   MODELS,
+  PARALLEL_TURN,
   REPOS,
   RESUME_TURN,
   type Repo,
   SILENT_TURN,
-  type ToolStep,
+  type SubagentScript,
   type TurnScript,
 } from "./content.js";
 import { Rng } from "./rng.js";
@@ -93,6 +94,10 @@ interface Profile {
   /** The hook that reports an edit as files.changed (Cursor's afterFileEdit); otherwise
    *  the post-tool hook stands for it. */
   filesChangedEvent?: string;
+  /** A subagent runs inside the parent's session, its tools stamped with `agent_id` and
+   *  the spawning turn's `turn_id` (Claude Code, as recorded). Otherwise it runs as a
+   *  child session with `parent_id` (the spec's other shape; Cursor here). */
+  agentsInParent?: boolean;
 }
 
 const PROFILES: Record<HarnessName, Profile> = {
@@ -117,6 +122,7 @@ const PROFILES: Record<HarnessName, Profile> = {
     attentionId: (r) => r.perm(),
     progress: true,
     modelAtStart: false,
+    agentsInParent: true,
   },
   codex: {
     name: "codex",
@@ -228,6 +234,12 @@ const prune = (o: Record<string, unknown>): Record<string, unknown> => {
   return out;
 };
 
+/** An Agent / Task call's `input.description`, when it has one. */
+const describe = (input: unknown): string | undefined => {
+  const d = (input as { description?: unknown } | null)?.description;
+  return typeof d === "string" && d ? d : undefined;
+};
+
 /** The first line of a prompt, cut the way the harness readers cut a first-ask title. */
 export function firstAsk(prompt: string, max = 50): string {
   const line =
@@ -242,6 +254,10 @@ export function firstAsk(prompt: string, max = 50): string {
 export class Sess {
   seq: number;
   readonly block: Block;
+  /** Background subagents still running, and the ones that finished and wait for the
+   *  orchestrator's `<task-notification>` turn. */
+  agentsOpen = 0;
+  readonly notices: { agentId: string; callId?: string; description?: string; sub: SubagentScript }[] = [];
   constructor(
     readonly sim: Simulation,
     readonly profile: Profile,
@@ -461,6 +477,19 @@ export class Simulation {
       90_000,
     );
 
+    // Three reviewers at once, two of them outliving the turn that launched them.
+    const parallel = () =>
+      this.session({
+        harness: "claude-code",
+        machine: m(1),
+        repo: REPOS[4] as Repo,
+        branch: "perf/bm25-cache",
+        turns: [PARALLEL_TURN],
+        source: "startup",
+        end: "exit",
+      });
+    this.spawn(parallel(), 10_000);
+
     let lastShowcase = this.now;
     yield OPENING_MS;
     for (;;) {
@@ -468,6 +497,7 @@ export class Simulation {
       if (this.now - lastShowcase > 7 * 60_000) {
         lastShowcase = this.now;
         this.spawn(showcase());
+        this.spawn(parallel(), 30_000);
         continue;
       }
       if (this.live >= 6) continue;
@@ -590,6 +620,16 @@ export class Simulation {
         this.live--;
         return;
       }
+      // Background agents report back, each in a turn of its own, before the next prompt.
+      while (sess.agentsOpen > 0 || sess.notices.length) {
+        const n = sess.notices.shift();
+        if (!n) {
+          yield 2000;
+          continue;
+        }
+        yield rng.ms(1500, 400);
+        yield* this.notificationTurn(sess, n, turn++);
+      }
       yield p.pause ?? rng.ms(30_000, 5000);
     }
     // No session-end hook: the session just goes quiet after its last Stop.
@@ -642,13 +682,21 @@ export class Simulation {
       const callId = profile.callId?.(rng);
       if (!profile.toolsEndedOnly)
         sess.emit("tool.started", { tool: step.tool, call_id: callId, turn_id: turnId, input: step.input }, ev.preTool);
-      yield step.ms;
       const ok = step.ok ?? true;
       let output = step.output;
-      let agentId: string | undefined;
-      if (step.subagent) {
-        agentId = rng.agent();
-        output = typeof output === "string" ? `${output}\nagentId: ${agentId}` : { ...(output as object), agentId };
+      const sub = step.subagent;
+      const agentId = sub ? rng.agent() : undefined;
+      const background = !!sub && (output as { isAsync?: unknown } | undefined)?.isAsync === true;
+      const inParent = !!sub && !!profile.agentsInParent;
+      if (sub && agentId && inParent && !background) {
+        // A synchronous agent: it runs while the call is open, and its last message is
+        // the call's output.
+        yield* this.agentInParent(sess, sub, agentId, turnId);
+        output = { status: "completed", agentId, content: [{ type: "text", text: sub.result ?? "" }] };
+      } else {
+        yield step.ms;
+        if (sub && agentId)
+          output = typeof output === "string" ? `${output}\nagentId: ${agentId}` : { ...(output as object), agentId };
       }
       const postEvent = ok ? ev.postTool : ev.postToolFail;
       if (profile.toolsEndedOnly) {
@@ -686,7 +734,13 @@ export class Simulation {
         if (profile.progress && this.now - lastProgress >= PROGRESS_EVERY_MS)
           progress(ok ? ev.postTool : ev.postToolFail);
       }
-      if (step.subagent && agentId) yield* this.subagent(sess, step.subagent, agentId);
+      if (sub && agentId && !inParent) yield* this.subagent(sess, sub, agentId);
+      // A background agent: SubagentStart right after the call returned, then it works
+      // on its own clock while the orchestrator's turn goes on and ends.
+      if (sub && agentId && inParent && background) {
+        sess.agentsOpen++;
+        this.spawn(this.agentInParent(sess, sub, agentId, turnId, { callId, description: describe(step.input) }));
+      }
       if (step.compactAfter) {
         yield rng.ms(2000, 500);
         sess.emit("context.compacted", { trigger: "auto" }, ev.compact);
@@ -721,9 +775,84 @@ export class Simulation {
     );
   }
 
+  /** A subagent as Claude Code sends it: inside the parent's session, every tool stamped
+   *  with its `agent_id` and the spawning turn's `turn_id`, bracketed by SubagentStart and
+   *  SubagentStop. `background`: it was launched async; when it ends it leaves a notice
+   *  for the orchestrator's `<task-notification>` turn. */
+  private *agentInParent(
+    sess: Sess,
+    sub: SubagentScript,
+    agentId: string,
+    turnId: string | undefined,
+    background?: { callId?: string; description?: string },
+  ): Script {
+    const rng = this.rng;
+    const profile = sess.profile;
+    const ev = profile.ev;
+    const [think, spread] = sub.think ?? [3000, 800];
+    sess.emit("subagent.started", { agent_id: agentId, agent_type: sub.type }, ev.subStart);
+    yield rng.ms(4000, 1000);
+    for (const step of sub.steps) {
+      const callId = profile.callId?.(rng);
+      sess.emit(
+        "tool.started",
+        { tool: step.tool, call_id: callId, agent_id: agentId, turn_id: turnId, input: step.input },
+        ev.preTool,
+      );
+      yield step.ms;
+      const ok = step.ok ?? true;
+      sess.emit(
+        "tool.ended",
+        {
+          tool: step.tool,
+          call_id: callId,
+          agent_id: agentId,
+          turn_id: turnId,
+          ms: step.ms,
+          ok,
+          error: ok ? undefined : step.error,
+          input: step.input,
+          output: step.output ?? null,
+        },
+        ok ? ev.postTool : ev.postToolFail,
+      );
+      yield rng.ms(think, spread);
+    }
+    sess.emit("subagent.ended", { agent_id: agentId, agent_type: sub.type }, ev.subStop);
+    if (background) {
+      sess.notices.push({ agentId, callId: background.callId, description: background.description, sub });
+      sess.agentsOpen--;
+    }
+  }
+
+  /** Claude Code's follow-up when a background agent stops: a prompt of the harness's own,
+   *  worded as the recording has it, and the orchestrator's answer to it. */
+  private *notificationTurn(sess: Sess, n: Sess["notices"][number], turn: number): Script {
+    const rng = this.rng;
+    const ev = sess.profile.ev;
+    const turnId = sess.profile.turnId?.(rng, this.wall());
+    const user = [
+      "<task-notification>",
+      `<task-id>${n.agentId}</task-id>`,
+      ...(n.callId ? [`<tool-use-id>${n.callId}</tool-use-id>`] : []),
+      "<status>completed</status>",
+      `<summary>Agent "${n.description ?? n.sub.type}" finished</summary>`,
+      `<result>${n.sub.result ?? ""}</result>`,
+      "</task-notification>",
+    ].join("\n");
+    const startedAt = this.now;
+    sess.emit("turn.started", { turn_id: turnId, prompt_chars: [...user].length }, ev.prompt);
+    if (sess.profile.progress)
+      sess.emit("turn.progress", { turn, user, assistant: "", at: new Date(this.wall()).toISOString() }, ev.prompt);
+    yield rng.ms(7000, 2000);
+    const assistant = n.sub.followUp ?? `The ${n.sub.type} agent reported back.`;
+    sess.emit("turn.ended", { turn_id: turnId, reason: "stop", ms: this.now - startedAt }, ev.stop);
+    sess.emit("turn.transcript", { turn, user, assistant, at: new Date(this.wall()).toISOString() }, ev.stop);
+  }
+
   /** A subagent: the parent announces it, the child runs as its own session with
    *  parent_id and agent_id on every tool, then the parent closes it. */
-  private *subagent(parent: Sess, sub: { type: string; steps: ToolStep[] }, agentId: string): Script {
+  private *subagent(parent: Sess, sub: SubagentScript, agentId: string): Script {
     const rng = this.rng;
     const ev = parent.profile.ev;
     parent.emit("subagent.started", { agent_id: agentId, agent_type: sub.type }, ev.subStart);

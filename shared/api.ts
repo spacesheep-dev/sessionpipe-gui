@@ -125,8 +125,13 @@ export interface SessionSummary {
     compactions: number;
     filesChanged: number;
     attentions: number;
+    /** Agents in `agents` not yet ended (running or stale). `subagents` above counts every
+     *  subagent.started ever; this is the live number. */
+    agentsRunning: number;
   };
-  /** The tool running right now (tool.started without its tool.ended), if any. */
+  /** The orchestrator's own tool running right now (tool.started without its tool.ended),
+   *  if any. A subagent's tool (one with `agent_id`) runs on its AgentRun instead.
+   *  `agentId` is kept for older clients and is no longer set. */
   currentTool?: { tool: string; callId?: string; since: string; agentId?: string };
   /** The turn running right now, if any. */
   currentTurn?: { turnId?: string; since: string; promptChars?: number };
@@ -138,6 +143,11 @@ export interface SessionSummary {
   lastAssistant?: string;
   /** Number of subagent sessions whose parent_id is this session. */
   children: number;
+  /** The subagents this session ran, open ones first, then the newest ended, at most
+   *  AGENTS_MAX. Read from its own events (subagent.started / .ended, `agent_id` on tools),
+   *  which is how Claude Code and Codex report them; a child session with `parent_id` is
+   *  merged in by id with `session` set. Empty when it ran none. */
+  agents: AgentRun[];
   /** Last tool names, newest last, at most 8 — for a sparkline of activity. */
   recentTools: { tool: string; ok: boolean; ms?: number }[];
   /** The store's smarter readings (ARCHITECTURE.md "The store's readings"): what is
@@ -148,6 +158,53 @@ export interface SessionSummary {
 }
 
 export const SNIPPET_CHARS = 280;
+
+/** At most this many AgentRuns ride on a summary (open ones are never dropped). */
+export const AGENTS_MAX = 20;
+
+/** A subagent, as the GUI reads it from the protocol (spec: subagent.started / .ended,
+ *  `agent_id` on tool events, the Agent / Task tool's input and output at tier 3). Claude
+ *  Code and Codex keep a subagent inside its parent's session; a harness that gives it a
+ *  session of its own (`parent_id`) is linked through `session`. Nothing here is guessed:
+ *  a field the events did not carry is absent. */
+export interface AgentRun {
+  /** `data.agent_id` (a child session's id when it came as one). */
+  id: string;
+  /** `data.agent_type`: "Explore", "general-purpose". */
+  type?: string;
+  /** The launching Agent / Task tool's `input.description` (tier 3): the line a person
+   *  recognises, "Find ad-hoc money formatting". */
+  description?: string;
+  /** The launching tool call: by its `output.agentId` (tier 3), else the newest Agent /
+   *  Task call not yet matched to an agent. */
+  callId?: string;
+  /** The turn that spawned it: the turn open when it started (Claude Code also stamps it
+   *  on every one of the agent's tools). */
+  turnId?: string;
+  /** running: started and not ended, with an event of its own within STALE_AFTER_MS.
+   *  stale: not ended and silent longer. done: subagent.ended, or the session ended. */
+  state: "running" | "stale" | "done";
+  startedAt: string;
+  endedAt?: string;
+  /** Its newest event. */
+  lastAt: string;
+  /** Its own tool calls (tool.ended with its `agent_id`); 0 for a harness that does not
+   *  stamp them (Codex), see `attributed`. */
+  tools: number;
+  toolErrors: number;
+  /** Whether its tools are told apart from the orchestrator's (they carry `agent_id`).
+   *  False for Codex, whose subagent tools arrive unmarked: show no tool facts then. */
+  attributed: boolean;
+  /** Its tool running right now. */
+  currentTool?: { tool: string; callId?: string; since: string };
+  /** Its last tools, newest last, at most 4. */
+  recentTools: { tool: string; ok: boolean; ms?: number }[];
+  /** A synchronous Agent call's output (tier 3), cut to SNIPPET_CHARS. Absent when the
+   *  agent ran in the background: the protocol does not carry its result then. */
+  result?: string;
+  /** The child session, when the harness sent the agent as one (`parent_id`). */
+  session?: SessionKey;
+}
 
 /** slow_tool: `currentTool` has run longer than SLOW_TOOL_MS. error_streak: the last
  *  3+ tool.ended were `ok: false`. loop: within the last 10 tool.started the same tool
@@ -228,6 +285,8 @@ export interface Snapshot {
   viewers?: Viewer[];
   /** Plugins' open suggestions (shared/plugin-api.ts); present on the stream's first frame. */
   suggestions?: Suggestion[];
+  /** The person's colour labels; present on the stream's first frame. */
+  labels?: Labels;
 }
 
 /** A server plugin's suggested answer to an open permission (shared/plugin-api.ts). Advice
@@ -258,7 +317,51 @@ export type StreamMessage =
   | { kind: "stats"; stats: Stats }
   | { kind: "control"; message: ControlActivity }
   | { kind: "viewers"; viewers: Viewer[] }
-  | { kind: "suggestion"; suggestion: Suggestion };
+  | { kind: "suggestion"; suggestion: Suggestion }
+  /** The whole label document after a change (small, idempotent; drop one whose `rev`
+   *  is older than what the page has). */
+  | { kind: "labels"; labels: Labels }
+  /** A view's server-side state (THEME_ROUTES.state) was written; `etag` names the new
+   *  version, so the page that wrote it can tell its own write from another device's. */
+  | { kind: "viewState"; id: string; etag: string };
+
+// ---------- labels (the person's colour labels; GET / PATCH ROUTES.ui.labels) ----------
+
+/** Seven muted colours, Finder's set. Ids, never hex: the colours are tokens
+ *  (`--label-red` …) each skin and scheme tunes. */
+export type LabelColor = "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "grey";
+export const LABEL_COLORS: readonly LabelColor[] = ["red", "orange", "yellow", "green", "blue", "purple", "grey"];
+/** A label's own name when the person gave it none. */
+export const LABEL_DEFAULT_NAMES: Readonly<Record<LabelColor, string>> = {
+  red: "Red",
+  orange: "Orange",
+  yellow: "Yellow",
+  green: "Green",
+  blue: "Blue",
+  purple: "Purple",
+  grey: "Grey",
+};
+/** A label name's longest form, in characters. */
+export const LABEL_NAME_MAX = 32;
+/** Labelled sessions the server keeps at most. */
+export const LABELS_MAX = 5000;
+
+/** `<stateDir>/labels.json`, as the server serves it. One label per session. */
+export interface Labels {
+  /** Bumped on every change: a page drops a frame older than what it has. */
+  rev: number;
+  /** The names the person gave; a colour without one is called by LABEL_DEFAULT_NAMES. */
+  names: Partial<Record<LabelColor, string>>;
+  sessions: Record<SessionKey, LabelColor>;
+}
+
+/** A merge (PATCH): `null` clears. Several keys at once serve a multi-select "Label ▸". */
+export interface LabelsPatch {
+  sessions?: Record<SessionKey, LabelColor | null>;
+  names?: Partial<Record<LabelColor, string | null>>;
+}
+
+export const EMPTY_LABELS: Labels = Object.freeze({ rev: 0, names: {}, sessions: {} }) as Labels;
 
 /** A browser connected to this GUI's stream right now: a phone on the LAN, this
  *  laptop's own tab. The receiver's reading of "devices", from the connection only;
@@ -306,6 +409,10 @@ export interface DetailQuery {
   slim?: boolean;
   /** With `slim`: a shorter cut, 200–2048 chars, for list pages. */
   preview?: number;
+  /** Only this subagent's events (an AgentRun id): its subagent.started / .ended, the
+   *  tool calls stamped with its `agent_id`, and the Agent / Task call that launched it.
+   *  Paged like the whole session; `total` counts the filtered events. */
+  agent?: string;
 }
 
 export interface FeedPage {
@@ -804,6 +911,10 @@ export const ROUTES = {
      *  `tailscale serve --bg <port>`, then the public url, → PhoneInfo, or { error });
      *  GET /device/:id → PhoneDeviceState; POST /trust-check → PhoneTrustCheck. */
     phone: "/api/ui/phone",
+    /** GET → Labels; PATCH LabelsPatch (application/json) → Labels. 400 `malformed` /
+     *  `bad_label` / `bad_name`, 404 `not_found` (a session the store does not know), 413
+     *  `too_many` / `too_large`, 415 `json_only`. Every change is a `labels` stream frame. */
+    labels: "/api/ui/labels",
   },
   /** GET / DELETE /attachments/<id>.<ext>, UI key: the uploaded image itself (served
    *  `private, immutable`), and taking it back. */

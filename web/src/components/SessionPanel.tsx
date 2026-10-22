@@ -7,7 +7,7 @@
 // scroller mounted up to MOUNTED_MAX, so its scroll position and loaded pages survive a
 // switch. Tabs and the head have their own menus. Opening from a rectangle morphs a
 // ghost of it into the panel.
-import type { SessionKey, SessionSummary } from "@shared/api";
+import type { AgentRun, SessionKey, SessionSummary } from "@shared/api";
 import { splitKey } from "@shared/api";
 import {
   createRef,
@@ -21,10 +21,11 @@ import {
   useState,
 } from "react";
 import { useAppState, useStore } from "../data/hooks";
+import { agentLabel, parseTab } from "../lib/agents";
 import { focusTab, tablistKey } from "../lib/focus";
 import { sessionTitle } from "../lib/format";
-import { sessionItems, sessionMenuSubtitle } from "../lib/menus";
-import { Link, navigate, sessionPath } from "../lib/router";
+import { agentItems, sessionItems, sessionMenuSubtitle } from "../lib/menus";
+import { agentPath, Link, navigate, sessionPath } from "../lib/router";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import {
@@ -35,6 +36,7 @@ import {
   cycleTab,
   MOUNTED_MAX,
   moveTab,
+  openSplit,
   PAGE_MIN,
   type Rect,
   SPLIT_MIN,
@@ -44,8 +46,10 @@ import {
   useSplitWidth,
 } from "../lib/split";
 import { TIER_LABEL } from "../lib/tier";
+import { AgentGlyph } from "./AgentRow";
 import { StateDot } from "./bits";
 import { type MenuList, MoreButton, useContextMenu } from "./ContextMenu";
+import { LabelDot } from "./LabelDot";
 import { answerItems, SessionView, STATUS_WORD } from "./SessionView";
 
 const MOTION_MS = 240;
@@ -69,10 +73,21 @@ function morph(from: Rect, to: Rect, opts: { fadeIn?: boolean } = {}): void {
   anim.finished.then(() => el.remove()).catch(() => el.remove());
 }
 
-/** Tab labels: the session title, plus " · machine" only where two tabs share a title. */
+/** The agent an agent tab holds, from its session's summary. */
+const agentOf = (s: SessionSummary | undefined, tab: SessionKey): AgentRun | undefined => {
+  const id = parseTab(tab).agent;
+  return id ? s?.agents?.find((a) => a.id === id) : undefined;
+};
+
+/** Tab labels: the session title ("Explore · description" for an agent tab), plus
+ *  " · machine" only where two tabs share a title. */
 function tabLabels(tabs: SessionKey[], summary: (k: SessionKey) => SessionSummary | undefined): string[] {
   const titles = tabs.map((k) => {
     const s = summary(k);
+    if (parseTab(k).agent) {
+      const a = agentOf(s, k);
+      return a ? agentLabel(a) : "Subagent";
+    }
     return s ? sessionTitle(s) : splitKey(k).id.slice(0, 8);
   });
   return titles.map((t, i) => {
@@ -89,7 +104,14 @@ export function SessionPanel({ phone }: { phone: boolean }) {
   const sessions = useAppState().sessions;
   /** Summaries the views learned, for tabs whose session is not in the snapshot. */
   const [known, setKnown] = useState<ReadonlyMap<SessionKey, SessionSummary>>(new Map());
-  const summary = useCallback((k: SessionKey) => sessions.get(k) ?? known.get(k), [sessions, known]);
+  // An agent tab reads its session's summary.
+  const summary = useCallback(
+    (k: SessionKey) => {
+      const key = parseTab(k).session;
+      return sessions.get(key) ?? known.get(key);
+    },
+    [sessions, known],
+  );
   const onSession = useCallback(
     (s: SessionSummary) => setKnown((m) => (m.get(s.key) === s ? m : new Map(m).set(s.key, s))),
     [],
@@ -276,15 +298,21 @@ export function SessionPanel({ phone }: { phone: boolean }) {
 
   const shown = open ? tabs : shownTabs;
   const s = activeKey ? summary(activeKey) : undefined;
+  const activeAgentId = activeKey ? parseTab(activeKey).agent : undefined;
+  const activeAgent = activeKey ? agentOf(s, activeKey) : undefined;
   const labels = tabLabels(shown, summary);
-  const title = s ? sessionTitle(s) : "Session";
+  const title = activeAgentId ? (activeAgent ? agentLabel(activeAgent) : "Subagent") : s ? sessionTitle(s) : "Session";
   const bodies = open ? mounted : [];
   const store = useStore();
   const { mode } = useAppSettings();
   const lens = useLens() ?? 3;
   /** The active tab's view, for the items that reach its strip (Allow, Deny). */
   const activeBody = () => panelRef.current?.querySelector<HTMLElement>(".panel-body:not(.panel-body--off)") ?? null;
-  const pagePath = (k: SessionKey) => sessionPath(splitKey(k).harness, splitKey(k).id);
+  const pagePath = (k: SessionKey) => {
+    const { session, agent } = parseTab(k);
+    const { harness, id } = splitKey(session);
+    return agent ? agentPath(harness, id, agent) : sessionPath(harness, id);
+  };
   const lensItems: MenuList =
     mode === "simple"
       ? []
@@ -303,6 +331,14 @@ export function SessionPanel({ phone }: { phone: boolean }) {
   const headMenu = (): MenuList => {
     if (!activeKey) return [];
     const cur = summary(activeKey);
+    const run = agentOf(cur, activeKey);
+    if (activeAgentId)
+      return [
+        { label: "Open as page", action: "session.openPage", run: () => navigate(pagePath(activeKey)) },
+        { label: "Open parent beside", run: () => openSplit(parseTab(activeKey).session) },
+        { label: "Close panel", action: "panel.close", run: closeSplit },
+        ...(cur && run ? [{ sep: true } as const, ...agentItems(cur, run).slice(3)] : []),
+      ];
     return [
       { label: "Open as page", action: "session.openPage", run: () => navigate(pagePath(activeKey)) },
       { label: "Close panel", action: "panel.close", run: closeSplit },
@@ -343,7 +379,8 @@ export function SessionPanel({ phone }: { phone: boolean }) {
       )}
       <div className="panel-bodies">
         {bodies.map((k) => {
-          const { harness, id } = splitKey(k);
+          const tab = parseTab(k);
+          const { harness, id } = splitKey(tab.session);
           const isActive = k === activeKey;
           return (
             <div
@@ -358,6 +395,7 @@ export function SessionPanel({ phone }: { phone: boolean }) {
                 id={id}
                 mode="panel"
                 scrollRef={bodyRef(k)}
+                agent={tab.agent}
                 onSession={onSession}
                 onForgotten={() => closeTab(tabs.indexOf(k))}
               />
@@ -366,16 +404,27 @@ export function SessionPanel({ phone }: { phone: boolean }) {
         })}
       </div>
       <header className="panel-head" {...headProps}>
-        {s && <StateDot state={s.state} />}
+        {activeAgentId ? (
+          <AgentGlyph a={activeAgent ?? { state: "done" }} size={10} />
+        ) : (
+          s && (
+            <>
+              <StateDot state={s.state} />
+              <LabelDot session={s.key} />
+            </>
+          )
+        )}
         <h2 className="panel-title ellipsis" title={title}>
           {title}
         </h2>
-        {s && <span className="panel-status">{STATUS_WORD[s.state]}</span>}
+        {activeAgentId
+          ? s && <span className="panel-status panel-parent ellipsis">{sessionTitle(s)}</span>
+          : s && <span className="panel-status">{STATUS_WORD[s.state]}</span>}
         <span className="panel-actions">
           <MoreButton build={headMenu} title={() => title} className="panel-btn" />
           {activeKey && (
             <Link
-              to={sessionPath(splitKey(activeKey).harness, splitKey(activeKey).id)}
+              to={pagePath(activeKey)}
               className="icon-btn panel-btn panel-open"
               aria-label="Open as page"
               data-tip="Open as page · o"
@@ -439,6 +488,8 @@ export function SessionPanel({ phone }: { phone: boolean }) {
             count={shown.length}
             label={labels[i]!}
             session={summary(k)}
+            agent={parseTab(k).agent ? (agentOf(summary(k), k) ?? null) : undefined}
+            paired={!!parseTab(k).agent && i > 0 && parseTab(shown[i - 1]!).session === parseTab(k).session}
             active={k === activeKey}
             dragging={dragging === k}
             onPointerDown={(e) => onTabDown(e, i)}
@@ -463,6 +514,7 @@ export function SessionPanel({ phone }: { phone: boolean }) {
             menu={() => {
               const cur = summary(k);
               const isActive = k === activeKey;
+              const tabAgent = parseTab(k).agent;
               return [
                 { label: "Close tab", action: isActive ? "panel.closeTab" : undefined, run: () => closeTab(i) },
                 shown.length > 1 && { label: "Close other tabs", run: () => closeOthers(i) },
@@ -480,8 +532,9 @@ export function SessionPanel({ phone }: { phone: boolean }) {
                   action: isActive ? "session.openPage" : undefined,
                   run: () => navigate(pagePath(k)),
                 },
+                tabAgent && { label: "Open parent beside", run: () => openSplit(parseTab(k).session) },
                 { sep: true },
-                ...(cur
+                ...(cur && !tabAgent
                   ? sessionItems(cur, {
                       store,
                       surface: "tab",
@@ -508,6 +561,8 @@ function PanelTab({
   count,
   label,
   session,
+  agent,
+  paired,
   active,
   dragging,
   onPointerDown,
@@ -520,6 +575,10 @@ function PanelTab({
   count: number;
   label: string;
   session: SessionSummary | undefined;
+  /** An agent tab's agent (null while its summary does not know it yet). */
+  agent?: AgentRun | null;
+  /** An agent tab right after its session's tab: the two read as a pair. */
+  paired?: boolean;
   active: boolean;
   dragging: boolean;
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
@@ -533,7 +592,7 @@ function PanelTab({
   });
   return (
     <div
-      className={`tab ${active ? "tab--active" : ""} ${dragging ? "tab--dragging" : ""}`}
+      className={`tab ${active ? "tab--active" : ""} ${dragging ? "tab--dragging" : ""} ${agent !== undefined ? "tab--agent" : ""} ${paired ? "tab--paired" : ""}`}
       role="tab"
       aria-selected={active}
       aria-setsize={count}
@@ -546,7 +605,19 @@ function PanelTab({
       onKeyDown={onKeyDown}
       {...props}
     >
-      <StateDot state={session?.state ?? "idle"} size={8} decorative />
+      {agent !== undefined ? (
+        <>
+          <span className="tab-tree" aria-hidden="true">
+            ↳
+          </span>
+          <AgentGlyph a={agent ?? { state: "done" }} />
+        </>
+      ) : (
+        <>
+          <StateDot state={session?.state ?? "idle"} size={8} decorative />
+          {session && <LabelDot session={session.key} />}
+        </>
+      )}
       <span className="tab-title">{label}</span>
       <button
         type="button"

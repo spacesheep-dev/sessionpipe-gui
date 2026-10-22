@@ -77,6 +77,22 @@
 .tab .dot {
   flex: none;
 }
+/* An agent's tab after its session's: a 10 px "↳" before its glyph, and 2 px of space
+   instead of the hairline between the two, so the pair reads as one. */
+.tab-tree {
+  flex: none;
+  margin-right: -4px;
+  color: var(--fg-4);
+  font-size: 10px;
+  line-height: 1;
+}
+.tab:has(+ .tab--paired) {
+  border-right-color: transparent;
+}
+.tab--paired {
+  margin-left: 2px;
+  padding-left: 8px;
+}
 .tab-title {
   flex: 1 1 auto;
   min-width: 0;

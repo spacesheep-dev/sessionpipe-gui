@@ -3,6 +3,7 @@
 // of slim events and session summaries in memory, the readings of ARCHITECTURE.md,
 // and a subscription stream the SSE route forwards. Contract: ARCHITECTURE.md "Store".
 import {
+  type AgentRun,
   type Digest,
   type DigestQuery,
   type EventSource,
@@ -25,7 +26,7 @@ import {
   splitKey,
 } from "../../shared/api.js";
 import { EventFiles } from "./files.js";
-import { applyEvent, newRecord, refreshFlags, refreshState, type SessionRecord } from "./readings.js";
+import { applyEvent, newRecord, refreshFlags, refreshState, type SessionRecord, settleAgents } from "./readings.js";
 import { digest, filesChanged, type ReviewIndex, search } from "./review.js";
 import { type SlimEvent, slimEvent, trimPreview } from "./slim.js";
 
@@ -181,9 +182,62 @@ export class Store {
       if (rec.t < keepAfter) rec.ev = trimPreview(ev, OLD_PREVIEW_CHARS);
     });
     for (const entry of this.sessions.values()) this.refresh(entry, now);
+    for (const entry of this.sessions.values()) this.syncChildren(entry);
   }
 
   // ---------- helpers ----------
+
+  /** A child session (`parent_id`) is also its parent's agent: one AgentRun by the
+   *  child's id (the parent's own subagent.started may have made it already) with
+   *  `session` set and the child's state and tools. True when the parent's agents changed. */
+  private syncChildAgent(parent: Entry, child: Entry): boolean {
+    const c = child.summary;
+    const s = parent.summary;
+    const have = s.agents.find((a) => a.id === c.id);
+    // An end already read (the parent's subagent.ended) holds unless the child spoke since;
+    // otherwise the child's own state is the agent's.
+    const ended = have?.state === "done" && (have.endedAt ?? "") >= c.lastAt;
+    const state: AgentRun["state"] = ended || c.state === "done" ? "done" : c.state === "stale" ? "stale" : "running";
+    const next: AgentRun = {
+      ...(have ?? {}),
+      id: c.id,
+      session: c.key,
+      state,
+      startedAt: have?.startedAt ?? c.startedAt,
+      lastAt: c.lastAt > (have?.lastAt ?? "") ? c.lastAt : (have?.lastAt ?? c.lastAt),
+      tools: c.counts.tools,
+      toolErrors: c.counts.toolErrors,
+      attributed: true,
+      recentTools: c.recentTools.slice(-4),
+      ...(c.currentTool
+        ? { currentTool: { tool: c.currentTool.tool, callId: c.currentTool.callId, since: c.currentTool.since } }
+        : {}),
+      ...(state === "done" ? { endedAt: have?.endedAt ?? c.endedAt ?? c.lastAt } : {}),
+    };
+    if (!c.currentTool) delete next.currentTool;
+    if (state !== "done") delete next.endedAt;
+    if (have && JSON.stringify(have) === JSON.stringify(next)) return false;
+    s.agents = have ? s.agents.map((a) => (a.id === c.id ? next : a)) : [...s.agents, next];
+    settleAgents(s);
+    return true;
+  }
+
+  /** Every child of `entry` synced into its agents; true when any changed. */
+  private syncChildren(entry: Entry): boolean {
+    let changed = false;
+    for (const k of entry.childKeys) {
+      const child = this.sessions.get(k);
+      if (child && this.syncChildAgent(entry, child)) changed = true;
+    }
+    if (changed) this.refresh(entry, Date.now());
+    return changed;
+  }
+
+  /** The parent of a child session, when both are known. */
+  private parentOf(entry: Entry): Entry | undefined {
+    const pid = entry.summary.parentId;
+    return pid ? this.sessions.get(sessionKey(entry.summary.harness, pid)) : undefined;
+  }
 
   /** The state machine, then the flags over it; true when either changed. */
   private refresh(entry: Entry, now: number): boolean {
@@ -224,6 +278,7 @@ export class Store {
     entry.files = fresh.files;
     entry.track = fresh.track;
     this.refresh(entry, now);
+    this.syncChildren(entry);
   }
 
   /** `slim`: `ev` is already the slim copy (boot), so it is kept as it is. */
@@ -363,7 +418,13 @@ export class Store {
     if (this.closed) return;
     for (const entry of this.sessions.values()) {
       if (entry.summary.state === "done" && (entry.ended || !entry.live)) continue;
-      if (this.refresh(entry, now)) this.emit({ kind: "session", session: entry.summary });
+      if (!this.refresh(entry, now)) continue;
+      this.emit({ kind: "session", session: entry.summary });
+      const parent = this.parentOf(entry);
+      if (parent && this.syncChildAgent(parent, entry)) {
+        this.refresh(parent, now);
+        this.emit({ kind: "session", session: parent.summary });
+      }
     }
   }
 
@@ -433,6 +494,14 @@ export class Store {
         this.refresh(entry, now);
         this.emit({ kind: "event", event: ev, session: entry.summary });
       }
+      // A child's agent entry on its parent follows the child; a parent that arrives after
+      // its children picks them up.
+      const parent = this.parentOf(entry);
+      if (parent && this.syncChildAgent(parent, entry)) {
+        this.refresh(parent, now);
+        parents.add(parent);
+      }
+      if (entry.childKeys.size && this.syncChildren(entry)) this.emit({ kind: "session", session: entry.summary });
       for (const p of parents) this.emit({ kind: "session", session: p.summary });
       if (entry.summary.machine) machines.add(entry.summary.machine);
     }
@@ -499,24 +568,34 @@ export class Store {
     key: SessionKey,
     after?: number,
     limit?: number,
-    opts: { before?: number; tail?: boolean; slim?: boolean } = {},
+    opts: { before?: number; tail?: boolean; slim?: boolean; agent?: string } = {},
   ): SessionDetail | undefined {
     const entry = this.sessions.get(key);
     if (!entry) return undefined;
     this.refresh(entry, Date.now());
     const n = Math.max(1, Math.min(DETAIL_MAX, limit ?? DETAIL_DEFAULT));
     const page: Rec[] = [];
+    // One subagent's events: those stamped with its agent_id (its subagent.* too) and the
+    // call that launched it.
+    const run = opts.agent ? entry.summary.agents.find((a) => a.id === opts.agent) : undefined;
+    const all = opts.agent
+      ? entry.recs.filter(
+          (r) =>
+            r.ev.data.agent_id === opts.agent ||
+            (!!run?.callId && r.ev.type.startsWith("tool.") && r.ev.data.call_id === run.callId),
+        )
+      : entry.recs;
     const backwards = opts.tail || (typeof opts.before === "number" && Number.isFinite(opts.before));
     if (backwards) {
       const below = opts.tail ? Number.POSITIVE_INFINITY : (opts.before as number);
-      for (let i = entry.recs.length - 1; i >= 0 && page.length < n; i--) {
-        const rec = entry.recs[i]!;
+      for (let i = all.length - 1; i >= 0 && page.length < n; i--) {
+        const rec = all[i]!;
         if (rec.ev.session.seq < below) page.push(rec);
       }
       page.reverse();
     } else {
       const from = typeof after === "number" && Number.isFinite(after) ? after : -1;
-      for (const rec of entry.recs) {
+      for (const rec of all) {
         if (rec.ev.session.seq <= from) continue;
         page.push(rec);
         if (page.length >= n) break;
@@ -531,8 +610,8 @@ export class Store {
       if (c) children.push(c.summary);
     }
     const firstSeq = page[0]?.ev.session.seq;
-    const hasOlder = firstSeq !== undefined && entry.recs.some((r) => r.ev.session.seq < firstSeq);
-    return { session: entry.summary, events, total: entry.recs.length, children, firstSeq, hasOlder };
+    const hasOlder = firstSeq !== undefined && all.some((r) => r.ev.session.seq < firstSeq);
+    return { session: entry.summary, events, total: all.length, children, firstSeq, hasOlder };
   }
 
   /** Newest event time first (arrival breaks ties). `before` is the cursor of a previous page. */
@@ -619,6 +698,12 @@ export class Store {
         const parent = this.sessions.get(parentKey);
         if (parent) {
           parent.summary.children = kids.size;
+          // The agent ran; only the link to its forgotten session goes.
+          parent.summary.agents = parent.summary.agents.map((a) => {
+            if (a.session !== key) return a;
+            const { session: _gone, ...rest } = a;
+            return rest;
+          });
           this.emit({ kind: "session", session: parent.summary });
         }
       }

@@ -6,8 +6,8 @@
 // Enter runs the row under the cursor, shift+Enter opens a session beside, `>` keeps only
 // actions, `#` only places. Messages and answers leave the way the control strip sends
 // them (web/src/control/command.ts). Mounted once, from app.tsx.
-import type { SessionSummary } from "@shared/api";
-import { sessionKey, splitKey } from "@shared/api";
+import type { AgentRun, SessionSummary } from "@shared/api";
+import { LABEL_COLORS, sessionKey, splitKey } from "@shared/api";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -23,17 +23,21 @@ import { sendCommand } from "../control/command";
 import { useRpId } from "../control/hooks";
 import { insecureHint, passkeysAvailable } from "../control/webauthn";
 import { sendErrorWords } from "../control/words";
-import { byStateThenRecent, useAppState, useStore } from "../data/hooks";
+import { byStateThenRecent, useAppState, useLabels, useStore } from "../data/hooks";
+import { agentLabel, agentMatches, openAgent } from "../lib/agents";
 import { modelShort, repoShort, sessionTitle } from "../lib/format";
 import { type FieldsMatch, fuzzyFields } from "../lib/fuzzy";
+import { labelName, labelQuery } from "../lib/labels";
 import { navigate, parseRoute, sessionPath, useRoute } from "../lib/router";
 import { useSimple } from "../lib/settings";
 import { matches, useShortcut } from "../lib/shortcuts";
 import { openSplit, useSplitKey } from "../lib/split";
 import { ago, useNow } from "../lib/time";
 import { useThemes } from "../themes/host/registry";
+import { AgentGlyph } from "./AgentRow";
 import { StateDot } from "./bits";
 import { answerable } from "./ControlStrip";
+import { LabelDot, LabelSwatch } from "./LabelDot";
 import { noContextMenu } from "./QuickSettings";
 import "../styles/palette.css";
 
@@ -119,13 +123,26 @@ type Mode =
   | { kind: "prompt"; session: SessionSummary }
   | { kind: "forget"; session: SessionSummary };
 
-/** `>` keeps only actions, `#` only places; the rest is the text to match. */
-function parseQuery(q: string): { only: Section | null; text: string } {
+/** `>` keeps only actions, `#` only places; the rest is the text to match. `is:subagent`
+ *  keeps only subagents (it is taken off the text). */
+function parseQuery(q: string): { only: Section | null; text: string; agentsOnly: boolean } {
   const s = q.trimStart();
-  if (s.startsWith(">")) return { only: "Actions", text: s.slice(1).trim() };
-  if (s.startsWith("#")) return { only: "Go to", text: s.slice(1).trim() };
-  return { only: null, text: s.trim() };
+  if (s.startsWith(">")) return { only: "Actions", text: s.slice(1).trim(), agentsOnly: false };
+  if (s.startsWith("#")) return { only: "Go to", text: s.slice(1).trim(), agentsOnly: false };
+  const words = s.trim().split(/\s+/);
+  const agentsOnly = words.some((w) => /^is:subagents?$/i.test(w));
+  return {
+    only: agentsOnly ? "Sessions" : null,
+    text: words.filter((w) => !/^is:subagents?$/i.test(w)).join(" "),
+    agentsOnly,
+  };
 }
+
+/** The word being typed when it is a `label:` token (the palette offers the labels). */
+const labelWord = (q: string): { prefix: string; partial: string } | null => {
+  const m = /(?:^|\s)(-?label:)(\S*)$/i.exec(q);
+  return m ? { prefix: m[1]!.toLowerCase(), partial: m[2]!.toLowerCase() } : null;
+};
 
 /** Text with the matched letters underlined (a hairline, never a block). */
 function Hit({ text, at }: { text: string; at: number[] | undefined }) {
@@ -172,6 +189,7 @@ const ACTIVE = new Set(["needs_you", "working"]);
 function PaletteDialog() {
   const store = useStore();
   const { sessions, machines } = useAppState();
+  const labels = useLabels();
   const route = useRoute();
   const splitActive = useSplitKey();
   const { themes } = useThemes();
@@ -221,15 +239,74 @@ function PaletteDialog() {
   }, []);
 
   const items = useMemo((): Item[] => {
-    const { only, text } = parseQuery(q);
+    const parsed = parseQuery(q);
+    const { only, agentsOnly } = parsed;
+    // `label:` tokens narrow the sessions; the rest of the words are matched.
+    const lq = labelQuery(labels, parsed.text);
+    const text = lq.rest;
     const want = (s: Section) => only === null || only === s;
-    const sorted = [...sessions.values()].sort(byStateThenRecent);
+    const sorted = [...sessions.values()].filter((s) => lq.test(s.key)).sort(byStateThenRecent);
     const out: Item[] = [];
+    // Typing `label:`: the labels, to finish the token with.
+    const typing = labelWord(q);
+    if (typing && want("Sessions")) {
+      for (const c of LABEL_COLORS) {
+        const name = labelName(labels, c);
+        if (typing.partial && !name.toLowerCase().startsWith(typing.partial) && !c.startsWith(typing.partial)) continue;
+        out.push({
+          id: `l:${c}`,
+          section: "Sessions",
+          mark: <LabelSwatch color={c} />,
+          label: `Label: ${name}`,
+          detail: typing.prefix.startsWith("-") ? "leave out" : undefined,
+          score: 10,
+          run: () => {
+            setQ((cur) => cur.replace(/(-?label:)\S*$/i, `$1${name.toLowerCase().replace(/\s+/g, "_")} `));
+            inputRef.current?.focus();
+          },
+        });
+      }
+    }
+    /** "↳ Explore · Find ad-hoc money formatting", under its session. */
+    const agentRow = (s: SessionSummary, a: AgentRun, m: FieldsMatch | null): Item => ({
+      id: `g:${s.key}:${a.id}`,
+      section: "Sessions",
+      mark: <AgentGlyph a={a} />,
+      label: (
+        <>
+          <span className="pal-tree" aria-hidden="true">
+            ↳{" "}
+          </span>
+          <Hit text={agentLabel(a)} at={m?.positions[0]} />
+        </>
+      ),
+      detail: agentsOnly || m ? sessionTitle(s) : undefined,
+      age: ago(a.endedAt ?? a.lastAt, now),
+      score: (m?.score ?? 0) + (a.state !== "done" ? 1 : 0),
+      // An agent opens beside, as its tab (a phone opens the page on it).
+      run: () => {
+        closePalette();
+        openAgent(s, a, "beside");
+      },
+    });
+    const agentsOf = (s: SessionSummary, m: FieldsMatch | null, all: boolean): Item[] =>
+      (s.agents ?? [])
+        .filter((a) => all || a.state !== "done")
+        .map((a) => {
+          const am = text ? fuzzyFields(text, [agentLabel(a)]) : null;
+          return text && !am && !m ? null : agentRow(s, a, am);
+        })
+        .filter((x): x is Item => !!x);
     const sessionRow = (s: SessionSummary, m: FieldsMatch | null): Item => ({
       id: `s:${s.key}`,
       section: "Sessions",
       mark: <StateDot state={s.state} decorative />,
-      label: <Hit text={sessionTitle(s)} at={m?.positions[0]} />,
+      label: (
+        <>
+          <LabelDot session={s.key} />
+          <Hit text={sessionTitle(s)} at={m?.positions[0]} />
+        </>
+      ),
       detail: [
         s.machine ? <Hit key="m" text={s.machine} at={m?.positions[1]} /> : null,
         repoShort(s.repo) ? <Hit key="r" text={repoShort(s.repo)} at={m?.positions[2]} /> : null,
@@ -245,10 +322,22 @@ function PaletteDialog() {
       },
     });
 
-    if (want("Sessions")) {
-      if (!text) out.push(...sorted.slice(0, 8).map((s) => sessionRow(s, null)));
+    if (want("Sessions") && agentsOnly) {
+      // `is:subagent`: every subagent, open ones first, each naming its session.
+      const rows: Item[] = [];
+      for (const s of sorted)
+        for (const a of s.agents ?? []) {
+          const m = text ? fuzzyFields(text, [agentLabel(a), sessionTitle(s)]) : null;
+          if (text && !m && !text.split(/\s+/).every((w) => agentMatches(a, w.toLowerCase()))) continue;
+          rows.push(agentRow(s, a, m));
+        }
+      rows.sort((a, b) => b.score - a.score);
+      out.push(...rows.slice(0, 20));
+    } else if (want("Sessions")) {
+      // A session's open subagents (any that match, with a query) follow it.
+      if (!text) out.push(...sorted.slice(0, 8).flatMap((s) => [sessionRow(s, null), ...agentsOf(s, null, false)]));
       else {
-        const rows: Item[] = [];
+        const rows: Item[][] = [];
         for (const s of sorted) {
           const m = fuzzyFields(text, [
             sessionTitle(s),
@@ -257,10 +346,11 @@ function PaletteDialog() {
             s.branch ?? "",
             `${modelShort(s.model)} ${s.model ?? ""}`,
           ]);
-          if (m) rows.push(sessionRow(s, m));
+          const kids = agentsOf(s, m, true).filter((r) => !m || r.score > 1 || r.detail);
+          if (m || kids.length) rows.push([sessionRow(s, m ?? { score: 0, positions: [] }), ...kids]);
         }
-        rows.sort((a, b) => b.score - a.score);
-        out.push(...rows.slice(0, 12));
+        rows.sort((a, b) => Math.max(...b.map((r) => r.score)) - Math.max(...a.map((r) => r.score)));
+        out.push(...rows.slice(0, 12).flat());
       }
     }
 
@@ -405,7 +495,7 @@ function PaletteDialog() {
       out.push(...rows);
     }
     return out;
-  }, [q, sessions, now, ctx, ctxKey, splitActive, themes, answered, rp, sendable, act, onItsPage, simple]);
+  }, [q, sessions, labels, now, ctx, ctxKey, splitActive, themes, answered, rp, sendable, act, onItsPage, simple]);
 
   // A new query starts at the top; a shorter list pulls the cursor in.
   useEffect(() => setCursor(0), [q]);
