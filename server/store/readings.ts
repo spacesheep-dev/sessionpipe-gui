@@ -237,6 +237,22 @@ export function answerableAttention(ev: ProtocolEvent): boolean {
   return ev.harness.event === "PermissionRequest" || id.startsWith("perm-");
 }
 
+/** Whether an attention is the harness's idle notice rather than a prompt: Claude Code's
+ *  `idle_prompt` Notification ("Claude is waiting for your input"), `kind: idle`, or the
+ *  same words from a Claude Code that names no notification type. The session ended its
+ *  turn and waits for the next one: idle, never "needs you". Only a real prompt (a
+ *  permission, a question, an elicitation, an error) opens an attention. */
+export function idleNotice(ev: ProtocolEvent): boolean {
+  const d = ev.data as Record<string, unknown>;
+  if (d.kind === "idle") return true;
+  return (
+    ev.harness.event === "Notification" &&
+    !d.tool &&
+    typeof d.message === "string" &&
+    /\bwaiting for your input\b/i.test(d.message)
+  );
+}
+
 /** One tool call for the loop reading (evaluateFlags): its name, when, and at tier 3 a
  *  hash of its input. The same input is judged on what the index keeps of it (slim.ts),
  *  so a reboot reads the same loop from the slim copies. */
@@ -414,6 +430,9 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       break;
     }
     case "attention.needed": {
+      // The idle notice is a hook event like any (it closed what was open above) and
+      // stays in the timeline, but it asks for nothing: no attention opens.
+      if (idleNotice(ev)) break;
       const attentionId = str(d.attention_id) ?? ev.id;
       const kind = (ATTENTION_KINDS.has(String(d.kind)) ? d.kind : "question") as AttentionKind;
       const a: Attention = { attentionId, kind, at };

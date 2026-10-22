@@ -201,6 +201,42 @@ describe("readings", () => {
     expect(sum.counts.attentions).toBe(2);
   });
 
+  it("keeps a session idle through the harness's idle notice", () => {
+    const s = new Session();
+    store.ingest([s.ev("session.started"), s.ev("turn.started"), s.ev("turn.ended", { reason: "stop" })], "http");
+    expect(store.session(KEY)!.state).toBe("idle");
+    // Claude Code's Notification a minute after the Stop: `idle_prompt` reads kind idle.
+    const idle = s.ev("attention.needed", {
+      attention_id: "notif-1",
+      kind: "idle",
+      message: "Claude is waiting for your input",
+    });
+    store.ingest([{ ...idle, harness: { ...idle.harness, event: "Notification" } }], "http");
+    let sum = store.session(KEY)!;
+    expect(sum.state).toBe("idle");
+    expect(sum.openAttentions).toEqual([]);
+    expect(sum.counts.attentions).toBe(0);
+    // A Claude Code that names no notification type: the same words, read as kind question.
+    const old = s.ev("attention.needed", {
+      attention_id: "notif-2",
+      kind: "question",
+      message: "Claude is waiting for your input",
+    });
+    store.ingest([{ ...old, harness: { ...old.harness, event: "Notification" } }], "http");
+    expect(store.session(KEY)!.state).toBe("idle");
+    // A real question still needs you.
+    store.ingest(
+      [s.ev("attention.needed", { attention_id: "q1", kind: "question", message: "Which branch?" })],
+      "http",
+    );
+    sum = store.session(KEY)!;
+    expect(sum.state).toBe("needs_you");
+    expect(sum.openAttentions).toMatchObject([{ attentionId: "q1", kind: "question" }]);
+    // The idle notice that follows is a hook event like any: the question is over.
+    store.ingest([{ ...s.ev("attention.needed", { attention_id: "notif-3", kind: "idle" }) }], "http");
+    expect(store.session(KEY)!.state).toBe("idle");
+  });
+
   it("comes back from done when the session starts again", () => {
     const s = new Session();
     store.ingest([s.ev("session.started"), s.ev("turn.started"), s.ev("session.ended", { reason: "other" })], "http");

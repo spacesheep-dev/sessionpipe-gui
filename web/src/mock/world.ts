@@ -373,6 +373,8 @@ export class World {
           counts.filesChanged += Array.isArray(d.paths) ? d.paths.length : 0;
           break;
         case "attention.needed": {
+          // The harness's idle notice asks for nothing (server/store/readings.ts idleNotice).
+          if (d.kind === "idle") break;
           const a: Attention = {
             attentionId: String(d.attention_id),
             kind: (d.kind as Attention["kind"]) ?? "question",

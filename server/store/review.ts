@@ -22,7 +22,7 @@ import type {
   StoredEvent,
 } from "../../shared/api.js";
 import { changedPaths } from "./paths.js";
-import { newRecord } from "./readings.js";
+import { idleNotice, newRecord } from "./readings.js";
 import type { Rec } from "./store.js";
 
 /** What the store lends these readings. */
@@ -374,7 +374,8 @@ export function digest(ix: ReviewIndex, q: DigestQuery, now = Date.now()): Diges
         if (d.ok === false) a.errors++;
         break;
       case "attention.needed":
-        a.attentions++;
+        // The idle notice asked for nothing (readings.ts idleNotice).
+        if (!idleNotice(ev)) a.attentions++;
         break;
       case "context.compacted":
         a.compactions++;
