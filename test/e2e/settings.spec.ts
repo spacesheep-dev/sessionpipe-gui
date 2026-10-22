@@ -246,7 +246,9 @@ test.describe("settings dialog", () => {
     await expect(view.locator("ol.timeline--chat")).toBeVisible();
     expect(await view.locator(".turn--chat").count()).toBeGreaterThan(0);
     await expect(view.locator(".ctl--chat textarea")).toHaveAttribute("placeholder", "Message this session…");
-    await expect(view.locator(".ctl-context")).toContainText("Add it");
+    // The suite runs on 127.0.0.1, never the rp id's origin, so the wrong-origin guard keeps
+    // "Add it" off this line (phone.spec.ts covers that); the line itself is still there.
+    await expect(view.locator(".ctl-context")).toContainText("message this session from here");
     await openPage(page, "/settings");
     await mode(page, "Advanced").click();
   });
