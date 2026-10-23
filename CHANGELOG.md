@@ -6,6 +6,18 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-24
+
+### Security
+
+- **One request could stop the server.** A path whose percent escape does not decode as
+  UTF-8 (`/api/ui/sessions/%E0%A4%A/x`) threw outside the request's error handling and
+  ended the process, before any key was checked, so anyone who could reach the port could
+  do it. It is now a `400 bad_path` and the server keeps serving. A cookie value that does
+  not decode (another app on the same host can set one, since cookies ignore the port) is
+  read as it is instead of failing every request from that browser. Upgrade if the GUI
+  listens on your network (the default).
+
 ## [0.2.0] - 2026-10-23
 
 The native redesign: one window shell, grouped rows, right-click menus everywhere, and
@@ -127,6 +139,7 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/spacesheep-dev/sessionpipe-gui/releases/tag/v0.1.0

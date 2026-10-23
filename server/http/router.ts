@@ -99,8 +99,10 @@ export class Router {
       }
     }
     const ctx = makeCtx(req, res, url, ip, forwarded);
-    const m = this.match(req.method ?? "GET", url.pathname);
     try {
+      // Inside the try: a path whose percent escape does not decode is the sender's
+      // mistake (a 400), and an unauthenticated one; it must never reach the process.
+      const m = this.match(req.method ?? "GET", url.pathname);
       const reply = m ? await m.handler({ ...ctx, params: m.params }) : await this.fallback(ctx);
       if (reply) send(res, reply, req);
       else if (!res.writableEnded && !res.headersSent) send(res, { status: 404, json: { reason: "not_found" } });
@@ -128,14 +130,34 @@ function matchParts(pattern: string[], parts: string[]): Record<string, string> 
     const p = pattern[i]!;
     const v = parts[i];
     if (p.startsWith("*")) {
-      params[p.slice(1) || "rest"] = parts.slice(i).map(decodeURIComponent).join("/");
+      params[p.slice(1) || "rest"] = parts.slice(i).map(decodePart).join("/");
       return params;
     }
     if (v === undefined) return null;
-    if (p.startsWith(":")) params[p.slice(1)] = decodeURIComponent(v);
+    if (p.startsWith(":")) params[p.slice(1)] = decodePart(v);
     else if (p !== v) return null;
   }
   return params;
+}
+
+/** A path segment decoded, or a 400 when its escape is not UTF-8 (`%E0%A4%A`, `%zz`). */
+function decodePart(v: string): string {
+  try {
+    return decodeURIComponent(v);
+  } catch {
+    throw new HttpError(400, { reason: "bad_path" });
+  }
+}
+
+/** A cookie value decoded, or as it is: cookies are per host, not per port, so another
+ *  app on this machine can set one this server cannot decode, and that must not fail
+ *  every request the browser makes here. */
+function decodeCookie(v: string): string {
+  try {
+    return decodeURIComponent(v);
+  } catch {
+    return v;
+  }
 }
 
 /** Bodies over this are gzipped when the client accepts it (a session page is 140 KB of JSON). */
@@ -215,7 +237,7 @@ function makeCtx(req: IncomingMessage, res: ServerResponse, url: URL, ip: string
       const out: Record<string, string> = {};
       for (const part of (req.headers.cookie ?? "").split(";")) {
         const i = part.indexOf("=");
-        if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+        if (i > 0) out[part.slice(0, i).trim()] = decodeCookie(part.slice(i + 1).trim());
       }
       return out;
     },
