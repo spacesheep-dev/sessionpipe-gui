@@ -1,15 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 // One session's body, used by the Session page and by the side panel: on the page its
-// title bar (PageBar: back, the title, a quiet status and the facts, Follow, Forget, the
-// "⋯" menu), in the panel one meta line under the panel's own head; then the timeline
-// grouped by turn (newest page first, older pages on demand, the stream appending) and
-// the docked control bar. The page scrolls the window; the panel scrolls its own element
-// (`scrollRef`). In Simple mode (lib/settings.ts) the same view is a chat: the person's
-// prompts as bubbles on the right, the assistant's replies as plain prose under its
-// name, the tools of a turn folded into one line. Replies render as markdown in both
-// modes. Every row of the timeline has its own right-click menu (long-press on touch);
-// the empty space around it has the view's options.
-import type { AgentRun, ControlActivity, SessionState, SessionSummary, StoredEvent, Tier } from "@shared/api";
+// title bar (PageBar: back, the state glyph and the title, then where it runs, the "⋯"
+// menu), in the panel nothing above the timeline but the panel's own head; then the
+// timeline grouped by turn (newest page first, older pages on demand, the stream
+// appending) and the docked composer. The page scrolls the window; the panel scrolls its
+// own element (`scrollRef`). The view sticks to the bottom while the person is within
+// 48 px of it; scrolled up, nothing moves and an "n new" pill offers the way back. In
+// Simple mode (lib/settings.ts) the same view is a chat: the person's prompts as bubbles
+// on the right, the assistant's replies as plain prose under its name, the tools of a
+// turn folded into one line. A message sent from here is drawn where its turn is or will
+// be: a session this device started is its layout from the first frame (its first
+// message as the title and the first bubble, one status row following the machine's
+// acks), and the first hook event fills it in place (control/Starting.tsx). Every row of
+// the timeline has its own right-click menu (long-press on touch); the empty space around
+// it has the view's options.
+import type {
+  AgentRun,
+  ControlActivity,
+  MachineControl,
+  SessionState,
+  SessionSummary,
+  StoredEvent,
+  Tier,
+} from "@shared/api";
 import { sessionKey, splitKey } from "@shared/api";
 import {
   createContext,
@@ -25,47 +38,70 @@ import {
 } from "react";
 import { forkOf } from "../control/Activity";
 import { PromptBody, promptParts } from "../control/Attachments";
+import { tildify } from "../control/folders";
 import { useControlActivity } from "../control/hooks";
 import { SessionControl } from "../control/SessionControl";
-import { appliedFact, optionsIgnored, StartingSession, useStartOf } from "../control/Starting";
-import { useMachinesMap, useSession, useStore } from "../data/hooks";
+import {
+  appliedFact,
+  editAgain,
+  optionsIgnored,
+  SentFailure,
+  SentFiles,
+  StatusRow,
+  sentRow,
+  startTitle,
+  useStartOf,
+} from "../control/Starting";
+import { isFinal } from "../control/words";
+import { useMachines, useMachinesMap, useSession, useStore } from "../data/hooks";
+import { LIST_PREVIEW, TAIL, takeWarm } from "../data/prefetch";
 import { agentLabel, agentsFact, agentType, openAgent, taskNotification } from "../lib/agents";
-import { useFocusTrap } from "../lib/focus";
 import {
   ATTENTION_LABEL,
   attentionMessage,
   basename,
-  eventSummary,
   harnessMark,
   modelShort,
   repoBranch,
   repoShort,
+  STATE_LABEL,
   sessionTitle,
 } from "../lib/format";
 import { labelMenu } from "../lib/labels";
 import { absoluteUrl, agentItems, copyItem, sessionItems } from "../lib/menus";
+import { reducedMotion, useFlip } from "../lib/motion";
 import { AGENT_PARAM, back, Link, navigate, sessionPath, useSearchParam } from "../lib/router";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { clock, dur, ms, useNow } from "../lib/time";
-import { type AgentItem, type EventItem, groupTurns, sentTurns, type ToolItem, type Turn, unframe } from "../lib/turns";
+import {
+  type AgentItem,
+  type EventItem,
+  eventWords,
+  groupTurns,
+  sentTurns,
+  type ToolItem,
+  type Turn,
+  unframe,
+} from "../lib/turns";
 import { AgentGlyph, AgentNow, AgentText } from "./AgentRow";
 import { HarnessGlyph, Redacted, Segmented, Spinner, StateDot } from "./bits";
-import { confirmAction, type MenuItem, type MenuList, MoreButton, openMenu, useContextMenu } from "./ContextMenu";
+import { confirmAction, type MenuItem, type MenuList, MoreButton, openMenu, tidy, useContextMenu } from "./ContextMenu";
 import { LabelDot, useLabelKeys } from "./LabelDot";
 import { CodeFrame, Markdown } from "./Markdown";
 import { BackButton, PageBar } from "./PageBar";
 
-/** The newest page a session opens on, and the size of each older page. Both slim: the
- *  full event is fetched only when a row is expanded (`fill`). */
-const TAIL = 100;
+/** The size of each older page; the newest page (TAIL) is data/prefetch's, which warms
+ *  it on hover. Both slim: the full event is fetched only when a row is expanded. */
 const OLDER = 200;
 /** While following a live session, rows past this many are let go from the top (they
  *  are one "Older turns" click away), so a tab left open for hours stays small. */
 const LIVE_CAP = TAIL + 2 * OLDER;
-/** Characters of each tool input/output or transcript kept in a list page. */
-const LIST_PREVIEW = 400;
+/** The view sticks to the bottom only while the person is this close to it. */
+const PIN_PX = 48;
+/** A delivered message with no turn of its own yet keeps its row this long. */
+const DELIVERED_HOLD_MS = 120_000;
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -107,7 +143,7 @@ export function answerItems(root: HTMLElement | null, s: SessionSummary, attenti
 
 type Leaf = Extract<MenuItem, { run: unknown }>;
 
-/** "Send a message…" and "Cancel the running turn…", read off the strip when the menu
+/** "Send a message…" and "Stop the running turn…", read off the strip when the menu
  *  opens: what a surface puts beside the session's own items. */
 function controlItems(root: HTMLElement | null): { send: Leaf | null; cancel: Leaf | null } {
   const ta = root?.querySelector<HTMLTextAreaElement>(".ctl textarea");
@@ -124,7 +160,7 @@ function controlItems(root: HTMLElement | null): { send: Leaf | null; cancel: Le
       : null,
     cancel: cancel
       ? {
-          label: "Cancel the running turn…",
+          label: "Stop the running turn…",
           action: "session.cancel",
           disabled: cancel.disabled || undefined,
           run: () => void askCancel(cancel),
@@ -139,8 +175,8 @@ const focusPrompt = (ta: HTMLTextAreaElement) => {
 };
 const askCancel = async (btn: HTMLButtonElement) => {
   const ok = await confirmAction({
-    title: "Cancel the running turn?",
-    body: "The agent stops what it is doing; the session stays open for the next prompt.",
+    title: "Stop the running turn?",
+    body: "The agent stops what it is doing; the session stays open for the next message.",
     action: "Stop the turn",
   });
   if (ok && btn.isConnected && !btn.disabled) btn.click();
@@ -158,7 +194,8 @@ const lensMenu = (lens: Tier): MenuItem => ({
 });
 
 /** What the timeline's rows share: where links point, which prompts are open, the menus
- *  that reach the strip. */
+ *  that reach the strip, the machine a sent message went to, and the one anchor an
+ *  expanding row keeps. */
 interface Timeline {
   path: string;
   open: ReadonlySet<string>;
@@ -172,6 +209,15 @@ interface Timeline {
   /** Scroll to an agent's block and open it (a "Subagent finished" row). */
   showAgent: (id: string) => void;
   mode: "page" | "panel";
+  /** The session's machine, as a sent message's row names it. */
+  machine: string;
+  online: boolean;
+  control?: MachineControl;
+  /** Puts a message's words back in the composer ("Edit and send again"). */
+  compose: (text: string) => void;
+  /** A row about to open or close in place: keep it where it is on screen, and stop
+   *  following the bottom (the person is reading). */
+  anchorOn: (el: HTMLElement) => void;
 }
 const TimelineCtx = createContext<Timeline | null>(null);
 const useTimeline = () => useContext(TimelineCtx)!;
@@ -179,6 +225,39 @@ const useTimeline = () => useContext(TimelineCtx)!;
 /** The link to a row of this session (the view jumps to it on open). */
 const seqLink = (path: string, seq: number | undefined) =>
   seq === undefined ? null : `${absoluteUrl(path)}#seq-${seq}`;
+
+/** Whether a message sent from here, with no turn of its own in the view, still gets its
+ *  row at the end of the timeline: while it is on its way; once it failed or was just
+ *  delivered, only when nothing began after it. A start without its session yet always. */
+function stillPending(a: ControlActivity, lastStart: number, hasTurns: boolean, now: number): boolean {
+  if (a.kind === "start") return !hasTurns;
+  if (!isFinal(a)) return true;
+  const at = Date.parse(a.at);
+  if (Number.isFinite(lastStart) && at < lastStart) return false;
+  if (a.outcome !== "delivered") return true;
+  return now - Date.parse(a.ackedAt ?? a.at) < DELIVERED_HOLD_MS;
+}
+
+/** A prompt whose text its machine keeps (a privacy tier below 2): said as the feature it
+ *  is, with a small lock, never as a gap ("A prompt of 110 characters"). */
+const PROMPT_KEPT = "Its machine sends at a tier that keeps prompt text on the machine; only the length arrives.";
+function PromptKept({ chars }: { chars: number | undefined }) {
+  return (
+    <>
+      <svg className="prompt-lock" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+        <rect x="2.5" y="5.25" width="7" height="5" rx="1.25" fill="currentColor" />
+        <path d="M4 5.25V4a2 2 0 0 1 4 0v1.25" fill="none" stroke="currentColor" strokeWidth="1.25" />
+      </svg>
+      {chars !== undefined ? (
+        <>
+          Prompt not shared · <span className="num">{chars}</span> characters
+        </>
+      ) : (
+        "Prompt not shared"
+      )}
+    </>
+  );
+}
 
 export interface SessionViewProps {
   harness: string;
@@ -205,6 +284,7 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
   // A start this device signed names the key before any event does (STEER-SPEC B.5).
   const started = useStartOf(key);
   const machines = useMachinesMap();
+  const machineList = useMachines();
   const [events, setEvents] = useState<StoredEvent[]>([]);
   const [summary, setSummary] = useState<SessionSummary | undefined>();
   const [children, setChildren] = useState<SessionSummary[]>([]);
@@ -216,21 +296,24 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
   // and writes it. "all" is tier 3 here. Simple mode: the chat, everything shown.
   const lensSetting = useLens();
   const lens: Tier = lensSetting ?? 3;
-  const { mode: uiMode, confirmForget } = useAppSettings();
+  const { mode: uiMode } = useAppSettings();
   const chat = uiMode === "simple";
   const [follow, setFollow] = useState(true);
   const followRef = useRef(follow);
   followRef.current = follow;
-  const [confirm, setConfirm] = useState(false);
-  const [forgetting, setForgetting] = useState(false);
+  /** Within PIN_PX of the bottom (read on every scroll; a ref, so growth can read it). */
+  const pinned = useRef(true);
+  const [away, setAway] = useState(false);
+  /** Events that arrived while the person was scrolled up (the "n new" pill). */
+  const [unseen, setUnseen] = useState(0);
+  /** The row a disclosure click asked to keep in place (Timeline.anchorOn). */
+  const held = useRef<{ el: HTMLElement; top: number } | null>(null);
   const lastSeq = useRef(-1);
   const rootRef = useRef<HTMLDivElement>(null);
-  const confirmRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(confirmRef, confirm, { onClose: () => setConfirm(false), initial: ".btn--danger" });
+  const listRef = useRef<HTMLOListElement>(null);
 
   const [hasOlder, setHasOlder] = useState(false);
   const [olderBusy, setOlderBusy] = useState(false);
-  const [tailSeq, setTailSeq] = useState(-1);
   const firstSeq = useRef<number | undefined>(undefined);
   /** Taken just before older events are prepended, to keep the viewport still: the first row
    *  on screen (by seq) and where it was, plus the page height as a fallback. */
@@ -243,10 +326,11 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
   const scrollY = useCallback(() => sc()?.scrollTop ?? window.scrollY, [sc]);
   const viewHeight = useCallback(() => sc()?.clientHeight ?? window.innerHeight, [sc]);
   const scrollTo = useCallback(
-    (y: number) => {
+    (y: number, smooth = false) => {
       const el = sc();
-      if (el) el.scrollTop = y;
-      else window.scrollTo(0, y);
+      const behavior: ScrollBehavior = smooth && !reducedMotion() ? "smooth" : "auto";
+      if (el) el.scrollTo({ top: y, behavior });
+      else window.scrollTo({ top: y, behavior });
     },
     [sc],
   );
@@ -257,6 +341,25 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
       else window.scrollBy(0, d);
     },
     [sc],
+  );
+  /** To the very end, and stay there. */
+  const toBottom = useCallback(
+    (smooth = false) => {
+      pinned.current = true;
+      scrollTo(scrollHeight(), smooth);
+    },
+    [scrollTo, scrollHeight],
+  );
+  const setFollowing = useCallback(
+    (on: boolean) => {
+      followRef.current = on;
+      setFollow(on);
+      if (on) {
+        setUnseen(0);
+        toBottom(true);
+      }
+    },
+    [toBottom],
   );
 
   // The newest page in one round trip, then let the stream append. Older pages load on demand.
@@ -269,18 +372,20 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
     setLoading(true);
     setError(null);
     setHasOlder(false);
-    const buffered: StoredEvent[] = [];
+    const ahead = reload === 0 ? takeWarm(key) : undefined;
+    const buffered: StoredEvent[] = ahead ? [...ahead.since] : [];
     const unsub = store.onEvent((e) => {
       if (`${e.harness.name}:${e.session.id}` === key) buffered.push(e);
     });
     (async () => {
       try {
-        const d = await store.transport.session(harness, id, {
-          tail: true,
-          limit: TAIL,
-          slim: true,
-          preview: LIST_PREVIEW,
-        });
+        const d = await (ahead?.answer ??
+          store.transport.session(harness, id, {
+            tail: true,
+            limit: TAIL,
+            slim: true,
+            preview: LIST_PREVIEW,
+          }));
         if (cancelled) return;
         const acc = d.events.slice();
         const seen = new Set(acc.map((e) => e.session.seq));
@@ -292,7 +397,6 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
         setChildren(d.children);
         setTotal(d.total);
         setHasOlder(!!d.hasOlder);
-        setTailSeq(lastSeq.current);
         setEvents(acc);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -345,6 +449,8 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
     history.replaceState(null, "", location.pathname + location.search);
     const row = rootRef.current?.querySelector<HTMLElement>(`[data-seq="${seq}"]`);
     if (!row) return false;
+    followRef.current = false;
+    pinned.current = false;
     setFollow(false);
     row.scrollIntoView({ block: "center" });
     row.classList.add("is-target");
@@ -357,9 +463,10 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
     if (!agentId) return false;
     const block = rootRef.current?.querySelector<HTMLElement>(`[data-agent="${CSS.escape(agentId)}"]`);
     if (!block) return false;
-    // Off at once, not at the next render: the follow effect of this same commit would
-    // otherwise scroll straight back to the bottom.
+    // Off at once, not at the next render: the view's growth would otherwise pin it
+    // straight back to the bottom.
     followRef.current = false;
+    pinned.current = false;
     setFollow(false);
     block.scrollIntoView({ block: "start" });
     return true;
@@ -378,13 +485,13 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
   }, [jumpTo]);
 
   // Bottom-anchored first paint (the newest turn is what a session opens on, unless the
-  // URL names a row), and a still viewport when older events land above it, whether or
-  // not the browser's own scroll anchoring already moved it.
+  // URL names a row), before the browser paints, and a still viewport when older events
+  // land above it, whether or not the browser's own scroll anchoring already moved it.
   useLayoutEffect(() => {
     if (events.length === 0) return;
     if (firstPaint.current) {
       firstPaint.current = false;
-      if (!jumpTo(hashSeq()) && !jumpToAgent(focusAgent)) scrollTo(scrollHeight());
+      if (!jumpTo(hashSeq()) && !jumpToAgent(focusAgent)) toBottom();
       return;
     }
     const a = anchor.current;
@@ -399,7 +506,7 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
         if (Math.abs(scrollY() - want) > 1) scrollTo(want);
       }
     }
-  }, [events, scrollTo, scrollBy, scrollHeight, scrollY, jumpTo, jumpToAgent, focusAgent]);
+  }, [events, scrollTo, scrollBy, scrollHeight, scrollY, jumpTo, jumpToAgent, focusAgent, toBottom]);
   // Asked for another agent while open (a second "Open beside" on the same tab, the URL).
   const lastFocus = useRef(focusAgent);
   useEffect(() => {
@@ -424,10 +531,101 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
         }
         return next;
       });
-      setTailSeq(e.session.seq);
       setTotal((t) => t + 1);
+      // The pill counts what landed below the fold; a growing reply is one thing, not many.
+      if (!pinned.current && e.type !== "turn.progress" && e.type !== "session.heartbeat") setUnseen((n) => n + 1);
     });
   }, [store, key, loading]);
+
+  // Sticking to the bottom (Slack's, iMessage's): whatever grows the view (a new row, a
+  // reply streaming, the composer's own lines, a font arriving) keeps the end in sight,
+  // but only while following and within PIN_PX of it; scrolled up, nothing moves. Runs
+  // before paint (a ResizeObserver callback), so a cold open never shows a re-anchor.
+  // A disclosure that opened or closed keeps its own row where it was instead.
+  const shape = !live && !summary && !started ? (loading ? "loading" : "missing") : "view";
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root || typeof ResizeObserver !== "function") return;
+    let last = root.offsetHeight;
+    const ro = new ResizeObserver(() => {
+      const h = root.offsetHeight;
+      if (h === last) return;
+      last = h;
+      const a = held.current;
+      if (a) {
+        held.current = null;
+        if (a.el.isConnected) {
+          const d = a.el.getBoundingClientRect().top - a.top;
+          if (Math.abs(d) > 1) scrollBy(d);
+        }
+        return;
+      }
+      if (followRef.current && pinned.current) scrollTo(scrollHeight());
+    });
+    ro.observe(root);
+    return () => ro.disconnect();
+  }, [shape, scrollTo, scrollBy, scrollHeight]);
+  // Where the person is: following resumes when they come back down to the end, and
+  // stops the moment they scroll up away from it.
+  useEffect(() => {
+    const target: EventTarget = sc() ?? window;
+    let lastY = scrollY();
+    const onScroll = () => {
+      const y = scrollY();
+      const near = scrollHeight() - (y + viewHeight()) <= PIN_PX;
+      pinned.current = near;
+      setAway(!near);
+      if (near) {
+        setUnseen(0);
+        if (!followRef.current && y > lastY) {
+          followRef.current = true;
+          setFollow(true);
+        }
+      } else if (y < lastY - 2 && followRef.current) {
+        followRef.current = false;
+        setFollow(false);
+      }
+      lastY = y;
+    };
+    target.addEventListener("scroll", onScroll, { passive: true });
+    return () => target.removeEventListener("scroll", onScroll);
+  }, [sc, scrollY, viewHeight, scrollHeight]);
+  const anchorOn = useCallback((el: HTMLElement) => {
+    followRef.current = false;
+    pinned.current = false;
+    setFollow(false);
+    held.current = { el, top: el.getBoundingClientRect().top };
+  }, []);
+  // Every disclosure in the timeline (a tool's details, "Ran 4 tools", a subagent's
+  // block) keeps the row that was clicked where it is: caught on the way down, before the
+  // row opens, in one listener for the view.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const onClick = (e: MouseEvent) => {
+      const row = (e.target as Element | null)?.closest?.(".timeline summary, .timeline .agent-toggle");
+      if (row instanceof HTMLElement && root.contains(row)) anchorOn(row);
+    };
+    root.addEventListener("click", onClick, true);
+    return () => root.removeEventListener("click", onClick, true);
+  }, [anchorOn, shape]);
+
+  /** Stream and feed events are slim (data cut to a preview); the detail route has the
+   *  whole event. Swap one in by its seq. */
+  const fillEv = useCallback(
+    async (e: StoredEvent) => {
+      const d = await store.transport.session(harness, id, { after: e.session.seq - 1, limit: 1 });
+      const full = d.events.find((x) => x.session.seq === e.session.seq);
+      if (full) setEvents((prev) => prev.map((p) => (p.session.seq === full.session.seq ? full : p)));
+    },
+    [store, harness, id],
+  );
+
+  // A copy of another session (a message sent there went to a fork, CONTROL.md §6): the
+  // original, named in the bar, linked.
+  const isCopy = useCallback((a: ControlActivity) => forkOf(a) === key, [key]);
+  const original = useControlActivity(isCopy)[0]?.session ?? "";
+  const originalSummary = useSession(original);
 
   const s = live ?? summary;
   const sRef = useRef(s);
@@ -436,56 +634,26 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
     if (s) onSession?.(s);
   }, [s, onSession]);
 
-  const visible = useMemo(
-    () => events.map((e) => atTier(e, lens)).filter((e): e is StoredEvent => e !== null),
-    [events, lens],
-  );
-  const agentRuns = s?.agents;
-  const turns = useMemo(() => groupTurns(visible, agentRuns), [visible, agentRuns]);
-  const hidden = events.length - visible.length;
-  // The delivered messages whose turn this view holds: their rows under the composer fold
-  // to one line (control/Activity.tsx), the reply being right here. Matched on every
-  // loaded event, whatever the lens leaves out; a copy's message is never here.
-  const allTurns = useMemo(() => (lens >= 3 ? turns : groupTurns(events, agentRuns)), [lens, turns, events, agentRuns]);
-  const inChat = useCallback(
-    (messages: readonly ControlActivity[]) => {
-      const sent = messages
-        .filter((a) => (a.kind === "prompt" || a.kind === "start") && a.outcome === "delivered" && !forkOf(a))
-        .map((a) => ({ id: a.id, at: a.at, text: promptParts(a.text ?? "").body }));
-      return new Set(sentTurns(sent, allTurns, (t) => promptParts(t).body).keys());
-    },
-    [allTurns],
-  );
-  // A copy of another session (a message sent there went to a fork, CONTROL.md §6): the
-  // original, named in the bar, linked; its row under the composer links back here.
-  const isCopy = useCallback((a: ControlActivity) => forkOf(a) === key, [key]);
-  const original = useControlActivity(isCopy)[0]?.session ?? "";
-  const originalSummary = useSession(original);
-  /** The loaded window ends at the latest turn, so its last turn is turn `counts.turns`. */
-  const loadedTurns = turns.filter((t) => t.start).length;
-  const turnOffset = Math.max(0, (s?.counts.turns ?? loadedTurns) - loadedTurns);
-
-  // Auto-follow: stick to the bottom while live and the person has not scrolled up.
-  const isLive = !!s && (s.state === "working" || s.state === "needs_you");
-  // To the very end (not "the last row into view": the docked control bar and the tab
-  // bar would cover the last rows), on every new event while following.
+  // The phone's keyboard: the docked composer rides on it, read from visualViewport
+  // (styles/session.css --kb), so the field and Send are never under the keys.
   useEffect(() => {
-    if (!follow || !followRef.current || !isLive) return;
-    scrollTo(scrollHeight());
-  }, [follow, isLive, tailSeq, scrollTo, scrollHeight]);
-  useEffect(() => {
-    if (!follow) return;
-    const target: EventTarget = sc() ?? window;
-    let lastY = scrollY();
-    const onScroll = () => {
-      const y = scrollY();
-      const atBottom = viewHeight() + y >= scrollHeight() - 120;
-      if (y < lastY - 24 && !atBottom) setFollow(false);
-      lastY = y;
+    if (mode !== "page") return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const root = document.documentElement;
+    const on = () => {
+      const kb = Math.round(window.innerHeight - vv.height - vv.offsetTop);
+      if (kb > 80) root.style.setProperty("--kb", `${kb}px`);
+      else root.style.removeProperty("--kb");
     };
-    target.addEventListener("scroll", onScroll, { passive: true });
-    return () => target.removeEventListener("scroll", onScroll);
-  }, [follow, sc, scrollY, viewHeight, scrollHeight]);
+    vv.addEventListener("resize", on);
+    vv.addEventListener("scroll", on);
+    return () => {
+      vv.removeEventListener("resize", on);
+      vv.removeEventListener("scroll", on);
+      root.style.removeProperty("--kb");
+    };
+  }, [mode]);
 
   // The docked bar's height, so a row scrolled into view (a jump, the focused prompt) is
   // never left under it (styles/session.css: scroll-padding-bottom).
@@ -502,30 +670,77 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
     };
   }, [mode, s?.key]);
 
-  /** Stream and feed events are slim (data cut to a preview); the detail route has the
-   *  whole event. Swap one in by its seq. */
-  const fill = useCallback(
-    async (e: StoredEvent) => {
-      const d = await store.transport.session(harness, id, { after: e.session.seq - 1, limit: 1 });
-      const full = d.events.find((x) => x.session.seq === e.session.seq);
-      if (full) setEvents((prev) => prev.map((p) => (p.session.seq === full.session.seq ? full : p)));
-    },
-    [store, harness, id],
+  const visible = useMemo(
+    () => events.map((e) => atTier(e, lens)).filter((e): e is StoredEvent => e !== null),
+    [events, lens],
   );
+  const agentRuns = s?.agents;
+  const turns = useMemo(() => groupTurns(visible, agentRuns), [visible, agentRuns]);
+  const hidden = events.length - visible.length;
+  // Every loaded event's turns, whatever the lens leaves out: what a sent message joins.
+  const allTurns = useMemo(() => (lens >= 3 ? turns : groupTurns(events, agentRuns)), [lens, turns, events, agentRuns]);
 
-  const forget = useCallback(async () => {
-    setForgetting(true);
-    try {
-      await store.transport.forget(harness, id);
-      store.apply({ kind: "forgotten", key });
-      if (onForgotten) onForgotten();
-      else navigate("/", { replace: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setForgetting(false);
-      setConfirm(false);
+  // The messages sent from here to this session (its start among them), and the turn each
+  // became: the turn shows the words as they were signed (tier 2 sends only a length),
+  // the files and, until the turn has a reply of its own, the reply the machine streamed
+  // back. One still on its way has its row at the end, where its turn will be.
+  const isMine = useCallback(
+    (a: ControlActivity) => a.session === key && (a.kind === "prompt" || a.kind === "start") && !forkOf(a),
+    [key],
+  );
+  const sentAll = useControlActivity(isMine);
+  const joined = useMemo(
+    () =>
+      sentTurns(
+        sentAll.map((a) => ({
+          id: a.id,
+          at: a.at,
+          takenAt: a.takenAt,
+          text: promptParts(a.text ?? "").body,
+          start: a.kind === "start",
+        })),
+        allTurns,
+        (t) => promptParts(t).body,
+        { fromStart: !hasOlder },
+      ),
+    [sentAll, allTurns, hasOlder],
+  );
+  const sentByTurn = useMemo(() => {
+    const m = new Map<number, ControlActivity>();
+    for (const a of sentAll) {
+      const n = joined.get(a.id);
+      if (n !== undefined) m.set(n, a);
     }
-  }, [store, harness, id, key, onForgotten]);
+    return m;
+  }, [sentAll, joined]);
+  // A just-delivered message keeps its row a while; only then does the view need a clock.
+  const holding = sentAll.some((a) => a.outcome === "delivered" && !joined.has(a.id));
+  const clockNow = useNow(holding ? "coarse" : "off");
+  const pending = useMemo(() => {
+    const begun = allTurns.filter((t) => t.start);
+    const lastStart = ms(begun[begun.length - 1]?.start?.time);
+    return sentAll.filter((a) => !joined.has(a.id) && stillPending(a, lastStart, begun.length > 0, clockNow)).reverse();
+  }, [sentAll, joined, allTurns, clockNow]);
+  // A pending turn takes the number (and so the key) its real turn will have: the first
+  // hook event fills the same block in place.
+  const lastN = Math.max(0, ...turns.map((t) => t.n), ...allTurns.map((t) => t.n));
+  /** The loaded window ends at the latest turn, so its last turn is turn `counts.turns`. */
+  const loadedTurns = turns.filter((t) => t.start).length;
+  const turnOffset = Math.max(0, (s?.counts.turns ?? loadedTurns) - loadedTurns);
+
+  const isLive = !!s && (s.state === "working" || s.state === "needs_you");
+  // A session this device started: its first turns slide into place as they arrive.
+  const fresh = !!started && turns.filter((t) => t.start).length <= 2;
+  useFlip(listRef, 12);
+
+  // The machine the session (or the start) runs on.
+  const startMachine = started ? machineList.find((m) => m.control?.machineId === started.machineId) : undefined;
+  const machineName = s?.machine ?? startMachine?.name ?? "the machine";
+  const control = s?.machine ? machines.get(s.machine)?.control : startMachine?.control;
+  const compose = useCallback(
+    (text: string) => window.dispatchEvent(new CustomEvent("sp:compose", { detail: { key, text } })),
+    [key],
+  );
 
   // The session keys (lib/shortcuts.ts). A view in the panel answers only while it is the
   // active tab; the page's view wins over the panel's unless focus is inside the panel.
@@ -560,20 +775,27 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
     },
     keyOpts,
   );
-  useShortcut("session.follow", () => (inert() || !isLive ? false : setFollow((f) => !f)), keyOpts);
+  useShortcut("session.follow", () => (inert() || !isLive ? false : setFollowing(!followRef.current)), keyOpts);
   useShortcut(
     "session.openPage",
     () => (inert() || mode === "page" ? false : navigate(sessionPath(harness, id))),
     keyOpts,
   );
   useShortcut("session.older", () => (inert() || !hasOlder || olderBusy ? false : void loadOlder()), keyOpts);
+  // The "n new" pill's way back, from the keyboard.
+  useShortcut("session.latest", () => (inert() ? false : setFollowing(true)), keyOpts);
   // ⌥⌘1 … ⌥⌘7 label this session, ⌥⌘0 clears it.
   useLabelKeys(() => (inert() ? [] : [key]), keyOpts);
 
   const path = sessionPath(harness, id);
   const followItem = (): MenuItem | null =>
     isLive
-      ? { label: "Follow the live turn", action: "session.follow", checked: follow, run: () => setFollow((f) => !f) }
+      ? {
+          label: "Follow the live turn",
+          action: "session.follow",
+          checked: follow,
+          run: () => setFollowing(!followRef.current),
+        }
       : null;
   // The empty space of the view: how it shows, not what it shows.
   const bgMenu = useContextMenu(
@@ -612,44 +834,70 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
       focus: shownAgent ?? focusAgent,
       showAgent,
       mode,
+      machine: machineName,
+      online: control?.online ?? false,
+      control,
+      compose,
+      anchorOn,
     }),
-    [path, s?.openAttentions, s?.state, agentRuns, shownAgent, focusAgent, showAgent, mode],
+    [
+      path,
+      s?.openAttentions,
+      s?.state,
+      agentRuns,
+      shownAgent,
+      focusAgent,
+      showAgent,
+      mode,
+      machineName,
+      control,
+      compose,
+      anchorOn,
+    ],
   );
 
-  if (!s && started) return <StartingSession a={started} mode={mode === "panel" ? "panel" : "page"} />;
-  if (!s && loading) {
+  // The composer arrives once the session does: it slides in under a page that was
+  // starting, and is simply there on an ordinary open.
+  const wasStarting = useRef(!s && !!started);
+  if (!s && started) wasStarting.current = true;
+
+  if (shape === "loading") {
     return (
-      <div className={`page session ${mode === "panel" ? "session--panel" : ""}`}>
-        {mode === "page" && <PageBar title="Loading…" back={<BackButton onClick={() => back("/")} />} large={false} />}
-        <div className="skeleton sess-skel" aria-hidden="true">
-          <div className="skeleton-row" />
-          <div className="skeleton-row" />
-          <div className="skeleton-row" />
-        </div>
-        <p className="sr-only">Loading session…</p>
+      <div className={`page session ${mode === "panel" ? "session--panel" : ""}`} ref={rootRef}>
+        {mode === "page" && (
+          <PageBar
+            title={<span className="sr-only">Loading session…</span>}
+            back={<BackButton onClick={() => back("/")} />}
+            large={false}
+          />
+        )}
       </div>
     );
   }
-  if (!s) {
+  if (shape === "missing") {
     return (
-      <div className={`page session ${mode === "panel" ? "session--panel" : ""}`}>
+      <div className={`page session ${mode === "panel" ? "session--panel" : ""}`} ref={rootRef}>
         {mode === "page" && <PageBar title="Session" back={<BackButton onClick={() => back("/")} />} large={false} />}
-        <div className="state">
-          <p className="state-title">{error ? "This session did not load" : "No such session here"}</p>
+        <div className="state state--center">
+          <h2 className="state-title">{error ? "This session didn't load" : "No such session here"}</h2>
           <p className="state-text">
             {error ?? "This receiver holds nothing for it: it was forgotten, or never arrived."}
           </p>
-          <Link to="/" className="btn">
-            Back to the board
-          </Link>
+          <div className="state-actions">
+            <Link to="/" className="btn">
+              Back to the board
+            </Link>
+          </div>
         </div>
       </div>
     );
   }
 
-  const control = s.machine ? machines.get(s.machine)?.control : undefined;
-  const kids = children.length ? children : childrenFromStore(store, key);
-  const title = sessionTitle(s);
+  const kids = s ? (children.length ? children : childrenFromStore(store, key)) : [];
+  // The session's own title once it has one; until then a start's first message, never
+  // the folder's name.
+  const title = s?.title?.trim() ? sessionTitle(s) : (startTitle(started) ?? (s ? sessionTitle(s) : "New session"));
+  const startState: SessionState = !started?.outcome ? "idle" : isFinal(started) ? "idle" : "working";
   const copyOf = original
     ? {
         path: sessionPath(splitKey(original).harness, splitKey(original).id),
@@ -657,148 +905,99 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
       }
     : undefined;
 
-  // The session's "⋯": Back, how the view follows, then the session's own menu with the
-  // answers and the strip's actions in it.
-  const pageMenu = (): MenuList => [
-    mode === "page" && { label: "Back", action: "back", run: () => back("/") },
-    { sep: true },
-    followItem(),
-    !chat && lensMenu(lens),
-    { sep: true },
-    ...sessionItems(s, {
-      store,
-      surface: mode,
-      answer: answerItems(rootRef.current, s),
-      extra: ((c) => [c.send, c.cancel])(controlItems(rootRef.current)),
-      children: kids,
-      onForgotten,
-    }),
+  // The session's "⋯", in three sections at most: what it can be asked now (Allow, Deny,
+  // a message, Stop), how the view shows and what it is (Follow, the lens, its own
+  // items), then Forget, last on its own.
+  const pageMenu = (): MenuList => {
+    if (!s)
+      return started ? [{ label: "Edit and start again", run: () => editAgain(started, startMachine?.name) }] : [];
+    const { send, cancel } = controlItems(rootRef.current);
+    const own = sessionItems(s, { store, surface: mode, children: kids, onForgotten }).filter((i) => !("sep" in i));
+    return tidy([
+      ...answerItems(rootRef.current, s),
+      send,
+      cancel,
+      { sep: true },
+      followItem(),
+      !chat && lensMenu(lens),
+      ...own,
+    ]);
+  };
+
+  const flags = !chat && s?.flags?.length ? s.flags : null;
+  const applied = appliedFact(started);
+  const folder = started?.cwd ? tildify(started.cwd, control?.home) : undefined;
+  // The timeline's rows: the loaded turns, each with the message sent from here that
+  // became it, then the messages still on their way.
+  // A "Session" group that only says the session started tells nothing the title band
+  // does not (its time is in the meta's tooltip), and arriving a beat after the first
+  // turn it pushed that turn down: the started moment held still but for it.
+  const onlyStarted = (t: Turn) =>
+    t.n === 0 &&
+    !hasOlder &&
+    t.items.length > 0 &&
+    t.items.every(
+      (i) =>
+        i.kind === "event" &&
+        i.e.type === "session.started" &&
+        ["", "startup", undefined].includes(i.e.data?.source as string | undefined),
+    );
+  const rows = [
+    ...turns.filter((t) => !onlyStarted(t)).map((t) => ({ t, sent: sentByTurn.get(t.n), pending: false })),
+    ...pending.map((a, i) => ({
+      t: { n: lastN + 1 + i, items: [] } as Turn,
+      sent: a as ControlActivity | undefined,
+      pending: true,
+    })),
   ];
-
-  const followBtn = isLive && (
-    <button
-      type="button"
-      className="icon-btn sess-desk"
-      aria-pressed={follow}
-      onClick={() => setFollow((f) => !f)}
-      data-tip="Follow the live turn · f"
-      data-tip-side="bottom"
-    >
-      <svg
-        viewBox="0 0 20 20"
-        width="16"
-        height="16"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        aria-hidden="true"
-      >
-        <path d="M10 3.5v9M6 9l4 4 4-4M4.5 16.5h11" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-      <span className="sr-only">{follow ? "Following" : "Follow"}</span>
-    </button>
-  );
-
-  const forgetBtn = (
-    <div className="sess-forget sess-desk">
-      <button
-        type="button"
-        className="icon-btn"
-        aria-label="Forget"
-        aria-expanded={confirm}
-        onClick={() => (confirmForget ? setConfirm((c) => !c) : void forget())}
-        disabled={forgetting}
-        data-tip="Forget this session"
-        data-tip-side="bottom"
-      >
-        <svg
-          viewBox="0 0 20 20"
-          width="16"
-          height="16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.4"
-          aria-hidden="true"
-        >
-          <path
-            d="M4 5.5h12M8 5.5V4h4v1.5M5.5 5.5l.7 10a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9l.7-10M8.5 8.5v5M11.5 8.5v5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </button>
-      {confirm && (
-        <div
-          className="sess-confirm"
-          role="alertdialog"
-          aria-modal="true"
-          aria-label="Forget this session?"
-          ref={confirmRef}
-        >
-          <p className="sess-confirm-title">Forget this session?</p>
-          <p className="sess-confirm-text">Delete everything held for this session here?</p>
-          <div className="sess-confirm-actions">
-            <button type="button" className="btn btn--sm" onClick={() => setConfirm(false)} data-dismiss>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn btn--sm btn--danger"
-              onClick={() => void forget()}
-              disabled={forgetting}
-            >
-              {forgetting ? "Forgetting…" : "Forget"}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  const flags = !chat && s.flags?.length ? s.flags : null;
 
   return (
     <TimelineCtx.Provider value={timeline}>
       <CodeFrame.Provider value={CodeWell}>
         <div
-          className={`page session ${mode === "panel" ? "session--panel" : ""} ${chat ? "session--chat" : ""}`}
+          className={`page session ${mode === "panel" ? "session--panel" : ""} ${chat ? "session--chat" : ""} ${s ? "" : "starting"}`}
           ref={rootRef}
           data-ui={chat ? "simple" : "advanced"}
+          data-starting={
+            !s && started
+              ? started.outcome === "taken" && started.reply !== undefined
+                ? "progress"
+                : (started.outcome ?? "queued")
+              : undefined
+          }
           {...bgMenu}
         >
-          {mode === "page" ? (
+          {mode === "page" && (
             <PageBar
               back={<BackButton onClick={() => back("/")} />}
               title={
                 <>
-                  <BarLabel s={s} />
-                  {title}
+                  <StateDot state={s?.state ?? startState} />
+                  {s && <BarLabel s={s} />}
+                  <span className="sess-title-text">{title}</span>
                 </>
               }
               titleClassName="sess-title"
               large={false}
               className="sess-bar"
               meta={
-                <>
-                  <SessionMeta s={s} chat={chat} total={total} copyOf={copyOf} />
-                  {appliedFact(started) && <span className="sess-applied">{appliedFact(started)}</span>}
-                </>
+                s ? (
+                  <>
+                    <SessionMeta s={s} total={total} copyOf={copyOf} chat={chat} />
+                    {applied && <span className="sess-applied">{applied}</span>}
+                  </>
+                ) : (
+                  <>
+                    <span className="sess-where">{[machineName, folder].filter(Boolean).join(" · ")}</span>
+                    {applied && <span className="sess-applied">{applied}</span>}
+                  </>
+                )
               }
-              tools={chat ? undefined : <LensTools lens={lens} hidden={hidden} maxTier={s.maxTier} />}
-              actions={
-                <>
-                  {followBtn}
-                  {forgetBtn}
-                  <MoreButton build={pageMenu} title={() => title} />
-                </>
-              }
+              actions={<MoreButton build={pageMenu} title={() => title} />}
             />
-          ) : (
-            <p className="sess-sub">
-              <SessionMeta s={s} chat={chat} total={total} withState={false} copyOf={copyOf} />
-            </p>
           )}
 
+          {!chat && s && lens < 3 && <LensTools lens={lens} hidden={hidden} maxTier={s.maxTier} />}
           {flags && (
             <p className="page-note sess-flags">
               {flags.map((f) => (
@@ -808,14 +1007,14 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
               ))}
             </p>
           )}
-          {error && <p className="page-note is-err">{error}</p>}
+          {error && s && events.length > 0 && <p className="page-note is-err">{error}</p>}
           {optionsIgnored(started) && (
             <p className="page-note">
-              {s.machine ?? "The machine"} ran this at its own mode; its sessionpipe ignores per-session options.
+              {machineName} ran this at its own mode; its sessionpipe ignores per-session options.
             </p>
           )}
 
-          <ol className={`timeline ${chat ? "timeline--chat" : ""}`}>
+          <ol className={`timeline ${chat ? "timeline--chat" : ""}`} ref={listRef}>
             {hasOlder && (
               <li className="older">
                 <button
@@ -828,10 +1027,13 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
                 </button>
               </li>
             )}
-            {turns.map((t) => (
+            {rows.map(({ t, sent, pending: p }) => (
               <TurnBlock
                 key={t.n}
                 turn={t}
+                sent={sent}
+                pending={p}
+                flip={fresh}
                 label={
                   t.n === 0
                     ? hasOlder
@@ -842,26 +1044,54 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
                     : `Turn ${t.n + turnOffset}`
                 }
                 lens={lens}
-                liveTurn={s.currentTurn ? t === turns[turns.length - 1] : false}
-                fill={fill}
+                liveTurn={!p && !!s?.currentTurn && t === turns[turns.length - 1]}
+                fill={fillEv}
                 chat={chat}
-                harness={s.harness}
+                harness={s?.harness ?? harness}
               />
             ))}
-            {!loading && visible.length === 0 && <li className="page-note">No events at this tier.</li>}
+            {!loading && s && visible.length === 0 && rows.length === 0 && (
+              <li className="page-note">No events at this tier.</li>
+            )}
             {/* A chat with nothing said yet (only the session's start): say so where the
                 first message will land, rather than leave the column blank. */}
-            {chat && !loading && !hasOlder && visible.length > 0 && turns.every((t) => t.n === 0) && (
-              <li className="state">
-                <p className="state-title">No messages yet</p>
-                <p className="state-text">What you and the agent say shows here as it happens.</p>
-              </li>
-            )}
+            {chat &&
+              !loading &&
+              s &&
+              !hasOlder &&
+              visible.length > 0 &&
+              pending.length === 0 &&
+              turns.every((t) => t.n === 0) && (
+                <li className="state">
+                  <h2 className="state-title">No messages yet</h2>
+                  <p className="state-text">What you and the agent say shows here as it happens.</p>
+                </li>
+              )}
           </ol>
 
-          <div className={`sess-ctl ${chat ? "sess-ctl--chat" : ""}`} {...ctlMenu}>
-            <SessionControl session={s} control={control} attentions={s.openAttentions} chat={chat} inChat={inChat} />
-          </div>
+          {s && (
+            <div
+              className={`sess-ctl ${chat ? "sess-ctl--chat" : ""} ${wasStarting.current ? "sess-ctl--arrive" : ""}`}
+              {...ctlMenu}
+            >
+              {unseen > 0 && away && (
+                <button type="button" className="sess-new" onClick={() => setFollowing(true)}>
+                  <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+                    <path
+                      d="M6 2.5v7M3 6.5l3 3 3-3"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  <span className="num">{unseen > 99 ? "99+" : unseen}</span> new
+                </button>
+              )}
+              <SessionControl session={s} control={control} attentions={s.openAttentions} chat={chat} />
+            </div>
+          )}
         </div>
       </CodeFrame.Provider>
     </TimelineCtx.Provider>
@@ -878,77 +1108,63 @@ function CodeWell({ text, children }: { text: string; children: ReactNode }) {
   );
 }
 
-/** The bar's meta: the state as a quiet word beside its glyph, then where it runs; in
- *  Advanced the facts (machine · repo · model · age · events), the one chain allowed. */
+/** The bar's meta, two facts in one muted tier: where it runs (machine · repo). The state
+ *  is the glyph before the title; the model, the age, the counts and the tier are the
+ *  meta's tooltip. A copy of another session names its original instead of the repo. */
 function SessionMeta({
   s,
-  chat,
   total,
-  withState = true,
   copyOf,
+  chat,
 }: {
   s: SessionSummary;
-  chat: boolean;
   total: number;
-  withState?: boolean;
   /** This session is a copy (a fork) of that one. */
   copyOf?: { path: string; title: string };
+  chat: boolean;
 }) {
   const repo = chat ? repoShort(s.repo) : repoBranch(s);
   const place = repo || (s.cwd ? basename(s.cwd) : "");
   const fact = agentsFact(s);
-  const state = withState && (
-    <span className="sess-state">
-      <StateDot state={s.state} decorative />
-      {STATUS_WORD[s.state]}
-      {fact && <span className="sess-agents num"> · {fact}</span>}
-    </span>
-  );
-  const copy = copyOf && (
-    <span className="sess-copy">
-      Copy of <Link to={copyOf.path}>{copyOf.title}</Link>
-    </span>
-  );
-  if (chat)
-    return (
-      <>
-        {state}
-        {copy}
-        <span className="sess-where">{[s.machine, place].filter(Boolean).join(" · ")}</span>
-      </>
-    );
-  // The bar keeps where and how much; the model, the age and the counts are its tooltip.
   const more = [
+    STATE_LABEL[s.state],
+    fact,
     s.model && modelShort(s.model),
-    `started ${new Date(s.startedAt).toLocaleString()}`,
+    `started ${new Date(s.startedAt).toLocaleString([], { hourCycle: "h23" })}`,
     plural(s.counts.turns, "turn"),
     plural(s.counts.tools, "tool"),
+    s.counts.toolErrors > 0 && plural(s.counts.toolErrors, "error"),
     s.counts.filesChanged > 0 && plural(s.counts.filesChanged, "file"),
     s.counts.subagents > 0 && plural(s.counts.subagents, "subagent"),
     s.counts.compactions > 0 && plural(s.counts.compactions, "compaction"),
-    `tier ${s.maxTier}`,
+    plural(total, "event"),
+    `arrived at tier ${s.maxTier}`,
   ]
     .filter(Boolean)
     .join(" · ");
   return (
-    <>
-      {state}
-      {copy}
-      <span className="sess-counts num" title={more}>
-        {s.machine && <span>{s.machine}</span>}
-        {place && <span className="sess-repo">{place}</span>}
-        <span className="sess-counts-ev">{total} events</span>
-        {s.counts.toolErrors > 0 && <span className="is-err">{plural(s.counts.toolErrors, "error")}</span>}
-      </span>
-    </>
+    <span className="sess-where" title={more} data-events={total}>
+      {s.machine && <span className="sess-machine">{s.machine}</span>}
+      {copyOf ? (
+        <span className="sess-copy">
+          Copy of <Link to={copyOf.path}>{copyOf.title}</Link>
+        </span>
+      ) : (
+        place && <span className="sess-repo">{place}</span>
+      )}
+    </span>
   );
 }
 
-/** The tier lens in the bar (Advanced): the segmented control Settings has, as a toolbar
- *  control, with what it takes away beside it. On a phone it lives in "⋯" instead. */
+/** The tier lens while it hides something (Advanced): one quiet line over the timeline
+ *  with the segmented control Settings has, what it takes away, and Show all. At
+ *  "everything" it is gone; the lens is then in "⋯" and on `l`. */
 function LensTools({ lens, hidden, maxTier }: { lens: Tier; hidden: number; maxTier: Tier }) {
   return (
-    <div className="lens" title={TIER_HINT[lens]}>
+    <div
+      className="lens sess-lens"
+      title={`${TIER_HINT[lens]}${lens > maxTier ? ` · arrived at tier ${maxTier}` : ""}`}
+    >
       <span className="lens-label sr-only">Tier lens</span>
       <Segmented<Tier>
         value={lens}
@@ -962,9 +1178,11 @@ function LensTools({ lens, hidden, maxTier }: { lens: Tier; hidden: number; maxT
       />
       <span className="lens-hint">
         {cap(TIER_LABEL[lens])}
-        {hidden > 0 ? ` · ${hidden} hidden` : ""}
-        {lens > maxTier ? ` · arrived at tier ${maxTier}` : ""}
+        {hidden > 0 ? <span className="num"> · {hidden} hidden</span> : null}
       </span>
+      <button type="button" className="btn btn--sm btn--ghost lens-all" onClick={() => setTierLens(null)}>
+        Show all
+      </button>
     </div>
   );
 }
@@ -1000,6 +1218,9 @@ function TurnBlock({
   label,
   chat = false,
   harness = "",
+  sent,
+  pending = false,
+  flip = false,
 }: {
   turn: Turn;
   lens: Tier;
@@ -1009,6 +1230,12 @@ function TurnBlock({
   /** Simple mode: the turn as a chat exchange (see ChatTurn). */
   chat?: boolean;
   harness?: string;
+  /** The message sent from here that this turn is (or will be). */
+  sent?: ControlActivity;
+  /** No event of this turn has arrived yet: the message is on its way. */
+  pending?: boolean;
+  /** Slide into place as the turns around it arrive (a session started here). */
+  flip?: boolean;
 }) {
   // Only a running turn or a running tool shows a moving duration; the other blocks
   // (most of the page) have nothing to redraw each second.
@@ -1016,6 +1243,7 @@ function TurnBlock({
     (i) => (i.kind === "tool" && !i.ended) || (i.kind === "agent" && i.tools.some((t) => !t.ended)),
   );
   const now = useNow(liveTurn || hasRunningTool ? "fine" : "off");
+  const { machine, online, control, compose } = useTimeline();
   const transcript = [...turn.items].reverse().find((i) => i.kind === "event" && i.e.type === "turn.transcript") as
     | EventItem
     | undefined;
@@ -1037,6 +1265,25 @@ function TurnBlock({
   const startSeq = turn.start?.session.seq;
   // Claude Code's own follow-up when a background agent stops: not a person's prompt.
   const notice = taskNotification(prompt);
+  // What the machine said of the message sent from here: its failure, in place; while
+  // it is on its way (or the agent is at it with nothing to show yet) the one status row.
+  const failed = !!sent && isFinal(sent) && sent.outcome !== "delivered";
+  const ownReply = String((transcript ?? progress)?.e.data.assistant ?? "").trim();
+  const ackReply = sent?.reply?.trim() && !ownReply ? sent.reply : undefined;
+  const status = (() => {
+    if (!sent || failed) return null;
+    if (pending) return sentRow(sent, { machine, online });
+    if (liveTurn && !ended)
+      return {
+        text: "Running",
+        since: sent.takenAt ?? turn.start?.time,
+        spinning: true,
+        tip: undefined,
+        state: "running",
+      };
+    return null;
+  })();
+  const failure = failed && sent ? <SentFailure a={sent} machine={machine} control={control} onEdit={compose} /> : null;
 
   if (chat)
     return (
@@ -1053,33 +1300,59 @@ function TurnBlock({
         transcript={transcript}
         progress={progress}
         ended={ended}
+        sent={sent}
+        pending={pending}
+        ackReply={ackReply}
+        status={status}
+        failure={failure}
+        flip={flip}
       />
     );
 
+  const endReason = ended ? String(ended.e.data.reason ?? "stop") : undefined;
+  const endErr = endReason === "error";
+  const items = turn.items.filter(
+    (it) => !(it.kind === "event" && (it.e.type === "turn.progress" || it.e.type === "turn.ended")),
+  );
   return (
-    <li className={`turn ${liveTurn ? "turn--live" : ""} ${turn.n === 0 ? "turn--pre" : ""}`}>
-      <TurnHead label={label} start={turn.start} elapsed={elapsed} running={liveTurn && !ended} />
-      {turn.start &&
-        (notice ? (
+    <li
+      className={`turn ${liveTurn || (pending && !failed) ? "turn--live" : ""} ${turn.n === 0 ? "turn--pre" : ""}`}
+      data-flip={flip ? String(turn.n) : undefined}
+    >
+      <TurnHead
+        label={label}
+        start={turn.start}
+        at={turn.start?.time ?? sent?.at}
+        elapsed={elapsed}
+        running={(liveTurn && !ended) || (pending && !!sent && !isFinal(sent))}
+        reason={endReason && endReason !== "stop" && !endErr ? endReason : undefined}
+        error={endErr ? String(ended?.e.data.error ?? "the turn ended with an error") : undefined}
+      />
+      {turn.start ? (
+        notice ? (
           <AgentNotice agentId={notice.agentId} seq={startSeq} />
         ) : prompt ? (
           <Prompt text={prompt} seq={startSeq} />
+        ) : sent?.text ? (
+          <Prompt text={sent.text} seq={startSeq} sent={sent} />
         ) : (
-          <p className="prompt prompt--hidden">
-            {promptChars !== undefined ? `A prompt of ${promptChars} characters` : "A prompt"}
+          <p className="prompt prompt--hidden" title={PROMPT_KEPT}>
+            <PromptKept chars={promptChars} />
           </p>
-        ))}
+        )
+      ) : pending && sent?.text ? (
+        <Prompt text={sent.text} sent={sent} />
+      ) : null}
       <ol className="turn-items">
-        {turn.items.map((it) => {
+        {items.length === 0 && status && <StatusRow {...status} chat={false} />}
+        {items.map((it) => {
           if (it.kind === "tool") return <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} />;
           if (it.kind === "agent") return <AgentBlock key={it.key} item={it} lens={lens} now={now} fill={fill} />;
           const e = it.e;
-          if (e.type === "turn.progress") return null;
           if (e.type === "turn.transcript") {
             if (it !== transcript) return null;
             return <Reply key={it.key} e={e} turnSeq={startSeq} fill={fill} />;
           }
-          if (e.type === "turn.ended") return <EndMarker key={it.key} e={e} />;
           if (e.type === "attention.needed") return <AttentionMarker key={it.key} e={e} />;
           if (e.type === "subagent.started" || e.type === "subagent.ended") return <AgentMarker key={it.key} e={e} />;
           return <EventMarker key={it.key} e={e} />;
@@ -1087,44 +1360,89 @@ function TurnBlock({
         {progress && String(progress.e.data.assistant ?? "").trim() && (
           <Reply e={progress.e} turnSeq={startSeq} fill={fill} live />
         )}
+        {ackReply && <AckReply text={ackReply} live={!!sent && !isFinal(sent)} />}
+        {endErr && ended && <EndMarker e={ended.e} />}
+        {failure && <li className="turn-failed">{failure}</li>}
       </ol>
     </li>
   );
 }
 
-/** A turn's section head: its number, when it started and how long it ran. Sticky under
- *  the bar, so the turn a row belongs to is always in sight. */
+/** A turn's section head: its number, then trailing how long it ran (and why it stopped,
+ *  when that was not the usual end); when it started shows on hover. Sticky under the
+ *  bar, so the turn a row belongs to is always in sight. The "Turn ended" row it used to
+ *  be followed by is this head's duration now. */
 function TurnHead({
   label,
   start,
+  at,
   elapsed,
   running,
+  reason,
+  error,
 }: {
   label: string;
   start?: StoredEvent;
+  /** When it began: its first event, or when the message was sent. */
+  at?: string;
   elapsed?: number;
   running: boolean;
+  /** How it stopped, when not the usual way ("interrupted"). */
+  reason?: string;
+  /** It ended with an error: the ✕ beside the duration, the words in its row below. */
+  error?: string;
 }) {
   const { path } = useTimeline();
   const seq = start?.session.seq;
   const menu = useContextMenu(() => [
     copyItem("Copy link to this turn", seqLink(path, seq)),
-    start && copyItem("Copy time", start.time),
+    at && copyItem("Copy time", at),
   ]);
   return (
     <header className="turn-head" data-seq={seq} {...menu}>
       <span className="turn-n">{label}</span>
       {running && <Spinner label="turn running" />}
       <span className="turn-facts num">
-        {start && <span className="turn-time">{clock(start.time)}</span>}
-        {elapsed !== undefined && <span className="turn-dur">{dur(elapsed)}</span>}
+        {at && (
+          <time className="turn-time" dateTime={at} title={new Date(at).toLocaleString([], { hourCycle: "h23" })}>
+            {clock(at).slice(0, 5)}
+          </time>
+        )}
+        {reason && <span className="turn-reason">{reason.replace(/_/g, " ")}</span>}
+        {error && (
+          <span className="turn-err" role="img" aria-label="ended with an error" title={error}>
+            <ErrGlyph />
+          </span>
+        )}
+        {elapsed !== undefined && <span className="turn-dur meta-col">{dur(elapsed)}</span>}
       </span>
     </header>
   );
 }
 
-/** The person's prompt: a well in the timeline, a bubble in the chat. */
-function Prompt({ text, seq, bubble = false }: { text: string; seq?: number; bubble?: boolean }) {
+/** The small ✕ that is an error's one signal in a row: red, 10 px, in the glyph column. */
+function ErrGlyph() {
+  return (
+    <svg className="err-glyph" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+      <path d="M3 3l6 6M9 3 3 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** The person's prompt: a well in the timeline, a bubble in the chat. A message sent from
+ *  here keeps the files it carried as chips under it. A start's first message is the
+ *  session's first bubble in both modes (the started moment is one surface). */
+function Prompt({
+  text,
+  seq,
+  bubble = false,
+  sent,
+}: {
+  text: string;
+  seq?: number;
+  bubble?: boolean;
+  sent?: ControlActivity;
+}) {
   const { path, root } = useTimeline();
   // A message sent through sessionpipe arrives framed ("Message via … (sessionpipe
   // control, …):"); the words show as written, and where they came from as a quiet line.
@@ -1135,11 +1453,32 @@ function Prompt({ text, seq, bubble = false }: { text: string; seq?: number; bub
     { sep: true },
     controlItems(root.current).send,
   ]);
+  const cls = bubble ? "chat-bubble" : sent?.kind === "start" ? "prompt chat-bubble" : "prompt";
   return (
-    <blockquote className={bubble ? "chat-bubble" : "prompt"} {...menu}>
-      <PromptBody text={words} />
-      {via && <span className="prompt-via">Sent from {via}</span>}
-    </blockquote>
+    <>
+      <blockquote className={cls} data-start-message={sent?.kind === "start" ? "" : undefined} {...menu}>
+        <PromptBody text={words} />
+        {via && <span className="prompt-via">Sent from {via}</span>}
+      </blockquote>
+      <SentFiles files={sent?.files} />
+    </>
+  );
+}
+
+/** The reply the machine streamed back with its acks, for a turn that has no reply event
+ *  of its own yet: rendered as the reply will be, in the same place. */
+function AckReply({ text, live, chat = false }: { text: string; live: boolean; chat?: boolean }) {
+  const menu = useContextMenu(() => [copyItem("Copy reply", text)]);
+  if (chat)
+    return (
+      <div className="chat-card" {...menu}>
+        <Markdown text={text} />
+      </div>
+    );
+  return (
+    <li className={`reply ${live ? "reply--live" : ""}`} {...menu}>
+      <Markdown text={text} />
+    </li>
   );
 }
 
@@ -1181,15 +1520,17 @@ function Reply({
   );
 }
 
-/** The leading columns every timeline row shares: the time, then a 16 px glyph. */
-function Lead({ time, children }: { time?: string; children?: ReactNode }) {
-  return (
-    <>
-      <span className="marker-time num">{time ? clock(time) : ""}</span>
-      <span className="marker-glyph">{children}</span>
-    </>
-  );
+/** The 16 px glyph column every timeline row starts with. When a row happened is its
+ *  turn head's (on hover) and its menu's "Copy time", not a column on every row. */
+function Lead({ children }: { children?: ReactNode }) {
+  return <span className="marker-glyph">{children}</span>;
 }
+
+/** The raw event, for the menus: "Copy event" and "Copy time". */
+const eventCopy = (e: StoredEvent): MenuList => [
+  copyItem("Copy event", JSON.stringify(e, null, 2)),
+  copyItem("Copy time", e.time),
+];
 
 /** A prompt the agent raised: the amber glyph in the gutter (no stripe), the kind and the
  *  message. While it is the open one, its menu answers it. */
@@ -1204,12 +1545,17 @@ function AttentionMarker({ e }: { e: StoredEvent }) {
   const shown = attentionMessage({ message, tool });
   const menu = useContextMenu(() => {
     const s = session();
-    return [...(isOpen && s ? answerItems(root.current, s, id) : []), { sep: true }, copyItem("Copy message", message)];
+    return [
+      ...(isOpen && s ? answerItems(root.current, s, id) : []),
+      { sep: true },
+      copyItem("Copy message", message),
+      ...eventCopy(e),
+    ];
   });
   return (
-    <li className={`marker marker--attn ${isOpen ? "is-open" : ""}`} data-seq={e.session.seq} {...menu}>
-      <Lead time={e.time}>
-        <StateDot state={isOpen ? "needs_you" : "idle"} decorative />
+    <li className={`marker marker--attn ${isOpen ? "is-open" : ""}`} data-seq={e.session.seq} title={e.type} {...menu}>
+      <Lead>
+        <StateDot state={isOpen ? "needs_you" : "idle"} size={10} decorative />
       </Lead>
       <span className="marker-body">
         <span className="marker-kind">{cap(ATTENTION_LABEL[kind] ?? kind)}</span>
@@ -1227,14 +1573,13 @@ function AttentionMarker({ e }: { e: StoredEvent }) {
 /** A subagent.started / .ended the timeline could not put in an agent's block (it named
  *  no agent): a quiet marker, as it came. */
 function AgentMarker({ e }: { e: StoredEvent }) {
-  const menu = useContextMenu(() => [
-    copyItem("Copy event as JSON", JSON.stringify(e, null, 2)),
-    copyItem("Copy time", e.time),
-  ]);
+  const menu = useContextMenu(() => eventCopy(e));
   return (
-    <li className="marker marker--agent" data-seq={e.session.seq} {...menu}>
-      <Lead time={e.time}>
-        <span aria-hidden="true">↳</span>
+    <li className="marker marker--agent" data-seq={e.session.seq} title={e.type} {...menu}>
+      <Lead>
+        <span className="marker-tree" aria-hidden="true">
+          ↳
+        </span>
       </Lead>
       <span className="marker-body">
         <span>
@@ -1245,50 +1590,53 @@ function AgentMarker({ e }: { e: StoredEvent }) {
   );
 }
 
+/** A turn that ended with an error: the one end worth its own row (the head carries the
+ *  duration of every other end), its words after the red ✕. */
 function EndMarker({ e }: { e: StoredEvent }) {
-  const reason = String(e.data.reason ?? "stop");
   const err = e.data.error as string | undefined;
-  const menu = useContextMenu(() => [
-    copyItem("Copy event as JSON", JSON.stringify(e, null, 2)),
-    copyItem("Copy time", e.time),
-  ]);
+  const menu = useContextMenu(() => eventCopy(e));
   return (
-    <li className={`marker marker--end ${reason === "error" ? "is-err" : ""}`} data-seq={e.session.seq} {...menu}>
-      <Lead time={e.time} />
+    <li className="marker marker--end is-err" data-seq={e.session.seq} title={e.type} {...menu}>
+      <Lead>
+        <ErrGlyph />
+      </Lead>
       <span className="marker-body">
-        <span>
-          {reason === "error" ? "Turn ended with an error" : "Turn ended"}
-          {reason !== "error" && reason !== "stop" ? ` · ${reason}` : ""}
-          {err ? ` · ${err}` : ""}
-        </span>
-      </span>
-    </li>
-  );
-}
-
-function EventMarker({ e }: { e: StoredEvent }) {
-  const menu = useContextMenu(() => [
-    copyItem("Copy event as JSON", JSON.stringify(e, null, 2)),
-    copyItem("Copy time", e.time),
-  ]);
-  return (
-    <li className={`marker marker--${e.type.split(".")[0]}`} data-seq={e.session.seq} {...menu}>
-      <Lead time={e.time} />
-      <span className="marker-body">
-        <span className="marker-type mono">{e.type}</span>
         <span className="marker-msg">
-          <Redacted text={eventSummary(e)} />
+          {err ? `The turn ended with an error: ${err}` : "The turn ended with an error"}
         </span>
       </span>
     </li>
   );
 }
 
-/** One turn as a chat exchange (Simple mode): the time centred over it (as Messages does),
- *  the prompt as a bubble on the right, then under the harness's mark and name the turn's
- *  tools folded into one quiet line ("Ran 4 tools"), and the reply as plain prose. The
- *  open permission is the docked bar's, so it is not repeated here; an answered one is a
- *  quiet note. While the agent works, one "Working…" line. */
+/** Any other event, in words ("Session started", "Changed handler.ts"); the raw type is
+ *  the row's tooltip, the event itself in "Copy event". */
+function EventMarker({ e }: { e: StoredEvent }) {
+  const menu = useContextMenu(() => eventCopy(e));
+  const w = eventWords(e);
+  return (
+    <li className={`marker marker--${e.type.split(".")[0]}`} data-seq={e.session.seq} title={e.type} {...menu}>
+      <Lead />
+      <span className="marker-body">
+        <span className="marker-text">{w.text}</span>
+        {w.detail && (
+          <span className="marker-msg">
+            <Redacted text={w.detail} />
+          </span>
+        )}
+      </span>
+    </li>
+  );
+}
+
+type Status = ReturnType<typeof sentRow>;
+
+/** One turn as a chat exchange (Simple mode): the person's prompt as a bubble on the
+ *  right (when it was sent shows on hover), then under the harness's mark and name the
+ *  turn's tools folded into one quiet line ("Ran 4 tools"), and the reply as plain
+ *  prose. The open permission is the docked bar's, so it is not repeated here; an
+ *  answered one is a quiet note. While the agent works, one "Running · 12 s" row; a
+ *  message on its way, its status row in the same place. */
 function ChatTurn({
   turn,
   lens,
@@ -1302,6 +1650,12 @@ function ChatTurn({
   transcript,
   progress,
   ended,
+  sent,
+  pending,
+  ackReply,
+  status,
+  failure,
+  flip,
 }: {
   turn: Turn;
   lens: Tier;
@@ -1316,6 +1670,12 @@ function ChatTurn({
   transcript: EventItem | undefined;
   progress: EventItem | undefined;
   ended: EventItem | undefined;
+  sent?: ControlActivity;
+  pending: boolean;
+  ackReply?: string;
+  status: Status;
+  failure: ReactNode;
+  flip: boolean;
 }) {
   const { open, working } = useTimeline();
   const tools = turn.items.filter((i): i is ToolItem => i.kind === "tool");
@@ -1333,23 +1693,43 @@ function ChatTurn({
   const replyText = replyItem ? String(replyItem.e.data.assistant ?? "").trim() : "";
   const busy = liveTurn && !ended && working;
   const startSeq = turn.start?.session.seq;
-  const agent = tools.length > 0 || agentItems.length > 0 || !!replyText || busy || notes.length > 0 || !!endErr;
+  // A running turn's one row: the sent message's status, else Running with its timer.
+  const row: Status =
+    status ?? (busy ? { text: "Running", since: turn.start?.time, spinning: true, state: "running" } : null);
+  const agent =
+    tools.length > 0 ||
+    agentItems.length > 0 ||
+    !!replyText ||
+    !!ackReply ||
+    !!row ||
+    !!failure ||
+    notes.length > 0 ||
+    !!endErr;
   // Before the first turn there is nothing a chat shows (session markers stay out of it).
-  if (!turn.start && !agent) return null;
+  if (!turn.start && !agent && !pending) return null;
+  const at = turn.start?.time ?? sent?.at;
   return (
-    <li className={`turn turn--chat ${liveTurn ? "turn--live" : ""}`} data-seq={startSeq}>
+    <li
+      className={`turn turn--chat ${liveTurn || (pending && !failure) ? "turn--live" : ""}`}
+      data-seq={startSeq}
+      data-flip={flip ? String(turn.n) : undefined}
+    >
       {turn.start && notice ? (
         <AgentNotice agentId={notice} seq={startSeq} />
-      ) : turn.start ? (
+      ) : turn.start || (pending && sent) ? (
         <div className="chat-you">
-          <time className="chat-time num" dateTime={turn.start.time}>
-            {clock(turn.start.time).slice(0, 5)}
-          </time>
+          {at && (
+            <time className="chat-time num" dateTime={at} title={new Date(at).toLocaleString([], { hourCycle: "h23" })}>
+              {clock(at).slice(0, 5)}
+            </time>
+          )}
           {prompt ? (
             <Prompt text={prompt} seq={startSeq} bubble />
+          ) : sent?.text ? (
+            <Prompt text={sent.text} seq={startSeq} bubble sent={sent} />
           ) : (
-            <p className="chat-bubble chat-bubble--hidden">
-              {promptChars !== undefined ? `A prompt of ${promptChars} characters` : "A prompt"}
+            <p className="chat-bubble chat-bubble--hidden" title={PROMPT_KEPT}>
+              <PromptKept chars={promptChars} />
             </p>
           )}
         </div>
@@ -1374,14 +1754,16 @@ function ChatTurn({
               {typeof it.e.data.tool === "string" ? ` · ${it.e.data.tool}` : ""}
             </p>
           ))}
-          {endErr && <p className="chat-err">The turn ended with an error · {endErr}</p>}
-          {replyItem && replyText && <Reply e={replyItem.e} turnSeq={startSeq} fill={fill} live={!transcript} chat />}
-          {busy && (
-            <p className="chat-working">
-              <Spinner label="working" />
-              Working…
+          {endErr && (
+            <p className="chat-err">
+              <ErrGlyph />
+              The turn ended with an error: {endErr}
             </p>
           )}
+          {replyItem && replyText && <Reply e={replyItem.e} turnSeq={startSeq} fill={fill} live={!transcript} chat />}
+          {ackReply && <AckReply text={ackReply} live={!!sent && !isFinal(sent)} chat />}
+          {failure}
+          {row && <StatusRow {...row} chat />}
         </div>
       )}
     </li>
@@ -1412,7 +1794,7 @@ function ChatTools({ tools, lens, now, fill }: { tools: ToolItem[]; lens: Tier; 
         <Chevron />
         {running ? (
           <>
-            <Spinner />
+            <span className="spinner spinner--sm" aria-hidden="true" />
             <span>
               Running {name}
               {tools.length > 1 ? ` · ${plural(tools.length - 1, "more tool")}` : ""}
@@ -1421,7 +1803,12 @@ function ChatTools({ tools, lens, now, fill }: { tools: ToolItem[]; lens: Tier; 
         ) : (
           <span>Ran {plural(tools.length, "tool")}</span>
         )}
-        {errors > 0 && <span className="is-err">{errors} failed</span>}
+        {errors > 0 && (
+          <span className="chat-tools-err">
+            <ErrGlyph />
+            {errors} failed
+          </span>
+        )}
       </summary>
       <ol className="turn-items">
         {tools.map((it) => (
@@ -1470,9 +1857,20 @@ function Cut({ e, field, fill }: { e: StoredEvent; field: string; fill: Fill }) 
   );
 }
 
-/** The one line a tool's input reads as: its command, path, pattern or address. */
+/** The one line a tool's input reads as: its command, path, pattern or address. An input
+ *  that arrived as a JSON string (some harnesses send it so) is read as the object. */
 function toolSubject(input: unknown): string {
-  if (typeof input === "string") return input;
+  if (typeof input === "string") {
+    const t = input.trim();
+    if (!t.startsWith("{")) return input;
+    try {
+      return toolSubject(JSON.parse(t)) || "";
+    } catch {
+      // Cut to a preview, it no longer parses: its first known field still reads.
+      const m = /"(command|file_path|path|pattern|url|query|description)"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(t);
+      return m ? m[2]!.replace(/\\n.*$/s, "").replace(/\\(.)/g, "$1") : input;
+    }
+  }
   if (!input || typeof input !== "object") return "";
   const o = input as Record<string, unknown>;
   for (const k of ["command", "file_path", "path", "pattern", "url", "query", "description", "prompt"]) {
@@ -1516,15 +1914,22 @@ function ToolRow({ item, lens, now, fill }: { item: ToolItem; lens: Tier; now: n
       cutOut && item.ended && { label: "Load full output", run: () => fill(item.ended!) },
     ];
   });
+  // One 10 px glyph in the 16 px column, the same box as a subagent's: the spinner, the
+  // drawn check, or the red ✕.
   const head = (
     <>
-      <span className="tool-time num">{clock((item.started ?? item.ended)!.time)}</span>
       <span
         className={`tool-status ${running ? "is-run" : ok ? "is-ok" : "is-err"}`}
         role="img"
         aria-label={running ? "running" : ok ? "ok" : "error"}
       >
-        {running ? <Spinner /> : ok ? "✓" : "✕"}
+        {running ? (
+          <span className="spinner spinner--sm" aria-hidden="true" />
+        ) : ok ? (
+          <StateDot state="done" size={10} decorative />
+        ) : (
+          <ErrGlyph />
+        )}
       </span>
       <span className="tool-main">
         <code className="tool-name">{tool}</code>
@@ -1699,7 +2104,6 @@ function AgentBlock({ item, lens, now, fill }: { item: AgentItem; lens: Tier; no
   return (
     <li className={`agent-block ${open ? "is-open" : ""}`} data-agent={item.id} data-seq={startSeq}>
       <div className="agent-head" data-open={focused ? "" : undefined} {...menu}>
-        <span className="marker-time num">{clock(run.startedAt)}</span>
         <button
           type="button"
           className="agent-toggle"
@@ -1708,7 +2112,7 @@ function AgentBlock({ item, lens, now, fill }: { item: AgentItem; lens: Tier; no
           title={run.attributed || run.session ? undefined : "Codex doesn't report a subagent's tools separately"}
         >
           <span className="marker-glyph">
-            <AgentGlyph a={run} />
+            <AgentGlyph a={run} size={10} />
           </span>
           <AgentText a={run} />
           <AgentNow a={run} />
@@ -1796,7 +2200,7 @@ function AgentNotice({ agentId, seq }: { agentId: string; seq?: number }) {
     <div className="agent-notice" data-seq={seq} {...menu}>
       <button type="button" className="agent-notice-btn" onClick={() => showAgent(agentId)}>
         <span className="marker-glyph">
-          <AgentGlyph a={run ?? { state: "done" }} />
+          <AgentGlyph a={run ?? { state: "done" }} size={10} />
         </span>
         <span className="agent-notice-text ellipsis">
           Subagent finished: {run ? agentLabel(run) : "a background agent"}

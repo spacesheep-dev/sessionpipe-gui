@@ -1,10 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 // Small shared pieces: the status glyph, harness monograms, chips, ticking times,
 // spinner, copy buttons (text and icon), redaction highlighting, the toolbar search,
-// segmented control, the toolbar pop-up (chip select), slider, switch. The select itself
-// lives in Select.tsx.
+// segmented control, the toolbar pop-up (chip select), slider, switch; and the round-4
+// pieces every surface shares: the action button with its pending state, key caps, the
+// one-line command well, the listening row, the inline notice and the empty state. The
+// select itself lives in Select.tsx; motion hooks in lib/motion.ts.
 import type { SessionState, Tier } from "@shared/api";
-import { type CSSProperties, type ReactNode, useEffect, useId, useState } from "react";
+import {
+  type ButtonHTMLAttributes,
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { copyText } from "../lib/clipboard";
 import { harnessMark, STATE_HINT, STATE_LABEL } from "../lib/format";
 import { HARNESS_ICONS } from "../lib/harnessIcons";
@@ -22,11 +33,23 @@ export function StateDot({
   size?: number;
   decorative?: boolean;
 }) {
+  // A change of state while on screen is drawn once (shared.css `.dot--arrive`): the new
+  // glyph settles in, and a session that finishes in front of you draws its check. A
+  // glyph that mounts in a state just shows it.
+  const prev = useRef(state);
+  const [changes, setChanges] = useState(0);
+  useEffect(() => {
+    if (prev.current === state) return;
+    prev.current = state;
+    setChanges((n) => n + 1);
+  }, [state]);
   const style = { width: size, height: size };
-  if (decorative) return <span className={`dot dot--${state}`} style={style} aria-hidden="true" />;
+  const cls = `dot dot--${state}${changes ? " dot--arrive" : ""}`;
+  if (decorative) return <span key={changes} className={cls} style={style} aria-hidden="true" />;
   return (
     <span
-      className={`dot dot--${state}`}
+      key={changes}
+      className={cls}
       style={style}
       role="img"
       aria-label={STATE_LABEL[state]}
@@ -37,7 +60,7 @@ export function StateDot({
 
 /** "● working · 12 s": the state as text, no box. */
 export function StateBadge({ state, since: sinceIso }: { state: SessionState; since?: string }) {
-  const now = useNow(sinceIso ? tickFor(Date.now() - ms(sinceIso)) : "off");
+  const now = useNow(sinceIso ? tickFor(Date.now() - ms(sinceIso), 60_000) : "off");
   return (
     <span className={`badge badge--${state}`} title={STATE_HINT[state]}>
       <StateDot state={state} decorative />
@@ -126,15 +149,16 @@ export function Ago({ iso, prefix }: { iso: string | undefined; prefix?: string 
   );
 }
 
-/** Elapsed since an instant, ticking: "4 m 12 s"; `coarse` drops the seconds past a minute. */
-export function Since({ iso, coarse = false }: { iso: string | undefined; coarse?: boolean }) {
-  // Seconds show for an hour (`dur`), or for a minute when coarse; after that the text
-  // changes once a minute, and a ten-second tick is plenty.
-  const now = useNow(iso ? tickFor(Date.now() - ms(iso), coarse ? 60_000 : 3_600_000) : "off");
+/** Elapsed since an instant, ticking, in the one grammar: "12 s", "4 m", "1 h 05 m".
+ *  `coarse` is kept for its callers; every duration is coarse now (lib/time.ts). */
+export function Since({ iso }: { iso: string | undefined; coarse?: boolean }) {
+  // Every second in the first minute; after that the text changes once a minute, and a
+  // ten-second tick is plenty.
+  const now = useNow(iso ? tickFor(Date.now() - ms(iso), 60_000) : "off");
   if (!iso) return null;
   return (
     <time dateTime={iso} className="num" title={new Date(iso).toLocaleString()}>
-      {coarse ? durCoarse(now - ms(iso)) : since(iso, now)}
+      {durCoarse(now - ms(iso))}
     </time>
   );
 }
@@ -413,3 +437,147 @@ export function Toggle({
 
 /** The same 36×20 switch under the name the design notes use. */
 export const Switch = Toggle;
+
+// ----- round 4: shared pieces -----
+
+/** A key cap: one key ("⌘", "K", "Esc") on a quiet raised face. */
+export function Kbd({ children }: { children: ReactNode }) {
+  return <kbd className="kbd">{children}</kbd>;
+}
+
+/** A button whose press shows at once and whose work shows as a pending verb: on
+ *  pointer-down it takes its pressed face; while `onClick`'s promise runs (or `pending`
+ *  is set) it reads `pendingLabel` ("Stopping…"), is inert and `aria-busy`, and holds the
+ *  width it had, so nothing beside it moves. It never shows success by itself: what
+ *  happened next is the caller's to say, from the daemon's real answer. */
+export function ActionButton({
+  children,
+  pendingLabel,
+  pending: pendingProp,
+  onClick,
+  className = "btn",
+  disabled,
+  ...rest
+}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> & {
+  pendingLabel?: ReactNode;
+  pending?: boolean;
+  onClick?: () => unknown;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const [running, setRunning] = useState(false);
+  const [width, setWidth] = useState<number | null>(null);
+  const pending = pendingProp ?? running;
+  useLayoutEffect(() => {
+    if (pending && ref.current) setWidth(ref.current.offsetWidth);
+    if (!pending) setWidth(null);
+  }, [pending]);
+  return (
+    <button
+      type="button"
+      {...rest}
+      ref={ref}
+      className={className}
+      disabled={disabled}
+      aria-busy={pending || undefined}
+      data-pending={pending ? "" : undefined}
+      style={width ? { ...rest.style, minWidth: width } : rest.style}
+      onClick={() => {
+        if (pending || !onClick) return;
+        const r = onClick();
+        if (r && typeof (r as Promise<unknown>).then === "function") {
+          setRunning(true);
+          void (r as Promise<unknown>).finally(() => setRunning(false));
+        }
+      }}
+    >
+      {pending ? (
+        <>
+          <span className="spinner spinner--sm" aria-hidden="true" />
+          {pendingLabel ?? children}
+        </>
+      ) : (
+        children
+      )}
+    </button>
+  );
+}
+
+/** A literal command on one line: mono, a quiet well, never wrapped (it scrolls sideways
+ *  inside itself), with Copy at its end. `prompt` draws a muted "$" first. */
+export function CommandWell({
+  command,
+  prompt = true,
+  label = "Copy command",
+}: {
+  command: string;
+  prompt?: boolean;
+  label?: string;
+}) {
+  return (
+    <div className="cmdwell">
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: it scrolls sideways, so a keyboard must reach it (axe scrollable-region-focusable) */}
+      <code className="cmdwell-text" tabIndex={0}>
+        {prompt ? (
+          <span className="cmdwell-prompt" aria-hidden="true">
+            ${" "}
+          </span>
+        ) : null}
+        {command}
+      </code>
+      <CopyIconButton text={command} label={label} />
+    </div>
+  );
+}
+
+/** "Listening · Claude Code, Codex": a live wait drawn as the working ring and one muted
+ *  line, never a progress bar. */
+export function Listening({ children, label = "Listening" }: { children?: ReactNode; label?: string }) {
+  return (
+    <p className="listening" role="status">
+      <span className="dot dot--working" style={{ width: 10, height: 10 }} aria-hidden="true" />
+      <span className="listening-text">
+        {label}
+        {children ? <span className="listening-detail"> · {children}</span> : null}
+      </span>
+    </p>
+  );
+}
+
+/** A condition of the system ("Notifications are off for this site"), as one quiet row
+ *  with its one way out at the right. Not a banner slab: the well tier, no icon colour. */
+export function Notice({ children, action }: { children: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="notice" role="note">
+      <span className="notice-text">{children}</span>
+      {action ? <span className="notice-action">{action}</span> : null}
+    </div>
+  );
+}
+
+/** The empty view (POLISH-PLAN.md §3): what fills this view in one sentence, and the one
+ *  thing to do. `center` sits it at the content's optical centre, 40 % down; without it
+ *  it stands where the first row would be (inside a panel, under a filter). */
+export function EmptyState({
+  title,
+  children,
+  actions,
+  center = false,
+  glyph,
+  className = "",
+}: {
+  title: ReactNode;
+  children?: ReactNode;
+  actions?: ReactNode;
+  center?: boolean;
+  glyph?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`state ${center ? "state--center" : ""} ${className}`}>
+      {glyph ? <div className="state-glyph">{glyph}</div> : null}
+      <h2 className="state-title">{title}</h2>
+      {children ? <div className="state-text">{children}</div> : null}
+      {actions ? <div className="state-actions">{actions}</div> : null}
+    </div>
+  );
+}

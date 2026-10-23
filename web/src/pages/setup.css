@@ -1,13 +1,17 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* The checklist (Setup's six steps and Your phone's three): one row per step, a 20 px
-   status glyph in the lead (a check in --ok once done, the amber disc on the step to do
-   now, a hollow ring for later ones), the title at 600 as the disclosure, one caption that
-   says where the step stands, and only the open step's body under it, indented to the
-   text. Hairlines between steps, inset to the text; on a phone the list is one inset
-   group. The same tokens as everywhere: amber only on the current step's disc. */
+   status glyph in the lead (a check that draws itself in once done, a ring in the ink on
+   the step to do now, a quiet hollow ring for later ones), the title at 600 as the
+   disclosure, one caption that says where the step stands, and only the open step's body
+   under it, indented to the text. Hairlines between steps, inset to the text; on a phone
+   the list is one inset group. No amber anywhere: amber means a prompt needs you. */
 
 .setup-skip-btn {
   font-weight: 500;
+}
+/* Setup's reading column stands in the middle of the window, as the session page's does. */
+.page.setup > :not(.bar):not(.bar-below):not(.sr-only) {
+  margin-inline: auto;
 }
 
 .steps {
@@ -60,7 +64,7 @@
   place-items: center;
   width: 20px;
   height: 18px;
-  color: var(--ok);
+  color: var(--fg-2);
 }
 .step-dot {
   display: block;
@@ -70,8 +74,11 @@
   border: 1.5px solid var(--fg-4);
 }
 .step-mark--needs .step-dot {
-  border-color: var(--needs);
-  background: var(--needs);
+  border: 2px solid var(--fg);
+}
+/* A step that turned done on screen draws its check left to right, once. */
+.step-mark--arrive svg {
+  animation: check-draw 240ms var(--ease-out) both;
 }
 .step-head-text {
   min-width: 0;
@@ -167,11 +174,11 @@
 .step-action .btn {
   flex: none;
 }
-.step-action > .step-note {
+.step-note {
   flex: 1 1 240px;
   min-width: 0;
 }
-.step-note {
+.step-action > .step-note {
   color: var(--fg-2);
   font-size: var(--text-sm);
   line-height: var(--lh);
@@ -181,6 +188,10 @@
 .step-facts code {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+}
+/* In a column the 240 px basis became a 240 px height: the gap under step 1's note. */
+.step-action--col > .step-note {
+  flex: none;
 }
 .step-note--err {
   color: var(--err);
@@ -320,6 +331,14 @@
 .step-harness--pending .step-harness-status {
   color: var(--fg-4);
 }
+/* The harnesses with no adapter yet, as one muted line under the table. */
+.step-pending {
+  max-width: 560px;
+  margin-top: -4px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+}
 .step-harness-last {
   color: var(--fg-4);
 }
@@ -438,6 +457,16 @@
 .setup-extras code {
   font-family: var(--font-mono);
 }
+/* The steps left can wait: the way to the board, at the end, a hairline above. */
+.setup-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: var(--hairline) solid var(--line);
+}
 
 /* ----- the phone: the steps as one inset group ----- */
 @media (max-width: 839px) {
@@ -476,6 +505,7 @@
     align-self: center;
   }
   .setup-done,
+  .setup-end,
   .setup-extras {
     padding-left: 16px;
     padding-right: 16px;

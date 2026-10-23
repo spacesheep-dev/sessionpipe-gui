@@ -13,6 +13,7 @@ import type { Store } from "../data/store";
 import { agentGlyph, agentLabel, openAgent } from "./agents";
 import { copyText } from "./clipboard";
 import { harnessMark, repoBranch, sessionTitle } from "./format";
+import { hide } from "./hidden";
 import { labelMenu } from "./labels";
 import { hrefFor, navigate, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath } from "./router";
 import { getSettings } from "./settings";
@@ -146,6 +147,12 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
     },
     { sep: true },
     ...(ctx.extra ?? []),
+    // Hide (Mail's archive): off this device's lists until it has news; "Hidden · Undo".
+    list &&
+      !onItsPage && {
+        label: "Hide",
+        run: () => hide(s.key, s.stateSince, { title: sessionTitle(s), session: s.key }),
+      },
     { sep: true },
     {
       label: "Copy",

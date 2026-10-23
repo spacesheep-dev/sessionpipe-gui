@@ -29,8 +29,63 @@ export const STATE_HINT: Record<SessionState, string> = {
   done: "Ended, or silent for six hours, or only known from backfill.",
 };
 
-export function sessionTitle(s: Pick<SessionSummary, "title" | "cwd" | "id">): string {
-  if (s.title?.trim()) return s.title.trim();
+/** A title cut upstream ("Why does the staging deploy take 14 minutes?...") keeps its
+ *  honest mark of a cut, as the one ellipsis glyph after the last whole word; CSS cuts
+ *  the rest at the real column width. */
+export function cleanTitle(t: string): string {
+  const s = t.trim();
+  const cut = s.replace(/\s*(?:\.{3}|…)$/, "");
+  if (cut === s) return s;
+  // A cut right after a whole sentence ("…take 14 minutes?...") lost nothing it says.
+  if (/[?!.]$/.test(cut)) return cut;
+  return `${cut.replace(/[\s,;:–—-]+$/, "")}…`;
+}
+
+/** A title the summariser cut ("Before I merge the BM25 cache, review it from...") is the
+ *  start of the session's first ask. While that ask is still the prompt the summary
+ *  carries, its whole first line is the title, so CSS cuts it at the real column width
+ *  and not 45 characters in. Undefined when the ask is not here or is something else. */
+export function uncutTitle(s: Pick<SessionSummary, "title" | "lastUser" | "progress">): string | undefined {
+  const t = s.title?.trim() ?? "";
+  const stem = t.replace(/\s*(?:\.{3}|…)$/, "");
+  if (stem === t || stem.length < 8) return undefined;
+  const ask = (s.progress?.user || s.lastUser || "").trim().split("\n")[0]!.trim();
+  if (ask.length <= stem.length || !ask.startsWith(stem)) return undefined;
+  return ask.length > 240 ? `${ask.slice(0, 239).replace(/\s+\S*$/, "")}…` : ask;
+}
+
+/** The first message of each session started from this app, by session key, kept by
+ *  control/Starting.tsx useStartTitles: until the agent reports a title, a session
+ *  started here is called by what it was asked, not by its folder ("billing" ×4). */
+let startTitles: ReadonlyMap<string, string> = new Map();
+export function rememberStartTitles(m: ReadonlyMap<string, string>): void {
+  startTitles = m;
+}
+
+/** Each session's uncut title once seen, by key and cut title: the next turn's prompt
+ *  takes the first ask's place in the summary, and the title must not shrink back to the
+ *  cut one then (a row that changes its name mid-session, the board and the panel
+ *  disagreeing). The oldest go first past UNCUT_KEEP. */
+const uncutSeen = new Map<string, string>();
+const UNCUT_KEEP = 2000;
+
+function keptUncut(s: Pick<SessionSummary, "title" | "lastUser" | "progress"> & { key?: string }) {
+  const full = uncutTitle(s);
+  if (!s.key) return full;
+  const k = `${s.key}\n${s.title?.trim() ?? ""}`;
+  const seen = uncutSeen.get(k);
+  if (seen || !full) return seen;
+  if (uncutSeen.size >= UNCUT_KEEP) uncutSeen.delete(uncutSeen.keys().next().value!);
+  uncutSeen.set(k, full);
+  return full;
+}
+
+export function sessionTitle(
+  s: Pick<SessionSummary, "title" | "cwd" | "id" | "lastUser" | "progress"> & { key?: string },
+): string {
+  if (s.title?.trim()) return keptUncut(s) ?? cleanTitle(s.title);
+  const started = s.key ? startTitles.get(s.key) : undefined;
+  if (started) return started;
   if (s.cwd) return basename(s.cwd);
   return s.id.slice(0, 8);
 }

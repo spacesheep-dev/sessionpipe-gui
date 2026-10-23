@@ -215,6 +215,10 @@ const THEME_JS = (session: string) => `export default {
 
 test.describe.configure({ mode: "serial" });
 
+/** A reply in the session view: the chat's card (Simple, the default) or the timeline's row. */
+const REPLY_IN = "li.reply, .chat-card";
+const REPLY = ".page.session li.reply, .page.session .chat-card";
+
 let server: ChildProcess;
 let base: string;
 let stateDir: string;
@@ -324,15 +328,11 @@ test("a prompt from the Session page reaches the daemon signed, and its reply co
   await page.goto(`/s/claude-code/${SID}`);
   const box = page.getByLabel("Message for the next turn");
   await expect(box).toBeEnabled();
-  await expect(page.locator(".ctl-hint")).toContainText(`${MACHINE} is listening`);
-  // The day-grant note lives in the chat context line (Simple mode, the default) or in
-  // the strip's note (Advanced): either wording is the same promise.
-  await expect(
-    page
-      .locator(".ctl-context, .ctl-note")
-      .filter({ hasText: /passkey once/ })
-      .first(),
-  ).toBeVisible();
+  // Ready, with the one line under the field: the day grant's (paired, trusted, online,
+  // no grant yet today), and Unlock now to take it ahead.
+  const foot = page.locator(".ctl-foot[data-reason=passkey]");
+  await expect(foot.locator(".ctl-hint")).toHaveText("The first send today asks for your passkey.");
+  await expect(foot.getByRole("button", { name: "Unlock now" })).toBeVisible();
   await shot(page, "strip-ready-desktop");
 
   await box.fill("Add the Oct 8 row");
@@ -340,9 +340,14 @@ test("a prompt from the Session page reaches the daemon signed, and its reply co
   await box.type("and run the tests");
   await box.press("Enter");
 
-  const row = page.locator("li[data-message]").first();
-  await expect(row).toHaveAttribute("data-outcome", "queued", { timeout: 20_000 });
-  await expect(row).toContainText("waiting for e2e-mac");
+  // The message is drawn in the timeline where its turn will be: the person's words, and
+  // the one status row under them as the acks move it (the receiver's words its tooltip).
+  const status = page.locator(".page.session .status-row[data-sent-state]").last();
+  await expect(status).toHaveAttribute("data-sent-state", "queued", { timeout: 20_000 });
+  await expect(status).toHaveText("Sent to e2e-mac");
+  await expect(status).toHaveAttribute("title", "queued · waiting for e2e-mac to take it");
+  await expect(page.locator(".page.session blockquote").last()).toHaveText(/Add the Oct 8 row\s+and run the tests/);
+  await expect(page.locator("li[data-message]")).toHaveCount(0);
   await expect(box).toHaveValue("");
   await shot(page, "strip-queued-desktop");
 
@@ -365,36 +370,43 @@ test("a prompt from the Session page reaches the daemon signed, and its reply co
   expect(grant.cred).toBeTruthy();
 
   await daemon.ack(msg.id, "taken");
-  await expect(row).toHaveAttribute("data-outcome", "taken");
-  await expect(row).toContainText("delivering");
+  await expect(status).toHaveAttribute("data-sent-state", "taken");
+  await expect(status).toHaveText("e2e-mac is handing it over…");
+  await expect(status).toHaveAttribute("title", /^taken · e2e-mac is delivering it/);
+  // The reply the machine streams back is drawn as the turn's reply will be, in its place.
   await daemon.ack(msg.id, "progress", { reply: "Adding the row", seq: 1 });
-  await expect(row).toHaveAttribute("data-outcome", "progress");
-  await expect(row.locator(".ctl-act-reply")).toContainText("Adding the row");
+  await expect(status).toHaveAttribute("data-sent-state", "progress");
+  await expect(status).toContainText("Running");
+  await expect(page.locator(REPLY).last()).toContainText("Adding the row");
   await daemon.ack(msg.id, "delivered", { reply: "Added the Oct 8 row; 14 tests pass." });
-  await expect(row).toHaveAttribute("data-outcome", "delivered");
-  await expect(row).toContainText("delivered · sdk");
-  await expect(row.locator(".ctl-act-reply")).toContainText("14 tests pass");
+  await expect(status).toHaveAttribute("data-sent-state", "delivered");
+  await expect(status).toHaveText("Delivered. Its turn shows here when it begins.");
+  await expect(status).toHaveAttribute("title", "delivered · sdk");
+  await expect(page.locator(REPLY).last()).toContainText("14 tests pass");
   await shot(page, "strip-delivered-desktop");
 
-  // The second send of the day signs by itself: no passkey hint, same grant.
-  await expect(page.locator(".ctl-note")).toHaveCount(0);
+  // The second send of the day signs by itself: no passkey line, same grant.
+  await expect(page.locator(".ctl-foot[data-reason=passkey]")).toHaveCount(0);
 });
 
-test("a delivered prompt whose turn is in the chat folds to one line; one that went to a copy links both ways", async () => {
+test("a delivered prompt becomes its turn in the chat, with no row of its own; one that went to a copy links both ways", async () => {
   const box = page.getByLabel("Message for the next turn");
   await box.fill("What is the coolest feature?");
   await box.press("Enter");
   const msg = await daemon.next();
-  const row = page.locator(`li[data-message="${msg.id}"]`);
   await daemon.ack(msg.id, "taken", { mode: "resume" });
   const start = events.ev("turn.started", { turn_id: "t-cool", prompt_chars: 120 });
   await events.post(start);
-  // The reply stays while it is being written, and once delivered until its turn's words arrive.
+  // The turn the message became: the person's words, and the reply the machine streams
+  // back in the reply's place until the turn's own words arrive.
+  const turn = page
+    .locator(".page.session ol.timeline > li.turn")
+    .filter({ has: page.locator("blockquote", { hasText: "What is the coolest feature?" }) });
   await daemon.ack(msg.id, "progress", { reply: "The control", seq: 1, mode: "resume" });
-  await expect(row.locator(".ctl-act-reply")).toContainText("The control");
+  await expect(turn.locator("blockquote")).toHaveText("What is the coolest feature?");
+  await expect(turn.locator(REPLY_IN)).toContainText("The control");
   await daemon.ack(msg.id, "delivered", { mode: "resume", reply: "The control channel." });
-  await expect(row).toHaveAttribute("data-outcome", "delivered");
-  await expect(row.locator(".ctl-act-reply")).toContainText("The control channel.");
+  await expect(turn.locator(REPLY_IN)).toContainText("The control channel.");
   await events.post(
     events.ev("turn.ended", { reason: "stop", ms: 900 }),
     events.ev("turn.transcript", {
@@ -404,10 +416,14 @@ test("a delivered prompt whose turn is in the chat folds to one line; one that w
       at: start.time,
     }),
   );
-  await expect(row).toHaveAttribute("data-folded");
-  await expect(row.locator(".ctl-act-reply")).toHaveCount(0);
-  await expect(row).toContainText("What is the coolest feature?");
-  await expect(row).toContainText("delivered · resume");
+  // Its words without the framing, one reply (the turn's own), no status row, and nothing
+  // under the composer for it.
+  await expect(turn.locator("blockquote")).toHaveText(/^What is the coolest feature\?Sent from localhost$/);
+  await expect(turn.locator("blockquote")).not.toContainText("Message via");
+  await expect(turn.locator(REPLY_IN)).toHaveCount(1);
+  await expect(turn.locator(REPLY_IN)).toContainText("The control channel.");
+  await expect(turn.locator(".status-row")).toHaveCount(0);
+  await expect(page.locator(`li[data-message="${msg.id}"]`)).toHaveCount(0);
 
   // Claude Code's idle notice a minute later asks for nothing: the session stays idle.
   await events.post(
@@ -417,7 +433,8 @@ test("a delivered prompt whose turn is in the chat folds to one line; one that w
       message: "Claude is waiting for your input",
     }),
   );
-  await expect(page.locator(".sess-state >> visible=true")).toHaveText("Idle");
+  // The state is the title's glyph now (the bar has no state word).
+  await expect(page.locator("h1.sess-title .dot")).toHaveClass(/\bdot--idle\b/);
   await expect(page.locator(".ctl-answer")).toHaveCount(0);
 
   // The session is open in a terminal: the next prompt goes to a copy (a fork).
@@ -478,17 +495,18 @@ test("Allow on an open permission sends a permission.answer naming the attention
     decision: "allow",
   });
   expect(msg.cmd).not.toHaveProperty("text");
-  await daemon.ack(msg.id, "delivered", { mode: "waiter" });
+  // On its way, the answer has its row under the composer; delivered, it is done and goes.
   const row = page.locator(`li[data-message="${msg.id}"]`);
   await expect(row).toContainText("answer");
   await expect(row).toContainText("allow");
-  await expect(row).toHaveAttribute("data-outcome", "delivered");
+  await daemon.ack(msg.id, "delivered", { mode: "waiter" });
+  await expect(row).toHaveCount(0);
 });
 
 test("Cancel on a working turn sends a cancel", async () => {
   await events.post(events.ev("attention.cleared", { attention_id: "perm-1", how: "answered" }));
   await expect(page.locator(".ctl-answer")).toHaveCount(0);
-  const cancel = page.getByRole("button", { name: "Cancel", exact: true });
+  const cancel = page.getByRole("button", { name: "Stop the turn", exact: true });
   await expect(cancel).toBeVisible();
   await cancel.click();
   const msg = await daemon.next();
@@ -557,10 +575,13 @@ test("a session is started from /machines in one of the machine's folders", asyn
   await page.goto("/machines");
   const block = page.getByRole("region", { name: MACHINE });
   await expect(block).toContainText(/paired/i);
-  await expect(block).toContainText("daemon online");
-  // The machine's New session… opens the compose sheet (NewSession.tsx) on this machine;
-  // its one folder and one harness are already chosen. Custom selects carry data-value.
-  await block.getByRole("button", { name: "New session…" }).click();
+  // Online is the normal case and says nothing; only a daemon that is down is named.
+  await expect(block).not.toContainText("daemon offline");
+  // The machine's ⋯ → New session on it opens the compose sheet (NewSession.tsx) on this
+  // machine; its one folder and one harness are already chosen. Custom selects carry
+  // data-value.
+  await block.getByRole("button", { name: `Actions for ${MACHINE}` }).click();
+  await page.getByRole("menuitem", { name: `New session on ${MACHINE}…` }).click();
   const sheet = page.locator("[data-new-session]");
   await expect(sheet.locator("[data-ns-row=machine] button.sel")).toHaveAttribute("data-value", MACHINE);
   await expect(sheet.locator("[data-ns-row=agent] button.sel")).toHaveAttribute("data-value", "claude-code");
@@ -630,10 +651,10 @@ test("a phone adds its own passkey: the paired browser approves with a key.add, 
   const phone = await phoneCtx.newPage();
   await virtualPasskey(phoneCtx, phone);
 
-  // A secure page whose browser holds no passkey the machine trusts: the line under the
-  // strip says so and points at /add-device.
+  // A secure page whose browser holds no passkey the machine trusts: the one line under
+  // the field says so and points at /add-device.
   await phone.goto(`/s/claude-code/${SID}`);
-  const hint = phone.locator(".ctl-untrusted");
+  const hint = phone.locator(".ctl-foot[data-reason=untrusted]");
   await expect(hint).toContainText("trusts no passkey from this browser");
   await hint.getByRole("link", { name: /Add this device/ }).click();
   await expect(phone).toHaveURL(/\/add-device$/);
@@ -692,14 +713,18 @@ test("a phone adds its own passkey: the paired browser approves with a key.add, 
   await phone.goto(`/s/claude-code/${SID}`);
   const box = phone.getByLabel("Message for the next turn");
   await expect(box).toBeEnabled();
-  await expect(phone.locator(".ctl-untrusted")).toHaveCount(0);
+  await expect(phone.locator(".ctl-foot[data-reason=untrusted]")).toHaveCount(0);
   await box.fill("From the phone");
   await box.press("Enter");
   const sent = await daemon.next();
   expect(sent.cmd).toMatchObject({ kind: "prompt", session: `claude-code:${SID}`, text: "From the phone" });
   expect((sent.raw.grant as { cred: string }).cred).toBe(key.id);
   await daemon.ack(sent.id, "delivered", { reply: "Heard from the phone." });
-  await expect(phone.locator(`li[data-message="${sent.id}"]`)).toHaveAttribute("data-outcome", "delivered");
+  await expect(phone.locator(".page.session .status-row[data-sent-state]").last()).toHaveAttribute(
+    "data-sent-state",
+    "delivered",
+  );
+  await expect(phone.locator(REPLY).last()).toContainText("Heard from the phone.");
 
   // Reject, from the Mac: a second request from another phone is gone at once.
   const other = await browser.newContext({ viewport: { width: 390, height: 844 }, baseURL: base, isMobile: true });
@@ -753,7 +778,7 @@ test("a 390 px phone sees the same pages", async ({ browser }: { browser: Browse
   const p = await phone.newPage();
   await p.goto(`/s/claude-code/${SID}`);
   await expect(p.getByLabel("Message for the next turn")).toBeEnabled();
-  await expect(p.locator("li[data-message]").first()).toBeVisible();
+  await expect(p.locator(".page.session ol.timeline > li.turn").first()).toBeVisible();
   await shot(p, "strip-phone");
   // A renewed code from the same terminal: the pair page at phone width.
   const renewed = await daemon.pair();

@@ -5,6 +5,24 @@
    steps at a time, the docked Check on the phone itself. Phone-width first: one column,
    the QR above its text; the same tokens, no new colour. */
 
+/* The reading column, centred as every page's is. */
+.phone-page > :not(.bar):not(.bar-below):not(.sr-only) {
+  margin-inline: auto;
+}
+/* An address's key rides in Copy; a phone shows host:port alone. */
+.ph-url .url-key {
+  color: var(--fg-3);
+}
+/* Until a phone asks: the listening row, on the step's own inset. */
+.ph-listen {
+  display: flex;
+  align-items: center;
+  min-height: var(--row-lg);
+}
+.ph-listen strong {
+  color: var(--fg-2);
+  font-weight: 500;
+}
 .ph-row {
   display: flex;
   flex-direction: column;
@@ -175,5 +193,24 @@
   }
   .ph-address .url-value {
     text-align: left;
+  }
+  .ph-url .url-scheme,
+  .ph-url .url-key {
+    display: none;
+  }
+  /* host:port is the part that matters: it keeps its width; the name gives way. */
+  .ph-address .url-value {
+    flex: none;
+    overflow: visible;
+  }
+  .ph-address-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ph-listen {
+    padding: 0 16px;
   }
 }

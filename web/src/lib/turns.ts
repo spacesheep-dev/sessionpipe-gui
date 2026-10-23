@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// A session's events grouped by turn, as the timeline and the chat draw them, and which
-// of those turns a message sent from here became. A subagent's events (`agent_id`) are
-// one group inside the turn that spawned it, wherever they arrive (a background agent
-// works on after that turn's Stop). Pure, so both are unit-tested.
+// A session's events grouped by turn, as the timeline and the chat draw them, which of
+// those turns a message sent from here became, and an event row's words. A subagent's
+// events (`agent_id`) are one group inside the turn that spawned it, wherever they arrive
+// (a background agent works on after that turn's Stop). Pure, so all three are
+// unit-tested.
 import type { AgentRun, StoredEvent } from "@shared/api";
 
 export interface Turn {
@@ -195,11 +196,15 @@ export function turnPrompt(turn: Turn): string | undefined {
 }
 
 /** A message sent from here, as far as matching it to a turn goes: its id, when the
- *  receiver queued it, and its words (without an attachments block). */
+ *  receiver queued it, and its words (without an attachments block). `takenAt`: when the
+ *  machine took it (its turn can't start much before). `start`: the `start` that made the
+ *  session, whose turn is the session's first. */
 export interface SentMessage {
   id: string;
   at: string;
   text: string;
+  takenAt?: string;
+  start?: boolean;
 }
 
 /** The receiver's clock and the machine's need not agree; a turn can't start before its
@@ -233,30 +238,125 @@ function sameWords(sent: string, prompt: string): boolean {
   return b.length >= SENT_PREFIX_MIN && u.startsWith(b.slice(0, 200));
 }
 
+/** What the machine's framing adds to a message at most, as `prompt_chars` counts it. */
+const FRAME_MAX = 400;
+
+/** Whether a turn whose prompt can't be read (tier 2 sends its length only) could be this
+ *  message: its length is the message's, give or take the machine's framing. */
+function hiddenFits(m: SentMessage, t: Turn): boolean {
+  const chars = t.start?.data.prompt_chars;
+  if (typeof chars !== "number") return true;
+  const n = m.text.trim().length;
+  return chars >= n && chars <= n + FRAME_MAX;
+}
+
 /** Which turn each sent message became: oldest message first, each takes the first turn
  *  not yet taken that started after it was queued and whose prompt is its words. Two
- *  messages in a row each find their own turn, even with the same words. `bodyOf` takes
- *  a prompt's attachments block off, the way the message's own text had it taken off.
- *  Returns message id → the turn's `n`. */
+ *  messages in a row each find their own turn, even with the same words. A turn whose
+ *  prompt arrived as a length only (tier 2) is the first such message's when it started
+ *  after the machine took it and the length fits; a `start` takes the session's first
+ *  turn when `fromStart` (the loaded window begins at the session's beginning). `bodyOf`
+ *  takes a prompt's attachments block off, the way the message's own text had it taken
+ *  off. Returns message id → the turn's `n`. */
 export function sentTurns(
   messages: readonly SentMessage[],
   turns: readonly Turn[],
   bodyOf: (text: string) => string = (t) => t,
+  o: { fromStart?: boolean } = {},
 ): Map<string, number> {
   const out = new Map<string, number>();
   const taken = new Set<number>();
   const sorted = [...messages].sort((a, b) => ms(a.at) - ms(b.at) || (a.id < b.id ? -1 : 1));
+  const first = turns.find((t) => t.start);
   for (const m of sorted) {
+    if (m.start) {
+      if (!o.fromStart || !first || taken.has(first.n)) continue;
+      const prompt = turnPrompt(first);
+      if (prompt !== undefined ? !sameWords(m.text, bodyOf(prompt)) : !hiddenFits(m, first)) continue;
+      out.set(m.id, first.n);
+      taken.add(first.n);
+      continue;
+    }
     const since = ms(m.at) - SENT_SKEW_MS;
+    const took = ms(m.takenAt) - SENT_SKEW_MS;
     for (const t of turns) {
       if (!t.start || taken.has(t.n)) continue;
-      if (Number.isFinite(since) && ms(t.start.time) < since) continue;
+      const at = ms(t.start.time);
+      if (Number.isFinite(since) && at < since) continue;
       const prompt = turnPrompt(t);
-      if (prompt === undefined || !sameWords(m.text, bodyOf(prompt))) continue;
+      if (prompt === undefined) {
+        // Its words are hidden: only a turn the machine could have run for this message.
+        if (!Number.isFinite(took) || at < took || !hiddenFits(m, t)) continue;
+      } else if (!sameWords(m.text, bodyOf(prompt))) continue;
       out.set(m.id, t.n);
       taken.add(t.n);
       break;
     }
   }
   return out;
+}
+
+// ----- an event row's words -----
+
+const base = (p: string): string => {
+  const clean = p.replace(/[\\/]+$/, "");
+  const i = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
+  return i >= 0 ? clean.slice(i + 1) || clean : clean;
+};
+const word = (v: unknown): string => (typeof v === "string" ? v.replace(/_/g, " ") : "");
+
+/** An event the timeline shows as its own row, in words ("Session started", "Changed
+ *  handler.ts and 2 more"), and the detail after them when it says something. The raw
+ *  type stays in the row's tooltip and in "Copy event". */
+export function eventWords(e: Pick<StoredEvent, "type" | "data">): { text: string; detail?: string } {
+  const d = e.data ?? {};
+  switch (e.type) {
+    case "session.started": {
+      const src = word(d.source);
+      const text =
+        src === "resume"
+          ? "Session resumed"
+          : src === "clear"
+            ? "Session cleared"
+            : src === "compact"
+              ? "Session continued after compacting"
+              : "Session started";
+      return { text, ...(src && !["startup", "resume", "clear", "compact"].includes(src) ? { detail: src } : {}) };
+    }
+    case "session.ended": {
+      const why = word(d.reason);
+      return { text: "Session ended", ...(why && why !== "other" ? { detail: why } : {}) };
+    }
+    case "session.backfill":
+      return { text: "Earlier history read from the transcript" };
+    case "session.heartbeat":
+      return { text: "Still running" };
+    case "files.changed": {
+      const paths = Array.isArray(d.paths)
+        ? (d.paths as unknown[]).filter((p): p is string => typeof p === "string")
+        : [];
+      if (paths.length === 0) return { text: "Changed files" };
+      const more = paths.length - 1;
+      // The folder after the name, so the name is never said twice.
+      const dir = paths[0]!.slice(0, paths[0]!.length - base(paths[0]!).length).replace(/[\\/]+$/, "");
+      return {
+        text: `Changed ${base(paths[0]!)}${more > 0 ? ` and ${more} more` : ""}`,
+        ...(dir ? { detail: dir } : {}),
+      };
+    }
+    case "attention.cleared": {
+      const how = word(d.how);
+      if (!how || how === "answered" || how === "unknown") return { text: "Answered" };
+      return { text: how === "timeout" || how === "expired" ? "The prompt expired" : `Cleared: ${how}` };
+    }
+    case "context.compacted":
+      return { text: "Context compacted", ...(word(d.trigger) === "manual" ? { detail: "by hand" } : {}) };
+    case "native":
+      return { text: "A hook payload sessionpipe passed through as it came" };
+    default: {
+      const [noun, verb] = e.type.split(".");
+      const t = [noun, verb].filter(Boolean).join(" ").replace(/_/g, " ");
+      return { text: t.charAt(0).toUpperCase() + t.slice(1) };
+    }
+  }
 }

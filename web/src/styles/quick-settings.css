@@ -33,6 +33,11 @@
   user-select: none;
   animation: rise var(--dur) var(--ease-out) both;
 }
+/* It leaves the way it came, quicker (POLISH-PLAN.md §2), and takes no clicks meanwhile. */
+.qs-pop[data-closing] {
+  animation: pop-out var(--dur-exit) var(--ease-in) both;
+  pointer-events: none;
+}
 .qs--rail .qs-pop {
   left: calc(var(--rail) + 8px);
   bottom: 12px;
@@ -84,7 +89,7 @@
 .qs-theme {
   width: 100%;
   display: grid;
-  grid-template-columns: 16px 14px minmax(0, 1fr) auto;
+  grid-template-columns: 16px 18px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   min-height: var(--menu-row);
@@ -123,13 +128,13 @@
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.6 5.3 4 7.6 8.4 2.6' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
     center / contain no-repeat;
 }
-/* The skin's ground and ink, split on the diagonal. */
+/* The skin's two grounds, sidebar then page, as a tiny window chip with a hairline. */
 .qs-swatch {
   display: block;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 var(--hairline) var(--line-2);
+  width: 18px;
+  height: 12px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklch, var(--fg) 22%, transparent);
 }
 .qs-theme-name {
   min-width: 0;
@@ -197,7 +202,12 @@
     inset: 0 0 calc(var(--tabbar) + env(safe-area-inset-bottom)) 0;
     z-index: var(--z-pop);
     background: var(--scrim);
+    opacity: calc(1 - var(--sheet-drag, 0));
     animation: fade-in var(--dur) var(--ease-out) both;
+  }
+  .qs-scrim[data-closing] {
+    animation: fade-out var(--dur-exit) var(--ease-in) both;
+    pointer-events: none;
   }
   .qs--tabbar .qs-pop {
     left: 0;
@@ -211,6 +221,10 @@
     border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
     background: var(--grouped-ground);
     animation: sheet-up var(--dur-slow) var(--ease-out) both;
+    touch-action: pan-y;
+  }
+  .qs--tabbar .qs-pop[data-closing] {
+    animation: sheet-down var(--dur-exit) var(--ease-in) both;
   }
   .qs-grab {
     display: block;
@@ -218,6 +232,8 @@
     width: 36px;
     height: 5px;
     margin: 6px auto -8px;
+    cursor: grab;
+    touch-action: none;
     border-radius: var(--radius-pill);
     background: var(--line-2);
   }
@@ -262,15 +278,25 @@
     background: var(--line);
   }
   .qs--tabbar .qs-theme {
-    grid-template-columns: 18px 22px minmax(0, 1fr) auto;
+    grid-template-columns: 18px 24px minmax(0, 1fr) auto;
     gap: 12px;
     min-height: 44px;
     padding: 0 16px;
     border-radius: 0;
   }
   .qs--tabbar .qs-swatch {
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 16px;
+    border-radius: 4px;
+  }
+  .qs--tabbar .ts-slider {
+    min-height: 44px;
+    padding: 0 16px;
+    border-radius: var(--radius-pop);
+    background: var(--bg-2);
+  }
+  .qs--tabbar .ts-input {
+    height: 28px;
   }
   .qs--tabbar .qs-theme-name {
     font-size: max(1rem, 16px);
@@ -301,4 +327,51 @@
     width: 8px;
     height: 12px;
   }
+}
+
+/* Text size (QuickSettings.tsx TextSizeSlider), as macOS draws it: a small "A", one track
+   with a tick under each of its four stops, a large "A". Shared with the Settings window. */
+.ts-slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ts-a {
+  flex: none;
+  color: var(--fg-3);
+  line-height: 1;
+}
+.ts-a--sm {
+  font-size: 11px;
+}
+.ts-a--lg {
+  font-size: 17px;
+}
+.ts-track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ts-input {
+  width: 100%;
+}
+/* The ticks sit under the track, one per stop, inset by half the thumb so each lines up
+   under the thumb's centre at that stop. */
+.ts-ticks {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 7.5px;
+  margin-top: -2px;
+  pointer-events: none;
+}
+.ts-tick {
+  width: 1px;
+  height: 4px;
+  background: var(--line-2);
+}
+.ts-tick--on {
+  background: var(--fg-3);
 }

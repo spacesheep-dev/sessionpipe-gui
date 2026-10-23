@@ -12,6 +12,7 @@
 
 import type { LabelColor } from "@shared/api";
 import {
+  Fragment,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -24,6 +25,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { copyText } from "../lib/clipboard";
+import { reducedMotion, tokenMs, useSheetDrag } from "../lib/motion";
 import { usePath } from "../lib/router";
 import { hintFor } from "../lib/shortcuts";
 import "../styles/menu.css";
@@ -59,15 +61,25 @@ const isLeaf = (i: MenuItem): i is Leaf => "run" in i;
 const isSub = (i: MenuItem): i is Sub => "items" in i;
 const isAction = (i: MenuItem): i is Leaf | Sub => isLeaf(i) || isSub(i);
 
-/** Falsy entries out, separators never doubled or at an edge. */
+/** Falsy entries out, separators never doubled or at an edge, and the destructive items
+ *  ("Forget…") last, after a separator of their own, as the OS's menus keep them. */
 export function tidy(list: MenuList): MenuItem[] {
   const out: MenuItem[] = [];
+  const danger: MenuItem[] = [];
   for (const i of list) {
     if (!i) continue;
+    if ("run" in i && i.danger) {
+      danger.push(i);
+      continue;
+    }
     if ("sep" in i && (out.length === 0 || "sep" in out[out.length - 1]!)) continue;
     out.push(i);
   }
   while (out.length && "sep" in out[out.length - 1]!) out.pop();
+  if (danger.length) {
+    if (out.length) out.push({ sep: true });
+    out.push(...danger);
+  }
   return out;
 }
 
@@ -429,13 +441,8 @@ function Chevron() {
     </svg>
   );
 }
-function Check({ radio }: { radio?: boolean }) {
-  if (radio)
-    return (
-      <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-        <circle cx="6" cy="6" r="2.5" fill="currentColor" />
-      </svg>
-    );
+/** The one check, for a toggled item and a chosen one alike (macOS draws both with ✓). */
+function Check(_: { radio?: boolean }) {
   return (
     <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
       <path
@@ -462,6 +469,7 @@ function MenuPanel({
   onClose,
   onCloseAll,
   depth,
+  onPanelEnter,
 }: {
   items: MenuItem[];
   x: number;
@@ -474,6 +482,8 @@ function MenuPanel({
   onClose: () => void;
   onCloseAll: (restore?: boolean) => void;
   depth: number;
+  /** The pointer reached this submenu: the parent keeps it open. */
+  onPanelEnter?: () => void;
 }) {
   const el = useRef<HTMLDivElement>(null);
   const actionable = items.map((i, n) => (isAction(i) ? n : -1)).filter((n) => n >= 0);
@@ -482,6 +492,26 @@ function MenuPanel({
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const typed = useRef({ text: "", at: 0 });
   const hoverTimer = useRef<number | null>(null);
+  // The pointer's last two points, for the submenu's safe triangle.
+  const pts = useRef<{ x: number; y: number }[]>([]);
+  /** Whether the pointer is heading into the open submenu: inside the triangle from
+   *  where it was a moment ago to the submenu's near edge. A diagonal path across the
+   *  rows below keeps the submenu, as macOS's menus do. */
+  const towardSub = (): boolean => {
+    const sub = document.querySelector<HTMLElement>(`.menu[data-depth="${depth + 1}"]`)?.getBoundingClientRect();
+    const [a, b] = pts.current;
+    if (!sub || !a || !b) return false;
+    const nearX = sub.left >= b.x ? sub.left : sub.right;
+    const tri = [a, { x: nearX, y: sub.top - 8 }, { x: nearX, y: sub.bottom + 8 }] as const;
+    const sign = (p: { x: number; y: number }, q: { x: number; y: number }, r: { x: number; y: number }) =>
+      (p.x - r.x) * (q.y - r.y) - (q.x - r.x) * (p.y - r.y);
+    const d1 = sign(b, tri[0], tri[1]);
+    const d2 = sign(b, tri[1], tri[2]);
+    const d3 = sign(b, tri[2], tri[0]);
+    const neg = d1 < 0 || d2 < 0 || d3 < 0;
+    const pos = d1 > 0 || d2 > 0 || d3 > 0;
+    return !(neg && pos);
+  };
 
   // Place: at the point, flipped left or up when it would overflow, 8 px inside.
   useLayoutEffect(() => {
@@ -592,6 +622,15 @@ function MenuPanel({
         aria-label={label ?? "Actions"}
         tabIndex={-1}
         onKeyDown={onKeyDown}
+        onMouseMove={(e) => {
+          const p = { x: e.clientX, y: e.clientY };
+          const last = pts.current[pts.current.length - 1];
+          if (last && Math.abs(last.x - p.x) + Math.abs(last.y - p.y) < 2) return;
+          pts.current = [...pts.current.slice(-1), p];
+        }}
+        onMouseEnter={() => {
+          onPanelEnter?.();
+        }}
         onMouseLeave={() => !open && setActive(-1)}
         // Unplaced for one layout pass: transparent, not hidden, so focus can land in it.
         style={pos ? { left: pos.left, top: pos.top } : { left: 0, top: 0, opacity: 0, pointerEvents: "none" }}
@@ -626,10 +665,16 @@ function MenuPanel({
                 onMouseEnter: () => {
                   setActive(n);
                   if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+                  // On the way into the open submenu: wait longer before letting it go.
+                  const heading = !!open && open.index !== n && towardSub();
                   if (isSub(i) && !i.disabled) {
-                    hoverTimer.current = window.setTimeout(() => setOpen({ index: n, keyboard: false }), 120);
+                    if (open?.index === n) return;
+                    hoverTimer.current = window.setTimeout(
+                      () => setOpen({ index: n, keyboard: false }),
+                      heading ? 400 : 120,
+                    );
                   } else if (open && open.index !== n) {
-                    hoverTimer.current = window.setTimeout(() => setOpen(null), 250);
+                    hoverTimer.current = window.setTimeout(() => setOpen(null), heading ? 400 : 120);
                   }
                 },
                 // A right-press dragged onto an item runs it, as a native menu does.
@@ -674,22 +719,48 @@ function MenuPanel({
             subRow.focus({ preventScroll: true });
           }}
           onCloseAll={onCloseAll}
+          onPanelEnter={() => {
+            if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+            setActive(open!.index);
+          }}
         />
       )}
     </>
   );
 }
 
-/** The touch presentation: an action sheet with the same items, groups split at the
- *  separators, destructive items last, Cancel apart; a submenu pushes into the sheet. */
-function ActionSheet({ req, onCloseAll }: { req: MenuRequest; onCloseAll: (restore?: boolean) => void }) {
+/** Set by a drag that already carried the sheet off screen: its close plays no exit. */
+let draggedOut = false;
+
+/** The touch presentation: an action sheet with the same items on one platter (the
+ *  separators become wider rules, as an iOS context menu's are), destructive items last,
+ *  Cancel apart; a submenu pushes into the sheet. It follows the finger down from its
+ *  grabber or head and leaves by velocity (lib/motion.ts useSheetDrag). `closing` is its
+ *  exit copy: drawn, inert, sliding down. */
+function ActionSheet({
+  req,
+  onCloseAll,
+  closing = false,
+}: {
+  req: MenuRequest;
+  onCloseAll: (restore?: boolean) => void;
+  closing?: boolean;
+}) {
   const [stack, setStack] = useState<{ label: string; items: MenuItem[] }[]>([]);
   const level = stack[stack.length - 1];
   const items = level ? level.items : req.items;
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    ref.current?.focus({ preventScroll: true });
-  }, [stack.length]);
+    if (!closing) ref.current?.focus({ preventScroll: true });
+  }, [stack.length, closing]);
+  useSheetDrag(
+    ref,
+    () => {
+      draggedOut = true;
+      onCloseAll(true);
+    },
+    { handle: ".menu-grab, .menu-sheet-head", enabled: !closing },
+  );
   const groups: MenuItem[][] = [[]];
   for (const i of items) {
     if ("sep" in i) groups.push([]);
@@ -708,7 +779,7 @@ function ActionSheet({ req, onCloseAll }: { req: MenuRequest; onCloseAll: (resto
       .catch(() => {});
   };
   return (
-    <>
+    <div className="menu-sheet-host" data-closing={closing ? "" : undefined} aria-hidden={closing || undefined}>
       <button type="button" className="menu-scrim" aria-label="Close" onClick={() => onCloseAll(true)} />
       <div
         className="menu-sheet"
@@ -737,59 +808,62 @@ function ActionSheet({ req, onCloseAll }: { req: MenuRequest; onCloseAll: (resto
             {!level && req.subtitle ? <div className="menu-sheet-sub ellipsis">{req.subtitle}</div> : null}
           </div>
         )}
-        {shown.map((g, gi) => (
-          <div className="menu-sheet-group" key={gi}>
-            {g.map((i, n) =>
-              "heading" in i ? (
-                <div key={`h${n}`} className="menu-heading" role="presentation">
-                  {i.heading}
-                </div>
-              ) : isAction(i) ? (
-                <button
-                  type="button"
-                  key={`${i.label}${n}`}
-                  {...rowProps({
-                    role:
-                      isLeaf(i) && i.checked !== undefined
-                        ? i.radio
-                          ? "menuitemradio"
-                          : "menuitemcheckbox"
-                        : "menuitem",
-                    checked: isLeaf(i) ? i.checked : undefined,
-                  })}
-                  className={`menu-sheet-item ${isLeaf(i) && i.danger ? "menu-item--danger" : ""}`}
-                  disabled={!!i.disabled}
-                  aria-description={reason(i.disabled)}
-                  onClick={() => pick(i)}
-                >
-                  <span className="menu-label">
-                    {isLeaf(i) && i.swatch ? (
-                      <span className={`label-dot label-dot--${i.swatch}`} aria-hidden="true" />
+        <div className="menu-sheet-group">
+          {shown.map((g, gi) => (
+            <Fragment key={gi}>
+              {gi > 0 ? <hr className="menu-sheet-sep" /> : null}
+              {g.map((i, n) =>
+                "heading" in i ? (
+                  <div key={`h${n}`} className="menu-heading" role="presentation">
+                    {i.heading}
+                  </div>
+                ) : isAction(i) ? (
+                  <button
+                    type="button"
+                    key={`${i.label}${n}`}
+                    {...rowProps({
+                      role:
+                        isLeaf(i) && i.checked !== undefined
+                          ? i.radio
+                            ? "menuitemradio"
+                            : "menuitemcheckbox"
+                          : "menuitem",
+                      checked: isLeaf(i) ? i.checked : undefined,
+                    })}
+                    className={`menu-sheet-item ${isLeaf(i) && i.danger ? "menu-item--danger" : ""}`}
+                    disabled={!!i.disabled}
+                    aria-description={reason(i.disabled)}
+                    onClick={() => pick(i)}
+                  >
+                    <span className="menu-label">
+                      {isLeaf(i) && i.swatch ? (
+                        <span className={`label-dot label-dot--${i.swatch}`} aria-hidden="true" />
+                      ) : null}
+                      {i.label}
+                    </span>
+                    {isLeaf(i) && i.checked ? (
+                      <span className="menu-check">
+                        <Check radio={i.radio} />
+                      </span>
                     ) : null}
-                    {i.label}
-                  </span>
-                  {isLeaf(i) && i.checked ? (
-                    <span className="menu-check">
-                      <Check radio={i.radio} />
-                    </span>
-                  ) : null}
-                  {isSub(i) ? (
-                    <span className="menu-chev" aria-hidden="true">
-                      <Chevron />
-                    </span>
-                  ) : null}
-                </button>
-              ) : null,
-            )}
-          </div>
-        ))}
+                    {isSub(i) ? (
+                      <span className="menu-chev" aria-hidden="true">
+                        <Chevron />
+                      </span>
+                    ) : null}
+                  </button>
+                ) : null,
+              )}
+            </Fragment>
+          ))}
+        </div>
         <div className="menu-sheet-group">
           <button type="button" className="menu-sheet-item menu-sheet-cancel" onClick={() => onCloseAll(true)}>
             Cancel
           </button>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -904,6 +978,25 @@ export function MenuHost() {
   const req = useSyncExternalStore(subscribe, getMenu, getMenu);
   const conf = useSyncExternalStore(subscribe, getConfirm, getConfirm);
   const path = usePath();
+  // A sheet's exit: the last one stays drawn for --dur-exit, sliding down. A desktop
+  // menu closes at once, as the OS's do.
+  const lastSheet = useRef<MenuRequest | null>(null);
+  const [leaving, setLeaving] = useState<MenuRequest | null>(null);
+  useEffect(() => {
+    if (req) {
+      lastSheet.current = req.sheet ? req : null;
+      setLeaving(null);
+      return;
+    }
+    const was = lastSheet.current;
+    lastSheet.current = null;
+    const skip = draggedOut || reducedMotion();
+    draggedOut = false;
+    if (!was || skip) return;
+    setLeaving(was);
+    const t = window.setTimeout(() => setLeaving(null), tokenMs("--dur-exit", 140));
+    return () => window.clearTimeout(t);
+  }, [req]);
   // A route change, a resize, the window losing focus or a scroll of the wheel closes it.
   useEffect(() => {
     closeMenu(false);
@@ -939,9 +1032,10 @@ export function MenuHost() {
       window.removeEventListener("wheel", onWheel, { capture: true });
     };
   }, [req]);
-  if (!req && !conf) return null;
+  if (!req && !conf && !leaving) return null;
   return createPortal(
     <>
+      {!req && leaving ? <ActionSheet key="leaving" req={leaving} closing onCloseAll={() => {}} /> : null}
       {req &&
         (req.sheet ? (
           <ActionSheet key={lastOpenAt} req={req} onCloseAll={(r) => closeMenu(r ?? true)} />

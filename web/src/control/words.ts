@@ -166,3 +166,48 @@ export const PERMISSION_HINT: Record<StartPermission, string> = {
   edits: "Also edits files in the folder",
   auto: "The agent's own automatic approval",
 };
+
+/** The command a harness runs as on its machine, for "Starting claude on studio-mac…":
+ *  the agent the person already runs in their terminal, not a product name. A harness
+ *  with no command of its own keeps its label. */
+const COMMAND: Record<string, string> = {
+  "claude-code": "claude",
+  codex: "codex",
+  "gemini-cli": "gemini",
+  cursor: "cursor-agent",
+  "copilot-cli": "copilot",
+  droid: "droid",
+  kiro: "kiro",
+  opencode: "opencode",
+};
+export const harnessCommand = (harness: string, label: string): string => COMMAND[harness] ?? label;
+
+/** The one status row under a message sent from here, in the timeline where its turn
+ *  will be (STEER-SPEC B.5): where it is, in a person's words, as the machine's acks
+ *  move it. `running` once the agent is at it: the row then reads "Running" with a live
+ *  timer beside it. Null once there is nothing to say (it failed: the failure says it). */
+export function sentLine(
+  a: ControlActivity,
+  o: { machine: string; online: boolean; command: string },
+): { text: string; running: boolean } | null {
+  const state = shownState(a);
+  switch (state) {
+    case "queued":
+      return {
+        text: o.online ? `Sent to ${o.machine}` : `Waiting for ${o.machine}. It starts when the machine is back.`,
+        running: false,
+      };
+    case "taken":
+      return a.kind === "start"
+        ? { text: `Starting ${o.command} on ${o.machine}…`, running: false }
+        : { text: `${o.machine} is handing it over…`, running: false };
+    case "progress":
+      return { text: "Running", running: true };
+    case "delivered":
+      return a.kind === "start"
+        ? { text: `Started on ${o.machine}. Its first events are on their way.`, running: false }
+        : { text: "Delivered. Its turn shows here when it begins.", running: false };
+    default:
+      return null;
+  }
+}

@@ -1,16 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 // The control affordance on a session, docked at the bottom of the view: an open
 // permission as one action bar (the question, Deny and Allow), then the composer, one
-// field that grows to six lines with attach, stop and send inside it, then one quiet
-// line of context under it. Disabled with its reason until the machine paired and
+// field that grows to 40 % of the view with attach, stop and send inside it, then at
+// most one quiet line under it: the one reason sending is off or will ask for something,
+// with its one action, and nothing at all when all is well. Every press shows at once:
+// Allow, Deny, Stop and Send take their pending face until the receiver has the signed
+// command, and what the machine did next is said by the machine's own acks, never here.
+// The draft is kept per session. Disabled with its reason until the machine paired and
 // `onSend` is wired (web/src/control/SessionControl.tsx signs and sends). Keep this
 // component self-contained: everything it needs comes through props.
 import type { Attention, MachineControl, SessionSummary, Suggestion } from "@shared/api";
-import { type KeyboardEvent, type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachments";
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
 import { attentionMessage } from "../lib/format";
-import { Spinner, StateDot } from "./bits";
+import { Link } from "../lib/router";
+import { hintFor } from "../lib/shortcuts";
+import { ActionButton, Spinner, StateDot } from "./bits";
 
 export type ControlAction =
   | { kind: "prompt"; text: string }
@@ -31,21 +45,56 @@ export interface ControlStripProps {
   working?: boolean;
   /** Why nothing here can work (no secure context): replaces the hint and disables the strip. */
   blocked?: string;
-  /** One extra line under the hint: an error, or why a passkey prompt is about to appear. */
+  /** The line under the field while it says something now: the last send's refusal, or a
+   *  passkey prompt being up. It wins over every other reason. */
   note?: string;
   noteKind?: "info" | "err";
+  /** This browser holds no passkey the machine trusts: a send would be refused. */
+  untrusted?: boolean;
+  /** The app's stream to the receiver is down ("reconnecting" or "offline"): the strip
+   *  waits for it, with Retry now. */
+  stream?: { state: "reconnecting" | "offline"; retry: () => void };
+  /** The next send asks for the passkey (no day grant yet): the line offers Unlock now. */
+  unlock?: () => void;
   /** Per attention id: "sent" while an answer is out (no second one goes), "closed" once
    *  the machine said the prompt is no longer open (answered in its terminal, or expired). */
   answers?: Readonly<Record<string, "sent" | "closed">>;
   /** Plugins' suggested answers for this session's attentions (shared/plugin-api.ts).
    *  Advice only: Confirm sends the ordinary signed answer through `onSend`. */
   suggestions?: readonly Suggestion[];
-  /** The textarea's placeholder; "Ask for the next turn…" by default. */
+  /** The textarea's placeholder; one voice in both modes. */
   placeholder?: string;
-  /** Simple mode's composer: the hint folded unless something is wrong. */
+  /** Simple mode's composer (its class only: the words are the same). */
   chat?: boolean;
-  /** More of the context line under the field (SessionControl's routing and passkey words). */
+  /** Unused: the line under the field is the strip's own one reason now. */
   foot?: ReactNode;
+}
+
+/** The one line under the field: which reason, its words and its one action. */
+interface Reason {
+  kind: string;
+  text: ReactNode;
+  action?: ReactNode;
+  tone?: "err";
+}
+
+/** A session's unsent draft, kept per device while it is typed (300 ms after the last
+ *  key), so a reload or a trip to another page keeps it. */
+const DRAFT_KEY = (key: string) => `sessionpipe-gui.draft:${key}`;
+function readDraft(key: string): string {
+  try {
+    return localStorage.getItem(DRAFT_KEY(key)) ?? "";
+  } catch {
+    return "";
+  }
+}
+function writeDraft(key: string, text: string): void {
+  try {
+    if (text) localStorage.setItem(DRAFT_KEY(key), text);
+    else localStorage.removeItem(DRAFT_KEY(key));
+  } catch {
+    // this page only
+  }
 }
 
 function SendIcon() {
@@ -108,7 +157,7 @@ function Question({ a }: { a: Attention }) {
   );
 }
 
-/** The textarea grows with its text up to six lines, then scrolls (CSS caps it). */
+/** The textarea grows with its text up to 40 % of the view, then scrolls (CSS caps it). */
 function useGrow(ref: RefObject<HTMLTextAreaElement | null>, value: string) {
   useLayoutEffect(() => {
     const el = ref.current;
@@ -130,41 +179,150 @@ export function ControlStrip({
   noteKind = "info",
   answers,
   suggestions,
-  placeholder = "Ask for the next turn…",
+  placeholder = "Message this session…",
   chat = false,
-  foot,
+  untrusted = false,
+  stream,
+  unlock,
 }: ControlStripProps) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => readDraft(session.key));
+  // The same strip shown for another session takes that session's own draft.
+  const [draftOf, setDraftOf] = useState(session.key);
+  if (draftOf !== session.key) {
+    setDraftOf(session.key);
+    setText(readDraft(session.key));
+  }
   const [busy, setBusy] = useState<string | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   useGrow(field, text);
+  useEffect(() => {
+    const t = window.setTimeout(() => writeDraft(session.key, text), 300);
+    return () => window.clearTimeout(t);
+  }, [session.key, text]);
+  // "Edit and send again" on a message that didn't make it: its words come back here.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ key: string; text: string }>).detail;
+      if (d?.key !== session.key) return;
+      setText(d.text);
+      requestAnimationFrame(() => field.current?.focus());
+    };
+    window.addEventListener("sp:compose", on);
+    return () => window.removeEventListener("sp:compose", on);
+  }, [session.key]);
   const paired = !!control;
   // The wrong address (control/origin.ts): the hint is the one line naming where sending
   // works, as a link to this very page there; never an offer to add a device.
   const wrong = blocked ? wrongOriginHere() : null;
   const httpsHref = blocked ? (wrong ? wrongOriginHref() : httpsHere()) : null;
-  const enabled = paired && !!onSend && !blocked;
+  const enabled = paired && !!onSend && !blocked && !stream;
   // Images beside the message (control/Attachments.tsx): paperclip, paste, drop, the phone's picker.
   const att = useAttachments({ machine: session.machine, enabled });
-  const hint = blocked
-    ? blocked
-    : !paired
-      ? `pair ${session.machine ?? "this machine"} to send messages`
-      : !onSend
-        ? "sending arrives in the next release"
-        : control?.online
-          ? `${session.machine} is listening`
-          : `${session.machine} is offline; the message waits`;
+  const name = session.machine ?? "the machine";
+  // One reason at a time, most fundamental first (the wrong address or an insecure page
+  // come before pairing, which needs the right address too), each with its one way out; none when
+  // sending simply works (the composer then carries no caption at all).
+  const reason = ((): Reason | null => {
+    if (note)
+      return { kind: noteKind === "err" ? "error" : "note", text: note, tone: noteKind === "err" ? "err" : undefined };
+    if (wrong)
+      return {
+        kind: "wrong-origin",
+        text: (
+          <>
+            Sending works from{" "}
+            <a className="ctl-origin-link" href={httpsHref ?? wrong}>
+              {wrong}
+            </a>
+            ; open it there.
+          </>
+        ),
+      };
+    if (blocked)
+      return {
+        kind: "blocked",
+        text: blocked,
+        action: httpsHref ? (
+          <a className="ctl-open-https" href={httpsHref}>
+            Open on {new URL(httpsHref).host}
+          </a>
+        ) : undefined,
+      };
+    if (!paired)
+      return {
+        kind: "unpaired",
+        text: (
+          <>
+            Pair <strong>{name}</strong> to message this session from here.
+          </>
+        ),
+        action: (
+          <Link to="/connect" className="ctl-link">
+            How to pair
+          </Link>
+        ),
+      };
+    if (untrusted)
+      return {
+        kind: "untrusted",
+        text: (
+          <>
+            <strong>{name}</strong> trusts no passkey from this browser.
+          </>
+        ),
+        action: (
+          <Link to="/add-device" className="ctl-link">
+            Add this device
+          </Link>
+        ),
+      };
+    if (!onSend) return null;
+    if (stream)
+      return {
+        kind: "stream",
+        text:
+          stream.state === "offline"
+            ? "Offline. Sending waits for the connection."
+            : "Reconnecting. Sending waits for the connection.",
+        action: (
+          <button type="button" className="ctl-link" onClick={stream.retry}>
+            Retry now
+          </button>
+        ),
+      };
+    if (control && !control.online)
+      return {
+        kind: "offline",
+        text: (
+          <>
+            <strong>{name}</strong> is offline. A message waits until it's back.
+          </>
+        ),
+      };
+    if (unlock)
+      return {
+        kind: "passkey",
+        text: "The first send today asks for your passkey.",
+        action: (
+          <button type="button" className="ctl-link" onClick={unlock}>
+            Unlock now
+          </button>
+        ),
+      };
+    return null;
+  })();
   // Why Allow / Deny are off, said on their own bar (the line under the field says the rest).
   const offWhy = enabled
     ? null
     : !paired
-      ? `pair ${session.machine ?? "this machine"} to answer here`
+      ? `pair ${name} to answer here`
       : blocked
         ? wrong
           ? "answer it where sending works"
           : "this page cannot sign an answer"
-        : "sending arrives in the next release";
+        : stream
+          ? "waiting for the connection"
+          : null;
   const permissions = (attentions ?? (attention ? [attention] : [])).filter((a) => a.kind === "permission");
   // The answerable prompt(s) only; a notification twin adds nothing. With no answerable one,
   // the notification is shown as what it is: a prompt waiting in the terminal.
@@ -188,6 +346,7 @@ export function ControlStrip({
     if (!composed) return;
     run("prompt", { kind: "prompt", text: composed.text }, () => {
       setText("");
+      writeDraft(session.key, "");
       att.clear();
     });
   };
@@ -267,10 +426,12 @@ export function ControlStrip({
             ) : null}
             {!shut && (
               <span className="ctl-answer-btns">
-                <button
-                  type="button"
+                <ActionButton
                   className="btn btn--deny"
-                  disabled={off}
+                  disabled={off && busy !== `deny:${a.attentionId}`}
+                  pending={busy === `deny:${a.attentionId}`}
+                  pendingLabel="Denying…"
+                  data-tip-keys={hintFor("session.deny") || undefined}
                   onClick={() =>
                     run(`deny:${a.attentionId}`, {
                       kind: "permission.answer",
@@ -279,12 +440,14 @@ export function ControlStrip({
                     })
                   }
                 >
-                  {busy === `deny:${a.attentionId}` ? "Sending…" : "Deny"}
-                </button>
-                <button
-                  type="button"
+                  Deny
+                </ActionButton>
+                <ActionButton
                   className="btn btn--allow"
-                  disabled={off}
+                  disabled={off && busy !== `allow:${a.attentionId}`}
+                  pending={busy === `allow:${a.attentionId}`}
+                  pendingLabel="Allowing…"
+                  data-tip-keys={hintFor("session.allow") || undefined}
                   onClick={() =>
                     run(`allow:${a.attentionId}`, {
                       kind: "permission.answer",
@@ -293,8 +456,8 @@ export function ControlStrip({
                     })
                   }
                 >
-                  {busy === `allow:${a.attentionId}` ? "Sending…" : "Allow"}
-                </button>
+                  Allow
+                </ActionButton>
               </span>
             )}
           </div>
@@ -318,48 +481,37 @@ export function ControlStrip({
           <button
             type="button"
             className="icon-btn ctl-cancel"
-            disabled={!enabled || !!busy}
+            disabled={!enabled || (!!busy && busy !== "cancel")}
             onClick={() => run("cancel", { kind: "cancel" })}
-            aria-label="Cancel"
-            title="Stop the running turn"
+            aria-label="Stop the turn"
+            aria-busy={busy === "cancel" || undefined}
+            data-tip-keys={hintFor("session.cancel") || undefined}
           >
-            {busy === "cancel" ? <Spinner label="Sending" /> : <StopIcon />}
+            {busy === "cancel" ? <Spinner label="Stopping" /> : <StopIcon />}
           </button>
         )}
         <button
           type="submit"
-          className={`icon-btn ctl-send ${canSend ? "is-ready" : ""}`}
+          className={`icon-btn ctl-send ${canSend || busy === "prompt" ? "is-ready" : ""}`}
           disabled={!canSend}
           aria-label="Send"
+          aria-busy={busy === "prompt" || undefined}
+          data-tip-keys="↩"
         >
           {busy === "prompt" ? <Spinner label="Sending" /> : <SendIcon />}
         </button>
       </div>
-      <p className="ctl-foot">
-        <span
-          className={`ctl-hint ${chat && !blocked ? "ctl-hint--quiet" : ""}`}
-          data-wrong-origin={wrong ? "" : undefined}
-        >
-          {wrong ? (
-            <>
-              Sending works from{" "}
-              <a className="ctl-origin-link" href={httpsHref ?? wrong}>
-                {wrong}
-              </a>
-              ; open it there.
-            </>
-          ) : (
-            hint
-          )}
-          {blocked && !wrong && httpsHref ? (
-            <a className="ctl-open-https" href={httpsHref}>
-              Open on {new URL(httpsHref).host}
-            </a>
-          ) : null}
-        </span>
-        {foot}
-        {note && <span className={`ctl-note ctl-note--${noteKind}`}>{note}</span>}
-      </p>
+      {reason && (
+        <p className="ctl-foot" data-reason={reason.kind}>
+          <span
+            className={`ctl-hint ctl-context ${reason.tone === "err" ? "ctl-note--err" : ""}`}
+            data-wrong-origin={reason.kind === "wrong-origin" ? "" : undefined}
+          >
+            {reason.text}
+          </span>
+          {reason.action}
+        </p>
+      )}
     </form>
   );
 }

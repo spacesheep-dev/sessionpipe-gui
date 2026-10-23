@@ -165,7 +165,11 @@ mark {
   outline: none;
 }
 
-.num {
+/* Every count, time and version sets in tabular figures, so a ticking number never
+   moves what sits beside it. */
+.num,
+time,
+kbd {
   font-variant-numeric: tabular-nums;
 }
 
@@ -182,6 +186,15 @@ mark {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A scheme or skin change lands in one frame (lib/theme.ts sets this for two frames):
+   no colour tween across the whole window. */
+:root[data-switching] *,
+:root[data-switching] *::before,
+:root[data-switching] *::after {
+  /* biome-ignore lint/complexity/noImportantStyles: it must beat every component's own transition, for one frame */
+  transition: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -3,10 +3,13 @@
 // is active live in the URL (`?s=<key>,<key>&t=<active>`; a lone `?s=<key>` still works),
 // mirrored to localStorage so a plain reload without params restores them (the URL wins
 // when present). The width is per device; the rectangle an open animates out of is
-// handed over once and consumed by the panel.
+// handed over once and consumed by the panel. The panel belongs beside the pages that
+// list sessions (and a session's own page, and Settings, a window over the board); on
+// the others (Setup, Connect, /phone, a missing page) it steps aside, its tabs kept for
+// the way back.
 import type { SessionKey } from "@shared/api";
 import { useMemo, useSyncExternalStore } from "react";
-import { SPLIT_ACTIVE_PARAM, SPLIT_PARAM, setSearchParams, useSearchParam } from "./router";
+import { parseRoute, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, setSearchParams, usePath, useSearchParam } from "./router";
 
 export interface Rect {
   x: number;
@@ -246,8 +249,22 @@ export function useSplit(): SplitState {
   return useMemo(() => parseSplit(s, t), [s, t]);
 }
 
-/** The active session key in the panel, or null. */
+/** The pages the panel opens beside: the session lists, a session, the installed views
+ *  (canvas, office), and Settings (a window over the board, which keeps its layout under
+ *  it). Never Setup, Connect, /phone, a pairing page or a path the app has no page for,
+ *  where a live session beside it reads as broken. */
+const BESIDE = new Set(["board", "inbox", "feed", "review", "machines", "session", "theme", "settings"]);
+export const panelBeside = (path: string): boolean => BESIDE.has(parseRoute(path).name);
+
+/** Whether the panel shows on the current page (its tabs stay in the URL either way). */
+export function usePanelHere(): boolean {
+  return panelBeside(usePath());
+}
+
+/** The active session key in the panel, or null; null too on a page the panel steps
+ *  aside for, so the shell lays the page out full width there. */
 export function useSplitKey(): SessionKey | null {
   const st = useSplit();
-  return st.tabs[st.active] ?? null;
+  const here = usePanelHere();
+  return here ? (st.tabs[st.active] ?? null) : null;
 }

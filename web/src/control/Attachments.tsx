@@ -330,7 +330,7 @@ export function AttachButton({
   };
   const full = att.items.length >= ATTACHMENTS_PER_MESSAGE;
   return (
-    <label className="att-btn" title={title} aria-disabled={disabled || full ? "true" : undefined}>
+    <label className="att-btn" title={title} data-tip={title} aria-disabled={disabled || full ? "true" : undefined}>
       <input
         ref={input}
         type="file"

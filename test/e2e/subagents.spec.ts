@@ -13,8 +13,10 @@ import { openBoard, openPage } from "./helpers.js";
 const TITLE = "Search: review the BM25 cache";
 const parent = (page: Page) => page.locator("article.card", { hasText: TITLE }).first();
 
-/** The BM25 row on the board (the done group opened when it ended a while ago). */
-async function bm25(page: Page) {
+/** The BM25 row on the board (the done group opened when it ended a while ago). `live`
+ *  moves the pointer off the list afterwards: the board holds still under it, and a new
+ *  run of the scene would wait there. */
+async function bm25(page: Page, { live = false } = {}) {
   await openBoard(page);
   const done = page.locator("section.group--done button.group-toggle");
   await expect
@@ -27,6 +29,7 @@ async function bm25(page: Page) {
       { timeout: 30_000 },
     )
     .toBe(true);
+  if (live) await page.mouse.move(5, 5);
   return parent(page);
 }
 
@@ -35,7 +38,7 @@ test.describe("subagents", () => {
 
   test("the parent says how many run and opens to its agents on the tree guide", async ({ page }) => {
     test.setTimeout(90_000);
-    const row = await bm25(page);
+    const row = await bm25(page, { live: true });
     // The scene comes back every few seconds at the suite's speed: catch it with agents running.
     await expect(row.locator(".card-agents")).toHaveText(/^\d+ subagents? (running|· \d+ quiet)$/, { timeout: 60_000 });
     // Open while any agent is open: the rows on the tree guide, glyph · Type · description · now.
@@ -58,7 +61,15 @@ test.describe("subagents", () => {
   test("a search for an agent's description finds its parent, open", async ({ page }) => {
     await bm25(page);
     await page.getByRole("searchbox", { name: "Search sessions" }).fill("hot path");
-    await expect(parent(page)).toBeVisible();
+    // The run may end meanwhile and go under the folded done group: open it then.
+    const done = page.locator("section.group--done button.group-toggle");
+    await expect
+      .poll(async () => {
+        if ((await parent(page).count()) === 0 && (await done.getAttribute("aria-expanded")) === "false")
+          await done.click();
+        return parent(page).isVisible();
+      })
+      .toBe(true);
     await expect(
       parent(page).locator(".agent-desc", { hasText: "Profile the scoring hot path" }).first(),
     ).toBeVisible();
@@ -109,7 +120,9 @@ test.describe("subagents", () => {
   });
 
   test("an agent opens beside as a tab right after its parent's", async ({ page }) => {
-    const row = await bm25(page);
+    // One run of the scene by its key: a newer run may come in above it meanwhile.
+    const key = await (await bm25(page)).getAttribute("data-flip");
+    const row = page.locator(`article.card[data-flip="${key}"]`);
     // The parent's tab first, then one of its agents.
     await row.locator("a.card-link").click({ modifiers: ["Shift"] });
     await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);

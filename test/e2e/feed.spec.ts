@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
-// The feed: live rows, Pause with its "N new" pill, Resume, the harness filter, search.
+// The feed: live rows, Pause with its "N new" pill, Resume, the harness filter (one Filter
+// menu with a section per filter), search, and what happened said in words.
 import { expect, test } from "@playwright/test";
 import { openPage } from "./helpers.js";
 
@@ -36,17 +37,17 @@ test.describe("feed", () => {
   test("the harness filter restricts rows and search narrows them", async ({ page }) => {
     await openPage(page, "/feed");
     await expect(rows(page).first()).toBeVisible();
-    // The filter is the custom select (components/Select.tsx): a combobox trigger, a listbox.
-    const harness = page.getByRole("combobox", { name: "Harness" });
-    await expect(harness).toBeVisible();
-    await harness.click();
-    const list = page.getByRole("listbox", { name: "Harness" });
-    const options = await list.getByRole("option").allInnerTexts();
+    // One Filter menu: a section per filter, its choices radio items.
+    const filter = page.getByRole("button", { name: /^Filter/ });
+    await expect(filter).toBeVisible();
+    await filter.click();
+    const menu = page.getByRole("menu");
+    const options = await menu.getByRole("menuitemradio").allInnerTexts();
     expect(options).toEqual(expect.arrayContaining(["Claude Code", "Codex", "Antigravity", "Cursor"]));
     // Claude Code: the busiest harness in the demo, so a live row through the filter is near.
-    await list.getByRole("option", { name: "Claude Code" }).click();
-    await expect(list).toHaveCount(0);
-    await expect(harness).toHaveAttribute("data-value", "claude-code");
+    await menu.getByRole("menuitemradio", { name: "Claude Code" }).click();
+    await expect(menu).toHaveCount(0);
+    await expect(filter).toHaveAccessibleName("Filter: Claude Code");
     await expect(page.locator("ol.rows")).toHaveAttribute("aria-busy", "false");
     await expect(rows(page).first()).toBeVisible();
     const harnessOf = () =>
@@ -58,16 +59,22 @@ test.describe("feed", () => {
     await expect.poll(() => rows(page).count(), { timeout: 40_000 }).toBeGreaterThan(n);
     expect(new Set(await harnessOf())).toEqual(new Set(["Claude Code"]));
 
-    await harness.click();
-    await page.getByRole("listbox", { name: "Harness" }).getByRole("option", { name: "All harnesses" }).click();
-    await expect(harness).toHaveAttribute("data-value", "");
+    await filter.click();
+    await page.getByRole("menu").getByRole("menuitemradio", { name: "All harnesses" }).click();
+    await expect(filter).toHaveAccessibleName("Filter");
     await page.getByRole("searchbox", { name: "Search events" }).fill("session.started");
     await expect(page.locator("ol.rows")).toHaveAttribute("aria-busy", "false");
     await expect(rows(page).first()).toBeVisible();
-    const types = await rows(page).evaluateAll((els) => els.map((el) => el.querySelector(".ev-type")?.textContent));
+    // The raw type is the row's data and its tooltip; the row says it in words.
+    const types = await rows(page).evaluateAll((els) =>
+      els.map((el) => [el.getAttribute("data-type"), el.querySelector(".ev-type")?.textContent]),
+    );
     expect(types.length).toBeGreaterThan(0);
-    expect(new Set(types)).toEqual(new Set(["session.started"]));
+    expect(new Set(types.map((t) => t[0]))).toEqual(new Set(["session.started"]));
+    expect(new Set(types.map((t) => t[1]))).toEqual(new Set(["Session started"]));
     await page.getByRole("searchbox", { name: "Search events" }).fill("no-such-thing-zzz");
-    await expect(page.getByText("No events match.")).toBeVisible();
+    await expect(page.getByText("No events match “no-such-thing-zzz”")).toBeVisible();
+    await page.getByRole("button", { name: "Clear search" }).click();
+    await expect(rows(page).first()).toBeVisible();
   });
 });

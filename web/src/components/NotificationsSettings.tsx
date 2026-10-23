@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Notifications section of the Settings window (components/Settings.tsx mounts it):
 // switch rows for system notifications (lib/notify.ts) and sounds (lib/sounds.ts), the
-// volume, one row per kind of moment with its sound and a Test, and the file you can
+// volume, one row per kind of moment with its sound and a ▶ to test it, and the file you can
 // upload for any of them. The window's grouped form: each control on the same trailing
 // edge as every other section's, one caption line under a label.
 import { useId, useRef, useState } from "react";
@@ -110,12 +110,17 @@ export function NotificationsSettings() {
                 />
                 <button
                   type="button"
-                  className="btn btn--sm"
+                  className="icon-btn ntf-play"
                   disabled={!s.supported}
                   onClick={() => void playSound(k.kind, { test: true })}
-                  title={`Play the ${k.label.toLowerCase()} sound`}
+                  aria-label={`Test the ${k.label.toLowerCase()} sound`}
                 >
-                  Test
+                  <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                    <path
+                      d="M5 3.6v8.8a.6.6 0 0 0 .9.5l7-4.4a.6.6 0 0 0 0-1L5.9 3.1a.6.6 0 0 0-.9.5Z"
+                      fill="currentColor"
+                    />
+                  </svg>
                 </button>
               </div>
             </div>

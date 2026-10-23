@@ -7,6 +7,7 @@
 // /phone: a row each, the digits large, Reject and Approve (and the same in its menu).
 import type { MachineSummary } from "@shared/api";
 import { useEffect, useState } from "react";
+import { ActionButton } from "../components/bits";
 import { useContextMenu } from "../components/ContextMenu";
 import { Select } from "../components/Select";
 import { useMachines } from "../data/hooks";
@@ -240,15 +241,16 @@ function DeviceRow({
         <button type="button" className="btn" disabled={!!busy} onClick={onReject}>
           Reject
         </button>
-        <button
-          type="button"
+        <ActionButton
           className="btn btn--primary"
-          disabled={!!why || !!busy}
-          title={why ?? (m ? `Trust it on ${m.name}` : undefined)}
+          disabled={!!why || (!!busy && busy !== d.requestId)}
+          data-tip={why ?? (m ? `Trust it on ${m.name}` : undefined)}
           onClick={onApprove}
+          pending={busy === d.requestId}
+          pendingLabel={tap ? "Confirm with your passkey…" : "Approving…"}
         >
-          {busy === d.requestId ? (tap ? "Confirm with your passkey…" : "Sending…") : "Approve"}
-        </button>
+          Approve
+        </ActionButton>
       </span>
       {why && <span className="pending-meta pending-wide">{why}</span>}
       {err ? (

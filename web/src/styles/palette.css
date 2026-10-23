@@ -2,9 +2,12 @@
 /* The command palette (web/src/components/Palette.tsx), as Spotlight and Raycast draw it:
    a real scrim, one 640 px panel a fifth of the way down, a 48 px input with no ring and
    a hairline under it, quiet section labels, 36 px rows (the status glyph, the title, its
-   meta, the age). A match is the title's own letters in the ink at 600, never an
-   underline; the cursor row is the selection fill, inset. On a phone it is a full-screen
-   sheet with Cancel and no key hints. The `?` help shares the frame (shortcuts.css). */
+   meta, the age or the action's key caps at the right). While a query is typed the rows
+   rest a tier down and the matched letters stand in the ink, never an underline; the
+   cursor row is the selection fill, inset. The list ends on a whole row at its fold
+   (Palette.tsx snapToRows). It zooms in from 0.98 and out the same, quicker. On a phone it
+   is a full-screen sheet with Cancel and no key hints. The `?` help shares the frame
+   (shortcuts.css). */
 
 .pal-scrim {
   position: fixed;
@@ -14,14 +17,21 @@
   cursor: default;
   animation: fade-in var(--dur) var(--ease-out) both;
 }
+.pal-scrim[data-closing] {
+  animation: fade-out var(--dur-exit) var(--ease-in) both;
+  pointer-events: none;
+}
+/* Centred by its margins, not a transform, so the zoom owns the transform. */
 .pal {
   position: fixed;
   z-index: calc(var(--z-dialog) + 1);
   top: 20vh;
-  left: 50%;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
   width: min(640px, calc(100vw - 32px));
   max-height: min(60dvh, 520px);
-  transform: translateX(-50%);
+  transform-origin: 50% 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -31,17 +41,11 @@
   box-shadow: var(--shadow-pop);
   -webkit-user-select: none;
   user-select: none;
-  animation: pal-in var(--dur) var(--ease-out) both;
+  animation: zoom-in var(--dur) var(--ease-out) both;
 }
-@keyframes pal-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 4px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
+.pal[data-closing] {
+  animation: zoom-out var(--dur-exit) var(--ease-in) both;
+  pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .pal,
@@ -106,8 +110,35 @@
 }
 .pal-busy {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--fg-3);
   font-size: var(--text-sm);
+}
+/* In a pushed list: where it came from, as a back control before the field. */
+.pal-crumb {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 40%;
+  height: 24px;
+  padding: 0 8px 0 6px;
+  border-radius: var(--radius-inner);
+  background: var(--bg-3);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.pal-crumb > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (hover: hover) {
+  .pal-crumb:hover {
+    color: var(--fg);
+  }
 }
 /* The phone's way out; a desktop closes with Esc or the scrim. */
 .pal-cancel {
@@ -122,11 +153,25 @@
 /* ----- the list ----- */
 
 .pal-list {
+  position: relative;
   list-style: none;
   margin: 0;
   padding: 4px 0 6px;
   overflow: auto;
   overscroll-behavior: contain;
+}
+/* A pushed list slides in from the right, once, quickly; stepping back just shows. */
+.pal-list[data-pushed] {
+  animation: pal-push var(--dur-fast) var(--ease-out);
+}
+@keyframes pal-push {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+.pal-list[data-pushed] > .pal-row:first-child {
+  margin-top: 2px;
 }
 .pal-section {
   padding: 10px 16px 4px;
@@ -137,12 +182,27 @@
 .pal-list > .pal-section:first-child {
   padding-top: 6px;
 }
+/* No results: what was looked for, then what does work. */
 .pal-empty {
-  padding: 16px;
-  color: var(--fg-3);
+  padding: 20px 16px 22px;
+  text-align: center;
+}
+.pal-empty-title {
+  margin: 0;
+  color: var(--fg);
   font-size: var(--text-md);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.pal-empty-text {
+  margin: 4px auto 0;
+  max-width: 52ch;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
 }
 .pal-row {
+  position: relative;
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
@@ -199,8 +259,29 @@
   font-size: var(--text-sm);
 }
 .pal-age {
+  min-width: var(--meta-col);
   color: var(--fg-3);
   font-size: var(--text-sm);
+  text-align: right;
+}
+/* An action's key, right-aligned in caps; a row that pushes a list ends in a ›. */
+.pal-keys {
+  display: inline-flex;
+  gap: 3px;
+}
+.pal-chev {
+  color: var(--fg-3);
+  font-size: var(--text-md);
+  line-height: 1;
+}
+.pal-check {
+  justify-self: center;
+  color: var(--fg);
+}
+/* The machine and the repo in "New session on studio-mac in acme/billing". */
+.pal-em {
+  color: var(--fg);
+  font-weight: 500;
 }
 /* A hit: the matched letters in the ink at 600. No underline, no block. */
 .pal-row u {
@@ -278,9 +359,12 @@
     box-shadow: none;
     animation: sheet-up var(--dur-slow) var(--ease-out) both;
   }
+  .pal[data-closing] {
+    animation: sheet-down var(--dur-exit) var(--ease-in) both;
+  }
   .pal-head {
     height: 52px;
-    padding: env(safe-area-inset-top) 12px 0 16px;
+    padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
     box-sizing: content-box;
     border-bottom: 0;
   }
@@ -306,7 +390,10 @@
   }
   .pal-row {
     min-height: 44px;
-    margin: 0 8px;
+    margin: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+  }
+  .pal-keys {
+    display: none;
   }
   .pal-section {
     padding: 14px 18px 6px;
@@ -321,15 +408,57 @@
   }
 }
 
-/* A session's colour label before its title; a subagent's "↳" before its name. */
+/* A session's colour label before its title. */
 .pal-label > .label-dot {
   margin-right: 6px;
   vertical-align: 0.05em;
 }
-.pal-tree {
-  color: var(--fg-4);
-  font-size: var(--text-sm);
-}
 .pal-row > .label-dot {
   justify-self: center;
+}
+/* Subagents under their session, on the board's tree guide (board.css .card-kids): one
+   hairline down from the parent's glyph, an elbow into each child's glyph, ending at the
+   last. The guide runs through the mark column; the child's glyph starts its label. */
+.pal-guide {
+  align-self: stretch;
+}
+.pal-row[data-parent]::after,
+.pal-row[data-kid]::before,
+.pal-row[data-kid]::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  border: 0 solid var(--line-2);
+  pointer-events: none;
+}
+.pal-row[data-parent]::after {
+  top: calc(50% + 6px);
+  bottom: 0;
+  border-left-width: var(--hairline);
+}
+.pal-row[data-kid]::before {
+  top: 0;
+  bottom: 0;
+  border-left-width: var(--hairline);
+}
+.pal-row[data-kid="last"]::before {
+  bottom: 50%;
+}
+.pal-row[data-kid]::after {
+  top: 50%;
+  width: 13px;
+  border-top-width: var(--hairline);
+}
+.pal-row[data-kid] .pal-label > .dot {
+  margin: 0 8px 0 0;
+  vertical-align: 0.05em;
+}
+.pal-row[data-kid] .pal-label {
+  font-size: var(--text-sm);
+}
+
+/* A query is typed: the cursor row's label rests a tier down too (after every other
+   label rule), so the matched letters are what stands out. */
+.pal[data-q] .pal-row[aria-selected="true"] .pal-label {
+  color: var(--fg-2);
 }

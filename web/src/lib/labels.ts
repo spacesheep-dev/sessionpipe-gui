@@ -6,6 +6,7 @@
 import { LABEL_COLORS, LABEL_DEFAULT_NAMES, type LabelColor, type Labels, type SessionKey } from "@shared/api";
 import type { MenuItem } from "../components/ContextMenu";
 import type { Store } from "../data/store";
+import { pushUndo } from "./toasts";
 
 /** What a label is called: the person's name for it, else the colour's own. */
 export const labelName = (labels: Labels, color: LabelColor): string =>
@@ -30,6 +31,25 @@ export async function setLabel(
     console.warn("label not set:", (e as Error).message);
     return false;
   }
+}
+
+/** Take the label off at once, with "Label removed · Undo" (⌘Z) to put each one back. */
+export async function removeLabel(store: Store, keys: SessionKey | readonly SessionKey[]): Promise<boolean> {
+  const list = typeof keys === "string" ? [keys] : keys;
+  const labels = store.get().labels;
+  const before = list.map((k) => [k, labels.sessions[k]] as const).filter((x): x is [SessionKey, LabelColor] => !!x[1]);
+  if (!before.length) return true;
+  const ok = await setLabel(store, list, null);
+  if (ok) {
+    const name = before.length === 1 ? labelName(labels, before[0]![1]) : `${before.length} labels`;
+    pushUndo({
+      id: `label|${list.join(",")}`,
+      title: "Label removed",
+      body: name,
+      undo: () => void store.patchLabels({ sessions: Object.fromEntries(before) }).catch(() => {}),
+    });
+  }
+  return ok;
 }
 
 /** Rename a label (an empty name goes back to the colour's own). Rejects with the
@@ -68,35 +88,37 @@ export function onLabelRename(l: (color?: LabelColor) => void): () => void {
  *  the current one (when every key shares it), "None", then "Edit labels…". Each row
  *  shows its keymap chord (⌥⌘1 … ⌥⌘7, ⌥⌘0). */
 export function labelMenu(store: Store, keys: readonly SessionKey[]): MenuItem {
+  return { label: "Label", items: labelItems(store, keys) };
+}
+
+/** The Label submenu's rows on their own (a phone's leading swipe opens them as a sheet). */
+export function labelItems(store: Store, keys: readonly SessionKey[]): MenuItem[] {
   const labels = store.get().labels;
   const current = new Set(keys.map((k) => labels.sessions[k] ?? null));
   const only = current.size === 1 ? [...current][0] : undefined;
-  return {
-    label: "Label",
-    items: [
-      ...LABEL_COLORS.map(
-        (c): MenuItem => ({
-          label: labelName(labels, c),
-          swatch: c,
-          checked: only === c,
-          radio: true,
-          action: `label.${c}`,
-          run: () => void setLabel(store, keys, c),
-        }),
-      ),
-      { sep: true },
-      {
-        label: "None",
-        checked: only === null,
+  return [
+    ...LABEL_COLORS.map(
+      (c): MenuItem => ({
+        label: labelName(labels, c),
+        swatch: c,
+        checked: only === c,
         radio: true,
-        action: "label.none",
-        disabled: current.size === 1 && only === null ? true : undefined,
-        run: () => void setLabel(store, keys, null),
-      },
-      { sep: true },
-      { label: "Edit labels…", run: () => requestLabelRename(only ?? undefined) },
-    ],
-  };
+        action: `label.${c}`,
+        run: () => void setLabel(store, keys, c),
+      }),
+    ),
+    { sep: true },
+    {
+      label: "None",
+      checked: only === null,
+      radio: true,
+      action: "label.none",
+      disabled: current.size === 1 && only === null ? true : undefined,
+      run: () => void removeLabel(store, keys),
+    },
+    { sep: true },
+    { label: "Edit labels…", run: () => requestLabelRename(only ?? undefined) },
+  ];
 }
 
 // ----- filtering: the toolbar chip and the `label:` search token -----

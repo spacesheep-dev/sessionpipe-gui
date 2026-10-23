@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
 // Machines: both demo machines with harness versions and the pair hint. Connect: the QR
-// image, the sink command behind Reveal, the demo toggle, copy buttons.
+// image, the sink command behind Reveal (in the Sink token group, folded to one line until
+// opened), the demo toggle (in Sources), copy buttons.
 import { expect, test } from "@playwright/test";
 import { INFO, openPage } from "./helpers.js";
 
@@ -18,6 +19,8 @@ test.describe("connect keeps its scroll", () => {
   test("scrolled to the bottom, the page stays put through eight seconds of live events", async ({ page, request }) => {
     await openPage(page, "/connect");
     await page.waitForLoadState("networkidle");
+    // Open the folded groups, so the page is long enough to scroll.
+    for (const name of [/^Sources/, /^This receiver/]) await page.getByRole("button", { name }).click();
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
     await page.waitForTimeout(300);
     const y = await page.evaluate(() => window.scrollY);
@@ -70,6 +73,11 @@ test.describe("connect", () => {
     const cmd = page.locator(".cmd-text");
     await expect(cmd).toContainText("sessionpipe sink add");
     await expect(cmd).not.toContainText(info.sinkToken);
+    // The token's group opens from its one-line summary.
+    const token = page.getByRole("button", { name: /^Sink token/ });
+    await expect(token).toHaveAttribute("aria-expanded", "false");
+    await token.click();
+    await expect(token).toHaveAttribute("aria-expanded", "true");
     await page.getByRole("button", { name: "Reveal" }).click();
     await expect(cmd).toHaveText(info.sinkCommand);
     await expect(cmd).toContainText(info.sinkToken);
@@ -77,11 +85,13 @@ test.describe("connect", () => {
     await page.getByRole("button", { name: "Hide" }).click();
     await expect(cmd).not.toContainText(info.sinkToken);
 
+    await page.getByRole("button", { name: /^Sources/ }).click();
     const demo = page.getByRole("switch", { name: "Demo mode" });
     await expect(demo).toHaveAttribute("aria-checked", String(info.sources.demo));
     await expect(demo).toHaveAttribute("aria-checked", "true");
     await expect(page.locator("dd.demo > span")).toHaveText(/^on ·/);
 
+    await page.getByRole("button", { name: /^Passkeys/ }).click();
     const copies = page.getByRole("button", { name: /^Copy( command)?$/ });
     expect(await copies.count()).toBeGreaterThanOrEqual(3);
     await expect(page.getByRole("button", { name: "Copy command" })).toBeVisible();

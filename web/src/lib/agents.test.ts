@@ -30,7 +30,7 @@ describe("agentNow", () => {
   });
   it("reads Thinking between tools, and quiet once stale", () => {
     expect(agentNow(run(), T0 + 11_000)).toBe("Thinking");
-    expect(agentNow(run({ state: "stale" }), T0 + 10_000 + 12 * 60_000)).toBe("Quiet for 12 m 00 s");
+    expect(agentNow(run({ state: "stale" }), T0 + 10_000 + 12 * 60_000)).toBe("Quiet for 12 m");
   });
   it("says only Running when its tools are not told apart (Codex)", () => {
     expect(agentNow(run({ attributed: false, currentTool: { tool: "shell", since: iso(6) } }), T0 + 9000)).toBe(
@@ -38,7 +38,7 @@ describe("agentNow", () => {
     );
   });
   it("is how long it ran once done", () => {
-    expect(agentNow(run({ state: "done", endedAt: iso(72) }), T0 + 999_000)).toBe("1 m 12 s");
+    expect(agentNow(run({ state: "done", endedAt: iso(72) }), T0 + 999_000)).toBe("1 m");
   });
 });
 

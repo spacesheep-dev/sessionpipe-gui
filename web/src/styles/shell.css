@@ -116,27 +116,32 @@
   text-align: center;
 }
 
-/* The Setup entry's amber dot: steps to go on this machine. */
+/* The Setup entry's dot: steps to go on this machine. The quiet mark tier, not amber:
+   amber is for what needs you, and a setup step does not. */
 .nav-dot {
   position: absolute;
   top: 7px;
   left: calc(50% + 8px);
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--needs);
+  background: var(--fg-3);
 }
 
-/* The stream: a dot and a word. Green only while live. */
+/* The stream (Shell.tsx ConnectionPill): while live, only a small green dot; its word
+   is kept for assistive tech and the tests, not drawn. A drop shows its words (and
+   Retry now) in the meta tier, the dot hollow while reconnecting, red when offline. */
 .conn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: 20px;
   color: var(--fg-3);
   font-size: var(--text-xs);
   white-space: nowrap;
 }
 .conn-dot {
+  flex: none;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -145,12 +150,39 @@
 .conn--live .conn-dot {
   background: var(--ok);
 }
+.conn-label {
+  font-variant-numeric: tabular-nums;
+}
+.conn--live .conn-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 .conn--reconnecting .conn-dot,
 .conn--connecting .conn-dot {
-  background: var(--needs);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--fg-3);
 }
 .conn--offline .conn-dot {
   background: var(--err);
+}
+.conn-retry {
+  padding: 0 4px;
+  border-radius: var(--radius-inner);
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 2px;
+}
+@media (hover: hover) {
+  .conn-retry:hover {
+    color: var(--fg);
+  }
 }
 
 /* ----- the sidebar (desktop) ----- */
@@ -234,8 +266,17 @@
   .rail-nav > [data-nav="machines"] {
     margin-top: 12px;
   }
+  /* The rail's links and the sidebar's rows show their fill at once under a press and
+     let it go over --dur-release. */
   .rail .nav-link {
-    min-height: 52px;
+    transition:
+      background-color var(--dur-release) linear,
+      color var(--dur-fast) var(--ease-out);
+  }
+  /* The compact rail is icons only, as a Mac's narrow sidebar is; each icon's tooltip
+     names its page and keys (Tip.tsx). The label stays for assistive tech. */
+  .rail .nav-link {
+    min-height: 40px;
     gap: 4px;
     border-radius: var(--radius);
     color: var(--fg-2);
@@ -259,6 +300,11 @@
     outline-offset: -2px;
   }
   .rail .nav-badge {
+    top: 2px;
+    left: calc(50% + 4px);
+  }
+  .rail .nav-dot {
+    top: 8px;
     left: calc(50% + 7px);
   }
   /* The views: a hairline in the rail; in the sidebar a section label instead. */
@@ -348,9 +394,48 @@
     flex-direction: row;
     margin: 0 auto 0 0;
   }
+  /* A drop's words ("Reconnecting · 8 s  Retry now") take the footer's first line, so
+     they never push its buttons past the sidebar's edge. */
+  .shell--side .rail-foot {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 4px;
+  }
+  .shell--side .rail .conn:not(.conn--live) {
+    flex-basis: 100%;
+  }
   /* The rail's tooltips name the page and its keys; the sidebar's labels already do. */
   .shell--side .rail .nav-link[data-tip]::after {
     display: none;
+  }
+}
+
+/* The compact rail (840–1200 px): icons only, each named by its tooltip; the labels stay
+   for assistive tech. The stream's words too: the dot says it, the tooltip names it. */
+@media (min-width: 840px) {
+  .shell:not(.shell--side) .rail .nav-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .shell:not(.shell--side) .rail .nav-glyph {
+    width: 20px;
+    height: 20px;
+  }
+  /* The compact rail has no room for words: the dot says it and the tooltip names it. */
+  .shell:not(.shell--side) .rail .conn-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .shell:not(.shell--side) .rail .conn-retry {
+    font-size: calc(var(--text-xs) - 1px);
   }
 }
 
@@ -546,7 +631,9 @@
     align-items: center;
     gap: 8px;
     margin: 0 calc(-1 * var(--gutter));
-    padding: 0 var(--gutter);
+    /* The chips have no fill at rest, so their words, not their pads, line up with the
+       search and the large title (a chip's own left pad is 8 px). */
+    padding: 0 var(--gutter) 0 calc(var(--gutter) - 8px);
     overflow-x: auto;
     overscroll-behavior-x: contain;
     scrollbar-width: none;

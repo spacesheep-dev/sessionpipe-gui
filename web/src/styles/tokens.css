@@ -52,10 +52,25 @@
   --menu-row: calc(var(--row-sm) - 6px);
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  /* Accelerating, but moving from the first frame: an expo-in (0.7, 0, 0.84, 0) held a
+     140 ms exit near full opacity for 80 ms, which read as a stall and then a snap. */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
   --dur-fast: 120ms;
   --dur: 200ms;
   --dur-slow: 280ms;
+  /* The motion system (POLISH-PLAN.md §2). Exits are quicker than entrances and
+     accelerate away on --ease-in: the eye has already moved on. A press shows at once and
+     clears --dur-release after the finger lifts, so a quick tap still reads. */
+  --dur-exit: 140ms;
+  --dur-release: 80ms;
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+  /* A primary button's give under the finger. */
+  --press-scale: 0.97;
+  /* The tooltip's first wait; while one has just shown, its neighbours show at once. */
+  --tip-delay: 600ms;
+  /* A list row's right column (a time, a count): "59 m" fits, so a ticking time never
+     moves the row's right edge. */
+  --meta-col: 4.5ch;
 
   --tap: 44px;
   --gutter: 24px;
@@ -213,7 +228,7 @@
 
     --raised: var(--bg-4);
     --switch-off: var(--bg-4);
-    --switch-on: var(--fg-3);
+    --switch-on: var(--fg-2);
     --grouped-ground: var(--bg);
     --scrim: oklch(0 0 0 / 0.5);
     --shadow-pop: 0 0 0 0.5px oklch(0 0 0 / 0.6), 0 2px 6px oklch(0 0 0 / 0.3), 0 16px 40px oklch(0 0 0 / 0.45);
@@ -258,7 +273,7 @@
 
   --raised: var(--bg-4);
   --switch-off: var(--bg-4);
-  --switch-on: var(--fg-3);
+  --switch-on: var(--fg-2);
   --grouped-ground: var(--bg);
   --scrim: oklch(0 0 0 / 0.5);
   --shadow-pop: 0 0 0 0.5px oklch(0 0 0 / 0.6), 0 2px 6px oklch(0 0 0 / 0.3), 0 16px 40px oklch(0 0 0 / 0.45);

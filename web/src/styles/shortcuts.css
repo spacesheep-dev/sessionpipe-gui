@@ -2,7 +2,8 @@
 /* ---------- the shortcuts help (?) and /shortcuts ---------- */
 
 /* The help: the palette's frame (palette.css), a read-only cheat sheet in two columns of
-   groups, every binding a quiet string ("G B", "⌘K"); the editor is one link away. */
+   groups on the 16 px rhythm, every key a cap ("G" "B", "⌘K"); the editor is one link
+   away. */
 .pal.sc-help {
   width: min(720px, calc(100vw - 32px));
   max-height: min(78dvh, 640px);
@@ -10,16 +11,16 @@
 .sc-help-list {
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 8px 8px 12px;
+  padding: 12px 8px 4px;
   columns: 2 280px;
-  column-gap: 24px;
+  column-gap: 32px;
 }
 .sc-help-list:focus-visible {
   outline-offset: -2px;
 }
 .sc-help-group {
   break-inside: avoid;
-  padding-bottom: 8px;
+  padding-bottom: 16px;
 }
 .sc-help-group ul,
 .sc-table {
@@ -28,7 +29,8 @@
   padding: 0;
 }
 .sc-help .pal-section {
-  padding: 8px 8px 4px;
+  margin: 0;
+  padding: 0 8px 6px;
 }
 .sc-help .sc-row {
   display: flex;
@@ -39,6 +41,21 @@
   padding: 0 8px;
   color: var(--fg);
   font-size: var(--text-sm);
+}
+/* A binding as caps (ShortcutHelp.tsx Keys caps): one binding's chords 3 px apart, two
+   bindings 10 px (the row's own gap). A key the browser may take first is a tier down. */
+.kbd-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.kbd-row.keys--soft .kbd {
+  color: var(--fg-3);
+}
+.sc-help-seq {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .sc-help .sc-row-label {
   min-width: 0;
@@ -273,4 +290,9 @@
   .sc-help .sc-row {
     min-height: 36px;
   }
+}
+
+/* The help's rows: a faint hairline between them, after the page's own row rules. */
+.sc-help .sc-row + .sc-row {
+  border-top: var(--hairline) solid color-mix(in oklch, var(--line) 60%, transparent);
 }

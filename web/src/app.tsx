@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useEffect } from "react";
+// The app: the shell, the page for the route, the palette and the toasts. Two decisions
+// live here. A first run lands on /setup before anything paints: on a device that has
+// not seen setup, the board waits (blank under the shell) for the setup status instead of
+// flashing and then redirecting. And Back puts a list page (Board, Inbox, Feed, Machines)
+// back where it was left: its scroll here, its cursor in lib/keys.ts, its open trees in
+// the settings that already keep them.
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PageBar } from "./components/PageBar";
 import { Palette } from "./components/Palette";
 import { Settings } from "./components/Settings";
@@ -7,7 +13,9 @@ import { Shell } from "./components/Shell";
 import { Toasts } from "./components/Toasts";
 import { AddDevicePage } from "./control/AddDevice";
 import { PairPage } from "./control/Pair";
+import { useStartTitles } from "./control/Starting";
 import { useAnswerableCount, useAppState } from "./data/hooks";
+import { markRestoring } from "./lib/keys";
 import { titlePrefix, useAttentionEffects } from "./lib/notify";
 import { Link, navigate, parseRoute, usePath, useRoute } from "./lib/router";
 import { getSettings } from "./lib/settings";
@@ -68,11 +76,10 @@ export function App() {
     document.title = `${titlePrefix(open)}${themeName ?? TITLES[route.name] ?? "sessionpipe"} · sessionpipe gui`;
   }, [route, themeName, open]);
   // To the top when the path changes (not on a `?s=` tab change, not on a stream-driven
-  // render: `route` is a fresh object every render, so it cannot be the dependency).
+  // render: `route` is a fresh object every render, so it cannot be the dependency);
+  // back to where it was when Back brought a list page back.
   const pathname = usePath().split("?")[0] ?? "/";
-  useEffect(() => {
-    if (parseRoute(pathname).name !== "session") window.scrollTo({ top: 0 });
-  }, [pathname]);
+  useScrollPlace(pathname);
   // The installed themes: at boot, and again each time the stream (re)connects, since a
   // reconnect may follow a restart with themes added or removed.
   useEffect(() => {
@@ -82,18 +89,38 @@ export function App() {
     void fetchThemes();
   }, []);
   // First run: a brand-new machine (no event yet, TLS mode off, or its daemon not paired)
-  // lands on /setup once per device; "Skip setup" or the first visit remembers it.
+  // lands on /setup once per device; "Skip setup" or the first visit remembers it. Until
+  // the status says which, a device that has not seen setup shows nothing under the shell
+  // (for at most FIRST_RUN_WAIT_MS): never the board for a frame, then the redirect.
   const setup = useSetupStatus();
+  // Every list names a session started here by its first message (lib/format.ts sessionTitle).
+  useStartTitles();
   useEffect(() => landOnDefaultPage(), []);
+  const [deciding, setDeciding] = useState(() => route.name === "board" && !setupSeen());
   useEffect(() => {
-    if (route.name !== "board" || setup.local !== true || !setup.status) return;
-    if (!needsSetup(setup.status) || setupSeen()) return;
-    markSetupSeen();
-    navigate("/setup", { replace: true });
-  }, [route.name, setup.local, setup.status]);
+    if (!deciding) return;
+    const t = window.setTimeout(() => setDeciding(false), FIRST_RUN_WAIT_MS);
+    return () => window.clearTimeout(t);
+  }, [deciding]);
+  useLayoutEffect(() => {
+    if (route.name !== "board") {
+      if (deciding) setDeciding(false);
+      return;
+    }
+    if (setup.local === false || setup.error) {
+      setDeciding(false);
+      return;
+    }
+    if (setup.local !== true || !setup.status) return;
+    if (needsSetup(setup.status) && !setupSeen()) {
+      markSetupSeen();
+      navigate("/setup", { replace: true });
+    }
+    setDeciding(false);
+  }, [route.name, setup.local, setup.status, setup.error, deciding]);
   return (
     <Shell route={route}>
-      {route.name === "board" && <Board />}
+      {route.name === "board" && !deciding && <Board />}
       {route.name === "inbox" && <Inbox />}
       {route.name === "session" && (
         <SessionPage key={`${route.harness}:${route.id}`} harness={route.harness} id={route.id} />
@@ -122,20 +149,92 @@ export function App() {
   );
 }
 
+/** How long a first run waits for the setup status before it shows the board anyway. */
+const FIRST_RUN_WAIT_MS = 3000;
+
+/** Where each list page was scrolled to, by path, for Back. */
+const scrolled = new Map<string, number>();
+const LIST_PAGES = new Set(["board", "inbox", "feed", "machines"]);
+/** Each history entry this page made is stamped with its place in the walk, so a path
+ *  change can tell Back (an entry stamped earlier) from a new page (no stamp yet). The
+ *  popstate event cannot: the router reads the URL on any render, and a live stream
+ *  renders before popstate arrives. */
+let walk = 0;
+const STAMP = "__spguiWalk";
+function arrivedByBack(): boolean {
+  const at = (history.state as Record<string, unknown> | null)?.[STAMP];
+  if (typeof at === "number" && at < walk) {
+    walk = at;
+    return true;
+  }
+  walk = typeof at === "number" ? at : walk + 1;
+  if (typeof at !== "number") history.replaceState({ ...(history.state ?? {}), [STAMP]: walk }, "");
+  return false;
+}
+
+/** Scroll on a path change: to the top, except a session page (it anchors itself) and a
+ *  list page that Back brought back, which returns to where it was. The cursor follows
+ *  in useListNav (lib/keys.ts), the open subagent trees and the Done group keep their own
+ *  state. */
+function useScrollPlace(pathname: string): void {
+  // Remember the place of the page being left, as it scrolls.
+  useEffect(() => {
+    if (!LIST_PAGES.has(parseRoute(pathname).name)) return;
+    let raf = 0;
+    const on = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        scrolled.set(pathname, window.scrollY);
+      });
+    };
+    window.addEventListener("scroll", on, { passive: true });
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", on);
+    };
+  }, [pathname]);
+  // Read once per path change, in the render that mounts the page (its cursor reads it).
+  const seen = useRef<{ path: string; back: boolean } | null>(null);
+  if (seen.current?.path !== pathname) seen.current = { path: pathname, back: arrivedByBack() };
+  const back = seen.current.back && LIST_PAGES.has(parseRoute(pathname).name);
+  markRestoring(back);
+  // `back` is read for this path change only.
+  useLayoutEffect(() => {
+    const name = parseRoute(pathname).name;
+    if (name === "session") return;
+    const y = back ? scrolled.get(pathname) : undefined;
+    if (y === undefined) {
+      window.scrollTo({ top: 0 });
+      return;
+    }
+    // The page paints its rows in this commit; the stream may add the last ones a frame
+    // later, so the place is set now and once more after the next frame.
+    window.scrollTo({ top: y });
+    const raf = requestAnimationFrame(() => window.scrollTo({ top: y }));
+    return () => cancelAnimationFrame(raf);
+  }, [pathname]);
+  useEffect(() => {
+    markRestoring(false);
+  });
+}
+
 /** A path the app has no page for: an empty state where the page would be, and the way
  *  back to the board. Nothing is rendered under it. */
 function Missing({ path }: { path: string }) {
   return (
     <div className="page missing">
       <PageBar title="Not found" />
-      <div className="state" data-missing>
-        <p className="state-title">This page doesn't exist</p>
+      <div className="state state--center" data-missing>
+        <h2 className="state-title">This page doesn't exist</h2>
         <p className="state-text">
           No page at <code>{path}</code>.
         </p>
-        <Link to="/" className="btn btn--primary">
-          Go to Board
-        </Link>
+        <div className="state-actions">
+          <Link to="/" className="btn btn--primary">
+            Go to Board
+          </Link>
+        </div>
       </div>
     </div>
   );

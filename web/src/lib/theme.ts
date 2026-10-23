@@ -131,8 +131,18 @@ export function applySettings(s: Settings = settings): void {
 /** Kept for callers of the first version; applies everything. */
 export const applyTheme = (t?: Theme): void => applySettings(t ? { ...settings, appearance: t } : settings);
 
+/** Holds every transition off while a change lands (base.css `[data-switching]`), so a
+ *  scheme or skin switch is one frame, as the OS's is, not a colour tween of the window.
+ *  Two frames: the first paints the new colours, the second lets transitions back in. */
+function switching(): void {
+  const root = document.documentElement;
+  root.setAttribute("data-switching", "");
+  requestAnimationFrame(() => requestAnimationFrame(() => root.removeAttribute("data-switching")));
+}
+
 function commit(next: Settings) {
   settings = next;
+  switching();
   applySettings(next);
   for (const l of listeners) l();
 }
@@ -155,7 +165,9 @@ export function setTextSize(size: TextSize): void {
 // A "both" skin under the "System" appearance follows the OS as it changes.
 if (typeof matchMedia === "function") {
   matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => {
-    if (settings.appearance === "auto") applySettings();
+    if (settings.appearance !== "auto") return;
+    switching();
+    applySettings();
   });
 }
 

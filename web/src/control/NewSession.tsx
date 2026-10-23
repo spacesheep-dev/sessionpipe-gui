@@ -6,8 +6,10 @@
 // through POST /api/ui/control/send, then opens the new session's page, which fills in as
 // the agent starts (Starting.tsx). The GUI runs nothing itself: the machine is the gate,
 // and a choice it did not advertise is never sent (a daemon that predates a field ignores
-// it). A desktop sheet drops from under the title bar, 640 px wide; a phone's is full
-// height with Cancel and Start in its top bar. Mounted once, in the shell.
+// it). A desktop sheet drops from under the title bar, 640 px wide, and lifts back into it
+// as it closes; a phone's is full height with Cancel and Start in its top bar, and can be
+// pulled down by its top to dismiss. With no machine paired it is an empty state with the
+// one way on, not a disabled form. Mounted once, in the shell.
 import type { MachineSummary, StartFile, StartPermission } from "@shared/api";
 import { START_FILE_MAX_BYTES, START_FILES_MAX, START_FILES_TOTAL_BYTES, sessionKey, validModel } from "@shared/api";
 import {
@@ -21,12 +23,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { HarnessGlyph } from "../components/bits";
+import { ActionButton, EmptyState, HarnessGlyph } from "../components/bits";
 import { MoreButton } from "../components/ContextMenu";
 import { Select, type SelectOption } from "../components/Select";
 import { useAppState, useMachines } from "../data/hooks";
 import { useFocusTrap } from "../lib/focus";
 import { bytes, harnessMark } from "../lib/format";
+import { usePresence, useSheetDrag } from "../lib/motion";
 import { navigate, sessionPath, setSearchParams } from "../lib/router";
 import { hintFor, matches, useShortcut } from "../lib/shortcuts";
 import { controlApi, wrongOriginHere } from "./api";
@@ -37,7 +40,9 @@ import { useGrant, useRpId } from "./hooks";
 import {
   closeNewSession,
   type Draft,
+  fixedPermission,
   getBoardFilter,
+  machineFacts,
   type NewSessionTarget,
   openNewSession,
   pickContext,
@@ -97,14 +102,16 @@ function blocker(
 
 export function NewSessionHost() {
   const { open, target, seq } = useNewSession();
-  if (!open) return null;
-  return <Sheet key={seq} target={target} />;
+  // Kept for its exit (sheet-lift on a desktop, sheet-down on a phone), then let go.
+  const { mounted, closing } = usePresence(open);
+  if (!mounted) return null;
+  return <Sheet key={seq} target={target} closing={closing} />;
 }
 
-function Sheet({ target }: { target: NewSessionTarget }) {
+function Sheet({ target, closing }: { target: NewSessionTarget; closing: boolean }) {
   const phone = usePhone();
   const machines = useMachines();
-  const { sessions } = useAppState();
+  const { sessions, snapshotAt } = useAppState();
   const rp = useRpId();
   const grant = useGrant(rp);
   const secure = passkeysAvailable(rp);
@@ -284,7 +291,9 @@ function Sheet({ target }: { target: NewSessionTarget }) {
       : !folderCheck.ok
         ? "[data-ns-row=folder] button, [data-ns-row=folder] input"
         : "textarea";
-  useFocusTrap(ref, true, { onClose: close, initial: initialFocus });
+  useFocusTrap(ref, !closing, { onClose: close, initial: initialFocus });
+  // A phone's sheet follows the finger down from its top, and goes past 40 % or a flick.
+  useSheetDrag(ref, close, { handle: ".ns-grab, .ns-bar-title", enabled: phone && !closing });
   // Opened from the palette or a menu, whose own focus goes back where it was as they
   // close: take it once they have, and let Esc close the sheet from wherever it is.
   useEffect(() => {
@@ -296,7 +305,7 @@ function Sheet({ target }: { target: NewSessionTarget }) {
     return () => clearTimeout(t);
     // Once, at open.
   }, []);
-  useShortcut("back", () => close(), { priority: 10 });
+  useShortcut("back", () => close(), { priority: 10, enabled: !closing });
 
   // The message grows with what is in it (no grip).
   useEffect(() => {
@@ -450,19 +459,21 @@ function Sheet({ target }: { target: NewSessionTarget }) {
     if (model && !modelOk)
       return { text: `${model} isn't a model ${m.name} offers for ${harnessMark(harness).label}.` };
     if (c && !c.online) return { text: `${m.name} is offline. It starts when the machine is back, within an hour.` };
-    if (grant.exp === null) return { text: "Your passkey is needed once today." };
-    if (opts && opts.permissions.length === 1) return { text: `Runs as ${PERMISSION_LABEL[opts.permissions[0]!]}` };
-    if (!opts && c?.mode) return { text: `Runs in ${m.name}'s ${c.mode} mode` };
     return { text: `${m.name} is listening.` };
   })();
+  // The passkey is a note on Start (its tooltip, and what a screen reader hears with it),
+  // not the status line: that line is for what is happening.
+  const passkeyNote = grant.exp === null && !blocked ? "Start asks for your passkey, once today." : null;
 
   // ----- the rows -----
+  const agentLabel = (h: string) => harnessMark(h).label;
   const machineOptions: SelectOption<string>[] = listed.map((x) => {
     const b = why(x);
+    const f = machineFacts(x.control, agentLabel);
     return {
       value: x.name,
       label: x.name,
-      hint: b?.short ?? (x.control && !x.control.online ? "offline" : undefined),
+      ...(b ? { hint: b.short } : f),
       disabled: !!b,
     };
   });
@@ -699,12 +710,42 @@ function Sheet({ target }: { target: NewSessionTarget }) {
     />
   );
 
+  // The Permission row is there on every machine, so the sheet keeps its height: the
+  // pop-up where the machine offers a choice, else what it will run as, in words.
+  const fixed = m && c && harness && !blocked ? fixedPermission(c, harness, PERMISSION_LABEL) : null;
   const startKeys = hintFor("newSession.start");
-  const more = () => [{ label: "Discard draft", danger: true, disabled: !text && !files.length, run: discard }];
+  const more = () => [{ label: "Discard draft", disabled: !text && !files.length, run: discard }];
   const statusLine = status && (
     <p className={`ns-status ${status.tone === "err" ? "ns-status--err" : ""}`} role="status" aria-live="polite">
       {status.text}
     </p>
+  );
+
+  // No machine paired here yet: nothing to fill in, one way on (Connect pairs one).
+  const noMachine = !!snapshotAt && !listed.some((x) => x.control);
+  const pairOne = () => {
+    close();
+    navigate("/connect");
+  };
+  const empty = (
+    <EmptyState
+      className="ns-empty"
+      title="No machine is paired yet"
+      actions={
+        <>
+          <button type="button" className="btn btn--primary" onClick={pairOne} data-ns-pair>
+            Pair a machine…
+          </button>
+          {!phone && (
+            <button type="button" className="btn" onClick={close}>
+              Cancel
+            </button>
+          )}
+        </>
+      }
+    >
+      Pair a machine that runs sessionpipe, and you can start Claude Code, Codex or Gemini on it from here.
+    </EmptyState>
   );
 
   if (phone)
@@ -715,6 +756,7 @@ function Sheet({ target }: { target: NewSessionTarget }) {
         aria-modal="true"
         aria-labelledby="ns-title"
         ref={ref}
+        data-closing={closing ? "" : undefined}
         onKeyDown={onKeyDown}
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
@@ -727,37 +769,54 @@ function Sheet({ target }: { target: NewSessionTarget }) {
           <h2 className="ns-bar-title" id="ns-title">
             New session
           </h2>
-          <button
-            type="button"
-            className="ns-bar-btn ns-bar-btn--start"
-            onClick={() => void start()}
-            disabled={!canStart}
-            data-ns-start
-          >
-            Start
-          </button>
+          {noMachine ? (
+            <span />
+          ) : (
+            <button
+              type="button"
+              className="ns-bar-btn ns-bar-btn--start"
+              onClick={() => void start()}
+              disabled={!canStart}
+              aria-busy={busy || undefined}
+              aria-describedby={passkeyNote ? "ns-passkey" : undefined}
+              data-ns-start
+            >
+              {busy ? "Starting…" : "Start"}
+            </button>
+          )}
+          <span className="ns-grab" aria-hidden="true" />
         </header>
         <div className="ns-scroll">
-          <div className="ns-group">{rows}</div>
-          <div className="ns-group ns-group--text">
-            {message}
-            {chips}
-          </div>
-          {(showPermission || showModel || takesFiles) && (
-            <div className="ns-group">
-              {showPermission && row("permission", "Permission", permissionSelect)}
-              {showModel && row("model", "Model", modelSelect)}
-              {takesFiles && <div className="ns-row">{fileButton}</div>}
-            </div>
+          {noMachine ? (
+            empty
+          ) : (
+            <>
+              <div className="ns-group">{rows}</div>
+              <div className="ns-group ns-group--text">{message}</div>
+              {chips}
+              {(showPermission || fixed || showModel || takesFiles) && (
+                <div className="ns-group">
+                  {showPermission && row("permission", "Permission", permissionSelect)}
+                  {fixed && row("options", "Permission", <span className="ns-fixed">{fixed}</span>)}
+                  {showModel && row("model", "Model", modelSelect)}
+                  {takesFiles && <div className="ns-row">{fileButton}</div>}
+                </div>
+              )}
+              <div className="ns-group-foot">
+                {statusLine}
+                {passkeyNote && (
+                  <p className="ns-passkey" id="ns-passkey">
+                    {passkeyNote}
+                  </p>
+                )}
+                {(text || files.length > 0) && (
+                  <button type="button" className="ns-discard" onClick={discard}>
+                    Discard draft
+                  </button>
+                )}
+              </div>
+            </>
           )}
-          <div className="ns-group-foot">
-            {statusLine}
-            {(text || files.length > 0) && (
-              <button type="button" className="ns-discard" onClick={discard}>
-                Discard draft
-              </button>
-            )}
-          </div>
         </div>
       </div>
     );
@@ -769,6 +828,7 @@ function Sheet({ target }: { target: NewSessionTarget }) {
         className="menu-scrim menu-scrim--dialog ns-scrim"
         aria-label="Close"
         onClick={close}
+        data-closing={closing ? "" : undefined}
         data-dismiss
       />
       <div
@@ -777,6 +837,7 @@ function Sheet({ target }: { target: NewSessionTarget }) {
         aria-modal="true"
         aria-labelledby="ns-title"
         ref={ref}
+        data-closing={closing ? "" : undefined}
         onKeyDown={onKeyDown}
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
@@ -785,46 +846,67 @@ function Sheet({ target }: { target: NewSessionTarget }) {
         <h2 className="ns-title" id="ns-title">
           New session
         </h2>
-        {rows}
-        {message}
-        {chips}
-        <div className="ns-opts">
-          {fileButton}
-          {showPermission && (
-            <span className="ns-opt" data-ns-row="permission">
-              <span className="ns-opt-label" id="ns-permission">
-                Permission
+        {noMachine ? (
+          empty
+        ) : (
+          <>
+            {rows}
+            {message}
+            {chips}
+            <div className="ns-opts">
+              {fileButton}
+              {showPermission && (
+                <span className="ns-opt" data-ns-row="permission">
+                  <span className="ns-opt-label" id="ns-permission">
+                    Permission
+                  </span>
+                  {permissionSelect}
+                </span>
+              )}
+              {fixed && (
+                <span className="ns-opt" data-ns-row="options">
+                  <span className="ns-opt-label">Permission</span>
+                  <span className="ns-fixed">{fixed}</span>
+                </span>
+              )}
+              {showModel && (
+                <span className="ns-opt" data-ns-row="model">
+                  <span className="ns-opt-label" id="ns-model">
+                    Model
+                  </span>
+                  {modelSelect}
+                </span>
+              )}
+            </div>
+            <footer className="ns-foot">
+              {statusLine}
+              <span className="ns-actions">
+                <MoreButton build={more} label="Draft" title={() => "New session"} className="ns-more" />
+                <button type="button" className="btn" onClick={close} data-ns-cancel>
+                  Cancel
+                </button>
+                <ActionButton
+                  className="btn btn--primary ns-start"
+                  onClick={start}
+                  disabled={!canStart && !busy}
+                  pending={busy}
+                  pendingLabel="Starting…"
+                  aria-describedby={passkeyNote ? "ns-passkey" : undefined}
+                  data-tip={passkeyNote ?? undefined}
+                  data-tip-side="top"
+                  data-ns-start
+                >
+                  Start {startKeys && <kbd className="ns-kbd">{startKeys}</kbd>}
+                </ActionButton>
               </span>
-              {permissionSelect}
-            </span>
-          )}
-          {showModel && (
-            <span className="ns-opt" data-ns-row="model">
-              <span className="ns-opt-label" id="ns-model">
-                Model
-              </span>
-              {modelSelect}
-            </span>
-          )}
-        </div>
-        <footer className="ns-foot">
-          {statusLine}
-          <span className="ns-actions">
-            <MoreButton build={more} label="Draft" title={() => "New session"} className="ns-more" />
-            <button type="button" className="btn" onClick={close} data-ns-cancel>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={() => void start()}
-              disabled={!canStart}
-              data-ns-start
-            >
-              Start {startKeys && <kbd className="ns-kbd">{startKeys}</kbd>}
-            </button>
-          </span>
-        </footer>
+              {passkeyNote && (
+                <span className="sr-only" id="ns-passkey">
+                  {passkeyNote}
+                </span>
+              )}
+            </footer>
+          </>
+        )}
       </div>
     </>
   );
@@ -848,7 +930,8 @@ export function ComposeButton({ className = "" }: { className?: string }) {
       type="button"
       className={`icon-btn compose-btn ${className}`}
       aria-label={label}
-      data-tip={keys ? `${label} (${keys.toUpperCase()})` : label}
+      data-tip={label}
+      data-tip-keys={keys || undefined}
       data-tip-side="bottom"
       onClick={() => openNewSession()}
       data-compose

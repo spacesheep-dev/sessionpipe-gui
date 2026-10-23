@@ -232,6 +232,21 @@ button.sel:focus-visible {
   padding-left: 8px;
   font-size: var(--text-md);
 }
+/* A choice with a meaning under it (New session's Permission), in a phone's bottom sheet: grouped rows
+   at least 44 px tall, a hairline between, the meaning on its own line. */
+.sel-sheet .sel-opt:has(.sel-opt-detail) {
+  row-gap: 2px;
+  padding-block: 10px;
+}
+.sel-sheet .sel-opt:has(.sel-opt-detail) + .sel-opt:has(.sel-opt-detail) {
+  box-shadow: inset 0 var(--hairline) 0 var(--line);
+  border-radius: 0;
+}
+.sel-sheet .sel-opt-detail {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
 .sel-sheet .sel-search input {
   height: 36px;
   border-radius: var(--radius-pop);

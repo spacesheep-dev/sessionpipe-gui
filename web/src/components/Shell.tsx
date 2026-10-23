@@ -10,10 +10,11 @@ import type { InstalledTheme } from "@shared/theme-api";
 import { type CSSProperties, Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
 import { newSessionOpen, openNewSession } from "../control/newSessionState";
-import { useAnswerableCount, useAppState } from "../data/hooks";
+import { useAnswerableCount, useAppState, useStore } from "../data/hooks";
 import { useFocusTrap } from "../lib/focus";
 import { useGlobalKeys } from "../lib/keys";
 import { linkItems } from "../lib/menus";
+import { usePresence, useSheetDrag } from "../lib/motion";
 import { Link, navigate, type Route, usePath } from "../lib/router";
 import { getSettings as getAppSettings, setMode, useSimple } from "../lib/settings";
 import { hintFor, useShortcut, useShortcutMap } from "../lib/shortcuts";
@@ -31,6 +32,26 @@ import { openPalette } from "./Palette";
 import { GearIcon, QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
 import { ShortcutHelp } from "./ShortcutHelp";
+import { TipHost } from "./Tip";
+
+/** Whether Setup had steps to go at the last visit: the rail draws its entry from this
+ *  until the status answers, so nothing below it moves ~100 ms after the first paint. A
+ *  device on its first visit has not set up yet, so it starts with the entry drawn. */
+const SETUP_KEY = "sessionpipe-gui.rail.setup";
+const readSetupHint = (): boolean => {
+  try {
+    return localStorage.getItem(SETUP_KEY) !== "0";
+  } catch {
+    return true;
+  }
+};
+const writeSetupHint = (on: boolean): void => {
+  try {
+    localStorage.setItem(SETUP_KEY, on ? "1" : "0");
+  } catch {
+    // a private window: the entry just arrives a moment late
+  }
+};
 
 /** Whether a media query matches, live. */
 function useMedia(query: string): boolean {
@@ -335,6 +356,7 @@ function NavEntry({
           {needs}
         </span>
       ) : null}
+      {/* A quiet dot, not amber: steps to go is not a thing that needs you. */}
       {n.key === "setup" ? <span className="nav-dot" role="img" aria-label="steps to go" /> : null}
     </Link>
   );
@@ -365,13 +387,17 @@ function MoreTab({ items, active, views }: { items: NavItem[]; active: string; v
   const [open, setOpen] = useState(false);
   const [display, setDisplay] = useState(false);
   const inside = items.some((n) => n.key === active);
+  const { mounted, closing } = usePresence(open);
   const sheetRef = useRef<HTMLDivElement>(null);
   useFocusTrap(sheetRef, open, { onClose: () => setOpen(false) });
+  // It follows a finger down from its grabber, and plays its exit before it unmounts.
+  useSheetDrag(sheetRef, () => setOpen(false), { handle: ".more-grab", enabled: open });
   // A route change closes the sheet, whichever tab was tapped.
   useEffect(() => setOpen(false), [active]);
   const plugins = items.filter((n) => n.key.startsWith("t:"));
   const pages = items.filter((n) => !n.key.startsWith("t:"));
-  const row = (n: NavItem) => <MoreRow key={n.key} n={n} active={active} action={navAction(n, views)} />;
+  // The exit copy marks no page current: the tab itself carries that once it closes.
+  const row = (n: NavItem) => <MoreRow key={n.key} n={n} active={closing ? "" : active} action={navAction(n, views)} />;
   return (
     <div className="more">
       <button
@@ -390,10 +416,25 @@ function MoreTab({ items, active, views }: { items: NavItem[]; active: string; v
         </svg>
         <span className="nav-label">More</span>
       </button>
-      {open && (
+      {mounted && (
         <>
-          <button type="button" className="more-scrim" aria-label="Close" onClick={() => setOpen(false)} data-dismiss />
-          <div className="more-sheet" role="dialog" aria-modal="true" aria-label="More" ref={sheetRef}>
+          <button
+            type="button"
+            className="more-scrim"
+            aria-label="Close"
+            onClick={() => setOpen(false)}
+            data-dismiss
+            data-closing={closing ? "" : undefined}
+          />
+          <div
+            className="more-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-label="More"
+            ref={sheetRef}
+            data-closing={closing ? "" : undefined}
+            aria-hidden={closing || undefined}
+          >
             <span className="more-grab" aria-hidden="true" />
             {pages.length > 0 && <ul className="more-list">{pages.map(row)}</ul>}
             {plugins.length > 0 && (
@@ -453,7 +494,11 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   // The Setup entry, with its amber dot, while this machine (and only from this machine:
   // elsewhere the status is 403) still has steps to go.
   const setup = useSetupStatus();
-  const showSetup = setup.local === true && !!setup.status && !setupComplete(setup.status);
+  const known = setup.local === false || !!setup.status || !!setup.error;
+  const showSetup = known ? setup.local === true && !!setup.status && !setupComplete(setup.status) : readSetupHint();
+  useEffect(() => {
+    if (known) writeSetupHint(showSetup);
+  }, [known, showSetup]);
   const simple = useSimple();
   const nav = navItems(useThemes().themes, { setup: showSetup, simple });
   const phone = useMedia("(max-width: 839px)");
@@ -566,6 +611,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
             to="/themes"
             className={`theme-btn ${route.name === "themes" ? "nav-link--on" : ""}`}
             data-tip="Views"
+            data-tip-keys={hintFor("nav.views")}
             data-tip-side="top"
             aria-label="Views"
             aria-current={route.name === "themes" ? "page" : undefined}
@@ -610,27 +656,61 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       <LabelsDialog />
       <NewSessionHost />
       <MenuHost />
+      <TipHost />
     </div>
   );
 }
 
+/** How long a drop must last before it is shown: a blip never flickers the footer. */
+const RECONNECT_GRACE_MS = 400;
+
+/** The stream, honestly: nothing to read while live (a quiet dot; the word stays for
+ *  assistive tech), "Reconnecting · 4 s" once a drop has lasted 400 ms, "Offline" when
+ *  the device is, each with Retry now. The board keeps its rows through a drop. */
 export function ConnectionPill() {
   const { connection, retryAt } = useAppState();
+  const store = useStore();
+  const down = connection === "reconnecting" || connection === "offline";
+  const [shown, setShown] = useState(!down);
+  useEffect(() => {
+    if (!down) {
+      setShown(true);
+      return;
+    }
+    setShown(false);
+    const t = window.setTimeout(() => setShown(true), RECONNECT_GRACE_MS);
+    return () => window.clearTimeout(t);
+  }, [down]);
   // The countdown ticks only while there is one.
-  const now = useNow(retryAt ? "fine" : "off");
+  const now = useNow(retryAt && shown ? "fine" : "off");
   const wait = retryAt ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
+  // Inside the grace, the footer still reads as it did.
+  const as = down && !shown ? "live" : connection;
   const label =
-    connection === "live"
+    as === "live"
       ? "live"
-      : connection === "connecting"
-        ? "connecting"
-        : connection === "offline"
-          ? "offline"
-          : `retry in ${wait} s`;
+      : as === "connecting"
+        ? "Connecting…"
+        : as === "offline"
+          ? "Offline"
+          : wait > 0
+            ? `Reconnecting · ${wait} s`
+            : "Reconnecting…";
   return (
-    <span className={`conn conn--${connection}`} role="status" aria-live="polite" title={`Stream: ${label}`}>
+    <span
+      className={`conn conn--${as}`}
+      role="status"
+      aria-live="polite"
+      data-tip={as === "live" ? "Live: updates arrive as they happen" : label}
+      data-tip-side="top"
+    >
       <span className="conn-dot" aria-hidden="true" />
       <span className="conn-label">{label}</span>
+      {as === "reconnecting" || as === "offline" ? (
+        <button type="button" className="conn-retry" onClick={() => store.reconnect()}>
+          Retry now
+        </button>
+      ) : null}
     </span>
   );
 }

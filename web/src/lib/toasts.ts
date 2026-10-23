@@ -5,6 +5,8 @@
 // TOAST_MAX: the oldest leaving-by-itself one goes first. Each toast plays the sound of
 // its moment (lib/sounds.ts) once, when it arrives. Control messages this page sent are
 // remembered here so their `delivered` never toasts back at the person who sent them.
+// An undo toast ("Hidden · Undo") follows an action that went through at once instead of
+// asking first; it lasts UNDO_MS, and ⌘Z (the keymap's `undo`) runs the newest one.
 import type { SessionKey } from "@shared/api";
 import { useSyncExternalStore } from "react";
 import { playSound, type SoundKind } from "./sounds";
@@ -12,7 +14,9 @@ import { playSound, type SoundKind } from "./sounds";
 export const TOAST_MS = 8000;
 export const TOAST_MAX = 3;
 
-export type ToastKind = "needs-you" | "error" | "delivered";
+export const UNDO_MS = 6000;
+
+export type ToastKind = "needs-you" | "error" | "delivered" | "undo";
 
 export interface Toast {
   id: string;
@@ -25,13 +29,20 @@ export interface Toast {
   /** Allow / Deny on the toast: a control answer can reach the prompt. */
   answerable?: boolean;
   title: string;
-  /** Under the title: "permission", "error", "delivered"… coloured by kind. */
+  /** What happened, the banner's first words: "Needs you", "Failed", "Started". */
+  verb?: string;
+  /** For assistive tech: "permission", "error", "delivered"… */
   label: string;
   tool?: string;
   body?: string;
   machine?: string;
-  sound: SoundKind;
+  /** None for an undo: the person just did it. */
+  sound?: SoundKind;
   at: number;
+  /** An undo toast's way back. */
+  undo?: () => void;
+  /** How long it stays when it leaves by itself (TOAST_MS unless set). */
+  ms?: number;
 }
 
 let toasts: readonly Toast[] = [];
@@ -80,9 +91,55 @@ export function pushToast(toast: Toast): void {
   if (!toast.sticky)
     timers.set(
       toast.id,
-      setTimeout(() => dismissToast(toast.id), TOAST_MS),
+      setTimeout(() => dismissToast(toast.id), toast.ms ?? TOAST_MS),
     );
-  void playSound(toast.sound);
+  if (toast.sound) void playSound(toast.sound);
+}
+
+/** Drops every toast about a session, the moment it is opened by any path. */
+export function dismissForSession(key: string): void {
+  for (const t of toasts) if (t.session === key && t.kind !== "undo") dismissToast(t.id);
+}
+
+let undoSeq = 0;
+/** "Hidden · Undo": the action already happened; this is the way back for UNDO_MS. A
+ *  second undo toast for the same thing (`id`) replaces the first. */
+export function pushUndo(o: {
+  id?: string;
+  title: string;
+  body?: string;
+  session?: SessionKey;
+  undo: () => void;
+}): void {
+  const id = `undo|${o.id ?? ++undoSeq}`;
+  dismissToast(id);
+  pushToast({
+    id,
+    kind: "undo",
+    sticky: false,
+    session: o.session,
+    title: o.title,
+    label: "undo",
+    body: o.body,
+    at: Date.now(),
+    undo: o.undo,
+    ms: UNDO_MS,
+  });
+}
+
+/** Runs one undo toast's way back and takes the toast away. */
+export function runUndo(id: string): boolean {
+  const t = toasts.find((x) => x.id === id);
+  if (!t?.undo) return false;
+  dismissToast(id);
+  t.undo();
+  return true;
+}
+
+/** ⌘Z: the newest undo still on screen. False when there is none. */
+export function undoLatest(): boolean {
+  const t = [...toasts].reverse().find((x) => x.kind === "undo");
+  return t ? runUndo(t.id) : false;
 }
 
 /** Drops the attention toasts whose attention is no longer open (`keep` is the set of

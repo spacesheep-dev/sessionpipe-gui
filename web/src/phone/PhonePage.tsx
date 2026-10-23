@@ -5,12 +5,13 @@
 // needs an https address the phone trusts, so one lane is recommended (Tailscale when it is
 // on this machine, else the same Wi-Fi with the local CA), the other one a segment away. 3 ·
 // Trust: the phone makes its passkey and asks; the laptop approves the six digits
-// (control/PendingDevices.tsx, the same request the inbox shows). The facts come from GET
-// /api/ui/phone every two seconds, so a step turns done by itself. The checklist is the
-// setup page's (pages/Setup.tsx Step).
+// (control/PendingDevices.tsx, the same request the inbox shows): until a phone asks, a
+// listening row; then its name and six digits with Approve. Every address is a row with
+// Copy. The facts come from GET /api/ui/phone every two seconds, so a step turns done by
+// itself. The checklist is the setup page's (pages/Setup.tsx Step), in a centred column.
 import type { PhoneInfo } from "@shared/api";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
-import { Ago, CopyIconButton, Segmented } from "../components/bits";
+import { ActionButton, Ago, CopyIconButton, Listening, Segmented } from "../components/bits";
 import { useContextMenu } from "../components/ContextMenu";
 import { PageBar } from "../components/PageBar";
 import { controlApi, type DeviceRequest, originPath, resetInfoCache, wrongOriginHref } from "../control/api";
@@ -109,9 +110,11 @@ export function PhonePage() {
 
 type Fold = { open: boolean; onToggle: () => void };
 
-/** An address as a row: its name, the url in mono with an ellipsis, a copy icon; the
+/** An address as a row: its name, the address in mono (the scheme and host:port, the key
+ *  after it quiet; a phone shows host:port alone), a copy icon that takes it whole; the
  *  row's menu copies it or opens it in a new window. */
 function AddressRow({ label, url }: { label: string; url: string }) {
+  const parts = /^(https?:\/\/)([^/?#]+)(.*)$/.exec(url);
   const menu = useContextMenu(
     () => [
       { label: "Copy link", run: () => copyText(url) },
@@ -126,7 +129,15 @@ function AddressRow({ label, url }: { label: string; url: string }) {
     <li className="form-row ph-address" {...menu}>
       <span className="ph-address-label">{label}</span>
       <code className="url-value ph-url" title={url}>
-        {url}
+        {parts ? (
+          <>
+            <span className="url-scheme">{parts[1]}</span>
+            <span className="url-host">{parts[2]}</span>
+            {parts[3] && parts[3] !== "/" ? <span className="url-key">{parts[3]}</span> : null}
+          </>
+        ) : (
+          url
+        )}
       </code>
       <CopyIconButton text={url} label={`Copy the ${label.toLowerCase()}`} />
     </li>
@@ -178,7 +189,7 @@ function SeeStep({
         <Qr url={info.lan.url} src={info.lan.qr} alt="QR code with the Wi-Fi address and the UI key" size={160} />
         <div className="ph-col">
           <ul className="form-list ph-addresses">
-            <AddressRow label="Wi-Fi address" url={info.lan.url} />
+            <AddressRow label="Wi-Fi" url={info.lan.url} />
           </ul>
           <p className="caption">The key in the address signs the phone in.</p>
         </div>
@@ -333,7 +344,7 @@ function TailscaleLane({
           {side === "laptop" && <Qr url={info.publicUrl} alt="QR code with the Tailscale address" size={160} />}
           <div className="ph-col">
             <ul className="form-list ph-addresses">
-              <AddressRow label="Tailscale address" url={info.publicUrl} />
+              <AddressRow label="Tailscale" url={info.publicUrl} />
             </ul>
             <p className="caption">{phoneLine}</p>
             {side === "phone" && (
@@ -346,15 +357,15 @@ function TailscaleLane({
       ) : state === "running" ? (
         side === "laptop" ? (
           <div className="step-action">
-            <button
-              type="button"
+            <ActionButton
               className="btn btn--primary"
-              disabled={busy}
-              onClick={() => void use()}
+              pending={busy}
+              pendingLabel="Setting up…"
+              onClick={use}
               data-action="tailscale"
             >
-              {busy ? "Setting up…" : "Use Tailscale"}
-            </button>
+              Use Tailscale
+            </ActionButton>
             <span className="step-note">
               {info.tailscale.name ? (
                 <>
@@ -473,21 +484,27 @@ function WifiLane({
         <li key={s.id}>{s.body}</li>
       ))}
       <li>
-        Open <code>{https ?? "the https address"}</code>: the board, signed in, with passkeys working.
+        {side === "laptop" && https ? (
+          "Open the secure address below: the board, signed in, with passkeys working."
+        ) : (
+          <>
+            Open <code>{https ?? "the https address"}</code>: the board, signed in, with passkeys working.
+          </>
+        )}
       </li>
     </ol>
   );
   const checkRow = side === "phone" && (
     <div className="step-action ph-check">
-      <button
-        type="button"
+      <ActionButton
         className="btn btn--primary btn--lg"
-        disabled={check === "busy"}
-        onClick={() => void run()}
+        pending={check === "busy"}
+        pendingLabel="Checking…"
+        onClick={run}
         data-action="check"
       >
-        {check === "busy" ? "Checking…" : "Check"}
-      </button>
+        Check
+      </ActionButton>
       <span className="step-note" role="status">
         {check === "yes" ? (
           <>
@@ -547,6 +564,11 @@ function WifiLane({
             />
             {list("iphone", shown !== "iphone")}
             {list("android", shown !== "android")}
+            {https && (
+              <ul className="form-list ph-addresses">
+                <AddressRow label="HTTPS" url={https} />
+              </ul>
+            )}
           </div>
         </div>
       ) : (
@@ -617,9 +639,11 @@ function LaptopTrust({ info }: { info: PhoneInfo }) {
       )}
       <PendingDevices />
       {info.pending.length === 0 && (
-        <p className="step-note" data-nothing-pending>
-          Nothing is asking yet. On the phone, after step 2, tap <strong>Send from this phone</strong>.
-        </p>
+        <div className="ph-listen" data-nothing-pending>
+          <Listening label={info.trusted.length ? "Waiting for another phone" : "Waiting for a phone"}>
+            on it, after step 2, tap <strong>Send from this phone</strong>
+          </Listening>
+        </div>
       )}
       {info.trusted.length > 0 && (
         <section className="form-group">
@@ -690,9 +714,7 @@ function PhoneTrust() {
           <strong>Turned down.</strong> Nothing was trusted.
         </div>
       ) : phase.k === "busy" ? (
-        <p className="page-note" role="status">
-          {phase.what}
-        </p>
+        <Listening label={phase.what.replace(/…$/, "")} />
       ) : null}
       {error && (
         <p className="pair-note pair-note--err" role="alert">
@@ -701,8 +723,7 @@ function PhoneTrust() {
       )}
       {(phase.k === "idle" || phase.k === "failed" || phase.k === "expired" || phase.k === "rejected") && (
         <div className="step-action">
-          <button
-            type="button"
+          <ActionButton
             className="btn btn--primary btn--lg"
             disabled={!secure || !rp || paired === 0}
             onClick={() => {
@@ -712,7 +733,7 @@ function PhoneTrust() {
             data-action="send-from-phone"
           >
             {phase.k === "idle" ? "Send from this phone" : "Ask again"}
-          </button>
+          </ActionButton>
           {paired === 0 && <span className="step-note">No machine is paired with this receiver yet.</span>}
         </div>
       )}

@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Connect: how a phone, another machine or demo mode gets onto this board, plus the
-// receiver's own numbers, as one grouped form. A phone on this network (the QR beside its
-// addresses, each with a copy icon), passkeys (one status row and its one action), another
-// machine (the sink line in a well, its tier a real choice), and, folded in Simple mode,
-// the sink token, the sources and this receiver. Every address, command and the token has
-// a menu (copy, open). Also where the empty board sends people.
+// receiver's own numbers, as one grouped form in a centred column. A phone on this network
+// (the QR beside its addresses, each host:port with the key behind its Copy), another
+// machine (the sink line in a one-line well with its tier menu beside it), then the rest
+// as one-line summaries that open: passkeys (HTTPS and its one action), the sink token,
+// the sources and this receiver. Every address, command and the token has a menu (copy,
+// open). Also where the empty board sends people.
 import { type Info, ROUTES, type Tier } from "@shared/api";
-import { type ReactNode, useEffect, useState } from "react";
-import { CopyIconButton, Toggle } from "../components/bits";
+import { type ReactNode, useEffect, useId, useState } from "react";
+import { ActionButton, CommandWell, CopyIconButton, Toggle } from "../components/bits";
 import { confirmAction, type MenuList, useContextMenu } from "../components/ContextMenu";
 import { PageBar } from "../components/PageBar";
 import { Select } from "../components/Select";
@@ -44,22 +45,33 @@ function useCopyMenu(text: string | null | undefined, title: string, extra?: () 
   );
 }
 
-/** One address: its name in the secondary tier, the url in mono with an ellipsis, the
- *  copy icon on the trailing edge. */
+/** One address: its name in the secondary tier, then the address in mono: the scheme
+ *  and the host:port, the key after it quiet (a phone shows only host:port, so the part
+ *  that tells two addresses apart is never the part cut off). Copy takes it whole. */
 function UrlRow({ label, url, className = "" }: { label: string; url: string; className?: string }) {
   const menu = useCopyMenu(url, label);
+  const m = /^(https?:\/\/)([^/?#]+)(.*)$/.exec(url);
   return (
     <li className={`form-row url-row ${className}`} {...menu}>
       <span className="url-label">{label}</span>
       <code className="url url-value" title={url}>
-        {url}
+        {m ? (
+          <>
+            <span className="url-scheme">{m[1]}</span>
+            <span className="url-host">{m[2]}</span>
+            {m[3] ? <span className="url-key">{m[3]}</span> : null}
+          </>
+        ) : (
+          url
+        )}
       </code>
       <CopyIconButton text={url} label="Copy" />
     </li>
   );
 }
 
-/** A command in a well with its copy icon. */
+/** A command on one line in the shared well (bits.tsx CommandWell's face), for a line
+ *  that shows one thing and copies another (the sink line with its token masked). */
 function CmdWell({
   shown,
   copy,
@@ -75,10 +87,50 @@ function CmdWell({
 }) {
   const menu = useCopyMenu(copy, title);
   return (
-    <div className="well-row cmd" {...menu}>
-      <code className={className}>{shown}</code>
+    <div className="cmdwell cmd" {...menu}>
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: it scrolls sideways, so a keyboard must reach it (axe scrollable-region-focusable) */}
+      <code className={`cmdwell-text ${className}`} tabIndex={0}>
+        {shown}
+      </code>
       {copy && <CopyIconButton text={copy} label={label} />}
     </div>
+  );
+}
+
+/** A group folded to one line: its name and a summary of its state; it opens in place.
+ *  Closed, its rows stay in the page (hidden), so nothing it holds is lost. */
+function Fold({
+  title,
+  summary,
+  className = "",
+  children,
+}: {
+  title: string;
+  summary: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  return (
+    <section className={`form-group fold ${className}`} aria-labelledby={`${id}-h`} data-open={open || undefined}>
+      <h2 className="fold-h" id={`${id}-h`}>
+        <button
+          type="button"
+          className="fold-head"
+          aria-expanded={open}
+          aria-controls={`${id}-b`}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <span className="fold-title">{title}</span>
+          <span className="fold-sum">{summary}</span>
+          <span className="fold-chev" aria-hidden="true" />
+        </button>
+      </h2>
+      <div className="fold-body" id={`${id}-b`} hidden={!open}>
+        {children}
+      </div>
+    </section>
   );
 }
 
@@ -203,6 +255,15 @@ export function Connect() {
     { title: () => "Sink token" },
   );
 
+  // Until the receiver's info is in, only the bar: the groups arrive whole in one frame
+  // (~70 ms later), never a half page that grows 220 px under the reader.
+  if (!info && !error)
+    return (
+      <div className="page page--doc page--grouped connect" aria-busy="true">
+        <PageBar title="Connect" />
+      </div>
+    );
+
   return (
     <div className="page page--doc page--grouped connect">
       <PageBar
@@ -250,7 +311,9 @@ export function Connect() {
               ))}
               {info && <UrlRow label="This machine" url={info.urls.local} className="urls-local" />}
             </ul>
-            <p className="caption">Scan, or open an address. The key in it signs the phone in.</p>
+            <p className="caption">
+              Scan, or open an address on the phone. Copy takes the key with it, which signs the phone in.
+            </p>
           </div>
         </div>
         {info?.remote && (
@@ -283,12 +346,47 @@ export function Connect() {
         )}
       </section>
 
-      <section className="form-group sect--passkeys" aria-labelledby="connect-passkeys">
+      <section className="form-group sect--machine" aria-labelledby="connect-machine">
         <div className="form-head">
-          <h2 className="section-label" id="connect-passkeys">
-            Passkeys
+          <h2 className="section-label" id="connect-machine">
+            Another machine
           </h2>
         </div>
+        <div className="connect-sink">
+          <CmdWell shown={sinkLine ? masked(sinkLine) : "…"} copy={sinkLine} label="Copy command" title="Sink line" />
+          {info && (
+            <Select<string>
+              size="sm"
+              align="end"
+              className="connect-tier"
+              aria-label="Tier"
+              value={String(chosenTier)}
+              onChange={(v) => setTier(Number(v) as Tier)}
+              options={([0, 1, 2, 3] as const).map((t) => ({
+                value: String(t),
+                label: `Tier ${t} · ${TIER_LABEL[t]}`,
+                hint: t === sinkTier ? "receiver's" : undefined,
+              }))}
+            />
+          )}
+        </div>
+        <p className="caption">
+          Run it there after <code>npx sessionpipe install</code>. Tier {chosenTier}:{" "}
+          {TIER_HINT[chosenTier].replace(/^\+ /, "adds ")}
+        </p>
+      </section>
+
+      <Fold
+        className="sect--passkeys"
+        title="Passkeys"
+        summary={
+          info?.tls?.on
+            ? `On · rp id ${info.control.rpId}`
+            : info?.tls === undefined && info
+              ? "Off · this server runs without TLS mode"
+              : "Off · passkeys need https on this address"
+        }
+      >
         {info?.tls?.on ? (
           <ul className="form-list passkeys">
             <li className="form-row">
@@ -316,33 +414,28 @@ export function Connect() {
               <span className="form-row-text">
                 <span className="form-label">HTTPS</span>
                 <span className="form-caption passkeys-off">
-                  Off. A passkey needs https on a name; this gives the port its own certificate.
-                  {info?.tls === undefined && info ? " This server has no TLS mode." : ""}
+                  {info?.tls === undefined && info
+                    ? "Off. Start the receiver in TLS mode to give it a certificate; until then passkeys sign only at localhost."
+                    : "Off. A passkey needs https on a name; turning it on gives this port its own certificate."}
                 </span>
               </span>
-              <span className="form-value">
-                {setup.local === true ? (
-                  <button
-                    type="button"
+              {setup.local === true && info?.tls !== undefined ? (
+                <span className="form-value">
+                  <ActionButton
                     className="btn btn--primary"
-                    onClick={() => void tlsOn()}
-                    disabled={busy === "tls" || info?.tls === undefined}
+                    pendingLabel="Turning on…"
+                    pending={busy === "tls"}
+                    onClick={tlsOn}
                   >
-                    {busy === "tls" ? "Turning on…" : "Turn on"}
-                  </button>
-                ) : null}
-              </span>
+                    Turn on
+                  </ActionButton>
+                </span>
+              ) : null}
             </li>
-            {setup.local !== true && (
+            {(setup.local !== true || info?.tls === undefined) && (
               <li className="form-row form-row--stack">
                 <span className="form-caption">On the receiver machine, once; it is remembered:</span>
-                <CmdWell
-                  shown="sessionpipe-gui --tls"
-                  copy="sessionpipe-gui --tls"
-                  label="Copy"
-                  title="TLS mode"
-                  className="passkeys-cmd"
-                />
+                <CommandWell command="sessionpipe-gui --tls" label="Copy" />
               </li>
             )}
           </ul>
@@ -352,35 +445,7 @@ export function Connect() {
           <code>sessionpipe control pair {info?.urls.local ?? "http://localhost:7373"}</code>), and the sink line stays
           plain http to the LAN address.
         </p>
-      </section>
-
-      <section className="form-group sect--machine" aria-labelledby="connect-machine">
-        <div className="form-head">
-          <h2 className="section-label" id="connect-machine">
-            Another machine
-          </h2>
-          {info && (
-            <Select<string>
-              size="sm"
-              align="end"
-              className="chipsel connect-tier"
-              aria-label="Tier"
-              value={String(chosenTier)}
-              onChange={(v) => setTier(Number(v) as Tier)}
-              options={([0, 1, 2, 3] as const).map((t) => ({
-                value: String(t),
-                label: `Tier ${t} · ${TIER_LABEL[t]}`,
-                hint: t === sinkTier ? "receiver's" : undefined,
-              }))}
-            />
-          )}
-        </div>
-        <CmdWell shown={sinkLine ? masked(sinkLine) : "…"} copy={sinkLine} label="Copy command" title="Sink line" />
-        <p className="caption">
-          After <code>npx sessionpipe install</code> there. Tier {chosenTier}:{" "}
-          {TIER_HINT[chosenTier].replace(/^\+ /, "adds ")}
-        </p>
-      </section>
+      </Fold>
 
       {simple && (
         <button
@@ -395,12 +460,7 @@ export function Connect() {
         </button>
       )}
       <div className="connect-fold" hidden={simple && !advanced}>
-        <section className="form-group" aria-labelledby="connect-token">
-          <div className="form-head">
-            <h2 className="section-label" id="connect-token">
-              Sink token
-            </h2>
-          </div>
+        <Fold title="Sink token" summary={info ? `${mask(info.sinkToken)} · sent with every batch` : "…"}>
           <ul className="form-list">
             <li className="form-row token-row" {...tokenMenu}>
               <code className="token-text">{info ? (reveal ? info.sinkToken : mask(info.sinkToken)) : "…"}</code>
@@ -412,7 +472,6 @@ export function Connect() {
                   disabled={!info || (!loopback && !info.sinkToken)}
                   aria-label={reveal ? "Hide" : "Reveal"}
                   aria-pressed={reveal}
-                  title={reveal ? "Hide" : "Reveal"}
                 >
                   <svg
                     viewBox="0 0 16 16"
@@ -435,11 +494,7 @@ export function Connect() {
                   onClick={() => void rotate()}
                   disabled={!loopback || busy === "rotate"}
                   aria-label="Rotate token…"
-                  title={
-                    loopback
-                      ? "Rotate: mint a new token; the old one stops working"
-                      : "Only on the machine running the receiver"
-                  }
+                  data-tip={loopback ? "Rotate: mint a new token" : "Only on the machine running the receiver"}
                 >
                   <svg
                     viewBox="0 0 16 16"
@@ -460,17 +515,25 @@ export function Connect() {
             </li>
           </ul>
           <p className="caption">
-            Sent as a bearer with every batch.
+            Sent as a bearer with every batch; rotating stops the old one at once.
             {loopback ? "" : ` Shown and rotated on the receiver machine only (${info?.urls.local ?? "localhost"}).`}
           </p>
-        </section>
+        </Fold>
 
-        <section className="form-group" aria-labelledby="connect-sources">
-          <div className="form-head">
-            <h2 className="section-label" id="connect-sources">
-              Sources
-            </h2>
-          </div>
+        <Fold
+          title="Sources"
+          summary={
+            info
+              ? [
+                  "HTTP receiver",
+                  info.sources.outbox?.enabled ? "outbox tailed" : "",
+                  info.sources.demo ? "demo on" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              : "…"
+          }
+        >
           <dl className="form-list sources">
             <div className="form-row form-row--kv">
               <dt className="form-key">HTTP receiver</dt>
@@ -518,14 +581,16 @@ export function Connect() {
               </div>
             )}
           </dl>
-        </section>
+        </Fold>
 
-        <section className="form-group" aria-labelledby="connect-receiver">
-          <div className="form-head">
-            <h2 className="section-label" id="connect-receiver">
-              This receiver
-            </h2>
-          </div>
+        <Fold
+          title="This receiver"
+          summary={
+            stats
+              ? `${stats.eventsLastMinute} a minute · ${bytes(stats.storageBytes)} · up ${dur(stats.uptimeS * 1000)}`
+              : "…"
+          }
+        >
           <dl className="form-list stats">
             <Stat k="Events per minute" v={stats?.eventsLastMinute ?? "–"} />
             <Stat k="Latency p50" v={stats?.latencyP50Ms !== undefined ? `${stats.latencyP50Ms} ms` : "–"} />
@@ -543,7 +608,7 @@ export function Connect() {
             <Stat k="Version" v={info ? `${info.name} ${info.version}` : "–"} />
           </dl>
           {info && <p className="caption connect-dir">{info.storage.dir}</p>}
-        </section>
+        </Fold>
       </div>
 
       <section className="form-group" aria-labelledby="connect-views">

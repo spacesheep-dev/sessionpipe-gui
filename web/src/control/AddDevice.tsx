@@ -6,6 +6,7 @@
 // The machine verifies it like any command, adds the key and acks `delivered`; this page
 // polls until then. Nothing here is trusted on its own word.
 import { useEffect, useState } from "react";
+import { ActionButton } from "../components/bits";
 import { BackButton, PageBar } from "../components/PageBar";
 import { back, Link } from "../lib/router";
 import { ms, useNow } from "../lib/time";
@@ -129,16 +130,16 @@ export function AddDevicePage() {
         </p>
       )}
 
-      {phase.k === "busy" ? (
-        <p className="page-note" role="status">
-          {phase.what}
-        </p>
-      ) : phase.k === "idle" || phase.k === "expired" || phase.k === "rejected" || phase.k === "failed" ? (
+      {phase.k === "busy" ||
+      phase.k === "idle" ||
+      phase.k === "expired" ||
+      phase.k === "rejected" ||
+      phase.k === "failed" ? (
         <form
           className="pair-form"
           onSubmit={(e) => {
             e.preventDefault();
-            void ask(name);
+            if (phase.k !== "busy") void ask(name);
           }}
         >
           <div className="pair-field">
@@ -153,18 +154,30 @@ export function AddDevicePage() {
               autoComplete="off"
               aria-label="Device name"
               placeholder={guessDeviceName()}
+              disabled={phase.k === "busy"}
             />
           </div>
           <div className="pair-actions">
-            <button type="submit" className="btn btn--primary" disabled={!secure || !rp}>
+            <ActionButton
+              type="submit"
+              className="btn btn--primary"
+              disabled={!secure || !rp}
+              pending={phase.k === "busy"}
+              pendingLabel="Asking…"
+            >
               {known.length ? `Add this device with its passkey “${known[0]?.name ?? "here"}”` : "Add this device"}
-            </button>
-            {known.length > 0 && secure && (
+            </ActionButton>
+            {known.length > 0 && secure && phase.k !== "busy" && (
               <button type="button" className="btn btn--ghost" onClick={() => void ask(name, true)}>
                 Make a new passkey instead
               </button>
             )}
           </div>
+          {phase.k === "busy" && (
+            <p className="pair-status" role="status">
+              {phase.what}
+            </p>
+          )}
         </form>
       ) : null}
     </div>

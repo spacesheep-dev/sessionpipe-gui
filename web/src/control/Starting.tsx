@@ -1,30 +1,65 @@
 // SPDX-License-Identifier: Apache-2.0
-// Owned by: control-web. A session that was just started from here and has sent nothing
-// yet (STEER-SPEC B.5). The store holds no summary for its key, but the `start` this
-// device signed names it, so the page draws the session's own layout instead of "No such
-// session": the message as the first bubble, then one neutral status row that follows the
-// machine's acks (queued, sent, starting, the reply growing). The first hook event for the
-// key turns the page into the ordinary live session (SessionView). A start the machine
-// refused or that failed says why in place, with one action: Edit and start again.
-import { type ControlActivity, splitKey } from "@shared/api";
-import { useCallback, useEffect } from "react";
-import { HarnessGlyph, Spinner } from "../components/bits";
-import { Markdown } from "../components/Markdown";
-import { BackButton, PageBar } from "../components/PageBar";
+// Owned by: control-web. A message this device sent, drawn where its turn is or will be
+// (STEER-SPEC B.5): the session's own layout (SessionView) shows a `start` it signed
+// before the receiver holds a single event of the session, then joins it to the turn it
+// became, so the started moment is one surface. The pieces live here: the title a start
+// gives its session, the files it carried as chips, the one status row that follows the
+// machine's acks and turns into "Running · 4 s" in place, and the failure, said neutrally
+// with one small ✕, its command in a well, and the honest ways on (Start in Safe instead,
+// Edit and start again).
+import { type ControlActivity, type MachineControl, type SessionKey, sessionKey, splitKey } from "@shared/api";
+import { useCallback, useMemo, useState } from "react";
+import { ActionButton, CommandWell, Since } from "../components/bits";
 import { useMachines } from "../data/hooks";
-import { bytes, harnessMark } from "../lib/format";
-import { back, navigate, sessionPath } from "../lib/router";
-import { tildify } from "./folders";
+import { bytes, harnessMark, rememberStartTitles } from "../lib/format";
+import { navigate, sessionPath } from "../lib/router";
+import { rpId } from "./api";
+import { uuid } from "./bytes";
+import { sendCommand } from "./command";
 import { useControlActivity } from "./hooks";
 import "./newSession.css";
 import { openNewSession } from "./newSessionState";
-import { isFinal, PERMISSION_LABEL, shownState, startFailureWords } from "./words";
+import {
+  harnessCommand,
+  isFinal,
+  outcomeWords,
+  PERMISSION_LABEL,
+  refusalWords,
+  sendErrorWords,
+  sentLine,
+  shownState,
+  startFailureWords,
+} from "./words";
 
 /** The start this device (or another) sent that names `key`, newest first. */
 export function useStartOf(key: string): ControlActivity | undefined {
   const mine = useCallback((a: ControlActivity) => a.kind === "start" && a.session === key, [key]);
   return useControlActivity(mine)[0];
 }
+
+/** The title a start gives its session until the session names itself: the first line of
+ *  the message, up to 80 characters, never the folder's name. */
+export function startTitle(a: ControlActivity | undefined): string | undefined {
+  const first = (a?.text ?? "").split("\n")[0]!.trim();
+  if (!first) return undefined;
+  return first.length > 80 ? `${first.slice(0, 79).replace(/\s+\S*$/, "")}…` : first;
+}
+
+/** Every start's title by the session it made, for surfaces that list sessions (the
+ *  split panel's tabs, the board): a session started here is called by its first message. */
+export function useStartTitles(): ReadonlyMap<SessionKey, string> {
+  const starts = useControlActivity(isStart);
+  return useMemo(() => {
+    const out = new Map<SessionKey, string>();
+    for (const a of starts) {
+      const t = startTitle(a);
+      if (a.session && t && !out.has(a.session as SessionKey)) out.set(a.session as SessionKey, t);
+    }
+    rememberStartTitles(out);
+    return out;
+  }, [starts]);
+}
+const isStart = (a: ControlActivity) => a.kind === "start";
 
 /** "Accept edits · sonnet": what the machine ran a start with, from its ack. */
 export function appliedFact(a: ControlActivity | undefined): string | null {
@@ -53,111 +88,190 @@ export function editAgain(a: ControlActivity, machine: string | undefined): void
   });
 }
 
-export function StartingSession({ a, mode }: { a: ControlActivity; mode: "page" | "panel" }) {
-  const machines = useMachines();
-  const m = machines.find((x) => x.control?.machineId === a.machineId);
-  const name = m?.name ?? "the machine";
-  const harness = a.session ? splitKey(a.session).harness : "";
-  const agent = harnessMark(harness).label;
-  const online = m?.control?.online ?? false;
-  const first = (a.text ?? "").split("\n")[0]!.trim();
-  const title = first.length > 80 ? `${first.slice(0, 79)}…` : first || "New session";
-  const folder = a.cwd ? tildify(a.cwd, m?.control?.home) : undefined;
-  const state = shownState(a);
-  const failure = isFinal(a) && a.outcome !== "delivered" ? startFailureWords(a, name, agent) : null;
-  const applied = appliedFact(a);
+/** Whether a refused start can be offered again at Safe: the machine refused the level,
+ *  and its hello offers Safe for this agent. */
+export function safeOffered(a: ControlActivity, control: MachineControl | undefined): boolean {
+  if (a.kind !== "start" || a.outcome !== "refused" || !a.session) return false;
+  if (a.code !== "permission" && a.code !== "mode") return false;
+  if (a.permission === "safe") return false;
+  return !!control?.start?.[splitKey(a.session).harness]?.permissions.includes("safe");
+}
 
-  // The machine started it under another id (the final ack names it): go there instead.
-  useEffect(() => {
-    if (!a.ackSession || a.ackSession === a.session || mode !== "page") return;
-    const k = splitKey(a.ackSession);
-    navigate(sessionPath(k.harness, k.id), { replace: true });
-  }, [a.ackSession, a.session, mode]);
+/** Signs the same start again at Safe, under a new session id, and opens it in place of
+ *  the refused one. Throws what the receiver or the passkey said. */
+async function startAtSafe(a: ControlActivity, control: MachineControl): Promise<void> {
+  const harness = splitKey(a.session!).harness;
+  const rp = await rpId();
+  const sid = uuid();
+  await sendCommand(rp, control.machineId, {
+    kind: "start",
+    session: sessionKey(harness, sid),
+    text: a.text ?? "",
+    cwd: a.cwd ?? "",
+    permission: "safe",
+    ...(a.model ? { model: a.model } : {}),
+    ...(a.files?.length ? { files: a.files } : {}),
+  });
+  navigate(sessionPath(harness, sid), { replace: true });
+}
 
-  const line =
-    state === "queued"
-      ? online
-        ? `Sent to ${name}`
-        : `Waiting for ${name}. It starts when the machine is back.`
-      : state === "taken"
-        ? `Starting on ${name}`
-        : state === "progress"
-          ? "Working…"
-          : state === "delivered"
-            ? `Started on ${name}; the session's first events are on their way`
-            : null;
-
+/** The files a start carried, as quiet chips under its message. */
+export function SentFiles({ files }: { files: ControlActivity["files"] }) {
+  if (!files?.length) return null;
   return (
-    <div
-      className={`page session session--chat starting ${mode === "panel" ? "session--panel" : ""}`}
-      data-starting={state}
-    >
-      {mode === "page" ? (
-        <PageBar
-          back={<BackButton onClick={() => back("/")} />}
-          title={title}
-          titleClassName="sess-title"
-          large={false}
-          className="sess-bar"
-          meta={
-            <span className="sess-counts">
-              <span>{name}</span>
-              <span>{agent}</span>
-              {folder && <span className="sess-repo">{folder}</span>}
-              {applied && <span className="sess-applied">{applied}</span>}
-            </span>
-          }
-        />
-      ) : (
-        <p className="sess-sub">{[name, agent, folder, applied].filter(Boolean).join(" · ")}</p>
-      )}
-      <ol className="timeline timeline--chat">
-        <li className="turn turn--chat">
-          <div className="chat-you">
-            <time className="chat-time num" dateTime={a.at}>
-              {new Date(a.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-            </time>
-            <p className="chat-bubble">{a.text}</p>
-            {a.files && a.files.length > 0 && (
-              <ul className="starting-files" aria-label="Files">
-                {a.files.map((f) => (
-                  <li key={f.sha256} className="starting-file">
-                    <span className="ellipsis">{f.name}</span>
-                    <span className="num">{bytes(f.size)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <div className="chat-ai">
-            <span className="chat-meta">
-              <HarnessGlyph name={harness} size="sm" />
-              {agent}
-            </span>
-            {a.reply && <Markdown text={a.reply} />}
-            {failure ? (
-              <div className="starting-failed" role="alert">
-                <p className="chat-err">
-                  <InlineCode text={failure} />
-                </p>
-                <button type="button" className="btn btn--sm" onClick={() => editAgain(a, m?.name)} data-edit-again>
-                  Edit and start again
-                </button>
-              </div>
-            ) : (
-              line && (
-                <p className="chat-working starting-state" aria-live="polite">
-                  {!isFinal(a) && <Spinner label={state} />}
-                  {line}
-                </p>
-              )
-            )}
-            {optionsIgnored(a) && (
-              <p className="chat-note">{name} ran this at its own mode; its sessionpipe ignores per-session options.</p>
-            )}
-          </div>
+    <ul className="starting-files" aria-label="Files">
+      {files.map((f) => (
+        <li key={f.sha256} className="starting-file">
+          <span className="ellipsis">{f.name}</span>
+          <span className="num">{bytes(f.size)}</span>
         </li>
-      </ol>
+      ))}
+    </ul>
+  );
+}
+
+/** The one status row of a message on its way, or of a turn running: a neutral glyph, the
+ *  words and, once the agent is at it, a live timer. The receiver's plumbing ("delivered ·
+ *  sdk") is its tooltip. `chat` draws it as the chat's quiet line, else a timeline row. */
+export function StatusRow({
+  text,
+  since,
+  spinning,
+  tip,
+  chat,
+  state,
+}: {
+  text: string;
+  since?: string;
+  spinning: boolean;
+  tip?: string;
+  chat: boolean;
+  state?: string;
+}) {
+  const body = (
+    <span className="starting-state">
+      {text}
+      {since ? (
+        <span className="status-since">
+          {" · "}
+          <Since iso={since} />
+        </span>
+      ) : null}
+    </span>
+  );
+  if (chat)
+    return (
+      <p className="chat-working status-row" title={tip} aria-live="polite" data-sent-state={state}>
+        {spinning ? <span className="spinner spinner--sm" aria-hidden="true" /> : <span className="status-gap" />}
+        {body}
+      </p>
+    );
+  return (
+    <li className="marker marker--status status-row" title={tip} aria-live="polite" data-sent-state={state}>
+      <span className="marker-glyph">
+        {spinning ? <span className="spinner spinner--sm" aria-hidden="true" /> : null}
+      </span>
+      <span className="marker-body">{body}</span>
+    </li>
+  );
+}
+
+/** Where a message sent from here stands, as its status row's props; null once it
+ *  failed (the failure says it). */
+export function sentRow(
+  a: ControlActivity,
+  o: { machine: string; online: boolean },
+): { text: string; since?: string; spinning: boolean; tip?: string; state?: string } | null {
+  const harness = a.session ? splitKey(a.session).harness : "";
+  const line = sentLine(a, { ...o, command: harnessCommand(harness, harnessMark(harness).label) });
+  if (!line) return null;
+  return {
+    text: line.text,
+    since: line.running ? (a.takenAt ?? a.at) : undefined,
+    spinning: !isFinal(a),
+    tip: outcomeWords(a, o),
+    state: shownState(a),
+  };
+}
+
+/** A prompt that did not reach its session, in the words the timeline shows under it. */
+export function promptFailureWords(a: ControlActivity, machine: string): string | null {
+  const detail = a.detail?.trim();
+  switch (a.outcome) {
+    case "refused":
+      return `${machine} refused it: ${refusalWords(a.code)}.`;
+    case "failed":
+      return `It didn't reach the session${detail ? `: ${detail.replace(/[.!?…]?$/, ".")}` : "."}`;
+    case "expired":
+      return `${machine} didn't take it in time.`;
+    case "unsupported":
+      return `${machine} can't hand messages to this session's agent.`;
+    default:
+      return null;
+  }
+}
+
+/** The `backticked` command a machine's words carry, the first one. */
+const commandIn = (text: string): string | null => /`([^`]+)`/.exec(text)?.[1] ?? null;
+
+/** A message that didn't make it: a neutral sentence after one small ✕ (a policy answer is
+ *  not a crash, so the words stay in the body tier), the command it names in a well with
+ *  Copy, and the ways on the machine allows. */
+export function SentFailure({
+  a,
+  machine,
+  control,
+  onEdit,
+}: {
+  a: ControlActivity;
+  machine: string;
+  control?: MachineControl;
+  /** A prompt's "Edit and send again": its words back in the composer. */
+  onEdit?: (text: string) => void;
+}) {
+  const machines = useMachines();
+  const harness = a.session ? splitKey(a.session).harness : "";
+  const words =
+    a.kind === "start" ? startFailureWords(a, machine, harnessMark(harness).label) : promptFailureWords(a, machine);
+  const [err, setErr] = useState<string | null>(null);
+  if (!words) return null;
+  const command = commandIn(words);
+  const safe = control && safeOffered(a, control);
+  const name = machines.find((m) => m.control?.machineId === a.machineId)?.name;
+  return (
+    <div className="starting-failed" role="alert">
+      <p className="sent-failed-text">
+        <svg className="sent-x" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+          <path d="M3 3l6 6M9 3 3 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+        <span>
+          <InlineCode text={words} />
+        </span>
+      </p>
+      {command && <CommandWell command={command} label="Copy the command" />}
+      <span className="sent-failed-actions">
+        {safe && (
+          <ActionButton
+            className="btn btn--sm"
+            pendingLabel="Starting…"
+            onClick={() =>
+              startAtSafe(a, control).catch((e) => setErr(sendErrorWords(e).replace(/^not sent · /, "Not sent: ")))
+            }
+          >
+            Start in Safe instead
+          </ActionButton>
+        )}
+        {a.kind === "start" ? (
+          <button type="button" className="btn btn--sm" onClick={() => editAgain(a, name)} data-edit-again>
+            Edit and start again
+          </button>
+        ) : onEdit && a.text ? (
+          <button type="button" className="btn btn--sm" onClick={() => onEdit(a.text ?? "")}>
+            Edit and send again
+          </button>
+        ) : null}
+      </span>
+      {err && <p className="sent-failed-err">{err}</p>}
     </div>
   );
 }

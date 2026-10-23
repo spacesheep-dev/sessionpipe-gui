@@ -43,6 +43,16 @@
 .ns-sheet:focus {
   outline: none;
 }
+/* The exit is the entrance's mirror, quicker: back up into the band (a phone's slides
+   down), the scrim fading with it; nothing in it takes a click meanwhile. */
+.ns-sheet[data-closing] {
+  animation: sheet-lift var(--dur-exit) var(--ease-in) both;
+  pointer-events: none;
+}
+.ns-scrim[data-closing] {
+  animation: fade-out var(--dur-exit) var(--ease-in) both;
+  pointer-events: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .ns-sheet {
     animation: none;
@@ -209,6 +219,10 @@
 .ns-opts:empty {
   display: none;
 }
+/* With no paperclip first, the row's label lines up with the labels above. */
+.ns-opts > .ns-opt:first-child {
+  margin-left: 6px;
+}
 .ns-opt {
   display: inline-flex;
   align-items: center;
@@ -222,6 +236,11 @@
   border-color: transparent;
   background: transparent;
   box-shadow: none;
+}
+/* What the machine runs as when it offers no choice: the row stays, the value in words. */
+.ns-fixed {
+  color: var(--fg-2);
+  font-size: var(--text-sm);
 }
 @media (hover: hover) {
   .ns-opt .ns-sel:hover:not(:disabled) {
@@ -266,6 +285,24 @@
   font-family: var(--font-ui);
   font-size: var(--text-xs);
 }
+/* Start keeps its width while it reads "Starting…" (ActionButton holds it). */
+.ns-start {
+  min-width: 88px;
+}
+
+/* No machine paired yet: the sheet is the empty state with its one way on. */
+.ns-sheet .ns-empty {
+  max-width: none;
+  margin: 0;
+  padding: 20px 20px 20px;
+  border-top: var(--hairline) solid var(--line);
+}
+.ns-sheet .ns-empty .state-title {
+  font-size: var(--text-md);
+}
+.ns-sheet .ns-empty .state-text {
+  max-width: 46ch;
+}
 
 /* ----- the compose glyph (sidebar header, the phone's Board and Inbox bars) ----- */
 
@@ -304,10 +341,18 @@
   border-radius: 0;
   background: var(--grouped-ground);
   box-shadow: none;
-  overflow: hidden;
+  /* The sheet is its own scroller, so a pull down from its top dismisses it (lib/motion
+     useSheetDrag reads its scroll), and the bar sticks over the rows. */
+  overflow: auto;
   animation: ns-up var(--dur-slow) var(--ease-out) both;
 }
+.ns-sheet--phone[data-closing] {
+  animation: sheet-down var(--dur-exit) var(--ease-in) both;
+}
 .ns-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   flex: none;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -337,14 +382,30 @@
   color: var(--fg);
   font-weight: 600;
 }
+/* A disabled Start is the same ink, faded: never grey on grey. */
 .ns-bar-btn:disabled {
-  color: var(--fg-4);
+  color: var(--fg);
+  opacity: 0.45;
+}
+.ns-bar-btn[aria-busy="true"] {
+  color: var(--fg-2);
+}
+/* The grabber: the sheet's top is its handle. */
+.ns-grab {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 4px);
+  left: 50%;
+  width: 36px;
+  height: 5px;
+  margin-left: -18px;
+  border-radius: var(--radius-pill);
+  background: var(--line-2);
+}
+.ns-bar-title {
+  touch-action: none;
 }
 .ns-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
+  flex: none;
   padding: 16px 16px calc(env(safe-area-inset-bottom) + 24px);
 }
 .ns-group {
@@ -383,8 +444,24 @@
   min-height: 160px;
   padding: 12px 16px;
 }
+/* The files sit in one row under the message that scrolls sideways, never stacked in it. */
 .ns-sheet--phone .ns-files {
-  padding: 0 16px 12px;
+  flex-wrap: nowrap;
+  margin: -8px -16px 16px;
+  padding: 0 16px 2px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.ns-sheet--phone .ns-files::-webkit-scrollbar {
+  display: none;
+}
+.ns-sheet--phone .ns-file {
+  flex: none;
+  max-width: 220px;
+  height: 32px;
+  background: var(--bg-2);
+  border-color: transparent;
 }
 .ns-cell {
   width: 100%;
@@ -406,13 +483,36 @@
   gap: 8px;
   padding: 0 16px;
 }
+/* Neutral: discarding a draft is no error (MISHA-NOTES 15). */
 .ns-discard {
   padding: 0;
   border: none;
   background: none;
-  color: var(--err);
+  color: var(--fg-2);
   font: inherit;
   font-size: var(--text-sm);
+}
+.ns-passkey {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.ns-sheet--phone .ns-fixed {
+  color: var(--fg-3);
+  font-size: var(--text-md);
+}
+.ns-sheet--phone [data-ns-row="options"] .ns-value {
+  padding-right: 8px;
+}
+/* On a phone the empty sheet is the screen's own empty state: centred, no platter. */
+.ns-sheet--phone .ns-empty {
+  align-items: center;
+  padding: 22dvh 16px 24px;
+  border-top: none;
+  text-align: center;
+}
+.ns-sheet--phone .ns-empty .state-actions {
+  justify-content: center;
 }
 
 /* ----- the starting session (control/Starting.tsx) ----- */
@@ -440,11 +540,47 @@
   color: var(--fg-3);
   font-size: var(--text-xs);
 }
+/* A start or a message that didn't make it: a neutral sentence after one small red ✕, the
+   command it names in its own well, then the ways on. */
 .starting-failed {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  gap: 10px;
+  max-width: 100%;
+}
+.sent-failed-text {
+  display: flex;
+  align-items: baseline;
   gap: 8px;
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-md);
+  line-height: var(--lh);
+}
+.sent-failed-text code {
+  font-size: var(--text-sm);
+}
+.sent-x {
+  flex: none;
+  position: relative;
+  top: 1px;
+  color: var(--err);
+}
+.starting-failed .cmdwell {
+  width: min(100%, 520px);
+  margin-left: 18px;
+}
+.sent-failed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: 18px;
+}
+.sent-failed-err {
+  margin: 0 0 0 18px;
+  color: var(--err);
+  font-size: var(--text-sm);
 }
 .sess-applied {
   color: var(--fg-3);
@@ -467,4 +603,14 @@
   .board-start:hover {
     color: var(--fg);
   }
+}
+
+/* In the timeline the ✕ takes the rows' 16 px glyph column, the words the text column. */
+.turn-failed .sent-x {
+  margin: 0 3px;
+}
+.turn-failed .cmdwell,
+.turn-failed .sent-failed-actions,
+.turn-failed .sent-failed-err {
+  margin-left: 24px;
 }

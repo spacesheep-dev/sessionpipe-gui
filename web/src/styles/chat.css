@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* ---------- session as a chat (Simple mode) ---------- */
 
-/* Messages, plainly: the time centred over each exchange, the person's prompt as a
-   bubble on the right (a fill, no border), the assistant's reply as prose on the page
-   under its mark and name, the tools of a turn one quiet disclosure line whose chevron
-   hangs in the gutter. No boxes around replies, no stripes. */
+/* Messages, plainly: the person's prompt as a bubble on the right (a fill, no border),
+   when it was sent at the left on hover, the assistant's reply as prose on the page under
+   its mark and name, the tools of a turn one quiet disclosure line whose chevron hangs in
+   the gutter. No boxes around replies, no stripes. */
 .timeline--chat {
   gap: 32px;
 }
@@ -14,17 +14,35 @@
   gap: 16px;
 }
 .chat-you {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
 }
+/* When it was sent: beside the bubble on hover, taking no line of its own; none on a
+   phone (no hover there, and the column is the reply's). */
 .chat-time {
-  align-self: center;
+  position: absolute;
+  top: 0;
+  left: 0;
+  line-height: calc(var(--lh) * var(--text-md) + 16px);
   color: var(--fg-3);
   font-size: var(--text-xs);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
   -webkit-user-select: none;
   user-select: none;
+}
+@media (hover: hover) {
+  .turn--chat:hover .chat-time {
+    opacity: 1;
+  }
+}
+@media (hover: none), (max-width: 839px) {
+  .chat-time {
+    display: none;
+  }
 }
 .chat-bubble {
   max-width: 70%;
@@ -109,8 +127,11 @@
   background: var(--press);
   transition: none;
 }
-.chat-tools-sum .is-err {
-  color: var(--err);
+.chat-tools-err {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-3);
 }
 .chat-tools > .turn-items {
   margin-top: 4px;
@@ -124,9 +145,19 @@
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
+/* The status row's glyph column: the spinner while it moves, the same room after. */
+.status-row > .spinner,
+.status-gap {
+  flex: none;
+  width: 10px;
+}
+/* A turn that ended with an error: the red ✕ is the signal, the words stay quiet. */
 .chat-err {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
-  color: var(--err);
+  color: var(--fg-2);
   font-size: var(--text-sm);
 }
 @media (max-width: 839px) {

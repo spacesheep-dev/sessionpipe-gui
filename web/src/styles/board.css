@@ -11,6 +11,9 @@
   margin: 0 -12px;
   container: board / inline-size;
 }
+.board-list[hidden] {
+  display: none;
+}
 
 /* Section headers: a 28 px band that sticks under the page bar (--sticky-top is the
    bar's measured height), opaque, a hairline below, edge to edge like the bar. The count
@@ -41,12 +44,33 @@
   -webkit-user-select: none;
   user-select: none;
 }
-/* Text is never fg-4 (a mark tier, under 4.5:1); the count is the meta tier. */
+/* Text is never fg-4 (a mark tier, under 4.5:1); the count is the meta tier. A count
+   that changes cross-fades in --dur-fast (its element is keyed by the number), never a
+   rolling digit; one that is there when the page paints just shows. */
 .group-count {
   color: var(--fg-3);
   font-weight: 400;
 }
-/* Done folds away behind a disclosure: the chevron turns as it opens. */
+.board-list[data-settled] .group-count {
+  animation: fade-in var(--dur-fast) var(--ease-out);
+}
+/* Done folds away behind a disclosure: the chevron turns as it opens. Its header is a
+   row like the ones it hides (a hover fill, the rows' inset), and its hairline stops at
+   the content's edge instead of running out to the window's. */
+.group--done > .group-head {
+  margin: 0 4px;
+  padding: 0;
+  border-bottom: 0;
+}
+.group--done > .group-head::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 0;
+  bottom: 0;
+  border-bottom: var(--hairline) solid var(--line);
+  pointer-events: none;
+}
 .group-toggle {
   display: inline-flex;
   align-items: center;
@@ -54,6 +78,21 @@
   min-height: 28px;
   color: inherit;
   font: inherit;
+}
+.group--done .group-toggle {
+  flex: 1;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .group--done .group-toggle:hover {
+    background: var(--hover);
+  }
+}
+.group--done .group-toggle:active {
+  background: var(--press);
+  transition: none;
 }
 .group-toggle:focus-visible {
   outline-offset: -2px;
@@ -142,6 +181,7 @@
   display: contents;
 }
 .card-state {
+  position: relative;
   grid-area: lead;
   display: flex;
   align-items: center;
@@ -163,7 +203,7 @@
 .card-time {
   grid-area: time;
   justify-self: end;
-  min-width: 8ch;
+  min-width: var(--meta-col);
   margin-left: 12px;
   text-align: right;
   color: var(--fg-3);
@@ -214,6 +254,12 @@
 .card-attn.mono {
   font-size: calc(var(--text-sm) * 0.95);
 }
+/* A code span in a one-line preview: mono, without its ticks, one tier up. */
+.inline-code {
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
 /* "2 subagents running": the parent's one trailing fact while any agent is open. */
 .card-agents {
   flex: none;
@@ -225,7 +271,6 @@
   gap: 8px;
   color: var(--fg-3);
 }
-.card-flags .is-err,
 .sess-flags .is-err {
   color: var(--err);
 }
@@ -268,8 +313,22 @@
   min-width: 8ch;
   text-align: right;
 }
-.card-foot .is-err,
 .sess-counts .is-err {
+  color: var(--err);
+}
+/* With the counts off, the foot is only the error mark's slot, beside the time. */
+.card-foot--mark {
+  margin-left: 12px;
+}
+.card-foot--mark > span {
+  min-width: 0;
+}
+/* The one red mark a row has: a small ✕ where its counts would be. */
+.card-err {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 1lh;
   color: var(--err);
 }
 /* The store's flags on the session page (SessionView): one muted line. */
@@ -309,9 +368,16 @@
   background: var(--press);
   transition: none;
 }
-.card-row:has(.card-link:focus-visible) {
-  outline: var(--focus-width) solid var(--focus);
-  outline-offset: -2px;
+/* The keyboard cursor is the row's selection fill with the shared hairline focus edge
+   (shared.css `[data-nav-item]:focus-visible`), drawn on the row, which is the box a row
+   is, rather than on the link inside it; never a 2 px ring. */
+.card-link:focus-visible {
+  background: none;
+  box-shadow: none;
+}
+.card-row:has(> .card-link:focus-visible) {
+  background: var(--sel);
+  box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklch, var(--focus) 60%, transparent);
 }
 .card:is([aria-current="true"], [data-open], :has(> .card-row:hover)) > .card-row::before,
 .card:not(:has(.card-kids)):is([aria-current="true"], [data-open], :has(> .card-row:hover)) + .card > .card-row::before,
@@ -475,9 +541,73 @@
   }
 }
 
-/* The first run: the empty state where the first row would be. */
-.board-empty code {
+/* The first run: the listening state at the optical centre; it fades out over 160 ms
+   when the first event lands, and the row comes in after it. */
+.board-empty[data-closing] {
+  animation: fade-out 160ms var(--ease-in) both;
+}
+.board-empty .state-text strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+.board-empty .listening {
+  margin-top: 16px;
+}
+/* Under the first row ever, once: where the next step is, in the muted tier. */
+.board-first {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 12px 0 40px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  animation: fade-in var(--dur) var(--ease-out) both;
+}
+/* A filter that hides everything. */
+.board-nomatch .state-title {
+  overflow-wrap: anywhere;
+}
+/* Loading: the rows' own height, so the list does not move when they land. */
+.board-skeleton .skeleton-row {
+  height: calc(var(--row-sm) * 2 - 12px);
+}
+
+/* The stream is down: the rows stay where they are, one quiet tier, their times stopped
+   (the shell's footer says why). */
+.board--down
+:is(.card-link, .card-title, .card-tool, .card-kind, .card-attn, .inline-code, .kid, .agent-type, .agent-desc) {
+  color: var(--fg-3);
+}
+/* What it is doing is not known while nothing arrives: the rings stop where they are. */
+.board--down .dot {
+  animation-play-state: paused;
+}
+.board--down .card-state,
+.board--down .card-meta .glyph-wrap,
+.board--down .kid .dot {
+  opacity: 0.55;
+}
+
+/* ⌘ held in the installed app: the first nine rows show their number over the glyph. */
+[data-jump-hints] .card-state[data-jump]::after {
+  content: attr(data-jump);
+  position: absolute;
+  inset: 50% auto auto 50%;
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: var(--radius-inner);
+  border: var(--hairline) solid var(--line-2);
+  background: var(--bg-2);
   color: var(--fg-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  transform: translate(-50%, -50%);
+  animation: fade-in var(--dur-fast) var(--ease-out);
 }
 
 /* A narrow column (the split open, a phone): three lines, the title and time, then what
@@ -498,6 +628,10 @@
   }
   .card-foot > span {
     min-width: 0;
+  }
+  /* Under the time, its right edge on the time's: the ✕ never floats mid-row. */
+  .card-foot {
+    justify-content: flex-end;
   }
 }
 
@@ -529,6 +663,54 @@
     left: -6px;
     width: 14px;
     height: 44px;
+  }
+}
+
+/* A phone's swipe (SessionCard useSwipe, the inbox's too): the row's content follows the
+   finger over an opaque ground, and the pane it uncovers says what letting go does: the
+   neutral well tier, the ink once it would act. Never shown with a pointer. */
+.swipe-pane {
+  display: none;
+}
+@media (hover: none) {
+  .card-row,
+  .inbox-row {
+    touch-action: pan-y;
+  }
+  .card-row[data-swipe],
+  .inbox-row[data-swipe] {
+    overflow: hidden;
+  }
+  .card-row[data-swipe] > .card-link,
+  .inbox-row[data-swipe] > .inbox-main {
+    position: relative;
+    z-index: 1;
+    background: var(--bg);
+  }
+  .swipe-pane {
+    position: absolute;
+    inset: 0;
+    align-items: center;
+    padding: 0 20px;
+    border-radius: var(--radius);
+    background: var(--bg-3);
+    color: var(--fg-2);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    transition:
+      background-color var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out);
+  }
+  .swipe-pane--trail {
+    justify-content: flex-end;
+  }
+  [data-swipe="lead"] > .swipe-pane--lead,
+  [data-swipe="trail"] > .swipe-pane--trail {
+    display: flex;
+  }
+  [data-swipe-armed] > .swipe-pane {
+    background: var(--fg);
+    color: var(--bg);
   }
 }
 

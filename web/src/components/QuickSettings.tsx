@@ -4,12 +4,14 @@
 // by eye: the appearance (System / Light / Dark), the skin (Spacesheep, Paper and any
 // installed from outside; never the internal Plain) and the text size, then one row to
 // the Settings window. Each choice is per device (web/src/lib/theme.ts). Esc closes it
-// through the global keys (data-dismiss). The keyboard and the install line live in
-// Settings.
+// through the global keys (data-dismiss); it leaves as it came (pop-out beside the rail,
+// sheet-down on a phone, where it also follows a drag down). The keyboard and the
+// install line live in Settings.
 
 import { skinTokensFor } from "@shared/skin-api";
-import { type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "../lib/focus";
+import { usePresence, useSheetDrag } from "../lib/motion";
 import { Link, navigate } from "../lib/router";
 import { fetchSkins, type InstalledSkin, isPlain, schemeLabel, useSkins } from "../lib/skins";
 import {
@@ -30,6 +32,45 @@ export const APPEARANCE: { value: Theme; label: string }[] = [
   { value: "dark", label: "Dark" },
 ];
 export const SIZE_LABEL: Record<TextSize, string> = { 0.9: "A−", 1: "A", 1.1: "A+", 1.25: "A++" };
+/** The stops in words, for the slider's spoken value and the palette. */
+export const SIZE_NAME: Record<TextSize, string> = { 0.9: "Small", 1: "Default", 1.1: "Large", 1.25: "Larger" };
+
+/** Text size as macOS draws it: a small "A", four stops on one track, a large "A". The
+ *  stops are ticks under the track; the value is spoken as its name ("Large, 110 %"). */
+export function TextSizeSlider({ value, onChange }: { value: TextSize; onChange: (t: TextSize) => void }) {
+  const i = Math.max(0, TEXT_SIZES.indexOf(value));
+  const last = TEXT_SIZES.length - 1;
+  return (
+    <div className="ts-slider">
+      <span className="ts-a ts-a--sm" aria-hidden="true">
+        A
+      </span>
+      <span className="ts-track">
+        <input
+          type="range"
+          className="slider ts-input"
+          min={0}
+          max={last}
+          step={1}
+          value={i}
+          aria-label="Text size"
+          aria-valuetext={`${SIZE_NAME[value]}, ${Math.round(value * 100)} %`}
+          data-size={value}
+          onChange={(e) => onChange(TEXT_SIZES[Number(e.target.value)] ?? 1)}
+          style={{ "--slider-pct": `${(i / last) * 100}%` } as CSSProperties}
+        />
+        <span className="ts-ticks" aria-hidden="true">
+          {TEXT_SIZES.map((t) => (
+            <span key={t} className={`ts-tick ${t === value ? "ts-tick--on" : ""}`} />
+          ))}
+        </span>
+      </span>
+      <span className="ts-a ts-a--lg" aria-hidden="true">
+        A
+      </span>
+    </div>
+  );
+}
 export const SKIN_ADD_LINE = "sessionpipe-gui skin add <folder | skin.tgz | skin.zip | npm-package | git-url>";
 
 // Settings.tsx (the Notifications section of the dialog) looks for the section under these
@@ -99,6 +140,9 @@ export function QuickSettings({
   const pop = useRef<HTMLDivElement>(null);
   // Focus stays inside while open, Esc closes, and it goes back to the trigger after.
   useFocusTrap(pop, open, { onClose: () => setOpen(false) });
+  // Mounted through its exit; on a phone the sheet follows a drag down from its grabber.
+  const { mounted, closing } = usePresence(open);
+  useSheetDrag(pop, () => setOpen(false), { enabled: placement === "tabbar" && open });
   const settings = useSettings();
   const { builtins, installed, error: skinsError } = useListedSkins();
 
@@ -139,27 +183,34 @@ export function QuickSettings({
           <GearIcon />
         </button>
       )}
-      {open && sheet && (
+      {mounted && sheet && (
         <button
           type="button"
           className="qs-scrim"
           aria-label="Close display settings"
           tabIndex={-1}
           data-dismiss
+          data-closing={closing ? "" : undefined}
           onClick={() => setOpen(false)}
         />
       )}
-      {open && (
+      {mounted && (
         <div
           className="qs-pop"
           role="dialog"
           aria-modal="true"
           aria-label="Quick settings"
+          aria-hidden={closing || undefined}
           ref={pop}
           onContextMenu={noContextMenu}
+          data-closing={closing ? "" : undefined}
         >
-          {sheet && <span className="qs-grab" aria-hidden="true" />}
-          {sheet && <h2 className="qs-sheet-title">Display</h2>}
+          {sheet && <span className="qs-grab" aria-hidden="true" data-sheet-handle />}
+          {sheet && (
+            <h2 className="qs-sheet-title" data-sheet-handle>
+              Display
+            </h2>
+          )}
           <div className="qs-sect">
             <span className="qs-label">Appearance</span>
             <Segmented<Theme>
@@ -189,18 +240,9 @@ export function QuickSettings({
             </ul>
             {skinsError && <p className="qs-note">Installed skins could not be read ({skinsError}).</p>}
           </div>
-          <div className="qs-sect qs-sect--inline">
+          <div className="qs-sect">
             <span className="qs-label">Text size</span>
-            <Segmented<TextSize>
-              value={settings.textSize}
-              onChange={setTextSize}
-              label="Text size"
-              options={TEXT_SIZES.map((s) => ({
-                value: s,
-                label: SIZE_LABEL[s],
-                title: `${Math.round(s * 100)} %`,
-              }))}
-            />
+            <TextSizeSlider value={settings.textSize} onChange={setTextSize} />
           </div>
           <div className="qs-foot">
             <Link
@@ -222,18 +264,19 @@ export function QuickSettings({
   );
 }
 
-/** The skin's own ground and ink as one small circle, split on the diagonal, so a row
- *  shows the skin before it is picked. A token the skin does not set falls back to the
- *  page's own. */
+/** The skin's two grounds as one tiny chip: its sidebar ground on the left, its page on
+ *  the right, a hairline round it, so a row shows the skin before it is picked and never
+ *  reads as a dark-mode glyph. A skin with one scheme shows that one; a token the skin
+ *  does not set falls back to the page's own. */
 export function SkinSwatch({ skin, scheme }: { skin: InstalledSkin; scheme: "dark" | "light" }) {
-  const t = skinTokensFor(skin, scheme);
-  const bg = t["--bg-3"] ?? t["--bg"] ?? "var(--bg-3)";
-  const fg = t["--fg"] ?? "var(--fg)";
+  const t = skinTokensFor(skin, skin.scheme === "both" ? scheme : (skin.scheme as "dark" | "light"));
+  const side = t["--bg-3"] ?? "var(--bg-3)";
+  const page = t["--bg"] ?? "var(--bg)";
   return (
     <span
       className="qs-swatch"
       aria-hidden="true"
-      style={{ background: `linear-gradient(135deg, ${bg} 50%, ${fg} 50%)` }}
+      style={{ background: `linear-gradient(to right, ${side} 0 42%, ${page} 42%)` }}
     />
   );
 }

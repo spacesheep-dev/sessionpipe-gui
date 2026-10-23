@@ -68,7 +68,20 @@ export function useAgentsOpen(s: SessionSummary): boolean {
 
 /** One agent under its parent on the board: a 32 px row (44 on a phone) on the tree guide,
  *  outside the list's j/k order (Tab reaches it). `open` while its tab is the panel's. */
-export function AgentRow({ s, a, open = false }: { s: SessionSummary; a: AgentRun; open?: boolean }) {
+export function AgentRow({
+  s,
+  a,
+  open = false,
+  flip,
+  gone = false,
+}: {
+  s: SessionSummary;
+  a: AgentRun;
+  open?: boolean;
+  /** The tree's FLIP key (lib/motion.ts useFlip), and whether the held tree kept it after it left. */
+  flip?: string;
+  gone?: boolean;
+}) {
   const store = useStore();
   // A child session (the `parent_id` shape) is a session: its own menu, with its label.
   const child = a.session ? store.get().sessions.get(a.session) : undefined;
@@ -78,7 +91,13 @@ export function AgentRow({ s, a, open = false }: { s: SessionSummary; a: AgentRu
   });
   const to = child ? sessionPath(child.harness, child.id) : agentPath(s.harness, s.id, a.id);
   return (
-    <li {...menu} data-agent={a.id} data-open={open ? "" : undefined}>
+    <li
+      {...menu}
+      data-agent={a.id}
+      data-open={open ? "" : undefined}
+      data-flip={flip}
+      data-gone={gone ? "" : undefined}
+    >
       <Link
         to={to}
         className="kid agent-row"

@@ -2,28 +2,35 @@
 /* ---------- toasts (components/Toasts.tsx) ---------- */
 
 /* Notification banners, the OS's shape: top-right on a desktop under the title band and
-   left of an open panel, newest on top; just above the tab bar on a phone, newest
-   nearest it. The raised surface every floating thing has, no stripe: the amber dot is
-   the one signal that a prompt needs a person. */
+   left of an open panel, newest on top; a compact banner under the status bar on a
+   phone. The raised surface every floating thing has, no stripe: the amber dot is the
+   one signal that a prompt needs a person, and only a banner that carries a mark keeps
+   the 16 px column for it. Each sits in a slot that keeps the 8 px between banners, so
+   when one leaves (pop-out, then its slot closes) the rest close up without a jump. */
 .toasts {
   position: fixed;
   z-index: var(--z-toast);
-  top: calc(var(--bar) + 8px);
+  top: calc(var(--bar) + 4px);
   right: calc(var(--split-width, 0px) + 16px);
   display: flex;
   flex-direction: column-reverse;
   justify-content: flex-end;
-  gap: 8px;
   width: min(360px, calc(100vw - 32px));
   pointer-events: none;
 }
+.toast-slot {
+  display: grid;
+  grid-template-rows: 1fr;
+  padding: 4px 0;
+}
 .toast {
   pointer-events: auto;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
-    "mark main x"
-    ".    act  act";
+    "main x"
+    "act  act";
   column-gap: 8px;
   padding: 12px 8px 12px 12px;
   border: var(--hairline) solid var(--line);
@@ -35,6 +42,26 @@
   animation: rise var(--dur) var(--ease-out) both;
   -webkit-user-select: none;
   user-select: none;
+}
+.toast-slot[data-closing] {
+  overflow: hidden;
+  animation: toast-collapse 140ms var(--ease-in) var(--dur-exit) both;
+}
+.toast-slot[data-closing] > .toast {
+  pointer-events: none;
+  animation: pop-out var(--dur-exit) var(--ease-in) both;
+}
+@keyframes toast-collapse {
+  to {
+    grid-template-rows: 0fr;
+    padding: 0;
+  }
+}
+.toast--marked {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "mark main x"
+    ".    act  act";
 }
 .toast-mark {
   grid-area: mark;
@@ -60,7 +87,7 @@
   grid-area: main;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
   text-align: left;
   color: inherit;
@@ -68,6 +95,18 @@
 }
 .toast-main:disabled {
   opacity: 1;
+}
+/* What happened, first: "Needs you on build-box". */
+.toast-head {
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toast-machine {
+  color: inherit;
 }
 .toast-top {
   display: flex;
@@ -85,19 +124,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--fg);
-  font-size: var(--text-md);
-  font-weight: 600;
-}
-.toast-machine {
-  flex: none;
-  margin-left: auto;
-  color: var(--fg-3);
-  font-size: var(--text-sm);
+  color: var(--fg-2);
+  font-weight: 500;
 }
 .toast-body {
   min-width: 0;
-  color: var(--fg-2);
+  color: var(--fg-3);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -111,7 +143,32 @@
   font-weight: 500;
 }
 .toast-msg {
-  color: var(--fg-2);
+  color: var(--fg-3);
+}
+.toast-body:empty {
+  display: none;
+}
+/* "Hidden · Undo": one line, the way back at its end. */
+.toast--undo {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "main x";
+  align-items: center;
+  padding: 6px 6px 6px 12px;
+}
+.toast-undo-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toast--undo .toast-head {
+  font-size: var(--text-sm);
+}
+.toast-undo-what {
+  color: var(--fg-3);
+}
+.toast-undo {
+  font-weight: 600;
 }
 .toast-msg.mono {
   font-size: calc(var(--text-sm) * 0.95);
@@ -157,36 +214,57 @@
     opacity: 1;
   }
 }
-/* The phone: full width above the tab bar; the banner grows from the bar. */
+@keyframes toast-in-phone {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+/* The phone: iOS's banner, compact under the status bar, newest on top; the title and
+   one line of detail, the two answers small at its end. It never covers the composer or
+   the tab bar. */
 @media (max-width: 839px) {
   .toasts {
-    top: auto;
+    top: calc(env(safe-area-inset-top) + 4px);
     left: 8px;
     right: 8px;
-    bottom: calc(var(--tabbar) + env(safe-area-inset-bottom) + 8px);
     width: auto;
     flex-direction: column;
   }
   .toast {
-    padding: 12px;
+    padding: 10px 8px 10px 12px;
+    border-radius: 14px;
+  }
+  .toast-body {
+    -webkit-line-clamp: 1;
   }
   .toast-x {
     width: 32px;
     height: 32px;
-    margin: -8px -4px 0 4px;
+    margin: -6px -2px 0 4px;
   }
-  .toast-actions .btn {
-    flex: 1;
+  .toast-actions {
+    justify-content: flex-end;
+    margin-top: 8px;
   }
   .toast-note {
-    flex-basis: 100%;
+    flex: 1 1 auto;
+    order: -1;
   }
   .toast-unlock {
     text-align: left;
   }
+  .toast {
+    animation-name: toast-in-phone;
+  }
+  .toast-slot[data-closing] > .toast {
+    animation: fade-out var(--dur-exit) var(--ease-in) both;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
-  .toast {
+  .toast,
+  .toast-slot[data-closing],
+  .toast-slot[data-closing] > .toast {
     animation: none;
   }
 }

@@ -244,7 +244,18 @@
   background: var(--grouped-ground);
   box-shadow: var(--shadow-pop);
   overflow: hidden;
-  animation: rise var(--dur) var(--ease-out) both;
+  animation: zoom-in var(--dur) var(--ease-out) both;
+}
+/* The exit: the window zooms out, the scrim fades, both quicker than they came, and
+   neither takes a click meanwhile (Settings.tsx plays it before it navigates away). */
+.settings-wrap[data-closing] {
+  pointer-events: none;
+}
+.settings-wrap[data-closing] .settings {
+  animation: zoom-out var(--dur-exit) var(--ease-in) both;
+}
+.settings-wrap[data-closing] .settings-scrim {
+  animation: fade-out var(--dur-exit) var(--ease-in) both;
 }
 .settings:focus,
 .settings:focus-visible {
@@ -510,6 +521,9 @@ a.settings-row:focus-visible {
     box-shadow: none;
     animation: sheet-up var(--dur-slow) var(--ease-out) both;
   }
+  .settings-wrap[data-closing] .settings {
+    animation: sheet-down var(--dur-exit) var(--ease-in) both;
+  }
   .settings[data-view="list"] .settings-main {
     display: none;
   }
@@ -645,6 +659,306 @@ a.settings-row:focus-visible {
   .settings-row-ctl {
     max-width: 100%;
   }
+  /* A choice is the row itself: the value and a ›, the whole row the tap target; its
+     explanation moves to the picker it pushes. */
+  .settings-row:has(> .settings-row-ctl > .settings-choice) {
+    flex-wrap: nowrap;
+  }
+  .settings-row:has(> .settings-row-ctl > .settings-choice) .settings-hint {
+    display: none;
+  }
+  .settings-row:has(> .settings-row-ctl > .settings-choice:active) {
+    background: var(--press);
+  }
+  .tiles {
+    gap: 16px;
+  }
+  .settings-row:has(.tiles),
+  .settings-row:has(.settings-size) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .settings-row:has(.tiles) > .settings-row-text,
+  .settings-row:has(.settings-size) > .settings-row-text {
+    flex: none;
+  }
+  .settings-row:has(.tiles) > .settings-row-ctl,
+  .settings-row:has(.settings-size) > .settings-row-ctl {
+    justify-content: center;
+  }
+  .settings-size {
+    width: 100%;
+  }
+}
+
+/* ----- a choice pushed as its own page (the phone) ----- */
+.settings-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  color: var(--fg-3);
+}
+.settings-choice .settings-value {
+  color: var(--fg-3);
+}
+.settings-choice::after {
+  /* The whole row is the target. */
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.settings-choice .settings-tab-chev {
+  display: block;
+  width: 7px;
+  height: 12px;
+  background: var(--fg-4);
+  -webkit-mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 12'%3E%3Cpath d='M1.5 1.5 6 6l-4.5 4.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 12'%3E%3Cpath d='M1.5 1.5 6 6l-4.5 4.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+.settings-picks {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.settings-pick {
+  width: 100%;
+  text-align: left;
+  cursor: default;
+}
+.settings-pick:active {
+  background: var(--press);
+}
+.settings-pick:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.settings-pick-check {
+  width: 14px;
+  height: 14px;
+}
+.settings-pick[data-on] .settings-pick-check {
+  background: var(--fg);
+  -webkit-mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.6 5.3 4 7.6 8.4 2.6' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.6 5.3 4 7.6 8.4 2.6' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+/* ----- the appearance and the skins: live miniatures to pick from ----- */
+.tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.tiles:disabled {
+  opacity: 0.55;
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+}
+.tiles:disabled .tile {
+  cursor: default;
+}
+.tile-pic {
+  display: block;
+  padding: 2px;
+  border-radius: 9px;
+  box-shadow: 0 0 0 var(--hairline) var(--line);
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .tiles:not(:disabled) .tile:hover .tile-pic {
+    box-shadow: 0 0 0 var(--hairline) var(--line-2);
+  }
+}
+/* The checked tile: a 2 px ring in the ink, the macOS way; its name in the ink too. */
+.tile--on .tile-pic {
+  box-shadow: 0 0 0 2px var(--fg);
+}
+.tile--on {
+  color: var(--fg);
+  font-weight: 500;
+}
+.tile:has(input:focus-visible) .tile-pic {
+  box-shadow:
+    0 0 0 2px var(--fg),
+    0 0 0 5px color-mix(in oklch, var(--focus) 45%, transparent);
+}
+.skin-mini {
+  position: relative;
+  display: flex;
+  width: 76px;
+  height: 50px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: var(--m-bg);
+  box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklch, var(--m-fg) 14%, transparent);
+}
+.skin-mini-side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 22px;
+  padding: 7px 4px;
+  background: var(--m-side);
+  border-right: var(--hairline) solid var(--m-line);
+}
+.skin-mini-nav {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--m-fg3);
+  opacity: 0.55;
+}
+.skin-mini-nav--on {
+  opacity: 1;
+  background: var(--m-fg);
+}
+.skin-mini-page {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 7px;
+}
+.skin-mini-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.skin-mini-dot {
+  flex: none;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--m-fg3);
+}
+.skin-mini-dot--needs {
+  background: var(--m-needs);
+  box-shadow: none;
+}
+.skin-mini-text {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--m-fg);
+  opacity: 0.8;
+}
+.skin-mini-row + .skin-mini-row .skin-mini-text {
+  background: var(--m-fg3);
+  opacity: 1;
+}
+/* System: light on the left, dark on the right, one window. */
+.skin-mini-split {
+  position: relative;
+  display: block;
+  width: 76px;
+  height: 50px;
+}
+.skin-mini-split > .skin-mini {
+  position: absolute;
+  inset: 0;
+}
+.skin-mini-split > .skin-mini + .skin-mini {
+  clip-path: inset(0 0 0 50%);
+}
+.settings-size {
+  display: block;
+  width: 220px;
+}
+.settings-row:has(.tiles) {
+  align-items: flex-start;
+}
+.settings-row:has(.tiles) > .settings-row-text {
+  padding-top: 4px;
+}
+
+/* ----- the tiers, as steps ----- */
+.settings-tier {
+  justify-content: flex-start;
+  gap: 12px;
+}
+.settings-steps {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.settings-step {
+  fill: var(--line-2);
+}
+.settings-step--on {
+  fill: var(--fg-2);
+}
+
+/* A command inside a row: the row stacks, the well takes the full measure. */
+.settings-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.settings-well {
+  min-width: 0;
+}
+
+/* ----- About: the app's own head, like a macOS About window ----- */
+.about-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0 4px;
+  text-align: center;
+}
+.about-icon {
+  display: block;
+  margin-bottom: 10px;
+  line-height: 0;
+}
+.about-icon .mark {
+  filter: drop-shadow(0 1px 2px oklch(0 0 0 / 0.18));
+}
+.about-name {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.about-version {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.about-lede {
+  margin: 6px 0 0;
+  max-width: 40ch;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+}
+.about-foot {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  text-align: center;
 }
 @media (min-width: 840px) {
   .settings-nav-bar,

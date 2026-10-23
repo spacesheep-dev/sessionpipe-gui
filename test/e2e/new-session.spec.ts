@@ -5,8 +5,10 @@
 // advertises and the one line an older machine gets instead, a typed folder outside the
 // allowed ones, and Start: the signed CONTROL.md §6 `start` carries only what was
 // advertised, the page goes straight to the new session in its starting state, follows
-// the acks, and turns live at the first hook event; an offline machine queues; a refusal
-// says why in place and "Edit and start again" brings the draft back. Against the second
+// the acks, and turns live at the first hook event on the same surface (one title, the
+// person's bubble kept, no remount); an offline machine queues; a refusal says why in
+// place, offers Safe where the machine does, and "Edit and start again" brings the draft
+// back. Against the second
 // e2e instance (test door on, rp id localhost) through fake daemons (control-helpers.ts).
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
@@ -122,13 +124,21 @@ test("the advertised rows on a 0.10 machine; one line, and no rows, on an old on
   await expect(page.locator(".sel-opt")).toHaveText([/Read only/, /Safe/, /Accept edits/, /Auto/]);
   await page.keyboard.press("Escape");
 
+  // The machine picker says what each one offers.
+  await rowValue(page, "machine").click();
+  await expect(page.locator(".sel-opt", { hasText: a.name })).toContainText("auto");
+  await expect(page.locator(".sel-opt", { hasText: b.name })).toContainText("0.9 · no model choice");
+  await page.keyboard.press("Escape");
+
   await pick(page, "machine", b.name);
   await expect(sheet(page).locator("[data-ns-row=permission]")).toHaveCount(0);
   await expect(sheet(page).locator("[data-ns-row=model]")).toHaveCount(0);
   await expect(sheet(page).getByRole("button", { name: "Add files" })).toHaveCount(0);
+  // The row stays, so the sheet keeps its height: the machine sets the level.
+  await expect(sheet(page).locator("[data-ns-row=options]")).toHaveText(/Permission\s*Safe mode, set at the machine/);
   await sheet(page).locator("[data-ns-text]").fill("Look around.");
-  // The grant comes first; once it is taken the line says what the machine will do.
-  await expect(status(page)).toHaveText(/passkey is needed once today|Runs in .* safe mode/);
+  // The status line is for what is happening; the passkey is Start's own note.
+  await expect(status(page)).toHaveText(`${b.name} is listening.`);
 });
 
 test("a typed folder outside the allowed ones disables Start, with the reason", async ({ page }) => {
@@ -176,10 +186,22 @@ test("Start: the starting state, then taken, then live; only advertised options 
   await expect(page).toHaveURL(/\/s\/claude-code\/[0-9a-f-]{36}$/);
   await expect(page.locator(".starting")).toBeVisible();
   await expect(page.locator(".starting .chat-bubble")).toHaveText("Fix the rounding in refunds.");
+  await expect(page.locator("h1.sess-title")).toHaveText("Fix the rounding in refunds.");
+  // Mark the surface: the live session must be this same element, not a remount.
+  await page.locator(".page.session").evaluate((el) => {
+    el.setAttribute("data-e2e-surface", "1");
+  });
   await expect(page.locator(".starting[data-starting=taken]")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".starting .starting-state")).toHaveText(/^Starting claude on .+…$/);
   await expect(page.locator(".sess-bar")).toContainText("Accept edits · sonnet");
-  // The first hook event: the ordinary live page.
+  // The first hook event: the ordinary live page, on the same surface, the same title and
+  // the person's bubble kept; the start is in the timeline, not under the composer.
   await expect(page.locator(".page.session:not(.starting)")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".page.session")).toHaveAttribute("data-e2e-surface", "1");
+  await expect(page.locator("h1.sess-title")).toHaveText("Fix the rounding in refunds.");
+  await expect(page.locator("[data-start-message]")).toHaveText("Fix the rounding in refunds.");
+  await expect(page.locator(".sess-ctl")).toBeVisible();
+  await expect(page.locator(".ctl-act")).toHaveCount(0);
   const cmd = m.seen.find((c) => c.kind === "start")!;
   expect(cmd).toMatchObject({ cwd: "/Users/e2e/code/billing", permission: "edits", model: "sonnet" });
 });
@@ -236,6 +258,9 @@ test("a refused permission says why, and Edit and start again restores the draft
       timeout: 15_000,
     },
   );
+  // A policy answer, not a crash: neutral words after one small ✕, and the honest way on.
+  await expect(page.locator(".starting-failed .sent-x")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start in Safe instead" })).toBeVisible();
   await page.getByRole("button", { name: "Edit and start again" }).click();
   await expect(sheet(page).locator("[data-ns-text]")).toHaveValue("Upgrade the date library.");
   await expect(rowValue(page, "machine")).toHaveAttribute("data-value", m.name);

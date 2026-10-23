@@ -148,7 +148,7 @@
   flex: none;
   width: 36px;
   height: 5px;
-  margin: 6px auto 0;
+  margin: 6px auto 2px;
   border-radius: var(--radius-pill);
   background: var(--line-2);
 }
@@ -185,14 +185,48 @@
   color: var(--fg-2);
   font-size: var(--text-md);
 }
+/* The sheet's exit copy (ContextMenu.tsx MenuHost): slides down and fades its scrim in
+   --dur-exit, inert. */
+.menu-sheet-host {
+  display: contents;
+}
+.menu-sheet-host[data-closing] .menu-sheet {
+  animation: sheet-down var(--dur-exit) var(--ease-in) both;
+  pointer-events: none;
+}
+.menu-sheet-host[data-closing] .menu-scrim {
+  animation: fade-out var(--dur-exit) var(--ease-in) both;
+  pointer-events: none;
+}
+/* One platter for the actions and one for Cancel. `flex: none`: in the sheet's
+   scrolling column a group must never shrink, or its rows clip. */
 .menu-sheet-group {
+  flex: none;
   display: flex;
   flex-direction: column;
   border-radius: var(--radius-pop);
   background: var(--bg-2);
   overflow: hidden;
 }
+/* A section break inside the platter: a band halfway between the platter and the
+   ground, as iOS draws it, so it reads as one platter with sections, not as boxes. */
+.menu-sheet-sep {
+  flex: none;
+  height: 6px;
+  margin: 0;
+  border: 0;
+  background: color-mix(in oklch, var(--bg-2), var(--grouped-ground) 55%);
+}
+.menu-sheet-group .menu-heading {
+  padding: 10px 16px 4px;
+}
+/* The head is the drag handle too: it takes the finger, not the page. */
+.menu-grab,
+.menu-sheet-head {
+  touch-action: none;
+}
 .menu-sheet-item {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -201,12 +235,14 @@
   color: var(--fg);
   font-size: max(1rem, 16px);
   text-align: left;
+  transition: background-color var(--dur-release) linear;
 }
 .menu-sheet-item + .menu-sheet-item {
   box-shadow: inset 0 var(--hairline) 0 var(--line);
 }
 .menu-sheet-item:active:not(:disabled) {
   background: var(--press);
+  transition: none;
 }
 .menu-sheet-item:disabled {
   color: var(--fg-4);

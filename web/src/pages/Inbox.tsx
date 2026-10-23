@@ -3,45 +3,87 @@
 // Mail lays out a mailbox: rows in two groups, the prompts a control answer can reach
 // (Allow / Deny, the same signed send as the session page, control/useSend.ts) and the
 // ones waiting in a terminal. A row click opens its session beside the page; rows leave
-// as the stream clears them. "Notify me" and the sounds sit in the page bar; why the
-// buttons are off (the machine is not paired, this page cannot use passkeys) is said
-// once under the bar, not on every row.
+// as the stream clears them, but never from under the pointer: the list holds still while
+// it is read (lib/motion.ts), a prompt that cleared stays faded until the hand leaves.
+// "Notify me" and the sounds live behind one bell in the page bar; why the buttons are
+// off (the machine is not paired, this page cannot use passkeys, notifications are off
+// for the site) is said once under the bar, not on every row.
 import type { MachineControl } from "@shared/api";
 import { type MutableRefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Ago, HarnessGlyph, Redacted, StateDot } from "../components/bits";
-import { type MenuList, useContextMenu } from "../components/ContextMenu";
+import { Ago, EmptyState, HarnessGlyph, Redacted, StateDot } from "../components/bits";
+import { type MenuList, openMenu, useContextMenu } from "../components/ContextMenu";
 import { LabelChip, LabelDot, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
-import { NotifyToggle } from "../components/NotifyToggle";
+import { NotifyBlocked, NotifyMenu } from "../components/NotifyToggle";
 import { PageBar } from "../components/PageBar";
-import { answerItems, lensMenu, useBackgroundMenu, useStickyTop } from "../components/SessionCard";
+import {
+  answerItems,
+  lensMenu,
+  SwipePanes,
+  useBackgroundMenu,
+  useStickyTop,
+  useSwipe,
+} from "../components/SessionCard";
 import { ComposeButton } from "../control/NewSession";
 import { answerState, useSessionSend } from "../control/useSend";
 import { type OpenAttention, useAppState, useLabels, useOpenAttentions, useStore } from "../data/hooks";
+import { prefetchProps } from "../data/prefetch";
 import { ATTENTION_LABEL, attentionMessage, oneLine, sessionTitle } from "../lib/format";
+import { attentionKey, hide, isHidden, useHidden } from "../lib/hidden";
 import { useListNav } from "../lib/keys";
-import { type LabelFilter, labelPasses } from "../lib/labels";
+import { type LabelFilter, labelItems, labelPasses } from "../lib/labels";
 import { copyItem, sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
+import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { setNotifyPref, useNotifyPref } from "../lib/notify";
-import { Link, navigate, sessionPath } from "../lib/router";
+import { navigate, sessionPath } from "../lib/router";
 import { type Lens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import { openSplit } from "../lib/split";
 
 const rowKey = (r: OpenAttention) => `${r.session.key}|${r.attention.attentionId}`;
+const groupOf = (r: OpenAttention) => (r.answerable ? "answer" : "terminal");
 
 export function Inbox() {
+  const store = useStore();
   const all = useOpenAttentions();
   const labels = useLabels();
+  const hidden = useHidden();
   const [label, setLabelFilter] = useState<LabelFilter>("");
-  const rows = useMemo(() => all.filter((r) => labelPasses(labels, r.session.key, label)), [all, labels, label]);
+  const rows = useMemo(
+    () =>
+      all.filter(
+        (r) =>
+          labelPasses(labels, r.session.key, label) &&
+          !isHidden(hidden, attentionKey(r.session.key, r.attention.attentionId), r.attention.at),
+      ),
+    [all, labels, label, hidden],
+  );
   const { machines, snapshotAt, connection } = useAppState();
-  const answer = useMemo(() => rows.filter((r) => r.answerable), [rows]);
-  const terminal = useMemo(() => rows.filter((r) => !r.answerable), [rows]);
+  // Answerable first, then the ones waiting in a terminal; held still while read.
+  const sorted = useMemo(() => [...rows.filter((r) => r.answerable), ...rows.filter((r) => !r.answerable)], [rows]);
+  const listRef = useRef<HTMLDivElement>(null);
+  const hold = useListHold(listRef);
+  const heldAll = useHeldOrder(sorted, rowKey, hold, groupOf);
+  // A prompt the person hid leaves at once, held or not.
+  const held = heldAll.filter(
+    (h) =>
+      !(
+        h.gone && isHidden(hidden, attentionKey(h.item.session.key, h.item.attention.attentionId), h.item.attention.at)
+      ),
+  );
+  useFlip(listRef);
+  const answer = useMemo(() => held.filter((h) => h.group === "answer"), [held]);
+  const terminal = useMemo(() => held.filter((h) => h.group === "terminal"), [held]);
   const ordered = useMemo(() => [...answer, ...terminal], [answer, terminal]);
-  const hrefs = useMemo(() => ordered.map((r) => sessionPath(r.session.harness, r.session.id)), [ordered]);
-  const keys = useMemo(() => ordered.map((r) => r.session.key), [ordered]);
-  const { cursor } = useListNav(hrefs, true, keys);
+  const hrefs = useMemo(() => ordered.map((h) => sessionPath(h.item.session.harness, h.item.session.id)), [ordered]);
+  const keys = useMemo(() => ordered.map((h) => h.item.session.key), [ordered]);
+  const clearRef = useRef<() => boolean>(() => false);
+  clearRef.current = () => {
+    if (!label) return false;
+    setLabelFilter("");
+    return true;
+  };
+  const { cursor } = useListNav(hrefs, true, keys, { peek: "inbox.peek", clear: () => clearRef.current(), store });
   // ⌥⌘1 … ⌥⌘7 label the session under the cursor, ⌥⌘0 clears it.
   useLabelKeys(() => (keys[cursor] ? [keys[cursor]!] : []));
   // The tier lens: attention messages and tool names travel at tier 1 (lib/tier.ts).
@@ -63,7 +105,7 @@ export function Inbox() {
       return next;
     });
   }, []);
-  const said = [...new Set(answer.map((r) => reasons[rowKey(r)]).filter((x): x is string => !!x))];
+  const said = [...new Set(answer.map((h) => reasons[h.key]).filter((x): x is string => !!x))];
 
   const bgMenu = useBackgroundMenu(
     () => [
@@ -92,19 +134,22 @@ export function Inbox() {
     .filter(Boolean)
     .join(" · ");
 
-  const group = (title: string, list: OpenAttention[], offset: number) =>
+  const group = (title: string, list: Held<OpenAttention>[], offset: number) =>
     list.length > 0 && (
       <section className="group inbox-group" aria-label={title}>
         <h2 className="group-head">
           {title}
-          <span className="group-count num">{list.length}</span>
+          <span key={list.length} className="group-count num">
+            {list.length}
+          </span>
         </h2>
         <ol className="inbox-rows">
-          {list.map((r, i) => (
+          {list.map((h, i) => (
             <InboxRow
-              key={rowKey(r)}
-              row={r}
-              control={r.session.machine ? machines.get(r.session.machine)?.control : undefined}
+              key={h.key}
+              row={h.item}
+              gone={h.gone}
+              control={h.item.session.machine ? machines.get(h.item.session.machine)?.control : undefined}
               cursor={offset + i === cursor ? cursor : undefined}
               lens={lens}
               report={report}
@@ -114,12 +159,7 @@ export function Inbox() {
       </section>
     );
 
-  const blocked =
-    notify.permission === "denied"
-      ? "Notifications are blocked for this site in the browser's settings."
-      : notify.permission === "unsupported"
-        ? "Notifications are not available in this browser."
-        : null;
+  const blocked = notify.permission === "denied" || notify.permission === "unsupported";
 
   return (
     <div className="page inbox" ref={page} {...bgMenu}>
@@ -130,18 +170,15 @@ export function Inbox() {
         tools={<LabelChip value={label} onChange={setLabelFilter} />}
         actions={
           <>
-            <NotifyToggle compact />
-            <Link to="/settings?section=notifications" className="btn btn--ghost btn--sm inbox-link">
-              Sounds
-            </Link>
             <LensChip />
+            <NotifyMenu />
             <ComposeButton className="compose-btn--phone" />
           </>
         }
       />
       {(blocked || said.length > 0 || hiddenByLens > 0) && (
         <div className="inbox-notes">
-          {blocked && <p className="page-note notify-hint">{blocked}</p>}
+          <NotifyBlocked permission={notify.permission} />
           {said.map((r) => (
             <p key={r} className="page-note inbox-reason">
               Allow and Deny are off: {r}.
@@ -158,42 +195,47 @@ export function Inbox() {
             ))}
           </div>
         ) : (
-          <div className="state">
-            <p className="state-title">No connection to the receiver</p>
-            <p className="state-text">Prompts show up here as soon as the stream is back.</p>
-          </div>
+          <EmptyState center title="No connection to the receiver">
+            Prompts show up here as soon as the stream is back.
+          </EmptyState>
         )
-      ) : rows.length === 0 && label ? (
-        <div className="state">
-          <p className="state-title">Nothing with this label needs you</p>
-          <p className="state-text">Prompts from sessions with other labels are hidden.</p>
-          <button type="button" className="btn" onClick={() => setLabelFilter("")}>
-            Show all labels
-          </button>
-        </div>
-      ) : rows.length === 0 ? (
-        <div className="state inbox-empty">
-          <p className="state-title">Nothing needs you</p>
-          <p className="state-text">Prompts, questions and errors from every session land here.</p>
-        </div>
-      ) : (
-        <div className="inbox-list">
-          {group("Needs an answer", answer, 0)}
-          {group("Waiting in a terminal", terminal, answer.length)}
-        </div>
-      )}
+      ) : held.length === 0 && label ? (
+        <EmptyState
+          center
+          title="Nothing with this label needs you"
+          actions={
+            <button type="button" className="btn" onClick={() => setLabelFilter("")}>
+              Show all labels
+            </button>
+          }
+        >
+          Prompts from sessions with other labels are hidden.
+        </EmptyState>
+      ) : held.length === 0 ? (
+        <EmptyState center className="inbox-empty" title="Nothing needs you">
+          Prompts and permissions from any machine land here. Allow and Deny from this page, or from your phone.
+        </EmptyState>
+      ) : null}
+      {/* Always there once loaded, so a first prompt is a new row to useFlip (its entrance). */}
+      <div className="inbox-list" ref={listRef} hidden={held.length === 0 || undefined}>
+        {group("Needs an answer", answer, 0)}
+        {group("Waiting in a terminal", terminal, answer.length)}
+      </div>
     </div>
   );
 }
 
 function InboxRow({
   row,
+  gone = false,
   control,
   cursor,
   lens = null,
   report,
 }: {
   row: OpenAttention;
+  /** Cleared while the list held still: faded and inert until the hand leaves. */
+  gone?: boolean;
   control?: MachineControl;
   cursor?: number;
   lens?: Lens;
@@ -213,28 +255,45 @@ function InboxRow({
       ...sessionItems(s, {
         store,
         surface: "list",
-        extra: [copyItem("Copy message", raw.message)],
+        extra: [
+          copyItem("Copy message", raw.message),
+          // Off this device's inbox until the prompt changes; "Hidden · Undo".
+          !row.answerable && {
+            label: "Hide this prompt",
+            run: () => hide(attentionKey(s.key, raw.attentionId), raw.at, { title: sessionTitle(s), session: s.key }),
+          },
+        ],
       }),
     ],
     { title: () => sessionMenuTitle(s), subtitle: () => sessionMenuSubtitle(s) },
   );
   const kind = ATTENTION_LABEL[a.kind] ?? a.kind;
+  // A phone's swipes: trailing hides this prompt here (Undo), leading labels its session.
+  // Allow and Deny are never a swipe: they are signed, and final.
+  useSwipe(ref, {
+    lead: () => openMenu(labelItems(store, [s.key]), ref.current!, { source: "touch", title: "Label" }),
+    trail: () => hide(attentionKey(s.key, raw.attentionId), raw.at, { title: sessionTitle(s), session: s.key }),
+  });
   return (
     <li
       ref={ref}
       className={`inbox-row ${row.answerable ? "inbox-row--answerable" : "inbox-row--terminal"}`}
       data-attention={a.attentionId}
       data-session={s.key}
+      data-flip={rowKey(row)}
+      data-gone={gone ? "" : undefined}
       data-cursor={cursor !== undefined ? String(cursor) : undefined}
       aria-current={cursor !== undefined ? "true" : undefined}
       {...menu}
     >
+      <SwipePanes lead="Label" trail="Hide" />
       <button
         type="button"
         className="inbox-main"
         data-nav-item=""
         onClick={(e) => open(e.metaKey || e.ctrlKey)}
         title="Open the session beside this page"
+        {...prefetchProps(store, s)}
       >
         <span className="inbox-lead">
           <StateDot state={row.answerable ? "needs_you" : s.state} decorative />
@@ -260,10 +319,9 @@ function InboxRow({
           {s.machine && <span className="inbox-machine">{s.machine}</span>}
         </span>
       </button>
-      {row.answerable ? (
+      {/* A prompt in a terminal has nothing to press here; its section says where it waits. */}
+      {row.answerable && (
         <Answer row={row} control={control} focused={cursor !== undefined} into={answerMenu} report={report} />
-      ) : (
-        <span className="inbox-answer inbox-answer--terminal">In the terminal</span>
       )}
     </li>
   );

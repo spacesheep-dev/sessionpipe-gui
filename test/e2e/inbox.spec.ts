@@ -2,9 +2,10 @@
 /// <reference lib="dom" />
 // The inbox: the demo's permission prompts appear as rows (Allow disabled with the
 // unpaired reason, since no demo machine is paired), leave when the demo clears them, and
-// count in the tab title's "(n)" and the nav badge. Notifications: the "Notify me" switch
-// asks the browser once and persists; a new prompt notifies a background tab. The browser's
-// Notification is mocked, since Chromium would never grant it here.
+// count in the tab title's "(n)" and the nav badge. Notifications: the "Notify me" switch,
+// behind the bell in the page bar, asks the browser once and persists; a new prompt
+// notifies a background tab. The browser's Notification is mocked, since Chromium would
+// never grant it here.
 import { expect, type Page, test } from "@playwright/test";
 import { openPage } from "./helpers.js";
 
@@ -50,6 +51,14 @@ const mockNotifications = (page: Page, opts: { permission?: string; focused?: bo
 
 /** Reads the first answerable row in one go (it may vanish any moment: the demo's windows
  *  last about two seconds), or null when there is none yet. */
+/** The bell's popover in the page bar, opened. */
+const bell = async (page: Page) => {
+  const head = page.locator(".inbox-head");
+  const btn = head.getByRole("button", { name: "Notifications" });
+  if ((await btn.getAttribute("aria-expanded")) !== "true") await btn.click();
+  return head.getByRole("dialog", { name: "Notifications" });
+};
+
 const readRow = async (page: Page) => {
   const row = page.locator(".inbox-row--answerable").first();
   if ((await row.count()) === 0) return null;
@@ -155,6 +164,7 @@ test.describe("inbox", () => {
     await mockNotifications(page);
     await openPage(page, "/inbox");
     const toggle = page.locator(".inbox-head").getByRole("switch", { name: "Notify me" });
+    await bell(page);
     await expect(toggle).toHaveAttribute("aria-checked", "false");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "true");
@@ -163,11 +173,12 @@ test.describe("inbox", () => {
 
     await page.reload();
     await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    await bell(page);
     await expect(toggle).toHaveAttribute("aria-checked", "true");
     // Granted already: turning it on again asks nothing; the Settings dialog's Notifications
     // section (where the header's "Sounds" link goes) shows the same switch.
     expect(await page.evaluate(() => window.__permissionRequests)).toBe(0);
-    await page.locator(".inbox-head").getByRole("link", { name: "Sounds" }).click();
+    await (await bell(page)).getByRole("link", { name: "Sounds" }).click();
     await expect(page).toHaveURL(/\/settings\?section=notifications$/);
     const st = page.locator(".ntf").getByRole("switch", { name: "Notify me" });
     await expect(st).toHaveAttribute("aria-checked", "true");
@@ -175,16 +186,21 @@ test.describe("inbox", () => {
     await expect(st).toHaveAttribute("aria-checked", "false");
     expect(await page.evaluate(() => localStorage.getItem("sessionpipe-gui.notify"))).toBeNull();
     await openPage(page, "/inbox");
+    await bell(page);
     await expect(toggle).toHaveAttribute("aria-checked", "false");
   });
 
   test("a blocked permission keeps the switch off and says why", async ({ page }) => {
     await mockNotifications(page, { permission: "denied" });
     await openPage(page, "/inbox");
+    // Said once under the page bar, as a condition with its way out, not beside the switch.
+    const notice = page.locator(".page.inbox > .inbox-notes .notify-hint");
+    await expect(notice).toContainText("Notifications are off for this site");
+    await notice.getByRole("button", { name: "How to allow" }).click();
+    await expect(notice).toContainText("set Notifications to Allow");
     const toggle = page.locator(".inbox-head").getByRole("switch", { name: "Notify me" });
+    await bell(page);
     await expect(toggle).toBeDisabled();
-    // Said once under the page bar, as a condition, not beside the switch.
-    await expect(page.locator(".page.inbox .notify-hint")).toHaveText(/blocked/);
   });
 
   test("a new prompt notifies a background tab, and the notification opens the inbox", async ({ page }) => {

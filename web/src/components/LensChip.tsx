@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-// The tier lens, app-wide: a toolbar chip at the top right of the page ("All tiers",
-// "Tier 1"), worded like the machine and harness filters beside it. A click cycles all → 0 → 1 → 2 → 3 → all, `l` does the same from anywhere;
-// a click held for a moment (or a right click) opens the picker, the same segmented
-// control the Session page has, with every tier's name. Hidden in Simple mode, where the
-// lens is always "all". Each page says what the lens took away ("tier 1 lens · 4 hidden")
-// through <LensNote>, with a reset.
+// The tier lens, app-wide: a toolbar pop-up at the top right of the page ("All tiers",
+// "Tier 1") that opens a menu like the machine and harness filters beside it, each tier
+// with what it keeps; `l` steps through them from anywhere. It holds one width whatever
+// it says, so the search beside it never moves. Hidden in Simple mode, where the lens is
+// always "all". Each page says what the lens took away in plain words ("Showing presence
+// only · 16 hidden · Show all") through <LensNote>.
 import type { Tier } from "@shared/api";
-import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
-import { cycleLens, LENSES, type Lens, lensLabel, setTierLens, useAppSettings } from "../lib/settings";
+import { useEffect, useRef, useState } from "react";
+import { LENSES, type Lens, lensLabel, setTierLens, useAppSettings } from "../lib/settings";
 import { TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { Segmented } from "./bits";
-
-const HOLD_MS = 450;
+import { type MenuList, openMenu, useMenuOpen } from "./ContextMenu";
 
 export const LENS_OPTIONS = LENSES.map((l) => ({
   value: l === null ? "all" : String(l),
@@ -34,102 +33,95 @@ export function LensPicker({ label = "Tier lens" }: { label?: string }) {
   );
 }
 
+const chipText = (l: Lens) => (l === null ? "All tiers" : `Tier ${l}`);
+const cap = (s: string) => s[0]!.toUpperCase() + s.slice(1);
+
+/** The lens menu: every tier with the name of what it keeps, the current one checked. */
+export function lensItems(current: Lens): MenuList {
+  return [
+    { heading: "Tier lens" },
+    ...LENSES.map((l) => ({
+      label: l === null ? "All tiers" : `Tier ${l} · ${cap(TIER_LABEL[l])}`,
+      radio: true,
+      checked: l === current,
+      run: () => setTierLens(l),
+    })),
+  ];
+}
+
 export function LensChip() {
   const { tierLens, mode } = useAppSettings();
+  const btn = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const wrap = useRef<HTMLDivElement>(null);
-  const hold = useRef<number | null>(null);
-  const held = useRef(false);
-
+  const menuUp = useMenuOpen();
   useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent | TouchEvent) => {
-      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("touchstart", onDown, { passive: true });
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("touchstart", onDown);
-    };
-  }, [open]);
-
+    if (!menuUp) setOpen(false);
+  }, [menuUp]);
   if (mode === "simple") return null;
-
-  const clearHold = () => {
-    if (hold.current !== null) window.clearTimeout(hold.current);
-    hold.current = null;
+  const show = (keyboard: boolean) => {
+    const el = btn.current;
+    if (!el) return;
+    openMenu(lensItems(tierLens), el, { source: keyboard ? "keyboard" : "mouse", invoker: el, title: "Tier lens" });
+    setOpen(true);
   };
-  const onPointerDown = (e: ReactPointerEvent) => {
-    if (e.button !== 0) return;
-    held.current = false;
-    clearHold();
-    hold.current = window.setTimeout(() => {
-      held.current = true;
-      setOpen(true);
-    }, HOLD_MS);
-  };
-  const onClick = () => {
-    clearHold();
-    if (held.current) {
-      held.current = false;
-      return;
-    }
-    if (open) setOpen(false);
-    else cycleLens();
-  };
-
   return (
-    <div className={`lens-chip ${tierLens !== null ? "lens-chip--on" : ""}`} ref={wrap} data-lens={lensLabel(tierLens)}>
+    <div className={`lens-chip ${tierLens !== null ? "lens-chip--on" : ""}`} data-lens={lensLabel(tierLens)}>
       <button
+        ref={btn}
         type="button"
         className="lens-chip-btn num"
-        onPointerDown={onPointerDown}
-        onPointerUp={clearHold}
-        onPointerLeave={clearHold}
-        onPointerCancel={clearHold}
-        onClick={onClick}
-        onContextMenu={(e) => {
+        onClick={(e) => show(e.detail === 0)}
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowDown") return;
           e.preventDefault();
-          clearHold();
-          setOpen(true);
+          show(true);
         }}
-        aria-label={`Tier lens: ${lensLabel(tierLens)}. Click to cycle, hold to pick`}
-        title={`Tier lens · ${tierLens === null ? "everything" : TIER_LABEL[tierLens]} · click cycles, hold picks, l`}
-        aria-haspopup="dialog"
+        aria-label={`Tier lens: ${chipText(tierLens)}`}
+        title={tierLens === null ? "Everything that arrived" : `${cap(TIER_LABEL[tierLens])}: ${TIER_HINT[tierLens]}`}
+        data-tip="Tier lens"
+        data-tip-keys="L"
+        aria-haspopup="menu"
         aria-expanded={open}
       >
-        {tierLens === null ? "All tiers" : `Tier ${tierLens}`}
+        {/* Every label stacked in one cell: the widest sets the width, so "All tiers" →
+            "Tier 0" never moves its neighbours. */}
+        <span className="lens-chip-text">
+          {LENSES.map((l) => (
+            <span key={lensLabel(l)} aria-hidden={l !== tierLens || undefined} data-on={l === tierLens || undefined}>
+              {chipText(l)}
+            </span>
+          ))}
+        </span>
+        <svg className="lens-chip-caret" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+          <path
+            d="M3 4.5 6 7.5l3-3"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
       </button>
-      {open && (
-        <div className="lens-pop" role="dialog" aria-label="Tier lens">
-          <div className="qs-row">
-            <span className="qs-label">Tier lens</span>
-            <LensPicker />
-            <p className="qs-note">
-              {tierLens === null ? "Everything that arrived." : `${TIER_LABEL[tierLens]} · ${TIER_HINT[tierLens]}`}
-            </p>
-          </div>
-          <button type="button" className="btn btn--sm btn--ghost qs-close" onClick={() => setOpen(false)} data-dismiss>
-            Close
-          </button>
-        </div>
-      )}
     </div>
   );
 }
 
-/** "tier 1 lens · 4 hidden · show all": one quiet line a page shows while its lens hides
- *  something. Nothing when the lens is off or nothing was hidden. */
+/** What the lens keeps, said plainly ("presence only", "presence and actions"). */
+export const lensWords = (l: Tier): string =>
+  l === 0 ? "presence only" : l === 1 ? "presence and actions" : l === 2 ? "everything but tool output" : "everything";
+
+/** "Showing presence only · 16 hidden · Show all": one quiet line a page shows while its
+ *  lens hides something. Nothing when the lens is off or nothing was hidden. */
 export function LensNote({ lens, hidden }: { lens: Lens; hidden: number }) {
   if (lens === null || hidden <= 0) return null;
   return (
     <p className="lens-note" data-lens-note>
       <span>
-        tier {lens} lens · {hidden} hidden
+        Showing {lensWords(lens)} · <span className="num">{hidden}</span> hidden
       </span>
-      <button type="button" className="lens-note-reset" onClick={() => setTierLens(null)}>
-        show all
+      <button type="button" className="btn btn--sm btn--ghost lens-note-reset" onClick={() => setTierLens(null)}>
+        Show all
       </button>
     </p>
   );

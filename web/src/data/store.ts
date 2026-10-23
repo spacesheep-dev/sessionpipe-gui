@@ -110,6 +110,14 @@ export class Store {
     this.stop = null;
   }
 
+  /** "Retry now": drop the backoff and open the stream again at once. The rows stay as
+   *  they were until the fresh snapshot lands. */
+  reconnect() {
+    this.close();
+    this.set({ connection: "connecting", retryAt: null });
+    this.start();
+  }
+
   private set(patch: Partial<AppState>) {
     this.state = { ...this.state, ...patch, version: this.state.version + 1 };
     for (const l of this.listeners) l();

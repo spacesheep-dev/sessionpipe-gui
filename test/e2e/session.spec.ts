@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
-// One session: the timeline, the tier lens, follow, back, and Forget.
+// One session: the timeline, the tier lens (in "⋯", and its line while it hides
+// something), follow (in "⋯"), back, and Forget (in "⋯").
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
-import { EVENTS, INFO, openBoard, sessionUrl, ulid } from "./helpers.js";
+import { EVENTS, INFO, openBoard, sessionUrl, tier1Batch, ulid } from "./helpers.js";
 
 /** Opens the first working card from the board and returns its href. */
 async function openWorking(page: Page): Promise<string> {
@@ -20,6 +21,9 @@ async function openWorking(page: Page): Promise<string> {
 
 const lens = (page: Page, tier: 0 | 1 | 2 | 3) =>
   page.locator(".lens fieldset.seg label.seg-opt").filter({ hasText: new RegExp(`^${tier}$`) });
+
+/** The session bar's "⋯". */
+const more = (page: Page) => page.locator(".sess-bar").getByRole("button", { name: "More actions" });
 
 /** A long tier-1 session: `turns` prompts, each with two tools, sent in batches of 50. */
 async function postLongSession(
@@ -95,12 +99,16 @@ test.describe("session page", () => {
     expect(body.total).toBe(long.total);
     expect(body.hasOlder).toBe(true);
     await expect(page.locator("h1.sess-title")).toHaveText(long.title);
-    await expect(page.locator(".sess-counts-ev")).toHaveText(`${long.total} events`);
+    // The bar's meta is where it runs; the count is its tooltip's (and a data attribute).
+    await expect(page.locator(".sess-where")).toHaveAttribute("data-events", String(long.total));
 
-    // The last turn is on screen and the page sits at the bottom.
+    // The last turn is on screen and the page sits at the bottom. Its end is the head's
+    // duration, not a row of its own.
     const lastTurn = page.locator("ol.timeline li.turn").last();
     await expect(lastTurn.locator(".turn-n")).toHaveText(`Turn ${long.turns}`);
-    await expect(lastTurn.locator(".marker--end")).toBeInViewport();
+    await expect(lastTurn.locator("li.tool").last()).toBeInViewport();
+    await expect(lastTurn.locator(".marker--end")).toHaveCount(0);
+    await expect(lastTurn.locator(".turn-dur")).toHaveText("5 s");
     const s1 = await scrollState(page);
     expect(s1.max).toBeGreaterThan(200);
     expect(s1.top, "scrollTop near its maximum").toBeGreaterThanOrEqual(s1.max - 4);
@@ -124,16 +132,17 @@ test.describe("session page", () => {
       .filter({ has: page.locator(".turn-n", { hasText: new RegExp(`^${anchorLabel}$`) }) });
     const yAfter = (await sameTurn.locator(".turn-head").boundingBox())!.y;
     expect(Math.abs(yAfter - yBefore), "the anchored turn did not move").toBeLessThanOrEqual(2);
-    await expect(page.locator(".sess-counts-ev")).toHaveText(`${long.total} events`);
+    await expect(page.locator(".sess-where")).toHaveAttribute("data-events", String(long.total));
   });
 
   test("shows the timeline with turns and tool rows; the tier lens hides and reveals", async ({ page }) => {
     await openWorking(page);
     await expect(page.locator("ol.timeline li.turn").first()).toBeVisible();
     await expect(page.locator("li.tool").first()).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator(".sess-counts-ev")).toHaveText(/^[1-9]\d* events$/);
-    // Lens 3 (default for a tier-3 session): tool rows expand to input and output.
-    await expect(lens(page, 3)).toHaveClass(/seg-on/);
+    await expect(page.locator(".sess-where")).toHaveAttribute("data-events", /^[1-9]\d*$/);
+    // Everything (the default): no lens line over the timeline; tool rows expand to input
+    // and output.
+    await expect(page.locator(".sess-lens")).toHaveCount(0);
     const expandable = page.locator("li.tool.tool--x details");
     await expect(expandable.first()).toBeVisible();
     const first = expandable.first();
@@ -142,8 +151,10 @@ test.describe("session page", () => {
     await expect(first.locator(".tool-io .tool-io-label").first()).toHaveText(/^(Input|Output|Error)$/);
     await expect(first.locator(".tool-io pre").first()).toBeVisible();
 
-    // Lens 0: presence only, no tool rows; the hint says how many were hidden.
-    await lens(page, 0).click();
+    // Lens 0 from "⋯": presence only, no tool rows; its line says how many were hidden.
+    await more(page).click();
+    await page.getByRole("menuitem", { name: "Tier lens" }).click();
+    await page.getByRole("menuitemradio", { name: /^0 · Presence/ }).click();
     await expect(lens(page, 0)).toHaveClass(/seg-on/);
     await expect(page.locator("li.tool")).toHaveCount(0);
     await expect(page.locator(".lens-hint")).toHaveText(/Presence · \d+ hidden/);
@@ -160,25 +171,39 @@ test.describe("session page", () => {
     );
     // Whatever opens at tier 1 holds the error alone: no input, no output.
     await expect(page.locator("li.tool .tool-io-label", { hasNotText: /^Error$/ })).toHaveCount(0);
+    // Show all puts the lens back to everything, and its line goes.
+    await page.locator(".sess-lens").getByRole("button", { name: "Show all" }).click();
+    await expect(page.locator(".sess-lens")).toHaveCount(0);
   });
 
-  test("follow toggles and back returns to the board", async ({ page }) => {
-    await openWorking(page);
-    const follow = page.getByRole("button", { name: /^Follow(ing)?$/ });
-    if (await follow.isVisible()) {
-      await expect(follow).toHaveAttribute("aria-pressed", "true");
-      await follow.click();
-      await expect(follow).toHaveAttribute("aria-pressed", "false");
-      await expect(follow).toHaveText("Follow");
-      await follow.click();
-      await expect(follow).toHaveAttribute("aria-pressed", "true");
-      await expect(follow).toHaveText("Following");
-    } else {
-      test.info().annotations.push({
-        type: "note",
-        description: "the session had already gone idle, so the Follow button (live sessions only) was not shown",
-      });
-    }
+  test("follow toggles from the menu and back returns to the board", async ({ page, request }) => {
+    // A turn of the suite's own that stays open: Follow is for live sessions only, and the
+    // demo's working ones can end between the menu's three openings.
+    const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+    const b = tier1Batch({ title: `E2E follow ${randomUUID().slice(0, 8)}` });
+    const res = await request.post(EVENTS, {
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${sinkToken}`,
+        "sessionpipe-protocol": "1",
+      },
+      data: { events: b.events.slice(0, 2) },
+    });
+    expect(res.status()).toBe(202);
+    await openBoard(page);
+    const href = sessionUrl(b.harness, b.sessionId);
+    await page.locator(`a.card-link[href="${href}"]`).click();
+    await expect(page).toHaveURL(href);
+    await more(page).click();
+    const follow = page.getByRole("menuitemcheckbox", { name: /Follow the live turn/ });
+    await expect(follow).toHaveAttribute("aria-checked", "true");
+    await follow.click();
+    await more(page).click();
+    await expect(follow).toHaveAttribute("aria-checked", "false");
+    await follow.click();
+    await more(page).click();
+    await expect(follow).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Back" }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator("section.group").first()).toBeVisible();
@@ -197,15 +222,18 @@ test.describe("session page", () => {
     await page.locator(`a.card-link[href="${href}"]`).click();
     await expect(page).toHaveURL(href);
 
-    await page.getByRole("button", { name: "Forget" }).click();
-    const dialog = page.getByRole("alertdialog", { name: "Forget this session?" });
+    // Forget is the last item of "⋯", on its own, and it asks first.
+    await more(page).click();
+    await page.getByRole("menuitem", { name: "Forget…" }).click();
+    const dialog = page.getByRole("alertdialog", { name: /^Forget “.+”\?$/ });
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText("Delete everything held for this session here?");
+    await expect(dialog).toContainText("It leaves the board and the feed here.");
     await dialog.getByRole("button", { name: "Cancel" }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page).toHaveURL(href);
 
-    await page.getByRole("button", { name: "Forget" }).click();
+    await more(page).click();
+    await page.getByRole("menuitem", { name: "Forget…" }).click();
     const [res] = await Promise.all([
       page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith("/forget")),
       page.getByRole("alertdialog").getByRole("button", { name: "Forget" }).click(),

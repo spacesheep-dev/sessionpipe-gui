@@ -11,8 +11,9 @@
 .lens-chip-btn {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   height: var(--control);
-  padding: 0 8px;
+  padding: 0 6px 0 8px;
   border-radius: var(--radius);
   background: transparent;
   color: var(--fg-2);
@@ -43,35 +44,30 @@
 .toolbar > .filters {
   order: 3;
 }
-.lens-pop {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: var(--z-pop);
-  width: min(300px, calc(100vw - 24px));
-  padding: 12px;
-  border-radius: var(--radius-pop);
-  border: var(--hairline) solid var(--line);
-  background: var(--bg-2);
-  box-shadow: var(--shadow-pop);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  animation: rise var(--dur) var(--ease-out) both;
+/* Every label in one grid cell: the widest one sets the width; only the current shows. */
+.lens-chip-text {
+  display: inline-grid;
 }
-/* The one line a page shows while the lens hides something. */
+.lens-chip-text > span {
+  grid-area: 1 / 1;
+  visibility: hidden;
+}
+.lens-chip-text > span[data-on] {
+  visibility: visible;
+}
+.lens-chip-caret {
+  color: var(--fg-3);
+}
+/* The one line a page shows while the lens hides something, its way out a quiet button. */
 .lens-note {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: var(--control);
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
 .lens-note-reset {
   color: var(--fg-2);
-  font-size: var(--text-sm);
   font-weight: 500;
-}
-.lens-note-reset:hover {
-  color: var(--fg);
 }

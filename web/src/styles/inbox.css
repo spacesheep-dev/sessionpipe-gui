@@ -18,6 +18,9 @@
   margin: 0 -12px;
   container: inbox / inline-size;
 }
+.inbox-list[hidden] {
+  display: none;
+}
 .inbox-rows {
   list-style: none;
   margin: 0;
@@ -57,9 +60,15 @@
   background: var(--press);
   transition: none;
 }
-.inbox-row:has(.inbox-main:focus-visible) {
-  outline: var(--focus-width) solid var(--focus);
-  outline-offset: -2px;
+/* The keyboard cursor: the selection fill and the shared hairline focus edge, on the
+   row (shared.css `[data-nav-item]:focus-visible`), never a 2 px ring. */
+.inbox-main:focus-visible {
+  background: none;
+  box-shadow: none;
+}
+.inbox-row:has(> .inbox-main:focus-visible) {
+  background: var(--sel);
+  box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklch, var(--focus) 60%, transparent);
 }
 .inbox-row:is(:hover, [aria-current="true"])::before,
 .inbox-row:is(:hover, [aria-current="true"]) + .inbox-row::before {
@@ -115,6 +124,8 @@
 .inbox-age {
   grid-area: age;
   justify-self: end;
+  min-width: var(--meta-col);
+  text-align: right;
   margin-left: 12px;
   color: var(--fg-3);
   font-size: var(--text-sm);
@@ -172,15 +183,35 @@
   color: var(--fg-4);
 }
 
-/* The trailing slot: Deny then Allow (the primary on the right, as in a macOS alert),
-   always reserving its room so the row never moves when they fade in. */
+/* Deny then Allow (the primary on the right, as in a macOS alert). With a pointer they
+   take the place of the time and machine while the row is hovered or selected, as Mail's
+   row actions do, so the right column ends where the board's does (the 36 px the board
+   keeps for "Open beside"); on touch they sit on the row, always there. */
 .inbox-answer {
   flex: none;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  min-width: 132px;
+}
+@media (hover: hover) {
+  .inbox-main {
+    padding-right: 28px;
+  }
+  .inbox-answer {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 36px;
+    pointer-events: none;
+  }
+  .inbox-row:is(:hover, [aria-current="true"], :focus-within) .inbox-answer {
+    pointer-events: auto;
+  }
+  .inbox-row--answerable:is(:hover, [aria-current="true"], :focus-within):has(.inbox-answer .btn)
+    :is(.inbox-age, .inbox-where) {
+    visibility: hidden;
+  }
 }
 .inbox-answer .btn {
   opacity: 0;
@@ -210,23 +241,56 @@
   white-space: normal;
 }
 
-/* "Notify me" (components/NotifyToggle.tsx): the switch and its name, in the page bar. */
+/* "Notify me" (components/NotifyToggle.tsx): the switch, its name and one line of what
+   it does, inside the bell's popover. */
 .notify {
-  display: inline-flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 4px 8px;
-  color: var(--fg-2);
+  gap: 4px 10px;
+  color: var(--fg);
   font-size: var(--text-sm);
 }
-.notify-hint {
+.notify-text {
+  font-weight: 500;
+}
+.notify .notify-hint {
+  grid-column: 2;
   color: var(--fg-3);
+  line-height: var(--lh);
 }
-.inbox-head .notify {
-  margin-right: 4px;
+/* The bell and its popover, under the bar's right edge. */
+.notify-menu {
+  position: relative;
 }
-.inbox-link {
-  color: var(--fg-2);
+.notify-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: var(--z-pop);
+  width: min(300px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-pop);
+  border: var(--hairline) solid var(--line);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-pop);
+  animation: rise var(--dur) var(--ease-out) both;
+}
+.notify-pop-foot {
+  display: flex;
+  justify-content: flex-start;
+  margin: 0 -4px -4px 42px;
+}
+/* Notifications off for the site: the condition once, its steps behind its button. */
+.notify-how {
+  margin: 6px 0 0 12px;
+  max-width: 60ch;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
 }
 
 /* Touch: the buttons are always there, at their full size; a narrow column moves them
@@ -251,10 +315,12 @@
     padding-bottom: 0;
   }
   .inbox-answer {
+    position: static;
     width: 100%;
     min-width: 0;
     justify-content: flex-start;
     padding: 0 0 12px 36px;
+    pointer-events: auto;
   }
   .inbox-answer:empty {
     display: none;

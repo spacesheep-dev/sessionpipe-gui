@@ -3,7 +3,7 @@
 // own detail ends the sentence it is quoted in, once, whatever punctuation it came with.
 import type { ControlActivity } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { startFailureWords } from "./words";
+import { harnessCommand, sentLine, startFailureWords } from "./words";
 
 const start = (over: Partial<ControlActivity>): ControlActivity => ({
   id: "c1",
@@ -39,5 +39,26 @@ describe("startFailureWords", () => {
   it("has nothing to say while the start is on its way or after it started", () => {
     expect(startFailureWords(start({}), "studio-mac", "Claude Code")).toBeNull();
     expect(startFailureWords(start({ outcome: "delivered" }), "studio-mac", "Claude Code")).toBeNull();
+  });
+});
+
+describe("sentLine", () => {
+  const o = { machine: "studio-mac", online: true, command: "claude" };
+  it("follows a start's acks in words, and says Running once the agent is at it", () => {
+    expect(sentLine(start({}), o)).toEqual({ text: "Sent to studio-mac", running: false });
+    expect(sentLine(start({}), { ...o, online: false })?.text).toBe(
+      "Waiting for studio-mac. It starts when the machine is back.",
+    );
+    expect(sentLine(start({ outcome: "taken" }), o)).toEqual({
+      text: "Starting claude on studio-mac…",
+      running: false,
+    });
+    expect(sentLine(start({ outcome: "taken", reply: "Reading…" }), o)).toEqual({ text: "Running", running: true });
+    expect(sentLine(start({ outcome: "refused", code: "folder" }), o)).toBeNull();
+  });
+
+  it("names the command a harness runs as, and keeps the label of one without", () => {
+    expect(harnessCommand("claude-code", "Claude Code")).toBe("claude");
+    expect(harnessCommand("antigravity", "Antigravity")).toBe("Antigravity");
   });
 });

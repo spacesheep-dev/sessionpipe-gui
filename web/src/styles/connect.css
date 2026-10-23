@@ -1,12 +1,16 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* ---------- connect ---------- */
-/* The grouped form (settings.css): the QR at 160 px beside its addresses, each row a
-   name, the url in mono and a copy icon; commands in wells; the token masked with its
-   three icon buttons. The QR stays on its own light ground so a camera reads it in both
-   schemes. */
+/* The grouped form (settings.css), in a reading column centred in the window: the QR at
+   160 px beside its addresses, each row a name, the address in mono and a copy icon; the
+   sink line in a one-line well with its tier menu beside it; the rest folded to one-line
+   summaries that open in place. The QR stays on its own light ground so a camera reads
+   it in both schemes. */
 
 .connect {
   gap: 32px;
+}
+.connect > :not(.bar):not(.bar-below):not(.sr-only) {
+  margin-inline: auto;
 }
 .connect-phone {
   display: flex;
@@ -62,10 +66,6 @@
 .url-row .url-value {
   flex: 1 1 auto;
 }
-.urls-none {
-  color: var(--fg-3);
-  font-size: var(--text-sm);
-}
 .connect-remote {
   display: flex;
   flex-direction: column;
@@ -83,7 +83,7 @@
   max-width: 100%;
 }
 .connect-tier {
-  max-width: 240px;
+  max-width: 220px;
 }
 .passkeys-fp {
   font-family: var(--font-mono);
@@ -162,6 +162,7 @@
 .connect-fold > * {
   width: 100%;
   max-width: var(--measure);
+  margin-inline: auto;
 }
 .connect-fold[hidden] {
   display: none;
@@ -191,11 +192,164 @@
   .url-label {
     min-width: 0;
   }
-  .connect-phone-text .caption {
+  .connect-remote .cmdwell,
+  .sect--machine .cmdwell {
+    background: var(--bg-2);
+  }
+}
+
+/* The key is the address's tail: quiet, and the first to give way. */
+.url-key {
+  color: var(--fg-3);
+}
+/* The sink line and the tier it is sent at: one row, the menu right beside the well. */
+.connect-sink {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.connect-sink > .cmd {
+  flex: 1 1 auto;
+}
+.connect-sink > .connect-tier {
+  flex: none;
+}
+
+/* A group folded to one line (Connect.tsx Fold): the name, its state in the meta tier, a
+   chevron that turns as it opens. The row is the button: on a desktop a plain row on a
+   hairline, as a Finder disclosure is; on a phone an inset group row. The folds sit
+   close, one list of four. */
+.fold {
+  gap: 0;
+}
+.connect > .fold + .fold,
+.connect-fold > .fold:first-child,
+.connect-fold > .fold + .fold {
+  margin-top: -32px;
+}
+.connect-advanced + .connect-fold > .fold:first-child {
+  margin-top: 0;
+}
+.fold-h {
+  margin: 0;
+  font: inherit;
+}
+.fold-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  box-shadow: 0 var(--hairline) 0 var(--line);
+  text-align: left;
+}
+.sect--passkeys .fold-head {
+  box-shadow:
+    0 calc(-1 * var(--hairline)) 0 var(--line),
+    0 var(--hairline) 0 var(--line);
+}
+@media (hover: hover) {
+  .fold-head:hover .fold-sum {
+    color: var(--fg-2);
+  }
+  .fold-head:hover .fold-chev {
+    background: var(--fg-2);
+  }
+}
+.fold-head:focus-visible {
+  outline-offset: -2px;
+}
+.fold-title {
+  flex: none;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+.fold-sum {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  text-align: right;
+}
+.fold-chev {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  background: var(--fg-4);
+  -webkit-mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4.5 2.5 8 6l-3.5 3.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4.5 2.5 8 6l-3.5 3.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.fold[data-open] .fold-chev {
+  transform: rotate(90deg);
+}
+.fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fade-in var(--dur-fast) var(--ease-out);
+}
+.fold-body[hidden] {
+  display: none;
+}
+.fold[data-open] .fold-body {
+  padding: 8px 0 24px;
+}
+/* Opened, the group's rows hang from the head as one inset table. */
+.fold-body > .form-list {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  margin-top: 0;
+}
+.urls-none {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 839px) {
+  /* On a phone an address is host:port; the scheme and the key ride along in Copy. */
+  .url-scheme,
+  .url-row .url-key {
+    display: none;
+  }
+  .connect-sink {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .connect-sink > .connect-tier {
+    align-self: flex-end;
+  }
+  .fold-head,
+  .sect--passkeys .fold-head {
+    width: 100%;
+    margin: 0;
+    padding: 0 16px;
+    border-radius: var(--radius-pop);
+    box-shadow: none;
+    background: var(--bg-2);
+  }
+  .fold-head:active {
+    background: var(--press);
+  }
+  .connect > .fold + .fold,
+  .connect-fold > .fold:first-child,
+  .connect-fold > .fold + .fold {
+    margin-top: -24px;
+  }
+  .fold-body > .caption {
     padding: 0 16px;
   }
-  .connect-remote .well-row,
-  .sect--machine .well-row {
-    background: var(--bg-2);
+  .connect-phone-text .caption {
+    padding: 0 16px;
   }
 }

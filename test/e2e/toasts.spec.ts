@@ -142,6 +142,8 @@ test.describe("toasts", () => {
     await expect(card).toBeVisible();
     await expect(card).toHaveClass(/toast--needs-you/);
     await expect(card.locator(".toast-dot")).toHaveCount(1);
+    // It leads with what happened, then the session.
+    await expect(card.locator(".toast-head")).toHaveText("Needs you on e2e-box");
     await expect(card.locator(".toast-title")).toHaveText(/^Toast target/);
     await expect(card.locator(".toast-machine")).toHaveText("e2e-box");
     await expect(card.locator(".toast-label")).toHaveText("permission");
@@ -186,10 +188,46 @@ test.describe("toasts", () => {
     await expect(card).toBeVisible();
     await expect(card).toHaveAttribute("data-toast", "error");
     await expect(card.locator(".toast-dot")).toHaveCount(0);
+    await expect(card.locator(".toast-head")).toHaveText("Failed on e2e-box");
     await expect(card.locator(".toast-label")).toHaveText("error");
     await expect(card.locator(".toast-msg")).toHaveText("The turn ended with an error: rate_limit");
     await expect(card.getByRole("button", { name: "Allow" })).toHaveCount(0);
     await expect(card).toHaveCount(0, { timeout: 12_000 });
+  });
+
+  test("no banner for the session already on screen", async ({ page, request }) => {
+    const s = sink(request, await token(request), `Toast seen ${randomUUID().slice(0, 6)}`);
+    await s.start();
+    const [harness, id] = s.key.split(":");
+    await openPage(page, `/s/${harness}/${id}`);
+    await s.permission("Bash", "git status");
+    await page.waitForTimeout(1_500);
+    await expect(page.locator(`.toast[data-session="${s.key}"]`)).toHaveCount(0);
+    await s.done();
+  });
+
+  test("Hide acts at once with Undo, and Undo brings the row back", async ({ page, request }) => {
+    const s = sink(request, await token(request), `Toast hide ${randomUUID().slice(0, 6)}`);
+    await s.start();
+    await openPage(page, "/");
+    const row = page.locator(`article.card[data-flip="${s.key}"]`);
+    await expect(row).toBeVisible();
+    await row.locator("a.card-link").click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Hide" }).click();
+    const undo = page.locator('.toast[data-toast="undo"]');
+    await expect(undo).toContainText("Hidden");
+    await expect(row).toHaveCount(0);
+    await undo.getByRole("button", { name: "Undo" }).click();
+    await expect(row).toBeVisible();
+    await expect(undo).toHaveCount(0);
+    // ⌘Z / ctrl+Z does the same.
+    await row.locator("a.card-link").click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Hide" }).click();
+    await expect(row).toHaveCount(0);
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("ControlOrMeta+z");
+    await expect(row).toBeVisible();
+    await s.done();
   });
 
   test("what was already open at the first snapshot never toasts", async ({ page, request }) => {

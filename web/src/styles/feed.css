@@ -8,6 +8,46 @@
 .feed-pause {
   gap: 8px;
 }
+/* The one Filter pop-up: the toolbar chip's look (shared.css .chipsel); while it narrows
+   the feed it says to what, on the selection fill. */
+.feed-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control);
+  max-width: 260px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.feed-filter svg {
+  flex: none;
+  color: var(--fg-3);
+}
+.feed-filter-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (hover: hover) {
+  .feed-filter:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+}
+.feed-filter:active {
+  background: var(--press);
+  transition: none;
+}
+.feed-filter--on,
+.feed-filter[aria-expanded="true"] {
+  background: var(--sel);
+  color: var(--fg);
+}
 .pill-new {
   padding: 0 6px;
   border-radius: var(--radius-pill);
@@ -84,9 +124,14 @@
   background: var(--press);
   transition: none;
 }
+/* The keyboard cursor: the selection fill and the shared hairline focus edge on the row. */
+.ev-session:focus-visible {
+  background: none;
+  box-shadow: none;
+}
 .ev:has(.ev-session:focus-visible) {
-  outline: var(--focus-width) solid var(--focus);
-  outline-offset: -2px;
+  background: var(--sel);
+  box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklch, var(--focus) 60%, transparent);
 }
 .ev:is(:hover, [aria-current="true"])::before,
 .ev:is(:hover, [aria-current="true"]) + .ev::before {
@@ -135,19 +180,35 @@
   min-width: 0;
   color: var(--fg-3);
 }
+/* What happened, in words, in the UI face; an error is the one small red ✕ before it. */
 .ev-type {
   grid-area: type;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  padding-top: 1px;
-  line-height: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg-3);
-  font-size: calc(var(--text-sm) * 0.95);
 }
-.ev-type.is-err {
+.ev-err {
+  flex: none;
   color: var(--err);
+}
+/* The same session again, under the row above: its title, glyph and machine are not said
+   twice (they stay for assistive tech and the row's own hover), and no hairline divides
+   the run. */
+.ev--more .ev-session,
+.ev--more .glyph-wrap,
+.ev--more .ev-machine {
+  visibility: hidden;
+}
+.ev--more:is(:hover, [aria-current="true"], :focus-within) .ev-session {
+  visibility: visible;
+}
+.ev + .ev--more::before {
+  border-top-color: transparent;
 }
 .ev-sum {
   grid-area: sum;
@@ -200,6 +261,17 @@
   }
   .ev + .ev::before {
     left: 32px;
+  }
+  /* A run of one session on a phone: one line per event under its title. */
+  .ev--more {
+    grid-template-areas: ".     type    sum     time";
+    min-height: 32px;
+    padding-top: 0;
+  }
+  .ev--more .ev-session,
+  .ev--more .ev-machine,
+  .ev--more .glyph-wrap {
+    display: none;
   }
   .ev-time {
     justify-self: end;

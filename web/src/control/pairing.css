@@ -111,6 +111,17 @@
   flex-wrap: wrap;
   align-items: center;
 }
+/* While the passkey works: one quiet line under the buttons, which keep their place. */
+.pair-status {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+@media (max-width: 839px) {
+  .pair-actions > .btn {
+    min-height: 44px;
+  }
+}
 /* The page's body, reused inline by the setup page. */
 .pair-body {
   display: flex;

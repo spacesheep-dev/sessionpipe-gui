@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-// Machines: one grouped section per sending machine, macOS Get Info style. Its header row
-// is the status glyph, the name and "online · last event 1 m"; then key/value rows: the
-// sessions, the harness versions, the control pairing (with New session…, which opens the
-// compose sheet for that machine), its folders (each with "New session in this folder" on
-// right-click), the devices that can answer. A machine is online if an event
+// Machines: one grouped section per sending machine, macOS Get Info style, in a centred
+// reading column. Its header row is the name and "online · last event 1 m" (a quiet
+// machine alone carries a hollow ring: online is the normal case and needs no mark); then
+// key/value rows: the sessions ("9 sessions · 3 working"), the harness versions, the
+// control pairing ("Paired · safe mode", the daemon's details on hover), the sessionpipe
+// version, its folders (each with "New session in this folder" on right-click), the
+// devices that can answer. New session and Add a phone live in the machine's ⋯ and
+// right-click menus, with one Add a phone… in the bar. A machine is online if an event
 // arrived in the last minute or its control daemon is online. Requests waiting for a
-// person (pairings, devices) come first. Each section's menu holds its real actions.
+// person (pairings, devices) come first.
 import type { MachineSummary } from "@shared/api";
 import { useEffect, useState } from "react";
-import { Ago, CopyIconButton, HarnessGlyph } from "../components/bits";
+import { Ago, CommandWell, EmptyState, HarnessGlyph } from "../components/bits";
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
 import { PageBar } from "../components/PageBar";
 import { tildify } from "../control/folders";
@@ -22,7 +25,7 @@ import { harnessMark } from "../lib/format";
 import { copyText } from "../lib/menus";
 import { Link, navigate } from "../lib/router";
 import { useSimple } from "../lib/settings";
-import { ms, useNow } from "../lib/time";
+import { ago, ms, useNow } from "../lib/time";
 import "../control/pairing.css";
 
 const isOnline = (m: MachineSummary, now: number) => now - ms(m.lastAt) < 60_000 || !!m.control?.online;
@@ -46,23 +49,44 @@ export function Machines() {
         title="Machines"
         meta={machines.length ? `${online} of ${machines.length} online` : undefined}
         actions={
-          <Link to="/connect" className="btn">
-            Connect…
-          </Link>
+          <>
+            <Link to="/phone" className="btn">
+              Add a phone…
+            </Link>
+            <Link to="/connect" className="btn">
+              Connect…
+            </Link>
+          </>
         }
       />
       <PendingPairings />
       <PendingDevices />
       {machines.length === 0 ? (
-        <div className="state">
-          <span className="state-title">No machine has sent anything yet</span>
-          <span className="state-text">Add this receiver as a sink on a machine and its sessions show up here.</span>
-          <Link to="/connect" className="btn">
-            Connect a machine
-          </Link>
-        </div>
+        <EmptyState
+          center
+          title="This Mac is the only machine"
+          actions={
+            <Link to="/connect" className="btn btn--primary">
+              Pair another…
+            </Link>
+          }
+        >
+          Sessions from another computer show up here once it sends to this receiver.
+        </EmptyState>
       ) : (
-        machines.map((m) => <MachineBlock key={m.name} m={m} online={isOnline(m, now)} lanUrl={lanUrl} />)
+        <>
+          {machines.map((m) => (
+            <MachineBlock key={m.name} m={m} online={isOnline(m, now)} lanUrl={lanUrl} />
+          ))}
+          {machines.length === 1 && (
+            <p className="machines-more">
+              {machines[0]!.name} is the only machine.{" "}
+              <Link to="/connect" className="link">
+                Pair another…
+              </Link>
+            </p>
+          )}
+        </>
       )}
     </div>
   );
@@ -100,7 +124,7 @@ function MachineBlock({ m, online, lanUrl }: { m: MachineSummary; online: boolea
   return (
     <section className={`form-group machine ${online ? "machine--on" : ""}`} aria-label={m.name} {...menu}>
       <header className="machine-head">
-        <span className={`online ${online ? "online--on" : ""}`} role="img" aria-label={online ? "online" : "quiet"} />
+        {!online && <span className="online" role="img" aria-label="quiet" />}
         <h2 className="machine-name">{m.name}</h2>
         <span className="machine-last">
           {online ? "online" : "quiet"} · last event <Ago iso={m.lastAt} />
@@ -111,7 +135,7 @@ function MachineBlock({ m, online, lanUrl }: { m: MachineSummary; online: boolea
         <li className="form-row form-row--kv">
           <span className="form-key">Sessions</span>
           <span className="form-kv num">
-            {m.sessions}
+            {m.sessions} {m.sessions === 1 ? "session" : "sessions"}
             {m.working > 0 && <span className="machine-sub"> · {m.working} working</span>}
             {m.needsYou > 0 && (
               <span className="machine-sub">
@@ -137,39 +161,26 @@ function MachineBlock({ m, online, lanUrl }: { m: MachineSummary; online: boolea
         <li className="form-row form-row--kv machine-control">
           <span className="form-key">Control</span>
           {c ? (
-            <span className="form-kv">
+            <span className="form-kv" title={controlDetail(c, simple)}>
               <span className="paired">Paired</span>
-              <span className="machine-sub">
-                {" "}
-                · {c.online ? "daemon online" : "daemon offline"}
-                {!simple && c.lastPollAt && (
-                  <>
-                    {" "}
-                    · polled <Ago iso={c.lastPollAt} />
-                  </>
-                )}
-                {!simple && c.mode && <> · {c.mode} mode</>}
-                {!simple && c.version && <> · v{c.version}</>}
-              </span>
+              {!c.online && <span className="machine-sub"> · daemon offline</span>}
+              {c.mode && <span className="machine-sub"> · {c.mode === "safe" ? "safe mode" : "auto mode"}</span>}
             </span>
           ) : (
             <span className="form-kv">
               <span className="unpaired">Not paired</span>
             </span>
           )}
-          {c && secure && (
-            <span className="form-value">
-              <button
-                type="button"
-                className="btn btn--sm machine-btn"
-                onClick={() => openNewSession({ machine: m.name })}
-                data-new-session-for={m.name}
-              >
-                New session…
-              </button>
-            </span>
-          )}
         </li>
+        {c?.version && !simple && (
+          <li className="form-row form-row--kv">
+            <span className="form-key">sessionpipe</span>
+            <span className="form-kv num">
+              {c.version}
+              {!c.start && <span className="machine-sub"> · starts no sessions</span>}
+            </span>
+          </li>
+        )}
         {c && !secure && (
           <li className="form-row form-row--stack">
             <span className="form-caption">{sentence(insecureHint()).replace(/\.?$/, ".")}</span>
@@ -192,11 +203,6 @@ function MachineBlock({ m, online, lanUrl }: { m: MachineSummary; online: boolea
               {devices}
               {c.queued > 0 && <span className="machine-sub"> · {c.queued} queued</span>}
             </span>
-            <span className="form-value">
-              <Link to="/phone" className="btn btn--sm machine-btn">
-                Add a phone…
-              </Link>
-            </span>
           </li>
         )}
         {!c && (
@@ -205,15 +211,27 @@ function MachineBlock({ m, online, lanUrl }: { m: MachineSummary; online: boolea
               <span className="form-label">Pair it</span>
               <span className="form-caption">On {m.name}, in a terminal; then approve the six digits here.</span>
             </span>
-            <div className="well-row machine-ctl-row">
-              <code>{pairCmd}</code>
-              <CopyIconButton text={pairCmd} label="Copy pair command" />
+            <div className="machine-ctl-row">
+              <CommandWell command={pairCmd} prompt={false} label="Copy pair command" />
             </div>
           </li>
         )}
       </ul>
     </section>
   );
+}
+
+/** The daemon's own details, for the Control row's tooltip: "daemon online · polled 4 s
+ *  ago". */
+function controlDetail(c: NonNullable<MachineSummary["control"]>, simple: boolean): string {
+  const now = Date.now();
+  return [
+    c.online ? "daemon online" : "daemon offline",
+    c.lastPollAt ? `polled ${ago(c.lastPollAt, now)}` : "",
+    simple && c.version ? `sessionpipe ${c.version}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /** One allowed folder, shown with `~`; right-click starts a session there. */

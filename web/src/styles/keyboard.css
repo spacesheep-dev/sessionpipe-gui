@@ -87,6 +87,12 @@
 [data-tip][aria-expanded="true"]::after {
   display: none;
 }
+/* The drawn tooltip (components/Tip.tsx) takes over once it is mounted: this CSS one is
+   the fallback for a page without the shell. */
+:root[data-tips] [data-tip]::after {
+  /* biome-ignore lint/complexity/noImportantStyles: it must beat the :hover and :focus-visible rules above */
+  display: none !important;
+}
 @media (hover: none) {
   [data-tip]::after {
     display: none;
@@ -126,7 +132,8 @@
   gap: 4px;
   color: var(--fg-3);
 }
-.keys kbd,
+/* A `.kbd` cap inside `.keys` keeps its face (the shortcut sheet, tooltips). */
+.keys kbd:not(.kbd),
 .chord-hint kbd {
   display: inline;
   min-width: 0;

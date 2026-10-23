@@ -6,7 +6,7 @@
 // to the daemon on its next status poll; the terminal finishes by itself. `PairBody` is
 // the page without its frame, so the setup page can show the same approval inline.
 import { useEffect, useState } from "react";
-import { HarnessGlyph } from "../components/bits";
+import { ActionButton, HarnessGlyph } from "../components/bits";
 import { BackButton, PageBar } from "../components/PageBar";
 import { harnessMark } from "../lib/format";
 import { back } from "../lib/router";
@@ -292,48 +292,62 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
               {error}
             </p>
           )}
-          {phase.k === "busy" ? (
-            <p className="page-note" role="status">
-              {phase.what}
-            </p>
-          ) : (
-            <form
-              className="pair-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void approve(p, false);
-              }}
-            >
-              {known.length === 0 && (
-                <div className="pair-field">
-                  <label htmlFor="pair-device-name">What to call this device on {m.name}</label>
-                  <input
-                    id="pair-device-name"
-                    className="field"
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    maxLength={80}
-                    autoComplete="off"
-                    aria-label="Device name"
-                  />
-                </div>
-              )}
-              <div className="pair-actions">
-                <button type="submit" className="btn btn--primary" disabled={!secure || expired}>
-                  {known.length ? `Approve with passkey “${known[0]?.name ?? "this browser"}”` : "Approve with passkey"}
-                </button>
-                <button type="button" className="btn" onClick={() => void reject(p)} disabled={expired}>
-                  Reject
-                </button>
-                {known.length > 0 && secure && !expired && (
-                  <button type="button" className="btn btn--ghost" onClick={() => void approve(p, true)}>
-                    Use a new passkey instead
-                  </button>
-                )}
+          {/* The form stays while the passkey works: the pressed button reads its pending
+              verb at its own width, the rest wait, and one line says what is happening. */}
+          <form
+            className="pair-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (phase.k !== "busy") void approve(p, false);
+            }}
+          >
+            {known.length === 0 && (
+              <div className="pair-field">
+                <label htmlFor="pair-device-name">What to call this device on {m.name}</label>
+                <input
+                  id="pair-device-name"
+                  className="field"
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  maxLength={80}
+                  autoComplete="off"
+                  aria-label="Device name"
+                  disabled={phase.k === "busy"}
+                />
               </div>
-            </form>
-          )}
+            )}
+            <div className="pair-actions">
+              <ActionButton
+                type="submit"
+                className="btn btn--primary"
+                disabled={!secure || expired}
+                pending={phase.k === "busy" && phase.what !== "Rejecting…"}
+                pendingLabel="Approving…"
+              >
+                {known.length ? `Approve with passkey “${known[0]?.name ?? "this browser"}”` : "Approve with passkey"}
+              </ActionButton>
+              <ActionButton
+                className="btn"
+                onClick={() => reject(p)}
+                disabled={expired || (phase.k === "busy" && phase.what !== "Rejecting…")}
+                pending={phase.k === "busy" && phase.what === "Rejecting…"}
+                pendingLabel="Rejecting…"
+              >
+                Reject
+              </ActionButton>
+              {known.length > 0 && secure && !expired && phase.k !== "busy" && (
+                <button type="button" className="btn btn--ghost" onClick={() => void approve(p, true)}>
+                  Use a new passkey instead
+                </button>
+              )}
+            </div>
+            {phase.k === "busy" && (
+              <p className="pair-status" role="status">
+                {phase.what}
+              </p>
+            )}
+          </form>
         </>
       )}
     </div>

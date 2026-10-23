@@ -3,7 +3,7 @@
 // gave it; and a message sent from here finds its own turn, two in a row included.
 import type { AgentRun, StoredEvent } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { groupTurns, sentTurns, type Turn, turnPrompt, unframe } from "./turns";
+import { eventWords, groupTurns, sentTurns, type Turn, turnPrompt, unframe } from "./turns";
 
 const T0 = Date.parse("2026-10-22T10:00:00.000Z");
 const iso = (s: number) => new Date(T0 + s * 1000).toISOString();
@@ -174,6 +174,51 @@ describe("sentTurns", () => {
       }),
     ]);
     expect(sentTurns([{ id: "s", at: iso(8), text: "What is the coolest feature?" }], turns).get("s")).toBe(1);
+  });
+
+  it("gives a tier-2 turn (its length only) to the message the machine took just before it", () => {
+    const ev = session();
+    const text = "Fix the rounding in refunds.";
+    const turns = groupTurns([
+      ev("turn.started", 10, { prompt_chars: 9 }),
+      ev("turn.started", 30, { prompt_chars: text.length + 120 }),
+    ]);
+    const m = { id: "p", at: iso(20), takenAt: iso(25), text };
+    // The first turn is too short to be these words.
+    expect(sentTurns([m], turns).get("p")).toBe(2);
+    // Not taken yet: no turn can be its.
+    expect(sentTurns([{ ...m, takenAt: undefined }], turns).has("p")).toBe(false);
+    // A length that can't be these words is someone else's turn.
+    expect(sentTurns([{ ...m, text: "x".repeat(400) }], turns).has("p")).toBe(false);
+  });
+
+  it("gives a start the session's first turn, but only when the window begins at it", () => {
+    const ev = session();
+    const text = "Fix the invoice rounding in src/money.ts.";
+    const turns = groupTurns([ev("session.started", 0), ev("turn.started", 4, { prompt_chars: text.length })]);
+    const start = { id: "st", at: iso(-2), text, start: true };
+    expect(sentTurns([start], turns, undefined, { fromStart: true }).get("st")).toBe(1);
+    expect(sentTurns([start], turns).has("st")).toBe(false);
+  });
+});
+
+describe("eventWords", () => {
+  it("writes the rows a log would print raw as words", () => {
+    expect(eventWords({ type: "session.started", data: { source: "startup" } })).toEqual({ text: "Session started" });
+    expect(eventWords({ type: "session.started", data: { source: "resume" } }).text).toBe("Session resumed");
+    expect(eventWords({ type: "files.changed", data: { paths: ["src/api/handler.ts"] } })).toEqual({
+      text: "Changed handler.ts",
+      detail: "src/api",
+    });
+    expect(eventWords({ type: "files.changed", data: { paths: ["a/b.ts", "c.ts", "d.ts"] } }).text).toBe(
+      "Changed b.ts and 2 more",
+    );
+    expect(eventWords({ type: "context.compacted", data: { trigger: "auto" } })).toEqual({ text: "Context compacted" });
+    expect(eventWords({ type: "attention.cleared", data: { how: "answered" } })).toEqual({ text: "Answered" });
+    expect(eventWords({ type: "files.changed", data: { paths: ["README.md"] } })).toEqual({
+      text: "Changed README.md",
+    });
+    expect(eventWords({ type: "custom.thing_done", data: {} }).text).toBe("Custom thing done");
   });
 });
 

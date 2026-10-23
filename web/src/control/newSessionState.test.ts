@@ -3,7 +3,15 @@
 // means, a remembered choice pruned to what the machine still advertises, the alias window.
 import type { ControlActivity, MachineControl } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { aliasHidden, pickContext, pruneRemembered, readDraft, saveDraft } from "./newSessionState";
+import {
+  aliasHidden,
+  fixedPermission,
+  machineFacts,
+  pickContext,
+  pruneRemembered,
+  readDraft,
+  saveDraft,
+} from "./newSessionState";
 
 const sessions = [
   { machine: "build-box", lastAt: "2026-10-23T09:00:00Z" },
@@ -121,5 +129,46 @@ describe("storage without localStorage", () => {
   it("reads nothing and writes nowhere, without throwing", () => {
     expect(() => saveDraft({ text: "keep me" })).not.toThrow();
     expect(readDraft()).toBeNull();
+  });
+});
+
+describe("machineFacts and fixedPermission", () => {
+  const base: MachineControl = {
+    machineId: "m1",
+    online: true,
+    keys: [],
+    queued: 0,
+    harnesses: ["claude-code", "codex"],
+  };
+  const label = (h: string) => (h === "codex" ? "Codex" : "Claude Code");
+  const opts = { permissions: ["read", "safe"] as const, permission: "safe" as const };
+  it("says how each machine starts sessions, and what it runs", () => {
+    expect(machineFacts({ ...base, mode: "auto", start: {} }, label)).toEqual({
+      hint: "auto",
+      detail: "Claude Code, Codex",
+    });
+    expect(machineFacts({ ...base, mode: "safe", start: {} }, label).hint).toBe("safe mode");
+    expect(machineFacts({ ...base, version: "0.9.0" }, label).hint).toBe("0.9 · no model choice");
+    expect(machineFacts({ ...base, online: false, mode: "auto", start: {} }, label).hint).toBe("offline");
+    expect(machineFacts(undefined, label)).toEqual({});
+  });
+  it("keeps the Permission row on every machine: a pop-up, one level, or set at the machine", () => {
+    const L = { read: "Read only", safe: "Safe" };
+    expect(
+      fixedPermission(
+        { ...base, start: { "claude-code": { ...opts, permissions: ["read", "safe"] } } },
+        "claude-code",
+        L,
+      ),
+    ).toBeNull();
+    expect(
+      fixedPermission(
+        { ...base, start: { "claude-code": { permissions: ["safe"], permission: "safe" } } },
+        "claude-code",
+        L,
+      ),
+    ).toBe("Safe");
+    expect(fixedPermission({ ...base, mode: "safe" }, "claude-code", L)).toBe("Safe mode, set at the machine");
+    expect(fixedPermission(base, "claude-code", L)).toBe("Set at the machine");
   });
 });

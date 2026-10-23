@@ -357,7 +357,10 @@ test("a pasted screenshot becomes a thumbnail; the sent text ends with the block
   await page.goto(`/s/claude-code/${SID}`);
   const box = page.getByLabel("Message for the next turn");
   await expect(box).toBeEnabled();
-  await expect(page.locator(".ctl-hint")).toContainText(`${hostname} is listening`);
+  // Ready: the one line under the field is the day grant's (paired, trusted, online).
+  await expect(page.locator(".ctl-foot[data-reason=passkey] .ctl-hint")).toHaveText(
+    "The first send today asks for your passkey.",
+  );
   await expect(page.getByLabel("Attach images")).toBeAttached();
 
   await box.fill("Make the header look like this");
@@ -374,8 +377,9 @@ test("a pasted screenshot becomes a thumbnail; the sent text ends with the block
   await shot(page, "composer-thumbnail-desktop", ".sess-ctl");
 
   await box.press("Enter");
-  const row = page.locator("li[data-message]").first();
-  await expect(row).toHaveAttribute("data-outcome", "queued", { timeout: 20_000 });
+  // The message is drawn in the timeline where its turn will be, with its status row.
+  const status = page.locator(".page.session .status-row[data-sent-state]").last();
+  await expect(status).toHaveAttribute("data-sent-state", "queued", { timeout: 20_000 });
   await expect(box).toHaveValue("");
   await expect(page.locator(".att-item")).toHaveCount(0);
 
@@ -392,16 +396,18 @@ test("a pasted screenshot becomes a thumbnail; the sent text ends with the block
   expect(existsSync(m![1]!)).toBe(true);
   expect(sentText.length).toBeLessThanOrEqual(20_000);
 
-  // The activity row shows the message and a thumbnail, not the block.
-  await expect(row.locator(".ctl-act-text")).toHaveText("Make the header look like this");
-  const thumb = row.locator(".att-thumbs img");
+  // The sent message shows its words and a thumbnail, not the block.
+  const sent = page.locator(".page.session blockquote").last();
+  await expect(sent).toContainText("Make the header look like this");
+  await expect(sent).not.toContainText("Attached images");
+  const thumb = sent.locator(".att-thumbs img");
   await expect(thumb).toHaveCount(1);
   await expect(thumb).toHaveAttribute("src", `/attachments/${id}.png`);
-  await expect(row.locator(".att-thumbs a")).toHaveAttribute("target", "_blank");
+  await expect(sent.locator(".att-thumbs a")).toHaveAttribute("target", "_blank");
   expect(await thumb.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth)).toBe(1440);
   await daemon.ack(msg.id, "delivered", { reply: "Matched the header." });
-  await expect(row).toHaveAttribute("data-outcome", "delivered");
-  await shot(page, "activity-thumbnail-desktop", ".sess-ctl");
+  await expect(status).toHaveAttribute("data-sent-state", "delivered");
+  await shot(page, "activity-thumbnail-desktop", ".page.session");
 });
 
 test("dropped files highlight the composer and attach; × takes one back; images alone send as the block", async () => {
@@ -433,9 +439,9 @@ test("dropped files highlight the composer and attach; × takes one back; images
   expect(String(msg.cmd.text)).toBe(
     `Attached images (open them with your file-reading tool):\n- ${path.join(stateDir, "attachments", `${kept}.png`)} (640×480)`,
   );
-  const row = page.locator(`li[data-message="${msg.id}"]`);
-  await expect(row.locator(".att-thumbs img")).toHaveCount(1);
-  await expect(row.locator(".ctl-act-text")).toHaveCount(0);
+  const sent = page.locator(".page.session blockquote").last();
+  await expect(sent.locator(".att-thumbs img")).toHaveCount(1);
+  await expect(sent).not.toContainText("Attached images");
   await daemon.ack(msg.id, "delivered");
 });
 
@@ -475,9 +481,10 @@ test("the Session view draws the sent prompt's image as a thumbnail", async () =
     events.ev("turn.transcript", { turn: 2, user: sentText, assistant: "Done: the header matches." }),
     events.ev("turn.ended", { reason: "stop", ms: 800 }),
   );
+  // The turn's own bubble (an images-only message sent earlier may still be drawn below).
   const bubble = page
     .locator("blockquote")
-    .filter({ has: page.locator(".att-thumbs") })
+    .filter({ has: page.locator(".att-thumbs"), hasText: "Make the header look like this" })
     .last();
   await expect(bubble).toBeVisible();
   await expect(bubble).toContainText("Make the header look like this");

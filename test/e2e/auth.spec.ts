@@ -76,6 +76,8 @@ test.describe("auth from a non-loopback address", () => {
       // A fresh context has not chosen a mode, so it is in Simple: the token block is behind "Advanced".
       const fold = page.locator("[data-connect-advanced]");
       if (await fold.isVisible()) await fold.click();
+      // The token's group is folded to one line; it opens in place.
+      await page.getByRole("button", { name: /^Sink token/ }).click();
       await expect(page.getByRole("button", { name: /^Rotate/ })).toBeDisabled();
     } finally {
       await ctx.close();

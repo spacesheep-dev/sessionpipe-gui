@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // The side panel: sessions open beside the current page, as tabs (`?s=<key>,…&t=<i>`).
 // 44 % of the width by default, resizable at its left edge, remembered per device; a
-// page sheet on phones. The head first, as tall as the page bar so their hairlines make
-// one rule (the state glyph, the title, a quiet status word, "⋯", Open as page, Close);
-// with two tabs or more, window tabs under it; then the bodies: every tab keeps its own
-// scroller mounted up to MOUNTED_MAX, so its scroll position and loaded pages survive a
-// switch. Tabs and the head have their own menus. Opening from a rectangle morphs a
-// ghost of it into the panel.
+// page sheet on phones. One bar, as tall as the page bar so their hairlines make one
+// rule (the state glyph, the title, "⋯", Open as page, Close; where it runs is the
+// title's tooltip); with two tabs or more, window tabs under it sharing the width; then
+// the bodies, the timeline and the composer: every tab keeps its own scroller mounted up
+// to MOUNTED_MAX, so its scroll position and loaded pages survive a switch. Tabs and the
+// head have their own menus. Opening from a rectangle morphs a ghost of it into the
+// panel. Pages that list no sessions (Setup, Connect, /phone, Settings) don't show it.
 import type { AgentRun, SessionKey, SessionSummary } from "@shared/api";
 import { splitKey } from "@shared/api";
 import {
@@ -20,14 +21,15 @@ import {
   useRef,
   useState,
 } from "react";
+import { useStartTitles } from "../control/Starting";
 import { useAppState, useStore } from "../data/hooks";
 import { agentLabel, parseTab } from "../lib/agents";
 import { focusTab, tablistKey } from "../lib/focus";
-import { sessionTitle } from "../lib/format";
+import { repoShort, sessionTitle } from "../lib/format";
 import { agentItems, sessionItems, sessionMenuSubtitle } from "../lib/menus";
 import { agentPath, Link, navigate, sessionPath } from "../lib/router";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
-import { useShortcut } from "../lib/shortcuts";
+import { hintFor, useShortcut } from "../lib/shortcuts";
 import {
   activateTab,
   closeOthers,
@@ -42,6 +44,7 @@ import {
   SPLIT_MIN,
   setSplitWidth,
   takeFrom,
+  usePanelHere,
   useSplit,
   useSplitWidth,
 } from "../lib/split";
@@ -50,7 +53,7 @@ import { AgentGlyph } from "./AgentRow";
 import { StateDot } from "./bits";
 import { type MenuList, MoreButton, useContextMenu } from "./ContextMenu";
 import { LabelDot } from "./LabelDot";
-import { answerItems, SessionView, STATUS_WORD } from "./SessionView";
+import { answerItems, SessionView } from "./SessionView";
 
 const MOTION_MS = 240;
 const reduced = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
@@ -79,15 +82,22 @@ const agentOf = (s: SessionSummary | undefined, tab: SessionKey): AgentRun | und
   return id ? s?.agents?.find((a) => a.id === id) : undefined;
 };
 
-/** Tab labels: the session title ("Explore · description" for an agent tab), plus
- *  " · machine" only where two tabs share a title. */
-function tabLabels(tabs: SessionKey[], summary: (k: SessionKey) => SessionSummary | undefined): string[] {
+/** Tab labels: the session title ("Explore · description" for an agent tab; a session
+ *  started here and not titled yet, its first message), plus " · machine" only where two
+ *  tabs share a title. */
+function tabLabels(
+  tabs: SessionKey[],
+  summary: (k: SessionKey) => SessionSummary | undefined,
+  started: ReadonlyMap<SessionKey, string>,
+): string[] {
   const titles = tabs.map((k) => {
     const s = summary(k);
     if (parseTab(k).agent) {
       const a = agentOf(s, k);
       return a ? agentLabel(a) : "Subagent";
     }
+    const begun = started.get(parseTab(k).session);
+    if (begun && !s?.title?.trim()) return begun;
     return s ? sessionTitle(s) : splitKey(k).id.slice(0, 8);
   });
   return titles.map((t, i) => {
@@ -133,8 +143,10 @@ export function SessionPanel({ phone }: { phone: boolean }) {
   const panelRef = useRef<HTMLElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
   const lastFrom = useRef<Rect | null>(null);
-  const wasOpen = useRef(tabs.length > 0);
-  const open = tabs.length > 0;
+  const here = usePanelHere();
+  const wasOpen = useRef(tabs.length > 0 && here);
+  const open = tabs.length > 0 && here;
+  const started = useStartTitles();
 
   const panelRect = useCallback(
     (): Rect =>
@@ -300,8 +312,17 @@ export function SessionPanel({ phone }: { phone: boolean }) {
   const s = activeKey ? summary(activeKey) : undefined;
   const activeAgentId = activeKey ? parseTab(activeKey).agent : undefined;
   const activeAgent = activeKey ? agentOf(s, activeKey) : undefined;
-  const labels = tabLabels(shown, summary);
-  const title = activeAgentId ? (activeAgent ? agentLabel(activeAgent) : "Subagent") : s ? sessionTitle(s) : "Session";
+  const labels = tabLabels(shown, summary, started);
+  const activeIndex = activeKey ? shown.indexOf(activeKey) : -1;
+  const title = activeAgentId
+    ? activeAgent
+      ? agentLabel(activeAgent)
+      : "Subagent"
+    : activeIndex >= 0
+      ? (labels[activeIndex] ?? "Session")
+      : "Session";
+  // Where it runs, as the title's tooltip: the panel keeps one bar.
+  const where = s ? [s.machine, repoShort(s.repo) || undefined].filter(Boolean).join(" · ") : "";
   const bodies = open ? mounted : [];
   const store = useStore();
   const { mode } = useAppSettings();
@@ -414,12 +435,15 @@ export function SessionPanel({ phone }: { phone: boolean }) {
             </>
           )
         )}
-        <h2 className="panel-title ellipsis" title={title}>
+        <h2
+          className="panel-title ellipsis"
+          title={where ? `${title} · ${where}` : title}
+          data-tip={where ? `${title} · ${where}` : title}
+          data-tip-side="bottom"
+        >
           {title}
         </h2>
-        {activeAgentId
-          ? s && <span className="panel-status panel-parent ellipsis">{sessionTitle(s)}</span>
-          : s && <span className="panel-status">{STATUS_WORD[s.state]}</span>}
+        {activeAgentId && s && <span className="panel-status panel-parent ellipsis">{sessionTitle(s)}</span>}
         <span className="panel-actions">
           <MoreButton build={headMenu} title={() => title} className="panel-btn" />
           {activeKey && (
@@ -427,7 +451,8 @@ export function SessionPanel({ phone }: { phone: boolean }) {
               to={pagePath(activeKey)}
               className="icon-btn panel-btn panel-open"
               aria-label="Open as page"
-              data-tip="Open as page · o"
+              data-tip="Open as page"
+              data-tip-keys={hintFor("session.openPage") || undefined}
               data-tip-side="bottom"
             >
               <svg
@@ -452,7 +477,8 @@ export function SessionPanel({ phone }: { phone: boolean }) {
             className="icon-btn panel-btn panel-close"
             onClick={closeSplit}
             aria-label="Close panel"
-            data-tip="Close · x"
+            data-tip="Close panel"
+            data-tip-keys={hintFor("panel.close") || undefined}
             data-tip-side="bottom"
             data-dismiss
           >
@@ -600,6 +626,8 @@ function PanelTab({
       tabIndex={active ? 0 : -1}
       data-tab-key={k}
       title={label}
+      data-tip={label}
+      data-tip-side="bottom"
       onPointerDown={onPointerDown}
       onAuxClick={onAuxClick}
       onKeyDown={onKeyDown}

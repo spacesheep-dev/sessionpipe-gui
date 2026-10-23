@@ -85,10 +85,11 @@ const stubAudio = (page: Page, o: { quiet?: boolean } = {}) =>
     { quiet: o.quiet ?? false, key: KEY },
   );
 
-/** The section, opened the way a person reaches it: the inbox header's "Sounds" link. */
+/** The section, opened the way a person reaches it: the inbox's bell, then "Sounds". */
 const openSection = async (page: Page) => {
   await openPage(page, "/inbox");
-  await page.locator(".inbox-head").getByRole("link", { name: "Sounds" }).click();
+  await page.locator(".inbox-head").getByRole("button", { name: "Notifications" }).click();
+  await page.getByRole("link", { name: "Sounds" }).click();
   await expect(page).toHaveURL(/\/settings\?section=notifications$/);
   const section = page.locator(".ntf");
   await expect(section).toBeVisible();

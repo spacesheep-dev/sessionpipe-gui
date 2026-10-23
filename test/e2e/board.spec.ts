@@ -2,7 +2,8 @@
 /// <reference lib="dom" />
 // The board as a person sees it: groups by state, a working card's current tool, an
 // attention banner when the demo asks for a permission, the collapsed done group,
-// live counts without a reload, and the keyboard.
+// live counts without a reload (with Advanced → Show counts), a list that holds still
+// under the pointer, the search that finds nothing, and the keyboard.
 import { expect, test } from "@playwright/test";
 import { openBoard } from "./helpers.js";
 
@@ -82,6 +83,8 @@ test.describe("board", () => {
   });
 
   test("counts on a working card change live, without a reload", async ({ page }) => {
+    // Turns and tools are the row's tooltip by default; "Show counts" prints them.
+    await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.board.counts", "1"));
     await openBoard(page);
     await expect(page.locator(".conn").first()).toHaveText("live");
     const foot = async () => {
@@ -116,6 +119,53 @@ test.describe("board", () => {
     expect(navigations, "no reload or navigation happened").toEqual([]);
   });
 
+  test("by default a row says two facts; Show counts in the view menu adds the columns", async ({ page }) => {
+    await openBoard(page);
+    await expect(page.locator("article.card .card-foot:not(.card-foot--mark)")).toHaveCount(0);
+    // The counts are the row's tooltip instead.
+    await expect(page.locator("article.card a.card-link").first()).toHaveAttribute("title", /\d+ (turn|tool)/);
+    await page.getByRole("button", { name: "View options" }).click();
+    await page.getByRole("menuitemcheckbox", { name: "Show counts" }).click();
+    await expect(page.locator("article.card .card-foot:not(.card-foot--mark)").first()).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem("sessionpipe-gui.board.counts"))).toBe("1");
+  });
+
+  test("the list holds still under the pointer: no row moves while it rests on one", async ({ page }) => {
+    test.setTimeout(60_000);
+    await openBoard(page);
+    // The first row: nothing above it is the pointer's to hold but the section header.
+    const row = page.locator("section.group:not(.group--done) article.card").first();
+    await expect(row).toBeVisible();
+    const box = await row.boundingBox();
+    if (!box) throw new Error("no row");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await expect(page.locator(".page.board")).toHaveAttribute("data-held", "");
+    const key = await row.getAttribute("data-flip");
+    const card = page.locator(`article.card[data-flip="${key}"]`);
+    // A move that was already playing when the pointer arrived finishes first.
+    await page.waitForTimeout(600);
+    const at = Math.round((await card.boundingBox())?.y ?? -1);
+    const tops: number[] = [];
+    for (let i = 0; i < 20; i++) {
+      await page.waitForTimeout(500);
+      tops.push(Math.round((await card.boundingBox())?.y ?? -1));
+    }
+    // The demo changes states every few seconds; the row under the pointer stays put.
+    expect(new Set(tops)).toEqual(new Set([at]));
+    // Leaving lets the list take its real order again.
+    await page.mouse.move(5, 5);
+    await expect(page.locator(".page.board")).not.toHaveAttribute("data-held", "", { timeout: 5_000 });
+  });
+
+  test("a search that finds nothing says so, with Clear search", async ({ page }) => {
+    await openBoard(page);
+    await page.getByRole("searchbox", { name: "Search sessions" }).fill("zzzz-nothing");
+    await expect(page.locator(".board-nomatch .state-title")).toHaveText("No sessions match “zzzz-nothing”");
+    await page.getByRole("button", { name: "Clear search" }).click();
+    await expect(page.locator("section.group").first()).toBeVisible();
+    await expect(page.getByRole("searchbox", { name: "Search sessions" })).toHaveValue("");
+  });
+
   test("keyboard: / focuses search, j/k move the cursor, Enter opens the session", async ({ page }) => {
     await openBoard(page);
     await page.locator("body").click({ position: { x: 5, y: 5 } });
@@ -130,8 +180,35 @@ test.describe("board", () => {
     await expect(page.locator("article.card[aria-current='true']")).toHaveAttribute("data-cursor", "1");
     await page.keyboard.press("k");
     await expect(page.locator("article.card[aria-current='true']")).toHaveAttribute("data-cursor", "0");
+    // `.` opens the row's own menu at the row; Esc closes it.
+    await page.keyboard.press(".");
+    await expect(page.getByRole("menu")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    const opened = await page.locator("article.card[aria-current='true'] a.card-link").getAttribute("href");
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/s\/[^/]+\/.+/);
     await expect(page.locator("h1.sess-title")).toBeVisible();
+    // Back puts the cursor on the row it was on (wherever the live list has put it since).
+    await page.goBack();
+    await expect(page.locator("article.card[aria-current='true'] a.card-link")).toHaveAttribute("href", opened!);
+  });
+
+  test("Esc clears the search first, then the cursor", async ({ page }) => {
+    await openBoard(page);
+    const search = page.getByRole("searchbox", { name: "Search sessions" });
+    await search.fill("a");
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("j");
+    await expect(page.locator("article.card[aria-current='true']")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await expect(search).toHaveValue("");
+    await expect(page.locator("article.card[aria-current='true']")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await expect(page.locator("article.card[aria-current='true']")).toHaveCount(0);
+    // A third goes nowhere: the board is a place, not a step.
+    await page.keyboard.press("Escape");
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator("section.group").first()).toBeVisible();
   });
 });

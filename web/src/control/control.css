@@ -114,7 +114,9 @@
   flex: 1;
   min-width: 0;
   min-height: var(--control);
-  max-height: calc(6 * var(--lh) * var(--text-md) + 2 * ((var(--control) - var(--lh) * var(--text-md)) / 2));
+  /* It grows with what is typed up to 40 % of the view, then scrolls inside itself; the
+     buttons stay on its last line. */
+  max-height: 40dvh;
   margin: 0;
   padding: calc((var(--control) - var(--lh) * var(--text-md)) / 2) 6px;
   border: 0;
@@ -154,23 +156,19 @@
   color: var(--fg-2);
 }
 
-/* One quiet line under the field: where messages go, what a send asks for, what is wrong. */
+/* At most one quiet line under the field: the one reason sending is off or will ask for
+   something, and its one way out at the end. Nothing when all is well. */
 .ctl-foot {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 2px 12px;
+  gap: 2px 8px;
   margin: 0;
   padding: 0 4px;
   color: var(--fg-3);
   font-size: var(--text-xs);
   line-height: var(--lh);
-}
-.ctl-foot:empty {
-  display: none;
-}
-.ctl-hint--quiet {
-  display: none;
+  animation: fade-in var(--dur-fast) var(--ease-out);
 }
 .ctl-context strong {
   color: var(--fg-2);
@@ -179,7 +177,6 @@
 .ctl-link,
 .ctl-open-https,
 .ctl-untrusted a {
-  margin-left: 8px;
   color: var(--fg-2);
   font: inherit;
   font-weight: 500;
@@ -194,8 +191,11 @@
     text-underline-offset: 2px;
   }
 }
-.ctl-context-note {
-  margin-left: 8px;
+.ctl-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
 }
 .ctl-note--err {
   color: var(--err);
@@ -239,9 +239,6 @@
   }
   .ctl-ask textarea {
     font-size: max(1rem, 16px);
-  }
-  .ctl--blocked .ctl-context {
-    display: none;
   }
 }
 

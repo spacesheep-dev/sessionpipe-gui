@@ -3,7 +3,8 @@
 
 /* Window tabs under the panel's head, shown once two sessions are open (one tab is the
    head itself). The active tab is the page's ground, the rest sit back on the chrome in
-   the meta tier, hairlines between; equal widths up to 200 px, × on hover. */
+   the meta tier, hairlines between; they share the strip's width evenly, as Safari's do
+   (the full title is the tab's tooltip), × on hover. */
 .tabs {
   order: -1;
   display: flex;
@@ -36,7 +37,6 @@
   gap: 8px;
   flex: 1 1 0;
   min-width: 96px;
-  max-width: 200px;
   padding: 0 4px 0 12px;
   border-right: var(--hairline) solid var(--line);
   color: var(--fg-3);

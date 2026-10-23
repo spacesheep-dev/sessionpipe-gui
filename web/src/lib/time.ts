@@ -88,37 +88,34 @@ export function ago(iso: string | undefined, at: number): string {
   return new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
-/** A duration: "0.4 s", "12 s", "4 m 12 s", "2 h 05 m", "3 d 4 h". */
+/** The one duration grammar (POLISH-PLAN.md §4): "0.4 s" under a second (a tool call;
+ *  "<0.1 s" when quicker),
+ *  "12 s", "4 m", "1 h 05 m", "3 d". Seconds show only in the first minute: past it a
+ *  ticking second is noise, and every list in the app reads the same. */
 export function dur(msTotal: number | undefined): string {
   if (msTotal === undefined || Number.isNaN(msTotal)) return "";
   const d = Math.max(0, msTotal);
+  // A call quicker than a tenth of a second says so, never "0.0 s".
+  if (d < 50) return "<0.1 s";
   if (d < 1000) return `${(d / 1000).toFixed(1)} s`;
-  const s = Math.floor(d / 1000);
-  if (s < 60) return `${s} s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m} m ${String(s % 60).padStart(2, "0")} s`;
-  const h = Math.floor(m / 60);
-  if (h < 48) return `${h} h ${String(m % 60).padStart(2, "0")} m`;
-  const days = Math.floor(h / 24);
-  return `${days} d ${h % 24} h`;
+  return durCoarse(d);
 }
 
-/** A duration without seconds once past a minute: "12 s", "4 m", "2 h 05 m". For things
- *  that started a while ago, where a ticking second is noise. */
+/** The same grammar in whole seconds from the start: a row's age never reads "0.0 s". */
 export function durCoarse(msTotal: number | undefined): string {
   if (msTotal === undefined || Number.isNaN(msTotal)) return "";
-  // Whole seconds: a row's age never reads "0.0 s".
-  if (msTotal < 60_000) return `${Math.floor(Math.max(0, msTotal) / 1000)} s`;
-  const m = Math.floor(msTotal / 60_000);
+  const d = Math.max(0, msTotal);
+  if (d < 60_000) return `${Math.floor(d / 1000)} s`;
+  const m = Math.floor(d / 60_000);
   if (m < 60) return `${m} m`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h} h ${String(m % 60).padStart(2, "0")} m`;
   return `${Math.floor(h / 24)} d`;
 }
 
-/** A short duration for dense rows: "0.4s", "12s", "4m12s", "2h05m". */
+/** Kept for callers of the dense form; the grammar is one now, spaces and all. */
 export function durShort(msTotal: number | undefined): string {
-  return dur(msTotal).replace(/ /g, "");
+  return dur(msTotal);
 }
 
 /** Elapsed since an ISO time, formatted with `dur`. */

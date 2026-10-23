@@ -26,7 +26,9 @@ test.describe("receiver", () => {
     };
     expect(body).toEqual({ accepted: batch.events.length, duplicates: 0, rejected: [], max_tier: 3 });
 
-    // The board shows the new session, with the title from its session block.
+    // The board shows the new session, with the title from its session block (and, with
+    // Advanced → Show counts, its turns and tools as columns).
+    await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.board.counts", "1"));
     await openBoard(page);
     const card = page.locator(`a.card-link[href="${sessionUrl(batch.harness, batch.sessionId)}"]`);
     await expect(card).toBeVisible();

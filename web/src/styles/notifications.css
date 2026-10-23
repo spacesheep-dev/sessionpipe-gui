@@ -22,6 +22,11 @@
 .ntf-select {
   min-width: 148px;
 }
+/* The test: a ▶ in an icon button beside the pop-up, named by its tooltip. The glyph
+   sits a hair right of centre, as a play triangle does optically. */
+.ntf-play svg {
+  transform: translateX(1px);
+}
 .ntf[data-sounds="off"] .ntf-row[data-kind] .settings-row-text {
   opacity: 0.6;
 }

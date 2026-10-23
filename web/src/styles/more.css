@@ -37,7 +37,17 @@
   user-select: none;
   animation: rise var(--dur) var(--ease-out) both;
 }
+/* Its exit: the mirror of the rise, quicker, inert. */
+.more-scrim[data-closing] {
+  animation: fade-out var(--dur-exit) var(--ease-in) both;
+  pointer-events: none;
+}
+.more-sheet[data-closing] {
+  animation: pop-out var(--dur-exit) var(--ease-in) both;
+  pointer-events: none;
+}
 .more-grab {
+  touch-action: none;
   display: block;
   flex: none;
   width: 36px;

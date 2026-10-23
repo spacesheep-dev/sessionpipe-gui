@@ -26,9 +26,10 @@ html:has(.main > .session) {
   scroll-padding-bottom: calc(var(--sess-ctl-h, 120px) + 8px);
 }
 .session {
-  --tl-time: 56px;
-  /* Where a row's text starts: the time, then a 16 px glyph, with 8 px between. */
-  --tl-lead: calc(var(--tl-time) + 32px);
+  /* Where a row's text starts: a 16 px glyph, then 8 px. When a row happened is its turn
+     head's (on hover) and its menu's, not a column on every row. */
+  --tl-time: 0px;
+  --tl-lead: 24px;
   gap: 16px;
 }
 .session > :not(.bar):not(.bar-below):not(.sess-ctl) {
@@ -37,12 +38,6 @@ html:has(.main > .session) {
   margin-left: auto;
   margin-right: auto;
 }
-@media (max-width: 839px) {
-  .session {
-    --tl-time: 54px;
-  }
-}
-
 /* ----- the title bar (PageBar) ----- */
 
 /* The title gives way last: the meta ellipsises first, then the title. The lead takes
@@ -67,12 +62,21 @@ html:has(.main > .session) {
   gap: 12px;
   margin-left: 4px;
 }
-.sess-state {
-  flex: none;
-  display: inline-flex;
+/* Two facts: the state glyph before the title, then where it runs. The glyph sits on the
+   title's cap height; the label dot (when set) follows it. */
+.sess-title {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  color: var(--fg-3);
+  gap: 8px;
+  min-width: 0;
+}
+.sess-title > .dot {
+  flex: none;
+}
+.sess-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 /* A copy of another session (a fork): the original, named and linked, in the same muted tier. */
@@ -95,22 +99,27 @@ html:has(.main > .session) {
     text-underline-offset: 2px;
   }
 }
-.sess-where,
-.sess-counts {
-  display: block;
+/* Where it runs: the machine never truncates; the repo gives way first. */
+.sess-where {
+  display: flex;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg-3);
 }
-.sess-counts > * + *::before {
+.sess-machine {
+  flex: none;
+}
+.sess-where > * + *::before {
   content: "·";
   margin: 0 6px;
   color: var(--fg-4);
 }
-.sess-counts .is-err {
-  color: var(--err);
+.sess-repo,
+.sess-where > .sess-copy {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* The phone: the meta is the line under the navigation bar. */
 .session > .bar + .bar-below {
@@ -124,12 +133,19 @@ html:has(.main > .session) {
   margin-top: 0;
 }
 
-/* The lens: the segmented control in the bar's tools, what it hides beside it. */
+/* The lens while it hides something: one quiet line over the timeline, the segmented
+   control, what it hides and Show all. At "everything" it is gone (⋯ has it). */
 .lens {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+.sess-lens {
+  min-height: var(--control);
+}
+.lens-all {
+  margin-left: auto;
 }
 .lens-hint {
   min-width: 0;
@@ -144,79 +160,12 @@ html:has(.main > .session) {
   padding: 0 8px;
 }
 @media (max-width: 839px) {
-  .session > .bar-below .bar-tools {
-    display: none;
+  .sess-lens .lens-hint {
+    flex: 1 1 auto;
   }
-}
-
-/* The Forget confirm: a popover under its button. */
-.sess-forget {
-  position: relative;
-  display: inline-flex;
-}
-.sess-confirm {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: var(--z-pop);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: calc(100vw - 32px);
-  padding: 12px;
-  border: var(--hairline) solid var(--line);
-  border-radius: var(--radius-pop);
-  background: var(--bg-2);
-  box-shadow: var(--shadow-pop);
-  animation: rise var(--dur) var(--ease-out);
-  cursor: default;
-}
-.sess-confirm:focus {
-  outline: none;
-}
-.sess-confirm {
-  width: 280px;
-}
-.sess-confirm-title {
-  margin: 0;
-  color: var(--fg);
-  font-size: var(--text-md);
-  font-weight: 600;
-}
-.sess-confirm-text {
-  margin: 0;
-  color: var(--fg-2);
-  font-size: var(--text-sm);
-  line-height: var(--lh);
-}
-.sess-confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
-}
-/* Follow, Forget and the lens live in "⋯" on a phone. */
-@media (max-width: 839px) {
-  .sess-bar .sess-desk {
-    display: none;
-  }
-}
-
-/* In the panel: the facts as one meta line under the panel's head. */
-.sess-sub {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  margin-top: 12px;
-  margin-bottom: -4px;
-  font-size: var(--text-sm);
 }
 .sess-flags {
   gap: 12px;
-}
-.sess-skel {
-  padding-top: 8px;
 }
 
 /* ----- the timeline ----- */
@@ -267,10 +216,37 @@ html:has(.main > .session) {
 }
 .turn-facts {
   display: flex;
+  align-items: center;
   gap: 12px;
   margin-left: auto;
   color: var(--fg-3);
   font-size: var(--text-xs);
+}
+/* When the turn began: there on hover (and while the head is focused), never on a
+   phone; its place is kept, so nothing moves when it shows. */
+.turn-time {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .turn:hover .turn-time,
+  .turn-head:focus-within .turn-time {
+    opacity: 1;
+  }
+}
+@media (hover: none) {
+  .turn-time {
+    display: none;
+  }
+}
+.turn-err {
+  display: inline-grid;
+  place-items: center;
+}
+/* An error's one signal: the small red ✕; its words stay in the row's own tier. */
+.err-glyph {
+  flex: none;
+  color: var(--err);
 }
 /* The prompt is the turn's one filled block: a quiet well where the rows' text starts. */
 .prompt {
@@ -299,6 +275,25 @@ html:has(.main > .session) {
   background: none;
   color: var(--fg-3);
   font-size: var(--text-sm);
+}
+/* The lock on a prompt its machine keeps: the meta tier, on the text's cap height. */
+.prompt-lock {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -0.5px;
+  color: var(--fg-4);
+}
+/* A start's first message is the person's bubble on both surfaces; in the timeline it
+   keeps the well's shape and place. */
+.timeline:not(.timeline--chat) .prompt.chat-bubble {
+  max-width: none;
+  margin: 0 0 8px var(--tl-lead);
+  border-radius: var(--radius);
+}
+/* The files a message sent from here carried, under its well. */
+.turn:not(.turn--chat) > .starting-files {
+  justify-content: flex-start;
+  margin: 0 0 8px var(--tl-lead);
 }
 .turn-items {
   list-style: none;
@@ -364,13 +359,6 @@ html:has(.main > .session) {
 .tool--x > details[open] > summary .chev {
   transform: rotate(90deg);
 }
-.tool-time,
-.marker-time {
-  flex: none;
-  width: var(--tl-time);
-  color: var(--fg-3);
-  font-size: var(--text-xs);
-}
 .tool-status,
 .marker-glyph {
   flex: none;
@@ -380,8 +368,8 @@ html:has(.main > .session) {
   color: var(--fg-3);
   font-size: var(--text-xs);
 }
-.tool-status.is-err {
-  color: var(--err);
+.marker-tree {
+  color: var(--fg-4);
 }
 .tool-main,
 .marker-body {
@@ -411,7 +399,8 @@ html:has(.main > .session) {
 }
 .tool-err {
   min-width: 0;
-  color: var(--err);
+  color: var(--fg-3);
+  font-size: var(--text-xs);
 }
 .tool-dur {
   flex: none;
@@ -470,7 +459,6 @@ html:has(.main > .session) {
   align-items: flex-start;
   color: var(--fg-3);
 }
-.marker > .marker-time,
 .marker > .marker-glyph {
   height: 28px;
   line-height: 28px;
@@ -491,7 +479,21 @@ html:has(.main > .session) {
   color: var(--fg);
 }
 .marker--end.is-err {
-  color: var(--err);
+  color: var(--fg-2);
+}
+.marker-text {
+  color: var(--fg-2);
+}
+/* The status row of a message on its way (control/Starting.tsx), in the timeline where its
+   turn will be: a spinner in the glyph column, the words, the live timer. */
+.marker--status {
+  color: var(--fg-3);
+}
+.status-since {
+  color: var(--fg-3);
+}
+.turn-failed {
+  padding: 4px 0 8px;
 }
 .marker-link {
   color: var(--fg-2);
@@ -546,9 +548,49 @@ html:has(.main > .session) {
   margin-left: auto;
   margin-right: auto;
 }
+/* It slides in under a page that was starting: the session arrived. */
+@keyframes ctl-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+.sess-ctl--arrive {
+  animation: ctl-arrive var(--dur-slow) var(--ease-out) both;
+}
+/* "3 new": what landed below while the person reads above; it hides at the bottom. */
+.sess-new {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: var(--hairline) solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-2);
+  box-shadow: var(--shadow-pop);
+  color: var(--fg);
+  font-size: var(--text-sm);
+  transform: translate(-50%, -100%);
+  animation: fade-in var(--dur) var(--ease-out);
+}
+@media (hover: hover) {
+  .sess-new:hover {
+    background: color-mix(in oklch, var(--bg-2), var(--fg) 5%);
+  }
+}
+.sess-new:active {
+  background: color-mix(in oklch, var(--bg-2), var(--fg) 10%);
+}
 @media (max-width: 839px) {
+  /* Over the tab bar, or over the keyboard when it is up (SessionView reads it from
+     visualViewport). */
   .sess-ctl {
-    bottom: calc(var(--tabbar) + env(safe-area-inset-bottom));
+    bottom: max(calc(var(--tabbar) + env(safe-area-inset-bottom)), var(--kb, 0px));
     padding: 8px var(--gutter);
   }
 }
@@ -636,12 +678,13 @@ html:has(.main > .session) {
   display: flex;
   flex-direction: column;
 }
+/* The tree guide drops from the head's glyph (the centre of its 16 px column). */
 .agent-items::before {
   content: "";
   position: absolute;
   top: 0;
   bottom: 14px;
-  left: calc(var(--tl-time) + 16px - 16px);
+  left: -8px;
   border-left: var(--hairline) solid var(--line-2);
   pointer-events: none;
 }
@@ -676,7 +719,7 @@ html:has(.main > .session) {
 /* "Subagent finished: …": the harness's own follow-up turn, a quiet row where the prompt
    would be; a click goes to the agent's block. */
 .agent-notice {
-  margin: 0 0 8px calc(var(--tl-time) + 8px);
+  margin: 0 0 8px;
 }
 .agent-notice-btn {
   display: flex;
@@ -724,9 +767,6 @@ html:has(.main > .session) {
 /* The chat (Simple): a turn's agents as the same quiet rows under the harness's name. */
 .chat-agents {
   margin: 4px 0;
-}
-.chat-agents .marker-time {
-  display: none;
 }
 .session--chat .agent-notice {
   margin: 0 0 8px;

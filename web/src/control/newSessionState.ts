@@ -212,3 +212,44 @@ export function aliasHidden(
   }
   return false;
 }
+
+// ----- what a machine offers, in the picker's words -----
+
+const shortVersion = (v: string | undefined): string | undefined => /^(\d+\.\d+)/.exec(v ?? "")?.[1];
+
+/** A machine's row in the Machine picker, the facts that make the choice informed
+ *  (STEER-SPEC B.3): at the right how it starts sessions ("auto", "safe mode", "0.9 · no
+ *  model choice" for a daemon whose hello has no `start`, or "offline"), and under the
+ *  name the agents it runs. */
+export function machineFacts(
+  c: MachineControl | undefined,
+  label: (h: string) => string,
+): { hint?: string; detail?: string } {
+  if (!c) return {};
+  const detail = c.harnesses?.length ? c.harnesses.map(label).join(", ") : undefined;
+  if (!c.online) return { hint: "offline", ...(detail ? { detail } : {}) };
+  const hint = !c.start
+    ? `${shortVersion(c.version) ?? "older"} · no model choice`
+    : c.mode === "safe"
+      ? "safe mode"
+      : c.mode === "auto"
+        ? "auto"
+        : undefined;
+  return { ...(hint ? { hint } : {}), ...(detail ? { detail } : {}) };
+}
+
+/** The Permission row when the machine shows no pop-up for it: the one level a start
+ *  gets there, or that it is set at the machine (and its mode, when the hello said), so
+ *  the row keeps its place on every machine. Null when a pop-up is shown. */
+export function fixedPermission(
+  c: MachineControl | undefined,
+  harness: string | undefined,
+  label: Record<string, string>,
+): string | null {
+  const opts = harness ? c?.start?.[harness] : undefined;
+  if (opts && opts.permissions.length >= 2) return null;
+  if (opts?.permissions.length === 1) return label[opts.permissions[0]!] ?? opts.permissions[0]!;
+  if (c?.mode === "safe") return "Safe mode, set at the machine";
+  if (c?.mode === "auto") return "Auto mode, set at the machine";
+  return "Set at the machine";
+}

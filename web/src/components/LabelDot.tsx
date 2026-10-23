@@ -7,7 +7,7 @@
 import { LABEL_COLORS, type LabelColor, type SessionKey } from "@shared/api";
 import type { RefObject } from "react";
 import { useLabel, useLabels, useStore } from "../data/hooks";
-import { anyLabel, type LabelFilter, labelName, setLabel } from "../lib/labels";
+import { anyLabel, type LabelFilter, labelName, removeLabel, setLabel } from "../lib/labels";
 import { useShortcut } from "../lib/shortcuts";
 import { Select } from "./Select";
 
@@ -60,7 +60,7 @@ export function useLabelKeys(
   const run = (color: LabelColor | null) => {
     const list = keys();
     if (!list.length) return false;
-    void setLabel(store, list, color);
+    void (color ? setLabel(store, list, color) : removeLabel(store, list));
   };
   useShortcut("label.red", () => run("red"), opts);
   useShortcut("label.orange", () => run("orange"), opts);

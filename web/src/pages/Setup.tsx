@@ -5,10 +5,14 @@
 // /api/ui/setup/status every two seconds (this machine only), so a step turns green by
 // itself the moment the outbox gets its first event, the CA is trusted, the daemon polls, a
 // phone connects, a message comes back delivered. A checklist (shared with /phone): one
-// glyph per step, the step to do now open, each action with its one caption beside it.
+// glyph per step (a ring in the ink on the step to do now, a check that draws itself in
+// the moment a step is done), the step to do now open, each action with its one caption
+// beside it, and "Open the board" at the end. Progress, not gaps: the harnesses that send
+// no hooks yet are one muted line, and the wait for the first event sits right under the
+// table it is waiting on. The reading column is centred, as the session page's is.
 import type { HarnessStatus, SessionSummary, SetupStatus } from "@shared/api";
-import { type FormEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useState } from "react";
-import { Ago, CopyIconButton, HarnessGlyph, Spinner, Toggle } from "../components/bits";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Ago, CommandWell, HarnessGlyph, Listening, Spinner, Toggle } from "../components/bits";
 import { PageBar } from "../components/PageBar";
 import { Select } from "../components/Select";
 import { ActivityRow } from "../control/Activity";
@@ -128,6 +132,14 @@ export function Setup() {
           </button>
         </div>
       )}
+      {s && done && !allDone && (
+        <div className="setup-end">
+          <span className="caption">The board works already; the steps left can wait.</span>
+          <button type="button" className="btn" onClick={skip}>
+            Open the board
+          </button>
+        </div>
+      )}
       {s && done && (
         <p className="caption setup-extras" data-setup-extras>
           Canvas and Office are already in; the ping-a-human plugin is one click on the{" "}
@@ -145,11 +157,23 @@ export function Setup() {
 
 export type Mark = "done" | "needs" | "todo";
 
-/** The status glyph in a step's 20 px lead: a check once done, the amber disc on the step
- *  to do now, a hollow ring for the ones after it. One signal; no number beside it. */
+/** The status glyph in a step's 20 px lead: a check once done, a ring in the ink on the
+ *  step to do now, a quiet hollow ring for the ones after it. No amber: amber means a
+ *  prompt needs you, and a step to do is not that. One signal; no number beside it. A
+ *  step that turns done in front of the person draws its check in (240 ms). */
 export function StepMark({ mark, label }: { mark: Mark; label: string }) {
+  const was = useRef(mark);
+  const [arrived, setArrived] = useState(false);
+  useEffect(() => {
+    if (was.current !== mark && mark === "done") setArrived(true);
+    was.current = mark;
+  }, [mark]);
   return (
-    <span className={`step-mark step-mark--${mark}`} role="img" aria-label={label}>
+    <span
+      className={`step-mark step-mark--${mark}${arrived ? " step-mark--arrive" : ""}`}
+      role="img"
+      aria-label={label}
+    >
       {mark === "done" ? (
         <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
           <path
@@ -257,12 +281,11 @@ function Facts({ rows }: { rows: [string, React.ReactNode][] }) {
   );
 }
 
-/** A literal line to run, in a well with its copy icon. */
+/** A literal line to run: the app's one command well (one line, mono, Copy at its end). */
 function Cmd({ text, label = "Copy" }: { text: string; label?: string }) {
   return (
-    <div className="well-row step-cmd">
-      <code>{text}</code>
-      <CopyIconButton text={text} label={label} />
+    <div className="step-cmd">
+      <CommandWell command={text} label={label} />
     </div>
   );
 }
@@ -306,9 +329,16 @@ function HarnessRow({ h }: { h: HarnessStatus }) {
   );
 }
 
+/** "Cursor, Copilot CLI and Kiro don't send hooks yet": the ones sessionpipe has no
+ *  adapter for, in one muted line instead of a row each. */
+const andList = (names: string[]) =>
+  names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+
 function SessionsStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark } & Fold) {
   const sp = s.sessionpipe;
-  const installed = s.harnesses.filter((h) => h.installed);
+  const all = s.harnesses.filter((h) => h.installed);
+  const installed = all.filter((h) => h.hooks !== "unsupported");
+  const pending = all.filter((h) => h.hooks === "unsupported");
   return (
     <Step
       attrs={{ "data-step": "sessions" }}
@@ -351,6 +381,19 @@ function SessionsStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark 
           ))}
         </ul>
       )}
+      {pending.length > 0 && (
+        <p className="step-pending" data-pending-harnesses>
+          {andList(pending.map((h) => h.label))} {pending.length === 1 ? "doesn't" : "don't"} send hooks yet.
+        </p>
+      )}
+      {mark !== "done" && (
+        <Listening label="Waiting for the first event">
+          {installed
+            .filter((h) => h.hooks === "on")
+            .map((h) => h.label)
+            .join(", ") || undefined}
+        </Listening>
+      )}
       {mark !== "done" && (
         <div className="step-action step-action--col">
           {!sp.installed && (
@@ -364,13 +407,11 @@ function SessionsStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark 
           )}
           {sp.installed && (
             <p className="step-note">
-              sessionpipe {sp.version ?? ""} is installed. Start a fresh conversation (<code>claude</code> in any
-              folder) and its first event lands here.
+              sessionpipe {sp.version ?? ""} is installed. Start a fresh conversation in any folder and its first event
+              lands here.
             </p>
           )}
-          <p className="step-wait" role="status">
-            <Spinner label="waiting" /> Waiting for the first event…
-          </p>
+          {sp.installed && <Cmd text="claude" />}
         </div>
       )}
     </Step>
