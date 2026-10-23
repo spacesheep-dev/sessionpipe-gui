@@ -24,6 +24,7 @@ export type Scope =
   | "inbox"
   | "machines"
   | "palette"
+  | "compose"
   | "views";
 
 export interface Action {
@@ -319,6 +320,14 @@ export const ACTIONS: readonly Action[] = [
     keys: ["mod+k"],
     inInputs: true,
   },
+  {
+    id: "newSession.open",
+    label: "New session",
+    group: "Everywhere",
+    scope: "global",
+    keys: ["c"],
+    hint: "the compose sheet, for the board's machine; ⌘N too in the installed app, once it reaches the page",
+  },
   { id: "search.focus", label: "Search this page", group: "Everywhere", scope: "global", keys: ["/"] },
   { id: "help.toggle", label: "Keyboard shortcuts help", group: "Everywhere", scope: "global", keys: ["?"] },
   {
@@ -380,7 +389,7 @@ export const ACTIONS: readonly Action[] = [
     label: "Cancel the running turn",
     group: "Session",
     scope: "session",
-    keys: ["c"],
+    keys: ["shift+c"],
     hint: "asks first",
   },
   { id: "session.follow", label: "Follow the live turn", group: "Session", scope: "session", keys: ["f"] },
@@ -439,6 +448,26 @@ export const ACTIONS: readonly Action[] = [
     inInputs: true,
   },
   { id: "palette.close", label: "Close", group: "Command palette", scope: "palette", keys: ["esc"], inInputs: true },
+
+  // The New session sheet reads these itself (control/NewSession.tsx, `matches`). ⌘⇧M and
+  // ⌘⇧A, for Machine and Agent, are the browser's (Chrome's profile menu and tab search),
+  // so Tab reaches those rows instead.
+  {
+    id: "newSession.start",
+    label: "Start the session",
+    group: "New session",
+    scope: "compose",
+    keys: ["mod+enter"],
+    inInputs: true,
+  },
+  {
+    id: "newSession.folder",
+    label: "Choose the folder",
+    group: "New session",
+    scope: "compose",
+    keys: ["mod+shift+f"],
+    inInputs: true,
+  },
 ];
 
 const byId = new Map(ACTIONS.map((a) => [a.id, a]));

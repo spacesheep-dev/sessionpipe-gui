@@ -11,6 +11,7 @@ import { uploadAttachment } from "./Attachments";
 import { rpId as fetchRpId } from "./api";
 import { uuid } from "./bytes";
 import { type CommandFields, sendCommand } from "./command";
+import { openNewSession } from "./newSessionState";
 import { insecureHint, passkeysAvailable } from "./webauthn";
 import { sendErrorWords } from "./words";
 
@@ -86,13 +87,16 @@ export function createControlApi(deps: ControlApiDeps): ThemeControl {
     attach(file) {
       return uploadAttachment(file);
     },
+    compose(prefill) {
+      openNewSession(prefill ?? {});
+    },
     async start(machineId, opts) {
       const machine = must(resolve(deps, { machineId }));
       const cwd = opts.cwd.trim();
       const text = opts.text.trim();
       if (!cwd.startsWith("/")) throw new Error("not sent · the folder must be an absolute path on the machine");
       if (!text) throw new Error("not sent · the first message is empty");
-      // The id is ours (StartSession.tsx: a UUID, claude-code's rule, kept by codex and gemini).
+      // The id is ours (NewSession.tsx: a UUID, claude-code's rule, kept by codex and gemini).
       const session = sessionKey(opts.harness, uuid());
       const activity = await send(machine, { kind: "start", session, text, cwd });
       return { ...activity, session };

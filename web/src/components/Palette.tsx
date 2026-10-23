@@ -21,6 +21,7 @@ import {
 } from "react";
 import { sendCommand } from "../control/command";
 import { useRpId } from "../control/hooks";
+import { type NewSessionTarget, openNewSession } from "../control/newSessionState";
 import { insecureHint, passkeysAvailable } from "../control/webauthn";
 import { sendErrorWords } from "../control/words";
 import { byStateThenRecent, useAppState, useLabels, useStore } from "../data/hooks";
@@ -443,6 +444,40 @@ function PaletteDialog() {
           });
         if (!simple) add("Forget…", () => setMode({ kind: "forget", session: s }));
       }
+      // New session: the sheet, for the board's machine, a named machine or a recent repo.
+      const paired = [...machines.values()].filter((m) => m.control).sort((a, b) => a.name.localeCompare(b.name));
+      if (paired.length) {
+        const compose = (id: string, verb: string, detail: string | undefined, target: NewSessionTarget) => {
+          const m = text ? fuzzyFields(text, [verb]) : null;
+          if (text && !m) return;
+          rows.push({
+            id: `n:${id}`,
+            section: "Actions",
+            mark: <Glyph>+</Glyph>,
+            label: <Hit text={verb} at={m?.positions[0]} />,
+            detail,
+            score: (m?.score ?? 0) + (id === "new" ? 0.5 : 0),
+            run: () => {
+              closePalette();
+              openNewSession(target);
+            },
+          });
+        };
+        compose("new", "New session…", undefined, {});
+        if (text) {
+          for (const m of paired) compose(`m:${m.name}`, `New session on ${m.name}…`, undefined, { machine: m.name });
+          const repos = new Map<string, SessionSummary>();
+          for (const s of sorted)
+            if (s.repo && s.machine && machines.get(s.machine)?.control && !repos.has(repoShort(s.repo)))
+              repos.set(repoShort(s.repo), s);
+          for (const [repo, s] of [...repos].slice(0, 12))
+            compose(`r:${repo}`, `New session in ${repo}`, s.machine, {
+              machine: s.machine,
+              harness: s.harness,
+              ...(s.cwd ? { cwd: s.cwd } : {}),
+            });
+        }
+      }
       if (text) rows.sort((a, b) => b.score - a.score);
       out.push(...rows.slice(0, only === "Actions" ? 40 : 8));
     }
@@ -495,7 +530,23 @@ function PaletteDialog() {
       out.push(...rows);
     }
     return out;
-  }, [q, sessions, labels, now, ctx, ctxKey, splitActive, themes, answered, rp, sendable, act, onItsPage, simple]);
+  }, [
+    q,
+    sessions,
+    machines,
+    labels,
+    now,
+    ctx,
+    ctxKey,
+    splitActive,
+    themes,
+    answered,
+    rp,
+    sendable,
+    act,
+    onItsPage,
+    simple,
+  ]);
 
   // A new query starts at the top; a shorter list pulls the cursor in.
   useEffect(() => setCursor(0), [q]);

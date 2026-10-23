@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // The context-menu items more than one surface shows, built once so a session's menu
 // reads the same on a board row, an inbox row, a panel tab, a toast and the session's own
-// "⋯": open (as a page, beside, in the background, in a new window), whatever the
-// surface can answer, its colour label, go to the parent or a subagent, copy, forget. Only actions that
-// exist; a surface adds its own groups around these. Builders run when a menu opens, so
+// "⋯": open (as a page, beside, in the background, in a new window), New session here,
+// whatever the surface can answer, its colour label, go to the parent or a subagent, copy,
+// forget. Only actions that exist; a surface adds its own groups around these. Builders run when a menu opens, so
 // they read the current URL and settings, never a stale render.
 import type { AgentRun, SessionSummary } from "@shared/api";
 import type { MenuItem, MenuList } from "../components/ContextMenu";
 import { confirmAction, tidy } from "../components/ContextMenu";
+import { openNewSession } from "../control/newSessionState";
 import type { Store } from "../data/store";
 import { agentGlyph, agentLabel, openAgent } from "./agents";
 import { copyText } from "./clipboard";
@@ -96,6 +97,8 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
     if (location.pathname === path) navigate("/");
     ctx.onForgotten?.();
   };
+  // "New session here": its machine, agent and folder, when that machine is paired here.
+  const paired = !!(s.machine && ctx.store.get().machines.get(s.machine)?.control);
   const items: MenuList = [
     ...open,
     !phone &&
@@ -106,6 +109,12 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
         run: () => openSplit(s.key, { background: true }),
       },
     !phone && { label: "Open in new window", run: () => void window.open(absoluteUrl(path), "_blank", "noopener") },
+    { sep: true },
+    paired && {
+      label: "New session here",
+      action: "newSession.open",
+      run: () => openNewSession({ machine: s.machine, harness: s.harness, ...(s.cwd ? { cwd: s.cwd } : {}) }),
+    },
     { sep: true },
     ...(ctx.answer ?? []),
     { sep: true },

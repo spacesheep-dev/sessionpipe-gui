@@ -185,15 +185,28 @@
     -webkit-user-select: none;
     user-select: none;
   }
-  /* The top band: the mark (and in the sidebar the name), as tall as every page bar. */
+  /* The top band: the mark (and in the sidebar the name) and, right of it, the compose
+     glyph (New session), as tall as every page bar. */
+  .rail-head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: var(--bar);
+    border-bottom: var(--hairline) solid var(--line);
+  }
+  .rail-compose {
+    flex: none;
+    color: var(--fg-2);
+  }
   .rail-brand {
     flex: none;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
-    height: var(--bar);
-    border-bottom: var(--hairline) solid var(--line);
+    height: 100%;
     color: var(--fg);
     font-size: var(--text-md);
     font-weight: 600;
@@ -273,9 +286,12 @@
   }
 
   /* The sidebar form: a source list, icon and label on one row. */
+  .shell--side .rail-head {
+    justify-content: space-between;
+    padding: 0 10px 0 16px;
+  }
   .shell--side .rail-brand {
     justify-content: flex-start;
-    padding: 0 16px;
   }
   .shell--side .rail-word {
     display: inline;

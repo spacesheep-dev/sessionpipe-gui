@@ -55,6 +55,9 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, active: boolean
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (!optsRef.current.onClose) return;
+        // An open pop-up inside the dialog (a Select) takes its own Esc first.
+        const t = e.target as HTMLElement | null;
+        if (t?.getAttribute?.("role") === "combobox" && t.getAttribute("aria-expanded") === "true") return;
         e.preventDefault();
         e.stopPropagation();
         optsRef.current.onClose();

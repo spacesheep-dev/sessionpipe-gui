@@ -68,6 +68,7 @@ interface MachineSpec {
 const MACHINES: MachineSpec[] = [
   { name: "misha-air", harnesses: { "claude-code": "2.1.290", codex: "0.157.1", "gemini-cli": "0.14.2" } },
   { name: "studio-mini", harnesses: { "claude-code": "2.1.288", "gemini-cli": "0.14.2", antigravity: "1.4.0" } },
+  { name: "build-box", harnesses: { "claude-code": "2.1.270", codex: "0.150.0" } },
 ];
 
 const TOOLS: Record<string, string[]> = {
@@ -563,22 +564,64 @@ export class World {
         working: mine.filter((s) => s.state === "working").length,
         needsYou: mine.filter((s) => s.state === "needs_you").length,
       };
-      if (i === 0) {
+      if (!base.lastAt) base.lastAt = iso(this.startedAt);
+      // Three daemons, so the New session sheet shows each honestly: one on sessionpipe
+      // 0.10 advertising every start option, one in safe mode offering read and safe, and
+      // one old one with no start options and no files.
+      const common = {
+        lastPollAt: iso(this.controlPollAt),
+        lastHelloAt: iso(this.startedAt + 2000),
+        modes: ["sdk", "waiter", "turn", "resume", "fork"],
+        keys: this.controlKeys,
+        queued: 0,
+      };
+      if (i === 0)
         base.control = {
-          machineId: "m_01K6Q3H2A9",
+          ...common,
+          machineId: "m_01K6Q3H2A9misha-air",
           online: true,
-          lastPollAt: iso(this.controlPollAt),
-          lastHelloAt: iso(this.startedAt + 2000),
-          mode: "safe",
-          folders: ["~/spacesheep", "~/sessionpipe"],
-          harnesses: ["claude-code", "codex"],
-          modes: ["safe", "auto"],
-          version: "0.7.0",
+          mode: "auto",
+          folders: ["/Users/misha/spacesheep", "/Users/misha/sessionpipe"],
+          home: "/Users/misha",
+          harnesses: ["claude-code", "codex", "gemini-cli"],
+          version: "0.10.0",
+          files: true,
+          promptFiles: true,
+          start: {
+            "claude-code": { permissions: ["read", "safe", "edits", "auto"], permission: "auto", anyModel: true },
+            codex: {
+              permissions: ["read", "safe", "auto"],
+              permission: "auto",
+              anyModel: true,
+              models: ["gpt-6-astra", "gpt-5.6-sol"],
+            },
+          },
           accounts: [{ harness: "claude-code", id: "a1b2c3", email: "dev@example.com" }],
-          keys: this.controlKeys,
-          queued: 0,
         };
-      }
+      else if (i === 1)
+        base.control = {
+          ...common,
+          machineId: "m_01K6Q3H2A9studio-mini",
+          online: true,
+          mode: "safe",
+          folders: ["/Users/studio/acme"],
+          home: "/Users/studio",
+          harnesses: ["claude-code", "antigravity"],
+          version: "0.10.0",
+          files: true,
+          start: { "claude-code": { permissions: ["read", "safe"], permission: "safe", anyModel: true } },
+        };
+      else
+        base.control = {
+          ...common,
+          machineId: "m_01K6Q3H2A9build-box0",
+          online: false,
+          lastPollAt: iso(this.startedAt + 60_000),
+          mode: "safe",
+          folders: ["/srv/build"],
+          harnesses: ["claude-code", "codex"],
+          version: "0.9.0",
+        };
       return base;
     });
   }

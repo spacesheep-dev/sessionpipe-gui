@@ -68,7 +68,17 @@
   font-size: var(--text-sm);
 }
 .machine-folders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
   color: var(--fg-2);
+}
+.machine-folder {
+  border-radius: var(--radius-inner);
+}
+/* A row's action never wraps ("Add a phone…" on a phone). */
+.machine-btn {
+  white-space: nowrap;
 }
 .paired {
   color: var(--fg);
@@ -78,9 +88,6 @@
 }
 .machine-ctl-row {
   max-width: 560px;
-}
-.machine-start .start-form {
-  margin-top: 4px;
 }
 @media (max-width: 839px) {
   .machine-head {

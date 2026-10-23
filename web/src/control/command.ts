@@ -2,7 +2,7 @@
 // Owned by: control-web. A command the way CONTROL.md §3.1 writes it, signed the way §3.2
 // signs it, sent through POST /api/ui/control/send. The string is written once and the
 // signature covers those exact bytes; the server passes it on byte for byte.
-import type { ControlActivity } from "@shared/api";
+import type { ControlActivity, StartFile, StartPermission } from "@shared/api";
 import { noteOwnSend } from "../lib/toasts";
 import { type Assertion, ControlError, controlApi, type SendBody, type TrustedKey } from "./api";
 import { nonce, sha256 } from "./bytes";
@@ -17,7 +17,17 @@ export type CommandFields =
   | { kind: "prompt"; session: string; text: string }
   | { kind: "permission.answer"; session: string; for: string; decision: "allow" | "deny"; note?: string }
   | { kind: "cancel"; session: string; note?: string }
-  | { kind: "start"; session: string; text: string; cwd: string }
+  /** `files`, `permission` and `model` only when the machine's hello advertised them
+   *  (CONTROL.md §2): a daemon that predates a field ignores it. NewSession.tsx decides. */
+  | {
+      kind: "start";
+      session: string;
+      text: string;
+      cwd: string;
+      files?: StartFile[];
+      permission?: StartPermission;
+      model?: string;
+    }
   /** A device this browser's passkey vouches for: the machine adds `key` to its store. */
   | { kind: "key.add"; key: TrustedKey; name?: string };
 
@@ -40,6 +50,10 @@ export function commandString(machine: string, f: CommandFields): string {
     case "start":
       o.text = f.text;
       o.cwd = f.cwd;
+      if (f.files?.length)
+        o.files = f.files.map((x) => ({ name: x.name, type: x.type, size: x.size, sha256: x.sha256 }));
+      if (f.permission) o.permission = f.permission;
+      if (f.model) o.model = f.model;
       break;
     case "key.add":
       o.key = { id: f.key.id, alg: f.key.alg, spki: f.key.spki };

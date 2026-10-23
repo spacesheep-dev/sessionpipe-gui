@@ -16,7 +16,8 @@
 //
 // The door's keys live in memory for the life of the process and never leave it. The
 // enqueue goes through the same verifier as the UI's send, so the door can never queue
-// what a browser could not.
+// what the verifier refuses. It skips the UI's second look at the hello (precheck.ts) on
+// purpose: a delivery scenario sends a start the machine itself must refuse.
 import { RECEIVER_MAX_AGE_MS, verifyCommand } from "sessionpipe-core/control";
 import type { Ctx, Reply, Router } from "../http/router.js";
 import { HttpError } from "../http/router.js";
@@ -41,6 +42,10 @@ const DOOR_FACTS: Hello = {
   folders: null,
   mode: null,
   accounts: [],
+  files: false,
+  promptFiles: false,
+  home: null,
+  start: null,
 };
 
 export function registerTestDoor(router: Router, d: TestDoorDeps): void {
@@ -100,6 +105,9 @@ export function registerTestDoor(router: Router, d: TestDoorDeps): void {
       cwd: msg.cwd,
       key: msg.key,
       name: msg.name,
+      files: msg.files,
+      permission: msg.permission,
+      model: msg.model,
       ...(typeof msg.nonce === "string" ? { nonce: msg.nonce } : {}),
       ...(typeof msg.iat === "number" ? { iat: msg.iat } : {}),
     });

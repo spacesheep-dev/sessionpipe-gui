@@ -105,7 +105,8 @@ age window, no nonce store) and only then queues it.
 
 | Route | Body → answer |
 |---|---|
-| `POST /send` | `{ machineId, cmd, csig?, grant?, confirm?, expires_in_s? }` → `201 ControlActivity`; `422 { reason, code }` with the verifier's code (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …) when it refuses; `404` unknown machine |
+| `POST /send` | `{ machineId, cmd, csig?, grant?, confirm?, expires_in_s? }` → `201 ControlActivity`; `422 { reason, code }` with the verifier's code (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …) or the second look's (below) when it refuses; `404` unknown machine |
+| `POST /files?name=<name>` | One file a `start` will carry: the raw bytes, its media type as `content-type` → `201 StartFile { name, type, size, sha256 }` (sha256 base64url, CONTROL.md §3.1). Held a day under `<stateDir>/control/files/<sha256>`, longer when a queued start needs it; `413` over 25 MiB, `415` no media type, `400` empty or a name a machine would refuse |
 | `GET /activity?limit=` | `{ activity: ControlActivity[] }`, newest first (default 100, at most 1000) |
 | `GET /machines` | `{ machines: (MachineControl & { name, createdAt, pairedAt? })[] }` — paired machines |
 | `POST /machines/:id/forget` | → `204`; the row, its token and its queue are gone here; its next poll is 401 and the daemon says so |
@@ -118,7 +119,24 @@ kept) to a final `delivered` / `expired` / `unsupported` / `failed` / `refused` 
 `{ kind: "control", message }` whenever one is queued, acked or expires.
 
 For a `permission.answer`, `text` is `"<decision>"` or `"<decision>: <note>"`; for a
-`key.add`, `"trust <name>"`.
+`key.add`, `"trust <name>"`. A `start`'s activity also carries what was signed (`cwd`,
+`permission`, `model`, `files`) and, from its `taken` / `delivered` ack, `applied`: what
+the machine ran it with.
+
+**The second look** (`precheck.ts`). After the verifier, the receiver holds a command to
+what the machine's last hello advertised (CONTROL.md §2), because a daemon that predates
+a field ignores it: `files`, `permission` and `model` belong to a `start` only
+(`bad_fields`); `files` must follow §3.1 and the machine must have said `files: true`
+(`bad_fields`), and every file must be held here (`file`); `permission` must be one of
+the levels its `start` entry lists for that harness (`permission`); `model` needs
+`models` or `any_model` there, and a closed list must hold it (`model`). The test door
+skips this look so a delivery scenario can reach the machine's own refusal.
+
+**Hello facts** kept per machine and shown on `MachineControl`: `files`, `prompt_files`
+(`promptFiles`), `home` (absolute, ≤ 1024) and `start` (per harness `{ permissions,
+permission, models?, any_model? }`; an entry for a harness the hello does not list, a
+default outside its levels, unknown levels and malformed models are dropped). Each hello
+says them again: one without them takes them away.
 
 ## The machine wire (for reference)
 
@@ -128,8 +146,9 @@ proof, `token` on the first pairing; open pairing adds `sink_token` and `account
 `expired`; 404 once the paired answer was handed over, or for a code never seen. A new
 `POST pair` naming an existing `machine` renews the code on the same row; the old code
 answers `expired`. `POST hello` 204, `GET ?machine=&wait=` 200/204 (wait ≤ 25 s),
-`POST ack` 202 `{ applied, unknown }`, `POST off` 204 — each with the machine's own
-token and nothing else. A `taken` ack pauses redelivery 35 minutes; a final ack ends it;
+`POST ack` 202 `{ applied, unknown }`, `POST off` 204, `GET {control}/files/<sha256>`
+(HTTP.md §3: the bytes with their `content-type`, 404 when not held) — each with the
+machine's own token and nothing else. A `taken` ack pauses redelivery 35 minutes; a final ack ends it;
 duplicates are tolerated. State lives under `<stateDir>/control/` (`machines.json` with
 hashed tokens and `queue/<machine id>.json`).
 

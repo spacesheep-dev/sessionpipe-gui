@@ -12,7 +12,9 @@ import { RECEIVER_MAX_AGE_MS, sha256 } from "sessionpipe-core/control";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ROUTES, type StreamMessage } from "../../shared/api.js";
 import { Router } from "../http/router.js";
+import { fileHash } from "./files.js";
 import { type Control, createControl } from "./index.js";
+import { parseAcks, parseHello } from "./parse.js";
 import { commandStr, signCommand, TestDayKey, TestPasskey } from "./testkeys.js";
 
 const SINK = "spg_test_sink_token_0123456789";
@@ -826,6 +828,245 @@ describe("persistence", () => {
   });
 });
 
+// --- a start's options and files (CONTROL.md §2, §3.1, §6; sessionpipe 0.10) -----------
+
+describe("parseHello: files, home and start", () => {
+  const base = { ...facts, harnesses: ["claude-code", "codex"] };
+  it("keeps a well-formed start, home and files", () => {
+    const h = parseHello({
+      ...base,
+      files: true,
+      prompt_files: true,
+      home: "/Users/misha",
+      start: {
+        "claude-code": { permissions: ["read", "safe", "edits", "auto"], permission: "auto", any_model: true },
+        codex: { permissions: ["read", "safe", "auto"], permission: "safe", models: ["gpt-6-astra", "gpt-5.6-sol"] },
+      },
+    })!;
+    expect(h.files).toBe(true);
+    expect(h.promptFiles).toBe(true);
+    expect(h.home).toBe("/Users/misha");
+    expect(h.start).toEqual({
+      "claude-code": { permissions: ["read", "safe", "edits", "auto"], permission: "auto", anyModel: true },
+      codex: { permissions: ["read", "safe", "auto"], permission: "safe", models: ["gpt-6-astra", "gpt-5.6-sol"] },
+    });
+  });
+  it("drops a foreign harness, a default not in the list, unknown levels and bad models", () => {
+    const h = parseHello({
+      ...base,
+      start: {
+        gemini: { permissions: ["safe"], permission: "safe" },
+        "claude-code": { permissions: ["read", "bypass", "safe"], permission: "safe", models: ["sonnet", "-x", ""] },
+        codex: { permissions: ["read"], permission: "auto" },
+      },
+    })!;
+    expect(h.start).toEqual({
+      "claude-code": { permissions: ["read", "safe"], permission: "safe", models: ["sonnet"] },
+    });
+  });
+  it("is null for what a 0.9 daemon sends, and for a relative or oversized home", () => {
+    const h = parseHello(base)!;
+    expect(h).toMatchObject({ files: false, promptFiles: false, home: null, start: null });
+    expect(parseHello({ ...base, home: "~/x" })!.home).toBeNull();
+    expect(parseHello({ ...base, home: `/${"a".repeat(1024)}` })!.home).toBeNull();
+    expect(parseHello({ ...base, home: "/a\nb" })!.home).toBeNull();
+    expect(parseHello({ ...base, start: [] })!.start).toBeNull();
+    expect(parseHello({ ...base, start: { codex: { permissions: [], permission: "safe" } } })!.start).toBeNull();
+  });
+});
+
+describe("parseAcks: applied", () => {
+  const now = () => "2026-10-23T10:00:00.000Z";
+  const id = "01K8ZQ6X4N3T5V7W9Y1A2B3C4D";
+  it("keeps a level and a model, drops what is malformed", () => {
+    const [a] = parseAcks(
+      { acks: [{ id, outcome: "taken", at: now(), applied: { permission: "edits", model: "sonnet" } }] },
+      now,
+    )!;
+    expect(a!.applied).toEqual({ permission: "edits", model: "sonnet" });
+    const [b] = parseAcks({ acks: [{ id, outcome: "delivered", applied: { permission: "full", model: "-x" } }] }, now)!;
+    expect(b!.applied).toBeUndefined();
+    const [c] = parseAcks({ acks: [{ id, outcome: "delivered", applied: { permission: "read" } }] }, now)!;
+    expect(c!.applied).toEqual({ permission: "read" });
+  });
+});
+
+describe("a start's options, files and applied, through POST send", () => {
+  let b: Booted;
+  let pk: TestPasskey;
+  let day: TestDayKey;
+  beforeAll(async () => {
+    b = await boot();
+    tmpDirs.push(b.stateDir);
+    pk = await TestPasskey.create();
+    day = await TestDayKey.create();
+  });
+  afterAll(() => b.close());
+
+  const SID = "claude-code:2f6c6f0e-6f0a-4b2e-9d0e-0d6f7a7b8c9d";
+  const hello = (m: { token: string }, extra: Record<string, unknown>) =>
+    call(b.url, "POST", `${CONTROL}/hello`, {
+      bearer: m.token,
+      body: { ...facts, name: "studio-mac", harnesses: ["claude-code", "codex"], ...extra },
+    });
+  const start = async (machine: string, fields: Record<string, unknown>) =>
+    call(b.url, "POST", `${UI}/send`, {
+      body: {
+        machineId: machine,
+        ...(await signedPrompt(pk, day, machine, {
+          kind: "start",
+          session: SID,
+          text: "Fix the date picker",
+          cwd: "/Users/demo/acme/web",
+          ...fields,
+        })),
+      },
+    });
+  const upload = (bytes: Uint8Array | string, type: string, name: string) =>
+    fetch(`${b.url}${UI}/files?name=${encodeURIComponent(name)}`, {
+      method: "POST",
+      headers: { "content-type": type },
+      body: bytes as BodyInit,
+    });
+
+  it("refuses a level the machine does not advertise, and a model where none is taken", async () => {
+    const m = await enrolled(b, pk, "m_startopts00000000001");
+    expect(
+      (
+        await hello(m, {
+          mode: "safe",
+          start: { "claude-code": { permissions: ["read", "safe"], permission: "safe" } },
+        })
+      ).status,
+    ).toBe(204);
+    const c = b.control.machines().get("studio-mac")!;
+    expect(c.start).toEqual({ "claude-code": { permissions: ["read", "safe"], permission: "safe" } });
+
+    const auto = await start(m.machine, { permission: "auto" });
+    expect(auto.status).toBe(422);
+    expect(auto.body.code).toBe("permission");
+    expect(String(auto.body.reason)).toMatch(/safe mode/);
+    const unknown = await start(m.machine, { permission: "full" });
+    expect(unknown.body.code).toBe("bad_fields");
+    const model = await start(m.machine, { model: "sonnet" });
+    expect(model).toMatchObject({ status: 422, body: { code: "model" } });
+    const dash = await start(m.machine, { model: "--dangerously-skip-permissions" });
+    expect(dash.body.code).toBe("bad_fields");
+    // A level on a harness with no entry, and options on a prompt.
+    const codex = await start(m.machine, { session: "codex:019a0000-0000-7000-8000-000000000001", permission: "read" });
+    expect(codex.body.code).toBe("permission");
+    const onPrompt = await call(b.url, "POST", `${UI}/send`, {
+      body: { machineId: m.machine, ...(await signedPrompt(pk, day, m.machine, { permission: "read" })) },
+    });
+    expect(onPrompt.body.code).toBe("bad_fields");
+    expect(b.control.activity().filter((a) => a.machineId === m.machine)).toHaveLength(0);
+
+    const ok = await start(m.machine, { permission: "read" });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    expect(ok.body).toMatchObject({ kind: "start", cwd: "/Users/demo/acme/web", permission: "read" });
+  });
+
+  it("a hello without start takes the options away again (a downgraded daemon)", async () => {
+    const m = await enrolled(b, pk, "m_startopts00000000002");
+    await hello(m, {
+      start: { "claude-code": { permissions: ["safe", "auto"], permission: "auto", any_model: true } },
+    });
+    expect((await start(m.machine, { model: "opus[1m]" })).status).toBe(201);
+    await hello(m, {});
+    expect(b.control.machines().get("studio-mac")!.start).toBeUndefined();
+    expect((await start(m.machine, { model: "opus[1m]" })).body.code).toBe("model");
+  });
+
+  it("a closed model list refuses an id that is not on it", async () => {
+    const m = await enrolled(b, pk, "m_startopts00000000003");
+    await hello(m, {
+      start: { codex: { permissions: ["read", "safe", "auto"], permission: "auto", models: ["gpt-6-astra"] } },
+    });
+    const sess = "codex:019a0000-0000-7000-8000-000000000002";
+    expect((await start(m.machine, { session: sess, model: "gpt-6-astra" })).status).toBe(201);
+    expect((await start(m.machine, { session: sess, model: "gpt-x" })).body.code).toBe("model");
+  });
+
+  it("files: uploaded here, named by hash, fetched with the machine's token only", async () => {
+    const m = await enrolled(b, pk, "m_startfiles0000000001");
+    const bytes = new TextEncoder().encode("# notes\nthe date picker is off by one\n");
+    const up = await upload(bytes, "text/markdown", "notes.md");
+    expect(up.status).toBe(201);
+    const entry = (await up.json()) as { name: string; type: string; size: number; sha256: string };
+    expect(entry).toEqual({ name: "notes.md", type: "text/markdown", size: bytes.length, sha256: fileHash(bytes) });
+    expect(entry.sha256).toMatch(/^[A-Za-z0-9_-]{43}$/);
+
+    // A machine that did not say files: true is not sent any.
+    await hello(m, {});
+    expect((await start(m.machine, { files: [entry] })).body.code).toBe("bad_fields");
+    await hello(m, { files: true });
+    const missing = { ...entry, sha256: fileHash(new TextEncoder().encode("never uploaded")) };
+    expect((await start(m.machine, { files: [missing] })).body.code).toBe("file");
+    expect((await start(m.machine, { files: [{ ...entry, name: ".env" }] })).body.code).toBe("bad_fields");
+    const sent = await start(m.machine, { files: [entry] });
+    expect(sent.status, JSON.stringify(sent.body)).toBe(201);
+    expect(sent.body.files).toEqual([entry]);
+    // Nothing about the file is in the text the agent reads.
+    expect(sent.body.text).toBe("Fix the date picker");
+
+    const get = (sha: string, bearer?: string) =>
+      fetch(`${b.url}${CONTROL}/files/${sha}`, bearer ? { headers: { authorization: `Bearer ${bearer}` } } : {});
+    const got = await get(entry.sha256, m.token);
+    expect(got.status).toBe(200);
+    expect(got.headers.get("content-type")).toBe("text/markdown");
+    expect(got.headers.get("content-length")).toBe(String(bytes.length));
+    expect(new Uint8Array(await got.arrayBuffer())).toEqual(bytes);
+    expect((await get(entry.sha256)).status).toBe(401);
+    expect((await get(entry.sha256, SINK)).status).toBe(401);
+    expect((await get(missing.sha256, m.token)).status).toBe(404);
+    expect((await get("not-a-hash", m.token)).status).toBe(404);
+  });
+
+  it("an upload over 25 MiB, without a type, empty, or with a bad name is refused", async () => {
+    // The router answers 413 and drops the connection mid-body, so the client may only see the drop.
+    const big = await upload(new Uint8Array(26_214_401), "application/octet-stream", "big.bin").then(
+      (r) => r.status,
+      () => 413,
+    );
+    expect(big).toBe(413);
+    expect((await upload("x", "nonsense", "a.txt")).status).toBe(415);
+    expect((await upload("", "text/plain", "a.txt")).status).toBe(400);
+    expect((await upload("x", "text/plain", "../a.txt")).status).toBe(400);
+    expect((await upload("x", "text/plain", "")).status).toBe(400);
+  });
+
+  it("keeps applied from taken and delivered on the activity", async () => {
+    const m = await enrolled(b, pk, "m_startapplied00000001");
+    await hello(m, {
+      start: { "claude-code": { permissions: ["safe", "edits", "auto"], permission: "auto", any_model: true } },
+    });
+    const sent = await start(m.machine, { permission: "edits", model: "sonnet" });
+    expect(sent.status).toBe(201);
+    const id = sent.body.id as string;
+    const ack = (a: Record<string, unknown>) =>
+      call(b.url, "POST", `${CONTROL}/ack`, {
+        bearer: m.token,
+        body: { acks: [{ id, at: new Date().toISOString(), ...a }] },
+      });
+    await ack({ outcome: "taken", applied: { permission: "edits", model: "sonnet" } });
+    expect(b.control.activity().find((a) => a.id === id)).toMatchObject({
+      outcome: "taken",
+      permission: "edits",
+      model: "sonnet",
+      applied: { permission: "edits", model: "sonnet" },
+    });
+    await ack({ outcome: "delivered", session: SID, applied: { permission: "edits", model: "sonnet" } });
+    expect(b.control.activity().find((a) => a.id === id)).toMatchObject({
+      outcome: "delivered",
+      applied: { permission: "edits", model: "sonnet" },
+    });
+  });
+
+  it("the well-known says control.files", () => {
+    expect(b.control.wellKnown().files).toBe(true);
+  });
+});
+
 // --- the early verification against every control vector ---------------------------
 
 const repo =
@@ -870,6 +1111,11 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
         expect(r0.status).toBe(201);
         for (const k of trusted.slice(1))
           await call(b.url, "POST", `${CONTROL}/_test/enroll`, { body: { machine: v.input.machine, key: k } });
+        // A machine that takes files on a start, as a hello says it (CONTROL.md §2).
+        await call(b.url, "POST", `${CONTROL}/hello`, {
+          bearer: r0.body.token as string,
+          body: { ...facts, name: "conformance", files: true },
+        });
         const s = v.input.signed!;
         const r = await call(b.url, "POST", `${UI}/send`, {
           body: {
@@ -893,6 +1139,15 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
           code = "too_old";
         }
         if (!expectOk && code === "replay") expectOk = true;
+        // And in a third: it holds the bytes a start's files name, and nobody uploaded these.
+        let carriesFiles = false;
+        try {
+          carriesFiles = Array.isArray(JSON.parse(s.cmd).files);
+        } catch {}
+        if (expectOk && carriesFiles) {
+          expectOk = false;
+          code = "file";
+        }
         if (expectOk) {
           expect(r.status, JSON.stringify(r.body)).toBe(201);
           expect(r.body.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
 // On a phone (the `phone` project, 390×844): the bottom tab bar is on every page with at
-// most five tabs (the rest behind More), nothing scrolls sideways, and the session page's
-// control strip sits above the tabs.
+// most five tabs (the rest behind More), nothing scrolls sideways, the session page's
+// control strip sits above the tabs, and New session is a full-height sheet.
 import { expect, type Page, test } from "@playwright/test";
+import { CONTROL_BASE, fakeDaemon, passkeyPage, seenSetupHere, sinkToken } from "./control-helpers.js";
 import { openBoard } from "./helpers.js";
 
 const noSidewaysScroll = async (page: Page) => {
@@ -146,5 +147,51 @@ test.describe("phone", () => {
     const ib = (await input.boundingBox())!;
     const tb = (await page.locator("nav.tabbar").boundingBox())!;
     expect(ib.y + ib.height).toBeLessThanOrEqual(tb.y);
+  });
+});
+
+// New session on a phone (STEER-SPEC B.6): the compose glyph in the Board's bar opens a
+// full-height sheet, Start sits in its top bar, and Start pushes the session's page in its
+// starting state. Signed for real, against the test-door instance (control-helpers.ts).
+test.describe("phone: new session", () => {
+  test.skip(({ isMobile }) => !isMobile, "phone project only");
+
+  test("compose glyph → full-height sheet → Start in the top bar → the session page", async ({ context, page }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const d = await fakeDaemon(
+      key,
+      {
+        name: `ns-phone-${Math.random().toString(36).slice(2, 8)}`,
+        harnesses: ["claude-code"],
+        folders: ["/Users/e2e/code"],
+        home: "/Users/e2e",
+        mode: "auto",
+        start: { "claude-code": { permissions: ["read", "safe", "auto"], permission: "auto", any_model: true } },
+      },
+      { sinkToken: await sinkToken() },
+    );
+    try {
+      await page.goto(`${CONTROL_BASE}/?new=1&machine=${d.name}`);
+      const sheet = page.locator("[data-new-session]");
+      await expect(sheet).toHaveClass(/ns-sheet--phone/);
+      await page.locator("[data-ns-cancel]").click();
+      await page.locator(".page.board .compose-btn--phone").click();
+      await expect(sheet).toBeVisible();
+      const box = (await sheet.boundingBox())!;
+      const vh = await page.evaluate(() => window.innerHeight);
+      expect(box.height, "full height").toBeGreaterThanOrEqual(vh - 1);
+      await expect(sheet.locator(".ns-bar [data-ns-start]")).toBeDisabled();
+      await sheet.locator("[data-ns-row=machine] button.sel").click();
+      await page.locator(".sel-sheet .sel-opt", { hasText: d.name }).click();
+      await sheet.locator("[data-ns-text]").fill("Run the e2e suite and tell me what fails.");
+      await expect(sheet.locator("[data-ns-row=permission]")).toBeVisible();
+      await sheet.locator(".ns-bar [data-ns-start]").click();
+      await expect(page).toHaveURL(/\/s\/claude-code\//);
+      await expect(page.locator(".starting .chat-bubble")).toHaveText("Run the e2e suite and tell me what fails.");
+      await noSidewaysScroll(page);
+    } finally {
+      await d.stop();
+    }
   });
 });

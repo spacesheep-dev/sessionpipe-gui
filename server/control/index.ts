@@ -60,6 +60,8 @@ export interface Control {
     /** MCP servers a session answering our message may use unasked (CONTROL.md §6); none here. */
     session_tools?: string[];
     signing: { rp_id: string; algs: number[] };
+    /** HTTP.md §1: it takes `files` on a `start` and serves {control}/files/{sha256}. */
+    files?: boolean;
   };
   close(): void;
 }
@@ -139,6 +141,7 @@ export function createControl(deps: ControlDeps): Control {
       open_pairing: true,
       session_tools: [],
       signing: { rp_id: rpId(), algs: [-7, -257] },
+      files: true,
     }),
     close: () => {
       if (machinesTimer) clearTimeout(machinesTimer);

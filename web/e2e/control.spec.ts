@@ -4,7 +4,8 @@
 // daemon played by fetch: pair → approve on /pair → the daemon collects key, proof and
 // token → hello → a session's events → a prompt from the Session page reaches the
 // daemon's poll as a verified command → taken / delivered acks show under the strip;
-// then Allow on an open permission, Cancel on a working turn, a start from /machines,
+// then Allow on an open permission, Cancel on a working turn, a start from /machines
+// (its New session… sheet),
 // and a theme sending through api.control.
 //
 //   node scripts/build.mjs && npx vite build --config web/vite.config.ts
@@ -557,26 +558,31 @@ test("a session is started from /machines in one of the machine's folders", asyn
   const block = page.getByRole("region", { name: MACHINE });
   await expect(block).toContainText(/paired/i);
   await expect(block).toContainText("daemon online");
-  const form = block.getByRole("form", { name: `Start a session on ${MACHINE}` });
-  // Custom selects (components/Select.tsx): the trigger carries its value in data-value.
-  await expect(form.getByLabel("harness")).toHaveAttribute("data-value", "claude-code");
-  await expect(form.getByLabel("folder")).toHaveAttribute("data-value", "/tmp/proj");
-  await form.getByLabel("first message").fill("Set up the Oct release branch");
+  // The machine's New session… opens the compose sheet (NewSession.tsx) on this machine;
+  // its one folder and one harness are already chosen. Custom selects carry data-value.
+  await block.getByRole("button", { name: "New session…" }).click();
+  const sheet = page.locator("[data-new-session]");
+  await expect(sheet.locator("[data-ns-row=machine] button.sel")).toHaveAttribute("data-value", MACHINE);
+  await expect(sheet.locator("[data-ns-row=agent] button.sel")).toHaveAttribute("data-value", "claude-code");
+  await expect(sheet.locator("[data-ns-row=folder] button.sel")).toHaveAttribute("data-value", "/tmp/proj");
+  // A 0.7 daemon advertises no start options: no permission or model rows.
+  await expect(sheet.locator("[data-ns-row=permission], [data-ns-row=model]")).toHaveCount(0);
+  await sheet.locator("[data-ns-text]").fill("Set up the Oct release branch");
   await shot(page, "machines-start-desktop");
-  await form.getByRole("button", { name: "Start session" }).click();
+  await sheet.locator("[data-ns-start]").click();
 
   const msg = await daemon.next();
   expect(msg.cmd).toMatchObject({ kind: "start", text: "Set up the Oct release branch", cwd: "/tmp/proj" });
   const session = String(msg.cmd.session);
   expect(session).toMatch(/^claude-code:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   expect(Object.keys(msg.cmd)).toEqual(["v", "t", "machine", "kind", "session", "text", "cwd", "nonce", "iat"]);
-  await daemon.ack(msg.id, "taken");
-  await expect(block.locator(`li[data-message="${msg.id}"]`)).toHaveAttribute("data-outcome", "taken");
-  await daemon.ack(msg.id, "delivered", { session, reply: "Session started." });
-  const link = block.getByRole("link", { name: /Open the new session/ });
-  await expect(link).toBeVisible();
+  // The page is already the new session, in its starting state, following the acks.
   const sid = session.slice("claude-code:".length);
-  await expect(link).toHaveAttribute("href", `/s/claude-code/${sid}`);
+  await expect(page).toHaveURL(new RegExp(`/s/claude-code/${sid}$`));
+  await daemon.ack(msg.id, "taken");
+  await expect(page.locator(".starting[data-starting=taken]")).toBeVisible();
+  await daemon.ack(msg.id, "delivered", { session, reply: "Session started." });
+  await expect(page.locator(".starting[data-starting=delivered]")).toBeVisible();
   await shot(page, "machines-started-desktop");
 });
 

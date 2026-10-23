@@ -3,7 +3,7 @@
 // pairings and their approval, a WebAuthn challenge, sending a signed command, the
 // activity, the paired machines and device requests (a phone's own passkey waiting for
 // a trusted device's key.add). Same-origin fetch, JSON both ways, errors by code.
-import type { ControlActivity, Info, MachineControl, TlsInfo } from "@shared/api";
+import type { ControlActivity, Info, MachineControl, StartFile, TlsInfo } from "@shared/api";
 import { ROUTES } from "@shared/api";
 import { sendingOriginOf, wrongOrigin } from "./origin";
 
@@ -135,6 +135,20 @@ export const controlApi = {
   activity: (limit = 100) =>
     call<{ activity: ControlActivity[] }>("GET", `${BASE}/activity?limit=${limit}`).then((r) => r.activity),
   machines: () => call<{ machines: PairedMachine[] }>("GET", `${BASE}/machines`).then((r) => r.machines),
+  /** One file a start will carry: held here under its hash, named in the signed `files`. */
+  uploadFile: async (file: File): Promise<StartFile> => {
+    const res = await fetch(`${BASE}/files?name=${encodeURIComponent(file.name)}`, {
+      method: "POST",
+      headers: { "content-type": file.type || "application/octet-stream", accept: "application/json" },
+      body: file,
+    });
+    const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      const reason = typeof json.reason === "string" ? json.reason : `http_${res.status}`;
+      throw new ControlError(res.status, reason, undefined, typeof json.error === "string" ? json.error : undefined);
+    }
+    return json as unknown as StartFile;
+  },
   deviceRequest: (body: { key: TrustedKey; name?: string }) => call<DeviceRequest>("POST", `${BASE}/devices`, body),
   devices: () => call<{ devices: DeviceRequest[] }>("GET", `${BASE}/devices`).then((r) => r.devices),
   device: (requestId: string) => call<DeviceRequest>("GET", `${BASE}/devices/${encodeURIComponent(requestId)}`),

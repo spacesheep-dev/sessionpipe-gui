@@ -15,6 +15,7 @@ import { LensChip, LensNote } from "../components/LensChip";
 import { NotifyToggle } from "../components/NotifyToggle";
 import { PageBar } from "../components/PageBar";
 import { answerItems, lensMenu, useBackgroundMenu, useStickyTop } from "../components/SessionCard";
+import { ComposeButton } from "../control/NewSession";
 import { answerState, useSessionSend } from "../control/useSend";
 import { type OpenAttention, useAppState, useLabels, useOpenAttentions, useStore } from "../data/hooks";
 import { ATTENTION_LABEL, attentionMessage, oneLine, sessionTitle } from "../lib/format";
@@ -134,6 +135,7 @@ export function Inbox() {
               Sounds
             </Link>
             <LensChip />
+            <ComposeButton className="compose-btn--phone" />
           </>
         }
       />

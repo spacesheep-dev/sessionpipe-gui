@@ -2,24 +2,43 @@
 // The board: every session in one grouped list, needs_you first, under sticky section
 // headers. Filters by machine, harness and text in the page bar; done sessions folded
 // behind a disclosure with a count. Empty, waiting and no-match states sit where the
-// first row would be. A right-click on the page's empty space has the view options.
-import type { SessionState, SessionSummary } from "@shared/api";
-import { SESSION_STATES } from "@shared/api";
-import { useCallback, useMemo, useRef, useState } from "react";
-import { ChipSelect, HarnessGlyph, SearchInput } from "../components/bits";
+// first row would be. A right-click on the page's empty space has the view options. A
+// session started from here shows at once, as a "starting" row from its signed start,
+// until its first event makes it an ordinary row (STEER-SPEC B.5).
+import type { ControlActivity, SessionState, SessionSummary } from "@shared/api";
+import { SESSION_STATES, splitKey } from "@shared/api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChipSelect, HarnessGlyph, SearchInput, Since, StateDot } from "../components/bits";
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
 import { LabelChip, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
 import { PageBar } from "../components/PageBar";
-import { cardHides, lensMenu, SessionCard, useBackgroundMenu, useStickyTop } from "../components/SessionCard";
-import { useAppState, useLabels, useSessionTree } from "../data/hooks";
+import {
+  BesideButton,
+  cardHides,
+  lensMenu,
+  SessionCard,
+  useBackgroundMenu,
+  useStickyTop,
+} from "../components/SessionCard";
+import { tildify } from "../control/folders";
+import { useControlActivity } from "../control/hooks";
+import { ComposeButton } from "../control/NewSession";
+import { ALIAS_WINDOW_MS, aliasHidden, openNewSession, setBoardFilter } from "../control/newSessionState";
+import { isFinal } from "../control/words";
+import { useAppState, useLabels, useMachines, useSessionTree } from "../data/hooks";
 import { agentMatches } from "../lib/agents";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import { focusSearch, useListNav } from "../lib/keys";
 import { type LabelFilter, labelPasses, labelQuery, requestLabelRename } from "../lib/labels";
 import { Link, sessionPath } from "../lib/router";
 import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
-import { useSplitKey } from "../lib/split";
+import { openSplit, useSplitKey } from "../lib/split";
+import { useNow } from "../lib/time";
+
+const isStart = (a: ControlActivity) => a.kind === "start";
+/** A start still on its way shows as a row for at most this long without an event. */
+const PENDING_MAX_MS = 3600_000;
 
 /** Whether a search finds one of a session's agents (their type or what they were asked). */
 const agentsMatch = (s: SessionSummary, q: string): boolean => {
@@ -111,11 +130,50 @@ export function Board() {
 
   const machines = useMemo(() => [...new Set(all.map((s) => s.machine).filter((m): m is string => !!m))].sort(), [all]);
   const harnesses = useMemo(() => [...new Set(all.map((s) => s.harness))].sort(), [all]);
+  // New session takes the board's machine and harness when the filter names one of each.
+  useEffect(() => {
+    setBoardFilter({ machine, harness });
+    return () => setBoardFilter({});
+  }, [machine, harness]);
+
+  // Starts from here that have no session yet, and the alias window (newSessionState.ts).
+  const paired = useMachines().filter((m) => m.control);
+  const starts = useControlActivity(isStart);
+  const { sessions } = useAppState();
+  const recentStart = starts.some((a) => Date.now() - Date.parse(a.at) < ALIAS_WINDOW_MS);
+  const now = useNow(recentStart ? "fine" : "coarse");
+  const pending = useMemo(
+    () =>
+      starts.filter(
+        (a) =>
+          !!a.session &&
+          !sessions.has(a.session) &&
+          !(a.ackSession && sessions.has(a.ackSession)) &&
+          !isFinal(a) &&
+          now - Date.parse(a.at) < PENDING_MAX_MS &&
+          (!machine || paired.find((m) => m.control?.machineId === a.machineId)?.name === machine) &&
+          (!harness || splitKey(a.session).harness === harness),
+      ),
+    [starts, sessions, now, machine, harness, paired],
+  );
+  const hidden = useCallback(
+    (s: SessionSummary) =>
+      recentStart &&
+      aliasHidden(
+        s,
+        starts,
+        (name) => paired.find((m) => m.name === name)?.control?.machineId,
+        (id) => paired.find((m) => m.control?.machineId === id)?.control?.home,
+        now,
+      ),
+    [recentStart, starts, paired, now],
+  );
 
   const visible = useMemo(
     () =>
       roots.filter(
         (s) =>
+          !hidden(s) &&
           (!machine || s.machine === machine) &&
           (!harness || s.harness === harness) &&
           labelPasses(labels, s.key, label) &&
@@ -124,7 +182,7 @@ export function Board() {
             agentsMatch(s, lq.rest) ||
             (childrenOf.get(s.key) ?? []).some((c) => matches(c, lq.rest))),
       ),
-    [roots, machine, harness, label, labels, lq, childrenOf],
+    [roots, machine, harness, label, labels, lq, childrenOf, hidden],
   );
   const groups = useMemo(() => {
     const g = new Map<SessionState, SessionSummary[]>();
@@ -218,7 +276,12 @@ export function Board() {
             </>
           )
         }
-        actions={<MoreButton build={view} label="View options" title={() => "Board"} />}
+        actions={
+          <>
+            <MoreButton build={view} label="View options" title={() => "Board"} />
+            <ComposeButton className="compose-btn--phone" />
+          </>
+        }
       />
 
       <LensNote lens={lens} hidden={hiddenByLens} />
@@ -236,7 +299,7 @@ export function Board() {
             <p className="state-text">The board fills in as soon as the stream is back.</p>
           </div>
         )
-      ) : empty ? (
+      ) : empty && pending.length === 0 ? (
         <div className="state board-empty">
           <p className="state-title">No sessions yet</p>
           <p className="state-text">
@@ -246,8 +309,13 @@ export function Board() {
           <Link to="/connect" className="btn btn--primary">
             Open Connect
           </Link>
+          {paired[0] && (
+            <button type="button" className="board-start" onClick={() => openNewSession({ machine: paired[0]!.name })}>
+              Start a session on {paired[0].name}
+            </button>
+          )}
         </div>
-      ) : visible.length === 0 ? (
+      ) : visible.length === 0 && pending.length === 0 ? (
         <div className="state">
           <p className="state-title">
             Nothing matches{q ? ` “${q}”` : ""}
@@ -263,18 +331,21 @@ export function Board() {
         <div className="board-list">
           {SESSION_STATES.filter((st) => st !== "done").map((st) => {
             const list = groups.get(st)!;
-            if (list.length === 0) return null;
+            const starting = st === "working" ? pending : [];
+            if (list.length === 0 && starting.length === 0) return null;
+            const n = list.length + starting.length;
             return (
-              <section
-                key={st}
-                className={`group group--${st}`}
-                aria-label={`${list.length} ${STATE_HEADING[st](list.length)}`}
-              >
+              <section key={st} className={`group group--${st}`} aria-label={`${n} ${STATE_HEADING[st](n)}`}>
                 <h2 className="group-head" title={STATE_HINT[st]}>
-                  {STATE_HEADING[st](list.length)}
-                  <span className="group-count num">{list.length}</span>
+                  {STATE_HEADING[st](n)}
+                  <span className="group-count num">{n}</span>
                 </h2>
-                <div className="grid">{list.map(row)}</div>
+                <div className="grid">
+                  {starting.map((a) => (
+                    <StartingCard key={a.id} a={a} machine={paired.find((m) => m.control?.machineId === a.machineId)} />
+                  ))}
+                  {list.map(row)}
+                </div>
               </section>
             );
           })}
@@ -309,5 +380,58 @@ export function Board() {
         </div>
       )}
     </div>
+  );
+}
+
+/** A start on its way: the board's row grammar, from the signed start alone (its first
+ *  line, the machine, the folder), "starting" where a session's state would be. */
+function StartingCard({
+  a,
+  machine,
+}: {
+  a: ControlActivity;
+  machine: { name: string; control?: { online: boolean; home?: string } } | undefined;
+}) {
+  const { harness, id } = splitKey(a.session!);
+  const title = (a.text ?? "").split("\n")[0]!.trim().slice(0, 120) || "New session";
+  const name = machine?.name ?? "the machine";
+  const line =
+    a.outcome === "taken" || a.outcome === "progress"
+      ? `Starting on ${name}`
+      : machine?.control?.online
+        ? `Sent to ${name}`
+        : `Waiting for ${name}`;
+  return (
+    <article className="card card--working card--starting" data-starting={a.session}>
+      <div className="card-row">
+        <Link to={sessionPath(harness, id)} className="card-link" title={title} data-nav-item="">
+          <h3 className="card-title ellipsis">{title}</h3>
+          <span className="card-status">
+            <span className="card-state">
+              <StateDot state="working" decorative />
+              <span className="sr-only">starting</span>
+            </span>
+            <span className="card-kind">starting</span>
+            <span className="card-time">
+              <Since iso={a.at} coarse />
+            </span>
+          </span>
+          <span className="card-line">
+            <span className="card-text">{a.reply ? a.reply.split("\n").pop() : line}</span>
+          </span>
+          <span className="card-meta">
+            <HarnessGlyph name={harness} size="sm" />
+            <span className="card-where ellipsis">
+              {name}
+              {a.cwd ? ` · ${tildify(a.cwd, machine?.control?.home)}` : ""}
+            </span>
+          </span>
+          <span className="card-foot num" aria-hidden="true">
+            <span />
+          </span>
+        </Link>
+        <BesideButton onClick={() => openSplit(a.session!)} />
+      </div>
+    </article>
   );
 }

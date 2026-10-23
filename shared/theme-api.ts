@@ -157,6 +157,10 @@ export interface ThemeApi {
       note?: string,
     ): Promise<ControlActivity>;
     cancel(session: SessionKey): Promise<ControlActivity>;
+    /** The host's New session sheet, prefilled (a canvas zone's "New session in acme/web",
+     *  its empty space's "New session…"): the person picks, writes and starts it there,
+     *  with every option the machine advertises. Absent on older hosts. */
+    compose?(prefill?: { machine?: string; harness?: string; cwd?: string }): void;
     /** A new session on a paired machine; the returned activity names the session key the host chose. */
     start(
       machineId: string,

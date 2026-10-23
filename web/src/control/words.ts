@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: control-web. A carried message's lifecycle and a refusal's code, in words a
 // person reads under the strip (CONTROL.md §5, §10).
-import type { ControlActivity, ControlKind, ControlOutcome } from "@shared/api";
+import type { ControlActivity, ControlKind, ControlOutcome, StartPermission } from "@shared/api";
 import { ControlError, wrongOriginHere } from "./api";
 import { wrongOriginWords } from "./origin";
 import { webauthnError } from "./webauthn";
@@ -38,6 +38,11 @@ export const REFUSAL_WORDS: Record<string, string> = {
   no_attention: "that permission is no longer open",
   no_session: "the machine has no such session",
   start_limit: "the machine is already starting as many sessions as it allows",
+  permission: "the machine won't start at that permission level",
+  model: "the agent won't run that model there",
+  file: "a file didn't reach the machine",
+  // A daemon up to 0.9.0 says `mode` where CONTROL.md now says `permission`.
+  mode: "the machine won't start at that permission level",
 };
 
 /** The wrong-origin guard's line, e.g. "Sending works from https://studio-mac.local:7373;
@@ -111,3 +116,53 @@ export function sendErrorWords(e: unknown): string {
   }
   return `not sent · ${e instanceof Error ? e.message : String(e)}`;
 }
+
+/** A machine's detail ends the sentence it is quoted in; most arrive without a full stop. */
+const ended = (s: string): string => (/[.!?…]$/.test(s) ? s : `${s}.`);
+
+/** A start that did not start, in the words the session page shows under it (STEER-SPEC
+ *  B.5), or null when it is still on its way or started. `agent` is the harness's name. */
+export function startFailureWords(a: ControlActivity, machine: string, agent: string): string | null {
+  const detail = a.detail?.trim();
+  const level = a.permission ? PERMISSION_LABEL[a.permission] : null;
+  if (a.outcome === "refused")
+    switch (a.code) {
+      case "folder":
+        return `${machine} doesn't allow that folder.`;
+      case "permission":
+      case "mode":
+        return detail
+          ? `${machine} won't start this: ${ended(detail)}`
+          : `${machine} runs in safe mode, so it won't start with ${level ?? "that level"}.`;
+      case "model":
+        return `${machine}'s ${agent} won't run ${a.model ?? "that model"}${detail ? `: ${ended(detail)}` : "."}`;
+      case "start_limit":
+        return `${machine} is already running as many new sessions as it allows. Try again in a few minutes.`;
+      default:
+        return `${machine} refused it: ${refusalWords(a.code)}${detail && !REFUSAL_WORDS[a.code ?? ""] ? `: ${ended(detail)}` : "."}`;
+    }
+  if (a.outcome === "failed") {
+    if (a.code === "model")
+      return `${machine}'s ${agent} won't run ${a.model ?? "that model"}${detail ? `: ${ended(detail)}` : "."}`;
+    if (a.code === "file") return `A file didn't reach ${machine}${detail ? `: ${ended(detail)}` : "."}`;
+    return `It didn't start on ${machine}${detail ? `: ${ended(detail)}` : "."}`;
+  }
+  if (a.outcome === "unsupported") return `${machine} can't start ${agent} sessions.`;
+  if (a.outcome === "expired") return `${machine} didn't come online in time.`;
+  return null;
+}
+
+/** The level's name in the sheet and on the session page (STEER-SPEC B.3). */
+export const PERMISSION_LABEL: Record<StartPermission, string> = {
+  read: "Read only",
+  safe: "Safe",
+  edits: "Accept edits",
+  auto: "Auto",
+};
+/** Its one line in the Permission pop-up. */
+export const PERMISSION_HINT: Record<StartPermission, string> = {
+  read: "Reads and plans; changes nothing",
+  safe: "Only what the folder already allows; the rest is denied and listed",
+  edits: "Also edits files in the folder",
+  auto: "The agent's own automatic approval",
+};

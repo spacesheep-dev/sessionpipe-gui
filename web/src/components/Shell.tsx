@@ -8,6 +8,8 @@
 // skin, mode); MenuHost here is the one context-menu policy for the whole app.
 import type { InstalledTheme } from "@shared/theme-api";
 import { type CSSProperties, Fragment, type ReactNode, useEffect, useRef, useState } from "react";
+import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
+import { newSessionOpen, openNewSession } from "../control/newSessionState";
 import { useAnswerableCount, useAppState } from "../data/hooks";
 import { useFocusTrap } from "../lib/focus";
 import { useGlobalKeys } from "../lib/keys";
@@ -481,6 +483,13 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     );
     return () => clearTimeout(t);
   }, [path]);
+  // New session: `c` anywhere outside a text field, `?new=1`, ⌘N in the installed app.
+  useShortcut("newSession.open", () => {
+    if (newSessionOpen()) return false;
+    openNewSession();
+  });
+  useNewFromUrl(usePath());
+  useStandaloneNewKey();
   // `g 1` … `g 9`: the n-th installed view, in rail order.
   const views = nav.filter((n) => n.key.startsWith("t:"));
   for (let i = 1; i <= 9; i++) {
@@ -515,13 +524,16 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {announce}
       </div>
       <nav className="rail" aria-label="Pages" {...railMenuProps}>
-        <Link to="/" className="rail-brand" title="sessionpipe gui">
-          <Mark size={20} />
-          <span className="rail-word" aria-hidden="true">
-            sessionpipe
-          </span>
-          <span className="sr-only">sessionpipe gui</span>
-        </Link>
+        <div className="rail-head">
+          <Link to="/" className="rail-brand" title="sessionpipe gui">
+            <Mark size={20} />
+            <span className="rail-word" aria-hidden="true">
+              sessionpipe
+            </span>
+            <span className="sr-only">sessionpipe gui</span>
+          </Link>
+          <ComposeButton className="rail-compose" />
+        </div>
         <div className="rail-nav">
           {nav.map((n, i) => (
             <Fragment key={n.key}>
@@ -596,6 +608,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       <SessionPanel phone={phone} />
       <ShortcutHelp />
       <LabelsDialog />
+      <NewSessionHost />
       <MenuHost />
     </div>
   );

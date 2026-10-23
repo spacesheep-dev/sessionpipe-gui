@@ -2,7 +2,7 @@
 /// <reference lib="dom" />
 // Accessibility: axe on every page (zero serious or critical violations), then a
 // keyboard-only walk: Tab from the top reaches the skip link, the main region, the rail
-// and a card; `g f` navigates; `?` opens the help; a rebinding on /shortcuts takes
+// and a card (New session between the brand and the pages); `g f` navigates; `?` opens the help; a rebinding on /shortcuts takes
 // effect (and the old key stops); a conflict is refused; Esc gives focus back.
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
@@ -91,10 +91,12 @@ test.describe("accessibility", () => {
     await expect(skip).toBeVisible();
     await page.keyboard.press("Enter");
     await expect(page.locator("main#main")).toBeFocused();
-    // From the skip link, Tab walks the rail: the brand, then the pages.
+    // From the skip link, Tab walks the rail: the brand, New session, then the pages.
     await skip.focus();
     await page.keyboard.press("Tab");
     await expect(page.locator("nav.rail a.rail-brand")).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(page.locator("nav.rail [data-compose]")).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(page.locator("nav.rail a[data-nav='board']")).toBeFocused();
     // The board's cards are one tab stop: Tab goes into the list, arrows move inside it.

@@ -18,7 +18,16 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, w
 import path from "node:path";
 import { ulid } from "sessionpipe-core";
 import type { Assertion, ControlCommand, GrantBundle, SignedCommand } from "sessionpipe-core/control";
-import type { ControlActivity, ControlKind, ControlOutcome, MachineControl } from "../../shared/api.js";
+import type {
+  ControlActivity,
+  ControlKind,
+  ControlOutcome,
+  HarnessStartOptions,
+  MachineControl,
+  StartFile,
+  StartPermission,
+} from "../../shared/api.js";
+import { FileStore } from "./files.js";
 import { type AckIn, type HarnessAccount, type Hello, isFinal } from "./parse.js";
 
 /** The longest long-poll we hold (HTTP.md §1 control.wait_max_s). */
@@ -78,6 +87,12 @@ export interface MachineRow {
   folders?: string[];
   mode?: "safe" | "auto";
   accounts?: HarnessAccount[];
+  /** The last hello's word on files and start options: each hello says them again, so a
+   *  daemon that stopped advertising one (a downgrade) loses it here at once. */
+  files?: boolean;
+  promptFiles?: boolean;
+  home?: string;
+  start?: Record<string, HarnessStartOptions>;
   waiting?: string[];
   lastHelloAt?: string;
   lastPollAt?: string;
@@ -133,6 +148,13 @@ export interface MessageRow {
   ackedAt?: string;
   /** A fork or a started session the final ack named. */
   ackSession?: string;
+  /** A start's signed folder, options and files, for the starting page and a retry. */
+  cwd?: string;
+  permission?: StartPermission;
+  model?: string;
+  files?: StartFile[];
+  /** What the machine ran the start with (`taken`, `delivered`). */
+  applied?: { permission?: StartPermission; model?: string };
 }
 
 interface MachinesFile {
@@ -186,6 +208,11 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.ackSession) a.ackSession = m.ackSession;
   if (m.takenAt) a.takenAt = m.takenAt;
   if (m.ackedAt) a.ackedAt = m.ackedAt;
+  if (m.cwd) a.cwd = m.cwd;
+  if (m.permission) a.permission = m.permission;
+  if (m.model) a.model = m.model;
+  if (m.files) a.files = m.files;
+  if (m.applied) a.applied = m.applied;
   return a;
 }
 
@@ -206,6 +233,9 @@ export class ControlState {
   /** Device requests in flight, in memory only. */
   private devices = new Map<string, DeviceRequestRow>();
   private sweeper: NodeJS.Timeout | null = null;
+  private filesSweptAt = 0;
+  /** The bytes of the files starts carry (files.ts), under <dir>/files. */
+  readonly files: FileStore;
   /** Called with every message whose state changed (queued, acked, expired). */
   onMessage: (m: MessageRow) => void = () => {};
   /** Called when any machine row changed (pairing, hello, poll, removal) or a machine's
@@ -214,6 +244,7 @@ export class ControlState {
   private onlineSig = "";
 
   constructor(readonly dir: string) {
+    this.files = new FileStore(path.join(dir, "files"));
     const mf = readJson<MachinesFile>(this.machinesFile);
     for (const m of mf?.machines ?? []) if (m && typeof m.id === "string") this.machinesById.set(m.id, m);
     const qdir = path.join(dir, "queue");
@@ -325,6 +356,15 @@ export class ControlState {
     if (h.folders) m.folders = h.folders;
     if (h.mode) m.mode = h.mode;
     if (h.accounts.length) m.accounts = h.accounts;
+    // Said again in every hello (CONTROL.md §2): absent now means absent.
+    if (h.files) m.files = true;
+    else delete m.files;
+    if (h.promptFiles) m.promptFiles = true;
+    else delete m.promptFiles;
+    if (h.home) m.home = h.home;
+    else delete m.home;
+    if (h.start) m.start = h.start;
+    else delete m.start;
   }
 
   /** Mint the machine's own bearer token (once, at its first pairing). Returned in clear
@@ -381,6 +421,10 @@ export class ControlState {
     if (m.modes.length) c.modes = m.modes;
     if (m.version) c.version = m.version;
     if (m.accounts) c.accounts = m.accounts;
+    if (m.files) c.files = true;
+    if (m.promptFiles) c.promptFiles = true;
+    if (m.home) c.home = m.home;
+    if (m.start) c.start = m.start;
     return c;
   }
 
@@ -499,6 +543,18 @@ export class ControlState {
     if (signed.confirm) row.confirm = signed.confirm;
     const text = describe(cmd);
     if (text !== undefined) row.text = text;
+    if (cmd.kind === "start") {
+      // The fields a start may carry beyond core 0.7's type (CONTROL.md §3.1); the caller's
+      // pre-check (ui.ts) already held them to the machine's hello.
+      const c = cmd as ControlCommand & { files?: StartFile[]; permission?: StartPermission; model?: string };
+      if (typeof c.cwd === "string") row.cwd = c.cwd;
+      if (c.permission) row.permission = c.permission;
+      if (c.model) row.model = c.model;
+      if (Array.isArray(c.files) && c.files.length) {
+        row.files = c.files.map((f) => ({ name: f.name, type: f.type, size: f.size, sha256: f.sha256 }));
+        for (const f of row.files) this.files.keepUntil(f.sha256, row.expiresAt);
+      }
+    }
     this.queue(m.id).push(row);
     this.saveQueue(m.id);
     if (cmd.kind === "key.add" && cmd.key) this.deviceSent(cmd.key.id, m.id, row.id);
@@ -535,6 +591,7 @@ export class ControlState {
         row.outcome = "taken";
         row.takenAt = a.at;
         if (a.mode) row.mode = a.mode;
+        if (a.applied && row.kind === "start") row.applied = a.applied;
       } else {
         row.outcome = a.outcome;
         row.ackedAt = a.at;
@@ -543,6 +600,7 @@ export class ControlState {
         if (a.detail) row.detail = a.detail;
         if (a.reply !== undefined) row.reply = a.reply;
         if (a.session) row.ackSession = a.session;
+        if (a.applied && row.kind === "start") row.applied = a.applied;
         if (row.kind === "key.add") this.keyAddSettled(m, row);
       }
       changed = true;
@@ -596,6 +654,10 @@ export class ControlState {
 
   sweep(): void {
     for (const id of this.queues.keys()) this.expireQueue(id);
+    if (Date.now() - this.filesSweptAt > 60_000) {
+      this.filesSweptAt = Date.now();
+      this.files.sweep();
+    }
     this.sweepDevices();
     this.checkOnline();
   }

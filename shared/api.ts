@@ -264,7 +264,57 @@ export interface MachineControl {
   keys: { id: string; alg: number; name?: string; addedAt: string }[];
   /** Messages queued for it and not yet finally acked. */
   queued: number;
+  /** Hello `files: true`: the machine takes `files` on a `start` (CONTROL.md §3.1, §6). */
+  files?: boolean;
+  /** Hello `prompt_files: true`: it takes `files` on a `prompt` too (sessionpipe 0.10). */
+  promptFiles?: boolean;
+  /** Hello `home`: the absolute home folder of the user the daemon runs as, to turn the
+   *  `~/…` folders events report into the absolute `cwd` a start needs (sessionpipe 0.10). */
+  home?: string;
+  /** Hello `start`: per harness, what a `start` may ask for there (sessionpipe 0.10). A
+   *  harness with no entry takes neither `permission` nor `model`, and nothing offers them. */
+  start?: Record<string, HarnessStartOptions>;
 }
+
+// ---------- starting a session (CONTROL.md §6 `start`, its options and files) ----------
+
+/** The levels a `start` may ask for, narrowest first (CONTROL.md §3.1). Closed: nothing is
+ *  wider than `auto`, and no level turns a harness's approval off. */
+export type StartPermission = "read" | "safe" | "edits" | "auto";
+export const START_PERMISSIONS: readonly StartPermission[] = ["read", "safe", "edits", "auto"];
+
+/** One harness's entry in the hello's `start`: the levels it starts at here (already capped
+ *  by the machine's mode), the one a start gets when it names none, and its models. */
+export interface HarnessStartOptions {
+  /** At least one, capped by the machine's mode. */
+  permissions: StartPermission[];
+  /** The default, one of `permissions`. */
+  permission: StartPermission;
+  /** At most 50 suggestions, not a promise. */
+  models?: string[];
+  /** Hello `any_model`: any well-formed id is passed on (the harness may still refuse it). */
+  anyModel?: boolean;
+}
+
+/** A model id as CONTROL.md §3.1 allows it: 1–100 characters, never a leading `-`. The
+ *  same rule as sessionpipe-core's MODEL_RE (0.10); import that once the GUI is on it. */
+export const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]*$/;
+export const MODEL_MAX = 100;
+export const validModel = (m: unknown): m is string =>
+  typeof m === "string" && m.length >= 1 && m.length <= MODEL_MAX && MODEL_RE.test(m);
+
+/** One file a `start` names (CONTROL.md §3.1 `files`): the receiver holds the bytes under
+ *  `sha256` (base64url, 43 characters) and the machine fetches them with its token. */
+export interface StartFile {
+  name: string;
+  type: string;
+  size: number;
+  sha256: string;
+}
+/** The limits of `files` on one command (CONTROL.md §3.1). */
+export const START_FILES_MAX = 10;
+export const START_FILE_MAX_BYTES = 26_214_400;
+export const START_FILES_TOTAL_BYTES = 52_428_800;
 
 export interface Stats {
   events: number;
@@ -832,6 +882,15 @@ export interface ControlActivity {
   ackSession?: string;
   takenAt?: string;
   ackedAt?: string;
+  /** A start's folder, as signed: the starting page shows it and "Edit and start again" puts it back. */
+  cwd?: string;
+  /** A start's level and model, as signed (what was asked, never what ran). */
+  permission?: StartPermission;
+  model?: string;
+  /** A start's files, as signed. */
+  files?: StartFile[];
+  /** What the machine ran it with, from its `taken` / `delivered` ack (sessionpipe 0.10). */
+  applied?: { permission?: StartPermission; model?: string };
 }
 
 // ---------- extras (the curated catalogue; server/extensions/catalog.ts) ----------
@@ -885,6 +944,8 @@ export const ROUTES = {
     demo: "/api/ui/demo",
     /** GET → image/svg+xml: the LAN URL with the UI key, for a phone camera. */
     qr: "/api/ui/qr.svg",
+    /** Everything under it is the control channel's UI side (server/control/README.md),
+     *  POST /files among it: one file a start will carry, as the raw body → StartFile. */
     control: "/api/ui/control",
     /** GET → { viewers: Viewer[] } */
     viewers: "/api/ui/viewers",

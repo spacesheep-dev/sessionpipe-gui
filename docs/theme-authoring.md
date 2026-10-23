@@ -166,6 +166,7 @@ acks it.
 | `answer(session, attentionId, "allow" \| "deny", note?)` | Answers an open permission (`session.openAttentions[].attentionId`). |
 | `cancel(session)` | Interrupts the running turn. |
 | `start(machineId, { harness, cwd, text })` | A new session on a paired machine (`machine.control.machineId`, a `cwd` from `machine.control.folders`). The result carries `session`, the key the host chose. |
+| `compose({ machine?, harness?, cwd? })` | Opens the host's New session sheet, prefilled (a zone's "New session in acme/web", the empty canvas's "New session…"); the person picks the options the machine advertises and starts it there. Absent on older hosts. |
 
 A call that cannot be sent rejects with an `Error` whose message is the host's wording
 (`not sent · …`), including a refusal the daemon returns. The first send of the day

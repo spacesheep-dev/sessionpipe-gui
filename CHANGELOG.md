@@ -6,6 +6,41 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **New session.** One compose sheet, from anywhere: `c`, the compose glyph beside the
+  sidebar's name (top right of Board and Inbox on a phone), the palette ("New session…",
+  "New session on studio-mac…", "New session in acme/web"), right-click a session for
+  *New session here*, a machine for *New session on …*, a folder on Machines for *New
+  session in this folder*, the empty board's "Start a session on …", and
+  `?new=1&machine=&harness=&cwd=`. Machine, agent and folder (recent folders under one the
+  machine allows, then the allowed ones, then a typed path, checked by whole path
+  segments), the message and files; Permission and Model only when the machine's
+  sessionpipe advertises them (0.10), one muted line when it does not. A machine that
+  cannot take a start from this page stays in the list with its reason; an offline one can
+  be chosen and queues. The draft is kept per device until it is sent or discarded.
+- **The started session opens live.** Start goes straight to the new session's page,
+  which shows the message, then "Sent to", "Starting on", the reply as it grows, and turns
+  into the ordinary live session at its first event; what the machine ran it with
+  ("Accept edits · sonnet") sits in the bar. A refusal says why in place, with *Edit and
+  start again*. The board shows the start as a row at once.
+- **Files on a new session** (CONTROL.md §3.1, HTTP.md §3): `POST /api/ui/control/files`
+  holds a file under its SHA-256 and `GET {control}/files/{sha256}` serves it to a paired
+  machine's token; the well-known says `control.files`. Nothing about a file goes into the
+  text the agent reads.
+- **The receiver reads sessionpipe 0.10's start options**: the hello's `start`, `home`,
+  `files`, `prompt_files`, and an ack's `applied`; it refuses before queueing a start that
+  asks for what the machine did not advertise (`permission`, `model`, `file`,
+  `bad_fields`).
+- `ThemeApi.control.compose(prefill)` opens the sheet from a view.
+
+### Changed
+
+- The Machines page's inline start form is gone: the Control row has *New session…*.
+- **Cancel the running turn** is `⇧C` now (`c` is New session).
+- A dialog's Esc closes an open pop-up inside it first; a pop-up's filter takes focus once
+  it is placed (it was missed on a desktop).
+
 ## [0.2.0] - 2026-10-23
 
 The native redesign: one window shell, grouped rows, right-click menus everywhere, and

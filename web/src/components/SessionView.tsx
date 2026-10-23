@@ -27,6 +27,7 @@ import { forkOf } from "../control/Activity";
 import { PromptBody, promptParts } from "../control/Attachments";
 import { useControlActivity } from "../control/hooks";
 import { SessionControl } from "../control/SessionControl";
+import { appliedFact, optionsIgnored, StartingSession, useStartOf } from "../control/Starting";
 import { useMachinesMap, useSession, useStore } from "../data/hooks";
 import { agentLabel, agentsFact, agentType, openAgent, taskNotification } from "../lib/agents";
 import { useFocusTrap } from "../lib/focus";
@@ -201,6 +202,8 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
   const store = useStore();
   const key = sessionKey(harness, id);
   const live = useSession(key);
+  // A start this device signed names the key before any event does (STEER-SPEC B.5).
+  const started = useStartOf(key);
   const machines = useMachinesMap();
   const [events, setEvents] = useState<StoredEvent[]>([]);
   const [summary, setSummary] = useState<SessionSummary | undefined>();
@@ -208,6 +211,7 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reload, setReload] = useState(0);
   // The tier lens is the app's (Settings › Tier lens, the chip, `l`); this control reads
   // and writes it. "all" is tier 3 here. Simple mode: the chat, everything shown.
   const lensSetting = useLens();
@@ -301,7 +305,17 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
       cancelled = true;
       unsub();
     };
-  }, [store, harness, id, key]);
+  }, [store, harness, id, key, reload]);
+
+  // A session started from here was not on the receiver when the page opened (404); once
+  // its first event lands, read it again, once.
+  const retried = useRef(false);
+  const appeared = !!live;
+  useEffect(() => {
+    if (!error || !appeared || retried.current) return;
+    retried.current = true;
+    setReload((n) => n + 1);
+  }, [error, appeared]);
 
   /** The previous page of older events, prepended; the viewport stays where it was. */
   const loadOlder = useCallback(async () => {
@@ -602,6 +616,7 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
     [path, s?.openAttentions, s?.state, agentRuns, shownAgent, focusAgent, showAgent, mode],
   );
 
+  if (!s && started) return <StartingSession a={started} mode={mode === "panel" ? "panel" : "page"} />;
   if (!s && loading) {
     return (
       <div className={`page session ${mode === "panel" ? "session--panel" : ""}`}>
@@ -763,7 +778,12 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
               titleClassName="sess-title"
               large={false}
               className="sess-bar"
-              meta={<SessionMeta s={s} chat={chat} total={total} copyOf={copyOf} />}
+              meta={
+                <>
+                  <SessionMeta s={s} chat={chat} total={total} copyOf={copyOf} />
+                  {appliedFact(started) && <span className="sess-applied">{appliedFact(started)}</span>}
+                </>
+              }
               tools={chat ? undefined : <LensTools lens={lens} hidden={hidden} maxTier={s.maxTier} />}
               actions={
                 <>
@@ -789,6 +809,11 @@ export function SessionView({ harness, id, mode, scrollRef, onSession, onForgott
             </p>
           )}
           {error && <p className="page-note is-err">{error}</p>}
+          {optionsIgnored(started) && (
+            <p className="page-note">
+              {s.machine ?? "The machine"} ran this at its own mode; its sessionpipe ignores per-session options.
+            </p>
+          )}
 
           <ol className={`timeline ${chat ? "timeline--chat" : ""}`}>
             {hasOlder && (

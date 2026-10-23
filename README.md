@@ -245,7 +245,7 @@ plugins, what is on disk, and the receiver's own numbers.
 ![The keyboard help: every binding in force, grouped, searchable](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/keyboard.png)
 
 `?` lists every binding in force, `/shortcuts` rebinds them (vim and emacs presets
-included). The ones to know: `⌘K` palette, `/` search this page, `j` `k` move,
+included). The ones to know: `⌘K` palette, `c` new session, `/` search this page, `j` `k` move,
 `Enter` open, `Shift+Enter` open beside, `a` `d` allow or deny the prompt under the
 cursor, `p` focus the composer, `l` cycle the tier lens, `t` dark or light, `g` then a
 letter to jump between pages, `Esc` back. A view's own keys join the same list.
@@ -267,6 +267,19 @@ your passkey. From then on a session has a composer and Allow / Deny on its open
 from the session page, the Inbox, a toast or the palette. The first send of a day asks
 for the passkey once. A phone makes its own passkey on `/add-device`; a device the
 machine already trusts compares six digits and approves.
+
+**New session.** `c` anywhere (the compose glyph beside the sidebar's name, top right on
+a phone; the palette; right-click a session for *New session here*, a machine for *New
+session on studio-mac…*, a folder on Machines for *New session in this folder*; or
+`/?new=1&machine=…&harness=…&cwd=…`) opens one sheet: the machine, the agent it runs,
+the folder (its recent ones first, then the ones it allows, or a path you type), what it
+should do, and files when the machine takes them. Permission (Read only, Safe, Accept
+edits, Auto) and the model appear only when that machine's sessionpipe advertises them,
+never above the mode its owner set at its terminal; an older machine gets one line
+instead ("Runs in build-box's safe mode"). Start signs one `start` and the new session's
+page opens at once and fills in as the agent starts; a machine that is offline takes it
+when it is back. The GUI runs nothing itself: the machine's daemon starts the agent, and
+checks everything again.
 
 **Images.** Paste, drop or attach up to six images (8 MB each) in the composer. The GUI
 stores them and the signed text names them, by absolute path when the session runs on

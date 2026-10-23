@@ -15,9 +15,12 @@ import {
   verifyCommand,
   verifyEnrollment,
 } from "sessionpipe-core/control";
+import { START_FILE_MAX_BYTES, type StartFile } from "../../shared/api.js";
 import type { Ctx, Handler, Reply, Router } from "../http/router.js";
 import { HttpError } from "../http/router.js";
+import { MEDIA_TYPE_RE } from "./files.js";
 import { CODE_RE, MACHINE_RE } from "./parse.js";
+import { filesProblem, precheck } from "./precheck.js";
 import { requestOrigin } from "./routes.js";
 import { type ControlState, type DeviceRequestRow, type MachineRow, type PairingRow, toActivity } from "./state.js";
 
@@ -315,9 +318,40 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
         maxAgeMs: RECEIVER_MAX_AGE_MS,
       });
       if (!verdict.ok) throw new HttpError(422, { reason: verdict.why, code: verdict.code });
+      // The second look: what this machine's hello advertised (precheck.ts). The same
+      // refusal shape, so the sheet shows the reason before anything is queued.
+      const refused = precheck(JSON.parse(signed.cmd) as Record<string, unknown>, m, state.files);
+      if (refused) throw new HttpError(422, { reason: refused.why, code: refused.code });
       const ttl = typeof body.expires_in_s === "number" && body.expires_in_s > 0 ? body.expires_in_s * 1000 : undefined;
       const row = state.enqueue(m, signed, verdict.cmd, { via: "ui", ...(ttl ? { expiresInMs: ttl } : {}) });
       return { status: 201, json: toActivity(row) };
+    }),
+  );
+
+  // One file a start will carry (CONTROL.md §3.1, HTTP.md §3): the raw bytes, the file's
+  // media type as content-type, its name in `?name=`. Held a day under its SHA-256 (files.ts);
+  // the answer is the entry the signed command names. Nothing about it is in the text.
+  router.post(
+    `${base}/files`,
+    guarded(async (ctx): Promise<Reply> => {
+      const name = (ctx.url.searchParams.get("name") ?? "").normalize("NFC");
+      const type = String(ctx.req.headers["content-type"] ?? "")
+        .split(";")[0]!
+        .trim()
+        .toLowerCase();
+      if (!MEDIA_TYPE_RE.test(type) || type.length > 100)
+        throw new HttpError(415, { reason: "unsupported_type", error: "Send the file's media type as content-type." });
+      const bytes = await ctx.body(START_FILE_MAX_BYTES);
+      if (!bytes.length) throw new HttpError(400, { reason: "empty", error: "The file is empty." });
+      const bad = filesProblem([{ name, type, size: bytes.length, sha256: "A".repeat(43) }]);
+      if (bad) throw new HttpError(400, { reason: "bad_name", error: bad });
+      let held: { sha256: string; size: number };
+      try {
+        held = state.files.put(bytes, type);
+      } catch {
+        throw new HttpError(507, { reason: "full", error: "Too many files are held here; try again tomorrow." });
+      }
+      return { status: 201, json: { name, type, size: held.size, sha256: held.sha256 } satisfies StartFile };
     }),
   );
 

@@ -1,0 +1,470 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* New session (control/NewSession.tsx). One surface, no inner boxes, no stripes: rows split
+   by hairlines, labels in the muted tier and values in the body tier, the message as plain
+   text on the sheet, the options and the one-fact status in the footer. A desktop sheet
+   drops from under the title bar, the way a macOS sheet does; a phone's fills the screen,
+   Cancel and Start in its top bar, the rows as grouped lists. Under the app's menus and
+   pop-ups (z-dialog), so its own Select lists open over it. */
+
+.ns-scrim {
+  z-index: var(--z-dialog);
+}
+@keyframes ns-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.ns-sheet {
+  position: fixed;
+  z-index: calc(var(--z-dialog) + 1);
+  top: var(--bar);
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100dvh - var(--bar) - 24px);
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: var(--hairline) solid var(--line);
+  border-top: none;
+  border-radius: 0 0 var(--radius-pop) var(--radius-pop);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-pop);
+  color: var(--fg);
+  animation: ns-drop var(--dur) var(--ease-out) both;
+}
+.ns-sheet:focus {
+  outline: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ns-sheet {
+    animation: none;
+  }
+}
+.ns-title {
+  margin: 0;
+  padding: 14px 20px 10px;
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+
+/* ----- the rows: Machine, Agent, Folder ----- */
+
+.ns-rows {
+  border-top: var(--hairline) solid var(--line);
+}
+.ns-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--row-lg);
+  padding: 0 12px 0 20px;
+  border-bottom: var(--hairline) solid var(--line);
+}
+.ns-label {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.ns-value {
+  min-width: 0;
+  display: flex;
+}
+.ns-aside {
+  max-width: 220px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  line-height: var(--lh-tight);
+  text-align: right;
+}
+/* The rows' pop-ups are their values: no well, no border, the chevron after the text. */
+.ns-row .ns-sel {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  padding-left: 4px;
+  margin-left: -4px;
+  font-size: var(--text-md);
+}
+@media (hover: hover) {
+  .ns-row .ns-sel:hover:not(:disabled) {
+    background: var(--hover);
+  }
+}
+.ns-row .ns-sel.sel--open {
+  background: var(--sel);
+}
+.ns-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--control);
+  margin-left: -4px;
+  padding: 0 4px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--text-sm);
+}
+.ns-path:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: 0;
+}
+.ns-path::placeholder {
+  color: var(--fg-4);
+}
+
+/* ----- the message and its files ----- */
+
+.ns-text-wrap {
+  position: relative;
+}
+.ns-text {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  margin: 0;
+  padding: 14px 20px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-md);
+  line-height: var(--lh);
+  resize: none;
+}
+.ns-text:focus {
+  outline: none;
+}
+.ns-text::placeholder {
+  color: var(--fg-4);
+}
+.ns-count {
+  position: absolute;
+  right: 16px;
+  bottom: 4px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.ns-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0 20px 10px;
+  list-style: none;
+}
+.ns-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  height: var(--control-sm);
+  padding: 0 2px 0 8px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+}
+.ns-file-name {
+  min-width: 0;
+  color: var(--fg);
+}
+.ns-file-size {
+  flex: none;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.ns-file--err .ns-file-size {
+  color: var(--err);
+}
+.ns-file .spinner {
+  flex: none;
+}
+.ns-file-x {
+  width: 20px;
+  height: 20px;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ----- the footer: files, the options, the status and the actions ----- */
+
+.ns-opts {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: var(--row);
+  padding: 4px 12px 0 14px;
+  border-top: var(--hairline) solid var(--line);
+}
+.ns-opts:empty {
+  display: none;
+}
+.ns-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ns-opt-label {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.ns-opt .ns-sel {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+@media (hover: hover) {
+  .ns-opt .ns-sel:hover:not(:disabled) {
+    background: var(--hover);
+  }
+}
+.ns-attach {
+  color: var(--fg-3);
+}
+.ns-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 12px 20px;
+}
+.ns-opts:empty + .ns-foot {
+  border-top: var(--hairline) solid var(--line);
+}
+.ns-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+}
+.ns-status--err {
+  color: var(--err);
+}
+.ns-actions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ns-more {
+  color: var(--fg-3);
+}
+.ns-kbd {
+  margin-left: 2px;
+  opacity: 0.7;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+}
+
+/* ----- the compose glyph (sidebar header, the phone's Board and Inbox bars) ----- */
+
+.compose-btn {
+  color: var(--fg-2);
+}
+/* On a desktop the sidebar has it; the bars' copy is the phone's. */
+.icon-btn.compose-btn--phone {
+  display: none;
+}
+@media (max-width: 839px) {
+  .icon-btn.compose-btn--phone {
+    display: inline-flex;
+  }
+}
+
+/* ----- the phone: full height, grouped lists ----- */
+
+@keyframes ns-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+.ns-sheet--phone {
+  /* Over the toasts too: on a phone they would sit on the message. */
+  z-index: calc(var(--z-toast) + 1);
+  inset: 0;
+  top: 0;
+  width: auto;
+  max-height: none;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: var(--grouped-ground);
+  box-shadow: none;
+  overflow: hidden;
+  animation: ns-up var(--dur-slow) var(--ease-out) both;
+}
+.ns-bar {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  height: calc(var(--bar) + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 8px 0;
+  border-bottom: var(--hairline) solid var(--line);
+  background: var(--chrome);
+}
+.ns-bar-title {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.ns-bar-btn {
+  justify-self: start;
+  min-height: var(--tap);
+  padding: 0 8px;
+  border: none;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--text-md);
+}
+.ns-bar-btn--start {
+  justify-self: end;
+  color: var(--fg);
+  font-weight: 600;
+}
+.ns-bar-btn:disabled {
+  color: var(--fg-4);
+}
+.ns-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px 16px calc(env(safe-area-inset-bottom) + 24px);
+}
+.ns-group {
+  margin-bottom: 16px;
+  border-radius: var(--radius-sheet);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+.ns-group .ns-rows {
+  border-top: none;
+}
+.ns-sheet--phone .ns-row {
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: var(--tap);
+  padding: 0 8px 0 16px;
+}
+.ns-sheet--phone .ns-row:last-child {
+  border-bottom: none;
+}
+.ns-sheet--phone .ns-row .ns-aside {
+  grid-column: 1 / -1;
+  max-width: none;
+  margin-top: -6px;
+  padding-bottom: 8px;
+  text-align: left;
+}
+/* A disclosure row: the value at the right, then the chevron. */
+.ns-sheet--phone .ns-value {
+  justify-content: flex-end;
+}
+.ns-sheet--phone .ns-row .ns-sel {
+  margin: 0;
+  color: var(--fg-2);
+}
+.ns-sheet--phone .ns-text {
+  min-height: 160px;
+  padding: 12px 16px;
+}
+.ns-sheet--phone .ns-files {
+  padding: 0 16px 12px;
+}
+.ns-cell {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--text-md);
+  text-align: left;
+}
+.ns-cell--action {
+  color: var(--fg);
+}
+.ns-group-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 16px;
+}
+.ns-discard {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--err);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+/* ----- the starting session (control/Starting.tsx) ----- */
+
+.starting-files {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.starting-file {
+  display: inline-flex;
+  gap: 6px;
+  max-width: 260px;
+  padding: 2px 8px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+}
+.starting-file .num {
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.starting-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.sess-applied {
+  color: var(--fg-3);
+}
+
+/* The empty board's "Start a session on studio-mac": a text link, not a second button. */
+.board-start {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .board-start:hover {
+    color: var(--fg);
+  }
+}

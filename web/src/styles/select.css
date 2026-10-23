@@ -125,6 +125,34 @@ button.sel:focus-visible {
 .sel-list--icons .sel-opt {
   grid-template-columns: 16px 16px minmax(0, 1fr) auto;
 }
+/* A level's meaning, one muted line under its label (the New session sheet's Permission). */
+.sel-opt-detail {
+  grid-column: 2 / -1;
+  margin: -4px 0 4px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  line-height: var(--lh-tight);
+  white-space: normal;
+}
+.sel-list--icons .sel-opt-detail {
+  grid-column: 3 / -1;
+}
+.sel-foot {
+  flex: none;
+  margin: 0;
+  padding: 8px 12px 10px;
+  border-top: var(--hairline) solid var(--line);
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  line-height: var(--lh-tight);
+}
+/* A section with no heading starts under one hairline (the folder list's recent, allowed
+   and typed rows; the model list's advertised ids and the ones seen in events). */
+.sel-sep {
+  height: var(--hairline);
+  margin: 4px 6px;
+  background: var(--line);
+}
 .sel-opt--active {
   background: var(--sel);
 }

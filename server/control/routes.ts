@@ -3,6 +3,7 @@
 // hello, the long-poll, acks and off, each with the machine's own token and nothing
 // else. A sink token on a machine call is 401, a machine token anywhere else is 401.
 import { createHash, timingSafeEqual } from "node:crypto";
+import { createReadStream } from "node:fs";
 import type { Ctx, Reply, Router } from "../http/router.js";
 import { HttpError } from "../http/router.js";
 import { CODE_RE, MACHINE_RE, POLL_KEY_RE, parseAcks, parseHello } from "./parse.js";
@@ -166,6 +167,22 @@ export function registerMachineRoutes(router: Router, d: MachineRouteDeps): void
     const acks = parseAcks(await ctx.json(4 * 1024 * 1024), () => new Date().toISOString());
     if (!acks) throw new HttpError(400, { reason: "bad_request", error: "Send control-ack.json." });
     return { status: 202, json: state.ack(m, acks) };
+  });
+
+  // HTTP.md §3: a file a start names, by its hash, to a machine paired here (one account
+  // per GUI). 404 when it is not held: never uploaded, or expired.
+  router.get(`${base}/files/:sha`, (ctx): Reply | undefined => {
+    machineGate(state, ctx);
+    const f = state.files.get(ctx.params.sha ?? "");
+    if (!f) throw notFound();
+    ctx.res.writeHead(200, {
+      "content-type": f.type,
+      "content-length": String(f.size),
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    });
+    createReadStream(f.path).pipe(ctx.res);
+    return undefined;
   });
 
   router.post(`${base}/off`, (ctx): Reply => {

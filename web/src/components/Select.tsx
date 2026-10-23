@@ -7,7 +7,9 @@
 // aria-activedescendant. Space / Enter / arrows open; arrows, Home, End and typing move;
 // Enter picks; Esc closes and gives focus back; Tab closes. `MultiSelect` is the same
 // with checkmarks and a summary ("3 selected"). `searchable` adds a filter input to the
-// list (on by default past eight options).
+// list (on by default past eight options); `custom` turns what is typed there into one
+// more row ("Use ~/acme/web/app"), for a field that takes a value the list does not hold.
+// An option with `divider` has a hairline above it: sections without headings.
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -30,6 +32,10 @@ export interface SelectOption<T> {
   /** A mark in the column before the label (a harness glyph). */
   icon?: ReactNode;
   disabled?: boolean;
+  /** A hairline above this row: the start of a section with no heading. */
+  divider?: boolean;
+  /** One muted line under the label, in the list only (a permission level's meaning). */
+  detail?: string;
 }
 
 interface CommonProps<T> {
@@ -41,6 +47,13 @@ interface CommonProps<T> {
   align?: "start" | "end";
   /** A filter input at the top of the list; on by itself past eight options. */
   searchable?: boolean;
+  /** The filter's placeholder ("Filter"). */
+  filterPlaceholder?: string;
+  /** What the filter's text means when no row is it: one more row at the end (a path, a
+   *  model id), or null. Implies `searchable`. */
+  custom?: (text: string) => SelectOption<T> | null;
+  /** One muted line under the list ("studio-mac is in safe mode. …"). */
+  footer?: ReactNode;
   /** The trigger's text, given the chosen option(s). */
   renderValue?: (chosen: SelectOption<T>[]) => ReactNode;
   "aria-label"?: string;
@@ -122,6 +135,9 @@ function Picker<T>({
   size = "md",
   align = "start",
   searchable,
+  filterPlaceholder = "Filter",
+  custom,
+  footer,
   renderValue,
   "aria-label": ariaLabel,
   labelledBy,
@@ -131,7 +147,7 @@ function Picker<T>({
   keyOf = defaultKey,
 }: CommonProps<T> & { chosen: T[]; onPick: (v: T) => void; multiple: boolean }) {
   const phone = usePhone();
-  const canSearch = searchable ?? options.length > 8;
+  const canSearch = !!custom || (searchable ?? options.length > 8);
   const rawId = useId().replace(/:/g, "");
   const listId = `sel-${rawId}-list`;
   const optId = (i: number) => `sel-${rawId}-${i}`;
@@ -147,13 +163,19 @@ function Picker<T>({
 
   const chosenKeys = useMemo(() => new Set(chosen.map(keyOf)), [chosen, keyOf]);
   const isChosen = (o: SelectOption<T>) => chosenKeys.has(keyOf(o.value));
-  const chosenOptions = useMemo(
-    () => options.filter((o) => chosenKeys.has(keyOf(o.value))),
-    [options, chosenKeys, keyOf],
-  );
+  const chosenOptions = useMemo(() => {
+    const found = options.filter((o) => chosenKeys.has(keyOf(o.value)));
+    // A value the list does not hold (typed by hand through `custom`) still shows as itself.
+    if (!multiple && !found.length && chosen.length && custom) {
+      const c = custom(keyOf(chosen[0]!));
+      if (c) return [c];
+    }
+    return found;
+  }, [options, chosenKeys, keyOf, chosen, custom, multiple]);
   const hasIcons = options.some((o) => o.icon);
 
-  const shown = useMemo(() => filterOptions(options, q), [options, q]);
+  const visible = (text: string) => withCustom(filterOptions(options, text), text, custom, keyOf);
+  const shown = useMemo(() => withCustom(filterOptions(options, q), q, custom, keyOf), [options, q, custom, keyOf]);
 
   // ----- open / close -----
 
@@ -172,17 +194,19 @@ function Picker<T>({
     setOpen(true);
   };
 
-  // Focus the filter on open; the trigger keeps focus otherwise.
+  // Focus the filter on open; the trigger keeps focus otherwise. On a desktop the list is
+  // hidden until it is placed, and a hidden field takes no focus: wait for the place.
+  const placed = phone || place !== null;
   useEffect(() => {
-    if (open && canSearch) search.current?.focus({ preventScroll: true });
-  }, [open, canSearch]);
+    if (open && canSearch && placed) search.current?.focus({ preventScroll: true });
+  }, [open, canSearch, placed]);
 
   // A new filter puts the cursor on the first row that can be picked. (Not an effect on
   // `shown`: callers hand in a fresh options array each render, and the board re-renders
   // every second.)
   const filter = (text: string) => {
     setQ(text);
-    setCursor(filterOptions(options, text).findIndex((o) => !o.disabled));
+    setCursor(visible(text).findIndex((o) => !o.disabled));
   };
 
   useLayoutEffect(() => {
@@ -293,6 +317,8 @@ function Picker<T>({
     if (disabled) return;
     const inSearch = e.target === search.current;
     if (!open) {
+      // A chord is the page's (⌘↩ starts the New session sheet), not the list's.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (
         e.key === "ArrowDown" ||
         e.key === "ArrowUp" ||
@@ -384,7 +410,7 @@ function Picker<T>({
       {shown.length === 0 && <p className="sel-empty">Nothing matches.</p>}
       {shown.map((o, i) => {
         const on = isChosen(o);
-        return (
+        const row = (
           // biome-ignore lint/a11y/useKeyWithClickEvents: keys are handled on the trigger (combobox pattern)
           <div
             key={keyOf(o.value)}
@@ -408,8 +434,12 @@ function Picker<T>({
             )}
             <span className="sel-opt-label ellipsis">{o.label}</span>
             {o.hint && <span className="sel-opt-hint">{o.hint}</span>}
+            {o.detail && <span className="sel-opt-detail">{o.detail}</span>}
           </div>
         );
+        return o.divider && i > 0
+          ? [<div key={`sep-${keyOf(o.value)}`} className="sel-sep" aria-hidden="true" />, row]
+          : row;
       })}
     </div>
   );
@@ -421,8 +451,8 @@ function Picker<T>({
         value={q}
         onChange={(e) => filter(e.target.value)}
         onKeyDown={onKey}
-        placeholder="Filter"
-        aria-label="Filter options"
+        placeholder={filterPlaceholder}
+        aria-label={filterPlaceholder === "Filter" ? "Filter options" : filterPlaceholder}
         aria-controls={listId}
         aria-activedescendant={activeId}
         autoComplete="off"
@@ -441,6 +471,7 @@ function Picker<T>({
               <span className="sel-grab" aria-hidden="true" />
               {filterBox}
               {rows}
+              {footer && <p className="sel-foot">{footer}</p>}
             </div>
           </>
         ) : (
@@ -463,6 +494,7 @@ function Picker<T>({
           >
             {filterBox}
             {rows}
+            {footer && <p className="sel-foot">{footer}</p>}
           </div>
         ),
         document.body,
@@ -508,6 +540,20 @@ function Picker<T>({
       {popover}
     </>
   );
+}
+
+/** The filtered rows, and the `custom` row for the typed text when no row has its value. */
+function withCustom<T>(
+  shown: SelectOption<T>[],
+  q: string,
+  custom: ((text: string) => SelectOption<T> | null) | undefined,
+  keyOf: (v: T) => string,
+): SelectOption<T>[] {
+  const t = q.trim();
+  if (!custom || !t) return shown;
+  const c = custom(t);
+  if (!c || shown.some((o) => keyOf(o.value) === keyOf(c.value))) return shown;
+  return [...shown, { ...c, divider: shown.length > 0 }];
 }
 
 function filterOptions<T>(options: SelectOption<T>[], q: string): SelectOption<T>[] {
