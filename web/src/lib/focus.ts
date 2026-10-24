@@ -88,7 +88,11 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, active: boolean
       cancelAnimationFrame(raf);
       root.removeEventListener("keydown", onKey);
       document.removeEventListener("focusin", onFocusIn);
-      if (optsRef.current.restore !== false && before?.isConnected) before.focus({ preventScroll: true });
+      // Give focus back only while it is still ours (or nobody's): an overlay this one
+      // handed over to (More → Display) has already taken it, and keeps it.
+      const now = document.activeElement;
+      const ours = !now || now === document.body || root.contains(now);
+      if (optsRef.current.restore !== false && ours && before?.isConnected) before.focus({ preventScroll: true });
     };
   }, [active, ref]);
 }

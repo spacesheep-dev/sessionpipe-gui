@@ -8,6 +8,20 @@
 .rv-tabs .rv-tab:focus-visible {
   outline-offset: -1px;
 }
+/* A phone: the two tabs span the column under the large title, as iOS lays a segmented
+   control out, on the gutter (the filter row starts 8 px out, for chips with no fill). */
+@media (max-width: 839px) {
+  .bar-filters > .rv-tabs {
+    flex: 1;
+    margin-left: 8px;
+  }
+  /* The filter row is one chip tall (and scrolls sideways, so it clips): the segments
+     take its height, iOS's compact segmented control, not the 44 px a lone button gets. */
+  .bar-filters > .rv-tabs .rv-tab {
+    min-height: 0;
+    height: 24px;
+  }
+}
 
 /* Search hits: two-line rows like the board's, under the feed's sticky day headers
    (feed.css .rows / .ev-day). The lead glyph says where it matched; the match is the
@@ -30,8 +44,9 @@
   border-top: var(--hairline) solid var(--line);
   pointer-events: none;
 }
-.review-hits .ev-row:has(.hit:hover)::before,
-.review-hits .ev-row:has(.hit:hover) + .ev-row::before {
+/* No hairline beside the hovered row or the j/k cursor's fill. */
+.review-hits .ev-row:is(:has(.hit:hover), [aria-current="true"])::before,
+.review-hits .ev-row:is(:has(.hit:hover), [aria-current="true"]) + .ev-row::before {
   border-top-color: transparent;
 }
 .review-meta {
@@ -67,9 +82,15 @@
   background: var(--press);
   transition: none;
 }
-.hit:focus-visible {
-  outline-offset: -2px;
+/* The j/k cursor: the selection fill; Tab focus adds the shared hairline focus edge
+   (shared.css `[data-nav-item]:focus-visible`), never a 2 px ring. */
+.review-hits .ev-row[aria-current="true"] .hit {
   background: var(--sel);
+}
+.hit:focus-visible {
+  outline: none;
+  background: var(--sel);
+  box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklch, var(--focus) 60%, transparent);
 }
 /* The row a right-click is about keeps the selected fill while its menu is up. */
 .hit[data-menu-open],
@@ -105,6 +126,9 @@
   min-width: 0;
   color: var(--fg-3);
   font-size: var(--text-sm);
+}
+.hit-snippet .inline-code {
+  color: var(--fg-2);
 }
 .hit-snippet mark {
   background: none;
@@ -154,10 +178,11 @@
 
 /* Files: a section per repo under the board's sticky headers, one row per path: the path
    in mono, the sessions that touched it as quiet text buttons, then when. */
+/* The repos are the board's groups: 16 px between them is theirs (board.css .group +
+   .group), not a second gap on top. */
 .rv-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
   margin: 0 -12px;
 }
 .rv-paths {
@@ -380,6 +405,23 @@
   .rv-table .rv-col-wide {
     display: none;
   }
+  /* A path on a phone: the file, then who touched it a tier down, one tight pair; how many
+     times is in the time's tooltip, so the time never crowds. */
+  .rv-path {
+    row-gap: 0;
+    padding-block: 10px;
+  }
+  .rv-sess {
+    color: var(--fg-3);
+  }
+  /* A finger's 44 px, but only the line's 24 to the eye: the file and who touched it
+     read as one pair, not two rows. */
+  .rv-touched > .rv-sess {
+    margin-block: -10px;
+  }
+  .rv-count {
+    display: none;
+  }
   .hit-where {
     display: none;
   }
@@ -420,4 +462,12 @@
 .rv-sess > .label-dot {
   margin-right: 6px;
   vertical-align: 0.05em;
+}
+
+/* The phone's bar stacks as a grid (shell.css); the tabs under the search are drawn, so
+   they keep a gap of their own. */
+@media (max-width: 839px) {
+  .page.review .bar-below .bar-tools {
+    row-gap: 8px;
+  }
 }

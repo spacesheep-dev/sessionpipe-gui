@@ -170,6 +170,12 @@
 .ph-trusted .form-row {
   min-height: var(--row);
 }
+/* A trusted phone is a plain row: its name in the ink, when it was trusted at the right. */
+.ph-trusted .pending-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 400;
+}
 .phone-page .pending {
   margin-top: 0;
 }

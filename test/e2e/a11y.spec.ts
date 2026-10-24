@@ -214,6 +214,8 @@ test.describe("accessibility", () => {
   test("a long page keeps its scroll through stream events and a panel (?s=) change", async ({ page, request }) => {
     await page.setViewportSize({ width: 390, height: 600 });
     await openPage(page, "/connect");
+    // The groups arrive whole once the receiver's info and the setup status are in.
+    await expect(page.locator(".connect .form-group").first()).toBeVisible();
     await page.evaluate(() => window.scrollTo(0, 600));
     const before = await page.evaluate(() => window.scrollY);
     expect(before).toBeGreaterThan(300);

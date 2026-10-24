@@ -121,6 +121,8 @@ test.describe("select", () => {
 
   test("axe: nothing new with the list open", async ({ page, isMobile }) => {
     test.skip(!!isMobile, "desktop project only");
+    // The list and a demo toast fade in; axe must sample text at full opacity, not mid-animation.
+    await page.emulateMedia({ reducedMotion: "reduce" });
     const scan = async () => {
       const r = await new AxeBuilder({ page })
         .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])

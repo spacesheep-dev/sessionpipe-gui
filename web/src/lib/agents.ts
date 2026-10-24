@@ -6,6 +6,7 @@
 // guesses: a fact the events did not carry is left out.
 import type { AgentRun, SessionKey, SessionState, SessionSummary } from "@shared/api";
 import { splitKey } from "@shared/api";
+import { toolLabel } from "./format";
 import { agentPath, navigate, sessionPath } from "./router";
 import { agentTabKey, type OpenSplitOptions, openSplit } from "./split";
 import { dur } from "./time";
@@ -39,7 +40,7 @@ export function agentNow(a: AgentRun, now: number): string {
   if (a.state === "done") return dur(agentDuration(a, now));
   if (a.state === "stale") return `Quiet for ${dur(now - Date.parse(a.lastAt))}`;
   if (!a.attributed) return "Running";
-  if (a.currentTool) return `${a.currentTool.tool} · ${dur(now - Date.parse(a.currentTool.since))}`;
+  if (a.currentTool) return `${toolLabel(a.currentTool.tool)} · ${dur(now - Date.parse(a.currentTool.since))}`;
   return "Thinking";
 }
 

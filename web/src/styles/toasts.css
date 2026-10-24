@@ -170,9 +170,6 @@
 .toast-undo {
   font-weight: 600;
 }
-.toast-msg.mono {
-  font-size: calc(var(--text-sm) * 0.95);
-}
 /* The ×: there on hover (always on touch), never in the way of the title. */
 .toast-x {
   grid-area: x;
@@ -214,51 +211,59 @@
     opacity: 1;
   }
 }
-@keyframes toast-in-phone {
+/* ----- the phone: iOS's banner ----- */
+
+/* One banner at a time under the status bar (its own rules load with it, banner.css);
+   the leaving one and its replacement overlap, so nothing below moves. "Hidden · Undo"
+   sits at the bottom, above the tab bar. */
+@keyframes undo-in {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(8px);
   }
 }
-/* The phone: iOS's banner, compact under the status bar, newest on top; the title and
-   one line of detail, the two answers small at its end. It never covers the composer or
-   the tab bar. */
 @media (max-width: 839px) {
-  .toasts {
-    top: calc(env(safe-area-inset-top) + 4px);
-    left: 8px;
-    right: 8px;
+  .toasts--phone {
+    inset: 0;
     width: auto;
-    flex-direction: column;
+    display: block;
   }
-  .toast {
-    padding: 10px 8px 10px 12px;
+  .toasts--phone .toast-slot {
+    position: absolute;
+    top: calc(env(safe-area-inset-top) + 8px);
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    padding: 0;
+  }
+  .toasts--phone .toast-slot--undo {
+    top: auto;
+    bottom: calc(var(--tabbar) + env(safe-area-inset-bottom) + 8px);
+  }
+  /* No height to give back: the slots overlap. */
+  .toasts--phone .toast-slot[data-closing] {
+    overflow: visible;
+    animation: none;
+  }
+  /* "Hidden · Undo": a bar by the thumb, Undo a full 44 px target. */
+  .toasts--phone .toast--undo {
+    min-height: 44px;
+    padding: 0 4px 0 16px;
     border-radius: 14px;
+    animation-name: undo-in;
   }
-  .toast-body {
-    -webkit-line-clamp: 1;
+  .toasts--phone .toast--undo .toast-undo {
+    min-height: 44px;
+    padding: 0 12px;
   }
-  .toast-x {
-    width: 32px;
-    height: 32px;
-    margin: -6px -2px 0 4px;
-  }
-  .toast-actions {
-    justify-content: flex-end;
-    margin-top: 8px;
-  }
-  .toast-note {
-    flex: 1 1 auto;
-    order: -1;
-  }
-  .toast-unlock {
-    text-align: left;
-  }
-  .toast {
-    animation-name: toast-in-phone;
-  }
-  .toast-slot[data-closing] > .toast {
+  .toasts--phone .toast-slot[data-closing] > .toast--undo {
     animation: fade-out var(--dur-exit) var(--ease-in) both;
+  }
+  .toasts--phone .toast-unlock {
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    bottom: calc(var(--tabbar) + env(safe-area-inset-bottom) + 60px);
+    text-align: center;
   }
 }
 @media (prefers-reduced-motion: reduce) {

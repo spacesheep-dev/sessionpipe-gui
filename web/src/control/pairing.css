@@ -6,6 +6,10 @@
 
 /* ---------- pairing page and add a device ---------- */
 
+/* The reading column, centred as every page's is. */
+.page.pair > :not(.bar):not(.bar-below):not(.sr-only) {
+  margin-inline: auto;
+}
 .pair-lead {
   max-width: 64ch;
 }
@@ -28,6 +32,7 @@
   color: var(--fg);
 }
 .pair-digits {
+  font-family: var(--font-display);
   font-size: calc(var(--text-xl) * 1.55);
   font-weight: 600;
   line-height: 1.2;

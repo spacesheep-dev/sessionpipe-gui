@@ -329,8 +329,10 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
 
 /** Something open that Esc closes first (a popover, a confirm, the panel): a
  *  `[data-dismiss]` that is drawn, not one kept in the DOM while closed. */
+/** Drawn and not on its way out: an overlay fading through its exit is already closed. */
 const drawn = (el: HTMLElement): boolean =>
-  typeof el.checkVisibility === "function" ? el.checkVisibility({ visibilityProperty: true }) : !!el.offsetParent;
+  !el.closest("[data-closing]") &&
+  (typeof el.checkVisibility === "function" ? el.checkVisibility({ visibilityProperty: true }) : !!el.offsetParent);
 const openDismiss = (): boolean => [...document.querySelectorAll<HTMLElement>("[data-dismiss]")].some(drawn);
 
 /** Focus is in the side panel: its own keys win there. */

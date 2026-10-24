@@ -17,6 +17,13 @@
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
+/* Why nothing can be signed on this address: one line above the machines, said once. */
+.machines-note {
+  margin-bottom: -16px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  text-wrap: pretty;
+}
 .machine-head {
   display: flex;
   align-items: center;
@@ -36,7 +43,8 @@
   border: 1.5px solid var(--fg-4);
 }
 .machine-name {
-  min-width: 0;
+  flex: none;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -44,8 +52,13 @@
   font-size: var(--text-md);
   font-weight: 600;
 }
+/* A machine's name never truncates; its "online · last event" gives way first. */
 .machine-last {
+  flex: 0 1 auto;
+  min-width: 0;
   margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--fg-3);
   font-size: var(--text-sm);
   white-space: nowrap;
@@ -101,7 +114,8 @@
   .machine-head {
     padding: 0 16px 6px;
   }
-  .machines-more {
+  .machines-more,
+  .machines-note {
     padding: 0 16px;
   }
   .machine-last {

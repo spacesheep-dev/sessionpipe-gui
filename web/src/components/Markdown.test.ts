@@ -38,8 +38,15 @@ describe("Markdown", () => {
     const html = render("```ts\nconst a = 1;\n```");
     expect(html).toContain('class="md-pre"');
     expect(html).toContain('<span class="md-pre-lang">ts</span>');
-    expect(html).toContain("<code>const a = 1;</code>");
+    expect(html).toContain('<code><span class="md-line">const a = 1;</span></code>');
     expect(html).toContain('aria-label="Copy code"');
+  });
+
+  it("gives each code line its indent, so a wrapped line hangs under its own text", () => {
+    const html = render("```\nif (a) {\n    go();\n\t\tdeep();\n}\n```");
+    expect(html).toContain('<span class="md-line">if (a) {</span>');
+    expect(html).toContain('<span class="md-line" style="--i:4">    go();</span>');
+    expect(html).toContain('<span class="md-line" style="--i:4">\t\tdeep();</span>');
   });
 
   it("wraps everything in .md and adds the caller's class", () => {

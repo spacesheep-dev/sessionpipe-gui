@@ -15,6 +15,11 @@
   columns: 2 280px;
   column-gap: 32px;
 }
+/* More below: the bottom edge fades, so the fold never reads as a row cut in half. */
+.sc-help-list[data-more] {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+}
 .sc-help-list:focus-visible {
   outline-offset: -2px;
 }

@@ -305,6 +305,14 @@ const base = (p: string): string => {
 };
 const word = (v: unknown): string => (typeof v === "string" ? v.replace(/_/g, " ") : "");
 
+/** Why a session ended, as a person says it (word() has already turned `_` into spaces). */
+const ENDED_WHY: Record<string, string> = {
+  exit: "left at the terminal",
+  "prompt input exit": "left at the terminal",
+  clear: "cleared",
+  logout: "logged out",
+};
+
 /** An event the timeline shows as its own row, in words ("Session started", "Changed
  *  handler.ts and 2 more"), and the detail after them when it says something. The raw
  *  type stays in the row's tooltip and in "Copy event". */
@@ -324,8 +332,10 @@ export function eventWords(e: Pick<StoredEvent, "type" | "data">): { text: strin
       return { text, ...(src && !["startup", "resume", "clear", "compact"].includes(src) ? { detail: src } : {}) };
     }
     case "session.ended": {
+      // Claude Code's reasons in words ("exit" is the person leaving the prompt).
       const why = word(d.reason);
-      return { text: "Session ended", ...(why && why !== "other" ? { detail: why } : {}) };
+      const said = ENDED_WHY[why] ?? why;
+      return { text: "Session ended", ...(said && why !== "other" ? { detail: said } : {}) };
     }
     case "session.backfill":
       return { text: "Earlier history read from the transcript" };

@@ -10,16 +10,130 @@
     <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
     <!-- Installable (Add to Home Screen); use-credentials so a phone's UI-key cookie reaches the manifest fetch. -->
     <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <!-- Installed on a phone it opens as its own app: no browser bars, its own name under the
+         icon, the status bar over the page's own ground (theme-color; Shell keeps it on the
+         applied skin's --bg once the app runs). -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="sessionpipe" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="format-detection" content="telephone=no" />
     <!-- --bg from tokens.css, light and dark. -->
     <meta name="theme-color" content="#fcfcfd" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#131317" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#121217" media="(prefers-color-scheme: dark)" />
     <meta property="og:title" content="sessionpipe gui" />
     <meta property="og:description" content="A local GUI for sessionpipe: every coding-agent session on your machines, live." />
     <meta property="og:image" content="/brand/og.png" />
     <meta name="twitter:card" content="summary_large_image" />
+    <!-- The static shell below shows only once the app's stylesheet has and its script below
+         has fitted it (shell.css lifts this), so a dev server, which injects its CSS from
+         script, never flashes it unstyled, and no frame shows it half-fitted. -->
+    <style>
+      .boot {
+        visibility: hidden;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- The first frame, before the app's script has run: the chrome (rail or tab bar), the
+         page's bar and title, and on the board its loading rows, drawn with the app's own
+         classes so they sit exactly where the app draws them. React replaces it whole on its
+         first commit. Hidden from assistive tech and inert: nothing in it works yet. -->
+    <div id="root"><div class="shell boot" aria-hidden="true" inert>
+      <svg aria-hidden="true" width="0" height="0" style="position: absolute">
+        <symbol id="b-board" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="6" height="6" rx="1" /><rect x="11" y="3" width="6" height="6" rx="1" /><rect x="3" y="11" width="6" height="6" rx="1" /><rect x="11" y="11" width="6" height="6" rx="1" /></g></symbol>
+        <symbol id="b-inbox" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l2.2-6.5A1 1 0 0 1 6.2 4h7.6a1 1 0 0 1 1 .5L17 11" /><path d="M3 11h4l1 2h4l1-2h4v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 15.5z" /></g></symbol>
+        <symbol id="b-feed" viewBox="0 0 20 20"><path d="M3 5h14M3 10h14M3 15h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></symbol>
+        <symbol id="b-review" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 5h8M3 10h5M3 15h4M16 14.5 18 16.5" /><circle cx="13.5" cy="12" r="3.5" /></g></symbol>
+        <symbol id="b-machines" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="4" width="15" height="10" rx="1.5" /><path d="M7 17h6" /></g></symbol>
+        <symbol id="b-connect" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8.5 11.5l3-3M7 13l-1.5 1.5a2.5 2.5 0 0 1-3.5-3.5L4 9M13 7l1.5-1.5a2.5 2.5 0 0 1 3.5 3.5L16 11" /></g></symbol>
+      </svg>
+      <div class="rail">
+        <div class="rail-head">
+          <span class="rail-brand"><svg aria-hidden="true" class="mark" width="20" height="20" viewBox="0 0 16 16"><rect width="16" height="16" rx="4" fill="var(--fg)" /><rect x="3" y="8" width="5" height="2" rx="1" fill="var(--bg)" /><rect x="3" y="11" width="10" height="2" rx="1" fill="var(--bg)" /><circle cx="11" cy="5" r="2" fill="var(--needs)" /></svg><span class="rail-word">sessionpipe</span></span>
+          <span class="icon-btn rail-compose"><svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H5.5A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16h9a1.5 1.5 0 0 0 1.5-1.5V11" /><path d="M14.2 3.3a1.3 1.3 0 0 1 1.9 0l.6.6a1.3 1.3 0 0 1 0 1.9L10.5 12 8 12.5l.5-2.5z" /></svg></span>
+        </div>
+        <div class="rail-nav">
+          <span class="nav-link" data-boot="board"><svg aria-hidden="true" class="nav-glyph" width="20" height="20"><use href="#b-board" /></svg><span class="nav-label">Board</span></span>
+          <span class="nav-link" data-boot="inbox"><svg aria-hidden="true" class="nav-glyph" width="20" height="20"><use href="#b-inbox" /></svg><span class="nav-label">Inbox</span></span>
+          <span class="nav-link" data-boot="feed" data-boot-adv><svg aria-hidden="true" class="nav-glyph" width="20" height="20"><use href="#b-feed" /></svg><span class="nav-label">Feed</span></span>
+          <span class="nav-link" data-boot="review" data-boot-adv><svg aria-hidden="true" class="nav-glyph" width="20" height="20"><use href="#b-review" /></svg><span class="nav-label">Review</span></span>
+          <span class="nav-link" data-boot="machines"><svg aria-hidden="true" class="nav-glyph" width="20" height="20"><use href="#b-machines" /></svg><span class="nav-label">Machines</span></span>
+          <span class="nav-link" data-boot="connect"><svg aria-hidden="true" class="nav-glyph" width="20" height="20"><use href="#b-connect" /></svg><span class="nav-label">Connect</span></span>
+        </div>
+      </div>
+      <main class="main">
+        <div class="page">
+          <header class="bar bar--large"><div class="bar-lead"><div class="bar-title" data-boot-title></div></div></header>
+          <div class="bar-below"><div class="bar-large" data-boot-title></div></div>
+          <div class="skeleton board-skeleton"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>
+        </div>
+      </main>
+      <div class="tabbar">
+        <span class="nav-link" data-boot="board"><svg aria-hidden="true" class="nav-glyph" width="20" height="20"><use href="#b-board" /></svg><span class="nav-label">Board</span></span>
+        <span class="nav-link" data-boot="inbox"><svg aria-hidden="true" class="nav-glyph" width="20" height="20"><use href="#b-inbox" /></svg><span class="nav-label">Inbox</span></span>
+        <span class="nav-link" data-boot="feed" data-boot-adv><svg aria-hidden="true" class="nav-glyph" width="20" height="20"><use href="#b-feed" /></svg><span class="nav-label">Feed</span></span>
+        <span class="nav-link" data-boot="review" data-boot-adv><svg aria-hidden="true" class="nav-glyph" width="20" height="20"><use href="#b-review" /></svg><span class="nav-label">Review</span></span>
+        <span class="nav-link" data-boot="machines" data-boot-simple><svg aria-hidden="true" class="nav-glyph" width="20" height="20"><use href="#b-machines" /></svg><span class="nav-label">Machines</span></span>
+        <span class="nav-link" data-boot="connect" data-boot-simple><svg aria-hidden="true" class="nav-glyph" width="20" height="20"><use href="#b-connect" /></svg><span class="nav-label">Connect</span></span>
+        <span class="nav-link"><svg aria-hidden="true" class="nav-glyph" width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><circle cx="4" cy="10" r="1.6" /><circle cx="10" cy="10" r="1.6" /><circle cx="16" cy="10" r="1.6" /></svg><span class="nav-label">More</span></span>
+      </div>
+    </div></div>
+    <!-- Before the first paint (the stylesheet above blocks it): the device's own scheme,
+         skin and text size, as lib/theme.ts applies them; the mode's pages; the page's
+         name. Anything unreadable leaves the defaults, which the app then corrects. -->
+    <script>
+      (() => {
+        const d = document.documentElement;
+        const shell = document.querySelector(".boot");
+        let a = null;
+        let skin = null;
+        let mode = "simple";
+        let size = 1;
+        let seen = false;
+        try {
+          const L = localStorage;
+          a = L.getItem("sessionpipe-gui.theme");
+          skin = JSON.parse(L.getItem("sessionpipe-gui.skin") || "null");
+          mode = JSON.parse(L.getItem("sessionpipe-gui.settings") || "{}").mode || mode;
+          size = Number(L.getItem("sessionpipe-gui.textSize")) || 1;
+          seen = !!L.getItem("sessionpipe-gui.setup.seen");
+        } catch {}
+        if (!skin || typeof skin !== "object" || !skin.tokens || (skin.source === "builtin" && skin.id === "plain")) skin = null;
+        const appearance = a === "light" || a === "dark" ? a : "auto";
+        const both = !skin || skin.scheme === "both";
+        const forced = both ? appearance : skin.scheme;
+        if (forced !== "auto") d.setAttribute("data-theme", forced);
+        const os = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        const scheme = both ? (appearance === "auto" ? os : appearance) : skin.scheme;
+        if (skin) {
+          for (const [k, v] of Object.entries(skin.tokens[scheme] || {})) if (v) d.style.setProperty(k, v);
+          if (skin.typography?.ui) d.style.setProperty("--font-ui", skin.typography.ui);
+          if (skin.shape?.radius !== undefined) d.style.setProperty("--radius", `${skin.shape.radius}px`);
+          if (skin.shape?.density && skin.shape.density !== "default") d.setAttribute("data-density", skin.shape.density);
+          d.setAttribute("data-skin", skin.id);
+        }
+        const scale = size * (skin?.typography?.scale || 1);
+        if (scale !== 1) d.style.fontSize = `${Math.round(scale * 1000) / 10}%`;
+        if (matchMedia("(min-width: 1200px)").matches) shell.classList.add("shell--side");
+        // The page: its tab lit, its title, the loading rows on the board only. A first visit
+        // may open Setup at "/", so it claims no page.
+        const p = location.pathname;
+        const session = p.startsWith("/s/");
+        const key = p === "/" || session ? "board" : p.slice(1);
+        const titles = { board: "Board", inbox: "Inbox", feed: "Feed", review: "Review", machines: "Machines", connect: "Connect" };
+        for (const e of shell.querySelectorAll(`[data-boot="${key}"]`)) e.classList.add("nav-link--on");
+        const title = session || (p === "/" && !seen) ? "" : titles[key] || "";
+        for (const e of shell.querySelectorAll("[data-boot-title]")) e.textContent = title;
+        const page = shell.querySelector(".page");
+        if (!title) shell.querySelector(".bar-below").remove();
+        if (title === "Board") page.classList.add("board");
+        else shell.querySelector(".skeleton").remove();
+        if (p.startsWith("/t/")) page.remove();
+        // Last: the mode, which lets the stylesheet show it, fitted.
+        shell.setAttribute("data-mode", mode === "advanced" ? "advanced" : "simple");
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

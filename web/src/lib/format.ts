@@ -190,23 +190,28 @@ export function eventSummary(e: ProtocolEvent): string {
     }
     case "turn.transcript":
     case "turn.progress": {
-      const text = oneLine(str(d.assistant), 120);
-      return text ? `turn ${str(d.turn)} · ${text}` : `turn ${str(d.turn)}`;
+      // The reply in words; the turn's number is the event's, not the person's.
+      return oneLine(str(d.assistant), 120) || "Reply";
     }
     case "tool.started":
-      return `${str(d.tool)}${d.agent_id ? " · subagent" : ""}`;
+      return toolLabel(str(d.tool));
     case "tool.ended": {
-      const bits = [str(d.tool), d.ok === false ? "error" : "ok"];
+      // "Edit · 0.4 s"; a failure says what failed, never a bare "ok" or "error".
+      const bits = [toolLabel(str(d.tool))];
       if (num(d.ms) !== undefined) bits.push(durShort(num(d.ms)));
-      if (d.error) bits.push(oneLine(str(d.error), 80));
-      return bits.join(" ");
+      if (d.ok === false) bits.push(d.error ? oneLine(str(d.error), 80) : "failed");
+      return bits.join(" · ");
     }
     case "files.changed": {
       const paths = Array.isArray(d.paths) ? (d.paths as unknown[]).map(str) : [];
       return paths.length <= 2 ? paths.join(", ") : `${paths.slice(0, 2).join(", ")} +${paths.length - 2}`;
     }
     case "attention.needed":
-      return [ATTENTION_LABEL[str(d.kind)] ?? str(d.kind), str(d.tool), oneLine(str(d.message), 100)]
+      return [
+        ATTENTION_LABEL[str(d.kind)] ?? str(d.kind),
+        d.tool ? toolLabel(str(d.tool)) : "",
+        oneLine(str(d.message), 100),
+      ]
         .filter(Boolean)
         .join(" · ");
     case "attention.cleared":
@@ -243,6 +248,46 @@ export function attentionMessage(a: { message?: string; tool?: string }): string
   const t = a.tool.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const rest = m.replace(new RegExp(`^${t}(:\\s*|\\s+)`), "");
   return rest || m;
+}
+
+/** Gemini CLI's and Codex's built-in tools, named the way Claude Code names its own, so
+ *  one board reads one vocabulary ("Shell", not "run_shell_command"). The raw name stays
+ *  in the tooltip and in "Copy tool name". An unknown name is left as it came. */
+const SNAKE_TOOLS: Record<string, string> = {
+  run_shell_command: "Shell",
+  shell: "Shell",
+  local_shell: "Shell",
+  exec_command: "Shell",
+  run_terminal_cmd: "Shell",
+  read_file: "Read",
+  read_many_files: "Read files",
+  write_file: "Write",
+  replace: "Edit",
+  edit_file: "Edit",
+  apply_patch: "Edit",
+  list_directory: "List",
+  list_dir: "List",
+  glob: "Glob",
+  search_file_content: "Search",
+  grep_search: "Search",
+  web_fetch: "Fetch",
+  google_web_search: "Web search",
+  web_search: "Web search",
+  save_memory: "Memory",
+  update_plan: "Plan",
+};
+
+/** A tool's name as a person reads it. An MCP tool arrives as `mcp__<server>__<tool>`
+ *  and reads "github · search_issues"; a claude.ai connector's server drops its
+ *  `claude_ai_` prefix ("Linear · list_issues") and a plugin's its `plugin_<name>_`.
+ *  Anything else is its own name. The raw name stays in "Copy tool name". */
+export function toolLabel(name: string): string {
+  const word = SNAKE_TOOLS[name];
+  if (word) return word;
+  const m = /^mcp__(.+?)__(.+)$/.exec(name);
+  if (!m) return name;
+  const server = m[1]!.replace(/^claude_ai_/, "").replace(/^plugin_[^_]+_/, "");
+  return `${server || m[1]} · ${m[2]}`;
 }
 
 export function oneLine(s: string, max: number): string {

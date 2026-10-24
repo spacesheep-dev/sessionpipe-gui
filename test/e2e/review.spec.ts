@@ -35,7 +35,9 @@ test.describe("review", () => {
     await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
 
     await box.fill("no-such-word-zzzz");
-    await expect(page.getByText("Nothing matches “no-such-word-zzzz”.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Nothing matches “no-such-word-zzzz”" })).toBeVisible();
+    await page.getByRole("button", { name: "Clear search" }).click();
+    await expect(box).toHaveValue("");
   });
 
   test("the files view groups changed paths by repo with the sessions that touched them", async ({ page }) => {

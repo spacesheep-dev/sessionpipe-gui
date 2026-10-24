@@ -7,7 +7,7 @@
 // were already waiting when the page opened.
 import { useEffect, useSyncExternalStore } from "react";
 import { type OpenAttention, openAttentions, useAnswerableCount, useStore } from "../data/hooks";
-import { ATTENTION_LABEL, oneLine, sessionTitle } from "./format";
+import { ATTENTION_LABEL, oneLine, sessionTitle, toolLabel } from "./format";
 import { navigate } from "./router";
 
 const KEY = "sessionpipe-gui.notify";
@@ -85,7 +85,7 @@ const inBackground = (): boolean => document.visibilityState !== "visible" || !d
 function show(r: OpenAttention): void {
   const s = r.session;
   const a = r.attention;
-  const title = `${sessionTitle(s)} needs you · ${a.tool ?? ATTENTION_LABEL[a.kind] ?? a.kind}`;
+  const title = `${sessionTitle(s)} needs you · ${a.tool ? toolLabel(a.tool) : (ATTENTION_LABEL[a.kind] ?? a.kind)}`;
   const options: NotificationOptions = {
     body: a.message ? oneLine(a.message, 160) : undefined,
     tag: `${s.key}|${a.attentionId}`,

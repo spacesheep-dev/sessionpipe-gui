@@ -132,7 +132,11 @@ export function SentFiles({ files }: { files: ControlActivity["files"] }) {
 
 /** The one status row of a message on its way, or of a turn running: a neutral glyph, the
  *  words and, once the agent is at it, a live timer. The receiver's plumbing ("delivered ·
- *  sdk") is its tooltip. `chat` draws it as the chat's quiet line, else a timeline row. */
+ *  sdk") is its tooltip. `chat` draws it as the chat's quiet line, else a timeline row.
+ *  Each step ("Sent to studio-mac" → "Starting claude on studio-mac…" → "Running · 2 s")
+ *  takes the row's place in one short cross-fade, the words keyed by what they say, so the
+ *  started moment reads as one line that moves on, never a row that jumps; the timer
+ *  ticks inside it without a fade. */
 export function StatusRow({
   text,
   since,
@@ -149,7 +153,7 @@ export function StatusRow({
   state?: string;
 }) {
   const body = (
-    <span className="starting-state">
+    <span className="starting-state" key={text}>
       {text}
       {since ? (
         <span className="status-since">

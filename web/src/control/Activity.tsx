@@ -12,6 +12,7 @@ import { oneLine } from "../lib/format";
 import { Link, sessionPath } from "../lib/router";
 import { AttachmentThumbs, promptParts } from "./Attachments";
 import { isFinal, KIND_LABEL, outcomeWords, shownState } from "./words";
+import "./control.css";
 
 /** The copy of the session a prompt went to (CONTROL.md §6 `fork`: a session a live
  *  process holds is never resumed, it is copied), when the machine's ack named one. A

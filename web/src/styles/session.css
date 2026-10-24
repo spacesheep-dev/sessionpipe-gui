@@ -414,9 +414,19 @@ html:has(.main > .session) {
   gap: 8px;
   padding: 4px 0 12px var(--tl-lead);
 }
+.tool-io-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 24px;
+  margin-bottom: 2px;
+}
+.tool-io-head .icon-btn {
+  width: 24px;
+  height: 24px;
+  margin-right: -4px;
+}
 .tool-io-label {
-  display: block;
-  margin-bottom: 4px;
   color: var(--fg-3);
   font-size: var(--text-xs);
   font-weight: 600;
@@ -475,7 +485,8 @@ html:has(.main > .session) {
 .marker--attn {
   color: var(--fg-2);
 }
-.marker--attn code {
+.marker-tool {
+  flex: none;
   color: var(--fg);
 }
 .marker--end.is-err {
@@ -606,15 +617,17 @@ html:has(.main > .session) {
   flex-direction: column;
 }
 .agent-head {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
   min-height: 32px;
   border-radius: var(--radius);
 }
 .agent-head[data-open] {
   background: var(--sel);
 }
+/* The head is a tool row's columns: the glyph, the text, the time where a tool's is, and
+   the chevron where a tool's is (so the two times line up on one right edge). */
 .agent-toggle {
   flex: 1 1 auto;
   display: flex;
@@ -649,8 +662,30 @@ html:has(.main > .session) {
   flex: 1 1 auto;
   min-width: 0;
 }
-.agent-beside {
+.agent-toggle .agent-now {
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.agent-chev {
   flex: none;
+  color: var(--fg-3);
+  opacity: var(--chev-shown, 1);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
+}
+[aria-expanded="true"] > .agent-chev {
+  transform: rotate(90deg);
+}
+/* Open beside lies over the chevron (centred on it, a 24 px target) and takes its place
+   while the head is hovered, focused or the one the view opened on. Nothing moves. */
+.agent-beside.icon-btn {
+  position: absolute;
+  top: 50%;
+  right: -7px;
+  width: 24px;
+  height: 24px;
+  margin-top: -12px;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-out);
 }
@@ -659,15 +694,26 @@ html:has(.main > .session) {
 .agent-beside:focus-visible {
   opacity: 1;
 }
+.agent-head:hover:has(.agent-beside),
+.agent-head[data-open]:has(.agent-beside),
+.agent-head:has(.agent-beside:focus-visible) {
+  --chev-shown: 0;
+}
 @media (hover: none) {
-  .agent-beside {
+  .agent-beside.icon-btn {
     opacity: 1;
   }
+  .agent-head:has(.agent-beside) {
+    --chev-shown: 0;
+  }
 }
-/* A phone has no "beside": the block itself is the way in. */
+/* A phone has no "beside": the block itself is the way in, and the chevron stays. */
 @media (max-width: 839px) {
-  .agent-beside {
+  .agent-beside.icon-btn {
     display: none;
+  }
+  .agent-chev {
+    opacity: 1;
   }
 }
 .agent-items {
@@ -766,6 +812,7 @@ html:has(.main > .session) {
 }
 /* The chat (Simple): a turn's agents as the same quiet rows under the harness's name. */
 .chat-agents {
+  align-self: stretch;
   margin: 4px 0;
 }
 .session--chat .agent-notice {

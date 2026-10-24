@@ -57,6 +57,44 @@
   font-weight: 600;
   line-height: 18px;
 }
+/* Rows waiting while the list holds still: a pill over the list's top that takes no room
+   (so its coming and going moves nothing), the session page's "n new" in the feed's
+   direction. It sits just before the list, outside it (a list item that is not a row
+   would be one more item to a screen reader), and cancels the page's 24 px gap. */
+.feed-news-anchor {
+  position: sticky;
+  top: calc(var(--sticky-top, var(--bar)) + 36px);
+  z-index: var(--z-sticky);
+  height: 0;
+  margin: 0 0 -24px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.feed-news {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: var(--hairline) solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-2);
+  box-shadow: var(--shadow-pop);
+  color: var(--fg);
+  font-size: var(--text-sm);
+  pointer-events: auto;
+  animation: rise var(--dur) var(--ease-out);
+}
+@media (hover: hover) {
+  .feed-news:hover {
+    background: color-mix(in oklch, var(--bg-2), var(--fg) 5%);
+  }
+}
+.feed-news:active {
+  background: color-mix(in oklch, var(--bg-2), var(--fg) 10%);
+  transition: none;
+}
 .rows {
   list-style: none;
   margin: 0 -12px;
@@ -101,6 +139,11 @@
   font-size: var(--text-sm);
   line-height: var(--lh-tight);
   transition: background-color var(--dur-fast) var(--ease-out);
+}
+/* A row that came in live: it fades and drops into its place (opacity and transform
+   only); rows from a page load just show. */
+.ev[data-arrive] {
+  animation: row-in var(--dur) var(--ease-out);
 }
 .ev + .ev::before {
   content: "";
@@ -236,10 +279,12 @@
   display: none;
 }
 
-/* A mid-width column: the machine goes (it is in the row's menu and the session). */
+/* A mid-width column: the machine goes (it is in the row's menu and the session), and
+   the session and the detail share what is left, so a split-narrowed feed never cuts
+   the detail to "97 c…". */
 @container feed (max-width: 860px) {
   .ev {
-    grid-template-columns: 64px 16px minmax(100px, 200px) 150px minmax(0, 1fr) 28px;
+    grid-template-columns: 64px 16px minmax(100px, 1.2fr) 124px minmax(72px, 1fr) 28px;
     grid-template-areas: "time glyph session type sum beside";
   }
   .ev-machine {

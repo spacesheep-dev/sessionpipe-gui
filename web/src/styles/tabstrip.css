@@ -26,9 +26,19 @@
 .tabs--single {
   display: none;
 }
-.tabs--overflow {
+/* Past the strip's edge: that edge fades, so a clipped tab reads as more to scroll to,
+   never as a cut one (SessionPanel.tsx sets which edges). */
+.tabs[data-fade-end] {
   -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
   mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+.tabs[data-fade-start] {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 24px), transparent);
+}
+.tabs[data-fade-start][data-fade-end] {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
 }
 .tab {
   position: relative;
@@ -36,7 +46,7 @@
   align-items: center;
   gap: 8px;
   flex: 1 1 0;
-  min-width: 96px;
+  min-width: 132px;
   padding: 0 4px 0 12px;
   border-right: var(--hairline) solid var(--line);
   color: var(--fg-3);
@@ -71,20 +81,24 @@
 .tab:focus-visible {
   outline-offset: -2px;
 }
+/* The dragged tab is lifted: drawn above its neighbours as they slide under it, with
+   the active ground, and no transition of its own (the pointer moves it). */
 .tab--dragging {
-  opacity: 0.6;
+  z-index: 2;
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: var(--shadow-sm);
+  transition: none;
 }
 .tab .dot {
   flex: none;
 }
-/* An agent's tab after its session's: a 10 px "↳" before its glyph, and 2 px of space
+/* An agent's tab after its session's: the board's tree elbow in a hairline before its glyph, and 2 px of space
    instead of the hairline between the two, so the pair reads as one. */
 .tab-tree {
   flex: none;
-  margin-right: -4px;
-  color: var(--fg-4);
-  font-size: 10px;
-  line-height: 1;
+  margin: 0 -4px 3px 0;
+  color: var(--line-2);
 }
 .tab:has(+ .tab--paired) {
   border-right-color: transparent;

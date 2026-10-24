@@ -152,7 +152,15 @@
 
 /* ----- the list ----- */
 
+/* The list and, on a wide window, the preview beside it. */
+.pal-body {
+  display: flex;
+  flex: 0 1 auto;
+  min-height: 0;
+}
 .pal-list {
+  flex: 1 1 auto;
+  min-width: 0;
   position: relative;
   list-style: none;
   margin: 0;
@@ -245,18 +253,44 @@
   white-space: nowrap;
   font-size: var(--text-md);
 }
+/* An action's verb is short and is the point: it never gives way to the session it acts
+   on ("Send a messag…"). */
+.pal-row[data-section="Actions"] .pal-label {
+  flex: none;
+  max-width: 70%;
+}
 .pal-label code {
   font-family: var(--font-mono);
   font-size: 0.925em;
 }
 .pal-detail {
   flex: 0 10 auto;
-  min-width: 0;
+  /* Never squeezed to a stub ("b."): it gives way down to a few letters, then the title
+     does. */
+  min-width: min(9ch, 30%);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg-3);
   font-size: var(--text-sm);
+}
+/* A session's "machine · repo": the machine is never cut, so the detail is at least its
+   width and only the repo after it truncates. */
+.pal-detail:has(> .pal-machine) {
+  display: flex;
+  /* Visible, so its automatic minimum is the machine's width (a clipping box's is 0);
+     the repo inside clips itself. */
+  overflow: visible;
+  min-width: auto;
+}
+.pal-machine {
+  flex: none;
+}
+.pal-repo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
 }
 .pal-age {
   min-width: var(--meta-col);
@@ -461,4 +495,99 @@
    label rule), so the matched letters are what stands out. */
 .pal[data-q] .pal-row[aria-selected="true"] .pal-label {
   color: var(--fg-2);
+}
+
+/* ----- the preview (a wide window): the row under the cursor, read beside the list -----
+   The panel takes a fixed height while it is up, so typing never resizes it; the list
+   keeps its whole-row fold inside. The preview is the sheet's own ground on a hairline,
+   one column of quiet text: the state and its timer, the title, where it runs, the last
+   ask and the latest reply, each clamped. It changes with the cursor and never animates. */
+.pal[data-peek] {
+  width: min(920px, calc(100vw - 64px));
+  max-height: none;
+}
+.pal[data-peek] .pal-body {
+  flex: none;
+  height: min(408px, calc(60dvh - 80px));
+}
+.pal-peek {
+  flex: none;
+  width: 340px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 16px 20px;
+  border-left: var(--hairline) solid var(--line);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.pal-peek :where(p) {
+  margin: 0;
+}
+.pal-peek-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-3);
+}
+.pal-peek-word::first-letter {
+  text-transform: uppercase;
+}
+.pal-peek-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  margin-top: 8px;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  overflow-wrap: anywhere;
+}
+.pal-peek-where {
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+}
+.pal-peek-block {
+  margin-top: 16px;
+}
+.pal-peek-label {
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.pal-peek-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.pal-peek-text--reply {
+  -webkit-line-clamp: 7;
+}
+.pal-peek-text code {
+  font-family: var(--font-mono);
+  font-size: 0.925em;
+  color: var(--fg);
+}
+.pal-peek--plain .pal-peek-title {
+  margin-top: 0;
+}
+.pal-peek--plain .pal-peek-text {
+  margin-top: 4px;
+  color: var(--fg-3);
+}
+.pal-peek-keys {
+  margin-top: 12px;
+}
+.pal-peek-keys .pal-keys {
+  display: inline-flex;
 }

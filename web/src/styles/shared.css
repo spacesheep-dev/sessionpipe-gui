@@ -1155,6 +1155,18 @@ textarea.field {
 .sticky-head[data-stuck] {
   box-shadow: 0 var(--hairline) 0 var(--line);
 }
+/* A stuck heading sits flush under the bar and draws the one hairline: the bar's own
+   would be a second rule a heading's height above it. */
+.page:has(.sticky-head[data-stuck]) > .bar {
+  border-bottom-color: transparent;
+}
+/* The phone's lists (Board, Inbox) keep a section heading stuck under the folded bar
+   whenever they are scrolled, and the heading draws the hairline. */
+@media (max-width: 839px) {
+  .page:has(.group-head) > .bar[data-collapsed] {
+    border-bottom-color: transparent;
+  }
+}
 
 /* A command well or a listening row inside the empty state: full measure, left text. */
 .state .cmdwell {

@@ -10,18 +10,19 @@
 // page, a right-click has the rest. Opening the session by any path takes its banner
 // away. A banner leaves the way it came, then the stack closes over it. The list and its
 // rules live in lib/toasts.ts. Allow and Deny are signed and final: never an undo.
-import type { ControlActivity, MachineControl, SessionKey, SessionSummary, StoredEvent } from "@shared/api";
+// On a phone it is iOS's banner (Banner.tsx), one at a time, the Inbox holding the
+// answers; "Hidden · Undo" sits at the bottom, by the thumb that just swiped.
+import type { ControlActivity, SessionKey, SessionSummary, StoredEvent } from "@shared/api";
 import { splitKey } from "@shared/api";
-import { type MutableRefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { answerState, useSessionSend } from "../control/useSend";
+import { useEffect, useRef, useState } from "react";
 import { type OpenAttention, openAttentions, useAppState, useStore } from "../data/hooks";
-import { ATTENTION_LABEL, attentionMessage, oneLine, sessionTitle } from "../lib/format";
-import { copyItem } from "../lib/menus";
+import { ATTENTION_LABEL, attentionMessage, oneLine, sessionTitle, toolLabel } from "../lib/format";
+import { lazyModule, whenIdle } from "../lib/lazy";
 import { reducedMotion, tokenMs } from "../lib/motion";
 import { SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath, usePath } from "../lib/router";
 import { useShortcut } from "../lib/shortcuts";
 import { installSoundUnlock, type SoundKind, useSounds } from "../lib/sounds";
-import { openSplit, parseSplit } from "../lib/split";
+import { parseSplit } from "../lib/split";
 import {
   dismissForSession,
   dismissToast,
@@ -33,10 +34,8 @@ import {
   undoLatest,
   useToasts,
 } from "../lib/toasts";
-import { Redacted } from "./bits";
-import { type MenuList, useContextMenu } from "./ContextMenu";
-import { LabelDot } from "./LabelDot";
-import { answerItems } from "./SessionCard";
+import { PHONE_QUERY, useMedia } from "./Shell";
+import type { ToastCard as ToastCardType } from "./ToastCard";
 
 const attKey = (r: OpenAttention): string => `${r.session.key}|${r.attention.attentionId}`;
 
@@ -75,7 +74,7 @@ function attentionToast(r: OpenAttention): Toast {
     machine: s.machine,
     verb: ATTENTION_VERB[a.kind] ?? "Needs you",
     label: ATTENTION_LABEL[a.kind] ?? a.kind,
-    tool: a.tool,
+    tool: a.tool ? toolLabel(a.tool) : undefined,
     body: a.message
       ? oneLine(attentionMessage(a) ?? a.message, 160)
       : a.tool
@@ -210,30 +209,77 @@ function useLeaving(list: readonly Toast[]): { toast: Toast; closing: boolean }[
 /** The exit (--dur-exit) and the collapse after it. */
 const LEAVE_MS = tokenMs("--dur-exit", 140) + 140;
 
+/** The Inbox lists every prompt: a banner about one would repeat the page. */
+const onInbox = (path: string): boolean => path.split("?")[0] === "/inbox";
+
+/** What a phone shows of the list: the newest banner (one at a time, as iOS does) and the
+ *  newest undo; on the Inbox no prompt banner at all. */
+function phoneList(list: readonly Toast[], path: string): Toast[] {
+  const banner = [...list].reverse().find((t) => t.kind !== "undo" && !(t.attentionId && onInbox(path)));
+  const undo = [...list].reverse().find((t) => t.kind === "undo");
+  return list.filter((t) => t === banner || t === undo);
+}
+
+/** A banner's code is the screen's own: the phone's (Banner.tsx) or the desktop's
+ *  (ToastCard.tsx), fetched when the page is idle after load. A banner only ever follows
+ *  the first snapshot, so it is in long before the first one is drawn. */
+const banner = lazyModule(() => import("./Banner"));
+const card = lazyModule(() => import("./ToastCard"));
+if (typeof window !== "undefined")
+  whenIdle(() => void (window.matchMedia?.(PHONE_QUERY).matches ? banner : card).preload().catch(() => {}));
+
+/** The banner once its module is in (a few ms after the first ask, if not warmed yet). */
+function PhoneBanner(p: { toast: Toast; closing: boolean }) {
+  const m = banner.use();
+  return m ? <m.Banner {...p} /> : null;
+}
+function DesktopCard(p: Parameters<typeof ToastCardType>[0]) {
+  const m = card.use();
+  return m ? <m.ToastCard {...p} /> : null;
+}
+
 export function Toasts() {
   useToastEffects();
   useEffect(() => installSoundUnlock(), []);
   const list = useToasts();
   const { sessions, machines } = useAppState();
   const sounds = useSounds();
+  const phone = useMedia(PHONE_QUERY);
   // A session opened by any path takes its banner away.
   const path = usePath();
   useEffect(() => {
     void path;
     for (const t of list) if (t.session && onScreen(t.session) && t.kind !== "undo") dismissForSession(t.session);
   }, [path, list]);
+  // A phone keeps one banner: a newer one replaces it (the older prompt is in the Inbox),
+  // and on the Inbox the list says it already.
+  const visible = phone ? phoneList(list, path) : list;
+  useEffect(() => {
+    if (!phone) return;
+    for (const t of list) if (t.kind !== "undo" && !visible.includes(t)) dismissToast(t.id);
+  });
   // ⌘Z: the newest undo on screen (a text field keeps its own).
   useShortcut("undo", () => (undoLatest() ? undefined : false));
-  const shown = useLeaving(list);
+  const leaving = useLeaving(visible);
+  // The phone's undo sits at the bottom, after the banner.
+  const shown = phone
+    ? [...leaving.filter((e) => e.toast.kind !== "undo"), ...leaving.filter((e) => e.toast.kind === "undo")]
+    : leaving;
   if (shown.length === 0) return null;
   return (
-    <section className="toasts" aria-label="Notifications">
+    <section className={`toasts${phone ? " toasts--phone" : ""}`} aria-label="Notifications">
       {shown.map(({ toast: t, closing }) => (
-        <div key={t.id} className="toast-slot" data-closing={closing ? "" : undefined}>
+        <div
+          key={t.id}
+          className={`toast-slot${t.kind === "undo" ? " toast-slot--undo" : ""}`}
+          data-closing={closing ? "" : undefined}
+        >
           {t.kind === "undo" ? (
             <UndoCard toast={t} />
+          ) : phone ? (
+            <PhoneBanner toast={t} closing={closing} />
           ) : (
-            <ToastCard
+            <DesktopCard
               toast={t}
               session={t.session ? sessions.get(t.session) : undefined}
               control={(k) => machines.get(k)?.control}
@@ -242,108 +288,11 @@ export function Toasts() {
         </div>
       ))}
       {sounds.on && sounds.wanted && !sounds.unlocked && (
-        <p className="toast-unlock">click anywhere once to enable sound</p>
+        <p className="toast-unlock">
+          {phone ? "Tap anywhere once to turn sound on" : "click anywhere once to enable sound"}
+        </p>
       )}
     </section>
-  );
-}
-
-/** A shell tool asks to run a command; any other asks to use its input. */
-const SHELL = /^(bash|shell|sh|zsh|exec|exec_command|run_terminal_cmd|run_shell_command|terminal)$/i;
-
-function ToastCard({
-  toast: t,
-  session,
-  control,
-}: {
-  toast: Toast;
-  session?: SessionSummary;
-  control: (machine: string) => MachineControl | undefined;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const open = () => {
-    if (!t.session) return;
-    openSplit(t.session, { from: ref.current?.getBoundingClientRect() });
-    dismissToast(t.id);
-  };
-  const attention = t.attentionId ? session?.openAttentions.find((a) => a.attentionId === t.attentionId) : undefined;
-  const answerMenu = useRef<MenuList>([]);
-  const menu = useContextMenu(
-    () => [
-      t.session && { label: "Open beside", run: open },
-      ...answerMenu.current,
-      { sep: true },
-      { label: "Copy", items: [copyItem("Title", t.title), copyItem("Message", t.body)] },
-      { sep: true },
-      { label: "Dismiss", run: () => dismissToast(t.id) },
-    ],
-    { title: () => t.title, subtitle: () => t.machine ?? "" },
-  );
-  const verb = t.tool ? (SHELL.test(t.tool) ? " wants to run " : " wants to use ") : "";
-  const marked = t.kind === "needs-you" || t.kind === "error";
-  return (
-    <div
-      ref={ref}
-      className={`toast toast--${t.kind}${marked ? " toast--marked" : ""}`}
-      data-toast={t.kind}
-      data-session={t.session}
-      data-attention={t.attentionId}
-      data-sticky={t.sticky ? "true" : undefined}
-      role="status"
-      {...menu}
-    >
-      {marked && (
-        <span className={`toast-mark toast-mark--${t.kind}`} aria-hidden="true">
-          {t.kind === "needs-you" && <span className="toast-dot" />}
-        </span>
-      )}
-      <button
-        type="button"
-        className="toast-main"
-        onClick={open}
-        disabled={!t.session}
-        title={t.session ? "Open the session beside this page" : undefined}
-      >
-        <span className="toast-head">
-          {t.verb ?? t.label}
-          {t.machine && (
-            <>
-              {" "}
-              {t.kind === "delivered" && t.verb === "Delivered" ? "to" : "on"}{" "}
-              <span className="toast-machine">{t.machine}</span>
-            </>
-          )}
-        </span>
-        <span className="toast-top">
-          {t.session && <LabelDot session={t.session} />}
-          <span className="toast-title">{t.title}</span>
-        </span>
-        <span className="toast-body">
-          <span className="toast-label sr-only">{t.label}</span>
-          {t.tool && <code className="toast-tool">{t.tool}</code>}
-          {verb && <span className="toast-verb">{verb}</span>}
-          {t.body && (
-            <span className={`toast-msg ${t.tool ? "mono" : ""}`}>
-              <Redacted text={t.body} />
-            </span>
-          )}
-        </span>
-      </button>
-      <button type="button" className="icon-btn toast-x" aria-label="Dismiss" onClick={() => dismissToast(t.id)}>
-        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-          <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-        </svg>
-      </button>
-      {t.answerable && session && attention && (
-        <ToastAnswer
-          toast={t}
-          session={session}
-          attention={attention}
-          control={session.machine ? control(session.machine) : undefined}
-          into={answerMenu}
-        />
-      )}
-    </div>
   );
 }
 
@@ -359,58 +308,5 @@ function UndoCard({ toast: t }: { toast: Toast }) {
         Undo
       </button>
     </div>
-  );
-}
-
-/** Allow / Deny on the banner, through the same signed send as the session page and the
- *  inbox; the banner leaves once an answer is out. Its menu gets the same two. */
-function ToastAnswer({
-  toast,
-  session: s,
-  attention: a,
-  control,
-  into,
-}: {
-  toast: Toast;
-  session: SessionSummary;
-  attention: NonNullable<SessionSummary["openAttentions"]>[number];
-  control?: MachineControl;
-  into: MutableRefObject<MenuList>;
-}) {
-  const send = useSessionSend(s, control, s.openAttentions);
-  const st = answerState(s, a, control, send);
-  const { reason, off, status, tag } = st;
-  const answer = (allow: boolean) =>
-    void send
-      .onSend({ kind: "permission.answer", attentionId: a.attentionId, allow })
-      .then(() => dismissToast(toast.id))
-      .catch(() => {});
-  useLayoutEffect(() => {
-    into.current = status === "closed" ? [] : answerItems(a.tool, st, answer);
-  });
-  useEffect(
-    () => () => {
-      into.current = [];
-    },
-    [into],
-  );
-  return (
-    <span className="toast-actions" data-answer={tag}>
-      {status !== "closed" && (
-        <>
-          <button type="button" className="btn btn--sm btn--deny" disabled={off} onClick={() => answer(false)}>
-            Deny
-          </button>
-          <button type="button" className="btn btn--sm btn--allow" disabled={off} onClick={() => answer(true)}>
-            Allow
-          </button>
-        </>
-      )}
-      {send.error ? (
-        <span className="toast-note toast-note--err">{send.error}</span>
-      ) : reason ? (
-        <span className="toast-note">{reason}</span>
-      ) : null}
-    </span>
   );
 }

@@ -33,7 +33,7 @@ import { PhonePage } from "./phone/PhonePage";
 import { markSetupSeen, setupSeen, useSetupStatus } from "./setup/api";
 import { needsSetup } from "./setup/steps";
 import { fetchThemes, useThemes } from "./themes/host/registry";
-import { ThemePage } from "./themes/host/ThemePage";
+import { ThemeRoute } from "./themes/host/ThemeRoute";
 
 const TITLES: Record<string, string> = {
   board: "Board",
@@ -138,7 +138,7 @@ export function App() {
           <Settings />
         </>
       )}
-      {route.name === "theme" && <ThemePage key={route.id} id={route.id} />}
+      {route.name === "theme" && <ThemeRoute key={route.id} id={route.id} />}
       {route.name === "pair" && <PairPage key={route.code} code={route.code} />}
       {route.name === "add-device" && <AddDevicePage />}
       {route.name === "phone" && <PhonePage />}

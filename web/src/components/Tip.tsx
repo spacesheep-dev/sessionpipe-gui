@@ -49,6 +49,8 @@ export function TipHost() {
     let current: HTMLElement | null = null;
     let heldTitle: string | null = null;
     let pressed: HTMLElement | null = null;
+    /** The last press was a finger or a pen (no tips on focus until a key is pressed). */
+    let touched = false;
     const restore = () => {
       if (current && heldTitle !== null) current.setAttribute("title", heldTitle);
       heldTitle = null;
@@ -94,6 +96,9 @@ export function TipHost() {
     };
     const focus = (e: FocusEvent) => {
       const t = e.target as HTMLElement | null;
+      // Focus that a finger caused (a tap, or a sheet handing focus back to its trigger)
+      // can still read as :focus-visible; a tip then would stay up where the finger was.
+      if (touched) return;
       if (!t?.matches?.(":focus-visible")) return;
       const el = t.closest<HTMLElement>(TARGET);
       if (!el || el !== t) return;
@@ -104,7 +109,9 @@ export function TipHost() {
     const blur = (e: FocusEvent) => {
       if (e.target === current) hide();
     };
-    const press = () => {
+    const press = (e: Event) => {
+      if (e.type === "pointerdown") touched = (e as PointerEvent).pointerType !== "mouse";
+      else if (e.type === "keydown") touched = false;
       if (!current) return;
       pressed = current;
       hide();

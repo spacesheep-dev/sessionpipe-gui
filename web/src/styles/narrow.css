@@ -74,8 +74,33 @@
   .cut-btn,
   .rv-sess,
   .notify,
-  .sel {
+  .sel,
+  .lens-chip-btn,
+  .feed-filter,
+  .rv-tabs .rv-tab {
     min-height: 44px;
+  }
+  /* A search field takes a tap anywhere on its well, not only on its line of text. */
+  .search input {
+    align-self: stretch;
+  }
+  /* A shortcut's keys and its +: 22 px to the eye, 44 tall to a finger (the row has room). */
+  .sc-key,
+  .sc-add {
+    position: relative;
+  }
+  .sc-key::after,
+  .sc-add::after {
+    content: "";
+    position: absolute;
+    inset: -11px 0;
+  }
+  /* The subagent disclosure stays 18 px to the eye; a finger gets 44, reaching into the
+     gutter rather than over the row's own glyph. */
+  .card-disclose::before {
+    content: "";
+    position: absolute;
+    inset: 0 -4px 0 -22px;
   }
   .toast-x {
     width: 44px;

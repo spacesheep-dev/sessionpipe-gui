@@ -26,6 +26,9 @@ body {
   line-height: var(--lh);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* The interface is lists of times, counts and versions: every figure is tabular, so a
+     ticking number never moves what sits beside it. Prose (a reply, .md) sets its own. */
+  font-variant-numeric: tabular-nums;
   overscroll-behavior-y: none;
 }
 
@@ -128,13 +131,26 @@ textarea,
   accent-color: var(--fg);
 }
 
-/* Mono sits a step under the text around it: 13 in body, 12 in a meta line. */
+/* Mono sits a step under the text around it: 13 in body, 12 in a meta line. Every mono
+   in the app takes this one ratio. Ligatures off: `=>` and `!=` read as typed. */
 code,
 pre,
 kbd,
 .mono {
   font-family: var(--font-mono);
   font-size: 0.925em;
+  font-variant-ligatures: none;
+}
+
+/* Headings break into even lines, prose avoids a one-word last line. Both are cheap in
+   the engines that have them (a few lines are measured) and a no-op elsewhere. */
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+p {
+  text-wrap: pretty;
 }
 
 pre {

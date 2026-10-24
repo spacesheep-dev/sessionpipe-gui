@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // The control affordance on a session, docked at the bottom of the view: an open
 // permission as one action bar (the question, Deny and Allow), then the composer, one
-// field that grows to 40 % of the view with attach, stop and send inside it, then at
-// most one quiet line under it: the one reason sending is off or will ask for something,
-// with its one action, and nothing at all when all is well. Every press shows at once:
-// Allow, Deny, Stop and Send take their pending face until the receiver has the signed
-// command, and what the machine did next is said by the machine's own acks, never here.
+// field that grows to 40 % of the view with the images to send, attach, stop and send
+// inside it, then at most one quiet line under it: the one reason sending is off or will
+// ask for something, with its one action, and nothing at all when all is well. Every
+// press shows at once: Allow, Deny, Stop and Send take their pending face until the
+// receiver has the signed command, and what the machine did next is said by the
+// machine's own acks, never here.
 // The draft is kept per session. Disabled with its reason until the machine paired and
 // `onSend` is wired (web/src/control/SessionControl.tsx signs and sends). Keep this
 // component self-contained: everything it needs comes through props.
@@ -21,10 +22,11 @@ import {
 } from "react";
 import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachments";
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
-import { attentionMessage } from "../lib/format";
+import { attentionMessage, toolLabel } from "../lib/format";
 import { Link } from "../lib/router";
 import { hintFor } from "../lib/shortcuts";
 import { ActionButton, Spinner, StateDot } from "./bits";
+import "../control/control.css";
 
 export type ControlAction =
   | { kind: "prompt"; text: string }
@@ -113,10 +115,12 @@ function SendIcon() {
   );
 }
 
+/** Stop as a media control reads: a square in a ring, at the send arrow's size. */
 function StopIcon() {
   return (
-    <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
-      <rect x="5.5" y="5.5" width="9" height="9" rx="1.5" fill="currentColor" />
+    <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+      <circle cx="10" cy="10" r="7.75" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="7.25" y="7.25" width="5.5" height="5.5" rx="1" fill="currentColor" />
     </svg>
   );
 }
@@ -147,12 +151,13 @@ function Question({ a }: { a: Attention }) {
   if (msg && SHELL.test(a.tool) && !/\b(permission|wants|needs)\b/i.test(msg))
     return (
       <>
-        Allow <span className="ctl-tool">{a.tool}</span> to run <code className="ctl-cmd">{msg}</code>?
+        Allow <span className="ctl-tool">{toolLabel(a.tool)}</span> to run <code className="ctl-cmd">{msg}</code>?
       </>
     );
   return (
     <>
-      Allow <span className="ctl-tool">{a.tool}</span>?{msg ? <span className="ctl-answer-msg"> {msg}</span> : null}
+      Allow <span className="ctl-tool">{toolLabel(a.tool)}</span>?
+      {msg ? <span className="ctl-answer-msg"> {msg}</span> : null}
     </>
   );
 }
@@ -463,43 +468,45 @@ export function ControlStrip({
           </div>
         );
       })}
-      <AttachmentTray att={att} />
-      <div className="ctl-ask">
-        <AttachButton att={att} disabled={!enabled || !!busy} />
-        <textarea
-          ref={field}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKey}
-          placeholder={placeholder}
-          disabled={!enabled}
-          aria-label="Message for the next turn"
-          rows={1}
-          enterKeyHint="send"
-        />
-        {working && (
+      <div className="ctl-field">
+        <AttachmentTray att={att} />
+        <div className="ctl-ask">
+          <AttachButton att={att} disabled={!enabled || !!busy} />
+          <textarea
+            ref={field}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKey}
+            placeholder={placeholder}
+            disabled={!enabled}
+            aria-label="Message for the next turn"
+            rows={1}
+            enterKeyHint="send"
+          />
+          {working && (
+            <button
+              type="button"
+              className="icon-btn ctl-cancel"
+              disabled={!enabled || (!!busy && busy !== "cancel")}
+              onClick={() => run("cancel", { kind: "cancel" })}
+              aria-label="Stop the turn"
+              aria-busy={busy === "cancel" || undefined}
+              data-tip-keys={hintFor("session.cancel") || undefined}
+            >
+              {busy === "cancel" ? <Spinner label="Stopping" /> : <StopIcon />}
+            </button>
+          )}
           <button
-            type="button"
-            className="icon-btn ctl-cancel"
-            disabled={!enabled || (!!busy && busy !== "cancel")}
-            onClick={() => run("cancel", { kind: "cancel" })}
-            aria-label="Stop the turn"
-            aria-busy={busy === "cancel" || undefined}
-            data-tip-keys={hintFor("session.cancel") || undefined}
+            type="submit"
+            className={`icon-btn ctl-send ${canSend || busy === "prompt" ? "is-ready" : ""}`}
+            disabled={!canSend}
+            aria-label="Send"
+            aria-busy={busy === "prompt" || undefined}
+            data-tip-keys="↩"
           >
-            {busy === "cancel" ? <Spinner label="Stopping" /> : <StopIcon />}
+            {busy === "prompt" ? <Spinner label="Sending" /> : <SendIcon />}
           </button>
-        )}
-        <button
-          type="submit"
-          className={`icon-btn ctl-send ${canSend || busy === "prompt" ? "is-ready" : ""}`}
-          disabled={!canSend}
-          aria-label="Send"
-          aria-busy={busy === "prompt" || undefined}
-          data-tip-keys="↩"
-        >
-          {busy === "prompt" ? <Spinner label="Sending" /> : <SendIcon />}
-        </button>
+        </div>
       </div>
       {reason && (
         <p className="ctl-foot" data-reason={reason.kind}>

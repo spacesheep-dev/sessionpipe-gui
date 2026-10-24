@@ -547,8 +547,9 @@ a.settings-row:focus-visible {
   .settings-nav-large {
     padding: 4px 0 16px;
     color: var(--fg);
+    font-family: var(--font-display);
     font-size: calc(var(--text-xl) * 1.55);
-    font-weight: 700;
+    font-weight: 600;
     line-height: 1.15;
     letter-spacing: -0.01em;
   }

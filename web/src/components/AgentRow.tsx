@@ -32,13 +32,20 @@ export function AgentGlyph({ a, size = 8 }: { a: Pick<AgentRun, "state">; size?:
 }
 
 /** "Grep · 4 s", "Thinking", "Quiet for 2 m", or how long it ran: ticking only while it
- *  runs (every ten seconds once it went quiet). Errors, when it had some, as a count. */
+ *  runs (every ten seconds once it went quiet). Errors, when it had some, are the one small
+ *  red ✕ before it (the board's error mark), the count in its name and tooltip. */
 export function AgentNow({ a, className = "agent-now" }: { a: AgentRun; className?: string }) {
   const now = useNow(a.state === "running" ? "fine" : a.state === "stale" ? "coarse" : "off");
-  const errors = a.attributed && a.toolErrors > 0 ? `${a.toolErrors} error${a.toolErrors === 1 ? "" : "s"}` : "";
+  const errors = a.attributed && a.toolErrors > 0 ? `${a.toolErrors} tool error${a.toolErrors === 1 ? "" : "s"}` : "";
   return (
     <span className={`${className} num`}>
-      {errors && <span className="agent-errs">{errors} · </span>}
+      {errors && (
+        <span className="agent-errs" role="img" aria-label={errors} title={errors}>
+          <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+            <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+        </span>
+      )}
       {agentNow(a, now)}
     </span>
   );

@@ -10,14 +10,33 @@
 :root {
   color-scheme: light dark;
 
-  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  /* Kept for other owners' styles; there is no display face any more. */
-  --font-display: var(--font-ui);
-  --font-mono: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
+  /* The platform's own UI face, by platform: SF Pro on Apple (it picks its Text or
+     Display cut by size), Segoe UI Variable on Windows 11 (Segoe UI before it), Roboto
+     on Android and ChromeOS through system-ui. Linux has no one face, and its system-ui
+     is often Cantarell or DejaVu Sans, which set loose and wide in a dense list: the
+     desktops' own modern faces come first (GNOME 48's Adwaita Sans, Ubuntu Sans, KDE and
+     Fedora's Noto Sans), system-ui after them. Nothing is downloaded: all are installed. */
+  --font-ui:
+    -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Adwaita Sans", "Ubuntu Sans", Ubuntu,
+    "Noto Sans", system-ui, sans-serif;
+  /* Titles of 20 px and up (the phone's large title, the pairing digits): Segoe's Display
+     cut on Windows; everywhere else the same face, which sizes itself. */
+  --font-display:
+    -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", "Adwaita Sans", "Ubuntu Sans", Ubuntu,
+    "Noto Sans", system-ui, sans-serif;
+  /* Mono is only for what a person might copy: a command, a path, code. SF Mono on Apple,
+     Cascadia Mono (Windows Terminal's) or Consolas on Windows; on Linux a mono the person
+     installed (JetBrains Mono) before the desktops' own (GNOME 48's Adwaita Mono, Ubuntu
+     Sans Mono, Noto Sans Mono), and DejaVu Sans Mono, the usual default, last. */
+  --font-mono:
+    ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, "JetBrains Mono", "Adwaita Mono", "Ubuntu Sans Mono",
+    "Noto Sans Mono", "DejaVu Sans Mono", monospace;
 
   /* The scale, in rem so the text-size setting multiplies it: 12 for tab labels and
      badges, 13 for meta and toolbars, 14 for everything a person reads, 15 for the page
-     title, 18 only for the phone's large title (×1.55) and the pairing digits. */
+     title, 18 only for the phone's large title (×1.55) and the pairing digits. Three
+     weights: 400 to read, 500 for a control's label, 600 for a title. Mono sets 0.925 of
+     the text around it (base.css), which puts it on the x-height of the UI face. */
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text-md: 0.875rem;
@@ -63,6 +82,9 @@
      clears --dur-release after the finger lifts, so a quick tap still reads. */
   --dur-exit: 140ms;
   --dur-release: 80ms;
+  /* One element travelling across the page (a typed message landing as a session's first
+     turn): longer than a sheet, since the eye follows it the whole way. */
+  --dur-land: 320ms;
   --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
   /* A primary button's give under the finger. */
   --press-scale: 0.97;

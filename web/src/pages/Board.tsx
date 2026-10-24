@@ -392,7 +392,9 @@ export function Board() {
                 />
               )}
               <LabelChip value={label} onChange={setLabelFilter} />
-              {filtered && (
+              {/* For the chips: a search has its own way out (Esc, the field's ✕, the
+                  no-match state's Clear search), and the bar does not shift as one types. */}
+              {(machine || harness || label) && (
                 <button type="button" className="btn btn--ghost btn--sm" onClick={clear}>
                   Clear
                 </button>

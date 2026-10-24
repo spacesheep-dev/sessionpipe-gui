@@ -765,7 +765,8 @@ test("over plain LAN http every control affordance says passkeys need https or l
   await expect(p.getByRole("button", { name: "Approve with passkey" })).toBeDisabled();
   await expect(p.locator(".pair-note--err")).toContainText(/passkeys need https or localhost/i);
   await p.goto(`${lan}/machines`);
-  await expect(p.getByRole("region", { name: MACHINE })).toContainText(/passkeys need https or localhost/i);
+  // Said once above the paired machines, not in each.
+  await expect(p.locator(".machines-note")).toContainText(/passkeys need https or localhost/i);
   await p.goto(`${lan}/t/e2e-control`);
   await expect(p.locator("[data-theme-id='e2e-control'] [data-avail]")).toContainText(
     /passkeys need https or localhost/i,

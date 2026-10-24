@@ -162,9 +162,6 @@
   text-overflow: ellipsis;
   color: var(--fg-2);
 }
-.inbox-msg.mono {
-  font-size: calc(var(--text-sm) * 0.95);
-}
 .inbox-row--terminal .inbox-msg {
   color: var(--fg-3);
 }
@@ -216,6 +213,22 @@
 .inbox-answer .btn {
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-out);
+}
+/* An answer on its way stays on the row after the pointer leaves: the pressed button
+   turning, the other stepped back, the time and machine out of their way. */
+.inbox-answer[data-chosen] .btn {
+  opacity: 1;
+}
+.inbox-answer[data-chosen] .btn:disabled {
+  opacity: 0.45;
+}
+@media (hover: hover) {
+  .inbox-row--answerable:has(.inbox-answer[data-chosen]) :is(.inbox-age, .inbox-where) {
+    visibility: hidden;
+  }
+  .inbox-row:has(.inbox-answer[data-chosen]) .inbox-answer {
+    pointer-events: auto;
+  }
 }
 .inbox-row:hover .inbox-answer .btn,
 .inbox-row[aria-current="true"] .inbox-answer .btn,

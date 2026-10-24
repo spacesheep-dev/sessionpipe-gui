@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* Images beside a prompt (control/Attachments.tsx): the paperclip inside the field, the
-   tray of 56 px thumbnails above it, the drop highlight, and the thumbnails a sent
+   tray of 56 px thumbnails at the field's top (each one's size is its tooltip; only a
+   refusal is written under it), the drop highlight, and the thumbnails a sent
    prompt shows in the activity list and the Session view. Fills and hairlines, no
    badges; the shared spinner while one uploads. */
 
@@ -37,14 +38,26 @@
 .att-btn input {
   display: none;
 }
+/* Under a finger it is the size of its neighbours, stop and send, so the three share
+   one line. */
+@media (pointer: coarse) {
+  .att-btn {
+    width: 44px;
+    height: 44px;
+  }
+}
 
 /* The field while a file is dragged over it. */
-.ctl--drop .ctl-ask {
+.ctl--drop .ctl-field {
   border-color: var(--fg-3);
   border-style: dashed;
   background: var(--bg-3);
 }
 
+/* Inside the composer's field, above the text: the images go with the message. */
+.ctl-field > .att {
+  padding: 12px 12px 4px;
+}
 .att-tray {
   list-style: none;
   margin: 0;

@@ -89,13 +89,10 @@
   color: var(--fg);
 }
 
-/* The composer: one field that grows to six lines, with attach, stop and send inside
-   it; the focus halo is the field's, not the textarea's. */
-.ctl-ask {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  padding: 3px;
+/* The composer: one field that grows to 40 % of the view, the images to send at its
+   top, attach, stop and send on its last line; the focus halo is the field's, not the
+   textarea's. */
+.ctl-field {
   border: var(--hairline) solid var(--line-2);
   border-radius: var(--radius);
   background: var(--bg-2);
@@ -103,12 +100,18 @@
     border-color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
 }
-.ctl-ask:focus-within {
+.ctl-field:focus-within {
   border-color: color-mix(in oklch, var(--focus) 70%, transparent);
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
 }
-.ctl--off .ctl-ask {
+.ctl--off .ctl-field {
   background: var(--bg);
+}
+.ctl-ask {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 3px;
 }
 .ctl-ask textarea {
   flex: 1;
@@ -154,6 +157,11 @@
 }
 .ctl-cancel {
   color: var(--fg-2);
+}
+@media (hover: hover) {
+  .ctl-cancel:hover:not(:disabled) {
+    color: var(--fg);
+  }
 }
 
 /* At most one quiet line under the field: the one reason sending is off or will ask for

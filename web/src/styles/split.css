@@ -1,12 +1,13 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* ---------- split: a session beside the page ---------- */
 
-/* The page makes room for the panel; the panel itself is fixed on the right, a hairline
-   at its left edge and no shadow (it is part of the window, not floating over it). */
+/* The page makes room for the panel in one step (a layout change is never animated: it
+   would re-lay the whole page every frame); the panel itself is fixed on the right, a
+   hairline at its left edge and no shadow (it is part of the window, not floating over
+   it), and slides in over the room made for it. */
 .shell {
   --split-width: 0px;
   padding-right: var(--split-width);
-  transition: padding-right 240ms var(--ease-out);
 }
 .split-dragging .shell,
 .split-dragging .panel {
@@ -31,9 +32,10 @@
   border-left: var(--hairline) solid var(--line);
   transform: translateX(100%);
   visibility: hidden;
+  /* Out: quicker than in, and accelerating away. */
   transition:
-    transform 240ms var(--ease-out),
-    visibility 0s linear 240ms;
+    transform var(--dur-exit) var(--ease-in),
+    visibility 0s linear var(--dur-exit);
 }
 .panel--open {
   transform: none;
@@ -210,7 +212,6 @@
   will-change: transform, opacity;
 }
 @media (prefers-reduced-motion: reduce) {
-  .shell,
   .panel,
   .panel-body {
     transition: none;

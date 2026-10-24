@@ -368,8 +368,8 @@ test("a pasted screenshot becomes a thumbnail; the sent text ends with the block
   const item = page.locator(".att-item");
   await expect(item).toHaveCount(1);
   await expect(item).toHaveAttribute("data-state", "ready", { timeout: 15_000 });
-  await expect(item.locator(".att-meta")).toContainText("1440×900");
-  await expect(item.locator(".att-meta")).toContainText(/\d+ KB/);
+  // Its name, size and bytes are the thumbnail's tooltip (no meta line under it).
+  await expect(item).toHaveAttribute("title", /Screenshot\.png · 1440×900 · \d+ KB/);
   const id = await item.getAttribute("data-attachment");
   expect(id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
   // The pasted text did not land in the box.
@@ -421,7 +421,7 @@ test("dropped files highlight the composer and attach; × takes one back; images
   await expect(items).toHaveCount(2);
   await expect(items.nth(0)).toHaveAttribute("data-state", "ready", { timeout: 15_000 });
   await expect(items.nth(1)).toHaveAttribute("data-state", "ready", { timeout: 15_000 });
-  await expect(items.nth(1).locator(".att-meta")).toContainText("640×480");
+  await expect(items.nth(1)).toHaveAttribute("title", / · 640×480 · /);
   const dropped = await items.nth(0).getAttribute("data-attachment");
   const kept = await items.nth(1).getAttribute("data-attachment");
   await shot(page, "composer-two-thumbnails-desktop", ".sess-ctl");
@@ -511,7 +511,7 @@ test("a 390 px phone composes with the native picker and the same thumbnails", a
   await input.setInputFiles({ name: "IMG_0412.png", mimeType: "image/png", buffer: Buffer.from(PHOTO, "base64") });
   const item = p.locator(".att-item");
   await expect(item).toHaveAttribute("data-state", "ready", { timeout: 15_000 });
-  await expect(item.locator(".att-meta")).toContainText("640×480");
+  await expect(item).toHaveAttribute("title", / · 640×480 · /);
   await p.getByLabel("Message for the next turn").fill("From the phone");
   await shot(p, "composer-thumbnail-phone", ".sess-ctl");
   await shot(p, "session-phone");

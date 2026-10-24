@@ -7,10 +7,16 @@
   "scope": "/",
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone"],
+  "launch_handler": { "client_mode": "focus-existing" },
   "background_color": "#fcfcfd",
   "theme_color": "#fcfcfd",
+  "categories": ["developer", "productivity"],
   "icons": [
     { "src": "/brand/mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/brand/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
     { "src": "/brand/apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
-  ]
+  ],
+  "shortcuts": [{ "name": "New session", "short_name": "New", "url": "/?new=1" }, { "name": "Inbox", "url": "/inbox" }]
 }

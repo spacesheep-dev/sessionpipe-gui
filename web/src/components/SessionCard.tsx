@@ -35,6 +35,7 @@ import {
   repoShort,
   STATE_LABEL,
   sessionTitle,
+  toolLabel,
 } from "../lib/format";
 import { hide } from "../lib/hidden";
 import { labelItems } from "../lib/labels";
@@ -276,8 +277,8 @@ export const SessionCard = memo(function SessionCard({
                 {ATTENTION_LABEL[attention.kind] ?? attention.kind}
               </span>
             )}
-            {attnTool && <code className="card-tool">{attnTool}</code>}
-            {!attention && tool && <code className="card-tool">{tool.tool}</code>}
+            {attnTool && <code className="card-tool">{toolLabel(attnTool)}</code>}
+            {!attention && tool && <code className="card-tool">{toolLabel(tool.tool)}</code>}
             <span
               className="card-time meta-col"
               title={
@@ -292,7 +293,7 @@ export const SessionCard = memo(function SessionCard({
 
           <span className="card-line">
             {attention ? (
-              <span className={`card-attn ${attnTool ? "mono" : ""}`}>
+              <span className={`card-attn ${literalAsk(attnTool) ? "mono" : ""}`}>
                 {attention.message && showTools ? (
                   attnTool ? (
                     <Redacted text={oneLine(attentionMessage(attention) || attention.message, 240)} />
@@ -308,7 +309,9 @@ export const SessionCard = memo(function SessionCard({
                 <Inline text={oneLine(isLiveText ? tail(liveText, 300) : liveText, 300)} />
               </span>
             ) : null}
-            {fact && <span className="card-agents num">{fact}</span>}
+            {/* The tree under the row says it once it is open: then the words are for a
+                screen reader only, and the preview keeps the line. */}
+            {fact && <span className={`card-agents num${showAgents ? " sr-only" : ""}`}>{fact}</span>}
             <Flags flags={s.flags} tool={tool?.tool ?? attnTool} />
           </span>
 
@@ -453,7 +456,7 @@ function KidRow({
         <StateDot state={c.state} decorative />
         <span className="kid-title ellipsis">{sessionTitle(c)}</span>
         {c.currentTool && c.state === "working" ? (
-          <code className="kid-tool">{c.currentTool.tool}</code>
+          <code className="kid-tool">{toolLabel(c.currentTool.tool)}</code>
         ) : (
           <span className="kid-state">{STATE_LABEL[c.state]}</span>
         )}
@@ -715,6 +718,11 @@ const tokenMsSafe = () => (reducedMotion() ? 0 : tokenMs("--dur", 200));
 /** One line of an agent's text with its inline Markdown read, not printed: a code span is
  *  mono without its ticks, emphasis and links are their words, a heading or quote mark
  *  goes. Placeholders for removed secrets keep their highlight. */
+/** Whether a tool's request is a literal a person might copy (a command, a path), set in
+ *  mono; an MCP tool's is a sentence ("Open a pull request on acme/billing"), in the UI
+ *  face. */
+export const literalAsk = (tool: string | undefined): boolean => !!tool && !tool.startsWith("mcp__");
+
 export function Inline({ text }: { text: string }) {
   const parts = text.split(/(`[^`\n]+`)/g);
   if (parts.length === 1) return <Redacted text={plainMarkdown(text)} />;

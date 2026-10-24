@@ -6,8 +6,11 @@
 // title's tooltip); with two tabs or more, window tabs under it sharing the width; then
 // the bodies, the timeline and the composer: every tab keeps its own scroller mounted up
 // to MOUNTED_MAX, so its scroll position and loaded pages survive a switch. Tabs and the
-// head have their own menus. Opening from a rectangle morphs a ghost of it into the
-// panel. Pages that list no sessions (Setup, Connect, /phone, Settings) don't show it.
+// head have their own menus. A dragged tab rides under the pointer while its neighbours
+// slide out of its way; a reordered tab slides to its place and a new one fades in; an
+// overflowing strip fades at the edge that has more. Opening from a rectangle morphs a
+// ghost of it into the panel. Pages that list no sessions (Setup, Connect, /phone,
+// Settings) don't show it.
 import type { AgentRun, SessionKey, SessionSummary } from "@shared/api";
 import { splitKey } from "@shared/api";
 import {
@@ -18,6 +21,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -56,10 +60,45 @@ import { LabelDot } from "./LabelDot";
 import { answerItems, SessionView } from "./SessionView";
 
 const MOTION_MS = 240;
+/** The slide out is quicker than the slide in (every exit is 140 ms). */
+const EXIT_MS = 140;
+const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 const reduced = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
+/** The strip's tabs move instead of jumping: a tab whose place changed (a reorder, a
+ *  neighbour closed) slides there from where it was drawn; a new one fades in. The tab
+ *  under the pointer in a drag is the pointer's, not this. Transform and opacity only. */
+function useTabFlip(strip: RefObject<HTMLDivElement>, keys: readonly SessionKey[], skip: SessionKey | null): void {
+  const prev = useRef<Map<string, number> | null>(null);
+  const sig = keys.join(",");
+  useLayoutEffect(() => {
+    const box = strip.current;
+    if (!box) return;
+    const els = [...box.querySelectorAll<HTMLElement>("[data-tab-key]")];
+    const now = new Map(els.map((el) => [el.dataset.tabKey!, el.offsetLeft]));
+    const before = prev.current;
+    prev.current = now;
+    // Nothing to move from on the first frame, while the strip folds into the head, or
+    // when the person asked for less motion.
+    if (!before || before.size === 0 || els.length < 2 || reduced() || typeof Element.prototype.animate !== "function")
+      return;
+    for (const el of els) {
+      const k = el.dataset.tabKey!;
+      if (k === skip) continue;
+      const was = before.get(k);
+      if (was === undefined) {
+        el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, easing: EASE });
+        continue;
+      }
+      const dx = was - now.get(k)!;
+      if (Math.abs(dx) < 1) continue;
+      el.animate([{ transform: `translateX(${dx}px)` }, { transform: "none" }], { duration: 200, easing: EASE });
+    }
+  }, [sig]);
+}
+
 /** A ghost rectangle animated from one viewport rect to another: transform and opacity only. */
-function morph(from: Rect, to: Rect, opts: { fadeIn?: boolean } = {}): void {
+function morph(from: Rect, to: Rect, opts: { fadeIn?: boolean; ms?: number } = {}): void {
   if (reduced() || from.width <= 0 || from.height <= 0) return;
   const el = document.createElement("div");
   el.className = "split-ghost";
@@ -71,7 +110,7 @@ function morph(from: Rect, to: Rect, opts: { fadeIn?: boolean } = {}): void {
       { transform: "none", opacity: opts.fadeIn ? 0.4 : 0.9 },
       { transform: end, opacity: opts.fadeIn ? 0.9 : 0 },
     ],
-    { duration: MOTION_MS, easing: "cubic-bezier(0.22, 1, 0.36, 1)", fill: "forwards" },
+    { duration: opts.ms ?? MOTION_MS, easing: EASE, fill: "forwards" },
   );
   anim.finished.then(() => el.remove()).catch(() => el.remove());
 }
@@ -172,14 +211,14 @@ export function SessionPanel({ phone }: { phone: boolean }) {
     if (was) {
       const from = lastFrom.current;
       lastFrom.current = null;
-      if (from) morph(panelRect(), from);
+      if (from) morph(panelRect(), from, { ms: EXIT_MS });
       const t = setTimeout(
         () => {
           setShownTabs([]);
           setMounted([]);
           bodyRefs.current.clear();
         },
-        reduced() ? 0 : MOTION_MS,
+        reduced() ? 0 : EXIT_MS,
       );
       return () => clearTimeout(t);
     }
@@ -206,9 +245,27 @@ export function SessionPanel({ phone }: { phone: boolean }) {
     if (!strip || !activeKey) return;
     const el = strip.querySelector<HTMLElement>(`[data-tab-key="${CSS.escape(activeKey)}"]`);
     el?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: reduced() ? "auto" : "smooth" });
-    const overflow = strip.scrollWidth > strip.clientWidth + 1;
-    strip.classList.toggle("tabs--overflow", overflow);
+    edges(strip);
   }, [activeKey, tabs, width]);
+  // An overflowing strip fades out at each edge that has tabs past it, kept up to date as
+  // it scrolls (a class flip per frame at most, no React render).
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    let raf = 0;
+    const on = () => {
+      if (!raf)
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          edges(strip);
+        });
+    };
+    strip.addEventListener("scroll", on, { passive: true });
+    return () => {
+      cancelAnimationFrame(raf);
+      strip.removeEventListener("scroll", on);
+    };
+  }, []);
 
   // Keyboard, through the keymap (lib/shortcuts.ts): [ / ] (and ctrl+tab) cycle, mod+1…9
   // jump, mod+w closes the active tab while the panel has focus (the browser keeps it
@@ -257,50 +314,77 @@ export function SessionPanel({ phone }: { phone: boolean }) {
     grip.addEventListener("pointercancel", up);
   };
 
-  // Tabs reorder by drag: past 6 px the tab follows the pointer across its neighbours'
-  // midpoints; a click that never moved activates.
+  // Tabs reorder by drag: past 6 px the tab lifts and rides under the pointer (a
+  // transform, written straight to the element); once its middle crosses a neighbour's,
+  // the order changes and that neighbour slides out of its way (useTabFlip). Let go, it
+  // settles into its slot. A click that never moved activates.
   const [dragging, setDragging] = useState<SessionKey | null>(null);
+  /** While a tab is dragged: puts it back under the pointer after the strip re-renders in
+   *  its new order, before that frame paints. */
+  const dragFix = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => {
+    dragFix.current?.();
+  });
   const onTabDown = (e: ReactPointerEvent<HTMLDivElement>, index: number) => {
     if (e.button !== 0) return;
     const tab = e.currentTarget;
     const strip = stripRef.current;
     if (!strip) return;
+    const key = tabs[index]!;
     const startX = e.clientX;
+    const grab = e.clientX - tab.getBoundingClientRect().left;
     let from = index;
     let moved = false;
     const pid = e.pointerId;
+    const place = (clientX: number) => {
+      // Where the pointer wants the tab, in the strip's own coordinates, kept inside it.
+      const box = strip.getBoundingClientRect();
+      const want = Math.max(
+        0,
+        Math.min(clientX - grab - box.left + strip.scrollLeft, strip.scrollWidth - tab.offsetWidth),
+      );
+      tab.style.transform = `translateX(${want - tab.offsetLeft}px)`;
+      return want + tab.offsetWidth / 2;
+    };
     const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return;
       if (!moved && Math.abs(ev.clientX - startX) < 6) return;
       if (!moved) {
         moved = true;
-        tab.setPointerCapture(pid);
-        setDragging(tabs[index]!);
+        setDragging(key);
       }
-      const els = [...strip.querySelectorAll<HTMLElement>("[data-tab-key]")];
-      let to = els.length - 1;
-      for (let i = 0; i < els.length; i++) {
-        const r = els[i]!.getBoundingClientRect();
-        if (ev.clientX < r.left + r.width / 2) {
-          to = i;
-          break;
-        }
-      }
+      const x = ev.clientX;
+      dragFix.current = () => place(x);
+      const mid = place(x);
+      const others = [...strip.querySelectorAll<HTMLElement>("[data-tab-key]")].filter((el) => el !== tab);
+      const to = others.filter((el) => el.offsetLeft + el.offsetWidth / 2 < mid).length;
       if (to !== from) {
         moveTab(from, to);
         from = to;
       }
     };
-    const up = () => {
-      tab.removeEventListener("pointermove", move);
-      tab.removeEventListener("pointerup", up);
-      tab.removeEventListener("pointercancel", up);
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      dragFix.current = null;
+      if (!moved) {
+        activateTab(index);
+        return;
+      }
+      // Settle: from under the pointer into its slot.
+      const left = tab.style.transform;
+      tab.style.transform = "";
       setDragging(null);
-      if (!moved) activateTab(index);
+      if (left && !reduced() && typeof tab.animate === "function")
+        tab.animate([{ transform: left }, { transform: "none" }], { duration: 160, easing: EASE });
     };
-    tab.addEventListener("pointermove", move);
-    tab.addEventListener("pointerup", up);
-    tab.addEventListener("pointercancel", up);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   };
+  useTabFlip(stripRef, open ? tabs : shownTabs, dragging);
   const onTabAux = (e: ReactMouseEvent<HTMLDivElement>, index: number) => {
     if (e.button === 1) {
       e.preventDefault();
@@ -635,9 +719,9 @@ function PanelTab({
     >
       {agent !== undefined ? (
         <>
-          <span className="tab-tree" aria-hidden="true">
-            ↳
-          </span>
+          <svg className="tab-tree" viewBox="0 0 8 8" width="8" height="8" aria-hidden="true">
+            <path d="M1 0v4.5Q1 7 3.5 7H8" fill="none" stroke="currentColor" strokeWidth="1" />
+          </svg>
           <AgentGlyph a={agent ?? { state: "done" }} />
         </>
       ) : (
@@ -663,4 +747,13 @@ function PanelTab({
       </button>
     </div>
   );
+}
+
+/** Which edges of the strip have tabs past them: each fades out where it does. */
+function edges(strip: HTMLElement): void {
+  const over = strip.scrollWidth > strip.clientWidth + 1;
+  const start = over && strip.scrollLeft > 1;
+  const end = over && strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 1;
+  strip.toggleAttribute("data-fade-start", start);
+  strip.toggleAttribute("data-fade-end", end);
 }

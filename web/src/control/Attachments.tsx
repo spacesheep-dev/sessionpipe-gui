@@ -356,7 +356,7 @@ export function AttachButton({
   );
 }
 
-/** The thumbnails above the input: each with its size, a spinner while uploading, the
+/** The thumbnails at the top of the field: each with a spinner while uploading, the
  *  error under it when refused, and × to take it back. Nothing when there is none. */
 export function AttachmentTray({ att }: { att: AttachmentsHandle }) {
   if (att.items.length === 0 && !att.error) return null;
@@ -378,7 +378,8 @@ export function AttachmentTray({ att }: { att: AttachmentsHandle }) {
   );
 }
 
-/** One image waiting to go; its menu copies its name or takes it back. */
+/** One image waiting to go: the thumbnail, its name and size the tooltip (a refusal is
+ *  written under it); its menu copies its name or takes it back. */
 function TrayItem({ it, onRemove }: { it: PendingItem; onRemove: () => void }) {
   const name =
     it.file instanceof File && it.file.name
@@ -386,6 +387,7 @@ function TrayItem({ it, onRemove }: { it: PendingItem; onRemove: () => void }) {
       : it.attachment
         ? `${it.attachment.id}.${it.attachment.ext}`
         : "";
+  const size = it.attachment ? `${it.attachment.width}×${it.attachment.height}` : "uploading";
   const menu = useContextMenu(() => [
     copyItem("Copy name", name),
     { sep: true },
@@ -396,20 +398,16 @@ function TrayItem({ it, onRemove }: { it: PendingItem; onRemove: () => void }) {
       className={`att-item ${it.error ? "att-item--err" : ""} ${!it.attachment && !it.error ? "att-item--busy" : ""}`}
       data-attachment={it.attachment?.id ?? ""}
       data-state={it.error ? "error" : it.attachment ? "ready" : "uploading"}
+      title={it.error ? undefined : [name, size, mb(it.bytes)].filter(Boolean).join(" · ")}
       {...menu}
     >
       <span className="att-frame">
         <img className="att-thumb" src={it.preview} alt="" />
         {!it.attachment && !it.error && <span className="spinner att-busy" aria-hidden="true" />}
       </span>
-      {it.error ? (
+      {it.error && (
         <span className="att-meta" title={it.error}>
           {it.error}
-        </span>
-      ) : (
-        <span className="att-meta num">
-          <span>{it.attachment ? `${it.attachment.width}×${it.attachment.height}` : "uploading"}</span>
-          <span>{mb(it.bytes)}</span>
         </span>
       )}
       <button type="button" className="icon-btn att-x" onClick={onRemove} aria-label="Remove image">

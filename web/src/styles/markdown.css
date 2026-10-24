@@ -4,6 +4,8 @@
    ruled by hairlines; no boxes, no stripes, no shadows. */
 
 .md {
+  /* A reply is prose: its figures are proportional (body sets tabular for the chrome). */
+  font-variant-numeric: normal;
   font-size: var(--text-md);
   line-height: 1.55;
   color: var(--fg);
@@ -71,7 +73,7 @@
   border-radius: var(--radius-inner);
   background: var(--bg-3);
   font-family: var(--font-mono);
-  font-size: 0.9em;
+  font-size: 0.925em;
 }
 
 /* ---------- fenced code: a well with its language and a copy button ---------- */
@@ -103,14 +105,27 @@
   font-size: var(--text-xs);
 }
 
+/* Long lines wrap, never scroll sideways: a wrapped part hangs two columns in from where
+   its line's text starts (`--i`, the line's indent, set by the renderer), so it still
+   reads as one line; a token longer than the well breaks anywhere. */
 .md-code {
   margin: 0;
   padding: 0 12px 10px;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   line-height: 1.55;
-  overflow-x: auto;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+.md-line {
+  display: block;
+  padding-left: calc((var(--i, 0) + 2) * 1ch);
+  text-indent: calc((var(--i, 0) + 2) * -1ch);
+}
+/* An empty line keeps its height (the zero-width space is drawn, never copied). */
+.md-line:empty::before {
+  content: "\200b";
 }
 .md-code code {
   padding: 0;

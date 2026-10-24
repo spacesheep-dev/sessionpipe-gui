@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Plugins section of the Views page: what server plugins are installed, their
 // status or error, an Enable / Disable switch (a bundled plugin is off until enabled), a
-// settings form made from each manifest (secrets as password fields showing the mask;
-// saving works from the receiver machine only), Reload, and the line that installs more.
+// settings form made from each manifest, folded while the plugin is off (secrets as
+// password fields showing the mask; saving works from the receiver machine only), Reload,
+// and the line that installs more.
 // A plugin is code running in the receiver process: the section says so.
 import type { InstalledPlugin, SettingField } from "@shared/plugin-api";
 import { isMasked } from "@shared/plugin-api";
@@ -129,7 +130,13 @@ function PluginRow({
         </span>
         {p.description && <span className="form-caption themes-row-meta">{p.description}</span>}
         {p.error && <span className="themes-row-err">{p.error}</span>}
-        {p.settings && p.settings.length > 0 && <SettingsForm plugin={p} loopback={loopback} />}
+        {p.settings && p.settings.length > 0 && (
+          // Folded while the plugin is off: a long form for something that does not run is noise.
+          <details className="plug-more" open={!p.disabled}>
+            <summary>Settings</summary>
+            <SettingsForm plugin={p} loopback={loopback} />
+          </details>
+        )}
       </span>
       {!p.error && (
         <span className="form-value themes-row-open">

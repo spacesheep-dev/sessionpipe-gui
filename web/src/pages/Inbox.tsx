@@ -10,7 +10,7 @@
 // for the site) is said once under the bar, not on every row.
 import type { MachineControl } from "@shared/api";
 import { type MutableRefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Ago, EmptyState, HarnessGlyph, Redacted, StateDot } from "../components/bits";
+import { ActionButton, Ago, EmptyState, HarnessGlyph, Redacted, StateDot } from "../components/bits";
 import { type MenuList, openMenu, useContextMenu } from "../components/ContextMenu";
 import { LabelChip, LabelDot, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
@@ -19,6 +19,7 @@ import { PageBar } from "../components/PageBar";
 import {
   answerItems,
   lensMenu,
+  literalAsk,
   SwipePanes,
   useBackgroundMenu,
   useStickyTop,
@@ -28,7 +29,7 @@ import { ComposeButton } from "../control/NewSession";
 import { answerState, useSessionSend } from "../control/useSend";
 import { type OpenAttention, useAppState, useLabels, useOpenAttentions, useStore } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
-import { ATTENTION_LABEL, attentionMessage, oneLine, sessionTitle } from "../lib/format";
+import { ATTENTION_LABEL, attentionMessage, oneLine, sessionTitle, toolLabel } from "../lib/format";
 import { attentionKey, hide, isHidden, useHidden } from "../lib/hidden";
 import { useListNav } from "../lib/keys";
 import { type LabelFilter, labelItems, labelPasses } from "../lib/labels";
@@ -305,9 +306,9 @@ function InboxRow({
         </span>
         <span className="inbox-what">
           <span className={`inbox-kind ${a.tool ? "sr-only" : ""}`}>{kind}</span>
-          {a.tool && <code className="inbox-tool">{a.tool}</code>}
+          {a.tool && <code className="inbox-tool">{toolLabel(a.tool)}</code>}
           {a.message ? (
-            <span className={`inbox-msg ${a.tool && a.kind === "permission" ? "mono" : ""}`}>
+            <span className={`inbox-msg ${a.kind === "permission" && literalAsk(a.tool) ? "mono" : ""}`}>
               <Redacted text={oneLine(attentionMessage(a) ?? a.message, 200)} />
             </span>
           ) : !a.tool ? (
@@ -329,7 +330,11 @@ function InboxRow({
 
 /** Allow / Deny for one answerable prompt, through the same signed send as the session
  *  page; disabled when nothing can go (control/useSend.ts answerState), the reason said
- *  once under the page bar. The row's menu gets the same two as items. */
+ *  once under the page bar. The row's menu gets the same two as items. A press answers in
+ *  the same frame: the pressed one turns into "Allowing…" (its spinner, its width held)
+ *  and the other steps back, through the passkey, the send and the wait for the machine
+ *  (said under it), until the machine clears the prompt and the row leaves. A refused
+ *  send gives both back. */
 function Answer({
   row,
   control,
@@ -348,10 +353,18 @@ function Answer({
   const send = useSessionSend(s, control, s.openAttentions);
   const st = answerState(s, a, control, send);
   const { reason, off, status, tag } = st;
-  const answer = (allow: boolean) =>
-    void send.onSend({ kind: "permission.answer", attentionId: a.attentionId, allow }).catch(() => {});
+  /** The answer pressed, from the press until the prompt leaves (or the send fails). */
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const answer = (allow: boolean) => {
+    if (chosen !== null) return;
+    setChosen(allow);
+    void send.onSend({ kind: "permission.answer", attentionId: a.attentionId, allow }).catch(() => setChosen(null));
+  };
+  // Pending from the press until the machine clears the prompt: "sent" is the receiver
+  // holding it, not the agent taking it.
+  const going = chosen !== null && status !== "closed";
   // The inbox row wins over a session open beside the page (priority 2 > the panel's 0).
-  const canKey = focused && !off && status !== "closed";
+  const canKey = focused && !off && chosen === null && status !== "closed";
   useShortcut("inbox.allow", () => answer(true), { enabled: canKey, priority: 2 });
   useShortcut("inbox.deny", () => answer(false), { enabled: canKey, priority: 2 });
   // Off for a standing reason (not paired, no passkeys here, raised before pairing): the
@@ -371,28 +384,36 @@ function Answer({
     <span className="inbox-note">{reason}</span>
   ) : null;
   return (
-    <span className="inbox-answer" data-answer={tag}>
+    <span
+      className="inbox-answer"
+      data-answer={tag}
+      data-chosen={chosen === null ? undefined : chosen ? "allow" : "deny"}
+    >
       {note}
       {status !== "closed" && (
         <>
-          <button
-            type="button"
+          <ActionButton
             className="btn btn--sm btn--deny"
-            disabled={off}
+            disabled={(off && chosen === null) || chosen === true}
+            pending={going && chosen === false}
+            pendingLabel="Denying…"
             onClick={() => answer(false)}
             aria-description={standing ?? undefined}
+            aria-pressed={chosen === false || undefined}
           >
             Deny
-          </button>
-          <button
-            type="button"
+          </ActionButton>
+          <ActionButton
             className="btn btn--sm btn--allow"
-            disabled={off}
+            disabled={(off && chosen === null) || chosen === false}
+            pending={going && chosen === true}
+            pendingLabel="Allowing…"
             onClick={() => answer(true)}
             aria-description={standing ?? undefined}
+            aria-pressed={chosen === true || undefined}
           >
             Allow
-          </button>
+          </ActionButton>
         </>
       )}
     </span>

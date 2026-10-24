@@ -80,13 +80,25 @@
   display: block;
   flex: none;
 }
-.tabbar .nav-link:active {
-  opacity: 0.6;
-  transition: none;
+/* A tab under the finger dims at once and comes back over --dur-release, as UIKit's do;
+   the glyph gives a little (transform only), so a tap reads even without haptics. */
+.tabbar .nav-link {
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    opacity var(--dur-release) linear;
 }
 .tabbar .nav-glyph {
   width: 22px;
   height: 22px;
+  transition: transform var(--dur-release) linear;
+}
+.tabbar .nav-link:active {
+  opacity: 0.55;
+  transition: none;
+}
+.tabbar .nav-link:active .nav-glyph {
+  transform: scale(var(--press-scale));
+  transition: none;
 }
 /* A label never clips: it is one line, cut with an ellipsis if a plugin's name is long. */
 .nav-label {
@@ -182,6 +194,99 @@
 @media (hover: hover) {
   .conn-retry:hover {
     color: var(--fg);
+  }
+}
+
+/* ----- the phone: safe areas, the dropped stream ----- */
+
+/* The page and its bars keep clear of a notch or the rounded corners in landscape; the
+   tab bar's tabs too, its ground still running edge to edge. */
+@media (max-width: 839px) {
+  .main {
+    padding-left: max(var(--gutter), env(safe-area-inset-left));
+    padding-right: max(var(--gutter), env(safe-area-inset-right));
+  }
+  .tabbar {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  .main > .page > .bar {
+    margin-left: calc(-1 * max(var(--gutter), env(safe-area-inset-left)));
+    margin-right: calc(-1 * max(var(--gutter), env(safe-area-inset-right)));
+    padding-left: max(var(--gutter), env(safe-area-inset-left));
+    padding-right: max(var(--gutter), env(safe-area-inset-right));
+  }
+}
+
+/* A dropped stream on the phone (Shell.tsx PhoneConn): one raised pill under the bar,
+   the whole pill the Retry button; a pull down the page moves it (transform only). It
+   floats over the page, so its arrival moves nothing. */
+.phone-conn {
+  position: fixed;
+  z-index: var(--z-chrome);
+  top: calc(env(safe-area-inset-top) + var(--bar) + 8px);
+  inset-inline: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  height: 36px;
+  margin-inline: auto;
+  padding: 0 14px 0 12px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--raised);
+  box-shadow: var(--shadow-pop);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  animation: rise var(--dur) var(--ease-out) both;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* 44 px to a finger, 36 to the eye. */
+.phone-conn::before {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
+}
+.phone-conn:active {
+  background: color-mix(in oklch, var(--raised), var(--fg) 8%);
+}
+.phone-conn .conn-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--fg-3);
+}
+.phone-conn--offline .conn-dot {
+  background: var(--err);
+  box-shadow: none;
+}
+.phone-conn-act {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* ----- the static first frame (index.html) ----- */
+
+/* The shell the page paints before the app's script runs, in the app's own classes: shown
+   once this stylesheet is in (index.html hides it until then) and its inline script has
+   fitted it to the device (the mode, last of all), so no frame shows it half-fitted. The
+   mode's pages only. */
+.boot[data-mode] {
+  visibility: visible;
+}
+.boot[data-mode="simple"] [data-boot-adv],
+.boot[data-mode="advanced"] [data-boot-simple] {
+  display: none;
+}
+@media (min-width: 840px) {
+  .boot .rail-nav > :is([data-boot="feed"], [data-boot="machines"]) {
+    margin-top: 12px;
+  }
+  .boot .bar-below {
+    display: none;
   }
 }
 
@@ -608,9 +713,11 @@
   }
   .bar-large {
     color: var(--fg);
+    font-family: var(--font-display);
     font-size: calc(var(--text-xl) * 1.55);
-    font-weight: 700;
+    font-weight: 600;
     line-height: 1.15;
+    /* Display sizes track in a little; text sizes keep the face's own spacing. */
     letter-spacing: -0.01em;
     -webkit-user-select: none;
     user-select: none;
@@ -620,10 +727,16 @@
     color: var(--fg-3);
     font-size: var(--text-sm);
   }
+  /* The search and the filter row stack as a one-column grid, each at its own height.
+     As a column flexbox the search's 100 % basis and the row's sideways scroll sized
+     each other: the search grew to 44 px and the row's 44 px chips were clipped to 25.
+     The chips are 44 px to a finger with no fill, so their own pad is the gap; a page
+     whose second row is drawn (Review's tabs) adds its own. */
   .bar-below .bar-tools {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-content: stretch;
+    row-gap: 0;
   }
   /* The pop-ups after the search: one row that scrolls sideways, edge to edge. */
   .bar-filters {

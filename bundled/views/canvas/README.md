@@ -1,11 +1,11 @@
 # Canvas
 
 A sessionpipe GUI view: every live session is a **window** on an infinite canvas, in
-**views**. The presets (State, Machine, Harness, Repo, Label) lay the windows out as a clean
-grid in labelled groups, computed the same on every device and never stored. **My layout**
-is your own arrangement, with areas and notes, kept by the host (`api.storage`) so it is the
-same on every device. **Map** is the infrastructure. The view and the viewport are per device
-(`api.local`).
+**views**. The presets (State, the default, then Machine, Harness, Repo, Label) lay the
+windows out as a clean grid in labelled groups, computed the same on every device and never
+stored. **My layout** is your own arrangement, with areas and notes, kept by the host
+(`api.storage`) so it is the same on every device. **Map** is the infrastructure. The view
+and the viewport are per device (`api.local`).
 
 Experimental: it lives under the "experimental" divider in the GUI's navigation, at `/t/canvas`.
 
@@ -53,7 +53,8 @@ Hidden n and Done n). The minimap shows only when something is off screen.
 ## Build, dev, test
 
 ```sh
-npm run build        # esbuild, minified → dist/index.js (~112 KB) + dist/index.css
+npm run build        # esbuild, minified → dist/index.js (~103 KB) + dist/index.css, and
+                     # dist/map.js (~17 KB): the Map view, imported when first shown
 npm run dev          # the harness at http://127.0.0.1:7420/harness.html
 npm run typecheck
 npm test             # Playwright on 7421 (run it alone): views, My layout, areas, notes,
@@ -84,10 +85,11 @@ dark and light are the host's, and the controls wear the host's classes (`.seg`,
 `.icon-btn`, `.search`, `.btn`); `prefers-reduced-motion` makes a view switch instant.
 
 `src/`: `index.ts` (the canvas: views, layout, menus, persistence), `doc.ts` (the stored
-document as operations, undo, the v1 migration), `window.ts` (a window), `agents.ts` (pills),
-`areas.ts` (areas and notes), `chrome.ts` (toolbar and status bar), `detail.ts` + `events.ts`
-(the rows), `map.ts` (the Map view), `input.ts` (pointer, pinch, wheel, keys, right-click,
-long-press), `layout.ts` (placement and the grid), `types.ts`, `canvas.css`.
+document as operations, undo, the v1 migration), `window.ts` (a window), `agents.ts`
+(pills), `areas.ts` (areas and notes), `chrome.ts` (toolbar and status bar), `detail.ts` +
+`events.ts` (the rows), `map.ts` (the Map view, its own module: `import()`ed on first use),
+`input.ts` (pointer, pinch, wheel, keys, right-click, long-press), `layout.ts` (placement
+and the grid), `types.ts`, `canvas.css`.
 
 The harness fakes `snapshot.viewers` (three browsers) and `api.control` (`misha-air`
 online with two accounts, `studio` offline; `send`/`answer`/`cancel`/`start` carry a

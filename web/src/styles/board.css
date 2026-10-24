@@ -251,14 +251,11 @@
 .card-attn {
   color: var(--fg-2);
 }
-.card-attn.mono {
-  font-size: calc(var(--text-sm) * 0.95);
-}
 /* A code span in a one-line preview: mono, without its ticks, one tier up. */
 .inline-code {
   color: var(--fg-2);
   font-family: var(--font-mono);
-  font-size: 0.95em;
+  font-size: 0.925em;
 }
 /* "2 subagents running": the parent's one trailing fact while any agent is open. */
 .card-agents {
@@ -523,8 +520,16 @@
 }
 .agent-now {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--fg-3);
   white-space: nowrap;
+}
+/* An agent's tool errors: the board's one red mark, a small ✕ before what it does now. */
+.agent-errs {
+  display: inline-flex;
+  color: var(--err);
 }
 .kid-more-btn {
   min-height: 28px;
@@ -619,6 +624,17 @@
       "lead title title time"
       ".    tool  line  line"
       ".    meta  meta  foot";
+  }
+  /* Nothing to say on line 2 yet (no reply, no prompt past the title): the tool it runs
+     leads the where line instead of opening a line of its own, so the row keeps its
+     height while tools come and go. */
+  .card-link:not(:has(.card-text, .card-attn, .card-agents, .card-flags)) {
+    grid-template-areas:
+      "lead title title time"
+      ".    tool  meta  foot";
+  }
+  .card-link:not(:has(.card-text, .card-attn, .card-agents, .card-flags)) > .card-line {
+    display: none;
   }
   .card-meta {
     justify-self: start;
