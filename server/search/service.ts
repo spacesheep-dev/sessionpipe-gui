@@ -492,11 +492,14 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
     }
     const old = reader;
     try {
-      reader = await backend.openReader({
+      // onCommitWanted: the live tail grew past its bound, so the writer should commit it.
+      const o: ReaderOptions & { onCommitWanted?: () => void } = {
         dir,
         sources: readSources(deps.history()),
         live: { env, adapters: adapters() },
-      });
+        onCommitWanted: () => indexer?.send({ t: "commit" }),
+      };
+      reader = await backend.openReader(o);
       readerError = undefined;
     } catch (e) {
       reader = emptyReader();
@@ -546,15 +549,19 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
     }
   };
 
-  const childArgs = (): string[] => [
-    "index",
-    "--ipc",
-    "--state",
-    deps.stateDir,
-    "--search-home",
-    home,
-    ...(deps.history() ? [] : ["--no-history"]),
-  ];
+  /** The child's argv (engine.indexerChildMain reads it): the real home is left implicit so
+   *  CLAUDE_CONFIG_DIR / CODEX_HOME still apply there. */
+  const childArgs = (): string[] => {
+    const synthetic = syntheticHome(deps.home);
+    return [
+      "index",
+      "--ipc",
+      "--state",
+      deps.stateDir,
+      ...(synthetic ? ["--search-home", synthetic] : []),
+      ...(deps.history() ? [] : ["--no-history"]),
+    ];
+  };
 
   const startChild = (cliPath: string): IndexerHandle | null => {
     let child: ChildProcess;

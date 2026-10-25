@@ -330,9 +330,6 @@ export async function runSearchCli(argv: string[], io: CliIo): Promise<number> {
       if (code !== 0) return code;
       opened.reader = await openForCli(io).then((o) => o.reader);
     }
-    try {
-      opened.reader.tick();
-    } catch {}
     const labels = readLabels(io.stateDir);
     const status = (): SearchIndexStatus => {
       const s = opened.reader.stats();
