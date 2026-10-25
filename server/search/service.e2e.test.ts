@@ -54,9 +54,10 @@ describe.skipIf(!hasEngine)("session search end to end (engine + sources + app)"
     home = path.join(out, "home");
     app = await createApp({
       port: 0,
-      host: "127.0.0.1",
+      host: "0.0.0.0",
       stateDir: path.join(out, "state"),
       outbox: false,
+      testDoor: true,
       quiet: true,
       searchHome: home,
     });
@@ -155,6 +156,32 @@ describe.skipIf(!hasEngine)("session search end to end (engine + sources + app)"
       const mode = statSync(p).mode & 0o777;
       expect([path.relative(dir, p), mode]).toEqual([path.relative(dir, p), statSync(p).isDirectory() ? 0o700 : 0o600]);
     }
+  });
+
+  it("remote viewers: the UI key, no POSTs, no transcript path", async () => {
+    const lan = app.lanUrls[0];
+    if (lan) {
+      const base = lan.replace(/:\d+$/, `:${app.port}`);
+      expect((await fetch(`${base}${ROUTES.ui.searchSessions}?q=agent:codex`)).status).toBe(401);
+      const ok = await fetch(`${base}${ROUTES.ui.searchSessions}?q=agent:codex&k=${app.config().uiKey}`);
+      expect(ok.status).toBe(200);
+    }
+    const remote = { "x-spgui-test-remote": "192.168.77.9", "content-type": "application/json" };
+    for (const p of [ROUTES.ui.searchReindex, ROUTES.ui.searchSettings, ROUTES.ui.searchReveal]) {
+      const r = await fetch(`${app.url}${p}`, { method: "POST", headers: remote, body: '{"history":false}' });
+      expect([p, r.status]).toEqual([p, 403]);
+    }
+    const page = (await (
+      await fetch(`${app.url}${ROUTES.ui.searchSessions}?q=source:history`, { headers: remote })
+    ).json()) as SessionSearchPage;
+    expect(page.sessions.length).toBeGreaterThan(0);
+    for (const s of page.sessions) expect(s.transcriptPath).toBeUndefined();
+    const st = (await (
+      await fetch(`${app.url}${ROUTES.ui.searchStatus}`, { headers: remote })
+    ).json()) as SearchIndexStatus;
+    expect(st.local).toBe(false);
+    const mine = await search("source:history");
+    expect(mine.sessions.some((s) => s.transcriptPath)).toBe(true);
   });
 
   it("history off deletes history/ and those sessions leave search", async () => {
