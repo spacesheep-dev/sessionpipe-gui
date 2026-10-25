@@ -466,11 +466,16 @@ function useSideForm(splitOpen: boolean): boolean {
   return wider || (wide && !splitOpen);
 }
 
+const LISTS = new Set(["board", "inbox", "search", "feed", "review"]);
+let fromList = "board";
+
 export function Shell({ route, children }: { route: Route; children: ReactNode }) {
   useGlobalKeys();
   // Tooltips and menus show the live keys: re-render when the keymap changes.
   useShortcutMap();
-  const active = route.name === "session" ? "board" : route.name === "theme" ? `t:${route.id}` : route.name;
+  // A session page keeps the list it was opened from lit (Board when it was opened directly).
+  if (LISTS.has(route.name)) fromList = route.name;
+  const active = route.name === "session" ? fromList : route.name === "theme" ? `t:${route.id}` : route.name;
   const needs = useAnswerableCount();
   // The Setup entry, with its amber dot, while this machine (and only from this machine:
   // elsewhere the status is 403) still has steps to go.
