@@ -86,20 +86,18 @@ export interface SearchBackend {
   eventsAdapter(): SourceAdapter;
   eventsPath(stateDir: string, key: SessionKey): string;
   sourceEnv(opts: { home?: string; stateDir: string; hostname: string }): SourceEnv;
+  /** Never fork the indexer (the oracle: a child would have nothing to run). */
+  inProcessOnly?: boolean;
 }
 
 /** The engine and the sources, imported on first use (they stay out of the boot path of
  *  anything that never searches). `SPGUI_SEARCH_ENGINE=oracle` (or an engine that does not
  *  load) uses perf's brute-force oracle instead: everything in memory, for small demo homes. */
 export async function loadBackend(): Promise<SearchBackend> {
-  // M2 swaps these for literal specifiers (bundled); until the engine lands they resolve at runtime.
+  // M2 makes the engine's specifier literal (bundled); until it lands it resolves at runtime.
   const enginePath = "./engine/index.js";
-  const sourcesPath = "./sources/index.js";
-  const sources = (await import(sourcesPath)) as Pick<
-    SearchBackend,
-    "historyAdapters" | "eventsAdapter" | "eventsPath" | "sourceEnv"
-  >;
-  let engine: Pick<SearchBackend, "openReader" | "runIndexer" | "removeIndex">;
+  const sources = await import("./sources/index.js");
+  let engine: Pick<SearchBackend, "openReader" | "runIndexer" | "removeIndex" | "inProcessOnly">;
   try {
     if (process.env.SPGUI_SEARCH_ENGINE === "oracle") throw new Error("SPGUI_SEARCH_ENGINE=oracle");
     engine = (await import(enginePath)) as typeof engine;
@@ -111,6 +109,7 @@ export async function loadBackend(): Promise<SearchBackend> {
     openReader: engine.openReader,
     runIndexer: engine.runIndexer,
     removeIndex: engine.removeIndex,
+    inProcessOnly: engine.inProcessOnly,
     historyAdapters: sources.historyAdapters,
     eventsAdapter: sources.eventsAdapter,
     eventsPath: sources.eventsPath,
@@ -120,9 +119,12 @@ export async function loadBackend(): Promise<SearchBackend> {
 
 /** The oracle as an engine: the reader reads every file at open; the "indexer" only says
  *  it is idle (and asks for a re-open every 10 s in watch mode, so new events show). */
-async function oracleEngine(): Promise<Pick<SearchBackend, "openReader" | "runIndexer" | "removeIndex">> {
+async function oracleEngine(): Promise<
+  Pick<SearchBackend, "openReader" | "runIndexer" | "removeIndex" | "inProcessOnly">
+> {
   const { loadOracle } = await import("./oracle.js");
   return {
+    inProcessOnly: true,
     openReader: async (o) => {
       if (!o.live) throw new Error("the oracle needs the adapters");
       return loadOracle(o.live.env, o.live.adapters, { sources: o.sources });
@@ -539,6 +541,11 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
       } else if (!busy) busySince = undefined;
       scheduleFrame();
     } else if (m.t === "committed") {
+      // The oracle holds everything in memory: "committed" means read it all again.
+      if (backend?.inProcessOnly) {
+        void openNow().then(scheduleFrame);
+        return;
+      }
       try {
         reader.refresh();
         dropStats();
@@ -680,7 +687,7 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
     if (closed || indexer || !backend) return;
     clearTimeout(respawnTimer);
     respawnTimer = undefined;
-    indexer = (deps.cliPath ? startChild(deps.cliPath) : null) ?? startInProcess(rebuild);
+    indexer = (deps.cliPath && !backend.inProcessOnly ? startChild(deps.cliPath) : null) ?? startInProcess(rebuild);
     if (rebuild && indexer?.kind === "child") indexer.send({ t: "rebuild" });
   };
   const scheduleRespawn = (ms: number): void => {

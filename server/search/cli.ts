@@ -33,6 +33,7 @@ import {
   type SearchBackend,
   searchDir,
   syntheticHome,
+  TOTAL_EXACT,
   thisHostname,
 } from "./service.js";
 import type { IndexerStatus, SearchReader } from "./types.js";
@@ -230,8 +231,8 @@ function formatSession(s: SessionMatch, home: string): string[] {
   else lines.push(`  session ${s.id}`);
   for (const h of s.hits) {
     const who = h.agent ? `${h.agent.type ?? "subagent"}` : (FIELD_WORD[h.field] ?? h.field);
-    const tool = h.field === "tool" && h.tool ? `${h.tool} ` : "";
-    lines.push(`    ${who.padEnd(6)} ${localTime(h.at)}${h.live ? " live" : ""}  ${tool}${markText(h.text, h.marks)}`);
+    // A tool line's text already starts with the tool's name (`Bash pnpm test`).
+    lines.push(`    ${who.padEnd(6)} ${localTime(h.at)}${h.live ? " live" : ""}  ${markText(h.text, h.marks)}`);
   }
   if (s.moreHits > 0) lines.push(`    ${s.moreHits === 1 ? "1 more match" : `${s.moreHits} more matches`}`);
   return lines;
@@ -379,7 +380,7 @@ export async function runSearchCli(argv: string[], io: CliIo): Promise<number> {
       out(url);
       return 1;
     }
-    const n = page.more ? `${page.total}+` : String(page.total);
+    const n = page.more && page.total >= TOTAL_EXACT ? `${TOTAL_EXACT}+` : String(page.total);
     out(`${n} ${page.total === 1 ? "session" : "sessions"} · ${page.ms} ms · ${statusLine(page.index)}`);
     out("");
     for (const s of page.sessions) {
