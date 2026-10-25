@@ -14,7 +14,7 @@ import { labelMenu } from "../lib/labels";
 import { absoluteUrl } from "../lib/menus";
 import { sessionPath } from "../lib/router";
 import { pushToast } from "../lib/toasts";
-import { type OpenMode, openResult, resultHref } from "./open";
+import { type OpenMode, openResult, resultLink } from "./open";
 import type { SearchClient } from "./types";
 import { harnessName, idWord } from "./words";
 
@@ -98,7 +98,10 @@ export function rowMenu(m: SessionMatch, ctx: RowMenuContext): MenuList {
     m.resume
       ? { label: "Copy resume command", keys: "⌘C", run: () => void copyAs("resume command", m.resume!) }
       : { label: `Copy ${idWord(m.harness)}`, run: () => void copyAs(idWord(m.harness), m.id) },
-    { label: "Copy link", run: () => void copyAs("link", absoluteUrl(resultHref(m, m.hits[0], ctx.q))) },
+    {
+      label: "Copy link",
+      run: () => void copyAs("link", new URL(resultLink(m, m.hits[0], ctx.q), location.origin).href),
+    },
     m.resume ? { label: `Copy ${idWord(m.harness)}`, run: () => void copyAs(idWord(m.harness), m.id) } : null,
     !phone() && m.transcriptPath
       ? { label: "Copy transcript path", run: () => void copyAs("transcript path", m.transcriptPath!) }

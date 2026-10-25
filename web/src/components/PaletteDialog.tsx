@@ -10,7 +10,7 @@
 // machine or a repo offers "New session on studio-mac in acme/billing" first. On a wide
 // window the session under the cursor is previewed beside the list. Messages and answers
 // leave the way the control strip sends them (web/src/control/command.ts).
-import type { AgentRun, MachineSummary, SessionSummary } from "@shared/api";
+import type { AgentRun, MachineSummary, SessionMatch, SessionSummary } from "@shared/api";
 import { LABEL_COLORS, SNIPPET_CHARS, sessionKey, splitKey } from "@shared/api";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -34,9 +34,20 @@ import { type FieldsMatch, fuzzyFields } from "../lib/fuzzy";
 import { labelName, labelQuery, setLabel } from "../lib/labels";
 import { navigate, parseRoute, sessionPath, useRoute } from "../lib/router";
 import { useSimple } from "../lib/settings";
-import { hintFor, matches, useShortcutMap } from "../lib/shortcuts";
+import { hintFor, IS_MAC, matches, useShortcutMap } from "../lib/shortcuts";
 import { openSplit, useSplitKey } from "../lib/split";
 import { setSkin, setTextSize, setTheme, TEXT_SIZES, type Theme, useSettings } from "../lib/theme";
+import {
+  openTranscriptRow,
+  PALETTE_MIN,
+  searchAll,
+  TxDetail,
+  TxMark,
+  TxPeek,
+  TxSearchMark,
+  TxTitle,
+  usePaletteTranscripts,
+} from "../search/palette";
 import { useThemes } from "../themes/host/registry";
 import { AgentGlyph } from "./AgentRow";
 import { Ago, Kbd, Since, StateDot } from "./bits";
@@ -60,8 +71,8 @@ function openDisplaySettings(): void {
 
 // ----- the rows -----
 
-type Section = "Sessions" | "Needs you" | "Actions" | "Go to";
-const SECTIONS: Section[] = ["Sessions", "Needs you", "Actions", "Go to"];
+type Section = "Sessions" | "In transcripts" | "Needs you" | "Actions" | "Go to";
+const SECTIONS: Section[] = ["Sessions", "In transcripts", "Needs you", "Actions", "Go to"];
 
 interface Item {
   id: string;
@@ -89,6 +100,8 @@ interface Item {
   on?: boolean;
   /** A subagent row matched the query itself (not only through its session). */
   hit?: boolean;
+  /** A session found by what was said in it (the In transcripts section), for the preview. */
+  match?: SessionMatch;
   score: number;
   run: (mods: { beside: boolean }) => void | Promise<void>;
 }
@@ -305,6 +318,9 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
   /** Attention ids answered from here this time; no second answer goes. */
   const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
   const peek = useWide();
+  // What was said, across every session and this machine's history (search/palette.tsx).
+  const txOn = mode.kind === "search" && !stack.length && !/^\s*[>#]/.test(q) && !/\bis:subagent\b/i.test(q);
+  const tx = usePaletteTranscripts(store, q, txOn);
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -507,6 +523,41 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
         rows.sort((a, b) => Math.max(...b.map((r) => r.score)) - Math.max(...a.map((r) => r.score)));
         out.push(...rows.slice(0, 12).flat());
       }
+    }
+
+    // In transcripts: sessions whose words match (not those already listed), then the way
+    // out to the Search page with the same query, always last once 2 characters are typed.
+    if (txOn && only === null && q.trim().length >= PALETTE_MIN) {
+      const listed = new Set(out.map((it) => it.id));
+      for (const m of tx?.sessions ?? []) {
+        if (listed.has(`s:${m.key}`)) continue;
+        out.push({
+          id: `t:${m.key}`,
+          section: "In transcripts",
+          mark: <TxMark m={m} />,
+          label: <TxTitle m={m} />,
+          detail: <TxDetail m={m} />,
+          at: m.lastAt,
+          match: m,
+          score: -1,
+          run: ({ beside }) => {
+            closePalette();
+            openTranscriptRow(m, q, beside);
+          },
+        });
+      }
+      out.push({
+        id: "t:all",
+        section: "In transcripts",
+        mark: <TxSearchMark />,
+        label: `Search all sessions for “${q.trim()}”`,
+        keys: IS_MAC ? "⌘↵" : "Ctrl ↵",
+        score: -2,
+        run: () => {
+          closePalette();
+          searchAll(q);
+        },
+      });
     }
 
     if (want("Needs you")) {
@@ -796,7 +847,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     // first, a title fragment the sessions. A typed machine puts its start first; with
     // nothing typed, sessions lead.
     let order = SECTIONS;
-    if (promote) order = ["Actions", "Sessions", "Needs you", "Go to"];
+    if (promote) order = ["Actions", "Sessions", "In transcripts", "Needs you", "Go to"];
     else if (text && !only) {
       const best = (sec: Section) =>
         out.reduce((m, it) => (it.section === sec ? Math.max(m, it.score) : m), Number.NEGATIVE_INFINITY);
@@ -804,6 +855,9 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
         .sort((a, b) => b.b - a.b || a.i - b.i)
         .map((x) => x.sec);
     }
+    // In transcripts stays under Sessions, whatever leads.
+    order = [...order.filter((x) => x !== "In transcripts")];
+    order.splice(Math.max(0, order.indexOf("Sessions")) + 1, 0, "In transcripts");
     // The cursor walks the rows in the order they are drawn.
     out.sort((a, b) => order.indexOf(a.section) - order.indexOf(b.section));
     held.current = {
@@ -976,6 +1030,8 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     act,
     onItsPage,
     simple,
+    tx,
+    txOn,
   ]);
 
   // A new query (or a pushed list) starts at the top, in this same render; a shorter list
@@ -1132,6 +1188,16 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     } else if (e.key === "End" && !q) {
       e.preventDefault();
       setCursor(Math.max(0, items.length - 1));
+    } else if (
+      e.key === "Enter" &&
+      (IS_MAC ? e.metaKey : e.ctrlKey) &&
+      txOn &&
+      q.trim().length >= PALETTE_MIN &&
+      !e.nativeEvent.isComposing
+    ) {
+      e.preventDefault();
+      closePalette();
+      searchAll(q);
     } else if ((is("palette.beside") || is("palette.run")) && !e.nativeEvent.isComposing) {
       e.preventDefault();
       const it = items[at];
@@ -1156,7 +1222,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
             : "Sessions, actions, pages…";
   const activeId = items[at] ? `pal-opt-${at}` : undefined;
   const paired = [...machines.values()].some((m) => m.control);
-  const noResults = items.length === 0 && mode.kind === "search";
+  const noResults = items.every((it) => it.id === "t:all") && mode.kind === "search";
 
   return (
     <>
@@ -1333,7 +1399,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
                 ];
               })}
             </div>
-            {peek && <Peek item={items[at]} />}
+            {peek && (items[at]?.match ? <TxPeek m={items[at]!.match!} /> : <Peek item={items[at]} />)}
           </div>
         )}
 
@@ -1345,6 +1411,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
               <FootKey keys="↑↓">Move</FootKey>
               <FootKey keys="↵">{items[at]?.sub ? "Choose" : "Open"}</FootKey>
               {!sub && <FootKey keys="⇧↵">Beside</FootKey>}
+              {txOn && q.trim().length >= PALETTE_MIN && <FootKey keys={IS_MAC ? "⌘↵" : "Ctrl ↵"}>Search all</FootKey>}
               <span className="pal-foot-spring" />
               {sub ? (
                 <FootKey keys="esc">Back</FootKey>

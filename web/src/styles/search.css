@@ -684,9 +684,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 40px;
-  margin: 0 calc(-1 * var(--gutter));
-  padding: 0 var(--gutter);
+  height: 44px;
+  margin: -16px 0 0;
+  padding: 0;
   background: var(--bg);
   border-bottom: var(--hairline) solid var(--line);
 }
@@ -696,6 +696,11 @@
 .hx-find .search {
   flex: 1 1 auto;
   max-width: 420px;
+  margin-left: -2px;
+}
+.hx-verb {
+  flex: none;
+  color: var(--fg-2);
 }
 .hx-count {
   min-width: 64px;
@@ -770,7 +775,7 @@
 .hx .sx-mark {
   border-radius: 2px;
 }
-.hx .sx-mark[data-current] {
+.hx-current .sx-mark {
   background: var(--sel);
   box-shadow: 0 0 0 2px var(--sel);
 }
@@ -780,8 +785,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 0 calc(-1 * var(--gutter));
-  padding: 12px var(--gutter) calc(12px + env(safe-area-inset-bottom));
+  margin: 0;
+  padding: 12px 0 calc(12px + env(safe-area-inset-bottom));
   background: var(--bg);
   border-top: var(--hairline) solid var(--line);
 }
@@ -860,4 +865,29 @@
   .hx-msg[data-field="prompt"] {
     max-width: 88%;
   }
+}
+
+/* ---------- ⌘K: In transcripts (search/palette.tsx) ---------- */
+
+.pal-row[data-section="In transcripts"]:has(.pal-tx-snip) {
+  align-items: start;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.pal-row[data-section="In transcripts"]:has(.pal-tx-snip) .pal-main {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+.pal-row[data-section="In transcripts"] .pal-detail {
+  min-width: 0;
+}
+.pal-row[data-section="In transcripts"]:has(.pal-tx-snip) > .pal-glyph {
+  padding-top: 2px;
+}
+.pal-row .sx-mark,
+.pal-peek .sx-mark {
+  background: none;
+  color: var(--fg);
+  font-weight: 600;
 }

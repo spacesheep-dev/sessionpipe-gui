@@ -88,6 +88,7 @@ import {
   type Turn,
   unframe,
 } from "../lib/turns";
+import { HistoryOrMissing } from "../search/HistoryEntry";
 import { AgentGlyph, AgentNow, AgentText } from "./AgentRow";
 import { CopyIconButton, HarnessGlyph, Redacted, Segmented, Spinner, StateDot } from "./bits";
 import { confirmAction, type MenuItem, type MenuList, MoreButton, openMenu, tidy, useContextMenu } from "./ContextMenu";
@@ -825,7 +826,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     // The receiver's "not_found" is the ordinary missing session, said in words; any other
     // failure is named as it came.
     const failed = error && !/^(not_found|404\b)/.test(error) ? error : null;
-    return (
+    const none = (
       <div className={`page session ${mode === "panel" ? "session--panel" : ""}`} ref={rootRef}>
         {mode === "page" && <PageBar title="Session" back={<BackButton onClick={() => back("/")} />} large={false} />}
         <div className="state state--center">
@@ -841,6 +842,8 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
         </div>
       </div>
     );
+    // Not on the receiver: this machine's own agent history may hold it (search/History.tsx).
+    return failed ? none : <HistoryOrMissing harness={harness} id={id} mode={mode} rootRef={rootRef} fallback={none} />;
   }
 
   const kids = s ? (children.length ? children : childrenFromStore(store, key)) : [];

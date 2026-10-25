@@ -78,7 +78,7 @@ export function createMockTransport(): Transport {
     info: () => latency(world.info()),
     session: async (harness, id, q) => {
       const d = world.detail(harness, id, q);
-      if (!d) throw new Error("no such session");
+      if (!d) throw new Error("not_found");
       return latency(d, 120);
     },
     feed: (q) => latency(world.feed(q), 90),

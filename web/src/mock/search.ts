@@ -474,11 +474,11 @@ function window(text: string, marks: SearchMark[], max = 160): { text: string; m
 
 const WEIGHT: Record<SearchDocField, number> = { prompt: 2, reply: 1, tool: 0.7 };
 
-const refOf = (s: Sess, i: number) => `m${i.toString(36)}${s.id.slice(0, 4)}`;
+const refOf = (s: Sess, i: number) => `m${i}-${s.id.slice(0, 4)}`;
 const indexOfRef = (ref: string | undefined): number => {
   if (!ref) return -1;
-  const m = /^m([0-9a-z]+)/.exec(ref);
-  return m ? Number.parseInt(m[1]!, 36) : -1;
+  const m = /^m(\d+)-/.exec(ref);
+  return m ? Number(m[1]) : -1;
 };
 
 const lastAt = (s: Sess) => Math.max(...s.docs.map((d) => d.at), s.summary ? Date.parse(s.summary.lastAt) : 0);

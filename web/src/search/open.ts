@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: search-ui. Opening a result (SEARCH-SPEC.md D17). A session the receiver knows
-// opens in the live view, at the hit's turn (`#seq-N`) or, for a hit from the history log
-// with no seq, at the turn nearest its time (`#at-<ms>`). A history-only session opens
+// opens in the live view, at the hit's turn (`#seq-N`; a hit from the history log has none
+// and opens at the latest). A history-only session opens
 // its transcript from the index at the exact hit (`?q=…#h-<ref>`), with the find bar on.
 // As a page (pushState, so Back returns to the results), beside (the side panel), or
 // beside in the background (focus stays on the results).
 import type { SessionMatch, SessionSearchHit } from "@shared/api";
-import { navigate, sessionPath } from "../lib/router";
+import { hrefFor, navigate, sessionPath } from "../lib/router";
 import { openSplit } from "../lib/split";
 
 export type OpenMode = "page" | "beside" | "background";
@@ -15,11 +15,18 @@ export type OpenMode = "page" | "beside" | "background";
 export function hitHash(m: SessionMatch, hit: SessionSearchHit | undefined): string {
   if (!hit) return "";
   if (m.summary) {
-    if (hit.seq !== undefined) return `#seq-${hit.seq}`;
-    const t = Date.parse(hit.at);
-    return Number.isNaN(t) ? "" : `#at-${t}`;
+    // A hit from the history log has no seq: the live view opens at its latest (the
+    // bridge into the history's earlier turns is P1).
+    return hit.seq !== undefined ? `#seq-${hit.seq}` : "";
   }
   return `#h-${hit.ref}`;
+}
+
+/** The address a result's link carries (the router's kept parameters before the hash). */
+export function resultLink(m: SessionMatch, hit: SessionSearchHit | undefined, q: string): string {
+  const href = resultHref(m, hit, q);
+  const at = href.indexOf("#");
+  return at < 0 ? hrefFor(href) : `${hrefFor(href.slice(0, at))}${href.slice(at)}`;
 }
 
 /** The page a result opens: the live view or the history transcript, at `hit`. */
@@ -41,7 +48,12 @@ export function openResult(
   from?: DOMRect,
 ): void {
   if (mode === "page") {
-    navigate(resultHref(m, hit, q));
+    // The hash goes on after the router has kept its own parameters (the mock flag, the
+    // panel), which it would otherwise append after it.
+    const href = resultHref(m, hit, q);
+    const at = href.indexOf("#");
+    navigate(at < 0 ? href : href.slice(0, at));
+    if (at >= 0) history.replaceState(history.state, "", `${location.pathname}${location.search}${href.slice(at)}`);
     return;
   }
   openSplit(m.key, { from, background: mode === "background" });

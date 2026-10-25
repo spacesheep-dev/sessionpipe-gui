@@ -42,6 +42,7 @@ import { DEFAULT_SKIN, type InstalledSkin } from "../lib/skins";
 import { resolvedScheme, setSkin, setTextSize, setTheme, type Theme, useSettings } from "../lib/theme";
 import { TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { ago } from "../lib/time";
+import { SearchDataGroup } from "../search/SettingsRows";
 import { useThemes } from "../themes/host/registry";
 import { Mark } from "./Brand";
 import { ActionButton, CommandWell, CopyIconButton, Segmented, Toggle } from "./bits";
@@ -357,6 +358,7 @@ export function Settings() {
                   {section === "notifications" && <Notifications />}
                   {section === "keyboard" && <Keyboard />}
                   {section === "views" && <Views />}
+                  {section === "data" && <SearchDataGroup Group={Group} Row={Row} />}
                   {section === "data" && <Data />}
                   {section === "about" && <About />}
                 </>

@@ -11,10 +11,9 @@ import { HarnessGlyph } from "../components/bits";
 import { useContextMenu } from "../components/ContextMenu";
 import { LabelDot } from "../components/LabelDot";
 import { toolLabel } from "../lib/format";
-import { hrefFor } from "../lib/router";
 import { Marked } from "./Marked";
 import { menuSubtitle, menuTitle, type RowMenuContext, rowMenu, snippetMenu } from "./menu";
-import { openResult, resultHref } from "./open";
+import { openResult, resultLink } from "./open";
 import { metaFacts, shortDate, spanTip } from "./words";
 
 const FIELD_WORD = { prompt: "Prompt", reply: "Reply", tool: "Tool call" } as const;
@@ -145,7 +144,7 @@ export const Row = memo(function Row({ m, index, active, now, ctx, onCursor }: R
       </span>
     );
   const facts = metaFacts(m);
-  const href = resultHref(m, m.hits[0], ctx().q);
+  const href = resultLink(m, m.hits[0], ctx().q);
   const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
     if (e.defaultPrevented || e.button !== 0) return;
     onCursor(index);
@@ -160,7 +159,7 @@ export const Row = memo(function Row({ m, index, active, now, ctx, onCursor }: R
   return (
     <a
       ref={ref}
-      href={hrefFor(href)}
+      href={href}
       className="sx-row"
       data-nav-item=""
       data-key={m.key}
