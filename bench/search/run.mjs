@@ -29,7 +29,40 @@ export const BUDGETS = {
   tickMs: 50, // quiet reader.tick p95 and the quiet sweep, <
   footprintMB: 60, // ≤ delta after 6,000 queries
   firstMs: 2000, // ≤ first results during the first build
+  entryGz: 141_000, // ≤ bytes, the web entry chunk gzipped as vite reports it (level 6)
 };
+
+/** vite build into .tmp/perf/dist/web; the entry chunk's gzip size and whether search code
+ *  stayed out of it (only the route stub may be there). */
+export async function bundle() {
+  const { gzipSync } = await import("node:zlib");
+  const { readFileSync } = await import("node:fs");
+  const outDir = path.join(OUT, "dist", "web");
+  const r = spawnSync(
+    process.execPath,
+    [
+      path.join(ROOT, "node_modules/vite/bin/vite.js"),
+      "build",
+      "--config",
+      "web/vite.config.ts",
+      "--outDir",
+      outDir,
+      "--emptyOutDir",
+      "--logLevel",
+      "error",
+    ],
+    { cwd: ROOT, encoding: "utf8", timeout: 300_000 },
+  );
+  if (r.status !== 0) throw new Error(`vite build failed:\n${(r.stderr || r.stdout).slice(-2000)}`);
+  const html = readFileSync(path.join(outDir, "index.html"), "utf8");
+  const entry = /<script[^>]+src="\/assets\/([^"]+\.js)"/.exec(html)?.[1];
+  if (!entry) throw new Error("no entry script in index.html");
+  const code = readFileSync(path.join(outDir, "assets", entry));
+  const map = JSON.parse(readFileSync(path.join(outDir, "assets", `${entry}.map`), "utf8"));
+  const searchInEntry = map.sources.filter((x) => /search/i.test(x) && !/pages\/Search\.tsx$/.test(x));
+  const lazy = readdirSync(path.join(outDir, "assets")).filter((f) => /^SearchPage-.*\.js$/.test(f));
+  return { entry, bytes: code.length, gz: gzipSync(code).length, searchInEntry, lazyChunk: lazy[0] ?? null };
+}
 
 function parse(argv) {
   const o = { oracle: false, size: "60MB", realSize: "60MB", reps: 40, keep: false, json: "", only: null };
@@ -259,6 +292,21 @@ export async function runGate(o) {
             gated,
           ),
         );
+    }
+    // 8. the web entry bundle (S5: the Search page is a lazy route)
+    if (want("bundle") && !o.oracle) {
+      const bu = await bundle();
+      report.bundle = bu;
+      rows.push(row("web entry chunk (bytes gz)", bu.gz, `≤ ${BUDGETS.entryGz}`, bu.gz <= BUDGETS.entryGz, gated));
+      rows.push(
+        row(
+          "search code in the entry (modules)",
+          bu.searchInEntry.length,
+          "0, and SearchPage lazy",
+          bu.searchInEntry.length === 0 && !!bu.lazyChunk,
+          gated,
+        ),
+      );
     }
     // 7. footprint
     if (want("footprint")) {
