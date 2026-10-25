@@ -570,3 +570,12 @@ process.on("message", (m) => {
     expect(existsSync(path.join(tmp.dir, "search", "history"))).toBe(false);
   });
 });
+
+describe("the wire's `more`", () => {
+  it("means past the exact count, not another page", () => {
+    const page = svc.search({ q: "machine:this", limit: 1 }, local);
+    expect(page.cursor).toBeDefined();
+    expect(page.more).toBe(false);
+    expect(page.total).toBe(3);
+  });
+});

@@ -380,7 +380,7 @@ export async function runSearchCli(argv: string[], io: CliIo): Promise<number> {
       out(url);
       return 1;
     }
-    const n = page.more && page.total >= TOTAL_EXACT ? `${TOTAL_EXACT}+` : String(page.total);
+    const n = page.more ? `${TOTAL_EXACT}+` : String(page.total);
     out(`${n} ${page.total === 1 ? "session" : "sessions"} · ${page.ms} ms · ${statusLine(page.index)}`);
     out("");
     for (const s of page.sessions) {

@@ -321,7 +321,9 @@ export function runSessionSearch(
   const res = f.sources.length ? reader.search(engineQuery) : { matches: [], total: 0, more: false, unknownWords: [] };
   page.sessions = res.matches.map((m) => shapeMatch(m, viewer, ctx));
   page.total = res.total;
-  page.more = res.more;
+  // The engine's `more` is "another page exists"; the wire's is "past the exact count"
+  // (the page then says 200+). The cursor follows the engine's.
+  page.more = res.total >= TOTAL_EXACT;
   if (res.more || offset + res.matches.length < res.total) page.cursor = encodeCursor(offset + res.matches.length);
   if (page.sessions.length === 0 && offset === 0) {
     page.hint = decideHint({
