@@ -200,6 +200,43 @@ describe("claude read", () => {
     expect(sink.folded(F).firstAt).toBe(Date.parse("2026-10-02T10:00:00.000Z"));
   });
 
+  it("older sidechain records inside the main file are the subagent's, never the person's", async () => {
+    const p = path.join(fx.home, ".claude/projects/-old/c0000000-0000-4000-8000-0000000000bb.jsonl");
+    mkdirSync(path.dirname(p), { recursive: true });
+    writeFileSync(
+      p,
+      [
+        {
+          type: "user",
+          uuid: "1",
+          isSidechain: true,
+          cwd: "/w",
+          timestamp: "2026-01-01T00:00:00Z",
+          message: { content: "subagent task text" },
+        },
+        {
+          type: "user",
+          uuid: "2",
+          isSidechain: false,
+          cwd: "/w",
+          timestamp: "2026-01-01T00:00:01Z",
+          message: { content: "the person asks" },
+        },
+      ]
+        .map((r) => JSON.stringify(r))
+        .join("\n")
+        .concat("\n"),
+    );
+    const sink = new Collect();
+    await readAll(claudeAdapter(), testEnv(fx.home, fx.state), sink);
+    const key = "claude-code:c0000000-0000-4000-8000-0000000000bb";
+    expect(sink.docs.filter((d) => d.key === key).map((d) => [d.agent, d.text])).toEqual([
+      ["sidechain", "subagent task text"],
+      [undefined, "the person asks"],
+    ]);
+    expect(sink.folded(key).title?.text).toBe("the person asks");
+  });
+
   it("cuts a huge prompt to DOC_TEXT_MAX on a word and never throws on junk", async () => {
     const env = testEnv(fx.home, fx.state);
     const p = path.join(fx.home, ".claude/projects/-x/c0000000-0000-4000-8000-0000000000aa.jsonl");

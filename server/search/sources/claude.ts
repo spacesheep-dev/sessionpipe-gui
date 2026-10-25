@@ -367,12 +367,15 @@ export function claudeAdapter(): SourceAdapter {
       const agentType = isSub && typeof st.at === "string" && st.at ? st.at : undefined;
       const acc: Acc = { facts: { key, harness: HARNESS, id: where.id }, any: false };
       const f = acc.facts;
+      /** Older Claude Code wrote a Task subagent's records into the main file as sidechain
+       *  records: they are the subagent's, never the person's (set per line). */
+      let sideAgent: string | undefined;
       const emit = (d: Omit<SearchDoc, "key">) => {
         const doc: SearchDoc = { key, ...d };
         if (agent) {
           doc.agent = agent;
           if (agentType) doc.agentType = agentType;
-        }
+        } else if (sideAgent) doc.agent = sideAgent;
         sink.doc(doc);
       };
       const title = (text: string, rank: number) => {
@@ -450,8 +453,9 @@ export function claudeAdapter(): SourceAdapter {
           }
           if (u) st.fp = true;
         }
+        sideAgent = !isSub && j.isSidechain === true ? str(j.agentId) || "sidechain" : undefined;
         const t = ms(j.timestamp);
-        if (typeof j.cwd === "string" && j.cwd) {
+        if (typeof j.cwd === "string" && j.cwd && !sideAgent) {
           if (!st.c0) st.c0 = j.cwd;
           f.cwd = j.cwd;
         }
@@ -514,7 +518,7 @@ export function claudeAdapter(): SourceAdapter {
         const text = finish(words.join("\n\n"));
         if (!text) return;
         emit({ field: "prompt", at: t, text, offset: at });
-        if (!isSub && !st.fa) {
+        if (!isSub && !sideAgent && !st.fa) {
           st.fa = true;
           title(firstAskTitle(text), TITLE_RANK.firstAsk);
         }

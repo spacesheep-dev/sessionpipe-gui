@@ -355,13 +355,37 @@ export function codexAdapter(): SourceAdapter & { zstdStats: () => { hits: numbe
             return;
           }
           if (j.type === "session_meta") onMeta(j);
-          else st.mid = fileId; // an old rollout without a meta: a main session by its name
-          if (!key && st.k !== "guard") {
+          else {
+            // A rollout from before the envelope (2025 H1): a bare `{id, timestamp,
+            // instructions, git}` header, then bare response items. A main session.
+            st.mid = str(j.id) || fileId;
+            st.lg = j.type === undefined;
+            key = sessionKey(HARNESS, st.mid);
+            const f = fx();
+            if (f) {
+              time(ms(j.timestamp));
+              const git = obj(j.git);
+              const br = str(git?.branch);
+              if (br && br !== "HEAD") f.branch = br;
+              const repo = repoName(git?.repository_url);
+              if (repo) f.repo = repo;
+            }
+          }
+          if (!key && st.k !== "guard") key = sessionKey(HARNESS, fileId);
+          if (st.k === undefined) {
             st.k = "main";
             st.b = true;
-            key = sessionKey(HARNESS, fileId);
-            st.key = key;
           }
+          st.key = key;
+          return;
+        }
+        if (st.lg) {
+          const j = parseLine(buf, s, e);
+          if (!j) {
+            bad++;
+            return;
+          }
+          if (typeof j.type === "string" && j.record_type === undefined) onItem(j, ms(j.timestamp), at);
           return;
         }
         // The envelope's `type` sits in the first ~120 bytes (`{"timestamp":…,"ordinal":n,"type":…`):

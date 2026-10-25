@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: search sources.
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TITLE_RANK } from "../types.js";
@@ -171,6 +171,54 @@ describe("codex read", () => {
     const s3 = new Collect();
     await a.read(sub, { offset: r2.offset, state: r2.state }, s3);
     expect(s3.docs.map((d) => [d.key, d.agent, d.text])).toEqual([[C1, CS.slice(6), "One more finding"]]);
+  });
+
+  it("reads a rollout from before the envelope: bare header, bare items", async () => {
+    const id = "c0000000-0000-4000-8000-0000000000ee";
+    const p = path.join(fx.home, `.codex/sessions/2025/03/01/rollout-2025-03-01T10-00-00-${id}.jsonl`);
+    mkdirSync(path.dirname(p), { recursive: true });
+    writeFileSync(
+      p,
+      [
+        {
+          id,
+          timestamp: "2025-03-01T10:00:00Z",
+          instructions: null,
+          git: { branch: "main", repository_url: "git@github.com:acme/old.git" },
+        },
+        { record_type: "state" },
+        {
+          type: "message",
+          id: null,
+          role: "user",
+          content: [{ type: "input_text", text: "legacy ask about caching" }],
+        },
+        {
+          type: "function_call",
+          name: "shell",
+          arguments: JSON.stringify({ command: ["bash", "-lc", "ls"] }),
+          call_id: "c1",
+        },
+        { type: "function_call_output", call_id: "c1", output: "OUTPUT_never_indexed" },
+        { type: "message", id: null, role: "assistant", content: [{ type: "output_text", text: "legacy answer" }] },
+      ]
+        .map((r) => JSON.stringify(r))
+        .join("\n")
+        .concat("\n"),
+    );
+    const sink = new Collect();
+    await readAll(codexAdapter(), testEnv(fx.home, fx.state), sink);
+    const key = `codex:${id}`;
+    expect(sink.docs.filter((d) => d.key === key).map((d) => [d.field, d.text])).toEqual([
+      ["prompt", "legacy ask about caching"],
+      ["tool", "shell ls"],
+      ["reply", "legacy answer"],
+    ]);
+    expect(sink.folded(key)).toMatchObject({
+      repo: "acme/old",
+      branch: "main",
+      resume: { argv: ["codex", "resume", id] },
+    });
   });
 
   it("tool lines by name", () => {
