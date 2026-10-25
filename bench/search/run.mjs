@@ -79,6 +79,7 @@ export async function buildHarness({ oracle = false } = {}) {
     `import { historyAdapters, eventsAdapter, sourceEnv } from ${JSON.stringify(sourcesIndex)};
 export const adapters = () => [...historyAdapters(), eventsAdapter()];
 export const env = (home: string, stateDir: string) => sourceEnv({ home, stateDir, hostname: "bench-host" });
+export { parseSearch } from ${JSON.stringify(path.join(ROOT, "shared/searchQuery.ts"))};
 `,
   );
   const entries = { harness: path.join(ROOT, "bench/search/harness.ts"), sources: path.join(src, "sources.ts") };

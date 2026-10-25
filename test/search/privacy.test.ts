@@ -12,6 +12,7 @@ import { type GenManifest, generate } from "../../bench/search/gen.mjs";
 import { type App, createApp } from "../../server/app.js";
 import { ROUTES, type SearchIndexStatus, type SessionSearchPage } from "../../shared/api.js";
 import { tempDir } from "../events.js";
+import { haveEngine } from "./kit.js";
 
 const PUBLIC = "https://laptop.tail1234.ts.net";
 const FORWARDED = {
@@ -107,7 +108,8 @@ describe("search privacy (S6)", () => {
     expect(st.history).toBe(true);
   });
 
-  it("files are 0600 and folders 0700 under <state>/search", () => {
+  // The oracle stand-in writes no index (only server.json): this waits for the engine.
+  it.skipIf(!haveEngine())("files are 0600 and folders 0700 under <state>/search", () => {
     const dir = path.join(state, "search");
     expect(existsSync(dir)).toBe(true);
     const bad: string[] = [];

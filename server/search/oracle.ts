@@ -207,6 +207,11 @@ interface Sess {
   id: string;
   docs: Record<SearchSource, Doc[]>;
   facts: Record<SearchSource, boolean>;
+  /** Facts folded per index, in commit order. */
+  ff: Partial<Record<SearchSource, Folded>>;
+}
+
+interface Folded {
   title?: { text: string; rank: number };
   cwd?: string;
   branch?: string;
@@ -219,6 +224,18 @@ interface Sess {
   forkOf?: SessionKey;
   resume?: SessionFacts["resume"];
   path?: string;
+}
+
+const FOLD_KEYS = ["cwd", "branch", "repo", "model", "machine", "account", "forkOf", "path"] as const;
+
+/** Folds `f` (newer) into `into`: newest value per field (empty strings ignored), the title by
+ *  rank (equal: the newer), firstAt min, lastAt max. */
+function fold(into: Folded, f: Folded): void {
+  if (f.title?.text && (!into.title || f.title.rank >= into.title.rank)) into.title = { ...f.title };
+  for (const k of FOLD_KEYS) if (f[k] !== undefined && f[k] !== "") into[k] = f[k];
+  if (f.resume !== undefined) into.resume = f.resume;
+  if (f.firstAt) into.firstAt = into.firstAt === undefined ? f.firstAt : Math.min(into.firstAt, f.firstAt);
+  if (f.lastAt) into.lastAt = into.lastAt === undefined ? f.lastAt : Math.max(into.lastAt, f.lastAt);
 }
 
 const W: Record<SearchDocField | "title", number> = { title: 4.0, prompt: 2.0, reply: 1.0, tool: 0.7 };
@@ -352,7 +369,14 @@ export class OracleReader implements SearchReader {
     let s = this.sess.get(key);
     if (!s) {
       const { harness, id } = splitKey(key);
-      s = { key, harness, id, docs: { history: [], sessionpipe: [] }, facts: { history: false, sessionpipe: false } };
+      s = {
+        key,
+        harness,
+        id,
+        docs: { history: [], sessionpipe: [] },
+        facts: { history: false, sessionpipe: false },
+        ff: {},
+      };
       this.sess.set(key, s);
     }
     return s;
@@ -365,12 +389,20 @@ export class OracleReader implements SearchReader {
     s.facts[source] = true;
     if (f.harness) s.harness = f.harness;
     if (f.id) s.id = f.id;
-    if (f.title?.text && (!s.title || f.title.rank >= s.title.rank)) s.title = { ...f.title };
-    for (const k of ["cwd", "branch", "repo", "model", "machine", "account", "forkOf", "path"] as const)
-      if (f[k] !== undefined) s[k] = f[k];
-    if (f.resume !== undefined) s.resume = f.resume;
-    if (f.firstAt) s.firstAt = s.firstAt === undefined ? f.firstAt : Math.min(s.firstAt, f.firstAt);
-    if (f.lastAt) s.lastAt = s.lastAt === undefined ? f.lastAt : Math.max(s.lastAt, f.lastAt);
+    const into = s.ff[source] ?? {};
+    s.ff[source] = into;
+    fold(into, f);
+  }
+
+  /** One session's facts: the events index folded first, history on top (it is newer and
+   *  fuller, so it wins a tie), as the engine reads them. */
+  private merged(s: Sess): Folded {
+    const out: Folded = {};
+    for (const src of ["sessionpipe", "history"] as const) {
+      const f = s.ff[src];
+      if (f && this.opened.includes(src)) fold(out, f);
+    }
+    return out;
   }
 
   // ── what a query may read ──
@@ -389,14 +421,15 @@ export class OracleReader implements SearchReader {
   private indexed(s: Sess, read: readonly SearchSource[] = this.opened): IndexedSession {
     const docs = this.docsOf(s, read);
     const o = this.overlays.get(s.key);
-    let title = s.title?.text;
-    let titleRank = s.title?.rank ?? 0;
+    const f = this.merged(s);
+    let title = f.title?.text;
+    let titleRank = f.title?.rank ?? 0;
     if (o?.title && (o.titleRank ?? 0) >= titleRank) {
       title = o.title;
       titleRank = o.titleRank ?? 0;
     }
-    let firstAt = s.firstAt ?? 0;
-    let lastAt = s.lastAt ?? 0;
+    let firstAt = f.firstAt ?? 0;
+    let lastAt = f.lastAt ?? 0;
     for (const d of docs) {
       if (!d.d.at) continue;
       if (!firstAt || d.d.at < firstAt) firstAt = d.d.at;
@@ -415,17 +448,17 @@ export class OracleReader implements SearchReader {
       messages: docs.length,
     };
     if (title !== undefined) out.title = title;
-    const cwd = o?.cwd ?? s.cwd;
+    const cwd = o?.cwd ?? f.cwd;
     if (cwd !== undefined) out.cwd = cwd;
-    if (s.branch !== undefined) out.branch = s.branch;
-    const repo = o?.repo ?? s.repo;
+    if (f.branch !== undefined) out.branch = f.branch;
+    const repo = o?.repo ?? f.repo;
     if (repo !== undefined) out.repo = repo;
-    const machine = o?.machine ?? s.machine;
+    const machine = o?.machine ?? f.machine;
     if (machine !== undefined) out.machine = machine;
-    if (s.account !== undefined) out.account = s.account;
-    if (s.forkOf !== undefined) out.forkOf = s.forkOf;
-    if (s.resume !== undefined) out.resume = s.resume;
-    if (s.path !== undefined) out.path = s.path;
+    if (f.account !== undefined) out.account = f.account;
+    if (f.forkOf !== undefined) out.forkOf = f.forkOf;
+    if (f.resume !== undefined) out.resume = f.resume;
+    if (f.path !== undefined) out.path = f.path;
     return out;
   }
 

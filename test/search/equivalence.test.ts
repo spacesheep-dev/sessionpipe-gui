@@ -229,12 +229,17 @@ function engineQuery(s: QSpec, opened: SearchSource[]): EngineQuery {
 }
 
 /** Prefixes with more completions than the smallest cap answer differently by design. */
+const TERMS = new WeakMap<OracleReader, Set<string>>();
 function capped(o: OracleReader, s: QSpec): boolean {
   const parsed = parseSearch(s.q, { live: !!s.live });
-  const terms = new Set<string>();
-  for (const sess of o.sessions())
-    for (const m of o.transcript(sess.key, { limit: 1e6 })?.messages ?? [])
-      for (const t of oracleTokens(m.text)) terms.add(t.term);
+  let terms = TERMS.get(o);
+  if (!terms) {
+    terms = new Set<string>();
+    for (const sess of o.sessions())
+      for (const m of o.transcript(sess.key, { limit: 1e6 })?.messages ?? [])
+        for (const t of oracleTokens(m.text)) terms.add(t.term);
+    TERMS.set(o, terms);
+  }
   for (const c of parsed.clauses) {
     if (c.kind !== "prefix") continue;
     const last =
@@ -250,12 +255,6 @@ function capped(o: OracleReader, s: QSpec): boolean {
 
 function compare(engine: SearchReader, oracle: OracleReader, specs: QSpec[], opened: SearchSource[]): string[] {
   const diffs: string[] = [];
-  // (key, at) → field of every transcript message, both readers (at is unique in the corpus).
-  const docAt = (r: SearchReader, key: string): Map<string, string> => {
-    const m = new Map<string, string>();
-    for (const x of r.transcript(key, { limit: 1e6 })?.messages ?? []) m.set(x.ref, `${x.at}|${x.field}`);
-    return m;
-  };
   for (const s of specs) {
     if (capped(oracle, s)) continue;
     const eq = engineQuery(s, opened);
@@ -274,20 +273,28 @@ function compare(engine: SearchReader, oracle: OracleReader, specs: QSpec[], ope
     }
     if (Math.min(e.total, 200) !== Math.min(o.total, 200)) diffs.push(`${label}: total ${e.total} vs ${o.total}`);
     const om = new Map(o.matches.map((m) => [m.session.key, m]));
+    const allHits = new Map(
+      oracle.search({ ...engineQuery(s, opened), hits: 100_000 }).matches.map((m) => [m.session.key, m.hits]),
+    );
     for (const m of e.matches) {
       const x = om.get(m.session.key)!;
       if (m.matched !== x.matched) diffs.push(`${label}: ${m.session.key} matched ${m.matched} vs ${x.matched}`);
       if (m.hits.length !== x.hits.length)
         diffs.push(`${label}: ${m.session.key} hits ${m.hits.length} vs ${x.hits.length}`);
-      if (!!m.titleMarks?.length !== !!x.titleMarks?.length) diffs.push(`${label}: ${m.session.key} titleMarks differ`);
-      // every engine hit is a doc the oracle also matches
+      if (!!m.titleMarks?.length !== !!x.titleMarks?.length)
+        diffs.push(
+          `${label}: ${m.session.key} titleMarks ${JSON.stringify(m.titleMarks)} vs ${JSON.stringify(x.titleMarks)} on "${m.session.title}" / "${x.session.title}"`,
+        );
+      // every engine hit is a doc the oracle also matches (asked for many hits, the oracle
+      // returns every doc it matched)
       const parsed = parseSearch(s.q, { live: !!s.live });
-      const allowed = new Set(oracle.hitsIn(m.session.key, parsed).map((h) => docAt(oracle, m.session.key).get(h.ref)));
       const browse = !parsed.clauses.some((c) => !c.not);
-      if (!browse)
+      if (!browse) {
+        const allowed = new Set((allHits.get(m.session.key) ?? []).map((h) => `${h.at}|${h.field}`));
         for (const h of m.hits)
           if (!allowed.has(`${h.at}|${h.field}`))
             diffs.push(`${label}: ${m.session.key} hit at ${h.at} ${h.field} is not a matching doc`);
+      }
       for (const h of m.hits)
         for (const [a, b] of h.marks)
           if (a < 0 || b > h.text.length || a >= b) diffs.push(`${label}: bad mark ${a},${b}`);
