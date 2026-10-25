@@ -472,3 +472,101 @@ describe("reveal", () => {
     expect(revealed).toHaveLength(0);
   });
 });
+
+describe("the indexer child (fork, nice, IPC)", () => {
+  /** A stand-in for `dist/cli.js index --ipc`: logs its argv, priority and every message. */
+  const CHILD = `
+import { appendFileSync } from "node:fs";
+import os from "node:os";
+const log = process.env.FAKE_CHILD_LOG;
+const w = (o) => appendFileSync(log, JSON.stringify(o) + "\\n");
+w({ argv: process.argv.slice(2) });
+setTimeout(() => w({ nice: os.getPriority() }), 100);
+process.send({ t: "status", status: { phase: "idle", doneBytes: 4, totalBytes: 4, firstRun: false, gen: { history: 1 } } });
+process.on("message", (m) => {
+  w({ got: m });
+  if (m.t === "commit") process.send({ t: "committed", source: "history", gen: 2 });
+  if (m.t === "stop") process.exit(0);
+});
+`;
+  let logFile: string;
+  const lines = (): Record<string, unknown>[] =>
+    existsSync(logFile)
+      ? readFileSync(logFile, "utf8")
+          .trim()
+          .split("\n")
+          .map((l) => JSON.parse(l) as Record<string, unknown>)
+      : [];
+  const until = async (f: () => boolean, ms = 3000) => {
+    const t0 = Date.now();
+    while (!f() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 20));
+    return f();
+  };
+
+  beforeEach(async () => {
+    await svc.close();
+    const script = path.join(tmp.dir, "child.mjs");
+    writeFileSync(script, CHILD);
+    logFile = path.join(tmp.dir, "child.log");
+    process.env.FAKE_CHILD_LOG = logFile;
+    fake = fakeBackend();
+    svc = await createSearch({
+      stateDir: tmp.dir,
+      store,
+      labels,
+      hostname: HOST,
+      home: HOME,
+      history: () => history,
+      setHistory: (on) => {
+        history = on;
+      },
+      broadcast: (m) => frames.push(m),
+      port: () => 7919,
+      backend: fake.backend,
+      cliPath: script,
+      tickMs: 0,
+      quiet: true,
+    });
+  });
+  afterEach(() => {
+    delete process.env.FAKE_CHILD_LOG;
+  });
+
+  it("forks `index --ipc --state … --search-home …` at nice 10 and runs no indexer in-process", async () => {
+    expect(await until(() => lines().some((l) => "nice" in l))).toBe(true);
+    expect(lines()[0]!.argv).toEqual(["index", "--ipc", "--state", tmp.dir, "--search-home", HOME]);
+    expect(lines().find((l) => "nice" in l)!.nice).toBe(10);
+    expect(fake.indexer).toHaveLength(0);
+  });
+
+  it("hints the events file of a session that just got an event, and forwards a forget", async () => {
+    expect(await until(() => lines().length > 0)).toBe(true);
+    const s = new Session("7c1e2d3f-bbbb", "codex");
+    store.ingest([s.ev("session.started", {})], "outbox");
+    expect(await until(() => lines().some((l) => (l.got as { t?: string })?.t === "hint"))).toBe(true);
+    const hint = lines().find((l) => (l.got as { t?: string })?.t === "hint")!.got as { path: string };
+    expect(hint.path).toBe(path.join(tmp.dir, "events", "codex", "7c1e2d3f-bbbb"));
+    store.forget(CX);
+    expect(await until(() => lines().some((l) => (l.got as { t?: string })?.t === "forget"))).toBe(true);
+    expect(lines().find((l) => (l.got as { t?: string })?.t === "forget")!.got).toEqual({ t: "forget", key: CX });
+  });
+
+  it("reindex sends commit; the committed answer refreshes the reader; close stops the child", async () => {
+    expect(await until(() => lines().length > 0)).toBe(true);
+    svc.reindex(false);
+    expect(await until(() => lines().some((l) => (l.got as { t?: string })?.t === "commit"))).toBe(true);
+    svc.reindex(true);
+    expect(await until(() => lines().some((l) => (l.got as { t?: string })?.t === "rebuild"))).toBe(true);
+    await svc.close();
+    expect(lines().some((l) => (l.got as { t?: string })?.t === "stop")).toBe(true);
+  });
+
+  it("history off tells the child, and removes history/ itself if the child does not", async () => {
+    expect(await until(() => lines().length > 0)).toBe(true);
+    mkdirSync(path.join(tmp.dir, "search", "history"), { recursive: true });
+    const s = await svc.setHistory(false);
+    expect(s.state).toBe("off");
+    expect(lines().some((l) => JSON.stringify(l.got) === JSON.stringify({ t: "history", on: false }))).toBe(true);
+    expect(existsSync(path.join(tmp.dir, "search", "history"))).toBe(false);
+  });
+});

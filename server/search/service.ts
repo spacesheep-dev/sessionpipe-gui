@@ -89,15 +89,24 @@ export interface SearchBackend {
 }
 
 /** The engine and the sources, imported on first use (they stay out of the boot path of
- *  anything that never searches). */
+ *  anything that never searches). `SPGUI_SEARCH_ENGINE=oracle` (or an engine that does not
+ *  load) uses perf's brute-force oracle instead: everything in memory, for small demo homes. */
 export async function loadBackend(): Promise<SearchBackend> {
   // M2 swaps these for literal specifiers (bundled); until the engine lands they resolve at runtime.
   const enginePath = "./engine/index.js";
   const sourcesPath = "./sources/index.js";
-  const [engine, sources] = (await Promise.all([import(enginePath), import(sourcesPath)])) as [
-    Pick<SearchBackend, "openReader" | "runIndexer" | "removeIndex">,
-    Pick<SearchBackend, "historyAdapters" | "eventsAdapter" | "eventsPath" | "sourceEnv">,
-  ];
+  const sources = (await import(sourcesPath)) as Pick<
+    SearchBackend,
+    "historyAdapters" | "eventsAdapter" | "eventsPath" | "sourceEnv"
+  >;
+  let engine: Pick<SearchBackend, "openReader" | "runIndexer" | "removeIndex">;
+  try {
+    if (process.env.SPGUI_SEARCH_ENGINE === "oracle") throw new Error("SPGUI_SEARCH_ENGINE=oracle");
+    engine = (await import(enginePath)) as typeof engine;
+  } catch (e) {
+    process.stderr.write(`[sessionpipe-gui] search: using the in-memory oracle (${(e as Error).message})\n`);
+    engine = await oracleEngine();
+  }
   return {
     openReader: engine.openReader,
     runIndexer: engine.runIndexer,
@@ -109,9 +118,43 @@ export async function loadBackend(): Promise<SearchBackend> {
   };
 }
 
+/** The oracle as an engine: the reader reads every file at open; the "indexer" only says
+ *  it is idle (and asks for a re-open every 10 s in watch mode, so new events show). */
+async function oracleEngine(): Promise<Pick<SearchBackend, "openReader" | "runIndexer" | "removeIndex">> {
+  const { loadOracle } = await import("./oracle.js");
+  return {
+    openReader: async (o) => {
+      if (!o.live) throw new Error("the oracle needs the adapters");
+      return loadOracle(o.live.env, o.live.adapters, { sources: o.sources });
+    },
+    runIndexer: async (o) => {
+      const status = (): IndexerStatus => ({ phase: "idle", doneBytes: 1, totalBytes: 1, firstRun: false, gen: {} });
+      o.onStatus?.(status());
+      if (o.mode === "once") return;
+      await new Promise<void>((resolve) => {
+        const t = setInterval(() => o.onCommit?.("sessionpipe", Date.now()), 10_000);
+        o.signal?.addEventListener("abort", () => {
+          clearInterval(t);
+          resolve();
+        });
+      });
+    },
+    removeIndex: async (dir, source) => {
+      rmSync(path.join(dir, source), { recursive: true, force: true });
+    },
+  };
+}
+
 /** What sessionpipe calls this machine (Info.hostname). */
 export function thisHostname(): string {
   return os.hostname().replace(/\.(local|lan|home)$/i, "");
+}
+
+/** `home` for sourceEnv: undefined for the real home, so the person's own CLAUDE_CONFIG_DIR,
+ *  CODEX_HOME and GEMINI_CLI_HOME still apply (a synthetic home ignores them). */
+export function syntheticHome(home: string | undefined): string | undefined {
+  if (!home) return undefined;
+  return path.resolve(home) === path.resolve(os.homedir()) ? undefined : home;
 }
 
 export function searchDir(stateDir: string): string {
@@ -390,7 +433,7 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
     log(backendError);
   }
   const env: SourceEnv | null = backend
-    ? backend.sourceEnv({ home, stateDir: deps.stateDir, hostname: deps.hostname })
+    ? backend.sourceEnv({ home: syntheticHome(deps.home), stateDir: deps.stateDir, hostname: deps.hostname })
     : null;
   const adapters = (): SourceAdapter[] =>
     backend ? [backend.eventsAdapter(), ...(deps.history() ? backend.historyAdapters() : [])] : [];
@@ -461,6 +504,7 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
       log(readerError);
     }
     readerGen++;
+    dropStats();
     try {
       old.close();
     } catch {}
@@ -491,6 +535,7 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
     } else if (m.t === "committed") {
       try {
         reader.refresh();
+        dropStats();
       } catch (e) {
         log(`refresh: ${(e as Error).message}`);
       }
@@ -635,14 +680,26 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
   const firstRun = (): boolean => {
     if (!deps.history()) return false;
     if (ixStatus) return ixStatus.firstRun;
-    return reader.stats().gen.history === undefined && backend !== null;
+    return stats().gen.history === undefined && backend !== null;
   };
+  // Every answer carries the status; the reader's stats are cached for a moment (and
+  // dropped whenever the index moves), so a keystroke never pays for counting.
+  let statsVal: ReaderStats | undefined;
+  let statsAt = 0;
+  const STATS_MS = 500;
   const stats = (): ReaderStats => {
+    const now = Date.now();
+    if (statsVal && now - statsAt < STATS_MS) return statsVal;
     try {
-      return reader.stats();
+      statsVal = reader.stats();
     } catch {
-      return { gen: {}, sessions: 0, messages: 0, bytes: 0, bySource: [] };
+      statsVal = { gen: {}, sessions: 0, messages: 0, bytes: 0, bySource: [] };
     }
+    statsAt = now;
+    return statsVal;
+  };
+  const dropStats = (): void => {
+    statsVal = undefined;
   };
   const computeStatus = (): SearchIndexStatus => {
     const st = stats();
@@ -758,6 +815,7 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
       storeVersion++;
       try {
         reader.forget(m.key);
+        dropStats();
       } catch {}
       indexer?.send({ t: "forget", key: m.key });
     }
@@ -877,7 +935,7 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
         const histDir = path.join(dir, "history");
         indexer?.send({ t: "history", on: false });
         const t0 = Date.now();
-        while (existsSync(histDir) && Date.now() - t0 < 5000 && indexer?.kind === "child") await sleep(50);
+        while (existsSync(histDir) && Date.now() - t0 < 3000 && indexer?.kind === "child") await sleep(50);
         deps.setHistory(false);
         if (existsSync(histDir) && backend) {
           // No child to do it (in-process, or it did not answer): stop it and remove it here.

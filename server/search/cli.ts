@@ -32,6 +32,7 @@ import {
   runSessionSearch,
   type SearchBackend,
   searchDir,
+  syntheticHome,
   thisHostname,
 } from "./service.js";
 import type { IndexerStatus, SearchReader } from "./types.js";
@@ -285,7 +286,7 @@ async function openForCli(io: CliIo): Promise<Opened> {
   const backend = io.backend ?? (await loadBackend());
   const home = io.home ?? os.homedir();
   const history = readHistorySetting(io.stateDir);
-  const env = backend.sourceEnv({ home, stateDir: io.stateDir, hostname: thisHostname() });
+  const env = backend.sourceEnv({ home: syntheticHome(home), stateDir: io.stateDir, hostname: thisHostname() });
   const adapters = [backend.eventsAdapter(), ...(history ? backend.historyAdapters() : [])];
   const reader = await backend.openReader({
     dir: searchDir(io.stateDir),
@@ -410,7 +411,7 @@ async function indexForeground(io: CliIo, rebuild: boolean, opened?: Opened): Pr
   const backend = opened?.backend ?? io.backend ?? (await loadBackend());
   const home = opened?.home ?? io.home ?? os.homedir();
   const history = readHistorySetting(io.stateDir);
-  const env = backend.sourceEnv({ home, stateDir: io.stateDir, hostname: thisHostname() });
+  const env = backend.sourceEnv({ home: syntheticHome(home), stateDir: io.stateDir, hostname: thisHostname() });
   const tty = (io.stderr as NodeJS.WriteStream).isTTY === true;
   const t0 = Date.now();
   let lastLine = 0;
