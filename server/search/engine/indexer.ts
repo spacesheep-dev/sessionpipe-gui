@@ -588,7 +588,7 @@ export class Indexer {
           b.add(d, entry.id);
         } else b.add({ ...d, at: entry.lastAt }, entry.id);
       },
-      facts: (x: SessionFacts) => b.facts(x),
+      facts: (x: SessionFacts) => b.facts(x, entry.id),
     };
     const file: SourceFile = { ...f, size: st.size, mtimeMs: st.mtimeMs };
     let read = 0;
@@ -907,7 +907,10 @@ export class Indexer {
     this.setStatus({ phase: "merging" });
     const name = `seg-${w.m.nextSeg++}.sps`;
     const path = join(w.dir, name);
-    const r = await mergeSegments(inputs, `${path}.tmp`, () => this.yieldNow());
+    const live = new Set<number>();
+    for (const e of Object.values(w.m.files)) live.add(e.id);
+    for (const e of w.pending.values()) live.add(e.id);
+    const r = await mergeSegments(inputs, `${path}.tmp`, () => this.yieldNow(), live);
     renameSync(`${path}.tmp`, path);
     // tombstones that arrived while merging are applied at the next commit (ids are stable)
     const superseded: string[] = [];

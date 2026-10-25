@@ -64,8 +64,14 @@ export function charClasses(): Uint8Array {
 
 const MARKS_RE = /\p{M}/gu;
 
+/** Han, kana, Hangul and their half-width forms: NFKC only (stripping marks after NFKD would
+ *  turn デ into テ and break Hangul syllables into jamo). */
+const CJK_RE =
+  /[\u1100-\u11ff\u3040-\u30ff\u3130-\u318f\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff\uff66-\uff9f]/;
+
 /** Case and diacritic folding of one term (ASCII: a plain lowercase). */
 export function fold(s: string): string {
+  if (s.length <= 2 && CJK_RE.test(s)) return s.normalize("NFKC").toLowerCase();
   for (let i = 0; i < s.length; i++) {
     if (s.charCodeAt(i) > 127) {
       let f = s.normalize("NFKD").replace(MARKS_RE, "").toLowerCase();

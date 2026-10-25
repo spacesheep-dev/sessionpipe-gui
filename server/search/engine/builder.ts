@@ -53,6 +53,8 @@ export class Builder {
   private ats = new GrowU32(1 << 10);
   private sessIdx = new Map<string, number>();
   private sessions: SegSession[] = [];
+  /** Per session: facts per file. */
+  private ff: Map<number, Facts>[] = [];
   private fileOrd = new Map<number, number>();
   private files: number[] = [];
   private strIdx = new Map<string, number>();
@@ -96,6 +98,7 @@ export class Builder {
       s = this.sessions.length;
       const k = harness && id ? { harness, id } : splitKey(key);
       this.sessions.push({ key, docs: 0, facts: emptyFacts(k.harness, k.id) });
+      this.ff.push(new Map());
       this.sessIdx.set(key, s);
     }
     return this.sessions[s]!;
@@ -117,7 +120,10 @@ export class Builder {
     const sess = this.session(d.key);
     const s = this.sessIdx.get(d.key)!;
     sess.docs++;
-    if (d.at > 0) foldTimes(sess.facts, d.at, d.at);
+    if (d.at > 0) {
+      foldTimes(sess.facts, d.at, d.at);
+      foldTimes(this.fileFacts(s, sess, fileId), d.at, d.at);
+    }
     const tt = this.tokTerm;
     const tp = this.tokPos;
     const ids = this.termIds;
@@ -186,9 +192,22 @@ export class Builder {
     this.textChars += text.length;
   }
 
-  facts(f: SessionFacts): void {
+  /** Facts learned from file `fileId` (−1: no file). */
+  facts(f: SessionFacts, fileId = -1): void {
     if (!this.since) this.since = Date.now();
-    foldFacts(this.session(f.key, f.harness, f.id).facts, f);
+    const sess = this.session(f.key, f.harness, f.id);
+    foldFacts(sess.facts, f);
+    foldFacts(this.fileFacts(this.sessIdx.get(f.key)!, sess, fileId), f);
+  }
+
+  private fileFacts(s: number, sess: SegSession, fileId: number): Facts {
+    const m = this.ff[s]!;
+    let x = m.get(fileId);
+    if (!x) {
+      x = emptyFacts(sess.facts.harness, sess.facts.id);
+      m.set(fileId, x);
+    }
+    return x;
   }
 
   /** Write the segment: into RAM (no `dest`) or to the file `dest` (fsynced; the caller
@@ -257,7 +276,7 @@ export class Builder {
             N,
             flen: this.flen,
             fcnt: this.fcnt,
-            sessions: this.sessions,
+            sessions: this.sessions.map((x, i) => ({ ...x, ff: [...this.ff[i]!] })),
             files: this.files,
             strs: this.strs,
             textBytes: this.storeN,
@@ -288,6 +307,7 @@ export class Builder {
     this.ats.clear();
     this.sessIdx = new Map();
     this.sessions = [];
+    this.ff = [];
     this.fileOrd = new Map();
     this.files = [];
     this.strIdx = new Map();

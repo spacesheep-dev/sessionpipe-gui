@@ -61,7 +61,11 @@ export interface SegSession {
   key: string;
   /** Docs of this session in this segment (before tombstones). */
   docs: number;
+  /** Everything folded (kept for old readers and as the fallback). */
   facts: Facts;
+  /** The same facts per source file (manifest id; −1 unknown), so a replaced or deleted
+   *  file's facts go with it: the reader folds only the files still named. */
+  ff?: [number, Facts][];
 }
 
 export interface SegMeta {

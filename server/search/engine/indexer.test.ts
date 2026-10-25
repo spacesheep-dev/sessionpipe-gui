@@ -327,3 +327,34 @@ describe("live tail", () => {
     r.close();
   });
 });
+
+describe("facts follow their file", () => {
+  it("a deleted or rewritten file takes its facts (title) with it", async () => {
+    const w = world();
+    const run = () => runIndexer({ dir: w.dir, env: w.env, adapters: [w.adapter], history: true, mode: "once" });
+    writeFileSync(
+      w.file("a"),
+      fakeLine({ k: "t", text: "", title: "Zeppelin plans" }) + fakeLine({ k: "p", text: "first ask", at }),
+    );
+    writeFileSync(
+      w.file("b"),
+      fakeLine({ k: "t", text: "", title: "Gondola notes" }) + fakeLine({ k: "p", text: "other", at }),
+    );
+    await run();
+    let r = await openReader({ dir: w.dir, sources: ["history"] });
+    expect(r.search(q("zeppelin")).total).toBe(1);
+    r.close();
+    // a: rewritten shorter without its title record; b: deleted
+    writeFileSync(`${w.file("a")}.new`, fakeLine({ k: "p", text: "first ask", at }));
+    renameSync(`${w.file("a")}.new`, w.file("a"));
+    unlinkSync(w.file("b"));
+    await run();
+    r = await openReader({ dir: w.dir, sources: ["history"] });
+    expect(r.search(q("zeppelin")).total).toBe(0);
+    expect(r.search(q("gondola")).total).toBe(0);
+    expect(r.session("claude-code:a")!.title).toBeUndefined();
+    expect(r.session("claude-code:b")).toBeUndefined();
+    expect([...r.sessions()].map((s) => s.key)).toEqual(["claude-code:a"]);
+    r.close();
+  });
+});

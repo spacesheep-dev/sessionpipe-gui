@@ -63,6 +63,10 @@ class IndexState {
   segs: Segment[] = [];
   byPath = new Map<string, FileEntry>();
   pathById = new Map<number, string>();
+  /** File ids the manifest names (facts of others are gone with their file). */
+  liveIds = new Set<number>();
+  /** A file's place in path order (transcript order breaks `at` ties by path, then offset). */
+  rankById = new Map<number, number>();
   idByProvisional = new Map<number, number>();
   constructor(
     readonly source: SearchSource,
@@ -120,7 +124,14 @@ class IndexState {
       this.byPath = new Map(Object.entries(m.files));
       this.pathById = new Map();
       this.idByProvisional = new Map();
+      this.liveIds = new Set();
+      const paths = [...this.byPath.keys()].sort();
+      this.rankById = new Map();
+      paths.forEach((p, i) => {
+        this.rankById.set(this.byPath.get(p)!.id, i);
+      });
       for (const [p, f] of this.byPath) {
+        this.liveIds.add(f.id);
         this.pathById.set(f.id, p);
         this.idByProvisional.set(provisionalId(p), f.id);
       }
@@ -277,7 +288,7 @@ export class Reader implements SearchReader {
       }
       return S[g]!;
     };
-    const add = (seg: Segment, source: SearchSource, tail: boolean) => {
+    const add = (seg: Segment, source: SearchSource, tail: boolean, liveIds: ReadonlySet<number> | null) => {
       const si = srcIndex(source);
       const ss = seg.meta.sessions;
       const gs = new Uint32Array(ss.length);
@@ -290,15 +301,23 @@ export class Reader implements SearchReader {
         const G = ensure(s.key, s.facts.harness, s.facts.id);
         gs[i] = G.g;
         const slot = tail ? G.tailFacts : G.facts;
-        if (!slot[si]) slot[si] = cloneFacts(s.facts);
-        else foldFacts(slot[si]!, s.facts);
+        // fold only the facts of files still named (a replaced or deleted file's go with it)
+        const parts: Facts[] = [];
+        if (s.ff && liveIds) {
+          for (const [fid, f] of s.ff) if (fid < 0 || fid >= PROVISIONAL || liveIds.has(fid)) parts.push(f);
+        } else parts.push(s.facts);
+        for (const f of parts) {
+          if (!slot[si]) slot[si] = cloneFacts(f);
+          else foldFacts(slot[si]!, f);
+        }
         if (tail) G.tailDocs[si] += live[i]!;
         else G.docs[si] += live[i]!;
       }
       refs.push({ seg, source, bit: BIT[source], gs, tail, live });
     };
-    for (const st of this.states.values()) for (const seg of st.segs) add(seg, st.source, false);
-    if (this.tail) for (const t of this.tail.segments()) if (this.states.has(t.source)) add(t.seg, t.source, true);
+    for (const st of this.states.values()) for (const seg of st.segs) add(seg, st.source, false, st.liveIds);
+    if (this.tail)
+      for (const t of this.tail.segments()) if (this.states.has(t.source)) add(t.seg, t.source, true, null);
     this.seenTailVersion = this.tailVersion;
     this.refs = refs;
     this.S = S;
@@ -971,7 +990,7 @@ export class Reader implements SearchReader {
     const text = r.seg.text(row);
     const sn = matcher ? snippet(text, matcher, width) : snippet(text, NO_MARKS, width);
     const fileId = this.fileIdOf(r, row);
-    ord?.push(row.at, fileId, row.offset);
+    ord?.push(row.at, this.rankOf(r.source, fileId), row.offset * 64 + row.sub);
     const h: EngineHit = {
       field: FIELD_NAMES[r.seg.fc[d]! % 3]!,
       at: row.at,
@@ -988,6 +1007,11 @@ export class Reader implements SearchReader {
     if (row.seq >= 0) h.seq = row.seq;
     if (r.tail) h.live = true;
     return h;
+  }
+
+  /** Path order of a file (a tail-only file sorts after the committed ones, by id). */
+  private rankOf(source: SearchSource, fileId: number): number {
+    return this.states.get(source)?.rankById.get(fileId) ?? 1e9 + (fileId % 1e9);
   }
 
   private fileIdOf(r: SegRef, row: DocRow): number {
@@ -1029,7 +1053,13 @@ export class Reader implements SearchReader {
         d = e;
       }
     }
-    list.sort((a, b) => a.row.at - b.row.at || a.file - b.file || a.row.offset - b.row.offset);
+    list.sort(
+      (a, b) =>
+        a.row.at - b.row.at ||
+        this.rankOf(a.r.source, a.file) - this.rankOf(b.r.source, b.file) ||
+        a.row.offset - b.row.offset ||
+        a.row.sub - b.row.sub,
+    );
     if (this.transcriptCache.size >= 4) this.transcriptCache.delete(this.transcriptCache.keys().next().value!);
     this.transcriptCache.set(G.key, { v: this.version, list });
     return list;
@@ -1130,7 +1160,13 @@ export class Reader implements SearchReader {
     } finally {
       A[g] = prev;
     }
-    found.sort((a, b) => a.row.at - b.row.at || a.file - b.file || a.row.offset - b.row.offset);
+    found.sort(
+      (a, b) =>
+        a.row.at - b.row.at ||
+        this.rankOf(a.r.source, a.file) - this.rankOf(b.r.source, b.file) ||
+        a.row.offset - b.row.offset ||
+        a.row.sub - b.row.sub,
+    );
     const out: { ref: string; marks: SearchMark[] }[] = [];
     for (const x of found) {
       if (out.length >= HITS_IN_MAX) break;

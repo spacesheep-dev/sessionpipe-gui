@@ -79,6 +79,12 @@ describe("tokenize", () => {
     ]);
   });
 
+  it("keeps kana voicing and Hangul syllables (NFKC, no mark stripping)", () => {
+    expect(words("デ テ")).toEqual(["デ", "テ"]);
+    expect(words("ｶ")).toEqual(["カ"]);
+    expect(words("한국")).toEqual(["한", "국"]);
+  });
+
   it("skips runs over 200 characters and parts over 40", () => {
     const b64 = "A".repeat(150) + "b".repeat(60);
     expect(words(`x ${b64} y`)).toEqual(["x", "y"]);

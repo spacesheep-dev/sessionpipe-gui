@@ -83,6 +83,8 @@ export async function mergeSegments(
   inputs: Segment[],
   dest: string,
   pause: () => Promise<void> = async () => {},
+  /** File ids still named in the manifest: facts of other files are dropped. */
+  liveFiles?: ReadonlySet<number>,
 ): Promise<MergeResult> {
   // doc remap, session remap, file and string tables
   const remap: Int32Array[] = [];
@@ -90,6 +92,7 @@ export async function mergeSegments(
   const sessIdx = new Map<string, number>();
   const sessions: SegSession[] = [];
   const sessRemap: Int32Array[] = [];
+  const ffs: Map<number, Facts>[] = [];
   const fileIdx = new Map<number, number>();
   const files: number[] = [];
   const strIdx = new Map<string, number>();
@@ -115,8 +118,16 @@ export async function mergeSegments(
       if (j === undefined) {
         j = sessions.length;
         sessions.push({ key: ss.key, docs: 0, facts: cloneFacts(ss.facts) });
+        ffs.push(new Map());
         sessIdx.set(ss.key, j);
       } else foldFacts(sessions[j]!.facts as Facts, ss.facts);
+      const fm = ffs[j]!;
+      for (const [fid, f] of ss.ff ?? [[-1, ss.facts] as [number, Facts]]) {
+        if (fid >= 0 && liveFiles && !liveFiles.has(fid)) continue;
+        const cur = fm.get(fid);
+        if (cur) foldFacts(cur, f);
+        else fm.set(fid, cloneFacts(f));
+      }
       sessions[j]!.docs += liveBySess[i]!;
       sm[i] = j;
     });
@@ -254,7 +265,7 @@ export async function mergeSegments(
         store: (o: Sink) => copyFileInto(storeOut.file, o, true),
         dsess,
         ats,
-        meta: { N, flen, fcnt, sessions, files, strs, textBytes },
+        meta: { N, flen, fcnt, sessions: sessions.map((x, i) => ({ ...x, ff: [...ffs[i]!] })), files, strs, textBytes },
       },
       dest,
     );

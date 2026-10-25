@@ -242,7 +242,7 @@ export class LiveTail {
         },
         facts: (f: SessionFacts) => {
           if (epoch !== this.epoch) return;
-          b.facts(f);
+          b.facts(f, fileId);
         },
       };
       const file: SourceFile = { ...tf.file, size: st.size, mtimeMs: st.mtimeMs };
