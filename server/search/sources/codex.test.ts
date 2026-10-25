@@ -91,7 +91,7 @@ describe("codex read", () => {
       branch: "feat/invoices",
       repo: "acme/billing",
       model: "gpt-5-codex",
-      resume: { argv: ["codex", "resume", C1.slice(6)], cwd: "/Users/dev/acme/billing" },
+      resume: { argv: ["codex", "resume", C1.slice(6)] },
       firstAt: Date.parse("2026-10-03T07:00:00.000Z"),
     });
     expect(JSON.stringify(sink.got)).not.toContain("x-oauth");

@@ -432,8 +432,8 @@ export function codexAdapter(): SourceAdapter & { zstdStats: () => { hits: numbe
           f.title = { text: finish(name, 200), rank: TITLE_RANK.harness };
         }
         f.path = file.path;
+        // D10: exactly `codex resume <id>` (Codex finds the thread by id from any folder).
         f.resume = { argv: ["codex", "resume", str(st.mid)] };
-        if (typeof st.c0 === "string" && st.c0) f.resume.cwd = st.c0;
       }
       if (f && (f.lastAt || f.title || from.offset === 0)) sink.facts(f);
       return { offset, state: st, ...(bad ? { bad } : {}), ...(skipped ? { skipped } : {}) };
