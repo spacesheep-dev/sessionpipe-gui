@@ -13,7 +13,7 @@
 //   changes       a new inode, a shrink, a changed head (append) or a changed (size, mtime)
 //                 (whole): the file's docs are tombstoned (its id dies, a new id is never a
 //                 reused one) and it is read again from 0. A file gone from disk: tombstoned.
-import { closeSync, openSync, readSync, renameSync, statSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type {
   DocSink,
@@ -46,7 +46,7 @@ import {
   writeManifest,
 } from "./manifest.js";
 import { mergeSegments } from "./merge.js";
-import { ROW, Segment } from "./segment.js";
+import { MAGIC, ROW, SECTIONS, Segment } from "./segment.js";
 
 /** Commit when this much text is uncommitted (watch mode). */
 const COMMIT_CHARS = 1 << 20;
@@ -110,14 +110,9 @@ class Writer {
     const good: SegEntry[] = [];
     let dropped = false;
     for (const e of this.m.segments) {
-      try {
-        const s = new Segment(join(dir, e.name), e.name);
-        if (e.del) s.setDeleted(readDel(dir, e.del, s.N));
-        this.segs.set(e.name, s);
-        good.push(e);
-      } catch {
-        dropped = true;
-      }
+      // a cheap check now (footer and section table); opened when a tombstone or merge needs it
+      if (segmentLooksWhole(join(dir, e.name), e.bytes)) good.push(e);
+      else dropped = true;
     }
     if (dropped) {
       // which files lost docs is unknown: read everything again (a rebuild, in place)
@@ -129,6 +124,20 @@ class Writer {
       this.m.built = false;
       writeManifest(dir, this.m);
       recover(dir, this.m);
+    }
+  }
+
+  /** A named segment, opened on first use (with its tombstones). */
+  seg(e: SegEntry): Segment | undefined {
+    let s = this.segs.get(e.name);
+    if (s) return s;
+    try {
+      s = new Segment(join(this.dir, e.name), e.name);
+      if (e.del) s.setDeleted(readDel(this.dir, e.del, s.N));
+      this.segs.set(e.name, s);
+      return s;
+    } catch {
+      return undefined;
     }
   }
 
@@ -581,14 +590,19 @@ export class Indexer {
     if (f.key) entry.key = f.key;
     w.removedPaths.delete(f.path);
     const b = w.builder;
+    let emitted = 0;
     const sink: DocSink = {
       doc: (d: SearchDoc) => {
+        emitted++;
         if (d.at > 0) {
           if (d.at > entry.lastAt) entry.lastAt = d.at;
           b.add(d, entry.id);
         } else b.add({ ...d, at: entry.lastAt }, entry.id);
       },
-      facts: (x: SessionFacts) => b.facts(x, entry.id),
+      facts: (x: SessionFacts) => {
+        emitted++;
+        b.facts(x, entry.id);
+      },
     };
     const file: SourceFile = { ...f, size: st.size, mtimeMs: st.mtimeMs };
     let read = 0;
@@ -634,7 +648,16 @@ export class Indexer {
         }
         if (this.stopping) break;
       }
-      this.store(w, f.path, entry, st, offset, state);
+      // a known file that gave nothing new (a partial last line still being written) is left
+      // as committed: no MANIFEST write for it; the next pass looks again
+      const nothing =
+        e !== undefined &&
+        !emitted &&
+        offset === e.offset &&
+        (state === e.state || JSON.stringify(state) === JSON.stringify(e.state)) &&
+        !!entry.skipped === !!e.skipped &&
+        f.kind === "append";
+      if (!nothing) this.store(w, f.path, entry, st, offset, state);
     } finally {
       this.busy--;
     }
@@ -748,7 +771,6 @@ export class Indexer {
       renameSync(`${path}.tmp`, path);
       w.builder.reset();
       t.segments.push({ name, docs: r.docs, bytes: r.bytes, crc: r.crc, dels: 0 });
-      w.segs.set(name, new Segment(path, name));
       await this.pause();
     }
     for (const [p, e] of w.pending) t.files[p] = e;
@@ -790,7 +812,7 @@ export class Indexer {
     const superseded: string[] = [];
     const keep: SegEntry[] = [];
     for (const e of t.segments) {
-      const seg = w.segs.get(e.name);
+      const seg = w.seg(e);
       if (!seg) {
         keep.push(e);
         continue;
@@ -902,7 +924,7 @@ export class Indexer {
   /** Merge segments [i, j) of `w` into one, in place in the list. */
   private async merge(w: Writer, i: number, j: number): Promise<void> {
     const entries = w.m.segments.slice(i, j);
-    const inputs = entries.map((e) => w.segs.get(e.name)).filter((s): s is Segment => !!s);
+    const inputs = entries.map((e) => w.seg(e)).filter((s): s is Segment => !!s);
     if (inputs.length !== entries.length || !inputs.length) return;
     this.setStatus({ phase: "merging" });
     const name = `seg-${w.m.nextSeg++}.sps`;
@@ -922,7 +944,6 @@ export class Indexer {
     }
     const out = { name, docs: r.docs, bytes: r.bytes, crc: r.crc, dels: 0 };
     w.m.segments.splice(i, j - i, ...(r.docs > 0 ? [out] : []));
-    if (r.docs > 0) w.segs.set(name, new Segment(path, name));
     w.m.gen++;
     writeManifest(w.dir, w.m);
     unlinkLater(w.dir, w.m, superseded);
@@ -942,6 +963,23 @@ const HARNESS_OF: Record<string, string> = {
   gemini: "gemini-cli",
   events: "sessionpipe",
 };
+
+/** The footer and section table of a segment file are sane (recovery's cheap check). */
+function segmentLooksWhole(path: string, bytes: number): boolean {
+  let fd = -1;
+  try {
+    fd = openSync(path, "r");
+    const size = fstatSync(fd).size;
+    if (size < 16 || (bytes && size !== bytes)) return false;
+    const t = Buffer.allocUnsafe(12);
+    readSync(fd, t, 0, 12, size - 12);
+    return t.readUInt32LE(8) === MAGIC && t.readUInt32LE(0) === SECTIONS;
+  } catch {
+    return false;
+  } finally {
+    if (fd >= 0) closeSync(fd);
+  }
+}
 
 const HEAD = Buffer.allocUnsafe(HEAD_BYTES);
 function headCrc(path: string, len: number): number {
