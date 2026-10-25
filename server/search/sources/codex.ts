@@ -20,7 +20,7 @@ import type {
 } from "../types.js";
 import { TITLE_RANK } from "../types.js";
 import { codexHome, list } from "./homes.js";
-import { Finder, type OnLine, parseLine, readAppend, readStreamLines } from "./prefilter.js";
+import { Finder, LineSplitter, type OnLine, parseLine, readAppend, readStreamLines } from "./prefilter.js";
 import {
   codexInjected,
   codexPrompt,
@@ -32,7 +32,7 @@ import {
   toolArg,
   toolLine,
 } from "./text.js";
-import { zstdChunks, zstdWay } from "./zstd.js";
+import { ZstdBatcher, zstdChunks, zstdWay } from "./zstd.js";
 
 export const HARNESS = "codex";
 const ROLLOUT = /^rollout-.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/i;
@@ -114,10 +114,11 @@ interface IndexCache {
   names: Map<string, string>;
 }
 
-export function codexAdapter(): SourceAdapter {
+export function codexAdapter(): SourceAdapter & { zstdStats: () => { hits: number; runs: number } } {
   let dirs: string[] = [];
   let titles: IndexCache | undefined;
   let seen: SourceEnv | undefined;
+  const zstd = new ZstdBatcher();
 
   /** `session_index.jsonl`: `{id, thread_name}`, the last line per id wins. Re-read on change. */
   const threadName = (env: SourceEnv, id: string): string | undefined => {
@@ -148,6 +149,7 @@ export function codexAdapter(): SourceAdapter {
   return {
     id: "codex",
     source: "history",
+    zstdStats: () => zstd.stats,
 
     roots(env: SourceEnv): string[] {
       if (dirs.length) return dirs;
@@ -199,7 +201,9 @@ export function codexAdapter(): SourceAdapter {
       walk(path.join(h, "sessions"), 3);
       walk(path.join(h, "archived_sessions"), 3);
       dirs = roots.length ? roots : dirs;
-      return [...best.values()];
+      const out = [...best.values()];
+      zstd.setPlan(out.filter((f) => f.kind === "whole"));
+      return out;
     },
 
     async read(file: SourceFile, from: ReadCursor, sink: DocSink, opts: ReadOptions = {}): Promise<ReadResult> {
@@ -399,13 +403,21 @@ export function codexAdapter(): SourceAdapter {
       if (file.kind === "whole") {
         const way = zstdWay(env);
         if (way.kind === "none") return { offset: 0, skipped: "zstd" };
-        try {
-          const r = await readStreamLines(zstdChunks(file.path, way, opts.signal), onLine, opts.signal);
-          offset = r.records;
-          bad += r.bad;
-        } catch {
-          skipped = "unreadable";
-        }
+        const data = await zstd.whole(file, way);
+        if (data) {
+          const split = new LineSplitter(0, onLine, true);
+          split.push(data, false);
+          split.end();
+          offset = split.lines;
+          bad += split.bad;
+        } else
+          try {
+            const r = await readStreamLines(zstdChunks(file.path, way, opts.signal), onLine, opts.signal);
+            offset = r.records;
+            bad += r.bad;
+          } catch {
+            skipped = "unreadable";
+          }
       } else {
         const r = readAppend(file.path, from.offset, onLine, opts);
         offset = r.offset;
