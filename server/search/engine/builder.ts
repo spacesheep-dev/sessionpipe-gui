@@ -65,9 +65,8 @@ export class Builder {
   textChars = 0;
   /** Date.now() of the first add since the last reset. */
   since = 0;
-  private lastFile = -1;
-  private lastOffset = -1;
-  private sub = 0;
+  /** Per file: the last record offset and how many docs it gave (files may interleave). */
+  private lastBy = new Map<number, { offset: number; sub: number }>();
 
   constructor() {
     this.docTok.push(0);
@@ -163,11 +162,14 @@ export class Builder {
     }
     const w = this.store.write(text, this.storeN, "utf8");
     this.storeN += w;
-    if (fileId === this.lastFile && d.offset === this.lastOffset) this.sub++;
+    let lb = this.lastBy.get(fileId);
+    if (!lb) {
+      lb = { offset: d.offset, sub: 0 };
+      this.lastBy.set(fileId, lb);
+    } else if (lb.offset === d.offset) lb.sub++;
     else {
-      this.sub = 0;
-      this.lastFile = fileId;
-      this.lastOffset = d.offset;
+      lb.offset = d.offset;
+      lb.sub = 0;
     }
     writeRow(this.rowsOut, {
       at: d.at,
@@ -179,7 +181,7 @@ export class Builder {
       tool: this.str(d.tool),
       agent: this.str(d.agent),
       agentType: this.str(d.agentType),
-      sub: this.sub,
+      sub: lb.sub,
     });
     this.textChars += text.length;
   }
@@ -294,9 +296,7 @@ export class Builder {
     this.fcnt.fill(0);
     this.textChars = 0;
     this.since = 0;
-    this.lastFile = -1;
-    this.lastOffset = -1;
-    this.sub = 0;
+    this.lastBy.clear();
     // Big token arrays shrink back after an unusually large flush (bounded RSS).
     if (this.tokTerm.a.length > 1 << 23) {
       this.tokTerm = new GrowU32(1 << 16);

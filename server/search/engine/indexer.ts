@@ -93,6 +93,8 @@ class Writer {
   deadFiles = new Set<number>();
   deadKeys = new Set<string>();
   removedPaths = new Set<string>();
+  /** When the oldest uncommitted change was made (0: none). */
+  since = 0;
   segs = new Map<string, Segment>();
   /** Rebuilding: the manifest under construction (published in one commit at the end). */
   next: Manifest | null = null;
@@ -176,6 +178,8 @@ export class Indexer {
   private firstCommitDone = false;
   private lastFlush = 0;
   private lastYield = performance.now();
+  /** Reads with docs in the builder ahead of their entry (see readFile). */
+  private busy = 0;
   private readonly inProcess: boolean;
   private readonly idleExitMs: number;
   private readonly tickMs: number;
@@ -441,6 +445,8 @@ export class Indexer {
       total += Math.max(0, k.file.size - from);
     }
     this.setStatus({ phase: plan.length ? "building" : "idle", doneBytes: 0, totalBytes: total });
+    // One file at a time, newest first: the order the sources' zstd batcher prefetches in
+    // (two readers at once measured slower: the batcher stops batching).
     let done = 0;
     for (const { k, from } of plan) {
       if (this.stopping) break;
@@ -520,6 +526,7 @@ export class Indexer {
     if (e.headLen > 0 && headCrc(f.path, e.headLen) !== e.head) return 0;
     if (st.size === e.offset) {
       // touched, not grown: remember the mtime
+      if (!w.since) w.since = Date.now();
       w.pending.set(f.path, { ...e, mtimeMs: f.mtimeMs });
       return -1;
     }
@@ -578,38 +585,49 @@ export class Indexer {
     let offset = entry.offset;
     let state = entry.state;
     const slice = this.inProcess ? SLICE_BYTES_INPROC : SLICE_BYTES;
-    for (;;) {
-      let r: Awaited<ReturnType<SourceAdapter["read"]>>;
-      try {
-        r = await k.adapter.read(file, state !== undefined ? { offset, state } : { offset }, sink, {
-          maxBytes: slice,
-        });
-      } catch {
-        r = { offset, skipped: "unreadable" };
-      }
-      if (r.skipped) {
-        entry.skipped = r.skipped;
-        break;
-      }
-      delete entry.skipped;
-      if (r.state !== undefined) state = r.state;
-      if (file.kind === "whole") {
+    // busy: this file's docs are in the builder ahead of its entry (no flush may commit them)
+    this.busy++;
+    try {
+      for (;;) {
+        let r: Awaited<ReturnType<SourceAdapter["read"]>>;
+        try {
+          r = await k.adapter.read(file, state !== undefined ? { offset, state } : { offset }, sink, {
+            maxBytes: slice,
+          });
+        } catch {
+          r = { offset, skipped: "unreadable" };
+        }
+        if (r.skipped) {
+          entry.skipped = r.skipped;
+          break;
+        }
+        delete entry.skipped;
+        if (r.state !== undefined) state = r.state;
+        if (file.kind === "whole") {
+          offset = r.offset;
+          read = st.size;
+          break;
+        }
+        const moved = r.offset - offset;
+        read += Math.max(0, moved);
         offset = r.offset;
-        read = st.size;
-        break;
+        progress(read);
+        if (moved <= 0 || offset >= st.size) break;
+        // between slices: keep the entry current, so a flush commits exactly what was read
+        this.store(w, f.path, entry, st, offset, state);
+        this.busy--;
+        try {
+          await this.maybeFlush();
+          await this.pause();
+        } finally {
+          this.busy++;
+        }
+        if (this.stopping) break;
       }
-      const moved = r.offset - offset;
-      read += Math.max(0, moved);
-      offset = r.offset;
-      progress(read);
-      if (moved <= 0 || offset >= st.size) break;
-      // between slices: keep the entry current, so a flush commits exactly what was read
       this.store(w, f.path, entry, st, offset, state);
-      await this.maybeFlush();
-      await this.pause();
-      if (this.stopping) break;
+    } finally {
+      this.busy--;
     }
-    this.store(w, f.path, entry, st, offset, state);
     await this.pause();
     return read;
   }
@@ -632,6 +650,7 @@ export class Indexer {
       entry.headLen = Math.min(HEAD_BYTES, offset);
       entry.head = headCrc(path, entry.headLen);
     }
+    if (!w.since) w.since = Date.now();
     w.pending.set(path, { ...entry });
   }
 
@@ -657,6 +676,7 @@ export class Indexer {
 
   /** Mid-pass flushes: the first commit within a second, then by size or time. */
   private async maybeFlush(): Promise<void> {
+    if (this.busy > 0) return; // another file is between its docs and its entry
     const now = Date.now();
     const limit = this.inProcess ? FLUSH_CHARS_INPROC : FLUSH_CHARS;
     for (const w of this.writers.values()) {
@@ -677,12 +697,15 @@ export class Indexer {
     for (const w of this.writers.values()) {
       if (!w.dirty) continue;
       const b = w.builder;
+      const since = Math.min(b.since || now, w.since || now);
       if (
         this.wantCommit ||
         b.textChars >= COMMIT_CHARS ||
-        (b.since && now - b.since >= COMMIT_AGE_MS) ||
-        (b.empty && (w.deadFiles.size || w.deadKeys.size || w.removedPaths.size)) ||
-        (b.empty && w.pending.size)
+        now - since >= COMMIT_AGE_MS ||
+        // tombstones (a forget, a deleted file) show soon
+        w.deadFiles.size > 0 ||
+        w.deadKeys.size > 0 ||
+        w.removedPaths.size > 0
       )
         await this.commit(w, true);
     }
@@ -720,6 +743,7 @@ export class Indexer {
     }
     for (const [p, e] of w.pending) t.files[p] = e;
     w.pending.clear();
+    w.since = 0;
     for (const p of w.removedPaths) delete t.files[p];
     w.removedPaths.clear();
     if (w.deadFiles.size || w.deadKeys.size) {

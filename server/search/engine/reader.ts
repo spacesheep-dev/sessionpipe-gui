@@ -58,7 +58,7 @@ const HITS_IN_MAX = 500;
 
 /** One open index (history or events). */
 class IndexState {
-  stamp = "";
+  stamp = "\u0000";
   manifest: Manifest | null = null;
   segs: Segment[] = [];
   byPath = new Map<string, FileEntry>();
@@ -72,7 +72,7 @@ class IndexState {
   /** (Re)open from the MANIFEST; reuses open segments by name. True when it moved. */
   load(): boolean {
     const stamp = manifestStamp(this.dir);
-    if (stamp === this.stamp && this.manifest) return false;
+    if (stamp === this.stamp && (this.manifest || !stamp)) return false; // one stat, nothing moved
     for (let attempt = 0; attempt < 4; attempt++) {
       const st = manifestStamp(this.dir);
       const m = readManifest(this.dir);
