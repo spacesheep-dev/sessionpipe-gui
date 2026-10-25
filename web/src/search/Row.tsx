@@ -166,6 +166,7 @@ export const Row = memo(function Row({ m, index, active, now, ctx, onCursor }: R
       aria-current={active ? "true" : undefined}
       tabIndex={-1}
       onClick={onClick}
+      onFocus={() => onCursor(index)}
       {...menu}
     >
       <span className="sx-glyph">

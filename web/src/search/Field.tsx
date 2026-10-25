@@ -159,7 +159,8 @@ export const SearchField = forwardRef<
           <button
             type="button"
             className="sx-clear"
-            aria-label="Clear search"
+            aria-label="Clear the field"
+            title="Clear"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
               markTyped();

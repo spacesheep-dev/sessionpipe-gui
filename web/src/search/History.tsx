@@ -287,7 +287,8 @@ export function HistorySession({
 function groupTurns(msgs: SearchTranscriptMessage[]): SearchTranscriptMessage[][] {
   const out: SearchTranscriptMessage[][] = [];
   for (const m of msgs) {
-    if (m.field === "prompt" || !out.length) out.push([m]);
+    // A subagent's prompt is its orchestrator's, inside the turn, never the person's bubble.
+    if ((m.field === "prompt" && !m.agent) || !out.length) out.push([m]);
     else out[out.length - 1]!.push(m);
   }
   return out;
@@ -304,7 +305,7 @@ function Turn({
   marks: Map<string, SearchMark[]>;
   current: string | undefined;
 }) {
-  const prompt = msgs[0]!.field === "prompt" ? msgs[0]! : null;
+  const prompt = msgs[0]!.field === "prompt" && !msgs[0]!.agent ? msgs[0]! : null;
   const rest = prompt ? msgs.slice(1) : msgs;
   return (
     <li className="turn turn--chat">
@@ -341,11 +342,16 @@ function Turn({
             ) : (
               <div
                 key={m.ref}
-                className="hx-msg hx-reply chat-card"
+                className={`hx-msg hx-reply chat-card ${m.agent ? "hx-sub" : ""}`}
                 data-ref={m.ref}
                 data-current={current === m.ref ? "" : undefined}
               >
-                {m.agent ? <span className="hx-who">{m.agent.type || "Subagent"}</span> : null}
+                {m.agent ? (
+                  <span className="hx-who">
+                    {m.agent.type || "Subagent"}
+                    {m.field === "prompt" ? " · asked" : ""}
+                  </span>
+                ) : null}
                 {marks.get(m.ref)?.length ? (
                   <p className="hx-prose">
                     <Text m={m} marks={marks.get(m.ref)} current={current === m.ref} />

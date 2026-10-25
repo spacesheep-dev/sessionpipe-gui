@@ -465,7 +465,8 @@ export function Search() {
       <ProgressHairline status={status} />
       {phone && <div className="sx-phonefield">{fieldEl}</div>}
       <div className="sx-filters" data-empty={idle ? "" : undefined}>
-        <div className="sx-chips">{chips}</div>
+        {/* The chips arrive together, with the facets, into a row already their height. */}
+        <div className="sx-chips">{facets ? chips : null}</div>
         {!idle && page && (
           <span className="sx-resline num" aria-live="polite">
             {resultLine(page.total, page.more, page.ms)}

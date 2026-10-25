@@ -38,11 +38,11 @@ export function StatusLine({
 }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
-  if (!status) return <p className={`sx-status ${className}`} aria-hidden="true" />;
+  if (!status) return <div className={`sx-status ${className}`} aria-hidden="true" />;
   const words = statusWords(status, withResults);
   const err = status.state === "error";
   return (
-    <p className={`sx-status num ${err ? "is-err" : ""} ${className}`} role="status">
+    <div className={`sx-status num ${err ? "is-err" : ""} ${className}`} role="status">
       <button
         ref={btn}
         type="button"
@@ -64,7 +64,7 @@ export function StatusLine({
         </button>
       )}
       {open && <IndexPopover status={status} client={client} anchor={btn} onClose={() => setOpen(false)} />}
-    </p>
+    </div>
   );
 }
 
@@ -130,7 +130,8 @@ function IndexPopover({
     };
   }, [onClose, anchor]);
   const history = status.sources.filter((s) => s.source === "history");
-  const piped = status.sources.filter((s) => s.source === "sessionpipe");
+  // What sessionpipe delivered is one row, whatever the harnesses.
+  const piped = status.sources.filter((s) => s.source === "sessionpipe").reduce((n, s) => n + s.sessions, 0);
   return (
     <div className="sx-pop" role="dialog" aria-label="Search index" ref={ref} tabIndex={-1}>
       <p className="sx-pop-title">Search index</p>
@@ -142,13 +143,13 @@ function IndexPopover({
             <span className="sx-pop-n num">{s.sessions.toLocaleString()}</span>
           </li>
         ))}
-        {piped.map((s) => (
-          <li key={`p:${s.harness}`} className="sx-pop-row">
+        {piped > 0 && (
+          <li className="sx-pop-row">
             <span className="sx-pop-name">sessionpipe</span>
-            <span className="sx-pop-homes sx-pop-homes--ui">{s.homes.length ? s.homes.join(", ") : "received"}</span>
-            <span className="sx-pop-n num">{s.sessions.toLocaleString()}</span>
+            <span className="sx-pop-homes sx-pop-homes--ui">received</span>
+            <span className="sx-pop-n num">{piped.toLocaleString()}</span>
           </li>
-        ))}
+        )}
         {status.skipped?.map((s) => (
           <li key={`s:${s.harness}:${s.why}`} className="sx-pop-row sx-pop-row--note">
             <span className="sx-pop-name">{harnessName(s.harness)}</span>

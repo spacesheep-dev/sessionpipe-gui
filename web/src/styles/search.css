@@ -173,6 +173,9 @@
 }
 .sx-resline {
   flex: none;
+  /* A box that holds still while its number changes (no shift per keystroke). */
+  min-width: 17ch;
+  text-align: right;
   color: var(--fg-3);
   font-size: var(--text-sm);
   white-space: nowrap;
@@ -890,4 +893,22 @@
   background: none;
   color: var(--fg);
   font-weight: 600;
+}
+
+/* A subagent's words inside its orchestrator's turn: indented on a hairline, one tier
+   quieter (the board's tree guide, not a box). */
+.hx-sub {
+  padding-left: 12px;
+  border-left: var(--hairline) solid var(--line-2);
+  color: var(--fg-2);
+}
+.hx-sub .md,
+.hx-sub .hx-prose {
+  color: var(--fg-2);
+}
+.hx-prose {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: var(--lh);
 }
