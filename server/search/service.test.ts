@@ -474,7 +474,9 @@ describe("status, frames and the history switch", () => {
 describe("reveal", () => {
   it("shows the transcript or the folder of a session that ran here", async () => {
     expect(await svc.reveal({ harness: "claude-code", id: "0b6a7f3e-aaaa", what: "transcript" })).toBe("ok");
-    expect(revealed.at(-1)![1]).toContain(transcriptFile);
+    const [cmd, args] = revealed.at(-1)!;
+    if (process.platform === "darwin") expect([cmd, args]).toEqual(["open", ["-R", transcriptFile]]);
+    else expect(args.join(" ")).toContain(path.dirname(transcriptFile));
   });
 
   it("answers gone when the path is missing, not_here for another machine", async () => {

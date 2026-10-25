@@ -1102,12 +1102,14 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
       } catch {
         return "gone";
       }
+      // Reveal = show it selected in its parent folder (UX §5.2); Linux has no "select", so
+      // the parent folder opens.
       const [cmd, args] =
         process.platform === "darwin"
-          ? ["open", r.what === "transcript" ? ["-R", target] : [target]]
+          ? ["open", ["-R", target]]
           : process.platform === "win32"
-            ? ["explorer", r.what === "transcript" ? [`/select,${target}`] : [target]]
-            : ["xdg-open", [r.what === "transcript" ? path.dirname(target) : target]];
+            ? ["explorer", [`/select,${target}`]]
+            : ["xdg-open", [path.dirname(target)]];
       (deps.reveal ?? openDetached)(cmd, args);
       return "ok";
     },
