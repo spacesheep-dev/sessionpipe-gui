@@ -159,8 +159,10 @@
   border-radius: 50%;
   background: var(--fg-4);
 }
+/* Live is the normal state, so it stays quiet: a solid neutral dot (connecting is a ring,
+   offline the error red). The brand's one bright colour is the needs-you orange. */
 .conn--live .conn-dot {
-  background: var(--ok);
+  background: var(--fg-3);
 }
 .conn-label {
   font-variant-numeric: tabular-nums;
@@ -441,12 +443,13 @@
     justify-content: space-between;
     padding: 0 10px 0 16px;
   }
-  /* The sidebar's head is the lockup, from the mark's 64-unit box: the name's ink is 33.18
-     units tall and starts 9.5 past the box (one dot's width from the dot), its centre 0.61
-     above the mark's, so both share the x-height's centre line (docs/brand.md). A 26 px box
-     makes it 121 px wide, the brand's smallest; the rail alone keeps the mark at 28. */
+  /* The sidebar's head is the lockup, from the mark's 64-unit box, exactly as the design
+     draws it (docs/brand.md): the name's ink is 28.905 units tall and starts 9.048 past the
+     box, its centre 0.707 above the mark's, so both share the x-height's centre line. A 29 px
+     box makes it 122 px wide, just over the brand's smallest (120); the rail alone keeps
+     the mark at 28. */
   .shell--side .rail-brand {
-    --brand-box: 26px;
+    --brand-box: 29px;
     justify-content: flex-start;
     gap: 0;
   }
@@ -456,9 +459,9 @@
   }
   .shell--side .rail-word {
     display: inline-block;
-    height: calc(var(--brand-box) * 33.18 / 64);
-    margin-left: calc(var(--brand-box) * 9.5 / 64);
-    translate: 0 calc(var(--brand-box) * -0.61 / 64);
+    height: calc(var(--brand-box) * 28.905 / 64);
+    margin-left: calc(var(--brand-box) * 9.048 / 64);
+    translate: 0 calc(var(--brand-box) * -0.707 / 64);
   }
   .shell--side .rail-nav {
     padding: 8px;

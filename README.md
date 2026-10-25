@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/web/public/brand/wordmark-dark.svg">
-    <img src="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/web/public/brand/wordmark.svg" alt="sessionpipe gui" width="274">
+    <img src="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/web/public/brand/wordmark.svg" alt="sessionpipe gui" width="248">
   </picture>
 </p>
 

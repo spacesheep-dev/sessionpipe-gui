@@ -12,8 +12,8 @@ describe("the server pages' lockup", () => {
 
   it("is one inline svg with the brand's geometry and colours, no font and no fetch", () => {
     const html = wordmarkHtml();
-    expect(html).toMatch(/^<svg class="wordmark" role="img" aria-label="sessionpipe" width="121.2" height="15"/);
-    expect(html).toContain('viewBox="5.5 13.5 299.061 37"');
+    expect(html).toMatch(/^<svg class="wordmark" role="img" aria-label="sessionpipe" width="123.5" height="17"/);
+    expect(html).toContain('viewBox="5.5 13.5 268.851 37"');
     expect(html).not.toMatch(/href=|url\(|<text/);
     expect(WORDMARK_CSS).toContain("--brand-dot:#ff5a1f");
   });

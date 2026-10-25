@@ -16,10 +16,10 @@ const MARK =
 export const markSvg = (size: number): string =>
   `<svg width="${size}" height="${size}" viewBox="0 0 64 64" aria-hidden="true">${MARK}</svg>`;
 
-/** Mark and name, `height` px tall (the name's ink, 121 px wide at 15). Needs
- *  WORDMARK_CSS. */
-export const wordmarkHtml = (height = 15): string =>
-  `<svg class="wordmark" role="img" aria-label="sessionpipe" width="${Math.round((height * 2990.61) / 37) / 10}" height="${height}" viewBox="5.5 13.5 299.061 37">${MARK}<path fill="currentColor" transform="translate(73.5 14.797) scale(.96)" d="${NAME_PATH}"/></svg>`;
+/** Mark and name, `height` px tall (124 px wide at 17, just over the brand's smallest
+ *  lockup, 120). Needs WORDMARK_CSS. */
+export const wordmarkHtml = (height = 17): string =>
+  `<svg class="wordmark" role="img" aria-label="sessionpipe" width="${Math.round((height * 2688.505) / 37) / 10}" height="${height}" viewBox="5.5 13.5 268.851 37">${MARK}<path fill="currentColor" transform="translate(73.048 16.841) scale(.836364)" d="${NAME_PATH}"/></svg>`;
 
 export const WORDMARK_CSS =
   ".wordmark{display:block;flex:none;color:var(--fg);--brand-inlet:#c4c4c0;--brand-stream:#141414;--brand-dot:#ff5a1f}@media (prefers-color-scheme:dark){.wordmark{--brand-inlet:#454545;--brand-stream:#dadada}}";

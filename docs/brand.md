@@ -29,9 +29,11 @@ the cut by the size the 64-unit box renders at:
 ## The lockup
 
 The mark, then **sessionpipe** in Geist Mono 500 at −0.045 em, outlined
-(`web/public/brand/name.svg`), so it never depends on a font. The name's ink is 33.18 u
-tall, starts one dot's width past the dot and shares the mark's x-height centre line. The
-sidebar sets it from a 26 px box (121 px wide, the smallest the brand allows); the name is
+(`web/public/brand/name.svg`), so it never depends on a font. It is placed exactly as the
+design draws its lockups: the name is set at 46/88 of the mark's box, its ink is 28.905 u
+tall, starts 9.048 u past the box (about one dot's width from the dot) and shares the mark's
+x-height centre line. The sidebar sets it from a 29 px box (122 px wide, just over the
+120 px the brand allows); the name is
 a CSS mask in the text colour (`.brand-name`, brand.css), so it follows the scheme. The
 server-rendered pages (`/trust`, the 401 page) inline the same lockup as one SVG
 (`server/ui/brand.ts`; a unit test keeps its path equal to `name.svg`).
