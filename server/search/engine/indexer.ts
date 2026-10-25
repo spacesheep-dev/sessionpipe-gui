@@ -970,7 +970,8 @@ const HARNESS_OF: Record<string, string> = {
   events: "sessionpipe",
 };
 
-/** The footer and section table of a segment file are sane (recovery's cheap check). */
+/** A segment file is whole: its footer is sane and its crc32 holds (19 MB: ~3 ms with
+ *  zlib.crc32). Flipped or lost bytes anywhere are caught here, at the writer's start. */
 function segmentLooksWhole(path: string, bytes: number): boolean {
   let fd = -1;
   try {
@@ -979,7 +980,18 @@ function segmentLooksWhole(path: string, bytes: number): boolean {
     if (size < 16 || (bytes && size !== bytes)) return false;
     const t = Buffer.allocUnsafe(12);
     readSync(fd, t, 0, 12, size - 12);
-    return t.readUInt32LE(8) === MAGIC && t.readUInt32LE(0) === SECTIONS;
+    if (t.readUInt32LE(8) !== MAGIC || t.readUInt32LE(0) !== SECTIONS) return false;
+    const want = t.readUInt32LE(4);
+    const buf = Buffer.allocUnsafe(1 << 20);
+    let acc = 0;
+    const total = size - 8;
+    for (let p = 0; p < total; ) {
+      const n = readSync(fd, buf, 0, Math.min(buf.length, total - p), p);
+      if (n <= 0) return false;
+      acc = crc32(buf.subarray(0, n), acc);
+      p += n;
+    }
+    return acc === want;
   } catch {
     return false;
   } finally {

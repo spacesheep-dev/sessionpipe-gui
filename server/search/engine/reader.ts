@@ -99,7 +99,15 @@ class IndexState {
         if (!seg) {
           try {
             seg = new Segment(join(this.dir, e.name), e.name);
+            // a damaged file never serves: its bytes are checked once, when first opened
+            if (!seg.verify()) {
+              seg.close();
+              seg = undefined;
+            }
           } catch {
+            seg = undefined;
+          }
+          if (!seg) {
             if (lenient) continue;
             failed = true;
             break;

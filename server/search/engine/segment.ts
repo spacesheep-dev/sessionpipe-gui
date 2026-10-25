@@ -364,6 +364,7 @@ export function trimPools(): void {
 }
 
 const cur = { p: 0 };
+const VERIFY_BUF = Buffer.allocUnsafe(1 << 20);
 
 export class SegmentError extends Error {}
 
@@ -760,14 +761,17 @@ export class Segment {
     return r.subarray(this.rp, this.rp + len);
   }
 
-  /** Verify the footer crc over the whole file (`index --verify`, merges). */
+  /** Verify the footer crc over the whole file (at first open, `index --verify`). */
   verify(): boolean {
-    const total = this.size - 8; // crc covers everything before the crc itself
+    const total = this.size - 8; // the crc covers everything before the crc itself
+    if (this.buf) return crc32(this.buf.subarray(0, total)) === this.crc;
     let acc = 0;
-    const chunk = 1 << 20;
-    for (let off = 0; off < total; off += chunk) {
-      const len = Math.min(chunk, total - off);
-      acc = crc32(this.raw(off, len), acc);
+    for (let off = 0; off < total; ) {
+      const len = Math.min(VERIFY_BUF.length, total - off);
+      const n = readSync(this.fd, VERIFY_BUF, 0, len, off);
+      if (n <= 0) return false;
+      acc = crc32(VERIFY_BUF.subarray(0, n), acc);
+      off += n;
     }
     return acc === this.crc;
   }
