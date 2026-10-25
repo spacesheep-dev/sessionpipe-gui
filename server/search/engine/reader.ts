@@ -53,6 +53,7 @@ const BIT: Record<SearchSource, number> = { history: 1, sessionpipe: 2 };
 const DAY = 86_400_000;
 const HALF_LIFE_DAYS = 30;
 export const TOTAL_EXACT = 200;
+const FORGET_MS = 30_000;
 const HITS_IN_MAX = 500;
 
 /** One open index (history or events). */
@@ -184,7 +185,9 @@ export class Reader implements SearchReader {
   private S: GSession[] = [];
   private byKey = new Map<string, number>();
   private overlays = new Map<string, SessionOverlay>();
-  private hidden = new Set<string>();
+  /** Forgotten sessions → when (they come back once the writer tombstoned them and new docs
+   *  arrive: an entry older than FORGET_MS is dropped at the next generation). */
+  private hidden = new Map<string, number>();
   private N = 0;
   private avg = new Float64Array(FIELD_CODES).fill(1);
   private dfCache = new Map<string, number>();
@@ -1165,7 +1168,7 @@ export class Reader implements SearchReader {
   }
 
   forget(key: SessionKey): void {
-    this.hidden.add(key);
+    this.hidden.set(key, Date.now());
   }
 
   stats(): ReaderStats {
@@ -1216,6 +1219,8 @@ export class Reader implements SearchReader {
     let moved = false;
     for (const st of this.states.values()) if (st.load()) moved = true;
     if (moved) {
+      const old = Date.now() - FORGET_MS;
+      for (const [k, at] of this.hidden) if (at < old) this.hidden.delete(k);
       this.tail?.reset();
       this.tailVersion++;
       this.rebuild();

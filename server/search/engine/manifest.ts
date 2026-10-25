@@ -7,18 +7,18 @@
 //             a failed unlink on Windows goes into `trash` and is retried next commit).
 //   recovery  every *.tmp and every seg-* / *.del-* the manifest does not name is deleted;
 //             an unreadable segment is dropped and its files' offsets reset to 0.
-//   LOCK      `search/LOCK`, O_EXCL, {pid, host, startedAt}; stale when the pid is gone.
+//   LOCK      `search/LOCK`, created by link (atomic, never half-written), {pid, host,
+//             startedAt}; stale when the pid is gone.
 import {
   chmodSync,
-  closeSync,
+  linkSync,
   mkdirSync,
-  openSync,
   readdirSync,
   readFileSync,
   rmSync,
   statSync,
   unlinkSync,
-  writeSync,
+  writeFileSync,
 } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
@@ -189,44 +189,57 @@ export class LockedError extends Error {
   }
 }
 
-/** Take `<dir>/LOCK` (O_EXCL). A stale lock (its pid gone, or this pid) is taken over. */
+/** Take `<dir>/LOCK`: the content goes to a private temp file first, then `link` creates the
+ *  LOCK atomically (it fails when one exists), so a LOCK is never half-written. A lock whose
+ *  pid is gone (or is this process) is stale and taken over. */
 export function acquireLock(dir: string): () => void {
   ensureDir(dir);
   const path = join(dir, "LOCK");
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const fd = openSync(path, "wx", FILE_MODE);
-      writeSync(fd, JSON.stringify({ pid: process.pid, host: hostname(), startedAt: Date.now() }));
-      closeSync(fd);
-      let released = false;
-      return () => {
-        if (released) return;
-        released = true;
-        try {
-          const cur = JSON.parse(readFileSync(path, "utf8")) as { pid?: number };
-          if (cur.pid === process.pid) unlinkSync(path);
-        } catch {}
-      };
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      let pid = 0;
+  const tmp = join(dir, `LOCK.${process.pid}.${Date.now()}.tmp`);
+  writeFileSync(tmp, JSON.stringify({ pid: process.pid, host: hostname(), startedAt: Date.now() }), {
+    mode: FILE_MODE,
+  });
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        pid = Number((JSON.parse(readFileSync(path, "utf8")) as { pid?: number }).pid) || 0;
-      } catch {
-        // half-written or garbage: stale unless it is brand new
-        try {
-          if (Date.now() - statSync(path).mtimeMs < 2000) throw new LockedError(0);
-        } catch (x) {
-          if (x instanceof LockedError) throw x;
+        linkSync(tmp, path);
+        for (const f of readdirSync(dir)) {
+          const m = /^LOCK\.(\d+)\.\d+\.tmp$/.exec(f);
+          if (m && Number(m[1]) !== process.pid && !pidAlive(Number(m[1]))) {
+            try {
+              unlinkSync(join(dir, f));
+            } catch {}
+          }
         }
+        let released = false;
+        return () => {
+          if (released) return;
+          released = true;
+          try {
+            const cur = JSON.parse(readFileSync(path, "utf8")) as { pid?: number };
+            if (cur.pid === process.pid) unlinkSync(path);
+          } catch {}
+        };
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        let pid = 0;
+        try {
+          pid = Number((JSON.parse(readFileSync(path, "utf8")) as { pid?: number }).pid) || 0;
+        } catch {
+          // unreadable (an old writer's half-written lock): stale
+        }
+        if (pid && pid !== process.pid && pidAlive(pid)) throw new LockedError(pid);
+        try {
+          unlinkSync(path);
+        } catch {}
       }
-      if (pid && pid !== process.pid && pidAlive(pid)) throw new LockedError(pid);
-      try {
-        unlinkSync(path);
-      } catch {}
     }
+    throw new LockedError(0);
+  } finally {
+    try {
+      unlinkSync(tmp);
+    } catch {}
   }
-  throw new LockedError(0);
 }
 
 /** Who holds the LOCK (a live pid), or 0. */
