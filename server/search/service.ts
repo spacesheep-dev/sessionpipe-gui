@@ -528,11 +528,18 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
   let busyTimer: NodeJS.Timeout | undefined;
 
   let crashes = 0;
+  let firstRunPendingUntil = 0;
   const backoff = (): number => Math.min(300_000, 5_000 * 2 ** Math.max(0, crashes - 1));
   const onIndexerMessage = (m: FromIndexer): void => {
     if (closed || !m || typeof m !== "object") return;
     if (m.t === "status") {
       if (m.status.phase !== "error") crashes = 0;
+      // After history is turned on, a status the indexer sent before it heard is stale:
+      // hold "first run" until it reports one itself (or 10 s pass).
+      if (firstRunPendingUntil) {
+        if (m.status.firstRun || Date.now() > firstRunPendingUntil) firstRunPendingUntil = 0;
+        else m = { t: "status", status: { ...m.status, firstRun: true } };
+      }
       ixStatus = m.status;
       ixError = m.status.phase === "error" ? (m.status.error ?? "The indexer stopped with an error.") : undefined;
       const busy = m.status.phase !== "idle" && m.status.phase !== "error";
@@ -1022,6 +1029,7 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
         deps.setHistory(true);
         // A first run until the indexer says otherwise (it starts from nothing: history/ is gone).
         ixStatus = { phase: "scanning", doneBytes: 0, totalBytes: 0, firstRun: true, gen: {} };
+        firstRunPendingUntil = Date.now() + 10_000;
         await openNow();
         if (indexer?.kind === "child") indexer.send({ t: "history", on: true });
         else {

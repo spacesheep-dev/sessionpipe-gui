@@ -579,3 +579,17 @@ describe("the wire's `more`", () => {
     expect(page.total).toBe(3);
   });
 });
+
+describe("turning history on", () => {
+  it("stays first-run until the indexer reports it, ignoring a stale idle status", async () => {
+    await svc.setHistory(false);
+    const s = await svc.setHistory(true);
+    expect(s.state).toBe("first-run");
+    fake.emit({ phase: "idle", firstRun: false }); // sent before the indexer heard
+    expect(svc.status().state).toBe("first-run");
+    fake.emit({ phase: "building", firstRun: true, doneBytes: 1, totalBytes: 4 });
+    expect(svc.status()).toMatchObject({ state: "first-run", progress: 0.25 });
+    fake.emit({ phase: "idle", firstRun: false });
+    expect(svc.status().state).toBe("ready");
+  });
+});
