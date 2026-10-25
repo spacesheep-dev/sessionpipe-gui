@@ -120,7 +120,7 @@ test.describe("search keystroke → paint", () => {
           if (!e.hadRecentInput) w.__kp.shift += e.value;
           for (const src of e.sources ?? []) {
             const el = src.node instanceof Element ? src.node : src.node?.parentElement;
-            const name = el ? `${el.tagName.toLowerCase()}.${[...el.classList].join(".")}` : "?";
+            const name = el ? `${el.tagName.toLowerCase()}.${Array.from(el.classList).join(".")}` : "?";
             who.set(name, (who.get(name) ?? 0) + e.value);
           }
         }
