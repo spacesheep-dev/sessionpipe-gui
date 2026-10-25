@@ -360,3 +360,19 @@ describe("transcript, overlay, forget, D6", () => {
     expect(s.bytes).toBeGreaterThan(0);
   });
 });
+
+describe("a damaged segment", () => {
+  it("is left out; the rest of the index still answers", async () => {
+    const { writeFileSync } = await import("node:fs");
+    const dir = tmp();
+    const docs: GenDoc[] = [
+      { key: "claude-code:a", field: "prompt", text: "alpha words", at: 1, offset: 0, file: 1 },
+      { key: "claude-code:b", field: "prompt", text: "bravo words", at: 2, offset: 0, file: 2 },
+    ];
+    const m = writeIndex(dir, "history", docs, [], 2);
+    writeFileSync(join(dir, "history", m.segments[0]!.name), "garbage");
+    const rd = new Reader({ dir, sources: ["history"] });
+    expect(rd.search(q("words")).matches.map((x) => x.session.key)).toEqual(["claude-code:b"]);
+    rd.close();
+  });
+});

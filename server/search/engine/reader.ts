@@ -92,18 +92,25 @@ class IndexState {
       const old = new Map(this.segs.map((s) => [s.name, s]));
       const next: Segment[] = [];
       let failed = false;
+      // the last attempt serves what it can: an unreadable segment is left out, not the index
+      const lenient = attempt === 3;
       for (const e of m.segments) {
         let seg = old.get(e.name);
         if (!seg) {
           try {
             seg = new Segment(join(this.dir, e.name), e.name);
           } catch {
+            if (lenient) continue;
             failed = true;
             break;
           }
         }
         const bits = e.del ? readDel(this.dir, e.del, seg.N) : null;
         if (e.del && !bits) {
+          if (lenient) {
+            if (!old.has(e.name)) seg.close();
+            continue;
+          }
           // superseded between our read of the manifest and of the tombstone: read again
           failed = true;
           if (!old.has(e.name)) seg.close();
