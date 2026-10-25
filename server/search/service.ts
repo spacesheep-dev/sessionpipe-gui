@@ -71,6 +71,8 @@ export const TRANSCRIPT_LIMIT_MAX = 200;
 export const TOTAL_EXACT = 200;
 /** At most one `searchIndex` frame per this. */
 export const FRAME_MS = 1000;
+/** Boot waits at most this long for the reader to open (it may then finish in the background). */
+export const BOOT_WAIT_MS = 300;
 /** A pass running longer than this reads as `updating`. */
 export const UPDATING_AFTER_MS = 1000;
 
@@ -162,6 +164,11 @@ export function syntheticHome(home: string | undefined): string | undefined {
 
 export function searchDir(stateDir: string): string {
   return path.join(stateDir, "search");
+}
+
+/** The folder of one index under `<stateDir>/search` (D22). */
+export function indexSubdir(source: SearchSource): string {
+  return source === "sessionpipe" ? "events" : "history";
 }
 
 /** The sources a reader opens: what sessionpipe delivered, plus history when it is on. */
@@ -412,6 +419,8 @@ export interface SearchDeps {
   reveal?: (cmd: string, args: string[]) => void;
   /** Tests: the live-tail period (default 1 s; 0 = never on a timer). */
   tickMs?: number;
+  /** How long boot waits for the reader before going on without it (default BOOT_WAIT_MS). */
+  bootWaitMs?: number;
 }
 
 interface IndexerHandle {
@@ -445,6 +454,12 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
   const allAdapters = (): SourceAdapter[] => (backend ? [backend.eventsAdapter(), ...backend.historyAdapters()] : []);
 
   let reader: SearchReader = emptyReader();
+  /** Whether the open reader runs the live tail (see openOnce). */
+  let liveOn = false;
+  /** The tail is cheap once history (the big one) has been committed by a finished first run;
+   *  what sessionpipe delivered is small, so it never waits for that. */
+  const canLive = (): boolean =>
+    !firstRun() && (!deps.history() || existsSync(path.join(dir, indexSubdir("history"), "MANIFEST")));
   let readerError: string | undefined;
   let readerGen = 0;
   let closed = false;
@@ -489,7 +504,15 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
     }
   };
 
-  const openNow = async (): Promise<void> => {
+  // Opens run one at a time (boot, the history switch), in order.
+  let openChain: Promise<void> = Promise.resolve();
+  const openNow = (): Promise<void> => {
+    const next = openChain.then(openOnce);
+    openChain = next.catch(() => {});
+    return next;
+  };
+  const openOnce = async (): Promise<void> => {
+    if (closed) return;
     if (!backend || !env) {
       reader = emptyReader();
       readerError = backendError;
@@ -498,13 +521,24 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
     const old = reader;
     try {
       // onCommitWanted: the live tail grew past its bound, so the writer should commit it.
+      const sources = readSources(deps.history());
+      // The live tail reads what the writer has not committed yet. With no index at all
+      // (a first run) that is everything, read again in this process while the child
+      // indexes it: so the tail comes on once each read index has a MANIFEST and the
+      // first run is over, and until then the reader serves what the child commits.
+      if (!liveOn && canLive()) liveOn = true;
       const o: ReaderOptions & { onCommitWanted?: () => void } = {
         dir,
-        sources: readSources(deps.history()),
-        live: { env, adapters: adapters() },
+        sources,
+        ...(liveOn ? { live: { env, adapters: adapters() } } : {}),
         onCommitWanted: () => indexer?.send({ t: "commit" }),
       };
-      reader = await backend.openReader(o);
+      const next = await backend.openReader(o);
+      if (closed) {
+        next.close();
+        return;
+      }
+      reader = next;
       readerError = undefined;
     } catch (e) {
       reader = emptyReader();
@@ -541,6 +575,8 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
         else m = { t: "status", status: { ...m.status, firstRun: true } };
       }
       ixStatus = m.status;
+      // The first run is over: now the tail is cheap, so the reader gets it.
+      if (!liveOn && m.status.phase === "idle" && canLive()) void openNow().then(scheduleFrame);
       ixError = m.status.phase === "error" ? (m.status.error ?? "The indexer stopped with an error.") : undefined;
       const busy = m.status.phase !== "idle" && m.status.phase !== "error";
       if (busy && busySince === undefined) {
@@ -748,7 +784,8 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
   const firstRun = (): boolean => {
     if (!deps.history()) return false;
     if (ixStatus) return ixStatus.firstRun;
-    return stats().gen.history === undefined && backend !== null;
+    // Before the indexer has said anything: a first run when history was never committed.
+    return backend !== null && !existsSync(path.join(dir, indexSubdir("history"), "MANIFEST"));
   };
   // Every answer carries the status; the reader's stats are cached for a moment (and
   // dropped whenever the index moves), so a keystroke never pays for counting.
@@ -836,18 +873,25 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
   }
 
   // ── boot ──
-  await openNow();
-  // One throwaway query, so the first real one does not pay the JIT.
-  try {
-    reader.search({
-      parsed: parseSearch("warmup"),
-      sources: readSources(deps.history()),
-      sort: "best",
-      offset: 0,
-      limit: 1,
-      hits: 1,
-    });
-  } catch {}
+  // Opening awaits the live tail's first pass. With an index that is quick (≈ 0.1 s); with
+  // none yet and a big history it is seconds, and the server must not wait for it: after
+  // BOOT_WAIT_MS the app starts and the reader comes in when ready (status: first-run).
+  const opened = openNow().then(() => {
+    // One throwaway query, so the first real one does not pay the JIT.
+    try {
+      reader.search({
+        parsed: parseSearch("warmup"),
+        sources: readSources(deps.history()),
+        sort: "best",
+        offset: 0,
+        limit: 1,
+        hits: 1,
+      });
+    } catch {}
+    lastFrame = "";
+    scheduleFrame();
+  });
+  await Promise.race([opened, sleep(deps.bootWaitMs ?? BOOT_WAIT_MS)]);
   startIndexer();
   writeServerJson();
 
@@ -1027,6 +1071,7 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
         if (!indexer) startIndexer();
       } else {
         deps.setHistory(true);
+        liveOn = false;
         // A first run until the indexer says otherwise (it starts from nothing: history/ is gone).
         ixStatus = { phase: "scanning", doneBytes: 0, totalBytes: 0, firstRun: true, gen: {} };
         firstRunPendingUntil = Date.now() + 10_000;

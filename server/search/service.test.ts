@@ -398,15 +398,29 @@ describe("status, frames and the history switch", () => {
   });
 
   it("sends searchIndex frames at most once a second, never with `local`", async () => {
-    await new Promise((r) => setTimeout(r, 1050)); // past the boot frame's second
+    const at: number[] = [];
+    const sent: SearchIndexStatus[] = [];
     frames.length = 0;
-    for (let i = 1; i <= 10; i++) fake.emit({ phase: "building", firstRun: true, doneBytes: i, totalBytes: 10 });
-    const sent = () => frames.filter((f) => f.kind === "searchIndex") as { status: SearchIndexStatus }[];
-    expect(sent().length).toBe(1);
+    const t0 = Date.now();
+    const orig = frames.push.bind(frames);
+    frames.push = (...m: StreamMessage[]) => {
+      for (const f of m)
+        if (f.kind === "searchIndex") {
+          at.push(Date.now());
+          sent.push(f.status);
+        }
+      return orig(...m);
+    };
+    for (let i = 1; i <= 30; i++) {
+      fake.emit({ phase: "building", firstRun: true, doneBytes: i, totalBytes: 30 });
+      await new Promise((r) => setTimeout(r, 50));
+    }
     await new Promise((r) => setTimeout(r, 1100));
-    expect(sent().length).toBe(2);
-    expect(sent().at(-1)!.status).toMatchObject({ state: "first-run", progress: 1 });
-    for (const f of sent()) expect("local" in f.status).toBe(false);
+    expect(sent.length).toBeGreaterThanOrEqual(1);
+    expect(sent.length).toBeLessThanOrEqual(Math.ceil((Date.now() - t0) / 1000) + 1);
+    for (let i = 1; i < at.length; i++) expect(at[i]! - at[i - 1]!).toBeGreaterThanOrEqual(990);
+    expect(sent.at(-1)).toMatchObject({ state: "first-run", progress: 1 });
+    for (const st of sent) expect("local" in st).toBe(false);
   });
 
   it("reads as updating once a pass runs over a second", async () => {
