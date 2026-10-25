@@ -443,6 +443,7 @@ export class Reader implements SearchReader {
 
   private setTitle(g: number, title: string | undefined): void {
     if (this.titleOf[g] === title) return;
+    this.titleSorted = null;
     const old = this.titleToks[g];
     if (old) {
       for (const t of old) this.titlePost.get(t.t)?.delete(g);
@@ -640,7 +641,7 @@ export class Reader implements SearchReader {
     if (c.titlePrefix) {
       for (const tp of c.titlePrefix) {
         if (tp.head.length) addSet(post.get(tp.head[0]!));
-        else for (const [t, set] of post) if (set.size && t.startsWith(tp.prefix)) addSet(set);
+        else for (const t of this.titleTermsWith(tp.prefix)) addSet(post.get(t));
       }
     } else {
       for (const a of c.atoms) {
@@ -708,6 +709,23 @@ export class Reader implements SearchReader {
       }
       fn(g, best);
     }
+  }
+
+  /** Title terms starting with `p`: a binary search over the sorted title vocabulary
+   *  (rebuilt only after titles changed). */
+  private titleSorted: string[] | null = null;
+  private *titleTermsWith(p: string): Generator<string> {
+    if (!this.titleSorted)
+      this.titleSorted = [...this.titlePost.keys()].filter((t) => this.titlePost.get(t)!.size).sort();
+    const a = this.titleSorted;
+    let lo = 0;
+    let hi = a.length;
+    while (lo < hi) {
+      const m = (lo + hi) >> 1;
+      if (a[m]! < p) lo = m + 1;
+      else hi = m;
+    }
+    for (let i = lo; i < a.length && a[i]!.startsWith(p); i++) yield a[i]!;
   }
 
   private slotIdf(terms: readonly string[], N: number): number {

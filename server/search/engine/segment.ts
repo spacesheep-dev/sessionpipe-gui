@@ -479,10 +479,18 @@ export class Segment {
     return this.sec[i * 2 + 1]!;
   }
 
-  /** Bytes of a section into a pooled buffer (`slot`); valid until the next read of that slot. */
-  read(i: number, off: number, len: number, slot: number): Uint8Array {
+  /** Where the bytes of the last `read` start in the buffer it returned. */
+  rp = 0;
+
+  /** Bytes [off, off+len) of a section: the returned buffer holds them from `this.rp` on (a
+   *  pooled buffer per `slot`, valid until the next read of that slot; no view is made). */
+  read(i: number, off: number, len: number, slot: number): Buffer {
     const at = this.sec[i * 2]! + off;
-    if (this.buf) return this.buf.subarray(at, at + len);
+    if (this.buf) {
+      this.rp = at;
+      return this.buf;
+    }
+    this.rp = 0;
     let pb = POOL[slot]!;
     if (pb.length < len) {
       pb = Buffer.allocUnsafe(Math.max(len, pb.length * 2));
@@ -494,7 +502,7 @@ export class Segment {
       if (n <= 0) throw new SegmentError(`short read: ${this.name}`);
       r += n;
     }
-    return pb.subarray(0, len);
+    return pb;
   }
 
   isDeleted(d: number): boolean {
@@ -527,9 +535,12 @@ export class Segment {
     return lo;
   }
 
-  private block(bi: number): Uint8Array {
+  /** A dict block; it spans [this.rp, this.rp + this.rl) of the returned buffer. */
+  private rl = 0;
+  private block(bi: number): Buffer {
     const start = this.blockOff[bi]!;
     const end = bi + 1 < this.blockOff.length ? this.blockOff[bi + 1]! : this.sectionLength(S_DICT);
+    this.rl = end - start;
     return this.read(S_DICT, start, end - start, SLOT_DICT);
   }
 
@@ -542,8 +553,9 @@ export class Segment {
     const b = this.block(this.findBlock(term));
     let s = this.scratch;
     let sl = 0;
-    cur.p = 0;
-    while (cur.p < b.length) {
+    cur.p = this.rp;
+    const bend = this.rp + this.rl;
+    while (cur.p < bend) {
       const shared = readV(b, cur);
       const suf = readV(b, cur);
       if (s.length < shared + suf) {
@@ -551,7 +563,7 @@ export class Segment {
         ns.set(s.subarray(0, sl));
         s = this.scratch = ns;
       }
-      s.set(b.subarray(cur.p, cur.p + suf), shared);
+      for (let k = 0; k < suf; k++) s[shared + k] = b[cur.p + k]!;
       cur.p += suf;
       sl = shared + suf;
       const df = readV(b, cur);
@@ -583,8 +595,9 @@ export class Segment {
     for (let bi = this.findBlock(prefix); bi < this.blockFirst.length; bi++) {
       const b = this.block(bi);
       let sl = 0;
-      cur.p = 0;
-      while (cur.p < b.length) {
+      cur.p = this.rp;
+      const bend = this.rp + this.rl;
+      while (cur.p < bend) {
         const shared = readV(b, cur);
         const suf = readV(b, cur);
         if (s.length < shared + suf) {
@@ -592,7 +605,7 @@ export class Segment {
           ns.set(s.subarray(0, sl));
           s = this.scratch = ns;
         }
-        s.set(b.subarray(cur.p, cur.p + suf), shared);
+        for (let k = 0; k < suf; k++) s[shared + k] = b[cur.p + k]!;
         cur.p += suf;
         sl = shared + suf;
         e.df = readV(b, cur);
@@ -644,8 +657,8 @@ export class Segment {
   /** Decode a term's postings into D (docs) and F (tf). Returns the count. */
   decode(e: DictEntry, D: Uint32Array, F: Uint32Array): number {
     const r = this.read(S_POST, e.po, e.pl, SLOT_POST);
-    const L = r.length;
-    let p = 0;
+    let p = this.rp;
+    const L = p + e.pl;
     let d = 0;
     let n = 0;
     let first = true;
@@ -691,7 +704,7 @@ export class Segment {
   decodePos(e: DictEntry, D: Uint32Array, F: Uint32Array, PS: Uint32Array, POS: Uint32Array): number {
     const n = this.decode(e, D, F);
     const r = this.read(S_POS, e.xo, e.xl, SLOT_POS);
-    let p = 0;
+    let p = this.rp;
     let k = 0;
     for (let i = 0; i < n; i++) {
       PS[i] = k;
@@ -719,7 +732,7 @@ export class Segment {
   /** One doc's row (a fresh object; for the hits shown only). */
   row(d: number): DocRow {
     const r = this.read(S_DOCS, d * ROW, ROW, SLOT_ROW);
-    return rowAt(r, 0);
+    return rowAt(r, this.rp);
   }
 
   /** Rows [from, to) in one read (a fresh buffer). */
@@ -730,7 +743,7 @@ export class Segment {
   text(row: DocRow): string {
     if (!row.storeLen) return "";
     const r = this.read(S_STORE, row.storeOff, row.storeLen, SLOT_ROW);
-    return utf8d.decode(r);
+    return r.toString("utf8", this.rp, this.rp + row.storeLen);
   }
 
   str(i: number): string | undefined {
@@ -743,7 +756,8 @@ export class Segment {
 
   /** The store bytes of a doc into `out` (merges). */
   storeBytes(off: number, len: number): Uint8Array {
-    return this.read(S_STORE, off, len, SLOT_ROW);
+    const r = this.read(S_STORE, off, len, SLOT_ROW);
+    return r.subarray(this.rp, this.rp + len);
   }
 
   /** Verify the footer crc over the whole file (`index --verify`, merges). */

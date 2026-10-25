@@ -30,9 +30,14 @@ const S_TE: number[] = [];
 const S_FOLD: (string | undefined)[] = [];
 const S_IDX: number[] = [];
 
-/** Marks in `text` (sorted, non-overlapping) and the clause bits they cover. No string is
- *  made per token: ASCII spans are compared in place, others folded one by one. */
-export function markText(text: string, m: Matcher): { marks: SearchMark[]; bits: number[] } {
+// the marks of the last markFlat: starts, ends, clause bits (grown as needed)
+const MS: number[] = [];
+const ME: number[] = [];
+const MB: number[] = [];
+
+/** Marks of `text` into MS/ME/MB (sorted, merged); returns how many. No string is made per
+ *  token: ASCII spans are compared in place, others folded one by one. */
+function markFlat(text: string, m: Matcher): number {
   const byLen = matcherByLen(m);
   const prefixes = m.prefixes;
   const phrases = m.phrases;
@@ -104,28 +109,40 @@ export function markText(text: string, m: Matcher): { marks: SearchMark[]; bits:
       }
     }
   }
-  if (!raw.length) return { marks: [], bits: [] };
+  if (!raw.length) return 0;
   const n = raw.length / 3;
   const idx = S_IDX;
   idx.length = 0;
   for (let i = 0; i < n; i++) idx.push(i);
   idx.sort((x, y) => raw[x * 3]! - raw[y * 3]! || raw[y * 3 + 1]! - raw[x * 3 + 1]!);
-  const marks: SearchMark[] = [];
-  const bits: number[] = [];
+  let k = 0;
   for (let ii = 0; ii < idx.length; ii++) {
     const i = idx[ii]!;
     const s = raw[i * 3]!;
     const e = raw[i * 3 + 1]!;
     const b = raw[i * 3 + 2]!;
-    const lm = marks[marks.length - 1];
-    if (lm && s < lm[1]) {
+    if (k > 0 && s < ME[k - 1]!) {
       // overlapping (a phrase over its own parts, a whole over its parts): merge
-      if (e > lm[1]) lm[1] = e;
-      bits[bits.length - 1]! |= b;
+      if (e > ME[k - 1]!) ME[k - 1] = e;
+      MB[k - 1]! |= b;
       continue;
     }
-    marks.push([s, e]);
-    bits.push(b);
+    MS[k] = s;
+    ME[k] = e;
+    MB[k] = b;
+    k++;
+  }
+  return k;
+}
+
+/** Marks in `text` (sorted, non-overlapping) and the clause bits they cover. */
+export function markText(text: string, m: Matcher): { marks: SearchMark[]; bits: number[] } {
+  const n = markFlat(text, m);
+  const marks: SearchMark[] = [];
+  const bits: number[] = [];
+  for (let i = 0; i < n; i++) {
+    marks.push([MS[i]!, ME[i]!]);
+    bits.push(MB[i]!);
   }
   return { marks, bits };
 }
@@ -216,33 +233,38 @@ export function snippet(text: string, m: Matcher, width = 160): { text: string; 
     base = r[0];
     src = text.slice(r[0], r[1]);
   }
-  const mk = markText(src, m);
+  const n = markFlat(src, m);
   const room = width - 2; // the ellipses
-  if (!mk.marks.length) return cut(text, 0, Math.min(text.length, room), [], width);
+  if (!n) return cut(text, 0, Math.min(text.length, room), [], width);
   // best window: most distinct clause bits, then most marks
   let best = 0;
   let bestScore = -1;
-  const ms = mk.marks;
-  for (let i = 0, j = 0; i < ms.length; i++) {
-    while (ms[i]![1] - ms[j]![0] > room && j < i) j++;
+  for (let i = 0, j = 0; i < n; i++) {
+    while (ME[i]! - MS[j]! > room && j < i) j++;
     let bits = 0;
-    for (let k = j; k <= i; k++) bits |= mk.bits[k]!;
+    for (let k = j; k <= i; k++) bits |= MB[k]!;
     const sc = popcount(bits) * 1000 + (i - j + 1);
     if (sc > bestScore) {
       bestScore = sc;
       best = j;
     }
   }
-  const first = ms[best]!;
-  let lastEnd = first[1];
-  for (let k = best; k < ms.length && ms[k]![1] - first[0] <= room; k++) lastEnd = ms[k]![1];
+  const f0 = MS[best]!;
+  let lastEnd = ME[best]!;
+  for (let k = best; k < n && ME[k]! - f0 <= room; k++) lastEnd = ME[k]!;
   // centre the marked span, leaning on context before it (a third)
-  const span = lastEnd - first[0];
+  const span = lastEnd - f0;
   const lead = Math.max(0, Math.min(40, Math.floor((room - span) / 3)));
-  let a = base + first[0] - lead;
+  let a = base + f0 - lead;
   a = Math.max(0, Math.min(a, text.length - room));
   const b = Math.min(text.length, a + room);
-  const abs: SearchMark[] = ms.map(([s, e]) => [s + base, e + base]);
+  // only the marks that can show in the window become objects
+  const abs: SearchMark[] = [];
+  for (let k = 0; k < n; k++) {
+    const s0 = MS[k]! + base;
+    const e0 = ME[k]! + base;
+    if (e0 > a - 16 && s0 < b + 16) abs.push([s0, e0]);
+  }
   return cut(text, a, b, abs, width);
 }
 
