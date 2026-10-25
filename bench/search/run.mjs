@@ -111,6 +111,12 @@ export async function serverImpact(G, tmp, queries = 6000) {
         await new Promise((r) => setTimeout(r, 200));
       }
     }
+    // At rest before any query: right after "ready", and after 30 s (V8 shrinks an idle heap).
+    const MBr = 1024 * 1024;
+    const rest = () => Object.fromEntries(servers.map((s) => [s.name, r2(footprintOf(s.proc.pid) / MBr)]));
+    const ready = { now: rest() };
+    await new Promise((r) => setTimeout(r, 30_000));
+    ready.after30s = rest();
     const urls = SHAPES.map(
       (x) =>
         `/api/ui/search/sessions?q=${encodeURIComponent(x.q)}&limit=30&hits=3&tz=0${x.live ? "&live=1" : ""}${x.sort ? `&sort=${x.sort}` : ""}`,
@@ -126,13 +132,26 @@ export async function serverImpact(G, tmp, queries = 6000) {
       }
       ms[s.name] = Math.round(performance.now() - t);
     }
-    await new Promise((r) => setTimeout(r, 3000));
-    const fp = Object.fromEntries(servers.map((s) => [s.name, footprintOf(s.proc.pid)]));
+    // Sampled over the minute after the burst (V8's memory reducer, the indexer's sweeps and
+    // the reader's refreshes all land in it); the gate takes the worst sample.
     const MB = 1024 * 1024;
+    const samples = [];
+    let waited = 0;
+    for (const at of [5, 30, 60]) {
+      await new Promise((r) => setTimeout(r, (at - waited) * 1000));
+      waited = at;
+      const fp = Object.fromEntries(servers.map((s) => [s.name, footprintOf(s.proc.pid)]));
+      samples.push({
+        at,
+        searchMB: r2(fp.search / MB),
+        emptyMB: r2(fp.empty / MB),
+        impactMB: r2((fp.search - fp.empty) / MB),
+      });
+    }
     return {
-      searchMB: r2(fp.search / MB),
-      emptyMB: r2(fp.empty / MB),
-      impactMB: r2((fp.search - fp.empty) / MB),
+      impactMB: Math.max(...samples.map((x) => x.impactMB)),
+      samples,
+      ready,
       queries,
       httpMs: ms,
       totalMs: Math.round(performance.now() - t0),
