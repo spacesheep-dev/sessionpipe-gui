@@ -38,6 +38,7 @@ const resolved = (): "dark" | "light" => {
 const NAV: Record<string, string> = {
   "nav.board": "/",
   "nav.inbox": "/inbox",
+  "nav.search": "/search",
   "nav.feed": "/feed",
   "nav.review": "/review",
   "nav.machines": "/machines",
@@ -53,6 +54,7 @@ const TOP = new Set([
   "inbox",
   "feed",
   "review",
+  "search",
   "machines",
   "connect",
   "setup",
@@ -74,6 +76,11 @@ export function useGlobalKeys(onBack: () => void = () => back("/")) {
     };
   }, []);
   useShortcut("search.focus", () => (focusSearch() ? undefined : false));
+  // ⌘⇧F from anywhere: the Search page, its field focused and its text selected.
+  useShortcut("search.global", () => {
+    if (parseRoute(path.split("?")[0] ?? "/").name !== "search") navigate("/search");
+    requestAnimationFrame(() => focusSearch());
+  });
   useShortcut("back", (e) => {
     if (isTyping(e.target)) {
       (e.target as HTMLElement).blur();

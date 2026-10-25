@@ -37,6 +37,7 @@ export function createMockTransport(): Transport {
   // Labels live beside the World, as they live beside the store on the server.
   let labels: Labels = { rev: 0, names: {}, sessions: {} };
   const handlers = new Set<(m: StreamMessage) => void>();
+  let search: ReturnType<Transport["sessionSearch"]> | null = null;
   return {
     openStream(h) {
       let stop: (() => void) | null = null;
@@ -94,5 +95,9 @@ export function createMockTransport(): Transport {
       return latency({ on }, 80);
     },
     qrUrl: () => null,
+    sessionSearch: () => {
+      search ??= import("./search").then((m) => m.mockSearch(world, () => labels));
+      return search;
+    },
   };
 }

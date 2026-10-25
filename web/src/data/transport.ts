@@ -12,12 +12,14 @@ import type {
   Info,
   Labels,
   LabelsPatch,
+  SearchIndexStatus,
   SearchPage,
   SearchQuery,
   SessionDetail,
   StreamMessage,
 } from "@shared/api";
 import { ROUTES } from "@shared/api";
+import type { SearchClient } from "../search/types";
 
 export interface StreamHandlers {
   onMessage(m: StreamMessage): void;
@@ -45,6 +47,8 @@ export interface Transport {
    *  arrives as a `labels` stream frame on every page. */
   labels(): Promise<Labels>;
   patchLabels(p: LabelsPatch): Promise<Labels>;
+  /** Session search (web/src/search): its client arrives with the search code itself. */
+  sessionSearch(): Promise<SearchClient>;
 }
 
 /** Every StreamMessage kind: EventSource only delivers the named events listened for, so
@@ -108,6 +112,7 @@ const params = (q: object): string => {
 };
 
 export function createHttpTransport(): Transport {
+  const searchFrames = new Set<(s: SearchIndexStatus) => void>();
   return {
     openStream(h) {
       let es: EventSource | null = null;
@@ -120,7 +125,9 @@ export function createHttpTransport(): Transport {
         for (const kind of STREAM_KINDS) {
           es.addEventListener(kind, (ev) => {
             try {
-              h.onMessage(JSON.parse((ev as MessageEvent).data) as StreamMessage);
+              const m = JSON.parse((ev as MessageEvent).data) as StreamMessage;
+              if (m.kind === "searchIndex") for (const l of searchFrames) l(m.status);
+              h.onMessage(m);
             } catch (err) {
               console.warn("bad stream frame", kind, err);
             }
@@ -189,5 +196,6 @@ export function createHttpTransport(): Transport {
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify(p),
       }).then((r) => json<Labels>(r)),
+    sessionSearch: () => import("../search/http").then((m) => m.httpSearch(searchFrames)),
   };
 }

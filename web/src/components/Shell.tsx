@@ -100,6 +100,12 @@ const ICON: Record<string, ReactNode> = {
       <path d="M3 11h4l1 2h4l1-2h4v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 15.5z" />
     </>
   ),
+  search: (
+    <>
+      <circle cx="8.75" cy="8.75" r="5.25" />
+      <path d="M12.6 12.6 17 17" />
+    </>
+  ),
   feed: (
     <>
       <path d="M3 5h14" />
@@ -196,6 +202,7 @@ interface NavItem {
 const BUILTIN: NavItem[] = [
   { to: "/", key: "board", label: "Board", glyph: ICON.board },
   { to: "/inbox", key: "inbox", label: "Inbox", glyph: ICON.inbox },
+  { to: "/search", key: "search", label: "Search", glyph: ICON.search },
   { to: "/feed", key: "feed", label: "Feed", glyph: ICON.feed },
   { to: "/review", key: "review", label: "Review", glyph: ICON.review },
   { to: "/machines", key: "machines", label: "Machines", glyph: ICON.machines },
@@ -528,7 +535,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       action={navAction(n, views)}
       needs={needs}
       tip={tip}
-      here={path === n.to}
+      here={path === n.to || (n.key === "search" && active === "search")}
     />
   );
   const firstView = nav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
