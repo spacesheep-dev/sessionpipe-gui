@@ -30,6 +30,8 @@ export interface GenOptions {
   seed?: number;
   now?: number;
   zstd?: "auto" | "off";
+  /** Median turns of a Claude / Codex session (default: the profile's). */
+  turns?: [number, number];
 }
 export function generate(o: GenOptions): GenManifest;
 export function parseSize(s: string): number;

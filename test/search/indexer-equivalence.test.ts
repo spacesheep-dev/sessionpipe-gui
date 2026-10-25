@@ -146,7 +146,7 @@ async function compare(engine: SearchReader, label: string): Promise<string[]> {
 describe.skipIf(!haveEngine())("runIndexer + reader = oracle through changes", () => {
   beforeAll(() => {
     tmp = tempDir("spgui-ixeq-");
-    generate({ out: path.join(tmp.dir, "gen"), profile: "gate", size: 2_000_000, seed: 9, now: NOW });
+    generate({ out: path.join(tmp.dir, "gen"), profile: "gate", size: 2_000_000, seed: 9, now: NOW, turns: [12, 8] });
     env = sourceEnv({ home: home(), stateDir: path.join(tmp.dir, "gen", "state"), hostname: "eq-host" });
   });
   afterAll(() => tmp?.cleanup());

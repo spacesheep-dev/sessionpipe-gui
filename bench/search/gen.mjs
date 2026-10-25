@@ -668,8 +668,9 @@ function codexPath(home, t, id) {
 
 export function generate(opts) {
   const o = { profile: "gate", seed: 42, zstd: "auto", ...opts };
-  const p = PROFILES[o.profile];
-  if (!p) throw new Error(`unknown profile ${o.profile}`);
+  if (!PROFILES[o.profile]) throw new Error(`unknown profile ${o.profile}`);
+  // `turns` overrides the profile's session length (tests that want many small files).
+  const p = { ...PROFILES[o.profile], ...(o.turns ? { turns: o.turns } : {}) };
   const target = o.size || p.size;
   const now = o.now || (o.profile === "demo" ? Date.now() : Date.parse("2026-10-25T00:00:00Z"));
   rmSync(o.out, { recursive: true, force: true });
