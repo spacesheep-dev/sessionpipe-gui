@@ -12,7 +12,7 @@ import { type GenManifest, generate } from "../../bench/search/gen.mjs";
 import { loadOracle } from "../../server/search/oracle.js";
 import { eventsAdapter, historyAdapters, sourceEnv } from "../../server/search/sources/index.js";
 import type { EngineQuery, SearchReader, SourceAdapter, SourceEnv } from "../../server/search/types.js";
-import { BOTH, engineModule, eq, haveEngine } from "./kit.js";
+import { allMessages, BOTH, engineModule, eq, haveEngine } from "./kit.js";
 
 const NOW = Date.parse("2026-10-25T00:00:00Z");
 
@@ -86,8 +86,7 @@ for (const subject of readers) {
       for (const s of m.secrets) expect(r.search(eq(`"${s.slice(0, 12)}"`)).total).toBe(0);
       let texts = 0;
       for (const sess of r.sessions()) {
-        const w = r.transcript(sess.key, { limit: 100_000 });
-        for (const msg of w?.messages ?? []) {
+        for (const msg of allMessages(r, sess.key)) {
           texts++;
           for (const s of m.secrets) expect(msg.text.includes(s)).toBe(false);
         }

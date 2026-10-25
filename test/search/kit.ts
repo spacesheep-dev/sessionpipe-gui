@@ -8,6 +8,7 @@ import type {
   ReaderOptions,
   SearchReader,
   SearchSource,
+  TranscriptWindow,
 } from "../../server/search/types.js";
 import { parseSearch } from "../../shared/searchQuery.js";
 
@@ -31,4 +32,17 @@ export function eq(
   extra: Partial<EngineQuery> = {},
 ): EngineQuery {
   return { parsed: parseSearch(text), sources, sort: "best", offset: 0, limit: 100, hits: 3, ...extra };
+}
+
+/** Every message of a session, paging through `transcript` by its `after` cursor (the engine
+ *  caps a window at 200). */
+export function allMessages(r: SearchReader, key: string): TranscriptWindow["messages"] {
+  const out: TranscriptWindow["messages"] = [];
+  let w = r.transcript(key, { limit: 200 });
+  for (let i = 0; w && i < 100_000; i++) {
+    out.push(...w.messages);
+    if (!w.after) break;
+    w = r.transcript(key, { after: w.after, limit: 200 });
+  }
+  return out;
 }

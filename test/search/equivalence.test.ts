@@ -20,6 +20,7 @@ import {
 } from "../../server/search/oracle.js";
 import type { EngineQuery, SearchReader, SearchSource, SessionFacts } from "../../server/search/types.js";
 import { parseSearch } from "../../shared/searchQuery.js";
+import { allMessages } from "./kit.js";
 
 const NOW = Date.parse("2026-10-25T00:00:00Z");
 const DAY = 86_400_000;
@@ -236,8 +237,7 @@ function capped(o: OracleReader, s: QSpec): boolean {
   if (!terms) {
     terms = new Set<string>();
     for (const sess of o.sessions())
-      for (const m of o.transcript(sess.key, { limit: 1e6 })?.messages ?? [])
-        for (const t of oracleTokens(m.text)) terms.add(t.term);
+      for (const m of allMessages(o, sess.key)) for (const t of oracleTokens(m.text)) terms.add(t.term);
     TERMS.set(o, terms);
   }
   for (const c of parsed.clauses) {
@@ -336,13 +336,13 @@ describe("engine = oracle on random corpora", () => {
     const { engine, oracle } = open(tmp(), c, 4, opened);
     const diffs: string[] = [];
     for (const s of oracle.sessions()) {
-      const e = engine.transcript(s.key, { limit: 1e6 })?.messages.map((m) => `${m.at}|${m.field}|${m.text}`) ?? [];
-      const o = oracle.transcript(s.key, { limit: 1e6 })?.messages.map((m) => `${m.at}|${m.field}|${m.text}`) ?? [];
+      const e = allMessages(engine, s.key).map((m) => `${m.at}|${m.field}|${m.text}`);
+      const o = allMessages(oracle, s.key).map((m) => `${m.at}|${m.field}|${m.text}`);
       if (JSON.stringify(e) !== JSON.stringify(o)) diffs.push(`${s.key}: transcript ${e.length} vs ${o.length}`);
       for (const q of ["webhook", '"rate limiter"', "getUserName", "検索"]) {
         const p = parseSearch(q);
-        const tE = new Map((engine.transcript(s.key, { limit: 1e6 })?.messages ?? []).map((m) => [m.ref, m]));
-        const tO = new Map((oracle.transcript(s.key, { limit: 1e6 })?.messages ?? []).map((m) => [m.ref, m]));
+        const tE = new Map(allMessages(engine, s.key).map((m) => [m.ref, m]));
+        const tO = new Map(allMessages(oracle, s.key).map((m) => [m.ref, m]));
         const he = engine.hitsIn(s.key, p).map((h) => {
           const m = tE.get(h.ref);
           return `${m?.at}:${h.marks.map(([a, b]) => m?.text.slice(a, b).toLowerCase()).join(",")}`;
