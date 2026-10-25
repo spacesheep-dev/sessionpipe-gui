@@ -326,6 +326,20 @@ describe("live tail", () => {
     expect(performance.now() - t0).toBeLessThan(50);
     r.close();
   });
+  it("reads a line appended to a fully committed, recently changed file without a hint", async () => {
+    const w = world();
+    writeFileSync(w.file("a"), fakeLine({ k: "p", text: "committed text", at }));
+    await runIndexer({ dir: w.dir, env: w.env, adapters: [w.adapter], history: true, mode: "once" });
+    const r = await openReader({ dir: w.dir, sources: ["history"], live: { env: w.env, adapters: [w.adapter] } });
+    await r.tickNow(); // the first discovery: nothing past the committed offset yet
+    expect(r.search(q("appended")).matches).toEqual([]);
+    appendFileSync(w.file("a"), fakeLine({ k: "r", text: "appended while you work", at: at + 1 }));
+    await r.tickNow();
+    const res = r.search(q("appended"));
+    expect(res.matches.map((m) => m.session.key)).toEqual(["claude-code:a"]);
+    expect(res.matches[0]!.hits.every((h) => h.live)).toBe(true);
+    r.close();
+  });
 });
 
 describe("facts follow their file", () => {

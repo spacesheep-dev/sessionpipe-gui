@@ -180,8 +180,9 @@ export class LiveTail {
         this.known.set(f.path, { file: f, adapter: a });
         const e = this.committed.entry(a.source, f.path);
         if (now - f.mtimeMs > HOT_MS && !this.hot.has(f.path)) continue;
-        if (!e) this.hot.add(f.path);
-        else if (f.kind === "append" && f.size > e.offset) this.hot.add(f.path);
+        // Changed lately: hot even when fully committed, so the session someone is in right
+        // now is read on the next tick after its next line (nothing hints a history file).
+        if (!e || f.kind === "append") this.hot.add(f.path);
       }
     }
   }
