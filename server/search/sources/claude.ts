@@ -323,7 +323,10 @@ export function claudeAdapter(): SourceAdapter {
       for (const [id, m] of mains) {
         const d = path.dirname(m.file.path);
         let a = byDir.get(d);
-        if (!a) byDir.set(d, (a = []));
+        if (!a) {
+          a = [];
+          byDir.set(d, a);
+        }
         a.push({ path: m.file.path, id, size: m.file.size });
       }
       mainsByDir = byDir;
