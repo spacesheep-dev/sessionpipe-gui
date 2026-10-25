@@ -1,6 +1,6 @@
 {
   "name": "sessionpipe-gui",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "The sessionpipe GUI: a local receiver with a live board for every coding-agent session on your machines, open from any device on your network.",
   "keywords": [
     "sessionpipe",
