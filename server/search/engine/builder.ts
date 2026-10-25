@@ -10,7 +10,7 @@ import type { SearchDoc, SessionFacts } from "../types.js";
 import { Out, utf8 } from "./codec.js";
 import { emptyFacts, type Facts, foldFacts, foldTimes } from "./facts.js";
 import { FIELD_CODES, fieldCode, LEN, lenCode, type SegSession, SegWriter, writeRow } from "./segment.js";
-import { tokenize } from "./tokenize.js";
+import { fold, spans } from "./tokenize.js";
 
 export class GrowU32 {
   a: Uint32Array;
@@ -41,6 +41,82 @@ export interface EncodeResult {
 export class Builder {
   private termIds = new Map<string, number>();
   private termList: string[] = [];
+  /** Open addressing over term ids (+1; 0 empty), keyed by the folded term's chars. */
+  private htab = new Int32Array(1 << 16);
+  private hmask = (1 << 16) - 1;
+
+  private static hashStr(t: string): number {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < t.length; i++) h = Math.imul(h ^ t.charCodeAt(i), 0x01000193);
+    return h >>> 0;
+  }
+
+  private grow(): void {
+    const cap = this.htab.length * 2;
+    const tab = new Int32Array(cap);
+    const mask = cap - 1;
+    const list = this.termList;
+    for (let id = 0; id < list.length; id++) {
+      let i = Builder.hashStr(list[id]!) & mask;
+      while (tab[i] !== 0) i = (i + 1) & mask;
+      tab[i] = id + 1;
+    }
+    this.htab = tab;
+    this.hmask = mask;
+  }
+
+  private add1(term: string, slot: number): number {
+    const id = this.termList.length;
+    this.termList.push(term);
+    this.termIds.set(term, id);
+    this.htab[slot] = id + 1;
+    if (this.termList.length * 2 > this.htab.length) this.grow();
+    return id;
+  }
+
+  /** The id of text[s, e) lowercased (an ASCII span). */
+  private internAscii(text: string, s: number, e: number): number {
+    let h = 0x811c9dc5;
+    for (let i = s; i < e; i++) {
+      let c = text.charCodeAt(i);
+      if (c >= 65 && c <= 90) c |= 32;
+      h = Math.imul(h ^ c, 0x01000193);
+    }
+    const mask = this.hmask;
+    const tab = this.htab;
+    const list = this.termList;
+    const len = e - s;
+    let i = (h >>> 0) & mask;
+    for (;;) {
+      const v = tab[i]!;
+      if (v === 0) return this.add1(text.slice(s, e).toLowerCase(), i);
+      const t = list[v - 1]!;
+      if (t.length === len) {
+        let k = 0;
+        for (; k < len; k++) {
+          let c = text.charCodeAt(s + k);
+          if (c >= 65 && c <= 90) c |= 32;
+          if (c !== t.charCodeAt(k)) break;
+        }
+        if (k === len) return v - 1;
+      }
+      i = (i + 1) & mask;
+    }
+  }
+
+  /** The id of a folded term. */
+  private intern(term: string): number {
+    const mask = this.hmask;
+    const tab = this.htab;
+    const list = this.termList;
+    let i = Builder.hashStr(term) & mask;
+    for (;;) {
+      const v = tab[i]!;
+      if (v === 0) return this.add1(term, i);
+      if (list[v - 1] === term) return v - 1;
+      i = (i + 1) & mask;
+    }
+  }
   private tokTerm = new GrowU32(1 << 16);
   private tokPos = new GrowU32(1 << 16);
   private docTok = new GrowU32(1 << 10);
@@ -130,15 +206,13 @@ export class Builder {
     const list = this.termList;
     const text = d.text;
     let parts = 0;
-    tokenize(text, (term, pos) => {
+    void ids;
+    void list;
+    // spans, not strings: an ASCII token is hashed and compared in place, a string is made
+    // only for a term seen for the first time (most tokens repeat)
+    spans(text, (pos, s0, e0, ascii) => {
       if (pos >= parts) parts = pos + 1;
-      let id = ids.get(term);
-      if (id === undefined) {
-        id = list.length;
-        list.push(term);
-        ids.set(term, id);
-      }
-      tt.push(id);
+      tt.push(ascii ? this.internAscii(text, s0, e0) : this.intern(fold(text.slice(s0, e0))));
       tp.push(pos);
     });
     // the length counts parts (a whole identifier repeats its parts)
@@ -295,6 +369,10 @@ export class Builder {
   reset(): void {
     this.termIds = new Map();
     this.termList = [];
+    if (this.htab.length > 1 << 20) {
+      this.htab = new Int32Array(1 << 16);
+      this.hmask = (1 << 16) - 1;
+    } else this.htab.fill(0);
     this.tokTerm.clear();
     this.tokPos.clear();
     this.docTok.clear();
