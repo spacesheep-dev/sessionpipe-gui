@@ -119,6 +119,7 @@ export function codexAdapter(): SourceAdapter & { zstdStats: () => { hits: numbe
   let titles: IndexCache | undefined;
   let seen: SourceEnv | undefined;
   const zstd = new ZstdBatcher();
+  let index_: SourceFile | undefined;
 
   /** `session_index.jsonl`: `{id, thread_name}`, the last line per id wins. Re-read on change. */
   const threadName = (env: SourceEnv, id: string): string | undefined => {
@@ -200,13 +201,24 @@ export function codexAdapter(): SourceAdapter & { zstdStats: () => { hits: numbe
       };
       walk(path.join(h, "sessions"), 3);
       walk(path.join(h, "archived_sessions"), 3);
+      // Thread names live beside the rollouts; read as a source of its own, a rename shows
+      // even for a finished (archived) session whose rollout is never read again.
+      const index = path.join(h, "session_index.jsonl");
+      try {
+        const st = statSync(index);
+        if (st.isFile()) index_ = { path: index, adapter: "codex", kind: "append", size: st.size, mtimeMs: st.mtimeMs };
+      } catch {
+        index_ = undefined;
+      }
       dirs = roots.length ? roots : dirs;
       const out = [...best.values()];
       zstd.setPlan(out.filter((f) => f.kind === "whole"));
+      if (index_) out.push(index_);
       return out;
     },
 
     async read(file: SourceFile, from: ReadCursor, sink: DocSink, opts: ReadOptions = {}): Promise<ReadResult> {
+      if (path.basename(file.path) === "session_index.jsonl") return readIndex(file, from, sink, opts);
       const env = seen && file.path.startsWith(codexHome(seen)) ? seen : envFromPath(file);
       const st = (obj(from.state) ? { ...(from.state as Obj) } : {}) as { [k: string]: AdapterState };
       if (file.kind === "whole") for (const k of Object.keys(st)) delete st[k]; // a whole file is read from scratch
@@ -439,6 +451,36 @@ export function codexAdapter(): SourceAdapter & { zstdStats: () => { hits: numbe
       return { offset, state: st, ...(bad ? { bad } : {}), ...(skipped ? { skipped } : {}) };
     },
   };
+}
+
+/** `session_index.jsonl`: `{id, thread_name, updated_at}` per line, the newest line winning.
+ *  Titles only (facts, never docs): an id that is no session (a guardian review) stays a
+ *  facts-only key, which the engine never lists. */
+function readIndex(file: SourceFile, from: ReadCursor, sink: DocSink, opts: ReadOptions): ReadResult {
+  let bad = 0;
+  const r = readAppend(
+    file.path,
+    from.offset,
+    (buf, s, e) => {
+      const j = parseLine(buf, s, e);
+      const id = str(j?.id);
+      const name = str(j?.thread_name).trim();
+      if (!j || !id) {
+        bad++;
+        return;
+      }
+      if (name)
+        sink.facts({
+          key: sessionKey(HARNESS, id),
+          harness: HARNESS,
+          id,
+          title: { text: finish(name, 200), rank: TITLE_RANK.harness },
+        });
+    },
+    opts,
+  );
+  bad += r.bad;
+  return { offset: r.offset, ...(bad ? { bad } : {}) };
 }
 
 /** The env a read runs in when it came before any discover (a resumed engine): the

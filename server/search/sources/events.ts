@@ -121,7 +121,6 @@ export function eventsAdapter(): SourceAdapter {
       const F = {
         beat: new Finder('"type":"session.heartbeat"'),
         start: new Finder('"type":"tool.started"'),
-        files: new Finder('"type":"files.changed"'),
         native: new Finder('"type":"native"'),
         title: new Finder('"title":"'),
       };
@@ -138,10 +137,7 @@ export function eventsAdapter(): SourceAdapter {
       const onLine: OnLine = (buf, s, e, at, gen) => {
         // Events that never carry words are skipped unless they may rename the session.
         if (
-          (F.beat.has(buf, gen, s, e) ||
-            F.start.has(buf, gen, s, e) ||
-            F.files.has(buf, gen, s, e) ||
-            F.native.has(buf, gen, s, e)) &&
+          (F.beat.has(buf, gen, s, e) || F.start.has(buf, gen, s, e) || F.native.has(buf, gen, s, e)) &&
           !F.title.has(buf, gen, s, e)
         )
           return;
@@ -244,6 +240,17 @@ export function eventsAdapter(): SourceAdapter {
           if (!name) return;
           const arg = tier >= 3 ? inputSummary(data.input) : "";
           emit({ field: "tool", at: time, text: toolLine(name, arg), offset: at, tool: name });
+        } else if (type === "files.changed" && tier >= 1) {
+          // The paths a tier-1 session touched: at that tier the only way to find it by file.
+          const paths = (Array.isArray(data.paths) ? data.paths : []).filter((p): p is string => typeof p === "string");
+          if (paths.length)
+            emit({
+              field: "tool",
+              at: time,
+              text: toolLine("Changed", paths.join(" ")),
+              offset: at,
+              tool: "files.changed",
+            });
         } else if (type === "attention.needed" && tier >= 1) {
           const m = str(data.message);
           if (m) prompt(m, time);

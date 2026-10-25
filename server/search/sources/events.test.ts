@@ -188,6 +188,18 @@ describe("events source", () => {
     expect(sink.docs[0]!.text).not.toContain("Zq81mLkP0vXy");
   });
 
+  it("files.changed paths make a tier-1 session findable by file", async () => {
+    write([ev("files.changed", { paths: ["src/webhooks/retry.ts", "README.md"] }, { tier: 1 })]);
+    write([ev("files.changed", { paths: ["TIER0_never_indexed"] }, { tier: 0 })]);
+    const sink = new Collect();
+    const a = eventsAdapter();
+    const [f] = await a.discover(testEnv(dir, dir));
+    await a.read(f!, { offset: 0 }, sink);
+    expect(sink.docs.map((d) => [d.field, d.tool, d.text])).toEqual([
+      ["tool", "files.changed", "Changed src/webhooks/retry.ts README.md"],
+    ]);
+  });
+
   it("is empty without an events folder", async () => {
     expect(await eventsAdapter().discover(testEnv(dir, path.join(dir, "none")))).toEqual([]);
   });

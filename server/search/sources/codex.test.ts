@@ -27,6 +27,7 @@ describe("codex discover", () => {
     const files = await codexAdapter().discover(testEnv(fx.home, fx.state));
     const rel = files.map((f) => [path.relative(path.join(fx.home, ".codex/sessions"), f.path), f.kind]).sort();
     expect(rel).toEqual([
+      ["../session_index.jsonl", "append"],
       ["2026/10/03/rollout-2026-10-03T07-00-00-c0000000-0000-4000-8000-000000000011.jsonl", "append"],
       ["2026/10/03/rollout-2026-10-03T08-00-00-c0000000-0000-4000-8000-000000000013.jsonl", "append"],
       ["2026/10/03/rollout-2026-10-03T09-00-00-c0000000-0000-4000-8000-000000000014.jsonl", "append"],
@@ -36,7 +37,7 @@ describe("codex discover", () => {
   });
   it("honours CODEX_HOME and is empty without one", async () => {
     const env = testEnv(path.join(fx.home, "x"), fx.state, { CODEX_HOME: path.join(fx.home, ".codex") });
-    expect(await codexAdapter().discover(env)).toHaveLength(5);
+    expect(await codexAdapter().discover(env)).toHaveLength(6);
     expect(await codexAdapter().discover(testEnv(path.join(fx.home, "x"), fx.state))).toEqual([]);
   });
 });
@@ -96,6 +97,25 @@ describe("codex read", () => {
     });
     expect(JSON.stringify(sink.got)).not.toContain("x-oauth");
     expect(f.machine).toBeUndefined();
+  });
+
+  it("a rename in session_index.jsonl reaches even an archived session, as a newer title", async () => {
+    const env = testEnv(fx.home, fx.state, { SPGUI_SEARCH_ZSTD: "cli" });
+    const a = codexAdapter();
+    const index = (await a.discover(env)).find((f) => f.path.endsWith("session_index.jsonl"))!;
+    const s1 = new Collect();
+    const r1 = await a.read(index, { offset: 0 }, s1);
+    expect(s1.docs).toEqual([]);
+    expect(s1.folded(C2).title).toEqual({ text: "Archived rounding run", rank: TITLE_RANK.harness });
+    appendFileSync(
+      index.path,
+      `${JSON.stringify({ id: C2.slice(6), thread_name: "Rounding, final", updated_at: "x" })}\n`,
+    );
+    const s2 = new Collect();
+    await a.read(index, { offset: r1.offset }, s2);
+    expect(s2.got).toEqual([
+      { key: C2, harness: "codex", id: C2.slice(6), title: { text: "Rounding, final", rank: TITLE_RANK.harness } },
+    ]);
   });
 
   it.skipIf(!hasCli)("reads .zst through the zstd command: offset is the record count", async () => {
