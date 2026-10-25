@@ -1,0 +1,170 @@
+// SPDX-License-Identifier: Apache-2.0
+// Owned by: search perf. Crash torture (SEARCH-SPEC.md §8.4): the writer runs in a child over
+// a generated home and is SIGKILLed at a random moment, 20 times, with new bytes appended
+// between rounds. After every kill a reader must open clean; after a last full pass the index
+// must hold exactly the docs the oracle holds: none lost, none twice.
+import { fork } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import path from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { type GenManifest, generate } from "../../bench/search/gen.mjs";
+import { loadOracle } from "../../server/search/oracle.js";
+import { eventsAdapter, historyAdapters, sourceEnv } from "../../server/search/sources/index.js";
+import type { SearchReader } from "../../server/search/types.js";
+import { tempDir } from "../events.js";
+import { BOTH, ENGINE, engineModule, eq, ROOT } from "./kit.js";
+
+const ROUNDS = 20;
+const NOW = Date.parse("2026-10-25T00:00:00Z");
+
+let tmp: { dir: string; cleanup: () => void };
+let child = "";
+let m: GenManifest;
+const home = (): string => path.join(tmp.dir, "gen", "home");
+const state = (): string => path.join(tmp.dir, "gen", "state");
+const dir = (): string => path.join(tmp.dir, "search");
+
+/** The writer as a plain node script (bundled from the TypeScript once). */
+async function bundleChild(): Promise<string> {
+  const esbuild = await import("esbuild");
+  const out = path.join(ROOT, ".tmp", "perf", "crash");
+  mkdirSync(out, { recursive: true });
+  const entry = path.join(out, "writer.ts");
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(
+    entry,
+    `import { runIndexer } from ${JSON.stringify(ENGINE)};
+import { eventsAdapter, historyAdapters, sourceEnv } from ${JSON.stringify(path.join(ROOT, "server/search/sources/index.ts"))};
+const [home, stateDir, dir] = process.argv.slice(2);
+const env = sourceEnv({ home, stateDir, hostname: "crash-host" });
+await runIndexer({ dir, env, adapters: [...historyAdapters(), eventsAdapter()], history: true, mode: "once" });
+`,
+  );
+  const file = path.join(out, "writer.mjs");
+  await esbuild.build({
+    entryPoints: [entry],
+    outfile: file,
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node20",
+    packages: "external",
+    logLevel: "error",
+  });
+  return file;
+}
+
+function runWriter(killAfterMs: number | null): Promise<"killed" | "done"> {
+  return new Promise((resolve, reject) => {
+    const c = fork(child, [home(), state(), dir()], { stdio: "ignore" });
+    let timer: NodeJS.Timeout | undefined;
+    if (killAfterMs !== null) timer = setTimeout(() => c.kill("SIGKILL"), killAfterMs);
+    c.on("exit", (code, sig) => {
+      if (timer) clearTimeout(timer);
+      if (sig === "SIGKILL") resolve("killed");
+      else if (code === 0) resolve("done");
+      else reject(new Error(`writer exited ${code}`));
+    });
+  });
+}
+
+/** Appends a turn to a few Claude files (new bytes for the next round to commit). */
+function grow(round: number): void {
+  const projects = path.join(home(), ".claude", "projects");
+  const files: string[] = [];
+  for (const slug of readdirSync(projects)) {
+    for (const f of readdirSync(path.join(projects, slug)))
+      if (f.endsWith(".jsonl")) files.push(path.join(projects, slug, f));
+  }
+  files.sort();
+  for (let i = 0; i < 3; i++) {
+    const f = files[(round * 7 + i * 13) % files.length]!;
+    const sid = path.basename(f, ".jsonl");
+    const line = {
+      type: "user",
+      sessionId: sid,
+      uuid: `crash-${round}-${i}`,
+      timestamp: new Date(NOW + round * 1000).toISOString(),
+      message: { role: "user", content: `round ${round} crashprobe${round}x${i} appended` },
+    };
+    appendFileSync(f, `${JSON.stringify(line)}\n`);
+  }
+}
+
+const transcripts = (r: SearchReader): Map<string, string[]> => {
+  const out = new Map<string, string[]>();
+  for (const s of r.sessions())
+    out.set(
+      s.key,
+      (r.transcript(s.key, { limit: 1e6 })?.messages ?? []).map((x) => `${x.field}|${x.at}|${x.text}`),
+    );
+  return out;
+};
+
+describe.skipIf(!existsSync(ENGINE))("crash torture: SIGKILL during commit", () => {
+  beforeAll(async () => {
+    tmp = tempDir("spgui-crash-");
+    m = generate({ out: path.join(tmp.dir, "gen"), profile: "dense", size: 8_000_000, seed: 21, now: NOW });
+    child = await bundleChild();
+  }, 120_000);
+  afterAll(() => tmp?.cleanup());
+
+  it(`${ROUNDS} kills, each recovering clean; then nothing lost and nothing twice`, async () => {
+    const e = await engineModule();
+    // How long one full first build takes here, to aim the kills inside it.
+    const t0 = Date.now();
+    await runWriter(null);
+    const full = Date.now() - t0;
+    // Start over: the kills land in first builds and in appends after them.
+    const { rmSync } = await import("node:fs");
+    rmSync(dir(), { recursive: true, force: true });
+    let killed = 0;
+    const opens: string[] = [];
+    for (let round = 0; round < ROUNDS; round++) {
+      if (round % 4 === 3) grow(round);
+      const at = 40 + Math.floor((((round * 7919) % 1000) / 1000) * Math.max(200, full));
+      if ((await runWriter(at)) === "killed") killed++;
+      try {
+        const r = await e.openReader({ dir: dir(), sources: BOTH });
+        r.search(eq("error"));
+        r.close();
+      } catch (err) {
+        opens.push(`round ${round}: ${(err as Error).message}`);
+      }
+    }
+    expect(opens).toEqual([]);
+    expect(killed).toBeGreaterThanOrEqual(ROUNDS / 2);
+    // A last, uninterrupted pass; then the index equals the oracle over the same files.
+    expect(await runWriter(null)).toBe("done");
+    const engine = await e.openReader({ dir: dir(), sources: BOTH });
+    const env = sourceEnv({ home: home(), stateDir: state(), hostname: "crash-host" });
+    const oracle = await loadOracle(env, [...historyAdapters(), eventsAdapter()], { now: () => NOW });
+    const te = transcripts(engine);
+    const to = transcripts(oracle);
+    const diffs: string[] = [];
+    for (const [k, v] of to) {
+      const w = te.get(k);
+      if (!w) diffs.push(`${k}: missing`);
+      else if (w.length !== v.length) diffs.push(`${k}: ${w.length} docs, want ${v.length}`);
+      else if (new Set(w).size !== w.length && new Set(v).size === v.length) diffs.push(`${k}: a doc twice`);
+    }
+    for (const k of te.keys()) if (!to.has(k)) diffs.push(`${k}: extra`);
+    expect(diffs.slice(0, 10)).toEqual([]);
+    for (let round = 3; round < ROUNDS; round += 4)
+      for (let i = 0; i < 3; i++) expect(engine.search(eq(`crashprobe${round}x${i}`)).total).toBe(1);
+    expect(engine.stats().messages).toBe(oracle.stats().messages);
+    // No temp files or unnamed segments survive a writer's recovery.
+    const stray: string[] = [];
+    const walk = (d: string): void => {
+      for (const f of readdirSync(d)) {
+        const p = path.join(d, f);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.tmp$/.test(f)) stray.push(path.relative(dir(), p));
+      }
+    };
+    walk(dir());
+    expect(stray).toEqual([]);
+    engine.close();
+    void m;
+  }, 300_000);
+});
