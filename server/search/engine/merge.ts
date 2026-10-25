@@ -228,6 +228,7 @@ export async function mergeSegments(
             tool: strRemap[k]![readU32(rows, p + 40)] ?? 0,
             agent: strRemap[k]![readU32(rows, p + 44)] ?? 0,
             agentType: strRemap[k]![readU32(rows, p + 48)] ?? 0,
+            sub: readU32(rows, p + 52),
           });
           fc[nd] = s.fc[d]!;
           lc[nd] = s.lc[d]!;

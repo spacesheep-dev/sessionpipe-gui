@@ -64,6 +64,9 @@ export class Builder {
   textChars = 0;
   /** Date.now() of the first add since the last reset. */
   since = 0;
+  private lastFile = -1;
+  private lastOffset = -1;
+  private sub = 0;
 
   constructor() {
     this.docTok.push(0);
@@ -119,9 +122,10 @@ export class Builder {
     const tp = this.tokPos;
     const ids = this.termIds;
     const list = this.termList;
-    const before = tt.n;
     const text = d.text;
+    let parts = 0;
     tokenize(text, (term, pos) => {
+      if (pos >= parts) parts = pos + 1;
       let id = ids.get(term);
       if (id === undefined) {
         id = list.length;
@@ -131,7 +135,8 @@ export class Builder {
       tt.push(id);
       tp.push(pos);
     });
-    const len = tt.n - before;
+    // the length counts parts (a whole identifier repeats its parts)
+    const len = parts;
     this.docTok.push(tt.n);
     this.dsess.push(s);
     this.ats.push(d.at > 0 ? Math.floor(d.at / 1000) : 0);
@@ -152,6 +157,12 @@ export class Builder {
     st.grow(text.length * 3);
     const w = utf8.encodeInto(text, st.b.subarray(st.n)).written;
     st.n += w;
+    if (fileId === this.lastFile && d.offset === this.lastOffset) this.sub++;
+    else {
+      this.sub = 0;
+      this.lastFile = fileId;
+      this.lastOffset = d.offset;
+    }
     writeRow(this.rowsOut, {
       at: d.at,
       offset: d.offset,
@@ -162,6 +173,7 @@ export class Builder {
       tool: this.str(d.tool),
       agent: this.str(d.agent),
       agentType: this.str(d.agentType),
+      sub: this.sub,
     });
     this.textChars += text.length;
   }
@@ -276,6 +288,9 @@ export class Builder {
     this.fcnt.fill(0);
     this.textChars = 0;
     this.since = 0;
+    this.lastFile = -1;
+    this.lastOffset = -1;
+    this.sub = 0;
     // Big token arrays shrink back after an unusually large flush (bounded RSS).
     if (this.tokTerm.a.length > 1 << 23) {
       this.tokTerm = new GrowU32(1 << 16);

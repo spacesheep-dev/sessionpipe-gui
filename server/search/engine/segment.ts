@@ -12,9 +12,10 @@
 //   dictIndex  per dict block: (termLen v, first term, dictOff v). The only dictionary in RAM.
 //   norms      N bytes of field code (field + 3 for a subagent) then N bytes of length code
 //              round(4·log2(1 + tokens)).
-//   docs       fixed 52-byte rows: at f64, offset f64, storeOff f64, storeLen u32,
+//   docs       fixed 56-byte rows: at f64, offset f64, storeOff f64, storeLen u32,
 //              fileOrd u32, seq f64 (−1 none), tool u32, agent u32, agentType u32 (string
-//              table index + 1, 0 none). Read with pread only for what is shown.
+//              table index + 1, 0 none), sub u32 (the n-th doc of one record). Read with
+//              pread only for what is shown.
 //   store      the docs' text, UTF-8, raw (one pread per snippet).
 //   docSess    u32 per doc: the local session ordinal.
 //   ats        u32 per doc: `at` in seconds (RAM: newest-first hits, transcript order).
@@ -31,7 +32,7 @@ import type { Facts } from "./facts.js";
 export const MAGIC = 0x32535053; // "SPS2"
 export const POST_BLOCK = 128;
 export const DICT_BLOCK = 32;
-export const ROW = 52;
+export const ROW = 56;
 
 export const S_POST = 0;
 export const S_POS = 1;
@@ -337,6 +338,8 @@ export interface DocRow {
   tool: number;
   agent: number;
   agentType: number;
+  /** The n-th doc emitted from one record (same file and offset). */
+  sub: number;
 }
 
 // Read pools: postings, positions, dict, rows/text. A caller never keeps a pooled view.
@@ -763,6 +766,7 @@ export function rowAt(r: Uint8Array, p: number): DocRow {
     tool: readU32(r, p + 40),
     agent: readU32(r, p + 44),
     agentType: readU32(r, p + 48),
+    sub: readU32(r, p + 52),
   };
 }
 
@@ -776,6 +780,7 @@ export function writeRow(o: Sink, x: DocRow): void {
   o.u32(x.tool);
   o.u32(x.agent);
   o.u32(x.agentType);
+  o.u32(x.sub);
 }
 
 function copy(b: Uint8Array): Uint8Array {
