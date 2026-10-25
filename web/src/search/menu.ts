@@ -16,7 +16,7 @@ import { sessionPath } from "../lib/router";
 import { pushToast } from "../lib/toasts";
 import { type OpenMode, openResult, resultLink } from "./open";
 import type { SearchClient } from "./types";
-import { harnessName, idWord } from "./words";
+import { harnessName, idWord, macWord } from "./words";
 
 /** A quiet confirmation that something reached the clipboard. */
 export function copied(what: string): void {
@@ -114,7 +114,12 @@ export function rowMenu(m: SessionMatch, ctx: RowMenuContext): MenuList {
     { sep: true },
     { label: "Find in this session…", run: () => ctx.find(m) },
     repo ? { label: `More from ${repo}`, run: () => withToken("repo", repo) } : null,
-    m.machine ? { label: `More from ${m.machine}`, run: () => withToken("machine", m.machine!) } : null,
+    // History from the server's own machine is "this Mac" (machine:this), as the row says.
+    m.machine
+      ? m.source === "history" && m.thisMachine
+        ? { label: `More from this ${macWord()}`, run: () => withToken("machine", "this") }
+        : { label: `More from ${m.machine}`, run: () => withToken("machine", m.machine!) }
+      : null,
     m.summary ? { sep: true } : null,
     m.summary ? labelMenu(ctx.store, [m.key]) : null,
   ];
@@ -137,7 +142,10 @@ export function snippetMenu(
 }
 
 export const menuTitle = (m: SessionMatch) => m.title;
-export const menuSubtitle = (m: SessionMatch) => [harnessName(m.harness), m.machine].filter(Boolean).join(" · ");
+export const menuSubtitle = (m: SessionMatch) =>
+  [harnessName(m.harness), m.source === "history" && m.thisMachine ? `this ${macWord()}` : m.machine]
+    .filter(Boolean)
+    .join(" · ");
 
 /** The history transcript's own page path, for its menu's "Copy link". */
 export const historyLink = (m: SessionMatch) => absoluteUrl(sessionPath(m.harness, m.id));

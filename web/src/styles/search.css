@@ -874,6 +874,15 @@
   .hx-find {
     height: 48px;
   }
+  .hx-find .search {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+  }
+  /* Over the tab bar, as the session's composer is. */
+  .hx-foot {
+    bottom: calc(var(--tabbar) + env(safe-area-inset-bottom));
+  }
   .hx-msg[data-field="prompt"] {
     max-width: 88%;
   }
