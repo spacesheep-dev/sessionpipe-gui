@@ -108,7 +108,11 @@ function IndexPopover({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const now = useNow("coarse");
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
+    ref.current?.focus();
+    const onClose = () => close.current();
     const down = (e: PointerEvent) => {
       const t = e.target as Node;
       if (ref.current?.contains(t) || anchor.current?.contains(t)) return;
@@ -123,12 +127,11 @@ function IndexPopover({
     };
     document.addEventListener("pointerdown", down, true);
     document.addEventListener("keydown", key, true);
-    ref.current?.focus();
     return () => {
       document.removeEventListener("pointerdown", down, true);
       document.removeEventListener("keydown", key, true);
     };
-  }, [onClose, anchor]);
+  }, [anchor]);
   const history = status.sources.filter((s) => s.source === "history");
   // What sessionpipe delivered is one row, whatever the harnesses.
   const piped = status.sources.filter((s) => s.source === "sessionpipe").reduce((n, s) => n + s.sessions, 0);

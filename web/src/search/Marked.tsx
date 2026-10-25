@@ -48,6 +48,31 @@ export function pieces(text: string, marks: readonly SearchMark[] = []): Piece[]
     for (let k = i + 1; k < j; k++) codeAt[k] = 1;
     i = j;
   }
+  // Emphasis reads as its words: the `**` / `*` of a closed pair go (snake_case and a
+  // lone `*` stay); a backtick a cut window left unpaired goes too.
+  for (const re of [/\*\*(?=\S)[^*\n]*?\S\*\*/g, /(?<![\w*])\*(?=[^\s*])[^*\n]*?[^\s*]\*(?![\w*])/g]) {
+    for (const m of text.matchAll(re)) {
+      const d = m[0].startsWith("**") ? 2 : 1;
+      const s0 = m.index;
+      const e0 = m.index + m[0].length;
+      if (codeAt[s0] || tick[s0]) continue;
+      for (let k = 0; k < d; k++) {
+        tick[s0 + k] = 1;
+        tick[e0 - d + k] = 1;
+        cuts.add(s0 + k);
+        cuts.add(s0 + k + 1);
+        cuts.add(e0 - d + k);
+        cuts.add(e0 - d + k + 1);
+      }
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    if (text[i] === "`" && !tick[i] && !codeAt[i]) {
+      tick[i] = 1;
+      cuts.add(i);
+      cuts.add(i + 1);
+    }
+  }
   const redAt = new Uint8Array(n + 1);
   for (const m of text.matchAll(REDACTED)) {
     cuts.add(m.index);

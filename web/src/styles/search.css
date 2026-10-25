@@ -99,6 +99,9 @@
 }
 .sx-opt-label {
   color: var(--fg);
+}
+/* A key is something typed: mono. A value is a name (Claude Code, build-box): the UI face. */
+.sx-complete[aria-label="Filters"] .sx-opt-label {
   font-family: var(--font-mono);
   font-size: calc(var(--text-sm) - 0.5px);
 }
@@ -161,6 +164,12 @@
   margin-left: -8px;
   overflow-x: auto;
   scrollbar-width: none;
+}
+/* Chips that run past the edge fade out under it rather than being cut (an edge with room
+   to spare fades nothing). */
+.sx-chips {
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  padding-right: 16px;
 }
 .sx-chips::-webkit-scrollbar {
   display: none;
@@ -911,4 +920,54 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: var(--lh);
+}
+
+/* Custom range: a popover under the chips; a sheet on a phone. */
+.sx-filters {
+  position: relative;
+}
+.sx-range {
+  position: absolute;
+  z-index: var(--z-pop);
+  top: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+  width: 340px;
+  padding: 12px;
+  border-radius: var(--radius-pop);
+  border: var(--hairline) solid var(--line);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-pop);
+  transform-origin: top left;
+  animation: sx-pop-in var(--dur-fast) var(--ease-out);
+}
+.sx-range-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+}
+.sx-range-field .field {
+  width: 100%;
+}
+.sx-range-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+@media (max-width: 839px) {
+  .sx-range {
+    position: fixed;
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    width: auto;
+    padding: 16px;
+    border-radius: var(--radius-sheet);
+  }
 }

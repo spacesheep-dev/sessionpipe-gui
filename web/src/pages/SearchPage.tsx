@@ -21,6 +21,7 @@ import { useShortcut } from "../lib/shortcuts";
 import { closeTab, parseSplit } from "../lib/split";
 import { useNow } from "../lib/time";
 import { markTyped, PAGE_SIZE, useFacets, useSearchClient, useSearchStatus, useSessionSearch } from "../search/client";
+import { DateRange, rangeLabel } from "../search/DateRange";
 import { type FieldHandle, SearchField } from "../search/Field";
 import { copyResume, type RowMenuContext } from "../search/menu";
 import { type OpenMode, openResult } from "../search/open";
@@ -122,7 +123,7 @@ export function Search() {
 
   const parsed = useMemo(() => parseSearch(q, { live: true }), [q]);
   const empty = isEmptySearch(parsed);
-  const res = useSessionSearch(client, q, sort);
+  const res = useSessionSearch(client, q, sort, status?.messages);
   const page = res.page;
   const facets = useFacets(client, status?.sessions);
   const sessions = page?.sessions ?? NONE;
@@ -130,6 +131,7 @@ export function Search() {
 
   // ----- the cursor -----
   const [cursor, setCursor] = useState(-1);
+  const [rangeOpen, setRangeOpen] = useState(false);
   const onRow = useRef<string | null>(null);
   const field = useRef<FieldHandle>(null);
   const listRef = useRef<HTMLOListElement>(null);
@@ -201,6 +203,25 @@ export function Search() {
     },
     [],
   );
+  // The phone: scrolling the list puts the keyboard away (iOS); the Search tab tapped
+  // again on this page goes to the top (the shell) and into the field.
+  useEffect(() => {
+    if (!phone) return;
+    const blur = () => {
+      const el = field.current?.input();
+      if (el && document.activeElement === el) el.blur();
+    };
+    window.addEventListener("touchmove", blur, { passive: true });
+    return () => window.removeEventListener("touchmove", blur);
+  }, [phone]);
+  useEffect(() => {
+    const on = (e: MouseEvent) => {
+      if ((e.target as HTMLElement | null)?.closest?.("a[data-nav='search']"))
+        requestAnimationFrame(() => field.current?.focus(true));
+    };
+    document.addEventListener("click", on);
+    return () => document.removeEventListener("click", on);
+  }, []);
 
   const listOn = sessions.length > 0;
   useShortcut("list.down", () => move(1), { enabled: listOn });
@@ -289,6 +310,9 @@ export function Search() {
   const labels = facets?.labels ?? [];
   const agentNow = filterValue(parsed, "agent");
   const since = filterValue(parsed, "since");
+  const until = filterValue(parsed, "until");
+  const range = rangeLabel(since, until);
+  const dateValue = range ? "range" : !since ? "" : DATE_PRESETS.some((d) => d.v === since) ? since : "other";
   const hasFilters = Object.keys(parsed.filters).length > 0 || Object.keys(parsed.notFilters).length > 0;
   const piped = status?.sources.some((s) => s.source === "sessionpipe") ?? false;
   const sourceNow = filterValue(parsed, "source");
@@ -336,15 +360,20 @@ export function Search() {
         />
       )}
       <ChipSelect
-        value={since && DATE_PRESETS.some((d) => d.v === since) ? since : (since ?? "")}
-        options={[
-          ...DATE_PRESETS.map((d) => d.v),
-          ...(since && !DATE_PRESETS.some((d) => d.v === since) ? [since] : []),
-        ]}
+        value={dateValue}
+        options={[...DATE_PRESETS.map((d) => d.v), ...(dateValue === "other" ? ["other"] : []), "range"]}
         all="Any time"
         label="Date"
-        optionLabel={(o) => DATE_PRESETS.find((d) => d.v === o)?.label ?? `Since ${o}`}
+        optionLabel={(o) =>
+          DATE_PRESETS.find((d) => d.v === o)?.label ??
+          (o === "range" ? (range ?? "Custom range…") : `Since ${since ?? ""}`)
+        }
         onChange={(v) => {
+          if (v === "range") {
+            setRangeOpen(true);
+            return;
+          }
+          if (v === "other") return;
           markTyped();
           setQuery(setFilter(setFilter(q, "until", null), "since", v || null));
         }}
@@ -467,9 +496,28 @@ export function Search() {
       <div className="sx-filters" data-empty={idle ? "" : undefined}>
         {/* The chips arrive together, with the facets, into a row already their height. */}
         <div className="sx-chips">{facets ? chips : null}</div>
+        {rangeOpen && (
+          <DateRange
+            since={since}
+            until={until}
+            onClose={() => setRangeOpen(false)}
+            onApply={(a, b) => {
+              markTyped();
+              setQuery(setFilter(setFilter(q, "since", a), "until", b));
+            }}
+          />
+        )}
         {!idle && page && (
           <span className="sx-resline num" aria-live="polite">
             {resultLine(page.total, page.more, page.ms)}
+            {res.newer && (
+              <>
+                {" · "}
+                <button type="button" className="sx-fix sx-newer" onClick={res.showNewer}>
+                  New matches
+                </button>
+              </>
+            )}
           </span>
         )}
       </div>

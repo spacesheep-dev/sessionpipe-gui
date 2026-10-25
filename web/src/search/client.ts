@@ -91,9 +91,27 @@ export interface SearchState {
   loadMore: () => void;
   retry: () => void;
   loadingMore: boolean;
+  /** The index grew and the same query now answers differently: the page offers
+   *  "New matches" instead of moving the rows under the person (UX §12). */
+  newer: boolean;
+  showNewer: () => void;
 }
 
-export function useSessionSearch(client: SearchClient | null, q: string, sort: SearchSort): SearchState {
+/** Whether two answers show the same rows (sessions, order, and how much each matched). */
+const sameRows = (a: SessionSearchPage, b: SessionSearchPage): boolean =>
+  a.sessions.length === b.sessions.length &&
+  a.sessions.every((s, i) => {
+    const t = b.sessions[i]!;
+    return s.key === t.key && s.moreHits + s.hits.length === t.moreHits + t.hits.length;
+  });
+
+export function useSessionSearch(
+  client: SearchClient | null,
+  q: string,
+  sort: SearchSort,
+  /** Changes when the index does (its message count): the shown answer is checked again. */
+  version = 0,
+): SearchState {
   const empty = isEmptySearch(parseSearch(q, { live: true }));
   const key = `${sort}\u0000${q}`;
   const [page, setPage] = useState<SessionSearchPage | null>(() => (empty ? null : (lru.get(key) ?? null)));
@@ -103,6 +121,7 @@ export function useSessionSearch(client: SearchClient | null, q: string, sort: S
   const [skeleton, setSkeleton] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [newer, setNewer] = useState<SessionSearchPage | null>(null);
   const shownOnce = useRef(page !== null);
   const seq = useRef(0);
   const ctl = useRef<AbortController | null>(null);
@@ -195,6 +214,31 @@ export function useSessionSearch(client: SearchClient | null, q: string, sort: S
       .finally(() => setLoadingMore(false));
   }, [client, page, pageKey, key, q, sort, loadingMore]);
 
+  // The index changed under a shown answer: ask again quietly, offer the difference.
+  const seenVersion = useRef(version);
+  useEffect(() => {
+    if (version === seenVersion.current) return;
+    seenVersion.current = version;
+    if (!client || !page || pageKey !== key || page.cursor) return;
+    const ac = new AbortController();
+    const base = page;
+    client
+      .sessions({ q, sort, live: true, limit: PAGE_SIZE, tz: tz(), hits: 3 }, ac.signal)
+      .then((p) => {
+        if (!sameRows(base, p)) setNewer(p);
+      })
+      .catch(() => {});
+    return () => ac.abort();
+  }, [version, client, page, pageKey, key, q, sort]);
+  // A new query forgets an offer made for the old one.
+  if (newer && newer.q !== q) setNewer(null);
+  const showNewer = useCallback(() => {
+    if (!newer) return;
+    remember(key, newer);
+    setPage(newer);
+    setNewer(null);
+  }, [newer, key]);
+
   const retry = useCallback(() => {
     lru.delete(key);
     setAttempt((n) => n + 1);
@@ -209,6 +253,8 @@ export function useSessionSearch(client: SearchClient | null, q: string, sort: S
     loadMore,
     retry,
     loadingMore,
+    newer: !!newer && newer.q === q,
+    showNewer,
   };
 }
 
