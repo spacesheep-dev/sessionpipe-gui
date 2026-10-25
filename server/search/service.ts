@@ -152,7 +152,8 @@ async function oracleEngine(): Promise<
 
 /** What sessionpipe calls this machine (Info.hostname). */
 export function thisHostname(): string {
-  return os.hostname().replace(/\.(local|lan|home)$/i, "");
+  // SPGUI_HOSTNAME names this machine in the search instead (demos and screenshots).
+  return (process.env.SPGUI_HOSTNAME?.trim() || os.hostname()).replace(/\.(local|lan|home)$/i, "");
 }
 
 /** `home` for sourceEnv: undefined for the real home, so the person's own CLAUDE_CONFIG_DIR,
