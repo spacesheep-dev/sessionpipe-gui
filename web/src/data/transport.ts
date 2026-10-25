@@ -13,8 +13,6 @@ import type {
   Labels,
   LabelsPatch,
   SearchIndexStatus,
-  SearchPage,
-  SearchQuery,
   SessionDetail,
   StreamMessage,
 } from "@shared/api";
@@ -34,8 +32,7 @@ export interface Transport {
   info(): Promise<Info>;
   session(harness: string, id: string, q: DetailQuery): Promise<SessionDetail>;
   feed(q: FeedQuery): Promise<FeedPage>;
-  /** The Review page: transcript search, files changed since a time, a day's digest. */
-  search(q: SearchQuery): Promise<SearchPage>;
+  /** The Review page: files changed since a time, a day's digest. */
   files(q: FilesQuery): Promise<FilesPage>;
   digest(q: DigestQuery): Promise<Digest>;
   forget(harness: string, id: string): Promise<void>;
@@ -182,7 +179,6 @@ export function createHttpTransport(): Transport {
       const qs = p.toString();
       return get<FeedPage>(`${ROUTES.ui.feed}${qs ? `?${qs}` : ""}`);
     },
-    search: (q) => get<SearchPage>(`${ROUTES.ui.search}?${params(q)}`),
     files: (q) => get<FilesPage>(`${ROUTES.ui.files}${params(q) ? `?${params(q)}` : ""}`),
     digest: (q) => get<Digest>(`${ROUTES.ui.digest}${params(q) ? `?${params(q)}` : ""}`),
     forget: (harness, id) => post<void>(`${ROUTES.ui.forget}/${enc(harness)}/${enc(id)}/forget`),

@@ -82,7 +82,6 @@ export function createMockTransport(): Transport {
       return latency(d, 120);
     },
     feed: (q) => latency(world.feed(q), 90),
-    search: (q) => latency(review(world).search(q), 120),
     files: (q) => latency(review(world).files(q), 90),
     digest: (q) => latency(review(world).digest(q), 90),
     forget: async (harness, id) => {
