@@ -274,7 +274,12 @@ function statusLine(s: SearchIndexStatus): string {
   }
 }
 
-const mb = (b: number): string => (b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(0, Math.round(b / 1e6))} MB`);
+const mb = (b: number): string =>
+  b >= 1e9
+    ? `${(b / 1e9).toFixed(1)} GB`
+    : b >= 1e6
+      ? `${Math.round(b / 1e6)} MB`
+      : `${Math.max(1, Math.round(b / 1e3))} KB`;
 
 interface Opened {
   reader: SearchReader;
