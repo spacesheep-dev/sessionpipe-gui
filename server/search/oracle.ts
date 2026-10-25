@@ -5,12 +5,12 @@
 // when the engine and the oracle disagree, the oracle is the one that reads like the spec.
 //
 // The rules it pins down where the spec leaves a choice (the engine must agree, or say so):
-//   tokens     runs of letters, digits, marks and `_`, cut into parts on `_`, a→B and HTTP→Server
-//              (never letter↔digit); a run over 200 code units or a part over 40 is dropped and
-//              takes no position; Han/Hiragana/Katakana/Hangul: one character per token; folded
-//              lowercase, NFKD with marks stripped when non-ASCII, ß → ss. A word of several parts
-//              also emits its joined parts (`getUserName`, `get_user_name` → `getusername`) at
-//              the first part's position.
+//   tokens     as the engine's tokenize.ts states them (re-implemented here independently, one
+//              UTF-16 unit at a time): runs of letters, digits (Nd), marks and `_`; parts cut at
+//              `_`, (lower|digit)→Upper and HTTP→Server, never letter→digit; a run over 200 units
+//              or a part over 40 takes no position; CJK one character per token; astral
+//              characters separate; folded NFKD without marks, lowercase, ß → ss. A word of 2+
+//              parts repeats itself whole (outer `_` trimmed) at its first part's position.
 //   word       one term: that term, or its plural variants (+s, +es, −s when > 3) at 0.6.
 //              Several terms: a phrase of the parts; a single identifier also matches its
 //              joined form as one term.
@@ -63,105 +63,101 @@ export interface OracleToken {
   whole?: boolean;
 }
 
-const WORD_RE = /[\p{L}\p{N}\p{M}_]+/gu;
-const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
-const UPPER_RE = /\p{Lu}/u;
-const LOWER_OR_DIGIT_RE = /[\p{Ll}\p{N}]/u;
-const LOWER_RE = /\p{Ll}/u;
-const MARK_RE = /\p{M}/gu;
+// One UTF-16 unit at a time (astral characters, emoji included, separate words).
+type Cls = "other" | "lower" | "upper" | "digit" | "letter" | "cjk" | "mark" | "under";
+const clsCache = new Map<number, Cls>();
+function cls(code: number): Cls {
+  const hit = clsCache.get(code);
+  if (hit) return hit;
+  let k: Cls = "other";
+  if (code === 95) k = "under";
+  else if (code >= 0xd800 && code <= 0xdfff) k = "other";
+  else {
+    const ch = String.fromCharCode(code);
+    if (
+      /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(ch) &&
+      /[\p{L}\p{Nd}\p{M}]/u.test(ch)
+    )
+      k = "cjk";
+    else if (/[\p{Lu}\p{Lt}]/u.test(ch)) k = "upper";
+    else if (/\p{Ll}/u.test(ch)) k = "lower";
+    else if (/\p{Nd}/u.test(ch)) k = "digit";
+    else if (/\p{L}/u.test(ch)) k = "letter";
+    else if (/\p{M}/u.test(ch)) k = "mark";
+  }
+  clsCache.set(code, k);
+  return k;
+}
 const RUN_MAX = 200;
 const PART_MAX = 40;
 
-/** Folds one part: lowercase; when non-ASCII, NFKD without marks and ß → ss. */
+/** Folds one term: when non-ASCII, NFKD without marks, then lowercase, ß → ss. */
 export function foldTerm(s: string): string {
-  let t = s.toLowerCase();
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: ASCII range test
-  if (/[^\x00-\x7f]/.test(t)) t = t.normalize("NFKD").replace(MARK_RE, "").replace(/ß/g, "ss");
-  return t;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: an ASCII range test
+  if (!/[^\x00-\x7f]/.test(s)) return s.toLowerCase();
+  return s.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/ß/g, "ss");
 }
 
-/** Splits one non-CJK word (`[\p{L}\p{N}\p{M}_]+`) into [start, end) parts of `text`. */
-function partsOf(text: string, start: number, end: number): [number, number][] {
-  const out: [number, number][] = [];
-  let ps = -1;
-  const chars: { i: number; c: string }[] = [];
-  for (let i = start; i < end; ) {
-    const cp = text.codePointAt(i)!;
-    const c = String.fromCodePoint(cp);
-    chars.push({ i, c });
-    i += c.length;
-  }
-  const flush = (e: number): void => {
-    if (ps >= 0 && e > ps) out.push([ps, e]);
-    ps = -1;
-  };
-  for (let k = 0; k < chars.length; k++) {
-    const { i, c } = chars[k]!;
-    if (c === "_") {
-      flush(i);
-      continue;
-    }
-    if (ps < 0) {
-      ps = i;
-      continue;
-    }
-    if (UPPER_RE.test(c)) {
-      // a→B: the previous base char is lower or a digit.
-      let j = k - 1;
-      while (j >= 0 && /\p{M}/u.test(chars[j]!.c)) j--;
-      const prev = j >= 0 ? chars[j]!.c : "";
-      if (prev && LOWER_OR_DIGIT_RE.test(prev)) {
-        flush(i);
-        ps = i;
-        continue;
-      }
-      // HTTP|Server: upper, then upper followed by lower.
-      const next = chars[k + 1]?.c ?? "";
-      if (prev && UPPER_RE.test(prev) && next && LOWER_RE.test(next)) {
-        flush(i);
-        ps = i;
-      }
-    }
-  }
-  flush(end);
-  return out;
-}
-
-/** The reference tokenizer (arch-engine.md §4 as the oracle reads it). */
+/** The reference tokenizer (arch-engine.md §4, as the engine's tokenize.ts reads it):
+ *  a word is a run of letters, digits (Nd), marks and `_` that does not start with a mark;
+ *  CJK characters are one token each; parts cut at `_`, (lower|digit)→Upper and
+ *  Upper→Upper+lower; a part over 40 or a run over 200 units takes no position; a word of
+ *  2+ emitted parts repeats itself whole (outer `_` trimmed, inner kept) at its first
+ *  part's position when that is ≤ 40 units. */
 export function oracleTokens(text: string): OracleToken[] {
   const out: OracleToken[] = [];
   let pos = 0;
-  WORD_RE.lastIndex = 0;
-  for (let m = WORD_RE.exec(text); m; m = WORD_RE.exec(text)) {
-    const runStart = m.index;
-    const run = m[0];
-    // Split the run on CJK characters: each is a token; the rest are words.
-    let ws = -1;
-    const word = (s: number, e: number): void => {
-      if (e - s > RUN_MAX) return;
-      const parts = partsOf(text, s, e)
-        .map(([a, b]) => ({ a, b, t: foldTerm(text.slice(a, b)) }))
-        .filter((p) => p.t.length > 0 && p.b - p.a <= PART_MAX);
-      if (!parts.length) return;
-      const first = pos;
-      for (const p of parts) out.push({ term: p.t, pos: pos++, start: p.a, end: p.b });
-      if (parts.length > 1) {
-        const whole = parts.map((p) => p.t).join("");
-        if (whole.length <= PART_MAX)
-          out.push({ term: whole, pos: first, start: parts[0]!.a, end: parts[parts.length - 1]!.b, whole: true });
-      }
-    };
-    for (let i = 0; i < run.length; ) {
-      const cp = run.codePointAt(i)!;
-      const c = String.fromCodePoint(cp);
-      if (CJK_RE.test(c)) {
-        if (ws >= 0) word(runStart + ws, runStart + i);
-        ws = -1;
-        out.push({ term: c, pos: pos++, start: runStart + i, end: runStart + i + c.length });
-      } else if (ws < 0) ws = i;
-      i += c.length;
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const k = cls(text.charCodeAt(i));
+    if (k === "other" || k === "mark") {
+      i++;
+      continue;
     }
-    if (ws >= 0) word(runStart + ws, runStart + run.length);
+    if (k === "cjk") {
+      out.push({ term: foldTerm(text[i]!), pos: pos++, start: i, end: i + 1 });
+      i++;
+      continue;
+    }
+    const start = i;
+    while (i < n) {
+      const c = cls(text.charCodeAt(i));
+      if (c === "other" || c === "cjk") break;
+      i++;
+    }
+    const end = i;
+    if (end - start > RUN_MAX) continue;
+    // Cut points.
+    const parts: [number, number][] = [];
+    let ps = start;
+    for (let j = start; j <= end; j++) {
+      const c = j < end ? cls(text.charCodeAt(j)) : "other";
+      let cut = j === end || c === "under";
+      if (!cut && j > ps && c === "upper") {
+        const prev = cls(text.charCodeAt(j - 1));
+        if (prev === "lower" || prev === "digit") cut = true;
+        else if (prev === "upper" && j + 1 < end && cls(text.charCodeAt(j + 1)) === "lower") cut = true;
+      }
+      if (!cut) continue;
+      if (j > ps) parts.push([ps, j]);
+      ps = c === "under" ? j + 1 : j;
+    }
+    const first = pos;
+    let emitted = 0;
+    for (const [a, b] of parts) {
+      if (b - a > PART_MAX) continue;
+      out.push({ term: foldTerm(text.slice(a, b)), pos: pos++, start: a, end: b });
+      emitted++;
+    }
+    if (emitted > 1) {
+      let ws = start;
+      while (ws < end && text.charCodeAt(ws) === 95) ws++;
+      let we = end;
+      while (we > ws && text.charCodeAt(we - 1) === 95) we--;
+      if (we - ws <= PART_MAX)
+        out.push({ term: foldTerm(text.slice(ws, we)), pos: first, start: ws, end: we, whole: true });
+    }
   }
   return out;
 }

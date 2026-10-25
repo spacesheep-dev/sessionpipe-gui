@@ -50,7 +50,8 @@ const keys = (r: { matches: { session: { key: string } }[] }): string[] => r.mat
 describe("oracle tokenizer", () => {
   it("splits identifiers, keeps digits, joins the whole", () => {
     expect(terms("getUserName")).toEqual(["get", "user", "name", "=getusername"]);
-    expect(terms("get_user_name")).toEqual(["get", "user", "name", "=getusername"]);
+    expect(terms("get_user_name")).toEqual(["get", "user", "name", "=get_user_name"]);
+    expect(terms("base64Encode ship🚀it")).toEqual(["base64", "encode", "=base64encode", "ship", "it"]);
     expect(terms("HTTPServer sha256 utf8 v8")).toEqual(["http", "server", "=httpserver", "sha256", "utf8", "v8"]);
     expect(terms("_private")).toEqual(["private"]);
     expect(terms("src/store/review.ts")).toEqual(["src", "store", "review", "ts"]);
@@ -63,7 +64,8 @@ describe("oracle tokenizer", () => {
   });
   it("one CJK character per token, at consecutive positions", () => {
     const t = oracleTokens("検索インデックス ok");
-    expect(t.map((x) => x.term)).toEqual(["検", "索", "イ", "ン", "デ", "ッ", "ク", "ス", "ok"]);
+    // As the engine folds today: NFKD drops the dakuten (デ → テ); asked of the engine to keep kana marks.
+    expect(t.map((x) => x.term)).toEqual(["検", "索", "イ", "ン", "テ", "ッ", "ク", "ス", "ok"]);
     expect(t.map((x) => x.pos)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
   });
   it("drops long runs and long parts", () => {
@@ -72,7 +74,7 @@ describe("oracle tokenizer", () => {
   });
   it("offsets point into the original text", () => {
     const s = "Fix the Größe bug in getUserName";
-    for (const t of oracleTokens(s)) expect(foldTerm(s.slice(t.start, t.end)).replace(/_/g, "")).toBe(t.term);
+    for (const t of oracleTokens(s)) expect(foldTerm(s.slice(t.start, t.end))).toBe(t.term);
   });
 });
 
