@@ -750,7 +750,7 @@ export function generate(opts) {
     sessions: out.sessions,
     messages: out.messages,
     textBytes: out.textBytes,
-    secrets: Object.values(secrets),
+    secrets: o.profile === "demo" ? [] : Object.values(secrets),
     needles: needles.list(),
   };
   writeFileSync(path.join(o.out, "manifest.json"), `${JSON.stringify(manifest, null, 1)}\n`);
