@@ -9,7 +9,8 @@
 //              UTF-16 unit at a time): runs of letters, digits (Nd), marks and `_`; parts cut at
 //              `_`, (lower|digit)→Upper and HTTP→Server, never letter→digit; a run over 200 units
 //              or a part over 40 takes no position; CJK one character per token; astral
-//              characters separate; folded NFKD without marks, lowercase, ß → ss. A word of 2+
+//              characters separate; folded NFKD without marks, lowercase, ß → ss (a CJK
+//              character: NFKC, so kana keep their voicing and Hangul stays whole). A word of 2+
 //              parts repeats itself whole (outer `_` trimmed) at its first part's position.
 //   word       one term: that term, or its plural variants (+s, +es, −s when > 3) at 0.6.
 //              Several terms: a phrase of the parts; a single identifier also matches its
@@ -116,7 +117,8 @@ export function oracleTokens(text: string): OracleToken[] {
       continue;
     }
     if (k === "cjk") {
-      out.push({ term: foldTerm(text[i]!), pos: pos++, start: i, end: i + 1 });
+      // NFKC only: stripping marks after NFKD would turn デ into テ and split Hangul into jamo.
+      out.push({ term: text[i]!.normalize("NFKC").toLowerCase(), pos: pos++, start: i, end: i + 1 });
       i++;
       continue;
     }

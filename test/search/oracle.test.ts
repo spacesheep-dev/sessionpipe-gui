@@ -64,8 +64,9 @@ describe("oracle tokenizer", () => {
   });
   it("one CJK character per token, at consecutive positions", () => {
     const t = oracleTokens("検索インデックス ok");
-    // As the engine folds today: NFKD drops the dakuten (デ → テ); asked of the engine to keep kana marks.
-    expect(t.map((x) => x.term)).toEqual(["検", "索", "イ", "ン", "テ", "ッ", "ク", "ス", "ok"]);
+    // Kana keep their voicing (デ stays デ) and Hangul syllables stay whole.
+    expect(t.map((x) => x.term)).toEqual(["検", "索", "イ", "ン", "デ", "ッ", "ク", "ス", "ok"]);
+    expect(oracleTokens("한국어").map((x) => x.term)).toEqual(["한", "국", "어"]);
     expect(t.map((x) => x.pos)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
   });
   it("drops long runs and long parts", () => {

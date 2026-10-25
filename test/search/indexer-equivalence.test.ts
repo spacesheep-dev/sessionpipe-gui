@@ -164,13 +164,8 @@ describe.skipIf(!haveEngine())("runIndexer + reader = oracle through changes", (
       // one file rewritten shorter, in place (same inode)
       const shrink = files[(round * 13 + 3) % files.length]!;
       const lines = readFileSync(shrink, "utf8").split("\n").filter(Boolean);
-      // (title records stay: the engine does not retract facts a re-read file no longer holds
-      // today; see perf/notes.md)
-      const titles = lines.filter((l) => l.includes('"type":"ai-title"') || l.includes('"type":"custom-title"'));
-      writeFileSync(
-        shrink,
-        `${[...lines.slice(0, Math.max(1, Math.floor(lines.length / 2))), ...titles].join("\n")}\n`,
-      );
+      // (its title records may go with the cut half: the facts must follow the file)
+      writeFileSync(shrink, `${lines.slice(0, Math.max(1, Math.floor(lines.length / 2))).join("\n")}\n`);
       // one file replaced by a new inode with the same name and a changed head
       const repl = files[(round * 17 + 5) % files.length]!;
       const body = readFileSync(repl, "utf8").split("\n").filter(Boolean);
@@ -181,7 +176,7 @@ describe.skipIf(!haveEngine())("runIndexer + reader = oracle through changes", (
       renameSync(`${repl}.new`, repl);
       // one file deleted (skip the shrink and replace targets)
       const del = files.find((f, i) => i % 11 === round && f !== shrink && f !== repl && statSync(f).size > 0);
-      if (del && !process.env.SPGUI_EQ_NODELETE) {
+      if (del) {
         rmSync(del);
         files.splice(files.indexOf(del), 1);
       }
