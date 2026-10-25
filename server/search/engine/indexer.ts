@@ -57,6 +57,8 @@ const FIRST_COMMIT_MS = 900;
 const FLUSH_CHARS = 24 << 20;
 const FLUSH_CHARS_INPROC = 4 << 20;
 const FLUSH_MS = 8_000;
+/** A pass reading less than this skips the early commit (it ends within about a second). */
+const SMALL_PASS = 16 << 20;
 const HOT_MS = 15 * 60_000;
 const TICK_MS = 1_000;
 const SWEEP_MS = 30_000;
@@ -191,6 +193,7 @@ export class Indexer {
   private firstCommitDone = false;
   private lastFlush = 0;
   private lastYield = performance.now();
+  private passSmall = false;
   /** Reads with docs in the builder ahead of their entry (see readFile). */
   private busy = 0;
   private readonly inProcess: boolean;
@@ -458,6 +461,8 @@ export class Indexer {
       total += Math.max(0, k.file.size - from);
     }
     this.setStatus({ phase: plan.length ? "building" : "idle", doneBytes: 0, totalBytes: total });
+    // a pass that reads little ends about as soon as an early commit would land: skip it
+    this.passSmall = total < SMALL_PASS;
     // One file at a time, newest first: the order the sources' zstd batcher prefetches in
     // (two readers at once measured slower: the batcher stops batching).
     let done = 0;
@@ -714,7 +719,8 @@ export class Indexer {
     const limit = this.inProcess ? FLUSH_CHARS_INPROC : FLUSH_CHARS;
     for (const w of this.writers.values()) {
       const chars = w.builder.textChars;
-      const firstDue = !this.firstCommitDone && now - this.passStart >= FIRST_COMMIT_MS && !w.builder.empty;
+      const firstDue =
+        !this.firstCommitDone && !this.passSmall && now - this.passStart >= FIRST_COMMIT_MS && !w.builder.empty;
       const sizeDue = chars >= limit;
       const timeDue = !w.builder.empty && now - this.lastFlush >= FLUSH_MS && now - this.passStart >= FLUSH_MS;
       if (firstDue || sizeDue || timeDue) {
