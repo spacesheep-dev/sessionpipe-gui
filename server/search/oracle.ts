@@ -648,18 +648,18 @@ export class OracleReader implements SearchReader {
       const n = df.get(t) ?? 0;
       return Math.log(1 + (N - n + 0.5) / (n + 0.5));
     };
+    // The idf of a slot is the highest over its terms that exist (a variant nobody wrote
+    // must not lend its df-0 idf to the ones that did; the engine reads it the same way).
+    // A slot no doc has (a title-only word) still weighs: it takes the df-0 idf.
+    const slotIdf = (sl: Set<string>): number => {
+      let m = -1;
+      for (const t of sl) if ((df.get(t) ?? 0) > 0) m = Math.max(m, idf(t));
+      return m < 0 ? idf("\u0000") : m;
+    };
     const atomIdf = (a: Atom): number => {
-      if (a.slots.length === 1) {
-        let m = 0;
-        for (const t of a.slots[0]!) m = Math.max(m, idf(t));
-        return m;
-      }
+      if (a.slots.length === 1) return slotIdf(a.slots[0]!);
       let s = 0;
-      for (const sl of a.slots) {
-        let m = 0;
-        for (const t of sl) m = Math.max(m, idf(t));
-        s += m;
-      }
+      for (const sl of a.slots) s += slotIdf(sl);
       return 0.7 * s;
     };
     const bm25 = (tf: number, idfv: number, len: number, f: SearchDocField | "title", mult: number): number => {
