@@ -309,33 +309,55 @@ function cut(
 }
 
 /** The ~1,800-char region of a long text holding the most distinct needles. */
+/** One case-insensitive regex over a query's needles (the short ones only when nothing longer
+ *  exists: a 1–2 letter needle hits inside every word and says nothing about where to look). */
+const NEEDLE_RE = new WeakMap<Matcher, { re: RegExp; index: Map<string, number> } | null>();
+function needleRe(m: Matcher): { re: RegExp; index: Map<string, number> } | null {
+  const hit = NEEDLE_RE.get(m);
+  if (hit !== undefined) return hit;
+  const all = [...new Set(m.needles.filter(Boolean))];
+  const long = all.filter((n) => n.length >= 3);
+  const use = (long.length ? long : all).sort((x, y) => y.length - x.length).slice(0, 24);
+  const out = use.length
+    ? {
+        re: new RegExp(use.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "gi"),
+        index: new Map(use.map((n, i) => [n, i])),
+      }
+    : null;
+  NEEDLE_RE.set(m, out);
+  return out;
+}
+
+const REGION = 900;
+
+/** The region of a long text holding the most distinct needles (no lowercased copy made). */
 function region(text: string, m: Matcher): [number, number] {
-  const low = text.toLowerCase();
-  const hits: [number, number][] = [];
-  m.needles.forEach((nd, i) => {
-    if (!nd) return;
-    let from = 0;
-    for (let k = 0; k < 16; k++) {
-      const at = low.indexOf(nd, from);
-      if (at < 0) break;
-      hits.push([at, i]);
-      from = at + nd.length;
-    }
-  });
-  if (!hits.length) return [0, Math.min(text.length, LONG)];
-  hits.sort((x, y) => x[0] - y[0]);
-  const W = 1800;
-  let best = hits[0]![0];
+  const nr = needleRe(m);
+  if (!nr) return [0, Math.min(text.length, LONG)];
+  const re = nr.re;
+  re.lastIndex = 0;
+  const at: number[] = [];
+  const which: number[] = [];
+  for (let k = 0; k < 64; k++) {
+    const x = re.exec(text);
+    if (!x) break;
+    at.push(x.index);
+    which.push(nr.index.get(x[0].toLowerCase()) ?? 0);
+    if (x[0].length === 0) re.lastIndex++;
+  }
+  if (!at.length) return [0, Math.min(text.length, LONG)];
+  let best = at[0]!;
   let bestN = -1;
-  for (let i = 0, j = 0; i < hits.length; i++) {
-    while (hits[i]![0] - hits[j]![0] > W) j++;
-    const seen = new Set<number>();
-    for (let k = j; k <= i; k++) seen.add(hits[k]![1]);
-    if (seen.size > bestN) {
-      bestN = seen.size;
-      best = hits[j]![0];
+  for (let i = 0, j = 0; i < at.length; i++) {
+    while (at[i]! - at[j]! > REGION) j++;
+    let mask = 0;
+    for (let k = j; k <= i; k++) mask |= 1 << (which[k]! & 31);
+    const n = popcount(mask);
+    if (n > bestN) {
+      bestN = n;
+      best = at[j]!;
     }
   }
-  const a = Math.max(0, best - 300);
-  return [a, Math.min(text.length, a + W + 300)];
+  const a = Math.max(0, best - 200);
+  return [a, Math.min(text.length, a + REGION + 400)];
 }

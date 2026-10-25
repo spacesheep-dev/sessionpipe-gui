@@ -83,7 +83,9 @@ describe("Reader vs brute force", () => {
       const b = many.search(q(text));
       expect(b.matches.map((m) => m.session.key)).toEqual(a.matches.map((m) => m.session.key));
       // equal up to the recency's drift between the two calls (and the 3-decimal rounding)
-      b.matches.forEach((m, i) => expect(Math.abs(m.score - a.matches[i]!.score)).toBeLessThanOrEqual(0.0011));
+      b.matches.forEach((m, i) => {
+        expect(Math.abs(m.score - a.matches[i]!.score)).toBeLessThanOrEqual(0.0011);
+      });
     }
   });
 
