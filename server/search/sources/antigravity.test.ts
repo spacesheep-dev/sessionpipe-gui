@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: search sources.
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TITLE_RANK } from "../types.js";
@@ -72,6 +73,43 @@ describe("antigravity", () => {
 });
 
 describe("gemini cli", () => {
+  it("older logs.json (prompts only) is read where a project has no chats", async () => {
+    const dir = path.join(fx.home, ".gemini/tmp/old-proj");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, ".project_root"), "/Users/dev/old\n");
+    writeFileSync(
+      path.join(dir, "logs.json"),
+      JSON.stringify([
+        {
+          sessionId: "s-old",
+          messageId: 0,
+          type: "user",
+          message: "migrate the cron to systemd timers",
+          timestamp: "2025-05-01T10:00:00Z",
+        },
+        { sessionId: "s-old", messageId: 1, type: "user", message: "/quit", timestamp: "2025-05-01T10:05:00Z" },
+      ]),
+    );
+    const sink = new Collect();
+    await readAll(geminiAdapter(), testEnv(fx.home, fx.state), sink);
+    expect(sink.docs.filter((d) => d.key === "gemini-cli:s-old").map((d) => [d.offset, d.text])).toEqual([
+      [0, "migrate the cron to systemd timers"],
+      [1, "/quit"],
+    ]);
+    expect(sink.folded("gemini-cli:s-old")).toMatchObject({
+      cwd: "/Users/dev/old",
+      title: { text: "migrate the cron to systemd timers" },
+    });
+    // A project with chats/ never reads its logs.json (the chats hold the same prompts).
+    writeFileSync(
+      path.join(fx.home, ".gemini/tmp/acme-cli/logs.json"),
+      JSON.stringify([{ sessionId: "dup", type: "user", message: "x" }]),
+    );
+    const again = new Collect();
+    await readAll(geminiAdapter(), testEnv(fx.home, fx.state), again);
+    expect(again.keys()).not.toContain("gemini-cli:dup");
+  });
+
   it("reads the .jsonl and the older whole .json chats", async () => {
     const sink = new Collect();
     const r = await readAll(geminiAdapter(), testEnv(fx.home, fx.state), sink);

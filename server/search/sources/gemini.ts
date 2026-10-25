@@ -69,7 +69,16 @@ export function geminiAdapter(): SourceAdapter {
         if (!slug.isDirectory()) continue;
         const chats = path.join(tmp, slug.name, "chats");
         const names = list(chats);
-        if (!names.length) continue;
+        if (!names.length) {
+          // Before chat recording, Gemini CLI kept only the person's prompts in logs.json.
+          const logs = path.join(tmp, slug.name, "logs.json");
+          try {
+            const st = statSync(logs);
+            if (st.isFile())
+              out.push({ path: logs, adapter: "gemini", kind: "whole", size: st.size, mtimeMs: st.mtimeMs });
+          } catch {}
+          continue;
+        }
         roots.push(chats);
         for (const e of names) {
           if (!e.isFile() || !CHAT.test(e.name)) continue;
@@ -91,6 +100,7 @@ export function geminiAdapter(): SourceAdapter {
     },
 
     async read(file: SourceFile, from: ReadCursor, sink: DocSink, opts: ReadOptions = {}): Promise<ReadResult> {
+      if (path.basename(file.path) === "logs.json") return readLogs(file, sink);
       const st = (file.kind === "append" && obj(from.state) ? { ...(from.state as Obj) } : {}) as {
         [k: string]: AdapterState;
       };
@@ -189,4 +199,41 @@ export function geminiAdapter(): SourceAdapter {
       return { offset, state: st, ...(bad ? { bad } : {}) };
     },
   };
+}
+
+/** Older Gemini CLI's `tmp/<project>/logs.json`: `[{sessionId, messageId, type: "user",
+ *  message, timestamp}]`, the person's prompts only (no replies were kept there). */
+function readLogs(file: SourceFile, sink: DocSink): ReadResult {
+  let list: unknown;
+  try {
+    list = JSON.parse(readFileSync(file.path, "utf8"));
+  } catch {
+    return { offset: 0, bad: 1 };
+  }
+  if (!Array.isArray(list)) return { offset: 0, bad: 1 };
+  const facts = new Map<string, SessionFacts>();
+  const root = projectRoot(path.join(path.dirname(file.path), "chats", "x"));
+  list.forEach((e, i) => {
+    const o = obj(e);
+    const sid = str(o?.sessionId);
+    if (!o || !sid || o.type !== "user") return;
+    const key = sessionKey(HARNESS, sid);
+    const t = ms(o.timestamp);
+    const text = finish(cleanPromptBlock(str(o.message)).text);
+    let f = facts.get(key);
+    if (!f) {
+      f = { key, harness: HARNESS, id: sid, path: file.path };
+      if (root) f.cwd = root;
+      facts.set(key, f);
+    }
+    if (t) {
+      if (!f.firstAt || t < f.firstAt) f.firstAt = t;
+      if (!f.lastAt || t > f.lastAt) f.lastAt = t;
+    }
+    if (!text) return;
+    sink.doc({ key, field: "prompt", at: t, text, offset: i });
+    if (!f.title) f.title = { text: finish(firstAskTitle(text), 200), rank: TITLE_RANK.firstAsk };
+  });
+  for (const f of facts.values()) sink.facts(f);
+  return { offset: list.length };
 }
