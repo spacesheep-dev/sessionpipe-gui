@@ -38,7 +38,7 @@ import type { LabelStore } from "../ui/labels.js";
 import { computeFacets } from "./facets.js";
 import { compileFilters, machineKey } from "./filters.js";
 import { decideHint } from "./hints.js";
-import { resumeLine } from "./resume.js";
+import { fallbackResume, resumeLine } from "./resume.js";
 import {
   type EngineHit,
   type EngineMatch,
@@ -88,19 +88,19 @@ export interface SearchBackend {
   sourceEnv(opts: { home?: string; stateDir: string; hostname: string }): SourceEnv;
   /** Never fork the indexer (the oracle: a child would have nothing to run). */
   inProcessOnly?: boolean;
+  /** An in-process indexer that takes the child's messages (hints, commit, forget, …). */
+  startIndexer?(o: IndexerOptions): { send(m: ToIndexer): void; done: Promise<void> };
 }
 
 /** The engine and the sources, imported on first use (they stay out of the boot path of
  *  anything that never searches). `SPGUI_SEARCH_ENGINE=oracle` (or an engine that does not
  *  load) uses perf's brute-force oracle instead: everything in memory, for small demo homes. */
 export async function loadBackend(): Promise<SearchBackend> {
-  // M2 makes the engine's specifier literal (bundled); until it lands it resolves at runtime.
-  const enginePath = "./engine/index.js";
   const sources = await import("./sources/index.js");
-  let engine: Pick<SearchBackend, "openReader" | "runIndexer" | "removeIndex" | "inProcessOnly">;
+  let engine: Pick<SearchBackend, "openReader" | "runIndexer" | "removeIndex" | "inProcessOnly" | "startIndexer">;
   try {
     if (process.env.SPGUI_SEARCH_ENGINE === "oracle") throw new Error("SPGUI_SEARCH_ENGINE=oracle");
-    engine = (await import(enginePath)) as typeof engine;
+    engine = await import("./engine/index.js");
   } catch (e) {
     process.stderr.write(`[sessionpipe-gui] search: using the in-memory oracle (${(e as Error).message})\n`);
     engine = await oracleEngine();
@@ -110,6 +110,7 @@ export async function loadBackend(): Promise<SearchBackend> {
     runIndexer: engine.runIndexer,
     removeIndex: engine.removeIndex,
     inProcessOnly: engine.inProcessOnly,
+    startIndexer: engine.startIndexer ? (o) => engine.startIndexer!(o) : undefined,
     historyAdapters: sources.historyAdapters,
     eventsAdapter: sources.eventsAdapter,
     eventsPath: sources.eventsPath,
@@ -255,7 +256,7 @@ export function shapeMatch(m: EngineMatch, viewer: Viewer, ctx: QueryContext): S
   const branch = s.branch ?? summary?.branch;
   if (branch) out.branch = branch;
   if (summary) out.summary = summary;
-  const resume = resumeLine(s.resume, ctx.home);
+  const resume = resumeLine(s.resume ?? fallbackResume(s.harness, s.id, cwd), ctx.home);
   if (resume) out.resume = resume;
   if (viewer.local && s.path) out.transcriptPath = s.path;
   if (s.forkOf) out.forkOf = s.forkOf;
@@ -572,6 +573,8 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
       deps.stateDir,
       ...(synthetic ? ["--search-home", synthetic] : []),
       ...(deps.history() ? [] : ["--no-history"]),
+      "--hostname",
+      deps.hostname,
     ];
   };
 
@@ -640,6 +643,39 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
    *  no hints; it finds changes by its own 1 s hot set and 30 s sweep. */
   const startInProcess = (rebuild = false): IndexerHandle | null => {
     if (!backend || !env) return null;
+    if (backend.startIndexer) {
+      const ix = backend.startIndexer({
+        dir,
+        env,
+        adapters: allAdapters(),
+        history: deps.history(),
+        rebuild,
+        mode: "watch",
+        onStatus: (status) => onIndexerMessage({ t: "status", status }),
+        onCommit: (source, gen) => onIndexerMessage({ t: "committed", source, gen }),
+      });
+      let done = false;
+      const finished = ix.done
+        .catch((e: Error) => {
+          if (!closed) onIndexerMessage({ t: "error", message: e.message });
+        })
+        .then(() => {
+          done = true;
+          if (indexer === h) indexer = null;
+          if (!closed) scheduleRespawn(30_000);
+        });
+      const h: IndexerHandle = {
+        kind: "inproc",
+        send: (m) => {
+          if (!done) ix.send(m);
+        },
+        stop: async () => {
+          if (!done) ix.send({ t: "stop" });
+          await finished;
+        },
+      };
+      return h;
+    }
     const ac = new AbortController();
     const b = backend;
     const e = env;

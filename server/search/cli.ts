@@ -458,9 +458,8 @@ async function indexForeground(io: CliIo, rebuild: boolean, opened?: Opened): Pr
 /** `sessionpipe-gui index …`. `--ipc`: the server's indexer child (engine.indexerChildMain). */
 export async function runIndexCli(argv: string[], io: CliIo): Promise<number> {
   if (argv.includes("--ipc")) {
-    const enginePath = "./engine/index.js";
-    const engine = (await import(enginePath)) as { indexerChildMain(argv: string[]): Promise<void> };
-    await engine.indexerChildMain(argv);
+    const { indexerChildMain } = await import("./engine/index.js");
+    await indexerChildMain(argv);
     return 0;
   }
   let rebuild = false;

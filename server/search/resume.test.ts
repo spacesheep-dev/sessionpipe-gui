@@ -2,7 +2,7 @@
 // Owned by: search-service.
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { homePath, resumeLine, shQuote } from "./resume.js";
+import { fallbackResume, homePath, resumeLine, shQuote } from "./resume.js";
 
 describe("resumeLine", () => {
   it("writes Claude's line with the folder single-quoted", () => {
@@ -61,5 +61,17 @@ describe("quoting helpers", () => {
     expect(homePath("/Users/demo", "/Users/demo")).toBe("~");
     expect(homePath("/Users/demo/a b", "/Users/demo")).toBe("~/'a b'");
     expect(homePath("/elsewhere", "/Users/demo")).toBe("/elsewhere");
+  });
+});
+
+describe("fallbackResume", () => {
+  it("builds the verified commands for a session sessionpipe delivered", () => {
+    expect(resumeLine(fallbackResume("claude-code", "8c13-29", "~/my proj"))).toBe(
+      "cd ~/'my proj' && claude --resume 8c13-29",
+    );
+    expect(resumeLine(fallbackResume("codex", "7c1e"))).toBe("codex resume 7c1e");
+    expect(fallbackResume("antigravity", "x")).toBeUndefined();
+    expect(fallbackResume("gemini-cli", "x")).toBeUndefined();
+    expect(fallbackResume("claude-code", "a;rm -rf /")).toBeUndefined();
   });
 });

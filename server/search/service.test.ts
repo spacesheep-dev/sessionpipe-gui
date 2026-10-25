@@ -534,7 +534,7 @@ process.on("message", (m) => {
 
   it("forks `index --ipc --state … --search-home …` at nice 10 and runs no indexer in-process", async () => {
     expect(await until(() => lines().some((l) => "nice" in l))).toBe(true);
-    expect(lines()[0]!.argv).toEqual(["index", "--ipc", "--state", tmp.dir, "--search-home", HOME]);
+    expect(lines()[0]!.argv).toEqual(["index", "--ipc", "--state", tmp.dir, "--search-home", HOME, "--hostname", HOST]);
     expect(lines().find((l) => "nice" in l)!.nice).toBe(10);
     expect(fake.indexer).toHaveLength(0);
   });
