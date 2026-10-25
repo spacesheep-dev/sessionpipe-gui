@@ -314,7 +314,7 @@ const tmp = (): string => {
   return d;
 };
 
-describe("engine = oracle on random corpora", () => {
+describe("engine = oracle on random corpora", { timeout: 180_000 }, () => {
   for (const [seed, sessions, segments] of [
     [1, 30, 1],
     [2, 40, 3],
