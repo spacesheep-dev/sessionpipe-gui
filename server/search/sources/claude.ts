@@ -305,6 +305,8 @@ export function claudeAdapter(): SourceAdapter {
               };
               keep(mains, id, { file, ino: st.ino });
             } else if (e.isDirectory() && e.name !== "memory" && e.name !== "tool-results") {
+              // `<id>/` moves when its `subagents/` appears; `subagents/` when an agent does.
+              roots.push(path.join(slugDir, e.name));
               const sub = path.join(slugDir, e.name, "subagents");
               if (list(sub).length) subagentsIn(sub, e.name);
             }
