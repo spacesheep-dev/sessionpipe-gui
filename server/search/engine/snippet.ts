@@ -233,7 +233,14 @@ export function snippet(text: string, m: Matcher, width = 160): { text: string; 
     base = r[0];
     src = text.slice(r[0], r[1]);
   }
-  const n = markFlat(src, m);
+  let n = markFlat(src, m);
+  if (!n && src !== text) {
+    // The needle's first occurrences were not where the match is (a phrase whose word also
+    // stands alone earlier): mark the whole text once rather than show an unmarked start.
+    base = 0;
+    src = text;
+    n = markFlat(src, m);
+  }
   const room = width - 2; // the ellipses
   if (!n) return cut(text, 0, Math.min(text.length, room), [], width);
   // best window: most distinct clause bits, then most marks
