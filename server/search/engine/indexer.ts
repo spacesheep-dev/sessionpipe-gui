@@ -274,7 +274,7 @@ export class Indexer {
       await this.pass(true);
       if (this.o.mode === "once" || this.stopping) {
         await this.commitAll(true);
-        await this.mergeAll(this.o.mode === "once");
+        await this.maybeMerge();
         return;
       }
       while (!this.stopping) {
@@ -360,15 +360,16 @@ export class Indexer {
 
   private setStatus(p: Partial<IndexerStatus>, now = false): void {
     Object.assign(this.status, p);
-    this.status.gen = this.gens();
-    this.status.firstRun = this.firstRun();
-    const sk = this.skippedNow();
-    if (sk.length) this.status.skipped = sk;
-    else delete this.status.skipped;
     if (p.phase && p.phase !== "error") delete this.status.error;
+    if (!this.o.onStatus) return;
     const emit = () => {
       this.statusTimer = null;
       this.lastStatusAt = Date.now();
+      this.status.gen = this.gens();
+      this.status.firstRun = this.firstRun();
+      const sk = this.skippedNow();
+      if (sk.length) this.status.skipped = sk;
+      else delete this.status.skipped;
       this.o.onStatus?.({ ...this.status, gen: { ...this.status.gen } });
     };
     if (now || Date.now() - this.lastStatusAt >= STATUS_MS) {
@@ -429,7 +430,8 @@ export class Indexer {
         }
       }
     }
-    files.sort((a, b) => b.file.mtimeMs - a.file.mtimeMs);
+    // newest first; ties by path (the order the sources' zstd batcher prefetches in)
+    files.sort((a, b) => b.file.mtimeMs - a.file.mtimeMs || (a.file.path < b.file.path ? -1 : 1));
     let total = 0;
     const plan: { k: Known; from: number }[] = [];
     for (const k of files) {
@@ -440,12 +442,16 @@ export class Indexer {
     }
     this.setStatus({ phase: plan.length ? "building" : "idle", doneBytes: 0, totalBytes: total });
     let done = 0;
-    for (const { k } of plan) {
+    for (const { k, from } of plan) {
       if (this.stopping) break;
       const before = done;
-      done += await this.readFile(k, (n) => {
-        this.setStatus({ doneBytes: Math.min(total, before + n) });
-      });
+      done += await this.readFile(
+        k,
+        (n) => {
+          this.setStatus({ doneBytes: Math.min(total, before + n) });
+        },
+        from,
+      );
       this.setStatus({ doneBytes: Math.min(total, done) });
       await this.maybeFlush();
     }
@@ -455,7 +461,8 @@ export class Indexer {
       for (const w of this.writers.values()) w.target.built = true;
       if (firstBuild || this.o.mode === "once") {
         await this.commitAll(true);
-        await this.mergeAll(true);
+        // one merge at the end of a first build, when it left more than a few segments
+        if (firstBuild && [...this.writers.values()].some((w) => w.m.segments.length > 4)) await this.mergeAll(true);
       }
     }
     this.setStatus({ phase: "idle", doneBytes: total, totalBytes: total }, true);
@@ -483,8 +490,9 @@ export class Indexer {
         continue;
       }
       k.file = { ...k.file, size: st.size, mtimeMs: st.mtimeMs };
-      if (this.changed(k) < 0) continue;
-      await this.readFile(k, () => {});
+      const from = this.changed(k);
+      if (from < 0) continue;
+      await this.readFile(k, () => {}, from);
       worked = true;
     }
     return worked;
@@ -520,12 +528,11 @@ export class Indexer {
 
   /** Read one file (from its committed offset, or from 0 when new or replaced). Returns
    *  the bytes read. */
-  private async readFile(k: Known, progress: (n: number) => void): Promise<number> {
+  private async readFile(k: Known, progress: (n: number) => void, from: number): Promise<number> {
     if (k.adapter.source === "history" && !this.history) return 0;
     const w = this.writer(k.adapter.source);
     const f = k.file;
     let e = w.entry(f.path);
-    const from = this.changed(k);
     if (from < 0) return 0;
     let st: { dev: number; ino: number; size: number; mtimeMs: number };
     try {
@@ -914,8 +921,10 @@ function headCrc(path: string, len: number): number {
 
 /** The writer loop (SEARCH-SPEC §3.2). In-process callers (tests, the service's fallback)
  *  get yields every few ms. */
-export async function runIndexer(o: IndexerOptions, x: IndexerInternals = { inProcess: true }): Promise<void> {
-  await new Indexer(o, x).run();
+export async function runIndexer(o: IndexerOptions, x?: IndexerInternals): Promise<void> {
+  // `once` owns its process (the CLI, the bench): full speed. `watch` in-process shares the
+  // server's loop: small slices and yields.
+  await new Indexer(o, x ?? { inProcess: o.mode === "watch" }).run();
 }
 
 /** An indexer and a way to talk to it, in this process. */

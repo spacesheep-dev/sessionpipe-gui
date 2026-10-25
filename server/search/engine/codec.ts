@@ -4,6 +4,7 @@
 // has no zlib.crc32) and the atomic, fsynced, 0600 file writes the index is built from.
 import { closeSync, fsyncSync, openSync, renameSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
+import zlib from "node:zlib";
 
 export const FILE_MODE = 0o600;
 export const DIR_MODE = 0o700;
@@ -197,8 +198,16 @@ const CRC = (() => {
   return t;
 })();
 
-/** crc32 of `b`, continuing from `prev` (pass the previous result to chain chunks). */
+const nativeCrc = (zlib as unknown as { crc32?: (b: Uint8Array, prev?: number) => number }).crc32;
+
+/** crc32 of `b`, continuing from `prev` (pass the previous result to chain chunks). Node's
+ *  zlib.crc32 when this Node has it (≥ 22.2), else the table. */
 export function crc32(b: Uint8Array, prev = 0): number {
+  if (nativeCrc && b.length > 64) return nativeCrc(b, prev) >>> 0;
+  return crc32Table(b, prev);
+}
+
+export function crc32Table(b: Uint8Array, prev = 0): number {
   let c = ~prev >>> 0;
   for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]!) & 0xff]! ^ (c >>> 8);
   return ~c >>> 0;

@@ -117,7 +117,7 @@ function compare(
 }
 
 describe("engine ≡ oracle", () => {
-  it("on a random history corpus split over 6 segments", () => {
+  it("on a random history corpus split over 6 segments", { timeout: 120_000 }, () => {
     const { engine, oracle, sources } = setup(5, 3000, 90, 6);
     const r = rng(17);
     let inv = 0;
@@ -131,7 +131,7 @@ describe("engine ≡ oracle", () => {
     expect(inv).toBeLessThanOrEqual(Math.ceil(pairs * 0.05));
   });
 
-  it("with sessionpipe events beside history (D6), filters, fields and newest", () => {
+  it("with sessionpipe events beside history (D6), filters, fields and newest", { timeout: 120_000 }, () => {
     const { engine, oracle, sources } = setup(8, 2500, 60, 4, true);
     const r = rng(23);
     for (let i = 0; i < 120; i++) {

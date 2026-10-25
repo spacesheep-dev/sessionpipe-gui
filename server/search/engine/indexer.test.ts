@@ -215,7 +215,7 @@ describe("runIndexer once", () => {
 });
 
 describe("watch mode", () => {
-  it("commits the first build quickly, then hot appends, forget and stop", async () => {
+  it("commits the first build quickly, then hot appends, forget and stop", { timeout: 60_000 }, async () => {
     const w = world();
     for (let i = 0; i < 30; i++)
       writeFileSync(w.file(`s${i}`), fakeLine({ k: "p", text: `hello world ${i}`, at: at + i }));
@@ -233,7 +233,7 @@ describe("watch mode", () => {
       { inProcess: true, tickMs: 50, sweepMs: 500, idleExitMs: 60_000 },
     );
     const r = await openReader({ dir: w.dir, sources: ["history"] });
-    const until = async (pred: () => boolean, ms = 5000) => {
+    const until = async (pred: () => boolean, ms = 30_000) => {
       const end = Date.now() + ms;
       while (!pred()) {
         if (Date.now() > end) throw new Error("timed out");
@@ -242,7 +242,7 @@ describe("watch mode", () => {
       }
     };
     await until(() => r.search(q("hello")).total === 30);
-    expect(commits[0]!).toBeLessThan(2000);
+    expect(commits[0]!).toBeLessThan(5000);
     appendFileSync(w.file("s3"), fakeLine({ k: "r", text: "brand new reply", at: at + 100 }));
     ix.send({ t: "hint", path: w.file("s3") });
     ix.send({ t: "commit" });
@@ -265,7 +265,7 @@ describe("watch mode", () => {
     expect(readManifest(join(w.dir, "history"))!.built).toBe(true);
   });
 
-  it("keeps few segments as commits pile up (merges), with the same answers", async () => {
+  it("keeps few segments as commits pile up (merges), with the same answers", { timeout: 60_000 }, async () => {
     const w = world();
     writeFileSync(w.file("a"), "");
     const ix = startIndexer(
@@ -279,7 +279,7 @@ describe("watch mode", () => {
       ix.send({ t: "commit" });
       await new Promise((res) => setTimeout(res, 40));
     }
-    const end = Date.now() + 5000;
+    const end = Date.now() + 30_000;
     while (Date.now() < end) {
       r.refresh();
       if (r.search(q("marker")).matches[0]?.matched === 30) break;

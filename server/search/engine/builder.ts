@@ -47,7 +47,8 @@ export class Builder {
   private fc = new Out(1 << 10);
   private lc = new Out(1 << 10);
   private rowsOut = new Out(1 << 14);
-  private store = new Out(1 << 16);
+  private store = Buffer.allocUnsafe(1 << 16);
+  private storeN = 0;
   private dsess = new GrowU32(1 << 10);
   private ats = new GrowU32(1 << 10);
   private sessIdx = new Map<string, number>();
@@ -152,11 +153,16 @@ export class Builder {
       this.files.push(fileId);
       this.fileOrd.set(fileId, fo);
     }
-    const st = this.store;
-    const storeOff = st.n;
-    st.grow(text.length * 3);
-    const w = utf8.encodeInto(text, st.b.subarray(st.n)).written;
-    st.n += w;
+    const storeOff = this.storeN;
+    if (this.storeN + text.length * 3 > this.store.length) {
+      let m = this.store.length * 2;
+      while (m < this.storeN + text.length * 3) m *= 2;
+      const nb = Buffer.allocUnsafe(m);
+      this.store.copy(nb, 0, 0, this.storeN);
+      this.store = nb;
+    }
+    const w = this.store.write(text, this.storeN, "utf8");
+    this.storeN += w;
     if (fileId === this.lastFile && d.offset === this.lastOffset) this.sub++;
     else {
       this.sub = 0;
@@ -210,12 +216,12 @@ export class Builder {
       }
     }
     const terms = this.termList;
-    const order = Uint32Array.from({ length: T }, (_, i) => i).sort((a, b) => {
-      const x = terms[a]!;
-      const y = terms[b]!;
-      return x < y ? -1 : x > y ? 1 : 0;
-    });
-    const w = new SegWriter(Math.max(1 << 12, ntok * 2), dest ? `${dest}.w` : null);
+    // the native string sort is UTF-16 order = code point order (terms hold no surrogates)
+    const sorted = terms.slice().sort();
+    const order = new Uint32Array(T);
+    for (let i = 0; i < T; i++) order[i] = this.termIds.get(sorted[i]!)!;
+    // in RAM (a builder is bounded by the flush thresholds); one write of the final file
+    const w = new SegWriter(Math.max(1 << 12, ntok * 2), null);
     try {
       for (let oi = 0; oi < T; oi++) {
         const t = order[oi]!;
@@ -235,14 +241,14 @@ export class Builder {
         w.end();
       }
       const rows = this.rowsOut;
-      const store = this.store;
+      const store = this.store.subarray(0, this.storeN);
       const r = w.finish(
         {
           N,
           fc: this.fc.view,
           lc: this.lc.view,
           docs: rows.view,
-          store: (o: Sink) => o.bytes(store.view),
+          store,
           dsess: this.dsess.a.subarray(0, N),
           ats: this.ats.a.subarray(0, N),
           meta: {
@@ -252,7 +258,7 @@ export class Builder {
             sessions: this.sessions,
             files: this.files,
             strs: this.strs,
-            textBytes: store.n,
+            textBytes: this.storeN,
           },
         },
         dest,
@@ -275,7 +281,7 @@ export class Builder {
     this.fc.clear();
     this.lc.clear();
     this.rowsOut.clear();
-    this.store.clear();
+    this.storeN = 0;
     this.dsess.clear();
     this.ats.clear();
     this.sessIdx = new Map();
@@ -298,7 +304,7 @@ export class Builder {
       this.oDoc = new Uint32Array(0);
       this.oPos = new Uint32Array(0);
     }
-    if (this.store.b.length > 1 << 26) this.store = new Out(1 << 16);
+    if (this.store.length > 1 << 26) this.store = Buffer.allocUnsafe(1 << 16);
   }
 }
 

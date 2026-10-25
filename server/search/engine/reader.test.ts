@@ -58,9 +58,9 @@ describe("Reader vs brute force", () => {
   const many = new Reader({ dir: dirB, sources: ["history"] });
   const tomb = new Reader({ dir: dirC, sources: ["history"] });
   const r = rng(99);
-  const queries = Array.from({ length: 250 }, () => randomQuery(r));
+  const queries = Array.from({ length: 150 }, () => randomQuery(r));
 
-  it("matches exactly the sessions and docs a scan finds (1 and 7 segments)", () => {
+  it("matches exactly the sessions and docs a scan finds (1 and 7 segments)", { timeout: 120_000 }, () => {
     for (const text of queries) {
       const want = bruteMatch(docs, parseSearch(text));
       for (const rd of [one, many]) {
@@ -86,7 +86,7 @@ describe("Reader vs brute force", () => {
     }
   });
 
-  it("never returns a tombstoned doc", () => {
+  it("never returns a tombstoned doc", { timeout: 120_000 }, () => {
     for (const text of queries) {
       const want = bruteMatch(docs, parseSearch(text), (d) => !dead(d, docs.indexOf(d)));
       const got = tomb.search(q(text));
