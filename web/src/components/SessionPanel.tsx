@@ -30,6 +30,7 @@ import { useAppState, useStore } from "../data/hooks";
 import { agentLabel, parseTab } from "../lib/agents";
 import { focusTab, tablistKey } from "../lib/focus";
 import { repoShort, sessionTitle } from "../lib/format";
+import { historyTitle, useHistoryTitles } from "../lib/historyTitle";
 import { agentItems, sessionItems, sessionMenuSubtitle } from "../lib/menus";
 import { agentPath, Link, navigate, sessionPath } from "../lib/router";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
@@ -137,7 +138,7 @@ function tabLabels(
     }
     const begun = started.get(parseTab(k).session);
     if (begun && !s?.title?.trim()) return begun;
-    return s ? sessionTitle(s) : splitKey(k).id.slice(0, 8);
+    return s ? sessionTitle(s) : (historyTitle(parseTab(k).session) ?? splitKey(k).id.slice(0, 8));
   });
   return titles.map((t, i) => {
     const dup = titles.some((o, j) => j !== i && o === t);
@@ -148,6 +149,7 @@ function tabLabels(
 
 export function SessionPanel({ phone }: { phone: boolean }) {
   const { tabs, active } = useSplit();
+  useHistoryTitles();
   const activeKey = tabs[active] ?? null;
   const width = useSplitWidth();
   const sessions = useAppState().sessions;

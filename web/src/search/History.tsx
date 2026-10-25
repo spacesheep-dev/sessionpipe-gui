@@ -16,6 +16,7 @@ import { Markdown } from "../components/Markdown";
 import { BackButton, PageBar } from "../components/PageBar";
 import { useStore } from "../data/hooks";
 import { toolLabel } from "../lib/format";
+import { noteHistoryTitle } from "../lib/historyTitle";
 import { back } from "../lib/router";
 import { IS_MAC } from "../lib/shortcuts";
 import { clock } from "../lib/time";
@@ -81,6 +82,7 @@ export function HistorySession({
           { q: query || undefined, around: around ?? undefined, limit: WINDOW },
           signal,
         );
+        noteHistoryTitle(t.session.key, t.session.title);
         setData(t);
         setState("ready");
         return t;

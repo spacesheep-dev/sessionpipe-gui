@@ -6,6 +6,7 @@
 // As a page (pushState, so Back returns to the results), beside (the side panel), or
 // beside in the background (focus stays on the results).
 import type { SessionMatch, SessionSearchHit } from "@shared/api";
+import { noteHistoryTitle } from "../lib/historyTitle";
 import { hrefFor, navigate, sessionPath } from "../lib/router";
 import { openSplit } from "../lib/split";
 
@@ -47,6 +48,7 @@ export function openResult(
   mode: OpenMode,
   from?: DOMRect,
 ): void {
+  if (!m.summary) noteHistoryTitle(m.key, m.title);
   if (mode === "page") {
     // The hash goes on after the router has kept its own parameters (the mock flag, the
     // panel), which it would otherwise append after it.
