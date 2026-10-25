@@ -934,7 +934,7 @@ a.settings-row:focus-visible {
   margin-bottom: 10px;
   line-height: 0;
 }
-.about-icon .mark {
+.about-icon .app-icon {
   filter: drop-shadow(0 1px 2px oklch(0 0 0 / 0.18));
 }
 .about-name {

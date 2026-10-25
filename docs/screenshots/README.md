@@ -1,7 +1,7 @@
 # Screenshots
 
 Every image the README shows, all from **demo data** (`--demo`), never from a real state
-dir: no real session, token or address of anyone's lands here. The Spacesheep skin, which
+dir: no real session, token or address of anyone's lands here. The sessionpipe skin, which
 follows the appearance, so the set shows both of its schemes; 1440 × 900 at 2× for the
 desktop shots, an iPhone 13 viewport at 3× for the phone shots. `shoot.mjs` in this folder
 takes them all in one run (about two minutes).
@@ -18,7 +18,7 @@ takes them all in one run (about two minutes).
 | `office.png` | dark | `/t/office` | The office view, iso style |
 | `review.png` | light | `/review` | A search for "webhook" with hits, the Files tab below |
 | `connect.png` | light | `/connect` | The QR code loaded; the sink token in its **masked** state |
-| `appearance.png` | light | any | The appearance popover open: Light, Spacesheep selected, the installed skins listed |
+| `appearance.png` | light | any | The appearance popover open: Light, sessionpipe selected, the installed skins listed |
 | `keyboard.png` | dark | any | The `?` help open |
 | `phone-board.png` | dark | `/` | The phone viewport, Simple mode |
 | `phone-session.png` | light | `/s/…` | The phone viewport, Simple mode |

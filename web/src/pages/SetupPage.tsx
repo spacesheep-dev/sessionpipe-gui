@@ -184,7 +184,7 @@ type Fold = { open: boolean; onToggle: () => void };
 // ---------- 1 · your sessions ----------
 
 /** One installed harness of the registry and where it stands, as one short word: hooks
- *  on, hooks off (the install command writes them; the one state in amber), or no
+ *  on, hooks off (the install command writes them; the one state in orange), or no
  *  adapter yet. The counts are its tooltip. */
 function HarnessRow({ h }: { h: HarnessStatus }) {
   const status = h.hooks === "on" ? "Hooks on" : h.hooks === "off" ? "Hooks off" : "Not supported yet";

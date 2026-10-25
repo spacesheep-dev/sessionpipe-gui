@@ -149,8 +149,8 @@ export function trustPage(input: TrustPageInput): string {
 <meta name="color-scheme" content="light dark">
 <title>sessionpipe-gui · trust this receiver</title>
 <style>
-:root{color-scheme:light dark;--bg:oklch(0.985 0.004 85);--bg-3:oklch(0.955 0.006 85);--line:oklch(0.905 0.008 85);--line-2:oklch(0.84 0.01 85);--fg:oklch(0.22 0.014 265);--fg-2:oklch(0.44 0.016 265);--fg-3:oklch(0.58 0.014 265);--needs:oklch(0.72 0.15 65);--ok:oklch(0.6 0.1 150)}
-@media (prefers-color-scheme:dark){:root{--bg:oklch(0.165 0.008 255);--bg-3:oklch(0.225 0.01 255);--line:oklch(0.255 0.01 255);--line-2:oklch(0.33 0.012 255);--fg:oklch(0.92 0.006 85);--fg-2:oklch(0.72 0.008 85);--fg-3:oklch(0.56 0.008 85);--needs:oklch(0.78 0.13 70);--ok:oklch(0.7 0.1 150)}}
+:root{color-scheme:light dark;--bg:#ffffff;--bg-3:#f5f5f3;--line:#e4e4e1;--line-2:#dcdcd8;--fg:#141414;--fg-2:#454545;--fg-3:#5c5c5a;--ok:oklch(0.6 0.1 150)}
+@media (prefers-color-scheme:dark){:root{--bg:#141414;--bg-3:#222222;--line:#2a2a2a;--line-2:#3a3a39;--fg:#f5f5f3;--fg-2:#c4c4c0;--fg-3:#9a9a96;--ok:oklch(0.7 0.1 150)}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
 main{max-width:40em;margin:0 auto;padding:28px 20px 64px}

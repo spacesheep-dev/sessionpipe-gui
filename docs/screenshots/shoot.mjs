@@ -4,7 +4,7 @@
 //     --themes ../sessionpipe-gui-themes/docs/screenshots [--out docs/screenshots] [--no-gif] \
 //     [--scheme dark|light] [--light a.png,b.png]
 // Desktop shots are 1440 × 900 at 2×, phone shots an iPhone 13 viewport at 3×, all on the
-// default (Spacesheep) skin, which follows the appearance: `--scheme` is the appearance
+// default (sessionpipe) skin, which follows the appearance: `--scheme` is the appearance
 // every shot gets (dark), `--light` names the shots taken in light instead (by default the
 // six the README shows light). Only demo data ever reaches the images: one extra session is
 // posted through the receiver so a permission prompt is open for the board, the inbox and

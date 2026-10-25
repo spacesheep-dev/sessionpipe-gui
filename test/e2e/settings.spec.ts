@@ -13,17 +13,17 @@ test.describe("quick settings", () => {
     await trigger.click();
     const pop = page.getByRole("dialog", { name: "Quick settings" });
     await expect(pop).toBeVisible();
-    // The two shipped skins first, in order, Spacesheep on; Plain (the internal base) is never listed.
-    await expect(pop.locator(".qs-theme[data-skin-source='builtin']")).toHaveText([/Spacesheep/, /Paper/]);
+    // The two shipped skins first, in order, sessionpipe on; Plain (the internal base) is never listed.
+    await expect(pop.locator(".qs-theme[data-skin-source='builtin']")).toHaveText([/sessionpipe/, /Paper/]);
     await expect(pop.locator("[data-skin='plain']")).toHaveCount(0);
-    await expect(pop.locator("[data-skin='spacesheep']")).toHaveAttribute("aria-pressed", "true");
+    await expect(pop.locator("[data-skin='sessionpipe']")).toHaveAttribute("aria-pressed", "true");
 
     await pop.locator("[data-skin='paper']").click();
     const root = page.locator("html");
     await expect(root).toHaveAttribute("data-theme", "light");
     await expect(root).toHaveAttribute("data-skin", "paper");
     const bg = await page.evaluate(() => document.documentElement.style.getPropertyValue("--bg"));
-    expect(bg).toBe("oklch(0.972 0.01 80)");
+    expect(bg).toBe("#f5f4ef");
     // The body really paints with it (the token is used, not just set).
     const bodyBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
     expect(bodyBg).toMatch(/^(oklch|color|rgb)/);
@@ -43,20 +43,16 @@ test.describe("quick settings", () => {
     await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
     await expect(root).toHaveAttribute("data-theme", "light");
     await expect(root).toHaveAttribute("data-skin", "paper");
-    expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--bg"))).toBe(
-      "oklch(0.972 0.01 80)",
-    );
+    expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--bg"))).toBe("#f5f4ef");
     expect(
       (await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize))) / before,
     ).toBeCloseTo(1.1, 2);
 
-    // Back to Spacesheep: its own tokens, the appearance free again; Esc closes the popover.
+    // Back to sessionpipe: its own tokens, the appearance free again; Esc closes the popover.
     await trigger.click();
-    await pop.locator("[data-skin='spacesheep']").click();
-    await expect(root).toHaveAttribute("data-skin", "spacesheep");
-    expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--bg"))).toBe(
-      "oklch(0.993 0.002 285)",
-    );
+    await pop.locator("[data-skin='sessionpipe']").click();
+    await expect(root).toHaveAttribute("data-skin", "sessionpipe");
+    expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--bg"))).toBe("#ffffff");
     await expect(appearance).toHaveJSProperty("disabled", false);
     await pop.getByRole("slider", { name: "Text size" }).fill("1");
     await page.keyboard.press("Escape");

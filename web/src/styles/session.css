@@ -463,7 +463,7 @@ html:has(.main > .session) {
   }
 }
 
-/* Markers: quiet rows; the attention one carries the amber glyph, nothing else. A
+/* Markers: quiet rows; the attention one carries the orange glyph, nothing else. A
    marker's text may wrap: the time and the glyph stay on its first line. */
 .marker {
   align-items: flex-start;

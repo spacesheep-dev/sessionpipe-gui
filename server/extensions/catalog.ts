@@ -22,7 +22,7 @@ export const EXTRAS: readonly ExtraEntry[] = [
     kind: "view",
     name: "Office",
     npm: "@sessionpipe-gui/theme-office",
-    line: "Every machine a room, every live session a person at a desk; posture is the state, amber marks who needs you.",
+    line: "Every machine a room, every live session a person at a desk; posture is the state, orange marks who needs you.",
     size: "36 kB",
     bundled: true,
   },

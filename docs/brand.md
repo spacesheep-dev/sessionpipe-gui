@@ -1,83 +1,113 @@
-# The mark
+# The brand
 
-![sessionpipe gui](../web/public/brand/wordmark.svg)
+![sessionpipe](../web/public/brand/wordmark.svg)
 
-A rounded tile, two short bars and one amber dot. The bars are the desk: the last thing
-a session said, the shape of a card on the board. The dot is the one who needs you, in
-the corner where the rail puts its badge. That is the whole product in one glance: the
-sessions, and the one to look at first.
+The GUI wears the sessionpipe identity: the same mark, wordmark, palette and type as the
+protocol's site and the native apps. Three inlets merge into one stream, and the stream
+sends one event: graphite carries the noise, and one bright dot carries what matters. In
+the app that dot is the needs-you signal, so the logo spends the orange where the app does.
 
-The amber is the app's only accent (`--needs`), so the mark spends it where the app
-does. Everything else is the neutral pair the interface is drawn in: the tile is the
-foreground colour, the bars the background, so in the app the mark inverts with the
-theme, like the rest of the page.
+## The mark
 
-It is a sibling of the sessionpipe logo, not a variant of it: the same rounded-square
-family, a different motif and a different colour. It never carries the pulse line.
+A 64-unit square (u = 1/64 of it): inlets at y 17 / 32 / 47 from x 9, merging at x 29 with
+horizontal tangents (`M9 47C20 47 19 32 29 32`), the stream from x 29, a 3.25 u gap, a dot
+of Ø 14 u at x 51. Thin strokes vanish small, so the drawing gets heavier as it shrinks; pick
+the cut by the size the 64-unit box renders at:
+
+| Box | Stroke | Stream ends | Dot | Where in the GUI |
+|---|---|---|---|---|
+| ≥ 128 px | 5.5 | 38 | Ø 14 | `mark.svg`, `wordmark*.svg`, `og.png` |
+| 48–127 px | 6 | 38 | Ø 14 | |
+| 20–47 px | 7 | 36 | Ø 15 | the sidebar (26 px), the rail (28 px), the favicon, the server pages |
+| ≤ 19 px | 7.5 | 36 | Ø 15 | the 16 px favicon |
+
+`web/src/components/Brand.tsx` draws it live with the cut for its size, in the
+`--brand-inlet`, `--brand-stream` and `--brand-dot` tokens (tokens.css): on a light ground
+#C4C4C0 inlets and an ink stream, on a dark one #454545 and #DADADA; the dot is always
+#FF5A1F. No skin sets them: a skin never recolours the logo.
+
+## The lockup
+
+The mark, then **sessionpipe** in Geist Mono 500 at −0.045 em, outlined
+(`web/public/brand/name.svg`), so it never depends on a font. The name's ink is 33.18 u
+tall, starts one dot's width past the dot and shares the mark's x-height centre line. The
+sidebar sets it from a 26 px box (121 px wide, the smallest the brand allows); the name is
+a CSS mask in the text colour (`.brand-name`, brand.css), so it follows the scheme. The
+server-rendered pages (`/trust`, the 401 page) inline the same lockup as one SVG
+(`server/ui/brand.ts`; a unit test keeps its path equal to `name.svg`).
+
+Don't recolour parts (the dot is the only accent), set the name in live text, re-space or
+stack the two, or add a shadow, an outline or a gradient. The app icon's tile is the one
+plate the mark sits on.
 
 ## Files
 
-All in `web/public/brand/`, served by the GUI under `/brand/`.
+All in `web/public/brand/`, served by the GUI under `/brand/`, generated from the brand kit
+(the design's construction, not redrawn by hand):
 
 | File | What it is for |
 |---|---|
-| `mark.svg` | The mark alone: dark tile, paper bars, amber dot. For light surfaces, or anywhere a fixed colour is wanted. |
-| `mark-mono.svg` | One ink, `currentColor`, the bars and the dot cut out. For inline SVG or a CSS mask; inside an `<img>` it renders black. |
-| `favicon.svg` | The mark, following the browser's colour scheme like the rail does. Linked from `index.html`. |
-| `wordmark.svg`, `wordmark-dark.svg` | Mark and name, for light and dark surfaces. The name is Inter Medium (OFL) as paths, so it needs no font; "gui" is a tier down. |
-| `apple-touch-icon.png` | 180 × 180, full bleed; iOS rounds the corners. |
-| `og.png` | 1200 × 630, the link preview. |
+| `favicon.svg`, `favicon.ico`, `favicon-32.png` | The browser tab: the small cut on an ink tile (radius 15/64), a hairline edge in dark mode |
+| `apple-touch-icon.png` | 180 × 180, full bleed, no alpha |
+| `icon-192.png`, `icon-512.png`, `icon-maskable-512.png` | The installed app (manifest.webmanifest); the maskable one keeps the mark inside the safe circle |
+| `mark.svg`, `mark-mono.svg` | The mark alone for light grounds, and in `currentColor` |
+| `wordmark.svg`, `wordmark-dark.svg` | The lockup for light and dark grounds (the README) |
+| `name.svg` | The outlined name alone (the app's lockup mask) |
+| `og.png` | 1200 × 630, the link preview |
 
-In the app and on the server-rendered pages the mark is drawn inline from the tokens
-(`web/src/components/Brand.tsx`, `server/ui/brand.ts`), and the name is set live in the
-UI face at weight 500. The SVG files are for the places that cannot do that: the README,
-a link preview, a slide.
+## Colour
 
-## Geometry
+Mostly graphite, one accent. These are the `sessionpipe` skin (`shared/skins-builtin.ts`),
+word for word the stock values of `web/src/styles/tokens.css` (a unit test holds them
+equal), so the first frame is already on brand.
 
-A 16-unit grid; every edge on a whole unit, so 16, 32, 64, 128 and 512 px all land on
-pixels.
+| Token | Light | Dark | |
+|---|---|---|---|
+| `--bg` / `--bg-2` | #FFFFFF / #FFFFFF | #141414 / #1C1C1B | the page, a card or a sheet |
+| `--bg-3` / `--bg-4` | #F5F5F3 / #EBEBE7 | #222222 / #2A2A2A | wells, fields; raised in dark |
+| `--line` / `--line-2` | #E4E4E1 / #DCDCD8 | #2A2A2A / #3A3A39 | hairlines |
+| `--fg` | #141414 (18.4:1) | #F5F5F3 (16.9:1) | text |
+| `--fg-2` | #454545 (9.6:1) | #C4C4C0 (10.5:1) | secondary text |
+| `--fg-3` | #5C5C5A (6.7:1) | #9A9A96 (6.5:1) | meta |
+| `--fg-4` | #858581 (3.7:1) | #6E6E6A (3.6:1) | marks only |
+| `--needs` | #FF5A1F (3.1:1) | #FF5A1F (5.9:1) | needs you: dots, glyphs, the badge |
+| `--needs-fg` | #C13B01 (5.4:1) | #FF5A1F | needs you as text |
+| `--needs-ink` | #141414 (5.9:1 on the orange) | #141414 | text on an orange fill |
+| `--err` | #CB234D (5.4:1) | #EF4C73 (5.2:1) | errors only |
+| `--focus` | #F24D06 (3.6:1) | #FF5A1F | the focus ring |
+| `--mark` / `--mark-fg` | #FFE1D7 / #141414 | #512617 / #F5F5F3 | a search hit |
 
-```
-tile   0,0  16 × 16   corner radius 4
-bar    3,8   5 × 2    corner radius 1
-bar    3,11 10 × 2    corner radius 1
-dot    centre 11,5    radius 2
-```
+The orange is never small text on a light ground (#FF5A1F is 3.1:1 on white): there it is a
+dot, a glyph or a fill under ink, and `--needs-fg` when it must be words. Red is for errors
+only: a crimson at OKLCH hue 10–14° against the orange's 38°, at least 0.10 apart in OKLab
+in every shipped skin and scheme (`shared/skins-builtin.test.ts`). Working, stale, idle and
+done are neutral tiers. The colour labels stay muted dots at half the accent's chroma, the
+orange one leaning to ochre so it never reads as needs you.
 
-Colours, as the app's tokens and their sRGB values in the files:
+**Paper**, the other shipped skin, is the brand's warm paper (#F5F4EF ground, #FAF9F5 cards,
+#1F1E1D ink), light only. Its needs-you dot is the orange's 3:1 cut (#F24D06), since
+#FF5A1F on warm paper is 2.8:1.
 
-| | Light | Dark |
-|---|---|---|
-| Tile | `--fg` `oklch(0.22 0.014 265)` `#171b21` | `--fg` `oklch(0.92 0.006 85)` `#e6e4e0` |
-| Bars | `--bg` `oklch(0.985 0.004 85)` `#fbfaf7` | `--bg` `oklch(0.165 0.008 255)` `#0c0f12` |
-| Dot | `--needs` `oklch(0.72 0.15 65)` `#e48e26` | `--needs` `oklch(0.78 0.13 70)` `#eca851` |
-| "gui" | `--fg-3` `#656971` | `--fg-3` `#94928d` |
+A device that had chosen **Spacesheep** (the default before the brand) moves to sessionpipe
+once, silently (lib/theme.ts, and the boot script in index.html for the first frame).
 
-The wordmark: the name at 15 units on the 16-unit mark, baseline at 12, an 8-unit gap
-after the mark (half the mark). Total 137 × 16.
+## Type
 
-## Clear space and size
+**Geist** for text and **Geist Mono** for literal code, commands and paths, both v1.8.2,
+SIL OFL 1.1 (`web/public/fonts/OFL.txt`). Self-hosted in `web/public/fonts/` and nothing
+else is fetched: the variable weight axis cut to 400–600 (the app's three weights), subset to
+Latin (Geist 20 KB, Geist Mono 16 KB) with Latin Extended in files that load only for a page
+that uses those letters. `index.html` preloads the Latin Geist only. `styles/fonts.css`
+also defines metric-matched stand-ins (Helvetica Neue on Apple, Segoe UI on Windows, Arial
+or Liberation Sans elsewhere, Menlo and Consolas for mono) with `size-adjust` and the
+ascent/descent overrides, so the swap moves no line. The server-rendered pages keep the
+system face: they are shown before the key that serves the font files.
 
-Keep clear space of a quarter of the mark on every side (4 px at 16, 8 px at 32), and
-half the mark's height around the wordmark. Nothing sits inside that space, including a
-rule.
+## Trademark
 
-Smallest sizes: the mark 16 px, the wordmark 20 px tall. The rail shows the mark at 20
-px; the empty board, the trust page and the 401 page show the wordmark at 20 px.
-
-## Do and don't
-
-- Do use the mark on the app's own neutrals, light or dark. On a dark surface prefer the
-  inverted tile (`wordmark-dark.svg`, or the live mark in the app).
-- Do use `mark-mono.svg` where only one colour is available.
-- Don't recolour it. Amber is the only accent; the tile and bars are the neutral pair.
-- Don't add a shadow, a gradient, an outline, or a second dot.
-- Don't stretch it, rotate it, or set it smaller than 16 px.
-- Don't put the pulse line in it, and don't present it as the sessionpipe logo. It is
-  the mark of this GUI, a receiver that speaks the sessionpipe protocol.
-- Don't set the name in another face, another case or another weight. It is
-  "sessionpipe gui", lowercase, with "gui" one tier lighter.
+"sessionpipe" and the sessionpipe logo are marks of Michael Makarov
+([TRADEMARKS.md](https://github.com/spacesheep-dev/sessionpipe/blob/main/TRADEMARKS.md)).
+Use the files as they are.
 
 ## Third-party marks
 
@@ -91,21 +121,4 @@ Anthropic, OpenAI, Google and Anysphere, used here only to identify the software
 session runs in. This project is not affiliated with, sponsored by or endorsed by any of
 them. Harnesses without a mark (the rest of the registry in sessionpipe's
 `spec/ADAPTERS.md`) keep their two-letter monogram. The marks stay monochrome and never
-take a brand colour; the amber is still the only accent of the stock scheme.
-
-The default skin, **Spacesheep**, carries the colours of [spacesheep](https://spacesheep.dev)
-as a whisper: cool neutrals of the brand's indigo hue at low chroma, and the sheep's flame
-for *needs you*, the one accent; working, stale, idle and done are neutral tiers, red is
-for errors only (`shared/skins-builtin.ts`). It uses no logo or wordmark of spacesheep's:
-it is a colour palette, not a rebrand. The other shipped skin, **Paper**, is warm paper and
-ink, light only. The server-rendered pages (`/trust`, the 401 page) and the OG image keep the
-neutral stock palette for now.
-
-## Trademark
-
-"sessionpipe" and the sessionpipe logo are marks of Michael Makarov
-([TRADEMARKS.md](https://github.com/spacesheep-dev/sessionpipe/blob/main/TRADEMARKS.md)).
-This mark is distinct from that logo on purpose, is not a modification of it, and does
-not imply that the sessionpipe project endorses or is affiliated with this GUI. The
-name follows the allowance for `sessionpipe-*` adapters and plugins that work with
-sessionpipe. Inter is used under the SIL Open Font License.
+take a brand colour; the orange is still the only accent.

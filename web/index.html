@@ -6,8 +6,12 @@
     <meta name="color-scheme" content="dark light" />
     <title>sessionpipe gui</title>
     <meta name="description" content="A local GUI for sessionpipe: every coding-agent session on your machines, live." />
+    <link rel="icon" href="/brand/favicon.ico" sizes="32x32" />
     <link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+    <!-- Geist, the text face (styles/fonts.css): early, so the first paint is already in it.
+         Only this one file; Geist Mono and the Latin Extended cuts load when a page uses them. -->
+    <link rel="preload" href="/fonts/Geist-latin.woff2" as="font" type="font/woff2" crossorigin />
     <!-- Installable (Add to Home Screen); use-credentials so a phone's UI-key cookie reaches the manifest fetch. -->
     <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
     <!-- Installed on a phone it opens as its own app: no browser bars, its own name under the
@@ -19,8 +23,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="format-detection" content="telephone=no" />
     <!-- --bg from tokens.css, light and dark. -->
-    <meta name="theme-color" content="#fcfcfd" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#121217" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#141414" media="(prefers-color-scheme: dark)" />
     <meta property="og:title" content="sessionpipe gui" />
     <meta property="og:description" content="A local GUI for sessionpipe: every coding-agent session on your machines, live." />
     <meta property="og:image" content="/brand/og.png" />
@@ -50,7 +54,7 @@
       </svg>
       <div class="rail">
         <div class="rail-head">
-          <span class="rail-brand"><svg aria-hidden="true" class="mark" width="20" height="20" viewBox="0 0 16 16"><rect width="16" height="16" rx="4" fill="var(--fg)" /><rect x="3" y="8" width="5" height="2" rx="1" fill="var(--bg)" /><rect x="3" y="11" width="10" height="2" rx="1" fill="var(--bg)" /><circle cx="11" cy="5" r="2" fill="var(--needs)" /></svg><span class="rail-word">sessionpipe</span></span>
+          <span class="rail-brand"><svg aria-hidden="true" class="mark" width="28" height="28" viewBox="0 0 64 64"><g fill="none" stroke="var(--brand-inlet)" stroke-linecap="round" stroke-width="7"><path d="M9 47C20 47 19 32 29 32M9 32H29M9 17C20 17 19 32 29 32" /><path d="M29 32H36" stroke="var(--brand-stream)" /></g><circle cx="51" cy="32" r="7.5" fill="var(--brand-dot)" /></svg><span class="rail-word brand-name"></span></span>
           <span class="icon-btn rail-compose"><svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H5.5A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16h9a1.5 1.5 0 0 0 1.5-1.5V11" /><path d="M14.2 3.3a1.3 1.3 0 0 1 1.9 0l.6.6a1.3 1.3 0 0 1 0 1.9L10.5 12 8 12.5l.5-2.5z" /></svg></span>
         </div>
         <div class="rail-nav">
@@ -99,7 +103,8 @@
           size = Number(L.getItem("sessionpipe-gui.textSize")) || 1;
           seen = !!L.getItem("sessionpipe-gui.setup.seen");
         } catch {}
-        if (!skin || typeof skin !== "object" || !skin.tokens || (skin.source === "builtin" && skin.id === "plain")) skin = null;
+        // Plain, and Spacesheep (the default before the brand), are the stock tokens: sessionpipe's.
+        if (!skin || typeof skin !== "object" || !skin.tokens || (skin.source === "builtin" && (skin.id === "plain" || skin.id === "spacesheep"))) skin = null;
         const appearance = a === "light" || a === "dark" ? a : "auto";
         const both = !skin || skin.scheme === "both";
         const forced = both ? appearance : skin.scheme;

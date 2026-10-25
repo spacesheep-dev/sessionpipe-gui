@@ -198,8 +198,8 @@ describe("SkinRegistry", () => {
         "odd",
       ]);
       const byId = (id: string, source?: string) => list.find((s) => s.id === id && (!source || s.source === source))!;
-      expect(byId("spacesheep")).toMatchObject({ source: "builtin", scheme: "both" });
-      expect(byId("spacesheep").tokens.dark?.["--bg"]).toMatch(/^oklch/);
+      expect(byId("sessionpipe")).toMatchObject({ source: "builtin", scheme: "both" });
+      expect(byId("sessionpipe").tokens.dark?.["--bg"]).toBe("#141414");
       expect(byId("plain")).toMatchObject({ source: "builtin", tokens: {} });
       expect(byId("alpha", "skin")).toMatchObject({
         source: "skin",
@@ -286,7 +286,7 @@ describe("SkinRegistry", () => {
       bundledDir: "/nonexistent/bundled",
     }).list();
     expect(list.map((s) => s.id)).toEqual(BUILTIN_SKINS.map((b) => b.id));
-    expect(list[0]!.id).toBe("spacesheep");
+    expect(list[0]!.id).toBe("sessionpipe");
   });
 });
 
@@ -487,7 +487,7 @@ describe("skin install", () => {
     const out = formatSkinList(skins, listSkins(skins, NO_BUNDLED));
     expect(out).toMatch(/^broken\s+\(broken: skin.json: api 7 is newer/m);
     expect(out).toMatch(/^folder\s+From folder 1\.0\.0\s+\[dark\]\s+← /m);
-    expect(out).not.toContain("spacesheep");
+    expect(out).not.toMatch(/^sessionpipe\s/m);
     expect(formatSkinList(skins, [])).toBe(`no skins installed in ${skins}\n`);
   });
 });

@@ -697,7 +697,12 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
             now: APPEARANCE.find((a) => a.value === display.appearance)?.label ?? "",
             words: "theme dark light system mode",
           },
-          { id: "skin", verb: "Skin…", now: display.skin.name, words: "theme colours colors paper spacesheep" },
+          {
+            id: "skin",
+            verb: "Skin…",
+            now: display.skin.name,
+            words: "theme colours colors paper sessionpipe spacesheep",
+          },
           { id: "text", verb: "Text size…", now: SIZE_NAME[display.textSize], words: "font zoom bigger smaller" },
         ];
         for (const d of disp) {

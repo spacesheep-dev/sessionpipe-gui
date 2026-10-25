@@ -106,7 +106,7 @@ test.describe("phone", () => {
     const pop = page.getByRole("dialog", { name: "Quick settings" });
     await expect(pop).toBeVisible();
     await expect(page.getByRole("dialog", { name: "More" })).toHaveCount(0);
-    await expect(pop.locator(".qs-theme").first()).toHaveText(/Spacesheep/);
+    await expect(pop.locator(".qs-theme").first()).toHaveText(/sessionpipe/);
     await page.keyboard.press("Escape");
     await expect(pop).toHaveCount(0);
     // Esc closes the sheet too.

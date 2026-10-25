@@ -352,6 +352,14 @@ describe("static", () => {
     expect(spa.status).toBe(200);
     expect(spa.headers.get("content-type")).toMatch(/text\/html/);
     expect(await spa.text()).toContain("board");
+    // Anything not hashed is revalidated: the same file answers 304.
+    const etag = home.headers.get("etag");
+    expect(home.headers.get("cache-control")).toBe("no-cache");
+    expect(etag).toMatch(/^W\/"[0-9a-z]+-[0-9a-z]+"$/);
+    const again = await fetch(`${app.url}/`, { headers: { "if-none-match": etag! } });
+    expect(again.status).toBe(304);
+    expect(await again.text()).toBe("");
+    expect((await fetch(`${app.url}/`, { headers: { "if-none-match": 'W/"0-0"' } })).status).toBe(200);
     expect((await fetch(`${app.url}/../package.json`)).status).toBe(200);
     expect((await fetch(`${app.url}/api/nope`)).status).toBe(404);
     const key = app.config().uiKey;

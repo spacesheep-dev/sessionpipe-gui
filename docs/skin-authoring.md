@@ -10,9 +10,9 @@ handles; the others are views (pages, `theme-authoring.md`) and plugins (server-
 code, `plugin-authoring.md`). A skin runs no code, so it is the one kind a person can
 install without trusting its author with their sessions.
 
-The contract is `shared/skin-api.ts`; this page explains it. The GUI ships with six
-skins (Spacesheep, the default; Plain, the stock tokens; Paper, Graphite, Ink, Sepia);
-yours are listed under *Installed* beside them.
+The contract is `shared/skin-api.ts`; this page explains it. The GUI ships with two
+skins (sessionpipe, the default, and Paper; Plain, the stock tokens, is the base and never
+listed); yours are listed under *Installed* beside them.
 
 ## A skin in ten lines
 
@@ -168,7 +168,7 @@ came from in `source`. `--state DIR` (or `--skins-dir DIR`) chooses the folder. 
 server reads it at boot and on `POST /api/ui/skins/reload` (loopback: the appearance
 popover asks for it when opened on the receiver machine).
 
-The GUI ships two skins, built in (`shared/skins-builtin.ts`): Spacesheep, the default, in
+The GUI ships two skins, built in (`shared/skins-builtin.ts`): sessionpipe, the default, in
 both schemes, and Paper, light only. No skin package ships with it. The folder
 `dist/bundled/skins/<id>/` still works for a distribution that wants one: a skin there is
 listed after the person's own with `bundled: true` and `origin: "bundled"`, `skin add` of
@@ -193,7 +193,8 @@ skin, screenshot the board at 1280 × 800.
 
 The choice is per device, in `localStorage` under `sessionpipe-gui.skin`, the whole
 skin (not only its id) so it applies at boot before any request. A device that never
-chose gets Spacesheep. A device that chose a color theme before skins existed
+chose gets sessionpipe, and so does one that had Spacesheep, the default before the
+brand (moved once, silently). A device that chose a color theme before skins existed
 (`sessionpipe-gui.colorTheme`) keeps that choice: the old key is read once and rewritten
 under the new one. When the list arrives with a newer copy of the applied skin (a linked
 skin you edited), that copy is applied and stored.
@@ -205,7 +206,7 @@ steps to the first skin that follows the appearance.
 
 - Keep the text tiers at their floors (above); the token checker in the themes repo
   tells you where a set is short.
-- One accent. Spacesheep's is flame, the stock scheme's is amber; whatever yours is,
+- One accent. sessionpipe's is its orange; whatever yours is,
   `--needs*` is where it lives, and it stays the loudest colour on a page.
 - Change what a skin is for: colour, type, shape, density. A page that needs new
   behaviour is a view.

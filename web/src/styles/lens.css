@@ -2,7 +2,7 @@
 /* ---------- the tier lens chip (shell) ---------- */
 
 /* A plain toolbar button in the page bar's tools, beside the filters; absent on view
-   routes and in Simple mode. An active lens takes the selection fill: no amber. */
+   routes and in Simple mode. An active lens takes the selection fill: no orange. */
 .lens-chip {
   position: relative;
   flex: none;

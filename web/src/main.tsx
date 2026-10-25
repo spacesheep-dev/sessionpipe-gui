@@ -13,6 +13,7 @@ import { applySettings } from "./lib/theme";
 // this block where it is. tokens.css stays one file (themes/host/api.ts reads it); the
 // shared pieces come before the pages that use them; narrow.css and density.css patch
 // what precedes them and stay last.
+import "./styles/fonts.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/shell.css";

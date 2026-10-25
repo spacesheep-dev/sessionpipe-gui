@@ -43,7 +43,7 @@ import { resolvedScheme, setSkin, setTextSize, setTheme, type Theme, useSettings
 import { TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { ago } from "../lib/time";
 import { useThemes } from "../themes/host/registry";
-import { Mark } from "./Brand";
+import { AppIcon } from "./AppIcon";
 import { ActionButton, CommandWell, CopyIconButton, Segmented, Toggle } from "./bits";
 import { LensPicker } from "./LensChip";
 import { NotificationsSettings } from "./NotificationsSettings";
@@ -591,7 +591,7 @@ const TileName = createContext<string | undefined>(undefined);
 
 /** A skin in one scheme, live and tiny: its sidebar ground, the page, three rows of ink
  *  (the first with the needs-you dot), drawn from the skin's own tokens for that scheme,
- *  Spacesheep's where it sets none. */
+ *  sessionpipe's where it sets none. */
 function SkinMini({ skin, scheme }: { skin: InstalledSkin; scheme: "dark" | "light" }) {
   const base: Record<string, string | undefined> = skinTokensFor(DEFAULT_SKIN, scheme);
   const own: Record<string, string | undefined> = skinTokensFor(skin, scheme);
@@ -748,7 +748,7 @@ function Views() {
         label="Skins"
         note={
           good.length === 0
-            ? "A skin is tokens, fonts and a stylesheet; it runs no code. Spacesheep and Paper ship with the app."
+            ? "A skin is tokens, fonts and a stylesheet; it runs no code. sessionpipe and Paper ship with the app."
             : `A skin runs no code. Installed from outside: ${good.map((s) => s.name || s.id).join(", ")}${broken.length ? ` · ${broken.length} broken` : ""}.`
         }
       >
@@ -984,7 +984,7 @@ function About() {
     <>
       <div className="about-head">
         <span className="about-icon" aria-hidden="true">
-          <Mark size={64} />
+          <AppIcon size={64} />
         </span>
         <h3 className="about-name">sessionpipe gui</h3>
         <p className="about-version num">{version ? `Version ${version}` : "–"}</p>

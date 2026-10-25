@@ -366,7 +366,7 @@ function NavEntry({
           {needs}
         </span>
       ) : null}
-      {/* A quiet dot, not amber: steps to go is not a thing that needs you. */}
+      {/* A quiet dot, not orange: steps to go is not a thing that needs you. */}
       {n.key === "setup" ? <span className="nav-dot" role="img" aria-label="steps to go" /> : null}
     </Link>
   );
@@ -465,7 +465,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   useShortcutMap();
   const active = route.name === "session" ? "board" : route.name === "theme" ? `t:${route.id}` : route.name;
   const needs = useAnswerableCount();
-  // The Setup entry, with its amber dot, while this machine (and only from this machine:
+  // The Setup entry, with its orange dot, while this machine (and only from this machine:
   // elsewhere the status is 403) still has steps to go.
   const setup = useSetupStatus();
   const known = setup.local === false || !!setup.status || !!setup.error;
@@ -554,10 +554,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       <nav className="rail" aria-label="Pages" {...railMenuProps}>
         <div className="rail-head">
           <Link to="/" className="rail-brand" title="sessionpipe gui">
-            <Mark size={20} />
-            <span className="rail-word" aria-hidden="true">
-              sessionpipe
-            </span>
+            <Mark size={28} />
+            <span className="rail-word brand-name" aria-hidden="true" />
             <span className="sr-only">sessionpipe gui</span>
           </Link>
           <ComposeButton className="rail-compose" />

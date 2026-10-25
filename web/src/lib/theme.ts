@@ -4,7 +4,8 @@
 // scheme while applied, a "both" skin follows the appearance) and the text size (a scale
 // on the root font-size, so every rem-based size follows). The skin itself is stored,
 // not only its id, so it applies at boot before any fetch. A device with no stored skin
-// gets Spacesheep; a device that chose a color theme before skins existed keeps it (the
+// gets sessionpipe, and so does one on a built-in this build no longer ships (Spacesheep,
+// the default before the brand), silently; a device that chose a color theme before skins existed keeps it (the
 // old key is read once and rewritten under the new one).
 import type { ColorTheme } from "@shared/color-theme";
 import { skinSchemeFor } from "@shared/skin-api";
@@ -63,8 +64,9 @@ export function skinFromColorTheme(ct: ColorTheme): InstalledSkin {
 }
 
 /** A stored skin as it applies today: a built-in from this build's own list (so an update
- *  shows at once), and Spacesheep for Plain or for a built-in this build no longer ships. */
-const current = (skin: InstalledSkin): InstalledSkin => {
+ *  shows at once), and sessionpipe for Plain or for a built-in this build no longer ships
+ *  (Spacesheep). */
+export const currentSkin = (skin: InstalledSkin): InstalledSkin => {
   if (skin.source !== "builtin") return skin;
   if (skin.id === PLAIN_SKIN_ID) return DEFAULT_SKIN;
   return BUILTIN_SKINS.find((b) => b.id === skin.id) ?? DEFAULT_SKIN;
@@ -80,7 +82,12 @@ const read = (): Settings => {
     const s = localStorage.getItem(KEY_SKIN);
     if (s) {
       const parsed: unknown = JSON.parse(s);
-      if (isSkin(parsed)) skin = current(parsed);
+      if (isSkin(parsed)) {
+        skin = currentSkin(parsed);
+        // A built-in is stored as this build has it, so index.html's boot script paints
+        // the right tokens on the next first frame.
+        if (parsed.source === "builtin") localStorage.setItem(KEY_SKIN, JSON.stringify(skin));
+      }
     } else {
       const old = localStorage.getItem(KEY_COLOR_OLD);
       if (old) {

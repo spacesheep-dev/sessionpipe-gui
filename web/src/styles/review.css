@@ -25,7 +25,7 @@
 
 /* Search hits: two-line rows like the board's, under the feed's sticky day headers
    (feed.css .rows / .ev-day). The lead glyph says where it matched; the match is the
-   text's own ink at 600, no block of colour (amber is for "needs you" alone). */
+   text's own ink at 600, no block of colour (orange is for "needs you" alone). */
 .review-search {
   display: flex;
   flex-direction: column;

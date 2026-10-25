@@ -4,7 +4,7 @@
    the step to do now, a quiet hollow ring for later ones), the title at 600 as the
    disclosure, one caption that says where the step stands, and only the open step's body
    under it, indented to the text. Hairlines between steps, inset to the text; on a phone
-   the list is one inset group. No amber anywhere: amber means a prompt needs you. */
+   the list is one inset group. No orange anywhere: orange means a prompt needs you. */
 
 .setup-skip-btn {
   font-weight: 500;
@@ -111,7 +111,7 @@
 .step-toggle:focus-visible {
   outline: none;
 }
-/* Step 6's word where the disc would mean "now": quiet, never amber. */
+/* Step 6's word where the disc would mean "now": quiet, never orange. */
 .step-optional {
   color: var(--fg-3);
   font-size: var(--text-sm);
@@ -306,7 +306,7 @@
   user-select: text;
 }
 
-/* Step 1's harnesses: one row each, the mark and name, then one status word. Amber only
+/* Step 1's harnesses: one row each, the mark and name, then one status word. Orange only
    on "Hooks off", the one state that needs the person. */
 .step-harnesses {
   max-width: 560px;

@@ -8,7 +8,7 @@ import "./setup.css";
 export type Mark = "done" | "needs" | "todo";
 
 /** The status glyph in a step's 20 px lead: a check once done, a ring in the ink on the
- *  step to do now, a quiet hollow ring for the ones after it. No amber: amber means a
+ *  step to do now, a quiet hollow ring for the ones after it. No orange: orange means a
  *  prompt needs you, and a step to do is not that. One signal; no number beside it. A
  *  step that turns done in front of the person draws its check in (240 ms). */
 export function StepMark({ mark, label }: { mark: Mark; label: string }) {

@@ -73,11 +73,21 @@ export function staticFiles(dir: string, opts: StaticOptions): Handler {
     if (!file) file = path.join(dir, "index.html");
     const ext = path.extname(file).toLowerCase();
     const immutable = pathname.startsWith("/assets/") && file !== path.join(dir, "index.html");
+    const st = statSync(file);
+    // Hashed assets never change; everything else (the fonts, the icons, the manifest, the
+    // page) is asked about again each time, and a 304 answers when the file is the same.
+    const etag = `W/"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"`;
     const headers: Record<string, string> = {
       "content-type": TYPES[ext] ?? "application/octet-stream",
       "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
-      "content-length": String(statSync(file).size),
+      etag,
     };
+    if (!immutable && ctx.req.headers["if-none-match"] === etag) {
+      ctx.res.writeHead(304, headers);
+      ctx.res.end();
+      return undefined;
+    }
+    headers["content-length"] = String(st.size);
     ctx.res.writeHead(200, headers);
     if (method === "HEAD") {
       ctx.res.end();
@@ -112,9 +122,9 @@ function unauthorized(): Reply {
     html: `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>sessionpipe-gui · not signed in</title>
 <meta name="color-scheme" content="light dark">
-<style>:root{color-scheme:light dark;--bg:oklch(0.985 0.004 85);--bg-3:oklch(0.955 0.006 85);--line:oklch(0.905 0.008 85);--fg:oklch(0.22 0.014 265);--fg-3:oklch(0.58 0.014 265);--needs:oklch(0.72 0.15 65)}
-@media (prefers-color-scheme:dark){:root{--bg:oklch(0.165 0.008 255);--bg-3:oklch(0.225 0.01 255);--line:oklch(0.255 0.01 255);--fg:oklch(0.92 0.006 85);--fg-3:oklch(0.56 0.008 85);--needs:oklch(0.78 0.13 70)}}
-body{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:4em auto;padding:0 1.5em;background:var(--bg);color:var(--fg)}code{background:var(--bg-3);padding:.1em .3em;border-radius:3px}
+<style>:root{color-scheme:light dark;--bg:#ffffff;--bg-3:#f5f5f3;--line:#e4e4e1;--fg:#141414;--fg-3:#5c5c5a}
+@media (prefers-color-scheme:dark){:root{--bg:#141414;--bg-3:#222222;--line:#2a2a2a;--fg:#f5f5f3;--fg-3:#9a9a96}}
+body{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:4em auto;padding:0 1.5em;background:var(--bg);color:var(--fg)}code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.92em;background:var(--bg-3);padding:.1em .3em;border-radius:3px}
 header{padding-bottom:12px;border-bottom:1px solid var(--line)}${WORDMARK_CSS}</style>
 <header>${wordmarkHtml()}</header>
 <h1>This board needs its key</h1>

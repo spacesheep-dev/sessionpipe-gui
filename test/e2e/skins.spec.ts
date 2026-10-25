@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
 // Skins: a fixture package is installed by test/e2e/serve.mjs with the real CLI before the
-// server starts. The list names it beside the built-ins (the two shipped, Spacesheep and
+// server starts. The list names it beside the built-ins (the two shipped, sessionpipe and
 // Paper, and Plain, the internal base the UI never lists), picking it in Display sets its
 // tokens, fonts, shape and density on <html>, a view inherits the tokens by name, the
 // choice survives a reload, and a device's old color-theme choice is migrated once.
@@ -30,10 +30,10 @@ test.describe("skins", () => {
   }) => {
     const { skins } = (await (await request.get("/api/ui/skins")).json()) as { skins: Listed[] };
     expect(skins.slice(0, 2).map((s) => [s.id, s.source])).toEqual([
-      ["spacesheep", "builtin"],
+      ["sessionpipe", "builtin"],
       ["plain", "builtin"],
     ]);
-    expect(skins.filter((s) => s.source === "builtin").map((s) => s.name)).toEqual(["Spacesheep", "Plain", "Paper"]);
+    expect(skins.filter((s) => s.source === "builtin").map((s) => s.name)).toEqual(["sessionpipe", "Plain", "Paper"]);
     const fx = skins.find((s) => s.id === "e2e-skin")!;
     expect(fx).toMatchObject({ source: "skin", scheme: "both", url: "/skins/e2e-skin/" });
     expect(fx.error).toBeUndefined();
@@ -53,10 +53,10 @@ test.describe("skins", () => {
   }) => {
     await openBoard(page);
     const root = page.locator("html");
-    // A fresh device is on Spacesheep, which follows the appearance (System → light here).
-    await expect(root).toHaveAttribute("data-skin", "spacesheep");
+    // A fresh device is on sessionpipe, which follows the appearance (System → light here).
+    await expect(root).toHaveAttribute("data-skin", "sessionpipe");
     await expect(root).not.toHaveAttribute("data-theme", /./);
-    expect(await rootVar(page, "--bg")).toBe("oklch(0.993 0.002 285)");
+    expect(await rootVar(page, "--bg")).toBe("#ffffff");
 
     const trigger = page.locator("nav.rail button[aria-label='Quick settings']");
     await trigger.click();
@@ -117,13 +117,13 @@ test.describe("skins", () => {
     expect(await rootVar(page, "--bg")).toBe("rgb(10, 20, 30)");
     expect(await page.evaluate(() => localStorage.getItem("sessionpipe-gui.skin"))).toContain('"id":"e2e-skin"');
 
-    // Back to Spacesheep: its tokens, no fonts, shape or density of the fixture's; the extras are gone.
+    // Back to sessionpipe: its tokens, no fonts, shape or density of the fixture's; the extras are gone.
     await openBoard(page);
     await trigger.click();
-    await pop.locator("[data-skin='spacesheep']").click();
-    await expect(root).toHaveAttribute("data-skin", "spacesheep");
+    await pop.locator("[data-skin='sessionpipe']").click();
+    await expect(root).toHaveAttribute("data-skin", "sessionpipe");
     await expect(root).not.toHaveAttribute("data-density", /./);
-    expect(await rootVar(page, "--bg")).toBe("oklch(0.185 0.01 285)");
+    expect(await rootVar(page, "--bg")).toBe("#141414");
     expect(await rootVar(page, "--font-ui")).toBe("");
     await expect(page.locator("style#skin-fonts")).toHaveCount(0);
     await expect(page.locator("link#skin-css")).toHaveCount(0);
@@ -151,8 +151,38 @@ test.describe("skins", () => {
     await expect(root).toHaveAttribute("data-skin", "paper");
     await expect(root).toHaveAttribute("data-theme", "light");
     // The built-in of that id, whole, not the stored fragment.
-    expect(await rootVar(page, "--fg")).toBe("oklch(0.24 0.02 60)");
+    expect(await rootVar(page, "--fg")).toBe("#1f1e1d");
     expect(await page.evaluate(() => localStorage.getItem("sessionpipe-gui.colorTheme"))).toBeNull();
     expect(await page.evaluate(() => localStorage.getItem("sessionpipe-gui.skin"))).toContain('"id":"paper"');
+  });
+
+  test("a device on Spacesheep, the default before the brand, moves to sessionpipe silently", async ({ page }) => {
+    await page.addInitScript(() => {
+      try {
+        if (!localStorage.getItem("sessionpipe-gui.migrated")) {
+          localStorage.setItem("sessionpipe-gui.migrated", "1");
+          localStorage.setItem(
+            "sessionpipe-gui.skin",
+            JSON.stringify({
+              id: "spacesheep",
+              name: "Spacesheep",
+              version: "",
+              scheme: "both",
+              source: "builtin",
+              tokens: { dark: { "--bg": "oklch(0.185 0.01 285)" }, light: { "--bg": "oklch(0.993 0.002 285)" } },
+            }),
+          );
+        }
+      } catch {}
+    });
+    await openBoard(page);
+    const root = page.locator("html");
+    await expect(root).toHaveAttribute("data-skin", "sessionpipe");
+    expect(await rootVar(page, "--bg")).toBe("#ffffff");
+    expect(await page.evaluate(() => localStorage.getItem("sessionpipe-gui.skin"))).toContain('"id":"sessionpipe"');
+    // The next first frame, before the app's script, is already on the new skin's tokens.
+    await page.reload();
+    await expect(root).toHaveAttribute("data-skin", "sessionpipe");
+    expect(await rootVar(page, "--bg")).toBe("#ffffff");
   });
 });

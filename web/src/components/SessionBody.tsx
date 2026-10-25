@@ -1482,7 +1482,7 @@ const eventCopy = (e: StoredEvent): MenuList => [
   copyItem("Copy time", e.time),
 ];
 
-/** A prompt the agent raised: the amber glyph in the gutter (no stripe), the kind and the
+/** A prompt the agent raised: the orange glyph in the gutter (no stripe), the kind and the
  *  message. While it is the open one, its menu answers it. */
 function AttentionMarker({ e }: { e: StoredEvent }) {
   const { open, root, session } = useTimeline();

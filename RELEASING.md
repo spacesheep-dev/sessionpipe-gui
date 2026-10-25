@@ -43,7 +43,7 @@ npm i -g --prefix /tmp/x github:spacesheep-dev/sessionpipe-gui
 /tmp/x/bin/sessionpipe-gui --help | grep extras                       # the subcommand is there
 /tmp/x/bin/sessionpipe-gui --state /tmp/spgui-smoke --port 7399 --no-outbox --quiet &
 curl -s http://localhost:7399/api/ui/themes | grep -o '"id":"\(canvas\|office\)"'          # both views
-curl -s http://localhost:7399/api/ui/skins | grep -o '"id":"\(spacesheep\|paper\)"'               # the two skins
+curl -s http://localhost:7399/api/ui/skins | grep -o '"id":"\(sessionpipe\|paper\)"'               # the two skins
 curl -s http://localhost:7399/api/ui/plugins | grep -o '"disabled":true'                   # ping-a-human off
 kill %1; rm -rf /tmp/x /tmp/spgui-smoke
 ```

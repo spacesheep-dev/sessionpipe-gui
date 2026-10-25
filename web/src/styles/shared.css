@@ -51,7 +51,7 @@
 }
 
 /* The status glyph (StateDot): the one signal a row carries for its state, 10 px in a
-   16 px lead. Needs you is the amber disc, the app's only accent; working is a turning
+   16 px lead. Needs you is the orange disc, the app's only accent; working is a turning
    ring (the one loop in the app); stale a dashed ring, idle a hollow one, done a check,
    all in the quiet tiers. Sized by the component. */
 .dot {
@@ -256,7 +256,7 @@
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 
-/* "Working · 12 s": the state as quiet text beside its glyph. Amber only for needs you. */
+/* "Working · 12 s": the state as quiet text beside its glyph. Orange only for needs you. */
 .badge {
   display: inline-flex;
   align-items: center;

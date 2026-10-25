@@ -1,14 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-labelledby="title">
-  <title id="title">sessionpipe gui</title>
-  <style>
-    @media (prefers-color-scheme: dark) {
-      .t { fill: #e6e4e0; }
-      .b { fill: #0c0f12; }
-      .d { fill: #eca851; }
-    }
-  </style>
-  <rect width="16" height="16" rx="4" fill="#171b21" class="t"/>
-  <rect x="3" y="8" width="5" height="2" rx="1" fill="#fbfaf7" class="b"/>
-  <rect x="3" y="11" width="10" height="2" rx="1" fill="#fbfaf7" class="b"/>
-  <circle cx="11" cy="5" r="2" fill="#e48e26" class="d"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><style>.e{stroke-opacity:0}@media (prefers-color-scheme:dark){.e{stroke-opacity:.2}}</style><clipPath id="sp-fav-c"><rect width="64" height="64" rx="15"/></clipPath><rect width="64" height="64" rx="15" fill="#141414"/><rect class="e" width="64" height="64" rx="15" fill="none" stroke="#fff" stroke-width="5" clip-path="url(#sp-fav-c)"/><g transform="translate(9 9) scale(.71875)"><g fill="none" stroke-linecap="round" stroke-width="7"><path d="M9 47C20 47 19 32 29 32" stroke="#454545"/><path d="M9 32H29" stroke="#454545"/><path d="M9 17C20 17 19 32 29 32" stroke="#454545"/><path d="M29 32H36" stroke="#DADADA"/></g><circle cx="51" cy="32" r="7.5" fill="#FF5A1F"/></g></svg>

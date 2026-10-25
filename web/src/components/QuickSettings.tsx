@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Quick settings ("Display"): one click from the sidebar's foot (a 260 px popover beside
 // it) or More › Display on a phone (a bottom sheet) to the three things a person changes
-// by eye: the appearance (System / Light / Dark), the skin (Spacesheep, Paper and any
+// by eye: the appearance (System / Light / Dark), the skin (sessionpipe, Paper and any
 // installed from outside; never the internal Plain) and the text size, then one row to
 // the Settings window. Each choice is per device (web/src/lib/theme.ts). Esc closes it
 // through the global keys (data-dismiss); it leaves as it came (pop-out beside the rail,

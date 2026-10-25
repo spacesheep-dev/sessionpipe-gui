@@ -363,8 +363,8 @@ A **skin** restyles the GUI without code: a `skin.json` with the custom properti
 `web/src/styles/tokens.css` to set (`--bg`, `--fg`, `--needs`, …, per scheme), bundled
 fonts, a typeface, a radius, the hairline width, a density and an optional stylesheet.
 People pick one from the page's quick settings (the gear on the rail or the tab bar),
-beside the appearance and the text size; the built-ins are Spacesheep (the default),
-Plain, Paper, Graphite, Ink and Sepia, and `sessionpipe-gui skin add` installs more.
+beside the appearance and the text size; the built-ins are sessionpipe (the default)
+and Paper, and `sessionpipe-gui skin add` installs more.
 How to write one: [`skin-authoring.md`](skin-authoring.md). A plain color-theme JSON
 file in `<stateDir>/color-themes/` ([`color-theme.example.json`](color-theme.example.json))
 still works and is listed with the skins. Because every view draws with the same tokens

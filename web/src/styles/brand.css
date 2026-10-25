@@ -1,23 +1,14 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* ---------- brand ---------- */
 
-/* The mark and the name (components/Brand.tsx): one line, the name in the UI face at
-   weight 500, "gui" a tier down. Used where a page stands alone, like the empty board. */
-.wordmark {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--fg);
-  font-size: var(--text-lg);
-  font-weight: 500;
-  line-height: 1;
-}
-.wordmark .mark {
+/* The name, outlined: web/public/brand/name.svg (Geist Mono 500 at −0.045 em, as paths)
+   as a mask in the text's own colour, so it follows the scheme and needs no font. The box
+   is the word's ink (240.688 × 34.56): set its height and the width follows. */
+.brand-name {
+  display: inline-block;
   flex: none;
-}
-.wordmark-gui {
-  color: var(--fg-3);
-}
-.empty .wordmark {
-  margin-bottom: 8px;
+  aspect-ratio: 240.688 / 34.56;
+  background-color: currentColor;
+  -webkit-mask: url("/brand/name.svg") center / contain no-repeat;
+  mask: url("/brand/name.svg") center / contain no-repeat;
 }

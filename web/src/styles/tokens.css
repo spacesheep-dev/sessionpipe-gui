@@ -1,42 +1,40 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* Design tokens. One typeface (the system sans) and one mono. Neutrals carry the whole
-   interface, all of one cool hue at low chroma, so nothing reads as tinted. The muted
-   tiers stay readable: fg-2 is secondary body (≥ 7:1 on the page), fg-3 is meta (≥ 5:1),
-   fg-4 is for marks only (≥ 3:1). One accent: amber, for "needs you" and nothing else;
-   red only where there is an error. Working, stale, idle and done are neutral tiers.
+/* Design tokens: the sessionpipe brand (docs/brand.md). One typeface, Geist, and its mono,
+   self-hosted (fonts.css). Neutrals carry the whole interface: ink, graphite and paper
+   greys, all of one warm-neutral axis at near-zero chroma, so nothing reads as tinted.
+   The muted tiers stay readable: fg-2 is secondary body (≥ 7:1 on the page), fg-3 is meta
+   (≥ 5:1), fg-4 is for marks only (≥ 3:1). One accent, the brand's orange, for "needs you"
+   and nothing else; a crimson only where there is an error, never close to the orange.
+   Working, stale, idle and done are neutral tiers. These are the "sessionpipe" skin's
+   values word for word (shared/skins-builtin.ts), so the first frame is already on brand.
    Every name here is public to views (themes/host/api.ts reads this file): keep it one
-   file, and keep every name. The design language is DESIGN-SPEC.md in the review folder. */
+   file, and keep every name. */
 
 :root {
   color-scheme: light dark;
 
-  /* The platform's own UI face, by platform: SF Pro on Apple (it picks its Text or
-     Display cut by size), Segoe UI Variable on Windows 11 (Segoe UI before it), Roboto
-     on Android and ChromeOS through system-ui. Linux has no one face, and its system-ui
-     is often Cantarell or DejaVu Sans, which set loose and wide in a dense list: the
-     desktops' own modern faces come first (GNOME 48's Adwaita Sans, Ubuntu Sans, KDE and
-     Fedora's Noto Sans), system-ui after them. Nothing is downloaded: all are installed. */
+  /* Geist, self-hosted (fonts.css, web/public/fonts), with a metric-matched stand-in per
+     platform while it loads (Helvetica Neue on Apple, Segoe UI on Windows, Arial or
+     Liberation Sans elsewhere), so the swap moves no line. The platform's own face after
+     them, for a glyph Geist does not have. */
   --font-ui:
-    -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Adwaita Sans", "Ubuntu Sans", Ubuntu,
-    "Noto Sans", system-ui, sans-serif;
-  /* Titles of 20 px and up (the phone's large title, the pairing digits): Segoe's Display
-     cut on Windows; everywhere else the same face, which sizes itself. */
-  --font-display:
-    -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", "Adwaita Sans", "Ubuntu Sans", Ubuntu,
-    "Noto Sans", system-ui, sans-serif;
-  /* Mono is only for what a person might copy: a command, a path, code. SF Mono on Apple,
-     Cascadia Mono (Windows Terminal's) or Consolas on Windows; on Linux a mono the person
-     installed (JetBrains Mono) before the desktops' own (GNOME 48's Adwaita Mono, Ubuntu
-     Sans Mono, Noto Sans Mono), and DejaVu Sans Mono, the usual default, last. */
+    Geist, "Geist Fallback Apple", "Geist Fallback Segoe", "Geist Fallback Arial", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", system-ui, sans-serif;
+  /* Titles of 20 px and up (the phone's large title, the pairing digits): the same face,
+     tracked in a little where they are set (Geist is drawn for text sizes). */
+  --font-display: var(--font-ui);
+  /* Mono is only for what a person might copy (a command, a path, code) and the wordmark,
+     which is outlined and needs no font. Geist Mono, then its stand-ins, then the platform's. */
   --font-mono:
-    ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, "JetBrains Mono", "Adwaita Mono", "Ubuntu Sans Mono",
-    "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+    "Geist Mono", "Geist Mono Fallback Menlo", "Geist Mono Fallback Consolas", ui-monospace, "SF Mono", Menlo,
+    "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
 
   /* The scale, in rem so the text-size setting multiplies it: 12 for tab labels and
      badges, 13 for meta and toolbars, 14 for everything a person reads, 15 for the page
      title, 18 only for the phone's large title (×1.55) and the pairing digits. Three
      weights: 400 to read, 500 for a control's label, 600 for a title. Mono sets 0.925 of
-     the text around it (base.css), which puts it on the x-height of the UI face. */
+     the text around it (base.css): Geist Mono shares Geist's x-height, and a step down
+     keeps its wider letters from reading louder than the line they sit in. */
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text-md: 0.875rem;
@@ -117,26 +115,28 @@
   --z-skip: 80;
   --focus-width: 2px;
 
-  /* light */
-  --bg: oklch(0.993 0.002 285);
-  --bg-2: oklch(1 0 0);
-  --bg-3: oklch(0.962 0.003 285);
-  --bg-4: oklch(0.928 0.004 285);
-  --line: oklch(0.912 0.004 285);
-  --line-2: oklch(0.85 0.006 285);
-  --fg: oklch(0.22 0.012 285);
-  --fg-2: oklch(0.4 0.012 285);
-  --fg-3: oklch(0.51 0.012 285);
-  --fg-4: oklch(0.62 0.01 285);
+  /* light: white ground, paper wells, ink text */
+  --bg: #ffffff;
+  --bg-2: #ffffff;
+  --bg-3: #f5f5f3;
+  --bg-4: #ebebe7;
+  --line: #e4e4e1;
+  --line-2: #dcdcd8;
+  --fg: #141414;
+  --fg-2: #454545;
+  --fg-3: #5c5c5a;
+  --fg-4: #858581;
 
-  --needs: oklch(0.68 0.17 50);
-  --needs-fg: oklch(0.52 0.15 45);
-  /* A whisper of amber: a well at most, never a slab behind text. */
-  --needs-bg: oklch(0.975 0.014 60);
-  --needs-line: oklch(0.87 0.06 55);
-  /* Text on a --needs fill (the unread badge, the "new" pill). */
-  --needs-ink: oklch(0.22 0.04 45);
-  /* The states views colour-code (the canvas) are neutral tiers: amber stays the one
+  /* The accent: the logo's dot. As a fill or a glyph it is #ff5a1f (3.1:1 on white);
+     as text it takes the deeper cut, 5.4:1. */
+  --needs: #ff5a1f;
+  --needs-fg: #c13b01;
+  /* A whisper of orange: a well at most, never a slab behind text. */
+  --needs-bg: #fff5f2;
+  --needs-line: #ffc5b1;
+  /* Text on a --needs fill (the unread badge, the "new" pill): ink, 5.9:1. */
+  --needs-ink: #141414;
+  /* The states views colour-code (the canvas) are neutral tiers: the orange stays the one
      accent. The names are kept for views and installed skins. */
   --state-working: var(--fg-2);
   --state-working-bg: var(--bg-3);
@@ -160,28 +160,31 @@
   --done-fg: var(--fg-4);
 
   /* Colour labels (the person's own, ORGANIZE-SPEC.md §3): seven muted dots, never a fill.
-     Orange leans to terracotta and yellow to ochre so neither reads as needs-you amber. */
+     Orange leans to ochre and red to brick, both at half the accent's chroma, so neither
+     reads as the needs-you orange. */
   --label-red: oklch(0.62 0.13 22);
-  --label-orange: oklch(0.66 0.11 42);
+  --label-orange: oklch(0.7 0.1 62);
   --label-yellow: oklch(0.78 0.11 92);
   --label-green: oklch(0.64 0.1 150);
   --label-blue: oklch(0.6 0.1 248);
   --label-purple: oklch(0.58 0.1 302);
-  --label-grey: oklch(0.66 0.008 285);
+  --label-grey: oklch(0.66 0.006 106);
 
   --ok: oklch(0.6 0.12 155);
-  --err: oklch(0.55 0.19 27);
-  --err-soft: oklch(0.58 0.12 27);
-  --err-bg: oklch(0.97 0.015 25);
-  --focus: oklch(0.55 0.1 285);
-  --mark: oklch(0.93 0.1 95);
-  --mark-fg: oklch(0.38 0.08 70);
+  --err: #cb234d;
+  --err-soft: #e07a93;
+  --err-bg: #fbf0f3;
+  /* The ring: the accent's 3:1 cut, so it reads on its own beside any control. */
+  --focus: #f24d06;
+  /* A search hit: a tint of the accent under ink. */
+  --mark: #ffe1d7;
+  --mark-fg: #141414;
   /* Read by nothing (skins set it): floating things use --shadow-pop. */
   --shadow: none;
   /* The QR code's ground and its "no network" text: paper and ink in both schemes, so a
      phone camera reads it. */
-  --qr-bg: oklch(0.995 0.002 85);
-  --qr-fg: oklch(0.6 0.01 265);
+  --qr-bg: #ffffff;
+  --qr-fg: #5c5c5a;
 
   /* Surfaces derived from the skin's own ground and ink, so every skin gets them. */
   --chrome: color-mix(in oklch, var(--bg) 95.5%, var(--fg));
@@ -189,7 +192,7 @@
   --hover: color-mix(in oklch, var(--fg) 5%, transparent);
   --sel: color-mix(in oklch, var(--fg) 9%, transparent);
   --press: color-mix(in oklch, var(--fg) 13%, transparent);
-  --scrim: oklch(0.2 0.01 285 / 0.24);
+  --scrim: oklch(0.191 0 0 / 0.24);
   /* A switch's track off and on, and the knob of a switch or a slider: always light. */
   --switch-off: var(--line-2);
   --switch-on: var(--fg);
@@ -200,6 +203,13 @@
      and the 1 px lift under a raised control. */
   --shadow-pop: 0 0 0 0.5px oklch(0 0 0 / 0.05), 0 2px 6px oklch(0 0 0 / 0.06), 0 12px 32px oklch(0 0 0 / 0.12);
   --shadow-sm: 0 0.5px 1px oklch(0 0 0 / 0.12), 0 0 0 0.5px oklch(0 0 0 / 0.03);
+  /* The mark's parts on this scheme's ground (components/Brand.tsx): the inlets drop back,
+     the stream is ink, the dot is the brand orange whatever a skin does to --needs. */
+  --brand-inlet: #c4c4c0;
+  --brand-stream: #141414;
+  --brand-dot: #ff5a1f;
+  /* The app icon's edge (components/AppIcon.tsx): none on a light ground. */
+  --brand-edge: transparent;
 }
 
 /* The phone: touch-sized controls and the narrower gutter. */
@@ -215,38 +225,38 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: oklch(0.185 0.01 285);
-    --bg-2: oklch(0.225 0.011 285);
-    --bg-3: oklch(0.25 0.011 285);
-    --bg-4: oklch(0.3 0.012 285);
-    --line: oklch(0.29 0.01 285);
-    --line-2: oklch(0.36 0.012 285);
-    --fg: oklch(0.95 0.005 285);
-    --fg-2: oklch(0.8 0.01 285);
-    --fg-3: oklch(0.68 0.012 285);
-    --fg-4: oklch(0.56 0.012 285);
+    --bg: #141414;
+    --bg-2: #1c1c1b;
+    --bg-3: #222222;
+    --bg-4: #2a2a2a;
+    --line: #2a2a2a;
+    --line-2: #3a3a39;
+    --fg: #f5f5f3;
+    --fg-2: #c4c4c0;
+    --fg-3: #9a9a96;
+    --fg-4: #6e6e6a;
 
-    --needs: oklch(0.77 0.145 55);
-    --needs-fg: oklch(0.83 0.11 60);
-    --needs-bg: oklch(0.235 0.03 50);
-    --needs-line: oklch(0.42 0.08 52);
-    --needs-ink: oklch(0.2 0.04 45);
+    --needs: #ff5a1f;
+    --needs-fg: #ff5a1f;
+    --needs-bg: #221815;
+    --needs-line: #662d18;
+    --needs-ink: #141414;
 
     --label-red: oklch(0.68 0.12 22);
-    --label-orange: oklch(0.72 0.1 45);
+    --label-orange: oklch(0.75 0.095 64);
     --label-yellow: oklch(0.82 0.1 94);
     --label-green: oklch(0.72 0.09 152);
     --label-blue: oklch(0.7 0.09 248);
     --label-purple: oklch(0.69 0.09 302);
-    --label-grey: oklch(0.62 0.008 285);
+    --label-grey: oklch(0.62 0.006 106);
 
     --ok: oklch(0.74 0.12 155);
-    --err: oklch(0.72 0.15 25);
-    --err-soft: oklch(0.68 0.09 25);
-    --err-bg: oklch(0.26 0.04 25);
-    --focus: oklch(0.72 0.09 285);
-    --mark: oklch(0.42 0.08 95);
-    --mark-fg: oklch(0.95 0.07 98);
+    --err: #ef4c73;
+    --err-soft: #a8405a;
+    --err-bg: #23181b;
+    --focus: #ff5a1f;
+    --mark: #512617;
+    --mark-fg: #f5f5f3;
 
     --raised: var(--bg-4);
     --switch-off: var(--bg-4);
@@ -255,43 +265,46 @@
     --scrim: oklch(0 0 0 / 0.5);
     --shadow-pop: 0 0 0 0.5px oklch(0 0 0 / 0.6), 0 2px 6px oklch(0 0 0 / 0.3), 0 16px 40px oklch(0 0 0 / 0.45);
     --shadow-sm: 0 0.5px 1px oklch(0 0 0 / 0.45);
+    --brand-inlet: #454545;
+    --brand-stream: #dadada;
+    --brand-edge: oklch(1 0 0 / 0.2);
   }
 }
 
 /* The same dark set, word for word, when Dark is forced (Settings or a dark-only skin). */
 :root[data-theme="dark"] {
-  --bg: oklch(0.185 0.01 285);
-  --bg-2: oklch(0.225 0.011 285);
-  --bg-3: oklch(0.25 0.011 285);
-  --bg-4: oklch(0.3 0.012 285);
-  --line: oklch(0.29 0.01 285);
-  --line-2: oklch(0.36 0.012 285);
-  --fg: oklch(0.95 0.005 285);
-  --fg-2: oklch(0.8 0.01 285);
-  --fg-3: oklch(0.68 0.012 285);
-  --fg-4: oklch(0.56 0.012 285);
+  --bg: #141414;
+  --bg-2: #1c1c1b;
+  --bg-3: #222222;
+  --bg-4: #2a2a2a;
+  --line: #2a2a2a;
+  --line-2: #3a3a39;
+  --fg: #f5f5f3;
+  --fg-2: #c4c4c0;
+  --fg-3: #9a9a96;
+  --fg-4: #6e6e6a;
 
-  --needs: oklch(0.77 0.145 55);
-  --needs-fg: oklch(0.83 0.11 60);
-  --needs-bg: oklch(0.235 0.03 50);
-  --needs-line: oklch(0.42 0.08 52);
-  --needs-ink: oklch(0.2 0.04 45);
+  --needs: #ff5a1f;
+  --needs-fg: #ff5a1f;
+  --needs-bg: #221815;
+  --needs-line: #662d18;
+  --needs-ink: #141414;
 
   --label-red: oklch(0.68 0.12 22);
-  --label-orange: oklch(0.72 0.1 45);
+  --label-orange: oklch(0.75 0.095 64);
   --label-yellow: oklch(0.82 0.1 94);
   --label-green: oklch(0.72 0.09 152);
   --label-blue: oklch(0.7 0.09 248);
   --label-purple: oklch(0.69 0.09 302);
-  --label-grey: oklch(0.62 0.008 285);
+  --label-grey: oklch(0.62 0.006 106);
 
   --ok: oklch(0.74 0.12 155);
-  --err: oklch(0.72 0.15 25);
-  --err-soft: oklch(0.68 0.09 25);
-  --err-bg: oklch(0.26 0.04 25);
-  --focus: oklch(0.72 0.09 285);
-  --mark: oklch(0.42 0.08 95);
-  --mark-fg: oklch(0.95 0.07 98);
+  --err: #ef4c73;
+  --err-soft: #a8405a;
+  --err-bg: #23181b;
+  --focus: #ff5a1f;
+  --mark: #512617;
+  --mark-fg: #f5f5f3;
 
   --raised: var(--bg-4);
   --switch-off: var(--bg-4);
@@ -300,6 +313,9 @@
   --scrim: oklch(0 0 0 / 0.5);
   --shadow-pop: 0 0 0 0.5px oklch(0 0 0 / 0.6), 0 2px 6px oklch(0 0 0 / 0.3), 0 16px 40px oklch(0 0 0 / 0.45);
   --shadow-sm: 0 0.5px 1px oklch(0 0 0 / 0.45);
+  --brand-inlet: #454545;
+  --brand-stream: #dadada;
+  --brand-edge: oklch(1 0 0 / 0.2);
 }
 
 /* More contrast asked for: hairlines a step darker, the muted tiers a step up, so the

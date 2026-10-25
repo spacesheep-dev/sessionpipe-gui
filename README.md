@@ -29,7 +29,7 @@ that runs it.
 ## Install
 
 Node 20 or newer. Three ways, one package, and everything official inside it: the
-Canvas and Office views, the two skins (Spacesheep and Paper) and the ping-a-human
+Canvas and Office views, the two skins (sessionpipe and Paper) and the ping-a-human
 Telegram plugin:
 
 ```sh
@@ -170,7 +170,7 @@ sidebar under *experimental*, and `sessionpipe-gui view disable canvas` hides on
 ![Office: every machine a room, every live session a person at a desk](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/office.png)
 
 Every machine a room, every live session a person at a desk, every subagent a helper at a
-side table. Posture is the state; amber marks who needs you; a tally by the door counts
+side table. Posture is the state; orange marks who needs you; a tally by the door counts
 who went home today. An isometric floor by default, figures on request.
 
 ### Review
@@ -230,9 +230,9 @@ layer in front. Machines elsewhere on the tailnet push and pair through the same
 ![The appearance popover: system, dark or light; the skin; the text size](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/appearance.png)
 
 Appearance (System, Light, Dark), skin and text size are one click from the sidebar
-(Display) and are kept per device. Two skins ship. **Spacesheep**, the default, is cool
-neutrals with the [spacesheep.dev](https://spacesheep.dev) flame as the one accent, for
-*needs you*, in both schemes: it follows the appearance setting, which is why the pictures
+(Display) and are kept per device. Two skins ship. **sessionpipe**, the default, is the
+brand's ink, graphite and paper with its orange as the one accent, for *needs you*, set in
+Geist (self-hosted, no request leaves the machine), in both schemes: it follows the appearance setting, which is why the pictures
 on this page come in a light and a dark version. **Paper** is warm paper and ink, light
 only. A skin installed from outside (`sessionpipe-gui skin add`) lists after them.
 
@@ -416,6 +416,8 @@ Apache-2.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)). This GUI is a receiver that s
 sessionpipe protocol; it is not part of the sessionpipe project and is not endorsed by it.
 The protocol is by Michael Makarov and contributors; "sessionpipe" and the sessionpipe
 logo are [marks of Michael Makarov](https://github.com/spacesheep-dev/sessionpipe/blob/main/TRADEMARKS.md).
-The mark in `web/public/brand/` is this project's own ([docs/brand.md](docs/brand.md)).
+The logo and wordmark in `web/public/brand/` are the sessionpipe logo system, Michael
+Makarov's marks ([docs/brand.md](docs/brand.md)). Geist and Geist Mono (`web/public/fonts/`)
+are by Vercel under the SIL Open Font License 1.1 (`web/public/fonts/OFL.txt`).
 Claude Code, Codex, Gemini, Antigravity, Cursor and the other harness names are trademarks
 of their owners, named here only to identify the software a session runs in.

@@ -36,6 +36,17 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Changed
 
+- **The sessionpipe brand.** The default skin is now **sessionpipe**: ink, graphite and
+  paper neutrals, the brand's orange (#FF5A1F) as the one accent for *needs you* (the dot,
+  the glyph, the Inbox badge, toasts, the canvas through the host tokens), a crimson for
+  errors that never reads as the orange, an orange focus ring. Paper is re-tuned to the
+  brand's warm paper. A device on Spacesheep moves to sessionpipe silently; the token names
+  are unchanged, so views and installed skins keep working. Text is set in Geist and code in
+  Geist Mono, self-hosted (36 KB for a page, the text face preloaded, metric-matched
+  stand-ins so the swap moves no line). The sessionpipe mark and lockup replace the old
+  tile: the sidebar, the rail, Settings › About, the favicon (SVG and ICO), the
+  installed-app icons (maskable too), the touch icon, the link preview, the trust and 401
+  pages, and the README's wordmark ([docs/brand.md](docs/brand.md)).
 - The Machines page's inline start form is gone: the Control row has *New session…*.
 - **Cancel the running turn** is `⇧C` now (`c` is New session).
 - A dialog's Esc closes an open pop-up inside it first; a pop-up's filter takes focus once

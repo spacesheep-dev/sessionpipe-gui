@@ -13,7 +13,7 @@
 
 /* An open permission: the question at the left, Deny and Allow at the right, and the
    reason they cannot be used as one caption line under the question, so the question
-   keeps the width. The amber glyph is the bar's only colour. */
+   keeps the width. The orange glyph is the bar's only colour. */
 .ctl-answer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
