@@ -182,17 +182,20 @@ interface Acc {
 
 export function claudeAdapter(): SourceAdapter {
   // Adapter-global knowledge (SEARCH-SPEC.md §3.1): never persisted by the engine.
-  const firstUuids = new Map<string, { ino: string; uuid: string | undefined }>();
+  const firstUuids = new Map<string, { size: number; uuid: string | undefined }>();
   const ownerSets = new Map<string, Set<string>>();
   let dirs: string[] = [];
+  /** Main session files per project folder, from the last discover (fork twins are siblings). */
+  let mainsByDir = new Map<string, { path: string; id: string; size: number }[]>();
 
-  const cachedFirst = (p: string): string | undefined => {
-    const st = statFile(p);
-    if (!st) return undefined;
+  /** A file's first record uuid; it never changes in an append-only file once written. */
+  const cachedFirst = (p: string, size?: number): string | undefined => {
     const have = firstUuids.get(p);
-    if (have && have.ino === st.ino && have.uuid) return have.uuid;
+    if (have?.uuid) return have.uuid;
+    const now = size ?? statFile(p)?.size ?? 0;
+    if (have && have.size === now) return undefined;
     const uuid = firstUuid(p);
-    firstUuids.set(p, { ino: st.ino, uuid });
+    firstUuids.set(p, { size: now, uuid });
     return uuid;
   };
 
@@ -210,13 +213,15 @@ export function claudeAdapter(): SourceAdapter {
       }
     };
     const dir = path.dirname(p);
+    const siblings =
+      mainsByDir.get(dir) ??
+      list(dir)
+        .filter((d) => d.name.endsWith(".jsonl"))
+        .map((d) => ({ path: path.join(dir, d.name), id: d.name.slice(0, -6), size: undefined as number | undefined }));
     const twins: { f: string; id: string; t: number }[] = [];
-    for (const d of list(dir)) {
-      if (!d.name.endsWith(".jsonl")) continue;
-      const f = path.join(dir, d.name);
-      const other = d.name.slice(0, -6);
-      if (other === id || cachedFirst(f) !== mine) continue;
-      twins.push({ f, id: other, t: birth(f) });
+    for (const sib of siblings) {
+      if (sib.id === id || cachedFirst(sib.path, sib.size) !== mine) continue;
+      twins.push({ f: sib.path, id: sib.id, t: birth(sib.path) });
     }
     if (!twins.length) return { owners: [] };
     const me = { f: p, id, t: birth(p) };
@@ -314,6 +319,14 @@ export function claudeAdapter(): SourceAdapter {
         }
       }
       dirs = roots;
+      const byDir = new Map<string, { path: string; id: string; size: number }[]>();
+      for (const [id, m] of mains) {
+        const d = path.dirname(m.file.path);
+        let a = byDir.get(d);
+        if (!a) byDir.set(d, (a = []));
+        a.push({ path: m.file.path, id, size: m.file.size });
+      }
+      mainsByDir = byDir;
       return [...mains.values(), ...subs.values()].map((f) => f.file);
     },
 

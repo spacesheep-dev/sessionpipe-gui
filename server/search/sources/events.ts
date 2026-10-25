@@ -116,6 +116,7 @@ export function eventsAdapter(): SourceAdapter {
         h: number;
       };
       const facts = new Map<string, SessionFacts>();
+      let lastTitle: [string, string] = ["", ""];
       let bad = 0;
       const F = {
         beat: new Finder('"type":"session.heartbeat"'),
@@ -178,7 +179,9 @@ export function eventsAdapter(): SourceAdapter {
           const title = str(sess.title).trim();
           if (title) {
             const rank = RANK[str(sess.title_source)] ?? TITLE_RANK.firstAsk;
-            if (!f.title || rank >= f.title.rank) f.title = { text: finish(title.replace(/\s+/g, " "), 200), rank };
+            // Every event repeats the title: redact it once per distinct value.
+            if (title !== lastTitle[0]) lastTitle = [title, finish(title.replace(/\s+/g, " "), 200)];
+            if (!f.title || rank >= f.title.rank) f.title = { text: lastTitle[1], rank };
           }
         }
 

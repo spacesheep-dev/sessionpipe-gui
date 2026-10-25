@@ -3,7 +3,7 @@
 // (SEARCH-SPEC.md D11, §3.1): harness wrappers and notices off, secrets redacted
 // (sessionpipe-core's redactSecrets, the same rules sessionpipe sends with), cut to
 // DOC_TEXT_MAX on a word. Plus the one-line tool summary every harness shares.
-import { redactSecrets } from "sessionpipe-core";
+import { RULESET_SECRETS, redactSecrets } from "sessionpipe-core";
 import { DOC_TEXT_MAX, TOOL_LINE_MAX } from "../types.js";
 
 /** Cut to `max` UTF-16 units at a word boundary (never inside a surrogate pair). */
@@ -23,6 +23,23 @@ export function cut(text: string, max: number): string {
   return text.slice(0, end).trimEnd();
 }
 
+/**
+ * A necessary condition for `redactSecrets` (secrets@1) to change a text: every rule needs a
+ * trigger word (`pass…`, `pwd`, `secret`, `…key`, `token`, `cred…`, `Bearer`/`Basic`), a URL
+ * (`://`), or one of its token prefixes. A text with none of them comes back unchanged, so
+ * it skips the ~35 regex passes (a quarter of the build's CPU on dense history). Bound to the
+ * ruleset id: when core ships another ruleset, every text takes the full path again until
+ * this list is checked against it (redact.test.ts pins the parity).
+ */
+const MAYBE_SECRET =
+  /pass|pwd|secret|key|token|cred|bearer|basic|:\/\/|AKIA|ASIA|ABIA|ACCA|gh[pousr]_|github_pat_|glpat-|xox[abposre]-|sk-|[sr]k_(?:live|test)_|whsec_|AIza|ya29\.|1\/\/0|GOCSPX-|xai-|gsk_|pplx-|hf_|pcsk_|npm_|pypi-|SG\.|shp(?:at|ss|ca|pa)_|dop_v1_|lin_(?:api|oauth)_|ntn_|sbp_|figd_|dp\.(?:pt|st|sa|ct)\.|grn_|ss_|:AA|eyJ/i;
+const FAST = RULESET_SECRETS === "secrets@1";
+
+/** sessionpipe-core's redactSecrets, skipped only when it provably changes nothing. */
+export function redact(text: string): string {
+  return FAST && !MAYBE_SECRET.test(text) ? text : redactSecrets(text);
+}
+
 /** Redacted and cut: the last step for every emitted text. Redaction runs before the cut
  *  so a secret is never left half-visible at the edge. */
 export function finish(text: string, max = DOC_TEXT_MAX): string {
@@ -30,7 +47,7 @@ export function finish(text: string, max = DOC_TEXT_MAX): string {
   if (!t) return "";
   // Bound the regex work on a huge paste; the margin keeps the cut edge clear of it.
   const pre = t.length > max * 2 ? cut(t, max * 2) : t;
-  return cut(redactSecrets(pre), max).trim();
+  return cut(redact(pre), max).trim();
 }
 
 /** The argument keys a tool line is made of, first non-empty wins (SEARCH-SPEC.md §3.1). */
@@ -122,6 +139,8 @@ export interface Cleaned {
  */
 export function cleanPromptBlock(raw: string): Cleaned {
   const attached: [string, string][] = [];
+  // Most prompts carry no markup at all: nothing to take off.
+  if (!raw.includes("<") && !raw.includes("[") && !raw.startsWith("No response")) return { text: raw.trim(), attached };
   let t = raw.replace(DROP_ANYWHERE, "");
   t = t.replace(ATTACHED, (_m, tag: string, inner: string) => {
     const s = inner.trim();
