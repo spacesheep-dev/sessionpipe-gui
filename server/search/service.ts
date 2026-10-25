@@ -522,9 +522,12 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
   let respawnTimer: NodeJS.Timeout | undefined;
   let busyTimer: NodeJS.Timeout | undefined;
 
+  let crashes = 0;
+  const backoff = (): number => Math.min(300_000, 5_000 * 2 ** Math.max(0, crashes - 1));
   const onIndexerMessage = (m: FromIndexer): void => {
     if (closed || !m || typeof m !== "object") return;
     if (m.t === "status") {
+      if (m.status.phase !== "error") crashes = 0;
       ixStatus = m.status;
       ixError = m.status.phase === "error" ? (m.status.error ?? "The indexer stopped with an error.") : undefined;
       const busy = m.status.phase !== "idle" && m.status.phase !== "error";
@@ -586,9 +589,15 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
         exited = true;
         if (indexer === handle) indexer = null;
         if (!closed) {
-          if (code !== 0 && signal !== "SIGTERM") log(`indexer exited (${signal ?? code})`);
-          // Idle exit (2 min) or a crash: come back for the next sweep, or on the next hint.
-          scheduleRespawn(code === 0 ? 30_000 : 5_000);
+          // Idle exit (2 min): back for the next sweep, or sooner on a hint. A crash: back
+          // after a pause that doubles each time (5 s … 5 min), so a broken index never spins.
+          if (code === 0) scheduleRespawn(30_000);
+          else {
+            crashes++;
+            log(`indexer exited (${signal ?? code}); retrying in ${Math.round(backoff() / 1000)} s`);
+            if (crashes >= 3) ixError = "The indexer keeps stopping. Search still covers what is already indexed.";
+            scheduleRespawn(backoff());
+          }
         }
         resolve();
       });
@@ -671,7 +680,7 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
     if (closed || indexer || !backend) return;
     clearTimeout(respawnTimer);
     respawnTimer = undefined;
-    indexer = (deps.cliPath && !rebuild ? startChild(deps.cliPath) : null) ?? startInProcess(rebuild);
+    indexer = (deps.cliPath ? startChild(deps.cliPath) : null) ?? startInProcess(rebuild);
     if (rebuild && indexer?.kind === "child") indexer.send({ t: "rebuild" });
   };
   const scheduleRespawn = (ms: number): void => {
@@ -797,7 +806,7 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
   const flushHints = (): void => {
     hintTimer = undefined;
     if (!pendingHints.size) return;
-    if (!indexer) startIndexer();
+    if (!indexer && crashes === 0) startIndexer();
     for (const p of pendingHints) indexer?.send({ t: "hint", path: p });
     pendingHints.clear();
   };
@@ -924,6 +933,7 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
     reindex(rebuild) {
       if (closed) return computeStatus();
       ixError = undefined;
+      crashes = 0;
       if (rebuild) {
         if (indexer) indexer.send({ t: "rebuild" });
         else startIndexer(true);
@@ -940,9 +950,14 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
       if (!on) {
         // The writer deletes history/ (it holds the LOCK); wait for that, then read without it.
         const histDir = path.join(dir, "history");
-        indexer?.send({ t: "history", on: false });
-        const t0 = Date.now();
-        while (existsSync(histDir) && Date.now() - t0 < 3000 && indexer?.kind === "child") await sleep(50);
+        if (indexer?.kind === "child") {
+          indexer.send({ t: "history", on: false });
+          const t0 = Date.now();
+          while (existsSync(histDir) && Date.now() - t0 < 3000 && indexer?.kind === "child") await sleep(50);
+        } else {
+          await indexer?.stop();
+          indexer = null;
+        }
         deps.setHistory(false);
         if (existsSync(histDir) && backend) {
           // No child to do it (in-process, or it did not answer): stop it and remove it here.
@@ -963,8 +978,12 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
         // A first run until the indexer says otherwise (it starts from nothing: history/ is gone).
         ixStatus = { phase: "scanning", doneBytes: 0, totalBytes: 0, firstRun: true, gen: {} };
         await openNow();
-        if (indexer) indexer.send({ t: "history", on: true });
-        else startIndexer();
+        if (indexer?.kind === "child") indexer.send({ t: "history", on: true });
+        else {
+          await indexer?.stop();
+          indexer = null;
+          startIndexer();
+        }
       }
       lastFrame = "";
       scheduleFrame();
