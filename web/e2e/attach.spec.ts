@@ -302,7 +302,19 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   stateDir = mkdtempSync(path.join(os.tmpdir(), "spgui-attach-e2e-"));
   server = spawn(
     process.execPath,
-    ["dist/cli.js", "--port", String(port), "--state", stateDir, "--no-outbox", "--test-door", "--quiet"],
+    // --search-home names a folder that holds no history: a test never reads this machine's.
+    [
+      "dist/cli.js",
+      "--port",
+      String(port),
+      "--state",
+      stateDir,
+      "--no-outbox",
+      "--test-door",
+      "--quiet",
+      "--search-home",
+      path.join(stateDir, "no-history"),
+    ],
     { cwd: root, stdio: ["ignore", "ignore", "pipe"] },
   );
   server.stderr?.on("data", (d) => process.stderr.write(`[server] ${d}`));
@@ -508,6 +520,9 @@ test("a 390 px phone composes with the native picker and the same thumbnails", a
   await expect(input).toBeAttached();
   await expect(input).toHaveAttribute("accept", "image/*");
   await expect(input).toHaveAttribute("multiple", "");
+  // The paperclip opens once the strip knows it can send (the receiver's info is in), as a
+  // tap would find it; files set before that are dropped like a tap on a disabled button.
+  await expect(input).toBeEnabled();
   await input.setInputFiles({ name: "IMG_0412.png", mimeType: "image/png", buffer: Buffer.from(PHOTO, "base64") });
   const item = p.locator(".att-item");
   await expect(item).toHaveAttribute("data-state", "ready", { timeout: 15_000 });
