@@ -48,7 +48,9 @@ export function parseSize(s) {
   return Math.round(Number(m[1]) * mult);
 }
 
-/** Per profile: words per prompt/reply, tool calls per turn, tool output words, and the
+/** Per profile: `turns` = median turns of a Claude / Codex session (gate: longer sessions, so
+ *  ~1,000 files hold 60 MB; this Mac averages 4–10 MB a file, so per-file costs are still
+ *  over-weighted 25×), words per prompt/reply, tool calls per turn, tool output words, and the
  *  share of bulky non-text records. `real` lands near 1 % indexable text (sources.md §0). */
 const PROFILES = {
   gate: {
@@ -62,6 +64,7 @@ const PROFILES = {
     big: 0,
     meta: 0.08,
     dup: 0.03,
+    turns: [45, 30],
   },
   real: {
     size: 60e6,
@@ -696,7 +699,7 @@ export function generate(opts) {
           home: claudeHome,
           cwd: cwdOf(),
           t,
-          turns: Math.max(2, Math.round(Math.exp(Math.log(18) + (w.r() * 2 - 1) * 1.1))),
+          turns: Math.max(2, Math.round(Math.exp(Math.log(p.turns?.[0] ?? 18) + (w.r() * 2 - 1) * 1.1))),
         });
         out.write(s.file, s.f.body());
         if (w.r() < 0.35) {
@@ -721,7 +724,7 @@ export function generate(opts) {
       } else if (x < 0.95) {
         const id = w.uuid();
         const f = new CodexFile(g, { id, t, cwd: cwdOf() });
-        codexTurns(g, f, Math.max(1, Math.round(Math.exp(Math.log(10) + (w.r() * 2 - 1) * 1.0))));
+        codexTurns(g, f, Math.max(1, Math.round(Math.exp(Math.log(p.turns?.[1] ?? 10) + (w.r() * 2 - 1) * 1.0))));
         out.write(codexPath(H, t, id), f.body(), { zst: w.r() < 0.85 });
         out.session("codex");
       } else {
