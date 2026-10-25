@@ -205,6 +205,13 @@ export class Reader implements SearchReader {
   private allowed = new Uint8Array(0);
   private tMask = new Uint32Array(0);
   private tScoreT = new Float64Array(0);
+  private rankG = new Uint32Array(0);
+  private tSeen = new Uint8Array(0);
+  private tCandsA = new Uint32Array(0);
+  private tTouched = new Uint32Array(0);
+  private heap = new Uint32Array(0);
+  private rankS = new Float64Array(0);
+  private rankL = new Float64Array(0);
   // title index
   private titlePost = new Map<string, Set<number>>();
   private titleToks: (TitleTok[] | null)[] = [];
@@ -331,6 +338,13 @@ export class Reader implements SearchReader {
       this.allowed = new Uint8Array(m);
       this.tMask = new Uint32Array(m);
       this.tScoreT = new Float64Array(m);
+      this.rankG = new Uint32Array(m);
+      this.tSeen = new Uint8Array(m);
+      this.tCandsA = new Uint32Array(m);
+      this.tTouched = new Uint32Array(m);
+      this.heap = new Uint32Array(m);
+      this.rankS = new Float64Array(m);
+      this.rankL = new Float64Array(m);
     }
     let maxN = 0;
     for (const r of refs) maxN = Math.max(maxN, r.seg.N);
@@ -590,55 +604,72 @@ export class Reader implements SearchReader {
   /** Sessions whose title matches clause `c`: fn(g, score). Prefixes match titles directly. */
   private titleMatch(c: Clause, fn: (g: number, score: number) => void): void {
     const post = this.titlePost;
-    const cands = new Set<number>();
-    const addSet = (t: string | undefined) => {
-      const s = t === undefined ? undefined : post.get(t);
-      if (s) for (const g of s) cands.add(g);
+    const seen = this.tSeen;
+    const cands = this.tCandsA;
+    let nc = 0;
+    const addSet = (set: Set<number> | undefined) => {
+      if (!set) return;
+      for (const g of set) {
+        if (seen[g]) continue;
+        seen[g] = 1;
+        cands[nc++] = g;
+      }
     };
     if (c.titlePrefix) {
       for (const tp of c.titlePrefix) {
-        if (tp.head.length) addSet(tp.head[0]);
-        else for (const [t, set] of post) if (set.size && t.startsWith(tp.prefix)) for (const g of set) cands.add(g);
+        if (tp.head.length) addSet(post.get(tp.head[0]!));
+        else for (const [t, set] of post) if (set.size && t.startsWith(tp.prefix)) addSet(set);
       }
     } else {
       for (const a of c.atoms) {
-        if (a.kind === "terms") for (const t of a.terms) addSet(t);
-        else addSet(a.slots[0]?.[0]);
+        if (a.kind === "terms") for (const t of a.terms) addSet(post.get(t));
+        else if (a.slots[0]?.[0] !== undefined) addSet(post.get(a.slots[0][0]));
       }
     }
-    if (!cands.size) return;
+    for (let i = 0; i < nc; i++) seen[cands[i]!] = 0;
+    if (!nc) return;
     const N = Math.max(1, this.N);
-    const idfs = c.atoms.map((a) => {
+    const idfs: number[] = [];
+    for (const a of c.atoms) {
       // a title-only word still weighs: a term with no doc takes the highest idf
-      const slot = (terms: readonly string[]) => Math.max(0, ...terms.map((t) => idfOf(N, this.dict.df(t))));
-      return a.kind === "terms" ? slot(a.terms) : PHRASE_IDF * a.slots.reduce((s, sl) => s + slot(sl), 0);
-    });
+      if (a.kind === "terms") idfs.push(this.slotIdf(a.terms, N));
+      else {
+        let x = 0;
+        for (const sl of a.slots) x += this.slotIdf(sl, N);
+        idfs.push(PHRASE_IDF * x);
+      }
+    }
     const avg = this.titleCount ? Math.max(1, this.titleLen / this.titleCount) : 1;
-    for (const g of cands) {
+    for (let ci = 0; ci < nc; ci++) {
+      const g = cands[ci]!;
       const toks = this.titleToks[g];
       if (!toks) continue;
-      const at = (p: number, ok: (t: string) => boolean) => toks.some((x) => x.pos === p && ok(x.t));
       let tf = 0;
       if (c.titlePrefix) {
         for (const tp of c.titlePrefix) {
-          for (const x of toks) {
-            if (tp.head.length ? x.t !== tp.head[0] : !x.t.startsWith(tp.prefix)) continue;
+          const h = tp.head;
+          for (let ti = 0; ti < toks.length; ti++) {
+            const x = toks[ti]!;
+            if (h.length ? x.t !== h[0] : !x.t.startsWith(tp.prefix)) continue;
             let ok = true;
-            for (let k = 1; k < tp.head.length && ok; k++) ok = at(x.pos + k, (t) => t === tp.head[k]);
-            if (ok && tp.head.length) ok = at(x.pos + tp.head.length, (t) => t.startsWith(tp.prefix));
+            for (let k = 1; k < h.length && ok; k++) ok = titleAt(toks, x.pos + k, h[k]!, false);
+            if (ok && h.length) ok = titleAt(toks, x.pos + h.length, tp.prefix, true);
             if (ok) tf++;
           }
         }
       } else {
-        for (const a of c.atoms) {
+        for (let ai = 0; ai < c.atoms.length; ai++) {
+          const a = c.atoms[ai]!;
           if (a.kind === "terms") {
-            for (const x of toks) if (a.terms.includes(x.t)) tf++;
+            const terms = a.terms;
+            for (let ti = 0; ti < toks.length; ti++) if (terms.includes(toks[ti]!.t)) tf++;
           } else {
             const s0 = a.slots[0]!;
-            for (const x of toks) {
+            for (let ti = 0; ti < toks.length; ti++) {
+              const x = toks[ti]!;
               if (!s0.includes(x.t)) continue;
               let ok = true;
-              for (let k = 1; k < a.slots.length && ok; k++) ok = at(x.pos + k, (t) => a.slots[k]!.includes(t));
+              for (let k = 1; k < a.slots.length && ok; k++) ok = titleAtAny(toks, x.pos + k, a.slots[k]!);
               if (ok) tf++;
             }
           }
@@ -649,12 +680,21 @@ export class Reader implements SearchReader {
       const tfw = TITLE_W * tf;
       const norm = tfw + K1 * (1 - TITLE_B + (TITLE_B * len) / avg);
       let best = 0;
-      c.atoms.forEach((a, i) => {
-        const s = (a.w * idfs[i]! * (tfw * (K1 + 1))) / norm;
-        if (s > best) best = s;
-      });
+      for (let i = 0; i < c.atoms.length; i++) {
+        const sc = (c.atoms[i]!.w * idfs[i]! * (tfw * (K1 + 1))) / norm;
+        if (sc > best) best = sc;
+      }
       fn(g, best);
     }
+  }
+
+  private slotIdf(terms: readonly string[], N: number): number {
+    let m = 0;
+    for (const t of terms) {
+      const v = idfOf(N, this.dict.df(t));
+      if (v > m) m = v;
+    }
+    return m;
   }
 
   private rank(
@@ -683,14 +723,15 @@ export class Reader implements SearchReader {
     let nts = 0;
     const tMask = this.tMask;
     const tScoreT = this.tScoreT;
-    const titleTouched: number[] = [];
+    const titleTouched = this.tTouched;
+    let ntt = 0;
 
     // titles
     if (fm.title) {
       pos.forEach((c, ci) => {
         this.titleMatch(c, (g, s) => {
           if (!A[g] || dropped[g]) return;
-          if (tMask[g] === 0) titleTouched.push(g);
+          if (tMask[g] === 0) titleTouched[ntt++] = g;
           tMask[g]! |= 1 << ci;
           tScoreT[g]! += s;
         });
@@ -762,48 +803,94 @@ export class Reader implements SearchReader {
       }
     }
 
-    // qualify
-    const ranked: { g: number; score: number; last: number }[] = [];
+    // qualify (typed arrays: no object per session)
+    const rg = this.rankG;
+    const rs = this.rankS;
+    const rl = this.rankL;
+    let nr = 0;
+    const S = this.S;
     const consider = (g: number) => {
       const m = sMask[g]! | tMask[g]!;
       if (m !== ALL || dropped[g]) return;
       const base = g * 3;
       const n = sN[g]!;
-      let top: number[];
+      let a = n > 0 ? tScore[base]! : 0;
+      let b = n > 1 ? tScore[base + 1]! : 0;
+      let c = n > 2 ? tScore[base + 2]! : 0;
       if (newest) {
-        top = [];
-        for (let j = 0; j < n; j++) top.push(tScore[base + j]!);
-        top.sort((a, b) => b - a);
-      } else top = [tScore[base]!, tScore[base + 1]!, tScore[base + 2]!].slice(0, n);
-      let rel = (top[0] ?? 0) + 0.3 * (top[1] ?? 0) + 0.1 * (top[2] ?? 0) + tScoreT[g]!;
+        // the slots hold the newest docs: order their scores
+        let x: number;
+        if (b > a) {
+          x = a;
+          a = b;
+          b = x;
+        }
+        if (c > b) {
+          x = b;
+          b = c;
+          c = x;
+        }
+        if (b > a) {
+          x = a;
+          a = b;
+          b = x;
+        }
+      }
+      let rel = a + 0.3 * b + 0.1 * c + tScoreT[g]!;
       if (!sFull[g]) rel *= 0.6;
-      const v = this.S[g]!.view;
-      const last = v.lastAt || now;
+      const last = S[g]!.view.lastAt || now;
       const age = Math.max(0, (now - last) / DAY);
-      const score = rel * (0.7 + 0.3 * 2 ** (-age / HALF_LIFE_DAYS));
-      ranked.push({ g, score, last });
+      rg[nr] = g;
+      rs[nr] = rel * (0.7 + 0.3 * 2 ** (-age / HALF_LIFE_DAYS));
+      rl[nr] = last;
+      nr++;
     };
     for (let i = 0; i < nts; i++) consider(touchedS[i]!);
-    for (const g of titleTouched) if (sMatched[g] === 0 && sMask[g] === 0) consider(g);
+    for (let i = 0; i < ntt; i++) {
+      const g = titleTouched[i]!;
+      if (sMatched[g] === 0 && sMask[g] === 0) consider(g);
+    }
 
-    const S = this.S;
-    if (newest) ranked.sort((a, b) => b.last - a.last || (S[a.g]!.key < S[b.g]!.key ? -1 : 1));
-    else ranked.sort((a, b) => b.score - a.score || b.last - a.last || (S[a.g]!.key < S[b.g]!.key ? -1 : 1));
-    const total = ranked.length;
-    const page = ranked.slice(q.offset, q.offset + q.limit);
+    // x before y in the result order
+    const before = newest
+      ? (x: number, y: number): boolean => rl[x]! > rl[y]! || (rl[x] === rl[y] && S[rg[x]!]!.key < S[rg[y]!]!.key)
+      : (x: number, y: number): boolean =>
+          rs[x]! > rs[y]! ||
+          (rs[x] === rs[y] && (rl[x]! > rl[y]! || (rl[x] === rl[y] && S[rg[x]!]!.key < S[rg[y]!]!.key)));
+    const order = topK(nr, Math.min(nr, q.offset + q.limit), before, this.heap);
+    const total = nr;
+    const page: { g: number; score: number }[] = [];
+    for (let i = q.offset; i < order.length; i++) page.push({ g: rg[order[i]!]!, score: rs[order[i]!]! });
     const matches: EngineMatch[] = page.map((x) => {
       const G = this.S[x.g]!;
-      const hits: (EngineHit & { _o: [number, number, number] })[] = [];
+      const hits: EngineHit[] = [];
+      const ord: number[] = [];
       const n = Math.min(sN[x.g]!, hitsWanted);
       for (let j = 0; j < n; j++) {
         const r = this.refs[tRef[x.g * 3 + j]!]!;
-        hits.push(this.hit(r, tDoc[x.g * 3 + j]!, matcher, width));
+        hits.push(this.hit(r, tDoc[x.g * 3 + j]!, matcher, width, ord));
       }
-      hits.sort(transcriptOrder);
+      // transcript order: (at, file, offset); at most 3, an insertion sort
+      for (let i = 1; i < hits.length; i++) {
+        for (let j = i; j > 0; j--) {
+          const a = (j - 1) * 3;
+          const b = j * 3;
+          const later = ord[a]! - ord[b]! || ord[a + 1]! - ord[b + 1]! || ord[a + 2]! - ord[b + 2]!;
+          if (later <= 0) break;
+          const h = hits[j - 1]!;
+          hits[j - 1] = hits[j]!;
+          hits[j] = h;
+          for (let k = 0; k < 3; k++) {
+            const t = ord[a + k]!;
+            ord[a + k] = ord[b + k]!;
+            ord[b + k] = t;
+          }
+        }
+      }
       const m: EngineMatch = {
         session: G.view,
         score: Math.round(x.score * 1000) / 1000,
-        hits: hits.map(stripOrder),
+        hits,
         matched: sMatched[x.g]!,
       };
       if (G.view.title && tMask[x.g]) {
@@ -821,7 +908,8 @@ export class Reader implements SearchReader {
       sMatched[g] = 0;
       sN[g] = 0;
     }
-    for (const g of titleTouched) {
+    for (let i = 0; i < ntt; i++) {
+      const g = titleTouched[i]!;
       tMask[g] = 0;
       tScoreT[g] = 0;
     }
@@ -840,7 +928,7 @@ export class Reader implements SearchReader {
       const hits: EngineHit[] = [];
       if (hitsWanted > 0) {
         const fp = this.firstPrompt(G.g);
-        if (fp) hits.push(stripOrder(this.hit(fp.r, fp.d, null, width)));
+        if (fp) hits.push(this.hit(fp.r, fp.d, null, width));
       }
       return { session: G.view, score: 0, hits, matched: 0 };
     });
@@ -874,23 +962,19 @@ export class Reader implements SearchReader {
     return 2;
   }
 
-  private hit(
-    r: SegRef,
-    d: number,
-    matcher: Matcher | null,
-    width: number,
-  ): EngineHit & { _o: [number, number, number] } {
+  /** One hit; `ord` (3 numbers per hit) receives its transcript order key. */
+  private hit(r: SegRef, d: number, matcher: Matcher | null, width: number, ord?: number[]): EngineHit {
     const row = r.seg.row(d);
     const text = r.seg.text(row);
     const sn = matcher ? snippet(text, matcher, width) : snippet(text, NO_MARKS, width);
     const fileId = this.fileIdOf(r, row);
-    const h: EngineHit & { _o: [number, number, number] } = {
+    ord?.push(row.at, fileId, row.offset);
+    const h: EngineHit = {
       field: FIELD_NAMES[r.seg.fc[d]! % 3]!,
       at: row.at,
       text: sn.text,
       marks: sn.marks,
       ref: encodeRef(r.source, fileId, row.offset, row.sub),
-      _o: [row.at, fileId, row.offset],
     };
     const tool = r.seg.str(row.tool);
     if (tool) h.tool = tool;
@@ -1175,15 +1259,68 @@ interface TDoc {
   file: number;
 }
 
-const NO_MARKS: Matcher = { terms: new Map(), prefixes: [], phrases: [], needles: [] };
-
-const transcriptOrder = (a: { _o: [number, number, number] }, b: { _o: [number, number, number] }): number =>
-  a._o[0] - b._o[0] || a._o[1] - b._o[1] || a._o[2] - b._o[2];
-
-function stripOrder(h: EngineHit & { _o?: unknown }): EngineHit {
-  delete h._o;
-  return h;
+/** The first `k` of 0..n−1 in `before` order, without sorting all n (a bounded heap). */
+function topK(n: number, k: number, before: (x: number, y: number) => boolean, heap: Uint32Array): number[] {
+  if (k <= 0) return [];
+  // a max-heap on "worst first": heap[0] is the item that comes last among those kept
+  let size = 0;
+  const worse = (a: number, b: number) => before(b, a);
+  const up = (i: number) => {
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (!worse(heap[i]!, heap[p]!)) break;
+      const t = heap[i]!;
+      heap[i] = heap[p]!;
+      heap[p] = t;
+      i = p;
+    }
+  };
+  const down = (i: number) => {
+    for (;;) {
+      const l = 2 * i + 1;
+      const r = l + 1;
+      let m = i;
+      if (l < size && worse(heap[l]!, heap[m]!)) m = l;
+      if (r < size && worse(heap[r]!, heap[m]!)) m = r;
+      if (m === i) break;
+      const t = heap[i]!;
+      heap[i] = heap[m]!;
+      heap[m] = t;
+      i = m;
+    }
+  };
+  for (let x = 0; x < n; x++) {
+    if (size < k) {
+      heap[size++] = x;
+      up(size - 1);
+    } else if (before(x, heap[0]!)) {
+      heap[0] = x;
+      down(0);
+    }
+  }
+  const out: number[] = [];
+  for (let i = 0; i < size; i++) out.push(heap[i]!);
+  out.sort((a, b) => (before(a, b) ? -1 : before(b, a) ? 1 : 0));
+  return out;
 }
+
+function titleAt(toks: TitleTok[], pos: number, t: string, prefix: boolean): boolean {
+  for (let i = 0; i < toks.length; i++) {
+    const x = toks[i]!;
+    if (x.pos === pos && (prefix ? x.t.startsWith(t) : x.t === t)) return true;
+  }
+  return false;
+}
+
+function titleAtAny(toks: TitleTok[], pos: number, terms: readonly string[]): boolean {
+  for (let i = 0; i < toks.length; i++) {
+    const x = toks[i]!;
+    if (x.pos === pos && terms.includes(x.t)) return true;
+  }
+  return false;
+}
+
+const NO_MARKS: Matcher = { terms: new Map(), prefixes: [], phrases: [], needles: [] };
 
 /** Per local session: (its first prompt doc << 1 | 1), else (its first doc << 1), else −1. */
 function firstDocs(r: SegRef): Int32Array {

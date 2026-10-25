@@ -7,7 +7,7 @@
 
 import { splitKey } from "../../../shared/api.js";
 import type { SearchDoc, SessionFacts } from "../types.js";
-import { Out, type Sink, utf8 } from "./codec.js";
+import { Out, utf8 } from "./codec.js";
 import { emptyFacts, type Facts, foldFacts, foldTimes } from "./facts.js";
 import { FIELD_CODES, fieldCode, LEN, lenCode, type SegSession, SegWriter, writeRow } from "./segment.js";
 import { tokenize } from "./tokenize.js";

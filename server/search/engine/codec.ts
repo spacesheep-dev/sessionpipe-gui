@@ -182,7 +182,7 @@ export function readU32(b: Uint8Array, p: number): number {
 }
 
 export function readF64(b: Uint8Array, p: number): number {
-  f64bytes.set(b.subarray(p, p + 8));
+  for (let i = 0; i < 8; i++) f64bytes[i] = b[p + i]!;
   return f64buf[0]!;
 }
 

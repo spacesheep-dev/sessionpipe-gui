@@ -6,7 +6,7 @@
 // the cuts. A long message is never tokenized whole: a raw indexOf finds the region first
 // (arch-engine.md §10: real-data p95 42 ms → 6.6 ms).
 import type { SearchMark } from "../types.js";
-import { isWordChar, tokenize } from "./tokenize.js";
+import { asciiEq, asciiStarts, fold, isWordChar, spans } from "./tokenize.js";
 
 /** What to mark, compiled once per query from its positive clauses. */
 export interface Matcher {
@@ -22,44 +22,74 @@ export function emptyMatcher(): Matcher {
   return { terms: new Map(), prefixes: [], phrases: [], needles: [] };
 }
 
-interface Tok {
-  t: string;
-  pos: number;
-  s: number;
-  e: number;
-}
+// scratch reused by every markText call (it never re-enters)
+const S_RAW: number[] = [];
+const S_TP: number[] = [];
+const S_TS: number[] = [];
+const S_TE: number[] = [];
+const S_FOLD: (string | undefined)[] = [];
+const S_IDX: number[] = [];
 
-/** Marks in `text` (sorted, non-overlapping) and the clause bits they cover. */
+/** Marks in `text` (sorted, non-overlapping) and the clause bits they cover. No string is
+ *  made per token: ASCII spans are compared in place, others folded one by one. */
 export function markText(text: string, m: Matcher): { marks: SearchMark[]; bits: number[] } {
-  const toks: Tok[] = [];
-  const needToks = m.phrases.length > 0;
-  const raw: [number, number, number][] = [];
-  tokenize(text, (t, pos, s, e) => {
-    if (needToks) toks.push({ t, pos, s, e });
-    let bit = m.terms.get(t) ?? 0;
-    if (!bit) for (const p of m.prefixes) if (t.startsWith(p.p)) bit |= p.bit;
-    if (bit) raw.push([s, e, bit]);
+  const byLen = matcherByLen(m);
+  const prefixes = m.prefixes;
+  const phrases = m.phrases;
+  const raw = S_RAW;
+  const tp = S_TP;
+  const ts = S_TS;
+  const te = S_TE;
+  const folded = S_FOLD;
+  raw.length = 0;
+  tp.length = 0;
+  ts.length = 0;
+  te.length = 0;
+  folded.length = 0;
+  const keepToks = phrases.length > 0;
+  spans(text, (pos, s, e, ascii) => {
+    let bit = 0;
+    let f: string | undefined;
+    if (ascii) {
+      const list = byLen.get(e - s);
+      if (list) for (let i = 0; i < list.length; i++) if (asciiEq(text, s, e, list[i]![0])) bit |= list[i]![1];
+      for (let i = 0; i < prefixes.length; i++) if (asciiStarts(text, s, e, prefixes[i]!.p)) bit |= prefixes[i]!.bit;
+    } else {
+      f = fold(text.slice(s, e));
+      bit |= m.terms.get(f) ?? 0;
+      for (let i = 0; i < prefixes.length; i++) if (f.startsWith(prefixes[i]!.p)) bit |= prefixes[i]!.bit;
+    }
+    if (bit) raw.push(s, e, bit);
+    if (keepToks) {
+      tp.push(pos);
+      ts.push(s);
+      te.push(e);
+      folded.push(f);
+    }
   });
-  if (needToks && toks.length) {
-    // Positions → the first token at each position (a whole identifier shares its first part's).
-    for (const ph of m.phrases) {
+  if (keepToks && tp.length) {
+    const eq = (i: number, t: string, prefix: boolean): boolean => {
+      const s = ts[i]!;
+      const e = te[i]!;
+      const f = folded[i];
+      if (f === undefined) return prefix ? asciiStarts(text, s, e, t) : asciiEq(text, s, e, t);
+      return prefix ? f.startsWith(t) : f === t;
+    };
+    for (const ph of phrases) {
       const k = ph.parts.length;
-      for (let i = 0; i < toks.length; i++) {
-        const a = toks[i]!;
-        if (a.t !== ph.parts[0]) continue;
-        let j = i;
+      for (let i = 0; i < tp.length; i++) {
+        if (!eq(i, ph.parts[0]!, false)) continue;
+        const p0 = tp[i]!;
+        let last = i;
         let ok = true;
-        let last = a;
+        let j = i;
         for (let q = 1; q < k && ok; q++) {
-          const want = a.pos + q;
+          const want = p0 + q;
           let x = j + 1;
-          while (x < toks.length && toks[x]!.pos < want) x++;
-          // several tokens may share a position (whole identifiers): try each
+          while (x < tp.length && tp[x]! < want) x++;
           let hit = -1;
-          for (let y = x; y < toks.length && toks[y]!.pos === want; y++) {
-            const t = toks[y]!.t;
-            const need = ph.parts[q]!;
-            if (t === need || (ph.lastPrefix && q === k - 1 && t.startsWith(need))) {
+          for (let y = x; y < tp.length && tp[y] === want; y++) {
+            if (eq(y, ph.parts[q]!, ph.lastPrefix && q === k - 1)) {
               hit = y;
               break;
             }
@@ -67,18 +97,26 @@ export function markText(text: string, m: Matcher): { marks: SearchMark[]; bits:
           if (hit < 0) ok = false;
           else {
             j = hit;
-            last = toks[hit]!;
+            last = hit;
           }
         }
-        if (ok) raw.push([a.s, Math.max(a.e, last.e), ph.bit]);
+        if (ok) raw.push(ts[i]!, Math.max(te[i]!, te[last]!), ph.bit);
       }
     }
   }
   if (!raw.length) return { marks: [], bits: [] };
-  raw.sort((x, y) => x[0] - y[0] || y[1] - x[1]);
+  const n = raw.length / 3;
+  const idx = S_IDX;
+  idx.length = 0;
+  for (let i = 0; i < n; i++) idx.push(i);
+  idx.sort((x, y) => raw[x * 3]! - raw[y * 3]! || raw[y * 3 + 1]! - raw[x * 3 + 1]!);
   const marks: SearchMark[] = [];
   const bits: number[] = [];
-  for (const [s, e, b] of raw) {
+  for (let ii = 0; ii < idx.length; ii++) {
+    const i = idx[ii]!;
+    const s = raw[i * 3]!;
+    const e = raw[i * 3 + 1]!;
+    const b = raw[i * 3 + 2]!;
     const lm = marks[marks.length - 1];
     if (lm && s < lm[1]) {
       // overlapping (a phrase over its own parts, a whole over its parts): merge
@@ -92,6 +130,23 @@ export function markText(text: string, m: Matcher): { marks: SearchMark[]; bits:
   return { marks, bits };
 }
 
+const byLenCache = new WeakMap<Matcher, Map<number, [string, number][]>>();
+function matcherByLen(m: Matcher): Map<number, [string, number][]> {
+  let x = byLenCache.get(m);
+  if (x) return x;
+  x = new Map();
+  for (const [t, b] of m.terms) {
+    let l = x.get(t.length);
+    if (!l) {
+      l = [];
+      x.set(t.length, l);
+    }
+    l.push([t, b]);
+  }
+  byLenCache.set(m, x);
+  return x;
+}
+
 const popcount = (x: number): number => {
   let c = 0;
   while (x) {
@@ -103,32 +158,47 @@ const popcount = (x: number): number => {
 
 const LONG = 2000;
 
+let FOLD_MAP = new Int32Array(1024);
+let FOLD_BUF = new Uint16Array(1024);
+const UTF16 = new TextDecoder("utf-16le");
+
 const isWs = (c: number): boolean => c === 32 || (c >= 9 && c <= 13) || c === 0xa0 || c === 0x2028 || c === 0x2029;
 
-/** Folds whitespace runs in text[a, b) into single spaces, mapping marks along. */
+/** Folds whitespace runs in text[a, b) into single spaces, mapping marks along (one string
+ *  made, from a reused buffer). */
 function foldPiece(text: string, a: number, b: number, marks: SearchMark[]): { text: string; marks: SearchMark[] } {
-  const map = new Int32Array(b - a + 1);
-  let out = "";
+  const len = b - a;
+  if (FOLD_MAP.length < len + 1) FOLD_MAP = new Int32Array(Math.max(len + 1, FOLD_MAP.length * 2));
+  if (FOLD_BUF.length < len) FOLD_BUF = new Uint16Array(Math.max(len, FOLD_BUF.length * 2));
+  const map = FOLD_MAP;
+  const buf = FOLD_BUF;
   let k = 0;
-  let run = a;
   let inWs = false;
+  let changed = false;
   for (let i = a; i < b; i++) {
-    if (isWs(text.charCodeAt(i))) {
+    const c = text.charCodeAt(i);
+    if (isWs(c)) {
       if (!inWs) {
-        out += `${text.slice(run, i)} `;
+        if (c !== 32) changed = true;
+        map[i - a] = k;
+        buf[k++] = 32;
         inWs = true;
-        map[i - a] = k++;
-      } else map[i - a] = k;
-      run = i + 1;
+      } else {
+        changed = true;
+        map[i - a] = k;
+      }
     } else {
       inWs = false;
-      map[i - a] = k++;
+      map[i - a] = k;
+      buf[k++] = c;
     }
   }
-  out += text.slice(run, b);
-  map[b - a] = k;
+  map[len] = k;
+  const out = changed ? UTF16.decode(buf.subarray(0, k)) : text.slice(a, b);
   const ms: SearchMark[] = [];
-  for (const [s, e] of marks) {
+  for (let i = 0; i < marks.length; i++) {
+    const s = marks[i]![0];
+    const e = marks[i]![1];
     if (e <= a || s >= b) continue;
     const ss = map[Math.max(s, a) - a]!;
     const ee = map[Math.min(e, b) - a]!;

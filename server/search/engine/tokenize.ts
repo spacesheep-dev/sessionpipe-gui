@@ -178,3 +178,88 @@ export function isWordChar(text: string, i: number): boolean {
   const k = ct[text.charCodeAt(i)]!;
   return k !== OTHER;
 }
+
+/** Called once per term with its span only (no string made): `ascii` when the run has no
+ *  character above 127 (then the term is the span lowercased). */
+export type SpanEmit = (pos: number, start: number, end: number, ascii: boolean) => void;
+
+/** The same terms as `tokenize`, as spans: the marks and snippets use it to match without
+ *  allocating a string per token. */
+export function spans(text: string, emit: SpanEmit, pos0 = 0): number {
+  const ct = table ?? charClasses();
+  const n = text.length;
+  let pos = pos0;
+  let i = 0;
+  while (i < n) {
+    const c = ct[text.charCodeAt(i)]!;
+    if (c === OTHER || c === MARK) {
+      i++;
+      continue;
+    }
+    if (c === CJK) {
+      emit(pos++, i, i + 1, false);
+      i++;
+      continue;
+    }
+    const start = i;
+    let ascii = true;
+    while (i < n) {
+      const code = text.charCodeAt(i);
+      const k = ct[code]!;
+      if (k === OTHER || k === CJK) break;
+      if (code > 127) ascii = false;
+      i++;
+    }
+    const end = i;
+    if (end - start > MAX_RUN) continue;
+    let parts = 0;
+    let ps = start;
+    const firstPos = pos;
+    for (let j = start; j <= end; j++) {
+      const k = j < end ? ct[text.charCodeAt(j)]! : OTHER;
+      let cut = j === end || k === UNDERSCORE;
+      if (!cut && j > ps && k === UPPER) {
+        const prev = ct[text.charCodeAt(j - 1)]!;
+        if (prev === LOWER || prev === DIGIT) cut = true;
+        else if (prev === UPPER && j + 1 < end && ct[text.charCodeAt(j + 1)] === LOWER) cut = true;
+      }
+      if (cut) {
+        if (j > ps && j - ps <= MAX_PART) {
+          emit(pos++, ps, j, ascii);
+          parts++;
+        }
+        ps = k === UNDERSCORE ? j + 1 : j;
+      }
+    }
+    if (parts > 1) {
+      let ws = start;
+      while (ws < end && text.charCodeAt(ws) === 95) ws++;
+      let we = end;
+      while (we > ws && text.charCodeAt(we - 1) === 95) we--;
+      if (we - ws <= MAX_PART) emit(firstPos, ws, we, ascii);
+    }
+  }
+  return pos;
+}
+
+/** text[s, e) lowercased equals `term` (ASCII spans only). */
+export function asciiEq(text: string, s: number, e: number, term: string): boolean {
+  if (e - s !== term.length) return false;
+  for (let i = 0; i < term.length; i++) {
+    let c = text.charCodeAt(s + i);
+    if (c >= 65 && c <= 90) c |= 32;
+    if (c !== term.charCodeAt(i)) return false;
+  }
+  return true;
+}
+
+/** text[s, e) lowercased starts with `p` (ASCII spans only). */
+export function asciiStarts(text: string, s: number, e: number, p: string): boolean {
+  if (e - s < p.length) return false;
+  for (let i = 0; i < p.length; i++) {
+    let c = text.charCodeAt(s + i);
+    if (c >= 65 && c <= 90) c |= 32;
+    if (c !== p.charCodeAt(i)) return false;
+  }
+  return true;
+}
