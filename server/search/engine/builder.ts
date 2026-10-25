@@ -8,7 +8,7 @@
 import { splitKey } from "../../../shared/api.js";
 import type { SearchDoc, SessionFacts } from "../types.js";
 import { Out, utf8 } from "./codec.js";
-import { emptyFacts, type Facts, foldFacts, foldTimes } from "./facts.js";
+import { emptyFacts, type Facts, foldFacts, foldTimes, headFacts } from "./facts.js";
 import { FIELD_CODES, fieldCode, LEN, lenCode, type SegSession, SegWriter, writeRow } from "./segment.js";
 import { fold, spans } from "./tokenize.js";
 
@@ -350,7 +350,14 @@ export class Builder {
             N,
             flen: this.flen,
             fcnt: this.fcnt,
-            sessions: this.sessions.map((x, i) => ({ ...x, ff: [...this.ff[i]!] })),
+            // on disk the facts live per file only (the reader folds the files still named);
+            // a RAM segment (the live tail) keeps the folded facts too
+            sessions: this.sessions.map((x, i) => ({
+              key: x.key,
+              docs: x.docs,
+              facts: dest ? headFacts(x.facts) : x.facts,
+              ff: [...this.ff[i]!],
+            })),
             files: this.files,
             strs: this.strs,
             textBytes: this.storeN,

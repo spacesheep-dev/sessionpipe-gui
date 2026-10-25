@@ -54,6 +54,11 @@ export function foldTimes(into: Facts, first: number, last: number): void {
   if (into.lastAt === 0 && first > 0) into.lastAt = first;
 }
 
+/** Only who the session is (a segment on disk keeps the rest per file, in `ff`). */
+export function headFacts(f: Facts): Facts {
+  return { harness: f.harness, id: f.id, titleRank: 0, firstAt: 0, lastAt: 0 };
+}
+
 export function cloneFacts(f: Facts): Facts {
   return { ...f };
 }

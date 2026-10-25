@@ -6,7 +6,7 @@
 // temp files. It yields every few ms so the in-process indexer never blocks the server.
 import { unlinkSync } from "node:fs";
 import { FileOut, readF64, readU32, readV, type Sink } from "./codec.js";
-import { cloneFacts, type Facts, foldFacts } from "./facts.js";
+import { cloneFacts, type Facts, foldFacts, headFacts } from "./facts.js";
 import {
   copyFileInto,
   FIELD_CODES,
@@ -265,7 +265,15 @@ export async function mergeSegments(
         store: (o: Sink) => copyFileInto(storeOut.file, o, true),
         dsess,
         ats,
-        meta: { N, flen, fcnt, sessions: sessions.map((x, i) => ({ ...x, ff: [...ffs[i]!] })), files, strs, textBytes },
+        meta: {
+          N,
+          flen,
+          fcnt,
+          sessions: sessions.map((x, i) => ({ key: x.key, docs: x.docs, facts: headFacts(x.facts), ff: [...ffs[i]!] })),
+          files,
+          strs,
+          textBytes,
+        },
       },
       dest,
     );
