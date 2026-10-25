@@ -22,6 +22,8 @@ import { provisionalId } from "./refs.js";
 import { Segment } from "./segment.js";
 
 export const TAIL_MAX_CHARS = 4 * 1024 * 1024;
+/** Small tail segments kept before they are folded into one. */
+const TAIL_SEGMENTS = 6;
 /** A file changed within this long is hot (stat'ed on every tick). */
 export const HOT_MS = 15 * 60_000;
 /** At most one discovery per this long (it costs the adapters a walk). */
@@ -53,7 +55,9 @@ export class LiveTail {
   private files = new Map<string, TailFile>();
   private hot = new Set<string>();
   private known = new Map<string, { file: SourceFile; adapter: SourceAdapter }>();
+  /** Everything the tail read since the last reset, and what arrived since the last encode. */
   private builders = new Map<SearchSource, Builder>();
+  private deltas = new Map<SearchSource, Builder>();
   private segs: { source: SearchSource; seg: Segment }[] = [];
   private dirty = false;
   private running: Promise<void> | null = null;
@@ -90,6 +94,8 @@ export class LiveTail {
     for (const f of this.files.values()) this.hot.add(f.file.path);
     this.files.clear();
     for (const b of this.builders.values()) b.reset();
+    for (const b of this.deltas.values()) b.reset();
+    for (const s of this.segs) s.seg.close();
     this.segs = [];
     this.dirty = false;
     this.wantsCommit = false;
@@ -111,19 +117,25 @@ export class LiveTail {
     return n;
   }
 
-  /** The tail as segments (encoded on demand when it changed). */
+  /** The tail as segments (encoded on demand when it changed). Only what arrived since the
+   *  last call is encoded, as one more small segment; past TAIL_SEGMENTS of them they are
+   *  replaced by one encoding of the whole tail. */
   segments(): { source: SearchSource; seg: Segment }[] {
     if (!this.dirty) return this.segs;
-    for (const s of this.segs) s.seg.close();
-    const out: { source: SearchSource; seg: Segment }[] = [];
-    for (const [source, b] of this.builders) {
-      if (b.empty) continue;
-      const r = b.encode();
-      out.push({ source, seg: new Segment(r.buffer!, `tail-${source}`) });
+    for (const [source, d] of this.deltas) {
+      if (d.empty) continue;
+      const mine = this.segs.filter((x) => x.source === source);
+      const whole = mine.length >= TAIL_SEGMENTS;
+      const r = (whole ? this.builder(source) : d).encode();
+      const seg = { source, seg: new Segment(r.buffer!, `tail-${source}-${this.segs.length}`) };
+      if (whole) {
+        for (const x of mine) x.seg.close();
+        this.segs = [...this.segs.filter((x) => x.source !== source), seg];
+      } else this.segs = [...this.segs, seg];
+      d.reset();
     }
-    this.segs = out;
     this.dirty = false;
-    return out;
+    return this.segs;
   }
 
   /** Path of a provisional (tail-only) file id. */
@@ -233,16 +245,20 @@ export class LiveTail {
       if (tf.skip || tf.done) continue;
       if (st.size <= tf.offset) continue;
       const b = this.builder(tf.source);
+      const delta = this.delta(tf.source);
       const fileId = tf.fileId;
       const sink: DocSink = {
         doc: (d: SearchDoc) => {
           if (epoch !== this.epoch) return;
           if (d.at > 0) tf!.lastAt = Math.max(tf!.lastAt, d.at);
-          b.add(d.at > 0 ? d : { ...d, at: tf!.lastAt }, fileId);
+          const doc = d.at > 0 ? d : { ...d, at: tf!.lastAt };
+          b.add(doc, fileId);
+          delta.add(doc, fileId);
         },
         facts: (f: SessionFacts) => {
           if (epoch !== this.epoch) return;
           b.facts(f, fileId);
+          delta.facts(f, fileId);
         },
       };
       const file: SourceFile = { ...tf.file, size: st.size, mtimeMs: st.mtimeMs };
@@ -264,6 +280,15 @@ export class LiveTail {
       this.onChange();
     }
     this.lastPassMs = performance.now() - t0;
+  }
+
+  private delta(source: SearchSource): Builder {
+    let b = this.deltas.get(source);
+    if (!b) {
+      b = new Builder();
+      this.deltas.set(source, b);
+    }
+    return b;
   }
 
   private builder(source: SearchSource): Builder {

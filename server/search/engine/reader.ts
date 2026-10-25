@@ -193,6 +193,11 @@ export class Reader implements SearchReader {
   private tailVersion = 0;
   private seenTailVersion = -1;
   private refs: SegRef[] = [];
+  private baseRefs: SegRef[] = [];
+  private tailTouched: number[] = [];
+  private baseN = 0;
+  private baseFlen = new Float64Array(FIELD_CODES);
+  private baseFcnt = new Float64Array(FIELD_CODES);
   private S: GSession[] = [];
   private byKey = new Map<string, number>();
   private overlays = new Map<string, SessionOverlay>();
@@ -264,69 +269,70 @@ export class Reader implements SearchReader {
   // ───────────────────────────── tables ─────────────────────────────
 
   /** Rebuild the global session table from the committed segments plus the tail. */
+  /** Rebuild the global session table from the committed segments, then fold the tail in. */
   private rebuild(): void {
-    this.version++;
+    this.S = [];
+    this.byKey = new Map();
+    this.tailTouched = [];
     const refs: SegRef[] = [];
-    const S: GSession[] = [];
-    const byKey = new Map<string, number>();
-    const ensure = (key: string, harness: string, id: string): GSession => {
-      let g = byKey.get(key);
-      if (g === undefined) {
-        g = S.length;
-        byKey.set(key, g);
-        S.push({
-          key,
-          g,
-          facts: [null, null],
-          tailFacts: [null, null],
-          docs: [0, 0],
-          tailDocs: [0, 0],
-          view: undefined as unknown as IndexedSession,
-        });
-        void harness;
-        void id;
-      }
-      return S[g]!;
-    };
-    const add = (seg: Segment, source: SearchSource, tail: boolean, liveIds: ReadonlySet<number> | null) => {
-      const si = srcIndex(source);
-      const ss = seg.meta.sessions;
-      const gs = new Uint32Array(ss.length);
-      const live = new Uint32Array(ss.length);
-      if (seg.delCount) {
-        for (let d = 0; d < seg.N; d++) if (!seg.isDeleted(d)) live[seg.dsess[d]!]!++;
-      } else for (let i = 0; i < ss.length; i++) live[i] = ss[i]!.docs;
-      for (let i = 0; i < ss.length; i++) {
-        const s = ss[i]!;
-        const G = ensure(s.key, s.facts.harness, s.facts.id);
-        gs[i] = G.g;
-        const slot = tail ? G.tailFacts : G.facts;
-        // fold only the facts of files still named (a replaced or deleted file's go with it)
-        const parts: Facts[] = [];
-        if (s.ff && liveIds) {
-          for (const [fid, f] of s.ff) if (fid < 0 || fid >= PROVISIONAL || liveIds.has(fid)) parts.push(f);
-        } else parts.push(s.facts);
-        for (const f of parts) {
-          if (!slot[si]) slot[si] = cloneFacts(f);
-          else foldFacts(slot[si]!, f);
-        }
-        if (tail) G.tailDocs[si] += live[i]!;
-        else G.docs[si] += live[i]!;
-      }
-      refs.push({ seg, source, bit: BIT[source], gs, tail, live });
-    };
-    for (const st of this.states.values()) for (const seg of st.segs) add(seg, st.source, false, st.liveIds);
-    if (this.tail)
-      for (const t of this.tail.segments()) if (this.states.has(t.source)) add(t.seg, t.source, true, null);
-    this.seenTailVersion = this.tailVersion;
-    this.refs = refs;
-    this.S = S;
-    this.byKey = byKey;
-    // global statistics
+    for (const st of this.states.values()) {
+      for (const seg of st.segs) refs.push(this.addSeg(seg, st.source, false, st.liveIds, null));
+    }
+    this.baseRefs = refs;
     let N = 0;
-    const flen = new Float64Array(FIELD_CODES);
-    const fcnt = new Float64Array(FIELD_CODES);
+    this.baseFlen.fill(0);
+    this.baseFcnt.fill(0);
     for (const r of refs) {
+      N += r.seg.N;
+      for (let f = 0; f < FIELD_CODES; f++) {
+        this.baseFlen[f]! += r.seg.meta.flen[f] ?? 0;
+        this.baseFcnt[f]! += r.seg.meta.fcnt[f] ?? 0;
+      }
+    }
+    this.baseN = N;
+    // views + titles
+    const n = this.S.length;
+    this.titlePost = new Map();
+    this.titleSorted = null;
+    this.titleToks = new Array(n).fill(null);
+    this.titleOf = new Array(n).fill(undefined);
+    this.titleParts = new Array(n).fill(0);
+    this.titleLen = 0;
+    this.titleCount = 0;
+    for (const G of this.S) {
+      G.view = this.makeView(G);
+      this.setTitle(G.g, G.view.title);
+    }
+    this.applyTail();
+  }
+
+  /** Fold the live tail in (it changed, or the committed tables were just rebuilt): only the
+   *  sessions the old and the new tail touch are recomputed. */
+  private applyTail(): void {
+    this.version++;
+    const redo = new Set<number>(this.tailTouched);
+    for (const g of this.tailTouched) {
+      const G = this.S[g]!;
+      G.tailFacts = [null, null];
+      G.tailDocs = [0, 0];
+    }
+    const touched: number[] = [];
+    const tailRefs: SegRef[] = [];
+    if (this.tail) {
+      for (const t of this.tail.segments()) {
+        if (!this.states.has(t.source)) continue;
+        tailRefs.push(this.addSeg(t.seg, t.source, true, null, touched));
+      }
+    }
+    this.tailTouched = touched;
+    for (const g of touched) redo.add(g);
+    this.seenTailVersion = this.tailVersion;
+    this.refs = tailRefs.length ? [...this.baseRefs, ...tailRefs] : this.baseRefs;
+    // global statistics: committed + tail
+    let N = this.baseN;
+    const flen = Float64Array.from(this.baseFlen);
+    const fcnt = Float64Array.from(this.baseFcnt);
+    for (const r of tailRefs) {
       N += r.seg.N;
       for (let f = 0; f < FIELD_CODES; f++) {
         flen[f]! += r.seg.meta.flen[f] ?? 0;
@@ -343,46 +349,97 @@ export class Reader implements SearchReader {
     this.dfCache.clear();
     this.expandCache.clear();
     this.transcriptCache.clear();
-    // pools
-    const n = S.length;
-    if (this.sMask.length < n) {
-      const m = Math.max(n, Math.ceil(this.sMask.length * 1.5), 64);
-      this.sMask = new Uint32Array(m);
-      this.sFull = new Uint8Array(m);
-      this.sMatched = new Uint32Array(m);
-      this.sN = new Uint8Array(m);
-      this.tRef = new Int32Array(m * 3);
-      this.tDoc = new Uint32Array(m * 3);
-      this.tKey = new Float64Array(m * 3);
-      this.tScore = new Float64Array(m * 3);
-      this.touchedS = new Uint32Array(m);
-      this.dropped = new Uint8Array(m);
-      this.allowed = new Uint8Array(m);
-      this.tMask = new Uint32Array(m);
-      this.tScoreT = new Float64Array(m);
-      this.rankG = new Uint32Array(m);
-      this.tSeen = new Uint8Array(m);
-      this.tCandsA = new Uint32Array(m);
-      this.tTouched = new Uint32Array(m);
-      this.heap = new Uint32Array(m);
-      this.rankS = new Float64Array(m);
-      this.rankL = new Float64Array(m);
-    }
+    this.ensurePools(this.S.length);
     let maxN = 0;
-    for (const r of refs) maxN = Math.max(maxN, r.seg.N);
+    for (const r of this.refs) maxN = Math.max(maxN, r.seg.N);
     this.P.shrink(maxN);
     this.P.ensure(maxN);
-    // views + titles
-    this.titlePost = new Map();
-    this.titleToks = new Array(n).fill(null);
-    this.titleOf = new Array(n).fill(undefined);
-    this.titleParts = new Array(n).fill(0);
-    this.titleLen = 0;
-    this.titleCount = 0;
-    for (const G of S) {
+    for (const g of redo) {
+      const G = this.S[g]!;
       G.view = this.makeView(G);
-      this.setTitle(G.g, G.view.title);
+      this.setTitle(g, G.view.title);
     }
+  }
+
+  private ensure(key: string): GSession {
+    let g = this.byKey.get(key);
+    if (g === undefined) {
+      g = this.S.length;
+      this.byKey.set(key, g);
+      this.S.push({
+        key,
+        g,
+        facts: [null, null],
+        tailFacts: [null, null],
+        docs: [0, 0],
+        tailDocs: [0, 0],
+        view: undefined as unknown as IndexedSession,
+      });
+      this.titleToks[g] = null;
+      this.titleOf[g] = undefined;
+      this.titleParts[g] = 0;
+    }
+    return this.S[g]!;
+  }
+
+  private addSeg(
+    seg: Segment,
+    source: SearchSource,
+    tail: boolean,
+    liveIds: ReadonlySet<number> | null,
+    touched: number[] | null,
+  ): SegRef {
+    const si = srcIndex(source);
+    const ss = seg.meta.sessions;
+    const gs = new Uint32Array(ss.length);
+    const live = new Uint32Array(ss.length);
+    if (seg.delCount) {
+      for (let d = 0; d < seg.N; d++) if (!seg.isDeleted(d)) live[seg.dsess[d]!]!++;
+    } else for (let i = 0; i < ss.length; i++) live[i] = ss[i]!.docs;
+    for (let i = 0; i < ss.length; i++) {
+      const s = ss[i]!;
+      const G = this.ensure(s.key);
+      gs[i] = G.g;
+      touched?.push(G.g);
+      const slot = tail ? G.tailFacts : G.facts;
+      // fold only the facts of files still named (a replaced or deleted file's go with it)
+      if (s.ff && liveIds) {
+        for (const [fid, f] of s.ff) {
+          if (fid >= 0 && fid < PROVISIONAL && !liveIds.has(fid)) continue;
+          if (!slot[si]) slot[si] = cloneFacts(f);
+          else foldFacts(slot[si]!, f);
+        }
+      } else if (!slot[si]) slot[si] = cloneFacts(s.facts);
+      else foldFacts(slot[si]!, s.facts);
+      if (tail) G.tailDocs[si] += live[i]!;
+      else G.docs[si] += live[i]!;
+    }
+    return { seg, source, bit: BIT[source], gs, tail, live };
+  }
+
+  private ensurePools(n: number): void {
+    if (this.sMask.length >= n) return;
+    const m = Math.max(n, Math.ceil(this.sMask.length * 1.5), 64);
+    this.sMask = new Uint32Array(m);
+    this.sFull = new Uint8Array(m);
+    this.sMatched = new Uint32Array(m);
+    this.sN = new Uint8Array(m);
+    this.tRef = new Int32Array(m * 3);
+    this.tDoc = new Uint32Array(m * 3);
+    this.tKey = new Float64Array(m * 3);
+    this.tScore = new Float64Array(m * 3);
+    this.touchedS = new Uint32Array(m);
+    this.dropped = new Uint8Array(m);
+    this.allowed = new Uint8Array(m);
+    this.tMask = new Uint32Array(m);
+    this.tScoreT = new Float64Array(m);
+    this.rankG = new Uint32Array(m);
+    this.tSeen = new Uint8Array(m);
+    this.tCandsA = new Uint32Array(m);
+    this.tTouched = new Uint32Array(m);
+    this.heap = new Uint32Array(m);
+    this.rankS = new Float64Array(m);
+    this.rankL = new Float64Array(m);
   }
 
   private makeView(G: GSession): IndexedSession {
@@ -475,7 +532,7 @@ export class Reader implements SearchReader {
 
   /** The tail changed since the tables were built: fold it in. */
   private sync(): void {
-    if (this.tail && this.tailVersion !== this.seenTailVersion) this.rebuild();
+    if (this.tail && this.tailVersion !== this.seenTailVersion) this.applyTail();
   }
 
   // ───────────────────────────── dictionary ─────────────────────────────
