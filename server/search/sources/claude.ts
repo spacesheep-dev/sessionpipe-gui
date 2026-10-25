@@ -25,6 +25,34 @@ import { cleanPromptBlock, finish, firstAskTitle, ms, repoName, toolArg, toolLin
 export const HARNESS = "claude-code";
 /** Lines above this are skipped unless they hold a queued prompt (pasted images). */
 const BIG_LINE = 8 << 20;
+/** Title records are small; a line under this is also searched for them whatever its key order. */
+const SMALL_LINE = 4096;
+const TYPE_FIRST = Buffer.from('{"type":"');
+/** What a `{"type":"<v>"…` line is: a = assistant, u = user, q = maybe a queued prompt,
+ *  t = a title or PR link to parse. Any other value is skipped unparsed. */
+const FIRST_KIND: Record<string, string> = {
+  assistant: "a",
+  user: "u",
+  attachment: "q",
+  "custom-title": "t",
+  "agent-name": "t",
+  "ai-title": "t",
+  summary: "t",
+  "pr-link": "t",
+};
+const TITLE_PATS = [
+  '"type":"custom-title"',
+  '"type":"agent-name"',
+  '"type":"ai-title"',
+  '"type":"summary"',
+  '"type":"pr-link"',
+].map((p) => Buffer.from(p));
+/** A bounded search: does `buf[s, e)` hold any of the patterns? */
+function hasAny(buf: Buffer, s: number, e: number, pats: Buffer[]): boolean {
+  const line = buf.subarray(s, e);
+  for (const p of pats) if (line.indexOf(p) >= 0) return true;
+  return false;
+}
 /** Attached material (IDE selection, pasted content) is indexed at the tool tier, clipped. */
 const ATTACHED_MAX = 2048;
 
@@ -75,12 +103,19 @@ function firstUuid(p: string): string | undefined {
     return undefined;
   }
   try {
-    const buf = Buffer.allocUnsafe(256 * 1024);
-    const n = readSync(fd, buf, 0, buf.length, 0);
-    const i = buf.subarray(0, n).indexOf('"uuid":"');
-    if (i < 0) return undefined;
-    const end = buf.indexOf(34, i + 8);
-    return end > i + 8 && end < n ? buf.toString("latin1", i + 8, end) : undefined;
+    // 64 KB holds the first record almost always; a first prompt with a pasted image can
+    // push its `uuid` (which follows `message`) further, so look once more, deeper.
+    for (const size of [64 * 1024, 4 << 20]) {
+      const buf = Buffer.allocUnsafe(size);
+      const n = readSync(fd, buf, 0, size, 0);
+      const i = buf.subarray(0, n).indexOf('"uuid":"');
+      if (i >= 0) {
+        const end = buf.indexOf(34, i + 8);
+        return end > i + 8 && end < n ? buf.toString("latin1", i + 8, end) : undefined;
+      }
+      if (n < size) return undefined;
+    }
+    return undefined;
   } finally {
     closeSync(fd);
   }
@@ -103,9 +138,26 @@ function uuidsOf(p: string): Set<string> {
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
+/** Argument keys tried after the shared ones (sources.md §2 and the M3 smoke's name-only
+ *  tools: Workflow `script`, TaskStop `task_id`, SendUserFile `caption`, browser `text`). */
+const CLAUDE_EXTRA = [
+  "title",
+  "message",
+  "name",
+  "question",
+  "summary",
+  "caption",
+  "scriptPath",
+  "script",
+  "task_id",
+  "taskId",
+  "text",
+  "action",
+];
+
 /** A Claude-shaped tool call's line (`Bash npm test`, `Edit src/a.ts`, `TodoWrite a; b`). */
 export function claudeToolLine(name: string, input: unknown): string {
-  let arg = toolArg(input, ["title", "message", "name", "question"]);
+  let arg = toolArg(input, CLAUDE_EXTRA);
   if (!arg && input && typeof input === "object") {
     const o = input as Record<string, unknown>;
     if (Array.isArray(o.todos))
@@ -324,33 +376,34 @@ export function claudeAdapter(): SourceAdapter {
         user: new Finder('"type":"user"'),
         asst: new Finder('"type":"assistant"'),
         queued: new Finder('"queued_command"'),
-        ct: new Finder('"type":"custom-title"'),
-        an: new Finder('"type":"agent-name"'),
-        ai: new Finder('"type":"ai-title"'),
-        sum: new Finder('"type":"summary"'),
-        pr: new Finder('"type":"pr-link"'),
       };
-      const API = Buffer.from('{"type":"api-request');
       let bad = 0;
 
       const onLine = (buf: Buffer, s: number, e: number, at: number, gen: number) => {
-        if (startsWith(buf, s, e, API)) return;
-        if (F.tur.has(buf, gen, s, e)) return;
-        const queued = F.queued.has(buf, gen, s, e);
-        const kind = F.asst.has(buf, gen, s, e)
-          ? "a"
-          : F.user.has(buf, gen, s, e)
-            ? "u"
-            : queued
-              ? "q"
-              : F.ai.has(buf, gen, s, e) ||
-                  F.ct.has(buf, gen, s, e) ||
-                  F.an.has(buf, gen, s, e) ||
-                  F.sum.has(buf, gen, s, e)
-                ? "t"
-                : F.pr.has(buf, gen, s, e)
-                  ? "p"
+        // Records Claude Code writes with `type` first (titles, last-prompt, queue-operation,
+        // api-request, file-history, mode…) are decided by their first bytes alone.
+        let kind = "";
+        if (startsWith(buf, s, e, TYPE_FIRST)) {
+          const v0 = s + TYPE_FIRST.length;
+          const q = buf.indexOf(34, v0);
+          const v = q > v0 && q - v0 < 40 && q < e ? buf.toString("latin1", v0, q) : "";
+          const k = FIRST_KIND[v];
+          if (k === undefined) return;
+          kind = k;
+        }
+        if (!kind) {
+          if (F.tur.has(buf, gen, s, e)) return;
+          kind = F.asst.has(buf, gen, s, e)
+            ? "a"
+            : F.user.has(buf, gen, s, e)
+              ? "u"
+              : F.queued.has(buf, gen, s, e)
+                ? "q"
+                : e - s < SMALL_LINE && hasAny(buf, s, e, TITLE_PATS)
+                  ? "t"
                   : "";
+        } else if (kind === "u" && F.tur.has(buf, gen, s, e)) return;
+        else if (kind === "q" && !F.queued.has(buf, gen, s, e)) return;
         if (!kind) return;
         if (e - s > BIG_LINE && kind !== "q") return;
         const j = parseLine(buf, s, e);
@@ -359,7 +412,7 @@ export function claudeAdapter(): SourceAdapter {
           return;
         }
         const type = j.type;
-        if (kind === "t" || kind === "p") {
+        if (kind === "t") {
           if (type === "custom-title") title(str(j.customTitle), TITLE_RANK.custom);
           else if (type === "agent-name") title(str(j.agentName), TITLE_RANK.agentName);
           else if (type === "ai-title") title(str(j.aiTitle), TITLE_RANK.aiTitle);

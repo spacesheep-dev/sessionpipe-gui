@@ -37,6 +37,31 @@ import { zstdChunks, zstdWay } from "./zstd.js";
 export const HARNESS = "codex";
 const ROLLOUT = /^rollout-.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/i;
 
+const TYPE_KEY = Buffer.from('"type":"');
+const PAYLOAD_TYPE_KEY = Buffer.from('"payload":{"type":"');
+const SKIP_PAYLOAD = new Set(["function_call_output", "custom_tool_call_output", "reasoning"]);
+
+/** The string value after `key` within the line's first `within` bytes, or undefined. */
+function headValue(buf: Buffer, s: number, e: number, key: Buffer, within: number): string | undefined {
+  const end = Math.min(e, s + within);
+  const i = buf.subarray(s, end).indexOf(key);
+  if (i < 0) return undefined;
+  const v0 = s + i + key.length;
+  const q = buf.indexOf(34, v0);
+  return q > v0 && q < e && q - v0 < 64 ? buf.toString("latin1", v0, q) : undefined;
+}
+
+const PAYLOAD_KEY = Buffer.from('"payload":');
+/** The envelope's own type, only when it comes before the payload (else undefined: search whole). */
+function topType(buf: Buffer, s: number, e: number): string | undefined {
+  const head = buf.subarray(s, Math.min(e, s + 240));
+  const t = head.indexOf(TYPE_KEY);
+  if (t < 0) return undefined;
+  const p = head.indexOf(PAYLOAD_KEY);
+  if (p >= 0 && p < t) return undefined;
+  return headValue(buf, s, e, TYPE_KEY, 240);
+}
+
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj | undefined => (v && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : undefined);
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -73,7 +98,7 @@ export function codexToolLine(name: string, rawArgs: unknown): string {
       .join("; ");
   else if (/^request_user_input/.test(name) && Array.isArray(o?.questions))
     arg = o.questions
-      .map((q) => str(obj(q)?.question) || str(q))
+      .map((q) => str(obj(q)?.question) || str(obj(q)?.title) || str(q))
       .filter(Boolean)
       .join(" ");
   else if (o && Array.isArray(o.command)) arg = shellJoin(o.command.map(String));
@@ -277,7 +302,9 @@ export function codexAdapter(): SourceAdapter {
               if (!s || codexInjected(s)) continue;
               const cleaned = codexPrompt(s);
               if (cleaned) parts.push(cleaned);
-            } else if (role === "assistant" && (o.type === "output_text" || o.type === "text")) parts.push(o.text);
+            } else if (role === "assistant" && (o.type === "output_text" || o.type === "text"))
+              // Plan mode wraps the plan in <proposed_plan>…</proposed_plan>: the words stay.
+              parts.push(o.text.replace(/<\/?proposed_plan>/g, ""));
           }
           const text = finish(parts.join("\n\n"));
           if (!text) return;
@@ -321,16 +348,20 @@ export function codexAdapter(): SourceAdapter {
           }
           return;
         }
+        // The envelope's `type` sits in the first ~120 bytes (`{"timestamp":…,"ordinal":n,"type":…`):
+        // read it there; only a line that does not say it early is searched whole.
+        const top = topType(buf, s, e);
         if (!st.b) {
-          if (!F.evt.has(buf, gen, s, e) || !F.thread?.has(buf, gen, s, e)) return;
+          if (top !== undefined ? top !== "event_msg" : !F.evt.has(buf, gen, s, e)) return;
+          if (!F.thread?.has(buf, gen, s, e)) return;
           const j = parseLine(buf, s, e);
           const tid = str(obj(j?.payload)?.thread_id);
           if (j?.type === "event_msg" && tid === st.mid) st.b = true;
           return;
         }
-        const isResp = F.resp.has(buf, gen, s, e);
+        const isResp = top !== undefined ? top === "response_item" : F.resp.has(buf, gen, s, e);
         if (!isResp) {
-          if (!F.ctx.has(buf, gen, s, e)) return;
+          if (top !== undefined ? top !== "turn_context" : !F.ctx.has(buf, gen, s, e)) return;
           const j = parseLine(buf, s, e);
           if (!j) {
             bad++;
@@ -343,8 +374,11 @@ export function codexAdapter(): SourceAdapter {
           if (f && typeof p.model === "string" && p.model) f.model = p.model;
           return;
         }
-        if (F.out.has(buf, gen, s, e) || F.cout.has(buf, gen, s, e) || F.reas.has(buf, gen, s, e)) {
-          // Skip by the payload's own type only: peek the bytes after `"payload":{`.
+        // Outputs and reasoning are most of the bytes: skipped by the payload's own type.
+        const pt = headValue(buf, s, e, PAYLOAD_TYPE_KEY, 400);
+        if (pt !== undefined) {
+          if (SKIP_PAYLOAD.has(pt)) return;
+        } else if (F.out.has(buf, gen, s, e) || F.cout.has(buf, gen, s, e) || F.reas.has(buf, gen, s, e)) {
           const head = buf.toString("latin1", s, Math.min(e, s + 400));
           if (/"payload":\{"type":"(?:function_call_output|custom_tool_call_output|reasoning)"/.test(head)) return;
         }

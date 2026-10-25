@@ -128,6 +128,9 @@ export function cleanPromptBlock(raw: string): Cleaned {
     if (s) attached.push([tag === "ide_selection" ? "Selection" : "Pasted", s]);
     return "";
   });
+  // Claude Code's paste marker `<pasted_content id="…">` (no closing tag) stands where the
+  // paste was: the marker goes, the person's words around it stay.
+  t = t.replace(/<\/?pasted_content\b[^>]*>/g, "");
   // Slash commands: <command-name>/x</command-name><command-message>…</command-message><command-args>a</command-args>
   if (t.includes("<command-name>")) {
     const name = /<command-name>([\s\S]*?)<\/command-name>/.exec(t)?.[1]?.trim() ?? "";
@@ -142,8 +145,10 @@ export function cleanPromptBlock(raw: string): Cleaned {
   for (let m = LEADING_TAG.exec(t); m; m = LEADING_TAG.exec(t)) t = t.slice(m[0].length);
   t = t.replace(PLACEHOLDER, "").trim();
   if (NOTICE.test(t)) t = "";
-  // A block that is one unclosed tag (`<task-notification>` cut by the harness) is not words.
-  if (/^<[A-Za-z][A-Za-z0-9]*[_-][\w-]*(?:\s[^>]*)?>/.test(t) && !/\S/.test(t.replace(/<[^>]*>/g, ""))) t = "";
+  // A block opened by a harness tag that never closes (a notice cut by the harness) is the
+  // harness talking, whatever follows it.
+  const open = /^<([A-Za-z][A-Za-z0-9]*[_-][\w-]*)(?:\s[^>]*)?>/.exec(t);
+  if (open && !t.includes(`</${open[1]}>`)) t = "";
   return { text: t, attached };
 }
 
