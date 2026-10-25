@@ -141,8 +141,12 @@ class Writer {
     return this.pending.get(path) ?? this.target.files[path];
   }
 
+  /** The manifest itself changed (first written, `built` flipped). */
+  metaDirty = false;
+
   get dirty(): boolean {
     return (
+      this.metaDirty ||
       !this.builder.empty ||
       this.pending.size > 0 ||
       this.deadFiles.size > 0 ||
@@ -464,7 +468,10 @@ export class Indexer {
     // the end of a first build (or a rebuild): commit, publish, merge everything
     const firstBuild = [...this.writers.values()].some((w) => !w.m.built || w.next);
     if (!this.stopping) {
-      for (const w of this.writers.values()) w.target.built = true;
+      for (const w of this.writers.values()) {
+        if (!w.target.built || w.target.gen === 0) w.metaDirty = true;
+        w.target.built = true;
+      }
       if (firstBuild || this.o.mode === "once") {
         await this.commitAll(true);
         // one merge at the end of a first build, when it left more than a few segments
@@ -515,6 +522,9 @@ export class Indexer {
       if (e.size === f.size && e.mtimeMs === f.mtimeMs && !e.skipped) return -1;
       return 0;
     }
+    // discovery stat'ed it: unchanged size and mtime is unchanged (a same-size, same-mtime
+    // replace is not a thing harnesses do), so a quiet sweep costs no syscall per file
+    if (f.size === e.size && f.mtimeMs === e.mtimeMs && f.size === e.offset) return -1;
     let st: { dev: number; ino: number; size: number };
     try {
       st = statSync(f.path);
@@ -769,6 +779,7 @@ export class Indexer {
     }
     w.m.gen++;
     writeManifest(w.dir, w.m);
+    w.metaDirty = false;
     unlinkLater(w.dir, w.m, superseded);
     this.o.onCommit?.(w.source, w.m.gen);
     this.setStatus({}, false);

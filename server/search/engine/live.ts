@@ -24,7 +24,8 @@ import { Segment } from "./segment.js";
 export const TAIL_MAX_CHARS = 4 * 1024 * 1024;
 /** A file changed within this long is hot (stat'ed on every tick). */
 export const HOT_MS = 15 * 60_000;
-const DISCOVER_MS = 5_000;
+/** At most one discovery per this long (it costs the adapters a walk). */
+const DISCOVER_MS = 1_000;
 const WHOLE_MAX = 4 * 1024 * 1024;
 
 interface TailFile {
@@ -58,6 +59,8 @@ export class LiveTail {
   private running: Promise<void> | null = null;
   private lastDiscover = 0;
   private discoverSoon = true;
+  private rootStamps = new Map<string, number>();
+  private rootsPending = false;
   private epoch = 0;
   /** True when the tail hit its bound: the writer should commit. */
   wantsCommit = false;
@@ -129,6 +132,26 @@ export class LiveTail {
     return undefined;
   }
 
+  /** A root folder's mtime moved (a new session or subagent file): discover again. */
+  private rootsMoved(): boolean {
+    let moved = false;
+    for (const a of this.adapters) {
+      if (!this.enabled(a)) continue;
+      for (const r of a.roots(this.env)) {
+        let m = 0;
+        try {
+          m = statSync(r).mtimeMs;
+        } catch {}
+        const was = this.rootStamps.get(r);
+        if (was !== m) {
+          if (was !== undefined) moved = true;
+          this.rootStamps.set(r, m);
+        }
+      }
+    }
+    return moved;
+  }
+
   private async discover(): Promise<void> {
     this.lastDiscover = Date.now();
     this.discoverSoon = false;
@@ -154,7 +177,16 @@ export class LiveTail {
   private async pass(): Promise<void> {
     const t0 = performance.now();
     const epoch = this.epoch;
-    if (this.discoverSoon || Date.now() - this.lastDiscover > DISCOVER_MS) await this.discover();
+    // discovery only at first, when a root folder moved, or for a hinted unknown file; the
+    // hot files themselves are one stat each
+    const moved = this.rootsMoved();
+    if (!this.lastDiscover || this.discoverSoon || (moved && Date.now() - this.lastDiscover >= DISCOVER_MS))
+      await this.discover();
+    else if (moved) this.rootsPending = true;
+    if (this.rootsPending && Date.now() - this.lastDiscover >= DISCOVER_MS) {
+      this.rootsPending = false;
+      await this.discover();
+    }
     let changed = false;
     for (const path of this.hot) {
       if (epoch !== this.epoch) break;
