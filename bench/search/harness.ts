@@ -23,6 +23,7 @@ import type {
 } from "../../server/search/types.js";
 import type { SearchSource } from "../../shared/api.js";
 import { parseSearch } from "../../shared/searchQuery.js";
+import { SHAPES } from "./shapes.mjs";
 
 interface EngineMod {
   openReader(o: ReaderOptions): Promise<SearchReader>;
@@ -60,35 +61,7 @@ const pct = (xs: number[], p: number): number => {
 };
 const r2 = (x: number): number => Math.round(x * 100) / 100;
 
-/** The 24+ query shapes of the gate (SEARCH-SPEC §8.2). `live` = typed in the page. */
-export const SHAPES: { name: string; q: string; live?: boolean; sort?: "best" | "newest" }[] = [
-  { name: "common word", q: "error" },
-  { name: "two words", q: "test build" },
-  { name: "four words", q: "please check the error" },
-  { name: "rare word", q: "axolotlcodexask" },
-  { name: "phrase common", q: '"the error"' },
-  { name: "phrase three", q: '"fix the bug"' },
-  { name: "phrase rare", q: '"purple elephant migration"' },
-  { name: "prefix 2 live", q: "re", live: true },
-  { name: "prefix 3 live", q: "ses", live: true },
-  { name: "prefix 4 live", q: "sear", live: true },
-  { name: "typing two words", q: "store eve", live: true },
-  { name: "prefix typed", q: "migrat*" },
-  { name: "camelCase rare", q: "quokkaSerializerFactory" },
-  { name: "camelCase common", q: "errorCode" },
-  { name: "path", q: "src/store" },
-  { name: "file name", q: "review.ts" },
-  { name: "exclusion", q: "error -test" },
-  { name: "exclusion phrase", q: 'build -"the error"' },
-  { name: "filter agent", q: "agent:codex error" },
-  { name: "filter since", q: "since:30d test" },
-  { name: "filter machine", q: "machine:build-box session" },
-  { name: "in prompt", q: "in:prompt deploy" },
-  { name: "browse", q: "agent:claude" },
-  { name: "newest", q: "error", sort: "newest" },
-  { name: "cjk", q: "検索" },
-  { name: "diacritics", q: "Größe" },
-];
+export { SHAPES };
 
 function query(text: string, live: boolean, sort: "best" | "newest" = "best"): EngineQuery {
   const parsed = parseSearch(text, { live });
@@ -119,6 +92,17 @@ async function reader(live = false): Promise<SearchReader> {
   const o: ReaderOptions = { dir: DIR, sources: SOURCES };
   if (live) o.live = e;
   return (await engine()).openReader(o);
+}
+
+/** The largest dirty categories of `footprint` (macOS), for --detail. */
+function footprintTable(): string[] {
+  if (process.platform !== "darwin") return [];
+  const r = spawnSync("footprint", ["-f", "bytes", String(process.pid)], { encoding: "utf8" });
+  return (r.stdout ?? "")
+    .split("\n")
+    .filter((l) => /^\s*\d+ B/.test(l))
+    .slice(0, 8)
+    .map((l) => l.trim().replace(/\s+/g, " "));
 }
 
 function footprintBytes(): number {
@@ -247,23 +231,47 @@ async function main(): Promise<void> {
       return;
     }
     case "footprint": {
+      // The modules are loaded first (a server has them loaded anyway): the delta is the reader.
+      if (!flag("oracle")) await engine();
+      await env();
+      const only = opt("shapes") ? new RegExp(opt("shapes")!) : null;
+      const qs = SHAPES.filter((s) => !only || only.test(s.name)).map((s) => query(s.q, !!s.live, s.sort));
       gc();
+      const mem = () => {
+        const m = process.memoryUsage();
+        return {
+          heap: r2(m.heapUsed / 1048576),
+          ext: r2(m.external / 1048576),
+          ab: r2(m.arrayBuffers / 1048576),
+          rss: r2(m.rss / 1048576),
+        };
+      };
       const base = footprintBytes();
+      const t0 = flag("detail") ? footprintTable() : [];
+      const m0 = mem();
       const r = await reader();
       gc();
       const opened = footprintBytes();
-      const qs = SHAPES.map((s) => query(s.q, !!s.live, s.sort));
+      const m1 = mem();
       const n = Number(opt("queries") ?? 6000);
-      for (let i = 0; i < n; i++) r.search(qs[i % qs.length]!);
+      const half = Math.floor(n / 2);
+      for (let i = 0; i < half; i++) r.search(qs[i % qs.length]!);
+      gc();
+      const mid = footprintBytes();
+      for (let i = half; i < n; i++) r.search(qs[i % qs.length]!);
       gc();
       const after = footprintBytes();
+      const m2 = mem();
       r.close();
       const MB = 1024 * 1024;
       out({
         baseMB: r2(base / MB),
         openedMB: r2(opened / MB),
+        midMB: r2(mid / MB),
         afterMB: r2(after / MB),
         deltaMB: r2((after - base) / MB),
+        mem: { base: m0, opened: m1, after: m2 },
+        ...(flag("detail") ? { tableBase: t0, table: footprintTable() } : {}),
         queries: n,
         how: process.platform === "darwin" ? "footprint" : "VmRSS",
       });

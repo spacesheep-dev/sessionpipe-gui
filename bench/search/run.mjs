@@ -10,7 +10,16 @@
 // --oracle runs the harness over the brute-force reader (no engine needed); it proves the
 // harness and reports numbers, but gates nothing.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +40,107 @@ export const BUDGETS = {
   firstMs: 2000, // ≤ first results during the first build
   entryGz: 141_000, // ≤ bytes, the web entry chunk gzipped as vite reports it (level 6)
 };
+
+/** The server as the release ships it (esbuild of server/cli.ts into .tmp/perf/dist/cli.js, so
+ *  it forks its own indexer child like dist/cli.js does). */
+export async function buildServer() {
+  const esbuild = await import("esbuild");
+  const out = path.join(OUT, "dist", "cli.js");
+  await esbuild.build({
+    entryPoints: [path.join(ROOT, "server/cli.ts")],
+    outfile: out,
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node20",
+    packages: "external",
+    banner: { js: "#!/usr/bin/env node" },
+    logLevel: "error",
+    absWorkingDir: ROOT,
+  });
+  return out;
+}
+
+function footprintOf(pid) {
+  if (process.platform === "darwin") {
+    const r = spawnSync("footprint", ["-f", "bytes", String(pid)], { encoding: "utf8" });
+    const m = /Footprint:\s*(\d+)\s*B/.exec(r.stdout ?? "");
+    if (m) return Number(m[1]);
+  }
+  try {
+    const m = /VmRSS:\s*(\d+)\s*kB/.exec(readFileSync(`/proc/${pid}/status`, "utf8"));
+    if (m) return Number(m[1]) * 1024;
+  } catch {}
+  return Number.NaN;
+}
+
+/** The search's footprint in a real server: two servers on the same build, one over the gate
+ *  home and its events, one over an empty home and state; each answers the same 6,000 page
+ *  queries over HTTP; the impact is the difference of their footprints (S5: server RSS impact). */
+export async function serverImpact(G, tmp, queries = 6000) {
+  const { SHAPES } = await import("./shapes.mjs");
+  const cli = await buildServer();
+  const empty = path.join(tmp, "empty-home");
+  mkdirSync(empty, { recursive: true });
+  const { spawn } = await import("node:child_process");
+  const { cpSync } = await import("node:fs");
+  const stateA = path.join(tmp, "srv-a");
+  cpSync(G.state, stateA, { recursive: true });
+  const servers = [
+    { name: "search", port: 7927, state: stateA, home: G.home },
+    { name: "empty", port: 7928, state: path.join(tmp, "srv-b"), home: empty },
+  ];
+  for (const s of servers) {
+    mkdirSync(s.state, { recursive: true });
+    s.proc = spawn(
+      process.execPath,
+      [cli, "--port", String(s.port), "--state", s.state, "--no-outbox", "--quiet", "--search-home", s.home],
+      { stdio: "ignore" },
+    );
+  }
+  const base = (s) => `http://127.0.0.1:${s.port}`;
+  try {
+    for (const s of servers) {
+      for (let i = 0; ; i++) {
+        if (i > 900) throw new Error(`${s.name} server never became ready`);
+        try {
+          const st = await (await fetch(`${base(s)}/api/ui/search/status`)).json();
+          if (st.state === "ready" || (s.name === "empty" && st.state !== "first-run")) break;
+        } catch {}
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+    const urls = SHAPES.map(
+      (x) =>
+        `/api/ui/search/sessions?q=${encodeURIComponent(x.q)}&limit=30&hits=3&tz=0${x.live ? "&live=1" : ""}${x.sort ? `&sort=${x.sort}` : ""}`,
+    );
+    const t0 = performance.now();
+    const ms = {};
+    for (const s of servers) {
+      const t = performance.now();
+      for (let i = 0; i < queries; i++) {
+        const r = await fetch(`${base(s)}${urls[i % urls.length]}`);
+        if (r.status !== 200) throw new Error(`${s.name}: ${r.status}`);
+        await r.arrayBuffer();
+      }
+      ms[s.name] = Math.round(performance.now() - t);
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+    const fp = Object.fromEntries(servers.map((s) => [s.name, footprintOf(s.proc.pid)]));
+    const MB = 1024 * 1024;
+    return {
+      searchMB: r2(fp.search / MB),
+      emptyMB: r2(fp.empty / MB),
+      impactMB: r2((fp.search - fp.empty) / MB),
+      queries,
+      httpMs: ms,
+      totalMs: Math.round(performance.now() - t0),
+    };
+  } finally {
+    for (const s of servers) s.proc?.kill("SIGTERM");
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
 
 /** vite build into .tmp/perf/dist/web; the entry chunk's gzip size and whether search code
  *  stayed out of it (only the route stub may be there). */
@@ -308,6 +418,21 @@ export async function runGate(o) {
         ),
       );
     }
+    // 9. the search's footprint inside a real server (the gated number), next to the reader
+    //    alone in a fresh process (a diagnostic: a fresh V8 heap grows its young generation)
+    if (want("server") && !o.oracle) {
+      const si = await serverImpact(G, tmp);
+      report.server = si;
+      rows.push(
+        row(
+          `server footprint impact, 6,000 page queries (MB)`,
+          si.impactMB,
+          `≤ ${BUDGETS.footprintMB}`,
+          si.impactMB <= BUDGETS.footprintMB,
+          gated,
+        ),
+      );
+    }
     // 7. footprint
     if (want("footprint")) {
       const fp = harness(
@@ -318,11 +443,11 @@ export async function runGate(o) {
       report.footprint = fp;
       rows.push(
         row(
-          `footprint delta after ${fp.queries} queries (MB, ${fp.how})`,
+          `reader alone, fresh process, after ${fp.queries} queries (MB, ${fp.how})`,
           fp.deltaMB,
-          `≤ ${BUDGETS.footprintMB}`,
+          `≤ ${BUDGETS.footprintMB} (diagnostic)`,
           fp.deltaMB <= BUDGETS.footprintMB,
-          gated,
+          false,
         ),
       );
     }
