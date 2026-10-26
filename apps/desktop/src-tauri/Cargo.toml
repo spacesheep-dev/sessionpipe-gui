@@ -1,6 +1,6 @@
 [package]
 name = "sessionpipe-desktop"
-version = "0.3.0"
+version = "0.3.1"
 description = "sessionpipe for macOS, Windows and Linux: a thin Tauri 2 shell around the bundled web UI."
 edition.workspace = true
 license.workspace = true
