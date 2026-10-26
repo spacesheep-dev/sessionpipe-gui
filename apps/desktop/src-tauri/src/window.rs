@@ -3,10 +3,9 @@
 use crate::Shell;
 use serde::Serialize;
 use tauri::webview::{NewWindowResponse, PageLoadEvent, PageLoadPayload};
-use tauri::{
-    AppHandle, Emitter, LogicalPosition, Manager, Runtime, TitleBarStyle, Webview, WebviewUrl,
-    WebviewWindowBuilder,
-};
+use tauri::{AppHandle, Emitter, Manager, Runtime, Webview, WebviewUrl, WebviewWindowBuilder};
+#[cfg(target_os = "macos")]
+use tauri::{LogicalPosition, TitleBarStyle};
 
 pub const MAIN: &str = "main";
 

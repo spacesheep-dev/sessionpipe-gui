@@ -189,11 +189,11 @@ pub fn run() {
     eprintln!("[shell] app built at {} ms", started.elapsed().as_millis());
     app.run(|app, event| match event {
         RunEvent::Ready => window::LOOP_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst),
-        RunEvent::ExitRequested { api, code, .. } => {
-            // The last window closed: keep the menu bar item, badge and notifications.
-            if code.is_none() && app.state::<Shell>().settings().keep_running {
-                api.prevent_exit();
-            }
+        // The last window closed: keep the menu bar item, badge and notifications.
+        RunEvent::ExitRequested {
+            api, code: None, ..
+        } if app.state::<Shell>().settings().keep_running => {
+            api.prevent_exit();
         }
         #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } if app.get_webview_window("main").is_none() => {
