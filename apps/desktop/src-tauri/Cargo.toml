@@ -48,5 +48,7 @@ rust-ini = "=0.21.1"
 [features]
 default = []
 # Wires sp_identity::init(lookup), capabilities/identity.json and the native answers
-# from notifications. Off by default: the default build never compiles the signer.
+# from notifications. The macOS release turns it on (desktop-release.yml, build-mac.sh);
+# it stays off by default, so debug builds, tests, Linux and Windows never compile the
+# signer and need no Secure Enclave.
 identity = ["dep:sp-identity"]

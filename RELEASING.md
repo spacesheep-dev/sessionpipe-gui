@@ -136,7 +136,8 @@ scripts/build-mac.sh --sign --universal         # arm64 + x86_64 (≥ 11 GB free
 `build-mac.sh` assembles the frontend (`scripts/assemble-frontend.sh`: `dist/web` plus
 Canvas and Office under `themes/`, no source maps), runs `tauri build` with
 `tauri.release.conf.json` (product *sessionpipe*, `dev.spacesheep.sessionpipe`, the
-`sessionpipe://` scheme, the GitHub updater endpoint), signs the dmg, and prints
+`sessionpipe://` scheme, the GitHub updater endpoint) and the `identity` feature (the
+Touch ID signer, as the release ships it), signs the dmg, and prints
 `codesign -dv`, `codesign --verify --deep --strict` and `spctl -a -vv`. Until the app is
 notarized, `spctl` says `rejected … source=Unnotarized Developer ID`: expected.
 

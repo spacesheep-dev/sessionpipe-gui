@@ -10,8 +10,9 @@
 #   --measure    tauri.measure.conf.json instead of tauri.release.conf.json: no URL scheme,
 #                identifier dev.spacesheep.sessionpipe.dev-packaging, the local updater
 #                endpoint and the throwaway key. The only variant anyone launches on a dev Mac
-#   --features L cargo features of the shell, e.g. `identity` (the Secure Enclave signer,
-#                sp-identity; off by default, NATIVE-SPEC §10)
+#   --features L cargo features of the shell; default `identity` (the Secure Enclave
+#                signer, sp-identity), as the release ships it. `--features ""` builds
+#                the app without the signer
 #   --version X  override the version (the updater tests build 0.0.1-test and 0.0.2-test)
 #   --out DIR    copy the .app, the dmg and the updater archive + .sig there
 #
@@ -25,7 +26,7 @@ desktop="$(cd "$here/.." && pwd)"
 root="$(cd "$desktop/../.." && pwd)"
 IDENTITY="Developer ID Application: Michael Petrov (QR7H8ARENW)"
 
-sign=0; universal=0; variant=release; version=""; out=""; features=""
+sign=0; universal=0; variant=release; version=""; out=""; features=identity
 while [ $# -gt 0 ]; do
   case "$1" in
     --sign) sign=1 ;;

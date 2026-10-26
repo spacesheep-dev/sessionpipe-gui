@@ -86,9 +86,13 @@ jobs:
             cargo clippy -p sessionpipe-desktop --all-targets --features identity --locked -- -D warnings
           fi
 
-      - name: cargo test --workspace
+      - name: cargo test --workspace (and the shell with the Touch ID signer on macOS)
         working-directory: apps
-        run: cargo test --workspace --locked
+        run: |
+          cargo test --workspace --locked
+          if [ "$RUNNER_OS" = macOS ]; then
+            cargo test -p sessionpipe-desktop --features identity --locked
+          fi
 
       - name: tauri build --debug
         working-directory: apps/desktop

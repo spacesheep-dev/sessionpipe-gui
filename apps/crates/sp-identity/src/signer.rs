@@ -293,6 +293,12 @@ impl Signer {
         self.hw.random(n)
     }
 
+    /// Whether this Mac holds a device key for `rp` (made when it was added to a machine,
+    /// "Sign with Touch ID"). Reads the keychain only: no key is made, no prompt shows.
+    pub fn holds_key(&self, rp: &str) -> bool {
+        self.stored_device(rp).is_some()
+    }
+
     /// Delete this rp id's keys from this Mac (the local "sign out of sending").
     pub fn forget(&self, rp: &str) -> Result<(), Error> {
         self.days.delete(&day_account(rp))?;
@@ -642,6 +648,19 @@ pub(crate) mod tests {
         s.forget("localhost").unwrap();
         let st = s.status("localhost");
         assert!(st.key.is_none() && st.grant_exp.is_none());
+    }
+
+    #[test]
+    fn holds_key_only_once_one_is_made_and_until_forgotten() {
+        let (s, hw, _) = signer();
+        assert!(!s.holds_key("localhost"));
+        // Asking makes nothing and prompts nobody.
+        assert!(hw.prompts.lock().unwrap().is_empty());
+        s.key("localhost").unwrap();
+        assert!(s.holds_key("localhost"));
+        assert!(!s.holds_key("spacesheep.dev"), "one key per rp id");
+        s.forget("localhost").unwrap();
+        assert!(!s.holds_key("localhost"));
     }
 
     #[test]

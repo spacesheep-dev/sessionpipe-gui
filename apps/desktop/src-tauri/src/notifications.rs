@@ -55,7 +55,7 @@ pub fn kind_on(kinds: &NotifyKinds, kind: &str) -> bool {
 }
 
 /// The notification for one attention. `can_answer`: this app can sign for that machine
-/// (identity is built in and the daemon takes device keys).
+/// (identity is built in and this Mac holds a device key for the receiver).
 pub fn content(rx: &str, item: &NeedsYouItem, a: &AttentionInfo, can_answer: bool) -> Content {
     let title = one_line(&item.display_title(), 80);
     let msg = message_without_tool(a)

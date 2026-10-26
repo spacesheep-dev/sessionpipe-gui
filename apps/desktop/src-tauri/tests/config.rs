@@ -77,3 +77,30 @@ fn csp_matches_the_spec_and_no_global_tauri() {
     // No URL scheme in the dev config: the release overlay is packaging's.
     assert!(v["plugins"].get("deep-link").is_none());
 }
+
+/// The macOS release ships the Touch ID signer (`--features identity`), and only the macOS
+/// one: Linux and Windows build without it. Its Secure Enclave keys and login-keychain items
+/// need no entitlement (checked with a Developer ID, hardened-runtime build), so
+/// Entitlements.plist stays empty and the app needs no provisioning profile.
+#[test]
+fn the_macos_release_carries_the_signer_and_no_entitlement() {
+    let read =
+        |p: &str| std::fs::read_to_string(dir().join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
+    let wf = read("../../../.github/workflows/desktop-release.yml");
+    let rows: Vec<&str> = wf.lines().filter(|l| l.contains("\"platform\":")).collect();
+    assert_eq!(rows.len(), 3, "macOS, Windows and Linux");
+    for row in rows {
+        assert_eq!(
+            row.contains("--features identity"),
+            row.contains("\"platform\":\"macos\""),
+            "{row}"
+        );
+    }
+    assert!(read("../scripts/build-mac.sh").contains("features=identity"));
+    let plist = read("Entitlements.plist");
+    let dict = &plist[plist.find("<dict>").unwrap()..];
+    assert!(
+        dict.starts_with("<dict>\n</dict>"),
+        "Entitlements.plist names an entitlement"
+    );
+}

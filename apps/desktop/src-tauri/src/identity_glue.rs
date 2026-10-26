@@ -19,12 +19,17 @@ pub enum Answer {
     },
 }
 
-/// Whether this build can sign at all.
-pub const HAS_SIGNER: bool = cfg!(feature = "identity");
-
 #[cfg(not(feature = "identity"))]
 pub fn init<R: tauri::Runtime>(_app: &mut tauri::App<R>) -> tauri::Result<()> {
     Ok(())
+}
+
+/// Whether a notification from receiver `rx` carries Allow / Deny and Reply: this build
+/// signs, and this Mac holds a device key for that receiver's rp id. A build without the
+/// signer never offers them.
+#[cfg(not(feature = "identity"))]
+pub fn can_answer(_hub: &sp_receivers::Hub, _rx: &str) -> bool {
+    false
 }
 
 #[cfg(not(feature = "identity"))]
@@ -87,6 +92,12 @@ mod imp {
         Ok(())
     }
 
+    pub fn can_answer(hub: &Hub, rx: &str) -> bool {
+        hub.receiver(rx)
+            .and_then(|r| r.rp_id)
+            .is_some_and(|rp| sp_identity::answer::holds_key(&rp))
+    }
+
     pub async fn answer(hub: &Hub, rx: &str, a: Answer) -> Result<(), String> {
         let lookup = Lookup(hub.clone());
         let native = match a {
@@ -118,4 +129,4 @@ mod imp {
 }
 
 #[cfg(feature = "identity")]
-pub use imp::{answer, init, Lookup};
+pub use imp::{answer, can_answer, init, Lookup};

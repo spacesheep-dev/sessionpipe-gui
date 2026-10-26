@@ -311,11 +311,12 @@ pub fn on_needs_you<R: Runtime>(app: &AppHandle<R>, rx: &str, items: &[NeedsYouI
     if focused {
         return;
     }
+    let signs = crate::identity_glue::can_answer(&shell.hub, rx);
     for (item, a) in fresh {
         if !content::kind_on(&s.kinds, &a.kind) {
             continue;
         }
-        let can_answer = crate::identity_glue::HAS_SIGNER && item.machine.is_some();
+        let can_answer = signs && item.machine.is_some();
         let c = content::content(rx, item, a, can_answer);
         state().lock().unwrap().meta.insert(
             c.identifier.clone(),

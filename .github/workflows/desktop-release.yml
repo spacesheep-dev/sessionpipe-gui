@@ -2,7 +2,9 @@
 # "Desktop release": a button (Actions → Desktop release → Run workflow), never a push.
 # It builds the desktop app for an existing v* tag and uploads it to that tag's GitHub
 # Release, which stays a DRAFT (release.yml makes it one):
-#   macOS   universal dmg, signed (Developer ID), notarized and stapled; .app.tar.gz + .sig
+#   macOS   universal dmg, signed (Developer ID), notarized and stapled; .app.tar.gz + .sig.
+#           With the Touch ID signer (`--features identity`): its Secure Enclave key needs
+#           no entitlement (Entitlements.plist stays empty), so no provisioning profile
 #   Windows NSIS .exe and .msi (unsigned until a signing method is chosen); .sig
 #   Linux   AppImage and .deb; .sig
 #   latest.json for the updater
@@ -86,7 +88,7 @@ jobs:
         run: |
           set -euo pipefail
           all='[
-            {"name":"macOS universal","platform":"macos","os":"macos-14","args":"--target universal-apple-darwin --bundles app,dmg","rust-targets":"aarch64-apple-darwin,x86_64-apple-darwin"},
+            {"name":"macOS universal","platform":"macos","os":"macos-14","args":"--target universal-apple-darwin --bundles app,dmg --features identity","rust-targets":"aarch64-apple-darwin,x86_64-apple-darwin"},
             {"name":"Windows x64","platform":"windows","os":"windows-latest","args":"--bundles nsis,msi","rust-targets":""},
             {"name":"Linux x64","platform":"linux","os":"ubuntu-22.04","args":"--bundles appimage,deb","rust-targets":""}
           ]'

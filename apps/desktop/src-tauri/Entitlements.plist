@@ -5,7 +5,10 @@
   Deliberately empty: no get-task-allow (no debugger attach in a release), no
   disable-library-validation, no JIT (WebKit's JIT runs in Apple's WebContent process, not
   ours), no sandbox. Device keys live in the login keychain (NATIVE-SPEC §5.3), which needs
-  no keychain-access-groups entitlement and so no provisioning profile.
+  no keychain-access-groups entitlement and so no provisioning profile. The release ships
+  the Touch ID signer; checked 2026-10-27 with a Developer ID, hardened-runtime build and
+  this file: Secure Enclave keys made with and without .userPresence, a signature, and the
+  login keychain's add, read and delete all work.
 -->
 <plist version="1.0">
 <dict>

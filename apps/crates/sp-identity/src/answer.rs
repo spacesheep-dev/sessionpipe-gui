@@ -250,6 +250,13 @@ pub fn command(a: &NativeAnswer, nonce: &str, iat: u64) -> Result<String, Error>
 /// The grant was refused by the receiver's check: one fresh grant is worth a try.
 const GRANT_FAULTS: [&str; 4] = ["bad_grant", "outside_grant", "bad_csig", "bad_assertion"];
 
+/// Whether a notification for a receiver signing for `rp` may offer Allow / Deny and Reply:
+/// the plugin is running and this Mac holds a device key for that rp id. Without one, an
+/// answer could only fail, so the notification just opens the app.
+pub fn holds_key(rp: &str) -> bool {
+    SIGNER.get().is_some_and(|s| s.holds_key(rp))
+}
+
 /// Answer from a notification with no webview: build, sign (the held grant, or one Touch ID
 /// for a new grant) and post to `POST /api/ui/control/send`, as the page would.
 pub async fn answer(lookup: &dyn ReceiverLookup, rx: &str, a: NativeAnswer) -> Result<(), Error> {
