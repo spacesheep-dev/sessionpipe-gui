@@ -6,6 +6,19 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-27
+
+### Fixed
+
+- **The desktop app finds a receiver already running on this machine.** On a first launch
+  it went straight to the welcome, even with a receiver on :7373; it now looks (the
+  default port, then the receiver's `run.json`) and opens on it.
+- **The welcome's Start sessionpipe works.** It asked npm for `sessionpipe-gui@<version>`,
+  which isn't published, and failed with E404; it now runs the same version from the
+  GitHub release tarball.
+- When the board's filter finds nothing, it says what it looked at and offers to search
+  every session for the words.
+
 ## [0.3.0] - 2026-10-26
 
 ### Added
@@ -230,7 +243,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.1.0...v0.2.0
