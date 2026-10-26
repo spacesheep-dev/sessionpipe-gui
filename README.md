@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <sub>Signed and notarized for macOS 11 or newer · Linux <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_amd64.AppImage">AppImage</a> (82.7 MB) · <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases">All releases</a> · or <a href="#install">install with npm</a></sub>
+  <sub>Signed and notarized for macOS 13 or newer · Linux <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_amd64.AppImage">AppImage</a> (82.7 MB) · <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases">All releases</a> · or <a href="#install">install with npm</a></sub>
 </p>
 
 <p align="center">
@@ -286,7 +286,7 @@ device.
 
 | Platform | Download |
 |---|---|
-| macOS 11 or newer, Apple silicon and Intel | [sessionpipe_0.3.0_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_universal.dmg), 7.3 MB, signed and notarized |
+| macOS 13 or newer, Apple silicon and Intel | [sessionpipe_0.3.0_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_universal.dmg), 7.3 MB, signed and notarized |
 | Linux, x86-64 | [.deb](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_amd64.deb), 4.0 MB · [AppImage](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_amd64.AppImage), 82.7 MB, for any distribution |
 
 The same UI in a small [Tauri 2](https://tauri.app) app that uses the system's own web view
