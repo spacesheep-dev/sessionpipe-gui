@@ -6,6 +6,8 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-26
+
 ### Added
 
 - **New session.** One compose sheet, from anywhere: `c`, the compose glyph beside the
@@ -70,6 +72,17 @@ All notable changes to `sessionpipe-gui`. The format follows
   tile: the sidebar, the rail, Settings › About, the favicon (SVG and ICO), the
   installed-app icons (maskable too), the touch icon, the link preview, the trust and 401
   pages, and the README's wordmark ([docs/brand.md](docs/brand.md)).
+- **The board holds still under the pointer**: within a section rows keep their place
+  while the pointer rests on the list (it re-sorted nine times in 20 s before), and rows
+  that do move slide (FLIP). Layout shift on load 0.127 → 0.0005; exit motion is 140 ms
+  everywhere, with one highlight at a time.
+- **Lighter start**: routes and dialogs load when first used, so the entry bundle is
+  140 KB gz instead of 232.
+- **Type**: three weights, tabular numerals for counts and times, balanced headings, and
+  each Linux desktop's own face before DejaVu or Cantarell.
+- **The phone**: a two-line needs-you banner, one top-bar layout, swipe actions on rows.
+- Tool names read as words ("github · search_issues"); the canvas view is the polished
+  one from sessionpipe-gui-themes 0.3.0.
 - The Machines page's inline start form is gone: the Control row has *New session…*.
 - **Cancel the running turn** is `⇧C` now (`c` is New session).
 - A dialog's Esc closes an open pop-up inside it first; a pop-up's filter takes focus once
@@ -208,7 +221,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/spacesheep-dev/sessionpipe-gui/releases/tag/v0.1.0

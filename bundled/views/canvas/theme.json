@@ -1,7 +1,7 @@
 {
   "id": "canvas",
   "name": "Canvas",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Every live session as a window on an infinite, pannable canvas. Drag them anywhere; the layout follows you across devices.",
   "entry": "dist/index.js",
   "style": "dist/index.css",
