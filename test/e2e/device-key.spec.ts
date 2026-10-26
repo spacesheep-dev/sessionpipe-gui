@@ -73,7 +73,7 @@ test("the app's device key: asked for, approved from a browser, key.add delivere
     // Not set up yet: the app's Machines page offers the setup on the machine that takes
     // device keys, and it leads to Add this Mac.
     await app.page.goto(`${CONTROL_BASE}/settings?section=app`);
-    await expect(app.page.locator("[data-device-key] [data-setup]")).toHaveText("Sign with Touch ID…");
+    await expect(app.page.locator("[data-device-key] [data-setup]")).toHaveText("Approve this Mac…");
     await shot(app.page, "0-app-settings-not-set-up");
     await app.page.goto(`${CONTROL_BASE}/machines`);
     const block = app.page.locator(`section[aria-label="${name}"]`);
@@ -85,14 +85,18 @@ test("the app's device key: asked for, approved from a browser, key.add delivere
     await app.page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
     const foot = app.page.locator('[data-reason="untrusted"]');
     await expect(foot).toContainText(`${name} doesn't trust this Mac yet.`);
-    await expect(foot.getByRole("link", { name: "Sign with Touch ID" })).toBeVisible();
+    await expect(foot.getByRole("link", { name: "Approve this Mac" })).toBeVisible();
     await shot(app.page, "0-app-session-not-set-up");
     await app.page.goto(`${CONTROL_BASE}/machines`);
-    await block.getByRole("link", { name: "Sign with Touch ID" }).click();
-    await expect(app.page.getByRole("heading", { name: "Sign with Touch ID" })).toBeVisible();
+    await block.getByRole("link", { name: "Approve this Mac" }).click();
+    await expect(app.page.getByRole("heading", { name: "Approve this Mac" })).toBeVisible();
     await expect(app.page).toHaveURL(/\/add-device$/);
     const check = await askToBeTrusted(app.page);
     await expect(app.page.locator(".pair-lead")).toContainText("Secure Enclave");
+    // Two ways to approve: the browser's Machines, or pairing again from the terminal.
+    const routes = app.page.locator("[data-routes]");
+    await expect(routes.getByRole("link", { name: "open Machines" })).toHaveAttribute("href", /\/machines/);
+    await expect(routes).toContainText("sessionpipe control pair http");
     await shot(app.page, "1-app-add-this-mac");
     const calls = () =>
       app.page.evaluate(() => (window as unknown as { __identityCalls: { cmd: string }[] }).__identityCalls);
@@ -102,6 +106,15 @@ test("the app's device key: asked for, approved from a browser, key.add delivere
     const row = browserPage.locator("li.pending-item--device", { hasText: `${check.slice(0, 3)} ${check.slice(3)}` });
     await expect(row.locator(".pending-name")).toHaveText("Mac app");
     await expect(row.locator(".pending-who .pending-meta")).toHaveText("Secure Enclave");
+    // A passkey prompt that never shows (the passkey is in another browser): the row says
+    // what else to try instead of spinning. A reload drops the stuck ask.
+    await browserPage.evaluate(() => {
+      navigator.credentials.get = () => new Promise(() => {});
+    });
+    await row.getByRole("button", { name: "Approve" }).click();
+    await expect(row.locator("[data-no-prompt]")).toContainText("sessionpipe control pair", { timeout: 15_000 });
+    await shot(browserPage, "2-browser-no-passkey-prompt");
+    await browserPage.reload();
     const target = row.getByRole("combobox", { name: "Machine to trust it on" });
     if (await target.count()) {
       await target.click();

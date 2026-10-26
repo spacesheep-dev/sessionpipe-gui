@@ -196,7 +196,7 @@ describe("the machine's key_types", () => {
     expect(machineTakes({ keyTypes: ["passkey", "device"] }, "device")).toBe(true);
     expect(updateWords("studio-mac")).toBe("Update sessionpipe on studio-mac to send from the app.");
     expect(setupWords("studio-mac")).toBe(
-      "studio-mac doesn't trust this Mac yet. Set up Touch ID, then approve it once from a browser or phone that machine trusts.",
+      "studio-mac doesn't trust this Mac yet. Approve it once, and Touch ID signs what you send from here.",
     );
   });
 

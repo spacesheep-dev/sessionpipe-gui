@@ -60,6 +60,14 @@ beforeEach(() => {
   passkeys.available = true;
 });
 
+describe("pairing in the Mac app", () => {
+  it("is done only once the machine trusts this Mac's key", () => {
+    expect(stepsDone(status(), false).pair).toBe(true);
+    expect(stepsDone(status(), false, false).pair).toBe(false);
+    expect(stepsDone(status(), false, true).pair).toBe(true);
+  });
+});
+
 describe("the sixth step is optional", () => {
   it("comes last and is the only optional one", () => {
     expect(STEP_ORDER).toHaveLength(6);

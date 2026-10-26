@@ -10,7 +10,7 @@ import { ActionButton } from "../components/bits";
 import { BackButton, PageBar } from "../components/PageBar";
 import { back, Link } from "../lib/router";
 import { ms, useNow } from "../lib/time";
-import { controlApi, httpsHere } from "./api";
+import { controlApi, httpsHere, httpsPath, lastInfo } from "./api";
 import { useRpId } from "./hooks";
 import { sentence } from "./PendingDevices";
 import { canSign, SETUP_LABEL, signerKind, signHint } from "./signer";
@@ -56,14 +56,18 @@ export function AddDevicePage() {
       />
       <p className="caption pair-lead">
         {device
-          ? "This Mac keeps its own key in its Secure Enclave, and a device the machine already trusts vouches for it: the same six digits on both, one approval."
+          ? "To start and answer sessions from this Mac, the machine has to trust it. You approve that once; after that, Touch ID signs what you send. The key never leaves this Mac's Secure Enclave."
           : "This device makes its own passkey, and one the machine already trusts vouches for it: the same six digits on both, one tap to approve."}
       </p>
 
       {d && digits && (
         <div className="pair-check">
           <span className="pair-check-label">
-            {phase.k === "waiting" ? "Approve on a device that is already trusted. It shows" : "The digits were"}
+            {phase.k !== "waiting"
+              ? "The digits were"
+              : device
+                ? "The request shows these digits"
+                : "Approve on a device that is already trusted. It shows"}
           </span>
           <div
             className="pair-digits num"
@@ -106,13 +110,12 @@ export function AddDevicePage() {
         <div className="pair-note pair-note--quiet" role="status">
           <strong>Rejected.</strong> A trusted device turned this request down. Nothing was trusted.
         </div>
+      ) : phase.k === "waiting" && device ? (
+        <ApproveRoutes />
       ) : phase.k === "waiting" ? (
         <p className="pair-note">
-          {device
-            ? "In a browser or on a phone the machine already trusts"
-            : "On the Mac (or any device the machine already trusts)"}
-          , open <strong>Machines</strong> in the GUI: this request is listed there with the same digits. Approve it
-          with the passkey that paired.
+          On the Mac (or any device the machine already trusts), open <strong>Machines</strong> in the GUI: this request
+          is listed there with the same digits. Approve it with the passkey that paired.
         </p>
       ) : null}
 
@@ -194,6 +197,40 @@ export function AddDevicePage() {
           )}
         </form>
       ) : null}
+    </div>
+  );
+}
+
+/** The app's two ways to be approved: in the browser that holds the passkey the machine
+ *  trusts, or from the machine's terminal, where pairing again adds this Mac's key with one
+ *  Touch ID here (CONTROL.md §2: "adding another passkey is the same pairing"). */
+function ApproveRoutes() {
+  const browser = httpsPath("/machines");
+  const local = lastInfo()?.urls.local ?? "http://localhost:7373";
+  return (
+    <div className="pair-note" data-routes>
+      <strong>Approve it one of two ways:</strong>
+      <ol className="pair-routes">
+        <li>
+          In your browser:{" "}
+          {browser ? (
+            <a href={browser} target="_blank" rel="noreferrer">
+              open Machines
+            </a>
+          ) : (
+            <>
+              open <strong>Machines</strong>
+            </>
+          )}{" "}
+          and click Approve on the request with these digits. Use the browser or phone that holds the passkey you paired
+          with.
+        </li>
+        <li>
+          Or, in a terminal on the machine, run <code>sessionpipe control pair {local}</code> and approve the pairing in
+          this app with Touch ID. On another computer, use the address it paired with (
+          <code>sessionpipe control keys</code> lists it).
+        </li>
+      </ol>
     </div>
   );
 }

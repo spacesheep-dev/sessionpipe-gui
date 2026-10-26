@@ -279,3 +279,9 @@
   border-color: var(--err-soft);
   color: var(--err);
 }
+.pair-routes {
+  margin: 6px 0 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+}

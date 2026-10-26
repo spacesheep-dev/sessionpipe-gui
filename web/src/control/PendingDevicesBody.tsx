@@ -16,6 +16,9 @@ import { deviceKeyLabel, sentence } from "./PendingDevices";
 import { approveBlocker, canSign, signerKind, signerLabel, signHint } from "./signer";
 import { outcomeWords, sendErrorWords } from "./words";
 
+/** How long a passkey prompt may take to show before the row says what else to try. */
+const NO_PROMPT_MS = 8_000;
+
 /** The grant did not satisfy the verifier even after a fresh tap: one passkey confirm over the command itself. */
 const CONFIRM_FALLBACK = new Set(["bad_grant", "outside_grant", "bad_csig", "bad_assertion"]);
 
@@ -29,6 +32,8 @@ export function PendingDevicesBody({ bar = false, list }: { bar?: boolean; list:
   const [target, setTarget] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [tap, setTap] = useState(false);
+  /** When the passkey prompt was asked for: a prompt that never shows gets a way out. */
+  const [tapAt, setTapAt] = useState(0);
   const [errors, setErrors] = useState<Record<string, string>>({});
   /** Requests this page approved: request id → the key.add's activity id, so the row stays
    *  until the machine's word is in, even once the server stops listing it. */
@@ -48,17 +53,21 @@ export function PendingDevicesBody({ bar = false, list }: { bar?: boolean; list:
     setBusy(d.requestId);
     setErrors((e) => ({ ...e, [d.requestId]: "" }));
     const fields = { kind: "key.add" as const, key: d.key, name: d.name };
+    const onTap = () => {
+      setTap(true);
+      setTapAt(Date.now());
+    };
     try {
       let a: Awaited<ReturnType<typeof sendCommand>>;
       try {
         // The app vouches with one Touch ID that names the device (Rust never signs a
         // key.add under the day grant).
         const confirm = signerKind() === "device";
-        a = await sendCommand(rp, m.control.machineId, fields, { confirm, onTap: () => setTap(true) });
+        a = await sendCommand(rp, m.control.machineId, fields, { confirm, onTap });
       } catch (e) {
         if (signerKind() === "device" || !(e instanceof ControlError && e.code && CONFIRM_FALLBACK.has(e.code)))
           throw e;
-        a = await sendCommand(rp, m.control.machineId, fields, { confirm: true, onTap: () => setTap(true) });
+        a = await sendCommand(rp, m.control.machineId, fields, { confirm: true, onTap });
       }
       setApproved((list) => [...list, { requestId: d.requestId, name: d.name, activityId: a.id, machine: m.name }]);
     } catch (e) {
@@ -112,6 +121,7 @@ export function PendingDevicesBody({ bar = false, list }: { bar?: boolean; list:
             rp={rp}
             busy={busy}
             tap={tap}
+            slow={tap && busy === d.requestId && now - tapAt > NO_PROMPT_MS}
             err={errors[d.requestId]}
             onTarget={(id) => setTarget((t) => ({ ...t, [d.requestId]: id }))}
             onApprove={() => void approve(d)}
@@ -149,6 +159,7 @@ function DeviceRow({
   rp,
   busy,
   tap,
+  slow,
   err,
   onTarget,
   onApprove,
@@ -162,6 +173,7 @@ function DeviceRow({
   rp: string | null;
   busy: string | null;
   tap: boolean;
+  slow: boolean;
   err: string | undefined;
   onTarget: (id: string) => void;
   onApprove: () => void;
@@ -221,6 +233,13 @@ function DeviceRow({
         </ActionButton>
       </span>
       {why && <span className="pending-meta pending-wide">{why}</span>}
+      {slow && signerKind() === "passkey" && (
+        <span className="pending-meta pending-wide" role="status" data-no-prompt>
+          No passkey prompt? The passkey {m?.name ?? "the machine"} trusts may be in another browser or on your phone:
+          approve there. Or run <code>sessionpipe control pair</code> on {m?.name ?? "the machine"} and approve that
+          instead.
+        </span>
+      )}
       {err ? (
         <span className="pending-meta pending-wide pending-err" role="alert">
           {err}

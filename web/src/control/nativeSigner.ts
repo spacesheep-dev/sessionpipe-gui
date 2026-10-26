@@ -194,8 +194,7 @@ export function errorWords(e: unknown): string | null {
 }
 
 const REFUSALS: Record<string, string> = {
-  untrusted_key:
-    "the machine doesn't trust this Mac yet: set up Touch ID on Machines, and approve it from a browser it trusts",
+  untrusted_key: "the machine doesn't trust this Mac yet: approve it once (Machines, Approve this Mac)",
   bad_assertion: "this Mac's signature did not verify",
   bad_grant: "the day grant did not verify; the next send asks for Touch ID again",
   outside_grant: "signed outside the grant's window; the next send asks for Touch ID again",

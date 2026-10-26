@@ -21,9 +21,10 @@ import { controlApi, httpsPath, resetInfoCache } from "../control/api";
 import { sendCommand } from "../control/command";
 import { useMessage } from "../control/hooks";
 import { PairBody } from "../control/PairBody";
+import { SETUP_LABEL, signerKind, signerLabel, useOwnKeys } from "../control/signer";
 import { noteOriginTrust, passkeysAvailable } from "../control/webauthn";
 import { sendErrorWords } from "../control/words";
-import { useAppState, useStore } from "../data/hooks";
+import { useAppState, useMachines, useStore } from "../data/hooks";
 import { sessionTitle } from "../lib/format";
 import { Link, navigate } from "../lib/router";
 import { markSetupSeen, refreshSetup, SetupError, setupApi, type TrustResult, useSetupStatus } from "../setup/api";
@@ -47,7 +48,8 @@ export function Setup() {
   const state = useSetupStatus(true);
   const s = state.status;
   const [tried, setTried] = useState(false);
-  const done = s ? stepsDone(s, tried) : null;
+  const macTrusted = useMacTrusted(s);
+  const done = s ? stepsDone(s, tried, macTrusted) : null;
   const marks = useMemo<Record<StepKey, Mark>>(() => {
     const out = {} as Record<StepKey, Mark>;
     let first = true;
@@ -111,7 +113,7 @@ export function Setup() {
         <ol className="steps">
           <SessionsStep s={s} mark={marks.sessions} {...fold("sessions")} />
           <SecureStep s={s} mark={marks.secure} {...fold("secure")} />
-          <PairStep s={s} mark={marks.pair} secure={done.secure} {...fold("pair")} />
+          <PairStep s={s} mark={marks.pair} secure={done.secure} macTrusted={macTrusted} {...fold("pair")} />
           <PhoneStep s={s} mark={marks.phone} {...fold("phone")} />
           <TryStep
             s={s}
@@ -153,6 +155,18 @@ export function Setup() {
       )}
     </div>
   );
+}
+
+/** In the Mac app: whether this machine (its daemon, paired here) trusts the app's own key.
+ *  Undefined in a browser, and while either side is still being read. */
+function useMacTrusted(s: SetupStatus | null | undefined): boolean | undefined {
+  const device = signerKind() === "device";
+  const mine = useOwnKeys(device && s ? s.tls.rpId : null);
+  const machines = useMachines();
+  if (!device || !s?.daemon.pairedHere) return undefined;
+  const here = machines.find((m) => m.control && m.control.machineId === s.daemon.machineId);
+  if (!here?.control) return undefined;
+  return mine.some((k) => here.control?.keys.some((t) => t.id === k.id));
 }
 
 function Facts({ rows }: { rows: [string, React.ReactNode][] }) {
@@ -393,9 +407,13 @@ function SecureStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark } 
       title="Secure address"
       caption={
         sub === "done" ? (
-          <>
-            Passkeys work here, on <code>{location.host}</code>
-          </>
+          signerKind() === "device" ? (
+            "Touch ID signs from this app; the https address is for your phone."
+          ) : (
+            <>
+              Passkeys work here, on <code>{location.host}</code>
+            </>
+          )
         ) : sub === "turnOn" ? (
           "Passkeys sign your messages and need https on a name; the GUI makes its own certificate."
         ) : sub === "trust" ? (
@@ -534,7 +552,14 @@ function SecureStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark } 
 
 // ---------- 3 · pair this machine ----------
 
-function PairStep({ s, mark, secure, open, onToggle }: { s: SetupStatus; mark: Mark; secure: boolean } & Fold) {
+function PairStep({
+  s,
+  mark,
+  secure,
+  macTrusted,
+  open,
+  onToggle,
+}: { s: SetupStatus; mark: Mark; secure: boolean; macTrusted?: boolean } & Fold) {
   const d = s.daemon;
   const name = d.name ?? s.tls.hostname.replace(/\.local$/, "");
   const [busy, setBusy] = useState(false);
@@ -585,10 +610,19 @@ function PairStep({ s, mark, secure, open, onToggle }: { s: SetupStatus; mark: M
     />
   );
 
-  let caption: ReactNode = "Answer and prompt this machine's sessions from the board, signed with your passkey.";
+  let caption: ReactNode = `Answer and prompt this machine's sessions from the board, signed with ${signerLabel()}.`;
   let body: React.ReactNode = null;
   if (mark === "done") {
     caption = `${name} is listening.`;
+  } else if (d.pairedHere && d.online && macTrusted === false) {
+    caption = `${name} is paired. Approve this Mac once, and Touch ID signs what you send.`;
+    body = (
+      <div className="step-action">
+        <Link to="/add-device" className="btn btn--primary" data-action="approve-mac">
+          {SETUP_LABEL}…
+        </Link>
+      </div>
+    );
   } else if (d.pendingPairing) {
     caption = "Compare the six digits with the terminal's, then approve.";
     body = (
@@ -671,7 +705,7 @@ function PairStep({ s, mark, secure, open, onToggle }: { s: SetupStatus; mark: M
             {busy ? "Starting…" : "Pair this Mac"}
           </button>
           <span className="step-note">
-            Runs <code>sessionpipe control pair</code>; the six digits appear here to approve with your passkey.
+            Runs <code>sessionpipe control pair</code>; the six digits appear here to approve with {signerLabel()}.
           </span>
         </div>
         {d.pairing.error && (

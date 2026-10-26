@@ -4,6 +4,7 @@
 // passkeys can work here). Shared by the page, the rail's dot and the first-run redirect so
 // they never disagree.
 import type { SetupStatus } from "@shared/api";
+import { signerKind } from "../control/signer";
 import { passkeysAvailable } from "../control/webauthn";
 
 export type StepKey = "sessions" | "secure" | "pair" | "phone" | "try" | "remote";
@@ -35,16 +36,19 @@ function secureOrigin(s: SetupStatus): boolean {
   return (s.tls.on && s.tls.caTrusted !== false) || !!publicUrl(s);
 }
 
-/** Step 2: a secure origin exists, and passkeys work right here. */
+/** Step 2: a secure origin exists, and this page can sign: passkeys work right here, or
+ *  (the Mac app) Touch ID signs, so the https address is only the phone's. */
 export function secureHere(s: SetupStatus): boolean {
-  return secureOrigin(s) && passkeysAvailable(s.tls.rpId);
+  return secureOrigin(s) && (signerKind() === "device" || passkeysAvailable(s.tls.rpId));
 }
 
-export function stepsDone(s: SetupStatus, tried: boolean): Record<StepKey, boolean> {
+/** `macTrusted`: in the Mac app, whether this machine trusts the app's key (false until
+ *  "Approve this Mac"); undefined in a browser, where the passkey that paired signs. */
+export function stepsDone(s: SetupStatus, tried: boolean, macTrusted?: boolean): Record<StepKey, boolean> {
   return {
     sessions: s.events.total > 0,
     secure: secureHere(s),
-    pair: s.daemon.pairedHere && s.daemon.online,
+    pair: s.daemon.pairedHere && s.daemon.online && macTrusted !== false,
     phone: (s.tls.on || !!publicUrl(s)) && s.viewers.phones > 0,
     try: s.tried.delivered > 0 || tried,
     remote: !!publicUrl(s),
