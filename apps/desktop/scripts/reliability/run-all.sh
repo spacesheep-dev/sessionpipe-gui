@@ -5,7 +5,7 @@
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fail=0
-for t in no-receiver single-instance sleep-wake receiver-restart run-json-port; do
+for t in no-receiver single-instance sleep-wake receiver-restart run-json-port discovered; do
   echo "== $t"
   python3 "$here/$t.py" "$@" || fail=1
 done

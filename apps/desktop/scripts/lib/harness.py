@@ -152,14 +152,20 @@ class App:
         return json.loads(out.stdout or "{}")
 
     def env(self, receiver_url, extra=None):
-        assert receiver_url and ":7373" not in receiver_url, "every launch names its receiver, never :7373"
+        # No receiver named: the app discovers one, and SP_LOCAL_STATE must say where (the
+        # scratch receiver's run.json; with it set the default port is never probed).
+        local_state = (extra or {}).get("SP_LOCAL_STATE")
+        assert receiver_url or local_state, "every launch names its receiver or its run.json, never :7373"
+        assert ":7373" not in (receiver_url or ""), "never :7373"
         e = dict(os.environ)
+        e.pop("SP_RECEIVER_URL", None)
         e.update({
-            "SP_RECEIVER_URL": receiver_url,
             "SP_SHELL_HOME": str(self.home),
             "SP_SHELL_STATUS": str(self.status_path),
             "SP_TEST_HOOKS": "1",
         })
+        if receiver_url:
+            e["SP_RECEIVER_URL"] = receiver_url
         # Our log lines on stderr too (until the shell's own logger is lifecycle's, shell.log
         # alone would do).
         e["RUST_LOG"] = "info"
@@ -175,9 +181,9 @@ class App:
                                      stderr=open(self.err_path, "w"))
         return self
 
-    def second(self, args, receiver_url, timeout=10):
+    def second(self, args, receiver_url, timeout=10, extra_env=None):
         """A second launch (single-instance hands argv to the running app and exits)."""
-        p = subprocess.run([str(self.exe), *args], env=self.env(receiver_url), stdin=subprocess.DEVNULL,
+        p = subprocess.run([str(self.exe), *args], env=self.env(receiver_url, extra_env), stdin=subprocess.DEVNULL,
                            capture_output=True, text=True, timeout=timeout)
         return p.returncode
 

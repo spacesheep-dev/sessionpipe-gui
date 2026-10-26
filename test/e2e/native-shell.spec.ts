@@ -12,11 +12,21 @@ interface FakeOptions {
   receiver?: boolean;
   firstRunDone?: boolean;
   features?: string[];
+  /** No receiver at first, and rx_discover finds this Mac's: "switch" plays the shell
+   *  building a new window on it (a reload with the contract set), "stay" plays 0.3.1's
+   *  shell, which kept the welcome window and its first frame. */
+  discover?: "switch" | "stay";
+  /** The stream: "big" grows the receiver's snapshot past 400 KB (sessions cloned) on its
+   *  way through the channel, as a busy Mac's is; "silent" opens and sends nothing;
+   *  "down" fails every attempt. */
+  stream?: "real" | "big" | "silent" | "down";
 }
 
 /** The fake shell, as an init script (runs before any page script, as the shell's does). */
-function fakeShell({ receiver = true, firstRunDone = true, features }: FakeOptions = {}) {
-  return ([receiver, firstRunDone, features]: [boolean, boolean, string[] | undefined]) => {
+type FakeArgs = [boolean, boolean, string[] | undefined, FakeOptions["discover"], FakeOptions["stream"]];
+
+function fakeShell() {
+  return ([hasReceiver, firstRunDone, features, discover, stream = "real"]: FakeArgs) => {
     const KINDS = [
       "snapshot",
       "event",
@@ -31,6 +41,8 @@ function fakeShell({ receiver = true, firstRunDone = true, features }: FakeOptio
       "viewState",
     ];
     const w = window as unknown as Record<string, unknown>;
+    // A window the (fake) shell built for the receiver it selected.
+    const receiver = hasReceiver || sessionStorage.getItem("fake.selected") === "1";
     w.sessionpipeShell = {
       v: 1,
       platform: "macos",
@@ -82,12 +94,33 @@ function fakeShell({ receiver = true, firstRunDone = true, features }: FakeOptio
           case "rx_stream": {
             const ch = (args.onFrame as { id: number }).id;
             let index = 0;
-            const es = new EventSource(args.path as string);
             const out = (message: unknown) => send(ch, { index: index++, message });
+            const sid = next++;
+            if (stream === "silent" || stream === "down") {
+              setTimeout(() => out(stream === "down" ? { event: "error", retryInMs: 1000 } : { event: "open" }), 50);
+              return sid;
+            }
+            const es = new EventSource(args.path as string);
             es.onopen = () => out({ event: "open" });
             es.onerror = () => out({ event: "error", retryInMs: 1000 });
-            for (const k of KINDS) es.addEventListener(k, (e) => out({ event: k, data: (e as MessageEvent).data }));
-            const sid = next++;
+            const grow = (data: string) => {
+              const m = JSON.parse(data);
+              const base = m.snapshot.sessions as { key: string; id: string; harness: string }[];
+              for (let i = 0; JSON.stringify(m).length < 400_000; i++) {
+                const s = base[i % base.length] as { key: string; id: string; harness: string };
+                const id = `${s.id}-copy${i}`;
+                m.snapshot.sessions.push({ ...s, id, key: `${s.harness}/${id}` });
+              }
+              const big = JSON.stringify(m);
+              w.__snapshotBytes = big.length;
+              w.__snapshotSessions = m.snapshot.sessions.length;
+              return big;
+            };
+            for (const k of KINDS)
+              es.addEventListener(k, (e) => {
+                const data = (e as MessageEvent).data;
+                out({ event: k, data: k === "snapshot" && stream === "big" ? grow(data) : data });
+              });
             streams.set(sid, es);
             return sid;
           }
@@ -111,6 +144,16 @@ function fakeShell({ receiver = true, firstRunDone = true, features }: FakeOptio
             return "granted";
           case "app_update_status":
             return { state: "ready", version: "0.3.1" };
+          case "rx_discover":
+            if (!discover) throw new Error("fake shell: no rx_discover");
+            return { local: { id: "e2erx00001", name: "This Mac", origin: location.origin, local: true } };
+          case "rx_select":
+            if (discover === "switch")
+              setTimeout(() => {
+                sessionStorage.setItem("fake.selected", "1");
+                location.reload();
+              }, 50);
+            return null;
           case "rx_list":
             return [{ id: "e2erx00001", name: "This Mac", origin: location.origin, local: true, connected: true }];
           case "app_open_view":
@@ -124,12 +167,8 @@ function fakeShell({ receiver = true, firstRunDone = true, features }: FakeOptio
 }
 
 async function openInShell(page: Page, path: string, opts: FakeOptions = {}) {
-  const arg: [boolean, boolean, string[] | undefined] = [
-    opts.receiver ?? true,
-    opts.firstRunDone ?? true,
-    opts.features,
-  ];
-  await page.addInitScript(fakeShell(opts), arg);
+  const arg: FakeArgs = [opts.receiver ?? true, opts.firstRunDone ?? true, opts.features, opts.discover, opts.stream];
+  await page.addInitScript(fakeShell(), arg);
   await page.goto(path);
 }
 
@@ -251,6 +290,55 @@ test.describe("inside the native shell", () => {
     await expect(page.locator(".e2e-counter")).toHaveCount(0);
     await page.getByRole("button", { name: "Open" }).click();
     await expect.poll(() => calls(page)).toContain("app_open_view");
+  });
+
+  // The 0.3.1 bug: the app found this Mac's running receiver, selected it, and the window
+  // stayed on its first frame for good. The shell's half is pinned in apps/desktop
+  // (actions::tests); this is the page's half, with a snapshot the size a busy Mac's is.
+  test("a receiver found running: the window switches to it and the board fills, big snapshot and all", async ({
+    page,
+  }) => {
+    await openInShell(page, "/", { receiver: false, discover: "switch", stream: "big" });
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    await expect(page.locator("section.group").first()).toBeVisible();
+    await expect(page.locator(".board-skeleton")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Welcome to sessionpipe" })).toHaveCount(0);
+    const big = await page.evaluate(() => {
+      const w = window as unknown as { __snapshotBytes: number; __snapshotSessions: number };
+      return { bytes: w.__snapshotBytes, sessions: w.__snapshotSessions };
+    });
+    expect(big.bytes).toBeGreaterThanOrEqual(300_000);
+    // They made it onto the board: the groups count the top-level ones (a subagent's
+    // session sits under its parent, and the demo keeps starting new ones meanwhile).
+    const counted = await page
+      .locator("section.group .group-count")
+      .evaluateAll((els) => els.reduce((n, el) => n + (Number.parseInt(el.textContent ?? "", 10) || 0), 0));
+    expect(counted).toBeGreaterThan(big.sessions * 0.8);
+    expect((await calls(page)).filter((c) => c === "rx_stream")).toHaveLength(1);
+  });
+
+  test("a hand-over that never comes ends on the welcome, not the first frame", async ({ page }) => {
+    await openInShell(page, "/", { receiver: false, discover: "stay" });
+    await expect.poll(() => calls(page)).toContain("rx_select");
+    await expect(page.getByRole("heading", { name: "Welcome to sessionpipe" })).toBeVisible({ timeout: 12_000 });
+  });
+
+  test("a first snapshot that doesn't come is said, with Retry now", async ({ page }) => {
+    await openInShell(page, "/", { stream: "silent" });
+    await expect(page.locator(".board-skeleton")).toBeVisible();
+    const slow = page.getByRole("heading", { name: "Still connecting to the receiver…" });
+    await expect(slow).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("button", { name: "Retry now" }).first().click();
+    await expect.poll(async () => (await calls(page)).filter((c) => c === "rx_stream").length).toBe(2);
+  });
+
+  test("a stream that fails says so on the board, with Retry now", async ({ page }) => {
+    await openInShell(page, "/", { stream: "down" });
+    await expect(page.getByRole("heading", { name: "No connection to the receiver" })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.locator(".board-skeleton")).toHaveCount(0);
+    await expect(page.locator("main").getByRole("button", { name: "Retry now" })).toBeVisible();
   });
 
   test("no receiver: the welcome; Try the demo works offline", async ({ page }) => {

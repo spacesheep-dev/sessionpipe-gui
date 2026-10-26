@@ -247,6 +247,7 @@ fn build_main<R: Runtime>(app: &AppHandle<R>, initial_path: Option<&str>) -> tau
     // Size and place come back through the window-state plugin's own hook (calling
     // restore_state here as well deadlocked against that hook on a reopen).
     let shell = handle.state::<Shell>();
+    *shell.shown.lock().unwrap() = c.receiver.as_ref().map(|r| r.id.clone());
     shell.hub.status().set_window(true);
     eprintln!(
         "[shell] main window created in {} ms (t+{} ms)",

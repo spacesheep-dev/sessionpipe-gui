@@ -13,6 +13,22 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.2/sessionpipe_0.3.2_universal.dmg"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/macos-dark.svg">
+    <img src="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/macos.svg" alt="Download for macOS: Apple silicon and Intel" width="272" height="56">
+  </picture></a>
+  &nbsp;
+  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.2/sessionpipe_0.3.2_amd64.deb"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/linux-dark.svg">
+    <img src="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/linux.svg" alt="Download for Linux: .deb, x86-64" width="272" height="56">
+  </picture></a>
+</p>
+
+<p align="center">
+  <sub>Signed and notarized for macOS 11 or newer · Linux <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.2/sessionpipe_0.3.2_amd64.AppImage">AppImage</a> · <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases">All releases</a> · or <a href="#install">install with npm</a></sub>
+</p>
+
+<p align="center">
   <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <a href="package.json"><img alt="Node 20 or newer" src="https://img.shields.io/badge/node-%E2%89%A5%2020-brightgreen"></a>
   <a href="DCO"><img alt="DCO" src="https://img.shields.io/badge/contributions-DCO-informational"></a>
@@ -127,7 +143,7 @@ To keep it on the PATH as `sessionpipe-gui`, install a [release](https://github.
 tarball:
 
 ```sh
-npm i -g https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe-gui-0.3.0.tgz
+npm i -g https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.2/sessionpipe-gui-0.3.2.tgz
 ```
 
 Or from a clone: `git clone https://github.com/spacesheep-dev/sessionpipe-gui && cd
@@ -142,7 +158,7 @@ ping-a-human Telegram plugin (off until you turn it on). The board runs on port 
 1. **Run `sessionpipe-gui`.** It prints where to open it, and a QR code for your phone:
 
    ```
-   sessionpipe-gui 0.3.0 · ~/.local/state/sessionpipe-gui
+   sessionpipe-gui 0.3.2 · ~/.local/state/sessionpipe-gui
 
      setup   http://localhost:7373/setup   (first run: your sessions, https, pairing, your phone)
      local   http://localhost:7373
@@ -270,13 +286,15 @@ device.
 
 | Platform | Download |
 |---|---|
-| macOS, Apple silicon and Intel | [sessionpipe_0.3.0_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_universal.dmg), signed and notarized |
-| Linux, x86-64 | [AppImage](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_amd64.AppImage) · [.deb](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_amd64.deb) |
+| macOS 11 or newer, Apple silicon and Intel | [sessionpipe_0.3.2_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.2/sessionpipe_0.3.2_universal.dmg), signed and notarized |
+| Linux, x86-64 | [.deb](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.2/sessionpipe_0.3.2_amd64.deb) · [AppImage](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.2/sessionpipe_0.3.2_amd64.AppImage), for any distribution |
 
-The same UI in a small [Tauri 2](https://tauri.app) app (a few MB, not a browser engine of
-its own). It connects to the receiver on this machine (keep one running with
-`sessionpipe-gui service install`), keeps a menu bar item and a Dock badge that count what
-needs you, notifies you, launches at login if you like, and updates itself. Every release is
+The same UI in a small [Tauri 2](https://tauri.app) app that uses the system's own web view
+(the AppImage carries WebKitGTK with it, which is why it is larger). It connects to the
+receiver on this machine; on first run it can start one for you as a service, which needs
+Node 20 or newer (`sessionpipe-gui service install` does the same from a terminal). It
+keeps a menu bar item and a Dock badge that count what needs you, notifies you, launches at
+login if you like, and updates itself. Every release is
 on the [releases page](https://github.com/spacesheep-dev/sessionpipe-gui/releases).
 
 The app shows everything; for now it sends nothing itself. Signing a prompt, a start or an

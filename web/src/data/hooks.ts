@@ -33,6 +33,29 @@ export function useConnection() {
   return { connection: s.connection, retryAt: s.retryAt, snapshotAt: s.snapshotAt };
 }
 
+/** How long a page shows its skeleton while the first snapshot is on its way; past this
+ *  it says it is still connecting, with Retry now. A receiver answers in well under a
+ *  second, so this is a wait worth saying out loud, not a failure: the stream stays open. */
+export const SLOW_FIRST_LOAD_MS = 6000;
+
+/** A page before its first snapshot: "loading" (the skeleton), "slow" (still connecting
+ *  after SLOW_FIRST_LOAD_MS), "down" (the stream failed; the transport retries); null
+ *  once loaded. No page sits on a skeleton without saying why. */
+export function useFirstLoad(): "loading" | "slow" | "down" | null {
+  const { connection, snapshotAt } = useAppState();
+  const waiting = !snapshotAt && (connection === "live" || connection === "connecting");
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    setSlow(false);
+    if (!waiting) return;
+    const t = window.setTimeout(() => setSlow(true), SLOW_FIRST_LOAD_MS);
+    return () => window.clearTimeout(t);
+  }, [waiting]);
+  if (snapshotAt) return null;
+  if (!waiting) return "down";
+  return slow ? "slow" : "loading";
+}
+
 /** How long a drop has to last before the lists say so: a blip is never drawn. */
 const DOWN_GRACE_MS = 400;
 

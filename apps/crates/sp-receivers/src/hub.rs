@@ -22,6 +22,41 @@ pub const SHELL_CLIENT_HEADER: (&str, &str) = ("x-sessionpipe-client", "shell");
 /// a half-dead connection (after sleep, a network change).
 const IDLE_LIMIT: Duration = Duration::from_secs(45);
 
+/// How long a page stream waits for the response head. A receiver answers at once, so a
+/// connection accepted but never answered (a receiver stuck in a long task) ends here and
+/// the page's backoff takes over, instead of the page "connecting" for good.
+const HEAD_LIMIT: Duration = if cfg!(test) {
+    Duration::from_millis(400)
+} else {
+    Duration::from_secs(20)
+};
+
+/// One `rx:` failure line per receiver at most this often (a page polling a receiver
+/// that is down would fill the log otherwise).
+const PROXY_LOG_EVERY: Duration = Duration::from_secs(10);
+
+/// An error and its causes, without the URL (never a key there, but a log needn't carry
+/// one either).
+fn describe(e: reqwest::Error) -> String {
+    if e.is_timeout() {
+        return "timed out".into();
+    }
+    let e = e.without_url();
+    let mut out = e.to_string();
+    let mut src = std::error::Error::source(&e);
+    while let Some(c) = src {
+        out.push_str(": ");
+        out.push_str(&c.to_string());
+        src = c.source();
+    }
+    out
+}
+
+/// A path for the log: no query (a search or a filter is the person's business).
+fn log_path(path: &str) -> &str {
+    path.split('?').next().unwrap_or(path)
+}
+
 /// What the shell, identity and packaging need to know about a receiver.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -162,6 +197,7 @@ struct Inner {
     info: Mutex<HashMap<String, Info>>,
     streams: Mutex<HashMap<u64, PageStream>>,
     next_stream: AtomicU64,
+    proxy_logged: Mutex<HashMap<String, std::time::Instant>>,
     rt: Mutex<Option<tokio::runtime::Handle>>,
 }
 
@@ -209,6 +245,7 @@ impl Hub {
             info: Mutex::new(HashMap::new()),
             streams: Mutex::new(HashMap::new()),
             next_stream: AtomicU64::new(1),
+            proxy_logged: Mutex::new(HashMap::new()),
             rt: Mutex::new(None),
         }))
     }
@@ -600,6 +637,7 @@ impl Hub {
             Err(r) => return refuse(r, "refused"),
         };
         let Some(rx) = self.find(&id) else {
+            self.proxy_failed(&id, req.method().as_str(), &path, "unknown receiver");
             return refuse(Refusal::UnknownReceiver, "unknown receiver");
         };
         if req.body().len() > proxy::MAX_BODY {
@@ -609,14 +647,17 @@ impl Hub {
             Ok(u) => u,
             Err(r) => return refuse(r, "refused"),
         };
-        let client = match self.client_for(&rx).await {
-            Ok(c) => c,
-            Err(e) => return proxy::refusal(http::StatusCode::BAD_GATEWAY, &e, origin, allowed),
-        };
         let method = reqwest::Method::from_bytes(req.method().as_str().as_bytes())
             .unwrap_or(reqwest::Method::GET);
+        let client = match self.client_for(&rx).await {
+            Ok(c) => c,
+            Err(e) => {
+                self.proxy_failed(&id, method.as_str(), &path, &e);
+                return proxy::refusal(http::StatusCode::BAD_GATEWAY, &e, origin, allowed);
+            }
+        };
         let mut b = self
-            .request(&client, &rx, method, url)
+            .request(&client, &rx, method.clone(), url)
             .timeout(Duration::from_secs(proxy::TIMEOUT_SECS));
         for h in proxy::FORWARD_REQUEST_HEADERS {
             if let Some(v) = req.headers().get(*h) {
@@ -635,6 +676,7 @@ impl Hub {
                 } else {
                     http::StatusCode::BAD_GATEWAY
                 };
+                self.proxy_failed(&id, method.as_str(), &path, &describe(e));
                 return proxy::refusal(status, "the receiver didn't answer", origin, allowed);
             }
         };
@@ -642,6 +684,7 @@ impl Hub {
             .content_length()
             .is_some_and(|n| n as usize > proxy::MAX_BODY)
         {
+            self.proxy_failed(&id, method.as_str(), &path, "response over the size limit");
             return refuse(Refusal::TooLarge, "too large");
         }
         let mut out = http::Response::builder().status(res.status().as_u16());
@@ -656,21 +699,44 @@ impl Hub {
             match chunk {
                 Ok(c) => {
                     if body.len() + c.len() > proxy::MAX_BODY {
+                        self.proxy_failed(
+                            &id,
+                            method.as_str(),
+                            &path,
+                            "response over the size limit",
+                        );
                         return refuse(Refusal::TooLarge, "too large");
                     }
                     body.extend_from_slice(&c);
                 }
-                Err(_) => {
+                Err(e) => {
+                    let why = format!("the body stopped: {}", describe(e));
+                    self.proxy_failed(&id, method.as_str(), &path, &why);
                     return proxy::refusal(
                         http::StatusCode::BAD_GATEWAY,
                         "the receiver stopped answering",
                         origin,
                         allowed,
-                    )
+                    );
                 }
             }
         }
         proxy::finish(out.body(body).expect("response"), origin, allowed)
+    }
+
+    /// An `rx:` request that never got the receiver's answer, in shell.log (rate-limited).
+    fn proxy_failed(&self, id: &str, method: &str, path: &str, why: &str) {
+        let now = std::time::Instant::now();
+        {
+            let mut m = self.0.proxy_logged.lock().unwrap();
+            if m.get(id)
+                .is_some_and(|t| now.duration_since(*t) < PROXY_LOG_EVERY)
+            {
+                return;
+            }
+            m.insert(id.to_string(), now);
+        }
+        log::warn!("rx: {id} {method} {}: {why}", log_path(path));
     }
 
     // ---- page streams (IPC channel) ----
@@ -695,7 +761,10 @@ impl Hub {
         let hub = self.clone();
         let handle = self
             .spawn(async move {
-                let retry = hub.page_stream(&r, url, &sink).await;
+                let (retry, why) = hub.page_stream(&r, url, &sink).await;
+                if let Some(why) = why {
+                    log::warn!("page stream {}: {why}; the page retries", r.id);
+                }
                 sink(StreamFrame {
                     event: "error".into(),
                     data: None,
@@ -714,48 +783,75 @@ impl Hub {
         Ok(id)
     }
 
+    /// Runs one page stream to its end: the retry the receiver asked for, and why it ended
+    /// (None when the page went away).
     async fn page_stream(
         &self,
         r: &Receiver,
         url: url::Url,
         sink: &(dyn Fn(StreamFrame) -> bool + Send + Sync),
-    ) -> u64 {
+    ) -> (u64, Option<String>) {
         let mut retry = 1000;
-        let Ok(client) = self.client_for(r).await else {
-            return retry;
+        let client = match self.client_for(r).await {
+            Ok(c) => c,
+            Err(e) => return (retry, Some(e)),
         };
-        let res = self
+        let started = std::time::Instant::now();
+        let send = self
             .request(&client, r, reqwest::Method::GET, url)
             .header("accept", "text/event-stream")
-            .send()
-            .await;
-        let Ok(res) = res else { return retry };
+            .send();
+        let res = match tokio::time::timeout(HEAD_LIMIT, send).await {
+            Ok(Ok(res)) => res,
+            Ok(Err(e)) => return (retry, Some(format!("couldn't connect: {}", describe(e)))),
+            Err(_) => {
+                let s = HEAD_LIMIT.as_secs_f32();
+                return (retry, Some(format!("no answer in {s} s")));
+            }
+        };
         if !res.status().is_success() {
-            return retry;
+            return (retry, Some(format!("HTTP {}", res.status().as_u16())));
         }
         if !sink(StreamFrame {
             event: "open".into(),
             data: None,
             retry_in_ms: None,
         }) {
-            return retry;
+            return (retry, None);
         }
         let mut parser = SseParser::new();
         let mut body = res.bytes_stream();
+        let mut first = true;
         loop {
             let chunk = match tokio::time::timeout(IDLE_LIMIT, body.next()).await {
                 Ok(Some(Ok(c))) => c,
-                _ => return retry,
+                Ok(Some(Err(e))) => {
+                    return (retry, Some(format!("the stream broke: {}", describe(e))))
+                }
+                Ok(None) => return (retry, Some("the receiver ended the stream".into())),
+                Err(_) => {
+                    let s = IDLE_LIMIT.as_secs();
+                    return (retry, Some(format!("nothing from the receiver in {s} s")));
+                }
             };
             for item in parser.push(&chunk) {
                 match item {
                     SseItem::Event { event, data, .. } => {
+                        if first {
+                            first = false;
+                            log::info!(
+                                "page stream {}: {event}, {} KB in {} ms",
+                                r.id,
+                                data.len().div_ceil(1024),
+                                started.elapsed().as_millis()
+                            );
+                        }
                         if !sink(StreamFrame {
                             event,
                             data: Some(data),
                             retry_in_ms: None,
                         }) {
-                            return retry;
+                            return (retry, None);
                         }
                     }
                     SseItem::Retry(ms) => retry = ms,
@@ -1249,6 +1345,108 @@ mod tests {
         assert_eq!(got[3].retry_in_ms, Some(2500));
         assert!(h.open_stream(&id, "/../x", "main", |_| true).is_err());
         assert!(h.open_stream("unknown", "/x", "main", |_| true).is_err());
+    }
+
+    /// Every frame a page stream sends, through the final `error`.
+    async fn stream_frames(h: &Hub, id: &str) -> Vec<StreamFrame> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        h.open_stream(id, "/api/ui/stream", "main", move |f| tx.send(f).is_ok())
+            .unwrap();
+        let mut got = vec![];
+        while let Some(f) = rx.recv().await {
+            let end = f.event == "error";
+            got.push(f);
+            if end {
+                break;
+            }
+        }
+        got
+    }
+
+    /// A loopback server that writes `head` and then each of `chunks`, yielding between
+    /// them so they reach the client as separate reads; `hang` keeps the socket open
+    /// without a byte (a receiver that accepted and never answered).
+    async fn raw_server(head: &'static str, chunks: Vec<Vec<u8>>, hang: bool) -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let Ok((mut s, _)) = l.accept().await else {
+                return;
+            };
+            let mut buf = [0u8; 4096];
+            let _ = s.read(&mut buf).await;
+            if hang {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                return;
+            }
+            s.write_all(head.as_bytes()).await.unwrap();
+            for c in chunks {
+                if s.write_all(&c).await.is_err() {
+                    return;
+                }
+                s.flush().await.unwrap();
+                tokio::task::yield_now().await;
+            }
+            let _ = s.shutdown().await;
+        });
+        port
+    }
+
+    /// A real receiver's first frame: the whole state as ONE `snapshot` event on a single
+    /// data line (315 KB on a busy Mac), arriving in many small reads that split lines and
+    /// UTF-8 characters.
+    #[tokio::test]
+    async fn page_stream_carries_a_large_snapshot_in_small_chunks() {
+        let t = TempDir::new("hub-big");
+        let row = r#"{"key":"claude-code/0f","title":"Fix the café build ✓ — naïve test","machine":"studio-mac"},"#;
+        let mut snap = String::from(r#"{"kind":"snapshot","snapshot":{"sessions":["#);
+        while snap.len() < 460_000 {
+            snap.push_str(row);
+        }
+        snap.push_str(r#"{}]}}"#);
+        let mut wire = format!("retry: 3000\nevent: snapshot\ndata: {snap}\n\n").into_bytes();
+        wire.extend_from_slice(b": ping\n\nevent: stats\ndata: {\"kind\":\"stats\"}\n\n");
+        // 997-byte reads: never on a line or character boundary for long.
+        let chunks: Vec<Vec<u8>> = wire.chunks(997).map(<[u8]>::to_vec).collect();
+        assert!(chunks.len() > 400);
+        let head =
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n";
+        let port = raw_server(head, chunks, false).await;
+        let h = hub(t.path(), Some(format!("http://127.0.0.1:{port}")));
+        let id = h.active().unwrap().id;
+        let got = stream_frames(&h, &id).await;
+        let ev: Vec<&str> = got.iter().map(|f| f.event.as_str()).collect();
+        assert_eq!(ev, vec!["open", "snapshot", "stats", "error"]);
+        assert_eq!(got[1].data.as_deref(), Some(snap.as_str()), "byte for byte");
+        assert_eq!(got[3].retry_in_ms, Some(3000));
+        // What the shell's IPC channel carries: it serialises intact too.
+        let json = serde_json::to_string(&got[1]).unwrap();
+        let back: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(back["data"].as_str(), Some(snap.as_str()));
+    }
+
+    /// A receiver that accepts the connection and never answers: the stream ends with
+    /// an error (the page backs off and says so) instead of "connecting" for good.
+    #[tokio::test]
+    async fn page_stream_gives_up_on_a_receiver_that_never_answers() {
+        let t = TempDir::new("hub-hang");
+        let port = raw_server("", vec![], true).await;
+        let h = hub(t.path(), Some(format!("http://127.0.0.1:{port}")));
+        let id = h.active().unwrap().id;
+        let t0 = std::time::Instant::now();
+        let got = tokio::time::timeout(Duration::from_secs(10), stream_frames(&h, &id))
+            .await
+            .expect("the stream ends");
+        let ev: Vec<&str> = got.iter().map(|f| f.event.as_str()).collect();
+        assert_eq!(ev, vec!["error"]);
+        assert!(t0.elapsed() >= HEAD_LIMIT);
+    }
+
+    #[test]
+    fn log_lines_carry_no_query() {
+        assert_eq!(log_path("/api/ui/search?q=secret+plan"), "/api/ui/search");
+        assert_eq!(log_path("/api/ui/info"), "/api/ui/info");
     }
 
     #[tokio::test]

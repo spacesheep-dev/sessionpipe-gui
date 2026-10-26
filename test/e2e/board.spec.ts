@@ -166,6 +166,13 @@ test.describe("board", () => {
     await expect(page.getByRole("searchbox", { name: "Search sessions" })).toHaveValue("");
   });
 
+  test("a filter that finds nothing hands the words to Search, which reads every session", async ({ page }) => {
+    await openBoard(page);
+    await page.getByRole("searchbox", { name: "Search sessions" }).fill("zzzz nothing");
+    await page.getByRole("button", { name: "Search every session for “zzzz nothing”" }).click();
+    await expect(page).toHaveURL((u) => u.pathname === "/search" && u.searchParams.get("q") === "zzzz nothing");
+  });
+
   test("keyboard: / focuses search, j/k move the cursor, Enter opens the session", async ({ page }) => {
     await openBoard(page);
     await page.locator("body").click({ position: { x: 5, y: 5 } });

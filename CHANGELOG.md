@@ -43,6 +43,33 @@ All notable changes to `sessionpipe-gui`. The format follows
   files on a prompt only for a machine that says `prompt_files`, and a level at most Safe
   on an inherit machine. A hello keeps up to 64 harnesses.
 
+## [0.3.2] - 2026-10-27
+
+### Fixed
+
+- **The desktop app opens on the receiver it finds.** 0.3.1 found a receiver already
+  running on this Mac and selected it, but kept the window it had opened with none, so the
+  board stayed on its first frame for good. Selecting a receiver now rebuilds any window
+  that doesn't show it; the same fix covers the welcome's Start sessionpipe and Connect.
+- The board and the inbox never sit on loading rows without saying why: after a few
+  seconds they say they're still connecting, or that the connection is down, with Retry
+  now. A stream that opens but never sends its first update is opened again.
+- The desktop app gives up on a receiver that accepts the connection and never answers
+  (20 s), and writes dropped streams and failed requests to its log (no keys, no queries).
+
+## [0.3.1] - 2026-10-27
+
+### Fixed
+
+- **The desktop app finds a receiver already running on this machine.** On a first launch
+  it went straight to the welcome, even with a receiver on :7373; it now looks (the
+  default port, then the receiver's `run.json`) and opens on it.
+- **The welcome's Start sessionpipe works.** It asked npm for `sessionpipe-gui@<version>`,
+  which isn't published, and failed with E404; it now runs the same version from the
+  GitHub release tarball.
+- When the board's filter finds nothing, it says what it looked at and offers to search
+  every session for the words.
+
 ## [0.3.0] - 2026-10-26
 
 ### Added
@@ -267,7 +294,9 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.1.0...v0.2.0

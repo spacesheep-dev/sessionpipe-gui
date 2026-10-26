@@ -45,7 +45,15 @@ import { ComposeButton } from "../control/NewSession";
 import { ALIAS_WINDOW_MS, aliasHidden, openNewSession, setBoardFilter } from "../control/newSessionState";
 import { useStartTitles } from "../control/Starting";
 import { isFinal } from "../control/words";
-import { useAppState, useLabels, useMachines, useSessionTree, useStore, useStreamDown } from "../data/hooks";
+import {
+  useAppState,
+  useFirstLoad,
+  useLabels,
+  useMachines,
+  useSessionTree,
+  useStore,
+  useStreamDown,
+} from "../data/hooks";
 import { agentMatches } from "../lib/agents";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import { isHidden, useHidden } from "../lib/hidden";
@@ -163,7 +171,8 @@ const either = (names: string[]) =>
 export function Board() {
   const store = useStore();
   const { roots, childrenOf, all } = useSessionTree();
-  const { snapshotAt, connection } = useAppState();
+  const { snapshotAt } = useAppState();
+  const firstLoad = useFirstLoad();
   const [q, setQ] = useState("");
   const [machine, setMachine] = useState("");
   const [harness, setHarness] = useState("");
@@ -423,18 +432,27 @@ export function Board() {
       )}
       <LensNote lens={lens} hidden={hiddenByLens} />
 
-      {!loaded &&
-        (connection === "live" || connection === "connecting" ? (
-          <div className="skeleton board-skeleton" role="status" aria-label="Loading sessions">
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="skeleton-row" />
-            ))}
-          </div>
-        ) : (
-          <EmptyState center title="No connection to the receiver">
-            The board fills in as soon as the stream is back.
-          </EmptyState>
-        ))}
+      {firstLoad === "loading" ? (
+        <div className="skeleton board-skeleton" role="status" aria-label="Loading sessions">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="skeleton-row" />
+          ))}
+        </div>
+      ) : firstLoad ? (
+        <EmptyState
+          center
+          title={firstLoad === "slow" ? "Still connecting to the receiver…" : "No connection to the receiver"}
+          actions={
+            <button type="button" className="btn btn--sm" onClick={() => store.reconnect()}>
+              Retry now
+            </button>
+          }
+        >
+          {firstLoad === "slow"
+            ? "Its sessions show up here as soon as the first update arrives."
+            : "The board fills in as soon as the stream is back."}
+        </EmptyState>
+      ) : null}
       {emptyShown.mounted && (
         <div className="board-empty" data-closing={emptyShown.closing ? "" : undefined}>
           <FirstRun paired={paired[0]?.name} />
@@ -557,9 +575,19 @@ function NoMatch({
       title={q ? `No ${only ? "sessions" : where} match “${q}”` : `No ${where}`}
       actions={
         only ? (
-          <button type="button" className="btn" onClick={clearSearch}>
-            Clear search
-          </button>
+          <>
+            {/* The board filters what it holds; Search reads every session, prompts included. */}
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => navigate(`/search?q=${encodeURIComponent(q.trim())}`)}
+            >
+              Search every session for “{q.trim()}”
+            </button>
+            <button type="button" className="btn" onClick={clearSearch}>
+              Clear search
+            </button>
+          </>
         ) : (
           <button type="button" className="btn" onClick={clear}>
             Clear filters
@@ -568,7 +596,7 @@ function NoMatch({
       }
     >
       {only
-        ? "Search looks at titles, folders, machines and what the agents said."
+        ? "This box filters the board by title, folder, machine and the latest reply. Search reads every session, what you sent included."
         : "Other sessions are hidden by the filter."}
     </EmptyState>
   );

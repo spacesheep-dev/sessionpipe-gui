@@ -4,7 +4,8 @@
 //! Starting runs `sessionpipe-gui service install` (a LaunchAgent / systemd unit: the
 //! receiver must outlive the window, so it is never the app's child), found through a login
 //! shell, because an app opened from Finder has no user PATH, then the known prefixes.
-//! With only npx: `npx -y sessionpipe-gui@<this version> service install`. No Node: the
+//! With only npx: `npx -y --package=<this version's release tarball> -- sessionpipe-gui
+//! service install` (the GUI is not on npm; its GitHub release carries the tarball). No Node: the
 //! welcome shows the one-line installer.
 //!
 //! Debug builds never install anything and never touch :7373: they run the install with
@@ -232,7 +233,14 @@ pub fn install_invocation(t: &Tools, o: &InstallOpts) -> Result<Invocation, Star
             path,
         }),
         (None, _, Some(npx)) => {
-            let mut args = vec!["-y".to_string(), format!("sessionpipe-gui@{}", o.version)];
+            // Not `sessionpipe-gui@<v>`: the GUI is not published on npm, so that is a 404.
+            // The release that shipped this app carries the same version as a tarball.
+            let mut args = vec![
+                "-y".to_string(),
+                format!("--package={}", release_tarball(&o.version)),
+                "--".to_string(),
+                "sessionpipe-gui".to_string(),
+            ];
             args.extend(rest);
             Ok(Invocation {
                 program: npx.clone(),
@@ -242,6 +250,13 @@ pub fn install_invocation(t: &Tools, o: &InstallOpts) -> Result<Invocation, Star
         }
         _ => Err(StartError::NoNode),
     }
+}
+
+/// The npm tarball attached to the GUI's GitHub release of `version`.
+pub fn release_tarball(version: &str) -> String {
+    format!(
+        "https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v{version}/sessionpipe-gui-{version}.tgz"
+    )
 }
 
 /// Waits for a child with a deadline, collecting (status, stdout, stderr).
@@ -795,7 +810,9 @@ mod tests {
             inv.args,
             [
                 "-y",
-                "sessionpipe-gui@0.3.0",
+                "--package=https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe-gui-0.3.0.tgz",
+                "--",
+                "sessionpipe-gui",
                 "service",
                 "install",
                 "--port",

@@ -69,6 +69,13 @@ export const STREAM_KINDS = [
 const _everyKind: Exclude<StreamMessage["kind"], (typeof STREAM_KINDS)[number]> extends never ? true : never = true;
 void _everyKind;
 
+/** How long an open stream may go without its first frame, the snapshot, before it is
+ *  treated as failed and opened again. A receiver sends it at once; the native shell's
+ *  own limits (no answer in 20 s, silence for 45 s) cover the network, and this covers
+ *  what lies between (a frame that never reaches the page). It doubles each time it runs
+ *  out, so a snapshot that is merely slow still gets through. */
+export const SNAPSHOT_LIMIT_MS = 30_000;
+
 export class HttpError extends Error {
   constructor(
     public status: number,
@@ -115,13 +122,34 @@ export function createHttpTransport(): Transport {
     openStream(h) {
       let es: EventSourceLike | null = null;
       let timer: ReturnType<typeof setTimeout> | null = null;
+      let deadline: ReturnType<typeof setTimeout> | null = null;
       let attempt = 0;
+      let late = 0;
       let closed = false;
+      const stopDeadline = () => {
+        if (deadline) clearTimeout(deadline);
+        deadline = null;
+      };
+      const fail = () => {
+        // A new EventSource always starts with a fresh snapshot, so we re-sync by
+        // reopening instead of trusting the browser's own retry.
+        stopDeadline();
+        es?.close();
+        es = null;
+        const delay = Math.min(15_000, 1000 * 2 ** attempt) * (0.8 + Math.random() * 0.4);
+        attempt = Math.min(attempt + 1, 5);
+        h.onError(delay);
+        timer = setTimeout(open, delay);
+      };
       const open = () => {
         if (closed) return;
         es = openEvents(ROUTES.ui.stream);
         for (const kind of STREAM_KINDS) {
           es.addEventListener(kind, (ev) => {
+            if (kind === "snapshot") {
+              stopDeadline();
+              late = 0;
+            }
             try {
               const m = JSON.parse(ev.data) as StreamMessage;
               if (m.kind === "searchIndex") for (const l of searchFrames) l(m.status);
@@ -135,16 +163,15 @@ export function createHttpTransport(): Transport {
           attempt = 0;
           h.onOpen();
         };
-        es.onerror = () => {
-          // A new EventSource always starts with a fresh snapshot, so we re-sync by
-          // reopening instead of trusting the browser's own retry.
-          es?.close();
-          es = null;
-          const delay = Math.min(15_000, 1000 * 2 ** attempt) * (0.8 + Math.random() * 0.4);
-          attempt = Math.min(attempt + 1, 5);
-          h.onError(delay);
-          timer = setTimeout(open, delay);
-        };
+        es.onerror = fail;
+        deadline = setTimeout(
+          () => {
+            late = Math.min(late + 1, 3);
+            console.warn("stream: no snapshot in time; reopening");
+            fail();
+          },
+          SNAPSHOT_LIMIT_MS * 2 ** late,
+        );
       };
       open();
       const onVisible = () => {
@@ -158,6 +185,7 @@ export function createHttpTransport(): Transport {
         closed = true;
         document.removeEventListener("visibilitychange", onVisible);
         if (timer) clearTimeout(timer);
+        stopDeadline();
         es?.close();
       };
     },

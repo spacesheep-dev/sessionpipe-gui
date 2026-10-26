@@ -98,6 +98,11 @@ pub async fn find_local(
     if probe(client, probe_origin).await.is_some() {
         return Some(probe_origin.to_string());
     }
+    from_run_file(client, state_dir).await
+}
+
+/// The live loopback receiver `<state>/run.json` names, if it answers.
+pub async fn from_run_file(client: &reqwest::Client, state_dir: &Path) -> Option<String> {
     let run = read_run_file(state_dir)?;
     if !pid_alive(run.pid) {
         log::info!("run.json names pid {} which is gone; ignored", run.pid);
@@ -110,10 +115,22 @@ pub async fn find_local(
     probe(client, &origin).await.map(|_| origin)
 }
 
-/// The release-build entry: everything decided from the environment. Compiled out in
-/// debug builds, which only ever connect to SP_RECEIVER_URL.
-#[cfg(not(debug_assertions))]
+/// The entry the shell calls: everything decided from the environment.
+///
+/// Tests (any build): SP_LOCAL_STATE names the state dir whose run.json is this Mac's
+/// receiver, and only that is read; the default port is never probed. That is how the
+/// reliability scripts reach the discovered-receiver path with a scratch receiver.
 pub async fn find_local_default(client: &reqwest::Client) -> Option<String> {
+    if let Some(state) = std::env::var_os("SP_LOCAL_STATE").filter(|s| !s.is_empty()) {
+        return from_run_file(client, Path::new(&state)).await;
+    }
+    find_default(client).await
+}
+
+/// Release builds: the default port, then the default state dir's run.json. Compiled out
+/// in debug builds, which never look at :7373 or ~/.local/state.
+#[cfg(not(debug_assertions))]
+async fn find_default(client: &reqwest::Client) -> Option<String> {
     if !enabled(std::env::var("SP_RECEIVER_URL").ok().as_deref()) {
         return None;
     }
@@ -123,7 +140,7 @@ pub async fn find_local_default(client: &reqwest::Client) -> Option<String> {
 }
 
 #[cfg(debug_assertions)]
-pub async fn find_local_default(_client: &reqwest::Client) -> Option<String> {
+async fn find_default(_client: &reqwest::Client) -> Option<String> {
     None
 }
 

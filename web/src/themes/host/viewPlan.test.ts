@@ -24,7 +24,7 @@ describe("viewPlan", () => {
     expect(viewPlan({ ...canvas, id: "office", url: "/themes/office/" }, true, "tauri://localhost").kind).toBe("page");
   });
   it("an installed view opens in its own window, never in the app's origin", () => {
-    expect(viewPlan(mine, true, "tauri://localhost")).toEqual({ kind: "window", path: "/themes/my-view/" });
+    expect(viewPlan(mine, true, "tauri://localhost")).toEqual({ kind: "window", path: "/views/my-view" });
     // A person's own install of a bundled id overrides it: not the app's code, so a window.
     expect(viewPlan({ ...canvas, bundled: false }, true, "tauri://localhost").kind).toBe("window");
     // A bundled view the app doesn't carry.
