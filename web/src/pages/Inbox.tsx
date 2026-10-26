@@ -27,7 +27,7 @@ import {
 } from "../components/SessionCard";
 import { ComposeButton } from "../control/NewSession";
 import { answerState, useSessionSend } from "../control/useSend";
-import { type OpenAttention, useAppState, useLabels, useOpenAttentions, useStore } from "../data/hooks";
+import { type OpenAttention, useAppState, useFirstLoad, useLabels, useOpenAttentions, useStore } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
 import { ATTENTION_LABEL, attentionMessage, oneLine, sessionTitle, toolLabel } from "../lib/format";
 import { attentionKey, hide, isHidden, useHidden } from "../lib/hidden";
@@ -59,7 +59,8 @@ export function Inbox() {
       ),
     [all, labels, label, hidden],
   );
-  const { machines, snapshotAt, connection } = useAppState();
+  const { machines } = useAppState();
+  const firstLoad = useFirstLoad();
   // Answerable first, then the ones waiting in a terminal; held still while read.
   const sorted = useMemo(() => [...rows.filter((r) => r.answerable), ...rows.filter((r) => !r.answerable)], [rows]);
   const listRef = useRef<HTMLDivElement>(null);
@@ -188,18 +189,24 @@ export function Inbox() {
           <LensNote lens={lens} hidden={hiddenByLens} />
         </div>
       )}
-      {!snapshotAt ? (
-        connection === "live" || connection === "connecting" ? (
-          <div className="skeleton" role="status" aria-label="Loading">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="skeleton-row" />
-            ))}
-          </div>
-        ) : (
-          <EmptyState center title="No connection to the receiver">
-            Prompts show up here as soon as the stream is back.
-          </EmptyState>
-        )
+      {firstLoad === "loading" ? (
+        <div className="skeleton" role="status" aria-label="Loading">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="skeleton-row" />
+          ))}
+        </div>
+      ) : firstLoad ? (
+        <EmptyState
+          center
+          title={firstLoad === "slow" ? "Still connecting to the receiver…" : "No connection to the receiver"}
+          actions={
+            <button type="button" className="btn btn--sm" onClick={() => store.reconnect()}>
+              Retry now
+            </button>
+          }
+        >
+          Prompts show up here as soon as the {firstLoad === "slow" ? "first update arrives" : "stream is back"}.
+        </EmptyState>
       ) : held.length === 0 && label ? (
         <EmptyState
           center

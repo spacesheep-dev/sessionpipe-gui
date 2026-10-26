@@ -6,9 +6,10 @@
 // what the page already does: the app menu, deep links and the menu bar (`navigate`),
 // sleep and wake, updates, and the receiver list.
 import "./chrome.css";
+import type { Store } from "../data/store";
 import { shellStreams } from "../lib/net";
 import { navigate } from "../lib/router";
-import { listen } from "./bridge";
+import { invoke, listen } from "./bridge";
 import { installKeyFilter, type MenuPayload, restoreSidebar, runMenu } from "./menu";
 import { openStream, resyncAll } from "./stream";
 
@@ -92,7 +93,6 @@ export const isDemo = (): boolean => new URLSearchParams(location.search).get("m
  *  none, or the shell can't say (the welcome then offers to start one). */
 export async function useLocalReceiver(): Promise<boolean> {
   try {
-    const { invoke } = await import("./bridge");
     const found = await invoke<{ local: { id: string } | null }>("rx_discover");
     if (!found?.local?.id) return false;
     await invoke("rx_select", { id: found.local.id });
@@ -101,6 +101,10 @@ export async function useLocalReceiver(): Promise<boolean> {
     return false;
   }
 }
+
+/** How long the page waits for the shell to replace its window after selecting the
+ *  receiver it found (a new window is up in well under a second). */
+export const HANDOFF_MS = 8000;
 
 /** Runs before the app renders. True when it put up the welcome instead (no receiver), or
  *  handed the window to a receiver found running on this machine. */
@@ -114,7 +118,13 @@ export async function start(): Promise<boolean> {
     // A receiver already running on this machine (the default port, or the one its run.json
     // names) is the one to use; the welcome is for when there is none. Selecting it opens
     // a fresh window on it.
-    if (await useLocalReceiver()) return true;
+    if (await useLocalReceiver()) {
+      // The shell builds a new window on it and this one goes. Should it stay (the hand-over
+      // failed), the welcome takes over rather than the first frame staying up for good.
+      const shown = info;
+      setTimeout(() => void import("./Welcome").then((m) => m.showWelcome(shown)), HANDOFF_MS);
+      return true;
+    }
     (await import("./Welcome")).showWelcome(info);
     return true;
   }
@@ -137,6 +147,16 @@ export async function start(): Promise<boolean> {
   void import("./appState").then((m) => m.wire(on));
   if (info.receiver) void import("./FirstRun").then((m) => m.maybeShowFirstRun());
   return false;
+}
+
+/** The launch's last mark, after fcp: the first snapshot is on the page (the board has its
+ *  rows). The shell prints it with the others; packaging's scripts read it. */
+export function markFirstSnapshot(store: Store): void {
+  const off = store.subscribe(() => {
+    if (!store.get().snapshotAt) return;
+    off();
+    invoke("app_mark", { name: "snapshot", at: Date.now(), ms: performance.now() }).catch(() => {});
+  });
 }
 
 /** The window's drag regions: the page bar's ground, the top band of the rail and the

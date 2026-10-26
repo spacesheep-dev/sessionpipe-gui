@@ -46,10 +46,12 @@ const isMockMode = () => import.meta.env.VITE_MOCK === "1" || new URLSearchParam
 
 async function boot() {
   // Inside the native app: its adapter first (it may put up the welcome instead).
-  if ("sessionpipeShell" in window && (await (await import("./native/shell")).start())) return;
+  const native = "sessionpipeShell" in window ? await import("./native/shell") : null;
+  if (native && (await native.start())) return;
   const transport = isMockMode() ? (await import("./mock/index")).createMockTransport() : createHttpTransport();
   const store = new Store(transport);
   store.start();
+  native?.markFirstSnapshot(store);
   // Install-only service worker (public/sw.js): it caches nothing. Secure contexts only,
   // which is where "Add to Home Screen" and the app badge exist anyway.
   if ("serviceWorker" in navigator && !isMockMode()) navigator.serviceWorker.register("/sw.js").catch(() => {});

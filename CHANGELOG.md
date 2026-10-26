@@ -6,6 +6,18 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The desktop app opens on the receiver it finds.** 0.3.1 found a receiver already
+  running on this Mac and selected it, but kept the window it had opened with none, so the
+  board stayed on its first frame for good. Selecting a receiver now rebuilds any window
+  that doesn't show it; the same fix covers the welcome's Start sessionpipe and Connect.
+- The board and the inbox never sit on loading rows without saying why: after a few
+  seconds they say they're still connecting, or that the connection is down, with Retry
+  now. A stream that opens but never sends its first update is opened again.
+- The desktop app gives up on a receiver that accepts the connection and never answers
+  (20 s), and writes dropped streams and failed requests to its log (no keys, no queries).
+
 ## [0.3.1] - 2026-10-27
 
 ### Fixed
