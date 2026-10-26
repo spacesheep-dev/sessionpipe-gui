@@ -6,6 +6,9 @@
 import { expect, type Page, test } from "@playwright/test";
 import { openBoard, openPage } from "./helpers.js";
 
+/** The card shows a long title up to its first sentence or an ellipsis; the palette and the
+ *  session page may show more, so a title is matched as the start. */
+const startsWith = (t: string) => new RegExp(`^${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
 const dialog = (page: Page) => page.getByRole("dialog", { name: "Command palette" });
 const rows = (page: Page) => dialog(page).locator(".pal-row");
 
@@ -15,16 +18,27 @@ async function open(page: Page) {
   await expect(dialog(page).getByRole("combobox")).toBeFocused();
 }
 
-/** The first board card's title and a fragment of it worth typing: its longest word. */
+/** A settled board card (idle or stale: past its first turn, so its title won't be replaced
+ *  by a better one mid-test) whose title is a phrase with a word worth typing (3+ words, one of
+ *  7+ letters: a session, not a repo or machine name), else the first card; its title, and that word. */
 async function firstCard(page: Page): Promise<{ title: string; href: string; fragment: string }> {
-  const link = page.locator("article.card a.card-link").first();
-  const title = (await link.locator(".card-title").textContent())!.trim();
+  const longest = (t: string) =>
+    t
+      .split(/\s+/)
+      .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ""))
+      .sort((a, b) => b.length - a.length)[0] ?? "";
+  const settled = page.locator("section.group--idle, section.group--stale").locator("article.card a.card-link");
+  let link = page.locator("article.card a.card-link").first();
+  for (let i = 0, n = await settled.count(); i < n; i++) {
+    const t = ((await settled.nth(i).locator(".card-title").textContent()) ?? "").trim();
+    if (t.split(/\s+/).length >= 3 && longest(t).length >= 7) {
+      link = settled.nth(i);
+      break;
+    }
+  }
+  const title = (await link.locator(".card-title").textContent())!.trim().replace(/…$/, "");
   const href = (await link.getAttribute("href"))!;
-  const fragment = title
-    .split(/\s+/)
-    .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ""))
-    .sort((a, b) => b.length - a.length)[0]!;
-  return { title, href, fragment };
+  return { title, href, fragment: longest(title) };
 }
 
 test.describe("command palette", () => {
@@ -40,14 +54,14 @@ test.describe("command palette", () => {
     await page.keyboard.type(fragment);
     const first = rows(page).first();
     await expect(first).toHaveAttribute("data-section", "Sessions");
-    await expect(first.locator(".pal-label")).toHaveText(title);
+    await expect(first.locator(".pal-label")).toHaveText(startsWith(title));
     // The matched letters are marked (in the ink at 600), not blocked.
     await expect(first.locator("u").first()).toBeVisible();
     await expect(first).toHaveAttribute("aria-selected", "true");
     await page.keyboard.press("Enter");
     await expect(dialog(page)).toBeHidden();
     await expect(page).toHaveURL((u) => u.pathname === href.split("?")[0]);
-    await expect(page.locator("h1.sess-title")).toHaveText(title);
+    await expect(page.locator("h1.sess-title")).toHaveText(startsWith(title));
   });
 
   test("shift+Enter opens the session beside the page", async ({ page }) => {
@@ -55,7 +69,7 @@ test.describe("command palette", () => {
     const { title, href, fragment } = await firstCard(page);
     await open(page);
     await page.keyboard.type(fragment);
-    await expect(rows(page).first().locator(".pal-label")).toHaveText(title);
+    await expect(rows(page).first().locator(".pal-label")).toHaveText(startsWith(title));
     await page.keyboard.press("Shift+Enter");
     await expect(dialog(page)).toBeHidden();
     const panel = page.locator("aside.panel");

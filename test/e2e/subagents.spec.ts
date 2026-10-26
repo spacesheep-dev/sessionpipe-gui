@@ -76,7 +76,8 @@ test.describe("subagents", () => {
   });
 
   test("the session view puts each agent under its turn and reads the notifications", async ({ page }) => {
-    test.setTimeout(90_000);
+    // The demo's background agents report back on their own clock: slower on a loaded runner.
+    test.setTimeout(150_000);
     const row = await bm25(page);
     const href = (await row.locator("a.card-link").getAttribute("href"))!;
     // Wait for a run with both background agents back (their notification turns).
@@ -86,7 +87,7 @@ test.describe("subagents", () => {
           await openPage(page, href.split("?")[0]!);
           return page.locator(".agent-notice").count();
         },
-        { timeout: 60_000, intervals: [2000] },
+        { timeout: 120_000, intervals: [2000] },
       )
       .toBeGreaterThanOrEqual(2);
     await expect(page.locator(".agent-notice").first()).toContainText(/^Subagent finished: (Explore|general-purpose)/);
