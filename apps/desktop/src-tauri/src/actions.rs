@@ -107,11 +107,12 @@ pub fn open_external(url: &str) {
 /// Switches the window to another receiver (reloads it with the new contract).
 pub fn select_receiver<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<(), String> {
     let shell = app.state::<Shell>();
-    if shell.hub.active().is_some_and(|a| a.id == id) {
+    let shown = shell.shown.lock().unwrap().clone();
+    if !choose(&shell.hub, shown.as_deref(), id)? {
         return Ok(());
     }
-    shell.hub.set_active(id)?;
     if let Some(w) = app.get_webview_window(MAIN) {
+        log::info!("main window: switching to receiver {id}");
         // The contract is baked into the init script: a fresh window carries the new one.
         let _ = w.destroy();
         // The old window leaves the manager on its Destroyed event; open after that.
@@ -127,6 +128,18 @@ pub fn select_receiver<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<(), S
         });
     }
     Ok(())
+}
+
+/// Makes `id` the chosen receiver; true when the main window must be built again for it.
+///
+/// What the window shows is the receiver its contract was built with (`shown`), not the
+/// hub's active one: with nothing chosen yet, `active()` falls back to the first receiver
+/// known, which is the very one just discovered, started or added while the welcome
+/// (built with none) is up. Comparing with that kept the welcome window, whose page had
+/// already handed itself over, on its static first frame for good.
+pub fn choose(hub: &sp_receivers::Hub, shown: Option<&str>, id: &str) -> Result<bool, String> {
+    hub.set_active(id)?;
+    Ok(shown != Some(id))
 }
 
 /// The machine went to sleep: close the native streams (packaging's power.rs calls this).
@@ -247,4 +260,51 @@ pub fn confirm_connect<R: Runtime>(
                 }
             });
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sp_receivers::{Hub, HubConfig, KeyStore, StatusFile};
+
+    fn hub(home: &std::path::Path) -> Hub {
+        Hub::new(HubConfig {
+            home: home.to_path_buf(),
+            keys: KeyStore::memory(),
+            env_receiver_url: None,
+            allowed_origins: vec![],
+            status: StatusFile::new(None, "test"),
+            user_agent: "sp-test".into(),
+        })
+    }
+
+    /// The first run on a Mac whose receiver is already running: the window opens with no
+    /// receiver (the welcome), the page finds the local one, and selecting it must give the
+    /// window a new contract, although the hub already counts it as active.
+    #[test]
+    fn selecting_the_discovered_receiver_rebuilds_the_welcome_window() {
+        let home = std::env::temp_dir().join(format!("sp-choose-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let h = hub(&home);
+        let shown = h.active().map(|r| r.id); // what build_main bakes in: none
+        assert_eq!(shown, None);
+        let found = h.add_transient("http://127.0.0.1:7861").unwrap();
+        assert_eq!(
+            h.active().map(|r| r.id),
+            Some(found.id.clone()),
+            "the fallback"
+        );
+        assert!(choose(&h, shown.as_deref(), &found.id).unwrap());
+        // The window built for it shows it: selecting it again leaves the window alone.
+        assert!(!choose(&h, Some(&found.id), &found.id).unwrap());
+        // "Start sessionpipe" on the welcome adds its receiver the same way.
+        let h2 = hub(&home.join("2"));
+        let added = h2.add_transient("http://127.0.0.1:7862").unwrap();
+        assert!(choose(&h2, None, &added.id).unwrap());
+        assert!(
+            choose(&h, Some(&found.id), &added.id).is_err(),
+            "unknown here"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }

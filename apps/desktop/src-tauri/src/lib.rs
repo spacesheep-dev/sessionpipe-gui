@@ -31,6 +31,9 @@ pub struct Shell {
     pub hub: Hub,
     pub home: PathBuf,
     pub settings: Mutex<settings::AppSettings>,
+    /// The receiver baked into the main window's contract when it was built (None: the
+    /// welcome). What the page talks to until the window is built again.
+    pub shown: Mutex<Option<String>>,
     pub started: Instant,
     pub started_wall: SystemTime,
     pub update: Mutex<updater::UpdateState>,
@@ -130,6 +133,7 @@ pub fn run() {
                 hub: hub.clone(),
                 home,
                 settings: Mutex::new(s.clone()),
+                shown: Mutex::new(None),
                 started,
                 started_wall,
                 update: Mutex::new(updater::UpdateState::default()),
