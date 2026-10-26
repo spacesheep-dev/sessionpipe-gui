@@ -125,12 +125,17 @@ test.describe("subagents", () => {
     const key = await (await bm25(page)).getAttribute("data-flip");
     const row = page.locator(`article.card[data-flip="${key}"]`);
     // The parent's tab first, then one of its agents, on a board held still under the pointer.
+    // Clicks dispatched on the element, as split.spec does: what this checks is the tabs and the
+    // URL, and a live card's height (its counts, its agents) keeps a pointer chasing it on CI.
     await holdBoard(page);
-    await row.locator("a.card-link").click({ modifiers: ["Shift"] });
+    const press = (l: ReturnType<typeof page.locator>, shiftKey = false) =>
+      l.dispatchEvent("click", { bubbles: true, cancelable: true, button: 0, shiftKey });
+    await press(row.locator("a.card-link"), true);
     await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
     const disclose = row.locator("button.card-disclose");
-    if ((await disclose.getAttribute("aria-expanded")) === "false") await disclose.click();
-    await row.locator(".agent-row").first().click();
+    if ((await disclose.getAttribute("aria-expanded")) === "false") await press(disclose);
+    await expect(row.locator(".agent-row").first()).toBeVisible();
+    await press(row.locator(".agent-row").first());
     const tabs = page.locator("aside.panel [role=tab]");
     await expect(tabs).toHaveCount(2);
     await expect(tabs.nth(1)).toHaveClass(/tab--agent/);
