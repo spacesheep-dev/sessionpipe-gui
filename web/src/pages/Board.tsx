@@ -557,9 +557,19 @@ function NoMatch({
       title={q ? `No ${only ? "sessions" : where} match “${q}”` : `No ${where}`}
       actions={
         only ? (
-          <button type="button" className="btn" onClick={clearSearch}>
-            Clear search
-          </button>
+          <>
+            {/* The board filters what it holds; Search reads every session, prompts included. */}
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => navigate(`/search?q=${encodeURIComponent(q.trim())}`)}
+            >
+              Search every session for “{q.trim()}”
+            </button>
+            <button type="button" className="btn" onClick={clearSearch}>
+              Clear search
+            </button>
+          </>
         ) : (
           <button type="button" className="btn" onClick={clear}>
             Clear filters
@@ -568,7 +578,7 @@ function NoMatch({
       }
     >
       {only
-        ? "Search looks at titles, folders, machines and what the agents said."
+        ? "This box filters the board by title, folder, machine and the latest reply. Search reads every session, what you sent included."
         : "Other sessions are hidden by the filter."}
     </EmptyState>
   );
