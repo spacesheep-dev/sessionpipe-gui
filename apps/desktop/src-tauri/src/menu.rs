@@ -4,20 +4,35 @@
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Runtime};
 
+/// The pages' chord: ⌃⌘ on a Mac. Elsewhere Ctrl and Cmd are one key, so it would collapse
+/// to Ctrl+1 (the list's own key) and Ctrl+S: Ctrl+Alt there, as in web/src/native/menu.ts.
+#[cfg(target_os = "macos")]
+macro_rules! page {
+    ($k:literal) => {
+        concat!("Ctrl+CmdOrCtrl+", $k)
+    };
+}
+#[cfg(not(target_os = "macos"))]
+macro_rules! page {
+    ($k:literal) => {
+        concat!("Ctrl+Alt+", $k)
+    };
+}
+
 /// (action id, title, accelerator), per menu, in order. None = separator.
 pub type Entry = Option<(&'static str, &'static str, Option<&'static str>)>;
 
 pub const FILE: &[Entry] = &[Some(("new-session", "New Session", Some("CmdOrCtrl+N")))];
 pub const EDIT_FIND: Entry = Some(("find", "Find", Some("CmdOrCtrl+F")));
 pub const VIEW: &[Entry] = &[
-    Some(("go-board", "Board", Some("Ctrl+CmdOrCtrl+1"))),
-    Some(("go-inbox", "Inbox", Some("Ctrl+CmdOrCtrl+2"))),
-    Some(("go-feed", "Feed", Some("Ctrl+CmdOrCtrl+3"))),
-    Some(("go-review", "Review", Some("Ctrl+CmdOrCtrl+4"))),
-    Some(("go-machines", "Machines", Some("Ctrl+CmdOrCtrl+5"))),
+    Some(("go-board", "Board", Some(page!("1")))),
+    Some(("go-inbox", "Inbox", Some(page!("2")))),
+    Some(("go-feed", "Feed", Some(page!("3")))),
+    Some(("go-review", "Review", Some(page!("4")))),
+    Some(("go-machines", "Machines", Some(page!("5")))),
     None,
     Some(("palette", "Command Palette", Some("CmdOrCtrl+K"))),
-    Some(("toggle-sidebar", "Toggle Sidebar", Some("Ctrl+CmdOrCtrl+S"))),
+    Some(("toggle-sidebar", "Toggle Sidebar", Some(page!("S")))),
 ];
 pub const GO: &[Entry] = &[
     Some(("back", "Back", Some("CmdOrCtrl+["))),

@@ -35,18 +35,22 @@ export function prefillTarget(p: MenuPayload["prefill"]): NewSessionTarget {
 }
 
 /** ⌃⌘1 … ⌃⌘5 for the pages, not ⌘1 … ⌘5: those open the n-th item of a list and the n-th
- *  tab of the side panel (lib/shortcuts.ts, list.jump / panel.tab). */
+ *  tab of the side panel (lib/shortcuts.ts, list.jump / panel.tab). Off a Mac `ctrl` is
+ *  `mod`, so ⌃⌘ would collapse to Ctrl+1 (the list's own key) and Ctrl+S: there it is
+ *  Ctrl+Alt, as in menu.rs. */
+const PAGE = IS_MAC ? "ctrl+mod" : "alt+mod";
+
 export const MENU: Record<string, MenuItem> = {
   settings: { keys: "mod+,", run: () => navigate("/settings") },
   "new-session": { keys: "mod+n", run: (p) => openNewSession(prefillTarget(p.prefill)) },
   find: { keys: "mod+f", run: () => fire("search.focus") },
-  "go-board": { keys: "ctrl+mod+1", run: () => navigate("/") },
-  "go-inbox": { keys: "ctrl+mod+2", run: () => navigate("/inbox") },
-  "go-feed": { keys: "ctrl+mod+3", run: () => navigate("/feed") },
-  "go-review": { keys: "ctrl+mod+4", run: () => navigate("/review") },
-  "go-machines": { keys: "ctrl+mod+5", run: () => navigate("/machines") },
+  "go-board": { keys: `${PAGE}+1`, run: () => navigate("/") },
+  "go-inbox": { keys: `${PAGE}+2`, run: () => navigate("/inbox") },
+  "go-feed": { keys: `${PAGE}+3`, run: () => navigate("/feed") },
+  "go-review": { keys: `${PAGE}+4`, run: () => navigate("/review") },
+  "go-machines": { keys: `${PAGE}+5`, run: () => navigate("/machines") },
   palette: { keys: "mod+k", run: () => fire("palette.toggle") },
-  "toggle-sidebar": { keys: "ctrl+mod+s", run: () => toggleSidebar() },
+  "toggle-sidebar": { keys: `${PAGE}+s`, run: () => toggleSidebar() },
   back: { keys: "mod+[", run: () => back("/") },
   forward: { keys: "mod+]", run: () => history.forward() },
   shortcuts: { keys: "mod+/", run: () => fire("help.toggle") },

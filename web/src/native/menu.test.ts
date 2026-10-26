@@ -94,6 +94,9 @@ describe("the no-double-fire key filter", () => {
     expect(menuOwns(press({ key: "n", ...MOD }))).toBe(true);
     expect(menuOwns(press({ key: ",", ...MOD }))).toBe(true);
     expect(menuOwns(press({ key: "[", ...MOD }))).toBe(true);
+    // The pages: ⌃⌘1 on a Mac, Ctrl+Alt+1 elsewhere (where ⌃⌘ would be Ctrl+1).
+    const PAGE = IS_MAC ? { ctrlKey: true, metaKey: true } : { ctrlKey: true, altKey: true };
+    expect(menuOwns(press({ key: "1", code: "Digit1", ...PAGE }))).toBe(true);
     // The web's own keys stay the web's.
     expect(menuOwns(press({ key: "k" }))).toBe(false);
     expect(menuOwns(press({ key: "1", code: "Digit1", ...MOD }))).toBe(false);
