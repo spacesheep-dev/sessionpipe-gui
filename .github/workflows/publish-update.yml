@@ -59,6 +59,31 @@ jobs:
           jq -e '.platforms | has("darwin-aarch64") and has("darwin-x86_64")' "$RUNNER_TEMP/rel/latest.json" >/dev/null \
             || { echo "::error::latest.json has no macOS platforms"; exit 1; }
 
+      # tauri-action writes latest.json while the release is a draft, so each url is the
+      # asset's API address (…/releases/assets/<id>), which serves JSON, not the file, to an
+      # updater. Name each file by its public download url instead; the signatures don't change.
+      - name: latest.json names its files by their public URLs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rel="$RUNNER_TEMP/rel"
+          assets="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$TAG\") | .assets")"
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          jq --argjson assets "$assets" --arg base "$base" '
+            .platforms |= with_entries(.value.url |= (
+              if test("/releases/assets/[0-9]+$") then
+                (capture("/releases/assets/(?<id>[0-9]+)$").id | tonumber) as $id
+                | ($assets | map(select(.id == $id)) | .[0].name) as $n
+                | if $n == null then error("no asset \($id) on the draft") else "\($base)/\($n)" end
+              else . end))' "$rel/latest.json" > "$rel/latest.public.json"
+          if ! cmp -s "$rel/latest.json" "$rel/latest.public.json"; then
+            mv "$rel/latest.public.json" "$rel/latest.json"
+            gh release upload "$TAG" "$rel/latest.json" --repo "$GITHUB_REPOSITORY" --clobber
+            echo "latest.json now names its files by their public download URLs" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          jq -r '.platforms | to_entries[] | "\(.key)\t\(.value.url)"' "$rel/latest.json"
+
       - name: Every update is signed with the release key
         run: |
           set -euo pipefail
