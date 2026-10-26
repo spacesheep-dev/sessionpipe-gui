@@ -16,6 +16,9 @@ export function viewPlan(
   inShell: boolean,
   origin: string,
 ): ViewPlan {
-  if (inShell && !(theme.bundled && APP_VIEWS.has(theme.id))) return { kind: "window", path: theme.url };
+  // A window opens the view's page on the receiver (/views/<id>, which mounts it), not its
+  // files' folder (theme.url), which has no page of its own.
+  if (inShell && !(theme.bundled && APP_VIEWS.has(theme.id)))
+    return { kind: "window", path: `/views/${encodeURIComponent(theme.id)}` };
   return { kind: "page", base: `${origin}${theme.url}` };
 }
