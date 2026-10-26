@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="272" height="56" viewBox="0 0 272 56" role="img" aria-label="Download for Linux, .deb · x86-64 · 4.0 MB">
+  <rect x="0.75" y="0.75" width="270.5" height="54.5" rx="10" fill="#0D1117" stroke="#3A3A39" stroke-width="1.5"/>
+  <g transform="translate(18 19.0)" fill="none" stroke="#F5F5F3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v11"/><path d="M4.5 8.5 9 13l4.5-4.5"/><path d="M3 16.5h12"/></g>
+  <text x="48" y="25" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#F5F5F3">Download for Linux</text>
+  <text x="48" y="42" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#9A9A96">.deb · x86-64 · 4.0 MB</text>
+</svg>
