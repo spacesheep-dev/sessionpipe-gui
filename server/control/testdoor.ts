@@ -14,6 +14,15 @@
 //   POST {control}/_test/approve  { code?, as? }                 approve a pending pairing with the
 //                                                                 door's passkey as `as` (test-person)
 //
+// And the native app's signer, played by the door's software device key (TestDeviceKey),
+// so the device-key path (CONTROL.md §2, §3.2) runs end to end in a browser test where no
+// Secure Enclave exists. They answer what the app's `identity` plugin answers:
+//
+//   POST {control}/_test/device/key   {}                         → the door's device key
+//   POST {control}/_test/device/sign  { cmd, mode }              → { cmd, csig, grant } (mode
+//                                                                 "grant") or { cmd, confirm }
+//   POST {control}/_test/device/pair  { code }                   → { key, proof } for a pending pairing
+//
 // The door's keys live in memory for the life of the process and never leave it. The
 // enqueue goes through the same verifier as the UI's send, so the door can never queue
 // what the verifier refuses. It skips the UI's second look at the hello (precheck.ts) on
@@ -23,13 +32,16 @@ import type { Ctx, Reply, Router } from "../http/router.js";
 import { HttpError } from "../http/router.js";
 import { CODE_RE, type Hello, MACHINE_RE } from "./parse.js";
 import type { ControlState, MachineRow } from "./state.js";
-import { commandStr, signCommand, TestDayKey, TestPasskey } from "./testkeys.js";
+import { commandStr, signCommand, signWithDevice, TestDayKey, TestDeviceKey, TestPasskey } from "./testkeys.js";
+import { readKey } from "./ui.js";
 
 export interface TestDoorDeps {
   state: ControlState;
   rpId: () => string;
   /** ROUTES.control */
   base: string;
+  /** Device keys are taken (devicekeys.ts); off, the door has no device key either. */
+  device: boolean;
 }
 
 const DOOR_FACTS: Hello = {
@@ -46,6 +58,7 @@ const DOOR_FACTS: Hello = {
   promptFiles: false,
   home: null,
   start: null,
+  keyTypes: null,
 };
 
 export function registerTestDoor(router: Router, d: TestDoorDeps): void {
@@ -57,6 +70,14 @@ export function registerTestDoor(router: Router, d: TestDoorDeps): void {
       day,
     }));
     return keys;
+  };
+  let device: Promise<{ key: TestDeviceKey; day: TestDayKey }> | null = null;
+  const deviceKeys = () => {
+    device ??= Promise.all([TestDeviceKey.create({ rpId: d.rpId() }), TestDayKey.create()]).then(([key, day]) => ({
+      key,
+      day,
+    }));
+    return device;
   };
   const fence = (ctx: Ctx) => {
     if (!ctx.remote.loopback) throw new HttpError(404, { reason: "not_found" });
@@ -74,11 +95,7 @@ export function registerTestDoor(router: Router, d: TestDoorDeps): void {
     fence(ctx);
     const body = await ctx.json<{ machine?: unknown; key?: unknown; name?: unknown }>(64 * 1024);
     const m = machineOf(body.machine, true);
-    const given = body.key as { id?: unknown; alg?: unknown; spki?: unknown } | undefined;
-    const key =
-      given && typeof given.id === "string" && typeof given.alg === "number" && typeof given.spki === "string"
-        ? { id: given.id, alg: given.alg, spki: given.spki }
-        : (await doorKeys()).passkey.key;
+    const key = readKey(body.key, d.device) ?? (await doorKeys()).passkey.key;
     state.addKey(m, key, typeof body.name === "string" ? body.name : "test door");
     const token = state.mintToken(m);
     return { status: 201, json: { machine: m.id, token, key } };
@@ -128,6 +145,34 @@ export function registerTestDoor(router: Router, d: TestDoorDeps): void {
       ...(ttlS ? { expiresInMs: ttlS * 1000 } : {}),
     });
     return { status: 201, json: { id: row.id, machine: m.id, expires_at: row.expiresAt } };
+  });
+
+  router.post(`${base}/_test/device/key`, async (ctx): Promise<Reply> => {
+    fence(ctx);
+    if (!d.device) throw new HttpError(404, { reason: "not_found" });
+    return { status: 200, json: { key: (await deviceKeys()).key.key } };
+  });
+
+  router.post(`${base}/_test/device/sign`, async (ctx): Promise<Reply> => {
+    fence(ctx);
+    if (!d.device) throw new HttpError(404, { reason: "not_found" });
+    const body = await ctx.json<{ cmd?: unknown; mode?: unknown }>(256 * 1024);
+    if (typeof body.cmd !== "string" || (body.mode !== "grant" && body.mode !== "confirm"))
+      throw new HttpError(400, { reason: "bad_request", error: "Send { cmd, mode: grant | confirm }." });
+    const { key, day } = await deviceKeys();
+    // The app signs the very bytes it was handed (it writes no command of its own).
+    const signed = await signWithDevice(key, day, body.cmd, { confirm: body.mode === "confirm" });
+    return { status: 200, json: signed };
+  });
+
+  router.post(`${base}/_test/device/pair`, async (ctx): Promise<Reply> => {
+    fence(ctx);
+    if (!d.device) throw new HttpError(404, { reason: "not_found" });
+    const body = await ctx.json<{ code?: unknown }>(16 * 1024);
+    const found = typeof body.code === "string" && CODE_RE.test(body.code) ? state.findPairing(body.code) : undefined;
+    if (!found) throw new HttpError(404, { reason: "not_found" });
+    const { key } = await deviceKeys();
+    return { status: 200, json: { key: key.key, proof: await key.enroll(found.machine.id, found.pairing.code) } };
   });
 
   router.post(`${base}/_test/approve`, async (ctx): Promise<Reply> => {

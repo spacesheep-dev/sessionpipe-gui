@@ -250,6 +250,22 @@ export interface MachineSummary {
   control?: MachineControl;
 }
 
+/** The kinds of key a machine or a receiver takes (sessionpipe CONTROL.md §2): browser
+ *  passkeys, and the device keys the native apps hold in hardware. Absent: passkeys only. */
+export type KeyType = "passkey" | "device";
+
+/** A key a machine trusts, as the receiver carries it whole: a passkey (`id`, `alg`,
+ *  `spki`), or an app's device key, which adds `type`, `store` and `uv` (CONTROL.md §2
+ *  "Device keys"; its id is the SHA-256 of its SPKI). */
+export interface TrustedKey {
+  id: string;
+  alg: number;
+  spki: string;
+  type?: "device";
+  store?: "hardware";
+  uv?: "each-use";
+}
+
 export interface MachineControl {
   machineId: string;
   online: boolean;
@@ -261,7 +277,11 @@ export interface MachineControl {
   modes?: string[];
   version?: string;
   accounts?: { harness: string; id: string; email: string }[];
-  keys: { id: string; alg: number; name?: string; addedAt: string }[];
+  /** `type: "device"` marks an app's device key; absent, a passkey. */
+  keys: { id: string; alg: number; type?: "device"; name?: string; addedAt: string }[];
+  /** Pairing or hello `key_types`: the kinds of key this machine takes. Absent (an older
+   *  daemon) means passkeys only, so the app never offers it a device key. */
+  keyTypes?: KeyType[];
   /** Messages queued for it and not yet finally acked. */
   queued: number;
   /** Hello `files: true`: the machine takes `files` on a `start` (CONTROL.md §3.1, §6). */
@@ -856,7 +876,7 @@ export interface Info {
    *  wrong address can be sent to the right one: the public url when it set the rp id,
    *  `https://<rpId>:<port>` for the TLS name, `http://localhost:<port>` only when the rp
    *  id is `localhost`. Absent on older servers. */
-  control: { enabled: boolean; rpId: string; machines: number; origins?: string[] };
+  control: { enabled: boolean; rpId: string; machines: number; origins?: string[]; keyTypes?: KeyType[] };
   /** TLS mode (`--tls`): the same port also answers https with a certificate from the
    *  GUI's own local CA, so passkeys work from a phone. Absent on older servers. */
   tls?: TlsInfo;

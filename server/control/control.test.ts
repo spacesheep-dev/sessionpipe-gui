@@ -12,10 +12,12 @@ import { RECEIVER_MAX_AGE_MS, sha256 } from "sessionpipe-core/control";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ROUTES, type StreamMessage } from "../../shared/api.js";
 import { Router } from "../http/router.js";
+import { coreTakesDevice, receiverKeyTypes } from "./devicekeys.js";
 import { fileHash } from "./files.js";
 import { type Control, createControl } from "./index.js";
 import { parseAcks, parseHello } from "./parse.js";
-import { commandStr, signCommand, TestDayKey, TestPasskey } from "./testkeys.js";
+import { commandStr, signCommand, signWithDevice, TestDayKey, TestDeviceKey, TestPasskey } from "./testkeys.js";
+import { readKey, readProof } from "./ui.js";
 
 const SINK = "spg_test_sink_token_0123456789";
 const CONTROL = ROUTES.control;
@@ -29,7 +31,7 @@ interface Booted {
 }
 
 async function boot(
-  o: { stateDir?: string; rpId?: string; testDoor?: boolean; uiAuth?: boolean } = {},
+  o: { stateDir?: string; rpId?: string; testDoor?: boolean; uiAuth?: boolean; deviceKeys?: boolean } = {},
 ): Promise<Booted> {
   const stateDir = o.stateDir ?? mkdtempSync(path.join(os.tmpdir(), "spgui-control-"));
   const control = createControl({
@@ -38,6 +40,7 @@ async function boot(
     rpId: o.rpId ?? "localhost",
     testDoor: o.testDoor ?? true,
     uiAuth: (ctx) => (o.uiAuth ?? true) && ctx.remote.loopback,
+    ...(o.deviceKeys !== undefined ? { deviceKeys: o.deviceKeys } : {}),
   });
   const router = new Router();
   control.register(router);
@@ -797,6 +800,264 @@ describe("device requests: a trusted device vouches for a phone's passkey (key.a
   });
 });
 
+describe("device keys off: this receiver's core can't verify one (sessionpipe-core today)", () => {
+  let b: Booted;
+  beforeAll(async () => {
+    b = await boot({ deviceKeys: false });
+    tmpDirs.push(b.stateDir);
+  });
+  afterAll(() => b.close());
+
+  it("the core decides: device keys only with a core that exports deviceMessage", () => {
+    expect(coreTakesDevice({})).toBe(false);
+    expect(coreTakesDevice({ deviceMessage: () => new Uint8Array() })).toBe(true);
+    expect(receiverKeyTypes(false)).toEqual(["passkey"]);
+    expect(receiverKeyTypes(true)).toEqual(["passkey", "device"]);
+  });
+
+  it("passkeys only: the well-known has no key_types, and the page reads passkey", () => {
+    expect(b.control.keyTypes).toEqual(["passkey"]);
+    expect(b.control.wellKnown().signing).toEqual({ rp_id: "localhost", algs: [-7, -257] });
+  });
+
+  it("readKey and readProof take the passkey shapes only", async () => {
+    const dev = await TestDeviceKey.create();
+    const pk = await TestPasskey.create();
+    expect(readKey(dev.key, false)).toBeNull();
+    expect(readKey(pk.key, false)).toEqual(pk.key);
+    expect(readProof(await dev.sign("pair", new Uint8Array(32)), false)).toBeNull();
+    const a = await pk.assert(new Uint8Array(32));
+    expect(readProof(a, false)).toEqual(a);
+  });
+
+  it("a machine offering device keys still pairs with a passkey; a device key is a 400", async () => {
+    // A daemon that says key_types (sessionpipe with device keys) on a receiver that can't check them.
+    const started = await call(b.url, "POST", `${CONTROL}/pair`, {
+      bearer: SINK,
+      body: { ...facts, key_types: ["passkey", "device"] },
+    });
+    const machine = started.body.machine as string;
+    const code = started.body.code as string;
+    const dev = await TestDeviceKey.create({ rpId: "localhost" });
+    const refused = await call(b.url, "POST", `${UI}/pair/${code}/approve`, {
+      body: { key: dev.key, proof: await dev.enroll(machine, code) },
+    });
+    expect(refused).toMatchObject({ status: 400, body: { reason: "bad_request" } });
+    expect(refused.body.error).toBe("Send { key: {id, alg, spki}, proof: {cred, ad, cd, sig} }.");
+    const pk = await TestPasskey.create();
+    const ok = await call(b.url, "POST", `${UI}/pair/${code}/approve`, {
+      body: { key: pk.key, proof: await pk.enroll(machine, code) },
+    });
+    expect(ok).toMatchObject({ status: 200, body: { ok: true, keyId: pk.key.id } });
+  });
+
+  it("a 0.9 or 0.10 daemon's hello (no key_types) leaves keyTypes unset: the page offers it no device key", async () => {
+    const pk = await TestPasskey.create();
+    const m = await enrolled(b, pk, "m_devicekeysoff0000001");
+    await call(b.url, "POST", `${CONTROL}/hello`, { bearer: m.token, body: facts });
+    const ms = (await call(b.url, "GET", `${UI}/machines`)).body.machines as {
+      machineId: string;
+      keyTypes?: string[];
+    }[];
+    expect(ms.find((x) => x.machineId === m.machine)).toBeDefined();
+    expect(ms.find((x) => x.machineId === m.machine)!.keyTypes).toBeUndefined();
+  });
+
+  it("/devices takes a passkey and refuses a device key; the door has no device key", async () => {
+    const dev = await TestDeviceKey.create();
+    const pk = await TestPasskey.create();
+    expect((await call(b.url, "POST", `${UI}/devices`, { body: { key: dev.key } })).status).toBe(400);
+    expect((await call(b.url, "POST", `${UI}/devices`, { body: { key: pk.key, name: "phone" } })).status).toBe(201);
+    for (const route of ["key", "sign", "pair"])
+      expect((await call(b.url, "POST", `${CONTROL}/_test/device/${route}`, { body: {} })).status).toBe(404);
+  });
+});
+
+// The device-key path itself needs a core that verifies device keys (sessionpipe
+// mp/native-keys); with today's core it is off (above) and these are skipped.
+describe.skipIf(!coreTakesDevice())("device keys: the native app's key, carried whole (CONTROL.md §2, §3.2)", () => {
+  let b: Booted;
+  beforeAll(async () => {
+    b = await boot();
+    tmpDirs.push(b.stateDir);
+  });
+  afterAll(() => b.close());
+
+  it("the well-known says the receiver stores and carries device keys", () => {
+    expect(b.control.wellKnown().signing).toEqual({
+      rp_id: "localhost",
+      algs: [-7, -257],
+      key_types: ["passkey", "device"],
+    });
+  });
+
+  it("readKey and readProof: the two shapes, closed", async () => {
+    const dev = await TestDeviceKey.create();
+    const pk = await TestPasskey.create();
+    expect(readKey(dev.key, true)).toEqual(dev.key);
+    expect(readKey(pk.key, true)).toEqual(pk.key);
+    expect(readKey({ ...pk.key, name: "x" }, true)).toBeNull();
+    expect(readKey({ ...dev.key, attestation: "none" }, true)).toBeNull();
+    expect(readKey({ ...pk.key, store: "hardware" }, true)).toBeNull(); // a passkey has no store
+    // The values are core's to judge (keyUsable), not the shape's.
+    expect(readKey({ ...dev.key, store: "software" }, true)).toMatchObject({ store: "software" });
+    const sig = await dev.sign("pair", new Uint8Array(32));
+    expect(readProof(sig, true)).toEqual(sig);
+    const a = await pk.assert(new Uint8Array(32));
+    expect(readProof(a, true)).toEqual(a);
+    expect(readProof({ ...sig, extra: 1 }, true)).toBeNull();
+    expect(readProof({ cred: sig.cred }, true)).toBeNull();
+  });
+
+  it("a pairing approved with a device key: a {cred, sig} proof, and the paired answer carries the whole key", async () => {
+    const started = await call(b.url, "POST", `${CONTROL}/pair`, {
+      bearer: SINK,
+      body: { ...facts, key_types: ["passkey", "device"] },
+    });
+    const machine = started.body.machine as string;
+    const code = started.body.code as string;
+    const dev = await TestDeviceKey.create({ rpId: "localhost" });
+    // A proof for another purpose, or another rp id, is refused here as on the machine.
+    for (const o of [{ purpose: "confirm" as const }, { rpId: "evil.example" }]) {
+      const bad = await dev.sign(
+        "pair",
+        await (await import("sessionpipe-core/control")).pairChallenge(machine, code),
+        o,
+      );
+      const r = await call(b.url, "POST", `${UI}/pair/${code}/approve`, { body: { key: dev.key, proof: bad } });
+      expect(r).toMatchObject({ status: 422, body: { reason: "bad_proof" } });
+    }
+    const soft = await call(b.url, "POST", `${UI}/pair/${code}/approve`, {
+      body: { key: { ...dev.key, store: "software" }, proof: await dev.enroll(machine, code) },
+    });
+    expect(soft).toMatchObject({ status: 422, body: { reason: "bad_key" } });
+    const ok = await call(b.url, "POST", `${UI}/pair/${code}/approve`, {
+      body: { key: dev.key, proof: await dev.enroll(machine, code), name: "Mac app" },
+    });
+    expect(ok).toMatchObject({ status: 200, body: { ok: true, keyId: dev.key.id } });
+    const paired = await call(b.url, "GET", `${CONTROL}/pair?code=${code}`, { bearer: SINK });
+    expect(paired.body.key).toEqual(dev.key);
+    expect(paired.body.proof).toEqual({ cred: dev.key.id, sig: expect.any(String) });
+    // The machine row says what it takes and which key is a device key.
+    const ms = (await call(b.url, "GET", `${UI}/machines`)).body.machines as {
+      machineId: string;
+      keyTypes?: string[];
+      keys: { id: string; type?: string }[];
+    }[];
+    const row = ms.find((x) => x.machineId === machine)!;
+    expect(row.keyTypes).toEqual(["passkey", "device"]);
+    expect(row.keys).toEqual([expect.objectContaining({ id: dev.key.id, type: "device" })]);
+    // A hello without key_types (a downgraded daemon) takes it away again.
+    await call(b.url, "POST", `${CONTROL}/hello`, { bearer: paired.body.token as string, body: facts });
+    const after = (await call(b.url, "GET", `${UI}/machines`)).body.machines as {
+      machineId: string;
+      keyTypes?: string[];
+    }[];
+    expect(after.find((x) => x.machineId === machine)!.keyTypes).toBeUndefined();
+  });
+
+  it("/devices takes a device key, and a key.add for it is mirrored whole once delivered; its grant then verifies", async () => {
+    const mac = await TestPasskey.create();
+    const day = await TestDayKey.create();
+    const m = await enrolled(b, mac, "m_devicekeys000000001");
+    const app = await TestDeviceKey.create({ rpId: "localhost" });
+    const create = (body: unknown) =>
+      fetch(`${b.url}${UI}/devices`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        },
+        body: JSON.stringify(body),
+      }).then(async (r) => ({ status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, unknown> }));
+    expect((await create({ key: { ...app.key, extra: true } })).status).toBe(400);
+    for (const bad of [{ store: "software" }, { uv: "once" }, { id: mac.key.id }, { type: "tpm" }])
+      expect(await create({ key: { ...app.key, ...bad } })).toMatchObject({ status: 422, body: { reason: "bad_key" } });
+    const req = await create({ key: app.key, name: "Mac app" });
+    expect(req).toMatchObject({ status: 201, body: { key: app.key, device: "Mac" } });
+
+    const cmd = commandStr(m.machine, {
+      kind: "key.add",
+      session: "sessionpipe:keys",
+      text: undefined,
+      key: app.key,
+      name: "Mac app",
+    });
+    const sent = await call(b.url, "POST", `${UI}/send`, {
+      body: { machineId: m.machine, ...(await signCommand(mac, day, cmd)) },
+    });
+    expect(sent.status).toBe(201);
+    // Before the machine's word, the app's grant is not trusted here either.
+    const early = await call(b.url, "POST", `${UI}/send`, {
+      body: {
+        machineId: m.machine,
+        ...(await signWithDevice(app, await TestDayKey.create(), commandStr(m.machine, { iat: Date.now() }))),
+      },
+    });
+    expect(early).toMatchObject({ status: 422, body: { code: "untrusted_key" } });
+    await call(b.url, "POST", `${CONTROL}/ack`, {
+      bearer: m.token,
+      body: { acks: [{ id: sent.body.id, outcome: "delivered", at: new Date().toISOString(), mode: "sdk" }] },
+    });
+    expect((await call(b.url, "GET", `${UI}/devices/${req.body.requestId}`)).body.status).toBe("added");
+    const ms = (await call(b.url, "GET", `${UI}/machines`)).body.machines as {
+      machineId: string;
+      keys: { id: string; type?: string }[];
+    }[];
+    expect(ms.find((x) => x.machineId === m.machine)!.keys.find((k) => k.id === app.key.id)).toMatchObject({
+      type: "device",
+    });
+    const appDay = await TestDayKey.create();
+    for (const confirm of [false, true]) {
+      const r = await call(b.url, "POST", `${UI}/send`, {
+        body: {
+          machineId: m.machine,
+          ...(await signWithDevice(app, appDay, commandStr(m.machine, { iat: Date.now(), text: "from the app" }), {
+            confirm,
+          })),
+        },
+      });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+    }
+    // The same signature counts for no other use: a grant signed as a confirm is refused.
+    const c = commandStr(m.machine, { iat: Date.now() });
+    const wrong = { cmd: c, confirm: await app.sign("confirm", await sha256(c), { purpose: "grant" }) };
+    expect(await call(b.url, "POST", `${UI}/send`, { body: { machineId: m.machine, ...wrong } })).toMatchObject({
+      status: 422,
+      body: { code: "bad_assertion" },
+    });
+    // The mirrored key is kept whole on disk, so a restart verifies it as a device key too.
+    const file = JSON.parse(readFileSync(path.join(b.stateDir, "control", "machines.json"), "utf8")) as {
+      machines: { id: string; keys: Record<string, unknown>[] }[];
+    };
+    const stored = file.machines.find((x) => x.id === m.machine)!.keys.find((k) => k.id === app.key.id);
+    expect(stored).toMatchObject({ ...app.key, name: "Mac app" });
+  });
+
+  it("the test door plays the app's signer: key, sign (grant or confirm) and pair, loopback only", async () => {
+    const key = await call(b.url, "POST", `${CONTROL}/_test/device/key`, { body: {} });
+    expect(key.status).toBe(200);
+    expect(key.body.key).toMatchObject({ type: "device", store: "hardware", uv: "each-use", alg: -7 });
+    const m = await call(b.url, "POST", `${CONTROL}/_test/enroll`, {
+      body: { machine: "m_doordevice0000000001", key: key.body.key },
+    });
+    expect(m.status).toBe(201);
+    const cmd = commandStr("m_doordevice0000000001", { iat: Date.now() });
+    for (const mode of ["grant", "confirm"]) {
+      const signed = await call(b.url, "POST", `${CONTROL}/_test/device/sign`, { body: { cmd, mode } });
+      expect(signed.status).toBe(200);
+      expect(signed.body.cmd).toBe(cmd);
+      const r = await call(b.url, "POST", `${UI}/send`, {
+        body: { machineId: "m_doordevice0000000001", ...signed.body },
+      });
+      if (mode === "grant") expect(r.status, JSON.stringify(r.body)).toBe(201);
+      else expect(r.body.code ?? "ok").toMatch(/ok|replay/);
+    }
+    expect((await call(b.url, "POST", `${CONTROL}/_test/device/sign`, { body: { cmd, mode: "x" } })).status).toBe(400);
+    expect((await call(b.url, "POST", `${CONTROL}/_test/device/pair`, { body: { code: "nope00" } })).status).toBe(404);
+  });
+});
+
 describe("persistence", () => {
   it("machines, keys, tokens and the queue survive a restart", async () => {
     const b = await boot();
@@ -1109,8 +1370,11 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
           body: { machine: v.input.machine, key: trusted[0] },
         });
         expect(r0.status).toBe(201);
+        // Each enrollment mints the machine's token again: keep the last one.
         for (const k of trusted.slice(1))
-          await call(b.url, "POST", `${CONTROL}/_test/enroll`, { body: { machine: v.input.machine, key: k } });
+          r0.body.token = (
+            await call(b.url, "POST", `${CONTROL}/_test/enroll`, { body: { machine: v.input.machine, key: k } })
+          ).body.token;
         // A machine that takes files on a start, as a hello says it (CONTROL.md §2).
         await call(b.url, "POST", `${CONTROL}/hello`, {
           bearer: r0.body.token as string,

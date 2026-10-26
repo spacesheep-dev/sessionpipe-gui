@@ -74,6 +74,8 @@ export interface Hello {
   files?: boolean;
   start?: Record<string, { permissions: string[]; permission: string; models?: string[]; any_model?: boolean }>;
   version?: string;
+  /** CONTROL.md §2: the kinds of key the machine takes (`["passkey","device"]` from 0.10). */
+  key_types?: string[];
 }
 
 type Ack = Record<string, unknown> & { outcome: string };
@@ -151,7 +153,8 @@ export async function fakeDaemon(
             for (const [i, a] of s.acks.entries()) {
               await new Promise((res) => setTimeout(res, s.pauseMs ?? 300));
               const final = i === s.acks.length - 1;
-              if (final && s.events && o.sinkToken) await startEvents(hello.name, c, o.sinkToken);
+              // Only a start brings a session's first hook events (a key.add or a prompt has none).
+              if (final && s.events && o.sinkToken && c.kind === "start") await startEvents(hello.name, c, o.sinkToken);
               await ack([{ id: m.id, ...a }]);
             }
           }
