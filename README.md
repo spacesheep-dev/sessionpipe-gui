@@ -6,8 +6,10 @@
 </p>
 
 <p align="center">
-  The local GUI for <a href="https://github.com/spacesheep-dev/sessionpipe">sessionpipe</a>: every coding-agent
-  session on your machines, live, from your laptop or your phone.<br>No cloud, no database, no telemetry.
+  <b>The control room for the agents you already run.</b><br>
+  Every coding-agent session on your machines on one live board, and every one you ever ran
+  a keystroke away. Answer, steer and start them from your laptop or your phone.<br>
+  No account, no cloud, no telemetry.
 </p>
 
 <p align="center">
@@ -18,397 +20,503 @@
 
 ![The board, live: sessions grouped by state, the one that needs you first](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/board.gif)
 
-One Node process on your machine is a [sessionpipe receiver](https://github.com/spacesheep-dev/sessionpipe/blob/main/spec/HTTP.md)
-with a face. It reads the sessions Claude Code, Codex, Gemini CLI, Antigravity, Cursor and
-the other harnesses of the [protocol registry](https://github.com/spacesheep-dev/sessionpipe/blob/main/spec/ADAPTERS.md)
-run here, takes events from your other machines over the LAN, and shows all of it as a
-board, an inbox, a chat per session and a few stranger views. Answer a permission prompt
-from the couch; send the next message from the train. Everything stays on the machine
-that runs it.
+sessionpipe-gui is a [sessionpipe](https://github.com/spacesheep-dev/sessionpipe) receiver
+with a face: one Node process on your machine that shows what Claude Code, Codex, Gemini
+CLI, Antigravity and the other agents sessionpipe hooks are doing in any terminal, IDE or
+machine, and lets you talk back. sessionpipe does the hooks, the privacy filtering and the
+signed control; this is the board, the inbox, the chat per session, and search across all
+of it.
+
+- **It sees what you already run.** Start agents the way you always do. sessionpipe's hooks
+  report every session on this machine and on the others you connect; nothing has to be
+  started from here to show up.
+- **It finds what they said.** Search covers every session the board holds and this
+  machine's own agent history, sessions from before sessionpipe included, in milliseconds,
+  with the network down.
+- **Steer from any device, signed by you.** Allow a permission from the couch, send the next
+  message from your phone, start a session on the build box. Each command is signed by your
+  passkey and checked on the machine that runs the agent; the GUI carries commands and
+  cannot forge one.
+- **Yours, on your machine.** Plain files on your disk, no database, no account, no service
+  of ours in between, no Electron. The server makes no outbound request of its own.
+
+## Search
+
+*New in 0.3.0.* Find anything you or your agents said, across every session and every
+machine, as you type.
+
+![Search: one row per session, its best moments marked](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/search.png)
+
+**What it searches.** Every session the receiver holds, from every machine, within the tier
+each arrived at; and this machine's own agent history, read straight from the harness logs:
+Claude Code (every `~/.claude*` home, subagents and forks included), Codex (`.jsonl` and
+`.jsonl.zst` rollouts), Antigravity and Gemini CLI. So it finds sessions from before
+sessionpipe was installed, and a session seen both ways shows once. Prompts, replies and one
+line per tool call are indexed. Tool output, thinking and anything the harness redacts are
+never indexed.
+
+**Offline and local.** The index is the GUI's own, written in TypeScript with no new
+dependency, under `~/.local/state/sessionpipe-gui/search/`. A low-priority child process
+builds it in the background on first start, then keeps it up to date incrementally and
+crash-safely; nothing leaves the machine. Settings › Data turns reading this machine's
+history off, which deletes that part of the index; `--search-home DIR` points it at another
+home.
+
+**Fast enough not to notice.** Measured on one Mac (Apple M1 Max) against 3.2 GB of real
+agent history: indexed from scratch in about 11 s, first results after about a second;
+queries in about 1.5 ms at the median; a line an agent writes is findable about 50 ms later.
+`npm run bench:search` runs the budgets on a generated corpus.
+
+**Where you search.**
+
+- **The Search page**, third in the sidebar (`⌘⇧F` from anywhere): results per keystroke,
+  grouped by session with one to three marked moments each, filter chips that edit the
+  query, *Best match* or *Newest*.
+- **`⌘K`**, whose *In transcripts* group previews the matched moment, with a row to search
+  all sessions for what you typed.
+- **A history transcript** for a session the receiver never saw: read-only, in the same
+  chat look, with a find bar (`⌘G` for the next hit) and the command that resumes it.
+- **The terminal**, no browser needed; it asks the running GUI when there is one:
+
+  ```sh
+  sessionpipe-gui search "rate limiter" --since 7d
+  sessionpipe-gui search webhook --agent codex --newest
+  sessionpipe-gui search '"rate limiter" -staging' --json | jq '.sessions[0].resume'
+  sessionpipe-gui index --status        # or --rebuild, --verify
+  ```
+
+  `search` exits 0 with results and 1 with none.
+- **The API**, `/api/ui/search/*`, behind the UI key like every other route.
+
+![⌘K: In transcripts, with a preview of the matched moment](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/search-palette.png)
+
+**The query.** One language for the page, `⌘K`, the terminal and the API:
+
+| Write | Finds |
+|---|---|
+| `webhook retry` | Sessions with every word |
+| `"rate limiter"` | The exact phrase |
+| `-staging` | Sessions without the word |
+| `migrat*` | Words that start with `migrat` |
+| `agent:codex` | One agent: `claude`, `codex`, `gemini`, `antigravity` |
+| `machine:build-box`, `repo:billing`, `label:red` | One machine (`machine:this` is this one), repo or label |
+| `since:7d`, `until:2026-10-20` | A time range: `12h`, `7d`, `2w`, `3m`, `1y`, `today`, `yesterday`, a date |
+| `in:prompt`, `in:reply`, `in:tool`, `in:title` | Only that field |
+| `source:history`, `source:sessionpipe` | Only this machine's own logs, or only what sessionpipe delivered |
+
+For example `"rate limiter" -staging since:30d`, `agent:claude in:prompt migrat*`, or
+`webhook machine:this`.
+
+**Keys.** `⏎` opens a result, `⇧⏎` opens it beside the page, `⌘⏎` beside as a background
+tab; `Space` peeks; `j` `k` move; `⌘C` copies the resume command (`claude --resume …` in its
+folder, `codex resume …`). Right-click a result for the rest: copy its link, id or
+transcript path, reveal it in Finder (this Mac only), find in this session, or more from the
+same repo or machine.
 
 ## Install
 
-Node 20 or newer. Three ways, one package, and everything official inside it: the
-Canvas and Office views, the two skins (sessionpipe and Paper) and the ping-a-human
-Telegram plugin:
+You need Node 20 or newer, and [sessionpipe](https://github.com/spacesheep-dev/sessionpipe)
+on each machine whose live sessions you want to see (`npx sessionpipe install`; the first-run
+page says so if it is missing). Search of this machine's own history works without it.
 
 ```sh
-npx github:spacesheep-dev/sessionpipe-gui      # straight from GitHub: builds once on install, then runs
-npm i -g github:spacesheep-dev/sessionpipe-gui # or on the PATH for good: `sessionpipe-gui`
-git clone https://github.com/spacesheep-dev/sessionpipe-gui && cd sessionpipe-gui && npm install && npm start
+npx github:spacesheep-dev/sessionpipe-gui      # try it straight from GitHub: builds once, then runs
 ```
 
-The bundled copies are checked in (`bundled/`), so a clone has them without the themes
-repo; `npm run bundle:sync` refreshes them from a
-[sessionpipe-gui-themes](https://github.com/spacesheep-dev/sessionpipe-gui-themes)
-checkout beside this one. The npm package (`npx sessionpipe-gui`) follows once published.
-
-Nothing to install afterwards: the skins are in the appearance popover, the views in the
-sidebar, and the plugin under Plugins on the Views page, off until you turn it on:
+To keep it on the PATH as `sessionpipe-gui`, install a [release](https://github.com/spacesheep-dev/sessionpipe-gui/releases)'s
+tarball:
 
 ```sh
-sessionpipe-gui extras list                  # the catalogue, every entry marked bundled
-sessionpipe-gui plugin enable ping-a-human   # the Telegram plugin runs only once you say so
+npm i -g https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe-gui-0.3.0.tgz
 ```
 
-`npx sessionpipe-gui` starts the receiver on port 7373 and prints where to open it:
+Or from a clone: `git clone https://github.com/spacesheep-dev/sessionpipe-gui && cd
+sessionpipe-gui && npm install && npm start`. The npm package (`npx sessionpipe-gui`)
+follows once it is published.
 
-```
-sessionpipe-gui 0.1.0 · ~/.local/state/sessionpipe-gui
+Everything official is inside: the Canvas and Office views, the two skins and the
+ping-a-human Telegram plugin (off until you turn it on). The board runs on port 7373.
 
-  setup   http://localhost:7373/setup   (first run: your sessions, https, pairing, your phone)
-  local   http://localhost:7373
-  network http://192.168.1.20:7373/?k=…
+### Your first minute
 
-  on a phone, scan this (same Wi-Fi):
-  █▀▀▀▀▀█ ▀ █▀▀▀▀▀█ …
-  from another machine:
-    sessionpipe sink add http://192.168.1.20:7373 --tier 3 --token …
+1. **Run `sessionpipe-gui`.** It prints where to open it, and a QR code for your phone:
 
-  outbox  tailing ~/.local/state/sessionpipe/outbox (14 sessions)
-  tls     off (passkeys from a phone need it: --tls)
+   ```
+   sessionpipe-gui 0.3.0 · ~/.local/state/sessionpipe-gui
 
-  Ctrl-C to stop
-  ready in 180 ms · 14 sessions · 1 039 events
-```
+     setup   http://localhost:7373/setup   (first run: your sessions, https, pairing, your phone)
+     local   http://localhost:7373
+     network http://192.168.1.20:7373/?k=…
 
-If `sessionpipe install` already ran on this machine there is nothing to configure: the
-GUI tails the same outbox files `sessionpipe tail` reads, so your history is there at
-once and new events show up in under a second.
+     on a phone, scan this (same Wi-Fi):
+     █▀▀▀▀▀█ ▀ █▀▀▀▀▀█ …
+     from another machine:
+       sessionpipe sink add http://192.168.1.20:7373 --tier 3 --token …
+   ```
 
-### First run
+2. **Open it.** The first time, you land on Setup. It checks every two seconds, so each step
+   turns green by itself: your sessions, https for passkeys, pairing this machine, your
+   phone, one message sent and delivered.
+3. **Start an agent in any terminal** (`claude`, `codex`, `gemini`, `agy`). Its row drops onto
+   the board within a second: the GUI tails the outbox `sessionpipe tail` reads, so there is
+   nothing to configure here, and the history already in it is there at once.
+4. **Pair this machine** to answer from the page: Setup runs `sessionpipe control pair` for
+   you, and you approve the six digits with your passkey.
+5. **Add your phone.** Scan the QR code; Setup's phone step gets it sending, over the same
+   Wi-Fi or [Tailscale](https://tailscale.com).
 
-The first time, the board sends a new device to `/setup`: five steps, each green once
-this machine has done its part, each with one button. The page checks every two seconds,
-so a step turns green by itself when the outbox gets its first event, the certificate is
-trusted, the daemon polls, a phone connects, a message comes back `delivered`.
-
-![Setup: five live-detected steps](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/setup.png)
-
-1. **Your sessions**: `npx sessionpipe install` if the CLI is missing.
-2. **Secure address**: turn on https from the GUI's own local CA (no restart) and trust it
-   on this Mac. Passkeys need it.
-3. **Pair this machine**: runs `sessionpipe control pair` for you; approve the six digits
-   with your passkey on the page.
-4. **Your phone**: the QR code and the steps to trust the CA on iPhone or Android.
-5. **Try it**: one message to a live session; green when it comes back `delivered`.
-
-*Skip setup* keeps the board as the front page; the sidebar keeps a *Setup* entry until the
-steps are green. The setup routes answer only from this machine.
-
-### Three ways to get data in
-
-| | |
-|---|---|
-| **This machine** | Zero config. `~/.local/state/sessionpipe/outbox` is tailed every 500 ms at tier 3. `--no-outbox` turns it off, `--outbox DIR` points elsewhere. |
-| **Another machine** | On it, after `npx sessionpipe install`: `sessionpipe sink add http://<this-machine>:7373 --tier 3 --token <sink token>`. The exact line, filled in, is on the Connect page and in the banner. `--tier` is how much that machine sends ([tiers](https://github.com/spacesheep-dev/sessionpipe#privacy-tiers)). |
-| **Demo** | `sessionpipe-gui --demo` runs a synthetic team so every state is on the board without running an agent. `--replay file.jsonl` replays any sessionpipe JSONL file. |
+No agent handy? `sessionpipe-gui --demo` fills the board with a synthetic team.
 
 ## Tour
 
 ### Board
 
-![The board: needs you, working, idle; done collapsed](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/board.png)
+![The board: needs you, working, stale, idle; done collapsed](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/board.png)
 
-Sessions grouped by state, in the order you would look: **needs you**, **working**,
-**stale**, **idle**, **done** (collapsed, with a count). A row is the title, one line under
-it (the command waiting for you, or the last thing the assistant said), where it runs
-(harness, machine, repo) and a few quiet counts: turns, tools, errors, how long ago. One
-mark says the state: a dot for needs you, a turning ring for working, a hollow ring for
-idle, a check for done. Subagents nest under their parent. Flags call out
-what is off: a slow tool, three errors in a row, the same tool on the same input three
-times, repeated compactions, a gap in the sequence. Filter by machine, harness or text;
-`⌘K` finds any session from anywhere.
-
-Every row, tab, message, machine and path has its own right-click menu with the actions
-that exist for it: open as a page or beside this one, allow or deny the prompt, show only
-its machine or harness, copy its link, id, folder or branch, forget it. `Shift+F10` or the
-context-menu key opens it from the keyboard; on a phone a long-press opens the same items
-as an action sheet.
+Every session, grouped in the order you would look: **needs you**, **working**, **stale**,
+**idle**, **done**. A row is the title, one line of what is happening (the command waiting
+for you, the tool running, the last thing the agent said) and where it runs. One mark says
+the state, and only *needs you* gets the colour. Flags call out what is off: a slow tool, a
+run of errors, the same call three times in a row. Every row has a right-click menu with its
+real actions; on a phone, a long press.
 
 ### Session
 
-![A session in Simple mode: a chat, the tools of a turn folded into one line](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/session-simple.png)
+![A session: the chat, a turn's tools folded into one line, the open prompt with Allow and Deny](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/session-simple.png)
 
-In **Simple** mode (the default) a session is a chat: your prompts on the right, the
-assistant's replies as markdown on the left, the tools of each turn folded into one line,
-a composer at the bottom. **Advanced** mode is the full timeline: every tool call with
-its duration, input and output at tier 3, permission prompts, subagents, compactions,
-turn statistics, and a *tier lens* that shows the same session as a tier 0, 1, 2 or 3
-receiver would have got it. Both modes open the newest turn first and page older turns
-on demand; a session can open as the page or beside it, in a split panel with tabs.
+A session reads as a chat: your prompts, the agent's replies, each turn's tools folded into
+one line, a composer at the bottom. Advanced mode shows the full timeline with every tool
+call's input, output and duration, and a tier lens that shows the session as a lower-tier
+receiver would have got it. Send the next message, attach up to six images, stop a turn, or
+answer the prompt in place.
 
-![The same session in Advanced mode: the timeline, turn by turn](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/session-advanced.png)
+### New session
 
-### Inbox and notifications
+![New session: machine, agent, folder, what it should do](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/new-session.png)
 
-![Inbox: every open prompt across every machine, Allow and Deny where an answer can reach](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/inbox.png)
+`c` anywhere, or right-click a machine, a folder or a session: pick the machine, the agent
+and the folder, type what it should do, add files. The page opens at once and fills in as the
+agent starts; a machine that is offline takes it when it is back. The machine's own
+sessionpipe daemon starts the agent and checks everything again; the GUI runs nothing.
+Permission mode and model appear only when that machine's sessionpipe offers them
+(sessionpipe 0.10); until then the sheet says which mode the machine set at its terminal.
 
-Every open prompt, question and error from every session and machine, newest first, in
-two groups: the ones a signed answer can reach (**Allow** / **Deny** right on the row) and
-the ones waiting in a terminal. A toast appears for each new one while you are on another
-page, with the same two buttons; *Notify me* adds a system notification when the tab is in
-the background, and the installed app's badge shows how many are open. Sounds are per
-moment (a prompt, a question, an error, a reply delivered), five built in or one you
-upload, all per device.
+### Inbox
 
-### Canvas
+![Inbox: every open prompt on every machine](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/inbox.png)
 
-![Canvas with the map on: windows for sessions, lanes for devices, agents, machines and repos](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/canvas.png)
+Every open permission, question and error from every machine, newest first, with Allow and
+Deny on the ones a signed answer can reach. A toast appears for each new one while you are
+elsewhere in the app; system notifications and sounds are per device.
 
-Every live session as a window on an infinite canvas: drag, resize, zoom out to see the
-fleet, double-click one to watch it work inline. The **Map** draws the infrastructure
-around them in lanes: the browsers looking at this GUI, the accounts per harness, the
-machines, the repos, with hairlines for who runs where. Drag an account chip onto a
-machine to start a session there. The layout is kept by the receiver, so it is the same
-on every device. Canvas and Office ship with the GUI (their sources live in the
-[themes repo](https://github.com/spacesheep-dev/sessionpipe-gui-themes)); they sit in the
-sidebar under *experimental*, and `sessionpipe-gui view disable canvas` hides one.
+### Labels and subagents
 
-### Office
+![Colour labels on the board and the Label menu](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/labels.png)
 
-![Office: every machine a room, every live session a person at a desk](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/office.png)
+Seven colours, Finder-style: right-click a session, *Label ▸*, or `⌥⌘1`–`⌥⌘7`. A label is
+one dot wherever the session appears, filters with `label:red`, can be named, and is the same
+on every device.
 
-Every machine a room, every live session a person at a desk, every subagent a helper at a
-side table. Posture is the state; orange marks who needs you; a tally by the door counts
-who went home today. An isometric floor by default, figures on request.
+![A session's subagents, each under the turn that started it, with its tools](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/subagents.png)
+
+A parent row says how many subagents are running and opens a tree of what each is doing. In
+the session, each agent sits under the turn that started it, with its tools and its result,
+and opens beside its parent as a tab of its own.
 
 ### Review
 
-![Review: search across transcripts, the files changed by repo, one day as a digest](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/review.png)
+![Review: the files your agents changed, by repo](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/review.png)
 
-The Board is now; Review is what happened. Search transcripts, tool names, file paths and
-titles across every session (a hit opens the session beside the page at that turn). Then
-two tabs: the files your agents changed in a range, grouped by repo, and one day as a
-digest with totals per machine and per repo. Advanced mode also keeps a **Feed** (every
-event as it arrives, like `sessionpipe tail`, paused with `space`) and **Machines** (each
-sender, its harness versions, its pairing).
+What happened, rather than what is happening: the files your agents changed in a range,
+grouped by repo, and one day as a digest per machine and repo. Review sits in Advanced mode
+with the Feed (every event as it arrives) and Machines (each sender, its versions and its
+pairing).
 
-### Connect and your phone
+### Canvas and Office
 
-![Connect: the QR code for a phone, the one line for another machine, the sink token masked](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/connect.png)
+![Canvas: sessions as windows, grouped by machine](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/canvas.png)
 
-Scan the QR code in the terminal or on the Connect page. The address carries a key that
-signs the phone into the page; without it the network answers 401. On the machine itself
-(`localhost`) no key is needed. The sink token is separate and only ever travels as a
-bearer with event batches.
+Two views that ship with the GUI, under *Experimental* in the sidebar. **Canvas** puts every
+live session in a window on an infinite canvas, laid out in one click by state, machine,
+harness, repo or label, or in your own areas and notes, the same on every device; its Map
+draws the machines, accounts and repos around them. **Office** makes every machine a room and
+every session a person at a desk.
 
-Passkeys need https on a DNS name, so `sessionpipe-gui --tls` gives the same port a
-second protocol: a certificate from the GUI's own local CA for `<machine>.local`,
-`localhost` and every LAN address. The QR then opens a plain-http **trust page** that
-walks the phone through installing that one certificate (compare the SHA-256 fingerprint
-it shows with the one in the profile) and forwards it to `https://<machine>.local:7373`.
-The daemon and the sinks keep using plain http.
+### Phone
 
-| ![The trust page on a phone](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/phone-trust.png) | ![The board on a phone](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/phone-board.png) | ![A session on a phone](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/phone-session.png) |
+| ![The board on a phone](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/phone-board.png) | ![A session on a phone, Allow and Deny on its prompt](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/phone-session.png) | ![Getting a phone sending: its own steps](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/phone-wifi-phone.png) |
 |---|---|---|
 
-### From anywhere
+The same app at phone size: a tab bar, sheets, a two-line banner when something needs you.
+Scan the QR code and the board is there; the key in the link signs the phone in. Sending
+needs https and a passkey, and the phone page walks you through one of two ways: the same
+Wi-Fi with the GUI's own certificate (`--tls`), or Tailscale from anywhere. Add it to your
+home screen and it opens like an app. Details: [docs/remote.md](docs/remote.md).
 
-Outside your Wi-Fi the GUI needs an https address phones already trust. The simplest one
-is [Tailscale](https://tailscale.com): no port forwarding, no certificate to install, and
-the receiver stays off the public internet. On the receiver machine:
+### Keyboard, ⌘K and the look
 
-```sh
-tailscale serve --bg 7373                                   # https://<machine>.<tailnet>.ts.net → this port
-sessionpipe-gui --public-url https://<machine>.<tailnet>.ts.net   # remembered; --no-public-url forgets
-```
+`⌘K` finds any session, page or action, and searches text across sessions. `c` starts a
+session, `j` `k` move, `Enter` opens, `Shift+Enter` opens beside, `a` and `d` allow or deny,
+`g` then a letter jumps between pages. `?` lists every binding in force; `/shortcuts`
+rebinds them, with vim and emacs presets.
 
-The setup page's optional step 6 does the same with a click once it sees Tailscale
-running. The url's host becomes the passkeys' rp id, so use that one address on the
-Wi-Fi too; passkeys made for `<machine>.local` are made again on first use. Behind the
-proxy the server trusts `X-Forwarded-For` on loopback connections only: a phone coming
-through it still needs the UI key, and the setup actions still answer only to this
-machine. Any https reverse proxy that sets `X-Forwarded-For`, `-Proto` and `-Host` works
-the same way; a public tunnel (Cloudflare, ngrok) does too, but then the UI key and the
-sink token are all that stand between the internet and your sessions, so put an access
-layer in front. Machines elsewhere on the tailnet push and pair through the same url:
-`sessionpipe connect https://<machine>.<tailnet>.ts.net`.
+Two skins ship. **sessionpipe**, the default, is the brand's ink, graphite and paper with its
+orange as the one accent, for *needs you*, in light and dark; **Paper** is warm paper and ink,
+light only. Text is set in Geist and code in Geist Mono, served by the GUI itself. Light,
+dark or system, the skin and the text size are one click from the sidebar and kept per
+device.
 
-### Settings and skins
+## Desktop apps
 
-![The appearance popover: system, dark or light; the skin; the text size](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/appearance.png)
+| Platform | Download |
+|---|---|
+| macOS, Apple silicon and Intel | [sessionpipe_0.3.0_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_universal.dmg), signed and notarized |
+| Linux, x86-64 | [AppImage](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_amd64.AppImage) · [.deb](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_amd64.deb) |
 
-Appearance (System, Light, Dark), skin and text size are one click from the sidebar
-(Display) and are kept per device. Two skins ship. **sessionpipe**, the default, is the
-brand's ink, graphite and paper with its orange as the one accent, for *needs you*, set in
-Geist (self-hosted, no request leaves the machine), in both schemes: it follows the appearance setting, which is why the pictures
-on this page come in a light and a dark version. **Paper** is warm paper and ink, light
-only. A skin installed from outside (`sessionpipe-gui skin add`) lists after them.
+The same UI in a small [Tauri 2](https://tauri.app) app (a few MB, not a browser engine of
+its own). It connects to the receiver on this machine (keep one running with
+`sessionpipe-gui service install`), keeps a menu bar item and a Dock badge that count what
+needs you, notifies you, launches at login if you like, and updates itself. Every release is
+on the [releases page](https://github.com/spacesheep-dev/sessionpipe-gui/releases).
 
-Settings (`/settings`) holds the rest: Simple or Advanced, the page to open on,
-the tier lens, notifications and sounds, the keymap, the installed views, skins and
-plugins, what is on disk, and the receiver's own numbers.
-
-### Keyboard
-
-![The keyboard help: every binding in force, grouped, searchable](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/keyboard.png)
-
-`?` lists every binding in force, `/shortcuts` rebinds them (vim and emacs presets
-included). The ones to know: `⌘K` palette, `c` new session, `/` search this page, `j` `k` move,
-`Enter` open, `Shift+Enter` open beside, `a` `d` allow or deny the prompt under the
-cursor, `p` focus the composer, `l` cycle the tier lens, `t` dark or light, `g` then a
-letter to jump between pages, `Esc` back. A view's own keys join the same list.
-
-## Control: talking back
-
-sessionpipe's [control channel](https://github.com/spacesheep-dev/sessionpipe/blob/main/spec/CONTROL.md)
-lets a page you have open send a message to a session, answer a permission prompt, stop a
-turn or start a new session, each command signed with a passkey and verified on the
-machine that runs the agent. This GUI is a full control receiver; `/setup` pairs the
-machine you are on, and for any other machine:
-
-```sh
-sessionpipe control pair http://<this-machine>:7373
-```
-
-The terminal prints a link and six digits; the page shows the same six; you approve with
-your passkey. From then on a session has a composer and Allow / Deny on its open prompts,
-from the session page, the Inbox, a toast or the palette. The first send of a day asks
-for the passkey once. A phone makes its own passkey on `/add-device`; a device the
-machine already trusts compares six digits and approves.
-
-**New session.** `c` anywhere (the compose glyph beside the sidebar's name, top right on
-a phone; the palette; right-click a session for *New session here*, a machine for *New
-session on studio-mac…*, a folder on Machines for *New session in this folder*; or
-`/?new=1&machine=…&harness=…&cwd=…`) opens one sheet: the machine, the agent it runs,
-the folder (its recent ones first, then the ones it allows, or a path you type), what it
-should do, and files when the machine takes them. Permission (Read only, Safe, Accept
-edits, Auto) and the model appear only when that machine's sessionpipe advertises them,
-never above the mode its owner set at its terminal; an older machine gets one line
-instead ("Runs in build-box's safe mode"). Start signs one `start` and the new session's
-page opens at once and fills in as the agent starts; a machine that is offline takes it
-when it is back. The GUI runs nothing itself: the machine's daemon starts the agent, and
-checks everything again.
-
-**Images.** Paste, drop or attach up to six images (8 MB each) in the composer. The GUI
-stores them and the signed text names them, by absolute path when the session runs on
-the machine the GUI runs on, by an authenticated URL otherwise, so the agent can open
-them.
-
-**From Telegram.** The [ping-a-human plugin](https://github.com/spacesheep-dev/sessionpipe-gui-themes/tree/main/packages/plugin-ping-a-human)
-sends a Telegram message when a session needs you, with Allow and Deny buttons. The one
-you tap comes back as a *suggestion* beside the prompt, "Allow suggested by Misha on
-Telegram · Confirm", and you confirm it with your passkey.
-
-**The security model, in six lines.**
-
-1. Every command is signed on your device by a WebAuthn passkey, or by a day key the passkey vouched for once that day.
-2. The receiver carries commands and holds a bearer token per machine. It holds no key that can sign, so it cannot forge one.
-3. The machine's daemon verifies the signature against the keys enrolled at its own terminal, then delivers through the harness's documented hooks.
-4. A plugin can suggest an answer. Nothing reaches a machine until a person confirms with a passkey; nothing auto-allows.
-5. A key is trusted only through pairing at the machine's terminal, or a signed `key.add` from a device the machine already trusts. Keys are removed at the terminal, never here.
-6. The sink token authenticates event batches; the UI key signs a browser into the page. Neither authorizes a command.
-
-## Extending
-
-Three kinds of extension, one installer, all kept outside the GUI under its state dir
-and installed, linked for development or removed with the same verbs. A **view** is an
-ES module that draws the board its own way on a page of the GUI, with a `ThemeApi` for
-the live state, control, storage and the keymap. A **skin** is tokens, fonts, radius,
-density and an optional stylesheet, no code. A **plugin** is server-side code in the
-receiver process that reacts to events: notifications, suggested answers. The official
-ones ship inside the GUI: Canvas, Office and ping-a-human (`sessionpipe-gui extras
-list`); the two skins are built in, and a skin installed from outside lists beside them. A bundled extension cannot be removed, only turned off
-(`view|skin|plugin disable <id>`, or the button on the Views page); an install of the same
-id overrides it. ping-a-human starts off and runs only after `plugin enable ping-a-human`
-(or Enable on the Views page), since a plugin may reach out of the machine; its Telegram
-token goes in its settings there. Anything else:
-
-```sh
-sessionpipe-gui view add   <folder | .tgz | .zip | npm package | git url>
-sessionpipe-gui skin add   <folder | .tgz | .zip | npm package | git url>
-sessionpipe-gui plugin add <folder | .tgz | .zip | npm package | git url>
-```
-
-A view is code running in the board page with everything the page has; a plugin is code
-running in the receiver with everything this machine has; a skin runs no code. Install
-only what you trust. The authoring guides are [docs/theme-authoring.md](docs/theme-authoring.md),
-[docs/skin-authoring.md](docs/skin-authoring.md) and [docs/plugin-authoring.md](docs/plugin-authoring.md);
-the official views, skins and plugins live in
-[sessionpipe-gui-themes](https://github.com/spacesheep-dev/sessionpipe-gui-themes).
+The app shows everything; for now it sends nothing itself. Signing a prompt, a start or an
+answer from the app waits on device keys in sessionpipe; until then the app says so and you
+send from a browser, where your passkey signs. An iPhone build runs in the simulator and is
+not released.
 
 ## How it works
 
 ```
- ┌──────────── this machine ──────────────┐      ┌── other machines ──┐
- │ sessionpipe hooks → outbox/*.jsonl      │      │ sessionpipe sinks  │
- │        │ (tailed, zero config)          │      │  POST /events      │
- │        ▼                                │      └─────────┬──────────┘
- │  sessionpipe-gui :7373 ◄────────────────┼────────────────┘
- │   store: JSONL per session + index      │
- │   receiver · control · UI API · SSE     │◄──── phones and laptops on the LAN
- │   static web app · views · plugins      │      http://<lan-ip>:7373/?k=<ui key>
- └─────────────────────────────────────────┘      https://<machine>.local:7373 (--tls)
+ Claude Code · Codex · Gemini CLI · Antigravity · Devin
+        │ hooks, in any terminal or IDE, on any machine
+        ▼
+ sessionpipe       filters to a privacy tier, removes secrets, appends to the outbox
+        │ this machine: the outbox is tailed     other machines: a sink posts the events
+        ▼
+ sessionpipe-gui   store · receiver · control · search index                  :7373
+        │ live, over SSE
+        ▼
+ the board         any browser: this machine, your phone, another laptop
+
+ and back:  board ── command signed by your passkey ──► sessionpipe-gui ──► the agent's
+            machine, whose sessionpipe daemon verifies it and delivers it through the
+            agent's own hooks
 ```
 
-The receiver implements the sessionpipe HTTP binding and the control channel
-(`GET /.well-known/sessionpipe`, `POST /api/sessionpipe/v1/events`,
-`/api/sessionpipe/v1/control`) and accepts every tier up to 3. The browser gets one
-snapshot and then deltas over Server-Sent Events. The board's states (`needs_you`,
-`working`, `stale`, `idle`, `done`) and flags are the receiver's readings of the
-protocol's facts, as the spec intends; they are never sent anywhere.
+On this machine there is nothing to configure: the GUI tails the outbox `sessionpipe tail`
+reads (`--no-outbox` turns that off). Another machine sends with one line, shown filled in on
+the Connect page and in the banner:
 
-**Where things live.** Everything under `~/.local/state/sessionpipe-gui/` (or `--state DIR`):
+```sh
+sessionpipe sink add http://<this-machine>:7373 --tier 3 --token <sink token>
+```
+
+The receiver implements sessionpipe's [HTTP binding](https://github.com/spacesheep-dev/sessionpipe/blob/main/spec/HTTP.md)
+and [control channel](https://github.com/spacesheep-dev/sessionpipe/blob/main/spec/CONTROL.md)
+and accepts every tier up to 3.
+
+**Privacy tiers.** What leaves each machine is decided there, by the tier its sink is set to,
+and secrets are redacted before the outbox. The GUI shows what arrived and nothing more.
+
+| Tier | What it carries |
+|---:|---|
+| 0 | Ids, state, timing, machine, repo, branch, model, title, what kind of attention is needed |
+| 1 | + tool names, durations, ok or error, file paths, what a prompt asks, subagents |
+| 2 | + your prompts and the agent's replies, a running turn as it runs |
+| 3 | + tool input and output (your own receiver only) |
+
+**Security model.**
+
+1. **Seeing** needs the UI key, carried once in the QR link and then as a cookie. The machine
+   itself (`localhost`) needs none. Other machines post events with a separate sink token.
+2. **Acting** needs a passkey. Every command is signed on your device and verified by the
+   agent's machine against keys enrolled at its own terminal. The GUI holds no key that can
+   sign, so it cannot forge a command, and a plugin can only *suggest* an answer for you to
+   confirm.
+3. **The wrong address says so.** A page opened where passkeys cannot work names the address
+   where sending does, instead of offering to enrol a new device.
+4. **Setup is local.** Setup's actions, token rotation and plugin settings answer only on
+   this machine.
+5. **Nothing phones home.** No telemetry; the web app calls only its own origin, and the
+   server's only outbound request is an extension you ask it to install by URL.
+   [SECURITY.md](SECURITY.md) has the details.
+
+The GUI is meant for your own network. For outside it, use Tailscale or another https proxy
+([docs/remote.md](docs/remote.md)); putting the port on the public internet is not supported.
+
+**Footprint.**
+
+| Measure | Value | Conditions |
+|---|---|---|
+| Package | about 1 MB packed | `npm pack` of 0.3.0, fonts and the bundled views included |
+| Board first load | 140 KB of JS, gzipped | 0.3.0's entry chunk; the other pages load when they are opened |
+| Server boot | about 1 s | to the first API answer; 177 sessions, 11 027 events, 182 MB of JSONL |
+| Server memory | 95–100 MB RSS | the same store, settled about 35 s after boot |
+| Server idle CPU | 0.2 % | the same store, no browser connected |
+| Board JS heap | about 9 MB, flat | after 30 minutes of streaming |
+
+The server and heap rows were measured on 2026-10-15 (0.1, before search) on an Apple-silicon
+Mac; method, raw numbers and what is still slow: [docs/perf.md](docs/perf.md). Search's own
+numbers are [above](#search).
+
+Other sessionpipe receivers: [spacesheep.dev](https://spacesheep.dev) (hosted, tier 2),
+[sessionpipe-receiver](https://github.com/spacesheep-dev/sessionpipe/tree/main/packages/receiver)
+(the reference), and `sessionpipe tail` in a terminal.
+
+## Reference
+
+<details>
+<summary><b>Options</b></summary>
+
+| Option | Default | |
+|---|---|---|
+| `--port N` | 7373 | |
+| `--host H` | `0.0.0.0` | this machine and the LAN |
+| `--state DIR` | `~/.local/state/sessionpipe-gui` | events, config, keys, the search index |
+| `--no-outbox`, `--outbox DIR` | the sessionpipe outbox here | what to tail on this machine |
+| `--keep-days N` | 14 | older events keep a shorter preview in memory; files are never trimmed |
+| `--search-home DIR` | your home | where search reads agent history (`~/.claude*`, `~/.codex`, `~/.gemini`); with `--demo`, none is read unless given |
+| `--tls`, `--no-tls` | off | https on the same port from the GUI's own local CA, for passkeys from a phone; remembered |
+| `--public-url URL`, `--no-public-url` | none | the https origin a proxy on this machine serves (Tailscale); remembered |
+| `--rp-id HOST` | `localhost` | the passkeys' rp id; set by `--tls` and `--public-url` |
+| `--demo`, `--replay FILE`, `--speed N` | | synthetic sessions, or a sessionpipe JSONL file replayed |
+| `--open`, `--quiet` | | open the browser; no banner |
+| `--themes-dir`, `--skins-dir`, `--plugins-dir`, `--bundled-dir` | under the state dir | where extensions live |
+| `--test-door` | off | loopback-only door for the conformance runner |
+
+`sessionpipe-gui --help` prints the full list.
+
+</details>
+
+<details>
+<summary><b>Commands</b></summary>
+
+```sh
+sessionpipe-gui                              # the board
+sessionpipe-gui search "query" [--agent a] [--machine m] [--repo r] [--since 7d] [--until d]
+                       [--in f] [--source s] [--newest] [--limit n] [--json]
+sessionpipe-gui index [--rebuild] [--status] [--verify]
+sessionpipe-gui tls status|trust|reset
+sessionpipe-gui view|skin|plugin list|add|link|remove|enable|disable
+sessionpipe-gui extras list                  # the official extensions, all bundled
+```
+
+</details>
+
+<details>
+<summary><b>Where things live</b></summary>
+
+Everything is under `~/.local/state/sessionpipe-gui/` (or `--state DIR`):
 
 | | |
 |---|---|
-| `events/<harness>/<session>.jsonl` | One append-only file per session, the full events. An index of summaries and slim events is rebuilt at boot; big strings are read back from disk by byte offset on demand. |
-| `config.json` | The sink token, the UI key, whether TLS mode is on, which extensions are off (`disabled`) and which bundled plugins are on (`enabled`). |
-| `control/` | Paired machines (token hashes) and their queues. |
-| `tls/` | The local CA and the server certificate (`--tls`). |
-| `attachments/` | Images sent from the composer. |
-| `themes/`, `skins/`, `plugins/` | Installed extensions; `plugins-settings/` and `plugins-storage/` beside them, mode 0600. |
+| `events/<harness>/<session>.jsonl` | One append-only file per session, the full events; the index is rebuilt at boot |
+| `search/` | The search index: what the receiver holds, and this machine's history unless it is off |
+| `config.json` | The sink token, the UI key, TLS and public url, which extensions are on or off |
+| `control/` | Paired machines (token hashes), their queues, and files a new session carries until the machine fetches them |
+| `tls/` | The local CA and certificate (`--tls`) |
+| `attachments/` | Images sent from the composer |
+| `labels.json` | Your colour labels |
+| `themes/`, `skins/`, `plugins/` | Installed extensions, with their settings (mode 0600) beside them |
 
-Delete a session from its page (*Forget*, which also honours a `session.forgotten`
-event) or delete the directory to start over. `--keep-days N` (default 14) shortens the
-in-memory preview of older events; the files are never trimmed.
+*Forget* on a session's menu deletes its file; deleting the folder starts over.
 
-**Footprint.** Measured on a real store of 177 sessions and 11 027 events (182 MB of
-JSONL, one session alone a 150 MB file), on an M-series Mac: the CLI answers its first
-request about 1 s after start; RSS is 185 MB at boot and settles at 95–100 MB after about
-35 s; idle CPU is 0.2 %, 0.3 % with two browsers streaming; after 30 minutes of streaming
-the Board's JS heap is flat at 9 MB. The method, the before and after, and what is still
-slow are in [docs/perf.md](docs/perf.md).
+</details>
 
-**Privacy.** The GUI shows what arrived and nothing more. What leaves each machine is
-decided there, by the tier its sink is set to, with secrets redacted before the outbox;
-the tier lens here lets you see the same session as a lower-tier receiver would have got
-it, to decide what a team board should receive. Nothing in the web bundle calls anywhere
-but its own origin; the server's only outbound request is the download of an extension
-you ask it to install by URL or npm name; a plugin's secrets are masked on the wire and in
-its logs.
+<details>
+<summary><b>Extending: views, skins, plugins</b></summary>
 
-## Development
+A **view** is an ES module that draws the board its own way on a page of the GUI. A **skin**
+is colours, fonts and shape, no code. A **plugin** is server-side code that reacts to events,
+such as [ping-a-human](https://github.com/spacesheep-dev/sessionpipe-gui-themes/tree/main/packages/plugin-ping-a-human),
+which sends a Telegram message when a session needs you, with Allow and Deny that come back
+as a suggestion you confirm with your passkey. The official ones ship inside the GUI and
+their sources live in [sessionpipe-gui-themes](https://github.com/spacesheep-dev/sessionpipe-gui-themes).
+
+```sh
+sessionpipe-gui plugin enable ping-a-human                              # bundled, off until you say so
+sessionpipe-gui view add <folder | .tgz | .zip | npm package | git url> # skin add, plugin add the same
+```
+
+A view runs with everything the page has and a plugin with everything this machine has;
+install only what you trust. Guides: [views](docs/theme-authoring.md),
+[skins](docs/skin-authoring.md), [plugins](docs/plugin-authoring.md).
+
+</details>
+
+## FAQ
+
+<details>
+<summary><b>Do I need sessionpipe?</b></summary>
+
+For live sessions, yes. sessionpipe is the protocol and the hooks; this is a receiver for it.
+`npx sessionpipe install` on a machine writes the hooks and keeps its events in a local
+outbox, and the GUI on that machine reads it with no configuration. Without sessionpipe the
+GUI still searches this machine's own agent history, and `--demo` shows the rest.
+
+</details>
+
+<details>
+<summary><b>Does it run my agents?</b></summary>
+
+No. Your agents run where you started them. When you start one from the GUI, it sends a
+signed `start` to that machine, and the machine's own sessionpipe daemon checks it and starts
+the agent. Without pairing, the GUI is a read-only board.
+
+</details>
+
+<details>
+<summary><b>Which agents does it show?</b></summary>
+
+Every agent sessionpipe hooks: today Claude Code, Codex, Gemini CLI, Antigravity and Devin.
+Cursor, Copilot CLI, Droid, Kiro and OpenCode are next in sessionpipe's
+[registry](https://github.com/spacesheep-dev/sessionpipe/blob/main/spec/ADAPTERS.md) and
+appear here as sessionpipe adds them. Search reads the history of Claude Code, Codex,
+Antigravity and Gemini CLI on this machine.
+
+</details>
+
+<details>
+<summary><b>Does anything leave my machine?</b></summary>
+
+Not unless you ask. No telemetry, no analytics, no account; search runs here, on files here.
+The server's one outbound request is an extension you install by URL. What other machines
+send to this one is up to each machine's sink tier.
+
+</details>
+
+<details>
+<summary><b>Can I reach it away from home?</b></summary>
+
+Yes, through Tailscale: `tailscale serve --bg 7373`, then
+`sessionpipe-gui --public-url https://<machine>.<tailnet>.ts.net`, or one click on the phone
+page when Tailscale runs here. No port forwarding, no certificate to install. Other https
+proxies work too: [docs/remote.md](docs/remote.md).
+
+</details>
+
+<details>
+<summary><b>Is it on npm?</b></summary>
+
+Not yet. Run it with `npx github:spacesheep-dev/sessionpipe-gui`, or install a release's
+tarball with `npm i -g` (above); the npm package follows.
+
+</details>
+
+## Contributing
+
+Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md): one
+concern per PR, tests beside the code, and every commit signed off under the [DCO](DCO)
+(`git commit -s`); there is no CLA. The architecture and module owners are in
+[ARCHITECTURE.md](ARCHITECTURE.md), cutting a release in [RELEASING.md](RELEASING.md), and
+security reports go through [SECURITY.md](SECURITY.md).
 
 ```sh
 npm install
-npm run dev            # server on :7373 (rebuilt on change) + Vite on :5173 proxying to it
-npm run build          # dist/ (server) + dist/web (app)
-npm start -- --demo    # the built server with synthetic sessions
-npm test               # vitest: store, receiver, control, conformance, demo, tls, plugins, ui
-npm run test:e2e       # playwright: a built server in demo mode, desktop and phone, on :7311 / :7312
-npm run typecheck && npm run lint
+npm run dev            # server on :7373 + Vite on :5173
+npm test               # vitest
+npm run test:e2e       # Playwright, desktop and phone
 ```
-
-The conformance runner scores this receiver against the delivery scenarios in a
-sessionpipe checkout (`npm run conformance -- http://127.0.0.1:7373 --fixtures
-../sessionpipe/conformance/delivery --token <sink token>`; start the server with
-`--test-door` for the control scenarios). Opt-in suites: `SPGUI_PERF=1` for browser
-memory under load.
-
-```
-server/     the receiver: store, http receiver, control, tls, demo, extensions (views, skins, plugins), setup
-web/        the app: React 18 + Vite, hand-written CSS with design tokens, no component library
-shared/     the contract both sides import: wire types, routes, the ThemeApi, PluginApi and skin manifests
-docs/       brand, authoring guides, screenshots
-test/       vitest fixtures and the Playwright suite
-```
-
-Architecture, module owners and the API contract: [ARCHITECTURE.md](ARCHITECTURE.md).
-Cutting a release: [RELEASING.md](RELEASING.md).
-Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Every commit is signed off under the
-[DCO](DCO) (`git commit -s`); there is no CLA.
 
 ## License
 
@@ -419,5 +527,5 @@ logo are [marks of Michael Makarov](https://github.com/spacesheep-dev/sessionpip
 The logo and wordmark in `web/public/brand/` are the sessionpipe logo system, Michael
 Makarov's marks ([docs/brand.md](docs/brand.md)). Geist and Geist Mono (`web/public/fonts/`)
 are by Vercel under the SIL Open Font License 1.1 (`web/public/fonts/OFL.txt`).
-Claude Code, Codex, Gemini, Antigravity, Cursor and the other harness names are trademarks
-of their owners, named here only to identify the software a session runs in.
+Claude Code, Codex, Gemini, Antigravity, Devin, Cursor and the other agent names are
+trademarks of their owners, named here only to identify the software a session runs in.

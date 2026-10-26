@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // The README screenshots, from a GUI running in demo mode (see README.md in this folder):
-//   node docs/screenshots/shoot.mjs --base http://localhost:7391 --tls https://localhost:7392 \
-//     --themes ../sessionpipe-gui-themes/docs/screenshots [--out docs/screenshots] [--no-gif] \
-//     [--scheme dark|light] [--light a.png,b.png]
+//   node docs/screenshots/shoot.mjs --base http://localhost:7391 \
+//     [--themes ../sessionpipe-gui-themes/docs/screenshots] [--out docs/screenshots] [--no-gif] \
+//     [--scheme dark|light] [--light a.png,b.png] [--only a.png,b.png]
 // Desktop shots are 1440 × 900 at 2×, phone shots an iPhone 13 viewport at 3×, all on the
 // default (sessionpipe) skin, which follows the appearance: `--scheme` is the appearance
 // every shot gets (dark), `--light` names the shots taken in light instead (by default the
-// six the README shows light). Only demo data ever reaches the images: one extra session is
-// posted through the receiver so a permission prompt is open for the board, the inbox and
-// the sessions, and the demo machine it names is enrolled through the test door so its
-// Allow / Deny are live.
+// ones the README shows light), `--only` takes just the named ones. Only demo data ever
+// reaches the images: one extra session is posted through the receiver so a permission
+// prompt is open for the board, the inbox and the sessions, the demo machine it names is
+// enrolled through the test door so its Allow / Deny and New session are live, and search
+// reads a generated history home (the server's --search-home), never a real one.
 import { spawnSync } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { chromium, devices } from "@playwright/test";
@@ -26,7 +28,6 @@ const args = Object.fromEntries(
     .filter(Boolean),
 );
 const BASE = args.base ?? "http://localhost:7391";
-const TLS = args.tls ?? "https://localhost:7392";
 const OUT = path.resolve(args.out ?? "docs/screenshots");
 const THEMES = args.themes ? path.resolve(args.themes) : null;
 const GIF = !args["no-gif"];
@@ -34,14 +35,12 @@ const DEFAULT_SCHEME = args.scheme === "light" ? "light" : "dark";
 const DEFAULT_LIGHT = [
   "board.png",
   "board.gif",
+  "search.png",
   "session-simple.png",
   "inbox.png",
   "review.png",
-  "appearance.png",
-  "connect.png",
+  "labels.png",
   "phone-session.png",
-  "phone-wifi-desktop.png",
-  "phone-waiting-phone.png",
 ];
 const LIGHT = new Set(
   typeof args.light === "string"
@@ -53,6 +52,16 @@ const LIGHT = new Set(
       ? []
       : DEFAULT_LIGHT,
 );
+const ONLY =
+  typeof args.only === "string"
+    ? new Set(
+        args.only
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      )
+    : null;
+const wanted = (file) => !ONLY || ONLY.has(file);
 /** The appearance a shot is taken in. */
 const schemeOf = (file) => (LIGHT.has(file) ? "light" : DEFAULT_SCHEME);
 mkdirSync(OUT, { recursive: true });
@@ -70,13 +79,23 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const info = await (await fetch(`${BASE}/api/ui/info`)).json();
 const CONTROL = `${BASE}/api/sessionpipe/v1/control`;
 
+/** A passkey the pages "hold" and studio-mac trusts, so New session and the composer read as
+ *  they do on a paired device. Its public half only: the shots never sign anything. */
+const DEMO_KEY = {
+  id: "demo_passkey_studio_0000",
+  alg: -7,
+  spki: generateKeyPairSync("ec", { namedCurve: "P-256" })
+    .publicKey.export({ type: "spki", format: "der" })
+    .toString("base64url"),
+};
+
 async function enrollMachine(name) {
   // The door wants a machine id in the protocol's shape; the hello below gives the row its name.
   const id = `m_${name.replace(/[^A-Za-z0-9_-]/g, "_")}_demo_000000000`;
   const r = await fetch(`${CONTROL}/_test/enroll`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ machine: id, name: "studio passkey" }),
+    body: JSON.stringify({ machine: id, key: DEMO_KEY, name: "studio passkey" }),
   });
   if (!r.ok) return null;
   const { machine, token } = await r.json();
@@ -84,14 +103,18 @@ async function enrollMachine(name) {
   await fetch(`${CONTROL}/hello`, {
     method: "POST",
     headers: auth,
+    // What a sessionpipe 0.9 daemon says: no start options yet (those are 0.10), so New
+    // session shows the one line instead of Permission and Model.
     body: JSON.stringify({
       name,
-      harnesses: ["claude-code", "codex"],
+      harnesses: ["claude-code", "codex", "antigravity"],
       modes: ["waiter"],
       mode: "safe",
-      folders: ["~/code/billing", "~/code/search-api"],
+      home: "/Users/dev",
+      folders: ["/Users/dev/code/billing", "/Users/dev/code/search-api"],
+      files: true,
       keys: [],
-      version: "0.7.0",
+      version: "0.9.0",
       waiting: [],
     }),
   }).catch(() => {});
@@ -245,14 +268,18 @@ async function context(kind, mode, scheme = "dark", extra = {}) {
     ...extra,
   });
   await ctx.addInitScript(
-    ({ SETUP_SEEN, SETTINGS, THEME, mode, scheme }) => {
+    ({ SETUP_SEEN, SETTINGS, THEME, mode, scheme, key }) => {
       try {
         localStorage.setItem(SETUP_SEEN, "1");
         localStorage.setItem(SETTINGS, JSON.stringify({ mode }));
         localStorage.setItem(THEME, scheme);
+        localStorage.setItem(
+          "sessionpipe.passkeys:localhost",
+          JSON.stringify([{ ...key, name: "Demo", createdAt: new Date().toISOString() }]),
+        );
       } catch {}
     },
-    { SETUP_SEEN, SETTINGS, THEME, mode, scheme },
+    { SETUP_SEEN, SETTINGS, THEME, mode, scheme, key: DEMO_KEY },
   );
   return ctx;
 }
@@ -283,6 +310,7 @@ async function shot(page, file, opts = {}) {
     path: target,
     animations: "disabled",
     ...(opts.locator ? {} : { fullPage: false }),
+    ...(opts.clip ? { clip: opts.clip } : {}),
   });
   const kb = Math.round(statSync(target).size / 1024);
   log(`${path.relative(process.cwd(), target)}  ${kb} KB  ${opts.themes ? "" : schemeOf(file)}`);
@@ -302,117 +330,188 @@ log(
     : "test door: not available (start with --test-door); Allow / Deny will read unpaired",
 );
 const needsKey = await postNeedsYou();
+await labelSome();
 await sleep(1500);
 
-const desktopAdvanced = {
+/** The demo's sessions right now (it restarts its scenes, so keys change between runs). */
+async function snapshot() {
+  return (await (await fetch(`${BASE}/api/ui/snapshot`)).json()).sessions ?? [];
+}
+
+/** Colour labels on four rows that hold still (stale ones), so the board shows a few dots. */
+async function labelSome() {
+  const stale = (await snapshot()).filter((x) => x.state === "stale").slice(0, 4);
+  const colors = ["red", "orange", "blue", "green"];
+  const sessions = Object.fromEntries(stale.map((x, i) => [x.key, colors[i]]));
+  const r = await fetch(`${BASE}/api/ui/labels`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessions, names: { red: "Ship today", blue: "Waiting on review" } }),
+  });
+  if (!r.ok) log(`labels: ${r.status} ${await r.text()}`);
+  return stale[1]?.title;
+}
+
+/** Waits for the board's needs-you and working rows (the demo raises them within a minute). */
+async function boardReady(page) {
+  await page.locator("article.card").first().waitFor();
+  await page
+    .locator("article.card--needs_you")
+    .first()
+    .waitFor({ timeout: 30_000 })
+    .catch(() => log("board: no needs-you row in time"));
+  await page
+    .locator("article.card--working")
+    .first()
+    .waitFor({ timeout: 60_000 })
+    .catch(() => log("board: no working row in time"));
+}
+
+/** Takes the focus ring and hover off a page whose field was just used. */
+const blur = (page) =>
+  page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : null));
+
+const desktopSimple = {
   "board.png": async (page) => {
     await open(page, "/");
-    await page.locator("article.card").first().waitFor();
-    await page
-      .locator("article.card--needs_you")
-      .first()
-      .waitFor({ timeout: 30_000 })
-      .catch(() => log("board: no needs-you card in time"));
-    await page
-      .locator("article.card--working")
-      .first()
-      .waitFor({ timeout: 60_000 })
-      .catch(() => log("board: no working card in time"));
+    await boardReady(page);
     await shot(page, "board.png");
   },
-  "appearance.png": async (page) => {
-    await open(page, "/");
-    await page.locator("article.card").first().waitFor();
-    await page.getByRole("button", { name: "Quick settings" }).click();
-    await page.locator(".qs-pop").waitFor();
-    await shot(page, "appearance.png");
-    await page.keyboard.press("Escape");
-    await page.locator(".qs-pop").waitFor({ state: "hidden" });
+  "search.png": async (page) => {
+    await open(page, "/search?q=webhook");
+    await page.locator(".sx-row").first().waitFor({ timeout: 20_000 });
+    await sleep(600);
+    await blur(page);
+    await page.mouse.move(5, 880);
+    await shot(page, "search.png");
   },
-  "keyboard.png": async (page) => {
+  "search-palette.png": async (page) => {
     await open(page, "/");
     await page.locator("article.card").first().waitFor();
-    await page.keyboard.press("?");
-    await page.getByRole("dialog", { name: "Keyboard shortcuts" }).waitFor();
-    await shot(page, "keyboard.png");
+    await clearToasts(page);
+    await page.keyboard.press("Meta+k");
+    await page.locator(".pal input").waitFor();
+    await page.keyboard.type("webhook", { delay: 30 });
+    await page.locator(".pal-section", { hasText: "In transcripts" }).waitFor({ timeout: 20_000 });
+    await sleep(300);
+    // The first row of "In transcripts", so its preview shows the matched moment.
+    const n = await page
+      .locator(".pal-row")
+      .evaluateAll((els) => els.findIndex((e) => e.dataset.section === "In transcripts"));
+    for (let i = 0; i < n; i++) await page.keyboard.press("ArrowDown");
+    await sleep(400);
+    await shot(page, "search-palette.png");
+    await page.keyboard.press("Escape");
+  },
+  "session-simple.png": async (page) => {
+    await open(page, sessionPath(needsKey));
+    await page.locator(".timeline--chat").waitFor({ timeout: 20_000 });
+    await page.locator(".chat-card, .chat-bubble").first().waitFor({ timeout: 20_000 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await shot(page, "session-simple.png");
+  },
+  "new-session.png": async (page) => {
+    await open(page, "/");
+    await page.locator("article.card").first().waitFor();
+    await clearToasts(page);
+    await page.keyboard.press("c");
+    const sheet = page.locator("[data-new-session]");
+    await sheet.waitFor();
+    const pick = async (row, label) => {
+      await sheet.locator(`[data-ns-row=${row}] button.sel`).click();
+      await page.locator(".sel-opt", { hasText: label }).first().click();
+    };
+    await pick("machine", "studio-mac").catch(() => log("new session: no studio-mac to pick"));
+    await pick("agent", "Claude Code").catch(() => log("new session: no Claude Code to pick"));
+    await pick("folder", "search-api").catch(() => log("new session: no folder to pick"));
+    await sheet
+      .locator("textarea")
+      .fill("Add a p95 latency panel for the BM25 cache to the staging dashboard, then open a PR.");
+    await sleep(400);
+    await shot(page, "new-session.png");
     await page.keyboard.press("Escape");
   },
   "inbox.png": async (page) => {
     await open(page, "/inbox");
     await page.locator(".inbox-row").first().waitFor({ timeout: 30_000 });
-    await shot(page, "inbox.png");
+    // The top of the page: the rows are all there is; the empty rest says nothing.
+    await shot(page, "inbox.png", { clip: { x: 0, y: 0, width: 1440, height: 420 } });
   },
-  "session-advanced.png": async (page) => {
-    // The timeline of the session with the open prompt (it has tools, a transcript and the prompt).
-    await open(page, sessionPath(needsKey));
-    await page.locator("h1.sess-title").waitFor();
-    await page.locator("li.tool").first().waitFor({ timeout: 20_000 });
-    await page.evaluate(() => window.scrollTo(0, 0));
-    await shot(page, "session-advanced.png");
+  "labels.png": async (page) => {
+    const title = await labelSome();
+    await open(page, "/");
+    await boardReady(page);
+    await clearToasts(page);
+    const row = page.locator("article.card", { hasText: title ?? "" }).first();
+    await row.click({ button: "right", position: { x: 260, y: 14 } });
+    const item = page.getByRole("menuitem", { name: /^Label/ }).first();
+    await item.waitFor();
+    await item.hover();
+    await sleep(500);
+    await shot(page, "labels.png");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
   },
+  "subagents.png": async (page) => {
+    // The newest run of the demo's subagent scene that has its agents, as a page.
+    const s = (await snapshot())
+      .filter((x) => (x.agents?.length ?? 0) >= 3)
+      .sort((a, b) => Date.parse(b.lastAt) - Date.parse(a.lastAt))[0];
+    if (!s) return log("subagents: no session with agents");
+    await open(page, sessionPath(s.key));
+    await page.locator(".agent-block").first().waitFor({ timeout: 20_000 });
+    await page.locator(".agent-block").first().scrollIntoViewIfNeeded();
+    await page.evaluate(() => {
+      const b = document.querySelector(".agent-block");
+      if (b) window.scrollBy(0, b.getBoundingClientRect().top - 220);
+    });
+    await sleep(400);
+    await shot(page, "subagents.png");
+  },
+};
+
+const desktopAdvanced = {
   "review.png": async (page) => {
     await open(page, "/review");
-    await page.getByLabel(/Search transcripts/).fill("webhook");
     await page
-      .locator(".rv-hit, .hit, [class*=hit]")
-      .first()
-      .waitFor({ timeout: 20_000 })
-      .catch(() => log("review: no hits rendered"));
-    await sleep(800);
+      .getByRole("button", { name: "7 days" })
+      .click()
+      .catch(() => {});
+    await sleep(1200);
     await shot(page, "review.png");
-  },
-  "connect.png": async (page) => {
-    await open(page, "/connect");
-    await page.locator(".cmd-text").filter({ hasText: "sessionpipe sink add" }).first().waitFor();
-    const qr = page.getByRole("img", { name: /^QR code/ });
-    await qr.waitFor();
-    await page.waitForFunction((el) => el.naturalWidth > 0, await qr.elementHandle());
-    await shot(page, "connect.png");
-  },
-  "setup.png": async (page) => {
-    await open(page, "/setup");
-    await sleep(2500); // two polls of the status
-    await shot(page, "setup.png");
   },
   "canvas.png": async (page) => {
     await open(page, "/t/canvas");
-    const mapBtn = page.getByRole("button", { name: "Map", exact: true });
-    await mapBtn.waitFor({ timeout: 20_000 });
+    // The preset bar's "Machine": one window group per machine.
+    const byMachine = page.getByText("Machine", { exact: true }).first();
+    await byMachine.waitFor({ timeout: 20_000 });
     await sleep(1500);
-    // The map's on/off lives in the view's server-side storage, so it survives between runs:
-    // read the button's state instead of assuming it is off.
-    const mapOn = async () => ((await mapBtn.getAttribute("class")) ?? "").includes("is-on");
-    if (!(await mapOn())) await mapBtn.click();
-    await sleep(400);
-    if (!(await mapOn())) log("canvas: the Map toggle did not take");
-    await page.getByRole("button", { name: "Tidy", exact: true }).click();
-    await sleep(400);
-    await page.getByRole("button", { name: "Fit", exact: true }).click();
+    await byMachine.click();
+    await sleep(600);
+    await page
+      .getByRole("button", { name: "Fit", exact: true })
+      .click()
+      .catch(() => {});
     await sleep(1200);
     await shot(page, "canvas.png");
     if (THEMES) await shot(page, "canvas.png", { themes: true });
   },
-  "office.png": async (page) => {
-    await open(page, "/t/office");
-    await page.locator("section.room").first().waitFor({ timeout: 20_000 });
-    await sleep(1500);
-    await shot(page, "office.png");
-    if (THEMES) {
-      await shot(page, "office-iso.png", { themes: true });
-      await page
-        .getByRole("button", { name: "figures", exact: true })
-        .click()
-        .catch(async () => {
-          await page.getByText("figures", { exact: true }).click();
-        });
-      await sleep(1500);
-      await shot(page, "office-figures.png", { themes: true });
-    }
-  },
 };
 
-/** The themes repo's own shot: the plugin's settings form. */
+/** The themes repo's own shots: Office both ways, and the plugin's settings form. */
 async function themesExtras(page) {
+  await open(page, "/t/office");
+  await page.locator("section.room").first().waitFor({ timeout: 20_000 });
+  await sleep(1500);
+  await shot(page, "office-iso.png", { themes: true });
+  await page
+    .getByRole("button", { name: "figures", exact: true })
+    .click()
+    .catch(async () => {
+      await page.getByText("figures", { exact: true }).click();
+    });
+  await sleep(1500);
+  await shot(page, "office-figures.png", { themes: true });
   await open(page, "/themes");
   // The settings form alone: the row above it prints the plugin's source path on this machine.
   const form = page.locator("section.plugins form").first();
@@ -421,16 +520,6 @@ async function themesExtras(page) {
   await sleep(500);
   await shot(page, "ping-a-human.png", { themes: true, locator: form });
 }
-
-const desktopSimple = {
-  "session-simple.png": async (page) => {
-    await open(page, sessionPath(needsKey));
-    await page.locator(".timeline--chat").waitFor({ timeout: 20_000 });
-    await page.locator(".chat-card, .chat-bubble").first().waitFor({ timeout: 20_000 });
-    await page.evaluate(() => window.scrollTo(0, 0));
-    await shot(page, "session-simple.png");
-  },
-};
 
 const phoneSimple = {
   "phone-board.png": async (page) => {
@@ -444,151 +533,57 @@ const phoneSimple = {
     await page.evaluate(() => window.scrollTo(0, 0));
     await shot(page, "phone-session.png");
   },
-  "phone-trust.png": async (page) => {
-    // The trust page of the TLS instance, over plain http (how the QR opens it).
-    const tlsHttp = TLS.replace(/^https:\/\/[^/]+/, (m) => `http://127.0.0.1:${new URL(m).port}`);
-    const tlsInfo = await (await fetch(`${tlsHttp}/api/ui/info`)).json().catch(() => null);
-    if (!tlsInfo) return log("tls instance: not reachable; phone-trust.png skipped");
-    await page.goto(`${tlsHttp}/trust?k=${tlsInfo.uiKey}`);
-    await page.locator("h1").first().waitFor();
-    // The page names the machine the GUI runs on (its mDNS name); the shot shows a demo
-    // machine's name instead. Text nodes only; nothing else about the page changes.
-    const realHost = tlsInfo.tls?.hostname?.replace(/\.local$/, "") ?? tlsInfo.hostname;
-    if (realHost) {
-      await page.evaluate((host) => {
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-        for (let n = walker.nextNode(); n; n = walker.nextNode())
-          if (n.nodeValue?.includes(host)) n.nodeValue = n.nodeValue.split(host).join("studio-mac");
-      }, realHost);
-    }
-    await shot(page, "phone-trust.png");
-  },
+  "phone-wifi-phone.png": (page) => phoneShot(page, "phone-wifi-phone.png", "wifi", "phone"),
 };
 
-// ---------- /phone: each lane state from demo data, the routes answered in the page ----------
+// ---------- /phone: a lane state from demo data, the routes answered in the page ----------
 
 /** PhoneInfo for one state of the page (the same scenes web/src/mock/phone.ts knows). */
-function phoneInfo(scene, rp = "studio-mac.local") {
+function phoneInfo(scene) {
   const serving = scene === "serving";
   const ts = scene === "tailscale" || serving;
-  const at = Date.now();
   return {
     lan: { url: "http://192.168.1.20:7373/?k=uik_demo0000000000000000", qr: `${BASE}/api/ui/qr.svg` },
-    rpId: serving ? "studio-mac.tail1234.ts.net" : rp,
+    rpId: serving ? "studio-mac.tail1234.ts.net" : "studio-mac.local",
     tls: true,
     publicUrl: serving ? "https://studio-mac.tail1234.ts.net" : null,
     tailscale: ts
       ? { installed: true, running: true, name: "studio-mac.tail1234.ts.net", serving }
       : { installed: false, running: false, name: null, serving: false },
-    trusted: scene === "trusted" ? [{ id: "k1", name: "iPhone", addedAt: new Date(at - 95_000).toISOString() }] : [],
-    pending:
-      scene === "waiting"
-        ? [{ id: "req1", name: "iPhone", digits: "482913", since: new Date(at - 20_000).toISOString() }]
-        : [],
+    trusted: [],
+    pending: [],
   };
 }
 
 /** Answers the phone routes in the page with one scene; `side: "phone"` makes the page read
- *  as the phone's own view (the setup status says "not this machine"). The phone's https
- *  states are shot on the TLS instance, whose rp id is `localhost`, so `rp` names it then. */
-async function stubPhone(page, scene, side = "laptop", rp = "studio-mac.local") {
-  const info = phoneInfo(scene, rp);
-  const origin = info.publicUrl ?? (rp === "localhost" ? TLS : "https://studio-mac.local:7373");
+ *  as the phone's own view (the setup status says "not this machine"). */
+async function stubPhone(page, scene, side = "laptop") {
+  const info = phoneInfo(scene);
+  const origin = info.publicUrl ?? "https://studio-mac.local:7373";
   await page.route("**/api/ui/phone", (r) => r.fulfill({ json: info }));
-  await page.route("**/api/ui/phone/device/*", (r) =>
-    r.fulfill({
-      json:
-        scene === "trusted"
-          ? { state: "trusted", digits: "482913", machine: "studio-mac" }
-          : { state: "pending", digits: "482913", machine: null },
-    }),
-  );
   await page.route("**/api/ui/info", async (r) => {
     const real = await (await r.fetch()).json();
     await r.fulfill({ json: { ...real, control: { ...real.control, rpId: info.rpId, origins: [origin] } } });
   });
-  await page.route("**/api/ui/control/devices", (r) =>
-    r.fulfill({
-      json: {
-        devices: info.pending.map((p) => ({
-          requestId: p.id,
-          check: p.digits,
-          key: { id: "c1", alg: -7, spki: "" },
-          name: p.name,
-          device: "iPhone · Safari",
-          fromIp: "192.168.1.31",
-          createdAt: p.since,
-          expiresAt: new Date(Date.parse(p.since) + 600_000).toISOString(),
-          status: "pending",
-        })),
-      },
-    }),
-  );
+  await page.route("**/api/ui/control/devices", (r) => r.fulfill({ json: { devices: [] } }));
   if (side === "phone")
     await page.route("**/api/ui/setup/status", (r) => r.fulfill({ status: 403, json: { reason: "not_this_machine" } }));
 }
 
-/** A phone that reloaded mid-wait: the request it filed is remembered for the tab. */
-const WAITING_REQUEST = JSON.stringify({
-  requestId: "req1",
-  check: "482913",
-  key: { id: "c1", alg: -7, spki: "" },
-  name: "iPhone",
-  device: "iPhone · Safari",
-  fromIp: "192.168.1.31",
-  createdAt: new Date().toISOString(),
-  expiresAt: new Date(Date.now() + 600_000).toISOString(),
-  status: "pending",
-});
-
-async function phoneShot(page, file, scene, side, path = "/phone", rp) {
+async function phoneShot(page, file, scene, side) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
-  await stubPhone(page, scene, side, rp);
-  await open(page, path);
-  await page.locator(".phone-page .steps, .ctl-hint[data-wrong-origin]").first().waitFor({ timeout: 20_000 });
+  await stubPhone(page, scene, side);
+  await open(page, "/phone");
+  await page.locator(".phone-page .steps").first().waitFor({ timeout: 20_000 });
   await sleep(600);
-  // Step 3 is the point of these two; on the laptop it sits under the Wi-Fi lane's steps.
-  if (scene === "waiting" || scene === "trusted")
-    await page.evaluate(() => document.querySelector("[data-phone-step='3']")?.scrollIntoView({ block: "end" }));
   await shot(page, file);
 }
-
-const phoneDesktop = {
-  "phone-tailscale-desktop.png": (page) => phoneShot(page, "phone-tailscale-desktop.png", "tailscale", "laptop"),
-  "phone-wifi-desktop.png": (page) => phoneShot(page, "phone-wifi-desktop.png", "wifi", "laptop"),
-  "phone-waiting-desktop.png": (page) => phoneShot(page, "phone-waiting-desktop.png", "waiting", "laptop"),
-  "phone-trusted-desktop.png": (page) => phoneShot(page, "phone-trusted-desktop.png", "trusted", "laptop"),
-  "phone-wrong-origin-desktop.png": (page) =>
-    phoneShot(page, "phone-wrong-origin-desktop.png", "wifi", "laptop", sessionPath(needsKey)),
-};
-// The phone's own waits happen on the https origin: here the TLS instance, whose rp id is localhost.
-const phonePhone = {
-  "phone-tailscale-phone.png": (page) => phoneShot(page, "phone-tailscale-phone.png", "serving", "phone"),
-  "phone-wifi-phone.png": (page) => phoneShot(page, "phone-wifi-phone.png", "wifi", "phone"),
-  "phone-waiting-phone.png": async (page) => {
-    await page.context().addInitScript((v) => sessionStorage.setItem("sessionpipe.device-request", v), WAITING_REQUEST);
-    await phoneShot(page, "phone-waiting-phone.png", "waiting", "phone", `${TLS}/phone`, "localhost");
-    await page.evaluate(() => sessionStorage.removeItem("sessionpipe.device-request"));
-  },
-  "phone-trusted-phone.png": async (page) => {
-    await page.context().addInitScript((v) => sessionStorage.setItem("sessionpipe.device-request", v), WAITING_REQUEST);
-    await phoneShot(page, "phone-trusted-phone.png", "trusted", "phone", `${TLS}/phone`, "localhost");
-    await page
-      .locator("[data-added]")
-      .waitFor({ timeout: 10_000 })
-      .catch(() => log("phone: trusted did not land"));
-    await shot(page, "phone-trusted-phone.png");
-    await page.evaluate(() => sessionStorage.removeItem("sessionpipe.device-request"));
-  },
-  "phone-wrong-origin-phone.png": (page) =>
-    phoneShot(page, "phone-wrong-origin-phone.png", "wifi", "phone", sessionPath(needsKey)),
-};
 
 /** Runs each group's shots, one context per appearance that any of them wants. */
 async function runGroup(kind, mode, shots, after) {
   for (const scheme of ["dark", "light"]) {
-    const names = Object.keys(shots).filter((f) => schemeOf(f) === scheme);
-    const extras = after && scheme === DEFAULT_SCHEME;
+    const names = Object.keys(shots).filter((f) => schemeOf(f) === scheme && wanted(f));
+    const extras = after && scheme === DEFAULT_SCHEME && !ONLY;
     if (names.length === 0 && !extras) continue;
     const ctx = await context(kind, mode, scheme);
     const page = await ctx.newPage();
@@ -598,21 +593,19 @@ async function runGroup(kind, mode, shots, after) {
   }
 }
 
-await runGroup("desktop", "advanced", desktopAdvanced, THEMES ? themesExtras : null);
 await runGroup("desktop", "simple", desktopSimple);
+await runGroup("desktop", "advanced", desktopAdvanced, THEMES ? themesExtras : null);
 await runGroup("phone", "simple", phoneSimple);
-await runGroup("desktop", "advanced", phoneDesktop);
-await runGroup("phone", "simple", phonePhone);
 
 // The GIF: six seconds of the board, recorded at 1×, cut from the moment a needs-you card
 // is on the board, so the accent reads on the surface it is shot on.
-if (GIF) {
+if (GIF && wanted("board.gif")) {
   const has = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" }).status === 0;
   if (!has) log("ffmpeg not found; board.gif skipped");
   else {
     const vdir = path.join(OUT, ".video");
     rmSync(vdir, { recursive: true, force: true });
-    const ctx = await context("desktop", "advanced", schemeOf("board.gif"), {
+    const ctx = await context("desktop", "simple", schemeOf("board.gif"), {
       deviceScaleFactor: 1,
       recordVideo: { dir: vdir, size: { width: 1440, height: 900 } },
     });
@@ -633,10 +626,10 @@ if (GIF) {
     const src = path.join(vdir, video);
     const palette = path.join(vdir, "palette.png");
     const gif = path.join(OUT, "board.gif");
-    const filters = "fps=10,scale=960:-1:flags=lanczos";
+    const filters = "fps=8,scale=800:-1:flags=lanczos";
     spawnSync(
       "ffmpeg",
-      ["-y", "-ss", from, "-t", "6", "-i", src, "-vf", `${filters},palettegen=stats_mode=diff`, palette],
+      ["-y", "-ss", from, "-t", "6", "-i", src, "-vf", `${filters},palettegen=max_colors=48:stats_mode=diff`, palette],
       { stdio: "ignore" },
     );
     spawnSync(
