@@ -59,6 +59,15 @@ All notable changes to `sessionpipe-gui`. The format follows
   History indexing is on by default and can be turned off in Settings › Data, which
   deletes that index; `--search-home` points it at another home.
 
+- **Desktop apps.** A macOS app (universal, signed and notarized, about 4 MB) and Linux
+  builds (AppImage, .deb) around the same UI, made with Tauri 2: it connects to the receiver
+  on this machine, keeps a menu bar item and a Dock badge for what needs you, notifies,
+  launches at login if asked and updates itself from GitHub Releases. It does not sign yet:
+  sending from the app waits on device keys in sessionpipe, and until then it says to send
+  from a browser. `sessionpipe-gui service install|uninstall|status` keeps a receiver
+  running. Release buttons in GitHub Actions build, sign, notarize and publish it
+  (RELEASING.md). An iOS build runs in the simulator and is not released.
+
 ### Changed
 
 - **The sessionpipe brand.** The default skin is now **sessionpipe**: ink, graphite and
