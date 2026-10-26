@@ -8,7 +8,7 @@
 // finished"; an agent opens beside as a tab right after its parent's; the palette lists
 // agents under their session and `is:subagent` keeps only them.
 import { expect, type Page, test } from "@playwright/test";
-import { openBoard, openPage } from "./helpers.js";
+import { holdBoard, openBoard, openPage } from "./helpers.js";
 
 const TITLE = "Search: review the BM25 cache";
 const parent = (page: Page) => page.locator("article.card", { hasText: TITLE }).first();
@@ -123,7 +123,8 @@ test.describe("subagents", () => {
     // One run of the scene by its key: a newer run may come in above it meanwhile.
     const key = await (await bm25(page)).getAttribute("data-flip");
     const row = page.locator(`article.card[data-flip="${key}"]`);
-    // The parent's tab first, then one of its agents.
+    // The parent's tab first, then one of its agents, on a board held still under the pointer.
+    await holdBoard(page);
     await row.locator("a.card-link").click({ modifiers: ["Shift"] });
     await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
     const disclose = row.locator("button.card-disclose");
