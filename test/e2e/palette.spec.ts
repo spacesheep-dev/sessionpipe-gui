@@ -20,7 +20,8 @@ async function open(page: Page) {
 
 /** A settled board card (idle or stale: past its first turn, so its title won't be replaced
  *  by a better one mid-test) whose title is a phrase with a word worth typing (3+ words, one of
- *  7+ letters: a session, not a repo or machine name), else the first card; its title, and that word. */
+ *  7+ letters, found in no other card's title: one session, not a repo, a machine or a near
+ *  namesake), else the first card; its title, and that word. */
 async function firstCard(page: Page): Promise<{ title: string; href: string; fragment: string }> {
   const longest = (t: string) =>
     t
@@ -28,10 +29,16 @@ async function firstCard(page: Page): Promise<{ title: string; href: string; fra
       .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ""))
       .sort((a, b) => b.length - a.length)[0] ?? "";
   const settled = page.locator("section.group--idle, section.group--stale").locator("article.card a.card-link");
+  // Every title on the board, so the word typed picks out one session, not two.
+  const all = (await page.locator("article.card .card-title").allTextContents()).map((t) => t.toLowerCase());
+  const unique = (t: string) => {
+    const w = longest(t).toLowerCase();
+    return all.filter((x) => x.includes(w)).length === 1;
+  };
   let link = page.locator("article.card a.card-link").first();
   for (let i = 0, n = await settled.count(); i < n; i++) {
     const t = ((await settled.nth(i).locator(".card-title").textContent()) ?? "").trim();
-    if (t.split(/\s+/).length >= 3 && longest(t).length >= 7) {
+    if (t.split(/\s+/).length >= 3 && longest(t).length >= 7 && unique(t)) {
       link = settled.nth(i);
       break;
     }
