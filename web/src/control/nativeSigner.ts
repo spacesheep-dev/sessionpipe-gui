@@ -28,7 +28,11 @@ export interface NativeError {
   message: string;
 }
 
-type Shell = { features?: unknown; receiver?: { id?: unknown } | null };
+type Shell = {
+  platform?: unknown;
+  features?: unknown;
+  receiver?: { id?: unknown; name?: unknown; local?: unknown } | null;
+};
 const shell = (): Shell | undefined => (globalThis as { sessionpipeShell?: Shell }).sessionpipeShell;
 
 /** The receiver this window shows, as the shell knows it (its id names it to Rust). */
@@ -37,12 +41,14 @@ export const shellReceiver = (): string | null => {
   return typeof id === "string" && id ? id : null;
 };
 
-/** The shell advertises `signer` only where a presence-gated hardware key can be made
- *  (never in a simulator, never as a software key). */
-const shellSigns = (): boolean => {
+/** The shell advertises `signer` where it was built with one: the macOS release
+ *  (`identity`), never a dev build, Linux or Windows. Rust's `status` then says whether
+ *  this device can hold the key (never in a simulator, never as a software key). */
+const builtToSign = (): boolean => {
   const f = shell()?.features;
-  return Array.isArray(f) && f.includes("signer") && !!shellReceiver();
+  return Array.isArray(f) && f.includes("signer");
 };
+const shellSigns = (): boolean => builtToSign() && !!shellReceiver();
 
 /** The receiver named (Settings may name another), else this window's. */
 const receiver = (other?: string): string => {
@@ -143,13 +149,28 @@ const receiverTakesDevice = (): boolean => {
  *  receiver carries device keys whole. */
 export const canSign = (rp?: string | null): boolean => shellSigns() && !(rp && why.has(rp)) && receiverTakesDevice();
 
+/** Why the app can't sign for `rp`, with the next step. Each reads as the fallback, not
+ *  an error: a browser's passkey still sends. A machine's own reasons (it predates device
+ *  keys, or doesn't trust this Mac yet) are signer.ts' updateWords and setupWords. */
 export function signHint(rp?: string | null): string {
   const reason = rp ? why.get(rp) : undefined;
   if (reason) return reason;
-  // Both read as the fallback, not an error: a browser's passkey still sends.
-  if (!shellSigns()) return "this app doesn't sign yet: send from a browser";
-  if (!receiverTakesDevice()) return "this receiver takes passkeys only: send from a browser";
+  if (!builtToSign())
+    return shell()?.platform === "macos"
+      ? "this build of the app has no signer: send from a browser"
+      : "the app signs on a Mac only for now: send from a browser";
+  if (!shellReceiver()) return "no receiver is open in this window";
+  // Its sessionpipe-core can't verify a device key (server/control/devicekeys.ts).
+  if (!receiverTakesDevice())
+    return `the receiver can't check this Mac's key yet: update sessionpipe-gui${receiverAt()} to send from the app, or send from a browser`;
   return "reading this Mac's key…";
+}
+
+/** Where the receiver this window shows runs, as the person knows it. */
+function receiverAt(): string {
+  const r = shell()?.receiver;
+  if (r?.local === true) return " on this Mac";
+  return typeof r?.name === "string" && r.name ? ` on ${r.name}` : "";
 }
 
 // --- the app's words ----------------------------------------------------------------------
@@ -173,7 +194,8 @@ export function errorWords(e: unknown): string | null {
 }
 
 const REFUSALS: Record<string, string> = {
-  untrusted_key: "the machine doesn't trust this Mac yet: add it from a device the machine trusts",
+  untrusted_key:
+    "the machine doesn't trust this Mac yet: set up Touch ID on Machines, and approve it from a browser it trusts",
   bad_assertion: "this Mac's signature did not verify",
   bad_grant: "the day grant did not verify; the next send asks for Touch ID again",
   outside_grant: "signed outside the grant's window; the next send asks for Touch ID again",

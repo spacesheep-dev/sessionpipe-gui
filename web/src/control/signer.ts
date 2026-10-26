@@ -80,6 +80,12 @@ export const machineTakes = (control: Pick<MachineControl, "keyTypes"> | undefin
 export const updateWords = (machine: string | undefined): string =>
   `Update sessionpipe on ${machine || "that machine"} to send from the app.`;
 
+/** The app's setup, where its device key is made and a trusted device approves it once. */
+export const SETUP_LABEL = "Sign with Touch ID";
+/** The one line where a machine takes device keys but doesn't trust this Mac's yet. */
+export const setupWords = (machine: string | undefined): string =>
+  `${machine || "That machine"} doesn't trust this Mac yet. Set up Touch ID, then approve it once from a browser or phone that machine trusts.`;
+
 /** Why Approve can't go for a device request on `machine`, or null: a device key (the
  *  request's own, or this app's, which signs the key.add) needs a machine that takes one. */
 export function approveBlocker(

@@ -22,6 +22,7 @@ import {
 } from "react";
 import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachments";
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
+import { SETUP_LABEL, signerKind } from "../control/signer";
 import { attentionMessage, toolLabel } from "../lib/format";
 import { Link } from "../lib/router";
 import { hintFor } from "../lib/shortcuts";
@@ -51,7 +52,8 @@ export interface ControlStripProps {
    *  passkey prompt being up. It wins over every other reason. */
   note?: string;
   noteKind?: "info" | "err";
-  /** This browser holds no passkey the machine trusts: a send would be refused. */
+  /** This browser holds no passkey the machine trusts (in the app: the machine doesn't
+   *  trust this Mac's device key): a send would be refused. */
   untrusted?: boolean;
   /** The app's stream to the receiver is down ("reconnecting" or "offline"): the strip
    *  waits for it, with Retry now. */
@@ -268,19 +270,33 @@ export function ControlStrip({
         ),
       };
     if (untrusted)
-      return {
-        kind: "untrusted",
-        text: (
-          <>
-            <strong>{name}</strong> trusts no passkey from this browser.
-          </>
-        ),
-        action: (
-          <Link to="/add-device" className="ctl-link">
-            Add this device
-          </Link>
-        ),
-      };
+      return signerKind() === "device"
+        ? {
+            kind: "untrusted",
+            text: (
+              <>
+                <strong>{name}</strong> doesn't trust this Mac yet.
+              </>
+            ),
+            action: (
+              <Link to="/add-device" className="ctl-link">
+                {SETUP_LABEL}
+              </Link>
+            ),
+          }
+        : {
+            kind: "untrusted",
+            text: (
+              <>
+                <strong>{name}</strong> trusts no passkey from this browser.
+              </>
+            ),
+            action: (
+              <Link to="/add-device" className="ctl-link">
+                Add this device
+              </Link>
+            ),
+          };
     if (!onSend) return null;
     if (stream)
       return {

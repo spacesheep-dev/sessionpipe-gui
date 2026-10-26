@@ -9,7 +9,7 @@
 // Run with test/e2e/control-device.config.ts against a demo receiver on the identity port.
 import { randomUUID } from "node:crypto";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
-import { CONTROL_BASE, fakeDaemon, passkeyPage, seenSetupHere, sinkToken } from "./control-helpers.js";
+import { CONTROL_BASE, fakeDaemon, passkeyPage, postSession, seenSetupHere, sinkToken } from "./control-helpers.js";
 import { asMacApp } from "./control-shell.js";
 
 // The receiver's test door holds ONE device key, as a Mac has one: asking to be trusted
@@ -70,6 +70,27 @@ test("the app's device key: asked for, approved from a browser, key.add delivere
   const m = await fakeDaemon(key, hello(name, ["passkey", "device"]), { sinkToken: sink });
   const app = await theMacApp(browser);
   try {
+    // Not set up yet: the app's Machines page offers the setup on the machine that takes
+    // device keys, and it leads to Add this Mac.
+    await app.page.goto(`${CONTROL_BASE}/settings?section=app`);
+    await expect(app.page.locator("[data-device-key] [data-setup]")).toHaveText("Sign with Touch ID…");
+    await shot(app.page, "0-app-settings-not-set-up");
+    await app.page.goto(`${CONTROL_BASE}/machines`);
+    const block = app.page.locator(`section[aria-label="${name}"]`);
+    await expect(block.locator("[data-setup]")).toBeVisible();
+    await block.locator(".machine-devices").scrollIntoViewIfNeeded();
+    await shot(app.page, "0-app-machines-not-set-up");
+    // A session there: its composer says the same, with the same way out.
+    const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Notes ${name}` });
+    await app.page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+    const foot = app.page.locator('[data-reason="untrusted"]');
+    await expect(foot).toContainText(`${name} doesn't trust this Mac yet.`);
+    await expect(foot.getByRole("link", { name: "Sign with Touch ID" })).toBeVisible();
+    await shot(app.page, "0-app-session-not-set-up");
+    await app.page.goto(`${CONTROL_BASE}/machines`);
+    await block.getByRole("link", { name: "Sign with Touch ID" }).click();
+    await expect(app.page.getByRole("heading", { name: "Sign with Touch ID" })).toBeVisible();
+    await expect(app.page).toHaveURL(/\/add-device$/);
     const check = await askToBeTrusted(app.page);
     await expect(app.page.locator(".pair-lead")).toContainText("Secure Enclave");
     await shot(app.page, "1-app-add-this-mac");
@@ -97,6 +118,15 @@ test("the app's device key: asked for, approved from a browser, key.add delivere
       .toMatchObject({ type: "device", store: "hardware", uv: "each-use", alg: -7 });
     await expect(app.page.locator("[data-added]")).toBeVisible({ timeout: 15_000 });
     await shot(app.page, "3-app-added");
+    // Set up: the machine lists this Mac's key as this one, and offers no setup any more.
+    await app.page.goto(`${CONTROL_BASE}/machines`);
+    await expect(block.locator(".machine-devices")).toContainText("Mac app (this one)");
+    await expect(block.locator("[data-setup]")).toHaveCount(0);
+    await block.locator(".machine-devices").scrollIntoViewIfNeeded();
+    await shot(app.page, "3-app-machines-set-up");
+    await app.page.goto(`${CONTROL_BASE}/settings?section=app`);
+    await expect(app.page.locator("[data-device-key]")).toContainText("The next send asks for Touch ID");
+    await expect(app.page.locator("[data-device-key] [data-setup]")).toHaveCount(0);
 
     // The app sends: a start, signed under the device key's day grant (no passkey anywhere).
     const sends: Record<string, unknown>[] = [];
@@ -155,6 +185,11 @@ test("a daemon that predates device keys: Approve waits, with one line", async (
     await expect(row).toContainText(`Update sessionpipe on ${name} to send from the app.`);
     await expect(row.getByRole("button", { name: "Approve" })).toBeDisabled();
     await shot(browserPage, "6-browser-old-daemon");
+    // The app's own Machines page says the same of that machine, and offers no setup there.
+    await app.page.goto(`${CONTROL_BASE}/machines`);
+    const block = app.page.locator(`section[aria-label="${name}"]`);
+    await expect(block.locator(".machine-devices")).toContainText("update sessionpipe here to send from the app");
+    await expect(block.locator("[data-setup]")).toHaveCount(0);
   } finally {
     await m.stop();
     await app.ctx.close();
@@ -185,12 +220,14 @@ test("a receiver that takes passkeys only: the app offers no device key and poin
     if (r.status() >= 400 && !r.url().includes("/_test/device/")) errors.push(`${r.status()} ${r.url()}`);
   });
   try {
-    const fallback = "This receiver takes passkeys only: send from a browser.";
+    const fallback =
+      "The receiver can't check this Mac's key yet: update sessionpipe-gui on this Mac to send from the app, or send from a browser.";
     await app.page.goto(`${CONTROL_BASE}/add-device`);
     await expect(app.page.getByText(fallback.slice(0, -1), { exact: true })).toBeVisible();
     await expect(app.page.getByRole("button", { name: "Add this Mac" })).toBeDisabled();
     await app.page.goto(`${CONTROL_BASE}/machines`);
     await expect(app.page.locator(".machines-note")).toHaveText(fallback);
+    await expect(app.page.locator("[data-setup]")).toHaveCount(0);
     // Nothing asked the signer to make, sign or pair with a key.
     const calls = await app.page.evaluate(
       () => (window as unknown as { __identityCalls: { cmd: string }[] }).__identityCalls,

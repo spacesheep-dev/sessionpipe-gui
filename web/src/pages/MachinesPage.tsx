@@ -20,7 +20,7 @@ import { useRpId } from "../control/hooks";
 import { openNewSession } from "../control/newSessionState";
 import { PendingDevices, sentence } from "../control/PendingDevices";
 import { PendingPairings } from "../control/PendingPairings";
-import { canSign, signHint, useOwnKeys } from "../control/signer";
+import { canSign, machineTakes, SETUP_LABEL, signerKind, signHint, useOwnKeys } from "../control/signer";
 import { useMachines, useStore } from "../data/hooks";
 import "../lib/acp";
 import { harnessMark } from "../lib/format";
@@ -144,6 +144,16 @@ function MachineBlock({
     ...Object.entries(m.harnesses),
     ...(c?.harnesses ?? []).filter((h) => !(h in m.harnesses)).map((h) => [h, undefined] as const),
   ];
+  // In the app: a daemon that predates device keys says so; one that takes them but doesn't
+  // trust this Mac's yet offers the setup (CONTROL.md §2).
+  const app =
+    secure && c && signerKind() === "device"
+      ? !machineTakes(c, "device")
+        ? "update"
+        : c.keys.some((k) => mine.has(k.id))
+          ? null
+          : "setup"
+      : null;
   const devices =
     c && c.keys.length > 0
       ? c.keys.map((k) => `${k.name ?? k.id.slice(0, 8)}${mine.has(k.id) ? " (this one)" : ""}`).join(", ")
@@ -246,6 +256,15 @@ function MachineBlock({
             <span className="form-kv">
               {devices}
               {c.queued > 0 && <span className="machine-sub"> · {c.queued} queued</span>}
+              {app === "update" && <span className="machine-sub"> · update sessionpipe here to send from the app</span>}
+              {app === "setup" && (
+                <>
+                  {" · "}
+                  <Link to="/add-device" className="link" data-setup>
+                    {SETUP_LABEL}
+                  </Link>
+                </>
+              )}
             </span>
           </li>
         )}

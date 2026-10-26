@@ -8,6 +8,8 @@
 import { useEffect, useState } from "react";
 import { ActionButton } from "../components/bits";
 import { Group, Row } from "../components/SettingsWindow";
+import { useMachines } from "../data/hooks";
+import { Link } from "../lib/router";
 import { lastInfo, type TrustedKey } from "./api";
 import { useRpId } from "./hooks";
 // Loaded only inside the app (Settings › App), so it may import the native adapter itself.
@@ -20,6 +22,7 @@ import {
   shellReceiver,
   status,
 } from "./nativeSigner";
+import { SETUP_LABEL } from "./signer";
 
 /** A key id as people compare it with `sessionpipe control keys`: its first 16 characters. */
 export const shortKeyId = (id: string): string => (id.length > 16 ? `${id.slice(0, 16)}…` : id);
@@ -36,6 +39,7 @@ export default function DeviceKeySettings({ receiverId }: { receiverId: string }
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
+  const machines = useMachines();
 
   useEffect(() => {
     if (here && !rp) return;
@@ -76,6 +80,10 @@ export default function DeviceKeySettings({ receiverId }: { receiverId: string }
       : key
         ? null
         : "None yet";
+  // Set up: a machine of this receiver trusts the key (its key.add was delivered). Until
+  // then the one thing to do here is the setup, whether or not the key was made already.
+  const trusted = !!key && machines.some((m) => m.control?.keys.some((k) => k.id === key.id));
+  const setup = here && !!s?.available && !trusted;
   return (
     <div data-device-key={key?.id ?? ""}>
       <Group
@@ -94,17 +102,25 @@ export default function DeviceKeySettings({ receiverId }: { receiverId: string }
         <Row
           label="This Mac's key"
           hint={
-            key
-              ? s?.grantExp
-                ? `Unlocked for sending until ${until(s.grantExp)}`
-                : "The next send asks for Touch ID, once for the day"
-              : "Made the first time this Mac is added to a machine"
+            setup
+              ? "Not set up yet: a browser or phone the machine trusts approves this Mac once"
+              : key
+                ? s?.grantExp
+                  ? `Unlocked for sending until ${until(s.grantExp)}`
+                  : "The next send asks for Touch ID, once for the day"
+                : "Made the first time this Mac is added to a machine"
           }
         >
-          {value ?? (
-            <span className="num" title={key?.id}>
-              {key ? shortKeyId(key.id) : ""}
-            </span>
+          {setup ? (
+            <Link to="/add-device" className="btn btn--sm" data-setup>
+              {SETUP_LABEL}…
+            </Link>
+          ) : (
+            (value ?? (
+              <span className="num" title={key?.id}>
+                {key ? shortKeyId(key.id) : ""}
+              </span>
+            ))
           )}
         </Row>
         {key && (

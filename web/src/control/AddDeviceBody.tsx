@@ -13,7 +13,7 @@ import { ms, useNow } from "../lib/time";
 import { controlApi, httpsHere } from "./api";
 import { useRpId } from "./hooks";
 import { sentence } from "./PendingDevices";
-import { canSign, signerKind, signHint } from "./signer";
+import { canSign, SETUP_LABEL, signerKind, signHint } from "./signer";
 import { NAME_MAX, useDeviceRequest } from "./useDeviceRequest";
 import { guessDeviceName } from "./webauthn";
 import { refusalWords } from "./words";
@@ -51,7 +51,7 @@ export function AddDevicePage() {
   return (
     <div className="page page--doc page--grouped pair add-device">
       <PageBar
-        title={device ? "Add this Mac" : "Add this device"}
+        title={device ? SETUP_LABEL : "Add this device"}
         back={<BackButton onClick={() => back("/machines")} label="Machines" />}
       />
       <p className="caption pair-lead">
@@ -108,8 +108,11 @@ export function AddDevicePage() {
         </div>
       ) : phase.k === "waiting" ? (
         <p className="pair-note">
-          On the Mac (or any device the machine already trusts), open <strong>Machines</strong> in the GUI: this request
-          is listed there with the same digits. Approve it with the {device ? "device" : "passkey"} that paired.
+          {device
+            ? "In a browser or on a phone the machine already trusts"
+            : "On the Mac (or any device the machine already trusts)"}
+          , open <strong>Machines</strong> in the GUI: this request is listed there with the same digits. Approve it
+          with the passkey that paired.
         </p>
       ) : null}
 

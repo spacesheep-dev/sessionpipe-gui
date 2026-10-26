@@ -14,6 +14,7 @@ import {
   nativeErrorWords,
   nativeSigner,
   ownKeys,
+  setupWords,
   sign,
   signerKind,
   signerLabel,
@@ -33,7 +34,11 @@ const DEVICE = {
 const MACHINE = "m_testmachine0000000001";
 
 /** The shell's flag and a stand-in Tauri runtime whose `invoke` the test scripts. */
-function inShell(answer: (cmd: string, args: Record<string, unknown>) => unknown, features = ["signer"]) {
+function inShell(
+  answer: (cmd: string, args: Record<string, unknown>) => unknown,
+  features = ["signer"],
+  shell: Record<string, unknown> = {},
+) {
   const calls: { cmd: string; args: Record<string, unknown> }[] = [];
   g.sessionpipeShell = {
     v: 1,
@@ -41,6 +46,7 @@ function inShell(answer: (cmd: string, args: Record<string, unknown>) => unknown
     features,
     receiver: { id: "rx0123abcd", name: "This Mac", origin: "http://127.0.0.1:7819", local: true },
     rxBase: null,
+    ...shell,
   };
   g.__TAURI_INTERNALS__ = {
     invoke: async (cmd: string, args: Record<string, unknown> = {}) => {
@@ -97,15 +103,57 @@ describe("signer selection", () => {
     await nativeSigner();
     await rpId();
     expect(canSign("localhost")).toBe(false);
-    expect(signHint("localhost")).toBe("this receiver takes passkeys only: send from a browser");
+    expect(signHint("localhost")).toBe(
+      "the receiver can't check this Mac's key yet: update sessionpipe-gui on this Mac to send from the app, or send from a browser",
+    );
     // A build without the `identity` feature advertises no signer.
     inShell(() => ({ available: true }), []);
     expect(canSign("localhost")).toBe(false);
-    expect(signHint("localhost")).toBe("this app doesn't sign yet: send from a browser");
+    expect(signHint("localhost")).toBe("this build of the app has no signer: send from a browser");
     // A browser on the same receiver still signs with its passkey, whatever the app can't.
     delete g.sessionpipeShell;
     expect(signerKind()).toBe("passkey");
     expect(machineTakes({ keyTypes: undefined })).toBe(true);
+  });
+
+  it("the line says exactly why the app can't sign, with the next step", async () => {
+    vi.stubGlobal("fetch", async () =>
+      Response.json({ control: { enabled: true, rpId: "localhost", machines: 1, keyTypes: ["passkey"] } }),
+    );
+    await nativeSigner();
+    // The app on Linux or Windows: built without the signer.
+    inShell(() => null, [], { platform: "linux" });
+    expect(signHint("localhost")).toBe("the app signs on a Mac only for now: send from a browser");
+    // No receiver in this window yet.
+    inShell(() => null, ["signer"], { receiver: null });
+    expect(canSign("localhost")).toBe(false);
+    expect(signHint("localhost")).toBe("no receiver is open in this window");
+    // A receiver on another computer, whose sessionpipe-core predates device keys: named.
+    inShell(() => null, ["signer"], {
+      receiver: { id: "rx0123abcd", name: "studio", origin: "https://studio.local:7373", local: false },
+    });
+    await rpId();
+    expect(signHint("localhost")).toBe(
+      "the receiver can't check this Mac's key yet: update sessionpipe-gui on studio to send from the app, or send from a browser",
+    );
+  });
+
+  it("a Mac that can't hold the key: Rust's reason, and nothing offered", async () => {
+    vi.stubGlobal("fetch", async () =>
+      Response.json({ control: { enabled: true, rpId: "localhost", machines: 1, keyTypes: ["passkey", "device"] } }),
+    );
+    const reason = "Sending needs a Mac with a Secure Enclave and Touch ID or a password";
+    const calls = inShell(() => ({ available: false, reason, grantExp: null }));
+    await nativeSigner();
+    await rpId();
+    expect(await refresh("localhost")).toBeNull();
+    expect(canSign("localhost")).toBe(false);
+    expect(signHint("localhost")).toBe(reason);
+    expect(calls.map((c) => c.cmd)).toEqual(["plugin:identity|status"]);
+    // Once it can (a password set, say), the reason goes.
+    inShell(() => ({ available: true, grantExp: null }));
+    await refresh("localhost");
+    expect(canSign("localhost")).toBe(true);
   });
 
   it("keyTypesOf: Info.control.keyTypes, else the well-known, else passkeys only", () => {
@@ -147,6 +195,9 @@ describe("the machine's key_types", () => {
     expect(machineTakes({ keyTypes: ["passkey"] }, "device")).toBe(false);
     expect(machineTakes({ keyTypes: ["passkey", "device"] }, "device")).toBe(true);
     expect(updateWords("studio-mac")).toBe("Update sessionpipe on studio-mac to send from the app.");
+    expect(setupWords("studio-mac")).toBe(
+      "studio-mac doesn't trust this Mac yet. Set up Touch ID, then approve it once from a browser or phone that machine trusts.",
+    );
   });
 
   it("PendingDevices' Approve: disabled with one line for a device key, or from the app, on an old daemon", () => {

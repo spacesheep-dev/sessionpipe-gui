@@ -297,10 +297,13 @@ keeps a menu bar item and a Dock badge that count what needs you, notifies you, 
 login if you like, and updates itself. Every release is
 on the [releases page](https://github.com/spacesheep-dev/sessionpipe-gui/releases).
 
-The app shows everything; for now it sends nothing itself. Signing a prompt, a start or an
-answer from the app waits on device keys in sessionpipe; until then the app says so and you
-send from a browser, where your passkey signs. An iPhone build runs in the simulator and is
-not released.
+On a Mac the app also sends: prompts, new sessions and permission answers, from the window
+or from a notification. It signs with a key in the Mac's Secure Enclave, unlocked with Touch
+ID once a day. Set it up once with **Sign with Touch ID** (on Machines, or Settings › App):
+a browser or phone the machine already trusts approves the Mac with its passkey. This needs
+a receiver and a machine that take device keys (sessionpipe 0.10); where either is older,
+or on Linux, the app says which and you send from a browser, where your passkey signs. An
+iPhone build runs in the simulator and is not released.
 
 ## How it works
 

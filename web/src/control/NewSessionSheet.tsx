@@ -57,7 +57,7 @@ import {
   saveDraft,
 } from "./newSessionState";
 import { sentence } from "./PendingDevices";
-import { canSign, machineTakes, signerKind, signHint, updateWords, useOwnKeys } from "./signer";
+import { canSign, machineTakes, setupWords, signerKind, signHint, updateWords, useOwnKeys } from "./signer";
 import { PERMISSION_LABEL, sendErrorWords, WRONG_ORIGIN } from "./words";
 import "./newSessionSheet.css";
 
@@ -110,10 +110,7 @@ function blocker(
   if (!machineTakes(c)) return { short: "needs a newer sessionpipe", long: updateWords(m.name) };
   if (!c.keys.some((k) => o.mine.has(k.id)))
     return device
-      ? {
-          short: `${m.name} doesn't trust this Mac`,
-          long: `${m.name} doesn't trust this Mac yet. Add it from a device it trusts.`,
-        }
+      ? { short: `${m.name} doesn't trust this Mac`, long: setupWords(m.name) }
       : {
           short: `no passkey here that ${m.name} trusts`,
           long: `${m.name} trusts no passkey from this browser. Add this device from one it trusts.`,

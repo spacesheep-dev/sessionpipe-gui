@@ -42,6 +42,21 @@ All notable changes to `sessionpipe-gui`. The format follows
 - The receiver's second look at a command follows 0.10.0: the closed field set per kind,
   files on a prompt only for a machine that says `prompt_files`, and a level at most Safe
   on an inherit machine. A hello keeps up to 64 harnesses.
+- **The Mac app sends.** The macOS release carries its Touch ID signer: a key in the
+  Mac's Secure Enclave signs new sessions, prompts and permission answers, from the window
+  and from a notification's Allow, Deny and Reply. Set it up once with **Sign with Touch
+  ID** (on Machines, a session's composer or Settings › App › Signing): a browser or phone
+  the machine already trusts approves the Mac with its passkey, and then one Touch ID a
+  day unlocks sending. It needs a receiver whose sessionpipe-core verifies device keys and
+  a machine that takes them (sessionpipe 0.10). The release needs no new entitlement.
+
+### Changed
+
+- Where the app can't send, it says exactly why, with the next step: this build has no
+  signer (Linux, Windows, a dev build), the receiver can't check the Mac's key yet (update
+  sessionpipe-gui), the machine predates device keys (update sessionpipe there), or the
+  Mac isn't set up for that machine yet (Sign with Touch ID). Notifications offer Allow,
+  Deny and Reply only once the Mac holds a key for that receiver.
 
 ## [0.3.2] - 2026-10-27
 
