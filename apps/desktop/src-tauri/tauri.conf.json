@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "sessionpipe",
+  "version": "../../../package.json",
+  "identifier": "dev.spacesheep.sessionpipe",
+  "build": {
+    "frontendDist": "../dist-app",
+    "devUrl": "http://127.0.0.1:7812"
+  },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": false,
+    "macOSPrivateApi": true,
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' rx: http://rx.localhost; img-src 'self' data: blob: rx: http://rx.localhost; font-src 'self' rx: http://rx.localhost; media-src 'self' rx: http://rx.localhost; connect-src 'self' ipc: http://ipc.localhost rx: http://rx.localhost; frame-src 'none'; object-src 'none'; base-uri 'none'",
+      "dangerousDisableAssetCspModification": ["style-src"],
+      "freezePrototype": false
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "category": "DeveloperTool",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.png"],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg1NkIxMTQyREIwNUY5NzgKUldSNCtRWGJRaEZyaFY1S0xQc2lJUXR1NWpFaUJxZk03bVNLbUxialN1aW53RFduQlg3YVZ1NncK",
+      "endpoints": ["https://github.com/spacesheep-dev/sessionpipe-gui/releases/latest/download/latest.json"]
+    }
+  }
+}

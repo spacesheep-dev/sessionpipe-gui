@@ -1,0 +1,46 @@
+[package]
+name = "sessionpipe-desktop"
+version = "0.2.0"
+description = "sessionpipe for macOS, Windows and Linux: a thin Tauri 2 shell around the bundled web UI."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+default-run = "sessionpipe-desktop"
+
+[lib]
+name = "sessionpipe_desktop"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-dialog = "2"
+sp-receivers = { path = "../../crates/sp-receivers" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "time"] }
+log = { version = "0.4", features = ["std"] }
+url = "2"
+# The signer (identity's crate), only with the `identity` feature.
+sp-identity = { path = "../../crates/sp-identity", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSSet", "NSError", "NSNotification", "NSOperation", "NSDictionary", "NSObject", "NSValue", "NSUserDefaults", "NSDate", "NSBundle"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSWorkspace", "NSRunningApplication", "NSResponder", "NSDockTile", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSView", "NSCell", "NSButtonCell"] }
+objc2-user-notifications = { version = "0.3", features = ["UNUserNotificationCenter", "UNNotification", "UNNotificationRequest", "UNNotificationContent", "UNNotificationAction", "UNNotificationCategory", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "block2"] }
+objc2-service-management = { version = "0.3", features = ["SMAppService"] }
+
+[features]
+default = []
+# Wires sp_identity::init(lookup), capabilities/identity.json and the native answers
+# from notifications. Off by default: the default build never compiles the signer.
+identity = ["dep:sp-identity"]

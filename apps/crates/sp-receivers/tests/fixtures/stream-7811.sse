@@ -1,0 +1,479 @@
+event: snapshot
+data: {"kind":"snapshot","snapshot":{"sessions":[{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","cwd":"~/code/search-api","machine":"build-box","state":"idle","stateSince":"2026-10-24T19:55:14.829Z","openAttentions":[]},{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Our Stripe webhook handler keeps retrying when\u2026","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:14.394Z","openAttentions":[]},{"key":"claude-code:2d424493-5986-4447-9ff4-1d87cb1952c5","harness":"claude-code","id":"2d424493-5986-4447-9ff4-1d87cb1952c5","title":"Rate limiter for the public API","cwd":"~/code/search-api","machine":"studio-mac","state":"done","stateSince":"2026-10-22T09:50:10.445Z","openAttentions":[]},{"key":"claude-code:6912d529-b413-429c-a7ea-22885e20ffc5","harness":"claude-code","id":"6912d529-b413-429c-a7ea-22885e20ffc5","title":"Flaky checkout test","cwd":"~/code/docs-site","machine":"studio-mac","state":"done","stateSince":"2026-10-20T13:27:41.121Z","openAttentions":[]},{"key":"claude-code:99774dd2-a827-49b1-8741-5c7dbaa8cb5f","harness":"claude-code","id":"99774dd2-a827-49b1-8741-5c7dbaa8cb5f","title":"Migrate sessions table to uuid","cwd":"~/code/design-system","machine":"studio-mac","state":"done","stateSince":"2026-10-18T14:48:52.787Z","openAttentions":[]},{"key":"codex:01a16f7b-28fd-7c1d-9f67-b17e697c4791","harness":"codex","id":"01a16f7b-28fd-7c1d-9f67-b17e697c4791","title":"Why is the nightly build red","cwd":"~/code/notify-service","machine":"build-box","state":"done","stateSince":"2026-10-17T05:45:48.738Z","openAttentions":[]},{"key":"claude-code:82c711d2-5709-456a-bb72-a211f3798820","harness":"claude-code","id":"82c711d2-5709-456a-bb72-a211f3798820","title":"Offline cart sync","cwd":"~/code/mobile","machine":"studio-mac","state":"done","stateSince":"2026-10-15T12:19:15.914Z","openAttentions":[]},{"key":"claude-code:851f0976-7893-470c-8e58-80ce7d87b7b1","harness":"claude-code","id":"851f0976-7893-470c-8e58-80ce7d87b7b1","title":"Upgrade to Vite 6","cwd":"~/code/mobile","machine":"build-box","state":"done","stateSince":"2026-10-12T23:33:18.629Z","openAttentions":[]},{"key":"gemini-cli:78603d05-426c-49f0-a124-699602139d46","harness":"gemini-cli","id":"78603d05-426c-49f0-a124-699602139d46","title":"Can you explain the retry queue to me","cwd":"~/work/data-pipeline","machine":"studio-mac","state":"done","stateSince":"2026-10-11T20:29:18.911Z","openAttentions":[]},{"key":"claude-code:291ddedb-37f0-452e-bdcf-9b969b03b5c6","harness":"claude-code","id":"291ddedb-37f0-452e-bdcf-9b969b03b5c6","title":"Search ranking regression","cwd":"~/code/mobile","machine":"studio-mac","state":"done","stateSince":"2026-10-08T16:20:20.054Z","openAttentions":[]},{"key":"codex:01a16f7b-28fd-768f-9c78-76dac403e04c","harness":"codex","id":"01a16f7b-28fd-768f-9c78-76dac403e04c","title":"Late events in the pipeline","cwd":"~/code/billing","machine":"build-box","state":"done","stateSince":"2026-10-07T08:35:12.977Z","openAttentions":[]},{"key":"claude-code:9689c205-05d9-4868-90ee-048717038cfe","harness":"claude-code","id":"9689c205-05d9-4868-90ee-048717038cfe","title":"Docs: getting started rewrite","cwd":"~/code/billing","machine":"build-box","state":"done","stateSince":"2026-10-05T17:40:54.615Z","openAttentions":[]},{"key":"antigravity:b73ac995-70a0-4b42-971b-e3feac2b3679","harness":"antigravity","id":"b73ac995-70a0-4b42-971b-e3feac2b3679","title":"Add the audit log export","cwd":"~/work/data-pipeline","machine":"studio-mac","state":"done","stateSince":"2026-10-03T09:04:57.492Z","openAttentions":[]},{"key":"claude-code:27baf4be-c6a2-4f0a-837a-4d0f17555012","harness":"claude-code","id":"27baf4be-c6a2-4f0a-837a-4d0f17555012","title":"Fix the CSV import encoding","cwd":"~/work/infra","machine":"studio-mac","state":"done","stateSince":"2026-10-01T03:22:53.402Z","openAttentions":[]},{"key":"claude-code:b60505a8-0738-4741-b01b-40f34a3dcb3d","harness":"claude-code","id":"b60505a8-0738-4741-b01b-40f34a3dcb3d","title":"Terraform drift in staging","cwd":"~/code/notify-service","machine":"studio-mac","state":"done","stateSince":"2026-09-29T21:11:18.314Z","openAttentions":[]},{"key":"codex:01a16f7b-28fd-7ced-9be3-e52d9e5592db","harness":"codex","id":"01a16f7b-28fd-7ced-9be3-e52d9e5592db","title":"Onboarding emails","cwd":"~/code/billing","machine":"studio-mac","state":"done","stateSince":"2026-09-27T14:53:02.231Z","openAttentions":[]},{"key":"claude-code:6f7aaa2e-8122-4c64-9890-ff6360ce899b","harness":"claude-code","id":"6f7aaa2e-8122-4c64-9890-ff6360ce899b","title":"Tighten the CSP header","cwd":"~/work/infra","machine":"build-box","state":"done","stateSince":"2026-09-25T08:37:12.200Z","openAttentions":[]}]}}
+
+event: event
+data: {"kind":"event","session":{"key":"codex:01a16f7b-6395-7078-833f-794fbafd6ef5","harness":"codex","id":"01a16f7b-6395-7078-833f-794fbafd6ef5","cwd":"~/work/infra","machine":"build-box","state":"idle","stateSince":"2026-10-24T19:55:19.829Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: stats
+data: {"kind":"stats"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Before I merge the BM25 cache, review it from\u2026","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Before I merge the BM25 cache, review it from\u2026","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Our Stripe webhook handler keeps retrying when\u2026","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:14.394Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Our Stripe webhook handler keeps retrying when\u2026","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:14.394Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"codex:01a16f7b-6395-7078-833f-794fbafd6ef5","harness":"codex","id":"01a16f7b-6395-7078-833f-794fbafd6ef5","title":"Why does the staging deploy take 14 minutes?\u2026","cwd":"~/work/infra","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:24.727Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:1383a660-5d41-4feb-be25-294831348870","harness":"claude-code","id":"1383a660-5d41-4feb-be25-294831348870","cwd":"~/code/mobile","machine":"build-box","state":"idle","stateSince":"2026-10-24T19:55:24.829Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: stats
+data: {"kind":"stats"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Before I merge the BM25 cache, review it from\u2026","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Before I merge the BM25 cache, review it from\u2026","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Before I merge the BM25 cache, review it from\u2026","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: machine
+data: {"kind":"machine"}
+
+event: stats
+data: {"kind":"stats"}
+
+event: event
+data: {"kind":"event","session":{"key":"codex:01a16f7b-6395-7078-833f-794fbafd6ef5","harness":"codex","id":"01a16f7b-6395-7078-833f-794fbafd6ef5","title":"Why does the staging deploy take 14 minutes?\u2026","cwd":"~/work/infra","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:24.727Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"codex:01a16f7b-6395-7078-833f-794fbafd6ef5","harness":"codex","id":"01a16f7b-6395-7078-833f-794fbafd6ef5","title":"Why does the staging deploy take 14 minutes?\u2026","cwd":"~/work/infra","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:24.727Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Our Stripe webhook handler keeps retrying when\u2026","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:14.394Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Our Stripe webhook handler keeps retrying when\u2026","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:14.394Z","openAttentions":[]}}
+
+: ping
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Before I merge the BM25 cache, review it from\u2026","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Before I merge the BM25 cache, review it from\u2026","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"antigravity:a7ae520f-e701-4ec5-a12e-83183dabed42","harness":"antigravity","id":"a7ae520f-e701-4ec5-a12e-83183dabed42","title":"The Button's focus ring disappears on the dark\u2026","cwd":"~/code/design-system","machine":"build-box","state":"idle","stateSince":"2026-10-24T19:55:34.829Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"antigravity:a7ae520f-e701-4ec5-a12e-83183dabed42","harness":"antigravity","id":"a7ae520f-e701-4ec5-a12e-83183dabed42","title":"The Button's focus ring disappears on the dark\u2026","cwd":"~/code/design-system","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:34.829Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: stats
+data: {"kind":"stats"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:1383a660-5d41-4feb-be25-294831348870","harness":"claude-code","id":"1383a660-5d41-4feb-be25-294831348870","title":"Profile the cart screen on a cold start and tell\u2026","cwd":"~/code/mobile","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:35.814Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:1383a660-5d41-4feb-be25-294831348870","harness":"claude-code","id":"1383a660-5d41-4feb-be25-294831348870","title":"Profile the cart screen on a cold start and tell\u2026","cwd":"~/code/mobile","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:35.814Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Webhook retry on bad signature","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:14.394Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Webhook retry on bad signature","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:14.394Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Webhook retry on bad signature","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:14.394Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Webhook retry on bad signature","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:14.394Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Webhook retry on bad signature","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:14.394Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Webhook retry on bad signature","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:14.394Z","openAttentions":[]}}
+
+event: stats
+data: {"kind":"stats"}
+
+event: event
+data: {"kind":"event","session":{"key":"antigravity:a7ae520f-e701-4ec5-a12e-83183dabed42","harness":"antigravity","id":"a7ae520f-e701-4ec5-a12e-83183dabed42","title":"The Button's focus ring disappears on the dark\u2026","cwd":"~/code/design-system","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:34.829Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:1383a660-5d41-4feb-be25-294831348870","harness":"claude-code","id":"1383a660-5d41-4feb-be25-294831348870","title":"Profile the cart screen on a cold start and tell\u2026","cwd":"~/code/mobile","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:35.814Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"antigravity:a7ae520f-e701-4ec5-a12e-83183dabed42","harness":"antigravity","id":"a7ae520f-e701-4ec5-a12e-83183dabed42","title":"The Button's focus ring disappears on the dark\u2026","cwd":"~/code/design-system","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:34.829Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"gemini-cli:7da3f18c-565c-45c4-b548-d599c9c18178","harness":"gemini-cli","id":"7da3f18c-565c-45c4-b548-d599c9c18178","cwd":"~/code/docs-site","machine":"studio-mac","state":"idle","stateSince":"2026-10-24T19:55:44.829Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: stats
+data: {"kind":"stats"}
+
+event: event
+data: {"kind":"event","session":{"key":"antigravity:a7ae520f-e701-4ec5-a12e-83183dabed42","harness":"antigravity","id":"a7ae520f-e701-4ec5-a12e-83183dabed42","title":"The Button's focus ring disappears on the dark\u2026","cwd":"~/code/design-system","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:34.829Z","openAttentions":[]}}
+
+: ping
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"codex:01a16f7b-6395-7078-833f-794fbafd6ef5","harness":"codex","id":"01a16f7b-6395-7078-833f-794fbafd6ef5","title":"Why does the staging deploy take 14 minutes?\u2026","cwd":"~/work/infra","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:24.727Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Webhook retry on bad signature","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:14.394Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"codex:01a16f7b-6395-7078-833f-794fbafd6ef5","harness":"codex","id":"01a16f7b-6395-7078-833f-794fbafd6ef5","title":"Why does the staging deploy take 14 minutes?\u2026","cwd":"~/work/infra","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:24.727Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: stats
+data: {"kind":"stats"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Webhook retry on bad signature","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:14.394Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"antigravity:a7ae520f-e701-4ec5-a12e-83183dabed42","harness":"antigravity","id":"a7ae520f-e701-4ec5-a12e-83183dabed42","title":"The Button's focus ring disappears on the dark\u2026","cwd":"~/code/design-system","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:34.829Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"gemini-cli:7da3f18c-565c-45c4-b548-d599c9c18178","harness":"gemini-cli","id":"7da3f18c-565c-45c4-b548-d599c9c18178","title":"The sidebar loses the active page after a\u2026","cwd":"~/code/docs-site","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:51.636Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"codex:01a16f7b-6395-7078-833f-794fbafd6ef5","harness":"codex","id":"01a16f7b-6395-7078-833f-794fbafd6ef5","title":"Why does the staging deploy take 14 minutes?\u2026","cwd":"~/work/infra","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:24.727Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"antigravity:a7ae520f-e701-4ec5-a12e-83183dabed42","harness":"antigravity","id":"a7ae520f-e701-4ec5-a12e-83183dabed42","title":"The Button's focus ring disappears on the dark\u2026","cwd":"~/code/design-system","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:34.829Z","openAttentions":[]}}
+
+event: stats
+data: {"kind":"stats"}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"codex:01a16f7b-6395-7078-833f-794fbafd6ef5","harness":"codex","id":"01a16f7b-6395-7078-833f-794fbafd6ef5","title":"Why does the staging deploy take 14 minutes?\u2026","cwd":"~/work/infra","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:24.727Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Webhook retry on bad signature","cwd":"~/code/billing","machine":"studio-mac","state":"idle","stateSince":"2026-10-24T19:55:56.519Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Webhook retry on bad signature","cwd":"~/code/billing","machine":"studio-mac","state":"idle","stateSince":"2026-10-24T19:55:56.519Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"gemini-cli:7da3f18c-565c-45c4-b548-d599c9c18178","harness":"gemini-cli","id":"7da3f18c-565c-45c4-b548-d599c9c18178","title":"The sidebar loses the active page after a\u2026","cwd":"~/code/docs-site","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:51.636Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"gemini-cli:7da3f18c-565c-45c4-b548-d599c9c18178","harness":"gemini-cli","id":"7da3f18c-565c-45c4-b548-d599c9c18178","title":"The sidebar loses the active page after a\u2026","cwd":"~/code/docs-site","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:51.636Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"codex:01a16f7b-6395-7078-833f-794fbafd6ef5","harness":"codex","id":"01a16f7b-6395-7078-833f-794fbafd6ef5","title":"Why does the staging deploy take 14 minutes?\u2026","cwd":"~/work/infra","machine":"build-box","state":"idle","stateSince":"2026-10-24T19:55:58.719Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"codex:01a16f7b-6395-7078-833f-794fbafd6ef5","harness":"codex","id":"01a16f7b-6395-7078-833f-794fbafd6ef5","title":"Why does the staging deploy take 14 minutes?\u2026","cwd":"~/work/infra","machine":"build-box","state":"idle","stateSince":"2026-10-24T19:55:58.719Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"cursor:5f6e1228-a492-4d81-aed5-ac13470fa39a","harness":"cursor","id":"5f6e1228-a492-4d81-aed5-ac13470fa39a","cwd":"~/code/notify-service","machine":"studio-mac","state":"idle","stateSince":"2026-10-24T19:55:59.829Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: stats
+data: {"kind":"stats"}
+
+: ping
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"antigravity:a7ae520f-e701-4ec5-a12e-83183dabed42","harness":"antigravity","id":"a7ae520f-e701-4ec5-a12e-83183dabed42","title":"The Button's focus ring disappears on the dark\u2026","cwd":"~/code/design-system","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:34.829Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"gemini-cli:7da3f18c-565c-45c4-b548-d599c9c18178","harness":"gemini-cli","id":"7da3f18c-565c-45c4-b548-d599c9c18178","title":"The sidebar loses the active page after a\u2026","cwd":"~/code/docs-site","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:51.636Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"gemini-cli:7da3f18c-565c-45c4-b548-d599c9c18178","harness":"gemini-cli","id":"7da3f18c-565c-45c4-b548-d599c9c18178","title":"The sidebar loses the active page after a\u2026","cwd":"~/code/docs-site","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:51.636Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:1383a660-5d41-4feb-be25-294831348870","harness":"claude-code","id":"1383a660-5d41-4feb-be25-294831348870","title":"Profile the cart screen on a cold start and tell\u2026","cwd":"~/code/mobile","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:35.814Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:1383a660-5d41-4feb-be25-294831348870","harness":"claude-code","id":"1383a660-5d41-4feb-be25-294831348870","title":"Profile the cart screen on a cold start and tell\u2026","cwd":"~/code/mobile","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:35.814Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:20.189Z","openAttentions":[]}}
+
+event: stats
+data: {"kind":"stats"}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:24.929Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:24.929Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"gemini-cli:7da3f18c-565c-45c4-b548-d599c9c18178","harness":"gemini-cli","id":"7da3f18c-565c-45c4-b548-d599c9c18178","title":"The sidebar loses the active page after a\u2026","cwd":"~/code/docs-site","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:51.636Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"gemini-cli:7da3f18c-565c-45c4-b548-d599c9c18178","harness":"gemini-cli","id":"7da3f18c-565c-45c4-b548-d599c9c18178","title":"The sidebar loses the active page after a\u2026","cwd":"~/code/docs-site","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:51.636Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"gemini-cli:7da3f18c-565c-45c4-b548-d599c9c18178","harness":"gemini-cli","id":"7da3f18c-565c-45c4-b548-d599c9c18178","title":"The sidebar loses the active page after a\u2026","cwd":"~/code/docs-site","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:55:51.636Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: stats
+data: {"kind":"stats"}
+
+event: event
+data: {"kind":"event","session":{"key":"antigravity:a7ae520f-e701-4ec5-a12e-83183dabed42","harness":"antigravity","id":"a7ae520f-e701-4ec5-a12e-83183dabed42","title":"The Button's focus ring disappears on the dark\u2026","cwd":"~/code/design-system","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:34.829Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"cursor:5f6e1228-a492-4d81-aed5-ac13470fa39a","harness":"cursor","id":"5f6e1228-a492-4d81-aed5-ac13470fa39a","title":"Digest emails go out twice when two cron workers\u2026","cwd":"~/code/notify-service","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:56:11.369Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:1383a660-5d41-4feb-be25-294831348870","harness":"claude-code","id":"1383a660-5d41-4feb-be25-294831348870","title":"Profile the cart screen on a cold start and tell\u2026","cwd":"~/code/mobile","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:35.814Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:1383a660-5d41-4feb-be25-294831348870","harness":"claude-code","id":"1383a660-5d41-4feb-be25-294831348870","title":"Profile the cart screen on a cold start and tell\u2026","cwd":"~/code/mobile","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:35.814Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"gemini-cli:7da3f18c-565c-45c4-b548-d599c9c18178","harness":"gemini-cli","id":"7da3f18c-565c-45c4-b548-d599c9c18178","title":"The sidebar loses the active page after a\u2026","cwd":"~/code/docs-site","machine":"studio-mac","state":"needs_you","stateSince":"2026-10-24T19:56:14.242Z","openAttentions":[{"attentionId":"notif-1792871774242","kind":"permission","at":"2026-10-24T19:56:14.242Z","tool":"run_shell_command","message":"run_shell_command npm run build"}]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"antigravity:a7ae520f-e701-4ec5-a12e-83183dabed42","harness":"antigravity","id":"a7ae520f-e701-4ec5-a12e-83183dabed42","title":"The Button's focus ring disappears on the dark\u2026","cwd":"~/code/design-system","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:34.829Z","openAttentions":[]}}
+
+event: stats
+data: {"kind":"stats"}
+
+event: machine
+data: {"kind":"machine"}
+
+: ping
+
+event: event
+data: {"kind":"event","session":{"key":"cursor:5f6e1228-a492-4d81-aed5-ac13470fa39a","harness":"cursor","id":"5f6e1228-a492-4d81-aed5-ac13470fa39a","title":"Digest emails go out twice when two cron workers\u2026","cwd":"~/code/notify-service","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:56:11.369Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"cursor:5f6e1228-a492-4d81-aed5-ac13470fa39a","harness":"cursor","id":"5f6e1228-a492-4d81-aed5-ac13470fa39a","title":"Digest emails go out twice when two cron workers\u2026","cwd":"~/code/notify-service","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:56:11.369Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:24.929Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:f15ebef5-a429-4fa4-88e5-9e6f8fceee54","harness":"claude-code","id":"f15ebef5-a429-4fa4-88e5-9e6f8fceee54","title":"Search: review the BM25 cache","cwd":"~/code/search-api","machine":"build-box","state":"working","stateSince":"2026-10-24T19:55:24.929Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Webhook retry on bad signature","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:56:16.519Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"claude-code:29365bb9-30ee-437d-9a25-9a8c33e82fd0","harness":"claude-code","id":"29365bb9-30ee-437d-9a25-9a8c33e82fd0","title":"Webhook retry on bad signature","cwd":"~/code/billing","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:56:16.519Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: machine
+data: {"kind":"machine"}
+
+event: stats
+data: {"kind":"stats"}
+
+event: event
+data: {"kind":"event","session":{"key":"codex:01a16f7b-6395-7078-833f-794fbafd6ef5","harness":"codex","id":"01a16f7b-6395-7078-833f-794fbafd6ef5","title":"Why does the staging deploy take 14 minutes?\u2026","cwd":"~/work/infra","machine":"build-box","state":"working","stateSince":"2026-10-24T19:56:20.352Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"cursor:5f6e1228-a492-4d81-aed5-ac13470fa39a","harness":"cursor","id":"5f6e1228-a492-4d81-aed5-ac13470fa39a","title":"Digest emails go out twice when two cron workers\u2026","cwd":"~/code/notify-service","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:56:11.369Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"cursor:5f6e1228-a492-4d81-aed5-ac13470fa39a","harness":"cursor","id":"5f6e1228-a492-4d81-aed5-ac13470fa39a","title":"Digest emails go out twice when two cron workers\u2026","cwd":"~/code/notify-service","machine":"studio-mac","state":"working","stateSince":"2026-10-24T19:56:11.369Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: event
+data: {"kind":"event","session":{"key":"antigravity:a7ae520f-e701-4ec5-a12e-83183dabed42","harness":"antigravity","id":"a7ae520f-e701-4ec5-a12e-83183dabed42","title":"The Button's focus ring disappears on the dark\u2026","cwd":"~/code/design-system","machine":"build-box","state":"idle","stateSince":"2026-10-24T19:56:23.756Z","openAttentions":[]}}
+
+event: event
+data: {"kind":"event","session":{"key":"antigravity:a7ae520f-e701-4ec5-a12e-83183dabed42","harness":"antigravity","id":"a7ae520f-e701-4ec5-a12e-83183dabed42","title":"The Button's focus ring disappears on the dark\u2026","cwd":"~/code/design-system","machine":"build-box","state":"idle","stateSince":"2026-10-24T19:56:23.756Z","openAttentions":[]}}
+
+event: machine
+data: {"kind":"machine"}
+
+event: stats
+data: {"kind":"stats"}
+

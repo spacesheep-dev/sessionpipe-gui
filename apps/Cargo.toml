@@ -1,0 +1,24 @@
+# The native apps' Rust workspace (NATIVE-SPEC.md §9). apps/ios is its own workspace and
+# shares crates/* by path; it is not listed here.
+[workspace]
+resolver = "2"
+members = ["crates/*", "desktop/src-tauri"]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/spacesheep-dev/sessionpipe-gui"
+
+# Small debug info keeps the shared target dir small (disk is tight).
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

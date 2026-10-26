@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened runtime entitlements for sessionpipe (Developer ID, outside the Mac App Store).
+  Deliberately empty: no get-task-allow (no debugger attach in a release), no
+  disable-library-validation, no JIT (WebKit's JIT runs in Apple's WebContent process, not
+  ours), no sandbox. Device keys live in the login keychain (NATIVE-SPEC §5.3), which needs
+  no keychain-access-groups entitlement and so no provisioning profile.
+-->
+<plist version="1.0">
+<dict>
+</dict>
+</plist>

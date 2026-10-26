@@ -1,0 +1,33 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The bundled main window only. No remote origin gets IPC; view windows get no capability at all.",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "allow-rx-list",
+    "allow-rx-add",
+    "allow-rx-remove",
+    "allow-rx-select",
+    "allow-rx-discover",
+    "allow-rx-start-local",
+    "allow-rx-stream",
+    "allow-rx-stream-close",
+    "allow-app-settings-get",
+    "allow-app-settings-set",
+    "allow-app-notify-status",
+    "allow-app-notify-request",
+    "allow-app-notify-open-settings",
+    "allow-app-open-view",
+    "allow-app-open-external",
+    "allow-app-update-status",
+    "allow-app-update-check",
+    "allow-app-update-restart",
+    "allow-app-first-run-done",
+    "allow-app-shortcut-set",
+    "allow-app-mark",
+    "allow-debug-simulate"
+  ]
+}
