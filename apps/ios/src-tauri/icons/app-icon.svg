@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-  <!-- The brand mark (web/public/brand/mark.svg), full bleed and opaque: iOS draws the corners. -->
-  <rect width="16" height="16" fill="#171b21"/>
-  <rect x="3" y="8" width="5" height="2" rx="1" fill="#fbfaf7"/>
-  <rect x="3" y="11" width="10" height="2" rx="1" fill="#fbfaf7"/>
-  <circle cx="11" cy="5" r="2" fill="#e48e26"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024"><title>sessionpipe</title><defs><linearGradient id="sp-ios1024-default-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1E1E1E"/><stop offset="1" stop-color="#111111"/></linearGradient></defs><rect width="1024" height="1024" fill="url(#sp-ios1024-default-g)"/><rect width="1024" height="3.556" fill="#fff" fill-opacity="0.08"/><g transform="translate(174.222 174.222) scale(10.556)"><g fill="none" stroke-linecap="round" stroke-width="5.5"><path d="M9 47C20 47 19 32 29 32" stroke="#454545"/><path d="M9 32H29" stroke="#454545"/><path d="M9 17C20 17 19 32 29 32" stroke="#454545"/><path d="M29 32H38" stroke="#DADADA"/></g><circle cx="51" cy="32" r="7" fill="#FF5A1F"/></g></svg>
