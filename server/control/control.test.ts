@@ -15,8 +15,9 @@ import { Router } from "../http/router.js";
 import { coreTakesDevice, receiverKeyTypes } from "./devicekeys.js";
 import { fileHash } from "./files.js";
 import { type Control, createControl } from "./index.js";
-import { parseAcks, parseHello } from "./parse.js";
+import { parseAccounts, parseAcks, parseHello } from "./parse.js";
 import { commandStr, signCommand, signWithDevice, TestDayKey, TestDeviceKey, TestPasskey } from "./testkeys.js";
+import { coreTakesTilde } from "./tilde.js";
 import { readKey, readProof } from "./ui.js";
 
 const SINK = "spg_test_sink_token_0123456789";
@@ -1091,14 +1092,13 @@ describe("persistence", () => {
 
 // --- a start's options and files (CONTROL.md §2, §3.1, §6; sessionpipe 0.10) -----------
 
-describe("parseHello: files, home and start", () => {
+describe("parseHello: files and start", () => {
   const base = { ...facts, harnesses: ["claude-code", "codex"] };
-  it("keeps a well-formed start, home and files", () => {
+  it("keeps a well-formed start and files", () => {
     const h = parseHello({
       ...base,
       files: true,
       prompt_files: true,
-      home: "/Users/misha",
       start: {
         "claude-code": { permissions: ["read", "safe", "edits", "auto"], permission: "auto", any_model: true },
         codex: { permissions: ["read", "safe", "auto"], permission: "safe", models: ["gpt-6-astra", "gpt-5.6-sol"] },
@@ -1106,7 +1106,6 @@ describe("parseHello: files, home and start", () => {
     })!;
     expect(h.files).toBe(true);
     expect(h.promptFiles).toBe(true);
-    expect(h.home).toBe("/Users/misha");
     expect(h.start).toEqual({
       "claude-code": { permissions: ["read", "safe", "edits", "auto"], permission: "auto", anyModel: true },
       codex: { permissions: ["read", "safe", "auto"], permission: "safe", models: ["gpt-6-astra", "gpt-5.6-sol"] },
@@ -1125,14 +1124,74 @@ describe("parseHello: files, home and start", () => {
       "claude-code": { permissions: ["read", "safe"], permission: "safe", models: ["sonnet"] },
     });
   });
-  it("is null for what a 0.9 daemon sends, and for a relative or oversized home", () => {
+  it("is null for what a 0.9 daemon sends; a home folder is not read (0.10 sends none)", () => {
     const h = parseHello(base)!;
-    expect(h).toMatchObject({ files: false, promptFiles: false, home: null, start: null });
-    expect(parseHello({ ...base, home: "~/x" })!.home).toBeNull();
-    expect(parseHello({ ...base, home: `/${"a".repeat(1024)}` })!.home).toBeNull();
-    expect(parseHello({ ...base, home: "/a\nb" })!.home).toBeNull();
+    expect(h).toMatchObject({ files: false, promptFiles: false, start: null });
+    expect(parseHello({ ...base, home: "/Users/misha" })).not.toHaveProperty("home");
     expect(parseHello({ ...base, start: [] })!.start).toBeNull();
     expect(parseHello({ ...base, start: { codex: { permissions: [], permission: "safe" } } })!.start).toBeNull();
+  });
+});
+
+describe("parseHello: inherit mode (sessionpipe 0.10, CONTROL.md §2, §3.1)", () => {
+  const base = { ...facts, harnesses: ["claude-code", "codex", "goose"] };
+  it("keeps the mode, and a harness whose default is inherit, capped at read and safe", () => {
+    const h = parseHello({
+      ...base,
+      mode: "inherit",
+      start: {
+        "claude-code": { permissions: ["read", "safe"], permission: "inherit", any_model: true },
+        // A daemon that lists wider levels (or inherit itself) on an inherit machine: capped.
+        codex: { permissions: ["read", "safe", "edits", "auto", "inherit"], permission: "inherit" },
+      },
+    })!;
+    expect(h.mode).toBe("inherit");
+    expect(h.start).toEqual({
+      "claude-code": { permissions: ["read", "safe"], permission: "inherit", anyModel: true },
+      codex: { permissions: ["read", "safe"], permission: "inherit" },
+    });
+  });
+  it("caps a named default too, and drops one wider than safe", () => {
+    const h = parseHello({
+      ...base,
+      mode: "inherit",
+      start: {
+        "claude-code": { permissions: ["read", "safe", "auto"], permission: "safe" },
+        codex: { permissions: ["read", "safe", "auto"], permission: "auto" },
+      },
+    })!;
+    expect(h.start).toEqual({ "claude-code": { permissions: ["read", "safe"], permission: "safe" } });
+  });
+  it("never takes inherit as a level to send, and an unknown mode is no mode", () => {
+    const h = parseHello({
+      ...base,
+      mode: "auto",
+      start: { "claude-code": { permissions: ["inherit"], permission: "inherit" } },
+    })!;
+    expect(h.start).toBeNull();
+    expect(parseHello({ ...base, mode: "bypass" })!.mode).toBeNull();
+  });
+  it("keeps up to 64 harnesses: the built-ins and the ACP agents installed", () => {
+    const many = Array.from({ length: 40 }, (_, i) => `agent-${i}`);
+    expect(parseHello({ ...base, harnesses: many })!.harnesses).toHaveLength(40);
+  });
+});
+
+describe("parseAccounts (sessionpipe 0.10 #75: a home on another API has a name, no email)", () => {
+  it("keeps an email, else a name, and drops one with neither", () => {
+    expect(
+      parseAccounts([
+        { harness: "claude-code", id: "a1", email: "dev@example.com" },
+        { harness: "claude-code", id: "api-3f9c1e0b7d2a4c68", name: "api.z.ai" },
+        { harness: "claude-code", id: "x", email: "not-an-email" },
+        { harness: "claude-code", id: "y" },
+        { harness: "claude-code", id: "z", name: " \u0007 " },
+      ]),
+    ).toEqual([
+      { harness: "claude-code", id: "a1", email: "dev@example.com" },
+      { harness: "claude-code", id: "api-3f9c1e0b7d2a4c68", name: "api.z.ai" },
+    ]);
+    expect(parseAccounts([{ harness: "codex", id: "b", name: `x\ny${"z".repeat(300)}` }])[0]!.name).toHaveLength(200);
   });
 });
 
@@ -1149,6 +1208,10 @@ describe("parseAcks: applied", () => {
     expect(b!.applied).toBeUndefined();
     const [c] = parseAcks({ acks: [{ id, outcome: "delivered", applied: { permission: "read" } }] }, now)!;
     expect(c!.applied).toEqual({ permission: "read" });
+  });
+  it("keeps inherit: the start ran with no permission flag", () => {
+    const [a] = parseAcks({ acks: [{ id, outcome: "taken", applied: { permission: "inherit" } }] }, now)!;
+    expect(a!.applied).toEqual({ permission: "inherit" });
   });
 });
 
@@ -1323,8 +1386,53 @@ describe("a start's options, files and applied, through POST send", () => {
     });
   });
 
-  it("the well-known says control.files", () => {
+  it("on an inherit machine: no level means its own default; read and safe only; inherit is never sent", async () => {
+    const m = await enrolled(b, pk, "m_startinherit00000001");
+    await hello(m, {
+      mode: "inherit",
+      start: { "claude-code": { permissions: ["read", "safe"], permission: "inherit", any_model: true } },
+    });
+    const c = b.control.machines().get("studio-mac")!;
+    expect(c.mode).toBe("inherit");
+    expect(c.start?.["claude-code"]).toEqual({ permissions: ["read", "safe"], permission: "inherit", anyModel: true });
+    const wide = await start(m.machine, { permission: "auto" });
+    expect(wide).toMatchObject({ status: 422, body: { code: "permission" } });
+    expect(String(wide.body.reason)).toMatch(/read only or safe/);
+    expect((await start(m.machine, { permission: "inherit" })).body.code).toBe("bad_fields");
+    expect((await start(m.machine, { permission: "safe" })).status).toBe(201);
+    const plain = await start(m.machine, {});
+    expect(plain.status).toBe(201);
+    expect(plain.body).not.toHaveProperty("permission");
+    const ack = await call(b.url, "POST", `${CONTROL}/ack`, {
+      bearer: m.token,
+      body: {
+        acks: [
+          { id: plain.body.id, at: new Date().toISOString(), outcome: "taken", applied: { permission: "inherit" } },
+        ],
+      },
+    });
+    expect(ack.status).toBe(202);
+    expect(b.control.activity().find((a) => a.id === plain.body.id)?.applied).toEqual({ permission: "inherit" });
+  });
+
+  it("files on a prompt go only to a machine that says prompt_files", async () => {
+    const m = await enrolled(b, pk, "m_promptfiles000000001");
+    const up = await upload("notes", "text/plain", "notes.txt");
+    const entry = await up.json();
+    const prompt = async () =>
+      call(b.url, "POST", `${UI}/send`, {
+        body: { machineId: m.machine, ...(await signedPrompt(pk, day, m.machine, { files: [entry] })) },
+      });
+    await hello(m, { files: true });
+    expect((await prompt()).body.code).toBe("bad_fields");
+    await hello(m, { files: true, prompt_files: true });
+    const ok = await prompt();
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+  });
+
+  it("the well-known says control.files and control.inherit", () => {
     expect(b.control.wellKnown().files).toBe(true);
+    expect(b.control.wellKnown().inherit).toBe(true);
   });
 });
 
@@ -1375,10 +1483,24 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
           r0.body.token = (
             await call(b.url, "POST", `${CONTROL}/_test/enroll`, { body: { machine: v.input.machine, key: k } })
           ).body.token;
-        // A machine that takes files on a start, as a hello says it (CONTROL.md §2).
+        // A machine that takes every option a hello can advertise (CONTROL.md §2): files on a
+        // start and a prompt, every level and any model, so the receiver's second look lets
+        // through what the verifier lets through.
         await call(b.url, "POST", `${CONTROL}/hello`, {
           bearer: r0.body.token as string,
-          body: { ...facts, name: "conformance", files: true },
+          body: {
+            ...facts,
+            name: "conformance",
+            harnesses: ["claude-code", "codex"],
+            mode: "auto",
+            files: true,
+            // Files on a prompt are 0.10's (S2): only for a vector set that has them.
+            prompt_files: vectorFiles.some((x) => x.includes("prompt-with-files")),
+            start: {
+              "claude-code": { permissions: ["read", "safe", "edits", "auto"], permission: "auto", any_model: true },
+              codex: { permissions: ["read", "safe", "edits", "auto"], permission: "auto", any_model: true },
+            },
+          },
         });
         const s = v.input.signed!;
         const r = await call(b.url, "POST", `${UI}/send`, {
@@ -1411,6 +1533,16 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
         if (expectOk && carriesFiles) {
           expectOk = false;
           code = "file";
+        }
+        // And in a fourth, until this receiver's sessionpipe-core is 0.10: a start's `~/…`
+        // folder (tilde.ts). Its core wants an absolute one and refuses it, which fails closed.
+        let tildeCwd = false;
+        try {
+          tildeCwd = /^~(?:[/\\]|$)/.test(String(JSON.parse(s.cmd).cwd ?? ""));
+        } catch {}
+        if (expectOk && tildeCwd && !coreTakesTilde()) {
+          expectOk = false;
+          code = "bad_fields";
         }
         if (expectOk) {
           expect(r.status, JSON.stringify(r.body)).toBe(201);

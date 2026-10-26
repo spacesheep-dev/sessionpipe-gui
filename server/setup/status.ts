@@ -11,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import type { SetupStatus } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
+import { DEMO_MACHINE } from "../control/state.js";
 import type { OutboxSource } from "../sources/outbox.js";
 import { resolveOutboxRoot } from "../sources/outbox.js";
 import type { Store } from "../store/store.js";
@@ -183,7 +184,10 @@ export async function buildStatus(d: StatusDeps): Promise<SetupStatus> {
   const allViewers = d.viewers.list();
   const phones = allViewers.filter((v) => !v.loopback && (v.device === "phone" || v.device === "tablet")).length;
   const publicUrl = d.publicUrl();
-  const delivered = d.control.activity(1000).filter((a) => a.outcome === "delivered").length;
+  // Demo mode's machine (server/demo/machine.ts) is nobody's first message.
+  const delivered = d.control
+    .activity(1000)
+    .filter((a) => a.outcome === "delivered" && !a.machineId.startsWith(DEMO_MACHINE)).length;
 
   return {
     sessionpipe: {

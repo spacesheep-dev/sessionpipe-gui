@@ -2,7 +2,7 @@
 // The new-session sheet's folder list (folders.ts): `~` from the hello's home, the
 // daemon's segment rule for "under", the order and the dedupe of recent folders.
 import { describe, expect, it } from "vitest";
-import { expandHome, folderChoices, normalizePath, tildify, typedFolder, under } from "./folders";
+import { expandHome, folderChoices, machineHome, normalizePath, tildify, typedFolder, under } from "./folders";
 
 const HOME = "/Users/demo";
 
@@ -96,5 +96,38 @@ describe("typedFolder", () => {
   });
   it("takes any absolute path when the machine listed no folders", () => {
     expect(typedFolder("/srv/app", { machine: "old-box" })).toEqual({ ok: true, path: "/srv/app" });
+  });
+});
+
+describe("a machine that expands ~/… itself (sessionpipe 0.10: no home folder in the hello)", () => {
+  const home = machineHome({ tilde: true });
+  it("is `~`, and nothing for a machine that doesn't", () => {
+    expect(home).toBe("~");
+    expect(machineHome({})).toBeUndefined();
+    expect(machineHome(undefined)).toBeUndefined();
+  });
+  it("keeps a ~/ folder as it is, and leaves the allowed-folder check to the machine", () => {
+    expect(expandHome("~/acme//web/", home)).toBe("~/acme/web");
+    expect(tildify("~/acme/web", home)).toBe("~/acme/web");
+    expect(tildify("/srv/app", home)).toBe("/srv/app");
+    const o = { folders: ["/Users/demo/acme"], home, machine: "studio-mac" };
+    expect(typedFolder("~/acme/web", o)).toEqual({ ok: true, path: "~/acme/web" });
+    expect(typedFolder("/srv/app", o).ok).toBe(false);
+    expect(typedFolder("~/acme/../x", o).ok).toBe(false);
+    // A ~/ allowed folder and a ~/ path compare by segments as any two do.
+    expect(typedFolder("~/elsewhere", { ...o, folders: ["~/acme"] }).ok).toBe(false);
+    const c = folderChoices({
+      sessions: [{ machine: "studio-mac", cwd: "~/acme/web", lastAt: "2026-10-23T10:00:00Z" }],
+      machine: "studio-mac",
+      folders: ["/Users/demo/acme"],
+      home,
+    });
+    expect(c.recent).toEqual([{ path: "~/acme/web", display: "~/acme/web" }]);
+  });
+  it("without it a ~/ path asks for the full one", () => {
+    expect(typedFolder("~/acme", { machine: "studio-mac" })).toMatchObject({
+      ok: false,
+      reason: "studio-mac needs the full path; type it starting with /",
+    });
   });
 });

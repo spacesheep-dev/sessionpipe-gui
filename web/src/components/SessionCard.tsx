@@ -42,6 +42,7 @@ import { labelItems } from "../lib/labels";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { reducedMotion, tokenMs, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { Link, sessionPath } from "../lib/router";
+import { backgroundFact, quietRun, submittedLabel } from "../lib/runs";
 import { LENSES, type Lens, setTierLens } from "../lib/settings";
 import { openSplit } from "../lib/split";
 import { durCoarse, ms } from "../lib/time";
@@ -160,6 +161,14 @@ export const SessionCard = memo(function SessionCard({
     if (agents.length > 0 && to !== showAgents) setAgentsChoice(s.key, to);
   };
   const fact = agentsFact(s);
+  // sessionpipe 0.10: paused on its own background work, a turn nobody typed, a run
+  // nobody attended. One trailing fact at most, after the subagents'.
+  const quiet = quietRun(s);
+  const other =
+    !fact &&
+    (backgroundFact(s) ||
+      (s.state === "working" && submittedLabel(s.currentTurn?.submittedBy)) ||
+      (quiet && "unattended"));
   const attention = s.openAttentions[0];
   const live = s.state === "working" || s.state === "needs_you";
   const showText = lens === null || lens >= 2;
@@ -206,7 +215,7 @@ export const SessionCard = memo(function SessionCard({
   return (
     <article
       ref={ref}
-      className={`card card--${s.state}`}
+      className={`card card--${s.state}${quiet ? " card--quiet" : ""}`}
       data-flip={s.key}
       data-gone={gone ? "" : undefined}
       data-cursor={cursor !== undefined ? String(cursor) : undefined}
@@ -312,6 +321,7 @@ export const SessionCard = memo(function SessionCard({
             {/* The tree under the row says it once it is open: then the words are for a
                 screen reader only, and the preview keeps the line. */}
             {fact && <span className={`card-agents num${showAgents ? " sr-only" : ""}`}>{fact}</span>}
+            {other && <span className="card-agents card-run">{other}</span>}
             <Flags flags={s.flags} tool={tool?.tool ?? attnTool} />
           </span>
 

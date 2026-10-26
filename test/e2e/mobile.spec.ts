@@ -165,7 +165,6 @@ test.describe("phone: new session", () => {
         name: `ns-phone-${Math.random().toString(36).slice(2, 8)}`,
         harnesses: ["claude-code"],
         folders: ["/Users/e2e/code"],
-        home: "/Users/e2e",
         mode: "auto",
         start: { "claude-code": { permissions: ["read", "safe", "auto"], permission: "auto", any_model: true } },
       },

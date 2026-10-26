@@ -37,7 +37,6 @@ const hello = (name: string, keyTypes?: string[]) => ({
   name,
   harnesses: ["claude-code"],
   folders: ["/Users/e2e/code"],
-  home: "/Users/e2e",
   mode: "auto" as const,
   files: true,
   ...(keyTypes ? { key_types: keyTypes } : { version: "0.9.0" }),

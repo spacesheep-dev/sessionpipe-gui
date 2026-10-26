@@ -39,7 +39,7 @@ import {
   useShowCounts,
   useStickyTop,
 } from "../components/SessionCard";
-import { tildify } from "../control/folders";
+import { machineHome, tildify } from "../control/folders";
 import { useControlActivity } from "../control/hooks";
 import { ComposeButton } from "../control/NewSession";
 import { ALIAS_WINDOW_MS, aliasHidden, openNewSession, setBoardFilter } from "../control/newSessionState";
@@ -226,7 +226,7 @@ export function Board() {
         s,
         starts,
         (name) => paired.find((m) => m.name === name)?.control?.machineId,
-        (id) => paired.find((m) => m.control?.machineId === id)?.control?.home,
+        (id) => machineHome(paired.find((m) => m.control?.machineId === id)?.control),
         now,
       ),
     [recentStart, starts, paired, now],
@@ -637,7 +637,7 @@ function StartingCard({
   machine,
 }: {
   a: ControlActivity;
-  machine: { name: string; control?: { online: boolean; home?: string } } | undefined;
+  machine: { name: string; control?: { online: boolean; tilde?: boolean } } | undefined;
 }) {
   const { harness, id } = splitKey(a.session!);
   const title = (a.text ?? "").split("\n")[0]!.trim().slice(0, 120) || "New session";
@@ -670,7 +670,7 @@ function StartingCard({
             <HarnessGlyph name={harness} size="sm" />
             <span className="card-where ellipsis">
               {name}
-              {a.cwd ? ` · ${tildify(a.cwd, machine?.control?.home)}` : ""}
+              {a.cwd ? ` · ${tildify(a.cwd, machineHome(machine?.control))}` : ""}
             </span>
           </span>
           <span className="card-foot num" aria-hidden="true">

@@ -9,6 +9,8 @@
 // The machine checks it all again: it stays the gate.
 import {
   type HarnessStartOptions,
+  INHERIT_LEVELS,
+  type MachineMode,
   START_FILE_MAX_BYTES,
   START_FILES_MAX,
   START_FILES_TOTAL_BYTES,
@@ -19,8 +21,10 @@ import { type FileStore, MEDIA_TYPE_RE, SHA256_RE } from "./files.js";
 
 export interface PrecheckFacts {
   files?: boolean;
+  /** Hello `prompt_files: true` (sessionpipe 0.10): it takes `files` on a `prompt` too. */
+  promptFiles?: boolean;
   start?: Record<string, HarnessStartOptions>;
-  mode?: "safe" | "auto";
+  mode?: MachineMode;
 }
 
 export interface Refusal {
@@ -66,14 +70,43 @@ export function filesProblem(v: unknown): string | null {
   return null;
 }
 
+/** The closed field set (sessionpipe 0.10, CONTROL.md §3.1): what each kind carries besides
+ *  these. A field a kind does not own is refused here as a 0.10 machine refuses it, whatever
+ *  this receiver's own core still lets through. */
+const COMMON_FIELDS = new Set(["v", "t", "machine", "kind", "session", "nonce", "iat", "note"]);
+const FIELDS: Record<string, readonly string[]> = {
+  prompt: ["text", "files"],
+  "permission.answer": ["for", "decision"],
+  cancel: [],
+  start: ["text", "cwd", "files", "permission", "model"],
+  "key.add": ["key", "name"],
+};
+
+/** A file the receiver no longer holds, which the machine could not fetch. */
+function heldProblem(list: { sha256: string; name: string }[], files: FileStore): Refusal | null {
+  for (const f of list)
+    if (!files.has(f.sha256)) return { code: "file", why: `${f.name} is not held here any more; add it again` };
+  return null;
+}
+
 /** Why the receiver will not queue this verified command for a machine with these facts,
  *  or null when it may. `cmd` is the parsed command string. */
 export function precheck(cmd: Record<string, unknown>, facts: PrecheckFacts, files: FileStore): Refusal | null {
   const has = (k: string) => Object.hasOwn(cmd, k);
+  const own = FIELDS[String(cmd.kind)];
+  const stray = own && Object.keys(cmd).find((k) => !COMMON_FIELDS.has(k) && !own.includes(k));
+  if (stray) return { code: "bad_fields", why: `a ${cmd.kind} carries no ${stray}` };
   if (cmd.kind !== "start") {
-    if (has("files") || has("permission") || has("model"))
-      return { code: "bad_fields", why: "only a start carries files, a model or a permission" };
-    return null;
+    if (has("permission") || has("model"))
+      return { code: "bad_fields", why: "only a start carries a model or a permission" };
+    if (!has("files")) return null;
+    // A prompt's files (CONTROL.md §2): only to a machine whose hello says `prompt_files`;
+    // an older one refuses the prompt `bad_fields`.
+    if (cmd.kind !== "prompt") return { code: "bad_fields", why: "only a start or a prompt carries files" };
+    const bad = filesProblem(cmd.files);
+    if (bad) return { code: "bad_fields", why: bad };
+    if (!facts.promptFiles) return { code: "bad_fields", why: "this machine did not say it takes files on a prompt" };
+    return heldProblem(cmd.files as { sha256: string; name: string }[], files);
   }
   const session = typeof cmd.session === "string" ? cmd.session : "";
   const harness = session.slice(0, Math.max(0, session.indexOf(":")));
@@ -83,8 +116,8 @@ export function precheck(cmd: Record<string, unknown>, facts: PrecheckFacts, fil
     const bad = filesProblem(cmd.files);
     if (bad) return { code: "bad_fields", why: bad };
     if (!facts.files) return { code: "bad_fields", why: "this machine did not say it takes files on a start" };
-    for (const f of cmd.files as { sha256: string; name: string }[])
-      if (!files.has(f.sha256)) return { code: "file", why: `${f.name} is not held here any more; add it again` };
+    const gone = heldProblem(cmd.files as { sha256: string; name: string }[], files);
+    if (gone) return gone;
   }
 
   if (has("permission")) {
@@ -92,7 +125,14 @@ export function precheck(cmd: Record<string, unknown>, facts: PrecheckFacts, fil
     if (typeof p !== "string" || !(START_PERMISSIONS as readonly string[]).includes(p))
       return { code: "bad_fields", why: "permission is read, safe, edits or auto" };
     if (!opts) return { code: "permission", why: "this machine takes no permission on a start for this agent" };
-    if (!opts.permissions.includes(p as HarnessStartOptions["permission"]))
+    // Inherit (CONTROL.md §3.1): the harness's own default can't be ranked, so a start there
+    // names read or safe at most, whatever the hello lists.
+    if (facts.mode === "inherit" && !(INHERIT_LEVELS as readonly string[]).includes(p))
+      return {
+        code: "permission",
+        why: `this machine runs its agents as your own sessions there, so a start may name read only or safe, not ${LEVEL_LABEL[p]}`,
+      };
+    if (!(opts.permissions as readonly string[]).includes(p))
       return {
         code: "permission",
         why: facts.mode

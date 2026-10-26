@@ -133,6 +133,7 @@ const HARNESSES: Record<string, HarnessMark> = {
   "gemini-cli": { glyph: "Ge", label: "Gemini CLI", hue: 265 },
   antigravity: { glyph: "Ag", label: "Antigravity", hue: 300 },
   cursor: { glyph: "Cu", label: "Cursor", hue: 200 },
+  devin: { glyph: "De", label: "Devin", hue: 20 },
   "copilot-cli": { glyph: "Cp", label: "Copilot CLI", hue: 230 },
   droid: { glyph: "Dr", label: "Droid", hue: 120 },
   kiro: { glyph: "Ki", label: "Kiro", hue: 330 },
@@ -140,17 +141,30 @@ const HARNESSES: Record<string, HarnessMark> = {
   conformance: { glyph: "Cf", label: "conformance", hue: 0 },
 };
 
+/** Labels for harness names the table above lacks, added by the pages that list a machine's
+ *  agents (lib/acp.ts, the ACP registry's): their monogram and hue still come from the name. */
+const MORE_LABELS = new Map<string, string>();
+/** `name:Label name:Label`, a space in a label written `_`. */
+export function addHarnessLabels(list: string): void {
+  for (const e of list.split(" ")) {
+    const [name, label] = e.split(":");
+    if (name && label) MORE_LABELS.set(name, label.replace(/_/g, " "));
+  }
+}
+
 export function harnessMark(name: string): HarnessMark {
   const known = HARNESSES[name];
   if (known) return known;
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  const letters = name
-    .split(/[-_.]/)
-    .map((p) => p[0] ?? "")
-    .join("")
-    .slice(0, 2);
-  return { glyph: letters ? letters[0]!.toUpperCase() + (letters[1] ?? "") : "?", label: name, hue: h };
+  const parts = name.split(/[-_.]/);
+  // One word gives its first two letters ("goose" → Go), several their initials (qwen-code → Qc).
+  const letters = (parts.length > 1 ? parts.map((p) => p[0] ?? "").join("") : name).slice(0, 2);
+  return {
+    glyph: letters ? letters[0]!.toUpperCase() + (letters[1] ?? "") : "?",
+    label: MORE_LABELS.get(name) ?? name,
+    hue: h,
+  };
 }
 
 export const ATTENTION_LABEL: Record<string, string> = {

@@ -40,7 +40,6 @@ const advertising = (name: string) => ({
   name,
   harnesses: ["claude-code", "codex"],
   folders: ["/Users/e2e/code"],
-  home: "/Users/e2e",
   mode: "auto" as const,
   files: true,
   start: {
@@ -55,6 +54,14 @@ const old = (name: string) => ({
   mode: "safe" as const,
   version: "0.9.0",
 });
+
+/** Whether the receiver offers a machine `~/…` folders (its core and the machine both take one). */
+async function tildeOn(machine: string): Promise<boolean> {
+  const snap = (await (await fetch(`${CONTROL_BASE}/api/ui/snapshot`)).json()) as {
+    machines: { name: string; control?: { tilde?: boolean } }[];
+  };
+  return !!snap.machines.find((x) => x.name === machine)?.control?.tilde;
+}
 
 let key: PageKey;
 let sink: string;
@@ -101,8 +108,13 @@ test("right-click a session: New session here, prefilled; a machine's menu: New 
   await page.getByRole("menuitem", { name: "New session here" }).click();
   await expect(rowValue(page, "machine")).toHaveAttribute("data-value", name);
   await expect(rowValue(page, "agent")).toHaveAttribute("data-value", "codex");
-  await expect(rowValue(page, "folder")).toHaveAttribute("data-value", "/Users/e2e/code/billing");
+  // sessionpipe 0.10's hello names no home folder: the session's own `~/…` folder is what
+  // the sheet carries (CONTROL.md §3.1), and it can be sent where both this receiver's core
+  // and the machine take one (`MachineControl.tilde`); elsewhere it asks for the full path.
+  await expect(rowValue(page, "folder")).toHaveAttribute("data-value", "~/code/billing");
   await expect(rowValue(page, "folder")).toContainText("~/code/billing");
+  if (!(await tildeOn(name)))
+    await expect(status(page)).toHaveText(`${name} needs the full path; type it starting with /`);
   await page.keyboard.press("Escape");
 
   await page.goto(`${CONTROL_BASE}/machines`);
@@ -152,10 +164,16 @@ test("a typed folder outside the allowed ones disables Start, with the reason", 
   await expect(status(page)).toHaveText(`${m.name} doesn't allow that folder`);
   await expect(sheet(page).locator("[data-ns-start]")).toBeDisabled();
   await rowValue(page, "folder").click();
-  await page.keyboard.type("~/code/web");
+  await page.keyboard.type("/Users/e2e/code/web");
   await page.keyboard.press("Enter");
   await expect(rowValue(page, "folder")).toHaveAttribute("data-value", "/Users/e2e/code/web");
   await expect(sheet(page).locator("[data-ns-start]")).toBeEnabled();
+  await rowValue(page, "folder").click();
+  await page.keyboard.type("~/code/web");
+  await page.keyboard.press("Enter");
+  await expect(rowValue(page, "folder")).toHaveAttribute("data-value", "~/code/web");
+  if (await tildeOn(m.name)) await expect(sheet(page).locator("[data-ns-start]")).toBeEnabled();
+  else await expect(sheet(page).locator("[data-ns-start]")).toBeDisabled();
 });
 
 test("Start: the starting state, then taken, then live; only advertised options are signed", async ({ page }) => {
@@ -176,7 +194,7 @@ test("Start: the starting state, then taken, then live; only advertised options 
     }),
   });
   daemons.push(m);
-  await page.goto(`${CONTROL_BASE}/?new=1&machine=${m.name}&cwd=~/code/billing`);
+  await page.goto(`${CONTROL_BASE}/?new=1&machine=${m.name}&cwd=/Users/e2e/code/billing`);
   await pick(page, "permission", "Accept edits");
   await rowValue(page, "model").click();
   await page.keyboard.type("sonnet");

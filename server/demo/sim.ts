@@ -11,6 +11,7 @@ import type { ProtocolEvent, ProtocolSession } from "../../shared/api.js";
 import {
   ANTIGRAVITY_TURNS,
   BACKFILL_TITLES,
+  BACKGROUND_TURNS,
   CLAUDE_TURNS,
   CODEX_TURNS,
   CURSOR_TURNS,
@@ -23,9 +24,12 @@ import {
   REPOS,
   RESUME_TURN,
   type Repo,
+  SCHEDULED_TURNS,
   SILENT_TURN,
   type SubagentScript,
   type TurnScript,
+  UNATTENDED_TURN,
+  V010_MACHINE,
 } from "./content.js";
 import { Rng } from "./rng.js";
 
@@ -36,7 +40,24 @@ export interface SimOptions {
   startAt?: number;
   /** Virtual ms per wall ms: the event times are startAt + virtual / speed. */
   speed?: number;
+  /** A session the demo says was started from this receiver (server/demo/machine.ts makes
+   *  its `start`), told when its first event goes out. */
+  onStart?: (s: DemoStarted) => void;
 }
+
+/** A demo session started through control: what its `start` carried. */
+export interface DemoStarted {
+  harness: HarnessName;
+  id: string;
+  machine: string;
+  cwd: string;
+  text: string;
+  at: number;
+}
+
+/** The account id sessionpipe 0.10 gives a Claude Code home on another API (#75):
+ *  `api-` and 16 hex of the endpoint's hash; the demo's names api.z.ai. */
+export const DEMO_API_ACCOUNT = "api-3f9c1e0b7d2a4c68";
 
 type Script = Generator<number, void, undefined>;
 interface Actor {
@@ -291,6 +312,8 @@ export class Simulation {
   now = 0;
   readonly rng: Rng;
   readonly machines: string[];
+  /** Where sessionpipe 0.10's scenes run: their own machine, or the only one when asked for one. */
+  readonly v010Machine: string;
   readonly startAt: number;
   readonly speed: number;
   /** Sessions that are running right now (the director keeps the board from overflowing). */
@@ -300,11 +323,14 @@ export class Simulation {
   private order = 0;
   private accounts = new Map<string, string>();
   private ended: Sess[] = [];
+  private readonly onStart?: (s: DemoStarted) => void;
 
   constructor(opts: SimOptions = {}) {
+    this.onStart = opts.onStart;
     this.rng = new Rng(opts.seed ?? 20261014);
     const n = Math.min(MACHINE_NAMES.length, Math.max(1, Math.floor(opts.machines ?? 2)));
     this.machines = MACHINE_NAMES.slice(0, n);
+    this.v010Machine = n === 1 ? (this.machines[0] as string) : V010_MACHINE;
     this.startAt = opts.startAt ?? Date.now();
     this.speed = opts.speed && opts.speed > 0 ? opts.speed : 1;
     this.spawn(this.director());
@@ -477,6 +503,49 @@ export class Simulation {
       90_000,
     );
 
+    // sessionpipe 0.10 on its own machine: a run started from here that waits on its own
+    // background work, a turn the harness's schedule submitted, and a script's unattended
+    // one-shot on a Claude Code home that runs on another API.
+    const waiting = () =>
+      this.session({
+        harness: "claude-code",
+        machine: this.v010Machine,
+        repo: REPOS[0] as Repo,
+        branch: "main",
+        turns: BACKGROUND_TURNS,
+        source: "startup",
+        end: "exit",
+        attended: true,
+        viaControl: true,
+      });
+    const scheduled = () =>
+      this.session({
+        harness: "claude-code",
+        machine: this.v010Machine,
+        repo: REPOS[0] as Repo,
+        branch: "main",
+        turns: SCHEDULED_TURNS,
+        source: "startup",
+        end: "exit",
+        attended: true,
+      });
+    this.spawn(waiting(), 25_000);
+    this.spawn(scheduled(), 35_000);
+    const unattended = () =>
+      this.session({
+        harness: "claude-code",
+        machine: this.v010Machine,
+        repo: REPOS[0] as Repo,
+        branch: "main",
+        turns: [UNATTENDED_TURN],
+        source: "startup",
+        end: "exit",
+        attended: false,
+        account: DEMO_API_ACCOUNT,
+        pause: 1500,
+      });
+    this.spawn(unattended(), 5_000);
+
     // Three reviewers at once, two of them outliving the turn that launched them.
     const parallel = () =>
       this.session({
@@ -498,6 +567,9 @@ export class Simulation {
         lastShowcase = this.now;
         this.spawn(showcase());
         this.spawn(parallel(), 30_000);
+        this.spawn(unattended(), 50_000);
+        this.spawn(waiting(), 20_000);
+        this.spawn(scheduled(), 40_000);
         continue;
       }
       if (this.live >= 6) continue;
@@ -589,6 +661,12 @@ export class Simulation {
     end: "exit" | "other" | "clear";
     pause?: number;
     resume?: Sess;
+    /** sessionpipe 0.10 `session.attended`; absent, the harness doesn't say. */
+    attended?: boolean;
+    /** Another account id than the machine's (a home on another API). */
+    account?: string;
+    /** Started from this receiver: the demo machine has its `start` (onStart). */
+    viaControl?: boolean;
   }): Script {
     const rng = this.rng;
     const profile = PROFILES[p.harness];
@@ -597,8 +675,18 @@ export class Simulation {
       new Sess(this, profile, this.newSessionId(p.harness), {
         machine: p.machine,
         cwd: p.repo.cwd,
-        account_id: this.account(p.machine, p.harness),
+        account_id: p.account ?? this.account(p.machine, p.harness),
+        ...(p.attended !== undefined ? { attended: p.attended } : {}),
         ...(profile.modelAtStart ? { model: rng.pick(MODELS[p.harness]) } : {}),
+      });
+    if (p.viaControl && this.onStart)
+      this.onStart({
+        harness: p.harness,
+        id: sess.id,
+        machine: p.machine,
+        cwd: p.repo.cwd,
+        text: (p.turns[0] as TurnScript).prompt,
+        at: this.wall(),
       });
     this.live++;
     const facts = (script: TurnScript) =>
@@ -630,7 +718,7 @@ export class Simulation {
         yield rng.ms(1500, 400);
         yield* this.notificationTurn(sess, n, turn++);
       }
-      yield p.pause ?? rng.ms(30_000, 5000);
+      yield script.waitAfter ?? p.pause ?? rng.ms(30_000, 5000);
     }
     // No session-end hook: the session just goes quiet after its last Stop.
     if (!profile.noSessionEnd) sess.emit("session.ended", { reason: p.end }, profile.ev.end);
@@ -654,7 +742,18 @@ export class Simulation {
 
     // Antigravity: the first PreInvocation of an execution is the session and the turn at once.
     if (profile.startsEveryTurn) sess.emit("session.started", { source: "unknown" }, ev.start);
-    sess.emit("turn.started", profile.bareTurns ? {} : { turn_id: turnId, prompt_chars: [...user].length }, ev.prompt);
+    sess.emit(
+      "turn.started",
+      profile.bareTurns
+        ? {}
+        : {
+            turn_id: turnId,
+            prompt_chars: [...user].length,
+            submitted_by: script.submittedBy,
+            injected: script.injected || undefined,
+          },
+      ev.prompt,
+    );
     if (profile.progress) progress(ev.prompt);
     yield rng.ms(4000, 800);
 
@@ -765,7 +864,7 @@ export class Simulation {
         ? { reason }
         : script.error
           ? { turn_id: turnId, reason, error: script.error, ms }
-          : { turn_id: turnId, reason, ms },
+          : { turn_id: turnId, reason, ms, background: script.background },
       endEvent,
     );
     sess.emit(

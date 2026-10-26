@@ -152,7 +152,8 @@ function useToastEffects(): void {
       // Oldest first, so the newest ends up nearest the corner. Nothing for a session the
       // person is already looking at.
       for (const r of fresh.reverse()) {
-        if (onScreen(r.session.key)) continue;
+        // Nobody attends an unattended run (`attended: false`): the Inbox has it, no banner.
+        if (onScreen(r.session.key) || r.session.attended === false) continue;
         // An older server may pass on a harness's notification about a prompt already
         // open as an answerable one (readings.ts folds these): one card, not two.
         const twin =
@@ -173,7 +174,7 @@ function useToastEffects(): void {
     check();
     const offState = store.subscribe(check);
     const offEvents = store.onEvent((e, s) => {
-      if (known === null || s.parentId) return;
+      if (known === null || s.parentId || s.attended === false) return;
       if (e.type === "turn.ended" && e.data.reason === "error" && !onScreen(s.key)) pushToast(errorToast(e, s));
     });
     return () => {

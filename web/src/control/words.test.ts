@@ -57,6 +57,11 @@ describe("sentLine", () => {
     expect(sentLine(start({ outcome: "refused", code: "folder" }), o)).toBeNull();
   });
 
+  it("an ACP agent's start (`api`) ran and answered in the ack: no first events promised", () => {
+    expect(sentLine(start({ outcome: "delivered", mode: "api", reply: "Done." }), o)?.text).toBe("Ran on studio-mac.");
+    expect(sentLine(start({ outcome: "delivered", mode: "sdk" }), o)?.text).toMatch(/first events are on their way/);
+  });
+
   it("names the command a harness runs as, and keeps the label of one without", () => {
     expect(harnessCommand("claude-code", "Claude Code")).toBe("claude");
     expect(harnessCommand("antigravity", "Antigravity")).toBe("Antigravity");

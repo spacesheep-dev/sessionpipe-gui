@@ -49,6 +49,10 @@ export interface ProtocolSession {
   title_source?: "custom" | "harness" | "first-ask";
   url?: string;
   account_id?: string;
+  /** Whether a person attends the session, in the harness's word (sessionpipe 0.10):
+   *  `false` for a run nobody watches (a headless run a script started). Absent is unknown,
+   *  never `false`. */
+  attended?: boolean;
   parent_id?: string | null;
 }
 
@@ -103,6 +107,9 @@ export interface SessionSummary {
   url?: string;
   accountId?: string;
   parentId?: string | null;
+  /** `session.attended`, the latest value (sessionpipe 0.10). Absent means unknown, never
+   *  false: only `false` marks an unattended run. */
+  attended?: boolean;
 
   state: SessionState;
   /** When the current state began (ISO). */
@@ -133,8 +140,16 @@ export interface SessionSummary {
    *  if any. A subagent's tool (one with `agent_id`) runs on its AgentRun instead.
    *  `agentId` is kept for older clients and is no longer set. */
   currentTool?: { tool: string; callId?: string; since: string; agentId?: string };
-  /** The turn running right now, if any. */
-  currentTurn?: { turnId?: string; since: string; promptChars?: number };
+  /** The turn running right now, if any. `submittedBy` is the harness's own word for who
+   *  submitted it (`turn.started.submitted_by`, sessionpipe 0.10: `user`, `sdk`, `system`,
+   *  `loop_wakeup`, `schedule_wakeup`, …, kept as sent); `injected` that its prompt is a
+   *  block the harness wrote, not the person's words. Absent is unknown. */
+  currentTurn?: { turnId?: string; since: string; promptChars?: number; submittedBy?: string; injected?: boolean };
+  /** The session's last turn ended with background work still in flight
+   *  (`turn.ended.background`, sessionpipe 0.10): it is paused on its own work, each piece
+   *  of which wakes it, not done. `tasks` is the count, `since` when that turn ended. Cleared
+   *  by its next turn, or its end. */
+  background?: { tasks: number; since: string };
   openAttentions: Attention[];
   /** Latest turn.progress until its turn.transcript lands (spec §4). */
   progress?: { turn: number; user: string; assistant: string; at: string };
@@ -271,12 +286,12 @@ export interface MachineControl {
   online: boolean;
   lastPollAt?: string;
   lastHelloAt?: string;
-  mode?: "safe" | "auto";
+  mode?: MachineMode;
   folders?: string[];
   harnesses?: string[];
   modes?: string[];
   version?: string;
-  accounts?: { harness: string; id: string; email: string }[];
+  accounts?: HarnessAccount[];
   /** `type: "device"` marks an app's device key; absent, a passkey. */
   keys: { id: string; alg: number; type?: "device"; name?: string; addedAt: string }[];
   /** Pairing or hello `key_types`: the kinds of key this machine takes. Absent (an older
@@ -288,13 +303,35 @@ export interface MachineControl {
   files?: boolean;
   /** Hello `prompt_files: true`: it takes `files` on a `prompt` too (sessionpipe 0.10). */
   promptFiles?: boolean;
-  /** Hello `home`: the absolute home folder of the user the daemon runs as, to turn the
-   *  `~/…` folders events report into the absolute `cwd` a start needs (sessionpipe 0.10). */
-  home?: string;
+  /** A start may name its folder as `~/…`, which the machine reads under its daemon user's
+   *  home (sessionpipe 0.10, CONTROL.md §3.1: no hello names a home folder; a machine whose
+   *  hello has `start` takes one). Set when this receiver's core takes one too; absent, a
+   *  start's folder is absolute and a `~/…` one is not offered. */
+  tilde?: boolean;
   /** Hello `start`: per harness, what a `start` may ask for there (sessionpipe 0.10). A
    *  harness with no entry takes neither `permission` nor `model`, and nothing offers them. */
   start?: Record<string, HarnessStartOptions>;
 }
+
+/** A machine's mode, the person's choice at its own terminal (CONTROL.md §2): `safe`,
+ *  nothing that needs approval runs unattended; `auto`, the harness's auto mode; `inherit`
+ *  (sessionpipe 0.10), no permission flag, so a session runs as the person's own do there,
+ *  with whatever the harness's settings allow, which can include skipping permission checks. */
+export type MachineMode = "safe" | "auto" | "inherit";
+
+/** A harness account signed in on a machine, from its pairing and hello (CONTROL.md §2): a
+ *  label for `session.account_id`, never checked against anything. `email` when it signs in
+ *  with one; `name` instead for one with no email (sessionpipe 0.10: a Claude Code home on
+ *  another API, named by its endpoint's host, `api.z.ai`). At least one of the two is set. */
+export interface HarnessAccount {
+  harness: string;
+  id: string;
+  email?: string;
+  name?: string;
+}
+
+/** What an account is called: its email, else its name, else nothing. */
+export const accountLabel = (a: HarnessAccount): string => a.email ?? a.name ?? "";
 
 // ---------- starting a session (CONTROL.md §6 `start`, its options and files) ----------
 
@@ -303,13 +340,23 @@ export interface MachineControl {
 export type StartPermission = "read" | "safe" | "edits" | "auto";
 export const START_PERMISSIONS: readonly StartPermission[] = ["read", "safe", "edits", "auto"];
 
+/** What a start runs with: a level, or `inherit` (sessionpipe 0.10): no permission flag, the
+ *  harness's own default on an `inherit` machine. `inherit` only ever comes from the machine
+ *  (its mode, a harness's default in the hello, an ack's `applied`); a command never names it. */
+export type RunLevel = StartPermission | "inherit";
+
+/** The levels a start may name on an `inherit` machine (CONTROL.md §3.1): the harness's own
+ *  default there can't be ranked, so nothing wider than `safe` is offered or queued. */
+export const INHERIT_LEVELS: readonly StartPermission[] = ["read", "safe"];
+
 /** One harness's entry in the hello's `start`: the levels it starts at here (already capped
  *  by the machine's mode), the one a start gets when it names none, and its models. */
 export interface HarnessStartOptions {
-  /** At least one, capped by the machine's mode. */
+  /** At least one, capped by the machine's mode (on an `inherit` machine, `INHERIT_LEVELS`). */
   permissions: StartPermission[];
-  /** The default, one of `permissions`. */
-  permission: StartPermission;
+  /** The default: one of `permissions`, or `inherit` on an `inherit` machine, which a start
+   *  gets by naming no level. */
+  permission: RunLevel;
   /** At most 50 suggestions, not a promise. */
   models?: string[];
   /** Hello `any_model`: any well-formed id is passed on (the harness may still refuse it). */
@@ -1103,6 +1150,12 @@ export interface PhoneTrustCheck {
 
 // ---------- control (phase 2; shapes fixed now so both sides can plan) ----------
 
+/** An ack's `applied` (control-ack.json): what a start ran with. */
+export interface Applied {
+  permission?: RunLevel;
+  model?: string;
+}
+
 export type ControlKind = "prompt" | "permission.answer" | "cancel" | "start" | "key.add";
 export type ControlOutcome = "progress" | "taken" | "delivered" | "expired" | "unsupported" | "failed" | "refused";
 
@@ -1132,8 +1185,9 @@ export interface ControlActivity {
   model?: string;
   /** A start's files, as signed. */
   files?: StartFile[];
-  /** What the machine ran it with, from its `taken` / `delivered` ack (sessionpipe 0.10). */
-  applied?: { permission?: StartPermission; model?: string };
+  /** What the machine ran it with, from its `taken` / `delivered` ack (sessionpipe 0.10);
+   *  `inherit` when it ran with no permission flag. */
+  applied?: Applied;
 }
 
 // ---------- extras (the curated catalogue; server/extensions/catalog.ts) ----------

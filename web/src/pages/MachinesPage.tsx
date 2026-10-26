@@ -10,18 +10,19 @@
 // arrived in the last minute or its control daemon is online. Requests waiting for a
 // person (pairings, devices) come first; on an address that cannot sign, one line says so
 // above the machines.
-import type { MachineSummary } from "@shared/api";
+import { accountLabel, type MachineSummary } from "@shared/api";
 import { useEffect, useState } from "react";
 import { Ago, CommandWell, EmptyState, HarnessGlyph } from "../components/bits";
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
 import { PageBar } from "../components/PageBar";
-import { tildify } from "../control/folders";
+import { machineHome, tildify } from "../control/folders";
 import { useRpId } from "../control/hooks";
 import { openNewSession } from "../control/newSessionState";
 import { PendingDevices, sentence } from "../control/PendingDevices";
 import { PendingPairings } from "../control/PendingPairings";
 import { canSign, signHint, useOwnKeys } from "../control/signer";
 import { useMachines, useStore } from "../data/hooks";
+import "../lib/acp";
 import { harnessMark } from "../lib/format";
 import { copyText } from "../lib/menus";
 import { receiverOrigin } from "../lib/net";
@@ -137,6 +138,12 @@ function MachineBlock({
     title: () => m.name,
     subtitle: () => (online ? "online" : "quiet"),
   });
+  // The harnesses its sessions came from, then the ones its daemon can start that sent none
+  // yet (sessionpipe 0.10: every ACP agent installed there).
+  const harnesses = [
+    ...Object.entries(m.harnesses),
+    ...(c?.harnesses ?? []).filter((h) => !(h in m.harnesses)).map((h) => [h, undefined] as const),
+  ];
   const devices =
     c && c.keys.length > 0
       ? c.keys.map((k) => `${k.name ?? k.id.slice(0, 8)}${mine.has(k.id) ? " (this one)" : ""}`).join(", ")
@@ -167,8 +174,8 @@ function MachineBlock({
         <li className="form-row form-row--kv" hidden={simple}>
           <span className="form-key">Harnesses</span>
           <span className="form-kv machine-harnesses">
-            {Object.keys(m.harnesses).length === 0 && <span className="machine-sub">None reported yet</span>}
-            {Object.entries(m.harnesses).map(([h, v]) => (
+            {harnesses.length === 0 && <span className="machine-sub">None reported yet</span>}
+            {harnesses.map(([h, v]) => (
               <span key={h} className="machine-harness">
                 <HarnessGlyph name={h} size="sm" />
                 <span>{harnessMark(h).label}</span>
@@ -183,7 +190,13 @@ function MachineBlock({
             <span className="form-kv" title={controlDetail(c, simple)}>
               <span className="paired">Paired</span>
               {!c.online && <span className="machine-sub"> · daemon offline</span>}
-              {c.mode && <span className="machine-sub"> · {c.mode === "safe" ? "safe mode" : "auto mode"}</span>}
+              {c.mode && <span className="machine-sub"> · {c.mode} mode</span>}
+              {c.mode === "inherit" && (
+                <span className="machine-caution">
+                  Sessions run as your own do on {m.name}: the agents' own settings decide, which can mean no permission
+                  checks.
+                </span>
+              )}
             </span>
           ) : (
             <span className="form-kv">
@@ -200,12 +213,29 @@ function MachineBlock({
             </span>
           </li>
         )}
+        {c && !simple && c.accounts && c.accounts.length > 0 && (
+          <li className="form-row form-row--kv">
+            <span className="form-key">Accounts</span>
+            <span className="form-kv machine-accounts">
+              {c.accounts.map((a) => (
+                <span key={`${a.harness}:${a.id}`} title={a.id}>
+                  {accountLabel(a)}
+                  <span className="machine-sub">
+                    {" "}
+                    · {harnessMark(a.harness).label}
+                    {a.email ? "" : ", API"}
+                  </span>
+                </span>
+              ))}
+            </span>
+          </li>
+        )}
         {c && !simple && c.folders && c.folders.length > 0 && (
           <li className="form-row form-row--kv">
             <span className="form-key">Folders</span>
             <span className="form-kv machine-folders">
               {c.folders.map((f) => (
-                <FolderName key={f} machine={m.name} path={f} home={c.home} />
+                <FolderName key={f} machine={m.name} path={f} home={machineHome(c)} />
               ))}
             </span>
           </li>

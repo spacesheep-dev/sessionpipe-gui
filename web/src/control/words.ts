@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: control-web. A carried message's lifecycle and a refusal's code, in words a
 // person reads under the strip (CONTROL.md §5, §10).
-import type { ControlActivity, ControlKind, ControlOutcome, StartPermission } from "@shared/api";
+import type { ControlActivity, ControlKind, ControlOutcome, RunLevel } from "@shared/api";
 import { ControlError, wrongOriginHere } from "./api";
 import { wrongOriginWords } from "./origin";
 import { deviceRefusal, nativeErrorWords } from "./signer";
@@ -157,19 +157,14 @@ export function startFailureWords(a: ControlActivity, machine: string, agent: st
   return null;
 }
 
-/** The level's name in the sheet and on the session page (STEER-SPEC B.3). */
-export const PERMISSION_LABEL: Record<StartPermission, string> = {
+/** The level's name in the sheet and on the session page (STEER-SPEC B.3). `inherit` is
+ *  only ever the machine's word (a default, an ack's `applied`), never one to send. */
+export const PERMISSION_LABEL: Record<RunLevel, string> = {
   read: "Read only",
   safe: "Safe",
   edits: "Accept edits",
   auto: "Auto",
-};
-/** Its one line in the Permission pop-up. */
-export const PERMISSION_HINT: Record<StartPermission, string> = {
-  read: "Reads and plans; changes nothing",
-  safe: "Only what the folder already allows; the rest is denied and listed",
-  edits: "Also edits files in the folder",
-  auto: "The agent's own automatic approval",
+  inherit: "As your own sessions",
 };
 
 /** The command a harness runs as on its machine, for "Starting claude on studio-mac…":
@@ -210,7 +205,10 @@ export function sentLine(
       return { text: "Running", running: true };
     case "delivered":
       return a.kind === "start"
-        ? { text: `Started on ${o.machine}. Its first events are on their way.`, running: false }
+        ? // An ACP agent (`api`) answers in the ack and may send no hook events at all.
+          a.mode === "api"
+          ? { text: `Ran on ${o.machine}.`, running: false }
+          : { text: `Started on ${o.machine}. Its first events are on their way.`, running: false }
         : { text: "Delivered. Its turn shows here when it begins.", running: false };
     default:
       return null;

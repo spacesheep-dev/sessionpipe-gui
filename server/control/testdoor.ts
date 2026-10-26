@@ -56,7 +56,6 @@ const DOOR_FACTS: Hello = {
   accounts: [],
   files: false,
   promptFiles: false,
-  home: null,
   start: null,
   keyTypes: null,
 };

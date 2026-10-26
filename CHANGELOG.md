@@ -6,6 +6,43 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **sessionpipe 0.10.0.** A machine in `inherit` mode (no permission flag: its agents run
+  as your own sessions there do, whatever their settings allow) shows as that, with one
+  line saying what it means, on Machines, the pairing page and the New session picker,
+  never as safe or auto; the well-known says `control.inherit: true`, so a 0.10.0 machine
+  may pair or switch to inherit with this receiver. New session there defaults to "As your
+  own sessions on this machine", which is sent as no level at all, and offers Read only
+  and Safe; nothing wider is offered or queued there, and `inherit` is never signed. An
+  ack's `applied: inherit` reads "As your own sessions".
+- **A session waiting on its own background work** (`turn.ended.background`) stays
+  working, "waiting on 2 background tasks", until it wakes, instead of going idle.
+- **Unattended runs** (`session.attended: false`): a short one is drawn quiet on the board
+  ("unattended"), and no unattended run raises a banner or a notification; absent is
+  unknown and changes nothing.
+- **Who submitted a turn** (`turn.started.submitted_by`): a scheduled, loop or system turn
+  says so under its prompt and on its row while it runs; an injected turn (a task
+  notification) never becomes the row's last ask.
+- **Accounts named by host** (an API home, `api.z.ai`): kept from the hello's `accounts`
+  without an email and listed on Machines.
+- **ACP agents**: labels and monograms for the ACP registry's harness names, Machines lists
+  what a daemon can start, New session offers them with no permission or model pickers,
+  and a start delivered over `api` says "Ran on …" with its reply.
+- **Demo mode pairs two machines**: studio-mac on 0.10.0 in inherit mode (goose among its
+  agents, an api.z.ai account, a start it ran over ACP) and build-box on 0.9.0, and plays
+  background work, a scheduled turn and a short unattended run.
+
+### Changed
+
+- The hello's `home` is gone (0.10.0 sends none). A start's folder may be `~/…` where the
+  machine's hello has `start` and this receiver's sessionpipe-core takes one (feature
+  detected, `server/control/tilde.ts`); otherwise folders stay absolute, from the
+  machine's `folders`.
+- The receiver's second look at a command follows 0.10.0: the closed field set per kind,
+  files on a prompt only for a machine that says `prompt_files`, and a level at most Safe
+  on an inherit machine. A hello keeps up to 64 harnesses.
+
 ## [0.3.0] - 2026-10-26
 
 ### Added

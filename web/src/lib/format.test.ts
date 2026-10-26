@@ -21,3 +21,17 @@ describe("toolLabel", () => {
     expect(toolLabel("apply_patch")).toBe("Edit");
   });
 });
+
+describe("harnessMark", () => {
+  it("names the ACP registry's agents once lib/acp.ts is loaded, with a monogram from the name", async () => {
+    const { harnessMark } = await import("./format");
+    expect(harnessMark("qwen-code")).toMatchObject({ glyph: "Qc", label: "qwen-code" });
+    await import("./acp");
+    expect(harnessMark("qwen-code")).toMatchObject({ glyph: "Qc", label: "Qwen Code" });
+    expect(harnessMark("goose")).toMatchObject({ glyph: "Go", label: "goose" });
+    expect(harnessMark("vtcode").label).toBe("VT Code");
+    expect(harnessMark("devin").label).toBe("Devin");
+    expect(harnessMark("claude-code").glyph).toBe("Cl");
+    expect(harnessMark("brand-new").label).toBe("brand-new");
+  });
+});

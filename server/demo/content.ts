@@ -9,6 +9,10 @@ export type HarnessName = "claude-code" | "codex" | "gemini-cli" | "antigravity"
 
 export const MACHINE_NAMES = ["studio-mac", "build-box", "ci-runner", "lab-pi"] as const;
 
+/** The machine sessionpipe 0.10's scenes run on, paired in demo mode (machine.ts): on its
+ *  own, so the other demo machines stay as an unpaired receiver sees them. */
+export const V010_MACHINE = "lab-mac";
+
 export const HARNESS_VERSION: Record<HarnessName, string> = {
   "claude-code": "2.1.296",
   codex: "0.157.1",
@@ -94,6 +98,14 @@ export interface TurnScript {
   error?: string;
   /** The turn never ends: the session goes quiet after its last step (a stale session). */
   abandon?: boolean;
+  /** sessionpipe 0.10 `turn.ended.background`: work still in flight when its Stop fires. */
+  background?: number;
+  /** sessionpipe 0.10 `turn.started.submitted_by`: the harness's own word for who submitted it. */
+  submittedBy?: string;
+  /** sessionpipe 0.10 `turn.started.injected`: the prompt is a block the harness wrote. */
+  injected?: boolean;
+  /** Virtual ms the session waits after this turn (its background work running). */
+  waitAfter?: number;
 }
 
 const bash = (stdout: string, stderr = "") => ({
@@ -1255,4 +1267,121 @@ export const PARALLEL_TURN: TurnScript = {
   ],
   final:
     "The coverage review is back: eviction (lines 22–27) and the size cap (line 41) have no tests. The invalidation and performance reviewers are still running in the background; I'll summarise them as they report.",
+};
+
+// ---------- sessionpipe 0.10 scenes (studio-mac, inherit mode) ----------
+
+/** Background work (`turn.ended.background`): two commands left running at the Stop; the
+ *  session waits on them, then wakes when the first finishes (Claude Code's own
+ *  `<task-notification>`, `injected`), with one still in flight. */
+export const BACKGROUND_TURNS: readonly TurnScript[] = [
+  {
+    prompt:
+      "Run the integration suite in the background and keep an eye on the staging deploy; tell me when either one finishes.",
+    title: { text: "Integration suite and staging deploy", source: "harness" },
+    steps: [
+      {
+        tool: "Bash",
+        input: {
+          command: "npm run test:integration",
+          description: "Run the integration suite",
+          run_in_background: true,
+        },
+        output: { backgroundTaskId: "b7k2m9", stdout: "", stderr: "" },
+        ms: 900,
+        say: "Started the integration suite in the background.",
+      },
+      {
+        tool: "Bash",
+        input: {
+          command: "kubectl rollout status deploy/billing -n staging --watch",
+          description: "Watch the staging deploy",
+          run_in_background: true,
+        },
+        output: { backgroundTaskId: "c4p8x1", stdout: "", stderr: "" },
+        ms: 700,
+      },
+    ],
+    final:
+      "Both are running in the background: the integration suite (about six minutes) and a watch on the staging rollout. I'll report as each one finishes.",
+    background: 2,
+    waitAfter: 240_000,
+  },
+  {
+    injected: true,
+    prompt:
+      '<task-notification>\n<task-id>b7k2m9</task-id>\n<status>completed</status>\n<summary>Background command "Run the integration suite" completed (exit code 0)</summary>\n</task-notification>',
+    steps: [
+      {
+        tool: "Read",
+        input: { file_path: "/tmp/claude/b7k2m9.output", limit: 40 },
+        output: read("/tmp/claude/b7k2m9.output", "Tests: 412 passed, 412 total\nTime: 5m 48s", 2),
+        ms: 6,
+      },
+    ],
+    final:
+      "The integration suite passed: 412 tests, no failures. The staging rollout is still going; I'm waiting on it.",
+    background: 1,
+    waitAfter: 180_000,
+  },
+];
+
+/** A scheduled wake-up (`submitted_by: schedule_wakeup`): the person asked once, the
+ *  harness's own schedule submits the next turn. */
+export const SCHEDULED_TURNS: readonly TurnScript[] = [
+  {
+    prompt: "Every 30 minutes, check the nightly build and open an issue for any test that started failing.",
+    steps: [
+      {
+        tool: "Bash",
+        input: {
+          command: "gh run list --workflow nightly --limit 1 --json conclusion",
+          description: "Last nightly run",
+        },
+        output: bash('[{"conclusion":"success"}]\n'),
+        ms: 1800,
+      },
+    ],
+    final: "Last night's build passed. I'll check again in 30 minutes.",
+    submittedBy: "user",
+    waitAfter: 50_000,
+  },
+  {
+    submittedBy: "schedule_wakeup",
+    prompt: "Check the nightly build and open an issue for any test that started failing.",
+    steps: [
+      {
+        tool: "Bash",
+        input: {
+          command: "gh run list --workflow nightly --limit 1 --json conclusion",
+          description: "Last nightly run",
+        },
+        output: bash('[{"conclusion":"failure"}]\n'),
+        ms: 1600,
+        say: "The nightly build failed; looking at which tests.",
+      },
+      {
+        tool: "Bash",
+        input: { command: "gh run view --log-failed | tail -n 20", description: "Failed tests" },
+        output: bash("FAIL test/invoices/proration.test.ts\n  ✕ prorates a mid-cycle downgrade (41 ms)\n"),
+        ms: 2400,
+      },
+    ],
+    final:
+      "The nightly build failed on one test, `prorates a mid-cycle downgrade` in test/invoices/proration.test.ts. It passed the night before, so I opened an issue for it.",
+  },
+];
+
+/** A run nobody attended (`session.attended: false`): a script's one-shot `claude -p`. */
+export const UNATTENDED_TURN: TurnScript = {
+  prompt: "Summarize the commits since v2.3.0 as release notes, one line each.",
+  steps: [
+    {
+      tool: "Bash",
+      input: { command: "git log v2.3.0..HEAD --oneline", description: "Commits since v2.3.0" },
+      output: bash("a1f3c2e Prorate mid-cycle downgrades\n9be01d4 Retry webhooks with backoff\n"),
+      ms: 400,
+    },
+  ],
+  final: "- Mid-cycle downgrades are prorated.\n- Webhook deliveries retry with backoff.",
 };

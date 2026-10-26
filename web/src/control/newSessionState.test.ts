@@ -7,6 +7,8 @@ import {
   aliasHidden,
   fixedPermission,
   machineFacts,
+  permissionChoices,
+  permissionToSend,
   pickContext,
   pruneRemembered,
   readDraft,
@@ -64,7 +66,7 @@ describe("pruneRemembered", () => {
     queued: 0,
     harnesses: ["claude-code", "codex"],
     folders: ["/Users/demo/acme/web"],
-    home: "/Users/demo",
+    tilde: true,
     start: {
       "claude-code": { permissions: ["read", "safe"], permission: "safe", anyModel: true },
       codex: { permissions: ["read", "safe", "auto"], permission: "auto", models: ["gpt-6-astra"] },
@@ -77,7 +79,7 @@ describe("pruneRemembered", () => {
         c,
         "studio-mac",
       ),
-    ).toEqual({ harness: "claude-code", permission: "read", model: "sonnet", cwd: "/Users/demo/acme/web" });
+    ).toEqual({ harness: "claude-code", permission: "read", model: "sonnet", cwd: "~/acme/web" });
   });
   it("drops a level above the mode now, a model off a closed list, a folder no longer allowed, a harness gone", () => {
     expect(pruneRemembered({ harness: "claude-code", permission: "auto" }, c, "studio-mac")).toEqual({
@@ -90,12 +92,53 @@ describe("pruneRemembered", () => {
     expect(pruneRemembered({ harness: "gemini-cli", permission: "read", model: "x" }, c, "studio-mac")).toEqual({});
   });
   it("drops every option on a machine that advertises none (an old daemon)", () => {
-    const old: MachineControl = { ...c, start: undefined, home: undefined };
+    const old: MachineControl = { ...c, start: undefined, tilde: undefined };
     expect(
       pruneRemembered({ harness: "codex", permission: "read", model: "gpt-6-astra", cwd: "~/acme/web" }, old, "x"),
     ).toEqual({
       harness: "codex",
     });
+  });
+});
+
+describe("the Permission row on an inherit machine (CONTROL.md §3.1)", () => {
+  const inherit = { permissions: ["read", "safe"], permission: "inherit" } as const;
+  const c: MachineControl = {
+    machineId: "m_studio",
+    online: true,
+    keys: [],
+    queued: 0,
+    mode: "inherit",
+    harnesses: ["claude-code", "goose"],
+    start: { "claude-code": { ...inherit, permissions: [...inherit.permissions] } },
+  };
+  it("offers its own default first, then read and safe; the default is sent as no level", () => {
+    const opts = c.start!["claude-code"];
+    expect(permissionChoices(opts)).toEqual(["inherit", "read", "safe"]);
+    expect(permissionToSend(opts, "inherit")).toBeUndefined();
+    expect(permissionToSend(opts, "safe")).toBe("safe");
+    expect(permissionToSend(opts, "auto")).toBeUndefined();
+    expect(permissionToSend(undefined, "read")).toBeUndefined();
+    expect(fixedPermission(c, "claude-code", {})).toBeNull();
+  });
+  it("keeps a remembered default, drops a level wider than safe", () => {
+    expect(pruneRemembered({ harness: "claude-code", permission: "inherit" }, c, "studio-mac").permission).toBe(
+      "inherit",
+    );
+    expect(pruneRemembered({ harness: "claude-code", permission: "auto" }, c, "studio-mac").permission).toBeUndefined();
+  });
+  it("an ACP agent there takes no options: its own settings, its asks refused", () => {
+    expect(permissionChoices(c.start?.goose)).toEqual([]);
+    expect(fixedPermission(c, "goose", {})).toBe("Its own settings; what it asks is refused");
+    expect(machineFacts(c, (h) => h).hint).toBe("inherit mode");
+  });
+  it("one level and no inherit: a fixed line, as before", () => {
+    const one: MachineControl = {
+      ...c,
+      mode: "safe",
+      start: { "claude-code": { permissions: ["safe"], permission: "safe" } },
+    };
+    expect(fixedPermission(one, "claude-code", { safe: "Safe" })).toBe("Safe");
   });
 });
 

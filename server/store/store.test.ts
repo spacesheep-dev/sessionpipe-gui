@@ -905,3 +905,105 @@ describe("flags and turn stats", () => {
     expect(store.snapshot().sessions).toEqual([before]);
   });
 });
+
+describe("sessionpipe 0.10 readings", () => {
+  const key = sessionKey("claude-code", SID);
+  it("a turn that ended with background work in flight keeps the session working until it wakes", () => {
+    const s = new Session();
+    store.ingest(
+      [
+        s.ev("session.started", { source: "startup" }),
+        s.ev("turn.started", { turn_id: "t1" }),
+        s.ev("turn.ended", { turn_id: "t1", reason: "stop", background: 2 }),
+      ],
+      "http",
+    );
+    const waiting = store.session(key)!;
+    expect(waiting.state).toBe("working");
+    expect(waiting.background?.tasks).toBe(2);
+    expect(waiting.stateSince).toBe(waiting.background?.since);
+    store.ingest([s.ev("turn.started", { turn_id: "t2", injected: true })], "http");
+    expect(store.session(key)!.background).toBeUndefined();
+    store.ingest([s.ev("turn.ended", { turn_id: "t2", reason: "stop", background: 0 })], "http");
+    expect(store.session(key)!).toMatchObject({ state: "idle" });
+    expect(store.session(key)!.background).toBeUndefined();
+    // A session that ends while waiting is done.
+    store.ingest(
+      [s.ev("turn.started", { turn_id: "t3" }), s.ev("turn.ended", { turn_id: "t3", reason: "stop", background: 1 })],
+      "http",
+    );
+    store.ingest([s.ev("session.ended", { reason: "exit" })], "http");
+    expect(store.session(key)!).toMatchObject({ state: "done" });
+    expect(store.session(key)!.background).toBeUndefined();
+  });
+
+  it("attended: the latest value; absent is unknown and keeps what was said", () => {
+    const s = new Session();
+    store.ingest([s.ev("session.started", { source: "startup" })], "http");
+    expect(store.session(key)!.attended).toBeUndefined();
+    store.ingest([s.ev("turn.started", {}, { session: { attended: false } })], "http");
+    expect(store.session(key)!.attended).toBe(false);
+    store.ingest([s.ev("tool.started", { tool: "Read" })], "http");
+    expect(store.session(key)!.attended).toBe(false);
+    store.ingest([s.ev("tool.ended", { tool: "Read", ok: true }, { session: { attended: true } })], "http");
+    expect(store.session(key)!.attended).toBe(true);
+  });
+
+  it("submitted_by is kept as the harness's word; a malformed one is dropped", () => {
+    const s = new Session();
+    store.ingest([s.ev("turn.started", { turn_id: "t1", submitted_by: "schedule_wakeup" })], "http");
+    expect(store.session(key)!.currentTurn).toMatchObject({ submittedBy: "schedule_wakeup" });
+    store.ingest([s.ev("turn.started", { turn_id: "t2", submitted_by: "a person, typing" })], "http");
+    expect(store.session(key)!.currentTurn?.submittedBy).toBeUndefined();
+    store.ingest([s.ev("turn.started", { turn_id: "t3", submitted_by: "future_word" })], "http");
+    expect(store.session(key)!.currentTurn?.submittedBy).toBe("future_word");
+  });
+
+  it("an injected turn never becomes the last ask, and a refired turn.started never reclassifies its turn", () => {
+    const s = new Session();
+    store.ingest(
+      [
+        s.ev("turn.started", { turn_id: "t1" }),
+        s.ev("turn.ended", { turn_id: "t1", reason: "stop" }),
+        s.ev("turn.transcript", { turn: 0, user: "Fix the date picker", assistant: "Done.", at: at(1) }),
+        s.ev("turn.started", { turn_id: "t2", injected: true }),
+        s.ev("turn.progress", { turn: 1, user: "<task-notification>…", assistant: "Reading", at: at(2) }),
+      ],
+      "http",
+    );
+    expect(store.session(key)!.progress?.user).toBe("");
+    store.ingest(
+      [
+        s.ev("turn.ended", { turn_id: "t2", reason: "stop" }),
+        s.ev("turn.transcript", { turn: 1, user: "<task-notification>…", assistant: "It passed.", at: at(3) }),
+      ],
+      "http",
+    );
+    const after = store.session(key)!;
+    expect(after.lastUser).toBe("Fix the date picker");
+    expect(after.lastAssistant).toBe("It passed.");
+    expect(after.counts.turns).toBe(2);
+
+    store.ingest(
+      [s.ev("turn.started", { turn_id: "t3" }), s.ev("turn.started", { turn_id: "t3", injected: true })],
+      "http",
+    );
+    expect(store.session(key)!.currentTurn?.injected).toBeUndefined();
+    expect(store.session(key)!.counts.turns).toBe(3);
+  });
+});
+
+describe("machines", () => {
+  it("keeps a harness's version from the newest session that names one, a backfill before it or not", () => {
+    const backfill = new Session("bf-1", "codex");
+    const live = new Session("live-1", "codex");
+    const other = new Session("other-1", "claude-code");
+    store.ingest(
+      [backfill.ev("session.backfill", { started_at: at(0), last_at: at(55) }, { harness: "codex", version: "" })],
+      "http",
+    );
+    store.ingest([live.ev("session.started", { source: "startup" }, { version: "0.157.1" })], "http");
+    store.ingest([other.ev("session.started", { source: "startup" })], "http");
+    expect(store.machines().find((m) => m.name === "misha-air")!.harnesses).toMatchObject({ codex: "0.157.1" });
+  });
+});

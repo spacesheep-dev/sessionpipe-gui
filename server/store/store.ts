@@ -715,6 +715,9 @@ export class Store {
 
   machines(): MachineSummary[] {
     const out = new Map<string, MachineSummary>();
+    /** When each machine's harness version was last seen: the newest session that names one
+     *  wins, whatever order the sessions come in (a backfill has no version). */
+    const versionAt = new Map<string, string>();
     for (const entry of this.sessions.values()) {
       const s = entry.summary;
       if (!s.machine) continue;
@@ -727,8 +730,12 @@ export class Store {
       if (s.lastAt > m.lastAt) m.lastAt = s.lastAt;
       if (s.state === "working") m.working++;
       if (s.state === "needs_you") m.needsYou++;
-      if (!(s.harness in m.harnesses) || (s.harnessVersion && s.lastAt >= m.lastAt))
+      if (!(s.harness in m.harnesses)) m.harnesses[s.harness] = undefined;
+      const k = `${s.machine}\u0000${s.harness}`;
+      if (s.harnessVersion && s.lastAt >= (versionAt.get(k) ?? "")) {
         m.harnesses[s.harness] = s.harnessVersion;
+        versionAt.set(k, s.lastAt);
+      }
     }
     return [...out.values()].sort((a, b) => (a.lastAt < b.lastAt ? 1 : a.lastAt > b.lastAt ? -1 : 0));
   }

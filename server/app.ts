@@ -225,13 +225,15 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     return n;
   };
   const setDemo = (on: boolean): void => {
-    if (on && !demo) demo = startDemo(store, { speed: opts.speed });
+    if (on && !demo) demo = startDemo(store, { speed: opts.speed, control });
     else if (!on && demo) {
       demo.stop();
       demo = null;
       dropDemoSessions();
     }
   };
+  // Demo machines (server/demo/machine.ts) never outlive demo mode either.
+  control.demo.remove();
   if (opts.demo) setDemo(true);
   else {
     const dropped = dropDemoSessions();

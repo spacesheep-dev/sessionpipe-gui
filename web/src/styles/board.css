@@ -175,6 +175,14 @@
 .card--done .card-title {
   color: var(--fg-2);
 }
+/* A short run nobody attended (sessionpipe 0.10 attended: false): a probe, a script's
+   one-shot. Quiet, never hidden. */
+.card--quiet :is(.card-title, .card-text) {
+  color: var(--fg-3);
+}
+.card-run::first-letter {
+  text-transform: lowercase;
+}
 /* The state, its request and the time are one element (the e2e contract); its parts
    take their places in the row's grid. */
 .card-status {

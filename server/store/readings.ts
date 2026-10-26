@@ -33,6 +33,9 @@ const ATTENTION_KINDS = new Set<string>(["permission", "question", "elicitation"
  *  (CONTROL.md §7). */
 const NOT_HOOK = new Set(["turn.progress", "turn.transcript", "session.heartbeat", "session.backfill"]);
 
+/** `turn.started.submitted_by`: a bare word (PROTOCOL.md §4), kept as the harness sent it. */
+const SUBMITTED_BY = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
+
 /** tool.started kept for the loop reading. */
 const LOOP_WINDOW = 10;
 /** Identical starts within the window that make a loop. */
@@ -65,6 +68,9 @@ export interface Tracking {
   /** Agent / Task tool calls (the tools that launch a subagent), newest last, at most
    *  AGENTS_MAX: what an AgentRun's description and launch call are read from. */
   launches: Launch[];
+  /** The last turn's prompt is a block the harness wrote (`turn.started.injected`): its
+   *  progress and transcript never become the session's last ask. */
+  injected?: boolean;
 }
 
 /** One call of a tool that launches a subagent. */
@@ -235,6 +241,8 @@ export function coalesceSession(s: SessionSummary, ev: ProtocolEvent): void {
   put("url", b.url);
   const acc = str(b.account_id);
   if (acc) s.accountId = acc;
+  // Latest wins (a headless run resumed in a terminal); absent leaves what is known.
+  if (typeof b.attended === "boolean") s.attended = b.attended;
   if (typeof b.parent_id === "string" && b.parent_id) s.parentId = b.parent_id;
   else if (b.parent_id === null && s.parentId === undefined) s.parentId = null;
   const title = str(b.title);
@@ -438,10 +446,12 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       // a harness reopened after a reboot) is live again, not done for good.
       rec.ended = false;
       s.endedAt = undefined;
+      s.background = undefined;
       break;
     case "session.ended":
       rec.ended = true;
       s.endedAt = at;
+      s.background = undefined;
       s.currentTurn = undefined;
       s.currentTool = undefined;
       s.progress = undefined;
@@ -449,10 +459,24 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       closeAgents(s, at);
       break;
     case "turn.started": {
+      const turnId = str(d.turn_id);
+      // A harness may fire turn.started again for a turn it absorbed a message into
+      // (PROTOCOL.md §4): the same turn, never reclassified by a later `injected`.
+      if (turnId && s.currentTurn?.turnId === turnId) break;
       s.counts.turns++;
       const promptChars = num(d.prompt_chars);
-      s.currentTurn = { turnId: str(d.turn_id), since: at, ...(promptChars !== undefined ? { promptChars } : {}) };
+      const by = typeof d.submitted_by === "string" && SUBMITTED_BY.test(d.submitted_by) ? d.submitted_by : undefined;
+      t.injected = d.injected === true;
+      s.currentTurn = {
+        turnId,
+        since: at,
+        ...(promptChars !== undefined ? { promptChars } : {}),
+        ...(by ? { submittedBy: by } : {}),
+        ...(t.injected ? { injected: true } : {}),
+      };
       s.currentTool = undefined;
+      // Woken: whatever it was waiting on is this turn's now; its Stop says what is left.
+      s.background = undefined;
       break;
     }
     case "turn.ended": {
@@ -466,6 +490,8 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       s.currentTurn = undefined;
       s.currentTool = undefined;
       s.progress = undefined;
+      const tasks = num(d.background);
+      s.background = tasks !== undefined && tasks > 0 ? { tasks: Math.floor(tasks), since: at } : undefined;
       break;
     }
     case "turn.progress": {
@@ -473,7 +499,8 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       if (turn !== undefined) {
         s.progress = {
           turn,
-          user: cut(d.user, PREVIEW_CHARS),
+          // An injected prompt (a task notification, a peer's message) is not the ask.
+          user: t.injected ? "" : cut(d.user, PREVIEW_CHARS),
           assistant: detach(cut(d.assistant, 2 * PREVIEW_CHARS).slice(-PREVIEW_CHARS)),
           at: str(d.at) ?? at,
         };
@@ -485,7 +512,8 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       noteTaskNotification(s, d.user);
       const turn = num(d.turn);
       if (s.progress && (turn === undefined || turn >= s.progress.turn)) s.progress = undefined;
-      s.lastUser = cut(d.user, SNIPPET_CHARS);
+      // The last ask stays the last one that wasn't a block the harness wrote.
+      if (!t.injected) s.lastUser = cut(d.user, SNIPPET_CHARS);
       s.lastAssistant = cut(d.assistant, SNIPPET_CHARS);
       break;
     }
@@ -693,11 +721,17 @@ export function evaluateState(rec: SessionRecord, now: number): { state: Session
   if (!rec.live) return { state: "done", since: s.lastAt };
   if (silent >= DONE_AFTER_MS) return { state: "done", since: new Date(last + DONE_AFTER_MS).toISOString() };
   // A subagent still running keeps its orchestrator working, even after the turn that
-  // launched it ended (Claude Code's background agents report after the Stop).
+  // launched it ended (Claude Code's background agents report after the Stop); so does
+  // background work the last turn's Stop said is still in flight (`turn.ended.background`).
   const open = s.agents.find((a) => a.state !== "done");
-  if (s.currentTurn || open) {
-    const since =
-      s.currentTurn && (!open || s.currentTurn.since < open.startedAt) ? s.currentTurn.since : open!.startedAt;
+  if (s.currentTurn || open || s.background) {
+    const since = s.currentTurn
+      ? !open || s.currentTurn.since < open.startedAt
+        ? s.currentTurn.since
+        : open.startedAt
+      : open && (!s.background || open.startedAt < s.background.since)
+        ? open.startedAt
+        : s.background!.since;
     if (silent < STALE_AFTER_MS) return { state: "working", since };
     return { state: "stale", since: new Date(last + STALE_AFTER_MS).toISOString() };
   }

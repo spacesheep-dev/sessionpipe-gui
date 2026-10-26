@@ -57,9 +57,9 @@ client against a receiver you can see into.
 | `server/setup/tailscale.ts` | onboarding | `tailscale status --json` / `serve status` probe for the "From anywhere" step, cached across the 2 s polls (`fresh` skips the cache); `serveTailscale`: `tailscale serve --bg <port>`, skipped when already served, `TailscaleError` with the CLI's last lines |
 | `server/phone/*` | onboarding | `registerPhone(router, deps)`: `/api/ui/phone` (`PhoneInfo`: LAN QR, rp id, public url, the Tailscale probe, trusted keys, pending device requests), `POST /tailscale` (this machine: serve, then the public url), `GET /device/:id` (`PhoneDeviceState`, from control's device requests), `POST /trust-check` (`https` true when the request came over TLS) |
 | `server/tls/*` | tls | `ensureCerts(dir, opts) → TlsMaterial`, `createDualListener({http, https})`, `registerTrust(router, deps)`: `/trust`, `/ca.crt` |
-| `server/control/*` | control | `registerControl(router, deps)`: pair/hello/poll/ack/off, queues, keys, early verify, test door; `ControlState` the UI reads (`machines()`, `activity()`, `pendingDevices()`, `deviceRequest(id)`); the hello's `start`, `home`, `files`, `prompt_files` on `MachineControl` and a start's `applied` (`parse.ts`); the second look at a start against that hello (`precheck.ts`); the files a start carries (`files.ts`: `POST /api/ui/control/files`, `GET {control}/files/{sha256}` with the machine's token) |
+| `server/control/*` | control | `registerControl(router, deps)`: pair/hello/poll/ack/off, queues, keys, early verify, test door; `ControlState` the UI reads (`machines()`, `activity()`, `pendingDevices()`, `deviceRequest(id)`); the hello's `mode` (`inherit` too), `start`, `files`, `prompt_files`, `accounts` (email or name) on `MachineControl` and a start's `applied` (`parse.ts`); `tilde` when a start may name `~/…` (`tilde.ts`); the well-known's `control.inherit`; demo mode's machines (`demo`); the second look at a start against that hello (`precheck.ts`); the files a start carries (`files.ts`: `POST /api/ui/control/files`, `GET {control}/files/{sha256}` with the machine's token) |
 | `server/conformance/*` | control | runner CLI + vitest that boots `createApp` in-process and runs every delivery fixture |
-| `server/demo/*` | demo | `startDemo(store, opts) → { stop }`: realistic synthetic sessions through `store.ingest(…, "demo")` |
+| `server/demo/*` | demo | `startDemo(store, opts) → { stop }`: realistic synthetic sessions through `store.ingest(…, "demo")`, with sessionpipe 0.10's fields (background work, a scheduled turn, an unattended run on an API account); with `opts.control`, its machines (`machine.ts`): a 0.10 one in `inherit` mode with an ACP agent and a name-only account, and a 0.9 one |
 | `server/extensions/*` | platform | `ExtensionKind { kind, noun, manifestFile, dir, validate }`, `scanKind`, `addExtension/linkExtension/removeExtension/formatEntries`: the folder layout, scan and installer every kind shares |
 | `server/themes/*` | platform | the view kind (`<stateDir>/themes/<id>/theme.json`): `ThemeRegistry`, `/api/ui/themes`, per-theme state (with an `etag`; `If-Match` → 412 `conflict`; every write a `viewState` frame through `onState`), `/themes/:id/*` static, `view add/link/remove/list` (`theme` alias) |
 | `server/plugins/*` | platform | the plugin kind (`<stateDir>/plugins/<id>/plugin.json`): `PluginRegistry`, `PluginHost` (import at boot / reload, `PluginApi`, suggestions), settings at `<stateDir>/plugins-settings/<id>.json` (0600, secrets masked on the wire), `/api/ui/plugins`, `/api/ui/plugins/reload` and `PUT …/:id/settings` (loopback), `plugin add/link/remove/list` |
@@ -104,6 +104,12 @@ function names above.
   `session` set and its own state. `counts.agentsRunning` is the open ones;
   `counts.subagents` stays the cumulative count. `DetailQuery.agent` pages one agent's
   events (its `agent_id`, its `subagent.*`, its launch call).
+- sessionpipe 0.10: `turn.ended.background` > 0 keeps a session `working` ("waiting on N
+  background tasks", `SessionSummary.background`) until its next turn or its end, `stale`
+  after STALE_AFTER_MS of silence as any working session; `session.attended` is the latest
+  value, absent unknown (`attended`); `turn.started.submitted_by` / `injected` ride on
+  `currentTurn`, a repeated `turn.started` for the same `turn_id` changes nothing, and an
+  injected turn's prompt never becomes `lastUser` (the row's last ask).
 - Labels are not a reading: they are the person's (`server/ui/labels.ts`), kept beside
   the store, never on a `SessionSummary`.
 

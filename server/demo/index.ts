@@ -5,7 +5,9 @@
 // startDemo: a deterministic simulation (sim.ts) of a small team's agents, played in
 // real time scaled by `speed`. startReplay: a file's events, paced by their own gaps.
 import type { ProtocolEvent } from "../../shared/api.js";
+import type { Control } from "../control/index.js";
 import type { Store } from "../store/store.js";
+import { type DemoMachines, startDemoMachines } from "./machine.js";
 import { inBatches, planReplay } from "./replay.js";
 import { Simulation } from "./sim.js";
 
@@ -16,6 +18,8 @@ export interface DemoOptions {
   speed?: number;
   /** The same seed gives the same demo. */
   seed?: number;
+  /** The receiver's control side: the demo pairs its machines there (machine.ts). */
+  control?: Control;
 }
 
 export interface Runner {
@@ -29,7 +33,15 @@ const MAX_TICK_MS = 1000;
 
 export function startDemo(store: Store, opts: DemoOptions = {}): Runner {
   const speed = opts.speed && opts.speed > 0 ? opts.speed : 1;
-  const sim = new Simulation({ machines: opts.machines, seed: opts.seed, speed, startAt: Date.now() });
+  let paired: DemoMachines | null = null;
+  const sim = new Simulation({
+    machines: opts.machines,
+    seed: opts.seed,
+    speed,
+    startAt: Date.now(),
+    onStart: (s) => paired?.started(s),
+  });
+  if (opts.control) paired = startDemoMachines(opts.control, sim.v010Machine, (m) => sim.account(m, "claude-code"));
   let timer: NodeJS.Timeout | undefined;
   let stopped = false;
   const tick = () => {
@@ -51,6 +63,7 @@ export function startDemo(store: Store, opts: DemoOptions = {}): Runner {
     stop() {
       stopped = true;
       if (timer) clearTimeout(timer);
+      paired?.stop();
     },
   };
 }

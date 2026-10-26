@@ -128,7 +128,8 @@ export function useAttentionEffects(): void {
       known = ids;
       if (fresh.length === 0 || !state.on || !inBackground()) return;
       // Oldest first, so the newest ends up on top of the stack.
-      for (const r of fresh.reverse()) show(r);
+      // An unattended run (`attended: false`) is in the Inbox, never a notification.
+      for (const r of fresh.reverse()) if (r.session.attended !== false) show(r);
     };
     check();
     return store.subscribe(check);

@@ -19,12 +19,14 @@ import path from "node:path";
 import { ulid } from "sessionpipe-core";
 import type { Assertion, ControlCommand, SignedCommand } from "sessionpipe-core/control";
 import type {
+  Applied,
   ControlActivity,
   ControlKind,
   ControlOutcome,
   HarnessStartOptions,
   KeyType,
   MachineControl,
+  MachineMode,
   StartFile,
   StartPermission,
   TrustedKey,
@@ -32,6 +34,21 @@ import type {
 import type { DeviceSignature } from "./devicekeys.js";
 import { FileStore } from "./files.js";
 import { type AckIn, type HarnessAccount, type Hello, isFinal } from "./parse.js";
+import { machineTakesTilde } from "./tilde.js";
+
+/** Demo mode's machines have ids under this prefix (MACHINE_RE: `m_` and 16–40 more). */
+export const DEMO_MACHINE = "m_demo-";
+
+/** What demo mode says a demo machine ran (ControlState.demoStart). */
+export interface DemoStart {
+  session: string;
+  text: string;
+  cwd: string;
+  at: string;
+  mode: string;
+  reply?: string;
+  applied?: Applied;
+}
 
 /** The longest long-poll we hold (HTTP.md §1 control.wait_max_s). */
 export const WAIT_MAX_S = 25;
@@ -107,13 +124,12 @@ export interface MachineRow {
   modes: string[];
   version: string;
   folders?: string[];
-  mode?: "safe" | "auto";
+  mode?: MachineMode;
   accounts?: HarnessAccount[];
   /** The last hello's word on files and start options: each hello says them again, so a
    *  daemon that stopped advertising one (a downgrade) loses it here at once. */
   files?: boolean;
   promptFiles?: boolean;
-  home?: string;
   start?: Record<string, HarnessStartOptions>;
   /** Pairing or hello `key_types`; absent means passkeys only (an older daemon). */
   keyTypes?: KeyType[];
@@ -178,7 +194,7 @@ export interface MessageRow {
   model?: string;
   files?: StartFile[];
   /** What the machine ran the start with (`taken`, `delivered`). */
-  applied?: { permission?: StartPermission; model?: string };
+  applied?: Applied;
 }
 
 interface MachinesFile {
@@ -260,6 +276,9 @@ export class ControlState {
   private filesSweptAt = 0;
   /** The bytes of the files starts carry (files.ts), under <dir>/files. */
   readonly files: FileStore;
+  /** This receiver's core takes a start's `~/…` folder (tilde.ts), so a machine that takes
+   *  one (its hello has `start`) is offered them (`MachineControl.tilde`). */
+  takesTilde = false;
   /** Called with every message whose state changed (queued, acked, expired). */
   onMessage: (m: MessageRow) => void = () => {};
   /** Called when any machine row changed (pairing, hello, poll, removal) or a machine's
@@ -385,8 +404,6 @@ export class ControlState {
     else delete m.files;
     if (h.promptFiles) m.promptFiles = true;
     else delete m.promptFiles;
-    if (h.home) m.home = h.home;
-    else delete m.home;
     if (h.start) m.start = h.start;
     else delete m.start;
     if (h.keyTypes) m.keyTypes = h.keyTypes;
@@ -456,7 +473,7 @@ export class ControlState {
     if (m.accounts) c.accounts = m.accounts;
     if (m.files) c.files = true;
     if (m.promptFiles) c.promptFiles = true;
-    if (m.home) c.home = m.home;
+    if (this.takesTilde && machineTakesTilde(m)) c.tilde = true;
     if (m.start) c.start = m.start;
     if (m.keyTypes) c.keyTypes = m.keyTypes;
     return c;
@@ -818,6 +835,61 @@ export class ControlState {
     const m = this.machinesById.get(id);
     const msgs = m ? this.deliverable(id) : [];
     for (const w of [...set]) w.resolve(msgs);
+  }
+
+  // --- demo mode (server/demo/machine.ts) ------------------------------------------
+
+  /** A demo machine: the row a paired daemon leaves (a token nobody holds, its hello), and
+   *  a poll now, so it reads online. Only an id under `DEMO_MACHINE` is taken. */
+  demoMachine(id: string, h: Hello): void {
+    if (!id.startsWith(DEMO_MACHINE)) return;
+    const m = this.machinesById.get(id) ?? this.createMachine(id, h);
+    if (!m.tokenHash) this.mintToken(m);
+    this.hello(m, h);
+    this.demoPoll(id);
+  }
+
+  /** The demo machine polled (it never holds a long-poll open: nothing is ever queued for it). */
+  demoPoll(id: string): void {
+    const m = this.machinesById.get(id);
+    if (!m || !id.startsWith(DEMO_MACHINE)) return;
+    m.lastPollAt = nowIso();
+    this.saveMachines();
+  }
+
+  /** A start the demo machine ran, as its acks leave it: delivered, with its mode, its
+   *  reply and what it ran with. Unsigned: it was never queued, and no machine runs it. */
+  demoStart(id: string, run: DemoStart): void {
+    if (!this.machinesById.has(id) || !id.startsWith(DEMO_MACHINE)) return;
+    const at = run.at;
+    const row: MessageRow = {
+      id: ulid(Date.parse(at)),
+      machineId: id,
+      cmd: "",
+      at,
+      expiresAt: new Date(Date.parse(at) + EXPIRES_DEFAULT_MS).toISOString(),
+      kind: "start",
+      session: run.session,
+      text: run.text,
+      cwd: run.cwd,
+      via: "demo",
+      outcome: "delivered",
+      mode: run.mode,
+      takenAt: at,
+      ackedAt: new Date(Date.parse(at) + 4000).toISOString(),
+      ...(run.reply ? { reply: run.reply } : {}),
+      ...(run.applied ? { applied: run.applied } : {}),
+    };
+    this.queue(id).push(row);
+    this.saveQueue(id);
+    this.onMessage(row);
+  }
+
+  /** Every demo machine is gone (demo mode off, or one left from an earlier run). */
+  removeDemoMachines(): number {
+    let n = 0;
+    for (const id of [...this.machinesById.keys()]) if (id.startsWith(DEMO_MACHINE) && this.removeMachine(id)) n++;
+    return n;
   }
 
   activity(limit = 100): ControlActivity[] {

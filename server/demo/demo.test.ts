@@ -3,10 +3,15 @@
 // runner on the wall clock at speed 1000 against a fake store.
 import { describe, expect, it } from "vitest";
 import { DONE_AFTER_MS, type EventSource, type ProtocolEvent } from "../../shared/api.js";
+import type { Control } from "../control/index.js";
+import { type Hello, MACHINE_RE } from "../control/parse.js";
+import type { DemoStart } from "../control/state.js";
 import { applyEvent, newRecord, refreshState } from "../store/readings.js";
 import type { Store } from "../store/store.js";
+import { MODELS } from "./content.js";
 import { startDemo } from "./index.js";
-import { Simulation } from "./sim.js";
+import { DEMO_ACP_SESSION, demoMachineId, startDemoMachines } from "./machine.js";
+import { DEMO_API_ACCOUNT, type DemoStarted, Simulation } from "./sim.js";
 import { TYPE_TIER, validate } from "./validate.js";
 
 class FakeStore {
@@ -322,10 +327,14 @@ describe("Simulation: a 10-minute run", () => {
     expect(events.some((e) => e.type === "context.compacted" && e.data.trigger === "auto")).toBe(true);
     expect(events.some((e) => e.type === "session.ended" && e.data.reason === "exit")).toBe(true);
 
-    expect(new Set(events.map((e) => e.session.machine))).toEqual(new Set(["studio-mac", "build-box"]));
+    expect(new Set(events.map((e) => e.session.machine))).toEqual(new Set(["studio-mac", "build-box", "lab-mac"]));
     const models = new Set(events.map((e) => e.session.model).filter(Boolean));
-    for (const m of ["claude-fable-5-1", "claude-opus-5-5", "gpt-5.4-codex", "gemini-3-pro", "gpt-5.5"])
+    for (const m of ["claude-fable-5-1", "claude-opus-5-5", "gpt-5.4-codex", "gemini-3-pro"])
       expect(models, m).toContain(m);
+    // Cursor's is the rng's pick of its two.
+    expect(events.some((e) => e.harness.name === "cursor" && MODELS.cursor.includes(String(e.session.model)))).toBe(
+      true,
+    );
     expect(new Set(events.map((e) => e.harness.name))).toEqual(
       new Set(["claude-code", "codex", "gemini-cli", "antigravity", "cursor"]),
     );
@@ -406,7 +415,8 @@ describe("Simulation: a 10-minute run", () => {
       const slice = sim.advance(m * 60_000);
       expect(slice.flatMap((e) => validate(e))).toEqual([]);
       n += slice.length;
-      expect(sim.live).toBeLessThanOrEqual(7);
+      // The showcase's cycle: the showcase, three reviewers, and sessionpipe 0.10's scenes.
+      expect(sim.live).toBeLessThanOrEqual(9);
     }
     expect(n).toBeGreaterThan(1500);
   });
@@ -602,5 +612,98 @@ describe("startDemo on the wall clock", () => {
     const live = events.filter((e) => e.type !== "session.backfill");
     const span = Date.parse(live[live.length - 1]!.time) - Date.parse(live[0]!.time);
     expect(span).toBeLessThan(2000);
+  });
+});
+
+describe("sessionpipe 0.10 scenes", () => {
+  const started: DemoStarted[] = [];
+  const sim = new Simulation({ seed: SEED, startAt: T0, speed: 1, onStart: (s) => started.push(s) });
+  const events = sim.advance(TEN_MINUTES);
+  const read = (k: string, now: number) => {
+    const list = events.filter((e) => key(e) === k && Date.parse(e.time) <= now);
+    const rec = newRecord(list[0]!.harness.name, list[0]!.session.id, list[0]!.time, "demo");
+    for (const e of list) applyEvent(rec, e, e.time, "demo");
+    refreshState(rec, now);
+    return rec.summary;
+  };
+
+  it("leaves work in the background, and the session reads working until it wakes", () => {
+    const stop = events.find((e) => e.type === "turn.ended" && e.data.background === 2)!;
+    expect(stop.harness.event).toBe("Stop");
+    const waiting = read(key(stop), Date.parse(stop.time) + 60_000);
+    expect(waiting.state).toBe("working");
+    expect(waiting.background).toEqual({ tasks: 2, since: stop.time });
+    // It wakes on its own <task-notification> turn, a block the harness wrote.
+    const wake = events.find((e) => key(e) === key(stop) && e.type === "turn.started" && e.data.injected === true)!;
+    expect(Date.parse(wake.time) - Date.parse(stop.time)).toBeGreaterThan(200_000);
+    const woken = read(key(stop), Date.parse(wake.time));
+    expect(woken.background).toBeUndefined();
+    expect(woken.currentTurn?.injected).toBe(true);
+    // The injected prompt never becomes the row's last ask.
+    expect(woken.lastUser).toMatch(/^Run the integration suite/);
+  });
+
+  it("says who submitted a turn, and a run nobody attended on another API's account", () => {
+    const sched = events.find((e) => e.type === "turn.started" && e.data.submitted_by === "schedule_wakeup")!;
+    expect(read(key(sched), Date.parse(sched.time)).currentTurn?.submittedBy).toBe("schedule_wakeup");
+    const probe = events.filter((e) => e.session.attended === false);
+    expect(probe.length).toBeGreaterThan(0);
+    expect(new Set(probe.map((e) => e.session.account_id))).toEqual(new Set([DEMO_API_ACCOUNT]));
+    const end = probe.find((e) => e.type === "session.ended")!;
+    const s = read(key(end), Date.parse(end.time));
+    expect(s.attended).toBe(false);
+    expect(Date.parse(s.lastAt) - Date.parse(s.startedAt)).toBeLessThan(60_000);
+    // Elsewhere the harness says nothing: unknown, never false.
+    expect(events.some((e) => e.session.attended === undefined)).toBe(true);
+  });
+
+  it("tells the demo machine which sessions it started, with their first message", () => {
+    expect(started.length).toBeGreaterThan(0);
+    const s = started[0]!;
+    expect(s.machine).toBe("lab-mac");
+    expect(events.some((e) => e.session.id === s.id && e.type === "session.started")).toBe(true);
+    expect(s.text).toMatch(/^Run the integration suite/);
+  });
+});
+
+describe("demo machines", () => {
+  it("pairs the 0.10 scenes' machine in inherit mode, and takes it away on stop", () => {
+    const calls: string[] = [];
+    const hellos: Hello[] = [];
+    const runs: DemoStart[] = [];
+    const control = {
+      demo: {
+        machine: (id: string, h: Hello) => {
+          calls.push(`machine ${id}`);
+          hellos.push(h);
+        },
+        poll: () => {},
+        start: (_id: string, r: DemoStart) => runs.push(r),
+        remove: () => {
+          calls.push("remove");
+          return 2;
+        },
+      },
+    } as unknown as Control;
+    const m = startDemoMachines(control, "lab-mac", () => "acct");
+    expect(calls).toEqual([`machine ${demoMachineId("lab-mac")}`]);
+    const [newer] = hellos;
+    expect(newer).toMatchObject({ mode: "inherit", version: "0.10.0" });
+    expect(newer!.start?.["claude-code"]).toMatchObject({ permissions: ["read", "safe"], permission: "inherit" });
+    expect(newer!.harnesses).toContain("goose");
+    expect(newer!.accounts).toContainEqual({ harness: "claude-code", id: DEMO_API_ACCOUNT, name: "api.z.ai" });
+    // The ACP agent's run: delivered over `api`, its reply in the ack.
+    expect(runs[0]).toMatchObject({ session: DEMO_ACP_SESSION, mode: "api" });
+    m.started({ harness: "claude-code", id: "s1", machine: "lab-mac", cwd: "~/code/billing", text: "hi", at: T0 });
+    m.started({ harness: "claude-code", id: "s2", machine: "studio-mac", cwd: "~/code/billing", text: "hi", at: T0 });
+    expect(runs).toHaveLength(2);
+    expect(runs[1]).toMatchObject({
+      session: "claude-code:s1",
+      cwd: "/Users/demo/code/billing",
+      applied: { permission: "inherit" },
+    });
+    m.stop();
+    expect(calls.at(-1)).toBe("remove");
+    expect(demoMachineId("lab-mac")).toMatch(MACHINE_RE);
   });
 });

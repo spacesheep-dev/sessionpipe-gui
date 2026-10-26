@@ -69,8 +69,7 @@ export interface Hello {
   name: string;
   harnesses: string[];
   folders?: string[];
-  mode?: "safe" | "auto";
-  home?: string;
+  mode?: "safe" | "auto" | "inherit";
   files?: boolean;
   start?: Record<string, { permissions: string[]; permission: string; models?: string[]; any_model?: boolean }>;
   version?: string;

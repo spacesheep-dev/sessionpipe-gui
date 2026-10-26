@@ -131,3 +131,16 @@
     display: none;
   }
 }
+/* Inherit mode (sessionpipe 0.10): the one line that says what it means, under the mode. */
+.machine-caution {
+  display: block;
+  margin-top: 2px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  text-wrap: pretty;
+}
+.machine-accounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+}

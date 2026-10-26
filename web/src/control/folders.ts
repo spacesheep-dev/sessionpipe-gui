@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: control-web. Where a new session may run (STEER-SPEC B.3, "Folder"): this
 // machine's recent folders that sit under one it allows, then the folders its hello lists,
-// then a path typed by hand. Events report a folder as `~/…` (EVENTS.md); a start needs it
-// absolute (CONTROL.md §3.1 `cwd`), so `~` is the hello's `home`, and without one a `~/`
-// folder is not offered. "Under" is the daemon's own rule, by path segments: `/a/web`
-// allows `/a/web/app` and never `/a/webx`. The daemon checks again with realpath; this is
-// only so the sheet never offers what the machine would refuse. Pure functions, tested.
+// then a path typed by hand. Events report a folder as `~/…` (EVENTS.md). sessionpipe 0.10's
+// hello carries no home folder: a machine whose daemon expands `~/…` itself takes such a
+// folder as it is (`MachineControl.tilde`; `home` below is then `~`), and on any other a
+// start's folder is absolute and a `~/` one is not offered. "Under" is the daemon's own
+// rule, by path segments: `/a/web` allows `/a/web/app` and never `/a/webx`; a `~/…` folder
+// and an absolute allowed one can't be compared here, so that check is the machine's. The
+// daemon checks again with realpath; this is only so the sheet never offers what the
+// machine would refuse. Pure functions, tested.
 
 /** `/a//b/` → `/a/b`; the root stays `/`. Backslashes are a Windows path's own. */
 export function normalizePath(p: string): string {
@@ -18,6 +21,15 @@ export function normalizePath(p: string): string {
 }
 
 const segments = (p: string): string[] => normalizePath(p).split(/[\\/]/).filter(Boolean);
+
+/** The `home` the functions below take for a machine: `~` where it expands `~/…` itself
+ *  (sessionpipe 0.10), else none. Never an absolute path: no hello sends one. */
+export const machineHome = (c: { tilde?: boolean } | undefined): string | undefined => (c?.tilde ? "~" : undefined);
+
+/** Whether `p` is allowed by `roots` as far as this page can tell: under one of them, or
+ *  any at all when none is listed. A `~/…` path against absolute roots is the machine's call. */
+const allowedBy = (roots: readonly string[], p: string): boolean =>
+  roots.length === 0 || roots.some((r) => r.startsWith("~") !== p.startsWith("~") || under(r, p));
 
 /** The absolute path `p` means on a machine whose home is `home`: `~` and `~/…` expanded,
  *  an absolute path as it is; null for anything else (a relative path, `~` with no home). */
@@ -84,7 +96,6 @@ export function folderChoices(o: {
   home?: string | null;
 }): { recent: FolderChoice[]; allowed: FolderChoice[] } {
   const roots = (o.folders ?? []).map(normalizePath);
-  const allowedBy = (p: string) => roots.length === 0 || roots.some((r) => under(r, p));
   const seen = new Set<string>();
   const recent: FolderChoice[] = [];
   const mine = o.sessions
@@ -92,7 +103,7 @@ export function folderChoices(o: {
     .sort((a, b) => (a.lastAt < b.lastAt ? 1 : a.lastAt > b.lastAt ? -1 : 0));
   for (const s of mine) {
     const abs = expandHome(s.cwd!, o.home);
-    if (!abs || seen.has(abs) || !allowedBy(abs)) continue;
+    if (!abs || seen.has(abs) || !allowedBy(roots, abs)) continue;
     seen.add(abs);
     recent.push({ path: abs, display: tildify(abs, o.home), repo: repoName(s.repo) });
     if (recent.length >= RECENT_MAX) break;
@@ -111,13 +122,11 @@ export function typedFolder(
   const t = text.trim();
   if (!t) return { ok: false, reason: "Choose a folder" };
   if ((t === "~" || t.startsWith("~/")) && !o.home)
-    return { ok: false, reason: `${o.machine} didn't say where its home folder is; type the full path` };
+    return { ok: false, reason: `${o.machine} needs the full path; type it starting with /` };
   const abs = expandHome(t, o.home);
   if (!abs) return { ok: false, reason: "Type the folder's full path, starting with / or ~/" };
   if (segments(abs).some((x) => x === ".." || x === "."))
     return { ok: false, reason: "Type the folder's own path, without . or .." };
-  const roots = o.folders ?? [];
-  if (roots.length && !roots.some((r) => under(r, abs)))
-    return { ok: false, reason: `${o.machine} doesn't allow that folder` };
+  if (!allowedBy(o.folders ?? [], abs)) return { ok: false, reason: `${o.machine} doesn't allow that folder` };
   return { ok: true, path: abs };
 }

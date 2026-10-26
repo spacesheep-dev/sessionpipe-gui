@@ -5,7 +5,17 @@
 // device key, waiting for a trusted device's key.add). JSON both ways, errors by code;
 // every URL goes through lib/net.ts, which is the receiver itself in a browser and the
 // shell's rx: protocol in the app.
-import type { ControlActivity, Info, KeyType, MachineControl, StartFile, TlsInfo, TrustedKey } from "@shared/api";
+import type {
+  ControlActivity,
+  HarnessAccount,
+  Info,
+  KeyType,
+  MachineControl,
+  MachineMode,
+  StartFile,
+  TlsInfo,
+  TrustedKey,
+} from "@shared/api";
 import { ROUTES } from "@shared/api";
 import { apiUrl } from "../lib/net";
 import { sendingOriginOf, wrongOrigin } from "./origin";
@@ -29,8 +39,8 @@ export interface Pairing {
     modes: string[];
     version: string;
     folders?: string[];
-    mode?: "safe" | "auto";
-    accounts?: { harness: string; id: string; email: string }[];
+    mode?: MachineMode;
+    accounts?: HarnessAccount[];
     /** The pairing request's `key_types`: absent, the daemon takes passkeys only. */
     keyTypes?: KeyType[];
     firstPairing: boolean;

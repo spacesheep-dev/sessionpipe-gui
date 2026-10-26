@@ -141,7 +141,7 @@ export function machineHint(m: MachineSummary): string {
   if (!c) return "";
   return [
     c.online ? "" : "offline",
-    c.mode === "safe" ? "safe mode" : c.mode === "auto" ? "auto" : "",
+    c.mode === "safe" ? "safe mode" : c.mode === "auto" ? "auto" : c.mode === "inherit" ? "inherit mode" : "",
     c.start ? "" : c.version ? `sessionpipe ${c.version}` : "",
   ]
     .filter(Boolean)

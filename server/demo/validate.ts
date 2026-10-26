@@ -70,7 +70,12 @@ const DATA_RULES: Record<string, { required: string[]; fields: Record<string, Ru
   "session.forgotten": { required: [], fields: {} },
   "turn.started": {
     required: [],
-    fields: { turn_id: { kind: "string", max: 128 }, prompt_chars: { kind: "int" } },
+    fields: {
+      turn_id: { kind: "string", max: 128 },
+      prompt_chars: { kind: "int" },
+      submitted_by: { kind: "string", pattern: /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/ },
+      injected: { kind: "bool" },
+    },
   },
   "turn.ended": {
     required: ["reason"],
@@ -79,6 +84,7 @@ const DATA_RULES: Record<string, { required: string[]; fields: Record<string, Ru
       reason: { kind: "enum", values: ["stop", "interrupt", "error"] },
       error: { kind: "string", max: 200 },
       ms: { kind: "int" },
+      background: { kind: "int" },
     },
   },
   "turn.transcript": {
@@ -225,6 +231,7 @@ export function validate(event: unknown): string[] {
       out.push("session.title_source: not custom|harness|first-ask");
     if (s.parent_id !== undefined && s.parent_id !== null && typeof s.parent_id !== "string")
       out.push("session.parent_id: not a string or null");
+    if (s.attended !== undefined && typeof s.attended !== "boolean") out.push("session.attended: not a boolean");
   }
 
   if (!isObj(e.privacy)) out.push("privacy: not an object");

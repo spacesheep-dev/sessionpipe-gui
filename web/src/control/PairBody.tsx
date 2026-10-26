@@ -8,8 +8,10 @@
 // In the native app there is no passkey: "Approve with Touch ID" asks the shell, which
 // reads this pairing itself, puts its digits and machine in the Touch ID prompt, and signs
 // the same challenge with the app's device key (CONTROL.md §3.2, purpose `pair`).
+import { accountLabel } from "@shared/api";
 import { useEffect, useState } from "react";
 import { ActionButton, HarnessGlyph } from "../components/bits";
+import "../lib/acp";
 import { harnessMark } from "../lib/format";
 import { ms, useNow } from "../lib/time";
 import { ControlError, controlApi, httpsHere, type Pairing } from "./api";
@@ -240,13 +242,21 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
           {m.mode && (
             <li className="form-row form-row--kv">
               <span className="form-key">Mode</span>
-              <span className="form-kv">{m.mode}</span>
+              <span className="form-kv">
+                {m.mode}
+                {m.mode === "inherit" && (
+                  <span className="machine-caution">
+                    Sessions run as your own do on {m.name}, with whatever the agents' own settings allow, which can
+                    include skipping permission checks.
+                  </span>
+                )}
+              </span>
             </li>
           )}
           {m.accounts && m.accounts.length > 0 && (
             <li className="form-row form-row--kv">
               <span className="form-key">Accounts</span>
-              <span className="form-kv">{m.accounts.map((a) => `${a.email} (${a.harness})`).join(", ")}</span>
+              <span className="form-kv">{m.accounts.map((a) => `${accountLabel(a)} (${a.harness})`).join(", ")}</span>
             </li>
           )}
           <li className="form-row form-row--kv">

@@ -32,8 +32,8 @@ interface Pairing {
   fromIp: string;                      // where the request came from (CONTROL.md §2)
   startedAt: string; expiresAt: string;
   machine: { id: string; name: string; harnesses: string[]; modes: string[]; version: string;
-             folders?: string[]; mode?: "safe" | "auto";
-             accounts?: { harness: string; id: string; email: string }[];
+             folders?: string[]; mode?: "safe" | "auto" | "inherit";
+             accounts?: { harness: string; id: string; email?: string; name?: string }[];
              firstPairing: boolean;    // no token yet: approving hands the machine its token
              keys: number };           // passkeys already trusted for it
   rpId: string;
@@ -125,18 +125,28 @@ the machine ran it with.
 
 **The second look** (`precheck.ts`). After the verifier, the receiver holds a command to
 what the machine's last hello advertised (CONTROL.md §2), because a daemon that predates
-a field ignores it: `files`, `permission` and `model` belong to a `start` only
-(`bad_fields`); `files` must follow §3.1 and the machine must have said `files: true`
-(`bad_fields`), and every file must be held here (`file`); `permission` must be one of
-the levels its `start` entry lists for that harness (`permission`); `model` needs
+a field ignores it: `permission` and `model` belong to a `start` only, `files` to a
+`start` or a `prompt` (`bad_fields`); `files` must follow §3.1 and the machine must have
+said `files: true` (a start) or `prompt_files: true` (a prompt) (`bad_fields`), and every
+file must be held here (`file`); `permission` must be one of the levels its `start` entry
+lists for that harness (`permission`), never `inherit` (`bad_fields`), and at most `safe`
+on an `inherit` machine (`permission`); `model` needs
 `models` or `any_model` there, and a closed list must hold it (`model`). The test door
 skips this look so a delivery scenario can reach the machine's own refusal.
 
-**Hello facts** kept per machine and shown on `MachineControl`: `files`, `prompt_files`
-(`promptFiles`), `home` (absolute, ≤ 1024) and `start` (per harness `{ permissions,
-permission, models?, any_model? }`; an entry for a harness the hello does not list, a
-default outside its levels, unknown levels and malformed models are dropped). Each hello
-says them again: one without them takes them away.
+**Hello facts** kept per machine and shown on `MachineControl`: `mode` (`safe`, `auto`, or
+`inherit` from sessionpipe 0.10: no permission flag), `files`, `prompt_files`
+(`promptFiles`) and `start` (per harness `{ permissions, permission, models?, any_model? }`;
+an entry for a harness the hello does not list, a default outside its levels (or
+`inherit`), unknown levels and malformed models are dropped; on an `inherit` machine, or
+for a default of `inherit`, the levels are capped at read and safe). `accounts` keep one
+named by `email`, else by `name` (an API home, `api.z.ai`). No home folder: sessionpipe
+0.10's hello has none. `MachineControl.tilde` says a start may name a `~/…` folder, which
+the machine expands: set when this receiver's sessionpipe-core takes one and the hello has
+`start` (CONTROL.md §3.1: "a machine that sends `start` also takes a `~` folder"; `tilde.ts`). Each hello says them again: one without them takes them
+away. The well-known's `control.inherit: true` tells a daemon this receiver shows an
+inherit machine as that, so it may pair or switch to inherit with it (CONTROL.md §2).
+Demo mode puts its machines here through `demo` (ids `m_demo-…`, server/demo/machine.ts).
 
 ## The machine wire (for reference)
 

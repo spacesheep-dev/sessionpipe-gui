@@ -40,7 +40,7 @@ import {
 } from "react";
 import { forkOf } from "../control/Activity";
 import { PromptBody, promptParts } from "../control/Attachments";
-import { tildify } from "../control/folders";
+import { machineHome, tildify } from "../control/folders";
 import { useControlActivity } from "../control/hooks";
 import { SessionControl } from "../control/SessionControl";
 import {
@@ -58,6 +58,7 @@ import { isFinal } from "../control/words";
 import { useMachines, useMachinesMap, useSession, useStore } from "../data/hooks";
 import { LIST_PREVIEW, TAIL, takeWarm } from "../data/prefetch";
 import { agentLabel, agentsFact, agentType, openAgent, taskNotification } from "../lib/agents";
+import "../lib/acp";
 import {
   ATTENTION_LABEL,
   attentionMessage,
@@ -74,6 +75,7 @@ import { labelMenu } from "../lib/labels";
 import { absoluteUrl, agentItems, copyItem, sessionItems } from "../lib/menus";
 import { reducedMotion, useFlip } from "../lib/motion";
 import { AGENT_PARAM, back, Link, navigate, sessionPath, useSearchParam } from "../lib/router";
+import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
@@ -879,7 +881,8 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
 
   const flags = !chat && s?.flags?.length ? s.flags : null;
   const applied = appliedFact(started);
-  const folder = started?.cwd ? tildify(started.cwd, control?.home) : undefined;
+  const waiting = s ? backgroundFact(s) : null;
+  const folder = started?.cwd ? tildify(started.cwd, machineHome(control)) : undefined;
   // The timeline's rows: the loaded turns, each with the message sent from here that
   // became it, then the messages still on their way.
   // A "Session" group that only says the session started tells nothing the title band
@@ -941,7 +944,9 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
                   </>
                 ) : (
                   <>
-                    <span className="sess-where">{[machineName, folder].filter(Boolean).join(" · ")}</span>
+                    <span className="sess-where">
+                      {[machineName, harnessMark(harness).label, folder].filter(Boolean).join(" · ")}
+                    </span>
                     {applied && <span className="sess-applied">{applied}</span>}
                   </>
                 )
@@ -961,6 +966,11 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
             </p>
           )}
           {error && s && events.length > 0 && <p className="page-note is-err">{error}</p>}
+          {waiting && (
+            <p className="page-note sess-waiting">
+              {waiting.replace(/^w/, "W")}; each one wakes the session when it finishes.
+            </p>
+          )}
           {optionsIgnored(started) && (
             <p className="page-note">
               {machineName} ran this at its own mode; its sessionpipe ignores per-session options.
@@ -1082,6 +1092,7 @@ function SessionMeta({
   const more = [
     STATE_LABEL[s.state],
     fact,
+    s.attended === false && "unattended",
     s.model && modelShort(s.model),
     `started ${new Date(s.startedAt).toLocaleString([], { hourCycle: "h23" })}`,
     plural(s.counts.turns, "turn"),
@@ -1285,7 +1296,7 @@ function TurnBlock({
         notice ? (
           <AgentNotice agentId={notice.agentId} seq={startSeq} />
         ) : prompt ? (
-          <Prompt text={prompt} seq={startSeq} />
+          <Prompt text={prompt} seq={startSeq} by={submittedLabel(turn.start.data.submitted_by)} />
         ) : sent?.text ? (
           <Prompt text={sent.text} seq={startSeq} sent={sent} />
         ) : (
@@ -1390,11 +1401,14 @@ function Prompt({
   seq,
   bubble = false,
   sent,
+  by,
 }: {
   text: string;
   seq?: number;
   bubble?: boolean;
   sent?: ControlActivity;
+  /** Who submitted the turn, when the harness said it was not the person ("Scheduled"). */
+  by?: string;
 }) {
   const { path, root } = useTimeline();
   // A message sent through sessionpipe arrives framed ("Message via … (sessionpipe
@@ -1412,6 +1426,7 @@ function Prompt({
       <blockquote className={cls} data-start-message={sent?.kind === "start" ? "" : undefined} {...menu}>
         <PromptBody text={words} />
         {via && <span className="prompt-via">Sent from {via}</span>}
+        {by && <span className="prompt-via">{by}</span>}
       </blockquote>
       <SentFiles files={sent?.files} />
     </>
@@ -1677,7 +1692,7 @@ function ChatTurn({
             </time>
           )}
           {prompt ? (
-            <Prompt text={prompt} seq={startSeq} bubble />
+            <Prompt text={prompt} seq={startSeq} bubble by={submittedLabel(turn.start?.data.submitted_by)} />
           ) : sent?.text ? (
             <Prompt text={sent.text} seq={startSeq} bubble sent={sent} />
           ) : (

@@ -5,9 +5,16 @@
 // device (pruned to what it still advertises), and the draft. Every storage read and
 // write is wrapped: a private window, or a page that cannot store, still starts sessions.
 // The pure parts (`pickContext`, `pruneRemembered`, `aliasHidden`) are tested.
-import type { ControlActivity, MachineControl, StartFile, StartPermission } from "@shared/api";
+import type {
+  ControlActivity,
+  HarnessStartOptions,
+  MachineControl,
+  RunLevel,
+  StartFile,
+  StartPermission,
+} from "@shared/api";
 import { useSyncExternalStore } from "react";
-import { expandHome, typedFolder } from "./folders";
+import { expandHome, machineHome, typedFolder } from "./folders";
 
 /** What an entry point knows: "here" is a session's machine, agent and folder. */
 export interface NewSessionTarget {
@@ -16,7 +23,7 @@ export interface NewSessionTarget {
   /** Absolute, or `~/…` as events report it (expanded with the machine's home). */
   cwd?: string;
   text?: string;
-  permission?: StartPermission;
+  permission?: RunLevel;
   model?: string;
   files?: StartFile[];
 }
@@ -91,7 +98,8 @@ function write(key: string, v: unknown): void {
 export interface Remembered {
   harness?: string;
   cwd?: string;
-  permission?: StartPermission;
+  /** `inherit`: the default on an inherit machine was the choice (nothing was sent). */
+  permission?: RunLevel;
   model?: string;
 }
 
@@ -122,7 +130,7 @@ export interface Draft {
   /** What the folder field holds: a choice's absolute path, or text typed by hand. */
   folder?: string;
   text: string;
-  permission?: StartPermission;
+  permission?: RunLevel;
   model?: string;
   /** Uploaded already (held here a day), so a restored draft can still send them. */
   files?: StartFile[];
@@ -179,11 +187,12 @@ export function pruneRemembered(r: Remembered, c: MachineControl, machine: strin
   const harness = r.harness && c.harnesses?.includes(r.harness) ? r.harness : undefined;
   if (harness) out.harness = harness;
   const opts = harness ? c.start?.[harness] : undefined;
-  if (r.permission && opts?.permissions.includes(r.permission)) out.permission = r.permission;
+  if (r.permission && permissionChoices(opts).includes(r.permission)) out.permission = r.permission;
   if (r.model && opts && (opts.anyModel || opts.models?.includes(r.model))) out.model = r.model;
   if (r.cwd) {
-    const abs = expandHome(r.cwd, c.home);
-    if (abs && typedFolder(abs, { folders: c.folders, home: c.home, machine }).ok) out.cwd = abs;
+    const home = machineHome(c);
+    const abs = expandHome(r.cwd, home);
+    if (abs && typedFolder(abs, { folders: c.folders, home, machine }).ok) out.cwd = abs;
   }
   return out;
 }
@@ -213,6 +222,25 @@ export function aliasHidden(
   return false;
 }
 
+// ----- the Permission row (CONTROL.md §2 `start`, §3.1) -----
+
+/** The levels the sheet offers for a harness, in its order. On an `inherit` machine its
+ *  default comes first, "As your own sessions on this machine", and is chosen by sending no
+ *  level; the named ones after it are what the hello lists, already capped at safe there. */
+export function permissionChoices(opts: HarnessStartOptions | undefined): RunLevel[] {
+  if (!opts) return [];
+  return opts.permission === "inherit" ? ["inherit", ...opts.permissions] : [...opts.permissions];
+}
+
+/** What a start carries for the chosen level: a level the hello lists, or nothing (the
+ *  default on an `inherit` machine, a level it no longer lists). `inherit` is never sent. */
+export function permissionToSend(
+  opts: HarnessStartOptions | undefined,
+  p: RunLevel | undefined,
+): StartPermission | undefined {
+  return p && p !== "inherit" && opts?.permissions.includes(p) ? p : undefined;
+}
+
 // ----- what a machine offers, in the picker's words -----
 
 const shortVersion = (v: string | undefined): string | undefined => /^(\d+\.\d+)/.exec(v ?? "")?.[1];
@@ -234,7 +262,9 @@ export function machineFacts(
       ? "safe mode"
       : c.mode === "auto"
         ? "auto"
-        : undefined;
+        : c.mode === "inherit"
+          ? "inherit mode"
+          : undefined;
   return { ...(hint ? { hint } : {}), ...(detail ? { detail } : {}) };
 }
 
@@ -246,10 +276,13 @@ export function fixedPermission(
   harness: string | undefined,
   label: Record<string, string>,
 ): string | null {
-  const opts = harness ? c?.start?.[harness] : undefined;
-  if (opts && opts.permissions.length >= 2) return null;
-  if (opts?.permissions.length === 1) return label[opts.permissions[0]!] ?? opts.permissions[0]!;
+  const choices = permissionChoices(harness ? c?.start?.[harness] : undefined);
+  if (choices.length >= 2) return null;
+  if (choices.length === 1) return label[choices[0]!] ?? choices[0]!;
   if (c?.mode === "safe") return "Safe mode, set at the machine";
   if (c?.mode === "auto") return "Auto mode, set at the machine";
+  // An agent with no start options on an inherit machine is driven over ACP, whose asks
+  // the machine refuses as in safe (CONTROL.md §6); its own settings decide the rest.
+  if (c?.mode === "inherit") return "Its own settings; what it asks is refused";
   return "Set at the machine";
 }

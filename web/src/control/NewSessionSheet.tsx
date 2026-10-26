@@ -11,7 +11,7 @@
 // can be pulled down by its top to dismiss. With no machine paired it is an empty state
 // with the one way on, not a disabled form. Loaded once the page is idle (NewSession.tsx
 // mounts it).
-import type { MachineSummary, StartFile, StartPermission } from "@shared/api";
+import type { MachineSummary, RunLevel, StartFile } from "@shared/api";
 import { START_FILE_MAX_BYTES, START_FILES_MAX, START_FILES_TOTAL_BYTES, sessionKey, validModel } from "@shared/api";
 import {
   type ClipboardEvent,
@@ -29,6 +29,7 @@ import { MoreButton } from "../components/ContextMenu";
 import { Select, type SelectOption } from "../components/Select";
 import { useAppState, useMachines } from "../data/hooks";
 import { useFocusTrap } from "../lib/focus";
+import "../lib/acp";
 import { bytes, harnessMark } from "../lib/format";
 import { reducedMotion, tokenMs, useSheetDrag } from "../lib/motion";
 import { navigate, sessionPath } from "../lib/router";
@@ -36,7 +37,7 @@ import { hintFor, matches, useShortcut } from "../lib/shortcuts";
 import { controlApi, wrongOriginHere } from "./api";
 import { uuid } from "./bytes";
 import { sendCommand } from "./command";
-import { folderChoices, tildify, typedFolder } from "./folders";
+import { folderChoices, machineHome, tildify, typedFolder } from "./folders";
 import { useGrant, useRpId } from "./hooks";
 import {
   closeNewSession,
@@ -45,6 +46,8 @@ import {
   getBoardFilter,
   machineFacts,
   type NewSessionTarget,
+  permissionChoices,
+  permissionToSend,
   pickContext,
   pruneRemembered,
   readDraft,
@@ -55,8 +58,19 @@ import {
 } from "./newSessionState";
 import { sentence } from "./PendingDevices";
 import { canSign, machineTakes, signerKind, signHint, updateWords, useOwnKeys } from "./signer";
-import { PERMISSION_HINT, PERMISSION_LABEL, sendErrorWords, WRONG_ORIGIN } from "./words";
+import { PERMISSION_LABEL, sendErrorWords, WRONG_ORIGIN } from "./words";
 import "./newSessionSheet.css";
+
+/** A level's one line in the Permission pop-up (only the sheet shows them, so they live here). */
+const PERMISSION_HINT: Record<RunLevel, string> = {
+  read: "Reads and plans; changes nothing",
+  safe: "Only what the folder already allows; the rest is denied and listed",
+  edits: "Also edits files in the folder",
+  auto: "The agent's own automatic approval",
+  inherit: "No permission flag: the agent's own settings there decide, which can mean no checks",
+};
+/** The default on an `inherit` machine, as the Permission pop-up names it. */
+const INHERIT_DEFAULT = "As your own sessions on this machine";
 
 const PHONE = "(max-width: 839px)";
 const TEXT_MAX = 20_000;
@@ -161,16 +175,16 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
         sessions: [...sessions.values()],
         machine: mm.name,
         folders: cc.folders,
-        home: cc.home,
+        home: machineHome(cc),
       });
       let folder = "";
       if (prefer.cwd) {
-        const t = typedFolder(prefer.cwd, { folders: cc.folders, home: cc.home, machine: mm.name });
+        const t = typedFolder(prefer.cwd, { folders: cc.folders, home: machineHome(cc), machine: mm.name });
         folder = t.ok ? t.path : prefer.cwd;
       } else folder = r.cwd ?? choices.recent[0]?.path ?? choices.allowed[0]?.path ?? "";
       const opts = harness ? cc.start?.[harness] : undefined;
-      const permission =
-        prefer.permission && opts?.permissions.includes(prefer.permission)
+      const permission: RunLevel | undefined =
+        prefer.permission && permissionChoices(opts).includes(prefer.permission)
           ? prefer.permission
           : r.harness === harness && r.permission
             ? r.permission
@@ -195,7 +209,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   }, []);
   const [harness, setHarness] = useState<string | undefined>(first.harness);
   const [folder, setFolder] = useState(first.folder);
-  const [permission, setPermission] = useState<StartPermission | undefined>(first.permission);
+  const [permission, setPermission] = useState<RunLevel | undefined>(first.permission);
   const [model, setModel] = useState(first.model ?? "");
   const [text, setText] = useState(target.text ?? initial.draft?.text ?? "");
   const [files, setFiles] = useState<FileItem[]>(() =>
@@ -249,7 +263,9 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     const opts = c?.start?.[h];
     const r = c ? readRemembered(c.machineId) : {};
     setPermission(
-      r.harness === h && r.permission && opts?.permissions.includes(r.permission) ? r.permission : opts?.permission,
+      r.harness === h && r.permission && permissionChoices(opts).includes(r.permission)
+        ? r.permission
+        : opts?.permission,
     );
     setModel(r.harness === h && r.model && opts && (opts.anyModel || opts.models?.includes(r.model)) ? r.model : "");
   };
@@ -258,12 +274,14 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const blocked = m ? why(m) : null;
   const harnesses = c?.harnesses ?? [];
   const opts = harness ? c?.start?.[harness] : undefined;
-  const showPermission = !!opts && opts.permissions.length >= 2;
+  // On an inherit machine the default ("As your own sessions") is one of the choices.
+  const levels = permissionChoices(opts);
+  const showPermission = levels.length >= 2;
   const showModel = !!opts && (!!opts.anyModel || !!opts.models?.length);
   const takesFiles = c?.files === true;
   const listsFolders = !!c?.folders?.length;
   const folderCheck = machine
-    ? typedFolder(folder, { folders: c?.folders, home: c?.home, machine })
+    ? typedFolder(folder, { folders: c?.folders, home: machineHome(c), machine })
     : ({ ok: false, reason: "Choose a machine" } as const);
   const uploading = files.some((f) => !f.entry && !f.error);
   const fileErrors = files.some((f) => f.error);
@@ -401,7 +419,10 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
           // Only what this machine's hello advertised (CONTROL.md §2): an older daemon
           // ignores a field it does not know and would run at its own mode.
           ...(takesFiles && held.length ? { files: held } : {}),
-          ...(showPermission && permission && opts!.permissions.includes(permission) ? { permission } : {}),
+          // On an inherit machine its default is chosen by naming no level at all.
+          ...(showPermission && permissionToSend(opts, permission)
+            ? { permission: permissionToSend(opts, permission) }
+            : {}),
           ...(showModel && model ? { model } : {}),
         },
         { onTap: () => setTap(true) },
@@ -498,7 +519,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const choices = useMemo(
     () =>
       machine && c
-        ? folderChoices({ sessions: [...sessions.values()], machine, folders: c.folders, home: c.home })
+        ? folderChoices({ sessions: [...sessions.values()], machine, folders: c.folders, home: machineHome(c) })
         : { recent: [], allowed: [] },
     [machine, c, sessions],
   );
@@ -512,12 +533,12 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   ];
   const typed = (t: string): SelectOption<string> | null => {
     if (!machine) return null;
-    const r = typedFolder(t, { folders: c?.folders, home: c?.home, machine });
-    return r.ok ? { value: r.path, label: tildify(r.path, c?.home) } : { value: t, label: t, hint: r.reason };
+    const r = typedFolder(t, { folders: c?.folders, home: machineHome(c), machine });
+    return r.ok ? { value: r.path, label: tildify(r.path, machineHome(c)) } : { value: t, label: t, hint: r.reason };
   };
-  const permissionOptions: SelectOption<StartPermission>[] = (opts?.permissions ?? []).map((p) => ({
+  const permissionOptions: SelectOption<RunLevel>[] = levels.map((p) => ({
     value: p,
-    label: PERMISSION_LABEL[p],
+    label: p === "inherit" ? INHERIT_DEFAULT : PERMISSION_LABEL[p],
     detail: PERMISSION_HINT[p],
   }));
   const seenModels = useMemo(() => {
@@ -594,7 +615,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
             aria-labelledby="ns-folder"
             value={folder}
             onChange={(e) => setFolder(e.target.value)}
-            placeholder={c?.home ? "~/path/on/the/machine" : "/absolute/path/on/the/machine"}
+            placeholder={c?.tilde ? "~/path/on/the/machine" : "/absolute/path/on/the/machine"}
             spellCheck={false}
             autoComplete="off"
           />
@@ -695,9 +716,14 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     </>
   );
 
-  const capped = c?.mode === "safe" ? `${machine} is in safe mode. Wider levels are set at the machine.` : undefined;
+  const capped =
+    c?.mode === "safe"
+      ? `${machine} is in safe mode. Wider levels are set at the machine.`
+      : c?.mode === "inherit"
+        ? `${machine} runs agents as your own sessions there. A level named here is at most Safe.`
+        : undefined;
   const permissionSelect = showPermission && (
-    <Select<StartPermission>
+    <Select<RunLevel>
       labelledBy="ns-permission"
       value={permission}
       onChange={setPermission}

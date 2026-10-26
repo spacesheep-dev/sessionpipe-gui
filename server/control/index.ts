@@ -20,9 +20,11 @@ import {
 } from "../../shared/api.js";
 import type { Ctx, Router } from "../http/router.js";
 import { coreTakesDevice, receiverKeyTypes } from "./devicekeys.js";
+import type { Hello } from "./parse.js";
 import { registerMachineRoutes } from "./routes.js";
-import { ControlState, type DeviceRequestRow, toActivity, WAIT_MAX_S } from "./state.js";
+import { ControlState, type DemoStart, type DeviceRequestRow, toActivity, WAIT_MAX_S } from "./state.js";
 import { registerTestDoor } from "./testdoor.js";
+import { coreTakesTilde } from "./tilde.js";
 import { registerUiRoutes } from "./ui.js";
 
 export interface ControlDeps {
@@ -40,6 +42,8 @@ export interface ControlDeps {
   sessionExists?: (key: string) => boolean;
   /** Take device keys (devicekeys.ts); by default only when this sessionpipe-core verifies them. */
   deviceKeys?: boolean;
+  /** Queue starts with a `~/…` folder (tilde.ts); by default only when this core takes one. */
+  tilde?: boolean;
 }
 
 export interface Control {
@@ -59,6 +63,14 @@ export interface Control {
   deviceRequest(id: string): { status: DeviceRequestRow["status"]; digits: string; machine?: string } | undefined;
   /** The kinds of key this receiver takes: passkeys, and device keys once its core verifies them. */
   keyTypes: KeyType[];
+  /** Demo mode's machines (server/demo/machine.ts), in the rows a paired daemon fills. */
+  demo: {
+    machine(id: string, hello: Hello): void;
+    poll(id: string): void;
+    start(id: string, run: DemoStart): void;
+    /** How many there were. */
+    remove(): number;
+  };
   /** The `control` member of the well-known file (HTTP.md §1). */
   wellKnown(): {
     wait_max_s: number;
@@ -69,12 +81,20 @@ export interface Control {
     signing: { rp_id: string; algs: number[]; key_types?: KeyType[] };
     /** HTTP.md §1: it takes `files` on a `start` and serves {control}/files/{sha256}. */
     files?: boolean;
-  };
+  } & InheritSignal;
   close(): void;
 }
 
+/** HTTP.md §1 `control.inherit` (sessionpipe 0.10): this receiver shows a machine whose mode
+ *  is `inherit` as that, on its pairing page and wherever it shows the mode, never as safe
+ *  or auto, and accepts the mode in a pairing and a hello. A daemon pairs in, or switches
+ *  to, inherit mode only with receivers that say so (CONTROL.md §2). */
+export const INHERIT_SIGNAL = { inherit: true } as const;
+export type InheritSignal = typeof INHERIT_SIGNAL;
+
 export function createControl(deps: ControlDeps): Control {
   const state = new ControlState(path.join(deps.stateDir, "control"));
+  state.takesTilde = deps.tilde ?? coreTakesTilde();
   const rpId = (): string => (typeof deps.rpId === "function" ? deps.rpId() : deps.rpId);
   const listeners = new Set<(m: StreamMessage) => void>();
   let machinesTimer: NodeJS.Timeout | null = null;
@@ -146,12 +166,19 @@ export function createControl(deps: ControlDeps): Control {
       listeners.add(l);
       return () => listeners.delete(l);
     },
+    demo: {
+      machine: (id, hello) => state.demoMachine(id, hello),
+      poll: (id) => state.demoPoll(id),
+      start: (id, run) => state.demoStart(id, run),
+      remove: () => state.removeDemoMachines(),
+    },
     wellKnown: () => ({
       wait_max_s: WAIT_MAX_S,
       open_pairing: true,
       session_tools: [],
       signing: { rp_id: rpId(), algs: [-7, -257], ...(device ? { key_types: keyTypes } : {}) },
       files: true,
+      ...INHERIT_SIGNAL,
     }),
     close: () => {
       if (machinesTimer) clearTimeout(machinesTimer);
