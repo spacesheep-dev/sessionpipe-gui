@@ -7,6 +7,7 @@
 // Documented route by route in README.md beside this file.
 import { randomBytes } from "node:crypto";
 import {
+  type Assertion,
   b64url,
   keyUsable,
   pairChallenge,
@@ -15,14 +16,21 @@ import {
   verifyCommand,
   verifyEnrollment,
 } from "sessionpipe-core/control";
-import { START_FILE_MAX_BYTES, type StartFile } from "../../shared/api.js";
+import { START_FILE_MAX_BYTES, type StartFile, type TrustedKey } from "../../shared/api.js";
 import type { Ctx, Handler, Reply, Router } from "../http/router.js";
 import { HttpError } from "../http/router.js";
 import { MEDIA_TYPE_RE } from "./files.js";
 import { CODE_RE, MACHINE_RE } from "./parse.js";
 import { filesProblem, precheck } from "./precheck.js";
 import { requestOrigin } from "./routes.js";
-import { type ControlState, type DeviceRequestRow, type MachineRow, type PairingRow, toActivity } from "./state.js";
+import {
+  type ControlState,
+  type DeviceRequestRow,
+  type MachineRow,
+  type PairingRow,
+  type Proof,
+  toActivity,
+} from "./state.js";
 
 export interface UiRouteDeps {
   state: ControlState;
@@ -31,12 +39,50 @@ export interface UiRouteDeps {
   uiAuth: (ctx: Ctx) => boolean;
   /** ROUTES.ui.control */
   base: string;
+  /** Device keys are taken (devicekeys.ts); off, a device key or signature is a 400. */
+  device: boolean;
 }
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
 const B64URL_RE = /^[A-Za-z0-9_-]+$/;
 /** A device name as the phone typed it: printed on the approving page and kept by `control keys`. */
 export const DEVICE_NAME_MAX = 40;
+
+const b64 = (v: unknown, min: number, max: number) =>
+  typeof v === "string" && v.length >= min && v.length <= max && B64URL_RE.test(v);
+
+/** A key as a page sends it: a passkey `{id, alg, spki}`, or (`device`) a device key
+ *  with `type`, `store` and `uv` (CONTROL.md §2). The shape only, and closed: whether a
+ *  machine could use it is core's `keyUsable`. Null when it breaks the shape. */
+export function readKey(v: unknown, device: boolean): TrustedKey | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const k = v as Record<string, unknown>;
+  if (!b64(k.id, 16, 1400) || (k.alg !== -7 && k.alg !== -257) || !b64(k.spki, 40, 2000)) return null;
+  const typed = k.type !== undefined;
+  if (typed && !device) return null;
+  const allowed = typed ? ["id", "alg", "spki", "type", "store", "uv"] : ["id", "alg", "spki"];
+  if (Object.keys(k).some((f) => !allowed.includes(f))) return null;
+  const key: TrustedKey = { id: k.id as string, alg: k.alg as number, spki: k.spki as string };
+  if (typed) Object.assign(key, { type: k.type, store: k.store, uv: k.uv });
+  return key;
+}
+
+/** A pairing proof as a page sends it: a passkey's assertion `{cred, ad, cd, sig}`, or
+ *  (`device`) a device key's signature `{cred, sig}` (CONTROL.md §3.2). Null otherwise. */
+export function readProof(v: unknown, device: boolean): Proof | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const p = v as Record<string, unknown>;
+  const str = (x: unknown, max: number) => typeof x === "string" && x.length > 0 && x.length <= max;
+  if (!str(p.cred, 1400) || !str(p.sig, 4000)) return null;
+  if (device && p.ad === undefined && p.cd === undefined && Object.keys(p).length === 2)
+    return { cred: p.cred as string, sig: p.sig as string };
+  if (!str(p.ad, 8000) || !str(p.cd, 8000)) return null;
+  return { cred: p.cred as string, ad: p.ad as string, cd: p.cd as string, sig: p.sig as string };
+}
+
+const keyShape = (device: boolean) => (device ? "key: {id, alg, spki[, type, store, uv]}" : "key: {id, alg, spki}");
+const proofShape = (device: boolean) =>
+  device ? "proof: {cred, ad, cd, sig} or {cred, sig}" : "proof: {cred, ad, cd, sig}";
 
 /** A short label from the user agent, for the approving page ("iPhone"). */
 export function deviceLabel(ua: string | undefined): string {
@@ -96,6 +142,7 @@ export async function pairingView(machine: MachineRow, pairing: PairingRow, rpId
       ...(machine.folders ? { folders: machine.folders } : {}),
       ...(machine.mode ? { mode: machine.mode } : {}),
       ...(machine.accounts ? { accounts: machine.accounts } : {}),
+      ...(machine.keyTypes ? { keyTypes: machine.keyTypes } : {}),
       firstPairing: !machine.tokenHash,
       keys: machine.keys.length,
     },
@@ -108,6 +155,7 @@ export async function pairingView(machine: MachineRow, pairing: PairingRow, rpId
 export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
   const { state, base } = d;
   const rpId = d.rpId;
+  const takesDevice = d.device;
   const guarded =
     (h: Handler): Handler =>
     (ctx) => {
@@ -172,36 +220,24 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
       if (pairing.approved || pairing.deliveredAt) throw new HttpError(409, { reason: "already_approved" });
       if (Date.parse(pairing.expiresAt) <= Date.now()) throw new HttpError(410, { reason: "expired" });
       const body = await ctx.json<{ key?: unknown; proof?: unknown; name?: unknown; by?: unknown }>(64 * 1024);
-      const key = body.key as { id?: unknown; alg?: unknown; spki?: unknown } | undefined;
-      const proof = body.proof as { cred?: unknown; ad?: unknown; cd?: unknown; sig?: unknown } | undefined;
       const str = (v: unknown, max: number) => typeof v === "string" && v.length > 0 && v.length <= max;
-      if (
-        !key ||
-        typeof key !== "object" ||
-        !str(key.id, 1400) ||
-        (key.alg !== -7 && key.alg !== -257) ||
-        !str(key.spki, 4000) ||
-        !proof ||
-        typeof proof !== "object" ||
-        !str(proof.cred, 1400) ||
-        !str(proof.ad, 8000) ||
-        !str(proof.cd, 8000) ||
-        !str(proof.sig, 4000)
-      )
+      const k = readKey(body.key, takesDevice);
+      const p = readProof(body.proof, takesDevice);
+      if (!k || !p)
         throw new HttpError(400, {
           reason: "bad_request",
-          error: "Send { key: {id, alg, spki}, proof: {cred, ad, cd, sig} }.",
+          error: `Send { ${keyShape(takesDevice)}, ${proofShape(takesDevice)} }.`,
         });
-      const k = { id: key.id as string, alg: key.alg as number, spki: key.spki as string };
-      const p = {
-        cred: proof.cred as string,
-        ad: proof.ad as string,
-        cd: proof.cd as string,
-        sig: proof.sig as string,
-      };
       if (!(await keyUsable(k)))
         throw new HttpError(422, { reason: "bad_key", detail: "the key is in a shape no machine can use" });
-      const v = await verifyEnrollment({ machine: machine.id, code: pairing.code, key: k, proof: p, rpId: rpId() });
+      // A device proof gets here only when this core verifies one (devicekeys.ts).
+      const v = await verifyEnrollment({
+        machine: machine.id,
+        code: pairing.code,
+        key: k,
+        proof: p as Assertion,
+        rpId: rpId(),
+      });
       if (!v.ok) throw new HttpError(422, { reason: "bad_proof", detail: v.why });
       const name = str(body.name, 80) ? (body.name as string).trim() : undefined;
       const by = str(body.by, 200) ? (body.by as string) : "sessionpipe-gui";
@@ -235,26 +271,17 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
     `${base}/devices`,
     guarded(async (ctx): Promise<Reply> => {
       const body = await ctx.json<{ key?: unknown; name?: unknown }>(16 * 1024);
-      const key = body.key as { id?: unknown; alg?: unknown; spki?: unknown } | undefined;
-      const b64 = (v: unknown, min: number, max: number) =>
-        typeof v === "string" && v.length >= min && v.length <= max && B64URL_RE.test(v);
-      if (
-        !key ||
-        typeof key !== "object" ||
-        !b64(key.id, 16, 1400) ||
-        (key.alg !== -7 && key.alg !== -257) ||
-        !b64(key.spki, 40, 2000)
-      )
+      const k = readKey(body.key, takesDevice);
+      if (!k)
         throw new HttpError(400, {
           reason: "bad_request",
-          error: "Send { key: {id, alg, spki}, name? }: id and spki base64url, alg -7 or -257.",
+          error: `Send { ${keyShape(takesDevice)}, name? }: id and spki base64url, alg -7 or -257.`,
         });
       if (body.name !== undefined && (typeof body.name !== "string" || body.name.length > DEVICE_NAME_MAX))
         throw new HttpError(400, {
           reason: "bad_request",
           error: `name is text, at most ${DEVICE_NAME_MAX} characters.`,
         });
-      const k = { id: key.id as string, alg: key.alg as -7 | -257, spki: key.spki as string };
       if (!(await keyUsable(k)))
         throw new HttpError(422, { reason: "bad_key", detail: "the key is in a shape no machine can use" });
       const device = deviceLabel(ctx.req.headers["user-agent"]);

@@ -270,7 +270,13 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       },
       storage: { dir: stateDir, bytes: stats.storageBytes + attachments.bytes(), attachments: attachments.bytes() },
       wellKnown: wellKnown(control),
-      control: { enabled: true, rpId, machines: control.machines().size, origins: origins() },
+      control: {
+        enabled: true,
+        rpId,
+        machines: control.machines().size,
+        origins: origins(),
+        keyTypes: control.keyTypes,
+      },
       hostname: os.hostname().replace(/\.(local|lan|home)$/i, ""),
       ...(publicUrl ? { remote: remoteInfo(publicUrl, config.sinkToken) } : {}),
       ...(tls

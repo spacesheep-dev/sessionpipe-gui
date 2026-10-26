@@ -1,0 +1,28 @@
+[package]
+name = "sp-identity"
+version = "0.1.0"
+description = "sessionpipe's native signer: a Secure Enclave device key behind Touch ID (CONTROL.md §2, §3.2), the day key and grant, the command validator, rate limits, and the Tauri plugin `identity`."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+# A Tauri plugin's permissions are found by the app through this key.
+links = "tauri-plugin-identity"
+build = "build.rs"
+
+[features]
+# The Tauri plugin (commands status, key, sign, pair, forget). The shell's `identity`
+# feature turns it on; `cargo test -p sp-identity --no-default-features` tests everything
+# else without compiling Tauri.
+default = ["plugin"]
+plugin = ["dep:tauri", "dep:tauri-plugin"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+base64 = "0.22"
+log = "0.4"
+tauri = { version = "2.12", default-features = false, optional = true }
+
+[build-dependencies]
+tauri-plugin = { version = "2.7", features = ["build"], optional = true }

@@ -5,20 +5,23 @@
 // sha256("sessionpipe.pair:" + machine + ":" + code) goes to the receiver, which hands it
 // to the daemon on its next status poll; the terminal finishes by itself. `PairBody` is
 // the page without its frame (Pair.tsx draws it), so the setup page shows it inline too.
+// In the native app there is no passkey: "Approve with Touch ID" asks the shell, which
+// reads this pairing itself, puts its digits and machine in the Touch ID prompt, and signs
+// the same challenge with the app's device key (CONTROL.md §3.2, purpose `pair`).
 import { useEffect, useState } from "react";
 import { ActionButton, HarnessGlyph } from "../components/bits";
 import { harnessMark } from "../lib/format";
 import { ms, useNow } from "../lib/time";
 import { ControlError, controlApi, httpsHere, type Pairing } from "./api";
 import { fromB64url } from "./bytes";
+import { assertPasskey, registerPasskey } from "./ceremony";
 import { sentence } from "./PendingDevices";
+import { machineTakes, nativeErrorWords, pairWithDevice, signerKind, signHint, updateWords } from "./signer";
 import {
-  assertPasskey,
   forgetPasskey,
   guessDeviceName,
   insecureHint,
   passkeysAvailable,
-  registerPasskey,
   type StoredPasskey,
   storedPasskeys,
   webauthnError,
@@ -60,7 +63,7 @@ function approveErrorWords(e: unknown, machine: string): string {
         return e.detail ?? e.reason;
     }
   }
-  return webauthnError(e);
+  return nativeErrorWords(e) ?? webauthnError(e);
 }
 
 /** The approval itself: the digits, the facts, Approve / Reject. `compact` drops the
@@ -70,7 +73,8 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState(guessDeviceName());
   const [known, setKnown] = useState<StoredPasskey[]>([]);
-  const secure = passkeysAvailable("p" in phase ? phase.p.rpId : undefined);
+  const device = signerKind() === "device";
+  const secure = device || passkeysAvailable("p" in phase ? phase.p.rpId : undefined);
   const now = useNow();
 
   useEffect(() => {
@@ -100,6 +104,19 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
       return;
     }
     const deviceName = name.trim() || guessDeviceName();
+    if (device) {
+      try {
+        setPhase({ k: "busy", p, what: "Confirm with Touch ID: the prompt shows the same digits…" });
+        const { key, proof } = await pairWithDevice(p.code);
+        setPhase({ k: "busy", p, what: "Sending the proof to the receiver…" });
+        const r = await controlApi.approve(p.code, { key, proof, name: "Mac app" });
+        setPhase({ k: "approved", p, keyName: "Mac app", firstPairing: r.firstPairing });
+      } catch (e) {
+        setError(approveErrorWords(e, p.machine.name));
+        setPhase({ k: "ready", p });
+      }
+      return;
+    }
     try {
       let key: StoredPasskey | undefined;
       let proof: Awaited<ReturnType<typeof assertPasskey>>;
@@ -159,13 +176,15 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
   // The daemon printed http://localhost/pair?code=…; with TLS mode on that origin cannot
   // sign, so the same page on the https origin is one click away.
   const https = secure ? null : httpsHere();
+  // The app's device key goes only to a daemon that said it takes one (CONTROL.md §2).
+  const old = device && !machineTakes(m) ? updateWords(m.name) : null;
 
   return (
     <div className={`pair-body ${compact ? "pair-body--compact" : ""}`}>
       {!compact && (
         <p className="caption pair-lead">
           A terminal on {m.name} asked to be controlled from here. Compare the six digits with the ones it printed, then
-          approve with a passkey.
+          approve with {device ? "Touch ID" : "a passkey"}.
         </p>
       )}
 
@@ -240,8 +259,8 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
       {phase.k === "approved" ? (
         <div className="pair-note pair-note--ok" role="status">
           <strong>Approved.</strong> The terminal on {m.name} will finish by itself
-          {phase.firstPairing ? " and collect its own token" : ""}. {m.name} now trusts the passkey “{phase.keyName}”
-          from this browser.
+          {phase.firstPairing ? " and collect its own token" : ""}. {m.name} now trusts{" "}
+          {device ? "this Mac's key" : `the passkey “${phase.keyName}” from this browser`}.
           <br />
           Every device you send from needs its own approval: on another phone or laptop, run{" "}
           <code>sessionpipe control pair</code> again on {m.name} and approve there.
@@ -254,8 +273,8 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
         <>
           {m.firstPairing && (
             <p className="pair-note">
-              First pairing: approving hands {m.name} its own token for polls and acks, and makes this browser's passkey
-              the first one it trusts.
+              First pairing: approving hands {m.name} its own token for polls and acks, and makes{" "}
+              {device ? "this Mac's key" : "this browser's passkey"} the first one it trusts.
             </p>
           )}
           {p.open && (
@@ -264,9 +283,10 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
               token, so its sessions show here without a second step. Only approve a request you just made.
             </p>
           )}
+          {old && <p className="pair-note pair-note--quiet">{old}</p>}
           {!secure && (
             <div className="pair-note pair-note--err">
-              {sentence(insecureHint())}
+              {sentence(device ? signHint() : insecureHint())}
               {https && (
                 <p className="pair-https">
                   <a className="btn btn--primary" href={https}>
@@ -290,7 +310,7 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
               if (phase.k !== "busy") void approve(p, false);
             }}
           >
-            {known.length === 0 && (
+            {known.length === 0 && !device && (
               <div className="pair-field">
                 <label htmlFor="pair-device-name">What to call this device on {m.name}</label>
                 <input
@@ -310,11 +330,15 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
               <ActionButton
                 type="submit"
                 className="btn btn--primary"
-                disabled={!secure || expired}
+                disabled={!secure || expired || !!old}
                 pending={phase.k === "busy" && phase.what !== "Rejecting…"}
                 pendingLabel="Approving…"
               >
-                {known.length ? `Approve with passkey “${known[0]?.name ?? "this browser"}”` : "Approve with passkey"}
+                {device
+                  ? "Approve with Touch ID"
+                  : known.length
+                    ? `Approve with passkey “${known[0]?.name ?? "this browser"}”`
+                    : "Approve with passkey"}
               </ActionButton>
               <ActionButton
                 className="btn"
@@ -325,7 +349,7 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
               >
                 Reject
               </ActionButton>
-              {known.length > 0 && secure && !expired && phase.k !== "busy" && (
+              {known.length > 0 && !device && secure && !expired && phase.k !== "busy" && (
                 <button type="button" className="btn btn--ghost" onClick={() => void approve(p, true)}>
                   Use a new passkey instead
                 </button>

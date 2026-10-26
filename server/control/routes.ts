@@ -7,7 +7,7 @@ import { createReadStream } from "node:fs";
 import type { Ctx, Reply, Router } from "../http/router.js";
 import { HttpError } from "../http/router.js";
 import { CODE_RE, MACHINE_RE, POLL_KEY_RE, parseAcks, parseHello } from "./parse.js";
-import { type ControlState, type MachineRow, type MessageRow, WAIT_MAX_S } from "./state.js";
+import { type ControlState, keyOf, type MachineRow, type MessageRow, WAIT_MAX_S } from "./state.js";
 
 export interface MachineRouteDeps {
   state: ControlState;
@@ -122,7 +122,9 @@ export function registerMachineRoutes(router: Router, d: MachineRouteDeps): void
     const { key, proof, by } = pairing.approved;
     const out: Record<string, unknown> = {
       status: "paired",
-      key: { id: key.id, alg: key.alg, spki: key.spki },
+      // The whole key: a device key keeps its type, store and uv, or the machine would
+      // store it as a passkey and refuse every signature it makes (CONTROL.md §2).
+      key: keyOf(key),
       proof,
     };
     // The machine's own token, minted once, at its first pairing (§2 step 4). A second

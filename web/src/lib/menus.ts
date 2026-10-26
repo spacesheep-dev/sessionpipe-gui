@@ -15,6 +15,7 @@ import { copyText } from "./clipboard";
 import { harnessMark, repoBranch, sessionTitle } from "./format";
 import { hide } from "./hidden";
 import { labelMenu } from "./labels";
+import { receiverOrigin } from "./net";
 import { hrefFor, navigate, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath } from "./router";
 import { getSettings } from "./settings";
 import { closeTab, openSplit, parseSplit } from "./split";
@@ -26,7 +27,7 @@ export const copyItem = (label: string, text: string | undefined | null): MenuIt
   text ? { label, run: () => copyText(text) } : null;
 
 /** The address of an in-app path, as a person would paste it. */
-export const absoluteUrl = (path: string): string => new URL(hrefFor(path), location.origin).href;
+export const absoluteUrl = (path: string): string => new URL(hrefFor(path), receiverOrigin()).href;
 
 const desktop = () => typeof matchMedia === "function" && matchMedia("(min-width: 840px)").matches;
 

@@ -13,19 +13,21 @@ import { ms, useNow } from "../lib/time";
 import { controlApi, httpsHere } from "./api";
 import { useRpId } from "./hooks";
 import { sentence } from "./PendingDevices";
+import { canSign, signerKind, signHint } from "./signer";
 import { NAME_MAX, useDeviceRequest } from "./useDeviceRequest";
-import { guessDeviceName, insecureHint, passkeysAvailable } from "./webauthn";
+import { guessDeviceName } from "./webauthn";
 import { refusalWords } from "./words";
 import "./pairing.css";
 
 export function AddDevicePage() {
   const rp = useRpId();
-  const secure = passkeysAvailable(rp);
+  const secure = canSign(rp);
+  const device = signerKind() === "device";
   const now = useNow();
   const { phase, error, known, ask } = useDeviceRequest(rp);
-  const [name, setName] = useState(guessDeviceName());
+  const [name, setName] = useState(device ? "Mac app" : guessDeviceName());
   const [paired, setPaired] = useState<number | null>(null);
-  const httpsHref = secure ? null : httpsHere();
+  const httpsHref = secure || device ? null : httpsHere();
 
   useEffect(() => {
     if (known[0]?.name) setName(known[0].name);
@@ -48,10 +50,14 @@ export function AddDevicePage() {
 
   return (
     <div className="page page--doc page--grouped pair add-device">
-      <PageBar title="Add this device" back={<BackButton onClick={() => back("/machines")} label="Machines" />} />
+      <PageBar
+        title={device ? "Add this Mac" : "Add this device"}
+        back={<BackButton onClick={() => back("/machines")} label="Machines" />}
+      />
       <p className="caption pair-lead">
-        This device makes its own passkey, and one the machine already trusts vouches for it: the same six digits on
-        both, one tap to approve.
+        {device
+          ? "This Mac keeps its own key in its Secure Enclave, and a device the machine already trusts vouches for it: the same six digits on both, one approval."
+          : "This device makes its own passkey, and one the machine already trusts vouches for it: the same six digits on both, one tap to approve."}
       </p>
 
       {d && digits && (
@@ -81,7 +87,8 @@ export function AddDevicePage() {
 
       {phase.k === "added" ? (
         <div className="pair-note pair-note--ok" role="status" data-added>
-          <strong>Done.</strong> This device can now answer and send: “{phase.d.name}” is a passkey the machine trusts.
+          <strong>Done.</strong> This device can now answer and send: “{phase.d.name}” is{" "}
+          {device ? "a key" : "a passkey"} the machine trusts.
           <br />
           <Link to="/">Open the board →</Link>
         </div>
@@ -102,13 +109,13 @@ export function AddDevicePage() {
       ) : phase.k === "waiting" ? (
         <p className="pair-note">
           On the Mac (or any device the machine already trusts), open <strong>Machines</strong> in the GUI: this request
-          is listed there with the same digits. Approve it with the passkey that paired.
+          is listed there with the same digits. Approve it with the {device ? "device" : "passkey"} that paired.
         </p>
       ) : null}
 
       {!secure && (
         <p className="pair-note pair-note--err">
-          {sentence(insecureHint())}
+          {sentence(signHint(rp))}
           {httpsHref ? (
             <>
               {" "}
@@ -165,9 +172,13 @@ export function AddDevicePage() {
               pending={phase.k === "busy"}
               pendingLabel="Asking…"
             >
-              {known.length ? `Add this device with its passkey “${known[0]?.name ?? "here"}”` : "Add this device"}
+              {device
+                ? "Add this Mac"
+                : known.length
+                  ? `Add this device with its passkey “${known[0]?.name ?? "here"}”`
+                  : "Add this device"}
             </ActionButton>
-            {known.length > 0 && secure && phase.k !== "busy" && (
+            {known.length > 0 && !device && secure && phase.k !== "busy" && (
               <button type="button" className="btn btn--ghost" onClick={() => void ask(name, true)}>
                 Make a new passkey instead
               </button>

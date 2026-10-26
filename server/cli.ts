@@ -16,6 +16,8 @@ import { InstallError } from "./extensions/install.js";
 import { bundledDirs } from "./extensions/kind.js";
 import { lanAddresses } from "./http/net.js";
 import { addPlugin, formatPluginList, linkPlugin, listPlugins, removePlugin } from "./plugins/index.js";
+import { removeRunFile, writeRunFile } from "./runfile.js";
+import { processEnv, runService, type Verb } from "./service/index.js";
 import { sameMachine } from "./setup/index.js";
 import { addSkin, formatSkinList, linkSkin, listSkins, removeSkin } from "./skins/index.js";
 import { addTheme, formatList, linkTheme, listThemes, removeTheme } from "./themes/index.js";
@@ -117,6 +119,22 @@ search (every session's prompts, replies and tool calls; works offline, no brows
                                              bring the search index up to date (asks the
                                              running GUI when there is one)
 
+service (the receiver in the background: started at login, restarted if it stops):
+
+  sessionpipe-gui service install            a LaunchAgent (macOS, dev.spacesheep.sessionpipe-gui)
+                                             or a systemd --user unit (Linux) running this
+                                             node and this sessionpipe-gui; --port N,
+                                             --state DIR and --host H as for the receiver,
+                                             receiver options after -- passed on. Refuses
+                                             when something answers on the port or a
+                                             service is installed already
+  sessionpipe-gui service uninstall          stop it and remove it
+  sessionpipe-gui service status             the label, pid, port and url (exit 3: not running)
+  --dry-run prints the file and the commands and changes nothing. Logs go to
+  <state>/service.log. Windows: not yet; run sessionpipe-gui in a terminal.
+  A running receiver writes <state>/run.json (port, pid, version, url) so the desktop
+  app finds it on any port; it is removed when the receiver stops.
+
 tls (passkeys from a phone; README "Passkeys from a phone"):
 
   sessionpipe-gui tls status                 hostname, names in the certificate, expiry,
@@ -160,10 +178,15 @@ interface Args {
   tls?: boolean;
   /** `tls <verb>`: a subcommand instead of the server. */
   tlsCommand?: string;
+  /** `service install|uninstall|status`: a subcommand instead of the server. */
+  service?: Verb;
+  dryRun: boolean;
+  /** After `--` (service install only): passed on to the service's receiver. */
+  extra?: string[];
 }
 
 function parseArgs(argv: string[]): Args | "help" | "version" {
-  const a: Args = { outbox: true, demo: false, testDoor: false, open: false, quiet: false };
+  const a: Args = { outbox: true, demo: false, testDoor: false, open: false, quiet: false, dryRun: false };
   for (let i = 0; i < argv.length; i++) {
     const f = argv[i]!;
     const next = (): string => {
@@ -257,6 +280,22 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
         if (a.extras) fail("one extras command at a time");
         a.extras = { verb: argv[++i] ?? "list" };
         if (argv[i + 1] !== undefined && !argv[i + 1]!.startsWith("--")) a.extras.arg = argv[++i];
+        break;
+      case "service": {
+        if (a.service) fail("one service command at a time");
+        const verb = argv[++i] ?? "status";
+        if (verb !== "install" && verb !== "uninstall" && verb !== "status")
+          fail(`unknown service command "${verb}" (install, uninstall, status)`);
+        a.service = verb;
+        break;
+      }
+      case "--dry-run":
+        a.dryRun = true;
+        break;
+      case "--":
+        if (a.service !== "install") fail("-- is only for `service install` (receiver options for the service)");
+        a.extra = argv.slice(i + 1);
+        i = argv.length;
         break;
       case "--open":
         a.open = true;
@@ -623,6 +662,21 @@ async function main(): Promise<void> {
   if (parsed.ext) return extensionCommand(parsed);
   if (parsed.extras) return extrasCommand(parsed);
   if (parsed.tlsCommand !== undefined) return tlsCommand(parsed);
+  if (parsed.service) {
+    process.exitCode = await runService(
+      {
+        verb: parsed.service,
+        port: parsed.port,
+        host: parsed.host,
+        state: parsed.state,
+        extra: parsed.extra,
+        dryRun: parsed.dryRun,
+      },
+      processEnv(defaultStateDir()),
+    );
+    return;
+  }
+  if (parsed.dryRun) fail("--dry-run is only for `service install|uninstall`");
   const t0 = Date.now();
   // --tls / --no-tls are remembered in config.json; a bare start uses the remembered choice.
   const stateDir = parsed.state ?? defaultStateDir();
@@ -671,12 +725,27 @@ async function main(): Promise<void> {
     process.stdout.write(`  ready in ${Date.now() - t0} ms · ${s.sessions} sessions · ${s.events} events\n\n`);
   }
   if (parsed.open) openBrowser(app.info().urls.local);
+  // run.json: how the desktop app finds a receiver on a port other than the default.
+  // Removed on a clean stop; a crash leaves a dead pid, which readers ignore.
+  try {
+    writeRunFile(app.stateDir, {
+      port: app.port,
+      pid: process.pid,
+      version: packageVersion(),
+      url: app.url,
+      startedAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    process.stderr.write(`sessionpipe-gui: could not write run.json: ${(e as Error).message}\n`);
+  }
+  process.on("exit", () => removeRunFile(app.stateDir));
 
   let closing = false;
   const shutdown = (signal: string): void => {
     if (closing) return;
     closing = true;
     if (!parsed.quiet) process.stdout.write(`\n${signal}: stopping\n`);
+    removeRunFile(app.stateDir);
     const force = setTimeout(() => process.exit(0), 3000);
     force.unref();
     void app.close().then(() => process.exit(0));
