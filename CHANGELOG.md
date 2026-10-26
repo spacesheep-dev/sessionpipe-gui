@@ -6,6 +6,8 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-27
+
 ### Added
 
 - **sessionpipe 0.10.0.** A machine in `inherit` mode (no permission flag: its agents run
@@ -49,8 +51,6 @@ All notable changes to `sessionpipe-gui`. The format follows
   the machine already trusts approves the Mac with its passkey, and then one Touch ID a
   day unlocks sending. It needs a receiver whose sessionpipe-core verifies device keys and
   a machine that takes them (sessionpipe 0.10). The release needs no new entitlement.
-
-### Changed
 
 - Where the app can't send, it says exactly why, with the next step: this build has no
   signer (Linux, Windows, a dev build), the receiver can't check the Mac's key yet (update
@@ -309,7 +309,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.2.1...v0.3.0
