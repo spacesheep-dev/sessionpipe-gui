@@ -39,6 +39,12 @@ objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSWorkspace", "
 objc2-user-notifications = { version = "0.3", features = ["UNUserNotificationCenter", "UNNotification", "UNNotificationRequest", "UNNotificationContent", "UNNotificationAction", "UNNotificationCategory", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "block2"] }
 objc2-service-management = { version = "0.3", features = ["SMAppService"] }
 
+# tauri-plugin-deep-link 2.6.2 builds rust-ini's ParseOption by naming every field, and
+# rust-ini 0.21.2 added two in a patch release (0.21.2 is yanked; 0.21.3 kept them), so its
+# Linux code stops compiling. Held at 0.21.1 until deep-link fixes it.
+[target.'cfg(target_os = "linux")'.dependencies]
+rust-ini = "=0.21.1"
+
 [features]
 default = []
 # Wires sp_identity::init(lookup), capabilities/identity.json and the native answers
