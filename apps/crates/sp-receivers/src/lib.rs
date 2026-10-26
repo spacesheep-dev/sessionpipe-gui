@@ -1,7 +1,8 @@
 //! sp-receivers: the native apps' network layer (NATIVE-SPEC.md §1, §2.1, §2.2, §11.2).
 //!
 //! - the receiver list (`receivers.json`) and UI keys (Keychain, or `keys.json` in dev)
-//! - discovery of the local receiver (release builds only; never in debug)
+//! - discovery of the local receiver (release builds; a debug build only from the
+//!   run.json SP_LOCAL_STATE names, for tests)
 //! - the `rx:` protocol: the page's requests, forwarded with the `spgui` cookie for
 //!   remote receivers and CORS for the bundled origin only
 //! - the SSE client: page streams over an IPC channel, and one long-lived menu-bar stream
