@@ -13,6 +13,18 @@ const mainWidth = (page: Page) => page.locator("main.main").evaluate((el) => el.
 const live = (page: Page) => expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
 const rx = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** What the panel's title must read for a card: the card shortens a long title with "…",
+ *  the panel shows it whole, so a shortened one is matched as a prefix. */
+const titleOf = (card: string): string | RegExp =>
+  card.endsWith("…") ? new RegExp(`^${rx(card.slice(0, -1))}`) : card;
+
+/** Rests the pointer on the first card, so the board holds still. `hover` waits for the card
+ *  to be attached and stable; a box read once can come back null while the list re-renders. */
+async function holdBoard(page: Page): Promise<void> {
+  await page.locator("article.card").first().hover();
+  await expect(page.locator(".page.board")).toHaveAttribute("data-held", "");
+}
+
 /** Shift-clicks the first board card; returns the title the panel shows for it. The
  *  panel is the source of truth: a demo session may learn a better title mid-turn, so the
  *  card's text at click time is matched by the session key in the URL, not by its words. */
@@ -20,9 +32,7 @@ async function openBeside(page: Page): Promise<string> {
   await openBoard(page);
   // The pointer rests on the list first, so the board holds still (Board.tsx) and the
   // row read is the row clicked.
-  const rest = (await page.locator("article.card").first().boundingBox())!;
-  await page.mouse.move(rest.x + rest.width / 2, rest.y + rest.height / 2);
-  await expect(page.locator(".page.board")).toHaveAttribute("data-held", "");
+  await holdBoard(page);
   const card = page.locator("article.card").first();
   const href = (await card.locator("a.card-link").getAttribute("href"))!;
   const key = href
@@ -173,7 +183,7 @@ test.describe("split panel", () => {
         const link2 = page.locator(`a.card-link[href="${href2}"]`);
         const title2 = (await link2.locator(".card-title").textContent())!;
         await link2.click({ modifiers: ["Alt"] });
-        await expect(panel(page).locator(".panel-title")).toHaveText(title2);
+        await expect(panel(page).locator(".panel-title")).toHaveText(titleOf(title2));
         await expect(page).toHaveURL(/[?&]s=/);
       }
       const open = panel(page).getByRole("link", { name: "Open as page" });
@@ -241,6 +251,8 @@ test.describe("split panel", () => {
       await openBoard(page);
       const links = page.locator("article.card a.card-link");
       await expect.poll(() => links.count()).toBeGreaterThanOrEqual(n);
+      // Held before the read and through the clicks: the pointer stays on the list.
+      await holdBoard(page);
       const out: { href: string; key: string; title: string }[] = [];
       for (let i = 0; i < n; i++) {
         const href = (await links.nth(i).getAttribute("href"))!;
@@ -259,7 +271,7 @@ test.describe("split panel", () => {
       await expect(tabs(page)).toHaveCount(2);
       expect(await tabKeys(page)).toEqual([a!.key, b!.key]);
       await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
-      await expect(panel(page).locator(".panel-title")).toHaveText(b!.title);
+      await expect(panel(page).locator(".panel-title")).toHaveText(titleOf(b!.title));
       expect(splitParams(page)).toEqual({ s: `${a!.key},${b!.key}`, t: "1" });
 
       await click(page, c!.href, [process.platform === "darwin" ? "Meta" : "Control"]);
