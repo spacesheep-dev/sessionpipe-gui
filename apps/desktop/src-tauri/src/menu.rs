@@ -211,8 +211,16 @@ mod tests {
         }
     }
 
-    /// ⌘1…⌘9 are the web's list.jump / panel.tab keys, so the pages take ⌃⌘1…5
-    /// (web/src/native/menu.ts); the menu must claim the same chords.
+    /// ⌘1…⌘9 are the web's list.jump / panel.tab keys, so the pages take ⌃⌘1…5 on a Mac and
+    /// Ctrl+Alt+1…5 elsewhere (web/src/native/menu.ts); the menu must claim the same chords.
+    fn page_chord(n: usize) -> String {
+        if cfg!(target_os = "macos") {
+            format!("Ctrl+CmdOrCtrl+{n}")
+        } else {
+            format!("Ctrl+Alt+{n}")
+        }
+    }
+
     #[test]
     fn pages_are_ctrl_cmd_digits() {
         for (i, id) in [
@@ -226,11 +234,7 @@ mod tests {
         .enumerate()
         {
             let e = VIEW.iter().flatten().find(|e| e.0 == *id).unwrap();
-            assert_eq!(
-                e.2,
-                Some(format!("Ctrl+CmdOrCtrl+{}", i + 1).as_str()),
-                "{id}"
-            );
+            assert_eq!(e.2, Some(page_chord(i + 1).as_str()), "{id}");
         }
         assert!(!FILE
             .iter()
