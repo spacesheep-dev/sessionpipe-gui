@@ -62,7 +62,7 @@
   },
   "dependencies": {
     "qrcode": "^1.5.4",
-    "sessionpipe-core": "^0.7.0"
+    "sessionpipe-core": "^0.10.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
