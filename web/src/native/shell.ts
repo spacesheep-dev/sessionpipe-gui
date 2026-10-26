@@ -88,7 +88,22 @@ const SETUP_SEEN = "sessionpipe-gui.setup.seen";
 /** Whether the page shows the demo (?mock=1): the welcome's "Try the demo". */
 export const isDemo = (): boolean => new URLSearchParams(location.search).get("mock") === "1";
 
-/** Runs before the app renders. True when it put up the welcome instead (no receiver). */
+/** Finds a receiver already running on this machine and selects it. False when there is
+ *  none, or the shell can't say (the welcome then offers to start one). */
+export async function useLocalReceiver(): Promise<boolean> {
+  try {
+    const { invoke } = await import("./bridge");
+    const found = await invoke<{ local: { id: string } | null }>("rx_discover");
+    if (!found?.local?.id) return false;
+    await invoke("rx_select", { id: found.local.id });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Runs before the app renders. True when it put up the welcome instead (no receiver), or
+ *  handed the window to a receiver found running on this machine. */
 export async function start(): Promise<boolean> {
   if (!info) return false;
   const d = document.documentElement;
@@ -96,6 +111,10 @@ export async function start(): Promise<boolean> {
   d.toggleAttribute("data-vibrancy", info.features.includes("vibrancy"));
   if (info.platform === "ios") for (const load of Object.values(import.meta.glob("./ios.css"))) await load();
   if (!info.receiver && !isDemo()) {
+    // A receiver already running on this machine (the default port, or the one its run.json
+    // names) is the one to use; the welcome is for when there is none. Selecting it opens
+    // a fresh window on it.
+    if (await useLocalReceiver()) return true;
     (await import("./Welcome")).showWelcome(info);
     return true;
   }

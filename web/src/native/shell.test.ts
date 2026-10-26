@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import "./test-env";
 import { describe, expect, it, vi } from "vitest";
-import { parseShell, safePath } from "./shell";
+import { parseShell, safePath, useLocalReceiver } from "./shell";
 
 vi.mock("../lib/router", () => ({ navigate: vi.fn(), back: vi.fn() }));
+const invoke = vi.fn();
+vi.mock("./bridge", () => ({ invoke: (...a: unknown[]) => invoke(...a), listen: vi.fn(), channel: vi.fn() }));
 
 const ok = {
   v: 1,
@@ -56,5 +58,24 @@ describe("safePath", () => {
     expect(safePath("/s/claude/abc?agent=x")).toBe("/s/claude/abc?agent=x");
     for (const bad of ["//evil.example/x", "https://x", "inbox", "/a\\b", "/a\nb", "", 3, null])
       expect(safePath(bad)).toBeNull();
+  });
+});
+
+describe("useLocalReceiver", () => {
+  it("selects a receiver already running on this machine instead of the welcome", async () => {
+    invoke.mockReset();
+    invoke.mockImplementation(async (cmd: string) =>
+      cmd === "rx_discover" ? { local: { id: "abcdefghij" } } : undefined,
+    );
+    expect(await useLocalReceiver()).toBe(true);
+    expect(invoke.mock.calls).toEqual([["rx_discover"], ["rx_select", { id: "abcdefghij" }]]);
+  });
+  it("none found, or the shell can't say: the welcome", async () => {
+    invoke.mockReset();
+    invoke.mockResolvedValueOnce({ local: null });
+    expect(await useLocalReceiver()).toBe(false);
+    invoke.mockRejectedValueOnce(new Error("no shell"));
+    expect(await useLocalReceiver()).toBe(false);
+    expect(invoke.mock.calls.every(([cmd]) => cmd === "rx_discover")).toBe(true);
   });
 });
