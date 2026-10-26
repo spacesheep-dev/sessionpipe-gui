@@ -4,7 +4,17 @@
 // agent). Nothing is installed on the device; a phone that closes the tab is gone from
 // the list the moment its stream drops. Listeners hear every join and leave.
 import { randomBytes } from "node:crypto";
+import type { IncomingHttpHeaders } from "node:http";
 import type { Viewer } from "../../shared/api.js";
+
+/** The desktop app's own menu-bar stream says so in this header. It is the app watching
+ *  for the menu bar and the Dock badge, not a person looking, so it is not a viewer. */
+export const CLIENT_HEADER = "x-sessionpipe-client";
+
+export const isShellClient = (headers: IncomingHttpHeaders): boolean => {
+  const v = headers[CLIENT_HEADER];
+  return (Array.isArray(v) ? v[0] : v)?.trim().toLowerCase() === "shell";
+};
 
 export interface ViewerSource {
   ip: string;
