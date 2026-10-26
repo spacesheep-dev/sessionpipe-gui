@@ -11,9 +11,16 @@ import { useState } from "react";
 import { ControlStrip } from "../components/ControlStrip";
 import { useAppState, useStore } from "../data/hooks";
 import { ActivityList, forkOf } from "./Activity";
-import { obtainGrant } from "./daykey";
+import {
+  machineTakes,
+  signerKind,
+  signerLabel,
+  signHint,
+  unlock as takeGrant,
+  updateWords,
+  useOwnKeys,
+} from "./signer";
 import { useSessionSend } from "./useSend";
-import { insecureHint, storedPasskeys } from "./webauthn";
 import { isFinal, sendErrorWords } from "./words";
 import "./control.css";
 
@@ -39,16 +46,30 @@ export function SessionControl({
   /** Unused: messages are joined to their turns in the timeline now. */
   inChat?: (messages: readonly ControlActivity[]) => ReadonlySet<string>;
 }) {
-  const { rp, secure, grant, tap, error, answers, activity, onSend } = useSessionSend(session, control, attentions);
+  const {
+    rp,
+    secure: canSignHere,
+    grant,
+    tap,
+    error,
+    answers,
+    activity,
+    onSend,
+  } = useSessionSend(session, control, attentions);
+  const device = signerKind() === "device";
+  // The app signs only for a machine whose daemon takes device keys (CONTROL.md §2).
+  const old = device && control && !machineTakes(control) ? updateWords(session.machine) : null;
+  const secure = canSignHere && !old;
+  const own = useOwnKeys(rp);
   const { connection, suggestions: all } = useAppState();
   const store = useStore();
   // "Unlock now": take the day grant ahead of the first send (one passkey tap).
   const [unlock, setUnlock] = useState<string | null>(null);
   const unlockNow = async () => {
     if (!rp) return;
-    setUnlock("Confirm with your passkey…");
+    setUnlock(`Confirm with ${device ? "Touch ID" : "your passkey"}…`);
     try {
-      await obtainGrant(rp);
+      await takeGrant(rp);
       grant.refresh();
       setUnlock(null);
     } catch (e) {
@@ -62,13 +83,14 @@ export function SessionControl({
   // A secure page whose browser holds no passkey the machine trusts (a phone that can open
   // the https origin but never paired): a send would be refused untrusted_key, so point
   // at /add-device, where a trusted device vouches for this one (CONTROL.md §2).
-  const untrustedHere =
-    secure && !!rp && !!control && !control.keys.some((k) => storedPasskeys(rp).some((s) => s.id === k.id));
+  const untrustedHere = secure && !!rp && !!control && !control.keys.some((k) => own.some((s) => s.id === k.id));
   // The line's one live fact: a refusal, the passkey prompt, or the unlock under way.
   const note = error
     ? error.replace(/^not sent · /, "Not sent: ")
     : tap
-      ? "Confirm with your passkey: it vouches for this browser for a day, so later sends need no tap."
+      ? device
+        ? "Confirm with Touch ID: it vouches for this Mac for a day, so later sends need no prompt."
+        : "Confirm with your passkey: it vouches for this browser for a day, so later sends need no tap."
       : (unlock ?? undefined);
   const down = connection === "reconnecting" || connection === "offline" ? connection : null;
   return (
@@ -79,7 +101,7 @@ export function SessionControl({
         attentions={attentions}
         onSend={secure && rp ? onSend : undefined}
         working={working}
-        blocked={secure ? undefined : insecureHint()}
+        blocked={secure ? undefined : (old ?? signHint(rp))}
         note={note}
         noteKind={error ? "err" : "info"}
         answers={answers}

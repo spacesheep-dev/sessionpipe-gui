@@ -54,7 +54,7 @@ import {
   saveDraft,
 } from "./newSessionState";
 import { sentence } from "./PendingDevices";
-import { insecureHint, passkeysAvailable, storedPasskeys } from "./webauthn";
+import { canSign, machineTakes, signerKind, signHint, updateWords, useOwnKeys } from "./signer";
 import { PERMISSION_HINT, PERMISSION_LABEL, sendErrorWords, WRONG_ORIGIN } from "./words";
 import "./newSessionSheet.css";
 
@@ -90,12 +90,20 @@ function blocker(
   const c = m.control;
   if (!c) return { short: "not paired", long: `Pair ${m.name} from its terminal to start sessions there.` };
   if (o.wrong) return { short: "can't sign from this address", long: WRONG_ORIGIN(o.wrong) };
-  if (!o.secure) return { short: "can't sign from this address", long: `${sentence(insecureHint())}.` };
+  const device = signerKind() === "device";
+  if (!o.secure)
+    return { short: device ? "can't sign here" : "can't sign from this address", long: `${sentence(signHint())}.` };
+  if (!machineTakes(c)) return { short: "needs a newer sessionpipe", long: updateWords(m.name) };
   if (!c.keys.some((k) => o.mine.has(k.id)))
-    return {
-      short: `no passkey here that ${m.name} trusts`,
-      long: `${m.name} trusts no passkey from this browser. Add this device from one it trusts.`,
-    };
+    return device
+      ? {
+          short: `${m.name} doesn't trust this Mac`,
+          long: `${m.name} doesn't trust this Mac yet. Add it from a device it trusts.`,
+        }
+      : {
+          short: `no passkey here that ${m.name} trusts`,
+          long: `${m.name} trusts no passkey from this browser. Add this device from one it trusts.`,
+        };
   return null;
 }
 
@@ -105,9 +113,10 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const { sessions, snapshotAt } = useAppState();
   const rp = useRpId();
   const grant = useGrant(rp);
-  const secure = passkeysAvailable(rp);
+  const secure = canSign(rp);
   const wrong = wrongOriginHere();
-  const mine = useMemo(() => new Set(rp ? storedPasskeys(rp).map((k) => k.id) : []), [rp]);
+  const own = useOwnKeys(rp);
+  const mine = useMemo(() => new Set(own.map((k) => k.id)), [own]);
   const ref = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -446,7 +455,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   // ----- the one-fact status line -----
   const status = ((): { text: string; tone?: "err" } | null => {
     if (error) return { text: error, tone: "err" };
-    if (tap) return { text: "Confirm with your passkey…" };
+    if (tap) return { text: signerKind() === "device" ? "Confirm with Touch ID…" : "Confirm with your passkey…" };
     if (busy) return { text: `Sending to ${machine}…` };
     if (!m) return { text: listed.length ? "Choose a machine" : "Pair a machine to start sessions on it." };
     if (blocked) return { text: blocked.long };
@@ -462,7 +471,12 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   })();
   // The passkey is a note on Start (its tooltip, and what a screen reader hears with it),
   // not the status line: that line is for what is happening.
-  const passkeyNote = grant.exp === null && !blocked ? "Start asks for your passkey, once today." : null;
+  const passkeyNote =
+    grant.exp === null && !blocked
+      ? signerKind() === "device"
+        ? "Start asks for Touch ID, once today."
+        : "Start asks for your passkey, once today."
+      : null;
 
   // ----- the rows -----
   const agentLabel = (h: string) => harnessMark(h).label;

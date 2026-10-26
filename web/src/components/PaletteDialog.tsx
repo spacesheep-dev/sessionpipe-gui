@@ -25,7 +25,7 @@ import {
 import { sendCommand } from "../control/command";
 import { useRpId } from "../control/hooks";
 import { type NewSessionTarget, openNewSession } from "../control/newSessionState";
-import { insecureHint, passkeysAvailable } from "../control/webauthn";
+import { canSign, signHint } from "../control/signer";
 import { sendErrorWords } from "../control/words";
 import { byStateThenRecent, useAppState, useLabels, useStore } from "../data/hooks";
 import { agentLabel, agentMatches, openAgent } from "../lib/agents";
@@ -337,7 +337,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     (s: SessionSummary): { ok: true; machineId: string } | { ok: false; why: string } => {
       const control = s.machine ? machines.get(s.machine)?.control : undefined;
       if (!control) return { ok: false, why: `pair ${s.machine ?? "this machine"} to send from here` };
-      if (!rp || !passkeysAvailable(rp)) return { ok: false, why: insecureHint() };
+      if (!rp || !canSign(rp)) return { ok: false, why: signHint(rp) };
       return { ok: true, machineId: control.machineId };
     },
     [machines, rp],

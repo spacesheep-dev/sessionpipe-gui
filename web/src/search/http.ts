@@ -6,6 +6,7 @@
 import type { SearchIndexStatus, SessionSearchQuery } from "@shared/api";
 import { ROUTES } from "@shared/api";
 import { HttpError } from "../data/transport";
+import { apiUrl } from "../lib/net";
 import type { SearchClient, SearchTranscriptQuery } from "./types";
 
 async function json<T>(res: Response): Promise<T> {
@@ -24,9 +25,9 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 const get = <T>(url: string, signal?: AbortSignal) =>
-  fetch(url, { headers: { accept: "application/json" }, signal }).then((r) => json<T>(r));
+  fetch(apiUrl(url), { headers: { accept: "application/json" }, signal }).then((r) => json<T>(r));
 const post = <T>(url: string, body: unknown) =>
-  fetch(url, {
+  fetch(apiUrl(url), {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),

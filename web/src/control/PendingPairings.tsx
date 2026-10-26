@@ -8,6 +8,7 @@ import { useContextMenu } from "../components/ContextMenu";
 import { Link, navigate } from "../lib/router";
 import { ms, useNow } from "../lib/time";
 import { controlApi, httpsPath, type Pairing } from "./api";
+import { signerKind } from "./signer";
 import { passkeysAvailable } from "./webauthn";
 import "./pairing.css";
 
@@ -58,7 +59,8 @@ export function PendingPairings() {
  *  (the pairing page, or the same page on the https origin where passkeys work). */
 function PairingRow({ p, left }: { p: Pairing; left: number }) {
   const pairPath = `/pair?code=${encodeURIComponent(p.code)}`;
-  const https = passkeysAvailable(p.rpId) ? null : httpsPath(pairPath);
+  // The app approves with its device key right here; only a browser goes to the https origin.
+  const https = signerKind() === "device" || passkeysAvailable(p.rpId) ? null : httpsPath(pairPath);
   const menu = useContextMenu(
     () => [
       {

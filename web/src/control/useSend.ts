@@ -9,7 +9,7 @@ import { type ControlAction, preHello } from "../components/ControlStrip";
 import { ControlError } from "./api";
 import { type CommandFields, sendCommand } from "./command";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
-import { insecureHint, passkeysAvailable } from "./webauthn";
+import { canSign, machineTakes, signerLabel, signHint, updateWords } from "./signer";
 import { sendErrorWords } from "./words";
 
 export type AnswerStatus = "sent" | "closed";
@@ -26,21 +26,24 @@ export function answerState(
 ): { reason: string | null; off: boolean; status: AnswerStatus | undefined; tag: string } {
   const status = send.answers[a.attentionId];
   const early = preHello(a, control);
+  const old = control && !machineTakes(control) ? updateWords(s.machine ?? undefined).replace(/\.$/, "") : null;
   const reason = !control
     ? `pair ${s.machine ?? "this machine"} to send messages`
     : !send.secure
-      ? insecureHint()
-      : early
-        ? "raised before this machine was paired; answer it in its terminal"
-        : status === "closed"
-          ? "answered in the terminal, or expired"
-          : status === "sent"
-            ? `answer sent · waiting for ${s.machine ?? "the machine"}`
-            : send.tap
-              ? "confirm with your passkey"
-              : null;
-  const off = !control || !send.secure || !send.rp || early || !!status;
-  const tag = !control ? "unpaired" : !send.secure ? "blocked" : (status ?? (early ? "pre-hello" : "open"));
+      ? signHint(send.rp)
+      : old
+        ? old
+        : early
+          ? "raised before this machine was paired; answer it in its terminal"
+          : status === "closed"
+            ? "answered in the terminal, or expired"
+            : status === "sent"
+              ? `answer sent · waiting for ${s.machine ?? "the machine"}`
+              : send.tap
+                ? `confirm with ${signerLabel()}`
+                : null;
+  const off = !control || !send.secure || !send.rp || !!old || early || !!status;
+  const tag = !control ? "unpaired" : !send.secure || old ? "blocked" : (status ?? (early ? "pre-hello" : "open"));
   return { reason, off, status, tag };
 }
 
@@ -69,7 +72,7 @@ export function useSessionSend(
   attentions: readonly Attention[],
 ): SessionSend {
   const rp = useRpId();
-  const secure = passkeysAvailable(rp);
+  const secure = canSign(rp);
   const grant = useGrant(rp);
   const [tap, setTap] = useState(false);
   const [error, setError] = useState<string | null>(null);

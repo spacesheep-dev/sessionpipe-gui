@@ -4,6 +4,7 @@
 import type { ControlActivity, ControlKind, ControlOutcome, StartPermission } from "@shared/api";
 import { ControlError, wrongOriginHere } from "./api";
 import { wrongOriginWords } from "./origin";
+import { deviceRefusal, nativeErrorWords } from "./signer";
 import { webauthnError } from "./webauthn";
 
 export const KIND_LABEL: Record<ControlKind, string> = {
@@ -54,6 +55,8 @@ export const refusalWords = (code: string | undefined): string => {
   // A refused key on the wrong address is the address, not the key: say so, with the way out.
   const wrong = code === "untrusted_key" ? wrongOriginHere() : null;
   if (wrong) return WRONG_ORIGIN(wrong);
+  const app = code ? deviceRefusal(code) : null;
+  if (app) return app;
   return (code && REFUSAL_WORDS[code]) ?? (code ? code.replace(/_/g, " ") : "refused");
 };
 
@@ -110,6 +113,8 @@ export function sendErrorWords(e: unknown): string {
     if (e.status === 401) return "not sent · this page lost its key; reload it from the terminal's link";
     return `not sent · ${e.detail ?? e.reason}`;
   }
+  const native = nativeErrorWords(e);
+  if (native) return `not sent · ${native}`;
   if (e && typeof e === "object" && "name" in e && typeof (e as { name: unknown }).name === "string") {
     const n = (e as { name: string }).name;
     if (n.endsWith("Error") && n !== "Error" && n !== "TypeError") return `not sent · ${webauthnError(e)}`;

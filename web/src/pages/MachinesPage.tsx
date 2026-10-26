@@ -20,10 +20,11 @@ import { useRpId } from "../control/hooks";
 import { openNewSession } from "../control/newSessionState";
 import { PendingDevices, sentence } from "../control/PendingDevices";
 import { PendingPairings } from "../control/PendingPairings";
-import { insecureHint, passkeysAvailable, storedPasskeys } from "../control/webauthn";
+import { canSign, signHint, useOwnKeys } from "../control/signer";
 import { useMachines, useStore } from "../data/hooks";
 import { harnessMark } from "../lib/format";
 import { copyText } from "../lib/menus";
+import { receiverOrigin } from "../lib/net";
 import { Link, navigate } from "../lib/router";
 import { useSimple } from "../lib/settings";
 import { ago, ms, useNow } from "../lib/time";
@@ -35,7 +36,7 @@ export function Machines() {
   const machines = useMachines();
   const store = useStore();
   const now = useNow();
-  const [lanUrl, setLanUrl] = useState<string>(location.origin);
+  const [lanUrl, setLanUrl] = useState<string>(receiverOrigin);
   useEffect(() => {
     store.transport
       .info()
@@ -48,7 +49,7 @@ export function Machines() {
   const rp = useRpId();
   // Over plain LAN http (or off the rp id) nothing can be signed here: said once, above the
   // machines it applies to, not repeated in each.
-  const secure = passkeysAvailable(rp);
+  const secure = canSign(rp);
   const paired = machines.some((m) => !!m.control);
 
   return (
@@ -83,7 +84,7 @@ export function Machines() {
         </EmptyState>
       ) : (
         <>
-          {paired && !secure && <p className="machines-note">{sentence(insecureHint()).replace(/\.?$/, ".")}</p>}
+          {paired && !secure && <p className="machines-note">{sentence(signHint(rp)).replace(/\.?$/, ".")}</p>}
           {machines.map((m) => (
             <MachineBlock key={m.name} m={m} online={isOnline(m, now)} lanUrl={lanUrl} rp={rp} secure={secure} />
           ))}
@@ -115,8 +116,9 @@ function MachineBlock({
   secure: boolean;
 }) {
   const c = m.control;
-  // The passkeys this browser made for the rp id: one of them trusted here is "this one".
-  const mine = new Set(storedPasskeys(rp).map((k) => k.id));
+  // The keys this device holds for the rp id (this browser's passkeys, or the app's device
+  // key): one of them trusted here is "this one".
+  const mine = new Set(useOwnKeys(rp).map((k) => k.id));
   // Simple mode: online, paired or the pair line, the start form; the daemon's details wait in Advanced.
   const simple = useSimple();
   const pairCmd = `sessionpipe control pair ${lanUrl}`;

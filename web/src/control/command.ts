@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: control-web. A command the way CONTROL.md §3.1 writes it, signed the way §3.2
-// signs it, sent through POST /api/ui/control/send. The string is written once and the
-// signature covers those exact bytes; the server passes it on byte for byte.
+// signs it (by this page's signer: the passkey and its day key in a browser, the app's
+// device key in the native app, signer.ts), sent through POST /api/ui/control/send. The
+// string is written once and the signature covers those exact bytes; the server passes it
+// on byte for byte.
 import type { ControlActivity, StartFile, StartPermission } from "@shared/api";
 import { noteOwnSend } from "../lib/toasts";
-import { type Assertion, ControlError, controlApi, type SendBody, type TrustedKey } from "./api";
-import { nonce, sha256 } from "./bytes";
-import { dropGrant, obtainGrant, signWithDayKey } from "./daykey";
-import { assertPasskey, storedPasskeys } from "./webauthn";
+import { ControlError, controlApi, type SendBody, type TrustedKey } from "./api";
+import { nonce } from "./bytes";
+import { dropGrant, sign, signerKind } from "./signer";
 
 export const COMMAND_TYPE = "sessionpipe.control";
 /** The session a `key.add` names: the machine's own key store (CONTROL.md §2). */
@@ -56,7 +57,12 @@ export function commandString(machine: string, f: CommandFields): string {
       if (f.model) o.model = f.model;
       break;
     case "key.add":
-      o.key = { id: f.key.id, alg: f.key.alg, spki: f.key.spki };
+      // The key whole: a device key's type, store and uv are inside the signed bytes, or
+      // the machine would store it as a passkey (CONTROL.md §2).
+      o.key =
+        f.key.type === "device"
+          ? { id: f.key.id, alg: f.key.alg, spki: f.key.spki, type: f.key.type, store: f.key.store, uv: f.key.uv }
+          : { id: f.key.id, alg: f.key.alg, spki: f.key.spki };
       if (f.name) o.name = f.name;
       break;
   }
@@ -66,26 +72,20 @@ export function commandString(machine: string, f: CommandFields): string {
 }
 
 export interface SendOptions {
-  /** Sign with one passkey confirm over sha256(cmd) instead of the day grant. */
+  /** Sign with one confirm over sha256(cmd) (a passkey tap, or Touch ID) instead of the day grant. */
   confirm?: boolean;
-  /** Fires right before a passkey prompt, so the page can say what the tap is for. */
+  /** Fires right before a prompt, so the page can say what the tap is for. */
   onTap?: () => void;
   expiresInS?: number;
 }
 
-/** Sign `cmd` for `rp` with the day grant (one passkey tap a day), or with a confirm. */
-export async function signCommand(rp: string, cmd: string, o: SendOptions = {}): Promise<Omit<SendBody, "machineId">> {
-  if (o.confirm) {
-    o.onTap?.();
-    const confirm: Assertion = await assertPasskey(
-      rp,
-      await sha256(cmd),
-      storedPasskeys(rp).map((k) => k.id),
-    );
-    return { cmd, confirm };
-  }
-  const rec = await obtainGrant(rp, o.onTap);
-  return { cmd, csig: await signWithDayKey(rec, cmd), grant: rec.grant };
+/** Sign `cmd` for `rp` with the day grant (one passkey tap, or one Touch ID, a day), or with a confirm. */
+export async function signCommand(
+  rp: string,
+  cmd: string,
+  o: SendOptions & { fresh?: boolean } = {},
+): Promise<Omit<SendBody, "machineId">> {
+  return sign(rp, cmd, o);
 }
 
 /** The grant did not satisfy the verifier: a fresh tap is worth one more try. */
@@ -100,8 +100,8 @@ export async function sendCommand(
   o: SendOptions = {},
 ): Promise<ControlActivity> {
   const cmd = commandString(machineId, fields);
-  const attempt = async (): Promise<ControlActivity> => {
-    const signed = await signCommand(rp, cmd, o);
+  const attempt = async (fresh = false): Promise<ControlActivity> => {
+    const signed = await signCommand(rp, cmd, { ...o, fresh });
     const body: SendBody = { machineId, ...signed };
     if (o.expiresInS) body.expires_in_s = o.expiresInS;
     const carried = await controlApi.send(body);
@@ -113,7 +113,8 @@ export async function sendCommand(
   } catch (e) {
     if (!o.confirm && e instanceof ControlError && e.code && GRANT_FAULTS.has(e.code)) {
       await dropGrant(rp);
-      return attempt();
+      // The app's signer gets one fresh grant after a refusal (it rate-limits the rest).
+      return attempt(signerKind() === "device");
     }
     throw e;
   }

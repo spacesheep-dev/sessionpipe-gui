@@ -5,9 +5,13 @@
 // adds the key, refuses it, or the request expires. `poll` is the status read: the control
 // route by default, the phone page's own (GET /api/ui/phone/device/:id) when it says so.
 // A request in flight is remembered for this tab, so a reload mid-wait keeps its digits.
+// In the native app the key is the app's device key for the rp id (made by the shell in
+// the Secure Enclave on first use, no prompt), never a passkey.
 import { useCallback, useEffect, useState } from "react";
 import { ControlError, controlApi, type DeviceRequest } from "./api";
-import { guessDeviceName, registerPasskey, type StoredPasskey, storedPasskeys, webauthnError } from "./webauthn";
+import { registerPasskey } from "./ceremony";
+import { deviceKey, nativeErrorWords, signerKind } from "./signer";
+import { guessDeviceName, type StoredPasskey, storedPasskeys, webauthnError } from "./webauthn";
 
 const POLL_MS = 2000;
 export const NAME_MAX = 40;
@@ -28,7 +32,7 @@ export function requestErrorWords(e: unknown): string {
     if (e.status === 401) return "This page lost its key. Open the GUI again from the link or QR on the Mac.";
     return e.detail ?? e.reason;
   }
-  return webauthnError(e);
+  return nativeErrorWords(e) ?? webauthnError(e);
 }
 
 function remembered(): DeviceRequest | null {
@@ -120,6 +124,20 @@ export function useDeviceRequest(
       if (!rp) return;
       setError(null);
       const deviceName = name.trim().slice(0, NAME_MAX) || guessDeviceName();
+      if (signerKind() === "device") {
+        try {
+          setPhase({ k: "busy", what: "Reading this Mac's key…" });
+          const key = await deviceKey(rp);
+          setPhase({ k: "busy", what: "Asking to be trusted…" });
+          const d = await controlApi.deviceRequest({ key, name: name.trim().slice(0, NAME_MAX) || "Mac app" });
+          remember(d);
+          setPhase({ k: "waiting", d });
+        } catch (e) {
+          setError(requestErrorWords(e));
+          setPhase({ k: "idle" });
+        }
+        return;
+      }
       try {
         let key: StoredPasskey | undefined = fresh ? undefined : storedPasskeys(rp)[0];
         if (!key) {

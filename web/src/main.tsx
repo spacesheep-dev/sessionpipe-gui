@@ -45,6 +45,8 @@ applySettings();
 const isMockMode = () => import.meta.env.VITE_MOCK === "1" || new URLSearchParams(location.search).get("mock") === "1";
 
 async function boot() {
+  // Inside the native app: its adapter first (it may put up the welcome instead).
+  if ("sessionpipeShell" in window && (await (await import("./native/shell")).start())) return;
   const transport = isMockMode() ? (await import("./mock/index")).createMockTransport() : createHttpTransport();
   const store = new Store(transport);
   store.start();

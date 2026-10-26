@@ -12,6 +12,7 @@ import type { Store } from "../data/store";
 import { copyText } from "../lib/clipboard";
 import { labelMenu } from "../lib/labels";
 import { absoluteUrl } from "../lib/menus";
+import { receiverOrigin } from "../lib/net";
 import { sessionPath } from "../lib/router";
 import { pushToast } from "../lib/toasts";
 import { type OpenMode, openResult, resultLink } from "./open";
@@ -100,7 +101,7 @@ export function rowMenu(m: SessionMatch, ctx: RowMenuContext): MenuList {
       : { label: `Copy ${idWord(m.harness)}`, run: () => void copyAs(idWord(m.harness), m.id) },
     {
       label: "Copy link",
-      run: () => void copyAs("link", new URL(resultLink(m, m.hits[0], ctx.q), location.origin).href),
+      run: () => void copyAs("link", new URL(resultLink(m, m.hits[0], ctx.q), receiverOrigin()).href),
     },
     m.resume ? { label: `Copy ${idWord(m.harness)}`, run: () => void copyAs(idWord(m.harness), m.id) } : null,
     !phone() && m.transcriptPath

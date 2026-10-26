@@ -7,6 +7,7 @@
 import type { ExtraEntry, ExtrasResponse } from "@shared/api";
 import { ROUTES } from "@shared/api";
 import { useCallback, useEffect, useState } from "react";
+import { apiUrl } from "../lib/net";
 import { fetchSkins } from "../lib/skins";
 import { fetchPlugins } from "../plugins/registry";
 import { fetchThemes } from "../themes/host/registry";
@@ -29,7 +30,7 @@ export function Extras({ loopback }: { loopback: boolean }) {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(ROUTES.ui.extras, { headers: { accept: "application/json" } });
+      const res = await fetch(apiUrl(ROUTES.ui.extras), { headers: { accept: "application/json" } });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       setRows(((await res.json()) as ExtrasResponse).extras);
       setError(null);
@@ -45,7 +46,7 @@ export function Extras({ loopback }: { loopback: boolean }) {
     setBusy(row.id);
     setLog((l) => ({ ...l, [row.id]: "" }));
     try {
-      const res = await fetch(`${ROUTES.ui.extras}/${encodeURIComponent(row.id)}/install`, { method: "POST" });
+      const res = await fetch(apiUrl(`${ROUTES.ui.extras}/${encodeURIComponent(row.id)}/install`), { method: "POST" });
       const text = res.ok ? await res.text() : `${res.status} ${res.statusText}`;
       setLog((l) => ({ ...l, [row.id]: text.trim() }));
       if (res.ok && text.trimEnd().endsWith("\nok")) await refresh(row.kind);

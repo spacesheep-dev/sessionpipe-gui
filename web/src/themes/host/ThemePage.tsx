@@ -5,11 +5,16 @@
 // message and the file, never a blank page.
 import type { Theme } from "@shared/theme-api";
 import { useEffect, useRef, useState } from "react";
+import { PageBar } from "../../components/PageBar";
 import { useStore } from "../../data/hooks";
 import { Link } from "../../lib/router";
 import { createThemeApi } from "./api";
 import { useThemes } from "./registry";
+import { viewPlan } from "./viewPlan";
 import "./host.css";
+
+/** Inside the native app (NATIVE-SPEC §2.5). */
+const inShell = "sessionpipeShell" in window;
 
 interface Failure {
   stage: "import" | "mount";
@@ -28,12 +33,15 @@ export function ThemePage({ id }: { id: string }) {
   const [status, setStatus] = useState<"loading" | "mounted">("loading");
 
   // Primitive deps: the list is refetched on every reconnect and would otherwise remount.
+  const plan = theme ? viewPlan(theme, inShell, location.origin) : null;
   const manifestKey =
-    theme && !theme.error && !theme.disabled ? JSON.stringify([theme.url, theme.entry, theme.style, theme.linked]) : "";
+    theme && !theme.error && !theme.disabled && plan?.kind === "page"
+      ? JSON.stringify([theme.url, theme.entry, theme.style, theme.linked])
+      : "";
 
   useEffect(() => {
     const el = ref.current;
-    if (!theme || theme.error || theme.disabled || !el) return;
+    if (!theme || theme.error || theme.disabled || !el || plan?.kind !== "page") return;
     let cancelled = false;
     let unmount: (() => void) | null = null;
     let link: HTMLLinkElement | null = null;
@@ -43,7 +51,7 @@ export function ThemePage({ id }: { id: string }) {
 
     // A linked theme is being edited: a fresh module instance on every visit.
     const bust = theme.linked ? `?v=${Date.now()}` : "";
-    const base = `${location.origin}${theme.url}`;
+    const base = plan.base;
     const entryUrl = `${base}${theme.entry ?? "index.js"}${bust}`;
 
     const run = async () => {
@@ -75,7 +83,7 @@ export function ThemePage({ id }: { id: string }) {
         // the mock, or offline: the theme still mounts
       }
       if (cancelled) return;
-      const built = createThemeApi({ store, manifest: theme, host: { name: "sessionpipe-gui", version } });
+      const built = createThemeApi({ store, manifest: theme, base, host: { name: "sessionpipe-gui", version } });
       dispose = built.dispose;
       let un: (() => void) | undefined;
       try {
@@ -115,6 +123,8 @@ export function ThemePage({ id }: { id: string }) {
   }, [manifestKey, store]);
 
   const notFound = loaded && !theme;
+  if (theme && !theme.error && !theme.disabled && plan?.kind === "window")
+    return <ViewWindowRow id={id} name={theme.name || id} path={plan.path} />;
   return (
     <div className="theme-page" data-theme-page={id} data-status={failure ? "error" : status}>
       <div
@@ -152,6 +162,41 @@ export function ThemePage({ id }: { id: string }) {
           Loading themes…
         </p>
       )}
+    </div>
+  );
+}
+
+/** An installed view inside the native app: it runs in a window of its own, on the
+ *  receiver's origin, never in the app's. One quiet row with Open. */
+function ViewWindowRow({ id, name, path }: { id: string; name: string; path: string }) {
+  const [error, setError] = useState<string | null>(null);
+  const open = async () => {
+    setError(null);
+    try {
+      const { invoke } = await import("../../native/bridge");
+      const receiver = (window as { sessionpipeShell?: { receiver?: { id: string } | null } }).sessionpipeShell
+        ?.receiver?.id;
+      await invoke("app_open_view", { receiver, path });
+    } catch (e) {
+      setError(describe(e));
+    }
+  };
+  return (
+    <div className="page page--doc page--grouped theme-window" data-theme-page={id} data-status="window">
+      <PageBar title={name} />
+      <section className="form-group" aria-label={name}>
+        <ul className="form-list">
+          <li className="form-row">
+            <span className="form-row-text">
+              <span className="form-label">Opens in its own window</span>
+              <span className="form-caption">{error ?? "Views you install run apart from the app."}</span>
+            </span>
+            <button type="button" className="btn" onClick={() => void open()}>
+              Open
+            </button>
+          </li>
+        </ul>
+      </section>
     </div>
   );
 }

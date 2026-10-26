@@ -6,6 +6,7 @@
 import type { InstalledTheme } from "@shared/theme-api";
 import { THEME_ROUTES } from "@shared/theme-api";
 import { useSyncExternalStore } from "react";
+import { apiUrl } from "../../lib/net";
 
 export interface ThemesState {
   themes: readonly InstalledTheme[];
@@ -31,7 +32,7 @@ const subscribe = (l: () => void) => {
 };
 
 async function request(url: string, method: "GET" | "POST"): Promise<InstalledTheme[]> {
-  const res = await fetch(url, { method, headers: { accept: "application/json" } });
+  const res = await fetch(apiUrl(url), { method, headers: { accept: "application/json" } });
   if (!res.ok) {
     let reason = `${res.status} ${res.statusText}`;
     try {

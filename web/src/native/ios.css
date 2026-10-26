@@ -1,0 +1,67 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The iPhone app (apps/ios), only under html[data-shell="ios"]; native/shell.ts loads it
+   on that platform alone, so a browser and the Mac app never see a rule of it. The page
+   already owns its safe areas (viewport-fit=cover + env()), its sheets and its long-press
+   menus; this file is what an app does that a web page doesn't. */
+
+/* Dynamic Type: the root follows the person's text size (Settings › Display & Brightness ›
+   Text Size), and the rem scale follows the root. The in-app text-size setting is an
+   inline style on <html> and still wins when the person picks one. The family stays the
+   skin's. */
+html[data-shell="ios"] {
+  /* biome-ignore lint/a11y/useGenericFontNames: -apple-system-body is a system font keyword, not a family; the next line sets the family */
+  font: -apple-system-body;
+  font-family: var(--font-ui);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* An app never zooms its own chrome: no double-tap zoom, no pinch (the shell also caps
+     the viewport). Scrolling and the page's own gestures are untouched. */
+  touch-action: manipulation;
+}
+
+/* The window doesn't rubber-band as a whole (the shell turned the outer bounce off); each
+   list scrolls inside, and a scroll that reaches its end stops there. */
+html[data-shell="ios"],
+html[data-shell="ios"] body {
+  overscroll-behavior: none;
+}
+
+/* No grey flash on a tap, and no "Copy / Look up" callout on chrome: a long-press there
+   is the app's own action sheet (the [data-menu] rows) or nothing. Text a person reads or
+   copies (a reply, code, a field) keeps the system's selection. */
+html[data-shell="ios"] * {
+  -webkit-tap-highlight-color: transparent;
+}
+html[data-shell="ios"]
+  :is(
+    button,
+    a,
+    [role="button"],
+    [role="tab"],
+    [role="switch"],
+    [role="menuitem"],
+    summary,
+    label,
+    img,
+    svg,
+    .chrome,
+    nav
+  ) {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+html[data-shell="ios"] :is(input, textarea, [contenteditable]) {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Action sheets sit on the home indicator, never under it: the last row clears the
+   indicator by its inset plus the system's 8 px (16 px on a phone without one), and a tall
+   one stops below the status bar, as UIKit's large detent does. (The More sheet stands on
+   the tab bar, which already clears the indicator.) */
+html[data-shell="ios"] .menu-sheet {
+  padding-bottom: max(calc(env(safe-area-inset-bottom) + 8px), 16px);
+  max-height: calc(100dvh - env(safe-area-inset-top) - 24px);
+}
