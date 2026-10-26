@@ -33,6 +33,29 @@ All notable changes to `sessionpipe-gui`. The format follows
   asks for what the machine did not advertise (`permission`, `model`, `file`,
   `bad_fields`).
 - `ThemeApi.control.compose(prefill)` opens the sheet from a view.
+- **Search.** Every session from one field, as you type: what the receiver holds from
+  every machine, and this machine's own agent history read from the harness logs (Claude
+  Code with subagents and forks, Codex `.jsonl` and `.jsonl.zst`, Antigravity, Gemini
+  CLI), even sessions from before sessionpipe. Prompts, replies and one line per tool call
+  are indexed; tool output, thinking and anything the harness redacts are not. Our own
+  index in TypeScript, no new dependency: BM25F with recency, phrases, prefixes,
+  `-exclusions`, camelCase and path tokens, folded diacritics and CJK; a niced child
+  writes it crash-safely and incrementally, and a live tail finds a new line in about
+  50 ms. One query language (`"phrase"`, `-word`, `pre*`, `agent:` `machine:` `repo:`
+  `since:` `until:` `in:prompt` `label:`) for:
+  - the Search page (third in the rail, `⌘⇧F`): results per keystroke grouped by session,
+    filter chips that edit the query, Best match or Newest, keys (`⏎`, `⇧⏎`, Space to
+    peek, `j`/`k`, `⌘C` copies the resume command) and a right-click menu;
+  - `⌘K`, whose *In transcripts* group previews the matched moment;
+  - a read-only transcript for a session the receiver never saw (`/s/<harness>/<id>`),
+    with a find bar and its resume line;
+  - the terminal, with no browser: `sessionpipe-gui search "…" [--agent] [--machine]
+    [--repo] [--since] [--newest] [--json]` and `sessionpipe-gui index
+    [--rebuild|--status|--verify]`;
+  - `/api/ui/search/*`, behind the UI key.
+
+  History indexing is on by default and can be turned off in Settings › Data, which
+  deletes that index; `--search-home` points it at another home.
 
 ### Changed
 

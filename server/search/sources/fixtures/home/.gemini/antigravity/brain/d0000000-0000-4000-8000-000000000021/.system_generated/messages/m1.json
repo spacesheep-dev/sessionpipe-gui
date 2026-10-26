@@ -1,0 +1,9 @@
+{
+  "id": "m1",
+  "recipient": "d0000000-0000-4000-8000-000000000021",
+  "sender": "system",
+  "priority": 1,
+  "timestamp": "2026-10-05T12:00:00Z",
+  "hideFromUser": true,
+  "content": "HIDDEN_never_indexed"
+}

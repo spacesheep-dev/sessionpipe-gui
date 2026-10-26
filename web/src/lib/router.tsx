@@ -20,6 +20,7 @@ export type Route =
   | { name: "setup" }
   | { name: "themes" }
   | { name: "review" }
+  | { name: "search" }
   | { name: "settings" }
   | { name: "shortcuts" }
   | { name: "theme"; id: string }
@@ -52,6 +53,7 @@ export function parseRoute(pathWithSearch: string): Route {
   if (path === "/setup") return { name: "setup" };
   if (path === "/themes") return { name: "themes" };
   if (path === "/review") return { name: "review" };
+  if (path === "/search") return { name: "search" };
   if (path === "/settings") return { name: "settings" };
   if (path === "/shortcuts") return { name: "shortcuts" };
   if (path === "/add-device") return { name: "add-device" };

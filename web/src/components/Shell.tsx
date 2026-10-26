@@ -100,6 +100,12 @@ const ICON: Record<string, ReactNode> = {
       <path d="M3 11h4l1 2h4l1-2h4v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 15.5z" />
     </>
   ),
+  search: (
+    <>
+      <circle cx="8.75" cy="8.75" r="5.25" />
+      <path d="M12.6 12.6 17 17" />
+    </>
+  ),
   feed: (
     <>
       <path d="M3 5h14" />
@@ -196,6 +202,7 @@ interface NavItem {
 const BUILTIN: NavItem[] = [
   { to: "/", key: "board", label: "Board", glyph: ICON.board },
   { to: "/inbox", key: "inbox", label: "Inbox", glyph: ICON.inbox },
+  { to: "/search", key: "search", label: "Search", glyph: ICON.search },
   { to: "/feed", key: "feed", label: "Feed", glyph: ICON.feed },
   { to: "/review", key: "review", label: "Review", glyph: ICON.review },
   { to: "/machines", key: "machines", label: "Machines", glyph: ICON.machines },
@@ -459,11 +466,16 @@ function useSideForm(splitOpen: boolean): boolean {
   return wider || (wide && !splitOpen);
 }
 
+const LISTS = new Set(["board", "inbox", "search", "feed", "review"]);
+let fromList = "board";
+
 export function Shell({ route, children }: { route: Route; children: ReactNode }) {
   useGlobalKeys();
   // Tooltips and menus show the live keys: re-render when the keymap changes.
   useShortcutMap();
-  const active = route.name === "session" ? "board" : route.name === "theme" ? `t:${route.id}` : route.name;
+  // A session page keeps the list it was opened from lit (Board when it was opened directly).
+  if (LISTS.has(route.name)) fromList = route.name;
+  const active = route.name === "session" ? fromList : route.name === "theme" ? `t:${route.id}` : route.name;
   const needs = useAnswerableCount();
   // The Setup entry, with its orange dot, while this machine (and only from this machine:
   // elsewhere the status is 403) still has steps to go.
@@ -528,7 +540,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       action={navAction(n, views)}
       needs={needs}
       tip={tip}
-      here={path === n.to}
+      here={path === n.to || (n.key === "search" && active === "search")}
     />
   );
   const firstView = nav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);

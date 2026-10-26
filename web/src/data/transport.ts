@@ -12,12 +12,12 @@ import type {
   Info,
   Labels,
   LabelsPatch,
-  SearchPage,
-  SearchQuery,
+  SearchIndexStatus,
   SessionDetail,
   StreamMessage,
 } from "@shared/api";
 import { ROUTES } from "@shared/api";
+import type { SearchClient } from "../search/types";
 
 export interface StreamHandlers {
   onMessage(m: StreamMessage): void;
@@ -32,8 +32,7 @@ export interface Transport {
   info(): Promise<Info>;
   session(harness: string, id: string, q: DetailQuery): Promise<SessionDetail>;
   feed(q: FeedQuery): Promise<FeedPage>;
-  /** The Review page: transcript search, files changed since a time, a day's digest. */
-  search(q: SearchQuery): Promise<SearchPage>;
+  /** The Review page: files changed since a time, a day's digest. */
   files(q: FilesQuery): Promise<FilesPage>;
   digest(q: DigestQuery): Promise<Digest>;
   forget(harness: string, id: string): Promise<void>;
@@ -45,6 +44,8 @@ export interface Transport {
    *  arrives as a `labels` stream frame on every page. */
   labels(): Promise<Labels>;
   patchLabels(p: LabelsPatch): Promise<Labels>;
+  /** Session search (web/src/search): its client arrives with the search code itself. */
+  sessionSearch(): Promise<SearchClient>;
 }
 
 /** Every StreamMessage kind: EventSource only delivers the named events listened for, so
@@ -61,6 +62,7 @@ export const STREAM_KINDS = [
   "suggestion",
   "labels",
   "viewState",
+  "searchIndex",
 ] as const satisfies readonly StreamMessage["kind"][];
 /** Fails to compile while a StreamMessage kind is missing from STREAM_KINDS. */
 const _everyKind: Exclude<StreamMessage["kind"], (typeof STREAM_KINDS)[number]> extends never ? true : never = true;
@@ -107,6 +109,7 @@ const params = (q: object): string => {
 };
 
 export function createHttpTransport(): Transport {
+  const searchFrames = new Set<(s: SearchIndexStatus) => void>();
   return {
     openStream(h) {
       let es: EventSource | null = null;
@@ -119,7 +122,9 @@ export function createHttpTransport(): Transport {
         for (const kind of STREAM_KINDS) {
           es.addEventListener(kind, (ev) => {
             try {
-              h.onMessage(JSON.parse((ev as MessageEvent).data) as StreamMessage);
+              const m = JSON.parse((ev as MessageEvent).data) as StreamMessage;
+              if (m.kind === "searchIndex") for (const l of searchFrames) l(m.status);
+              h.onMessage(m);
             } catch (err) {
               console.warn("bad stream frame", kind, err);
             }
@@ -174,7 +179,6 @@ export function createHttpTransport(): Transport {
       const qs = p.toString();
       return get<FeedPage>(`${ROUTES.ui.feed}${qs ? `?${qs}` : ""}`);
     },
-    search: (q) => get<SearchPage>(`${ROUTES.ui.search}?${params(q)}`),
     files: (q) => get<FilesPage>(`${ROUTES.ui.files}${params(q) ? `?${params(q)}` : ""}`),
     digest: (q) => get<Digest>(`${ROUTES.ui.digest}${params(q) ? `?${params(q)}` : ""}`),
     forget: (harness, id) => post<void>(`${ROUTES.ui.forget}/${enc(harness)}/${enc(id)}/forget`),
@@ -188,5 +192,6 @@ export function createHttpTransport(): Transport {
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify(p),
       }).then((r) => json<Labels>(r)),
+    sessionSearch: () => import("../search/http").then((m) => m.httpSearch(searchFrames)),
   };
 }

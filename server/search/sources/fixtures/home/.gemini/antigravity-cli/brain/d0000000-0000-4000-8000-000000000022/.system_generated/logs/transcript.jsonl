@@ -1,0 +1,4 @@
+{"type":"USER_INPUT","created_at":"2026-10-06T08:00:00Z","content":"<USER_REQUEST>\nAdd a retry budget to the uploader\n</USER_REQUEST>\n<META>META_never_indexed</META>"}
+{"type":"PLANNER_RESPONSE","created_at":"2026-10-06T08:00:05Z","content":"I'll cap retries at five with jitter.","tool_calls":[{"name":"view_file","args":{"AbsolutePath":"/Users/dev/acme/uploader/src/upload.ts"}},{"name":"run_command","args":{"CommandLine":"npm test","Cwd":"/Users/dev/acme/uploader"}}]}
+{"type":"TOOL_RESULT","created_at":"2026-10-06T08:00:06Z","content":"TOOL_RESULT_never_indexed"}
+{"type":"PLANNER_RESPONSE","created_at":"2026-10-06T08:00:07Z","content":"HIDDEN_STEP_never_indexed","hideFromUser":true}

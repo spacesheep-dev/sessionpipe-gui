@@ -5,6 +5,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
 import { DEFAULT_PORT, type ExtraEntry, ROUTES, UI_KEY_PARAM } from "../shared/api.js";
 import { type App, createApp } from "./app.js";
@@ -58,6 +59,9 @@ usage: sessionpipe-gui [options]
   --skins-dir DIR   where skins are installed (default <state>/skins)
   --bundled-dir DIR where the views that ship with the GUI are (default dist/bundled/views);
                     the bundled skins and plugins are in skins/ and plugins/ beside it
+  --search-home DIR session search reads agent history (~/.claude*, ~/.codex, ~/.gemini)
+                    under DIR instead of your home; also SPGUI_SEARCH_HOME. With --demo and
+                    neither, no history is read (demos and screenshots stay synthetic)
   --open            open the board in the browser
   --quiet           no banner
   --version         print the version
@@ -102,6 +106,17 @@ A view is code running in the board page with access to everything it shows. A p
 is code running in the receiver process with everything this machine has. Only install
 what you trust, from people you trust. A skin runs no code.
 
+search (every session's prompts, replies and tool calls; works offline, no browser):
+
+  sessionpipe-gui search "<query>" [--agent a] [--machine m] [--repo r] [--since 7d]
+                         [--until d] [--in f] [--source s] [--newest] [--limit n] [--json]
+                                             "a phrase", -without, pre*, and the same filters
+                                             as the page (agent: machine: repo: since: …);
+                                             exit 0 with results, 1 with none
+  sessionpipe-gui index [--rebuild] [--status] [--verify]
+                                             bring the search index up to date (asks the
+                                             running GUI when there is one)
+
 tls (passkeys from a phone; README "Passkeys from a phone"):
 
   sessionpipe-gui tls status                 hostname, names in the certificate, expiry,
@@ -135,6 +150,8 @@ interface Args {
   pluginsDir?: string;
   skinsDir?: string;
   bundledDir?: string;
+  /** --search-home DIR: where session search reads agent history. */
+  searchHome?: string;
   /** `view|theme|plugin|skin <verb> [arg]`: a subcommand instead of the server. */
   ext?: { kind: "view" | "plugin" | "skin"; verb: string; arg?: string };
   /** `extras list|add <id|all>`: a subcommand instead of the server. */
@@ -224,6 +241,9 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
         break;
       case "--bundled-dir":
         a.bundledDir = next();
+        break;
+      case "--search-home":
+        a.searchHome = path.resolve(next());
         break;
       case "theme":
       case "view":
@@ -568,7 +588,29 @@ function tlsCommand(parsed: Args): void {
   }
 }
 
+/** `search …` / `index …`: session search from a terminal (server/search/cli.ts). */
+async function searchCommand(sub: "search" | "index", rest: string[]): Promise<void> {
+  const { runIndexCli, runSearchCli } = await import("./search/cli.js");
+  const flag = (name: string): string | undefined => {
+    const i = rest.indexOf(name);
+    return i >= 0 ? rest[i + 1] : undefined;
+  };
+  const home = flag("--search-home") ?? process.env.SPGUI_SEARCH_HOME;
+  const io = {
+    stdout: process.stdout,
+    stderr: process.stderr,
+    stateDir: path.resolve(flag("--state") ?? defaultStateDir()),
+    home: home ? path.resolve(home) : undefined,
+  };
+  const code = await (sub === "search" ? runSearchCli : runIndexCli)(rest, io);
+  process.exitCode = code;
+  // Nothing should hold the loop open now; if something does, do not hang the terminal.
+  setTimeout(() => process.exit(code), 2000).unref();
+}
+
 async function main(): Promise<void> {
+  const sub = process.argv[2];
+  if (sub === "search" || sub === "index") return searchCommand(sub, process.argv.slice(3));
   const parsed = parseArgs(process.argv.slice(2));
   if (parsed === "help") {
     process.stdout.write(HELP);
@@ -609,6 +651,13 @@ async function main(): Promise<void> {
       skinsDir: parsed.skinsDir,
       bundledDir: parsed.bundledDir,
       tls,
+      // History search reads the real home only when asked to run for real: a demo without
+      // --search-home reads none (SEARCH-SPEC D14), and only the bundle forks the indexer.
+      searchHome:
+        parsed.searchHome ??
+        (process.env.SPGUI_SEARCH_HOME ? path.resolve(process.env.SPGUI_SEARCH_HOME) : undefined) ??
+        (parsed.demo ? undefined : os.homedir()),
+      searchCliPath: import.meta.url.endsWith(".js") ? fileURLToPath(import.meta.url) : undefined,
     });
   } catch (e) {
     const err = e as NodeJS.ErrnoException;

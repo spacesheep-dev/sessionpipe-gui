@@ -253,7 +253,7 @@ export function useSplit(): SplitState {
  *  (canvas, office), and Settings (a window over the board, which keeps its layout under
  *  it). Never Setup, Connect, /phone, a pairing page or a path the app has no page for,
  *  where a live session beside it reads as broken. */
-const BESIDE = new Set(["board", "inbox", "feed", "review", "machines", "session", "theme", "settings"]);
+const BESIDE = new Set(["board", "inbox", "search", "feed", "review", "machines", "session", "theme", "settings"]);
 export const panelBeside = (path: string): boolean => BESIDE.has(parseRoute(path).name);
 
 /** Whether the panel shows on the current page (its tabs stay in the URL either way). */

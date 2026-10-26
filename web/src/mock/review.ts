@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// The Review page's three readings over the mock world, from its feed and snapshot:
+// The Review page's two readings over the mock world, from its feed and snapshot:
 // enough for the page to work with no server. The real ones live in server/store/review.ts.
 import type {
   Digest,
@@ -9,10 +9,6 @@ import type {
   FilesPage,
   FilesPath,
   FilesQuery,
-  SearchField,
-  SearchHit,
-  SearchPage,
-  SearchQuery,
   SessionSummary,
   StoredEvent,
 } from "@shared/api";
@@ -34,46 +30,6 @@ export function review(world: World) {
     s?.title ?? e.session.title ?? e.session.id.slice(0, 8);
 
   return {
-    search(q: SearchQuery): SearchPage {
-      const needle = q.q.trim().toLowerCase();
-      const hits: SearchHit[] = [];
-      if (!needle) return { q: needle, hits, scanned: 0, ms: 0 };
-      const sums = summaries();
-      const events = all();
-      const seenTitle = new Set<string>();
-      for (const e of events) {
-        const s = sums.get(keyOf(e));
-        const fields: [SearchField, unknown][] = [
-          ["user", e.data.user],
-          ["assistant", e.data.assistant],
-          ["tool", e.data.tool],
-          ["message", e.data.message],
-        ];
-        if (Array.isArray(e.data.paths)) for (const p of e.data.paths) fields.push(["path", p]);
-        if (!seenTitle.has(keyOf(e))) fields.push(["title", s?.title ?? e.session.title]);
-        for (const [field, v] of fields) {
-          if (typeof v !== "string") continue;
-          const i = v.toLowerCase().indexOf(needle);
-          if (i < 0) continue;
-          if (field === "title") seenTitle.add(keyOf(e));
-          const start = Math.max(0, i - 80);
-          const end = Math.min(v.length, i + needle.length + 80);
-          const pre = start > 0 ? "…" : "";
-          const snippet = pre + v.slice(start, end).replace(/[\r\n\t]/g, " ") + (end < v.length ? "…" : "");
-          hits.push({
-            session: s ?? ({ key: keyOf(e), harness: e.harness.name, id: e.session.id } as SessionSummary),
-            event: e,
-            field,
-            snippet,
-            match: [pre.length + i - start, pre.length + i - start + needle.length],
-          });
-          break;
-        }
-        if (hits.length >= (q.limit ?? 50)) break;
-      }
-      return { q: needle, hits, scanned: events.length, ms: 1 };
-    },
-
     files(q: FilesQuery): FilesPage {
       const since = q.since ? Date.parse(q.since) : Date.now() - DAY_MS;
       const sums = summaries();

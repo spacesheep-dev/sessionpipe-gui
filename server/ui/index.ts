@@ -80,11 +80,15 @@ export function snapshotWithControl(store: Store, control: Control): Snapshot {
   return snap;
 }
 
+/** The guard every /api/ui route wears: this machine, or the UI key; else 401. */
+export const uiGuard =
+  (uiKey: () => string) =>
+  (h: Handler): Handler =>
+  (ctx) =>
+    uiAuth(ctx, uiKey()) ? h(ctx) : { status: 401, json: { reason: "unauthorized" } };
+
 export function registerUi(router: Router, deps: UiDeps): void {
-  const guard =
-    (h: Handler): Handler =>
-    (ctx) =>
-      uiAuth(ctx, deps.uiKey()) ? h(ctx) : { status: 401, json: { reason: "unauthorized" } };
+  const guard = uiGuard(deps.uiKey);
   const viewers = deps.viewers ?? new ViewerRegistry();
   const snapshot = (): Snapshot => ({
     ...snapshotWithControl(deps.store, deps.control),

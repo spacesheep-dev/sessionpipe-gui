@@ -1,45 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
-// Review: the transcript search (a hit opens the session beside at its turn), the files
-// changed grouped by repo, and the day's digest.
-import { expect, type Page, test } from "@playwright/test";
+// Review: the files changed grouped by repo, and the day's digest. Search lives on /search
+// (search.spec.ts).
+import { expect, test } from "@playwright/test";
 import { openPage } from "./helpers.js";
 
-const hits = (page: Page) => page.locator("ol.review-hits button.hit");
-
 test.describe("review", () => {
-  test("search finds a demo transcript word, marks it, and opens the session beside", async ({ page }) => {
-    await openPage(page, "/review");
-    // `/` focuses the search like on every page.
-    await page.keyboard.press("/");
-    const box = page.getByRole("searchbox", { name: "Search transcripts" });
-    await expect(box).toBeFocused();
-    // The first demo session's first turn is about a Stripe webhook; the word reaches the
-    // transcript (turn.progress) and the session's title within seconds at demo speed.
-    await box.fill("webhook");
-    await expect(hits(page).first()).toBeVisible({ timeout: 30_000 });
-    const mark = hits(page).first().locator("mark").first();
-    await expect(mark).toHaveText(/webhook/i);
-    // The mark is the text's own ink at 600, not a block of colour.
-    expect(await mark.evaluate((el) => getComputedStyle(el).backgroundColor)).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
-    await expect(page.locator(".review-meta")).toHaveText(/\d+ hits? · [\d,]+ events looked at · [\d.]+ ms/);
-
-    const first = hits(page).first();
-    const title = (await first.locator(".hit-session").textContent())!.trim();
-    await first.click();
-    const panel = page.locator("aside.panel");
-    await expect(panel).toHaveClass(/panel--open/);
-    await expect(panel.locator(".panel-title")).toHaveText(new RegExp(title.split(" ")[0]!));
-    await expect(page).toHaveURL(/[?&]s=/);
-    // The hash was consumed by the session view.
-    await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
-
-    await box.fill("no-such-word-zzzz");
-    await expect(page.getByRole("heading", { name: "Nothing matches “no-such-word-zzzz”" })).toBeVisible();
-    await page.getByRole("button", { name: "Clear search" }).click();
-    await expect(box).toHaveValue("");
-  });
-
   test("the files view groups changed paths by repo with the sessions that touched them", async ({ page }) => {
     await openPage(page, "/review");
     await page.getByRole("tab", { name: "Files" }).click();

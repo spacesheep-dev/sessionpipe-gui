@@ -21,6 +21,7 @@ export type Scope =
   | "session"
   | "panel"
   | "review"
+  | "search"
   | "inbox"
   | "machines"
   | "palette"
@@ -301,6 +302,7 @@ const nav = (id: string, label: string, key: string, hint?: string): Action => (
 export const ACTIONS: readonly Action[] = [
   nav("nav.board", "Board", "g b"),
   nav("nav.inbox", "Inbox", "g i"),
+  nav("nav.search", "Search", "g /"),
   nav("nav.feed", "Feed", "g f"),
   nav("nav.review", "Review", "g r"),
   nav("nav.machines", "Machines", "g m"),
@@ -329,6 +331,14 @@ export const ACTIONS: readonly Action[] = [
     hint: "the compose sheet, for the board's machine; ⌘N too in the installed app, once it reaches the page",
   },
   { id: "search.focus", label: "Search this page", group: "Everywhere", scope: "global", keys: ["/"] },
+  {
+    id: "search.global",
+    label: "Search all sessions",
+    group: "Everywhere",
+    scope: "global",
+    keys: ["mod+shift+f"],
+    inInputs: true,
+  },
   { id: "help.toggle", label: "Keyboard shortcuts help", group: "Everywhere", scope: "global", keys: ["?"] },
   {
     id: "back",
@@ -380,6 +390,8 @@ export const ACTIONS: readonly Action[] = [
     hint: "the right-click menu, at the row",
   },
   { id: "board.peek", label: "Peek beside the page", group: "Board", scope: "board", keys: ["space"] },
+  { id: "search.peek", label: "Peek beside the page", group: "Search", scope: "search", keys: ["space"] },
+  { id: "search.copyResume", label: "Copy resume command", group: "Search", scope: "search", keys: ["mod+c"] },
   ...Array.from({ length: 9 }, (_, i) => ({
     id: `list.jump${i + 1}`,
     label: `Open item ${i + 1}`,
@@ -708,7 +720,7 @@ export function resetAll(): void {
 
 // ----- conflicts -----
 
-const LIST_PAGES: readonly Scope[] = ["board", "feed", "inbox"];
+const LIST_PAGES: readonly Scope[] = ["board", "feed", "inbox", "search"];
 
 /** Whether two scopes can be live at the same time (so a shared key would be ambiguous). */
 export function scopesOverlap(a: Scope, b: Scope): boolean {

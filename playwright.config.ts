@@ -90,7 +90,8 @@ export default defineConfig({
       // TLS mode on its own port and state dir; the readiness check goes over plain http,
       // which the same port also answers. --rp-id localhost because the test browser
       // cannot resolve this machine's .local name. Needs openssl (tls.spec.ts skips if not).
-      command: `node dist/cli.js --port ${E2E_TLS_PORT} --state "${tlsStateDir}" --no-outbox --tls --rp-id localhost --test-door --quiet`,
+      // --search-home names a folder that holds no history: a test never reads this machine's.
+      command: `node dist/cli.js --port ${E2E_TLS_PORT} --state "${tlsStateDir}" --no-outbox --tls --rp-id localhost --test-door --quiet --search-home "${tlsStateDir}-no-history"`,
       url: `http://127.0.0.1:${E2E_TLS_PORT}/api/ui/info`,
       reuseExistingServer: false,
       timeout: 30_000,

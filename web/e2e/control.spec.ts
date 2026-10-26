@@ -239,7 +239,19 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   stateDir = mkdtempSync(path.join(os.tmpdir(), "spgui-control-e2e-"));
   server = spawn(
     process.execPath,
-    ["dist/cli.js", "--port", String(port), "--state", stateDir, "--no-outbox", "--test-door", "--quiet"],
+    // --search-home names a folder that holds no history: a test never reads this machine's.
+    [
+      "dist/cli.js",
+      "--port",
+      String(port),
+      "--state",
+      stateDir,
+      "--no-outbox",
+      "--test-door",
+      "--quiet",
+      "--search-home",
+      path.join(stateDir, "no-history"),
+    ],
     { cwd: root, stdio: ["ignore", "ignore", "pipe"] },
   );
   server.stderr?.on("data", (d) => process.stderr.write(`[server] ${d}`));

@@ -16,6 +16,7 @@ import {
   setDisabled,
   setEnabled,
   setPublicUrl,
+  setSearchHistory,
   setTlsPreference,
 } from "./config.js";
 import { type Control, createControl } from "./control/index.js";
@@ -27,8 +28,11 @@ import { Router } from "./http/router.js";
 import { registerPhone } from "./phone/index.js";
 import { PluginHost, PluginRegistry, PluginSettings, registerPlugins } from "./plugins/index.js";
 import { registerReceiver, wellKnown } from "./receiver/index.js";
+import { registerSearch } from "./search/routes.js";
+import { createSearch, thisHostname } from "./search/service.js";
+import type { SearchService } from "./search/types.js";
 import { registerSetup } from "./setup/index.js";
-import { execDefault } from "./setup/local.js";
+import { execDefault, isThisMachine } from "./setup/local.js";
 import { createTailscaleProbe } from "./setup/tailscale.js";
 import { registerSkins, SkinRegistry } from "./skins/index.js";
 import { type OutboxSource, startOutboxSource } from "./sources/outbox.js";
@@ -40,7 +44,7 @@ import { createDualListener, type DualListener, listen } from "./tls/listen.js";
 import { registerTrust } from "./tls/trust.js";
 import { AttachmentStore } from "./ui/attachments.js";
 import { uiAuthFor } from "./ui/auth.js";
-import { registerUi } from "./ui/index.js";
+import { registerUi, uiGuard } from "./ui/index.js";
 import { LabelStore } from "./ui/labels.js";
 import { Broadcast } from "./ui/stream.js";
 import { ViewerRegistry } from "./ui/viewers.js";
@@ -90,6 +94,11 @@ export interface AppOptions {
   /** Where the views that ship with the GUI are; default dist/bundled/views beside the bundle.
    *  The bundled skins and plugins are its siblings (`../skins`, `../plugins`). */
   bundledDir?: string;
+  /** Session search reads agent history under this home (`--search-home`, else the CLI's
+   *  os.homedir()). Absent here: an empty home, so tests and embedders never read a real one. */
+  searchHome?: string;
+  /** dist/cli.js, forked as the search indexer (`index --ipc`); absent: it runs in-process. */
+  searchCliPath?: string;
 }
 
 export interface App {
@@ -126,6 +135,7 @@ export interface App {
   themes: ThemeRegistry;
   plugins: PluginHost;
   skins: SkinRegistry;
+  search: SearchService;
   close(): Promise<void>;
 }
 
@@ -317,6 +327,29 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     },
     demo: { on: () => demo !== null, set: setDemo },
   });
+  // Session search (server/search): after the store and labels, behind the same UI guard;
+  // its POSTs only from this machine (loopback or one of its own addresses, never through
+  // the proxy; with the test door, x-spgui-test-remote stands in for the address).
+  const search = await createSearch({
+    stateDir,
+    store,
+    labels,
+    hostname: thisHostname(),
+    home: opts.searchHome ?? path.join(stateDir, "search", "no-home"),
+    history: () => config.searchHistory !== false,
+    setHistory: (on) => {
+      config = setSearchHistory(stateDir, config, on);
+    },
+    broadcast: (m) => broadcast.emit(m),
+    port: () => port,
+    cliPath: opts.searchCliPath,
+    quiet: opts.quiet,
+  });
+  registerSearch(router, search, uiGuard(uiKey), (ctx) => {
+    if (ctx.remote.forwarded) return false;
+    const over = opts.testDoor ? ctx.req.headers["x-spgui-test-remote"] : undefined;
+    return isThisMachine(typeof over === "string" && over ? over : ctx.remote.ip);
+  });
   const themes = new ThemeRegistry(opts.themesDir ?? path.join(stateDir, "themes"), {
     bundledDir: bundled.view,
     disabled,
@@ -457,6 +490,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     themes,
     plugins,
     skins,
+    search,
     close: async () => {
       await plugins.stop();
       setup.pairer.close();
@@ -464,6 +498,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       setDemo(false);
       replay?.stop();
       control.close();
+      await search.close();
       await store.close();
       server.closeAllConnections?.();
       httpsServer?.closeAllConnections?.();

@@ -25,6 +25,7 @@ import { Feed } from "./pages/Feed";
 import { Inbox } from "./pages/Inbox";
 import { Machines } from "./pages/Machines";
 import { Review } from "./pages/Review";
+import { Search } from "./pages/Search";
 import { SessionPage } from "./pages/Session";
 import { Setup } from "./pages/Setup";
 import { Shortcuts } from "./pages/Shortcuts";
@@ -40,6 +41,7 @@ const TITLES: Record<string, string> = {
   inbox: "Inbox",
   feed: "Feed",
   review: "Review",
+  search: "Search",
   machines: "Machines",
   connect: "Connect",
   setup: "Setup",
@@ -127,6 +129,7 @@ export function App() {
       )}
       {route.name === "feed" && <Feed />}
       {route.name === "review" && <Review />}
+      {route.name === "search" && <Search />}
       {route.name === "machines" && <Machines />}
       {route.name === "connect" && <Connect />}
       {route.name === "setup" && <Setup />}
@@ -154,7 +157,7 @@ const FIRST_RUN_WAIT_MS = 3000;
 
 /** Where each list page was scrolled to, by path, for Back. */
 const scrolled = new Map<string, number>();
-const LIST_PAGES = new Set(["board", "inbox", "feed", "machines"]);
+const LIST_PAGES = new Set(["board", "inbox", "feed", "machines", "search"]);
 /** Each history entry this page made is stamped with its place in the walk, so a path
  *  change can tell Back (an entry stamped earlier) from a new page (no stamp yet). The
  *  popstate event cannot: the router reads the URL on any render, and a live stream

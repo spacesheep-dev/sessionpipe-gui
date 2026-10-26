@@ -373,7 +373,9 @@ export type StreamMessage =
   | { kind: "labels"; labels: Labels }
   /** A view's server-side state (THEME_ROUTES.state) was written; `etag` names the new
    *  version, so the page that wrote it can tell its own write from another device's. */
-  | { kind: "viewState"; id: string; etag: string };
+  | { kind: "viewState"; id: string; etag: string }
+  /** The search index's status changed (state, progress, counts). At most one a second. */
+  | { kind: "searchIndex"; status: SearchIndexStatus };
 
 // ---------- labels (the person's colour labels; GET / PATCH ROUTES.ui.labels) ----------
 
@@ -513,6 +515,227 @@ export interface SearchPage {
   /** Events looked at for this page, and how long it took. */
   scanned: number;
   ms: number;
+}
+
+// ---------- session search (SEARCH-SPEC.md; GET /api/ui/search/sessions and friends) ----------
+// The old GET /api/ui/search (SearchPage, one row per event) stays as it is for older
+// clients. Everything below is the session-level search: this machine's own agent history
+// plus what sessionpipe delivered, one row per session, ranked. One query language for
+// the page, ⌘K, the CLI and the API: shared/searchQuery.ts.
+
+/** Where a session's searchable text came from: this machine's own harness logs, or the
+ *  events sessionpipe delivered (at the tier they arrived at, never above). */
+export type SearchSource = "history" | "sessionpipe";
+/** The field of a message. Titles are session metadata, matched separately (`titleMarks`). */
+export type SearchDocField = "prompt" | "reply" | "tool";
+export type SearchSort = "best" | "newest";
+/** [start, end) in UTF-16 code units of the text it belongs to. Never markup. */
+export type SearchMark = [start: number, end: number];
+
+/** Filter keys of the query language. Aliases (`harness:`, `is:`, `after:`, `before:`) are
+ *  read as these by the parser. */
+export type SearchFilterKey = "agent" | "machine" | "repo" | "label" | "since" | "until" | "in" | "source";
+
+/** One match clause. Clauses are ANDed at the session level; `not` drops every session
+ *  that has it anywhere. A `word` the engine's tokenizer splits into several terms
+ *  (`src/store/review.ts`, `getUserName`) is matched as a phrase of its parts. */
+export interface SearchClause {
+  kind: "word" | "phrase" | "prefix";
+  /** As typed, without quotes, `-` or `*`. */
+  text: string;
+  not: boolean;
+  /** The last bare word while typing (`live` query): a prefix the person has not finished. */
+  live?: boolean;
+}
+
+/** What a query string was read as. Pure function of the string (+ `live`): the server, the
+ *  CLI and the web all get the same answer from `parseSearch`. */
+export interface ParsedSearch {
+  clauses: SearchClause[];
+  /** Positive filters, values as typed (agent aliases already resolved to harness names). */
+  filters: Partial<Record<SearchFilterKey, string[]>>;
+  /** `-label:red` and the like. */
+  notFilters: Partial<Record<SearchFilterKey, string[]>>;
+  /** Keys that are not filters (`foo:` in `foo:bar`); that token was searched as text. */
+  unknown: string[];
+}
+
+/** Query of GET /api/ui/search/sessions. The whole query, filters included, is `q`. */
+export interface SessionSearchQuery {
+  q: string;
+  /** Default "best". A filter-only query (no clauses) always browses newest first. */
+  sort?: SearchSort;
+  /** Sessions per page; default 20, at most 100. */
+  limit?: number;
+  /** The `cursor` of the previous page. */
+  cursor?: string;
+  /** Typing: the last bare word is a prefix. The page and ⌘K send 1; the CLI does not. */
+  live?: boolean;
+  /** The viewer's `Date.prototype.getTimezoneOffset()`, for `since:today` and dates. */
+  tz?: number;
+  /** Hits per session, 0–3; default 3 (⌘K asks 1). */
+  hits?: number;
+}
+
+/** One moment in a session that matched. */
+export interface SessionSearchHit {
+  field: SearchDocField;
+  /** The tool's name on a tool line (the UI words it with `toolLabel`). */
+  tool?: string;
+  /** Set when the message is a subagent's (Claude agentId, Codex child thread). */
+  agent?: { id: string; type?: string };
+  at: string;
+  /** A window of at most 240 chars around the hits, whitespace folded, `…` at cuts. */
+  text: string;
+  /** Into `text`. The UI renders these and never re-matches. */
+  marks: SearchMark[];
+  /** Opaque, URL-safe, stable while the source file is unchanged: the transcript view's
+   *  anchor (`/s/<harness>/<id>?q=…#h-<ref>`) and its `around=`. */
+  ref: string;
+  /** A sessionpipe event's seq: the live session view's `#seq-N`. */
+  seq?: number;
+  /** Found in bytes appended since the last index commit (a reading, not a state). */
+  live?: true;
+}
+
+/** One session in the results. */
+export interface SessionMatch {
+  /** `sessionKey(harness, id)` with the receiver's harness names: the store's key. */
+  key: SessionKey;
+  harness: string;
+  id: string;
+  source: SearchSource | "both";
+  /** Never an id: the store's title, else the history's best title, else the first ask cut
+   *  on a word, else "Untitled session". */
+  title: string;
+  titleMarks?: SearchMark[];
+  machine?: string;
+  /** The session ran on the machine the server runs on. */
+  thisMachine: boolean;
+  /** Claude account home label (`work` for ~/.claude-work) when this machine has several. */
+  account?: string;
+  repo?: string;
+  cwd?: string;
+  branch?: string;
+  firstAt: string;
+  lastAt: string;
+  /** When the store knows the session: live state, counts (labels are keyed by `key`). */
+  summary?: SessionSummary;
+  /** 1–3, in transcript order (chosen by score, or newest under sort=newest). */
+  hits: SessionSearchHit[];
+  /** Matching messages beyond `hits`. */
+  moreHits: number;
+  /** The exact line to paste in a terminal, only for a harness whose resume is verified
+   *  (Claude Code, Codex): `cd '<cwd>' && claude --resume <id>`, `codex resume <id>`. */
+  resume?: string;
+  /** The session's main transcript file. Only to a viewer on this machine. */
+  transcriptPath?: string;
+  /** A Claude fork: the session it continues. */
+  forkOf?: SessionKey;
+  score: number;
+}
+
+/** When a query has no results: the first fix that applies, decided by the server. */
+export interface SearchHint {
+  kind: "filters" | "phrase" | "spelling" | "exclude" | "indexing" | "none";
+  /** The rewritten query the hint's button runs. */
+  query?: string;
+  /** The word the hint is about (`spelling`: the near word; `exclude`: the excluded one). */
+  word?: string;
+}
+
+export type SearchIndexState = "ready" | "updating" | "first-run" | "off" | "error";
+
+export interface SearchIndexStatus {
+  state: SearchIndexState;
+  sessions: number;
+  messages: number;
+  /** 0–1 while `first-run` (bytes read over bytes found). */
+  progress?: number;
+  /** On disk, both indexes. */
+  bytes: number;
+  updatedAt?: string;
+  /** The setting: read this machine's agent history (default on). */
+  history: boolean;
+  /** Per source, only those present on this machine (no zero rows). */
+  sources: { harness: string; source: SearchSource; homes: string[]; sessions: number }[];
+  /** Files found but not readable here, said once in the popover (`zstd`: Codex's
+   *  compressed rollouts on a Node without zstd and no `zstd` command). */
+  skipped?: { harness: string; files: number; why: "zstd" | "unreadable" }[];
+  /** A sentence, when `error`. */
+  error?: string;
+  /** The viewer is on this machine (may toggle history, rebuild, reveal). Only on the
+   *  GET /status and POST answers, never in the `searchIndex` stream frame. */
+  local?: boolean;
+}
+
+export interface SessionSearchPage {
+  q: string;
+  sort: SearchSort;
+  parsed: ParsedSearch;
+  sessions: SessionMatch[];
+  /** Sessions matching, exact up to 200; `more` past that. */
+  total: number;
+  more: boolean;
+  cursor?: string;
+  ms: number;
+  index: SearchIndexStatus;
+  /** Set when `sessions` is empty. */
+  hint?: SearchHint;
+}
+
+/** One message of a transcript read from the index (prompts, replies, one line per tool
+ *  call; tool output is never indexed, so never shown). */
+export interface SearchTranscriptMessage {
+  ref: string;
+  field: SearchDocField;
+  tool?: string;
+  agent?: { id: string; type?: string };
+  at: string;
+  /** The whole message (redacted, at most 32 K chars). */
+  text: string;
+  seq?: number;
+}
+
+/** GET /api/ui/search/transcript/:harness/:id?q=&around=<ref>|before=<ref>|after=<ref>&limit= */
+export interface SearchTranscript {
+  /** `hits` empty here; the find bar uses `hits` below. */
+  session: SessionMatch;
+  /** A window in transcript order (60 by default, centred on `around`). */
+  messages: SearchTranscriptMessage[];
+  /** Every message in the whole session matching `q`'s clauses, in transcript order, with
+   *  marks into that message's `text`: the find bar's "2 of 7". */
+  hits: { ref: string; marks: SearchMark[] }[];
+  /** Cursors for the window before / after this one, when there is more. */
+  before?: string;
+  after?: string;
+}
+
+export interface SearchFacet {
+  value: string;
+  count: number;
+  /** A display name when it differs from the value (`Claude Code`, a label's own name). */
+  label?: string;
+}
+
+/** GET /api/ui/search/facets: values present in the index, for the chips and completion. */
+export interface SearchFacets {
+  agents: SearchFacet[];
+  machines: SearchFacet[];
+  repos: SearchFacet[];
+  labels: SearchFacet[];
+}
+
+/** POST /api/ui/search/settings (this machine only). */
+export interface SearchSettings {
+  history: boolean;
+}
+
+/** POST /api/ui/search/reveal (this machine only, a session that ran here). */
+export interface SearchRevealRequest {
+  harness: string;
+  id: string;
+  what: "folder" | "transcript";
 }
 
 /** Query of GET /api/ui/files. `since` is an ISO time; `repo` an exact `session.repo`. */
@@ -951,6 +1174,22 @@ export const ROUTES = {
     viewers: "/api/ui/viewers",
     /** GET /api/ui/search?q=&limit=&before= → SearchPage */
     search: "/api/ui/search",
+    /** Session search (SEARCH-SPEC.md). UI key like every /api/ui route; the POSTs are
+     *  this machine only (403 `local_only` otherwise).
+     *  GET  /sessions?<SessionSearchQuery> → SessionSearchPage
+     *  GET  /transcript/:harness/:id?q=&around=|before=|after=&limit= → SearchTranscript (404 `not_found`)
+     *  GET  /facets → SearchFacets
+     *  GET  /status → SearchIndexStatus (also `searchIndex` stream frames)
+     *  POST /reindex { rebuild?: boolean } → 202 SearchIndexStatus
+     *  POST /settings SearchSettings → SearchIndexStatus
+     *  POST /reveal SearchRevealRequest → 204; 404 `gone` (the folder is no longer here) */
+    searchSessions: "/api/ui/search/sessions",
+    searchTranscript: "/api/ui/search/transcript",
+    searchFacets: "/api/ui/search/facets",
+    searchStatus: "/api/ui/search/status",
+    searchReindex: "/api/ui/search/reindex",
+    searchSettings: "/api/ui/search/settings",
+    searchReveal: "/api/ui/search/reveal",
     /** GET /api/ui/files?since=<iso>&repo= → FilesPage */
     files: "/api/ui/files",
     /** GET /api/ui/digest?day=YYYY-MM-DD&tz=<minutes> → Digest */

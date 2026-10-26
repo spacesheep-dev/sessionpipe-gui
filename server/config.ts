@@ -24,6 +24,9 @@ export interface GuiConfig {
    *  code and may reach out of the machine (ping-a-human messages a phone), so it stays
    *  off until the person enables it here; an installed plugin needs no entry. */
   enabled?: string[];
+  /** Session search reads this machine's own agent history (Claude Code, Codex,
+   *  Antigravity, Gemini CLI logs), read-only. Absent = on; Settings ▸ Data turns it off. */
+  searchHistory?: boolean;
 }
 
 export function defaultStateDir(): string {
@@ -58,6 +61,7 @@ export function readGuiConfig(dir: string): GuiConfig {
   if (typeof cfg.publicUrl === "string" && cfg.publicUrl) full.publicUrl = cfg.publicUrl;
   if (Array.isArray(cfg.disabled)) full.disabled = cfg.disabled.filter((d): d is string => typeof d === "string");
   if (Array.isArray(cfg.enabled)) full.enabled = cfg.enabled.filter((d): d is string => typeof d === "string");
+  if (typeof cfg.searchHistory === "boolean") full.searchHistory = cfg.searchHistory;
   if (!complete) writeGuiConfig(dir, full);
   return full;
 }
@@ -87,6 +91,14 @@ export function setPublicUrl(dir: string, cfg: GuiConfig, url: string | undefine
   const next = { ...cfg };
   if (url) next.publicUrl = url;
   else delete next.publicUrl;
+  writeGuiConfig(dir, next);
+  return next;
+}
+
+/** Session search's history setting (`POST /api/ui/search/settings`), remembered. */
+export function setSearchHistory(dir: string, cfg: GuiConfig, on: boolean): GuiConfig {
+  if ((cfg.searchHistory !== false) === on) return cfg;
+  const next = { ...cfg, searchHistory: on };
   writeGuiConfig(dir, next);
   return next;
 }

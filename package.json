@@ -56,6 +56,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "conformance": "node dist/conformance.js",
+    "bench:search": "node bench/search/run.mjs",
     "prepare": "node scripts/prepare.mjs",
     "bundle:sync": "node scripts/build.mjs --sync-bundle"
   },

@@ -3,8 +3,11 @@ import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// Dev: `npm run dev` runs this beside the server on :7373 and proxies the API to it.
+// Dev: `npm run dev` runs this beside the server on :7373 and proxies the API to it
+// (`SPGUI_API=http://127.0.0.1:7924` points it at another server).
 // Build: static files land in dist/web, served by the server itself.
+const api = process.env.SPGUI_API ?? "http://127.0.0.1:7373";
+
 export default defineConfig({
   root: __dirname,
   plugins: [react()],
@@ -14,11 +17,11 @@ export default defineConfig({
     port: 5173,
     host: true,
     proxy: {
-      "/api": "http://127.0.0.1:7373",
-      "/.well-known": "http://127.0.0.1:7373",
-      "/themes": "http://127.0.0.1:7373",
-      "/skins": "http://127.0.0.1:7373",
-      "/attachments": "http://127.0.0.1:7373",
+      "/api": api,
+      "/.well-known": api,
+      "/themes": api,
+      "/skins": api,
+      "/attachments": api,
     },
   },
 });

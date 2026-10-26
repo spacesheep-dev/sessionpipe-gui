@@ -37,6 +37,7 @@ export function createMockTransport(): Transport {
   // Labels live beside the World, as they live beside the store on the server.
   let labels: Labels = { rev: 0, names: {}, sessions: {} };
   const handlers = new Set<(m: StreamMessage) => void>();
+  let search: ReturnType<Transport["sessionSearch"]> | null = null;
   return {
     openStream(h) {
       let stop: (() => void) | null = null;
@@ -77,11 +78,10 @@ export function createMockTransport(): Transport {
     info: () => latency(world.info()),
     session: async (harness, id, q) => {
       const d = world.detail(harness, id, q);
-      if (!d) throw new Error("no such session");
+      if (!d) throw new Error("not_found");
       return latency(d, 120);
     },
     feed: (q) => latency(world.feed(q), 90),
-    search: (q) => latency(review(world).search(q), 120),
     files: (q) => latency(review(world).files(q), 90),
     digest: (q) => latency(review(world).digest(q), 90),
     forget: async (harness, id) => {
@@ -94,5 +94,9 @@ export function createMockTransport(): Transport {
       return latency({ on }, 80);
     },
     qrUrl: () => null,
+    sessionSearch: () => {
+      search ??= import("./search").then((m) => m.mockSearch(world, () => labels));
+      return search;
+    },
   };
 }
