@@ -52,7 +52,7 @@ test.describe("command palette", () => {
 
   test("shift+Enter opens the session beside the page", async ({ page }) => {
     await openBoard(page);
-    const { title, fragment } = await firstCard(page);
+    const { title, href, fragment } = await firstCard(page);
     await open(page);
     await page.keyboard.type(fragment);
     await expect(rows(page).first().locator(".pal-label")).toHaveText(title);
@@ -60,8 +60,16 @@ test.describe("command palette", () => {
     await expect(dialog(page)).toBeHidden();
     const panel = page.locator("aside.panel");
     await expect(panel).toHaveClass(/panel--open/);
-    await expect(panel.locator(".panel-title")).toHaveText(title);
-    await expect(page).toHaveURL(/[?&]s=/);
+    // By its key, not its words: a demo session may learn a better title mid-turn.
+    const key = href
+      .split("?")[0]!
+      .replace(/^\/s\//, "")
+      .split("/")
+      .slice(0, 2)
+      .map(decodeURIComponent)
+      .join(":");
+    await expect.poll(() => decodeURIComponent(new URL(page.url()).searchParams.get("s") ?? "")).toBe(key);
+    await expect(panel.locator(".panel-title")).not.toHaveText("");
     // Inside the split, ⌘K still works.
     await open(page);
     await expect(dialog(page).locator(".pal-section", { hasText: "Actions" })).toBeVisible();
