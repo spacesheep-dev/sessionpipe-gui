@@ -6,7 +6,7 @@
 // Pages that list no sessions (Setup, Connect, a missing page) don't show it, and it is
 // back, tabs and all, on the board.
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
-import { EVENTS, INFO, openBoard, tier1Batch } from "./helpers.js";
+import { EVENTS, holdBoard, INFO, openBoard, tier1Batch } from "./helpers.js";
 
 const panel = (page: Page) => page.locator("aside.panel");
 const mainWidth = (page: Page) => page.locator("main.main").evaluate((el) => el.getBoundingClientRect().width);
@@ -17,13 +17,6 @@ const rx = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  *  the panel shows it whole, so a shortened one is matched as a prefix. */
 const titleOf = (card: string): string | RegExp =>
   card.endsWith("…") ? new RegExp(`^${rx(card.slice(0, -1))}`) : card;
-
-/** Rests the pointer on the first card, so the board holds still. `hover` waits for the card
- *  to be attached and stable; a box read once can come back null while the list re-renders. */
-async function holdBoard(page: Page): Promise<void> {
-  await page.locator("article.card").first().hover();
-  await expect(page.locator(".page.board")).toHaveAttribute("data-held", "");
-}
 
 /** Shift-clicks the first board card; returns the title the panel shows for it. The
  *  panel is the source of truth: a demo session may learn a better title mid-turn, so the

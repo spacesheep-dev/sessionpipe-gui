@@ -24,6 +24,16 @@ export async function openBoard(page: Page): Promise<void> {
   await expect(page.locator("section.group").first()).toBeVisible();
 }
 
+/** Rests the pointer on the board's list, so it holds still (Board.tsx `useListHold`): a row
+ *  read is then the row clicked. The list itself never moves, so this waits on no card. */
+export async function holdBoard(page: Page): Promise<void> {
+  const list = page.locator(".board-list");
+  await expect(list).toBeVisible();
+  const box = (await list.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + Math.min(40, box.height / 2));
+  await expect(page.locator(".page.board")).toHaveAttribute("data-held", "");
+}
+
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /** A ULID (26 Crockford base32 chars: 48-bit ms time + 80 random bits). */
