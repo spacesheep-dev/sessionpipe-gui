@@ -157,9 +157,14 @@ describe.skipIf(!existsSync(ENGINE))("crash torture: SIGKILL during commit", () 
     const inc = Date.now() - t0;
     let killed = 0;
     let inCommit = 0;
+    let rounds = 0;
     const opens: string[] = [];
     const probes: number[] = [];
-    for (let round = 0; round < ROUNDS; round++) {
+    // A commit can finish between two polls (a fast disk), and that kill lands outside one:
+    // keep going until enough kills hit a commit in flight, up to three times the rounds.
+    const wantInCommit = Math.ceil(ROUNDS * 0.6);
+    for (let round = 0; round < ROUNDS * 3 && (round < ROUNDS || inCommit < wantInCommit); round++) {
+      rounds++;
       // Even rounds: a rebuild beside the live generation. Odd: new bytes appended, then a pass.
       const rebuild = round % 2 === 0;
       if (!rebuild) {
@@ -179,11 +184,11 @@ describe.skipIf(!existsSync(ENGINE))("crash torture: SIGKILL during commit", () 
       }
     }
     console.log(
-      `crash torture: first build ${full} ms, append pass ${inc} ms, ${killed}/${ROUNDS} kills, ${inCommit} with a commit in flight`,
+      `crash torture: first build ${full} ms, append pass ${inc} ms, ${killed}/${rounds} kills, ${inCommit} with a commit in flight`,
     );
     expect(opens).toEqual([]);
-    expect(killed).toBe(ROUNDS);
-    expect(inCommit).toBeGreaterThanOrEqual(Math.ceil(ROUNDS * 0.6));
+    expect(killed).toBe(rounds);
+    expect(inCommit).toBeGreaterThanOrEqual(wantInCommit);
     // A last, uninterrupted pass; then the index equals the oracle over the same files.
     expect((await runWriter(null)).how).toBe("done");
     const engine = await e.openReader({ dir: dir(), sources: BOTH });
