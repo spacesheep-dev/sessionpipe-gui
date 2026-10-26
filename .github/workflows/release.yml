@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-# A `v*` tag runs the gates, packs the tarball and creates the GitHub Release from the
-# CHANGELOG section. The package carries Canvas, Office and ping-a-human from the
+# A `v*` tag runs the gates, packs the tarball and creates the GitHub Release (a draft) from
+# the CHANGELOG section. The package carries Canvas, Office and ping-a-human from the
 # tracked bundled/ copy (refreshed with `npm run bundle:sync`
 # from a checkout of sessionpipe-gui-themes beside this repo, and committed), so the
 # workflow needs no second checkout and no token. Publishing to npm is off until the
@@ -58,4 +58,6 @@ jobs:
           set -e
           node scripts/release-notes.mjs "$GITHUB_REF_NAME" > /tmp/notes.md
           npm pack --silent --pack-destination /tmp
-          gh release create "$GITHUB_REF_NAME" --title "sessionpipe-gui $GITHUB_REF_NAME" --notes-file /tmp/notes.md /tmp/sessionpipe-gui-*.tgz
+          # A draft: the desktop app is built into it ("Desktop release") and the whole
+          # release goes out with "Publish update" (RELEASING.md, The desktop app).
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "sessionpipe-gui $GITHUB_REF_NAME" --notes-file /tmp/notes.md /tmp/sessionpipe-gui-*.tgz

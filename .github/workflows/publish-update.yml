@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: Apache-2.0
+# "Publish update": the button that puts a release in front of installed apps, and the
+# only thing that publishes a desktop release. It checks the tag's DRAFT release (made by
+# release.yml and filled by "Desktop release"):
+#   - the macOS dmg, latest.json, and the updater archive + .sig for every platform in it;
+#   - every signature in latest.json verifies, with minisign, against the PUBLIC key in
+#     apps/desktop/src-tauri/tauri.release.conf.json (key id 5D71CED7E98EE42F);
+# then publishes it as the latest release. Installed apps read
+# releases/latest/download/latest.json, so they see the update from that moment on.
+# Runs in the `release` environment, so it waits for Misha's approval. No secret is read.
+name: Publish update
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The v* tag whose draft release to publish"
+        required: true
+
+permissions:
+  contents: write # publish the release
+
+concurrency:
+  group: desktop-release-${{ inputs.tag }}
+
+env:
+  TAG: ${{ inputs.tag }}
+  KEY_ID: 5D71CED7E98EE42F
+
+jobs:
+  publish:
+    name: check and publish
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: minisign
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends minisign
+
+      - name: The release is a draft with every file
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          draft="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$TAG\") | .draft" | head -1)"
+          [ -n "$draft" ] || { echo "::error::no release for $TAG"; exit 1; }
+          [ "$draft" = true ] || { echo "::error::the $TAG release is already published"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/rel"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/rel"
+          ls -la "$RUNNER_TEMP/rel"
+          ls "$RUNNER_TEMP/rel"/*.dmg >/dev/null 2>&1 || { echo "::error::no macOS dmg on the draft (run Desktop release first)"; exit 1; }
+          [ -f "$RUNNER_TEMP/rel/latest.json" ] || { echo "::error::no latest.json on the draft"; exit 1; }
+          v="$(jq -r .version "$RUNNER_TEMP/rel/latest.json")"
+          [ "v${v#v}" = "$TAG" ] || { echo "::error::latest.json says $v, the tag is $TAG"; exit 1; }
+          jq -e '.platforms | has("darwin-aarch64") and has("darwin-x86_64")' "$RUNNER_TEMP/rel/latest.json" >/dev/null \
+            || { echo "::error::latest.json has no macOS platforms"; exit 1; }
+
+      - name: Every update is signed with the release key
+        run: |
+          set -euo pipefail
+          rel="$RUNNER_TEMP/rel"
+          # The public key the shipped apps carry, as minisign's .pub file.
+          jq -r '.plugins.updater.pubkey' apps/desktop/src-tauri/tauri.release.conf.json | base64 -d > "$RUNNER_TEMP/release.pub"
+          grep -q "minisign public key: $KEY_ID" "$RUNNER_TEMP/release.pub" \
+            || { echo "::error::tauri.release.conf.json's pubkey is not key $KEY_ID"; exit 1; }
+          n=0
+          while IFS=$'\t' read -r platform url sig; do
+            file="$rel/$(basename "${url%%\?*}")"
+            [ -f "$file" ] || { echo "::error::$platform: $(basename "$url") is not on the draft"; exit 1; }
+            [ -f "$file.sig" ] || { echo "::error::$platform: $(basename "$file").sig is not on the draft"; exit 1; }
+            printf '%s' "$sig" | base64 -d > "$RUNNER_TEMP/check.sig"
+            cmp -s "$RUNNER_TEMP/check.sig" <(base64 -d < "$file.sig") \
+              || { echo "::error::$platform: latest.json's signature differs from $(basename "$file").sig"; exit 1; }
+            minisign -V -p "$RUNNER_TEMP/release.pub" -m "$file" -x "$RUNNER_TEMP/check.sig" \
+              || { echo "::error::$platform: the signature does not verify with key $KEY_ID"; exit 1; }
+            echo "$platform: $(basename "$file") verifies with key $KEY_ID" | tee -a "$GITHUB_STEP_SUMMARY"
+            n=$((n + 1))
+          done < <(jq -r '.platforms | to_entries[] | [.key, .value.url, .value.signature] | @tsv' "$rel/latest.json")
+          [ "$n" -gt 0 ] || { echo "::error::latest.json lists no platforms"; exit 1; }
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          echo "Published $TAG: installed apps see the update from now on." >> "$GITHUB_STEP_SUMMARY"

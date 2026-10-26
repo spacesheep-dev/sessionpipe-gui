@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: Apache-2.0
+# The desktop app on every PR that changes it (apps/**): the Rust workspace's format,
+# clippy and tests, and a debug `tauri build` of the .app, on one macOS runner. Windows
+# and Linux build only when run by hand (Actions → Desktop → Run workflow), and always in
+# "Desktop release". The page the app bundles is checked by CI (ci.yml) on every PR, so a
+# web-only change doesn't start this. Nothing is signed, notarized or uploaded, and no
+# secret is read: a PR from a fork runs it the same way.
+name: Desktop
+
+on:
+  pull_request:
+    paths:
+      - "apps/**"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  build:
+    name: test · debug build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["macos-14","windows-latest","ubuntu-22.04"]') || fromJSON('["macos-14"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux packages (WebKitGTK 4.1, the tray, SVG icons)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev build-essential file
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps -> target
+
+      - name: cargo fmt --check (the workspace and the iOS app)
+        if: runner.os == 'macOS'
+        run: |
+          cargo fmt --all --manifest-path apps/Cargo.toml -- --check
+          cargo fmt --all --manifest-path apps/ios/src-tauri/Cargo.toml -- --check
+
+      # The web UI the app bundles: the same build the npm package ships.
+      - run: npm ci
+      - run: npm run build
+      - run: npm ci
+        working-directory: apps/desktop
+      - name: Assemble the app's frontend (dist/web + the bundled views)
+        run: apps/desktop/scripts/assemble-frontend.sh
+
+      - name: cargo clippy (with and without the Touch ID signer on macOS)
+        working-directory: apps
+        run: |
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          if [ "$RUNNER_OS" = macOS ]; then
+            cargo clippy -p sessionpipe-desktop --all-targets --features identity --locked -- -D warnings
+          fi
+
+      - name: cargo test --workspace
+        working-directory: apps
+        run: cargo test --workspace --locked
+
+      - name: tauri build --debug
+        working-directory: apps/desktop
+        run: |
+          case "$RUNNER_OS" in
+            macOS) bundles=app ;;
+            Windows) bundles=nsis ;;
+            *) bundles=deb ;;
+          esac
+          npx tauri build --debug --bundles "$bundles" --ci

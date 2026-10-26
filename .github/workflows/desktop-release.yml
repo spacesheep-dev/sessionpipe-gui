@@ -1,0 +1,305 @@
+# SPDX-License-Identifier: Apache-2.0
+# "Desktop release": a button (Actions → Desktop release → Run workflow), never a push.
+# It builds the desktop app for an existing v* tag and uploads it to that tag's GitHub
+# Release, which stays a DRAFT (release.yml makes it one):
+#   macOS   universal dmg, signed (Developer ID), notarized and stapled; .app.tar.gz + .sig
+#   Windows NSIS .exe and .msi (unsigned until a signing method is chosen); .sig
+#   Linux   AppImage and .deb; .sig
+#   latest.json for the updater
+# Installed apps read releases/latest/download/latest.json, which a draft never is: nothing
+# reaches anyone until "Publish update" (publish-update.yml) checks the draft and publishes it.
+#
+# Every job that signs runs in the `release` environment (Misha is its required reviewer,
+# so the run waits for his approval) and reads these secrets from it (names only;
+# RELEASING.md "The desktop app" says how each is made):
+#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD   the updater's minisign key
+#   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD                     Developer ID .p12, base64
+#   APPLE_SIGNING_IDENTITY        "Developer ID Application: Michael Petrov (QR7H8ARENW)"
+#   APPLE_TEAM_ID                 QR7H8ARENW
+# and, to notarize, ONE of:
+#   APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_PRIVATE_KEY            App Store Connect API key
+#                                 (the .p8's text; written to a file for APPLE_API_KEY_PATH)
+#   APPLE_ID, APPLE_PASSWORD      an Apple ID and an app-specific password for it (with
+#                                 APPLE_TEAM_ID); used when the API key's three are not all set
+# With notarize on and neither set, the run fails. With notarize off the dmg is signed but
+# not notarized, and the job summary says so in a warning.
+name: Desktop release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing v* tag to build"
+        required: true
+      platforms:
+        description: "What to build"
+        type: choice
+        options: [all, macos, windows, linux]
+        default: all
+      notarize:
+        description: "Notarize and staple the macOS app and dmg"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write # upload to the tag's draft release
+
+concurrency:
+  group: desktop-release-${{ inputs.tag }}
+
+env:
+  TAG: ${{ inputs.tag }}
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: the tag's draft release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      id: ${{ steps.release.outputs.id }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: The tag is package.json's version
+        run: |
+          case "$TAG" in v*) ;; *) echo "::error::$TAG is not a v* tag"; exit 1 ;; esac
+          v="$(node -p "require('./package.json').version")"
+          [ "v$v" = "$TAG" ] || { echo "::error::tag $TAG, package.json $v"; exit 1; }
+
+      # An app built with the placeholder can never verify an update, so it could never be
+      # updated again: refuse to release it.
+      - name: The updater's public key is set
+        run: |
+          if grep -q 'REPLACE-WITH-THE-PUBLIC-KEY' apps/desktop/src-tauri/tauri.release.conf.json; then
+            echo "::error file=apps/desktop/src-tauri/tauri.release.conf.json::plugins.updater.pubkey is still the placeholder (RELEASING.md, The desktop app)"
+            exit 1
+          fi
+
+      - id: plan
+        name: The platforms to build
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          set -euo pipefail
+          all='[
+            {"name":"macOS universal","platform":"macos","os":"macos-14","args":"--target universal-apple-darwin --bundles app,dmg","rust-targets":"aarch64-apple-darwin,x86_64-apple-darwin"},
+            {"name":"Windows x64","platform":"windows","os":"windows-latest","args":"--bundles nsis,msi","rust-targets":""},
+            {"name":"Linux x64","platform":"linux","os":"ubuntu-22.04","args":"--bundles appimage,deb","rust-targets":""}
+          ]'
+          m="$(jq -c --arg p "$PLATFORMS" '{include: [.[] | select($p == "all" or .platform == $p)]}' <<<"$all")"
+          echo "matrix=$m" >> "$GITHUB_OUTPUT"
+
+      # release.yml made the tag's release as a draft; if it has not run (or failed), make the
+      # draft here. A release that is already published is refused: uploading latest.json to
+      # it would update every installed app before anyone checked the build.
+      - id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          row="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$TAG\") | [.id, .draft] | @tsv" | head -1)"
+          if [ -z "$row" ]; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+              --title "sessionpipe-gui $TAG" --notes "The notes are written by the Release workflow."
+            row="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$TAG\") | [.id, .draft] | @tsv" | head -1)"
+          fi
+          id="$(cut -f1 <<<"$row")"; draft="$(cut -f2 <<<"$row")"
+          [ -n "$id" ] || { echo "::error::no release for $TAG"; exit 1; }
+          if [ "$draft" != "true" ]; then
+            echo "::error::the $TAG release is already published; build desktop apps into a draft only (RELEASING.md, The desktop app)"
+            exit 1
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.name }})
+    needs: release
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.release.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      # Secrets cannot be tested in `if:`; this step turns each into a yes/no and fails
+      # clearly on what a release cannot do without.
+      - id: secrets
+        name: The secrets this build needs
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          NOTARIZE: ${{ inputs.notarize }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || missing+=(TAURI_SIGNING_PRIVATE_KEY)
+          if [ "$PLATFORM" = macos ]; then
+            for s in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_TEAM_ID; do
+              [ -n "${!s}" ] || missing+=("$s")
+            done
+          fi
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::missing secrets in the release environment: ${missing[*]} (RELEASING.md, The desktop app)"
+            exit 1
+          fi
+          # How to notarize: the App Store Connect API key when all three are set, else the
+          # Apple ID with its app-specific password; none when the input is off.
+          notarize=false
+          via=none
+          if [ "$PLATFORM" = macos ]; then
+            if [ "$NOTARIZE" != true ]; then
+              echo "::warning::notarize is off: the dmg is signed but NOT notarized, and Gatekeeper will warn on open"
+              echo "> [!WARNING]"$'\n'"> **Not notarized** (the run's notarize input is off). Gatekeeper warns on open; do not publish this build." >> "$GITHUB_STEP_SUMMARY"
+            elif [ -n "$APPLE_API_ISSUER" ] && [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_API_PRIVATE_KEY" ]; then
+              notarize=true
+              via=api-key
+            elif [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ]; then
+              notarize=true
+              via=apple-id
+            else
+              echo "::error::notarize is on, but the release environment has neither the App Store Connect API key (APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_PRIVATE_KEY) nor an Apple ID (APPLE_ID, APPLE_PASSWORD: an app-specific password). Add one (RELEASING.md, The desktop app), or run with notarize off for a signed-only test build."
+              exit 1
+            fi
+            [ "$via" = none ] || echo "macOS: notarizing with the $via." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "notarize=$notarize" >> "$GITHUB_OUTPUT"
+          echo "via=$via" >> "$GITHUB_OUTPUT"
+
+      - name: Linux packages (WebKitGTK 4.1, the tray, SVG icons)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev build-essential file
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps -> target
+
+      # build:release refuses to ship without the bundled views; the app carries them too.
+      - run: npm ci
+      - run: npm run build:release
+      - run: npm ci
+        working-directory: apps/desktop
+      - name: Assemble the app's frontend (dist/web + the bundled views, no source maps)
+        run: apps/desktop/scripts/assemble-frontend.sh
+
+      - name: The App Store Connect key, as a file (macOS, notarizing with the API key)
+        if: steps.secrets.outputs.via == 'api-key'
+        env:
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$key"
+          chmod 600 "$key"
+          echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
+
+      # tauri-action action-v1.0.0 (checked: tag → commit 1deb371b, 2026-06-29). v1 renamed
+      # includeUpdaterJson to uploadUpdaterJson. Tauri notarizes with APPLE_API_* or with
+      # APPLE_ID + APPLE_PASSWORD + APPLE_TEAM_ID, whichever is in its environment (only the
+      # one chosen above is); with neither it signs the app and skips notarization.
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_API_ISSUER: ${{ steps.secrets.outputs.via == 'api-key' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_API_KEY: ${{ steps.secrets.outputs.via == 'api-key' && secrets.APPLE_API_KEY || '' }}
+          APPLE_ID: ${{ steps.secrets.outputs.via == 'apple-id' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ steps.secrets.outputs.via == 'apple-id' && secrets.APPLE_PASSWORD || '' }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: npx tauri
+          args: --config src-tauri/tauri.release.conf.json ${{ matrix.args }}
+          releaseId: ${{ needs.release.outputs.id }}
+          uploadUpdaterJson: true
+          retryAttempts: 2
+
+      # Tauri notarizes and staples the .app; the dmg around it is notarized and stapled here,
+      # then put back on the draft in place of the one tauri-action uploaded.
+      - name: Notarize and staple the dmg (macOS)
+        if: steps.secrets.outputs.notarize == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VIA: ${{ steps.secrets.outputs.via }}
+          APPLE_API_ISSUER: ${{ steps.secrets.outputs.via == 'api-key' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_API_KEY: ${{ steps.secrets.outputs.via == 'api-key' && secrets.APPLE_API_KEY || '' }}
+          APPLE_ID: ${{ steps.secrets.outputs.via == 'apple-id' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ steps.secrets.outputs.via == 'apple-id' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          dmg="$(ls apps/target/universal-apple-darwin/release/bundle/dmg/*.dmg)"
+          if [ "$VIA" = api-key ]; then
+            auth=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
+          else
+            auth=(--apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID")
+          fi
+          xcrun notarytool submit "$dmg" "${auth[@]}" --wait --timeout 30m
+          xcrun stapler staple "$dmg"
+          gh release upload "$TAG" "$dmg" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Check the signature (macOS)
+        if: runner.os == 'macOS'
+        env:
+          NOTARIZED: ${{ steps.secrets.outputs.notarize }}
+        run: |
+          set -euo pipefail
+          bundle=apps/target/universal-apple-darwin/release/bundle
+          app="$bundle/macos/sessionpipe.app"
+          dmg="$(ls "$bundle"/dmg/*.dmg)"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv --verbose=4 "$app" 2>&1 | grep -E '^(Authority|TeamIdentifier|Identifier|CodeDirectory)'
+          codesign -dv "$app" 2>&1 | grep -q 'TeamIdentifier=QR7H8ARENW' || { echo "::error::not signed by team QR7H8ARENW"; exit 1; }
+          codesign -dv "$app" 2>&1 | grep -q 'flags=0x10000(runtime)' || { echo "::error::hardened runtime is off"; exit 1; }
+          app_verdict="$(spctl -a -vv -t execute "$app" 2>&1 || true)"
+          dmg_verdict="$(spctl -a -vv -t open --context context:primary-signature "$dmg" 2>&1 || true)"
+          printf 'app: %s\ndmg: %s\n' "$app_verdict" "$dmg_verdict"
+          if [ "$NOTARIZED" = true ]; then
+            for v in "$app_verdict" "$dmg_verdict"; do
+              grep -q 'source=Notarized Developer ID' <<<"$v" || { echo "::error::spctl does not say Notarized Developer ID"; exit 1; }
+            done
+            xcrun stapler validate "$dmg"
+            echo "macOS: signed, notarized and stapled (spctl: Notarized Developer ID)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            grep -q 'source=Unnotarized Developer ID' <<<"$app_verdict" || { echo "::error::the app is not signed with Developer ID"; exit 1; }
+            echo "> [!WARNING]"$'\n'"> macOS: signed with Developer ID but **not notarized** (spctl: Unnotarized Developer ID)." >> "$GITHUB_STEP_SUMMARY"
+          fi
