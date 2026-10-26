@@ -254,8 +254,18 @@ test.describe("split panel", () => {
       }
       return out;
     };
+    /** A modified click on the card's link, dispatched on the element: what these tests check
+     *  is the tabs and the URL, and a live card's height changes (its counts) and the panel's
+     *  reflow can keep a pointer click chasing it, or put it under the sticky bar. */
     const click = (page: Page, href: string, modifiers: ("Shift" | "Meta" | "Control")[]) =>
-      page.locator(`a.card-link[href="${href}"]`).click({ modifiers });
+      page.locator(`a.card-link[href="${href}"]`).dispatchEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        shiftKey: modifiers.includes("Shift"),
+        metaKey: modifiers.includes("Meta"),
+        ctrlKey: modifiers.includes("Control"),
+      });
 
     test("shift-clicks add tabs, ⌘-click adds one in the background; the URL round-trips", async ({ page }) => {
       const [a, b, c] = await cards(page, 3);
@@ -300,7 +310,9 @@ test.describe("split panel", () => {
       await click(page, b!.href, ["Shift"]);
       await click(page, c!.href, ["Shift"]);
       await expect(tabs(page)).toHaveCount(3);
-      // Drag the third tab to the front.
+      // Drag the third tab to the front, once the tabs have settled (hover waits for stable).
+      await tabs(page).nth(0).hover();
+      await tabs(page).nth(2).hover();
       const third = (await tabs(page).nth(2).boundingBox())!;
       const first = (await tabs(page).nth(0).boundingBox())!;
       await page.mouse.move(third.x + third.width / 2, third.y + third.height / 2);
