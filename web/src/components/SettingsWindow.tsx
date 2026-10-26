@@ -15,8 +15,10 @@ import { skinTokensFor } from "@shared/skin-api";
 import {
   type CSSProperties,
   createContext,
+  lazy,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  Suspense,
   useContext,
   useEffect,
   useId,
@@ -28,6 +30,7 @@ import { useAppState, useStore } from "../data/hooks";
 import { tablistKey } from "../lib/focus";
 import { bytes } from "../lib/format";
 import { reducedMotion, tokenMs } from "../lib/motion";
+import { apiUrl } from "../lib/net";
 import { back, hasInAppHistory, Link, navigate, useSearchParam } from "../lib/router";
 import {
   DEFAULT_PAGES,
@@ -52,7 +55,7 @@ import { APPEARANCE, noContextMenu, SKIN_ADD_LINE, TextSizeSlider, useListedSkin
 import { Select } from "./Select";
 import { Keys } from "./ShortcutHelp";
 
-export type Section = "general" | "lens" | "notifications" | "keyboard" | "views" | "data" | "about";
+export type Section = "general" | "app" | "lens" | "notifications" | "keyboard" | "views" | "data" | "about";
 
 /** The section list's 16 px line glyphs, one per section. */
 const GLYPH: Record<Section, ReactNode> = {
@@ -61,6 +64,12 @@ const GLYPH: Record<Section, ReactNode> = {
       <path d="M4 6h7M15 6h1M4 14h1M9 14h7" />
       <circle cx="13" cy="6" r="2" />
       <circle cx="7" cy="14" r="2" />
+    </>
+  ),
+  app: (
+    <>
+      <rect x="2.5" y="3.5" width="15" height="13" rx="2.5" />
+      <path d="M2.5 7.5h15M5.2 5.5h.01M7.2 5.5h.01M9.2 5.5h.01" />
     </>
   ),
   lens: (
@@ -101,8 +110,13 @@ const GLYPH: Record<Section, ReactNode> = {
   ),
 };
 
+/** Inside the native app (NATIVE-SPEC §2.5): Settings › App, its own lazy section. */
+const inShell = "sessionpipeShell" in window;
+const AppSection = inShell ? lazy(() => import("../native/AppSettings")) : null;
+
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "general", label: "General" },
+  ...(inShell ? [{ id: "app" as const, label: "App" }] : []),
   { id: "lens", label: "Tier lens" },
   { id: "notifications", label: "Notifications" },
   { id: "keyboard", label: "Keyboard" },
@@ -354,6 +368,11 @@ export function Settings() {
               ) : (
                 <>
                   {section === "general" && <General />}
+                  {section === "app" && AppSection && (
+                    <Suspense fallback={null}>
+                      <AppSection />
+                    </Suspense>
+                  )}
                   {section === "lens" && <Lens />}
                   {section === "notifications" && <Notifications />}
                   {section === "keyboard" && <Keyboard />}
@@ -832,7 +851,7 @@ function Data() {
     setBusy("export");
     setNote(null);
     try {
-      const res = await fetch(ROUTES.ui.snapshot, { headers: { accept: "application/json" } });
+      const res = await fetch(apiUrl(ROUTES.ui.snapshot), { headers: { accept: "application/json" } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
       const a = document.createElement("a");
@@ -956,7 +975,7 @@ function About() {
       .info()
       .then(setInfo)
       .catch(() => {});
-    fetch(UPDATE, { headers: { accept: "application/json" } })
+    fetch(apiUrl(UPDATE), { headers: { accept: "application/json" } })
       .then((r) => (r.ok ? (r.json() as Promise<UpdateStatus>) : null))
       .then(setUpdate)
       .catch(() => setUpdate(null));
@@ -965,7 +984,7 @@ function About() {
   const check = async () => {
     setErr(null);
     try {
-      const r = await fetch(`${UPDATE}/check`, { method: "POST", headers: { accept: "application/json" } });
+      const r = await fetch(apiUrl(`${UPDATE}/check`), { method: "POST", headers: { accept: "application/json" } });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setUpdate((await r.json()) as UpdateStatus);
     } catch (e) {

@@ -1,0 +1,206 @@
+# SPDX-License-Identifier: Apache-2.0
+# "iOS → TestFlight": a button (Actions → iOS → TestFlight → Run workflow) that builds the
+# iOS app for an existing v* tag, signs it for the App Store (manual signing: the Apple
+# Distribution certificate and the "sessionpipe App Store" profile, bundle id
+# dev.spacesheep.sessionpipe, team QR7H8ARENW) and uploads it to TestFlight. The .ipa is
+# kept as a workflow artifact either way.
+#
+# Runs in the `release` environment (Misha approves it) and reads, by name:
+#   IOS_DIST_P12, IOS_DIST_P12_PASSWORD        Apple Distribution certificate + key, .p12 base64
+#   IOS_APPSTORE_PROFILE                       "sessionpipe App Store" .mobileprovision, base64
+#   APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_PRIVATE_KEY   App Store Connect API key (upload)
+# The certificate lives only in a temporary keychain with a random password, deleted at the end.
+name: iOS → TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing v* tag to build"
+        required: true
+      upload:
+        description: "Upload the .ipa to TestFlight"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-testflight-${{ inputs.tag }}
+
+env:
+  TAG: ${{ inputs.tag }}
+  BUNDLE_ID: dev.spacesheep.sessionpipe
+  TEAM_ID: QR7H8ARENW
+  PROFILE_NAME: sessionpipe App Store
+  CARGO_TERM_COLOR: always
+
+jobs:
+  testflight:
+    name: build, sign, upload
+    runs-on: macos-15
+    environment: release
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: The tag is package.json's version
+        run: |
+          case "$TAG" in v*) ;; *) echo "::error::$TAG is not a v* tag"; exit 1 ;; esac
+          v="$(node -p "require('./package.json').version")"
+          [ "v$v" = "$TAG" ] || { echo "::error::tag $TAG, package.json $v"; exit 1; }
+
+      - name: The secrets this build needs
+        env:
+          IOS_DIST_P12: ${{ secrets.IOS_DIST_P12 }}
+          IOS_DIST_P12_PASSWORD: ${{ secrets.IOS_DIST_P12_PASSWORD }}
+          IOS_APPSTORE_PROFILE: ${{ secrets.IOS_APPSTORE_PROFILE }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          UPLOAD: ${{ inputs.upload }}
+        run: |
+          set -euo pipefail
+          need=(IOS_DIST_P12 IOS_DIST_P12_PASSWORD IOS_APPSTORE_PROFILE)
+          [ "$UPLOAD" = true ] && need+=(APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY)
+          missing=()
+          for s in "${need[@]}"; do [ -n "${!s}" ] || missing+=("$s"); done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::missing secrets in the release environment: ${missing[*]} (RELEASING.md, The iOS app)"
+            exit 1
+          fi
+
+      - name: A temporary keychain with the distribution certificate
+        env:
+          IOS_DIST_P12: ${{ secrets.IOS_DIST_P12 }}
+          IOS_DIST_P12_PASSWORD: ${{ secrets.IOS_DIST_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          kc="$RUNNER_TEMP/sessionpipe-ios.keychain-db"
+          pw="$(openssl rand -hex 24)"
+          echo "::add-mask::$pw"
+          printf '%s' "$IOS_DIST_P12" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 3600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          security import "$RUNNER_TEMP/dist.p12" -k "$kc" -P "$IOS_DIST_P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$pw" "$kc" >/dev/null
+          # Ours first, then the runner's own (so Apple's intermediates still resolve).
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/dist.p12"
+          security find-identity -v -p codesigning "$kc" | grep -q "Apple Distribution" \
+            || { echo "::error::IOS_DIST_P12 holds no Apple Distribution identity"; exit 1; }
+          echo "KEYCHAIN=$kc" >> "$GITHUB_ENV"
+
+      - name: The "sessionpipe App Store" profile
+        env:
+          IOS_APPSTORE_PROFILE: ${{ secrets.IOS_APPSTORE_PROFILE }}
+        run: |
+          set -euo pipefail
+          p="$RUNNER_TEMP/appstore.mobileprovision"
+          printf '%s' "$IOS_APPSTORE_PROFILE" | base64 --decode > "$p"
+          security cms -D -i "$p" > "$RUNNER_TEMP/profile.plist"
+          name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")"
+          uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")"
+          appid="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$RUNNER_TEMP/profile.plist")"
+          [ "$name" = "$PROFILE_NAME" ] || { echo "::error::the profile is \"$name\", not \"$PROFILE_NAME\""; exit 1; }
+          [ "$appid" = "$TEAM_ID.$BUNDLE_ID" ] || { echo "::error::the profile is for $appid, not $TEAM_ID.$BUNDLE_ID"; exit 1; }
+          dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$dir"
+          cp "$p" "$dir/$uuid.mobileprovision"
+          rm -f "$p" "$RUNNER_TEMP/profile.plist"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/ios/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/ios/src-tauri -> target
+
+      - run: npm ci
+      - run: npm run build:release
+      - run: npm ci
+        working-directory: apps/ios
+
+      # App Store export with manual signing: the named profile for the one bundle id.
+      - name: ExportOptions.plist and the build number
+        env:
+          RUN: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          apple=apps/ios/src-tauri/gen/apple
+          cat > "$apple/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict><key>$BUNDLE_ID</key><string>$PROFILE_NAME</string></dict>
+            <key>uploadSymbols</key><true/>
+            <key>destination</key><string>export</string>
+          </dict>
+          </plist>
+          PLIST
+          plutil -lint "$apple/ExportOptions.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $RUN" "$apple/sessionpipe-shell_iOS/Info.plist"
+
+      # The release configuration signs with "Apple Distribution" and the
+      # "sessionpipe App Store" profile (project.yml / the pbxproj); tauri archives and
+      # exports with the ExportOptions.plist above.
+      - name: Build and export the .ipa
+        env:
+          RUN: ${{ github.run_number }}
+        working-directory: apps/ios
+        run: |
+          set -euo pipefail
+          npx tauri ios build --target aarch64 --export-method app-store-connect --build-number "$RUN" --ci
+          ipa="$(find src-tauri/gen/apple/build -name '*.ipa' -print -quit)"
+          [ -n "$ipa" ] || { echo "::error::no .ipa was exported"; exit 1; }
+          echo "IPA=$PWD/$ipa" >> "$GITHUB_ENV"
+          echo "Built $(basename "$ipa") ($(du -h "$ipa" | cut -f1)), CFBundleVersion $RUN." >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sessionpipe-ios-${{ inputs.tag }}-${{ github.run_number }}
+          path: ${{ env.IPA }}
+          if-no-files-found: error
+
+      - name: Upload to TestFlight
+        if: inputs.upload
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          dir="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$dir"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$dir/AuthKey_$APPLE_API_KEY.p8"
+          chmod 600 "$dir/AuthKey_$APPLE_API_KEY.p8"
+          xcrun altool --upload-app --type ios --file "$IPA" --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
+          echo "Uploaded to TestFlight; App Store Connect processes it before testers see it." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the keychain and the keys
+        if: always()
+        run: |
+          [ -n "${KEYCHAIN:-}" ] && security delete-keychain "$KEYCHAIN" || true
+          rm -rf "$HOME/.appstoreconnect/private_keys" "$HOME/Library/MobileDevice/Provisioning Profiles"

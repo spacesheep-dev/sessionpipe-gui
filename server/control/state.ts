@@ -17,16 +17,19 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { ulid } from "sessionpipe-core";
-import type { Assertion, ControlCommand, GrantBundle, SignedCommand } from "sessionpipe-core/control";
+import type { Assertion, ControlCommand, SignedCommand } from "sessionpipe-core/control";
 import type {
   ControlActivity,
   ControlKind,
   ControlOutcome,
   HarnessStartOptions,
+  KeyType,
   MachineControl,
   StartFile,
   StartPermission,
+  TrustedKey,
 } from "../../shared/api.js";
+import type { DeviceSignature } from "./devicekeys.js";
 import { FileStore } from "./files.js";
 import { type AckIn, type HarnessAccount, type Hello, isFinal } from "./parse.js";
 
@@ -52,13 +55,32 @@ const PAIRING_TTL_MS = 3600_000;
 export const DEVICE_TTL_MS = 10 * 60_000;
 const DEVICE_KEEP_MS = 3600_000;
 
+/** A key a machine trusts, mirrored here whole: a device key keeps its `type`, `store`
+ *  and `uv` (CONTROL.md §2), so the early check verifies it the way the machine does. */
 export interface KeyRow {
   id: string;
   alg: number;
   spki: string;
+  type?: "device";
+  store?: "hardware";
+  uv?: "each-use";
   name?: string;
   addedAt: string;
 }
+
+/** The key's own fields (TrustedKey), without this receiver's bookkeeping. */
+export function keyOf(k: TrustedKey): TrustedKey {
+  return {
+    id: k.id,
+    alg: k.alg,
+    spki: k.spki,
+    ...(k.type === "device" ? { type: k.type, store: k.store, uv: k.uv } : {}),
+  };
+}
+
+/** A proof or a signature as the receiver carries it: a passkey's assertion, or a device
+ *  key's `{cred, sig}` (CONTROL.md §3.2). */
+export type Proof = Assertion | DeviceSignature;
 
 export interface PairingRow {
   code: string;
@@ -69,7 +91,7 @@ export interface PairingRow {
   /** Started with no sink token (open pairing): the poll_key's hash gates its status. */
   open: boolean;
   pollHash?: string;
-  approved?: { key: KeyRow; proof: Assertion; by: string; at: string };
+  approved?: { key: KeyRow; proof: Proof; by: string; at: string };
   /** The paired answer (and the token) went out once; the code answers 404 from then on. */
   deliveredAt?: string;
 }
@@ -93,6 +115,8 @@ export interface MachineRow {
   promptFiles?: boolean;
   home?: string;
   start?: Record<string, HarnessStartOptions>;
+  /** Pairing or hello `key_types`; absent means passkeys only (an older daemon). */
+  keyTypes?: KeyType[];
   waiting?: string[];
   lastHelloAt?: string;
   lastPollAt?: string;
@@ -105,7 +129,7 @@ export interface MachineRow {
 export interface DeviceRequestRow {
   requestId: string;
   check: string;
-  key: { id: string; alg: -7 | -257; spki: string };
+  key: TrustedKey;
   /** What the person called it on the phone ("Misha's iPhone"). */
   name: string;
   /** A short label from the user agent ("iPhone"), for the approving page. */
@@ -129,8 +153,8 @@ export interface MessageRow {
   machineId: string;
   cmd: string;
   csig?: string | null;
-  grant?: GrantBundle | null;
-  confirm?: Assertion | null;
+  grant?: SignedCommand["grant"];
+  confirm?: SignedCommand["confirm"];
   at: string;
   expiresAt: string;
   kind: ControlKind;
@@ -365,6 +389,8 @@ export class ControlState {
     else delete m.home;
     if (h.start) m.start = h.start;
     else delete m.start;
+    if (h.keyTypes) m.keyTypes = h.keyTypes;
+    else delete m.keyTypes;
   }
 
   /** Mint the machine's own bearer token (once, at its first pairing). Returned in clear
@@ -377,11 +403,12 @@ export class ControlState {
     return token;
   }
 
-  /** A key the machine will trust (the approval page's passkey, or the test door's). */
-  addKey(m: MachineRow, key: { id: string; alg: number; spki: string }, name?: string): KeyRow {
+  /** A key the machine will trust (the approval page's passkey or the app's device key,
+   *  or the test door's), kept whole. */
+  addKey(m: MachineRow, key: TrustedKey, name?: string): KeyRow {
     let row = m.keys.find((k) => k.id === key.id);
     if (!row) {
-      row = { id: key.id, alg: key.alg, spki: key.spki, addedAt: nowIso() };
+      row = { ...keyOf(key), addedAt: nowIso() };
       m.keys.push(row);
     }
     if (name) row.name = name;
@@ -410,7 +437,13 @@ export class ControlState {
     const c: MachineControl = {
       machineId: m.id,
       online: !!m.lastPollAt && Date.now() - Date.parse(m.lastPollAt) < ONLINE_WINDOW_MS,
-      keys: m.keys.map((k) => ({ id: k.id, alg: k.alg, ...(k.name ? { name: k.name } : {}), addedAt: k.addedAt })),
+      keys: m.keys.map((k) => ({
+        id: k.id,
+        alg: k.alg,
+        ...(k.type === "device" ? { type: k.type } : {}),
+        ...(k.name ? { name: k.name } : {}),
+        addedAt: k.addedAt,
+      })),
       queued: this.queued(m.id).length,
     };
     if (m.lastPollAt) c.lastPollAt = m.lastPollAt;
@@ -425,6 +458,7 @@ export class ControlState {
     if (m.promptFiles) c.promptFiles = true;
     if (m.home) c.home = m.home;
     if (m.start) c.start = m.start;
+    if (m.keyTypes) c.keyTypes = m.keyTypes;
     return c;
   }
 
@@ -479,7 +513,7 @@ export class ControlState {
 
   /** The proof verified (the caller's job): the key is trusted for the machine and the
    *  daemon's next status poll collects it. */
-  approvePairing(m: MachineRow, p: PairingRow, key: KeyRow, proof: Assertion, by: string): void {
+  approvePairing(m: MachineRow, p: PairingRow, key: KeyRow, proof: Proof, by: string): void {
     const row = this.addKey(m, key, key.name);
     p.approved = { key: row, proof, by, at: nowIso() };
     this.saveMachines();

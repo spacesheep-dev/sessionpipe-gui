@@ -5,7 +5,8 @@
 // IndexedDB (CryptoKey objects clone into it; the private key never leaves the browser).
 import type { GrantBundle } from "./api";
 import { b64url, sha256, utf8 } from "./bytes";
-import { assertPasskey, storedPasskeys } from "./webauthn";
+import { assertPasskey } from "./ceremony";
+import { storedPasskeys } from "./webauthn";
 
 export const GRANT_TYPE = "sessionpipe.grant";
 /** A grant lasts at most 24 h (§3.2); we stop a minute short so clock slack never trips it. */

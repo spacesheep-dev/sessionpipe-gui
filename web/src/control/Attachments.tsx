@@ -29,6 +29,7 @@ import {
 import { Redacted } from "../components/bits";
 import { useContextMenu } from "../components/ContextMenu";
 import { copyItem } from "../lib/menus";
+import { apiUrl } from "../lib/net";
 import "./attachments.css";
 
 // ---------- the upload itself (also the theme api's control.attach) ----------
@@ -54,7 +55,7 @@ export function refuseFile(file: Blob): string | null {
 export async function uploadAttachment(file: Blob): Promise<Attachment> {
   const why = refuseFile(file);
   if (why) throw new Error(why);
-  const res = await fetch(ROUTES.ui.attachments, {
+  const res = await fetch(apiUrl(ROUTES.ui.attachments), {
     method: "POST",
     headers: { "content-type": file.type, accept: "application/json" },
     body: file,
@@ -77,7 +78,7 @@ export async function uploadAttachment(file: Blob): Promise<Attachment> {
 
 /** Take back an upload that was not sent. Best effort: the daily prune catches strays. */
 export function deleteAttachment(a: Pick<Attachment, "id" | "ext">): Promise<void> {
-  return fetch(`${ROUTES.attachments}/${a.id}.${a.ext}`, { method: "DELETE" })
+  return fetch(apiUrl(`${ROUTES.attachments}/${a.id}.${a.ext}`), { method: "DELETE" })
     .then(() => undefined)
     .catch(() => undefined);
 }
@@ -86,7 +87,7 @@ let infoPromise: Promise<Info> | null = null;
 /** Info, read once per page: `hostname` says which machine the paths mean something on. */
 function hostInfo(): Promise<Info> {
   if (!infoPromise)
-    infoPromise = fetch(ROUTES.ui.info, { headers: { accept: "application/json" } })
+    infoPromise = fetch(apiUrl(ROUTES.ui.info), { headers: { accept: "application/json" } })
       .then((r) => r.json() as Promise<Info>)
       .catch((e) => {
         infoPromise = null;
@@ -429,13 +430,13 @@ export function AttachmentThumbs({ items, small }: { items: readonly AttachmentR
       {items.map((it) => (
         <a
           key={it.id}
-          href={it.src}
+          href={apiUrl(it.src)}
           target="_blank"
           rel="noreferrer noopener"
           title={it.width && it.height ? `${it.width}×${it.height} · open` : "open"}
         >
           <img
-            src={it.src}
+            src={apiUrl(it.src)}
             alt={`attachment${it.width && it.height ? ` ${it.width}×${it.height}` : ""}`}
             loading="lazy"
           />

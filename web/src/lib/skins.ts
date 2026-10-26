@@ -15,6 +15,7 @@ import {
 } from "@shared/skin-api";
 import { BUILTIN_SKINS, DEFAULT_SKIN_ID, PLAIN_SKIN_ID } from "@shared/skins-builtin";
 import { useSyncExternalStore } from "react";
+import { apiUrl } from "./net";
 
 export type { InstalledSkin, SkinScheme } from "@shared/skin-api";
 export { BUILTIN_SKINS, DEFAULT_SKIN_ID, PLAIN_SKIN_ID } from "@shared/skins-builtin";
@@ -31,7 +32,7 @@ export function fontFaceCss(skin: InstalledSkin): string {
   if (!skin.fonts?.length || !skin.url) return "";
   return skin.fonts
     .map((f) => {
-      const src = `${skin.url}${f.src.split("/").map(encodeURIComponent).join("/")}`;
+      const src = apiUrl(`${skin.url}${f.src.split("/").map(encodeURIComponent).join("/")}`);
       const ext = f.src.toLowerCase().split(".").pop();
       const format = ext === "ttf" ? "truetype" : ext === "otf" ? "opentype" : ext;
       return [
@@ -82,7 +83,7 @@ export function applySkin(skin: InstalledSkin, appearance: "dark" | "light"): vo
   } else fontsEl?.remove();
 
   const cssEl = document.getElementById(CSS_ID) as HTMLLinkElement | null;
-  const href = skin.css && skin.url ? `${skin.url}${skin.css}${skin.linked ? `?t=${Date.now()}` : ""}` : null;
+  const href = skin.css && skin.url ? apiUrl(`${skin.url}${skin.css}${skin.linked ? `?t=${Date.now()}` : ""}`) : null;
   if (href) {
     const link = cssEl ?? document.createElement("link");
     link.id = CSS_ID;
@@ -121,7 +122,7 @@ function set(next: SkinsState) {
 }
 
 async function request(method: "GET" | "POST", url: string): Promise<InstalledSkin[]> {
-  const res = await fetch(url, { method, headers: { accept: "application/json" } });
+  const res = await fetch(apiUrl(url), { method, headers: { accept: "application/json" } });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   const body = (await res.json()) as { skins?: InstalledSkin[] };
   return body.skins ?? [];

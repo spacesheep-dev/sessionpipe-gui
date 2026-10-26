@@ -1,0 +1,127 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- the app's own pages (NATIVE-SPEC §3.9) ---------- */
+/* The welcome, the first-run sheet and Settings › App: the grouped-form grammar of the
+   document pages (settings.css), no cards, one muted tier, no red but an error. Loaded
+   only with them, inside the shell. */
+
+/* ----- the welcome ----- */
+
+.welcome {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+/* The title bar's band: the lights and the window's drag, nothing else. */
+.welcome-bar {
+  flex: none;
+  height: var(--bar);
+}
+.welcome-body {
+  width: 100%;
+  max-width: calc(var(--measure) + 2 * var(--gutter));
+  margin: 0 auto;
+  padding: clamp(24px, 10vh, 96px) var(--gutter) 48px;
+}
+.welcome-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.welcome-title {
+  color: var(--fg);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.welcome-lede {
+  color: var(--fg-2);
+  font-size: var(--text-md);
+  text-wrap: pretty;
+}
+.welcome-list .form-row > .btn {
+  flex: none;
+  min-width: 132px;
+  justify-content: center;
+}
+.welcome-list > .welcome-connect {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  border-top: 0;
+  padding-top: 0;
+}
+.welcome-connect-form {
+  display: flex;
+  gap: 8px;
+}
+.welcome-connect-form .field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.welcome-error {
+  color: var(--err);
+}
+
+/* ----- the first-run sheet ----- */
+
+.first-run {
+  width: min(400px, calc(100vw - 32px));
+}
+.first-run-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.first-run-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 40px;
+}
+.first-run-row + .first-run-row {
+  border-top: var(--hairline) solid var(--line);
+}
+.first-run-label {
+  color: var(--fg);
+  font-size: var(--text-md);
+}
+.first-run-key {
+  margin-left: 6px;
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.first-run-note {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+
+/* ----- Settings › App ----- */
+
+.app-settings-key {
+  min-width: 96px;
+  justify-content: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.app-settings-key[data-recording] {
+  color: var(--fg-3);
+}
+.app-settings-err {
+  flex-basis: 100%;
+  text-align: right;
+}
+.app-settings-hotkey {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}

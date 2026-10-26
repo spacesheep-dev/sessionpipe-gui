@@ -12,7 +12,7 @@ import { rpId as fetchRpId } from "./api";
 import { uuid } from "./bytes";
 import { type CommandFields, sendCommand } from "./command";
 import { openNewSession } from "./newSessionState";
-import { insecureHint, passkeysAvailable } from "./webauthn";
+import { canSign, signHint } from "./signer";
 import { sendErrorWords } from "./words";
 
 export type ThemeControl = NonNullable<ThemeApi["control"]>;
@@ -28,7 +28,7 @@ type Target = { session?: SessionKey; machineId?: string };
 
 /** The paired machine a target names, or the reason there is none / it cannot be sent to. */
 function resolve(deps: ControlApiDeps, target: Target): { machine: MachineSummary } | { reason: string } {
-  if (!passkeysAvailable()) return { reason: insecureHint() };
+  if (!canSign()) return { reason: signHint() };
   let machine: MachineSummary | undefined;
   let name: string | undefined;
   if (target.machineId) {

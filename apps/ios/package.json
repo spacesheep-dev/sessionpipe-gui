@@ -1,0 +1,12 @@
+{
+  "name": "sessionpipe-ios",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The iOS app: a Tauri 2 mobile shell around the bundled web UI (simulator prototype).",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}

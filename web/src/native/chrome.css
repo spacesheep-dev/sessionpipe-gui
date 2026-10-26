@@ -1,0 +1,96 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- the window chrome inside the native app (NATIVE-SPEC §3.1) ---------- */
+/* Loaded only inside the shell (native/shell.ts), every rule under html[data-shell], so a
+   browser never sees one. macOS: the title bar is folded into the page (overlay), and the
+   traffic lights sit inset in the window's top band, the one band the sidebar's top and
+   every page bar share (--bar, 48 px). The corner under them holds nothing: in the
+   sidebar the band keeps only the compose button at its trailing edge (a Mac app names
+   itself in the menu bar, not in its sidebar); in the compact rail the compose button
+   steps down under the band; with no rail (a narrow window, or the sidebar toggled off)
+   the page bar starts after the lights. The bands drag the window (shell.ts marks them). */
+
+html[data-shell="macos"] {
+  /* The lights: three 14 px buttons on a 20 px stride from x = 16, and a gap after. */
+  --lights: 84px;
+}
+
+/* The Mac conventions the web already keeps (base.css: the arrow on every control, no
+   ring after a click, chrome not selectable) hold here unchanged; the window adds: */
+/* No rubber-band of the whole window past the page's ends: the page scrolls, the window
+   holds still, as an AppKit scroll view under a fixed title bar does. */
+html[data-shell="macos"],
+html[data-shell="macos"] body {
+  overscroll-behavior: none;
+}
+
+@media (min-width: 840px) {
+  /* The sidebar: the band holds the lights at its leading edge and the compose button at
+     its trailing edge; the brand steps aside (the menu bar names the app). */
+  html[data-shell="macos"] .shell--side .rail-head {
+    justify-content: flex-end;
+    padding-left: var(--lights);
+  }
+  html[data-shell="macos"] .rail-brand {
+    display: none;
+  }
+
+  /* The compact rail: a little wider so the lights clear its edge; the band is theirs, and
+     the compose button opens the list under it. */
+  html[data-shell="macos"] .shell:not(.shell--side) {
+    --rail: 80px;
+  }
+  html[data-shell="macos"] .shell:not(.shell--side) .rail-compose {
+    position: absolute;
+    top: calc(var(--bar) + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  html[data-shell="macos"] .shell:not(.shell--side) .rail-nav {
+    padding-top: calc(8px + var(--control, 28px) + 8px);
+  }
+
+  /* Toggle Sidebar (⌃⌘S): the page takes the window, its bar starts after the lights. */
+  html[data-shell="macos"][data-rail-hidden] .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  html[data-shell="macos"][data-rail-hidden] .rail {
+    display: none;
+  }
+  html[data-shell="macos"][data-rail-hidden] .main > .page > .bar,
+  html[data-shell="macos"][data-rail-hidden] .boot .bar {
+    padding-left: max(var(--gutter), var(--lights));
+  }
+}
+
+/* A narrow window (the phone layout): no rail, so the page bar starts after the lights. */
+@media (max-width: 839px) {
+  html[data-shell="macos"] .main > .page > .bar,
+  html[data-shell="macos"] .boot .bar {
+    padding-left: max(var(--gutter), var(--lights));
+  }
+}
+
+/* Sidebar vibrancy (the window's "sidebar" material behind a transparent rail), only when
+   the shell turned it on; the page itself stays on its own opaque ground. With Reduce
+   Transparency on, the rail is solid again. */
+@media (min-width: 840px) {
+  html[data-shell="macos"][data-vibrancy],
+  html[data-shell="macos"][data-vibrancy] body {
+    background: transparent;
+  }
+  html[data-shell="macos"][data-vibrancy] .main {
+    background: var(--bg);
+  }
+  html[data-shell="macos"][data-vibrancy] .rail {
+    background: transparent;
+  }
+}
+@media (min-width: 840px) and (prefers-reduced-transparency: reduce) {
+  html[data-shell="macos"][data-vibrancy],
+  html[data-shell="macos"][data-vibrancy] body {
+    background: var(--bg);
+  }
+  html[data-shell="macos"][data-vibrancy] .rail {
+    background: var(--chrome);
+  }
+}

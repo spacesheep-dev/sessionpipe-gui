@@ -106,16 +106,21 @@ function errorToast(e: StoredEvent, s: SessionSummary): Toast {
 
 function deliveredToast(a: ControlActivity, sessions: ReadonlyMap<SessionKey, SessionSummary>): Toast {
   const s = a.session ? sessions.get(a.session) : undefined;
+  const key = a.kind === "key.add";
   return {
     id: `ctl|${a.id}`,
     kind: "delivered",
     sticky: false,
     session: s?.key ?? a.session,
-    title: s ? sessionTitle(s) : "a message",
+    title: s ? sessionTitle(s) : key ? "A new device" : "A message",
     machine: s?.machine,
-    verb: a.kind === "start" ? "Started" : a.reply ? "Replied" : "Delivered",
+    verb: a.kind === "start" ? "Started" : a.reply ? "Replied" : key ? "Trusted" : "Delivered",
     label: "delivered",
-    body: a.reply ? oneLine(a.reply, 160) : `Your ${a.kind} reached ${s?.machine ?? "the machine"}`,
+    body: a.reply
+      ? oneLine(a.reply, 160)
+      : key
+        ? "The machine takes its commands from now on"
+        : `It reached ${s?.machine ?? "the machine"}`,
     sound: "done",
     at: Date.now(),
   };

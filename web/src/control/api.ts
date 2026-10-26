@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: control-web. The browser's side of /api/ui/control/* (server/control/README.md):
 // pairings and their approval, a WebAuthn challenge, sending a signed command, the
-// activity, the paired machines and device requests (a phone's own passkey waiting for
-// a trusted device's key.add). Same-origin fetch, JSON both ways, errors by code.
-import type { ControlActivity, Info, MachineControl, StartFile, TlsInfo } from "@shared/api";
+// activity, the paired machines and device requests (a phone's own passkey, or the app's
+// device key, waiting for a trusted device's key.add). JSON both ways, errors by code;
+// every URL goes through lib/net.ts, which is the receiver itself in a browser and the
+// shell's rx: protocol in the app.
+import type { ControlActivity, Info, KeyType, MachineControl, StartFile, TlsInfo, TrustedKey } from "@shared/api";
 import { ROUTES } from "@shared/api";
+import { apiUrl } from "../lib/net";
 import { sendingOriginOf, wrongOrigin } from "./origin";
+
+export type { TrustedKey };
 
 const BASE = ROUTES.ui.control;
 
@@ -26,18 +31,14 @@ export interface Pairing {
     folders?: string[];
     mode?: "safe" | "auto";
     accounts?: { harness: string; id: string; email: string }[];
+    /** The pairing request's `key_types`: absent, the daemon takes passkeys only. */
+    keyTypes?: KeyType[];
     firstPairing: boolean;
     keys: number;
   };
   rpId: string;
   /** base64url(sha256("sessionpipe.pair:" + machine + ":" + code)): the WebAuthn challenge. */
   challenge: string;
-}
-
-export interface TrustedKey {
-  id: string;
-  alg: -7 | -257;
-  spki: string;
 }
 
 export interface Assertion {
@@ -51,12 +52,18 @@ export interface GrantBundle extends Assertion {
   str: string;
 }
 
+/** A device key's signature (CONTROL.md §3.2): its id and raw r‖s over the device message. */
+export interface DeviceSignature {
+  cred: string;
+  sig: string;
+}
+
 export interface SendBody {
   machineId: string;
   cmd: string;
   csig?: string;
-  grant?: GrantBundle;
-  confirm?: Assertion;
+  grant?: GrantBundle | (DeviceSignature & { str: string });
+  confirm?: Assertion | DeviceSignature;
   expires_in_s?: number;
 }
 
@@ -97,7 +104,7 @@ export class ControlError extends Error {
 }
 
 async function call<T>(method: "GET" | "POST", url: string, body?: unknown): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(apiUrl(url), {
     method,
     headers: { accept: "application/json", ...(body !== undefined ? { "content-type": "application/json" } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -122,7 +129,7 @@ async function call<T>(method: "GET" | "POST", url: string, body?: unknown): Pro
 export const controlApi = {
   pairings: () => call<{ pairings: Pairing[] }>("GET", `${BASE}/pairings`).then((r) => r.pairings),
   pairing: (code: string) => call<Pairing>("GET", `${BASE}/pair/${encodeURIComponent(code)}`),
-  approve: (code: string, body: { key: TrustedKey; proof: Assertion; name?: string; by?: string }) =>
+  approve: (code: string, body: { key: TrustedKey; proof: Assertion | DeviceSignature; name?: string; by?: string }) =>
     call<{ ok: true; machineId: string; keyId: string; firstPairing: boolean }>(
       "POST",
       `${BASE}/pair/${encodeURIComponent(code)}/approve`,
@@ -137,7 +144,7 @@ export const controlApi = {
   machines: () => call<{ machines: PairedMachine[] }>("GET", `${BASE}/machines`).then((r) => r.machines),
   /** One file a start will carry: held here under its hash, named in the signed `files`. */
   uploadFile: async (file: File): Promise<StartFile> => {
-    const res = await fetch(`${BASE}/files?name=${encodeURIComponent(file.name)}`, {
+    const res = await fetch(apiUrl(`${BASE}/files?name=${encodeURIComponent(file.name)}`), {
       method: "POST",
       headers: { "content-type": file.type || "application/octet-stream", accept: "application/json" },
       body: file,
@@ -161,14 +168,18 @@ let tlsCache: TlsInfo | null | undefined;
 let uiKeyCache: string | undefined;
 let originCache: string | null | undefined;
 let originsCache: string[] | undefined;
+let infoCache: Info | undefined;
+/** The receiver's Info as last read by `rpId()` (the app's signer reads its key types). */
+export const lastInfo = (): Info | undefined => infoCache;
 
 /** The rp id this receiver makes passkeys for (Info.control.rpId), fetched once. The
  *  same read remembers Info.tls for `tlsInfo()`. */
 export function rpId(): Promise<string> {
   if (!rpIdPromise) {
-    rpIdPromise = fetch(ROUTES.ui.info, { headers: { accept: "application/json" } })
+    rpIdPromise = fetch(apiUrl(ROUTES.ui.info), { headers: { accept: "application/json" } })
       .then((r) => r.json() as Promise<Info>)
       .then((i) => {
+        infoCache = i;
         tlsCache = i.tls ?? null;
         uiKeyCache = i.uiKey || undefined;
         originCache = sendingOriginOf(i);
@@ -192,16 +203,23 @@ export function resetInfoCache(): void {
   tlsCache = undefined;
   originCache = undefined;
   originsCache = undefined;
+  infoCache = undefined;
 }
 
 /** The wrong-origin guard for this very page (control/origin.ts): the https origin
  *  sending works at when `location.hostname` is not under the rp id, else null.
  *  Synchronous from the cached Info, like `tlsInfo()`; null before the first read lands. */
 export function wrongOriginHere(): string | null {
+  // The guard is about passkeys, which are bound to an origin. The app signs with its
+  // device key instead, and its page's origin is its own, never a WebAuthn one.
+  if (inShell()) return null;
   if (originCache === undefined) void rpId().catch(() => {});
   if (typeof location === "undefined") return null;
   return wrongOrigin(location, rpCache, originsCache, originCache ?? null);
 }
+
+/** Inside the native app (its shell set the flag before any script ran). */
+export const inShell = (): boolean => !!(globalThis as { sessionpipeShell?: unknown }).sessionpipeShell;
 
 /** Info.tls as last read (by `rpId()`): null when the server has no TLS mode on,
  *  undefined before the first read lands. Synchronous, for hint text. */

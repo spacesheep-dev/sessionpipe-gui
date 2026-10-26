@@ -6,7 +6,7 @@ import type { ControlActivity } from "@shared/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppState } from "../data/hooks";
 import { controlApi, rpId } from "./api";
-import { grantExpiry } from "./daykey";
+import { grantExpiry } from "./signer";
 
 export function useRpId(): string | null {
   const [rp, setRp] = useState<string | null>(null);
@@ -22,7 +22,7 @@ export function useRpId(): string | null {
   return rp;
 }
 
-/** When the day grant for `rp` ends (ms), null when the next send will ask for a passkey,
+/** When the day grant for `rp` ends (ms), null when the next send will ask (a passkey, or Touch ID),
  *  undefined while unknown. `refresh` re-reads it (after a send). */
 export function useGrant(rp: string | null): { exp: number | null | undefined; refresh: () => void } {
   const [exp, setExp] = useState<number | null | undefined>(undefined);

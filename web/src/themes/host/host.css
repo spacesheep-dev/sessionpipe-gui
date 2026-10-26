@@ -210,3 +210,9 @@
     padding: 8px 16px 0;
   }
 }
+
+/* An installed view inside the native app (ThemePage's window row): a document page in
+   the bleed column, so it keeps the page's own gutter. */
+.main--bleed > .theme-window {
+  padding: 0 var(--gutter);
+}

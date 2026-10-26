@@ -5,6 +5,7 @@
 import {
   type ControlOutcome,
   type HarnessStartOptions,
+  type KeyType,
   START_PERMISSIONS,
   type StartPermission,
   validModel,
@@ -44,6 +45,15 @@ export interface Hello {
   home: string | null;
   /** What a `start` may ask for, per harness (sessionpipe 0.10); null when not sent. */
   start: Record<string, HarnessStartOptions> | null;
+  /** `key_types` (CONTROL.md §2): the kinds of key it takes; null when not sent (passkeys only). */
+  keyTypes: KeyType[] | null;
+}
+
+/** `key_types`: known kinds only, each once; null when absent or empty. */
+export function parseKeyTypes(v: unknown): KeyType[] | null {
+  if (!Array.isArray(v)) return null;
+  const out = (["passkey", "device"] as const).filter((t) => v.includes(t));
+  return out.length ? out : null;
 }
 
 /** A machine name is printed in a terminal and on a page: control characters are dropped. */
@@ -71,6 +81,7 @@ export function parseHello(body: unknown): Hello | null {
     promptFiles: b.prompt_files === true,
     home: parseHome(b.home),
     start: parseStart(b.start, strs(b.harnesses, HARNESS_RE, 20)),
+    keyTypes: parseKeyTypes(b.key_types),
   };
 }
 

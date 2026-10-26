@@ -2,12 +2,13 @@
 // GET /api/ui/stream: Server-Sent Events. The first frame is a snapshot, then every
 // store message, every control message, every change of who is connected, of the
 // labels and of a view's stored state as it happens, and a `: ping` comment every 15 s so proxies and phones keep the connection.
-// Each stream is one Viewer in the registry for as long as it stays open.
+// Each stream is one Viewer in the registry for as long as it stays open, except the
+// desktop app's menu-bar stream (`x-sessionpipe-client: shell`), which is not a person.
 import type { Snapshot, StreamMessage } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
 import type { Ctx } from "../http/router.js";
 import type { Store } from "../store/store.js";
-import type { ViewerRegistry } from "./viewers.js";
+import { isShellClient, type ViewerRegistry } from "./viewers.js";
 
 export const PING_MS = 15_000;
 
@@ -37,12 +38,14 @@ export function serveStream(ctx: Ctx, deps: StreamDeps): void {
     res.write(`event: ${msg.kind}\ndata: ${JSON.stringify(msg)}\n\n`);
   };
   const ua = req.headers["user-agent"];
-  const me = deps.viewers.add({
-    ip: ctx.remote.ip,
-    loopback: ctx.remote.loopback,
-    forwarded: ctx.remote.forwarded,
-    userAgent: Array.isArray(ua) ? ua[0] : ua,
-  });
+  const me = isShellClient(req.headers)
+    ? undefined
+    : deps.viewers.add({
+        ip: ctx.remote.ip,
+        loopback: ctx.remote.loopback,
+        forwarded: ctx.remote.forwarded,
+        userAgent: Array.isArray(ua) ? ua[0] : ua,
+      });
   write({ kind: "snapshot", snapshot: { ...deps.snapshot(), viewers: deps.viewers.list(me) } });
   const offStore = deps.store.subscribe((m) => {
     if (m.kind === "machine") {
@@ -58,13 +61,15 @@ export function serveStream(ctx: Ctx, deps: StreamDeps): void {
       write({ kind: "machine", machine: known ?? m.machine });
     } else write(m);
   });
-  const offViewers = deps.viewers.subscribe(() => write({ kind: "viewers", viewers: deps.viewers.list(me) }));
+  const offViewers = me
+    ? deps.viewers.subscribe(() => write({ kind: "viewers", viewers: deps.viewers.list(me) }))
+    : () => {};
   const offPlugins = deps.plugins?.subscribe(write);
   const offMore = (deps.more ?? []).map((src) => src.subscribe(write));
   const ping = setInterval(() => {
     if (res.destroyed || res.writableEnded) return;
     res.write(": ping\n\n");
-    deps.viewers.touch(me);
+    if (me) deps.viewers.touch(me);
   }, deps.pingMs ?? PING_MS);
   let done = false;
   const cleanup = (): void => {
@@ -76,7 +81,7 @@ export function serveStream(ctx: Ctx, deps: StreamDeps): void {
     offViewers();
     offPlugins?.();
     for (const off of offMore) off();
-    deps.viewers.remove(me);
+    if (me) deps.viewers.remove(me);
     if (!res.writableEnded) res.end();
   };
   res.on("close", cleanup);

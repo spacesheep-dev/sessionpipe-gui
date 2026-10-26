@@ -1,0 +1,20 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "sessionpipe",
+  "identifier": "dev.spacesheep.sessionpipe.dev-packaging",
+  "version": "../../../package.json",
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "signingIdentity": "Developer ID Application: Michael Petrov (QR7H8ARENW)"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg1NkIxMTQyREIwNUY5NzgKUldSNCtRWGJRaEZyaFY1S0xQc2lJUXR1NWpFaUJxZk03bVNLbUxialN1aW53RFduQlg3YVZ1NncK",
+      "endpoints": ["http://127.0.0.1:7830/latest.json"],
+      "dangerousInsecureTransportProtocol": true
+    }
+  }
+}

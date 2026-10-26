@@ -12,12 +12,14 @@
 import path from "node:path";
 import {
   type ControlActivity,
+  type KeyType,
   type MachineControl,
   type MachineSummary,
   ROUTES,
   type StreamMessage,
 } from "../../shared/api.js";
 import type { Ctx, Router } from "../http/router.js";
+import { coreTakesDevice, receiverKeyTypes } from "./devicekeys.js";
 import { registerMachineRoutes } from "./routes.js";
 import { ControlState, type DeviceRequestRow, toActivity, WAIT_MAX_S } from "./state.js";
 import { registerTestDoor } from "./testdoor.js";
@@ -36,6 +38,8 @@ export interface ControlDeps {
   uiAuth: (ctx: Ctx) => boolean;
   /** Harness:session keys the store knows, for validating a command's session (optional help). */
   sessionExists?: (key: string) => boolean;
+  /** Take device keys (devicekeys.ts); by default only when this sessionpipe-core verifies them. */
+  deviceKeys?: boolean;
 }
 
 export interface Control {
@@ -53,13 +57,16 @@ export interface Control {
   /** One device request as the phone reads it back; undefined when rejected or never made.
    *  `machine` is the name of the machine the `key.add` went to, once it did. */
   deviceRequest(id: string): { status: DeviceRequestRow["status"]; digits: string; machine?: string } | undefined;
+  /** The kinds of key this receiver takes: passkeys, and device keys once its core verifies them. */
+  keyTypes: KeyType[];
   /** The `control` member of the well-known file (HTTP.md §1). */
   wellKnown(): {
     wait_max_s: number;
     open_pairing?: boolean;
     /** MCP servers a session answering our message may use unasked (CONTROL.md §6); none here. */
     session_tools?: string[];
-    signing: { rp_id: string; algs: number[] };
+    /** `key_types` (HTTP.md §1): sent once this receiver takes device keys too. */
+    signing: { rp_id: string; algs: number[]; key_types?: KeyType[] };
     /** HTTP.md §1: it takes `files` on a `start` and serves {control}/files/{sha256}. */
     files?: boolean;
   };
@@ -102,11 +109,14 @@ export function createControl(deps: ControlDeps): Control {
         l({ kind: "control", message });
       } catch {}
   };
+  const keyTypes = receiverKeyTypes(deps.deviceKeys ?? coreTakesDevice());
+  const device = keyTypes.includes("device");
   return {
+    keyTypes,
     register(router) {
       registerMachineRoutes(router, { state, sinkToken: deps.sinkToken, base: ROUTES.control });
-      registerUiRoutes(router, { state, rpId, uiAuth: deps.uiAuth, base: ROUTES.ui.control });
-      if (deps.testDoor) registerTestDoor(router, { state, rpId, base: ROUTES.control });
+      registerUiRoutes(router, { state, rpId, uiAuth: deps.uiAuth, base: ROUTES.ui.control, device });
+      if (deps.testDoor) registerTestDoor(router, { state, rpId, base: ROUTES.control, device });
     },
     machines() {
       const out = new Map<string, MachineControl>();
@@ -140,7 +150,7 @@ export function createControl(deps: ControlDeps): Control {
       wait_max_s: WAIT_MAX_S,
       open_pairing: true,
       session_tools: [],
-      signing: { rp_id: rpId(), algs: [-7, -257] },
+      signing: { rp_id: rpId(), algs: [-7, -257], ...(device ? { key_types: keyTypes } : {}) },
       files: true,
     }),
     close: () => {

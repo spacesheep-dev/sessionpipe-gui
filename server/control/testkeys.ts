@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // A stand-in authenticator and signing device, so the test door and the tests run on
 // real signatures: a passkey (P-256, or RSA for RS256) that answers WebAuthn assertions
-// the way a platform authenticator does, and a browser day key that signs commands.
+// the way a platform authenticator does, a browser day key that signs commands, and an
+// app's device key (TestDeviceKey) that signs the device message (CONTROL.md §3.2).
+// A software key can't be honest about `store: "hardware"`: TestDeviceKey claims it only
+// so the device path runs end to end without a Secure Enclave, and only here.
 // Test keys only: made fresh per process, never written anywhere, and only reachable
 // through the loopback test door (testdoor.ts) or a test file.
 import {
@@ -14,8 +17,15 @@ import {
   RS256,
   type SignedCommand,
   sha256,
-  type TrustedKey,
 } from "sessionpipe-core/control";
+import type { TrustedKey } from "../../shared/api.js";
+import {
+  type DeviceGrant,
+  type DevicePurpose,
+  type DeviceSignature,
+  deviceKeyId,
+  deviceMessage,
+} from "./devicekeys.js";
 
 const enc = new TextEncoder();
 type CryptoKey = Awaited<ReturnType<typeof crypto.subtle.importKey>>;
@@ -135,6 +145,69 @@ export class TestDayKey {
   async sign(cmd: string): Promise<string> {
     return b64url(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, this.priv, enc.encode(cmd) as Bytes));
   }
+}
+
+/** An app's device key, in software (test door and tests only): it names itself by its
+ *  SPKI's hash and signs `sessionpipe.device.v1⏎<purpose>⏎<rp id>⏎<challenge>`, raw r‖s. */
+export class TestDeviceKey {
+  constructor(
+    readonly key: TrustedKey,
+    private readonly priv: CryptoKey,
+    readonly rpId: string,
+  ) {}
+
+  static async create(o: { rpId?: string } = {}): Promise<TestDeviceKey> {
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+    const spki = b64url(await crypto.subtle.exportKey("spki", pair.publicKey));
+    const key: TrustedKey = {
+      id: await deviceKeyId(spki),
+      alg: -7,
+      spki,
+      type: "device",
+      store: "hardware",
+      uv: "each-use",
+    };
+    return new TestDeviceKey(key, pair.privateKey, o.rpId ?? "localhost");
+  }
+
+  /** `o.purpose` / `o.rpId` sign another line than the one asked for (a broken signer). */
+  async sign(
+    purpose: DevicePurpose,
+    challenge: Uint8Array,
+    o: { purpose?: DevicePurpose; rpId?: string } = {},
+  ): Promise<DeviceSignature> {
+    const msg = deviceMessage(o.purpose ?? purpose, o.rpId ?? this.rpId, challenge) as Bytes;
+    const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, this.priv, msg);
+    return { cred: this.key.id, sig: b64url(sig) };
+  }
+
+  async enroll(machine: string, code: string): Promise<DeviceSignature> {
+    return this.sign("pair", await pairChallenge(machine, code));
+  }
+
+  /** The day grant a device key signs (the native signer writes the same string). */
+  async grant(day: TestDayKey, o: { iat: number; exp: number }): Promise<DeviceGrant> {
+    const str = day.grantStr({ iat: o.iat, exp: o.exp, rp: this.rpId });
+    return { ...(await this.sign("grant", await sha256(str))), str };
+  }
+}
+
+/** A command as a device key signs it (CONTROL.md §3.2). */
+export type DeviceSignedCommand = Omit<SignedCommand, "grant" | "confirm"> & {
+  grant?: DeviceGrant;
+  confirm?: DeviceSignature;
+};
+
+/** A command signed by a device key: its day grant and csig, or a confirm. */
+export async function signWithDevice(
+  device: TestDeviceKey,
+  day: TestDayKey,
+  cmd: string,
+  o: { confirm?: boolean } = {},
+): Promise<DeviceSignedCommand> {
+  if (o.confirm) return { cmd, confirm: await device.sign("confirm", await sha256(cmd)) };
+  const iat = (JSON.parse(cmd).iat as number) - 60_000;
+  return { cmd, csig: await day.sign(cmd), grant: await device.grant(day, { iat, exp: iat + 12 * 3600_000 }) };
 }
 
 export const nonce = (n = 16) => b64url(crypto.getRandomValues(new Uint8Array(n)));

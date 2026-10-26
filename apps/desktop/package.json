@@ -1,0 +1,13 @@
+{
+  "name": "sessionpipe-desktop",
+  "private": true,
+  "version": "0.2.0",
+  "description": "The sessionpipe desktop app's build tooling (the Tauri CLI). The app itself is src-tauri/.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}

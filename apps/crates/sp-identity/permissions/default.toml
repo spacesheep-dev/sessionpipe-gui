@@ -1,0 +1,5 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "The signer, for the bundled main window only (capabilities/identity.json): read this device's key and grant, make the key, sign a checked command, approve a pairing, forget. Every command also checks the calling webview's label and origin."
+permissions = ["allow-status", "allow-key", "allow-sign", "allow-pair", "allow-forget"]

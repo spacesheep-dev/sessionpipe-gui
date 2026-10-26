@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "identity",
+  "description": "The signer (sp-identity): the bundled main window only, and no remote URL. Its handlers check the calling webview's label and origin again.",
+  "windows": ["main"],
+  "permissions": ["identity:default"]
+}

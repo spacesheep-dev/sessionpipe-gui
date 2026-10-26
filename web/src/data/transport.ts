@@ -17,6 +17,7 @@ import type {
   StreamMessage,
 } from "@shared/api";
 import { ROUTES } from "@shared/api";
+import { apiUrl, type EventSourceLike, openEvents } from "../lib/net";
 import type { SearchClient } from "../search/types";
 
 export interface StreamHandlers {
@@ -92,9 +93,9 @@ async function json<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-const get = <T>(url: string) => fetch(url, { headers: { accept: "application/json" } }).then((r) => json<T>(r));
+const get = <T>(url: string) => fetch(apiUrl(url), { headers: { accept: "application/json" } }).then((r) => json<T>(r));
 const post = <T>(url: string, body?: unknown) =>
-  fetch(url, {
+  fetch(apiUrl(url), {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -112,17 +113,17 @@ export function createHttpTransport(): Transport {
   const searchFrames = new Set<(s: SearchIndexStatus) => void>();
   return {
     openStream(h) {
-      let es: EventSource | null = null;
+      let es: EventSourceLike | null = null;
       let timer: ReturnType<typeof setTimeout> | null = null;
       let attempt = 0;
       let closed = false;
       const open = () => {
         if (closed) return;
-        es = new EventSource(ROUTES.ui.stream);
+        es = openEvents(ROUTES.ui.stream);
         for (const kind of STREAM_KINDS) {
           es.addEventListener(kind, (ev) => {
             try {
-              const m = JSON.parse((ev as MessageEvent).data) as StreamMessage;
+              const m = JSON.parse(ev.data) as StreamMessage;
               if (m.kind === "searchIndex") for (const l of searchFrames) l(m.status);
               h.onMessage(m);
             } catch (err) {
@@ -184,10 +185,10 @@ export function createHttpTransport(): Transport {
     forget: (harness, id) => post<void>(`${ROUTES.ui.forget}/${enc(harness)}/${enc(id)}/forget`),
     rotateToken: () => post<{ sinkToken: string }>(ROUTES.ui.rotateToken),
     demo: (on) => post<{ on: boolean }>(ROUTES.ui.demo, { on }),
-    qrUrl: () => ROUTES.ui.qr,
+    qrUrl: () => apiUrl(ROUTES.ui.qr),
     labels: () => get<Labels>(ROUTES.ui.labels),
     patchLabels: (p) =>
-      fetch(ROUTES.ui.labels, {
+      fetch(apiUrl(ROUTES.ui.labels), {
         method: "PATCH",
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify(p),

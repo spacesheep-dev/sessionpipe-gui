@@ -223,7 +223,14 @@ export function useFlip(ref: RefObject<HTMLElement | null>, max = 80): void {
       return !outer || !box.contains(outer);
     });
     const top = box.getBoundingClientRect().top;
-    const motion = !reducedMotion() && els.length <= max && typeof Element.prototype.animate === "function";
+    // A hidden page (an occluded or minimised window, a background tab) draws nothing and
+    // WebKit holds its animation clock: a row would wait there, transparent or half-moved,
+    // until the window is seen again. Nobody can see a move then, so it just snaps.
+    const motion =
+      !reducedMotion() &&
+      document.visibilityState === "visible" &&
+      els.length <= max &&
+      typeof Element.prototype.animate === "function";
     const now = new Map<string, number>();
     const drawn = new Map<string, number>();
     for (const el of els) {
