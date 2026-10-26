@@ -266,14 +266,23 @@ light only. Text is set in Geist and code in Geist Mono, served by the GUI itsel
 dark or system, the skin and the text size are one click from the sidebar and kept per
 device.
 
-## Native apps (preview)
+## Desktop apps
 
-Not in a release, and nothing to download yet. A Mac app is in development: a small
-[Tauri 2](https://tauri.app) shell around the same UI, with a menu bar item and a Dock badge
-that count what needs you, notifications you can answer from, and an opt-in global shortcut
-for New session; signing with Touch ID waits on device keys in sessionpipe. An iPhone build
-runs in the simulator. Until they ship, add the web app to your Dock or home screen from the
-browser.
+| Platform | Download |
+|---|---|
+| macOS, Apple silicon and Intel | [sessionpipe_0.3.0_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_universal.dmg), signed and notarized |
+| Linux, x86-64 | [AppImage](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_amd64.AppImage) · [.deb](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_amd64.deb) |
+
+The same UI in a small [Tauri 2](https://tauri.app) app (a few MB, not a browser engine of
+its own). It connects to the receiver on this machine (keep one running with
+`sessionpipe-gui service install`), keeps a menu bar item and a Dock badge that count what
+needs you, notifies you, launches at login if you like, and updates itself. Every release is
+on the [releases page](https://github.com/spacesheep-dev/sessionpipe-gui/releases).
+
+The app shows everything; for now it sends nothing itself. Signing a prompt, a start or an
+answer from the app waits on device keys in sessionpipe; until then the app says so and you
+send from a browser, where your passkey signs. An iPhone build runs in the simulator and is
+not released.
 
 ## How it works
 
