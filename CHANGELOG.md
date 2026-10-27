@@ -23,6 +23,8 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Changed
 
+- *iOS → TestFlight* uploads with the Apple ID and app-specific password that notarize the
+  Mac app when there is no App Store Connect API key yet.
 - The phone apps are called **sessionpipe** (they were "sessionpipe Dev").
 
 ### Fixed

@@ -8,7 +8,9 @@
 # Runs in the `release` environment (Misha approves it) and reads, by name:
 #   IOS_DIST_P12, IOS_DIST_P12_PASSWORD        Apple Distribution certificate + key, .p12 base64
 #   IOS_APPSTORE_PROFILE                       "sessionpipe App Store" .mobileprovision, base64
-#   APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_PRIVATE_KEY   App Store Connect API key (upload)
+#   APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_PRIVATE_KEY   App Store Connect API key (upload), or
+#   APPLE_ID, APPLE_PASSWORD                   the Apple ID and app-specific password notarizing
+#                                              the Mac app uses, when there is no API key yet
 # The certificate lives only in a temporary keychain with a random password, deleted at the end.
 name: iOS → TestFlight
 
@@ -64,11 +66,19 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           UPLOAD: ${{ inputs.upload }}
         run: |
           set -euo pipefail
           need=(IOS_DIST_P12 IOS_DIST_P12_PASSWORD IOS_APPSTORE_PROFILE)
-          [ "$UPLOAD" = true ] && need+=(APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY)
+          if [ "$UPLOAD" = true ]; then
+            if [ -n "$APPLE_API_KEY" ]; then
+              need+=(APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY)
+            else
+              need+=(APPLE_ID APPLE_PASSWORD)
+            fi
+          fi
           missing=()
           for s in "${need[@]}"; do [ -n "${!s}" ] || missing+=("$s"); done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -190,13 +200,20 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
         run: |
           set -euo pipefail
-          dir="$HOME/.appstoreconnect/private_keys"
-          mkdir -p "$dir"
-          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$dir/AuthKey_$APPLE_API_KEY.p8"
-          chmod 600 "$dir/AuthKey_$APPLE_API_KEY.p8"
-          xcrun altool --upload-app --type ios --file "$IPA" --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
+          if [ -n "$APPLE_API_KEY" ]; then
+            dir="$HOME/.appstoreconnect/private_keys"
+            mkdir -p "$dir"
+            printf '%s' "$APPLE_API_PRIVATE_KEY" > "$dir/AuthKey_$APPLE_API_KEY.p8"
+            chmod 600 "$dir/AuthKey_$APPLE_API_KEY.p8"
+            xcrun altool --upload-app --type ios --file "$IPA" --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
+          else
+            # The password stays in the environment (@env:), out of the command line.
+            xcrun altool --upload-app --type ios --file "$IPA" --username "$APPLE_ID" --password @env:APPLE_PASSWORD
+          fi
           echo "Uploaded to TestFlight; App Store Connect processes it before testers see it." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove the keychain and the keys

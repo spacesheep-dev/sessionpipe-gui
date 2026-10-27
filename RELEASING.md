@@ -220,15 +220,17 @@ In the Apple portal (developer.apple.com → Certificates, IDs & Profiles), once
    upload).
 
 The CI secrets for TestFlight are `IOS_DIST_P12`, `IOS_DIST_P12_PASSWORD`,
-`IOS_APPSTORE_PROFILE` and the `APPLE_API_*` key (the table above). Never commit a
+`IOS_APPSTORE_PROFILE`, and for the upload the `APPLE_API_*` key or, until there is one,
+`APPLE_ID` + `APPLE_PASSWORD` (the table above). Never commit a
 certificate, a key, a profile or a password.
 
 *iOS → TestFlight* (`ios-testflight.yml`) takes the tag and builds, signs and exports the
 `.ipa` (kept as a workflow artifact), then uploads it with `upload` on. `CFBundleVersion` is
 the workflow's run number (`bundle.iOS.bundleVersion`), so every upload is new to App Store
 Connect; `CFBundleShortVersionString` is the version. Uploading needs the app's record in
-App Store Connect and the `APPLE_API_*` key; without them, run it with `upload` off and keep
-the `.ipa`.
+App Store Connect and one of those credentials; without them, run it with `upload` off and
+keep the `.ipa`. Internal testers (App Store Connect users on the team) get a build without
+App Review; external testers wait for Beta App Review.
 
 ## The Android app
 
