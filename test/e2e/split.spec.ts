@@ -110,28 +110,22 @@ test.describe("split panel", () => {
     test("shift-click opens beside, the page shrinks, reload keeps it, Esc closes it", async ({ page }) => {
       await openBoard(page);
       const before = await mainWidth(page);
-      const title = await openBeside(page);
+      await openBeside(page);
       // The session view inside opens with its own scrolling and its latest events.
       await expect(panel(page).locator("ol.timeline li.turn").first()).toBeVisible();
       await expect.poll(() => mainWidth(page)).toBeLessThan(before - 300);
       const url = page.url();
-      // The same session after the reload: by its key in the URL, and the title the panel
-      // showed just before (a demo session may learn a better title mid-turn).
-      const shown = await panel(page).locator(".panel-title").textContent();
+      // The same session after the reload: by its key, in the URL and on the panel. Not by
+      // title: a demo session may learn a better one at any moment, reload included.
+      const key = await panel(page).getAttribute("data-split");
+      expect(key).toBeTruthy();
 
       await page.reload();
       await live(page);
       await expect(panel(page)).toHaveClass(/panel--open/);
       expect(page.url()).toBe(url);
-      // A title the summariser cut may come back cut (its uncut form is the first ask, which
-      // the summary carries only while it is the latest prompt; lib/format.ts uncutTitle).
-      const same = (t: string, was: string) => t === was || (t.endsWith("…") && was.startsWith(t.slice(0, -1)));
-      await expect
-        .poll(async () => {
-          const t = (await panel(page).locator(".panel-title").textContent()) ?? "";
-          return same(t, title) || same(t, shown ?? "") || new RegExp(`^(${rx(title)}|${rx(shown ?? "")})`).test(t);
-        })
-        .toBe(true);
+      await expect(panel(page)).toHaveAttribute("data-split", key ?? "");
+      await expect(panel(page).locator(".panel-title")).not.toBeEmpty();
 
       await page.keyboard.press("Escape");
       await expect(panel(page)).not.toHaveClass(/panel--open/);
