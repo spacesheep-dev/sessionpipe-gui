@@ -85,6 +85,10 @@ impl ShellInfo {
     }
 }
 
+/// The first line of the contract script: how the shell finds its own script among the
+/// webview's user scripts to swap it when the person switches receivers.
+pub const MARKER: &str = "/* sessionpipe shell contract v1 */";
+
 /// The initialization script: runs before any page script, in the main frame only.
 ///
 /// - `window.sessionpipeShell`: frozen, not writable, not configurable, so page code can't
@@ -92,10 +96,6 @@ impl ShellInfo {
 /// - `data-shell` on `<html>` for the CSS (`web/src/native/mobile.css`).
 /// - The viewport gets `maximum-scale=1, user-scalable=no`: an app doesn't pinch-zoom its
 ///   own chrome (WKWebView honours it, unlike Safari).
-/// The first line of the contract script: how the shell finds its own script among the
-/// webview's user scripts to swap it when the person switches receivers.
-pub const MARKER: &str = "/* sessionpipe shell contract v1 */";
-
 pub fn init_script(info: &ShellInfo) -> String {
     // serde_json escapes quotes and control characters; `<`, `>`, `&` and the two JS line
     // separators are escaped too, so no value can end the script or break the literal.

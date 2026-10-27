@@ -14,8 +14,26 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// Release signing with the upload key (Play re-signs with the app signing key it keeps).
+// Both come from the environment only, never a file in the repo: the "Android release"
+// workflow sets them from the release environment's secrets, and a local release build
+// from the signing folder (RELEASING.md, The Android app). Without them the release build
+// is unsigned.
+val uploadKeystore: String? = System.getenv("ANDROID_UPLOAD_KEYSTORE")
+val uploadKeystorePassword: String? = System.getenv("ANDROID_UPLOAD_KEYSTORE_PASSWORD")
+
 android {
     compileSdk = 37
+    signingConfigs {
+        if (uploadKeystore != null && uploadKeystorePassword != null) {
+            create("upload") {
+                storeFile = file(uploadKeystore)
+                storePassword = uploadKeystorePassword
+                keyAlias = "upload"
+                keyPassword = uploadKeystorePassword
+            }
+        }
+    }
     namespace = "dev.spacesheep.sessionpipe"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
@@ -39,6 +57,7 @@ android {
             }
         }
         getByName("release") {
+            signingConfigs.findByName("upload")?.let { signingConfig = it }
             optimization {
                enable = true
             }
@@ -56,6 +75,11 @@ android {
     }
     buildFeatures {
         buildConfig = true
+    }
+    // lintVital crashes analysing the Tauri plugins' own modules ("a bug in lint"), which
+    // fails every release build; the checks run on the debug build.
+    lint {
+        checkReleaseBuilds = false
     }
 }
 

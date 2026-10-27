@@ -64,7 +64,7 @@ jobs:
         with:
           workspaces: apps -> target
 
-      - name: cargo fmt --check (the workspace and the iOS app)
+      - name: cargo fmt --check (the workspace and the phone app)
         if: runner.os == 'macOS'
         run: |
           cargo fmt --all --manifest-path apps/Cargo.toml -- --check

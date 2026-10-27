@@ -30,6 +30,10 @@ not be published for a release of the GUI.
    with the changelog section as its notes and the tarball attached. A failed run is re-run
    once the cause is fixed. The draft goes out with the desktop app: *Desktop release*,
    then *Publish update* (The desktop app, below).
+6. The phones, from the same tag: *Android release* (attaches the `.apk` to the draft, so
+   run it before *Publish update*; uploads the `.aab` to Google Play on a track) and
+   *iOS → TestFlight* (The Android app, The iOS app, below). Each waits for the `release`
+   environment's approval.
 
 Installs pin a tag with `npx github:spacesheep-dev/sessionpipe-gui#v0.2.0`; without one
 they follow `main`.
@@ -218,3 +222,62 @@ In the Apple portal (developer.apple.com → Certificates, IDs & Profiles), once
 The CI secrets for TestFlight are `IOS_DIST_P12`, `IOS_DIST_P12_PASSWORD`,
 `IOS_APPSTORE_PROFILE` and the `APPLE_API_*` key (the table above). Never commit a
 certificate, a key, a profile or a password.
+
+*iOS → TestFlight* (`ios-testflight.yml`) takes the tag and builds, signs and exports the
+`.ipa` (kept as a workflow artifact), then uploads it with `upload` on. `CFBundleVersion` is
+the workflow's run number (`bundle.iOS.bundleVersion`), so every upload is new to App Store
+Connect; `CFBundleShortVersionString` is the version. Uploading needs the app's record in
+App Store Connect and the `APPLE_API_*` key; without them, run it with `upload` off and keep
+the `.ipa`.
+
+## The Android app
+
+`apps/mobile` on Android is the package **`dev.spacesheep.sessionpipe`** (minSdk 24, arm64,
+armv7 and x86_64). `versionName` is the version and `versionCode` comes from it
+(`major·1000000 + minor·1000 + patch`: 0.4.1 is 4001), so Google Play takes one upload per
+version.
+
+Signing is **Play App Signing**: Google keeps the key the store signs with, and our
+**upload key** signs what we send. It is a PKCS12 keystore with the alias `upload`,
+certificate `CN=sessionpipe, O=spacesheep, C=US`, SHA-256
+`92:14:30:AE:A4:B1:A7:C4:06:36:EC:52:56:21:F5:14:12:62:3E:9B:BB:16:6E:D4:1B:EA:3A:4C:28:CA:6C:69`.
+The release workflow refuses anything signed by another key. If the upload key is lost,
+Play can reset it; the app signing key never leaves Google. The `.apk` attached to the
+GitHub release is signed by the upload key, not Play's key, so an install from GitHub and
+one from Play don't update each other: uninstall one before installing the other.
+
+The Gradle project (`gen/android/app/build.gradle.kts`) signs the release build when
+`ANDROID_UPLOAD_KEYSTORE` (the keystore's path) and `ANDROID_UPLOAD_KEYSTORE_PASSWORD` are
+set, and leaves it unsigned otherwise. They are only ever environment variables, never a
+file in the repo. On the Mac that holds the key:
+
+```sh
+cd apps/mobile
+ANDROID_UPLOAD_KEYSTORE=<path to the keystore> \
+ANDROID_UPLOAD_KEYSTORE_PASSWORD="$(security find-generic-password -s <service> -a <account> -w)" \
+  npx tauri android build --aab --apk --target aarch64 armv7 x86_64 --ci
+```
+
+It needs JDK 17, the Android SDK and NDK (`ANDROID_HOME`, `NDK_HOME`), and the Rust
+targets `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android`.
+
+*Android release* (`android-release.yml`) takes the tag and builds both, checks the signer,
+keeps them as workflow artifacts, attaches `sessionpipe_<version>_android.apk` to the tag's
+**draft** release (`attach`), and uploads the `.aab` to Google Play when `track` is
+`internal`, `alpha` or `beta`. Its secrets, in the `release` environment:
+
+| Secret | Value |
+|---|---|
+| `ANDROID_UPLOAD_KEYSTORE` | the keystore, base64 |
+| `ANDROID_UPLOAD_KEYSTORE_PASSWORD` | its password (the store's and the key's) |
+| `PLAY_SERVICE_ACCOUNT_JSON` | a Play Console service account's JSON key, for `track` only |
+
+In the Google Play Console, once:
+1. A developer account, then **Create app**: *sessionpipe*, app, free.
+2. **Play App Signing** on (the default); upload the first `.aab` by hand to **Internal
+   testing**. The API can't create an app or make its first release.
+3. **Users and permissions**: a Google Cloud service account (with the *Google Play Android
+   Developer API* enabled) invited with *Release to testing tracks*; its JSON key becomes
+   `PLAY_SERVICE_ACCOUNT_JSON`.
+4. The store listing, content rating, data safety (sessionpipe collects nothing: the app
+   talks only to your own computer) and the testers' list.

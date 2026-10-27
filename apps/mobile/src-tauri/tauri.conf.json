@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "sessionpipe Dev",
+  "productName": "sessionpipe",
   "version": "../../../package.json",
   "identifier": "dev.spacesheep.sessionpipe",
   "build": { "frontendDist": "../../../dist/web" },

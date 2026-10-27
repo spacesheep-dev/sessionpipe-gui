@@ -15,6 +15,20 @@ All notable changes to `sessionpipe-gui`. The format follows
   the status and gesture bars. Sending from a phone comes in a later version, on both.
 - **A phone's welcome** offers your computer and the demo; a phone runs no sessionpipe of
   its own, so the "This Mac" row is gone there.
+- **Phone releases.** *Android release* builds the Android app for a tag (arm64, armv7,
+  x86_64; about 11 MB on arm64), signs it with the upload key and checks the signer,
+  attaches the `.apk` to the draft release and uploads the `.aab` to a Google Play track. A
+  *Mobile* check builds both phone apps on every PR that touches them. RELEASING.md has the
+  steps.
+
+### Changed
+
+- The phone apps are called **sessionpipe** (they were "sessionpipe Dev").
+
+### Fixed
+
+- **TestFlight builds** set `CFBundleVersion` to the run number alone. Appending it to the
+  version (`0.4.1.12`) gave App Store Connect four numbers, and it takes at most three.
 
 ## [0.4.1] - 2026-10-27
 

@@ -10,7 +10,7 @@ configs:
 settingGroups:
   app:
     base:
-      PRODUCT_NAME: sessionpipe Dev
+      PRODUCT_NAME: sessionpipe
       PRODUCT_BUNDLE_IDENTIFIER: dev.spacesheep.sessionpipe
       DEVELOPMENT_TEAM: QR7H8ARENW
       # Manual signing with the named profiles (RELEASING.md, The iOS app). The simulator
@@ -58,7 +58,7 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleDisplayName: sessionpipe Dev
+        CFBundleDisplayName: sessionpipe
         CFBundleShortVersionString: 0.2.0
         CFBundleVersion: "0.2.0"
         ITSAppUsesNonExemptEncryption: false

@@ -138,9 +138,7 @@ jobs:
         working-directory: apps/mobile
 
       # App Store export with manual signing: the named profile for the one bundle id.
-      - name: ExportOptions.plist and the build number
-        env:
-          RUN: ${{ github.run_number }}
+      - name: ExportOptions.plist
         run: |
           set -euo pipefail
           apple=apps/mobile/src-tauri/gen/apple
@@ -161,7 +159,6 @@ jobs:
           </plist>
           PLIST
           plutil -lint "$apple/ExportOptions.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $RUN" "$apple/sessionpipe-shell_iOS/Info.plist"
 
       # The release configuration signs with "Apple Distribution" and the
       # "sessionpipe App Store" profile (project.yml / the pbxproj); tauri archives and
@@ -172,7 +169,10 @@ jobs:
         working-directory: apps/mobile
         run: |
           set -euo pipefail
-          npx tauri ios build --target aarch64 --export-method app-store-connect --build-number "$RUN" --ci
+          # CFBundleVersion is the run number alone: App Store Connect takes one to three
+          # integers, and --build-number would append it to the version (0.4.1.12).
+          npx tauri ios build --target aarch64 --export-method app-store-connect \
+            --config "{\"bundle\":{\"iOS\":{\"bundleVersion\":\"$RUN\"}}}" --ci
           ipa="$(find src-tauri/gen/apple/build -name '*.ipa' -print -quit)"
           [ -n "$ipa" ] || { echo "::error::no .ipa was exported"; exit 1; }
           echo "IPA=$PWD/$ipa" >> "$GITHUB_ENV"

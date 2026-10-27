@@ -1,0 +1,185 @@
+# SPDX-License-Identifier: Apache-2.0
+# "Android release": a button (Actions → Android release → Run workflow) that builds the
+# Android app for an existing v* tag (arm64, armv7 and x86_64), signs it with the upload
+# key, checks the signer against the pinned upload certificate, and then:
+#   - keeps the .aab and the .apk as workflow artifacts, either way;
+#   - attaches the .apk to the tag's DRAFT release (attach), so "Publish update" publishes
+#     it with the desktop apps for anyone installing outside Google Play;
+#   - uploads the .aab to Google Play on the chosen track (track ≠ none). Play re-signs it
+#     with the app signing key it keeps (Play App Signing).
+#
+# Runs in the `release` environment (Misha approves it) and reads, by name:
+#   ANDROID_UPLOAD_KEYSTORE            the upload key, a PKCS12 keystore (alias "upload"), base64
+#   ANDROID_UPLOAD_KEYSTORE_PASSWORD   its password (the store's and the key's)
+#   PLAY_SERVICE_ACCOUNT_JSON          a Play Console service account's JSON key (with a track only)
+# The keystore lives only in the runner's temp dir and is deleted after the build.
+name: Android release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing v* tag to build"
+        required: true
+      attach:
+        description: "Attach the .apk to the tag's draft release"
+        type: boolean
+        default: true
+      track:
+        description: "Upload the .aab to this Google Play track"
+        type: choice
+        options: [none, internal, alpha, beta]
+        default: none
+
+permissions:
+  contents: write # attach the .apk to the tag's draft release
+
+concurrency:
+  group: android-release-${{ inputs.tag }}
+
+env:
+  TAG: ${{ inputs.tag }}
+  PACKAGE: dev.spacesheep.sessionpipe
+  # The upload certificate's SHA-256 (public; RELEASING.md, The Android app). A build signed
+  # by anything else stops here.
+  UPLOAD_CERT_SHA256: 921430aea4b1a7c40636ec525621f51412623e9bbb166ed41bea3a4c28ca6c69
+  CARGO_TERM_COLOR: always
+
+jobs:
+  android:
+    name: build, sign, verify, publish
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: The tag is package.json's version
+        run: |
+          case "$TAG" in v*) ;; *) echo "::error::$TAG is not a v* tag"; exit 1 ;; esac
+          v="$(node -p "require('./package.json').version")"
+          [ "v$v" = "$TAG" ] || { echo "::error::tag $TAG, package.json $v"; exit 1; }
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: The secrets this build needs
+        env:
+          ANDROID_UPLOAD_KEYSTORE: ${{ secrets.ANDROID_UPLOAD_KEYSTORE }}
+          ANDROID_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          TRACK: ${{ inputs.track }}
+        run: |
+          set -euo pipefail
+          need=(ANDROID_UPLOAD_KEYSTORE ANDROID_UPLOAD_KEYSTORE_PASSWORD)
+          [ "$TRACK" != none ] && need+=(PLAY_SERVICE_ACCOUNT_JSON)
+          missing=()
+          for s in "${need[@]}"; do [ -n "${!s}" ] || missing+=("$s"); done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::missing secrets in the release environment: ${missing[*]} (RELEASING.md, The Android app)"
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/mobile/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/mobile/src-tauri -> target
+
+      - run: npm ci
+      - run: npm run build:release
+      - run: npm ci
+        working-directory: apps/mobile
+
+      - name: The upload key, in the runner's temp dir
+        env:
+          ANDROID_UPLOAD_KEYSTORE: ${{ secrets.ANDROID_UPLOAD_KEYSTORE }}
+        run: |
+          set -euo pipefail
+          k="$RUNNER_TEMP/upload.p12"
+          printf '%s' "$ANDROID_UPLOAD_KEYSTORE" | base64 --decode > "$k"
+          chmod 600 "$k"
+          echo "KEYSTORE=$k" >> "$GITHUB_ENV"
+
+      # The Gradle project signs the release build when both variables are set
+      # (gen/android/app/build.gradle.kts). versionCode comes from the version (0.4.1 → 4001).
+      - name: Build the .aab and the .apk
+        working-directory: apps/mobile
+        env:
+          ANDROID_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export NDK_HOME="$ANDROID_NDK_LATEST_HOME" ANDROID_UPLOAD_KEYSTORE="$KEYSTORE"
+          npx tauri android build --aab --apk --target aarch64 armv7 x86_64 --ci
+          rm -f "$KEYSTORE"
+
+      - name: Signed by the upload key, and named for the release
+        working-directory: apps/mobile/src-tauri/gen/android/app/build/outputs
+        run: |
+          set -euo pipefail
+          apk=apk/universal/release/app-universal-release.apk
+          aab=bundle/universalRelease/app-universal-release.aab
+          bt="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          got="$("$bt/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+          [ "$got" = "$UPLOAD_CERT_SHA256" ] || { echo "::error::the .apk is signed by $got, not the upload key"; exit 1; }
+          got="$(keytool -printcert -jarfile "$aab" | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr 'A-F' 'a-f')"
+          [ "$got" = "$UPLOAD_CERT_SHA256" ] || { echo "::error::the .aab is signed by $got, not the upload key"; exit 1; }
+          out="$RUNNER_TEMP/out"
+          mkdir -p "$out"
+          cp "$apk" "$out/sessionpipe_${VERSION}_android.apk"
+          cp "$aab" "$out/sessionpipe_${VERSION}_android.aab"
+          echo "OUT=$out" >> "$GITHUB_ENV"
+          {
+            echo "Built for $TAG, signed by the upload key ($UPLOAD_CERT_SHA256):"
+            (cd "$out" && du -h ./*) | sed 's/^/    /'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sessionpipe-android-${{ inputs.tag }}-${{ github.run_number }}
+          path: ${{ env.OUT }}
+          if-no-files-found: error
+
+      # Only a draft: a published release is what people already downloaded.
+      - name: Attach the .apk to the draft release
+        if: inputs.attach
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          draft="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$TAG\") | .draft" | head -1)"
+          [ -n "$draft" ] || { echo "::error::no release for $TAG yet (release.yml makes its draft)"; exit 1; }
+          [ "$draft" = true ] || { echo "::error::the $TAG release is already published; attach to a draft only"; exit 1; }
+          gh release upload "$TAG" "$OUT/sessionpipe_${VERSION}_android.apk" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "Attached the .apk to the $TAG draft." >> "$GITHUB_STEP_SUMMARY"
+
+      # The app must exist in the Play Console and have had its first release uploaded there
+      # by hand; the API can't make either (RELEASING.md, The Android app).
+      - name: Upload to Google Play (${{ inputs.track }})
+        if: inputs.track != 'none'
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ env.PACKAGE }}
+          releaseFiles: ${{ env.OUT }}/sessionpipe_${{ env.VERSION }}_android.aab
+          releaseName: ${{ env.VERSION }}
+          track: ${{ inputs.track }}
+          status: completed
