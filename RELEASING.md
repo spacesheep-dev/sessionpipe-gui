@@ -189,7 +189,7 @@ online by Gatekeeper on first open.
 
 ## The iOS app
 
-`apps/ios` is one App ID with the Mac app: **`dev.spacesheep.sessionpipe`**, team
+`apps/mobile` on iOS is one App ID with the Mac app: **`dev.spacesheep.sessionpipe`**, team
 **`QR7H8ARENW`**, one capability (*Time Sensitive Notifications*,
 `com.apple.developer.usernotifications.time-sensitive`, in
 `sessionpipe-shell_iOS.entitlements`). No Push, App Groups, Keychain Sharing or Associated

@@ -1,4 +1,4 @@
-# The native apps' Rust workspace (NATIVE-SPEC.md §9). apps/ios is its own workspace and
+# The native apps' Rust workspace (NATIVE-SPEC.md §9). apps/mobile is its own workspace and
 # shares crates/* by path; it is not listed here.
 [workspace]
 resolver = "2"

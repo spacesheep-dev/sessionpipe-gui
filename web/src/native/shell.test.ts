@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import "./test-env";
 import { describe, expect, it, vi } from "vitest";
-import { parseShell, safePath, useLocalReceiver } from "./shell";
+import { followInsets, parseShell, safePath, useLocalReceiver } from "./shell";
 
 vi.mock("../lib/router", () => ({ navigate: vi.fn(), back: vi.fn() }));
 const invoke = vi.fn();
@@ -33,6 +33,9 @@ describe("parseShell", () => {
     // A base without a receiver is meaningless.
     expect(parseShell({ ...ok, receiver: null })).toMatchObject({ receiver: null, rxBase: null });
     expect(parseShell({ ...ok, receiver: { name: "x" } })).toMatchObject({ receiver: null });
+  });
+  it("knows the Android app", () => {
+    expect(parseShell({ v: 1, platform: "android" })?.platform).toBe("android");
   });
   it("tolerates missing optional fields", () => {
     expect(parseShell({ v: 1, platform: "ios" })).toEqual({
@@ -106,5 +109,28 @@ describe("start, on a Mac whose receiver is already running", () => {
       vi.doUnmock("./Welcome");
       vi.useRealTimers();
     }
+  });
+});
+
+describe("followInsets", () => {
+  it("puts the shell's insets in --safe-* and follows changes", () => {
+    let sides = "24 0 48 0";
+    const props = new Map<string, string>();
+    const s = {
+      setProperty: (k: string, v: string) => props.set(k, v),
+      getPropertyValue: (k: string) => props.get(k) ?? "",
+    };
+    vi.stubGlobal("document", { documentElement: { style: s } });
+    (globalThis as { spInsets?: unknown }).spInsets = { get: () => sides };
+    followInsets();
+    expect([s.getPropertyValue("--safe-top"), s.getPropertyValue("--safe-bottom")]).toEqual(["24px", "48px"]);
+    sides = "24 0 0 0";
+    dispatchEvent(new Event("sp-insets"));
+    expect(s.getPropertyValue("--safe-bottom")).toBe("0px");
+    sides = "nonsense";
+    dispatchEvent(new Event("sp-insets"));
+    expect(s.getPropertyValue("--safe-bottom")).toBe("0px");
+    delete (globalThis as { spInsets?: unknown }).spInsets;
+    vi.unstubAllGlobals();
   });
 });

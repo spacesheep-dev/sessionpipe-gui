@@ -211,7 +211,7 @@ button.sel:focus-visible {
   display: flex;
   flex-direction: column;
   max-height: 85dvh;
-  padding: 0 8px calc(env(safe-area-inset-bottom) + 8px);
+  padding: 0 8px calc(var(--safe-bottom, env(safe-area-inset-bottom)) + 8px);
   border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
   background: var(--bg-2);
   box-shadow: var(--shadow-pop);

@@ -531,7 +531,7 @@ a.settings-row:focus-visible {
     display: none;
   }
   .settings-nav {
-    padding: 0 16px calc(24px + env(safe-area-inset-bottom));
+    padding: 0 16px calc(24px + var(--safe-bottom, env(safe-area-inset-bottom)));
     border-right: 0;
     background: var(--grouped-ground);
   }
@@ -541,7 +541,7 @@ a.settings-row:focus-visible {
     justify-content: flex-end;
     height: 44px;
     margin: 0 -8px;
-    padding-top: env(safe-area-inset-top);
+    padding-top: var(--safe-top, env(safe-area-inset-top));
     box-sizing: content-box;
   }
   .settings-nav-large {
@@ -600,7 +600,7 @@ a.settings-row:focus-visible {
   }
   .settings-bar {
     height: 44px;
-    padding: env(safe-area-inset-top) 4px 0;
+    padding: var(--safe-top, env(safe-area-inset-top)) 4px 0;
     box-sizing: content-box;
     border-bottom: 0;
     position: relative;
@@ -638,7 +638,7 @@ a.settings-row:focus-visible {
   }
   .settings-pane {
     gap: 24px;
-    padding: 8px 16px calc(32px + env(safe-area-inset-bottom));
+    padding: 8px 16px calc(32px + var(--safe-bottom, env(safe-area-inset-bottom)));
   }
   .settings-cells {
     border: 0;

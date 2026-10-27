@@ -349,8 +349,8 @@
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  height: calc(var(--bar) + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 8px 0;
+  height: calc(var(--bar) + var(--safe-top, env(safe-area-inset-top)));
+  padding: var(--safe-top, env(safe-area-inset-top)) 8px 0;
   border-bottom: var(--hairline) solid var(--line);
   background: var(--chrome);
 }
@@ -385,7 +385,7 @@
 /* The grabber: the sheet's top is its handle. */
 .ns-grab {
   position: absolute;
-  top: calc(env(safe-area-inset-top) + 4px);
+  top: calc(var(--safe-top, env(safe-area-inset-top)) + 4px);
   left: 50%;
   width: 36px;
   height: 5px;
@@ -398,7 +398,7 @@
 }
 .ns-scroll {
   flex: none;
-  padding: 16px 16px calc(env(safe-area-inset-bottom) + 24px);
+  padding: 16px 16px calc(var(--safe-bottom, env(safe-area-inset-bottom)) + 24px);
 }
 .ns-group {
   margin-bottom: 16px;

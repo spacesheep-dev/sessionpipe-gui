@@ -398,7 +398,8 @@
   }
   .pal-head {
     height: 52px;
-    padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+    padding: var(--safe-top, env(safe-area-inset-top)) max(12px, var(--safe-right, env(safe-area-inset-right))) 0
+      max(16px, var(--safe-left, env(safe-area-inset-left)));
     box-sizing: content-box;
     border-bottom: 0;
   }
@@ -420,11 +421,12 @@
     opacity: 0.6;
   }
   .pal-list {
-    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    padding-bottom: calc(16px + var(--safe-bottom, env(safe-area-inset-bottom)));
   }
   .pal-row {
     min-height: 44px;
-    margin: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+    margin: 0 max(8px, var(--safe-right, env(safe-area-inset-right))) 0
+      max(8px, var(--safe-left, env(safe-area-inset-left)));
   }
   .pal-keys {
     display: none;

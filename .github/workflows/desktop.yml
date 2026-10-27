@@ -68,7 +68,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           cargo fmt --all --manifest-path apps/Cargo.toml -- --check
-          cargo fmt --all --manifest-path apps/ios/src-tauri/Cargo.toml -- --check
+          cargo fmt --all --manifest-path apps/mobile/src-tauri/Cargo.toml -- --check
 
       # The web UI the app bundles: the same build the npm package ships.
       - run: npm ci

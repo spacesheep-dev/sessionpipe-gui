@@ -12,7 +12,7 @@
 }
 .more-scrim {
   position: fixed;
-  inset: 0 0 calc(var(--tabbar) + env(safe-area-inset-bottom)) 0;
+  inset: 0 0 calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom))) 0;
   z-index: 1;
   background: var(--scrim);
   animation: fade-in var(--dur) var(--ease-out) both;
@@ -21,7 +21,7 @@
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(var(--tabbar) + env(safe-area-inset-bottom));
+  bottom: calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom)));
   z-index: 2;
   max-height: calc(85dvh - var(--tabbar));
   overflow: auto;

@@ -13,16 +13,16 @@
 }
 @media (max-width: 839px) {
   .main:has(> .session) {
-    padding-bottom: calc(var(--tabbar) + env(safe-area-inset-bottom));
+    padding-bottom: calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom)));
   }
   .main > .session {
-    min-height: calc(100dvh - var(--tabbar) - env(safe-area-inset-bottom));
+    min-height: calc(100dvh - var(--tabbar) - var(--safe-bottom, env(safe-area-inset-bottom)));
   }
 }
 /* A row scrolled into view (a jump, the focused prompt) clears the bar and the docked
    control (SessionView measures it). */
 html:has(.main > .session) {
-  scroll-padding-top: calc(var(--bar) + env(safe-area-inset-top) + 28px);
+  scroll-padding-top: calc(var(--bar) + var(--safe-top, env(safe-area-inset-top)) + 28px);
   scroll-padding-bottom: calc(var(--sess-ctl-h, 120px) + 8px);
 }
 .session {
@@ -191,7 +191,7 @@ html:has(.main > .session) {
    started and how long it ran, trailing. */
 .turn-head {
   position: sticky;
-  top: calc(var(--bar) + env(safe-area-inset-top));
+  top: calc(var(--bar) + var(--safe-top, env(safe-area-inset-top)));
   z-index: 2;
   display: flex;
   align-items: center;
@@ -601,7 +601,7 @@ html:has(.main > .session) {
   /* Over the tab bar, or over the keyboard when it is up (SessionView reads it from
      visualViewport). */
   .sess-ctl {
-    bottom: max(calc(var(--tabbar) + env(safe-area-inset-bottom)), var(--kb, 0px));
+    bottom: max(calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom))), var(--kb, 0px));
     padding: 8px var(--gutter);
   }
 }

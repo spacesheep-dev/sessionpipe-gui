@@ -6,6 +6,16 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **sessionpipe for Android** (`apps/mobile`, formerly `apps/ios`): the iPhone app's
+  Tauri shell now also builds for Android, with the same bundled UI. It connects to your
+  computer by its address or phone link (asking first, in the system dialog), shows the
+  board and sessions live, follows the system's dark mode, and draws edge to edge clear of
+  the status and gesture bars. Sending from a phone comes in a later version, on both.
+- **A phone's welcome** offers your computer and the demo; a phone runs no sessionpipe of
+  its own, so the "This Mac" row is gone there.
+
 ## [0.4.1] - 2026-10-27
 
 ### Fixed

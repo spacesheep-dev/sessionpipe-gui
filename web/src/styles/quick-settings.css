@@ -199,7 +199,7 @@
   .qs-scrim {
     display: block;
     position: fixed;
-    inset: 0 0 calc(var(--tabbar) + env(safe-area-inset-bottom)) 0;
+    inset: 0 0 calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom))) 0;
     z-index: var(--z-pop);
     background: var(--scrim);
     opacity: calc(1 - var(--sheet-drag, 0));
@@ -212,7 +212,7 @@
   .qs--tabbar .qs-pop {
     left: 0;
     right: 0;
-    bottom: calc(var(--tabbar) + env(safe-area-inset-bottom));
+    bottom: calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom)));
     width: auto;
     max-height: calc(85dvh - var(--tabbar));
     padding: 0 16px 20px;

@@ -131,7 +131,7 @@
   max-height: 85dvh;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 0 8px calc(env(safe-area-inset-bottom) + 8px);
+  padding: 0 8px calc(var(--safe-bottom, env(safe-area-inset-bottom)) + 8px);
   border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
   background: var(--grouped-ground);
   box-shadow: var(--shadow-pop);

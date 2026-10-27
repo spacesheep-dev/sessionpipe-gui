@@ -122,7 +122,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             package-lock.json
-            apps/ios/package-lock.json
+            apps/mobile/package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -130,12 +130,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/ios/src-tauri -> target
+          workspaces: apps/mobile/src-tauri -> target
 
       - run: npm ci
       - run: npm run build:release
       - run: npm ci
-        working-directory: apps/ios
+        working-directory: apps/mobile
 
       # App Store export with manual signing: the named profile for the one bundle id.
       - name: ExportOptions.plist and the build number
@@ -143,7 +143,7 @@ jobs:
           RUN: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          apple=apps/ios/src-tauri/gen/apple
+          apple=apps/mobile/src-tauri/gen/apple
           cat > "$apple/ExportOptions.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -169,7 +169,7 @@ jobs:
       - name: Build and export the .ipa
         env:
           RUN: ${{ github.run_number }}
-        working-directory: apps/ios
+        working-directory: apps/mobile
         run: |
           set -euo pipefail
           npx tauri ios build --target aarch64 --export-method app-store-connect --build-number "$RUN" --ci
