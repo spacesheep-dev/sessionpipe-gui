@@ -6,6 +6,22 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-27
+
+### Fixed
+
+- **Approving the Mac app says how.** Its page names the two ways: open Machines in the
+  browser that holds your passkey (a link opens it), or run `sessionpipe control pair` on
+  the machine and approve it in the app with Touch ID. "Sign with Touch ID" is now
+  **Approve this Mac**, and a composer on a machine that doesn't trust this Mac yet says
+  what approving does.
+- **A passkey prompt that never shows** no longer leaves Approve spinning in the browser:
+  after eight seconds the row says where the passkey may be and what else to try.
+- **Setup in the app.** Step 2 no longer asks for passkeys on the app's page (Touch ID
+  signs there; the https address is the phone's), so the sidebar's Setup dot can clear.
+  Step 3 is done only once the paired machine trusts this Mac, with Approve this Mac until
+  then.
+
 ## [0.4.0] - 2026-10-27
 
 ### Added
@@ -309,7 +325,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.0...v0.3.1
