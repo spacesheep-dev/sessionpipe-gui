@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.spacesheep.sessionpipe
 
 import android.content.res.Configuration
