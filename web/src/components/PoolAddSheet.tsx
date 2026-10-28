@@ -158,7 +158,7 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
       {!link ? (
         <>
           <p className="pa-lead">{signInLead(m.name, target.again)}</p>
-          <div className="pa-actions">
+          <div className="pa-actions pa-actions--ready">
             {pendingLine && (
               <p className="pa-status" role="status">
                 {pendingLine}

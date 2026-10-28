@@ -540,6 +540,15 @@
     grid-column: 2;
     justify-self: start;
   }
+  /* The Ready state's one action fills its cell, a grouped list's full-width action; the
+     link state keeps Start over and Done side by side, Done at the right. */
+  .ns-sheet--phone .pa-actions--ready {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ns-sheet--phone .pa-actions--ready .btn--primary {
+    flex: 1 1 auto;
+  }
   .ns-sheet--phone .pa-foot {
     display: none;
   }
