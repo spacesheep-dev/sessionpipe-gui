@@ -82,6 +82,26 @@ test.describe("the pooled section, from the demo", () => {
     expect(await axeBad(page, "usage")).toEqual([]);
   });
 
+  test("the section's ··· opens on the first click; a section taller than the window holds still", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!!isMobile, "the desktop project");
+    await openPage(page, "/usage");
+    // lab-mac's section starts mid-window and runs past its bottom (three accounts, two with
+    // windows); the click's focus must not scroll it out from under the pointer.
+    const lab = section(page, "lab-mac");
+    const box = (await lab.boundingBox())!;
+    expect(box.y).toBeGreaterThan(0);
+    expect(box.y + box.height).toBeGreaterThan(900);
+    const before = await page.evaluate(() => window.scrollY);
+    await lab.locator(".usage-head .icon-btn").click();
+    await expect(page.getByRole("menu")).toBeVisible();
+    expect(await page.evaluate(() => window.scrollY)).toBe(before);
+    await expect(page.getByRole("menuitem")).toHaveText(["Add account…", "Refresh usage", "Copy setup command"]);
+    await page.keyboard.press("Escape");
+  });
+
   test("phone: one inset group, the grip at the trailing edge, no horizontal scroll", async ({ page, isMobile }) => {
     test.skip(!isMobile, "the phone project");
     await openPage(page, "/usage");
