@@ -243,6 +243,12 @@ profile → Edit → Save, then download) goes into `IOS_APPSTORE_PROFILE`.
    link in the run's summary. A build that never shows up fails the run, whatever altool
    said.
 
+The privacy manifest declares no tracking, no data collected, and the one required-reason
+API the binary links (`stat`/`fstat`: file timestamps, for files in the app's container).
+If App Store Connect emails *ITMS-91053: Missing API declaration*, a dependency has started
+using another one; `nm -u` on the binary in the `.ipa` names it, and its category and reason
+go into the manifest.
+
 `CFBundleVersion` is the workflow's run number (`bundle.iOS.bundleVersion`), so every upload
 is new to App Store Connect; `CFBundleShortVersionString` is the version. Re-running a run
 that uploaded reuses its number and is refused: start a new run instead. With no tag it is a
