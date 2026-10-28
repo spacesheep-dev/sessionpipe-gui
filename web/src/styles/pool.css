@@ -370,11 +370,13 @@
   margin-top: 8px;
 }
 .pa-step-n {
+  align-self: baseline;
   color: var(--fg-3);
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
   font-variant-numeric: tabular-nums;
 }
 .pa-step-text {
+  align-self: baseline;
   color: var(--fg);
   font-size: var(--text-md);
 }
