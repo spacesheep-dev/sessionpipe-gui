@@ -75,14 +75,23 @@ export function answerItems(root: HTMLElement | null, s: SessionSummary, attenti
   const name = tool ? ` ${toolLabel(tool)}` : "";
   // A plan review's pair: the strip's own two buttons, by their own names.
   const plan = isPlanReview({ kind: "permission", tool });
-  const why = allow.disabled
-    ? row.querySelector(".ctl-answer-note")?.textContent?.trim() || "This prompt cannot be answered from here"
-    : undefined;
-  // Deny can be off on its own (Keep planning with a note over 2,000 characters): the
-  // item says so rather than pressing a button that cannot go.
+  // Either button can be off on its own (Approve plan while the composer holds a note, Keep
+  // planning with one over 2,000 characters): its item says so rather than pressing a
+  // button that cannot go.
+  const own = allow.getAttribute("aria-description");
+  const why =
+    allow.disabled && !own
+      ? row.querySelector(".ctl-answer-note")?.textContent?.trim() || "This prompt cannot be answered from here"
+      : undefined;
+  const allowWhy = why ?? (allow.disabled ? own || true : undefined);
   const denyWhy = why ?? (deny.disabled ? deny.getAttribute("aria-description") || true : undefined);
   return [
-    { label: plan ? "Approve plan" : `Allow${name}`, action: "session.allow", disabled: why, run: () => allow.click() },
+    {
+      label: plan ? "Approve plan" : `Allow${name}`,
+      action: "session.allow",
+      disabled: allowWhy,
+      run: () => allow.click(),
+    },
     {
       label: plan ? "Keep planning" : `Deny${name}`,
       action: "session.deny",

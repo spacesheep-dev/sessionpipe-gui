@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { answerItems } from "./SessionView";
 
 /** The strip's bar as answerItems reads it: one answer row and its two buttons. */
-function bar(allow: { disabled: boolean }, deny: { disabled: boolean; description?: string }) {
+function bar(allow: { disabled: boolean; description?: string }, deny: { disabled: boolean; description?: string }) {
   const button = (b: { disabled: boolean; description?: string }) => ({
     disabled: b.disabled,
     getAttribute: (n: string) => (n === "aria-description" ? (b.description ?? null) : null),
@@ -26,6 +26,13 @@ describe("answerItems", () => {
     const [approve, keep] = answerItems(root, s) as unknown as { label: string; disabled?: string | boolean }[];
     expect(approve).toMatchObject({ label: "Approve plan", disabled: undefined });
     expect(keep).toMatchObject({ label: "Keep planning", disabled: "Keep it under 2,000 characters" });
+  });
+  it("says why Approve plan is off while the composer holds a note, and leaves Keep planning on", () => {
+    const why = "Send the note with Keep planning, or clear it";
+    const root = bar({ disabled: true, description: why }, { disabled: false });
+    const [approve, keep] = answerItems(root, s) as unknown as { label: string; disabled?: string | boolean }[];
+    expect(approve).toMatchObject({ label: "Approve plan", disabled: why });
+    expect(keep).toMatchObject({ label: "Keep planning", disabled: undefined });
   });
   it("leaves both on when both buttons are", () => {
     const items = answerItems(bar({ disabled: false }, { disabled: false }), s) as unknown as { disabled?: unknown }[];

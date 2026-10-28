@@ -230,6 +230,9 @@ function Question({ a, session }: { a: Attention; session: SessionSummary }) {
 /** A note travels with an answer up to this many characters (CONTROL.md §3, `note`). */
 const NOTE_MAX = 2000;
 
+/** Why Approve plan is off while the composer holds a note. */
+const NOTED = "Send the note with Keep planning, or clear it";
+
 /** Keep planning: a no to the plan, carrying what should change when the composer says
  *  it. The note reaches the model beside the decision, so the plan comes back revised. */
 export function keepPlanning(attentionId: string, text: string): ControlAction {
@@ -385,6 +388,9 @@ export function ControlStrip({
     (a) => isPlanReview(a) && answerable(a) && !preHello(a, control) && answers?.[a.attentionId] !== "closed",
   );
   const tooLong = text.trim().length > NOTE_MAX;
+  // Approve plan carries no note (an allow reaches Claude Code with none), so while the
+  // composer holds one it waits: the words would otherwise stay behind as the next prompt.
+  const noted = !!review && !!text.trim();
   // One reason at a time, most fundamental first (the wrong address or an insecure page
   // come before pairing, which needs the right address too), each with its one way out; none when
   // sending simply works (the composer then carries no caption at all).
@@ -458,6 +464,7 @@ export function ControlStrip({
           };
     if (!onSend) return null;
     if (review && tooLong) return { kind: "too-long", text: "Keep it under 2,000 characters", tone: "err" };
+    if (noted) return { kind: "plan-note", text: NOTED };
     if (stream)
       return {
         kind: "stream",
@@ -630,10 +637,11 @@ export function ControlStrip({
                 </ActionButton>
                 <ActionButton
                   className="btn btn--allow"
-                  disabled={off && busy !== `allow:${a.attentionId}`}
+                  disabled={(off || (plan && noted)) && busy !== `allow:${a.attentionId}`}
                   pending={busy === `allow:${a.attentionId}`}
                   pendingLabel={plan ? "Approving…" : "Allowing…"}
                   data-tip-keys={hintFor("session.allow") || undefined}
+                  aria-description={plan && noted && !off ? NOTED : undefined}
                   onClick={() =>
                     run(`allow:${a.attentionId}`, {
                       kind: "permission.answer",
