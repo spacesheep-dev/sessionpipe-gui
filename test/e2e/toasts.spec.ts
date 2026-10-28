@@ -213,7 +213,7 @@ test.describe("toasts", () => {
     const row = page.locator(`article.card[data-flip="${s.key}"]`);
     await expect(row).toBeVisible();
     await row.locator("a.card-link").click({ button: "right" });
-    await page.getByRole("menuitem", { name: "Hide" }).click();
+    await page.getByRole("menuitem", { name: "Hide", exact: true }).click();
     const undo = page.locator('.toast[data-toast="undo"]');
     await expect(undo).toContainText("Hidden");
     await expect(row).toHaveCount(0);
@@ -222,7 +222,7 @@ test.describe("toasts", () => {
     await expect(undo).toHaveCount(0);
     // ⌘Z / ctrl+Z does the same.
     await row.locator("a.card-link").click({ button: "right" });
-    await page.getByRole("menuitem", { name: "Hide" }).click();
+    await page.getByRole("menuitem", { name: "Hide", exact: true }).click();
     await expect(row).toHaveCount(0);
     await page.locator("body").click({ position: { x: 5, y: 5 } });
     await page.keyboard.press("ControlOrMeta+z");
