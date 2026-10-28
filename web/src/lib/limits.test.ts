@@ -112,7 +112,12 @@ describe("untilWords", () => {
     expect(untilWords(12 * D)).toBe("resets in 12 d");
   });
   it("keeps the clock for the tooltip", () => {
-    expect(resetClock(new Date(2026, 9, 31, 14, 0).toISOString())).toBe("Sat 31 Oct, 14:00");
+    const at = new Date(2026, 9, 31, 14, 0);
+    // The person's own clock, as the rest of the app shows times: no fixed 24-hour English.
+    const hm = at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    expect(resetClock(at.toISOString())).toBe(
+      `${at.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}, ${hm}`,
+    );
     expect(resetClock(undefined)).toBe("");
   });
 });

@@ -82,15 +82,14 @@ export function untilWords(msLeft: number): string {
   return `resets in ${Math.floor(h / 24)} d${h % 24 ? ` ${h % 24} h` : ""}`;
 }
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-/** The reset as a clock time, for a tooltip only: "Sat 31 Oct, 14:00". */
+/** The reset as a clock time, for a tooltip only, in the person's own clock as every
+ *  other time in the app: "Sat, Oct 31, 2:00 PM" here, "Sat 31 Oct, 14:00" elsewhere. */
 export function resetClock(iso: string | undefined): string {
   const t = ms(iso);
   if (Number.isNaN(t)) return "";
   const d = new Date(t);
-  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}, ${hm}`;
+  const day = d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  return `${day}, ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
 }
 
 export interface Reading {
