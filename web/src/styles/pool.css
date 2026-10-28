@@ -97,6 +97,16 @@
 .pool-row:active {
   cursor: grabbing;
 }
+/* While the row's menu is up (right-click or its ···), the row is the selection pill the
+   header and every list row become; the pill clears --dur-release after the menu closes.
+   No background on hover: the grip is the hover cue. */
+.pool-row {
+  transition: background-color var(--dur-release) linear;
+}
+.pool-row[data-menu-open] {
+  background: var(--sel);
+  border-radius: var(--radius);
+}
 .pool-row > .icon-btn,
 .pool-row .btn {
   cursor: default;
