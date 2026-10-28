@@ -6,7 +6,7 @@
 // effect (and the old key stops); a conflict is refused; Esc gives focus back.
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
-import { EVENTS, INFO, openBoard, openPage, tier1Batch } from "./helpers.js";
+import { EVENTS, INFO, openBoard, openPage, sessionUrl, tier1Batch } from "./helpers.js";
 
 const SHORTCUTS_KEY = "sessionpipe-gui.shortcuts";
 
@@ -80,6 +80,25 @@ test.describe("accessibility", () => {
     await page.keyboard.press("Shift+?");
     await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeVisible();
     await axe(page, "help");
+  });
+
+  test("axe: a session that opens on its New line", async ({ page, request }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    // A session whose turn ended after this receiver began keeping marks: unread at open.
+    const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+    const batch = tier1Batch({ title: "New line" });
+    const res = await request.post(EVENTS, {
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${sinkToken}`,
+        "sessionpipe-protocol": "1",
+      },
+      data: { events: batch.events },
+    });
+    expect(res.ok()).toBeTruthy();
+    await openPage(page, sessionUrl(batch.harness, batch.sessionId));
+    await expect(page.getByRole("separator", { name: "New since you looked" })).toBeVisible();
+    await axe(page, "session, New line");
   });
 
   test("keyboard-only: skip link, main, rail, a card; g f navigates; ? opens the help", async ({ page }) => {

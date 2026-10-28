@@ -1808,12 +1808,15 @@ function ChatTurn({
  *  answer since they last looked (lib/newLine.ts). In the meta tier: it says where, and
  *  asks nothing. */
 function NewLine({ chat = false }: { chat?: boolean }) {
-  const Row = chat ? "div" : "li";
-  return (
-    <Row className="new-line" role="separator" aria-label="New since you looked">
+  const line = (
+    // biome-ignore lint/a11y/useSemanticElements: an <hr> can't hold the word "New"
+    <div className="new-line" role="separator" aria-label="New since you looked">
       New
-    </Row>
+    </div>
   );
+  // Among a turn's rows it is an item that holds the separator: a list's own children
+  // can't be separators (axe's "list").
+  return chat ? line : <li>{line}</li>;
 }
 
 /** The tools of a turn as one quiet disclosure line, the usual rows when opened. */
