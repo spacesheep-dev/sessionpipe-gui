@@ -4,12 +4,16 @@
 import type { LimitsEntry, MachinePoolAccount, ProtocolEvent } from "@shared/api";
 import { describe, expect, it } from "vitest";
 import {
+  accountSentence,
+  eventWindows,
   firstBack,
   leftBecause,
   loginFromDetail,
   poolAgentWords,
   pooledIds,
   pooling,
+  poolPickerWords,
+  poolTip,
   roomWords,
   rowTitle,
   sentenceName,
@@ -285,5 +289,88 @@ describe("a login.begin's detail", () => {
     expect(loginFromDetail("https://claude.ai/x")).toEqual({ url: "https://claude.ai/x", pendingId: null, text: "" });
     expect(loginFromDetail("nothing here")).toEqual({ url: null, pendingId: null, text: "nothing here" });
     expect(loginFromDetail(undefined)).toEqual({ url: null, pendingId: null, text: "" });
+  });
+});
+
+describe("the Agent menu's pooled line (UX-SPEC §6)", () => {
+  const pool = { on: true, harness: "claude-code", accounts: [misha, fiction, sheep] };
+  const fresh: LimitsEntry = {
+    key: "claude-code a:a",
+    harness: "claude-code",
+    accountId: "a",
+    machine: "lab-mac",
+    machines: ["lab-mac"],
+    windows: [
+      {
+        id: "five_hour",
+        usedPercent: 38,
+        windowMinutes: 300,
+        resetsAt: new Date(NOW + 2 * H + 21 * MIN).toISOString(),
+      },
+      { id: "seven_day", usedPercent: 20, windowMinutes: 10_080, resetsAt: new Date(NOW + 3 * 24 * H).toISOString() },
+    ],
+    observedAt: new Date(NOW).toISOString(),
+  };
+  it("puts the value at the right and the count with the window under", () => {
+    expect(poolPickerWords(pool, () => fresh, NOW)).toEqual({
+      hint: "62% left",
+      detail: "3 accounts, 2 with room · Misha, 5 hours, resets in 2 h 21 m",
+      out: false,
+    });
+    expect(poolPickerWords(pool, () => undefined, NOW)).toEqual({ detail: "3 accounts, 2 with room · Misha" });
+    expect(poolPickerWords(pool, () => ({ ...fresh, observedAt: new Date(NOW - 3 * H).toISOString() }), NOW)).toEqual({
+      hint: "62% left",
+      detail: "3 accounts, 2 with room · Misha, 5 hours, resets in 2 h 21 m, numbers as of 3 h ago",
+      out: false,
+    });
+  });
+  it("says None left when no account has room, and nothing when every one is off or in error", () => {
+    const err = acc({ id: "x", status: "error" });
+    expect(poolPickerWords({ ...pool, accounts: [sheep, err] }, () => undefined, NOW)).toEqual({
+      hint: "None left",
+      detail: "2 accounts, none with room · first back in 2 h 10 m",
+      out: true,
+    });
+    expect(poolPickerWords({ ...pool, accounts: [{ ...sheep, until: undefined }, err] }, () => undefined, NOW)).toEqual(
+      { hint: "None left", detail: "2 accounts, none with room", out: true },
+    );
+    expect(
+      poolPickerWords({ ...pool, accounts: [err, acc({ id: "y", enabled: false })] }, () => undefined, NOW),
+    ).toEqual({ detail: "2 accounts, none with room" });
+  });
+  it("words the sidebar's tooltip a sentence a line", () => {
+    expect(accountSentence(fiction, pool.accounts, NOW)).toBe("Fiction has room.");
+    expect(accountSentence(sheep, pool.accounts, NOW)).toBe("spacesheep is used up, resets in 2 h 10 m.");
+    expect(accountSentence(acc({ id: "x", label: "Old", enabled: false }), [], NOW)).toBe("Old is off.");
+    expect(accountSentence(acc({ id: "x", label: "Misha", status: "error" }), [], NOW)).toBe(
+      "Misha needs to sign in again.",
+    );
+    expect(poolTip(pool, "lab-mac", { ...fresh, observedAt: new Date(NOW - 2 * MIN).toISOString() }, NOW)).toBe(
+      [
+        "Misha, Claude Code on lab-mac, in use.",
+        "5 hours: 62% left, resets in 2 h 21 m.",
+        "This week, all models: 80% left, resets in 3 d.",
+        "Fiction has room.",
+        "spacesheep is used up, resets in 2 h 10 m.",
+        "As of 2 m ago.",
+      ].join("\n"),
+    );
+    expect(poolTip({ ...pool, accounts: [sheep] }, "lab-mac", undefined, NOW)).toBe(
+      "Claude Code on lab-mac: 1 account.\nspacesheep is used up, resets in 2 h 10 m.",
+    );
+  });
+  it("reads a report's windows into the page's shape", () => {
+    expect(
+      eventWindows({
+        data: {
+          windows: [
+            { id: "five_hour", used_percent: 99.2, window_minutes: 300, resets_at: "2026-10-29T14:10:00Z" },
+            { id: "bad" },
+            null,
+          ],
+        },
+      }),
+    ).toEqual([{ id: "five_hour", usedPercent: 99.2, windowMinutes: 300, resetsAt: "2026-10-29T14:10:00Z" }]);
+    expect(eventWindows({ data: {} })).toEqual([]);
   });
 });

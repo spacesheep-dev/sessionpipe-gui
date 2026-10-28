@@ -7,13 +7,24 @@
 import type {
   ControlActivity,
   LimitsEntry,
+  LimitWindow,
   MachinePool,
   MachinePoolAccount,
   MachineSummary,
   ProtocolEvent,
   SessionSummary,
 } from "@shared/api";
-import { readWindow, tightest, untilWords, windowSentence } from "./limits";
+import {
+  isOut,
+  orderWindows,
+  readWindow,
+  staleWords,
+  tightest,
+  untilWords,
+  windowLabel,
+  windowSentence,
+} from "./limits";
+import { ago } from "./time";
 
 const OUT_PERCENT = 98;
 
@@ -271,3 +282,93 @@ export function loginFromDetail(detail: string | undefined): {
 
 /** The pool commands among the activity, newest first: those on the pool's own session. */
 export const isPoolActivity = (a: ControlActivity): boolean => a.kind === "pool";
+
+// ----- the picker's line, as the Agent menu draws it (§6) -----
+
+/** The Agent menu's three parts for a pooled harness, the Usage spec's picker shape: the
+ *  hint at the right is the current account's tightest value ("62% left"), the detail under
+ *  the name the room count and that account's window ("3 accounts, 2 with room · Misha,
+ *  5 hours, resets in 2 h 21 m", with "numbers as of 3 h ago" when its entry is stale), and
+ *  `out` when the hint takes the accent: "None left" when no account has room and one is
+ *  used up. Every account off or in error has no hint, only the count. */
+export function poolPickerWords(
+  pool: MachinePool,
+  entryFor: (accountId: string) => LimitsEntry | undefined,
+  now: number,
+): { hint?: string; detail?: string; out?: boolean } {
+  const room = roomWords(pool.accounts, now);
+  const current = pool.accounts.find((a) => a.current && hasRoom(a));
+  if (!current) {
+    const usedUp = pool.accounts.some((a) => a.enabled && a.status === "limited");
+    return usedUp ? { hint: "None left", detail: room, out: true } : { detail: room };
+  }
+  const name = sentenceName(current, pool.accounts);
+  const e = entryFor(current.id);
+  const t = e ? tightest(e, now) : null;
+  if (!e) return { detail: `${room} · ${name}` };
+  if (!t) {
+    const first = orderWindows(e.windows)[0];
+    return { hint: "Reset", detail: first ? `${room} · ${name}, ${windowSentence(first, now)}` : `${room} · ${name}` };
+  }
+  const r = readWindow(t, now);
+  const stale = staleWords(e, now);
+  const detail = [`${room} · ${name}`, windowLabel(t), r.when, stale ? `numbers ${stale}` : ""]
+    .filter(Boolean)
+    .join(", ");
+  return { hint: r.value, detail, out: isOut(r) };
+}
+
+// ----- the sidebar's tooltip (§7.3) -----
+
+/** One other account of the pool in a sentence: "Fiction has room.", "Spacesheep is used
+ *  up, resets in 2 h 10 m.", "Misha needs to sign in again.", "Old is off." */
+export function accountSentence(a: MachinePoolAccount, shown: readonly MachinePoolAccount[], now: number): string {
+  const name = sentenceName(a, shown);
+  const s = statusWords(a, false, now);
+  if (s.word === "Off") return `${name} is off.`;
+  if (s.action === "sign-in") return `${name} needs to sign in again.`;
+  if (s.word === "Used up") return `${name} is used up${s.after ? `,${s.after.slice(2)}` : ""}.`;
+  return `${name} has room.`;
+}
+
+/** The pooled machine's sidebar line, a sentence a line: the current account, where and
+ *  that it is in use, each of its windows, every other account's state, how old the
+ *  numbers are. With no account in room the first line is the count instead. */
+export function poolTip(
+  pool: MachinePool,
+  machine: string,
+  entry: LimitsEntry | undefined,
+  now: number,
+  agent = "Claude Code",
+): string {
+  const current = pool.accounts.find((a) => a.current && hasRoom(a));
+  const lines = current
+    ? [`${sentenceName(current, pool.accounts)}, ${agent} on ${machine}, in use.`]
+    : [`${agent} on ${machine}: ${roomWords(pool.accounts, now)}.`];
+  if (entry) lines.push(...orderWindows(entry.windows).map((w) => `${windowSentence(w, now, ": ")}.`));
+  for (const a of pool.accounts) if (a !== current) lines.push(accountSentence(a, pool.accounts, now));
+  const age = entry ? ago(entry.observedAt, now) : "";
+  if (age) lines.push(`As of ${age}.`);
+  return lines.join("\n");
+}
+
+// ----- a report's windows (§7.2) -----
+
+/** The windows a `limits.observed` carries, read into the page's shape (`used_percent` →
+ *  `usedPercent`), so the chat can say why an account was left from the report that said
+ *  so. Empty when the event has none worth reading. */
+export function eventWindows(e: Pick<ProtocolEvent, "data">): LimitWindow[] {
+  const raw = e.data?.windows;
+  if (!Array.isArray(raw)) return [];
+  const out: LimitWindow[] = [];
+  for (const w of raw as Record<string, unknown>[]) {
+    if (!w || typeof w.id !== "string" || typeof w.used_percent !== "number") continue;
+    out.push({
+      id: w.id,
+      usedPercent: w.used_percent,
+      ...(typeof w.resets_at === "string" ? { resetsAt: w.resets_at } : {}),
+      ...(typeof w.window_minutes === "number" ? { windowMinutes: w.window_minutes } : {}),
+    });
+  }
+  return out;
+}
