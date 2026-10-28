@@ -1,0 +1,289 @@
+// SPDX-License-Identifier: Apache-2.0
+// The pool's words (UX-SPEC §2): names, status words from the hello, the room count, the
+// swap and served-by sentences, the picker's line, and the readings of a session's events.
+import type { LimitsEntry, MachinePoolAccount, ProtocolEvent } from "@shared/api";
+import { describe, expect, it } from "vitest";
+import {
+  firstBack,
+  leftBecause,
+  loginFromDetail,
+  poolAgentWords,
+  pooledIds,
+  pooling,
+  roomWords,
+  rowTitle,
+  sentenceName,
+  servedBy,
+  servedWords,
+  statusWords,
+  swaps,
+  swapWords,
+  switchHint,
+} from "./pool";
+
+const NOW = Date.UTC(2026, 9, 29, 12, 0, 0);
+const MIN = 60_000;
+const H = 60 * MIN;
+const acc = (over: Partial<MachinePoolAccount> & { id: string }): MachinePoolAccount => ({
+  enabled: true,
+  status: "ready",
+  current: false,
+  ...over,
+});
+const misha = acc({ id: "a", email: "misha@example.com", label: "Misha", current: true });
+const fiction = acc({ id: "b", email: "fiction@example.com", label: "Fiction" });
+const sheep = acc({
+  id: "c",
+  email: "spacesheep@example.com",
+  status: "limited",
+  until: new Date(NOW + 2 * H + 10 * MIN).toISOString(),
+});
+
+describe("names", () => {
+  it("titles a row by its label with the email muted, else the email, never the id", () => {
+    expect(rowTitle(misha)).toEqual({ title: "Misha", muted: "misha@example.com" });
+    expect(rowTitle(sheep)).toEqual({ title: "spacesheep@example.com" });
+    expect(rowTitle({ label: "Old" })).toEqual({ title: "Old" });
+    expect(rowTitle({})).toEqual({ title: "Claude account" });
+  });
+  it("names an account in a sentence by its label, else the email's local part unless shared", () => {
+    expect(sentenceName(misha)).toBe("Misha");
+    expect(sentenceName(sheep)).toBe("spacesheep");
+    const twin = acc({ id: "d", email: "spacesheep@other.example" });
+    expect(sentenceName(sheep, [misha, sheep, twin])).toBe("spacesheep@example.com");
+    expect(sentenceName(acc({ id: "e" }))).toBe("Claude account");
+  });
+});
+
+describe("status words", () => {
+  it("come from the hello alone", () => {
+    expect(statusWords(misha, true, NOW)).toEqual({ word: "In use", tone: "fg" });
+    expect(statusWords(misha, false, NOW)).toEqual({ word: "Has room", tone: "fg-2" });
+    expect(statusWords(fiction, true, NOW)).toEqual({ word: "Has room", tone: "fg-2" });
+    expect(statusWords(sheep, true, NOW)).toEqual({ word: "Used up", tone: "needs", after: " · resets in 2 h 10 m" });
+    expect(statusWords({ ...sheep, until: undefined }, true, NOW)).toEqual({ word: "Used up", tone: "needs" });
+    expect(statusWords({ ...sheep, until: new Date(NOW - MIN).toISOString() }, true, NOW)).toEqual({
+      word: "Used up",
+      tone: "needs",
+    });
+    expect(statusWords(acc({ id: "x", status: "error" }), true, NOW)).toEqual({
+      word: "Sign in again…",
+      tone: "fg-2",
+      action: "sign-in",
+    });
+    expect(statusWords(acc({ id: "x", status: "disabled", enabled: false }), true, NOW)).toEqual({
+      word: "Off",
+      tone: "fg-3",
+    });
+    expect(statusWords(acc({ id: "x", enabled: false, current: true }), true, NOW)).toEqual({
+      word: "Off",
+      tone: "fg-3",
+    });
+  });
+});
+
+describe("the room count", () => {
+  it("counts every account, and only ready ones as room", () => {
+    expect(roomWords([misha, fiction, sheep], NOW)).toBe("3 accounts, 2 with room");
+    expect(roomWords([misha, acc({ id: "x", status: "error" }), sheep], NOW)).toBe("3 accounts, 1 with room");
+    expect(
+      roomWords([sheep, acc({ id: "x", status: "error" }), acc({ id: "y", enabled: false, status: "disabled" })], NOW),
+    ).toBe("3 accounts, none with room · first back in 2 h 10 m");
+    expect(roomWords([sheep, acc({ id: "x", status: "error" })], NOW, false)).toBe("2 accounts, none with room");
+    expect(roomWords([acc({ id: "x", status: "limited" }), acc({ id: "y", status: "error" })], NOW)).toBe(
+      "2 accounts, none with room",
+    );
+    expect(roomWords([misha], NOW)).toBe("1 account");
+    expect(roomWords([], NOW)).toBe("No accounts");
+    expect(firstBack([sheep, { until: new Date(NOW + 30 * MIN).toISOString() }, { until: "bad" }], NOW)).toBe(
+      "first back in 30 m",
+    );
+    expect(firstBack([{ until: new Date(NOW - 1).toISOString() }], NOW)).toBeNull();
+  });
+  it("words the switch's hint by state", () => {
+    expect(switchHint(true, "lab-mac")).toMatch(
+      /^Requests go to the first account .* Claude Code on lab-mac sends through sessionpipe while this is on\.$/,
+    );
+    expect(switchHint(false, "lab-mac")).toMatch(/Claude Code on lab-mac uses its own login\.$/);
+  });
+});
+
+describe("the swap sentence", () => {
+  const entry = (windows: LimitsEntry["windows"]): Pick<LimitsEntry, "windows"> => ({ windows });
+  const later = new Date(NOW + H).toISOString();
+  it("says why the account was left, from the hello's word or the account's tightest window", () => {
+    expect(leftBecause({ limitedBy: "seven_day" }, NOW)).toBe("week is used up");
+    expect(leftBecause({ limitedBy: "five_hour" }, NOW)).toBe("5 hours are used up");
+    expect(leftBecause({ limitedBy: "seven_day_fable" }, NOW)).toBe("week for Fable is used up");
+    expect(leftBecause({ limitedBy: "spend_limit" }, NOW)).toBe("spend limit is reached");
+    expect(leftBecause({ status: "error" }, NOW)).toBe("needs to sign in again");
+    expect(leftBecause({ limitedBy: "error" }, NOW)).toBe("needs to sign in again");
+    expect(leftBecause({ limitedBy: "rejected" }, NOW)).toBe("is used up");
+    expect(leftBecause({ limitedBy: "mystery" }, NOW)).toBe("is used up");
+    expect(
+      leftBecause(
+        {
+          entry: entry([
+            { id: "five_hour", usedPercent: 40, resetsAt: later },
+            { id: "seven_day", usedPercent: 98.5, resetsAt: later },
+          ]),
+        },
+        NOW,
+      ),
+    ).toBe("week is used up");
+    expect(leftBecause({ entry: entry([{ id: "five_hour", usedPercent: 100, resetsAt: later }]) }, NOW)).toBe(
+      "5 hours are used up",
+    );
+    expect(leftBecause({ entry: entry([{ id: "spend_limit", usedPercent: 112 }]) }, NOW)).toBe(
+      "spend limit is reached",
+    );
+    expect(
+      leftBecause({ status: "limited", entry: entry([{ id: "five_hour", usedPercent: 40, resetsAt: later }]) }, NOW),
+    ).toBe("5 hours are used up");
+    expect(leftBecause({ entry: entry([{ id: "five_hour", usedPercent: 40, resetsAt: later }]) }, NOW)).toBeNull();
+    expect(leftBecause({ status: "limited" }, NOW)).toBe("is used up");
+    expect(leftBecause({}, NOW)).toBeNull();
+  });
+  it("reads as the spec writes it", () => {
+    expect(swapWords("Fiction", "Misha", "week is used up")).toBe("Switched to Fiction: Misha's week is used up");
+    expect(swapWords("Fiction", undefined, "week is used up")).toBe(
+      "Switched to Fiction: its own account's week is used up",
+    );
+    expect(swapWords("Fiction", "Misha", null)).toBe("Switched to Fiction");
+    expect(swapWords("Fiction", undefined, null)).toBe("Switched to Fiction from its own account");
+  });
+});
+
+describe("served by", () => {
+  it("names the account and the clock time", () => {
+    const d = new Date(2026, 9, 29, 14, 2, 0);
+    expect(servedWords("Fiction", d.toISOString())).toBe("Served by Fiction since 14:02");
+    expect(servedWords("Fiction", "bad")).toBe("Served by Fiction since ");
+  });
+});
+
+describe("a session's events", () => {
+  const ev = (seq: number, data: Record<string, unknown>, type = "limits.observed"): ProtocolEvent => ({
+    protocol: 1,
+    id: `01${String(seq).padStart(24, "0")}`,
+    type,
+    time: new Date(NOW + seq * MIN).toISOString(),
+    tier: 1,
+    harness: { name: "claude-code" },
+    session: { id: "s", seq },
+    privacy: { rulesets: ["secrets@1"], pii: false },
+    data,
+  });
+  const w = [{ id: "five_hour", used_percent: 10 }];
+  it("finds each switch in seq order, from the session's own account", () => {
+    const events = [
+      ev(5, { windows: w, account_id: "fiction" }),
+      ev(1, { windows: w }),
+      ev(2, { windows: w, account_id: "own" }),
+      ev(3, { windows: w, account_id: "fiction" }),
+      ev(4, { windows: w }, "turn.ended"),
+      ev(6, { windows: w, account_id: "own" }),
+      ev(7, { windows: w, account_id: 7 }),
+    ];
+    expect(swaps(events, { accountId: "own" })).toEqual([
+      { seq: 3, at: new Date(NOW + 3 * MIN).toISOString(), from: "own", to: "fiction" },
+      { seq: 6, at: new Date(NOW + 6 * MIN).toISOString(), from: "fiction", to: "own" },
+    ]);
+    expect(swaps(events, {})).toMatchObject([
+      { seq: 2, to: "own" },
+      { seq: 3, from: "own", to: "fiction" },
+      { seq: 6, to: "own" },
+    ]);
+    expect(servedBy(events, { accountId: "own" })).toBeNull();
+    expect(servedBy(events.slice(0, 4), { accountId: "own" })).toEqual({
+      accountId: "fiction",
+      since: new Date(NOW + 3 * MIN).toISOString(),
+    });
+    expect(servedBy([], { accountId: "own" })).toBeNull();
+  });
+});
+
+describe("the picker and the machines", () => {
+  const pool = { on: true, harness: "claude-code", accounts: [misha, fiction, sheep] };
+  const entries = new Map<string, LimitsEntry>([
+    [
+      "a",
+      {
+        key: "claude-code a:a",
+        harness: "claude-code",
+        accountId: "a",
+        machine: "lab-mac",
+        machines: ["lab-mac"],
+        windows: [
+          {
+            id: "five_hour",
+            usedPercent: 38,
+            windowMinutes: 300,
+            resetsAt: new Date(NOW + 2 * H + 21 * MIN).toISOString(),
+          },
+          {
+            id: "seven_day",
+            usedPercent: 20,
+            windowMinutes: 10_080,
+            resetsAt: new Date(NOW + 3 * 24 * H).toISOString(),
+          },
+        ],
+        observedAt: new Date(NOW).toISOString(),
+      },
+    ],
+  ]);
+  it("says the room count and the current account's tightest window", () => {
+    expect(poolAgentWords(pool, (id) => entries.get(id), NOW)).toEqual({
+      hint: "3 accounts, 2 with room",
+      detail: "Misha, 5 hours 62% left, resets in 2 h 21 m",
+    });
+    expect(poolAgentWords({ ...pool, accounts: [fiction, misha] }, () => undefined, NOW)).toEqual({
+      hint: "2 accounts, 2 with room",
+      detail: "Misha",
+    });
+    expect(
+      poolAgentWords({ ...pool, accounts: [sheep, acc({ id: "x", status: "error" })] }, () => undefined, NOW),
+    ).toEqual({
+      hint: "2 accounts, none with room · first back in 2 h 10 m",
+      out: true,
+    });
+    expect(poolAgentWords({ ...pool, accounts: [] }, () => undefined, NOW)).toEqual({
+      hint: "No accounts",
+      out: false,
+    });
+  });
+  it("knows which ids some machine pools, and which machines pool", () => {
+    const lab = { name: "lab-mac", control: { machineId: "m", online: true, keys: [], queued: 0, pool } };
+    const desk = {
+      name: "desk-pc",
+      control: { machineId: "m2", online: true, keys: [], queued: 0, pool: { ...pool, on: false, accounts: [misha] } },
+    };
+    const plain: { name: string; control?: undefined } = { name: "studio-mac" };
+    expect(pooledIds([lab, desk, plain, lab])).toEqual(
+      new Map([
+        ["a", ["lab-mac", "desk-pc"]],
+        ["b", ["lab-mac"]],
+        ["c", ["lab-mac"]],
+      ]),
+    );
+    expect([lab, desk, plain, undefined].map(pooling)).toEqual([true, false, false, false]);
+  });
+});
+
+describe("a login.begin's detail", () => {
+  it('reads the pending id and the URL out of "<id> <URL>"', () => {
+    expect(loginFromDetail("login_8f3k2m https://claude.ai/oauth/authorize?code=true&state=abc")).toEqual({
+      url: "https://claude.ai/oauth/authorize?code=true&state=abc",
+      pendingId: "login_8f3k2m",
+      text: "",
+    });
+    expect(loginFromDetail("lg.1:a https://claude.ai/x. then paste the code")).toEqual({
+      url: "https://claude.ai/x",
+      pendingId: "lg.1:a",
+      text: ". then paste the code",
+    });
+    expect(loginFromDetail("https://claude.ai/x")).toEqual({ url: "https://claude.ai/x", pendingId: null, text: "" });
+    expect(loginFromDetail("nothing here")).toEqual({ url: null, pendingId: null, text: "nothing here" });
+    expect(loginFromDetail(undefined)).toEqual({ url: null, pendingId: null, text: "" });
+  });
+});

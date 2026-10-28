@@ -13,6 +13,7 @@ export const KIND_LABEL: Record<ControlKind, string> = {
   cancel: "cancel",
   start: "start",
   "key.add": "trust a device",
+  pool: "manage its accounts",
 };
 
 /** Why the machine (or the receiver's early check) said no. */
@@ -44,6 +45,13 @@ export const REFUSAL_WORDS: Record<string, string> = {
   file: "a file didn't reach the machine",
   // A daemon up to 0.9.0 says `mode` where CONTROL.md now says `permission`.
   mode: "the machine won't start at that permission level",
+  // The pool (DESIGN §2.3): the receiver's second look, and the daemon's own words.
+  pool_unsupported: "this machine's sessionpipe is older than account switching; update it there",
+  pool_account: "the machine's pool has no such account, or the sign-in took longer than ten minutes",
+  pool_order: "the order must name every account in the pool, each once",
+  pool_off: "the pool is off on that machine; turn it on first",
+  login: "Claude did not take the code; start over",
+  pool: "the machine could not reach Claude; try again",
 };
 
 /** The wrong-origin guard's line, e.g. "Sending works from https://studio-mac.local:7373;
