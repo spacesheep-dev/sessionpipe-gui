@@ -241,8 +241,9 @@ test.describe("search: the phone", () => {
       .locator(".sx-hit")
       .evaluateAll((els) => els.filter((el) => getComputedStyle(el).display !== "none").length);
     expect(shown).toBeLessThanOrEqual(2);
-    // Tapping a row pushes its transcript.
-    await rows(page).first().tap();
+    // Tapping a history row pushes its transcript (a live session's row opens its live page,
+    // and the mock's live sessions now mention webhooks too).
+    await rows(page).filter({ hasText: "this Mac's history" }).first().tap();
     await expect(page.getByRole("search", { name: "Find in this session" })).toBeVisible();
   });
 });
