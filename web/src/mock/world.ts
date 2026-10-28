@@ -359,6 +359,8 @@ export class World {
     let lastUser: string | undefined;
     let lastAssistant: string | undefined;
     let lastTurnEnd: string | undefined;
+    // News for someone away (readings.ts noteNews); the mock types no turn at a terminal.
+    let newsAt: string | undefined;
     const open = new Map<string, Attention>();
     const recentTools: SessionSummary["recentTools"] = [];
     let source: SessionSummary["source"] = "outbox";
@@ -401,6 +403,7 @@ export class World {
         case "session.ended":
           live = true;
           endedAt = e.time;
+          if (!newsAt || e.arrivedAt > newsAt) newsAt = e.arrivedAt;
           currentTurn = undefined;
           currentTool = undefined;
           break;
@@ -419,6 +422,7 @@ export class World {
           currentTool = undefined;
           progress = undefined;
           lastTurnEnd = e.time;
+          if (!newsAt || e.arrivedAt > newsAt) newsAt = e.arrivedAt;
           break;
         case "turn.transcript":
           lastUser = cut(String(d.user ?? ""));
@@ -549,6 +553,7 @@ export class World {
       recentTools,
       flags: [],
       turnStats: { count: 0 },
+      newsAt,
     };
   }
 

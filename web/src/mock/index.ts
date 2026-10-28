@@ -2,7 +2,15 @@
 // Mock mode: `VITE_MOCK=1` or `?mock=1` swaps the HTTP transport for an in-page World, so
 // the whole app runs with `npx vite --config web/vite.config.ts` and no server. Add
 // `&empty=1` for the first-run board.
-import { LABEL_COLORS, LABEL_NAME_MAX, type Labels, type LabelsPatch, type StreamMessage } from "@shared/api";
+import {
+  LABEL_COLORS,
+  LABEL_NAME_MAX,
+  type Labels,
+  type LabelsPatch,
+  type Marks,
+  type MarksPatch,
+  type StreamMessage,
+} from "@shared/api";
 import type { Transport } from "../data/transport";
 import { installPhoneMock } from "./phone";
 import { review } from "./review";
@@ -30,12 +38,32 @@ function mergeLabels(doc: Labels, p: LabelsPatch, known: (key: string) => boolea
   return { rev: doc.rev + 1, names, sessions };
 }
 
+/** The server's marks merge (server/ui/marks.ts), in the page: the same refusals, and a
+ *  key the World does not know is skipped. */
+function mergeMarks(doc: Marks, p: MarksPatch, known: (key: string) => boolean): Marks {
+  const read = { ...doc.read };
+  const unread = { ...doc.unread };
+  for (const [k, at] of Object.entries(p.read ?? {})) {
+    if (at !== null && (typeof at !== "string" || Number.isNaN(Date.parse(at)))) throw new Error("bad_read");
+    if (at === null) delete read[k];
+    else if (known(k)) read[k] = at;
+  }
+  for (const [k, on] of Object.entries(p.unread ?? {})) {
+    if (on !== null && on !== true) throw new Error("bad_unread");
+    if (on === null) delete unread[k];
+    else if (known(k)) unread[k] = true;
+  }
+  return { ...doc, rev: doc.rev + 1, read, unread };
+}
+
 export function createMockTransport(): Transport {
   const world = new World({ empty: new URLSearchParams(location.search).get("empty") === "1" });
   (window as unknown as { __sessionpipeMock?: World }).__sessionpipeMock = world;
   installPhoneMock(new URLSearchParams(location.search), () => world.info());
   // Labels live beside the World, as they live beside the store on the server.
   let labels: Labels = { rev: 0, names: {}, sessions: {} };
+  // Marks too; the samples made before this page opened are read.
+  let marks: Marks = { rev: 0, since: new Date().toISOString(), read: {}, unread: {} };
   const handlers = new Set<(m: StreamMessage) => void>();
   let search: ReturnType<Transport["sessionSearch"]> | null = null;
   return {
@@ -45,7 +73,7 @@ export function createMockTransport(): Transport {
       const t = setTimeout(() => {
         h.onOpen();
         const first = world.snapshot();
-        h.onMessage(first.kind === "snapshot" ? { ...first, snapshot: { ...first.snapshot, labels } } : first);
+        h.onMessage(first.kind === "snapshot" ? { ...first, snapshot: { ...first.snapshot, labels, marks } } : first);
         handlers.add(send);
         const off = world.subscribe((m) => {
           if (m.kind === "forgotten" && m.key in labels.sessions) {
@@ -53,6 +81,14 @@ export function createMockTransport(): Transport {
             delete sessions[m.key];
             labels = { ...labels, rev: labels.rev + 1, sessions };
             for (const l of handlers) l({ kind: "labels", labels });
+          }
+          if (m.kind === "forgotten" && (m.key in marks.read || m.key in marks.unread)) {
+            const read = { ...marks.read };
+            const unread = { ...marks.unread };
+            delete read[m.key];
+            delete unread[m.key];
+            marks = { ...marks, rev: marks.rev + 1, read, unread };
+            for (const l of handlers) l({ kind: "marks", marks });
           }
           h.onMessage(m);
         });
@@ -74,6 +110,15 @@ export function createMockTransport(): Transport {
       labels = mergeLabels(labels, p, known);
       for (const l of handlers) l({ kind: "labels", labels });
       return labels;
+    },
+    marks: () => latency(marks, 40),
+    patchMarks: async (p) => {
+      await latency(undefined, 60);
+      const snap = world.snapshot();
+      const known = (k: string) => snap.kind === "snapshot" && snap.snapshot.sessions.some((s) => s.key === k);
+      marks = mergeMarks(marks, p, known);
+      for (const l of handlers) l({ kind: "marks", marks });
+      return marks;
     },
     info: () => latency(world.info()),
     session: async (harness, id, q) => {

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The page's store: labels arrive whole and numbered, a change shows at once and goes
-// back when the server refuses it, and a view's state version is kept per view.
-import type { Labels, LabelsPatch } from "@shared/api";
+// back when the server refuses it, and a view's state version is kept per view. Read
+// marks the same way.
+import type { Labels, LabelsPatch, Marks, MarksPatch } from "@shared/api";
 import { describe, expect, it } from "vitest";
 import { Store } from "./store";
 import type { Transport } from "./transport";
@@ -55,5 +56,34 @@ describe("labels in the store", () => {
     store.apply({ kind: "viewState", id: "canvas", etag: '"a"' });
     store.apply({ kind: "viewState", id: "canvas", etag: '"b"' });
     expect(store.get().viewStates.get("canvas")).toBe('"b"');
+  });
+});
+
+describe("marks in the store", () => {
+  const marks = (rev: number, read: Marks["read"] = {}, unread: Marks["unread"] = {}): Marks => ({
+    rev,
+    since: "2026-10-28T10:00:00.000Z",
+    read,
+    unread,
+  });
+  const storeWith = (patch: (p: MarksPatch) => Promise<Marks>) =>
+    new Store({ patchMarks: patch } as unknown as Transport);
+
+  it("takes newer frames only, and shows a change at once until the answer or a refusal", async () => {
+    let answer: (m: Marks) => void = () => {};
+    const store = storeWith(() => new Promise<Marks>((r) => (answer = r)));
+    store.apply({ kind: "marks", marks: marks(3, { a: "2026-10-28T10:01:00.000Z" }) });
+    store.apply({ kind: "marks", marks: marks(2) });
+    expect(store.get().marks.rev).toBe(3);
+    const done = store.patchMarks({ read: { a: null, b: "2026-10-28T10:02:00.000Z" }, unread: { c: true } });
+    expect(store.get().marks).toEqual(marks(3, { b: "2026-10-28T10:02:00.000Z" }, { c: true }));
+    answer(marks(4, { b: "2026-10-28T10:02:00.000Z" }, { c: true }));
+    await done;
+    expect(store.get().marks.rev).toBe(4);
+
+    const refusing = storeWith(() => Promise.reject(new Error("bad_read")));
+    refusing.apply({ kind: "marks", marks: marks(1) });
+    await expect(refusing.patchMarks({ unread: { a: true } })).rejects.toThrow("bad_read");
+    expect(refusing.get().marks).toEqual(marks(1));
   });
 });

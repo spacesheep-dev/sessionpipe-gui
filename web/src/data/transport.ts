@@ -12,6 +12,8 @@ import type {
   Info,
   Labels,
   LabelsPatch,
+  Marks,
+  MarksPatch,
   SearchIndexStatus,
   SessionDetail,
   StreamMessage,
@@ -45,6 +47,10 @@ export interface Transport {
    *  arrives as a `labels` stream frame on every page. */
   labels(): Promise<Labels>;
   patchLabels(p: LabelsPatch): Promise<Labels>;
+  /** The person's read marks, and a merge into them (`null` clears); every page also gets
+   *  the change as a `marks` frame. */
+  marks(): Promise<Marks>;
+  patchMarks(p: MarksPatch): Promise<Marks>;
   /** Session search (web/src/search): its client arrives with the search code itself. */
   sessionSearch(): Promise<SearchClient>;
 }
@@ -222,6 +228,13 @@ export function createHttpTransport(): Transport {
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify(p),
       }).then((r) => json<Labels>(r)),
+    marks: () => get<Marks>(ROUTES.ui.marks),
+    patchMarks: (p) =>
+      fetch(apiUrl(ROUTES.ui.marks), {
+        method: "PATCH",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify(p),
+      }).then((r) => json<Marks>(r)),
     sessionSearch: () => import("../search/http").then((m) => m.httpSearch(searchFrames)),
   };
 }

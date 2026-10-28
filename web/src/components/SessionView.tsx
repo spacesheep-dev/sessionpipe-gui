@@ -5,8 +5,9 @@
 // first session opened before that, which meanwhile shows what a session shows while its
 // events load (the bar, nothing under it). What other surfaces read off a mounted view
 // (the strip's Allow / Deny as menu items) stays here, in the app's own chunk.
-import type { SessionSummary } from "@shared/api";
+import { type SessionSummary, sessionKey } from "@shared/api";
 import { lazy, type RefObject, Suspense } from "react";
+import { useSeen } from "../data/hooks";
 import { toolLabel } from "../lib/format";
 import { back } from "../lib/router";
 import type { MenuList } from "./ContextMenu";
@@ -38,6 +39,8 @@ if (typeof window !== "undefined") {
 }
 
 export function SessionView(props: SessionViewProps) {
+  // On the page it is what the person is looking at; the panel marks its active tab.
+  useSeen(props.mode === "page" ? sessionKey(props.harness, props.id) : null);
   return (
     <Suspense fallback={<SessionLoading mode={props.mode} />}>
       <Body {...props} />

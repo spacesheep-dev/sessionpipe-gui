@@ -6,9 +6,12 @@
 import {
   type ControlActivity,
   EMPTY_LABELS,
+  EMPTY_MARKS,
   type Labels,
   type LabelsPatch,
   type MachineSummary,
+  type Marks,
+  type MarksPatch,
   type SessionKey,
   type SessionSummary,
   type Stats,
@@ -40,6 +43,8 @@ export interface AppState {
   suggestions: readonly Suggestion[];
   /** The person's colour labels, the same on every device (server/ui/labels.ts). */
   labels: Labels;
+  /** What the person has seen, the same on every device (server/ui/marks.ts). */
+  marks: Marks;
   /** The newest ETag of each view's server-side state (`viewState` frames), so a mounted
    *  view can re-read what another device wrote. */
   viewStates: ReadonlyMap<string, string>;
@@ -61,6 +66,7 @@ const initial: AppState = {
   viewers: [],
   suggestions: [],
   labels: EMPTY_LABELS,
+  marks: EMPTY_MARKS,
   viewStates: new Map(),
   version: 0,
 };
@@ -138,6 +144,7 @@ export class Store {
           viewers: s.viewers ?? [],
           suggestions: s.suggestions ?? [],
           labels: s.labels ?? this.state.labels,
+          marks: s.marks ?? this.state.marks,
         });
         return;
       }
@@ -195,6 +202,9 @@ export class Store {
         // the answer to its own PATCH) changes nothing.
         if (m.labels.rev >= this.state.labels.rev) this.set({ labels: m.labels });
         return;
+      case "marks":
+        if (m.marks.rev >= this.state.marks.rev) this.set({ marks: m.marks });
+        return;
       case "viewState": {
         const viewStates = new Map(this.state.viewStates);
         viewStates.set(m.id, m.etag);
@@ -239,6 +249,31 @@ export class Store {
       return next;
     } catch (e) {
       if (this.state.labels.rev === before.rev) this.set({ labels: before });
+      throw e;
+    }
+  }
+
+  /** Mark sessions read (up to a `newsAt`) or unread, the way patchLabels sets labels:
+   *  shown at once, the server's answer replaces it, a refusal puts it back. */
+  async patchMarks(p: MarksPatch): Promise<Marks> {
+    const before = this.state.marks;
+    const read = { ...before.read };
+    for (const [k, at] of Object.entries(p.read ?? {})) {
+      if (at === null) delete read[k];
+      else read[k] = at;
+    }
+    const unread = { ...before.unread };
+    for (const [k, on] of Object.entries(p.unread ?? {})) {
+      if (on === null) delete unread[k];
+      else unread[k] = true;
+    }
+    this.set({ marks: { ...before, read, unread } });
+    try {
+      const next = await this.transport.patchMarks(p);
+      if (next.rev >= this.state.marks.rev) this.set({ marks: next });
+      return next;
+    } catch (e) {
+      if (this.state.marks.rev === before.rev) this.set({ marks: before });
       throw e;
     }
   }

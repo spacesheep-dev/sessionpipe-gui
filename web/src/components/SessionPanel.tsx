@@ -26,7 +26,7 @@ import {
   useState,
 } from "react";
 import { useStartTitles } from "../control/Starting";
-import { useAppState, useStore } from "../data/hooks";
+import { useAppState, useSeen, useStore } from "../data/hooks";
 import { agentLabel, parseTab } from "../lib/agents";
 import { focusTab, tablistKey } from "../lib/focus";
 import { repoShort, sessionTitle } from "../lib/format";
@@ -151,6 +151,8 @@ export function SessionPanel({ phone }: { phone: boolean }) {
   const { tabs, active } = useSplit();
   useHistoryTitles();
   const activeKey = tabs[active] ?? null;
+  // The active tab is on screen beside the page: it is seen as the page would be.
+  useSeen(activeKey ? parseTab(activeKey).session : null);
   const width = useSplitWidth();
   const sessions = useAppState().sessions;
   /** Summaries the views learned, for tabs whose session is not in the snapshot. */
