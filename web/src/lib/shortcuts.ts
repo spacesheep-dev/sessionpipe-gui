@@ -434,6 +434,14 @@ export const ACTIONS: readonly Action[] = [
   { id: "session.openPage", label: "Open as a page", group: "Session", scope: "session", keys: ["o"] },
   { id: "session.older", label: "Older turns", group: "Session", scope: "session", keys: ["."] },
   { id: "session.latest", label: "Jump to the newest", group: "Session", scope: "session", keys: ["end", "shift+g"] },
+  {
+    id: "session.ask",
+    label: "Ask another agent",
+    group: "Session",
+    scope: "session",
+    keys: ["shift+a"],
+    hint: "the Handoff sheet: another agent on the same machine, its answer brought back here",
+  },
 
   { id: "panel.prev", label: "Previous tab", group: "Side panel", scope: "panel", keys: ["[", "ctrl+shift+tab"] },
   { id: "panel.next", label: "Next tab", group: "Side panel", scope: "panel", keys: ["]", "ctrl+tab"] },
@@ -507,6 +515,7 @@ export const ACTIONS: readonly Action[] = [
     keys: ["mod+shift+f"],
     inInputs: true,
   },
+
 ];
 
 const byId = new Map(ACTIONS.map((a) => [a.id, a]));

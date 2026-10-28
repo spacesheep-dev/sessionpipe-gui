@@ -37,6 +37,8 @@ import { useSimple } from "../lib/settings";
 import { hintFor, IS_MAC, matches, useShortcutMap } from "../lib/shortcuts";
 import { openSplit, useSplitKey } from "../lib/split";
 import { setSkin, setTextSize, setTheme, TEXT_SIZES, type Theme, useSettings } from "../lib/theme";
+import { askOff } from "../orchestrate/handoff/handoff";
+import { openHandoffFor } from "../orchestrate/handoff/handoffState";
 import {
   openTranscriptRow,
   PALETTE_MIN,
@@ -644,6 +646,21 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
             if (!can.ok) setNote({ text: can.why, err: true });
           },
           onItsPage(s) ? hintFor("session.prompt") : undefined,
+        );
+        // The Handoff sheet (orchestrate/handoff): the row runs when its machine can take
+        // an ask; else it says why, the way a message that cannot be sent does.
+        add(
+          "Ask another agent…",
+          () => {
+            const off = askOff(s, s.machine ? machines.get(s.machine)?.control : undefined);
+            if (off) {
+              setNote({ text: off, err: true });
+              return;
+            }
+            closePalette();
+            openHandoffFor(s);
+          },
+          hintFor("session.ask") || undefined,
         );
         if (!simple && !(isCtx && splitActive === s.key && !onItsPage(s)))
           add(

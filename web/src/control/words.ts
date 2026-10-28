@@ -42,6 +42,7 @@ export const REFUSAL_WORDS: Record<string, string> = {
   permission: "the machine won't start at that permission level",
   model: "the agent won't run that model there",
   file: "a file didn't reach the machine",
+  handoff: "this machine did not say it takes handoffs; the answer would not come back",
   // A daemon up to 0.9.0 says `mode` where CONTROL.md now says `permission`.
   mode: "the machine won't start at that permission level",
 };

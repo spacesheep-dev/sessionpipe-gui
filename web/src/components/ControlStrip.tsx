@@ -60,6 +60,10 @@ export interface ControlStripProps {
   stream?: { state: "reconnecting" | "offline"; retry: () => void };
   /** The next send asks for the passkey (no day grant yet): the line offers Unlock now. */
   unlock?: () => void;
+  /** Opens the Ask another agent sheet (orchestrate/handoff), at the right end of the line
+   *  under the field; absent, no button (hidden, never disabled: the line's own reason
+   *  already says why sending is off). */
+  ask?: () => void;
   /** Per attention id: "sent" while an answer is out (no second one goes), "closed" once
    *  the machine said the prompt is no longer open (answered in its terminal, or expired). */
   answers?: Readonly<Record<string, "sent" | "closed">>;
@@ -191,6 +195,7 @@ export function ControlStrip({
   untrusted = false,
   stream,
   unlock,
+  ask,
 }: ControlStripProps) {
   const [text, setText] = useState(() => readDraft(session.key));
   // The same strip shown for another session takes that session's own draft.
@@ -524,15 +529,22 @@ export function ControlStrip({
           </button>
         </div>
       </div>
-      {reason && (
-        <p className="ctl-foot" data-reason={reason.kind}>
-          <span
-            className={`ctl-hint ctl-context ${reason.tone === "err" ? "ctl-note--err" : ""}`}
-            data-wrong-origin={reason.kind === "wrong-origin" ? "" : undefined}
-          >
-            {reason.text}
-          </span>
-          {reason.action}
+      {(reason || ask) && (
+        <p className="ctl-foot" data-reason={reason?.kind}>
+          {reason && (
+            <span
+              className={`ctl-hint ctl-context ${reason.tone === "err" ? "ctl-note--err" : ""}`}
+              data-wrong-origin={reason.kind === "wrong-origin" ? "" : undefined}
+            >
+              {reason.text}
+            </span>
+          )}
+          {reason?.action}
+          {ask && (
+            <button type="button" className="btn btn--ghost btn--sm ctl-ask-agent" onClick={ask} data-ctl-ask>
+              Ask another agent…
+            </button>
+          )}
         </p>
       )}
     </form>

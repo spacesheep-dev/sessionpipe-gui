@@ -4,7 +4,7 @@
 // device key in the native app, signer.ts), sent through POST /api/ui/control/send. The
 // string is written once and the signature covers those exact bytes; the server passes it
 // on byte for byte.
-import type { ControlActivity, StartFile, StartPermission } from "@shared/api";
+import type { ControlActivity, SessionKey, StartFile, StartPermission } from "@shared/api";
 import { noteOwnSend } from "../lib/toasts";
 import { ControlError, controlApi, type SendBody, type TrustedKey } from "./api";
 import { nonce } from "./bytes";
@@ -15,7 +15,10 @@ export const COMMAND_TYPE = "sessionpipe.control";
 export const KEY_STORE_SESSION = "sessionpipe:keys";
 
 export type CommandFields =
-  | { kind: "prompt"; session: string; text: string }
+  /** `replyTo` (CONTROL.md §3.1 `reply_to`, a handoff): the session on the same machine
+   *  the daemon relays the answer into. Inside the signed bytes; only when the machine's
+   *  hello said `handoff` (orchestrate/handoff decides). */
+  | { kind: "prompt"; session: string; text: string; replyTo?: SessionKey }
   | { kind: "permission.answer"; session: string; for: string; decision: "allow" | "deny"; note?: string }
   | { kind: "cancel"; session: string; note?: string }
   /** `files`, `permission` and `model` only when the machine's hello advertised them
@@ -28,6 +31,7 @@ export type CommandFields =
       files?: StartFile[];
       permission?: StartPermission;
       model?: string;
+      replyTo?: SessionKey;
     }
   /** A device this browser's passkey vouches for: the machine adds `key` to its store. */
   | { kind: "key.add"; key: TrustedKey; name?: string };
@@ -39,6 +43,7 @@ export function commandString(machine: string, f: CommandFields): string {
   switch (f.kind) {
     case "prompt":
       o.text = f.text;
+      if (f.replyTo) o.reply_to = f.replyTo;
       break;
     case "permission.answer":
       o.for = f.for;
@@ -55,6 +60,7 @@ export function commandString(machine: string, f: CommandFields): string {
         o.files = f.files.map((x) => ({ name: x.name, type: x.type, size: x.size, sha256: x.sha256 }));
       if (f.permission) o.permission = f.permission;
       if (f.model) o.model = f.model;
+      if (f.replyTo) o.reply_to = f.replyTo;
       break;
     case "key.add":
       // The key whole: a device key's type, store and uv are inside the signed bytes, or
@@ -77,6 +83,9 @@ export interface SendOptions {
   /** Fires right before a prompt, so the page can say what the tap is for. */
   onTap?: () => void;
   expiresInS?: number;
+  /** The session whose page sends it (`SendBody.from`): unsigned, the receiver's own note
+   *  on the activity, so the page shows the ask at once while the events are on their way. */
+  from?: SessionKey;
 }
 
 /** Sign `cmd` for `rp` with the day grant (one passkey tap, or one Touch ID, a day), or with a confirm. */
@@ -104,6 +113,7 @@ export async function sendCommand(
     const signed = await signCommand(rp, cmd, { ...o, fresh });
     const body: SendBody = { machineId, ...signed };
     if (o.expiresInS) body.expires_in_s = o.expiresInS;
+    if (o.from) body.from = o.from;
     const carried = await controlApi.send(body);
     noteOwnSend(carried.id);
     return carried;
