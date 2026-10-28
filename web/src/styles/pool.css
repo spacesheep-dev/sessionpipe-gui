@@ -122,6 +122,7 @@
   opacity: 0;
   cursor: grab;
   touch-action: none;
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 .pool-grip:focus-visible {
   outline: var(--focus-width) solid var(--focus);
@@ -251,6 +252,7 @@
   font-size: var(--text-md);
   text-align: left;
   cursor: default;
+  transition: color var(--dur-fast) var(--ease-out);
 }
 .pool-add:focus-visible {
   outline: var(--focus-width) solid var(--focus);
@@ -275,6 +277,7 @@
   text-decoration-color: var(--line-2);
   text-underline-offset: 3px;
   cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
 }
 .pool-setup:hover {
   color: var(--fg);
