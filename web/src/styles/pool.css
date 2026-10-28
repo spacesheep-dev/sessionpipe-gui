@@ -32,7 +32,8 @@
   margin: 2px 0 6px 24px;
 }
 .pool-section .notice {
-  margin: 4px 0 6px;
+  /* The well starts at the text column, as the note under it and the switch's label do. */
+  margin: 4px 0 6px 24px;
 }
 /* Why nothing can be signed here: the Machines page's line, above the first section. */
 .usage .machines-note {
