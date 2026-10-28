@@ -48,6 +48,31 @@ describe("stored entries", () => {
   });
 });
 
+describe("Undo", () => {
+  afterEach(() => {
+    vi.doUnmock("./toasts");
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("puts back the entry a Hide replaced, so Hide until it needs you isn't lost", async () => {
+    let stored = JSON.stringify({ "codex:b": { since: T0, until: "needs" } });
+    vi.stubGlobal("localStorage", { getItem: () => stored, setItem: (_: string, v: string) => (stored = v) });
+    const undos: (() => void)[] = [];
+    vi.doMock("./toasts", () => ({ pushUndo: (o: { undo: () => void }) => undos.push(o.undo) }));
+    vi.resetModules();
+    const { hide, hiddenNow } = await import("./hidden");
+    // it needs you, so it shows; e hides this one prompt, then Undo
+    hide("codex:b", T1, { title: "nightly build" });
+    undos.pop()!();
+    expect(hiddenNow({ key: "codex:b", stateSince: "2026-10-28T11:00:00.000Z", state: "working" })).toBe(true);
+    // a first Hide's Undo still unhides
+    hide("gemini:e", T1, { title: "e" });
+    undos.pop()!();
+    expect(JSON.parse(stored)).toEqual({ "codex:b": { since: T0, until: "needs" } });
+  });
+});
+
 describe("hiddenCount", () => {
   const row = (key: string, machine: string, state: SessionSummary["state"], stateSince = T1) =>
     ({ key, machine, state, stateSince }) as SessionSummary;

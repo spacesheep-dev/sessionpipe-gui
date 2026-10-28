@@ -100,21 +100,28 @@ export function unhide(key: string): void {
   write(next);
 }
 
+/** Undo puts back the entry a Hide replaced: a Hide until it needs you, hidden again
+ *  while it needs you and then undone, still waits for the next time. */
+const undoTo = (key: string, was: Entry | undefined) => () =>
+  was === undefined ? unhide(key) : write({ ...read(), [key]: was });
+
 /** Hide at once, with "Hidden · Undo" for six seconds (⌘Z too). */
 export function hide(key: string, since: string, o: { title: string; session?: SessionKey }): void {
+  const was = read()[key];
   write({ ...read(), [key]: since });
-  pushUndo({ id: `hide|${key}`, title: "Hidden", body: o.title, session: o.session, undo: () => unhide(key) });
+  pushUndo({ id: `hide|${key}`, title: "Hidden", body: o.title, session: o.session, undo: undoTo(key, was) });
 }
 
 /** Hide until it needs you: new turns leave it hidden; Undo as for Hide. */
 export function hideUntilNeeded(key: string, o: { title: string; session?: SessionKey }): void {
+  const was = read()[key];
   write({ ...read(), [key]: { since: new Date().toISOString(), until: "needs" } });
   pushUndo({
     id: `hide|${key}`,
     title: "Hidden until it needs you",
     body: o.title,
     session: o.session,
-    undo: () => unhide(key),
+    undo: undoTo(key, was),
   });
 }
 
