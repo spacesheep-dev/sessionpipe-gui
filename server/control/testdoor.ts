@@ -58,6 +58,7 @@ const DOOR_FACTS: Hello = {
   promptFiles: false,
   start: null,
   keyTypes: null,
+  pool: null,
 };
 
 export function registerTestDoor(router: Router, d: TestDoorDeps): void {

@@ -148,6 +148,48 @@ away. The well-known's `control.inherit: true` tells a daemon this receiver show
 inherit machine as that, so it may pair or switch to inherit with it (CONTROL.md §2).
 Demo mode puts its machines here through `demo` (ids `m_demo-…`, server/demo/machine.ts).
 
+## The pool (DESIGN §2.3: hello `pool`, the `pool` command)
+
+A machine whose sessionpipe (0.11) pools Claude accounts sends `pool` in every hello
+(`{on, harness, accounts[]}`, `{on: false, accounts: []}` when nothing is set up), and a
+hello at once when the pool changes. `parse.ts` reads it strictly: the object needs `on`,
+a harness and an `accounts` list, or there is no pool (the rest of the hello stands); an
+account that breaks its shape (no id, an unknown `status`, `enabled` not a boolean) is
+dropped, never the pool; a malformed `email`, `label`, `until`, `limited_by` or window is
+dropped from its account; ids once each, at most 20, in the machine's order. It lands on
+`MachineControl.pool` (`shared/api.ts` `MachinePool`, `MachinePoolAccount`: `id`, `email?`,
+`label?`, `enabled`, `status` ready · limited · error · disabled, `current`, `until?`,
+`windows?`, `limitedBy?`) and, like every hello fact, a hello without it takes it away. An
+account's `windows` (its freshest numbers, idle or not) feed the limits store
+(`server/ui/limits.ts` `followControl`), dated by the hello, newest wins against the
+events'; a `limits.observed` with `data.account_id` is keyed by that account, the one that
+served the request.
+
+The command is kind `pool` on session `sessionpipe:pool` with `pool_action` (`on`, `off`,
+`enable`, `disable`, `remove`, `order`, `refresh`, `login.begin`, `login.complete`),
+`pool_account` (`^[A-Za-z0-9._:-]{1,128}$`: the account for enable / disable / remove,
+optionally for refresh, the pending login id for login.complete), `pool_order` (order:
+every account id once, at most 20) and `pool_code` (login.complete: the pasted
+`code#state`, at most 512 characters, one line); on, off and login.begin take nothing
+else. It goes through `POST /send` like any command; the page signs on, off, remove and
+login.complete with a fresh confirm (`POOL_CONFIRM_ACTIONS`), never the day grant. This receiver's sessionpipe-core (0.10.0) closes
+its kind set in `parseCommand`, which its verifier runs first, so `pool.ts` verifies the
+kind itself: its own strict parser for the fields, then the core's exported primitives
+(`parseGrant`, `verifyAssertion`, `sha256`) in the core's order with the core's refusal
+codes, and the day key's P-256 signature over the exact bytes checked here; once a core
+that lists `pool` is installed (`coreTakesPool()`), the core's `verifyCommand` decides.
+The second look (`precheck.ts`) refuses `pool_unsupported` for a machine whose hello has
+no `pool`, `pool_account` for an id the pool does not list (login.complete's pending id
+excepted), `pool_order` for an order that does not name every account once. The activity
+carries `poolAction` and `poolAccount`, its `text` the command in words ("Turn the pool
+on", "Move Fiction first", "Refresh fiction@example.com"), and the machine's ack `detail`
+as it came: the pool's summary line ("on · 3 accounts · 2 with room · serving Fiction"),
+or for `login.begin` "<pending login id> <URL>" (`web/src/lib/pool.ts` reads it). The
+machine's own codes (`shared/api.ts` `POOL_CODES`): refused `pool_account` (unknown, or a
+sign-in older than ten minutes), `pool_order`, `pool_off` (refresh and the sign-ins need
+the pool on); failed `login` (the vendor rejected the code), `pool` (the vendor call did
+not go through); `unsupported` when the daemon knows the kind but the machine cannot pool.
+
 ## The machine wire (for reference)
 
 `POST {control}/pair` (sink token, or none + `poll_key`) → 201 `control-pair-started`;

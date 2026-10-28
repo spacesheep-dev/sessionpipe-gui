@@ -259,6 +259,29 @@ describe("readings", () => {
     expect(sum.lastAt).toBe(ended.lastAt);
   });
 
+  it("reads which account the pool serves a session with, from limits.observed.account_id", () => {
+    const s = new Session();
+    const windows = [{ id: "five_hour", used_percent: 23.5, window_minutes: 300 }];
+    store.ingest([s.ev("session.started", {}, { session: { account_id: "own" } }), s.ev("turn.started")], "http");
+    // The session's own account, or no account at all: nothing to say.
+    store.ingest([s.ev("limits.observed", { windows, account_id: "own" }, { tier: 1 })], "http");
+    store.ingest([s.ev("limits.observed", { windows }, { tier: 1 })], "http");
+    expect(store.session(KEY)!.servedBy).toBeUndefined();
+    const moved = s.ev("limits.observed", { windows, account_id: "fiction" }, { tier: 1 });
+    store.ingest([moved], "http");
+    expect(store.session(KEY)!.servedBy).toEqual({ accountId: "fiction", since: moved.time });
+    // The same account again keeps `since`; one without an id changes nothing.
+    store.ingest([s.ev("limits.observed", { windows, account_id: "fiction" }, { tier: 1 })], "http");
+    store.ingest([s.ev("limits.observed", { windows }, { tier: 1 })], "http");
+    expect(store.session(KEY)!.servedBy).toEqual({ accountId: "fiction", since: moved.time });
+    const again = s.ev("limits.observed", { windows, account_id: "work" }, { tier: 1 });
+    store.ingest([again], "http");
+    expect(store.session(KEY)!.servedBy).toEqual({ accountId: "work", since: again.time });
+    // Back on its own account: cleared.
+    store.ingest([s.ev("limits.observed", { windows, account_id: "own" }, { tier: 1 })], "http");
+    expect(store.session(KEY)!.servedBy).toBeUndefined();
+  });
+
   it("comes back from done when the session starts again", () => {
     const s = new Session();
     store.ingest([s.ev("session.started"), s.ev("turn.started"), s.ev("session.ended", { reason: "other" })], "http");

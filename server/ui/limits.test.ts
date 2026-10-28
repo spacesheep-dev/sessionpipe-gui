@@ -186,6 +186,83 @@ describe("LimitsStore", () => {
     expect(limits.list()).toHaveLength(1);
   });
 
+  it("keys a pooled report by the account that served it (data.account_id), else the session's own", () => {
+    const own = "acc-own";
+    const served = "acc-served";
+    expect(limits.observe(observed({ windows: [FIVE] }, { account: own }))).toBe(true);
+    expect(limits.observe(observed({ windows: [WEEK], account_id: served }, { account: own }))).toBe(true);
+    expect(limits.list().map((e) => [e.key, e.accountId, e.windows[0]?.id])).toEqual([
+      ["claude-code a:acc-own", own, "five_hour"],
+      ["claude-code a:acc-served", served, "seven_day"],
+    ]);
+    // A session with no account of its own still names the account that served it.
+    limits.observe(observed({ windows: [FIVE], account_id: "acc-pooled" }, { harness: "claude-code" }));
+    expect(limits.list().map((e) => e.key)).toContain("claude-code a:acc-pooled");
+  });
+
+  it("takes a hello's pooled windows as a source, dated by the hello, newest wins", () => {
+    const machine = (
+      lastHelloAt: string,
+      windows: LimitsEntry["windows"] | undefined,
+      id = "m_realmachine000000001",
+    ) => ({
+      name: "lab-mac",
+      lastAt: lastHelloAt,
+      harnesses: {},
+      sessions: 0,
+      working: 0,
+      needsYou: 0,
+      control: {
+        machineId: id,
+        online: true,
+        keys: [],
+        queued: 0,
+        lastHelloAt,
+        pool: {
+          on: true,
+          harness: "claude-code",
+          accounts: [
+            {
+              id: "acc-idle",
+              enabled: true,
+              status: "limited" as const,
+              current: false,
+              ...(windows ? { windows } : {}),
+            },
+            { id: "acc-none", enabled: true, status: "ready" as const, current: true },
+          ],
+        },
+      },
+    });
+    const idle = [{ id: "five_hour", usedPercent: 99.2, windowMinutes: 300 }];
+    expect(limits.observeMachine(machine(minutesAgo(1), idle))).toBe(true);
+    expect(limits.list()).toMatchObject([
+      { key: "claude-code a:acc-idle", machine: "lab-mac", windows: idle, observedAt: expect.any(String) },
+    ]);
+    expect(frames.at(-1)).toMatchObject({ kind: "limits" });
+    // An event a minute later wins over the hello; an older hello does not take it back.
+    const now = new Date().toISOString();
+    expect(limits.observe(observed({ windows: [FIVE], account_id: "acc-idle" }, { time: now, account: "other" }))).toBe(
+      true,
+    );
+    expect(limits.observeMachine(machine(minutesAgo(5), idle))).toBe(false);
+    expect(limits.list()[0]?.windows[0]?.usedPercent).toBe(FIVE.used_percent);
+    // Nothing to read: no pool, no hello time, no windows.
+    expect(limits.observeMachine({ ...machine(now, idle), control: undefined })).toBe(false);
+    expect(
+      limits.observeMachine({
+        ...machine(now, idle),
+        control: { ...machine(now, idle).control, lastHelloAt: undefined },
+      }),
+    ).toBe(false);
+    expect(limits.observeMachine(machine(now, undefined))).toBe(false);
+    // A demo machine's stay in memory, and go with demo mode.
+    expect(limits.observeMachine(machine(now, idle, "m_demo-lab-mac0000"))).toBe(true);
+    expect(JSON.parse(readFileSync(path.join(tmp.dir, "limits.json"), "utf8")).entries).toHaveLength(1);
+    limits.dropDemo();
+    expect(limits.list()[0]?.windows[0]?.usedPercent).toBe(FIVE.used_percent);
+  });
+
   it("keeps the demo's numbers in memory only, under a real report, and drops them with demo mode", () => {
     limits.observe(observed({ windows: [FIVE] }, { account: "demo", source: "demo" }));
     expect(limits.list().map((e) => e.key)).toEqual(["claude-code a:demo"]);

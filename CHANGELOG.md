@@ -8,6 +8,16 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Added
 
+- **Several Claude accounts on one machine.** A machine whose sessionpipe pools accounts
+  (`sessionpipe pool`, 0.11) says so in its hello, and the GUI reads the pool: the accounts
+  in the machine's order, which one is in use, which is used up and when it is back, which
+  needs signing in again, and each one's freshest numbers on the Usage page even while it is
+  idle. Turning the pool on or off, reordering, enabling, disabling, removing and refreshing
+  an account, and signing a new one in, are signed `pool` commands through the same channel
+  as everything else, verified here before they are carried; a machine whose hello has no
+  pool is told so before anything is queued. A session the pool moved to another account
+  says which one serves it and since when, and its chat shows the switch. Demo mode has a
+  machine with the pool on, one with an account in error, and one with the pool off.
 - **How much each account has left.** A Usage page, a line per account in the sidebar, and
   each agent in New session say how much of its 5-hour and weekly windows is left and when
   they reset, from sessionpipe's `limits.observed`. Claude Code's week is "This week, all

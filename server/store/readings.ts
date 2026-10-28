@@ -419,7 +419,15 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
     if (turns !== undefined && turns > s.counts.turns) s.counts.turns = turns;
   } else if (ev.type === "limits.observed" && !first) {
     // The account's numbers, not the session's activity (server/ui/limits.ts keeps them):
-    // they never move lastAt, so they never wake a session or keep it working.
+    // they never move lastAt, so they never wake a session or keep it working. One thing
+    // is the session's: `data.account_id` (the pool, DESIGN §2.3) names the account that
+    // served the request. Another than the session's own means the pool moved it there;
+    // `since` is the first such report in a row for that account. Its own account again
+    // clears it; a report with no account id says nothing either way.
+    const served = str(d.account_id);
+    if (served && served !== s.accountId) {
+      if (s.servedBy?.accountId !== served) s.servedBy = { accountId: served, since: at };
+    } else if (served) delete s.servedBy;
   } else {
     if (first || !rec.live) {
       // The first live event: a backfill's span, if any, is history before it.

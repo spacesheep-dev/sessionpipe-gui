@@ -27,6 +27,8 @@ import type {
   KeyType,
   MachineControl,
   MachineMode,
+  MachinePool,
+  PoolAction,
   StartFile,
   StartPermission,
   TrustedKey,
@@ -34,6 +36,7 @@ import type {
 import type { DeviceSignature } from "./devicekeys.js";
 import { FileStore } from "./files.js";
 import { type AckIn, type HarnessAccount, type Hello, isFinal } from "./parse.js";
+import type { PoolCommand } from "./pool.js";
 import { machineTakesTilde } from "./tilde.js";
 
 /** Demo mode's machines have ids under this prefix (MACHINE_RE: `m_` and 16–40 more). */
@@ -133,6 +136,8 @@ export interface MachineRow {
   start?: Record<string, HarnessStartOptions>;
   /** Pairing or hello `key_types`; absent means passkeys only (an older daemon). */
   keyTypes?: KeyType[];
+  /** The last hello's `pool` (sessionpipe 0.11); said again each time, so absent is absent. */
+  pool?: MachinePool;
   waiting?: string[];
   lastHelloAt?: string;
   lastPollAt?: string;
@@ -195,6 +200,9 @@ export interface MessageRow {
   files?: StartFile[];
   /** What the machine ran the start with (`taken`, `delivered`). */
   applied?: Applied;
+  /** A pool command's action and account, as signed (pool.ts read them). */
+  poolAction?: PoolAction;
+  poolAccount?: string;
 }
 
 interface MachinesFile {
@@ -253,6 +261,8 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.model) a.model = m.model;
   if (m.files) a.files = m.files;
   if (m.applied) a.applied = m.applied;
+  if (m.poolAction) a.poolAction = m.poolAction;
+  if (m.poolAccount) a.poolAccount = m.poolAccount;
   return a;
 }
 
@@ -261,7 +271,38 @@ function describe(cmd: ControlCommand): string | undefined {
   if (typeof cmd.text === "string") return cmd.text;
   if (cmd.kind === "permission.answer") return cmd.note ? `${cmd.decision}: ${cmd.note}` : cmd.decision;
   if (cmd.kind === "key.add") return cmd.name ? `trust ${cmd.name}` : "trust a new device";
+  if ((cmd.kind as string) === "pool") return describePool(cmd as unknown as PoolCommand);
   return cmd.note;
+}
+
+/** A pool command in words, as the activity shows it: "Turn the pool on", "Move Fiction
+ *  first", "Refresh dev@example.com". `names` turns an account id into what the person
+ *  calls it (its label, else its email, else the id itself); the activity keeps the id. */
+export function describePool(cmd: PoolCommand, names: (id: string) => string = (id) => id): string {
+  const who = cmd.pool_account ? names(cmd.pool_account) : "an account";
+  if (cmd.pool_action === "refresh" && !cmd.pool_account) return "Refresh usage";
+  switch (cmd.pool_action) {
+    case "on":
+      return "Turn the pool on";
+    case "off":
+      return "Turn the pool off";
+    case "enable":
+      return `Turn ${who} on`;
+    case "disable":
+      return `Turn ${who} off`;
+    case "remove":
+      return `Remove ${who}`;
+    case "refresh":
+      return `Refresh ${who}`;
+    case "order": {
+      const first = cmd.pool_order?.[0];
+      return first ? `Move ${names(first)} first` : "Reorder the accounts";
+    }
+    case "login.begin":
+      return "Sign in to Claude";
+    case "login.complete":
+      return "Finish signing in";
+  }
 }
 
 type Waiter = { resolve: (messages: MessageRow[]) => void; timer: NodeJS.Timeout };
@@ -408,6 +449,8 @@ export class ControlState {
     else delete m.start;
     if (h.keyTypes) m.keyTypes = h.keyTypes;
     else delete m.keyTypes;
+    if (h.pool) m.pool = h.pool;
+    else delete m.pool;
   }
 
   /** Mint the machine's own bearer token (once, at its first pairing). Returned in clear
@@ -476,6 +519,7 @@ export class ControlState {
     if (this.takesTilde && machineTakesTilde(m)) c.tilde = true;
     if (m.start) c.start = m.start;
     if (m.keyTypes) c.keyTypes = m.keyTypes;
+    if (m.pool) c.pool = m.pool;
     return c;
   }
 
@@ -592,8 +636,16 @@ export class ControlState {
     if (signed.csig) row.csig = signed.csig;
     if (signed.grant) row.grant = signed.grant;
     if (signed.confirm) row.confirm = signed.confirm;
-    const text = describe(cmd);
+    const text =
+      (cmd.kind as string) === "pool"
+        ? describePool(cmd as unknown as PoolCommand, (id) => this.accountName(m, id))
+        : describe(cmd);
     if (text !== undefined) row.text = text;
+    if ((cmd.kind as string) === "pool") {
+      const c = cmd as unknown as PoolCommand;
+      row.poolAction = c.pool_action;
+      if (c.pool_account) row.poolAccount = c.pool_account;
+    }
     if (cmd.kind === "start") {
       // The fields a start may carry beyond core 0.7's type (CONTROL.md §3.1); the caller's
       // pre-check (ui.ts) already held them to the machine's hello.
@@ -612,6 +664,16 @@ export class ControlState {
     this.onMessage(row);
     this.wake(m.id);
     return row;
+  }
+
+  /** What the person calls a pooled account on this machine: its pool label, else its
+   *  email (from the pool or the hello's accounts), else the id as it is. */
+  private accountName(m: MachineRow, id: string): string {
+    const pooled = m.pool?.accounts.find((a) => a.id === id);
+    if (pooled?.label) return pooled.label;
+    if (pooled?.email) return pooled.email;
+    const named = m.accounts?.find((a) => a.id === id);
+    return named?.email ?? named?.name ?? id;
   }
 
   message(machineId: string, id: string): MessageRow | undefined {
