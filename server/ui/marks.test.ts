@@ -69,6 +69,29 @@ describe("MarkStore", () => {
     }
   });
 
+  it("never moves a read mark back: a late device's older newsAt changes nothing", () => {
+    const tmp = tempDir();
+    try {
+      const store = new MarkStore(
+        tmp.dir,
+        () => true,
+        () => T0,
+      );
+      const frames: StreamMessage[] = [];
+      store.subscribe((m) => frames.push(m));
+      store.patch({ read: { a: iso(9) } });
+      store.patch({ read: { a: iso(4) } });
+      expect(store.get()).toMatchObject({ rev: 1, read: { a: iso(9) } });
+      expect(frames).toHaveLength(1);
+      // Cleared, it starts again from anything.
+      store.patch({ read: { a: null } });
+      store.patch({ read: { a: iso(4) } });
+      expect(store.get()).toMatchObject({ rev: 3, read: { a: iso(4) } });
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
   it("refuses unknown fields, a read that is not an ISO time and an unread that is not true, changing nothing", () => {
     const tmp = tempDir();
     try {

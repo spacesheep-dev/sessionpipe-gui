@@ -131,7 +131,7 @@ function names above.
 | GET `/labels` | `Labels`: `{ rev, names, sessions }` |
 | PATCH `/labels` | `LabelsPatch` (JSON only, 415 otherwise): a merge, `null` clears → `Labels`; 400 `malformed` / `bad_label` / `bad_name`, 404 `not_found` (a session the store does not know), 413 `too_many` / `too_large` |
 | GET `/marks` | `Marks`: `{ rev, since, read, unread }` |
-| PATCH `/marks` | `MarksPatch` (JSON only, 415 otherwise): a merge, `null` clears, a key the store does not know is skipped → `Marks`; 400 `malformed` (an unknown field) / `bad_read` (not an ISO time) / `bad_unread` (not `true`), 413 `too_large`. At most 5,000 keys a map and 256 KB, the oldest read values dropped first |
+| PATCH `/marks` | `MarksPatch` (JSON only, 415 otherwise): a merge, `null` clears, a read mark never moves back, a key the store does not know is skipped → `Marks`; 400 `malformed` (an unknown field) / `bad_read` (not an ISO time) / `bad_unread` (not `true`), 413 `too_large`. At most 5,000 keys a map and 256 KB, the oldest read values dropped first |
 | GET `/events?limit&before&harness&machine&type&session&q` | `FeedPage`, newest first |
 | POST `/sessions/:harness/:id/forget` | 204; same effect as a `session.forgotten` event |
 | POST `/token/rotate` | `{ sinkToken }` (loopback only) |

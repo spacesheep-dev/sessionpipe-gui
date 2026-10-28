@@ -46,7 +46,7 @@ function mergeMarks(doc: Marks, p: MarksPatch, known: (key: string) => boolean):
   for (const [k, at] of Object.entries(p.read ?? {})) {
     if (at !== null && (typeof at !== "string" || Number.isNaN(Date.parse(at)))) throw new Error("bad_read");
     if (at === null) delete read[k];
-    else if (known(k)) read[k] = at;
+    else if (known(k) && !(read[k] && read[k] >= at)) read[k] = at;
   }
   for (const [k, on] of Object.entries(p.unread ?? {})) {
     if (on !== null && on !== true) throw new Error("bad_unread");

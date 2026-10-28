@@ -82,13 +82,15 @@ export class MarkStore {
     const read = { ...this.doc.read };
     const unread = { ...this.doc.unread };
     let changed = false;
+    // A read mark only moves on: a second device sending the older `newsAt` it saw (its
+    // PATCH late, or held in its 2 s queue) never makes news already seen unread again.
     for (const [key, at] of reads as [SessionKey, string | null][]) {
       if (at === null) {
         if (key in read) {
           delete read[key];
           changed = true;
         }
-      } else if (read[key] !== at && this.known(key)) {
+      } else if (!(read[key] && read[key] >= at) && this.known(key)) {
         read[key] = at;
         changed = true;
       }
