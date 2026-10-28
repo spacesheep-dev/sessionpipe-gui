@@ -100,6 +100,20 @@
     center / contain no-repeat;
 }
 
+/* Unread (lib/marks.ts): an idle or done row with news since the person looked draws its
+   glyph as a disc in ink, in place of the ring or the check. No accent: the orange disc
+   stays the one thing that asks. Arriving, it settles like any glyph, never wiped in. */
+.dot--unread {
+  border: 1.5px solid var(--fg);
+  border-radius: 50%;
+  background: var(--fg);
+  -webkit-mask: none;
+  mask: none;
+}
+.dot--unread.dot--arrive {
+  animation: dot-arrive var(--dur) var(--ease-out);
+}
+
 /* Kept for the pages that still use them until their owners move off (setup's ring, the
    streaming caret); new work uses none of them. */
 @keyframes ring {

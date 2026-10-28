@@ -24,7 +24,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { answerState, useSessionSend } from "../control/useSend";
-import { useAppState, useStore } from "../data/hooks";
+import { useAppState, useStore, useUnread } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
 import { agentsChoice, agentsFact, agentsShown, agentTabKey, setAgentsChoice } from "../lib/agents";
 import {
@@ -170,6 +170,7 @@ export const SessionCard = memo(function SessionCard({
       (s.state === "working" && submittedLabel(s.currentTurn?.submittedBy)) ||
       (quiet && "unattended"));
   const attention = s.openAttentions[0];
+  const unread = useUnread(s);
   const live = s.state === "working" || s.state === "needs_you";
   const showText = lens === null || lens >= 2;
   const showTools = lens === null || lens >= 1;
@@ -276,8 +277,9 @@ export const SessionCard = memo(function SessionCard({
               row's two lines (the glyph in the lead, the time at line 1's end). */}
           <span className="card-status">
             <span className="card-state" data-jump={jump}>
-              <StateDot state={s.state} decorative />
+              <StateDot state={s.state} decorative unread={unread} />
               <span className="sr-only">{STATE_LABEL[s.state]}</span>
+              {unread && <span className="sr-only">Unread</span>}
               <LabelDot session={s.key} />
             </span>
             {attention && (
