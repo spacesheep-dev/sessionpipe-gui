@@ -126,6 +126,16 @@
   grid-column: 2;
   grid-row: 1 / span 2;
 }
+/* Beside a command block, the pair sits on the question's line, so it stays put when the
+   block unfolds (only the wide bar: the narrow one and the phone put it under). */
+@media (min-width: 840px) {
+  @container ctl (min-width: 561px) {
+    .ctl-answer:has(> .ctl-cmd-block) > .ctl-answer-btns {
+      align-self: start;
+      margin-top: calc((var(--text-md) * var(--lh) - var(--control)) / 2);
+    }
+  }
+}
 .ctl-answer + .ctl-answer {
   padding-top: 8px;
   border-top: var(--hairline) solid var(--line);
