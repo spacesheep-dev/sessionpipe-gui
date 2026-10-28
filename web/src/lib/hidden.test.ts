@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Hide on this device: a plain Hide comes back with the next state, Hide until it needs
 // you comes back only while the session needs you, entries stored before either keep
-// reading, and the board's Hidden group counts what is still hidden under its filters.
+// reading, another tab's Hide is followed, Undo puts back what a Hide replaced, and the
+// board's Hidden group counts what is still hidden under its filters.
 import type { SessionSummary } from "@shared/api";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hiddenCount, hiddenRows, isHidden } from "./hidden";
@@ -32,6 +33,7 @@ describe("isHidden", () => {
 
 describe("stored entries", () => {
   afterEach(() => {
+    vi.doUnmock("./toasts");
     vi.unstubAllGlobals();
     vi.resetModules();
   });
@@ -45,6 +47,24 @@ describe("stored entries", () => {
     expect(hiddenNow({ key: "claude-code:a", stateSince: T1, state: "working" })).toBe(false);
     expect(hiddenNow({ key: "codex:b", stateSince: T1, state: "working" })).toBe(true);
     expect(hiddenNow({ key: "codex:b", stateSince: T1, state: "needs_you" })).toBe(false);
+  });
+
+  it("follows another tab, and doesn't write its old copy back over it", async () => {
+    let stored = "{}";
+    let onStorage: ((e: { key: string | null }) => void) | undefined;
+    vi.stubGlobal("localStorage", { getItem: () => stored, setItem: (_: string, v: string) => (stored = v) });
+    vi.stubGlobal("window", { addEventListener: (_: string, f: typeof onStorage) => (onStorage = f) });
+    vi.doMock("./toasts", () => ({ pushUndo: () => {} }));
+    vi.resetModules();
+    const { hide, hiddenNow } = await import("./hidden");
+    const a = { key: "claude-code:a", stateSince: T0, state: "idle" } as const;
+    expect(hiddenNow(a)).toBe(false);
+    // the other tab hides a
+    stored = JSON.stringify({ "claude-code:a": T0 });
+    onStorage?.({ key: "sessionpipe-gui.hidden" });
+    expect(hiddenNow(a)).toBe(true);
+    hide("codex:b", T0, { title: "b" });
+    expect(Object.keys(JSON.parse(stored))).toEqual(["claude-code:a", "codex:b"]);
   });
 });
 

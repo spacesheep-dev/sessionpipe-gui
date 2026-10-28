@@ -48,6 +48,15 @@ function write(next: Hidden): void {
   for (const l of listeners) l();
 }
 
+/** Another tab hid or unhid one: read it again, so this tab's Hidden group is current and
+ *  its next write doesn't put its old copy back over the other tab's. */
+if (typeof window !== "undefined")
+  window.addEventListener("storage", (e) => {
+    if (e.key !== KEY && e.key !== null) return;
+    hidden = null;
+    for (const l of listeners) l();
+  });
+
 const subscribe = (l: () => void) => {
   listeners.add(l);
   return () => {
