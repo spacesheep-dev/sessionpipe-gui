@@ -749,7 +749,7 @@ describe("demo machines", () => {
     const m = startDemoMachines(control, "lab-mac", () => "acct");
     expect(calls).toEqual([`machine ${demoMachineId("lab-mac")}`]);
     const [newer] = hellos;
-    expect(newer).toMatchObject({ mode: "inherit", version: "0.10.0" });
+    expect(newer).toMatchObject({ mode: "inherit", version: "0.11.0" });
     expect(newer!.start?.["claude-code"]).toMatchObject({ permissions: ["read", "safe"], permission: "inherit" });
     expect(newer!.harnesses).toContain("goose");
     expect(newer).toMatchObject({ ask: true, handoff: true });

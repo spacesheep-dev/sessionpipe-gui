@@ -14,16 +14,26 @@
   font-size: var(--text-md);
 }
 
+/* The options line wraps: with a long permission label ("As your own sessions on this
+   machine") Permission and Model drop to a second line, and the switch's label never
+   breaks into a column of words. */
+.hs-opts {
+  flex-wrap: wrap;
+  row-gap: 4px;
+  padding-bottom: 4px;
+}
+/* Every option starts at the labels' column, on whichever line it lands. */
+.hs-opts > .ns-opt {
+  margin-left: 4px;
+}
 /* The switch and its label in the options line, the label in the body tier (it is the
    choice, not a caption). */
 .hs-switch {
   gap: 8px;
 }
-.hs-opts > .hs-switch:first-child {
-  margin-left: 4px;
-}
 .hs-switch .hs-switch-label {
   color: var(--fg-2);
+  white-space: nowrap;
 }
 /* The phone's cell: the label at the left, the switch at the right. */
 .ns-sheet--phone .hs-switch .hs-switch-label {

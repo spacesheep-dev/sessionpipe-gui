@@ -27,7 +27,7 @@ export function demoHellos(newer: string, account: (machine: string) => string):
       harnesses: ["claude-code", "codex", "gemini-cli", "goose"],
       modes: ["sdk", "waiter", "turn", "api", "resume", "fork"],
       keys: [],
-      version: "0.10.0",
+      version: "0.11.0",
       waiting: [],
       folders: [`${DEMO_HOME}/code`, `${DEMO_HOME}/work`],
       mode: "inherit",

@@ -99,6 +99,11 @@ export function feedSummary(e: StoredEvent): string {
       return d.agent_id ? "" : str(d.agent_type);
     case "context.compacted":
       return str(d.trigger) === "manual" ? "Manual" : "Automatic";
+    case "delegation.started":
+    case "delegation.ended":
+      // The ask's state ("running", "answered in 2 m 05 s · answer relayed here"); the kind
+      // column names the agent.
+      return turnWords(e).detail ?? "";
     default:
       return eventSummary(e);
   }
@@ -146,11 +151,9 @@ export function eventWords(e: StoredEvent): string {
     case "native":
       return "Native hook";
     case "delegation.started":
-    case "delegation.ended": {
-      // The session page's words for an agent this session asked ("Asked Codex · running").
-      const w = turnWords(e);
-      return w.detail ? `${w.text} · ${w.detail}` : w.text;
-    }
+    case "delegation.ended":
+      // "Asked Codex" / "You asked Codex"; the ask's state is the detail (feedSummary).
+      return turnWords(e).text;
     default:
       return e.type;
   }

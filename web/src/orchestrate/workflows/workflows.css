@@ -144,6 +144,10 @@ button.wf-row:active {
   color: var(--fg-4);
   text-align: center;
 }
+/* A row with no right column (a template) keeps its › at the right edge all the same. */
+.wf-row > .wf-facts + .wf-chev {
+  margin-left: auto;
+}
 /* The empty list: one line over the templates, never a block. */
 .workflows .page-note {
   margin-bottom: -8px;
@@ -409,10 +413,8 @@ button.wf-row:active {
 .wf-step-line .is-err {
   color: var(--err);
 }
-/* The open step: its name is a field in the header, its rows under it. */
-.wf-step--open > .wf-step-head {
-  background: var(--bg-2);
-}
+/* The open step: its name is a field in the header (focused on open), its rows under it.
+   No fill: its rows say it is open, in both schemes alike. */
 .wf-step-name-input {
   flex: 1 1 auto;
   min-width: 0;
@@ -658,6 +660,10 @@ button.wf-row:active {
     min-height: var(--tap);
     padding-left: 16px;
     padding-right: 8px;
+  }
+  /* Add step lines up with the step names (16 px cell + 20 px number + 8 px gap). */
+  .wf-add {
+    padding-left: 44px;
   }
   .wf-step-btn {
     min-height: var(--tap);
