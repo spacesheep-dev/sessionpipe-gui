@@ -131,6 +131,13 @@ test("the fake daemon: the held order, a drag, the sheet, offline, none with roo
     await s.locator("[data-pool-add]").click();
     const sheet = page.locator("[data-pool-sheet]");
     await expect(sheet).toBeVisible();
+    if (isMobile) {
+      // The Ready state's one action fills its cell, 44 pt tall.
+      const cell = (await sheet.locator(".pa-actions--ready").boundingBox())!;
+      const btn = (await sheet.locator("[data-pool-signin]").boundingBox())!;
+      expect(btn.width).toBe(cell.width);
+      expect(btn.height).toBeGreaterThanOrEqual(44);
+    }
     await shot(page, `${p}9-sheet-ready`);
     await sheet.locator("[data-pool-signin]").click();
     await expect(sheet.locator(".pa-status")).toHaveText(/Sending to lab-slow-/);

@@ -75,6 +75,106 @@ test.describe("the pooled section, from the demo", () => {
     expect(html).not.toMatch(/01K8[A-Z0-9]{20}/);
   });
 
+  test("the geometry: one lead edge, inset window rules, the switch on its label, the trail beside the word", async ({
+    page,
+    isMobile,
+  }) => {
+    await openPage(page, "/usage");
+    const lab = section(page, "lab-mac");
+    await lab.scrollIntoViewIfNeeded();
+    const box = async (l: ReturnType<Page["locator"]>) => (await l.boundingBox())!;
+    const left = async (l: ReturnType<Page["locator"]>) => (await box(l)).x;
+    const cy = async (l: ReturnType<Page["locator"]>) => {
+      const b = await box(l);
+      return b.y + b.height / 2;
+    };
+    const textRight = (l: ReturnType<Page["locator"]>) =>
+      l.evaluate((el) => {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        return r.getBoundingClientRect().right;
+      });
+    const sheep = row(page, "lab-mac", "Spacesheep");
+    const win = sheep.locator(".pool-windows .usage-win").first();
+    if (!isMobile) {
+      // One lead edge: the title, the switch's label, the names and "Add account…".
+      const edge = await left(lab.locator(".usage-title"));
+      expect(await left(lab.locator(".pool-switch .form-label"))).toBe(edge);
+      expect(await left(lab.locator(".pool-title").first())).toBe(edge);
+      expect(
+        await lab.locator(".pool-add").evaluate((el) => {
+          const r = document.createRange();
+          r.selectNodeContents(el);
+          return r.getBoundingClientRect().left;
+        }),
+      ).toBe(edge);
+      // A window's rule starts under its label, one step in; the bar stays on the page's
+      // bar line, the same in a free-standing section (whose rules start at its labels too).
+      expect(await left(win)).toBe(edge + 24);
+      expect(await left(win.locator(".usage-label"))).toBe(edge + 24);
+      expect(await left(sheep.locator(".pool-row"))).toBe(edge - 24);
+      const free = page.locator("section.usage-acct").first();
+      expect(await left(win.locator(".usage-bar"))).toBe(await left(free.locator(".usage-bar").first()));
+      expect(await left(free.locator(".usage-win").first())).toBe(await left(free.locator(".usage-label").first()));
+      // The switch on the label's line, not on the paragraph.
+      expect(
+        Math.abs((await cy(lab.locator(".toggle"))) - (await cy(lab.locator(".pool-switch .form-label")))),
+      ).toBeLessThanOrEqual(1);
+      // The word and its trail on one baseline; "Sign in again…" ending where "Off" ends.
+      const word = await box(sheep.locator(".pool-word"));
+      const sub = await box(sheep.locator(".pool-status-sub"));
+      expect(Math.abs(word.y + word.height - (sub.y + sub.height))).toBeLessThan(2);
+      const mini = section(page, "mini-mac");
+      expect(await textRight(mini.getByRole("button", { name: "Sign in again…" }))).toBe(
+        await textRight(row(page, "mini-mac", "Old").locator(".pool-word")),
+      );
+      // "Sending works from…" sits 16 px above the first header.
+      const note = await box(page.locator(".machines-note"));
+      const first = await box(page.locator("#main section").first());
+      expect(first.y - (note.y + note.height)).toBe(16);
+      // A pointer landing beside the grip's mark still lands on the grip.
+      const grip = sheep.locator(".pool-grip");
+      const g = await box(grip);
+      expect(
+        await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.className, [g.x - 6, g.y + g.height / 2] as [
+          number,
+          number,
+        ]),
+      ).toBe("pool-grip");
+      // With its menu open the row is the selection pill; closed, it is the page again.
+      const fiction = row(page, "lab-mac", "Fiction").locator(".pool-row");
+      const bg = (l: ReturnType<Page["locator"]>) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
+      const plain = await bg(fiction);
+      await fiction.click({ button: "right" });
+      await expect(page.getByRole("menu")).toBeVisible();
+      await expect(fiction).toHaveAttribute("data-menu-open", "");
+      await expect.poll(() => bg(fiction)).not.toBe(plain);
+      expect(await fiction.evaluate((el) => getComputedStyle(el).borderRadius)).toBe("6px");
+      await page.keyboard.press("Escape");
+      await expect(fiction).not.toHaveAttribute("data-menu-open", "");
+      await expect.poll(() => bg(fiction)).toBe(plain);
+    } else {
+      // Spacesheep's cell: the name and the word, the email, then "resets in … · numbers
+      // as of …" as one third line, nothing drawn over anything (the numbers' age is
+      // there only once the demo's report is old enough to say so).
+      const email = await box(sheep.locator(".pool-email"));
+      const after = await box(sheep.locator(".pool-status-after"));
+      expect(after.y).toBeGreaterThanOrEqual(email.y + email.height - 1);
+      await expect(sheep.locator(".pool-status-sub")).toHaveText(/^resets in 2 h \d{2} m/);
+      if (await sheep.locator(".pool-age").count()) {
+        const age = await box(sheep.locator(".pool-age"));
+        expect(Math.abs(after.y - age.y)).toBeLessThan(1);
+        expect(after.x + after.width <= age.x || age.x + age.width <= after.x).toBe(true);
+      }
+      // The switch centred on the label's first line; the window row 16 px in from the name.
+      expect(
+        Math.abs((await cy(lab.locator(".toggle"))) - (await cy(lab.locator(".pool-switch .form-label")))),
+      ).toBeLessThanOrEqual(1);
+      expect(await left(win)).toBe((await left(sheep.locator(".pool-title"))) + 16);
+      expect(await left(win.locator(".usage-label"))).toBe(await left(win));
+    }
+  });
+
   test("axe: the page with the section has no serious or critical violation", async ({ page, isMobile }) => {
     test.skip(!!isMobile, "the desktop project");
     await page.emulateMedia({ reducedMotion: "reduce" });
@@ -150,7 +250,9 @@ test.describe("signed pool commands", () => {
       const sw = s.getByRole("switch", { name: "Switch accounts when one runs out" });
       await expect(sw).toHaveAttribute("aria-checked", "true");
       await expect(s.locator("li.pool-acct .pool-word").first()).toHaveText("In use");
-      await sw.click();
+      // The switch answers 10 px above its track: its reach, not just its 18 px.
+      const t = (await sw.boundingBox())!;
+      await page.mouse.click(t.x + t.width / 2, t.y - 10);
       // Optimistic: off before the machine answers, and "In use" goes with it.
       await expect(sw).toHaveAttribute("aria-checked", "false");
       await expect(s.locator("li.pool-acct .pool-word").first()).toHaveText("Has room");
@@ -238,13 +340,19 @@ test.describe("signed pool commands", () => {
     const name = `lab-${tag()}`;
     const m = await poolDaemon(key, name);
     try {
+      await page.emulateMedia({ colorScheme: "dark" });
       await page.goto(`${CONTROL_BASE}/usage`);
       const s = section(page, name);
       const grip = row(page, name, "Spacesheep").locator(".pool-grip");
+      const bg = () => row(page, name, "Spacesheep").evaluate((el) => getComputedStyle(el).backgroundColor);
+      const pageBg = await bg();
       await grip.focus();
       await page.keyboard.press("Space");
       await expect(s.locator("[data-pool-live]")).toHaveText("Picked up Spacesheep");
       await expect(row(page, name, "Spacesheep")).toHaveAttribute("data-grabbed", "");
+      // Lifted: on the raised ground (visible in dark, where a shadow is not), with corners.
+      await expect.poll(bg).toBe("rgb(42, 42, 42)");
+      expect(await row(page, name, "Spacesheep").evaluate((el) => getComputedStyle(el).borderRadius)).toBe("6px");
       await page.keyboard.press("ArrowUp");
       await expect(s.locator("[data-pool-live]")).toHaveText("Moved to position 2 of 3");
       await page.keyboard.press("ArrowUp");
@@ -253,6 +361,7 @@ test.describe("signed pool commands", () => {
       await page.keyboard.press("Escape");
       await expect(s.locator("[data-pool-live]")).toHaveText("Cancelled, order unchanged");
       await expect(s.locator("li.pool-acct .pool-title")).toHaveText(["Misha", "Fiction", "Spacesheep"]);
+      await expect.poll(bg).toBe(pageBg);
       await grip.focus();
       await page.keyboard.press("Space");
       await page.keyboard.press("ArrowUp");
