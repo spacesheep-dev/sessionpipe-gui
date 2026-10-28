@@ -29,7 +29,8 @@ env:
 jobs:
   ios:
     name: test · iOS simulator build
-    runs-on: macos-15
+    # The Xcode TestFlight builds with (26 or later, which App Store Connect requires).
+    runs-on: macos-26
     timeout-minutes: 45
     defaults:
       run:

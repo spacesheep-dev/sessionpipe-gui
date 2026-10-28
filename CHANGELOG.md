@@ -23,8 +23,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Changed
 
-- *iOS → TestFlight* uploads with the Apple ID and app-specific password that notarize the
-  Mac app when there is no App Store Connect API key yet.
+- **iOS → TestFlight, end to end.** The build runs on Xcode 26 (App Store Connect refuses
+  builds from older SDKs since April 2026), checks the `.ipa` before uploading it (ids,
+  numbers, SDK, signer, profile, privacy manifest), uploads to the app by its Apple ID with
+  the App Store Connect API key, and passes only once App Store Connect has processed the
+  build, with the TestFlight link in the summary. Without a tag it is a dry run of the
+  branch. The app carries a privacy manifest (no tracking, no data collected).
 - The phone apps are called **sessionpipe** (they were "sessionpipe Dev").
 
 ### Fixed

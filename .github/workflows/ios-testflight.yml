@@ -2,15 +2,15 @@
 # "iOS → TestFlight": a button (Actions → iOS → TestFlight → Run workflow) that builds the
 # iOS app for an existing v* tag, signs it for the App Store (manual signing: the Apple
 # Distribution certificate and the "sessionpipe App Store" profile, bundle id
-# dev.spacesheep.sessionpipe, team QR7H8ARENW) and uploads it to TestFlight. The .ipa is
-# kept as a workflow artifact either way.
+# dev.spacesheep.sessionpipe, team QR7H8ARENW), uploads it to TestFlight and waits until
+# App Store Connect has processed it. The .ipa is kept as a workflow artifact either way.
+# Without a tag it is a dry run of the branch it runs on: built, signed and checked, never
+# uploaded.
 #
 # Runs in the `release` environment (Misha approves it) and reads, by name:
 #   IOS_DIST_P12, IOS_DIST_P12_PASSWORD        Apple Distribution certificate + key, .p12 base64
 #   IOS_APPSTORE_PROFILE                       "sessionpipe App Store" .mobileprovision, base64
-#   APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_PRIVATE_KEY   App Store Connect API key (upload), or
-#   APPLE_ID, APPLE_PASSWORD                   the Apple ID and app-specific password notarizing
-#                                              the Mac app uses, when there is no API key yet
+#   APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_PRIVATE_KEY   App Store Connect API key (upload)
 # The certificate lives only in a temporary keychain with a random password, deleted at the end.
 name: iOS → TestFlight
 
@@ -18,8 +18,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "An existing v* tag to build"
-        required: true
+        description: "A v* tag to build and upload (empty: a dry run of this branch, never uploaded)"
+        required: false
+        default: ""
       upload:
         description: "Upload the .ipa to TestFlight"
         type: boolean
@@ -29,10 +30,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ios-testflight-${{ inputs.tag }}
+  group: ios-testflight-${{ inputs.tag || github.ref }}
 
 env:
   TAG: ${{ inputs.tag }}
+  UPLOAD: ${{ inputs.tag != '' && inputs.upload }}
+  BUILD: ${{ github.run_number }}
   BUNDLE_ID: dev.spacesheep.sessionpipe
   TEAM_ID: QR7H8ARENW
   PROFILE_NAME: sessionpipe App Store
@@ -41,22 +44,36 @@ env:
 jobs:
   testflight:
     name: build, sign, upload
-    runs-on: macos-15
+    # App Store Connect takes only builds made with Xcode 26 and the iOS 26 SDK or later
+    # (since 2026-04-28); macos-26's default Xcode is one.
+    runs-on: macos-26
     environment: release
-    timeout-minutes: 60
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ inputs.tag || github.sha }}
 
       - name: The tag is package.json's version
         run: |
-          case "$TAG" in v*) ;; *) echo "::error::$TAG is not a v* tag"; exit 1 ;; esac
           v="$(node -p "require('./package.json').version")"
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          if [ -z "$TAG" ]; then
+            echo "Dry run of ${GITHUB_REF_NAME} at ${GITHUB_SHA::7}: built and signed, never uploaded." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          case "$TAG" in v*) ;; *) echo "::error::$TAG is not a v* tag"; exit 1 ;; esac
           [ "v$v" = "$TAG" ] || { echo "::error::tag $TAG, package.json $v"; exit 1; }
+
+      - name: Xcode 26 or later
+        run: |
+          set -euo pipefail
+          sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
+          echo "$(xcodebuild -version | tr '\n' ' '), iOS SDK $sdk." >> "$GITHUB_STEP_SUMMARY"
+          [ "${sdk%%.*}" -ge 26 ] || { echo "::error::iOS SDK $sdk: App Store Connect takes 26 or later"; exit 1; }
 
       - name: The secrets this build needs
         env:
@@ -66,25 +83,37 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          UPLOAD: ${{ inputs.upload }}
         run: |
           set -euo pipefail
           need=(IOS_DIST_P12 IOS_DIST_P12_PASSWORD IOS_APPSTORE_PROFILE)
-          if [ "$UPLOAD" = true ]; then
-            if [ -n "$APPLE_API_KEY" ]; then
-              need+=(APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY)
-            else
-              need+=(APPLE_ID APPLE_PASSWORD)
-            fi
-          fi
+          [ "$UPLOAD" = true ] && need+=(APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY)
           missing=()
           for s in "${need[@]}"; do [ -n "${!s}" ] || missing+=("$s"); done
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::missing secrets in the release environment: ${missing[*]} (RELEASING.md, The iOS app)"
             exit 1
           fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/mobile/package-lock.json
+
+      # Before the build, so a missing app record or a bad key fails in seconds. The Apple ID
+      # goes to altool, which in Xcode 26 can otherwise pick another app by bundle id prefix.
+      - name: The app in App Store Connect
+        if: env.UPLOAD == 'true'
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          id="$(node apps/mobile/scripts/asc.mjs app)"
+          echo "ASC_APP_ID=$id" >> "$GITHUB_ENV"
 
       - name: A temporary keychain with the distribution certificate
         env:
@@ -119,20 +148,15 @@ jobs:
           name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")"
           uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")"
           appid="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$RUNNER_TEMP/profile.plist")"
+          expires="$(plutil -extract ExpirationDate raw -o - "$RUNNER_TEMP/profile.plist")"
           [ "$name" = "$PROFILE_NAME" ] || { echo "::error::the profile is \"$name\", not \"$PROFILE_NAME\""; exit 1; }
           [ "$appid" = "$TEAM_ID.$BUNDLE_ID" ] || { echo "::error::the profile is for $appid, not $TEAM_ID.$BUNDLE_ID"; exit 1; }
+          [[ "$expires" > "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ]] \
+            || { echo "::error::the profile expired on $expires: make a new one (RELEASING.md, The iOS app)"; exit 1; }
           dir="$HOME/Library/MobileDevice/Provisioning Profiles"
           mkdir -p "$dir"
           cp "$p" "$dir/$uuid.mobileprovision"
           rm -f "$p" "$RUNNER_TEMP/profile.plist"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            apps/mobile/package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -147,7 +171,8 @@ jobs:
       - run: npm ci
         working-directory: apps/mobile
 
-      # App Store export with manual signing: the named profile for the one bundle id.
+      # App Store export with manual signing: the named profile for the one bundle id. The
+      # build number is ours (BUILD), so Xcode doesn't manage it.
       - name: ExportOptions.plist
         run: |
           set -euo pipefail
@@ -163,6 +188,7 @@ jobs:
             <key>signingCertificate</key><string>Apple Distribution</string>
             <key>provisioningProfiles</key>
             <dict><key>$BUNDLE_ID</key><string>$PROFILE_NAME</string></dict>
+            <key>manageAppVersionAndBuildNumber</key><false/>
             <key>uploadSymbols</key><true/>
             <key>destination</key><string>export</string>
           </dict>
@@ -174,47 +200,84 @@ jobs:
       # "sessionpipe App Store" profile (project.yml / the pbxproj); tauri archives and
       # exports with the ExportOptions.plist above.
       - name: Build and export the .ipa
-        env:
-          RUN: ${{ github.run_number }}
         working-directory: apps/mobile
         run: |
           set -euo pipefail
           # CFBundleVersion is the run number alone: App Store Connect takes one to three
           # integers, and --build-number would append it to the version (0.4.1.12).
           npx tauri ios build --target aarch64 --export-method app-store-connect \
-            --config "{\"bundle\":{\"iOS\":{\"bundleVersion\":\"$RUN\"}}}" --ci
+            --config "{\"bundle\":{\"iOS\":{\"bundleVersion\":\"$BUILD\"}}}" --ci
           ipa="$(find src-tauri/gen/apple/build -name '*.ipa' -print -quit)"
           [ -n "$ipa" ] || { echo "::error::no .ipa was exported"; exit 1; }
           echo "IPA=$PWD/$ipa" >> "$GITHUB_ENV"
-          echo "Built $(basename "$ipa") ($(du -h "$ipa" | cut -f1)), CFBundleVersion $RUN." >> "$GITHUB_STEP_SUMMARY"
+
+      # What App Store Connect checks first, checked here: the ids and numbers, the SDK, the
+      # signer, the profile, and no debugger entitlement.
+      - name: Check the .ipa
+        run: |
+          set -euo pipefail
+          x="$RUNNER_TEMP/ipa"
+          rm -rf "$x" && mkdir -p "$x" && unzip -q "$IPA" -d "$x"
+          app="$(find "$x/Payload" -maxdepth 1 -name '*.app' -print -quit)"
+          plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$app/Info.plist"; }
+          bad() { echo "::error::$*"; exit 1; }
+          [ "$(plist CFBundleIdentifier)" = "$BUNDLE_ID" ] || bad "CFBundleIdentifier is $(plist CFBundleIdentifier)"
+          [ "$(plist CFBundleShortVersionString)" = "$VERSION" ] || bad "CFBundleShortVersionString is $(plist CFBundleShortVersionString), not $VERSION"
+          [ "$(plist CFBundleVersion)" = "$BUILD" ] || bad "CFBundleVersion is $(plist CFBundleVersion), not $BUILD"
+          sdk="$(plist DTSDKName)"
+          v="${sdk#iphoneos}"
+          [ "$v" != "$sdk" ] && [ "${v%%.*}" -ge 26 ] || bad "built with $sdk"
+          codesign --verify --deep --strict "$app"
+          codesign -dvv "$app" 2>&1 | grep '^Authority=Apple Distribution: ' >/dev/null || bad "not signed by Apple Distribution"
+          codesign -d --entitlements :- "$app" 2>/dev/null > "$x/ent.plist"
+          [ "$(/usr/libexec/PlistBuddy -c 'Print :get-task-allow' "$x/ent.plist" 2>/dev/null || echo false)" = false ] \
+            || bad "get-task-allow is on: a development build"
+          security cms -D -i "$app/embedded.mobileprovision" > "$x/profile.plist"
+          [ "$(/usr/libexec/PlistBuddy -c 'Print :Name' "$x/profile.plist")" = "$PROFILE_NAME" ] || bad "embedded profile is not $PROFILE_NAME"
+          [ -f "$app/PrivacyInfo.xcprivacy" ] || bad "no PrivacyInfo.xcprivacy in the app"
+          echo "Built $(basename "$IPA") ($(du -h "$IPA" | cut -f1)): $(plist CFBundleDisplayName) $VERSION ($BUILD), $sdk, Apple Distribution, \"$PROFILE_NAME\"." >> "$GITHUB_STEP_SUMMARY"
+          rm -rf "$x"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: sessionpipe-ios-${{ inputs.tag }}-${{ github.run_number }}
+          name: sessionpipe-ios-${{ env.VERSION }}-${{ github.run_number }}
           path: ${{ env.IPA }}
           if-no-files-found: error
 
+      # altool's exit status isn't trusted (Xcode 26's can be 0 on a failed upload): the
+      # build has to show up in App Store Connect, processed, for the run to pass.
       - name: Upload to TestFlight
-        if: inputs.upload
+        if: env.UPLOAD == 'true'
         env:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
         run: |
           set -euo pipefail
-          if [ -n "$APPLE_API_KEY" ]; then
-            dir="$HOME/.appstoreconnect/private_keys"
-            mkdir -p "$dir"
-            printf '%s' "$APPLE_API_PRIVATE_KEY" > "$dir/AuthKey_$APPLE_API_KEY.p8"
-            chmod 600 "$dir/AuthKey_$APPLE_API_KEY.p8"
-            xcrun altool --upload-app --type ios --file "$IPA" --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
-          else
-            # The password stays in the environment (@env:), out of the command line.
-            xcrun altool --upload-app --type ios --file "$IPA" --username "$APPLE_ID" --password @env:APPLE_PASSWORD
+          dir="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$dir"
+          printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$dir/AuthKey_$APPLE_API_KEY.p8"
+          chmod 600 "$dir/AuthKey_$APPLE_API_KEY.p8"
+          xcrun altool --upload-app --type ios --file "$IPA" --apple-id "$ASC_APP_ID" \
+            --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER" 2>&1 | tee "$RUNNER_TEMP/altool.log"
+          if grep -E '^\*\*\* Error|ERROR:|UPLOAD FAILED|Failed to upload' "$RUNNER_TEMP/altool.log" >/dev/null; then
+            echo "::error::altool: $(grep -E '^\*\*\* Error|ERROR:|UPLOAD FAILED|Failed to upload' "$RUNNER_TEMP/altool.log" | head -1)"
+            exit 1
           fi
-          echo "Uploaded to TestFlight; App Store Connect processes it before testers see it." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: App Store Connect processes it
+        if: env.UPLOAD == 'true'
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          node apps/mobile/scripts/asc.mjs wait "$VERSION" "$BUILD" 45 | tee "$RUNNER_TEMP/asc.log"
+          {
+            echo "On TestFlight: $VERSION ($BUILD)."
+            grep -E '^TestFlight:|^https://' "$RUNNER_TEMP/asc.log"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove the keychain and the keys
         if: always()

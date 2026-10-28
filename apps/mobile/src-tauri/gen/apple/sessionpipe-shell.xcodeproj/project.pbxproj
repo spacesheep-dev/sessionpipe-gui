@@ -19,6 +19,7 @@
 		DDF0CD3B4EF708888021A2C5 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9A42679FD43B37607C45E03B /* UIKit.framework */; };
 		F7594EABB82563D6FC1AE04A /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 2563B848936BAF60CC2AACD0 /* assets */; };
 		F8F273E7AE2DAC47705E477B /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 719F27A17B9383E23690C41C /* CoreGraphics.framework */; };
+		DE9EAC0D2D9F76CE4FE52DCA /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 211606FAEFB090F1047BEDE7 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -43,6 +44,7 @@
 		D21915F07C58F340F58D47BC /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		E8914E5912CDEBFE9FAE17B4 /* sessionpipe-shell_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "sessionpipe-shell_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		F2621C6A043D451B94AAD33C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		211606FAEFB090F1047BEDE7 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -120,6 +122,7 @@
 			isa = PBXGroup;
 			children = (
 				C0C866F3D9DBDA5DF8ADD58B /* Info.plist */,
+				211606FAEFB090F1047BEDE7 /* PrivacyInfo.xcprivacy */,
 				70915A66AAEF2E58A9D2AE41 /* sessionpipe-shell_iOS.entitlements */,
 			);
 			path = "sessionpipe-shell_iOS";
@@ -224,6 +227,7 @@
 				7DEE317DB4DE4DAF3610A5A9 /* Assets.xcassets in Resources */,
 				C667FF7BB2646256310552B5 /* LaunchScreen.storyboard in Resources */,
 				F7594EABB82563D6FC1AE04A /* assets in Resources */,
+				DE9EAC0D2D9F76CE4FE52DCA /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
