@@ -289,7 +289,16 @@ const SNAKE_TOOLS: Record<string, string> = {
   web_search: "Web search",
   save_memory: "Memory",
   update_plan: "Plan",
+  // Claude Code's plan review, asked as a permission: "… needs you · Plan".
+  ExitPlanMode: "Plan",
+  exit_plan_mode: "Plan",
 };
+
+/** A plan review: Claude Code asks to leave plan mode as an ordinary permission, so
+ *  answering it is approving the plan or asking for more planning. Codex's update_plan
+ *  is no permission and stays a row in the timeline. */
+export const isPlanReview = (a: { kind?: string; tool?: string }): boolean =>
+  a.kind === "permission" && (a.tool === "ExitPlanMode" || a.tool === "exit_plan_mode");
 
 /** A tool's name as a person reads it. An MCP tool arrives as `mcp__<server>__<tool>`
  *  and reads "github · search_issues"; a claude.ai connector's server drops its
