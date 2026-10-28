@@ -212,7 +212,11 @@ test.describe("phone: a plan review", () => {
     try {
       const id = randomUUID();
       const turn = randomUUID();
-      const plan = Array.from({ length: 40 }, (_, i) => `${i + 1}. Step ${i + 1} of the plan.`).join("\n");
+      // Headings and paragraphs: their margins put the lines off any grid of whole lines.
+      const plan = Array.from(
+        { length: 8 },
+        (_, i) => `### Part ${i + 1}\n\nWhat part ${i + 1} changes, and why.\n\n1. One step.\n2. \`Another\` step.`,
+      ).join("\n\n");
       let seq = 0;
       let clock = Date.now() - 30_000;
       const ev = (type: string, data: Record<string, unknown>, hook: string) => {
@@ -260,6 +264,23 @@ test.describe("phone: a plan review", () => {
       await expect(page.getByRole("button", { name: "Show less" })).toBeVisible();
       const text = page.locator(".ctl-plan-text");
       expect(await text.evaluate((el) => el.scrollHeight > el.clientHeight), "the plan scrolls inside").toBe(true);
+      // It ends halfway down a line, so the line cut in half says there is more, at any
+      // phone's height.
+      const halved = () =>
+        text.evaluate((el) => {
+          const foot = el.getBoundingClientRect().bottom;
+          const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          const r = document.createRange();
+          for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+            r.selectNodeContents(n);
+            for (const b of Array.from(r.getClientRects())) if (b.top + 4 < foot && foot < b.bottom - 4) return true;
+          }
+          return false;
+        });
+      for (const height of [667, 700, 740, 780, 812, 844]) {
+        await page.setViewportSize({ width: 390, height });
+        await expect.poll(halved, `a line is cut in half at the plan's foot, ${height} tall`).toBe(true);
+      }
       const vh = await page.evaluate(() => window.innerHeight);
       const strip = (await page.locator(".sess-ctl").boundingBox())!;
       expect(strip.height, `the strip is ${strip.height} of ${vh}`).toBeLessThanOrEqual(vh / 2 + 24);

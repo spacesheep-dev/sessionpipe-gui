@@ -43,9 +43,30 @@ export function foldPlan(el: HTMLElement): boolean {
   return over;
 }
 
+/** Opens the plan to its cap (CSS's), ending halfway down a line, so a line cut in half
+ *  always says there is more, as a long command does. A margin under a paragraph or a
+ *  heading would otherwise end it on a clean edge. */
+export function peekPlan(el: HTMLElement): void {
+  el.style.maxHeight = "";
+  const cap = el.clientHeight;
+  if (el.scrollHeight <= cap + 1) return;
+  const top = el.getBoundingClientRect().top - el.scrollTop;
+  const lh = Number.parseFloat(getComputedStyle(el).lineHeight) || 20;
+  const r = document.createRange();
+  r.selectNodeContents(el);
+  let mid = 0;
+  for (const b of r.getClientRects()) {
+    // A line's box, not a block's (a paragraph or a list is one box of several lines).
+    const y = b.top - top + b.height / 2;
+    if (b.height < 2 * lh && y <= cap && y > mid) mid = y;
+  }
+  if (mid) el.style.maxHeight = `${Math.floor(mid)}px`;
+}
+
 /** The plan a plan review asks to start on (its call's `input.plan`, tier 3), as the
  *  timeline reads Markdown, in the question's column: eight lines (six on a phone) until
- *  "Show the whole plan", then up to half the view, scrolling inside. */
+ *  "Show the whole plan", then up to half the view, scrolling inside, a line cut in half
+ *  at its foot. */
 export function PlanText({ text }: { text: string }) {
   const box = useRef<HTMLDivElement>(null);
   const [whole, setWhole] = useState(false);
@@ -53,14 +74,16 @@ export function PlanText({ text }: { text: string }) {
   useLayoutEffect(() => {
     const el = box.current?.querySelector<HTMLElement>(".ctl-plan-text");
     if (!el) return;
-    el.style.maxHeight = "";
-    if (whole) return;
-    const measure = () => setCut(foldPlan(el));
+    const measure = whole ? () => peekPlan(el) : () => setCut(foldPlan(el));
     measure();
-    if (typeof ResizeObserver !== "function") return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
+    // The opened cap follows the view's height, which leaves the clamped box as it was.
+    addEventListener("resize", measure);
+    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    return () => {
+      removeEventListener("resize", measure);
+      ro?.disconnect();
+    };
   }, [text, whole]);
   return (
     <div className={whole ? "ctl-plan is-whole" : "ctl-plan"} ref={box}>
