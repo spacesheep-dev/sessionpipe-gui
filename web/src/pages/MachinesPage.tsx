@@ -10,7 +10,7 @@
 // arrived in the last minute or its control daemon is online. Requests waiting for a
 // person (pairings, devices) come first; on an address that cannot sign, one line says so
 // above the machines.
-import { accountLabel, type MachineSummary } from "@shared/api";
+import { accountLabel, type HarnessAccount, type MachinePool, type MachineSummary } from "@shared/api";
 import { useEffect, useState } from "react";
 import { Ago, CommandWell, EmptyState, HarnessGlyph } from "../components/bits";
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
@@ -32,6 +32,11 @@ import { ago, ms, useNow } from "../lib/time";
 import "../control/pairing.css";
 
 const isOnline = (m: MachineSummary, now: number) => now - ms(m.lastAt) < 60_000 || !!m.control?.online;
+
+/** The one pool word on this page (UX-SPEC §7.4): a login the machine's pool lists, while
+ *  the switch is on. An account only in the pool is not a login here and is not drawn. */
+const pooled = (pool: MachinePool | undefined, a: HarnessAccount): boolean =>
+  !!pool?.on && pool.harness === a.harness && pool.accounts.some((p) => p.id === a.id);
 
 export function Machines() {
   const machines = useMachines();
@@ -228,12 +233,13 @@ function MachineBlock({
             <span className="form-key">Accounts</span>
             <span className="form-kv machine-accounts">
               {c.accounts.map((a) => (
-                <span key={`${a.harness}:${a.id}`} title={a.id}>
+                <span key={`${a.harness}:${a.id}`}>
                   {accountLabel(a)}
                   <span className="machine-sub">
                     {" "}
                     · {harnessMark(a.harness).label}
                     {a.email ? "" : ", API"}
+                    {pooled(c.pool, a) ? ", pooled" : ""}
                   </span>
                 </span>
               ))}
