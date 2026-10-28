@@ -376,6 +376,7 @@ export function Board() {
   const doneMenu = useContextMenu(() => [
     { label: "Show done sessions", checked: showDone, run: () => setShowDone((v) => !v) },
   ]);
+  const hiddenMenu = useContextMenu(() => [{ label: "Show hidden sessions", checked: showHidden, run: toggleHidden }]);
 
   const doneCount = groups.get("done")!.length;
   const loaded = !!snapshotAt;
@@ -603,7 +604,7 @@ export function Board() {
         {/* What this device hid, under the same filters: folded, the fold is the switch. */}
         {ready && hiddenHeld.length > 0 && (
           <section className="group group--hidden" aria-label={`${hiddenHeld.length} hidden`}>
-            <h2 className="group-head">
+            <h2 className="group-head" {...hiddenMenu}>
               <button type="button" className="group-toggle" onClick={toggleHidden} aria-expanded={showHidden}>
                 Hidden
                 <span key={hiddenHeld.length} className="group-count num">
