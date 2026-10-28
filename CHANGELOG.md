@@ -18,6 +18,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   long-press sheet, `u` on the board's cursor, and **Mark all as read** in the board's
   view menu. The marks live in `<stateDir>/marks.json` (`GET` / `PATCH /api/ui/marks`, a
   `marks` frame on every change); a forgotten session loses its marks.
+- **A New line where you left off.** A session with news since you looked opens with a
+  quiet "New" hairline above the first answer you haven't read, in Simple and Advanced
+  and on a phone. When there's more than a screen of it, the session opens with the line
+  a third of the way down instead of at the bottom. Your own turns at the terminal never
+  count, the line doesn't move while the page is open, and it's gone when you come back.
 
 ## [0.4.1] - 2026-10-27
 
