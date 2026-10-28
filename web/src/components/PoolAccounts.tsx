@@ -51,7 +51,8 @@ import { confirmAction, type MenuList, MoreButton, useContextMenu } from "./Cont
 import { WindowRow } from "./UsageWindows";
 import "../styles/pool.css";
 
-const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+/** --ease-out (tokens.css), as a string the Web Animations API takes. */
+const EASE_OUT = "cubic-bezier(0.22, 1, 0.36, 1)";
 /** A delivered command whose hello has not come after this long lets the hello's state show. */
 const SETTLE_MS = 5_000;
 export const SORT_HELP = "Press Space to pick up, arrow keys to move, Space to drop, Escape to cancel.";
@@ -100,7 +101,7 @@ function useRowFlip(ref: RefObject<HTMLElement | null>, sig: string, skip: strin
       if (was === undefined) continue;
       const dy = was - now.get(k)!;
       if (Math.abs(dy) < 1) continue;
-      el.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: dur, easing: EASE });
+      el.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: dur, easing: EASE_OUT });
     }
   }, [sig]);
 }
@@ -298,12 +299,15 @@ export function PoolSection({
       if (ev.pointerId !== pid) return;
       off();
       if (!moved) return;
-      // Settle: from under the pointer into its slot.
+      // Settle: from under the pointer into its slot, an exit (the row leaves the pointer).
       const left = li.style.transform;
       li.style.transform = "";
       setDragging(null);
       if (left && !reducedMotion() && typeof li.animate === "function")
-        li.animate([{ transform: left }, { transform: "none" }], { duration: 160, easing: EASE });
+        li.animate([{ transform: left }, { transform: "none" }], {
+          duration: tokenMs("--dur-exit", 140),
+          easing: EASE_OUT,
+        });
       if (sameList(cur, helloIds)) {
         setShown(null);
         setAnnounce("Dropped");
