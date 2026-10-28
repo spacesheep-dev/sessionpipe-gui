@@ -242,13 +242,18 @@ test("Enter on an account opens New session there, with its harness", async ({ p
 
 test("the sidebar line's menu, its tooltip, and hiding it until Settings brings it back", async ({ page }) => {
   await openPage(page, "/");
-  const dev = page.locator(".glance-line", { hasText: "dev" }).first();
-  await expect(dev).toHaveAttribute("data-tip", /^dev@example\.com, Claude Code\.\n5 hours: .*\nAs of .*\.$/s);
+  // lab-mac pools dev@example.com as "Misha", so its line is the pooled machine's: the
+  // tooltip is the pool's (the account, where, its windows, the others, the age).
+  const dev = page.locator('.glance-line[data-glance="pool:lab-mac"]');
+  await expect(dev).toHaveAttribute(
+    "data-tip",
+    /^Misha, Claude Code on lab-mac, in use\.\n5 hours: .*\nFiction has room\.\nSpacesheep is used up, .*\nAs of .*\.$/s,
+  );
   await dev.click({ button: "right" });
   const menu = page.getByRole("menu");
   await expect(menu.getByRole("menuitem")).toHaveText([
+    /^Open lab-mac's accounts/,
     "New session on lab-mac…",
-    /^Open Usage/,
     "Copy usage",
     "Hide usage in the sidebar",
   ]);
@@ -265,7 +270,7 @@ test("the sidebar line's menu, its tooltip, and hiding it until Settings brings 
   await page.keyboard.press("Escape");
   await expect(page.locator(".glance")).toBeVisible();
   await dev.click();
-  await expect(page).toHaveURL(/\/usage#claude-code%20a%3A/);
+  await expect(page).toHaveURL(/\/usage#pool%3Alab-mac$/);
 });
 
 test("a long name keeps its room in the sidebar; the window's name gives way", async ({ page }) => {

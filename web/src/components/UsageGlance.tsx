@@ -233,12 +233,13 @@ function PoolGlanceLine({ line, now, machines }: { line: PoolLine; now: number; 
     !!starts && (starts.start ? pool.harness in starts.start : !!starts.harnesses?.includes(pool.harness));
   const menu = useContextMenu(
     () => [
+      // One Open, first: the machine's section is where this line leads.
+      { label: `Open ${machine}'s accounts`, action: "nav.usage", run: () => openUsage(line.key) },
+      { sep: true },
       canStart && {
         label: `New session on ${machine}…`,
         run: () => openNewSession({ harness: pool.harness, machine }),
       },
-      { label: "Open Usage", action: "nav.usage", run: () => openUsage(line.key) },
-      { label: `Open ${machine}'s accounts`, run: () => openUsage(line.key) },
       entry && { label: "Copy usage", run: () => copyText(usageText(entry, title, Date.now())) },
       { sep: true },
       { label: "Hide usage in the sidebar", run: () => setSettings({ usageInSidebar: false }) },
