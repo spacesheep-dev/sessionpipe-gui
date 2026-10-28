@@ -372,3 +372,110 @@ export function eventWindows(e: Pick<ProtocolEvent, "data">): LimitWindow[] {
   }
   return out;
 }
+
+// ----- the section's words (§3.5–§3.7, §4) -----
+
+export const IMPORT_COMMAND = "sessionpipe pool add --import";
+export const LOGIN_COMMAND = "sessionpipe pool add --login";
+export const SAVING_ORDER = "saving order…";
+/** Why the Toggle, the grips and Move are off while a command is out. */
+export const stillSaving = (machine: string): string => `${machine} is still saving the last change`;
+/** The daemon answered `unsupported`: it predates account switching. */
+export const olderDaemon = (machine: string): string =>
+  `${machine}'s sessionpipe is older than account switching. Update it there.`;
+/** The Notice while the daemon is offline: plainer with the switch off. */
+export const offlineNotice = (machine: string, on: boolean): string =>
+  on
+    ? `${machine}'s sessionpipe is offline, so Claude Code there can't reach Claude while switching is on.`
+    : `${machine}'s sessionpipe is offline.`;
+/** The sign-in group's lead sentence; "again as …" when opened from an error row. */
+export const signInLead = (machine: string, again?: string): string =>
+  `${again ? `Sign in again as ${again}. ` : ""}${machine} opens a sign-in link; you sign in on claude.ai and paste the code it shows. Nothing from the account reaches this device.`;
+export const CODE_INCOMPLETE =
+  "That isn't the whole code. Paste everything the page showed, including the part after #.";
+export const LOGIN_EXPIRED = "The sign-in took too long. Start over to get a new link.";
+export const cannotSignInHere = (machine: string): string =>
+  `${machine}'s sessionpipe can't sign in from here. Use the command below.`;
+
+/** A machine's detail ends the sentence it is quoted in. */
+const ended = (s: string): string => (/[.!?…]$/.test(s) ? s : `${s}.`);
+
+export interface CommandNote {
+  text: string;
+  err: boolean;
+  /** Stays until something else happens (unsupported); else gone after 8 s. */
+  sticky?: boolean;
+}
+
+/** The note under the section header for a pool command's state (§3.6), with
+ *  `refusal(code)` the app's refusal words; null once delivered (the hello says). */
+export function commandNote(
+  a: Pick<ControlActivity, "outcome" | "code" | "detail">,
+  machine: string,
+  online: boolean,
+  refusal: (code: string | undefined) => string,
+): CommandNote | null {
+  const detail = a.detail?.trim();
+  switch (a.outcome) {
+    case undefined:
+    case "taken":
+    case "progress":
+      return { text: online ? `Sending to ${machine}…` : `Waiting for ${machine} to come online.`, err: false };
+    case "delivered":
+      return null;
+    case "refused":
+      return { text: `${machine} refused it: ${ended(a.code ? refusal(a.code) : (detail ?? "refused"))}`, err: true };
+    case "unsupported":
+      return { text: olderDaemon(machine), err: true, sticky: true };
+    case "failed":
+      return { text: `It didn't reach ${machine}${detail ? `: ${ended(detail)}` : "."}`, err: true };
+    case "expired":
+      return { text: `${machine} didn't take it in time.`, err: true };
+  }
+}
+
+/** A sign-in's failure line (§4.2), or null while it is on its way or done. */
+export function loginFailure(
+  a: Pick<ControlActivity, "outcome" | "code" | "detail" | "poolAction">,
+  machine: string,
+  refusal: (code: string | undefined) => string,
+): CommandNote | null {
+  const detail = a.detail?.trim() ?? "";
+  if (a.outcome === "unsupported") return { text: cannotSignInHere(machine), err: true, sticky: true };
+  if (a.outcome === "refused") {
+    if (a.poolAction === "login.complete") {
+      if (a.code === "expired" || /expir|too long|ten minutes/i.test(detail)) return { text: LOGIN_EXPIRED, err: true };
+      if (/already/i.test(detail)) {
+        const email = /[^\s@]+@[^\s@]+\.[^\s@.]+/.exec(detail)?.[0]?.replace(/[.,;:]+$/, "");
+        return { text: `${email ?? "That account"} is already on ${machine}.`, err: true };
+      }
+      return {
+        text: `${machine} couldn't finish the sign-in: ${ended(detail || refusal(a.code))} Check the code and try again.`,
+        err: true,
+      };
+    }
+    return commandNote(a, machine, true, refusal);
+  }
+  return commandNote(a, machine, true, refusal);
+}
+
+/** The Remove confirm (§3.5): with one account left, what the machine is left with. */
+export function removeConfirm(name: string, machine: string, last: boolean): { title: string; body: string } {
+  return {
+    title: `Remove ${name} from ${machine}?`,
+    body: `sessionpipe forgets its sign-in on ${machine}. ${
+      last
+        ? `${machine} will have no accounts to switch between.`
+        : "Sessions on it move to the next account with room."
+    } Claude Code's own login is not touched.`,
+  };
+}
+
+/** The list with the item at `from` moved to `to`; the same list when nothing moves. */
+export function moveIn<T>(list: readonly T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return [...list];
+  const out = [...list];
+  const [it] = out.splice(from, 1);
+  out.splice(to, 0, it as T);
+  return out;
+}

@@ -1,25 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 // The pool's words (UX-SPEC §2): names, status words from the hello, the room count, the
 // swap and served-by sentences, the picker's line, and the readings of a session's events.
-import type { LimitsEntry, MachinePoolAccount, ProtocolEvent } from "@shared/api";
+import type { ControlActivity, LimitsEntry, MachinePoolAccount, ProtocolEvent } from "@shared/api";
 import { describe, expect, it } from "vitest";
 import {
   accountSentence,
+  commandNote,
   eventWindows,
   firstBack,
   leftBecause,
+  loginFailure,
   loginFromDetail,
+  moveIn,
+  offlineNotice,
   poolAgentWords,
   pooledIds,
   pooling,
   poolPickerWords,
   poolTip,
+  removeConfirm,
   roomWords,
   rowTitle,
   sentenceName,
   servedBy,
   servedWords,
+  signInLead,
   statusWords,
+  stillSaving,
   swaps,
   swapWords,
   switchHint,
@@ -372,5 +379,71 @@ describe("the Agent menu's pooled line (UX-SPEC §6)", () => {
       }),
     ).toEqual([{ id: "five_hour", usedPercent: 99.2, windowMinutes: 300, resetsAt: "2026-10-29T14:10:00Z" }]);
     expect(eventWindows({ data: {} })).toEqual([]);
+  });
+});
+
+describe("the section's words", () => {
+  const refusal = (code: string | undefined) => `words for ${code}`;
+  it("says where a command stands, in the page's words", () => {
+    expect(commandNote({}, "lab-mac", true, refusal)).toEqual({ text: "Sending to lab-mac…", err: false });
+    expect(commandNote({}, "lab-mac", false, refusal)?.text).toBe("Waiting for lab-mac to come online.");
+    expect(commandNote({ outcome: "delivered" }, "lab-mac", true, refusal)).toBeNull();
+    expect(commandNote({ outcome: "refused", code: "pool_off" }, "lab-mac", true, refusal)).toEqual({
+      text: "lab-mac refused it: words for pool_off.",
+      err: true,
+    });
+    expect(commandNote({ outcome: "unsupported" }, "lab-mac", true, refusal)).toEqual({
+      text: "lab-mac's sessionpipe is older than account switching. Update it there.",
+      err: true,
+      sticky: true,
+    });
+    expect(commandNote({ outcome: "failed", detail: "socket closed" }, "lab-mac", true, refusal)?.text).toBe(
+      "It didn't reach lab-mac: socket closed.",
+    );
+    expect(commandNote({ outcome: "expired" }, "lab-mac", true, refusal)?.text).toBe("lab-mac didn't take it in time.");
+  });
+  it("words a sign-in's failures by the §4.2 table", () => {
+    const complete = (over: Partial<ControlActivity>) =>
+      loginFailure({ poolAction: "login.complete", outcome: "refused", ...over }, "lab-mac", refusal)?.text;
+    expect(complete({ code: "expired" })).toBe("The sign-in took too long. Start over to get a new link.");
+    expect(complete({ code: "pool_account", detail: "the login expired" })).toBe(
+      "The sign-in took too long. Start over to get a new link.",
+    );
+    expect(complete({ code: "pool_account", detail: "fiction@example.com is already in the pool" })).toBe(
+      "fiction@example.com is already on lab-mac.",
+    );
+    expect(complete({ code: "login", detail: "bad code" })).toBe(
+      "lab-mac couldn't finish the sign-in: bad code. Check the code and try again.",
+    );
+    expect(loginFailure({ poolAction: "login.begin", outcome: "unsupported" }, "lab-mac", refusal)).toEqual({
+      text: "lab-mac's sessionpipe can't sign in from here. Use the command below.",
+      err: true,
+      sticky: true,
+    });
+    expect(loginFailure({ poolAction: "login.begin" }, "lab-mac", refusal)?.text).toBe("Sending to lab-mac…");
+    expect(loginFailure({ poolAction: "login.begin", outcome: "delivered" }, "lab-mac", refusal)).toBeNull();
+  });
+  it("asks before a remove, and says what one account left leaves", () => {
+    expect(removeConfirm("Fiction", "lab-mac", false)).toEqual({
+      title: "Remove Fiction from lab-mac?",
+      body: "sessionpipe forgets its sign-in on lab-mac. Sessions on it move to the next account with room. Claude Code's own login is not touched.",
+    });
+    expect(removeConfirm("Fiction", "lab-mac", true).body).toContain(
+      "lab-mac will have no accounts to switch between.",
+    );
+  });
+  it("moves one item and leaves the rest in order", () => {
+    expect(moveIn(["a", "b", "c"], 0, 2)).toEqual(["b", "c", "a"]);
+    expect(moveIn(["a", "b", "c"], 2, 0)).toEqual(["c", "a", "b"]);
+    expect(moveIn(["a", "b", "c"], 1, 1)).toEqual(["a", "b", "c"]);
+    expect(moveIn(["a", "b", "c"], 1, 7)).toEqual(["a", "b", "c"]);
+  });
+  it("says the rest once each", () => {
+    expect(offlineNotice("lab-mac", true)).toMatch(/can't reach Claude while switching is on\.$/);
+    expect(offlineNotice("lab-mac", false)).toBe("lab-mac's sessionpipe is offline.");
+    expect(signInLead("lab-mac", "fiction@example.com")).toMatch(
+      /^Sign in again as fiction@example\.com\. lab-mac opens/,
+    );
+    expect(stillSaving("lab-mac")).toBe("lab-mac is still saving the last change");
   });
 });
