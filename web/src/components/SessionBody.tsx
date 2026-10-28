@@ -107,6 +107,9 @@ const OLDER = 200;
 const LIVE_CAP = TAIL + 2 * OLDER;
 /** The view sticks to the bottom only while the person is this close to it. */
 const PIN_PX = 48;
+/** Arrivals the "new below" pill doesn't count: a reply growing, a heartbeat, a status
+ *  line's usage report (none is a row of its own). */
+const QUIET_TYPES = new Set(["turn.progress", "session.heartbeat", "limits.observed"]);
 /** A delivered message with no turn of its own yet keeps its row this long. */
 const DELIVERED_HOLD_MS = 120_000;
 
@@ -495,7 +498,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
       });
       setTotal((t) => t + 1);
       // The pill counts what landed below the fold; a growing reply is one thing, not many.
-      if (!pinned.current && e.type !== "turn.progress" && e.type !== "session.heartbeat") setUnseen((n) => n + 1);
+      if (!pinned.current && !QUIET_TYPES.has(e.type)) setUnseen((n) => n + 1);
     });
   }, [store, key, loading]);
 

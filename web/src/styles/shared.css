@@ -1038,6 +1038,11 @@ textarea.field {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* A tip of a few lines (data-tip-wrap): each line as written, wrapped inside the width. */
+.tip--wrap {
+  max-width: 360px;
+  white-space: pre-line;
+}
 .tip-keys {
   display: inline-flex;
   gap: 2px;

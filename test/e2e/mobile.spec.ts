@@ -194,3 +194,48 @@ test.describe("phone: new session", () => {
     }
   });
 });
+
+// Usage on a phone: More › Usage, after Machines, opens the page as inset groups, nothing
+// scrolls sideways, and a long press on an account's header is its menu as a sheet.
+test.describe("phone: usage", () => {
+  test.skip(({ isMobile }) => !isMobile, "phone project only");
+
+  test("More › Usage, grouped, and a long press opens the account's sheet", async ({ page }) => {
+    await openBoard(page);
+    await page.locator("[data-nav=more]").click();
+    await expect(page.locator(".more-sheet [data-nav=usage]")).toBeVisible();
+    const rows = page.locator(".more-sheet .more-row");
+    const names = await rows.locator(".more-row-name").allTextContents();
+    expect(names.indexOf("Usage")).toBeGreaterThan(-1);
+    if (names.includes("Machines")) expect(names.indexOf("Usage")).toBe(names.indexOf("Machines") + 1);
+    await page.locator(".more-sheet [data-nav=usage]").click();
+    await expect(page).toHaveURL(/\/usage$/);
+    const dev = page.locator("section.usage-acct", { hasText: "dev@example.com" });
+    await expect(dev.locator(".usage-win").first()).toBeVisible();
+    await noSidewaysScroll(page);
+    // The where-line is the group's footer, under its windows.
+    const list = (await dev.locator(".form-list").boundingBox())!;
+    const where = (await dev.locator(".usage-where").boundingBox())!;
+    expect(where.y).toBeGreaterThan(list.y + list.height - 1);
+
+    const head = dev.locator(".usage-head");
+    await head.scrollIntoViewIfNeeded();
+    // Held still for the long-press (a scroll cancels one).
+    await page.waitForTimeout(300);
+    await head.locator(".usage-title").evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      el.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          pointerType: "touch",
+          clientX: r.left + 4,
+          clientY: r.top + 4,
+        }),
+      );
+    });
+    const sheet = page.locator(".menu-sheet");
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText("Copy usage");
+    await expect(sheet).toContainText("Forget these numbers");
+  });
+});

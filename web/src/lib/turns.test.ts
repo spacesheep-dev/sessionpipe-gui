@@ -30,6 +30,17 @@ const prompts = (turns: Turn[]) => started(turns).map(turnPrompt);
 const FRAME = "Message via studio-mac.local:7373 (sessionpipe control, signed on the sender's device):\n\n";
 
 describe("groupTurns", () => {
+  it("leaves a status line's usage report out of the turn: it is the account's, not a step", () => {
+    const ev = session();
+    const turns = groupTurns([
+      ev("turn.started", 1),
+      ev("turn.ended", 5),
+      ev("limits.observed", 6, { windows: [{ id: "five_hour", used_percent: 38 }] }),
+    ]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.items.map((i) => (i.kind === "event" ? i.e.type : i.kind))).toEqual(["turn.ended"]);
+  });
+
   it("puts each transcript on its own turn when they come one per turn", () => {
     const ev = session();
     const turns = groupTurns([

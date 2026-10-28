@@ -306,6 +306,7 @@ export const ACTIONS: readonly Action[] = [
   nav("nav.feed", "Feed", "g f"),
   nav("nav.review", "Review", "g r"),
   nav("nav.machines", "Machines", "g m"),
+  nav("nav.usage", "Usage", "g u", "what each account has left"),
   nav("nav.connect", "Connect", "g c"),
   nav("nav.setup", "Setup", "g s"),
   nav("nav.views", "Views", "g v", "the installed view plugins"),
