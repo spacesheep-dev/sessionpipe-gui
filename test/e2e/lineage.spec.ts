@@ -74,5 +74,7 @@ test("Machines: lab-mac's agents can ask each other; the Feed words the events",
   await openPage(page, "/feed");
   const ev = page.locator('li.ev[data-type="delegation.started"]').first();
   await expect(ev).toBeVisible({ timeout: 30_000 });
-  await expect(ev).toContainText(/asked Codex · running/i);
+  // The kind column says who was asked; the detail column says how the ask is going.
+  await expect(ev).toContainText(/asked Codex/i);
+  await expect(ev).toContainText(/running/);
 });
