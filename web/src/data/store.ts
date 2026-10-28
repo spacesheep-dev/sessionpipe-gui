@@ -8,6 +8,7 @@ import {
   EMPTY_LABELS,
   type Labels,
   type LabelsPatch,
+  type LimitsEntry,
   type MachineSummary,
   type SessionKey,
   type SessionSummary,
@@ -40,6 +41,9 @@ export interface AppState {
   suggestions: readonly Suggestion[];
   /** The person's colour labels, the same on every device (server/ui/labels.ts). */
   labels: Labels;
+  /** Each account's newest usage limits (server/ui/limits.ts), the whole list from the
+   *  snapshot and from every `limits` frame. */
+  limits: readonly LimitsEntry[];
   /** The newest ETag of each view's server-side state (`viewState` frames), so a mounted
    *  view can re-read what another device wrote. */
   viewStates: ReadonlyMap<string, string>;
@@ -61,6 +65,7 @@ const initial: AppState = {
   viewers: [],
   suggestions: [],
   labels: EMPTY_LABELS,
+  limits: [],
   viewStates: new Map(),
   version: 0,
 };
@@ -138,6 +143,7 @@ export class Store {
           viewers: s.viewers ?? [],
           suggestions: s.suggestions ?? [],
           labels: s.labels ?? this.state.labels,
+          limits: s.limits ?? [],
         });
         return;
       }
@@ -194,6 +200,9 @@ export class Store {
         // Whole documents, numbered: one older than what the page has (a frame overtaken by
         // the answer to its own PATCH) changes nothing.
         if (m.labels.rev >= this.state.labels.rev) this.set({ labels: m.labels });
+        return;
+      case "limits":
+        this.set({ limits: m.limits });
         return;
       case "viewState": {
         const viewStates = new Map(this.state.viewStates);

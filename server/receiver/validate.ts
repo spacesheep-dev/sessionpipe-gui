@@ -13,8 +13,9 @@ const SESSION_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
 const RFC3339_RE = /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})$/;
 
 /** The lowest tier that carries each known type (spec §4). core 0.7.0 predates
- *  `turn.progress`; the spec puts it at tier 2 beside `turn.transcript`. */
-export const MIN_TIER: Record<string, Tier> = { ...TYPE_TIER, "turn.progress": 2 };
+ *  `turn.progress`; the spec puts it at tier 2 beside `turn.transcript`. core 0.10.0
+ *  predates `limits.observed`, an account's usage limits, at tier 1. */
+export const MIN_TIER: Record<string, Tier> = { ...TYPE_TIER, "turn.progress": 2, "limits.observed": 1 };
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 

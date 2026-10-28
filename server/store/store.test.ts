@@ -237,6 +237,28 @@ describe("readings", () => {
     expect(store.session(KEY)!.state).toBe("idle");
   });
 
+  it("files a limits.observed and counts it, but reads it as no activity", () => {
+    const s = new Session();
+    const windows = [{ id: "five_hour", used_percent: 23.5, window_minutes: 300 }];
+    store.ingest([s.ev("session.started"), s.ev("turn.started")], "http");
+    store.ingest([s.ev("attention.needed", { attention_id: "p1", kind: "permission", tool: "Bash" })], "http");
+    const before = structuredClone(store.session(KEY)!);
+    // The status line redraws while the prompt is open: the prompt stays, so does the state.
+    store.ingest([s.ev("limits.observed", { windows }, { tier: 1 })], "http");
+    let sum = store.session(KEY)!;
+    expect(sum.openAttentions).toMatchObject([{ attentionId: "p1" }]);
+    expect(sum.state).toBe("needs_you");
+    expect(sum.lastAt).toBe(before.lastAt);
+    expect(sum.counts.events).toBe(before.counts.events + 1);
+    // Nor does one wake a session that ended.
+    store.ingest([s.ev("session.ended", { reason: "exit" })], "http");
+    const ended = structuredClone(store.session(KEY)!);
+    store.ingest([s.ev("limits.observed", { windows }, { tier: 1 })], "http");
+    sum = store.session(KEY)!;
+    expect(sum.state).toBe("done");
+    expect(sum.lastAt).toBe(ended.lastAt);
+  });
+
   it("comes back from done when the session starts again", () => {
     const s = new Session();
     store.ingest([s.ev("session.started"), s.ev("turn.started"), s.ev("session.ended", { reason: "other" })], "http");

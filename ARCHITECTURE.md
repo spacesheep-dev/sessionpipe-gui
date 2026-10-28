@@ -48,7 +48,7 @@ client against a receiver you can see into.
 | `server/store/*` | server-core | `Store`: `ingest(events, source) → IngestResult`, `snapshot()`, `session(key)`, `sessionDetail(key, after, limit)`, `feed(query)`, `forget(key)`, `subscribe(listener)`, `stats()`, `close()` |
 | `server/receiver/*` | server-core | `registerReceiver(router, deps)`: well-known, events, errors per HTTP.md §2 |
 | `server/sources/outbox.ts` | server-core | `startOutboxSource(store, opts) → { stop }` |
-| `server/ui/*` | server-core | `registerUi(router, deps)`: info, snapshot, stream (SSE), session, feed, forget, rotate token, demo toggle; `staticFiles(dir)` fallback; `LabelStore` + `registerLabels` (`labels.ts`: `<stateDir>/labels.json`, GET / PATCH `/api/ui/labels`, `labels` frames, a forgotten session loses its label); `Broadcast` (`stream.ts`: stream messages from elsewhere, the theme routes' `viewState`) |
+| `server/ui/*` | server-core | `registerUi(router, deps)`: info, snapshot, stream (SSE), session, feed, forget, rotate token, demo toggle; `staticFiles(dir)` fallback; `LabelStore` + `registerLabels` (`labels.ts`: `<stateDir>/labels.json`, GET / PATCH `/api/ui/labels`, `labels` frames, a forgotten session loses its label); `LimitsStore` + `registerLimits` (`limits.ts`: each account's newest `limits.observed`, per (harness, account id) or per machine without one, in `<stateDir>/limits.json`, GET `/api/ui/limits`, POST `/api/ui/limits/forget`, `limits` frames; forgetting a session keeps them, the demo's stay in memory); `Broadcast` (`stream.ts`: stream messages from elsewhere, the theme routes' `viewState`) |
 | `server/cli.ts` | server-core | flags, banner with LAN URL + QR + `sink add` line, `--open`, `--tls`, `tls status/trust/reset`, `--public-url`; `search` / `index` hand off to `server/search/cli.ts`; `--search-home` |
 | `server/search/service.ts`, `routes.ts`, `cli.ts`, `filters.ts`, `hints.ts`, `facets.ts`, `resume.ts` | search-service | `createSearch(deps) → SearchService` (reader + live tail, store overlays, the indexer child over IPC, status frames, history switch, reveal; `runSessionSearch` shared with the CLI), `registerSearch(router, svc, guard, isLocal)`, `runSearchCli` / `runIndexCli`; filters → the engine's `allow`, the no-result hint, facets, the quoted resume line |
 | `server/search/engine/*` | search-engine | `openReader`, `runIndexer`, `indexerChildMain`, `removeIndex`: segments, merges, the LOCK, BM25F, snippets |
@@ -112,6 +112,9 @@ function names above.
   injected turn's prompt never becomes `lastUser` (the row's last ask).
 - Labels are not a reading: they are the person's (`server/ui/labels.ts`), kept beside
   the store, never on a `SessionSummary`.
+- `limits.observed` is filed and counted like any event but is not activity: it never
+  closes an attention or moves a session's `lastAt`. Its numbers belong to the account
+  (`server/ui/limits.ts`), not the session.
 
 ## UI API (all under `/api/ui`, JSON, see `ROUTES` in `shared/api.ts`)
 
@@ -119,10 +122,12 @@ function names above.
 |---|---|
 | GET `/info` | `Info` (sink token and UI key only to loopback or an authenticated UI) |
 | GET `/snapshot` | `Snapshot` |
-| GET `/stream` | SSE of `StreamMessage`; `event:` = kind, `data:` = JSON; first frame a snapshot (with plugins' open `suggestions` and the `labels`); a `suggestion` frame when a plugin suggests an answer; a `labels` frame (the whole document, `rev` bumped) on every label change; a `viewState` frame (`id`, `etag`) when a view's state is written; a `: ping` comment every 15 s |
+| GET `/stream` | SSE of `StreamMessage`; `event:` = kind, `data:` = JSON; first frame a snapshot (with plugins' open `suggestions`, the `labels` and the `limits`); a `suggestion` frame when a plugin suggests an answer; a `labels` frame (the whole document, `rev` bumped) on every label change; a `limits` frame (the whole list) on every change of an account's limits; a `viewState` frame (`id`, `etag`) when a view's state is written; a `: ping` comment every 15 s |
 | GET `/sessions/:harness/:id?after=<seq>&limit=<n>&agent=<id>` | `SessionDetail` (full events, read from disk); `agent` keeps one subagent's events |
 | GET `/labels` | `Labels`: `{ rev, names, sessions }` |
 | PATCH `/labels` | `LabelsPatch` (JSON only, 415 otherwise): a merge, `null` clears → `Labels`; 400 `malformed` / `bad_label` / `bad_name`, 404 `not_found` (a session the store does not know), 413 `too_many` / `too_large` |
+| GET `/limits` | `{ limits: LimitsEntry[] }`: each account's newest usage limits |
+| POST `/limits/forget` `{ key }` | 204 (JSON only, 415 otherwise) and a `limits` frame; 400 `malformed`, 404 `not_found` |
 | GET `/events?limit&before&harness&machine&type&session&q` | `FeedPage`, newest first |
 | POST `/sessions/:harness/:id/forget` | 204; same effect as a `session.forgotten` event |
 | POST `/token/rotate` | `{ sinkToken }` (loopback only) |

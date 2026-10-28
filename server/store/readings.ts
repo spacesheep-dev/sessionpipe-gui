@@ -30,8 +30,15 @@ const ATTENTION_KINDS = new Set<string>(["permission", "question", "elicitation"
 
 /** Events a worker derives from files or clocks rather than a harness hook. Only a
  *  hook event proves the harness moved on, so only a hook event closes an attention
- *  (CONTROL.md §7). */
-const NOT_HOOK = new Set(["turn.progress", "turn.transcript", "session.heartbeat", "session.backfill"]);
+ *  (CONTROL.md §7). A status line redraws on its own clock, prompt open or not, so the
+ *  usage limits it reports (limits.observed) are not one either. */
+const NOT_HOOK = new Set([
+  "turn.progress",
+  "turn.transcript",
+  "session.heartbeat",
+  "session.backfill",
+  "limits.observed",
+]);
 
 /** `turn.started.submitted_by`: a bare word (PROTOCOL.md §4), kept as the harness sent it. */
 const SUBMITTED_BY = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
@@ -410,6 +417,9 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
     }
     const turns = num(d.turns);
     if (turns !== undefined && turns > s.counts.turns) s.counts.turns = turns;
+  } else if (ev.type === "limits.observed" && !first) {
+    // The account's numbers, not the session's activity (server/ui/limits.ts keeps them):
+    // they never move lastAt, so they never wake a session or keep it working.
   } else {
     if (first || !rec.live) {
       // The first live event: a backfill's span, if any, is history before it.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The transport's stream: what it does when the first frame, the snapshot, never comes.
 import "../native/test-env";
+import { ROUTES } from "@shared/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type EventSourceLike, shellStreams } from "../lib/net";
 import { createHttpTransport, SNAPSHOT_LIMIT_MS } from "./transport";
@@ -69,5 +70,25 @@ describe("the stream's first snapshot", () => {
     expect(h.onError).not.toHaveBeenCalled();
     expect(opened).toHaveLength(1);
     stop();
+  });
+});
+
+describe("forgetting an account's usage limits", () => {
+  it("posts the key as JSON and resolves on the 204", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(null, { status: 204 });
+    });
+    try {
+      await createHttpTransport().forgetLimits("claude-code a:acc-1");
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.url).toContain(ROUTES.ui.limitsForget);
+      expect(calls[0]!.init.method).toBe("POST");
+      expect(new Headers(calls[0]!.init.headers).get("content-type")).toBe("application/json");
+      expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ key: "claude-code a:acc-1" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

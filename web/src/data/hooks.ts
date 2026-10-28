@@ -4,6 +4,7 @@ import type {
   Attention,
   LabelColor,
   Labels,
+  LimitsEntry,
   MachineSummary,
   SessionKey,
   SessionState,
@@ -91,6 +92,14 @@ export function useSession(key: SessionKey): SessionSummary | undefined {
 export function useLabels(): Labels {
   const store = useStore();
   const read = useCallback(() => store.get().labels, [store]);
+  return useSyncExternalStore(store.subscribe, read, read);
+}
+
+/** Each account's newest usage limits (the whole list; it changes only when a report
+ *  does). The page words them (web/src/lib/limits.ts). */
+export function useLimits(): readonly LimitsEntry[] {
+  const store = useStore();
+  const read = useCallback(() => store.get().limits, [store]);
   return useSyncExternalStore(store.subscribe, read, read);
 }
 

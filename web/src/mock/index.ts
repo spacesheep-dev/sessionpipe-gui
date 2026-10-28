@@ -2,7 +2,14 @@
 // Mock mode: `VITE_MOCK=1` or `?mock=1` swaps the HTTP transport for an in-page World, so
 // the whole app runs with `npx vite --config web/vite.config.ts` and no server. Add
 // `&empty=1` for the first-run board.
-import { LABEL_COLORS, LABEL_NAME_MAX, type Labels, type LabelsPatch, type StreamMessage } from "@shared/api";
+import {
+  LABEL_COLORS,
+  LABEL_NAME_MAX,
+  type Labels,
+  type LabelsPatch,
+  type LimitsEntry,
+  type StreamMessage,
+} from "@shared/api";
 import type { Transport } from "../data/transport";
 import { installPhoneMock } from "./phone";
 import { review } from "./review";
@@ -36,6 +43,8 @@ export function createMockTransport(): Transport {
   installPhoneMock(new URLSearchParams(location.search), () => world.info());
   // Labels live beside the World, as they live beside the store on the server.
   let labels: Labels = { rev: 0, names: {}, sessions: {} };
+  // So do the usage limits.
+  let limits: LimitsEntry[] = [];
   const handlers = new Set<(m: StreamMessage) => void>();
   let search: ReturnType<Transport["sessionSearch"]> | null = null;
   return {
@@ -45,7 +54,7 @@ export function createMockTransport(): Transport {
       const t = setTimeout(() => {
         h.onOpen();
         const first = world.snapshot();
-        h.onMessage(first.kind === "snapshot" ? { ...first, snapshot: { ...first.snapshot, labels } } : first);
+        h.onMessage(first.kind === "snapshot" ? { ...first, snapshot: { ...first.snapshot, labels, limits } } : first);
         handlers.add(send);
         const off = world.subscribe((m) => {
           if (m.kind === "forgotten" && m.key in labels.sessions) {
@@ -74,6 +83,12 @@ export function createMockTransport(): Transport {
       labels = mergeLabels(labels, p, known);
       for (const l of handlers) l({ kind: "labels", labels });
       return labels;
+    },
+    forgetLimits: async (key) => {
+      await latency(undefined, 60);
+      if (!limits.some((e) => e.key === key)) throw new Error("not_found");
+      limits = limits.filter((e) => e.key !== key);
+      for (const l of handlers) l({ kind: "limits", limits });
     },
     info: () => latency(world.info()),
     session: async (harness, id, q) => {
