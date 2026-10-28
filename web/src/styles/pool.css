@@ -79,6 +79,9 @@
 .pool-acct {
   position: relative;
   background: var(--bg);
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 .pool-row {
   display: grid;
@@ -217,10 +220,16 @@
   padding-left: 0;
 }
 /* The row in flight: lifted over its siblings, under the pointer (the transform is
-   written by the drag), the neighbours sliding (the FLIP in PoolAccounts.tsx). */
+   written by the drag), the neighbours sliding (the FLIP in PoolAccounts.tsx). The lift
+   is a raised surface with corners: the shadow carries it in light, the raised ground
+   (--raised, a step up from the page) in dark, where a shadow on the dark page shows
+   nothing. The lift and the landing tween on the row's own transition; under reduced
+   motion they land at once, and the raised ground stays as the static cue. */
 .pool-acct[data-dragging],
 .pool-acct[data-grabbed] {
   z-index: 2;
+  border-radius: var(--radius);
+  background: var(--raised);
   box-shadow: var(--shadow-sm);
   border-top-color: transparent;
 }
