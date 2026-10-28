@@ -5,9 +5,14 @@
 // one-second clock (a ready step nobody claims, a machine coming online or going away).
 // The server never signs anything: a ready step waits for a browser that can, which
 // claims it, signs the `start` or `prompt` and brings the command's id back (routes.ts).
-// Every change goes out as one `workflowRun` stream frame (the whole run), a save or a
-// delete as a `workflows` frame. `createOrchestrate(deps)` is the contract app.ts and the
-// routes code against.
+// The browser's signed command comes back here too (`send`): the receiver verifies it as
+// /send does, and only then, in one move with no await between, checks the step is still
+// this claim's and the run still live, queues it and marks the step `sent`. A command
+// never runs on a machine for a step that was re-offered, taken by another tab or
+// cancelled, and a refusal of the command itself fails the step instead of leaving it to
+// be claimed and refused again every CLAIM_TTL_MS. Every change goes out as one
+// `workflowRun` stream frame (the whole run), a save or a delete as a `workflows` frame.
+// `createOrchestrate(deps)` is the contract app.ts and the routes code against.
 //
 //   store.ts   <stateDir>/workflows.json, workflow-runs.json; readWorkflow
 //   runs.ts    the pure state machine, unit-tested on its own
@@ -15,14 +20,17 @@
 import { ulid } from "sessionpipe-core";
 import type { ControlActivity, StreamMessage, Workflow, WorkflowRun } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
-import { advance, cancel, claim, newRun, type Online, runEnded, sent, settle } from "./runs.js";
+import { SIGNER_FAULTS } from "../control/ui.js";
+import { HttpError } from "../http/router.js";
+import { advance, cancel, claim, fail, newRun, type Online, RunError, runEnded, sent, settle } from "./runs.js";
 import { OrchestrateStore, readWorkflow, WorkflowError } from "./store.js";
 
 export interface OrchestrateDeps {
   stateDir: string;
   /** Control: its stream (the acks), the activity (acks that landed while this receiver
-   *  was down) and the paired machines (which are online). */
-  control: Pick<Control, "subscribe" | "activity" | "machines">;
+   *  was down), the paired machines (which are online), and the two halves of /send for
+   *  a step's command (verify, then queue). */
+  control: Pick<Control, "subscribe" | "activity" | "machines" | "verifySend" | "queueSend">;
   /** Stream frames out (the Broadcast the stream route forwards). */
   broadcast: (m: StreamMessage) => void;
   /** How often runs are read again for the clock rules (default 1 s). */
@@ -44,6 +52,12 @@ export interface Orchestrate {
   /** The signer's two moves (runs.ts claim / sent); throw RunError. */
   claim(runId: string, stepId: string, rev: number): WorkflowRun;
   sent(runId: string, stepId: string, commandId: string, rev: number): WorkflowRun;
+  /** The signer's second move as the browser makes it: the signed command (a /send body)
+   *  verified, then queued and the step marked `sent` in one move, or refused before
+   *  anything is queued (RunError 412 when the step is no longer this claim's or the run
+   *  ended; HttpError from the verifier for a signer's fault, the step left `sending`);
+   *  a refusal of the command itself fails the step and comes back as the run. */
+  send(runId: string, stepId: string, rev: number, body: unknown): Promise<WorkflowRun>;
   cancel(runId: string): WorkflowRun;
   deleteRun(runId: string): boolean;
   /** Read every live run again now (the clock rules); the timer does this every second. */
@@ -73,6 +87,23 @@ export function createOrchestrate(deps: OrchestrateDeps): Orchestrate {
     const run = store.run(id);
     if (!run) throw new WorkflowError(404, "not_found", "No such run.");
     return run;
+  };
+  /** `sent`'s own guard, read before anything is queued (runs.ts sent). */
+  const stillSending = (run: WorkflowRun, stepId: string, rev: number): void => {
+    if (rev > run.rev) throw new RunError(412, "conflict", "the run moved; read it again");
+    if (runEnded(run)) throw new RunError(412, "conflict", `the run is ${run.status}`);
+    const s = run.steps[stepId];
+    if (!s) throw new RunError(404, "not_found", "no such step");
+    if (s.status !== "sending") throw new RunError(412, "conflict", "the step was not being sent");
+  };
+  const markSent = (runId: string, stepId: string, commandId: string, rev: number): WorkflowRun => {
+    const run = put(sent(must(runId), stepId, commandId, rev, now(), online()));
+    // The machine may have answered already: a daemon that long-polls takes a command
+    // within milliseconds and refuses one at once, while the tab's PATCH with the id
+    // comes over a slower link. That ack found no step holding its id; look again now.
+    const a = deps.control.activity(1000).find((x) => x.id === commandId);
+    if (a) onActivity(a);
+    return store.run(runId) ?? run;
   };
 
   /** A control message: the step whose command it is settles, and its run moves on. */
@@ -144,14 +175,25 @@ export function createOrchestrate(deps: OrchestrateDeps): Orchestrate {
       );
     },
     claim: (runId, stepId, rev) => put(claim(must(runId), stepId, rev, now())),
-    sent(runId, stepId, commandId, rev) {
-      const run = put(sent(must(runId), stepId, commandId, rev, now(), online()));
-      // The machine may have answered already: a daemon that long-polls takes a command
-      // within milliseconds and refuses one at once, while the tab's PATCH with the id
-      // comes over a slower link. That ack found no step holding its id; look again now.
-      const a = deps.control.activity(1000).find((x) => x.id === commandId);
-      if (a) onActivity(a);
-      return store.run(runId) ?? run;
+    sent: (runId, stepId, commandId, rev) => markSent(runId, stepId, commandId, rev),
+    async send(runId, stepId, rev, body) {
+      // The step must be this claim's before the (async) verification and again, with
+      // nothing awaited in between, when the command is queued: a cancel or a re-offer
+      // that lands during the verifier's work still means nothing is queued.
+      stillSending(must(runId), stepId, rev);
+      let verified: Awaited<ReturnType<typeof deps.control.verifySend>>;
+      try {
+        verified = await deps.control.verifySend(body);
+      } catch (e) {
+        if (!(e instanceof HttpError) || e.status !== 422) throw e;
+        const { code, reason: why } = (e.body ?? {}) as { code?: string; reason?: string };
+        if (!code || SIGNER_FAULTS.has(code)) throw e;
+        // The command itself was refused: no signer can mend it, so the step fails.
+        return put(fail(must(runId), stepId, why ? `${code}: ${why}` : code, rev, now(), online()));
+      }
+      stillSending(must(runId), stepId, rev);
+      const a = deps.control.queueSend(verified);
+      return markSent(runId, stepId, a.id, rev);
     },
     cancel(runId) {
       const run = must(runId);

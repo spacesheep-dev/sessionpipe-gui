@@ -136,7 +136,7 @@ describe("workflow routes", () => {
     const s = await streamOf(app.url);
     await s.next("snapshot");
     // The machine has not polled yet: the run waits for it.
-    const noInput = await call(app.url, "POST", `${WF}/review/run`);
+    const noInput = await call(app.url, "POST", `${WF}/review/run`, { body: {} });
     expect(noInput.status).toBe(400);
     expect(noInput.body.error).toBe("This workflow asks for Task.");
     const started = await call(app.url, "POST", `${WF}/review/run`, { body: { input: "dark mode" } });
@@ -241,17 +241,17 @@ describe("workflow routes", () => {
     expect(settled.run.rev).toBeGreaterThan(rev);
 
     // Cancel: the ready step is skipped and the run is cancelled; a second cancel changes nothing.
-    const cancelled = await call(app.url, "POST", `${WF}/runs/${run0.id}/cancel`);
+    const cancelled = await call(app.url, "POST", `${WF}/runs/${run0.id}/cancel`, { body: {} });
     expect(cancelled.status).toBe(200);
     expect(cancelled.body).toMatchObject({
       status: "cancelled",
       steps: { a: { status: "done" }, b: { status: "skipped" } },
     });
     expect(((await s.next("workflowRun")) as { run: WorkflowRun }).run.status).toBe("cancelled");
-    expect((await call(app.url, "POST", `${WF}/runs/${run0.id}/cancel`)).body).toMatchObject({
+    expect((await call(app.url, "POST", `${WF}/runs/${run0.id}/cancel`, { body: {} })).body).toMatchObject({
       rev: (cancelled.body as { rev: number }).rev,
     });
-    expect((await call(app.url, "POST", `${WF}/runs/nope/cancel`)).status).toBe(404);
+    expect((await call(app.url, "POST", `${WF}/runs/nope/cancel`, { body: {} })).status).toBe(404);
 
     // Delete: gone, with a frame saying so.
     expect((await call(app.url, "DELETE", `${WF}/runs/${run0.id}`)).status).toBe(204);
@@ -262,7 +262,7 @@ describe("workflow routes", () => {
     // Deleting the workflow leaves nothing behind.
     expect((await call(app.url, "DELETE", `${WF}/review`)).status).toBe(204);
     expect(((await s.next("workflows")) as { workflows: Workflow[] }).workflows).toEqual([]);
-    expect((await call(app.url, "POST", `${WF}/review/run`)).status).toBe(404);
+    expect((await call(app.url, "POST", `${WF}/review/run`, { body: {} })).status).toBe(404);
     await s.close();
   });
 
@@ -288,6 +288,11 @@ describe("the service over a fake control", () => {
     },
     activity: () => activity,
     machines: () => new Map<string, MachineControl>([["box", { machineId: MACHINE, online, keys: [], queued: 0 }]]),
+    // The one-move send is the routes' (send.test.ts); the service here is driven by hand.
+    verifySend: () => Promise.reject(new Error("not here")),
+    queueSend: () => {
+      throw new Error("not here");
+    },
   };
   const emitAck = (a: ControlActivity) => {
     activity.push(a);

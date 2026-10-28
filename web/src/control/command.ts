@@ -6,7 +6,7 @@
 // on byte for byte.
 import type { ControlActivity, SessionKey, StartFile, StartPermission } from "@shared/api";
 import { noteOwnSend } from "../lib/toasts";
-import { ControlError, controlApi, type SendBody, type TrustedKey } from "./api";
+import { controlApi, type SendBody, type TrustedKey } from "./api";
 import { nonce } from "./bytes";
 import { dropGrant, sign, signerKind } from "./signer";
 
@@ -99,33 +99,61 @@ export async function signCommand(
 
 /** The grant did not satisfy the verifier: a fresh tap is worth one more try. */
 const GRANT_FAULTS = new Set(["bad_grant", "outside_grant", "bad_csig", "bad_assertion"]);
+/** The verifier's `code` on a 422, whichever door answered (ControlError from /send, the
+ *  workflow route's error for a step's command); undefined for anything else. */
+const faultCode = (e: unknown): string | undefined =>
+  e && typeof e === "object" && (e as { status?: unknown }).status === 422 ? (e as { code?: string }).code : undefined;
 
-/** Build, sign and send one command to `machineId`. A refusal of the cached grant drops
- *  it and tries once more with a new one; any other refusal is thrown as ControlError. */
-export async function sendCommand(
+/** Sign one command for `machineId` and hand the signed body to `deliver`: /send for the
+ *  page's own commands (sendCommand), the run's PATCH for a workflow step (useRunner.ts),
+ *  which queues it only once the server has seen the step is still this tab's. A refusal
+ *  of the cached grant drops it and tries once more with a new one; any other refusal is
+ *  thrown as `deliver` threw it. */
+export async function signAndDeliver<T>(
   rp: string,
   machineId: string,
   fields: CommandFields,
+  deliver: (body: SendBody) => Promise<T>,
   o: SendOptions = {},
-): Promise<ControlActivity> {
+): Promise<T> {
   const cmd = commandString(machineId, fields);
-  const attempt = async (fresh = false): Promise<ControlActivity> => {
+  const attempt = async (fresh = false): Promise<T> => {
     const signed = await signCommand(rp, cmd, { ...o, fresh });
     const body: SendBody = { machineId, ...signed };
     if (o.expiresInS) body.expires_in_s = o.expiresInS;
     if (o.from) body.from = o.from;
-    const carried = await controlApi.send(body);
-    noteOwnSend(carried.id);
-    return carried;
+    return deliver(body);
   };
   try {
     return await attempt();
   } catch (e) {
-    if (!o.confirm && e instanceof ControlError && e.code && GRANT_FAULTS.has(e.code)) {
+    const code = faultCode(e);
+    if (!o.confirm && code && GRANT_FAULTS.has(code)) {
       await dropGrant(rp);
       // The app's signer gets one fresh grant after a refusal (it rate-limits the rest).
       return attempt(signerKind() === "device");
     }
     throw e;
   }
+}
+
+/** Build, sign and send one command to `machineId`. A refusal of the cached grant drops
+ *  it and tries once more with a new one; any other refusal is thrown as ControlError. */
+export function sendCommand(
+  rp: string,
+  machineId: string,
+  fields: CommandFields,
+  o: SendOptions = {},
+): Promise<ControlActivity> {
+  return signAndDeliver(
+    rp,
+    machineId,
+    fields,
+    async (body) => {
+      const carried = await controlApi.send(body);
+      noteOwnSend(carried.id);
+      return carried;
+    },
+    o,
+  );
 }

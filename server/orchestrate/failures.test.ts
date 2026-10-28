@@ -130,6 +130,11 @@ describe("the service over a fake control", () => {
     },
     activity: () => [...activity].reverse(),
     machines: () => new Map<string, MachineControl>([["box", { machineId: MACHINE, online, keys: [], queued: 0 }]]),
+    // The one-move send is the routes' (send.test.ts); the service here is driven by hand.
+    verifySend: () => Promise.reject(new Error("not here")),
+    queueSend: () => {
+      throw new Error("not here");
+    },
   };
   /** The machine answers: the ack is kept (control's queue file) and announced (its stream). */
   const emitAck = (a: ControlActivity) => {
@@ -476,7 +481,7 @@ describe("the routes, where the races are real", () => {
     ((await call("GET", WF)).body.runs as WorkflowRun[]).find((r) => r.id === id)!;
   const start = async (wid: string, steps: WorkflowStep[]): Promise<WorkflowRun> => {
     expect((await call("PUT", `${WF}/${wid}`, { body: doc(steps) })).status).toBe(200);
-    const r = await call("POST", `${WF}/${wid}/run`);
+    const r = await call("POST", `${WF}/${wid}/run`, { body: {} });
     expect(r.status).toBe(201);
     return r.body as unknown as WorkflowRun;
   };

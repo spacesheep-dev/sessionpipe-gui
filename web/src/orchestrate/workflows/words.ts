@@ -195,6 +195,14 @@ export function stepRowWords(
     failureWords?: string | null;
     /** This page can sign but holds no grant yet: the signer line offers Unlock now. */
     needsUnlock?: boolean;
+    /** This page could sign, but the run was not started here (mine.ts): the signer line
+     *  offers Sign here. */
+    elsewhere?: boolean;
+    /** This page could sign, but the step's machine trusts none of its keys. */
+    untrusted?: boolean;
+    /** Why this page cannot sign the step as written (runner.ts unsignable), after the
+     *  machine's name: "doesn't offer read for Claude Code". */
+    unsignable?: string | null;
   },
 ): { glyph: StepGlyph; right: string; live?: boolean; second?: string; tone?: "needs" | "err" } {
   const step = run.plan[i]!;
@@ -206,13 +214,24 @@ export function stepRowWords(
     case "ready":
       if (run.status === "waiting" && run.waitingFor === "machine")
         return { glyph: "idle", right: "", second: `Waiting for ${machine}. It sends when the machine is back.` };
+      if (o.unsignable)
+        return {
+          glyph: "needs",
+          right: "",
+          second: `${machine} ${o.unsignable}. Change the step and run it again.`,
+          tone: "err",
+        };
       if (run.status === "waiting" && run.waitingFor === "signer")
         return {
           glyph: "needs",
           right: "",
           second: o.needsUnlock
             ? "Waiting for your passkey."
-            : "Waiting for a signer. Open this page on a device that can sign.",
+            : o.untrusted
+              ? `Waiting for a signer. ${machine} trusts no passkey from this browser.`
+              : o.elsewhere
+                ? "Waiting for a signer. This run was started elsewhere."
+                : "Waiting for a signer. Open this page on a device that can sign.",
           tone: "needs",
         };
       return { glyph: "idle", right: "starting…" };

@@ -18,7 +18,7 @@ import { BackButton, PageBar } from "../../components/PageBar";
 import { sendCommand } from "../../control/command";
 import { useControlActivity, useGrant, useRpId } from "../../control/hooks";
 import { promptFailureWords } from "../../control/Starting";
-import { canSign, unlock } from "../../control/signer";
+import { canSign, unlock, useOwnKeys } from "../../control/signer";
 import { harnessCommand, sentLine, startFailureWords } from "../../control/words";
 import { useAppState, useMachines } from "../../data/hooks";
 import { harnessMark, sessionTitle } from "../../lib/format";
@@ -29,6 +29,8 @@ import { actionById, useShortcut } from "../../lib/shortcuts";
 import { openSplit } from "../../lib/split";
 import { cancelRun, copyRunLink, deleteRun, runAgain, runPath, workflowPath } from "./actions";
 import { Chevron, StatusGlyph } from "./glyphs";
+import { markMine, useMine } from "./mine";
+import { unsignable } from "./runner";
 import { useWorkflowsState } from "./state";
 import { machineNameOf, runLive, runMetaWords, stepHarness, stepName, stepRowWords } from "./words";
 
@@ -70,11 +72,27 @@ function RunBody({ run, hasWorkflow }: { run: WorkflowRun; hasWorkflow: boolean 
   const phone = typeof matchMedia === "function" && matchMedia(PHONE).matches;
   const live = runLive(run);
 
-  // This page's own signing: whether the signer line can offer Unlock now.
+  // This page's own signing: whether the signer line can offer Unlock now, or Sign here
+  // (a run this browser did not start is never signed here unasked, mine.ts), and the
+  // keys the step's machine would have to trust.
   const rp = useRpId();
   const secure = canSign(rp);
   const grant = useGrant(live ? rp : null);
   const needsUnlock = live && secure && grant.exp === null;
+  const signsFor = useMine();
+  const elsewhere = live && secure && !signsFor.has(run.id);
+  const own = useOwnKeys(live && secure ? rp : null);
+  const ownIds = useMemo(() => new Set(own.map((k) => k.id)), [own]);
+  const signHere = async () => {
+    markMine(run.id);
+    if (grant.exp !== null || !rp) return;
+    try {
+      await unlock(rp);
+    } catch {
+      // dismissed: the line stays
+    }
+    grant.refresh();
+  };
 
   // The activity of the steps' commands, for the status line under a step on its way.
   const ids = useMemo(
@@ -179,6 +197,9 @@ function RunBody({ run, hasWorkflow }: { run: WorkflowRun; hasWorkflow: boolean 
             machines={machines}
             sessions={sessions}
             needsUnlock={needsUnlock}
+            elsewhere={elsewhere}
+            onSignHere={signHere}
+            ownIds={ownIds}
             rp={rp}
             onUnlocked={grant.refresh}
             secure={secure}
@@ -198,6 +219,9 @@ function StepRow({
   machines,
   sessions,
   needsUnlock,
+  elsewhere,
+  onSignHere,
+  ownIds,
   rp,
   onUnlocked,
   secure,
@@ -210,6 +234,11 @@ function StepRow({
   machines: ReturnType<typeof useMachines>;
   sessions: ReadonlyMap<SessionKey, { harness: string; id: string } & Parameters<typeof sessionTitle>[0]>;
   needsUnlock: boolean;
+  /** This page could sign, but the run was not started here: Sign here. */
+  elsewhere: boolean;
+  onSignHere: () => void;
+  /** The ids of the keys this page signs with. */
+  ownIds: ReadonlySet<string>;
   rp: string | null;
   onUnlocked: () => void;
   secure: boolean;
@@ -230,7 +259,19 @@ function StepRow({
       ? startFailureWords(activity, mname, agent)
       : promptFailureWords(activity, mname)
     : null;
-  const words = stepRowWords(run, i, { machineName, activity, sentLine: line, failureWords: failure, needsUnlock });
+  const control = machine?.control;
+  const untrusted = secure && !!control && !control.keys.some((k) => ownIds.has(k.id));
+  const cannot = control && secure ? unsignable(step, control, (h) => harnessMark(h).label) : null;
+  const words = stepRowWords(run, i, {
+    machineName,
+    activity,
+    sentLine: line,
+    failureWords: failure,
+    needsUnlock: needsUnlock && !elsewhere,
+    elsewhere,
+    untrusted,
+    unsignable: cannot,
+  });
   const key = s.session;
   const session = key ? sessions.get(key) : undefined;
   const title = session ? sessionTitle(session) : key ? undefined : "harness" in step.agent ? "new session" : undefined;
@@ -312,13 +353,26 @@ function StepRow({
       {words.second && (
         <p className={`wf-second ${words.tone === "needs" ? "is-needs" : words.tone === "err" ? "is-err" : ""}`}>
           {words.second}
-          {needsUnlock && words.tone === "needs" && (
+          {words.tone === "needs" && !untrusted && !cannot && elsewhere ? (
             <>
               {" "}
-              <button type="button" className="link-btn" onClick={() => void unlockNow()} data-wf-unlock>
-                Unlock now
+              <button type="button" className="link-btn" onClick={() => void onSignHere()} data-wf-sign-here>
+                Sign here
               </button>
             </>
+          ) : (
+            needsUnlock &&
+            !elsewhere &&
+            words.tone === "needs" &&
+            !untrusted &&
+            !cannot && (
+              <>
+                {" "}
+                <button type="button" className="link-btn" onClick={() => void unlockNow()} data-wf-unlock>
+                  Unlock now
+                </button>
+              </>
+            )
           )}
         </p>
       )}

@@ -57,7 +57,8 @@ async function startRun(page: Page, machine: FakeDaemon): Promise<{ run: Run; wo
   ];
   const saved = await page.request.put(`${WORKFLOWS}/${id}`, { data: { name: `Failure ${id}`, steps } });
   expect(saved.status()).toBe(200);
-  const started = await page.request.post(`${WORKFLOWS}/${id}/run`);
+  // Every write is JSON, an empty one too (routes.ts: no other site can make it).
+  const started = await page.request.post(`${WORKFLOWS}/${id}/run`, { data: {} });
   expect(started.status()).toBe(201);
   return { run: (await started.json()) as Run, workflowId: id };
 }

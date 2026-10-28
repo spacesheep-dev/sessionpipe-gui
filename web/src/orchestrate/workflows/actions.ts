@@ -15,6 +15,7 @@ import { navigate } from "../../lib/router";
 import { pushToast } from "../../lib/toasts";
 import { workflowsApi } from "./api";
 import { askCancel, askInput } from "./dialogs";
+import { forgetMine, markMine } from "./mine";
 import { applyRun, draft, dropRun, dropWorkflow, putDraft, putWorkflow, workflowsState } from "./state";
 import { newWorkflowId, runLive, stepName } from "./words";
 
@@ -49,6 +50,7 @@ export async function runWorkflow(w: Workflow): Promise<void> {
   }
   try {
     const run = await workflowsApi.run(w.id, input !== undefined ? { input } : {});
+    markMine(run.id);
     applyRun(run);
     navigate(runPath(run.id));
   } catch (e) {
@@ -60,6 +62,7 @@ export async function runWorkflow(w: Workflow): Promise<void> {
 export async function runAgain(run: WorkflowRun): Promise<void> {
   try {
     const next = await workflowsApi.run(run.workflowId, run.input !== undefined ? { input: run.input } : {});
+    markMine(next.id);
     applyRun(next);
     navigate(runPath(next.id));
   } catch (e) {
@@ -118,6 +121,7 @@ export async function deleteWorkflow(w: Workflow, o: { leave?: boolean } = {}): 
         // a run already gone
       }
       dropRun(r.id);
+      forgetMine(r.id);
     }
     if (o.leave) navigate("/workflows");
     return true;
@@ -200,6 +204,7 @@ export async function deleteRun(run: WorkflowRun, o: { leave?: string } = {}): P
   try {
     await workflowsApi.removeRun(run.id);
     dropRun(run.id);
+    forgetMine(run.id);
     if (o.leave) navigate(o.leave);
     return true;
   } catch (e) {

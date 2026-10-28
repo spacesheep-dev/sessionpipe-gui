@@ -7,8 +7,15 @@
 // (routes.ts PATCH, If-Match) is the idempotency guard across tabs: a 412 means another
 // tab has it, and the run it hands back shows the step `sending`, so the next reading
 // offers nothing for it. A page that cannot sign, or holds no day grant yet, offers
-// nothing either (the server says `waiting`, the run view says what to do); the runner
-// never signs anything but what a ready step says.
+// nothing either (the server says `waiting`, the run view says what to do), nor for a run
+// this browser did not start or was not told to sign (mine.ts: a loopback caller may
+// start a run, and must not drive this page's passkey by that alone), nor for a machine
+// that trusts none of this page's keys (the signature would be refused, and the claim
+// would sit for CLAIM_TTL_MS keeping a device that could sign from it). A step that names
+// a permission or a model the machine's hello does not offer is never signed without it
+// (the start would run at the machine's own mode, maybe wider than the author chose):
+// `unsignable` says so, and the run view shows it. The runner never signs anything but
+// what a ready step says.
 import {
   type HarnessStartOptions,
   type MachineControl,
@@ -19,15 +26,18 @@ import {
 import type { CommandFields } from "../../control/command";
 import { runLive } from "./words";
 
-/** What the runner needs of a machine: its id, whether it polls, and its hello. */
-export type RunnerMachine = Pick<MachineControl, "machineId" | "online" | "folders" | "harnesses" | "start">;
+/** What the runner needs of a machine: its id, whether it polls, its hello, and the keys it trusts. */
+export type RunnerMachine = Pick<MachineControl, "machineId" | "online" | "folders" | "harnesses" | "start" | "keys">;
 
 export interface RunnerInput {
   runs: readonly WorkflowRun[];
   machines: readonly RunnerMachine[];
-  /** This page can sign here, and holds the day grant (a run never asks for a passkey
-   *  out of the blue: the run view offers "Unlock now" instead). */
-  signer: { canSign: boolean; grant: boolean };
+  /** This page can sign here, holds the day grant (a run never asks for a passkey out of
+   *  the blue: the run view offers "Unlock now" instead), and signs with one of `keyIds`
+   *  (signer.ts ownKeys), which the step's machine must trust. */
+  signer: { canSign: boolean; grant: boolean; keyIds: ReadonlySet<string> };
+  /** The runs this browser signs for (mine.ts): started here, or "Sign here" was taken. */
+  mine: ReadonlySet<string>;
   /** `claimKey(run, step)` of the claims this tab has in flight, or that failed a moment
    *  ago (the server offers a stale claim again after CLAIM_TTL_MS; this keeps a refused
    *  passkey from being asked for every second meanwhile). */
@@ -47,15 +57,37 @@ export interface Claim {
 
 export const claimKey = (runId: string, stepId: string): string => `${runId}/${stepId}`;
 
-/** A start's level, only when the machine's hello offers it for that harness. */
-const permissionFor = (opts: HarnessStartOptions | undefined, p: WorkflowStep["permission"]) =>
-  p && opts?.permissions.includes(p) ? p : undefined;
-/** A start's model, only when the hello offers it (or any). */
-const modelFor = (opts: HarnessStartOptions | undefined, m: string | undefined) =>
-  m && opts && (opts.anyModel || opts.models?.includes(m)) ? m : undefined;
+/** Does the hello offer this level for the harness? */
+const offersPermission = (opts: HarnessStartOptions | undefined, p: WorkflowStep["permission"]) =>
+  !!p && !!opts?.permissions.includes(p);
+/** Does the hello offer this model (or any)? */
+const offersModel = (opts: HarnessStartOptions | undefined, m: string | undefined) =>
+  !!m && !!opts && (opts.anyModel || !!opts.models?.includes(m));
 
-/** The command a ready step signs, or null when nothing can be signed for it: a harness
- *  the machine does not run, a start with no folder anywhere, an empty text. */
+/** Why a step cannot be signed for its machine as written, in the run view's words after
+ *  the machine's name ("lab-mac doesn't offer read for Claude Code"), or null when it can.
+ *  A level or a model the hello does not offer is a refusal, not an omission: dropped,
+ *  the start would run at the machine's mode, which may be wider than the author chose.
+ *  `label` names the harness as the page prints it. */
+export function unsignable(
+  step: WorkflowStep,
+  machine: RunnerMachine,
+  label: (harness: string) => string,
+): string | null {
+  if ("session" in step.agent) return null;
+  const harness = step.agent.harness;
+  if (!machine.harnesses?.includes(harness)) return `doesn't run ${label(harness)}`;
+  if (!(step.cwd ?? machine.folders?.[0])) return "has no folder a new session could start in";
+  const opts = machine.start?.[harness];
+  if (step.permission && !offersPermission(opts, step.permission))
+    return `doesn't offer ${step.permission} for ${label(harness)}`;
+  if (step.model && !offersModel(opts, step.model))
+    return `doesn't offer the model ${step.model} for ${label(harness)}`;
+  return null;
+}
+
+/** The command a ready step signs, or null when nothing can be signed for it (`unsignable`,
+ *  or a text not resolved yet). A start carries the step's level and model as written. */
 export function commandFor(
   run: WorkflowRun,
   step: WorkflowStep,
@@ -65,36 +97,36 @@ export function commandFor(
   const text = run.steps[step.id]?.text ?? "";
   if (!text.trim()) return null;
   if ("session" in step.agent) return { kind: "prompt", session: step.agent.session, text };
+  if (unsignable(step, machine, (h) => h)) return null;
   const harness = step.agent.harness;
-  if (!machine.harnesses?.includes(harness)) return null;
-  const cwd = step.cwd ?? machine.folders?.[0];
-  if (!cwd) return null;
-  const opts = machine.start?.[harness];
-  const permission = permissionFor(opts, step.permission);
-  const model = modelFor(opts, step.model);
   return {
     kind: "start",
     session: sessionKey(harness, uuid()),
     text,
-    cwd,
-    ...(permission ? { permission } : {}),
-    ...(model ? { model } : {}),
+    cwd: step.cwd ?? machine.folders![0]!,
+    ...(step.permission ? { permission: step.permission } : {}),
+    ...(step.model ? { model: step.model } : {}),
   };
 }
 
-/** The claims this tab should make now, one per ready step of a live run whose machine
- *  is paired and polling, in run order then plan order. */
+/** Does the machine trust a key this page signs with? */
+export const trustsOne = (machine: Pick<RunnerMachine, "keys">, keyIds: ReadonlySet<string>): boolean =>
+  machine.keys.some((k) => keyIds.has(k.id));
+
+/** The claims this tab should make now, one per ready step of a live run this browser
+ *  signs for, whose machine is paired, polling and trusts a key of this page's, in run
+ *  order then plan order. */
 export function plan(input: RunnerInput): Claim[] {
   if (!input.signer.canSign || !input.signer.grant) return [];
   const out: Claim[] = [];
   const byId = new Map(input.machines.map((m) => [m.machineId, m]));
   for (const run of input.runs) {
-    if (!runLive(run)) continue;
+    if (!runLive(run) || !input.mine.has(run.id)) continue;
     for (const step of run.plan) {
       if (run.steps[step.id]?.status !== "ready") continue;
       if (input.held.has(claimKey(run.id, step.id))) continue;
       const machine = byId.get(step.machineId);
-      if (!machine?.online) continue;
+      if (!machine?.online || !trustsOne(machine, input.signer.keyIds)) continue;
       const fields = commandFor(run, step, machine, input.uuid);
       if (!fields) continue;
       out.push({ runId: run.id, stepId: step.id, rev: run.rev, machineId: machine.machineId, fields });

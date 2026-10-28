@@ -30,7 +30,15 @@ All notable changes to `sessionpipe-gui`. The format follows
   templates, an editor of native rows that saves itself, Run with the input it names, and
   a run view with every step's state, elapsed, reply and session. The server owns a run
   (`workflows.json`, `workflow-runs.json`, moved by control's acks); the browser is only
-  the signer, from any device that can sign, with claims as the guard across tabs.
+  the signer, from any device that can sign, with claims as the guard across tabs. A
+  browser signs the runs it started on its own; one started elsewhere asks once ("Sign
+  here"), so nothing on the loopback or another site can set your passkey to work. The
+  signed command goes back through the run itself, queued only once the server has seen
+  the step is still that tab's: a step cancelled or re-offered mid-signature queues
+  nothing, and one the receiver refuses fails in place instead of being offered again
+  every minute. A step is never signed without the level or model it names when the
+  machine's hello does not offer it; the run says so. Every write to `/api/ui/workflows`
+  is JSON only, an empty POST too, and refuses a cross-site request.
 - **Demo mode** plays an ask and a handoff on lab-mac, whose hello now says `ask` and
   `handoff`; the mock stream has the same.
 

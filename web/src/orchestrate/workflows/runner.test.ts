@@ -2,16 +2,20 @@
 // The signer's reading of the runs (runner.ts): one ready step becomes one claim with a
 // start (a harness) or a prompt (a session); two tabs settle through the claim (a 412's
 // run shows the step `sending`, so nothing is offered for it); a page with no grant, or
-// one that cannot sign, offers nothing; a machine that is offline, a harness it does not
-// run, a start with no folder, a claim this tab already holds: nothing either.
+// one that cannot sign, offers nothing; a run this browser did not start, a machine that
+// trusts none of its keys: nothing either; a machine that is offline, a harness it does
+// not run, a start with no folder, a level or a model the hello does not offer (never
+// signed without it), a claim this tab already holds.
 import type { MachineControl, WorkflowRun, WorkflowStep } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { type Claim, claimKey, commandFor, plan, type RunnerMachine } from "./runner";
+import { type Claim, claimKey, commandFor, plan, type RunnerMachine, unsignable } from "./runner";
 
 const MACHINE = "m_lab00000000000001";
+const KEY = { id: "key-of-this-page", alg: -7, addedAt: "2026-10-28T09:00:00.000Z" };
 const lab: RunnerMachine = {
   machineId: MACHINE,
   online: true,
+  keys: [KEY],
   folders: ["/Users/demo/code", "/Users/demo/work"],
   harnesses: ["claude-code", "codex"],
   start: {
@@ -52,9 +56,9 @@ function run(o: Partial<WorkflowRun> & { steps: WorkflowRun["steps"] }): Workflo
 }
 
 const uuid = () => "00000000-0000-4000-8000-000000000001";
-const signer = { canSign: true, grant: true };
+const signer = { canSign: true, grant: true, keyIds: new Set([KEY.id]) };
 const input = (runs: WorkflowRun[], o: Partial<Parameters<typeof plan>[0]> = {}) =>
-  plan({ runs, machines: [lab], signer, held: new Set(), uuid, ...o });
+  plan({ runs, machines: [lab], signer, mine: new Set(runs.map((r) => r.id)), held: new Set(), uuid, ...o });
 
 describe("runner: one ready step", () => {
   const r = run({
@@ -76,15 +80,30 @@ describe("runner: one ready step", () => {
     });
   });
 
-  it("drops a level or a model the hello does not offer for that harness", () => {
-    const codex: WorkflowStep = { ...implement, agent: { harness: "codex" }, permission: "auto", model: "o3" };
-    const c = commandFor(
-      run({ plan: [codex], steps: { implement: { status: "ready", text: "x" } } }),
-      codex,
-      lab,
-      uuid,
-    );
-    expect(c).toEqual({ kind: "start", session: `codex:${uuid()}`, text: "x", cwd: "/Users/demo/code" });
+  it("never signs a step without the level or the model it names: one the hello does not offer is unsignable, and says so", () => {
+    const label = (h: string) => (h === "codex" ? "Codex" : h);
+    const r1 = run({ steps: { implement: { status: "ready", text: "x" } } });
+    const level: WorkflowStep = { ...implement, agent: { harness: "codex" }, permission: "auto" };
+    expect(commandFor(run({ plan: [level], steps: r1.steps }), level, lab, uuid)).toBeNull();
+    expect(unsignable(level, lab, label)).toBe("doesn't offer auto for Codex");
+    const model: WorkflowStep = { ...implement, agent: { harness: "codex" }, model: "o3" };
+    expect(commandFor(run({ plan: [model], steps: r1.steps }), model, lab, uuid)).toBeNull();
+    expect(unsignable(model, lab, label)).toBe("doesn't offer the model o3 for Codex");
+    // Offered: carried as written. Named by neither: nothing to check.
+    const fine: WorkflowStep = {
+      ...implement,
+      agent: { harness: "codex" },
+      permission: "read",
+      model: "gpt-5.4-codex",
+    };
+    expect(commandFor(run({ plan: [fine], steps: r1.steps }), fine, lab, uuid)).toMatchObject({
+      permission: "read",
+      model: "gpt-5.4-codex",
+    });
+    expect(unsignable(fine, lab, label)).toBeNull();
+    expect(unsignable({ ...implement, permission: undefined, model: undefined }, lab, label)).toBeNull();
+    expect(unsignable(review, { ...lab, harnesses: [] }, label)).toBeNull();
+    expect(input([run({ plan: [level], steps: r1.steps })])).toEqual([]);
   });
 
   it("takes the step's own folder over the machine's", () => {
@@ -98,10 +117,12 @@ describe("runner: one ready step", () => {
   });
 
   it("offers nothing for a start with no folder anywhere, or a harness the machine does not run", () => {
-    const bare: RunnerMachine = { machineId: MACHINE, online: true, harnesses: ["claude-code"] };
+    const bare: RunnerMachine = { machineId: MACHINE, online: true, keys: [KEY], harnesses: ["claude-code"] };
     expect(commandFor(r, implement, bare, uuid)).toBeNull();
+    expect(unsignable(implement, bare, (h) => h)).toBe("has no folder a new session could start in");
     const gemini: WorkflowStep = { ...implement, agent: { harness: "gemini-cli" } };
     expect(commandFor(r, gemini, lab, uuid)).toBeNull();
+    expect(unsignable(gemini, lab, (h) => h)).toBe("doesn't run gemini-cli");
   });
 
   it("offers nothing for a step whose text is not resolved yet", () => {
@@ -130,7 +151,7 @@ describe("runner: start vs prompt", () => {
     const two = run({
       plan: [
         { ...implement, id: "first", after: [] },
-        { ...implement, id: "second", after: [], agent: { harness: "codex" } },
+        { ...implement, id: "second", after: [], agent: { harness: "codex" }, model: undefined },
       ],
       steps: { first: { status: "ready", text: "q" }, second: { status: "ready", text: "q" } },
     });
@@ -164,8 +185,20 @@ describe("runner: when it must do nothing", () => {
   const ready = run({ steps: { implement: { status: "ready", text: "x" }, review: { status: "pending" } } });
 
   it("no grant, or no way to sign here: nothing (the server says waiting)", () => {
-    expect(input([ready], { signer: { canSign: true, grant: false } })).toEqual([]);
-    expect(input([ready], { signer: { canSign: false, grant: true } })).toEqual([]);
+    expect(input([ready], { signer: { ...signer, grant: false } })).toEqual([]);
+    expect(input([ready], { signer: { ...signer, canSign: false } })).toEqual([]);
+  });
+
+  it("a run this browser did not start (and was not told to sign): nothing, until it is marked", () => {
+    expect(input([ready], { mine: new Set() })).toEqual([]);
+    expect(input([ready], { mine: new Set(["other"]) })).toEqual([]);
+    expect(input([ready], { mine: new Set(["other", ready.id]) })).toHaveLength(1);
+  });
+
+  it("a machine that trusts none of this page's keys: nothing (the signature would be refused)", () => {
+    expect(input([ready], { signer: { ...signer, keyIds: new Set(["someone-else"]) } })).toEqual([]);
+    expect(input([ready], { machines: [{ ...lab, keys: [] }] })).toEqual([]);
+    expect(input([ready], { machines: [{ ...lab, keys: [{ ...KEY, id: "other" }, KEY] }] })).toHaveLength(1);
   });
 
   it("a run that ended, a step that is not ready, a machine that is offline or not paired", () => {
@@ -185,6 +218,6 @@ describe("runner: when it must do nothing", () => {
   });
 });
 
-// The runner only ever reads a MachineControl's four fields: a change to the contract shows here.
+// The runner only ever reads a MachineControl's five fields: a change to the contract shows here.
 const _typed: RunnerMachine = {} as MachineControl;
 void _typed;

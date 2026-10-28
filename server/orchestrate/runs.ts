@@ -11,6 +11,7 @@ import {
   type RunStatus,
   type StepRun,
   WAITING_SIGNER_MS,
+  WORKFLOW_TEXT_MAX,
   type Workflow,
   type WorkflowRun,
   type WorkflowStep,
@@ -112,13 +113,35 @@ export function placeholderProblem(
   return null;
 }
 
+/** What a cut fill ends with: a reply longer than a prompt may be is cut, never refused. */
+export const CUT_MARK = "\n[… cut here: longer than a prompt may be]";
+
+/** The fills of a text's placeholders cut to fit `budget` characters together: the longest
+ *  first, so a short one stays whole; each cut one ends with CUT_MARK, or is dropped when
+ *  not even the mark would fit. */
+export function fitFills(fills: readonly string[], budget: number): string[] {
+  const out = [...fills];
+  const total = (): number => out.reduce((n, f) => n + f.length, 0);
+  const order = out.map((f, i) => [f.length, i] as const).sort((a, b) => b[0] - a[0]);
+  for (const [, i] of order) {
+    const over = total() - budget;
+    if (over <= 0) break;
+    const keep = out[i]!.length - over - CUT_MARK.length;
+    out[i] = keep > 0 ? out[i]!.slice(0, keep) + CUT_MARK : "";
+  }
+  return out;
+}
+
 /** The step's text with its placeholders filled from the run: `{{input}}` the run's input,
  *  `{{prev}}` the reply of the step(s) it runs after (in plan order, joined by a blank
- *  line; one with no reply contributes nothing), `{{step.x}}` that step's reply. */
+ *  line; one with no reply contributes nothing), `{{step.x}}` that step's reply. The
+ *  whole is kept within WORKFLOW_TEXT_MAX, which is what a command's text may be: the
+ *  step's own words always fit (checked at save), so what is cut is the fills, the longest
+ *  first, each ending with CUT_MARK; a run never stalls on a long reply. */
 export function resolveText(run: WorkflowRun, step: WorkflowStep): string {
   const i = run.plan.findIndex((s) => s.id === step.id);
   const reply = (id: string): string => run.steps[id]?.reply ?? "";
-  return step.text.replace(PLACEHOLDER, (whole: string, raw: string) => {
+  const fill = (raw: string, whole: string): string => {
     const p = readPlaceholder(raw);
     if (p.kind === "input") return run.input ?? "";
     if (p.kind === "prev")
@@ -128,7 +151,13 @@ export function resolveText(run: WorkflowRun, step: WorkflowStep): string {
         .join("\n\n");
     if (p.kind === "step") return reply(p.id);
     return whole;
-  });
+  };
+  const fills = [...step.text.matchAll(PLACEHOLDER)].map((m) => fill(m[1]!, m[0]));
+  const fixed = step.text.replace(PLACEHOLDER, "").length;
+  const fitted = fitFills(fills, WORKFLOW_TEXT_MAX - fixed);
+  let n = 0;
+  const text = step.text.replace(PLACEHOLDER, () => fitted[n++]!);
+  return text.length > WORKFLOW_TEXT_MAX ? text.slice(0, WORKFLOW_TEXT_MAX) : text;
 }
 
 /** A run of `w`: its steps copied into the plan (an edit of the workflow never changes a
@@ -260,6 +289,31 @@ export function sent(
     ...run,
     rev: run.rev + 1,
     steps: { ...run.steps, [stepId]: { ...s, status: "sent", commandId, sentAt: iso(now) } },
+  };
+  return advance(next, now, online);
+}
+
+/** The tab that claimed a step could not queue its command: the receiver refused the
+ *  command itself (the core's `bad_fields`, precheck's closed lists), which no signer can
+ *  mend. The step is failed with the refusal's `code: detail`, its dependants skip, and
+ *  the run moves on, instead of the claim being offered again every CLAIM_TTL_MS. Guarded
+ *  like `sent`: the step must still be `sending`. */
+export function fail(
+  run: WorkflowRun,
+  stepId: string,
+  error: string,
+  rev: number,
+  now: number,
+  online: Online,
+): WorkflowRun {
+  if (rev > run.rev) throw new RunError(412, "conflict", "the run moved; read it again");
+  const s = stepOf(run, stepId);
+  if (s.status !== "sending") throw new RunError(412, "conflict", "the step was not being sent");
+  const { claimedAt: _claimed, ...rest } = s;
+  const next: WorkflowRun = {
+    ...run,
+    rev: run.rev + 1,
+    steps: { ...run.steps, [stepId]: { ...rest, status: "failed", error, endedAt: iso(now) } },
   };
   return advance(next, now, online);
 }

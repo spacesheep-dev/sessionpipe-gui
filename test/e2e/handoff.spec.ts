@@ -183,23 +183,17 @@ test("a reply's menu asks about that turn; ⌘K has the verb; Esc keeps the draf
   await expect(sheet(page).locator("[data-hs-text]")).toHaveValue("Is five enough?");
 });
 
-test("an older machine: the sheet keeps the answer there, and the menu item says what it needs", async ({ page }) => {
+test("an older machine: the strip offers no ask, and the menu item says what it needs", async ({ page }) => {
   const name = `ho-old-${tag()}`;
   const m = await fakeDaemon(key, older(name), { sinkToken: sink });
   daemons.push(m);
   const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Old ${name}` });
   await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
   await expect(page.locator(".conn").first()).toHaveText("live");
-  // The strip still offers a plain ask (a prompt or a start with `from`); the sheet says
-  // the answer stays in the asked session, and has no switch.
-  await page.locator("[data-ctl-ask]").click();
-  await expect(sheet(page)).toBeVisible();
-  await expect(sheet(page).locator(".ns-status")).toHaveText(
-    `${name} needs a newer sessionpipe to bring answers back. The answer stays in the asked session.`,
-  );
-  await expect(sheet(page).locator("[data-hs-row=back]")).toHaveCount(0);
-  await page.keyboard.press("Escape");
-  await expect(sheet(page)).toHaveCount(0);
+  // The hello said neither `ask` nor `handoff`: the strip's button reads it the way the
+  // menu item does and is not shown (a capability shows only where the hello says so).
+  await expect(page.locator(".ctl textarea")).toBeVisible();
+  await expect(page.locator("[data-ctl-ask]")).toHaveCount(0);
   await page.getByRole("button", { name: "More actions" }).click();
   const item = page.getByRole("menuitem", { name: "Ask another agent…" });
   await expect(item).toBeVisible();

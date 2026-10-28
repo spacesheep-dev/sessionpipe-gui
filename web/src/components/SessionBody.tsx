@@ -1240,7 +1240,7 @@ function TurnBlock({
     (i) => (i.kind === "tool" && !i.ended) || (i.kind === "agent" && i.tools.some((t) => !t.ended)),
   );
   const now = useNow(liveTurn || hasRunningTool ? "fine" : "off");
-  const { machine, online, control, compose } = useTimeline();
+  const { machine, online, control, compose, session } = useTimeline();
   const transcript = [...turn.items].reverse().find((i) => i.kind === "event" && i.e.type === "turn.transcript") as
     | EventItem
     | undefined;
@@ -1262,8 +1262,12 @@ function TurnBlock({
   const startSeq = turn.start?.session.seq;
   // Claude Code's own follow-up when a background agent stops: not a person's prompt.
   const notice = taskNotification(prompt);
-  // An answer a handoff brought back (CONTROL.md §6): the asked agent's words, not the person's.
-  const answer = prompt ? handoffAnswer(prompt) : undefined;
+  // An answer a handoff brought back (CONTROL.md §6): the asked agent's words, not the
+  // person's, but only once the events say a handoff was relayed here (a prompt anyone
+  // writes can wear the frame; without the delegation it shows as the message it is).
+  const framed = prompt ? handoffAnswer(prompt) : undefined;
+  const answer =
+    framed && relayedFrom(session()?.delegations, framed.harness, turn.start?.time ?? sent?.at) ? framed : undefined;
   // What the machine said of the message sent from here: its failure, in place; while
   // it is on its way (or the agent is at it with nothing to show yet) the one status row.
   const failed = !!sent && isFinal(sent) && sent.outcome !== "delivered";

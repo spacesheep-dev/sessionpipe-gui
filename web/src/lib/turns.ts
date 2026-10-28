@@ -248,8 +248,10 @@ const SENT_PREFIX_MIN = 24;
 const FRAME_HEAD = /^Message via [^\n]*\(sessionpipe control[^\n]*\):\s*/;
 const FRAME_TAIL = /\s*\(Sent via [^\n]* with sessionpipe control[^\n]*\)\s*$/;
 // The daemon's trailer on the question it hands an agent another session asked
-// (`sessionpipe ask`, CONTROL.md §13): the asker's `<harness>:<id>`.
-const ASK_TAIL = /\s*\(Asked by (\S+) on this machine with sessionpipe ask\.[^)]*\)\s*$/;
+// (`sessionpipe ask`, CONTROL.md §13): the asker's `<harness>:<id>`, in the shape a
+// session ref has (control's SESSION_REF), or the trailer is just words in the prompt.
+const ASK_TAIL =
+  /\s*\(Asked by ([a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}) on this machine with sessionpipe ask\.[^)]*\)\s*$/;
 const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 
 /** A prompt as the person wrote it: the machine's framing taken off, and where it was sent

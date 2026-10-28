@@ -10,6 +10,7 @@ import * as core from "sessionpipe-core/control";
 import {
   type Assertion,
   b64url,
+  type ControlCommand,
   keyUsable,
   pairChallenge,
   RECEIVER_MAX_AGE_MS,
@@ -17,7 +18,7 @@ import {
   verifyCommand,
   verifyEnrollment,
 } from "sessionpipe-core/control";
-import { START_FILE_MAX_BYTES, type StartFile, type TrustedKey } from "../../shared/api.js";
+import { type ControlActivity, START_FILE_MAX_BYTES, type StartFile, type TrustedKey } from "../../shared/api.js";
 import type { Ctx, Handler, Reply, Router } from "../http/router.js";
 import { HttpError } from "../http/router.js";
 import { MEDIA_TYPE_RE } from "./files.js";
@@ -200,6 +201,92 @@ export async function pairingView(machine: MachineRow, pairing: PairingRow, rpId
   };
 }
 
+/** The longest body /send takes (a command's text is at most 20 000 characters, plus a grant). */
+export const SEND_BODY_MAX = 256 * 1024;
+
+/** The two faults a signer has, as the verifier codes them (CONTROL.md §5): the grant or
+ *  the signature did not satisfy it, the key is not one the machine trusts, the command
+ *  is too old, from the future or seen before. A page answers these with a fresh grant
+ *  or by pairing; they say nothing about the command itself. Every other refusal is
+ *  about the command (`bad_fields` from the core, precheck's closed lists). */
+export const SIGNER_FAULTS: ReadonlySet<string> = new Set([
+  "bad_grant",
+  "outside_grant",
+  "bad_csig",
+  "bad_assertion",
+  "untrusted_key",
+  "too_old",
+  "future",
+  "replay",
+]);
+
+/** A command a page signed, verified and ready to queue: the machine it names, the signed
+ *  bytes as they came, what the core read them as, and the queue options the body carried. */
+export interface VerifiedSend {
+  machine: MachineRow;
+  signed: SignedCommand;
+  cmd: ControlCommand;
+  opts: { expiresInMs?: number; from?: string };
+}
+
+/** Read and verify a /send body (CONTROL.md §3, §5): the machine, the signed bytes, the
+ *  verifier's verdict against the machine's keys within the receiver's window, then the
+ *  second look at what the hello advertised (precheck.ts; a handoff's `reply_to` first).
+ *  Throws HttpError with the route's status and the refusal's `code`. Nothing is queued:
+ *  `queueSend` does that, so a caller with its own guard (a workflow step's claim,
+ *  orchestrate/index.ts) can check it between the two, with no await in between. */
+export async function verifySend(d: Pick<UiRouteDeps, "state" | "rpId">, raw: unknown): Promise<VerifiedSend> {
+  const body = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as {
+    machineId?: unknown;
+    cmd?: unknown;
+    csig?: unknown;
+    grant?: unknown;
+    confirm?: unknown;
+    expires_in_s?: unknown;
+    from?: unknown;
+  };
+  if (typeof body.machineId !== "string" || !MACHINE_RE.test(body.machineId))
+    throw new HttpError(400, { reason: "bad_request", error: "Which machine?" });
+  // The page's own note of where it was sent from (SendBody.from): unsigned, never
+  // carried; a session ref or nothing.
+  if (body.from !== undefined && (typeof body.from !== "string" || !SESSION_REF.test(body.from)))
+    throw new HttpError(400, { reason: "bad_request", error: "from is a session, <harness>:<id>." });
+  const m = d.state.machine(body.machineId);
+  if (!m) throw new HttpError(404, { reason: "not_found", error: "No such machine." });
+  if (typeof body.cmd !== "string")
+    throw new HttpError(400, { reason: "bad_request", error: "cmd is the signed command string." });
+  const signed: SignedCommand = { cmd: body.cmd };
+  if (typeof body.csig === "string") signed.csig = body.csig;
+  if (body.grant && typeof body.grant === "object") signed.grant = body.grant as SignedCommand["grant"];
+  if (body.confirm && typeof body.confirm === "object") signed.confirm = body.confirm as SignedCommand["confirm"];
+  const verdict = await verifyCommand(signed, {
+    machine: m.id,
+    rpId: d.rpId(),
+    trusted: m.keys,
+    now: Date.now(),
+    maxAgeMs: RECEIVER_MAX_AGE_MS,
+  });
+  if (!verdict.ok) throw new HttpError(422, { reason: verdict.why, code: verdict.code });
+  // The second look: what this machine's hello advertised (precheck.ts). The same
+  // refusal shape, so the sheet shows the reason before anything is queued. A handoff's
+  // `reply_to` is looked at here first, then kept from precheck's closed lists.
+  const parsed = JSON.parse(signed.cmd) as Record<string, unknown>;
+  const refused = replyToProblem(parsed, m) ?? precheck(withoutReplyTo(parsed), m, d.state.files);
+  if (refused) throw new HttpError(422, { reason: refused.why, code: refused.code });
+  const ttl = typeof body.expires_in_s === "number" && body.expires_in_s > 0 ? body.expires_in_s * 1000 : undefined;
+  return {
+    machine: m,
+    signed,
+    cmd: verdict.cmd,
+    opts: { ...(ttl ? { expiresInMs: ttl } : {}), ...(typeof body.from === "string" ? { from: body.from } : {}) },
+  };
+}
+
+/** Queue a verified command for its machine (synchronous): the activity row as the page reads it. */
+export function queueSend(state: ControlState, v: VerifiedSend): ControlActivity {
+  return toActivity(state.enqueue(v.machine, v.signed, v.cmd, { via: "ui", ...v.opts }));
+}
+
 export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
   const { state, base } = d;
   const rpId = d.rpId;
@@ -367,50 +454,8 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
   router.post(
     `${base}/send`,
     guarded(async (ctx): Promise<Reply> => {
-      const body = await ctx.json<{
-        machineId?: unknown;
-        cmd?: unknown;
-        csig?: unknown;
-        grant?: unknown;
-        confirm?: unknown;
-        expires_in_s?: unknown;
-        from?: unknown;
-      }>(256 * 1024);
-      if (typeof body.machineId !== "string" || !MACHINE_RE.test(body.machineId))
-        throw new HttpError(400, { reason: "bad_request", error: "Which machine?" });
-      // The page's own note of where it was sent from (SendBody.from): unsigned, never
-      // carried; a session ref or nothing.
-      if (body.from !== undefined && (typeof body.from !== "string" || !SESSION_REF.test(body.from)))
-        throw new HttpError(400, { reason: "bad_request", error: "from is a session, <harness>:<id>." });
-      const m = state.machine(body.machineId);
-      if (!m) throw new HttpError(404, { reason: "not_found", error: "No such machine." });
-      if (typeof body.cmd !== "string")
-        throw new HttpError(400, { reason: "bad_request", error: "cmd is the signed command string." });
-      const signed: SignedCommand = { cmd: body.cmd };
-      if (typeof body.csig === "string") signed.csig = body.csig;
-      if (body.grant && typeof body.grant === "object") signed.grant = body.grant as SignedCommand["grant"];
-      if (body.confirm && typeof body.confirm === "object") signed.confirm = body.confirm as SignedCommand["confirm"];
-      const verdict = await verifyCommand(signed, {
-        machine: m.id,
-        rpId: rpId(),
-        trusted: m.keys,
-        now: Date.now(),
-        maxAgeMs: RECEIVER_MAX_AGE_MS,
-      });
-      if (!verdict.ok) throw new HttpError(422, { reason: verdict.why, code: verdict.code });
-      // The second look: what this machine's hello advertised (precheck.ts). The same
-      // refusal shape, so the sheet shows the reason before anything is queued. A handoff's
-      // `reply_to` is looked at here first, then kept from precheck's closed lists.
-      const parsed = JSON.parse(signed.cmd) as Record<string, unknown>;
-      const refused = replyToProblem(parsed, m) ?? precheck(withoutReplyTo(parsed), m, state.files);
-      if (refused) throw new HttpError(422, { reason: refused.why, code: refused.code });
-      const ttl = typeof body.expires_in_s === "number" && body.expires_in_s > 0 ? body.expires_in_s * 1000 : undefined;
-      const row = state.enqueue(m, signed, verdict.cmd, {
-        via: "ui",
-        ...(ttl ? { expiresInMs: ttl } : {}),
-        ...(typeof body.from === "string" ? { from: body.from } : {}),
-      });
-      return { status: 201, json: toActivity(row) };
+      const verified = await verifySend({ state, rpId }, await ctx.json<unknown>(SEND_BODY_MAX));
+      return { status: 201, json: queueSend(state, verified) };
     }),
   );
 

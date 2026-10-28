@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   type ControlActivity,
   WAITING_SIGNER_MS,
+  WORKFLOW_TEXT_MAX,
   type Workflow,
   type WorkflowRun,
   type WorkflowStep,
@@ -15,8 +16,11 @@ import {
   afterOf,
   ancestors,
   CLAIM_TTL_MS,
+  CUT_MARK,
   cancel,
   claim,
+  fail,
+  fitFills,
   newRun,
   placeholderProblem,
   placeholders,
@@ -367,5 +371,57 @@ describe("cancel", () => {
     let run = newRun(workflow([step("a", "A")]), { id: "r", now: T0, online: all });
     run = deliver(run, "a", CMD3, "ok", T0);
     expect(cancel(run, T0)).toBe(run);
+  });
+});
+
+describe("a step the receiver refused before anything was queued", () => {
+  it("fails with the refusal, skips what depended on it, and is never offered again", () => {
+    let run = newRun(workflow([step("a", "A"), step("b", "B {{prev}}")]), { id: "r", now: T0, online: all });
+    run = claim(run, "a", run.rev, T0);
+    const rev = run.rev;
+    run = fail(run, "a", "folder: cwd is not an allowed folder", rev, T0 + 1000, all);
+    // One rev for the failure, one for the move it sets off (b skipped, the run failed).
+    expect(run).toMatchObject({
+      status: "failed",
+      rev: rev + 2,
+      steps: { a: { status: "failed", error: "folder: cwd is not an allowed folder" }, b: { status: "skipped" } },
+    });
+    expect(run.steps.a!.claimedAt).toBeUndefined();
+    expect(run.steps.a!.endedAt).toBe(new Date(T0 + 1000).toISOString());
+    // Like `sent`: only a claimed step can fail this way, and a rev from the future is refused.
+    const fresh = newRun(workflow([step("a", "A")]), { id: "r2", now: T0, online: all });
+    expect(() => fail(fresh, "a", "x", fresh.rev, T0, all)).toThrow(RunError);
+    expect(() => fail(fresh, "a", "x", fresh.rev + 1, T0, all)).toThrow("the run moved");
+    expect(() => fail(fresh, "zz", "x", fresh.rev, T0, all)).toThrow("no such step");
+  });
+});
+
+describe("the text a step resolves to is never longer than a prompt may be", () => {
+  it("cuts the fills, the longest first, and keeps the step's own words whole", () => {
+    const long = "r".repeat(WORKFLOW_TEXT_MAX);
+    let run = newRun(workflow([step("a", "A"), step("b", "Review:\n{{prev}}\n\nBe brief.")]), {
+      id: "r",
+      now: T0,
+      online: all,
+    });
+    run = deliver(run, "a", CMD, long, T0);
+    const text = run.steps.b!.text!;
+    expect(text.length).toBe(WORKFLOW_TEXT_MAX);
+    expect(text.startsWith("Review:\nrrrr")).toBe(true);
+    expect(text.endsWith(`${CUT_MARK}\n\nBe brief.`)).toBe(true);
+    // A short reply beside a long one stays whole.
+    expect(fitFills(["short", long], 1000)).toEqual([
+      "short",
+      `${long.slice(0, 1000 - 5 - CUT_MARK.length)}${CUT_MARK}`,
+    ]);
+    expect(fitFills(["a", "b"], 100)).toEqual(["a", "b"]);
+    // An input at the cap with a step text at the cap: still within it.
+    const w = workflow([step("a", "{{input}}\n".repeat(1) + "x".repeat(WORKFLOW_TEXT_MAX - 10))], {
+      input: { label: "Task" },
+    });
+    const r2 = newRun(w, { id: "r3", input: "i".repeat(WORKFLOW_TEXT_MAX), now: T0, online: all });
+    expect(r2.steps.a!.text!.length).toBeLessThanOrEqual(WORKFLOW_TEXT_MAX);
+    // Not even the mark fits beside the step's words: the fill is dropped, the words stay.
+    expect(r2.steps.a!.text).toBe(`\n${"x".repeat(WORKFLOW_TEXT_MAX - 10)}`);
   });
 });

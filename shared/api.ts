@@ -1459,14 +1459,22 @@ export const ROUTES = {
      *  `bad_label` / `bad_name`, 404 `not_found` (a session the store does not know), 413
      *  `too_many` / `too_large`, 415 `json_only`. Every change is a `labels` stream frame. */
     labels: "/api/ui/labels",
-    /** Workflows (server/orchestrate; ARCHITECTURE.md "UI API"), UI key like the rest:
-     *  GET → { workflows, runs } · PUT /:id (the whole Workflow, JSON) → Workflow; 400
-     *  `malformed` / `bad_step`, 413 `too_large` (WORKFLOW_STEPS_MAX, WORKFLOW_TEXT_MAX) ·
-     *  DELETE /:id → 204 · POST /:id/run RunBody → 201 WorkflowRun · PATCH /runs/:id with
-     *  `If-Match: <rev>`: { step, status: "sending" } (a claim) or { step, commandId }
-     *  (sent) → WorkflowRun; 412 `conflict` with the current run when the rev moved or the
-     *  step is not where the patch expects it · POST /runs/:id/cancel → WorkflowRun ·
-     *  DELETE /runs/:id → 204. Every change is a `workflowRun` or `workflows` stream frame. */
+    /** Workflows (server/orchestrate; ARCHITECTURE.md "UI API"), UI key like the rest.
+     *  Every write takes JSON only, an empty POST too (415 `json_only`), and 403
+     *  `cross_site` when the browser marks it from another site: a write here sets a
+     *  signer to work. GET → { workflows, runs } · PUT /:id (the whole Workflow) →
+     *  Workflow; 400 `malformed` / `bad_step`, 413 `too_large` (WORKFLOW_STEPS_MAX,
+     *  WORKFLOW_TEXT_MAX; a step's resolved text is cut to fit, never refused) · DELETE
+     *  /:id → 204 · POST /:id/run RunBody → 201 WorkflowRun · PATCH /runs/:id with
+     *  `If-Match: <rev>`: { step, status: "sending" } (a claim), { step, send: SendBody }
+     *  (the signed command: verified as /send does, queued and the step marked sent in one
+     *  move, or nothing queued: 412 when the step is no longer this claim's, 422 with the
+     *  verifier's `code` for a signer's fault; a refusal of the command itself fails the
+     *  step and answers with the run) or { step, commandId } (a command queued through
+     *  /send: the test door) → WorkflowRun; 412 `conflict` with the current run when the
+     *  rev moved or the step is not where the patch expects it · POST /runs/:id/cancel
+     *  `{}` → WorkflowRun · DELETE /runs/:id → 204. Every change is a `workflowRun` or
+     *  `workflows` stream frame. */
     workflows: "/api/ui/workflows",
   },
   /** GET / DELETE /attachments/<id>.<ext>, UI key: the uploaded image itself (served

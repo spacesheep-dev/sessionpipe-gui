@@ -132,16 +132,17 @@ export function askOff(s: { machine?: string }, control: MachineControl | undefi
   return null;
 }
 
-/** Whether the strip shows its "Ask another agent…" button: the machine is paired and
- *  there is someone to ask there (a harness in the hello, or another session). Hidden
- *  otherwise, never disabled: the strip's own line already says why sending is off. */
+/** Whether the strip shows its "Ask another agent…" button: the machine is paired, its
+ *  daemon can ask (`askOff`, the same reading the menu item makes) and there is someone
+ *  to ask there (a harness in the hello, or another session). Hidden otherwise, never
+ *  disabled: the strip's own line already says why sending is off. */
 export function canAskFrom(
   s: { key: SessionKey; machine?: string },
   control: MachineControl | undefined,
   sessions: Iterable<Askable>,
   now: number,
 ): boolean {
-  if (!control) return false;
+  if (!control || askOff(s, control) !== null) return false;
   if (control.harnesses?.length) return true;
   return askableSessions(sessions, s, now).length > 0;
 }

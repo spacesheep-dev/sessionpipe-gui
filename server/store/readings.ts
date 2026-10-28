@@ -24,6 +24,7 @@ import {
   type Tier,
   type TurnStats,
 } from "../../shared/api.js";
+import { SESSION_REF } from "../control/parse.js";
 import { changedPaths } from "./paths.js";
 import { detach, PREVIEW_CHARS } from "./slim.js";
 
@@ -249,9 +250,9 @@ export function coalesceSession(s: SessionSummary, ev: ProtocolEvent): void {
   if (typeof b.parent_id === "string" && b.parent_id) s.parentId = b.parent_id;
   else if (b.parent_id === null && s.parentId === undefined) s.parentId = null;
   // The session this one was started for (sessionpipe ask, a handoff): a `<harness>:<id>`
-  // ref, kept like parent_id, across harnesses.
+  // ref, kept like parent_id, across harnesses; the shape control reads, nothing looser.
   const by = str(b.delegated_by);
-  if (by?.includes(":")) s.delegatedBy = by;
+  if (by && SESSION_REF.test(by)) s.delegatedBy = by;
   const title = str(b.title);
   if (title) {
     const src = b.title_source && TITLE_RANK[b.title_source] ? b.title_source : undefined;
@@ -757,7 +758,7 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       const harness = str(d.harness);
       if (harness) x.harness = harness;
       const to = str(d.to);
-      if (to) x.to = to;
+      if (to && SESSION_REF.test(to)) x.to = to;
       const text = str(d.text);
       if (text) x.text = cut(text, 200);
       settleDelegations(s, x);
@@ -772,7 +773,7 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       const ms = num(d.ms);
       if (ms !== undefined) x.ms = ms;
       const to = str(d.to);
-      if (to) x.to = to;
+      if (to && SESSION_REF.test(to)) x.to = to;
       const error = str(d.error);
       if (error) x.error = cut(error, 200);
       // The answer (tier 2+) as the index keeps it; the event on disk has it whole.
