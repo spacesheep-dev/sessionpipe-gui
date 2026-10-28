@@ -51,9 +51,15 @@ jobs:
           components: clippy
           targets: aarch64-apple-ios-sim
 
+      # The Rust cache keeps build-script output with Xcode's paths in it (swift-rs, the
+      # clang runtime), so each Xcode build gets its own: a macos-15 cache can't link on 26.
+      - name: Xcode
+        run: echo "XCODE_BUILD=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_ENV"
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/mobile/src-tauri -> target
+          key: xcode-${{ env.XCODE_BUILD }}
 
       # The UI the app bundles (frontendDist), which the shell's build also needs for tests.
       - run: npm ci

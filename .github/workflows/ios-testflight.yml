@@ -73,6 +73,7 @@ jobs:
           set -euo pipefail
           sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
           echo "$(xcodebuild -version | tr '\n' ' '), iOS SDK $sdk." >> "$GITHUB_STEP_SUMMARY"
+          echo "XCODE_BUILD=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_ENV"
           [ "${sdk%%.*}" -ge 26 ] || { echo "::error::iOS SDK $sdk: App Store Connect takes 26 or later"; exit 1; }
 
       - name: The secrets this build needs
@@ -162,9 +163,11 @@ jobs:
         with:
           targets: aarch64-apple-ios
 
+      # Keyed on the Xcode build: the cache holds build-script output with Xcode's paths in it.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/mobile/src-tauri -> target
+          key: xcode-${{ env.XCODE_BUILD }}
 
       - run: npm ci
       - run: npm run build:release
