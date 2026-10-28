@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // A chained command one step per line: only the top level splits.
 import { describe, expect, it } from "vitest";
-import { shellLines, splitShellCommand } from "./shellCommand";
+import { askedCommand, shellLines, splitShellCommand } from "./shellCommand";
 
 describe("splitShellCommand", () => {
   it("splits on &&, || and ;, each step after the first led by its operator", () => {
@@ -57,5 +57,18 @@ describe("shellLines", () => {
     expect(shellLines("ls -la")).toBeNull();
     expect(shellLines("cd web && npm test")).toBeNull();
     expect(shellLines("docker run \\\n  --rm img")).toEqual(["docker run \\\n  --rm img"]);
+  });
+});
+
+describe("askedCommand", () => {
+  it("is the call's command only when it starts with the command the prompt names", () => {
+    const input = { command: "npm run build && npm test -- bm25 && npm run deploy -- --target staging" };
+    expect(askedCommand(input, "npm run build && npm test")).toBe(input.command);
+    expect(askedCommand(input, `${input.command.slice(0, 30)}…`)).toBe(input.command);
+    expect(askedCommand(input, undefined)).toBe(input.command);
+    // A subagent's newer call of the same tool is not the one this prompt asks about.
+    expect(askedCommand({ command: "ls -la" }, "rm -rf build")).toBeUndefined();
+    expect(askedCommand({ file_path: "a.ts" }, undefined)).toBeUndefined();
+    expect(askedCommand(undefined, "ls")).toBeUndefined();
   });
 });

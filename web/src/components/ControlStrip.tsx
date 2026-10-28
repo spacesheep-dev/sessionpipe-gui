@@ -27,7 +27,7 @@ import { SETUP_LABEL, signerKind } from "../control/signer";
 import { useAskedInput } from "../lib/askedInput";
 import { attentionMessage, toolLabel } from "../lib/format";
 import { Link } from "../lib/router";
-import { shellLines } from "../lib/shellCommand";
+import { askedCommand, shellLines } from "../lib/shellCommand";
 import { hintFor } from "../lib/shortcuts";
 import { ActionButton, Spinner, StateDot } from "./bits";
 import "../control/control.css";
@@ -173,8 +173,9 @@ function Question({ a, session }: { a: Attention; session: SessionSummary }) {
   const tool = <span className="ctl-tool">{toolLabel(a.tool)}</span>;
   const msg = attentionMessage(a);
   const shell = SHELL.test(a.tool);
-  const whole = shell && typeof input?.command === "string" && input.command ? input.command : undefined;
-  const cmd = whole ?? (msg && shell && !/\b(permission|wants|needs)\b/i.test(msg) ? msg : undefined);
+  const said = msg && shell && !/\b(permission|wants|needs)\b/i.test(msg) ? msg : undefined;
+  const whole = shell ? askedCommand(input, said) : undefined;
+  const cmd = whole ?? said;
   if (!cmd)
     return line(
       <>

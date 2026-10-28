@@ -79,3 +79,13 @@ export function shellLines(cmd: string): string[] | null {
   const lines = splitShellCommand(cmd);
   return (lines.length >= 2 && cmd.length > 60) || cmd.includes("\n") ? lines : null;
 }
+
+/** The call's own command, when it is the command the prompt names. A Claude Code prompt
+ *  carries no call id, so the call read for it is the newest of its tool, and a subagent's
+ *  can be newer: where the message (`said`, its first characters) is a command, the call's
+ *  must start with it, or the strip stays on the message. */
+export function askedCommand(input: Record<string, unknown> | undefined, said: string | undefined): string | undefined {
+  const cmd = input?.command;
+  if (typeof cmd !== "string" || !cmd) return undefined;
+  return !said || cmd.trimStart().startsWith(said.replace(/…$/, "").trimStart()) ? cmd : undefined;
+}
