@@ -30,6 +30,7 @@ import { useShortcut } from "../lib/shortcuts";
 import { openSplit } from "../lib/split";
 import { atTier } from "../lib/tier";
 import { clock, dayLabel, durShort, useToday } from "../lib/time";
+import { eventWords as turnWords } from "../lib/turns";
 
 const CAP = 1500;
 const TYPES = ["session", "turn", "tool", "files", "attention", "subagent", "context"];
@@ -144,6 +145,12 @@ export function eventWords(e: StoredEvent): string {
       return "Compacted";
     case "native":
       return "Native hook";
+    case "delegation.started":
+    case "delegation.ended": {
+      // The session page's words for an agent this session asked ("Asked Codex · running").
+      const w = turnWords(e);
+      return w.detail ? `${w.text} · ${w.detail}` : w.text;
+    }
     default:
       return e.type;
   }

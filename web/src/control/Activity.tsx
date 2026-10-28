@@ -4,15 +4,19 @@
 // expired / unsupported / failed / refused, each in words. One row each, hairlines
 // between; the spinner is the only motion while one is under way. A delivered message
 // whose turn the chat above already shows folds to one line; one that went to a copy of
-// the session (a fork) keeps its reply and links to the copy.
-import { type ControlActivity, splitKey } from "@shared/api";
+// the session (a fork) keeps its reply and links to the copy. One sent from another
+// session's page to ask an agent (`from`, and `replyTo` when the answer comes back there)
+// says so in a line of its own, the sessions linked.
+import { type ControlActivity, type SessionKey, splitKey } from "@shared/api";
 import { Ago } from "../components/bits";
 import { Markdown } from "../components/Markdown";
-import { oneLine } from "../lib/format";
+import { useSession } from "../data/hooks";
+import { harnessMark, oneLine, sessionTitle } from "../lib/format";
 import { Link, sessionPath } from "../lib/router";
 import { AttachmentThumbs, promptParts } from "./Attachments";
 import { isFinal, KIND_LABEL, outcomeWords, shownState } from "./words";
 import "./control.css";
+import "../styles/lineage.css";
 
 /** The copy of the session a prompt went to (CONTROL.md §6 `fork`: a session a live
  *  process holds is never resumed, it is copied), when the machine's ack named one. A
@@ -66,6 +70,7 @@ export function ActivityRow({
         {when}
       </div>
       {prompt && prompt.items.length > 0 && <AttachmentThumbs items={prompt.items} small />}
+      {(a.from || a.replyTo) && <ViaLine from={a.from} replyTo={a.replyTo} />}
       <p className={`ctl-act-state ${live ? "is-live" : ""}`} aria-live="polite">
         {live && <span className="spinner" aria-hidden="true" />}
         {outcomeWords(a, { machine, online })}
@@ -81,6 +86,37 @@ export function ActivityRow({
         </blockquote>
       ) : null}
     </li>
+  );
+}
+
+/** "asked from <session> · the answer comes back there" (UX-SPEC §3.6): which page sent
+ *  it, and where the answer goes when that is signed (`reply_to`). The relay's own
+ *  outcome is the events', on the asking session's page, never this row's. */
+function ViaLine({ from, replyTo }: { from?: SessionKey; replyTo?: SessionKey }) {
+  const origin = from ?? replyTo!;
+  return (
+    <p className="ctl-act-via">
+      asked from <SessionName k={origin} />
+      {replyTo && replyTo === origin ? (
+        " · the answer comes back there"
+      ) : replyTo ? (
+        <>
+          {" · the answer goes to "}
+          <SessionName k={replyTo} />
+        </>
+      ) : null}
+    </p>
+  );
+}
+
+/** A session by its title, linked; one the store does not hold is named by its harness. */
+function SessionName({ k }: { k: SessionKey }) {
+  const s = useSession(k);
+  const { harness, id } = splitKey(k);
+  return (
+    <Link to={sessionPath(harness, id)} title={k}>
+      {s ? sessionTitle(s) : `a ${harnessMark(harness).label} session`}
+    </Link>
   );
 }
 

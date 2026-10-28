@@ -76,6 +76,30 @@ export interface ToolStep {
   subagent?: SubagentScript;
   /** The context fills up right after this step: context.compacted, then a compact restart. */
   compactAfter?: boolean;
+  /** This step is `sessionpipe ask <harness> "<text>"`: while the call is open the daemon
+   *  runs the asked agent as a session of its own (`delegated_by` on its events) and
+   *  brackets it with delegation.started / .ended on this session; the answer is the
+   *  call's stdout. `ms` is ignored: the step lasts as long as the child does. */
+  ask?: AskScript;
+}
+
+/** Another agent asked from inside a session (sessionpipe CONTROL.md §13). */
+export interface AskScript {
+  harness: HarnessName;
+  /** The question, as the daemon records it (cut to 200 chars on delegation.started). */
+  text: string;
+  /** The child's turns; the last one's `final` is the answer. */
+  turns: readonly TurnScript[];
+}
+
+/** A handoff (CONTROL.md §3.1 `reply_to`): a `start` signed from here with this session
+ *  named as the one to answer into. The daemon starts the asked agent, relays its reply
+ *  here as a framed prompt, and this session answers that with `followUp`. */
+export interface HandoffScript {
+  harness: HarnessName;
+  text: string;
+  turns: readonly TurnScript[];
+  followUp: string;
 }
 
 export interface SubagentScript {
@@ -1384,4 +1408,143 @@ export const UNATTENDED_TURN: TurnScript = {
     },
   ],
   final: "- Mid-cycle downgrades are prorated.\n- Webhook deliveries retry with backoff.",
+};
+
+// ---------- agents that ask each other (sessionpipe ask, a handoff) ----------
+
+const RETRY_DIFF =
+  "diff --git a/src/webhooks/send.ts b/src/webhooks/send.ts\n@@ -18,7 +18,12 @@ export async function deliver(job: WebhookJob) {\n-  const delay = 30_000;\n+  // 1 s, 2 s, 4 s, 8 s, 16 s; five tries, then the dead-letter queue.\n+  const delay = Math.min(1000 * 2 ** job.attempt, 16_000);\n+  if (job.attempt >= 5) return deadLetter(job);\n";
+
+/** What Codex answers when asked to review the backoff change (the ask's reply, and the
+ *  handoff's too: the same question from two directions). */
+const CODEX_REVIEW =
+  'Two things I\'d change.\n\n1. Add jitter. Five failed deliveries to the same endpoint now retry in lockstep (1 s, 2 s, 4 s…), which is the thundering herd the backoff was meant to avoid. `delay * (0.5 + Math.random())` is enough.\n2. `job.attempt >= 5` checks the attempt *before* this delivery, so a job gets six tries, not five. Either compare against `attempt + 1` or say "six" in the comment.\n\nThe cap at 16 s is fine for a webhook. The dead-letter path reads right.';
+
+/** Codex, asked for the review: its first prompt is the question as the daemon frames it
+ *  (sim.ts adds the trailer), and it answers in one turn. */
+export const CODEX_ASKED_TURN: TurnScript = {
+  prompt:
+    "Review the diff in src/webhooks/send.ts: exponential backoff on webhook retries. Say what you'd do differently.",
+  title: { text: "Review: backoff on webhook retries", source: "harness" },
+  steps: [
+    {
+      tool: "Bash",
+      input: { command: "git diff -- src/webhooks/send.ts" },
+      output: RETRY_DIFF,
+      ms: 60,
+    },
+    {
+      tool: "Bash",
+      input: { command: "sed -n 1,40p src/webhooks/send.ts" },
+      output:
+        "import { deadLetter } from './dead-letter';\nimport type { WebhookJob } from './types';\n\nexport async function deliver(job: WebhookJob) {\n  …\n",
+      ms: 20,
+    },
+  ],
+  final: CODEX_REVIEW,
+};
+
+/** A Claude Code turn that asks Codex for a review through the daemon (`sessionpipe ask`
+ *  in a Bash step), then applies the answer. */
+export const ASK_TURN: TurnScript = {
+  prompt:
+    "Make the webhook sender retry with exponential backoff instead of a flat 30 s, then ask Codex for a second opinion on the diff before you commit.",
+  title: { text: "Webhook retries with backoff", source: "harness" },
+  steps: [
+    {
+      tool: "Read",
+      input: { file_path: "~/code/billing/src/webhooks/send.ts" },
+      output: read(
+        "/Users/dev/code/billing/src/webhooks/send.ts",
+        "export async function deliver(job: WebhookJob) {\n  try {\n    await post(job);\n  } catch (err) {\n    const delay = 30_000;\n    return queue.enqueue({ ...job, attempt: job.attempt + 1 }, { delay });\n  }\n}\n",
+        36,
+      ),
+      ms: 5,
+      say: "The retry delay is a flat 30 s in `deliver`; I'll make it exponential with a cap and a dead-letter after five tries.",
+    },
+    {
+      tool: "Edit",
+      input: {
+        file_path: "~/code/billing/src/webhooks/send.ts",
+        old_string: "    const delay = 30_000;",
+        new_string:
+          "    // 1 s, 2 s, 4 s, 8 s, 16 s; five tries, then the dead-letter queue.\n    const delay = Math.min(1000 * 2 ** job.attempt, 16_000);\n    if (job.attempt >= 5) return deadLetter(job);",
+      },
+      output: edit("~/code/billing/src/webhooks/send.ts", "    const delay = 30_000;", "    const delay = …"),
+      ms: 9,
+      paths: ["src/webhooks/send.ts"],
+      say: "Backoff is in: 1 s, 2 s, 4 s, 8 s, 16 s, then the dead-letter queue. Asking Codex to review the diff.",
+    },
+    {
+      tool: "Bash",
+      input: {
+        command:
+          'sessionpipe ask codex "Review the diff in src/webhooks/send.ts: exponential backoff on webhook retries. Say what you\'d do differently."',
+        description: "Ask Codex to review the diff",
+      },
+      ms: 0,
+      ask: { harness: "codex", text: CODEX_ASKED_TURN.prompt, turns: [CODEX_ASKED_TURN] },
+      say: "Codex is back: it wants jitter on the delay, and it caught an off-by-one in the try count. Both are right.",
+    },
+    {
+      tool: "Edit",
+      input: {
+        file_path: "~/code/billing/src/webhooks/send.ts",
+        old_string:
+          "    const delay = Math.min(1000 * 2 ** job.attempt, 16_000);\n    if (job.attempt >= 5) return deadLetter(job);",
+        new_string:
+          "    const base = Math.min(1000 * 2 ** job.attempt, 16_000);\n    const delay = Math.round(base * (0.5 + Math.random()));\n    if (job.attempt + 1 >= 5) return deadLetter(job);",
+      },
+      output: edit("~/code/billing/src/webhooks/send.ts", "    const delay = Math.min(…", "    const base = …"),
+      ms: 11,
+      paths: ["src/webhooks/send.ts"],
+    },
+    {
+      tool: "Bash",
+      input: { command: "git commit -am 'webhooks: retry with exponential backoff and jitter'", description: "Commit" },
+      output: bash(
+        "[fix/webhook-retry 7c1e2d9] webhooks: retry with exponential backoff and jitter\n 1 file changed, 5 insertions(+), 2 deletions(-)\n",
+      ),
+      ms: 140,
+    },
+  ],
+  final:
+    "Done. Retries back off 1 s → 16 s with jitter and go to the dead-letter queue after five tries. I asked Codex to review the diff: it suggested the jitter (so a burst of failures doesn't retry in lockstep) and caught that the try count was off by one; both are in. Committed as `webhooks: retry with exponential backoff and jitter`.",
+};
+
+/** The session a handoff is asked from: one plain turn, then (sim.ts `handoff`) Codex's
+ *  answer arrives as a framed prompt and this turn's `followUp` answers it. */
+export const HANDOFF_PARENT_TURN: TurnScript = {
+  prompt: "Switch the webhook sender's retries from a flat 30 s to exponential backoff, capped at 16 s.",
+  title: { text: "Webhook backoff", source: "harness" },
+  steps: [
+    {
+      tool: "Edit",
+      input: {
+        file_path: "~/code/billing/src/webhooks/send.ts",
+        old_string: "    const delay = 30_000;",
+        new_string:
+          "    const delay = Math.min(1000 * 2 ** job.attempt, 16_000);\n    if (job.attempt >= 5) return deadLetter(job);",
+      },
+      output: edit("~/code/billing/src/webhooks/send.ts", "    const delay = 30_000;", "    const delay = …"),
+      ms: 8,
+      paths: ["src/webhooks/send.ts"],
+    },
+  ],
+  final:
+    "Retries now back off 1 s, 2 s, 4 s, 8 s, 16 s and stop after five tries, when the job goes to the dead-letter queue. The diff is in src/webhooks/send.ts; I haven't committed it.",
+};
+
+export const HANDOFF: HandoffScript = {
+  harness: "codex",
+  text: `Give a second opinion on the reply below. Point out what you'd do differently and why.\n\n---\n${HANDOFF_PARENT_TURN.final}`,
+  turns: [
+    {
+      ...CODEX_ASKED_TURN,
+      prompt: "",
+      title: { text: "Second opinion on the webhook retry", source: "harness" },
+    },
+  ],
+  followUp:
+    "Codex is right on both counts. I've added jitter (`base * (0.5 + Math.random())`) and fixed the try count to compare `attempt + 1`, so a job gets exactly five tries. Still uncommitted; say the word and I'll commit.",
 };

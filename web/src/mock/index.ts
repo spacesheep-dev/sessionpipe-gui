@@ -46,6 +46,8 @@ export function createMockTransport(): Transport {
         h.onOpen();
         const first = world.snapshot();
         h.onMessage(first.kind === "snapshot" ? { ...first, snapshot: { ...first.snapshot, labels } } : first);
+        // The messages the receiver carried, as the stream would have brought them.
+        for (const message of [...world.controlActivity()].reverse()) h.onMessage({ kind: "control", message });
         handlers.add(send);
         const off = world.subscribe((m) => {
           if (m.kind === "forgotten" && m.key in labels.sessions) {

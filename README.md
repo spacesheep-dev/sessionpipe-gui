@@ -239,6 +239,17 @@ A parent row says how many subagents are running and opens a tree of what each i
 the session, each agent sits under the turn that started it, with its tools and its result,
 and opens beside its parent as a tab of its own.
 
+### Agents that ask each other
+
+A session can hand a task to another agent on its machine and get the answer back
+(`sessionpipe ask codex "review this diff"`), and from a session's page you can ask another
+agent and have its answer brought back into that session as a message. Either way the ask
+is one row in the chat where it happened, the asked session says who it is for, and the
+board nests it under the one that asked. **Workflows** chain steps across agents and
+machines (implement, then review; two opinions, then a comparison), every step a signed
+command, every run resumable from any device that can sign. Details and the commands:
+[docs/orchestration.md](docs/orchestration.md).
+
 ### Review
 
 ![Review: the files your agents changed, by repo](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/review.png)

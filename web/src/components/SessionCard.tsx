@@ -50,6 +50,17 @@ import { AgentRow, useAgentsOpen } from "./AgentRow";
 import { HarnessGlyph, Redacted, Since, StateDot } from "./bits";
 import { type MenuItem, type MenuList, openMenu, useContextMenu } from "./ContextMenu";
 import { LabelDot } from "./LabelDot";
+import "../styles/lineage.css";
+
+/** The row's trailing fact while the session waits on an agent it asked (sessionpipe ask,
+ *  a handoff): "asking Codex", or "asking 2 agents". Null when it asked none. */
+export function askingFact(s: Pick<SessionSummary, "delegations" | "counts">): string | null {
+  const n = s.counts.delegationsRunning ?? 0;
+  if (n <= 0) return null;
+  if (n > 1) return `asking ${n} agents`;
+  const open = (s.delegations ?? []).find((d) => !d.endedAt);
+  return open ? `asking ${harnessMark(open.harness).label}` : "asking another agent";
+}
 
 interface SessionCardProps {
   s: SessionSummary;
@@ -160,7 +171,9 @@ export const SessionCard = memo(function SessionCard({
   const toggleAgents = (to = !showAgents) => {
     if (agents.length > 0 && to !== showAgents) setAgentsChoice(s.key, to);
   };
-  const fact = agentsFact(s);
+  // The subagents running, and the agents it asked (one fact when both: "2 subagents
+  // running · asking Codex").
+  const fact = [agentsFact(s), askingFact(s)].filter(Boolean).join(" · ") || null;
   // sessionpipe 0.10: paused on its own background work, a turn nobody typed, a run
   // nobody attended. One trailing fact at most, after the subagents'.
   const quiet = quietRun(s);
@@ -443,7 +456,8 @@ function KidList({
   );
 }
 
-/** A subagent: one line under its parent, on the tree guide, with the session menu. */
+/** A subagent, or a session this one asked (`delegatedBy`): one line under its parent,
+ *  on the tree guide, with the session menu. */
 function KidRow({
   c,
   flip,
@@ -464,6 +478,13 @@ function KidRow({
         modClick={(o) => openSplit(c.key, { background: o.background })}
       >
         <StateDot state={c.state} decorative />
+        {/* An asked session is another harness's: its glyph says which (a subagent shares
+            its parent's and keeps the row bare). */}
+        {c.delegatedBy && (
+          <span className="kid-glyph">
+            <HarnessGlyph name={c.harness} size="sm" />
+          </span>
+        )}
         <span className="kid-title ellipsis">{sessionTitle(c)}</span>
         {c.currentTool && c.state === "working" ? (
           <code className="kid-tool">{toolLabel(c.currentTool.tool)}</code>

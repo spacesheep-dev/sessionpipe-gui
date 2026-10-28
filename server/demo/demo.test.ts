@@ -415,8 +415,9 @@ describe("Simulation: a 10-minute run", () => {
       const slice = sim.advance(m * 60_000);
       expect(slice.flatMap((e) => validate(e))).toEqual([]);
       n += slice.length;
-      // The showcase's cycle: the showcase, three reviewers, and sessionpipe 0.10's scenes.
-      expect(sim.live).toBeLessThanOrEqual(9);
+      // The showcase's cycle: the showcase, three reviewers, sessionpipe 0.10's scenes, and
+      // the two sessions that ask Codex, each with the Codex session it asked.
+      expect(sim.live).toBeLessThanOrEqual(13);
     }
     expect(n).toBeGreaterThan(1500);
   });
@@ -664,6 +665,66 @@ describe("sessionpipe 0.10 scenes", () => {
     expect(events.some((e) => e.session.id === s.id && e.type === "session.started")).toBe(true);
     expect(s.text).toMatch(/^Run the integration suite/);
   });
+
+  it("asks Codex from inside a Claude Code turn: the events, the child's delegated_by, the answer", () => {
+    const begun = events.find((e) => e.type === "delegation.started" && e.data.via === "ask")!;
+    expect(begun.harness.name).toBe("claude-code");
+    expect(begun.harness.event).toBeUndefined();
+    expect(begun.data).toMatchObject({ harness: "codex", text: expect.stringMatching(/^Review the diff/) });
+    expect(begun.data.to).toBeUndefined();
+    const ended = events.find((e) => e.type === "delegation.ended" && e.data.ask_id === begun.data.ask_id)!;
+    expect(ended.data).toMatchObject({ ok: true, to: expect.stringMatching(/^codex:/), reply: expect.any(String) });
+    expect(ended.data.relayed).toBeUndefined();
+    // The ask ran inside a Bash call that stayed open for as long as the child did.
+    const call = events.find(
+      (e) => e.type === "tool.ended" && key(e) === key(begun) && Date.parse(e.time) >= Date.parse(ended.time),
+    )!;
+    expect((call.data.input as { command: string }).command).toMatch(/^sessionpipe ask codex /);
+    expect((call.data.output as { stdout: string }).stdout).toBe(ended.data.reply);
+    expect(call.data.ms).toBe(ended.data.ms);
+    // The child: Codex, on the same machine and in the same folder, delegated_by the asker.
+    const child = events.filter((e) => key(e) === ended.data.to);
+    expect(child.length).toBeGreaterThan(3);
+    expect(child[0]!.type).toBe("session.started");
+    for (const e of child) expect(e.session.delegated_by).toBe(key(begun));
+    expect(child[0]!.session.machine).toBe(begun.session.machine);
+    expect(child[0]!.session.cwd).toBe(begun.session.cwd);
+    const first = child.find((e) => e.type === "turn.transcript")!;
+    expect(first.data.user).toMatch(/\n\n\(Asked by claude-code:[^ ]+ on this machine with sessionpipe ask\./);
+    expect(first.data.assistant).toBe(ended.data.reply);
+    // Through the store: open, the ask keeps the asker working; closed, it carries the answer.
+    const mid = read(key(begun), Date.parse(begun.time) + 1000);
+    expect(mid.counts.delegationsRunning).toBe(1);
+    expect(mid.delegations![0]).toMatchObject({ via: "ask", harness: "codex" });
+    const after = read(key(begun), Date.parse(ended.time) + 1000);
+    expect(after.counts.delegationsRunning).toBe(0);
+    expect(after.delegations![0]).toMatchObject({ to: ended.data.to, ok: true, reply: ended.data.reply });
+    expect(read(ended.data.to as string, Date.parse(ended.time)).delegatedBy).toBe(key(begun));
+  });
+
+  it("brings a handoff's answer back as a framed prompt, and says it was relayed", () => {
+    const begun = events.find((e) => e.type === "delegation.started" && e.data.via === "handoff")!;
+    expect(begun.data).toMatchObject({ harness: "codex", to: expect.stringMatching(/^codex:/) });
+    const ended = events.find((e) => e.type === "delegation.ended" && e.data.ask_id === begun.data.ask_id)!;
+    expect(ended.data).toMatchObject({ ok: true, to: begun.data.to, relayed: "delivered" });
+    // The daemon started the child for us: the demo machine has its start.
+    expect(started.some((s) => `${s.harness}:${s.id}` === begun.data.to)).toBe(true);
+    const child = events.filter((e) => key(e) === begun.data.to);
+    for (const e of child) expect(e.session.delegated_by).toBe(key(begun));
+    expect(child.find((e) => e.type === "turn.transcript")!.data.user).toMatch(/with sessionpipe control/);
+    // Then the answer lands in the asking session as a prompt of its own, and it answers.
+    const relay = events.find(
+      (e) => key(e) === key(begun) && e.type === "turn.transcript" && Date.parse(e.time) > Date.parse(ended.time),
+    )!;
+    expect(relay.data.user).toMatch(/^Answer from codex:[0-9a-f]{8} \(sessionpipe handoff, asked via [^)]+\):\n\n/);
+    expect(String(relay.data.user).endsWith(String(ended.data.reply))).toBe(true);
+    expect(relay.data.assistant).toMatch(/^Codex is right/);
+    const after = read(key(begun), Date.parse(relay.time) + 1000);
+    expect(after.delegations!.find((d) => d.askId === begun.data.ask_id)).toMatchObject({
+      via: "handoff",
+      relayed: "delivered",
+    });
+  });
 });
 
 describe("demo machines", () => {
@@ -691,6 +752,7 @@ describe("demo machines", () => {
     expect(newer).toMatchObject({ mode: "inherit", version: "0.10.0" });
     expect(newer!.start?.["claude-code"]).toMatchObject({ permissions: ["read", "safe"], permission: "inherit" });
     expect(newer!.harnesses).toContain("goose");
+    expect(newer).toMatchObject({ ask: true, handoff: true });
     expect(newer!.accounts).toContainEqual({ harness: "claude-code", id: DEMO_API_ACCOUNT, name: "api.z.ai" });
     // The ACP agent's run: delivered over `api`, its reply in the ack.
     expect(runs[0]).toMatchObject({ session: DEMO_ACP_SESSION, mode: "api" });

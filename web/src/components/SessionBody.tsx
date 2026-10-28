@@ -19,7 +19,9 @@
 import type {
   AgentRun,
   ControlActivity,
+  Delegation,
   MachineControl,
+  SessionKey,
   SessionState,
   SessionSummary,
   StoredEvent,
@@ -28,6 +30,7 @@ import type {
 import { sessionKey, splitKey } from "@shared/api";
 import {
   createContext,
+  type MutableRefObject,
   type ReactNode,
   type RefObject,
   useCallback,
@@ -54,7 +57,9 @@ import {
   startTitle,
   useStartOf,
 } from "../control/Starting";
-import { isFinal } from "../control/words";
+import { signHint } from "../control/signer";
+import { useSessionSend } from "../control/useSend";
+import { harnessCommand, isFinal, REFUSAL_WORDS, refusalWords, sentLine } from "../control/words";
 import { useMachines, useMachinesMap, useSession, useStore } from "../data/hooks";
 import { LIST_PREVIEW, TAIL, takeWarm } from "../data/prefetch";
 import { agentLabel, agentsFact, agentType, openAgent, taskNotification } from "../lib/agents";
@@ -72,19 +77,22 @@ import {
   toolLabel,
 } from "../lib/format";
 import { labelMenu } from "../lib/labels";
-import { absoluteUrl, agentItems, copyItem, sessionItems } from "../lib/menus";
+import { absoluteUrl, agentItems, askItem, copyItem, sessionItems } from "../lib/menus";
 import { reducedMotion, useFlip } from "../lib/motion";
 import { AGENT_PARAM, back, Link, navigate, sessionPath, useSearchParam } from "../lib/router";
 import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
+import { openSplit } from "../lib/split";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { clock, dur, ms, useNow } from "../lib/time";
 import {
   type AgentItem,
+  type DelegationItem,
   type EventItem,
   eventWords,
   groupTurns,
+  handoffAnswer,
   sentTurns,
   type ToolItem,
   type Turn,
@@ -92,12 +100,14 @@ import {
 } from "../lib/turns";
 import { HistoryOrMissing } from "../search/HistoryEntry";
 import { AgentGlyph, AgentNow, AgentText } from "./AgentRow";
-import { CopyIconButton, HarnessGlyph, Redacted, Segmented, Spinner, StateDot } from "./bits";
+import { CopyIconButton, HarnessGlyph, Redacted, Segmented, Since, Spinner, StateDot } from "./bits";
 import { confirmAction, type MenuItem, type MenuList, MoreButton, openMenu, tidy, useContextMenu } from "./ContextMenu";
 import { LabelDot, useLabelKeys } from "./LabelDot";
 import { CodeFrame, Markdown } from "./Markdown";
 import { BackButton, PageBar } from "./PageBar";
+import { askingFact } from "./SessionCard";
 import { answerItems, SessionLoading, type SessionViewProps } from "./SessionView";
+import "../styles/lineage.css";
 
 /** The size of each older page; the newest page (TAIL) is data/prefetch's, which warms
  *  it on hover. Both slim: the full event is fetched only when a row is expanded. */
@@ -588,6 +598,13 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   const isCopy = useCallback((a: ControlActivity) => forkOf(a) === key, [key]);
   const original = useControlActivity(isCopy)[0]?.session ?? "";
   const originalSummary = useSession(original);
+  // The agents this page asked (the handoff sheet's `from`): their rows at the end of the
+  // view until the events say what became of them (AskRows).
+  const isFromHere = useCallback(
+    (a: ControlActivity) => a.from === key && a.session !== key && (a.kind === "prompt" || a.kind === "start"),
+    [key],
+  );
+  const askedFromHere = useControlActivity(isFromHere);
 
   const s = live ?? summary;
   const sRef = useRef(s);
@@ -746,6 +763,8 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   useShortcut("session.older", () => (inert() || !hasOlder || olderBusy ? false : void loadOlder()), keyOpts);
   // The "n new" pill's way back, from the keyboard.
   useShortcut("session.latest", () => (inert() ? false : setFollowing(true)), keyOpts);
+  // ⇧A: the strip's "Ask another agent…" (the Handoff sheet), where the strip offers it.
+  useShortcut("session.ask", () => click("[data-ctl-ask]:not(:disabled)"), keyOpts);
   // ⌥⌘1 … ⌥⌘7 label this session, ⌥⌘0 clears it.
   useLabelKeys(() => (inert() ? [] : [key]), keyOpts);
 
@@ -1013,6 +1032,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
                 harness={s?.harness ?? harness}
               />
             ))}
+            {s && <AskRows sent={askedFromHere} delegations={s.delegations ?? []} chat={chat} />}
             {!loading && s && visible.length === 0 && rows.length === 0 && (
               <li className="page-note">No events at this tier.</li>
             )}
@@ -1089,9 +1109,14 @@ function SessionMeta({
   const repo = chat ? repoShort(s.repo) : repoBranch(s);
   const place = repo || (s.cwd ? basename(s.cwd) : "");
   const fact = agentsFact(s);
+  // Asked by another session (sessionpipe ask, a handoff): that session, named and linked,
+  // first; a `delegatedBy` session is not a subagent, so "for" never meets "parent".
+  const parent = useSession(s.delegatedBy ?? "");
+  const askedBy = s.delegatedBy ? splitKey(s.delegatedBy) : null;
   const more = [
     STATE_LABEL[s.state],
     fact,
+    askingFact(s),
     s.attended === false && "unattended",
     s.model && modelShort(s.model),
     `started ${new Date(s.startedAt).toLocaleString([], { hourCycle: "h23" })}`,
@@ -1108,6 +1133,14 @@ function SessionMeta({
     .join(" · ");
   return (
     <span className="sess-where" title={more} data-events={total}>
+      {askedBy && (
+        <span className="sess-for">
+          for{" "}
+          <Link to={sessionPath(askedBy.harness, askedBy.id)} title={parent ? sessionTitle(parent) : s.delegatedBy}>
+            {parent ? sessionTitle(parent) : `a ${harnessMark(askedBy.harness).label} session`}
+          </Link>
+        </span>
+      )}
       {s.machine && <span className="sess-machine">{s.machine}</span>}
       {copyOf ? (
         <span className="sess-copy">
@@ -1229,6 +1262,8 @@ function TurnBlock({
   const startSeq = turn.start?.session.seq;
   // Claude Code's own follow-up when a background agent stops: not a person's prompt.
   const notice = taskNotification(prompt);
+  // An answer a handoff brought back (CONTROL.md §6): the asked agent's words, not the person's.
+  const answer = prompt ? handoffAnswer(prompt) : undefined;
   // What the machine said of the message sent from here: its failure, in place; while
   // it is on its way (or the agent is at it with nothing to show yet) the one status row.
   const failed = !!sent && isFinal(sent) && sent.outcome !== "delivered";
@@ -1260,6 +1295,7 @@ function TurnBlock({
         harness={harness}
         prompt={prompt}
         notice={notice?.agentId}
+        answer={answer}
         promptChars={promptChars}
         transcript={transcript}
         progress={progress}
@@ -1312,6 +1348,7 @@ function TurnBlock({
         {items.map((it) => {
           if (it.kind === "tool") return <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} />;
           if (it.kind === "agent") return <AgentBlock key={it.key} item={it} lens={lens} now={now} fill={fill} />;
+          if (it.kind === "delegation") return <AskRow key={it.key} item={it} as="li" />;
           const e = it.e;
           if (e.type === "turn.transcript") {
             if (it !== transcript) return null;
@@ -1410,10 +1447,13 @@ function Prompt({
   /** Who submitted the turn, when the harness said it was not the person ("Scheduled"). */
   by?: string;
 }) {
-  const { path, root } = useTimeline();
+  const { path, root, machine } = useTimeline();
   // A message sent through sessionpipe arrives framed ("Message via … (sessionpipe
   // control, …):"); the words show as written, and where they came from as a quiet line.
-  const { text: words, via } = unframe(text);
+  // A question another session asked (sessionpipe ask) says who asked under it; an answer
+  // a handoff brought back shows raw here (the chat draws it as the agent's turn).
+  const { text: words, via, askedBy } = unframe(text);
+  const answer = bubble ? undefined : handoffAnswer(text);
   const menu = useContextMenu(() => [
     copyItem("Copy message", words),
     copyItem("Copy link to this turn", seqLink(path, seq)),
@@ -1426,6 +1466,16 @@ function Prompt({
       <blockquote className={cls} data-start-message={sent?.kind === "start" ? "" : undefined} {...menu}>
         <PromptBody text={words} />
         {via && <span className="prompt-via">Sent from {via}</span>}
+        {askedBy && (
+          <span className="prompt-via">
+            Asked by {harnessMark(splitKey(askedBy).harness).label} with sessionpipe ask
+          </span>
+        )}
+        {answer && (
+          <span className="prompt-via">
+            answer from {harnessMark(answer.harness).label}, brought back by {machine}
+          </span>
+        )}
         {by && <span className="prompt-via">{by}</span>}
       </blockquote>
       <SentFiles files={sent?.files} />
@@ -1436,7 +1486,15 @@ function Prompt({
 /** The reply the machine streamed back with its acks, for a turn that has no reply event
  *  of its own yet: rendered as the reply will be, in the same place. */
 function AckReply({ text, live, chat = false }: { text: string; live: boolean; chat?: boolean }) {
-  const menu = useContextMenu(() => [copyItem("Copy reply", text)]);
+  const { session } = useTimeline();
+  const store = useStore();
+  const menu = useContextMenu(() => {
+    const s = session();
+    return [
+      copyItem("Copy reply", text),
+      s && askItem(s, store, { label: "Ask another agent about this…", reply: text }),
+    ];
+  });
   if (chat)
     return (
       <div className="chat-card" {...menu}>
@@ -1464,15 +1522,22 @@ function Reply({
   live?: boolean;
   chat?: boolean;
 }) {
-  const { path } = useTimeline();
+  const { path, session } = useTimeline();
+  const store = useStore();
   const text = String(e.data.assistant ?? "");
   const cut = e.preview?.assistant !== undefined;
-  const menu = useContextMenu(() => [
-    copyItem(cut ? "Copy reply (preview)" : "Copy reply", text),
-    copyItem("Copy link to this turn", seqLink(path, turnSeq ?? e.session.seq)),
-    cut && { sep: true },
-    cut && { label: "Load full text", run: () => fill(e) },
-  ]);
+  const menu = useContextMenu(() => {
+    const s = session();
+    return [
+      copyItem(cut ? "Copy reply (preview)" : "Copy reply", text),
+      copyItem("Copy link to this turn", seqLink(path, turnSeq ?? e.session.seq)),
+      // The Handoff sheet prefilled with this reply, not the last one.
+      s &&
+        askItem(s, store, { label: "Ask another agent about this…", reply: text, turnSeq: turnSeq ?? e.session.seq }),
+      cut && { sep: true },
+      cut && { label: "Load full text", run: () => fill(e) },
+    ];
+  });
   if (chat)
     return (
       <div className="chat-card" data-seq={e.session.seq} {...menu}>
@@ -1614,6 +1679,7 @@ function ChatTurn({
   harness,
   prompt,
   notice,
+  answer,
   promptChars,
   transcript,
   progress,
@@ -1634,6 +1700,8 @@ function ChatTurn({
   prompt: string | undefined;
   /** The agent a `<task-notification>` prompt reports on: a quiet line, not a bubble. */
   notice?: string;
+  /** The prompt is an answer a handoff brought back: the asked agent's turn, not a bubble. */
+  answer?: HandoffAnswer;
   promptChars: number | undefined;
   transcript: EventItem | undefined;
   progress: EventItem | undefined;
@@ -1648,6 +1716,13 @@ function ChatTurn({
   const { open, working } = useTimeline();
   const tools = turn.items.filter((i): i is ToolItem => i.kind === "tool");
   const agentItems = turn.items.filter((i): i is AgentItem => i.kind === "agent");
+  const asks = turn.items.filter((i): i is DelegationItem => i.kind === "delegation");
+  // An ask the agent made while it worked sits with its tools; one made after the turn
+  // ended (a handoff from here, once the reply was in) sits after the reply.
+  const endedMs = ended ? ms(ended.e.time) : Number.NaN;
+  const after = (it: DelegationItem) => Number.isFinite(endedMs) && ms((it.started ?? it.ended)?.time) > endedMs;
+  const asksDuring = asks.filter((it) => !after(it));
+  const asksAfter = asks.filter(after);
   // The harness's idle notice ("waiting for your input") asked for nothing: no note.
   const notes = turn.items.filter(
     (i): i is EventItem =>
@@ -1667,6 +1742,7 @@ function ChatTurn({
   const agent =
     tools.length > 0 ||
     agentItems.length > 0 ||
+    asks.length > 0 ||
     !!replyText ||
     !!ackReply ||
     !!row ||
@@ -1684,6 +1760,8 @@ function ChatTurn({
     >
       {turn.start && notice ? (
         <AgentNotice agentId={notice} seq={startSeq} />
+      ) : turn.start && answer ? (
+        <AnswerTurn answer={answer} at={at} seq={startSeq} e={(transcript ?? progress)?.e} fill={fill} />
       ) : turn.start || (pending && sent) ? (
         <div className="chat-you">
           {at && (
@@ -1716,6 +1794,9 @@ function ChatTurn({
               ))}
             </ol>
           )}
+          {asksDuring.map((it) => (
+            <AskRow key={it.key} item={it} as="div" />
+          ))}
           {notes.map((it) => (
             <p key={it.key} className="chat-note" data-seq={it.e.session.seq}>
               {cap(ATTENTION_LABEL[String(it.e.data.kind)] ?? String(it.e.data.kind))}
@@ -1730,6 +1811,9 @@ function ChatTurn({
           )}
           {replyItem && replyText && <Reply e={replyItem.e} turnSeq={startSeq} fill={fill} live={!transcript} chat />}
           {ackReply && <AckReply text={ackReply} live={!!sent && !isFinal(sent)} chat />}
+          {asksAfter.map((it) => (
+            <AskRow key={it.key} item={it} as="div" />
+          ))}
           {failure}
           {row && <StatusRow {...row} chat />}
         </div>
@@ -2196,6 +2280,392 @@ function AgentNotice({ agentId, seq }: { agentId: string; seq?: number }) {
           Subagent finished: {run ? agentLabel(run) : "a background agent"}
         </span>
       </button>
+    </div>
+  );
+}
+
+// ----- the agents this session asked (sessionpipe ask, a handoff): the lineage rows -----
+
+type HandoffAnswer = NonNullable<ReturnType<typeof handoffAnswer>>;
+
+/** One ask as its row reads it: from the summary's `Delegation` (the store's reading),
+ *  from the turn's own events when the summary has none for it (past DELEGATIONS_MAX, or
+ *  a reading still on its way), or from the activity of a message this page sent to
+ *  another agent (`from`) before any event said what became of it. */
+interface Ask {
+  askId?: string;
+  /** "You asked …": a handoff, or a message sent from here; else the agent asked on its own. */
+  you: boolean;
+  harness: string;
+  to?: SessionKey;
+  startedAt: string;
+  endedAt?: string;
+  ok?: boolean;
+  ms?: number;
+  reply?: string;
+  error?: string;
+  relayed?: Delegation["relayed"];
+  /** The message, while the row is the activity's alone. */
+  activity?: ControlActivity;
+}
+
+const askOf = (d: Delegation): Ask => ({
+  askId: d.askId,
+  you: d.via === "handoff",
+  harness: d.harness,
+  to: d.to,
+  startedAt: d.startedAt,
+  endedAt: d.endedAt,
+  ok: d.ok,
+  reply: d.reply,
+  error: d.error,
+  relayed: d.relayed,
+  ...(d.ms !== undefined ? { ms: d.ms } : {}),
+});
+
+const strOf = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
+
+/** The events' own reading of an ask the summary has no Delegation for. */
+function askFromItem(item: DelegationItem): Ask {
+  const sd = item.started?.data ?? {};
+  const ed = item.ended?.data ?? {};
+  const to = strOf(ed.to) ?? strOf(sd.to);
+  const relayed = ed.relayed;
+  return {
+    askId: item.askId,
+    you: sd.via === "handoff" || relayed !== undefined,
+    harness: strOf(sd.harness) ?? (to ? splitKey(to).harness : ""),
+    to,
+    startedAt: item.started?.time ?? item.ended?.time ?? new Date().toISOString(),
+    endedAt: item.ended?.time,
+    ok: typeof ed.ok === "boolean" ? ed.ok : undefined,
+    ...(typeof ed.ms === "number" ? { ms: ed.ms } : {}),
+    reply: strOf(ed.reply),
+    error: strOf(ed.error),
+    relayed: relayed === "delivered" || relayed === "unsupported" || relayed === "failed" ? relayed : undefined,
+  };
+}
+
+/** A message this page sent to another agent, before the events: the session it named
+ *  (a start's new one, or the one the ack said it went to). */
+function askFromActivity(a: ControlActivity): Ask {
+  const to = a.ackSession ?? a.session;
+  return { you: true, harness: to ? splitKey(to).harness : "", to, startedAt: a.at, activity: a };
+}
+
+/** A daemon's refusal of an ask (CONTROL.md §13 codes), when the error starts with its
+ *  code ("harness: gemini-cli is not installed here"); the control codes keep their words. */
+const ASK_REFUSALS: Record<string, (machine: string) => string> = {
+  ask_off: (m) => `asking between agents is off on ${m} (sessionpipe ask on)`,
+  harness: (m) => `${m} can't run that agent`,
+  depth: () => "an asked agent can't ask a third one",
+  loop: () => "it would be asking itself",
+};
+function askRefusal(error: string, machine: string): string | null {
+  const m = /^([a-z_]+)(?::\s|$)/.exec(error);
+  if (!m) return null;
+  const code = m[1]!;
+  const own = ASK_REFUSALS[code];
+  if (own) return own(machine);
+  return REFUSAL_WORDS[code] ? refusalWords(code) : null;
+}
+
+/** A machine's detail ends the sentence it is quoted in; most arrive without a full stop. */
+const stopped = (s: string): string => (/[.!?…]$/.test(s) ? s : `${s}.`);
+const lower = (s: string): string => s.charAt(0).toLowerCase() + s.slice(1);
+
+/** The row's state (UX-SPEC §3.1): one phrase in the meta tier, a live timer while it
+ *  runs, red only when it went wrong. `child` is the asked session when the store has it. */
+function askState(
+  a: Ask,
+  o: { machine: string; online: boolean; child?: SessionSummary },
+): { text: string; since?: string; err?: boolean; glyph: "run" | "ok" | "err" | "none" } {
+  const act = a.activity;
+  if (act) {
+    const harness = a.to ? splitKey(a.to).harness : "";
+    if (isFinal(act) && act.outcome !== "delivered")
+      return {
+        text: `not sent · ${act.outcome === "refused" ? refusalWords(act.code) : (act.detail ?? act.outcome)}`,
+        err: true,
+        glyph: "err",
+      };
+    if (act.outcome === "delivered" && o.child)
+      return o.child.state === "working" || o.child.state === "needs_you"
+        ? { text: "running", since: o.child.stateSince, glyph: "run" }
+        : { text: STATE_LABEL[o.child.state], glyph: o.child.state === "done" ? "ok" : "none" };
+    if (!act.outcome && !o.online)
+      return { text: `waiting for ${o.machine}. It asks when the machine is back.`, glyph: "run" };
+    const line = sentLine(act, {
+      machine: o.machine,
+      online: o.online,
+      command: harnessCommand(harness, harnessMark(harness).label),
+    });
+    return { text: line ? lower(line.text).replace(/[.…]?$/, "…") : "sent…", glyph: "run" };
+  }
+  if (!a.endedAt) return { text: "running", since: a.startedAt, glyph: "run" };
+  const took = a.ms !== undefined ? dur(a.ms) : dur(ms(a.endedAt) - ms(a.startedAt));
+  if (a.ok === false) {
+    const refusal = a.error ? askRefusal(a.error, o.machine) : null;
+    if (refusal) return { text: `refused · ${refusal}`, err: true, glyph: "err" };
+    return { text: `failed after ${took}${a.error ? ` · ${a.error}` : ""}`, err: true, glyph: "err" };
+  }
+  if (a.ok === undefined) return { text: "no answer", glyph: "none" };
+  const relay =
+    a.relayed === "delivered"
+      ? " · answer below"
+      : a.relayed === "unsupported"
+        ? ` · couldn't bring it back: ${o.machine} can't message this session`
+        : a.relayed === "failed"
+          ? ` · couldn't bring it back: ${stopped(a.error ?? "it didn't arrive")}`
+          : "";
+  return { text: `answered in ${took}${relay}`, glyph: "ok" };
+}
+
+const isWide = () => typeof matchMedia === "function" && matchMedia("(min-width: 840px)").matches;
+
+/** One agent this session asked, where the ask happened (UX-SPEC §3.1): one line in the
+ *  agent's column, a glyph, "Asked Codex · <its title> · <state>", the whole row a link to
+ *  the asked session; the answer folded under it only when it was not relayed here. */
+function AskRow({ item, ask: given, as }: { item?: DelegationItem; ask?: Ask; as: "li" | "div" }) {
+  const { session, machine, online, control } = useTimeline();
+  const s = session();
+  const d = item ? s?.delegations?.find((x) => x.askId === item.askId) : undefined;
+  const a = given ?? (d ? askOf(d) : askFromItem(item!));
+  const child = useSession(a.to ?? "");
+  const st = askState(a, { machine, online, child });
+  const label = harnessMark(a.harness).label;
+  const verb = `${a.you ? "You asked" : "Asked"} ${label}`;
+  const title = child ? sessionTitle(child) : "new session";
+  const target = a.to ? splitKey(a.to) : null;
+  const path = target ? sessionPath(target.harness, target.id) : null;
+  const running = st.glyph === "run" && !a.activity;
+  const stop = useRef<MenuList>([]);
+  const menu = useContextMenu(
+    () => [
+      path && { label: "Open the asked session", run: () => navigate(path) },
+      path && isWide() && { label: "Open beside", run: () => openSplit(a.to!) },
+      copyItem("Copy the answer", a.reply ?? null),
+      target && copyItem("Copy session ID", target.id),
+      { sep: true },
+      ...stop.current,
+    ],
+    { title: () => verb, subtitle: () => st.text },
+  );
+  const glyph =
+    st.glyph === "run" ? (
+      <span className="spinner spinner--sm" aria-hidden="true" />
+    ) : st.glyph === "ok" ? (
+      <StateDot state="done" size={10} decorative />
+    ) : st.glyph === "err" ? (
+      <ErrGlyph />
+    ) : null;
+  const body = (
+    <>
+      <span className="marker-glyph">{glyph}</span>
+      <span className="ask-text">
+        <span className="ask-verb">{verb}</span>
+        <span className="ask-title" title={title}>
+          {title}
+        </span>
+        <span className={`ask-state ${st.err ? "is-err" : ""}`}>
+          {st.text}
+          {st.since && (
+            <>
+              {" "}
+              <Since iso={st.since} />
+            </>
+          )}
+        </span>
+      </span>
+      <span className="ask-chev" aria-hidden="true">
+        ›
+      </span>
+    </>
+  );
+  const Tag = as;
+  return (
+    <Tag
+      className="ask"
+      data-ask={a.askId ?? a.activity?.id}
+      data-seq={item?.started?.session.seq ?? item?.ended?.session.seq}
+      {...menu}
+    >
+      {path ? (
+        <Link to={path} className="ask-link" modClick={(o) => openSplit(a.to!, { background: o.background })}>
+          {body}
+        </Link>
+      ) : (
+        <span className="ask-link ask-link--none">{body}</span>
+      )}
+      {a.reply && a.relayed !== "delivered" && <AskFold reply={a.reply} />}
+      {running && child && control && <AskStop child={child} control={control} label={label} into={stop} />}
+    </Tag>
+  );
+}
+
+/** The answer, folded like a turn's tools: "Show the answer", the reply as prose. */
+function AskFold({ reply }: { reply: string }) {
+  const [open, setOpen] = useState(false);
+  const menu = useContextMenu(() => [copyItem("Copy the answer", reply)]);
+  return (
+    <details
+      className="chat-tools ask-fold"
+      open={open}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary className="chat-tools-sum" {...menu}>
+        <Chevron />
+        <span>{open ? "Hide the answer" : "Show the answer"}</span>
+      </summary>
+      <div className="chat-card">
+        <Markdown text={reply} />
+      </div>
+    </details>
+  );
+}
+
+/** "Stop Codex…" for a running ask: a `cancel` on the asked session through the one
+ *  signed send path, mounted only while the row can offer it. Writes the menu item into
+ *  the row's ref, as the board's rows keep their Allow / Deny. */
+function AskStop({
+  child,
+  control,
+  label,
+  into,
+}: {
+  child: SessionSummary;
+  control: MachineControl;
+  label: string;
+  into: MutableRefObject<MenuList>;
+}) {
+  const send = useSessionSend(child, control, child.openAttentions);
+  useLayoutEffect(() => {
+    into.current = [
+      {
+        label: `Stop ${label}…`,
+        disabled: send.secure ? undefined : signHint(send.rp),
+        run: async () => {
+          const ok = await confirmAction({
+            title: `Stop ${label}?`,
+            body: "Its session keeps what it did so far.",
+            action: "Stop",
+          });
+          if (ok) await send.onSend({ kind: "cancel" }).catch(() => {});
+        },
+      },
+    ];
+  });
+  useEffect(
+    () => () => {
+      into.current = [];
+    },
+    [into],
+  );
+  return null;
+}
+
+/** A message that did not go keeps its row this long before it folds to the activity. */
+const ASK_FAILED_HOLD_MS = 60_000;
+
+/** The messages this page sent to other agents that no event has caught up with yet (the
+ *  handoff sheet's `from`): their rows at the end of the view, oldest first, each gone
+ *  once a Delegation names the session it made, or a minute after one failed. */
+function AskRows({
+  sent,
+  delegations,
+  chat,
+}: {
+  sent: ControlActivity[];
+  delegations: readonly Delegation[];
+  chat: boolean;
+}) {
+  const failed = sent.some((a) => isFinal(a) && a.outcome !== "delivered");
+  const now = useNow(failed ? "coarse" : "off");
+  const rows = sent.filter((a) => {
+    const to = a.ackSession ?? a.session;
+    if (to && delegations.some((d) => d.to === to)) return false;
+    if (isFinal(a) && a.outcome !== "delivered") return now - Date.parse(a.ackedAt ?? a.at) < ASK_FAILED_HOLD_MS;
+    return true;
+  });
+  if (rows.length === 0) return null;
+  const items = [...rows].reverse().map((a) => <AskRow key={a.id} ask={askFromActivity(a)} as={chat ? "div" : "li"} />);
+  return chat ? (
+    <li className="turn turn--chat">
+      <div className="chat-ai">{items}</div>
+    </li>
+  ) : (
+    <li className="turn">
+      <ol className="turn-items">{items}</ol>
+    </li>
+  );
+}
+
+/** The session whose answer a handoff relayed into this one just before `at`: the newest
+ *  delegation of that harness that reads `relayed: "delivered"` and ended by then. */
+function relayedFrom(ds: readonly Delegation[] | undefined, harness: string, at?: string): SessionKey | undefined {
+  const t = ms(at);
+  let best: Delegation | undefined;
+  for (const d of ds ?? []) {
+    if (d.relayed !== "delivered" || !d.to || d.harness !== harness) continue;
+    const e = ms(d.endedAt);
+    if (Number.isFinite(t) && Number.isFinite(e) && e > t + 60_000) continue;
+    if (!best || ms(best.endedAt) < e) best = d;
+  }
+  return best?.to;
+}
+
+/** The answer a handoff brought back (UX-SPEC §3.2): the asked agent's glyph and name with
+ *  "answer", the reply as prose, in the agent's column; linked to the asked session when
+ *  the reading knows it. The session's own reply to it follows as usual. */
+function AnswerTurn({
+  answer,
+  at,
+  seq,
+  e,
+  fill,
+}: {
+  answer: HandoffAnswer;
+  at?: string;
+  seq?: number;
+  /** The transcript (or progress) the answer was read from: slim, its `user` may be cut. */
+  e?: StoredEvent;
+  fill: Fill;
+}) {
+  const { session, path } = useTimeline();
+  const from = relayedFrom(session()?.delegations, answer.harness, at);
+  const target = from ? splitKey(from) : null;
+  const label = harnessMark(answer.harness).label;
+  const menu = useContextMenu(() => [
+    copyItem("Copy the answer", answer.reply),
+    copyItem("Copy link to this turn", seqLink(path, seq)),
+    { sep: true },
+    target && { label: "Open the asked session", run: () => navigate(sessionPath(target.harness, target.id)) },
+  ]);
+  const meta = (
+    <>
+      <HarnessGlyph name={answer.harness} size="sm" />
+      {label}
+      <span className="chat-meta-sub"> · answer</span>
+    </>
+  );
+  return (
+    <div className="chat-ai chat-answer" data-seq={seq} {...menu}>
+      <span className="chat-meta">
+        {target ? <Link to={sessionPath(target.harness, target.id)}>{meta}</Link> : meta}
+        {at && (
+          <time
+            className="chat-answer-time num"
+            dateTime={at}
+            title={new Date(at).toLocaleString([], { hourCycle: "h23" })}
+          >
+            {clock(at).slice(0, 5)}
+          </time>
+        )}
+      </span>
+      <div className="chat-card">
+        <Markdown text={answer.reply} />
+        {e && <Cut e={e} field="user" fill={fill} />}
+      </div>
     </div>
   );
 }

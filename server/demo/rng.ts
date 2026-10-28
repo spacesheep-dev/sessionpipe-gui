@@ -65,4 +65,18 @@ export class Rng {
   agent(): string {
     return this.hex(17);
   }
+  /** A ULID at `now`: the daemon's ask ids (CONTROL.md §13). The time part sorts with the
+   *  clock; the random part comes from the seed, so the demo stays the same demo. */
+  ulid(now: number): string {
+    const a = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    let t = Math.floor(now);
+    let time = "";
+    for (let i = 0; i < 10; i++) {
+      time = a[t % 32] + time;
+      t = Math.floor(t / 32);
+    }
+    let rand = "";
+    for (let i = 0; i < 16; i++) rand += a[this.int(0, 31)];
+    return time + rand;
+  }
 }

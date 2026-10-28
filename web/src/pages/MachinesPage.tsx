@@ -207,6 +207,7 @@ function MachineBlock({
                   checks.
                 </span>
               )}
+              {askLine(c, m.name, simple) && <span className="machine-caution">{askLine(c, m.name, simple)}</span>}
             </span>
           ) : (
             <span className="form-kv">
@@ -282,6 +283,18 @@ function MachineBlock({
       </ul>
     </section>
   );
+}
+
+/** What the hello says about agents asking each other (CONTROL.md §13 `ask`) and answers
+ *  coming back into a session (§3.1 `handoff`), as one line under the pairing; a daemon
+ *  that says neither is an older sessionpipe, said only in Advanced. */
+function askLine(c: NonNullable<MachineSummary["control"]>, machine: string, simple: boolean): string | null {
+  if (c.ask && c.handoff) return "Agents here can ask each other, and an answer can be brought back into a session.";
+  if (c.ask) return "Agents here can ask each other.";
+  if (c.ask === false)
+    return `Asking between agents is off here (sessionpipe ask on).${c.handoff ? " An answer can still be brought back into a session." : ""}`;
+  if (c.handoff) return "An answer can be brought back into a session.";
+  return simple ? null : `Update sessionpipe on ${machine} for its agents to ask each other.`;
 }
 
 /** The daemon's own details, for the Control row's tooltip: "daemon online · polled 4 s
