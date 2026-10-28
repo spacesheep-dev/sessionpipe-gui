@@ -18,17 +18,23 @@ const reading = new Map<string, Promise<void>>();
 const isInput = (v: unknown): v is Input => !!v && typeof v === "object" && !Array.isArray(v);
 
 /** The input of the newest `tool.started` of `tool` that no later `tool.ended` closed
- *  (by `call_id`; by name when the call has none). Undefined when there is none. */
-export function pickAskedInput(events: readonly StoredEvent[], tool: string): Input | undefined {
+ *  (by `call_id`; by name when the call has none). Undefined when there is none. When
+ *  the prompt's id is its call's id (Codex, Devin), that call is the one, even with a
+ *  subagent's call of the same tool started after it. */
+export function pickAskedInput(events: readonly StoredEvent[], tool: string, callId?: string): Input | undefined {
   const ended = new Set<string>();
+  let newest: StoredEvent | undefined;
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!;
     if (e.data.tool !== tool) continue;
     const call = typeof e.data.call_id === "string" ? e.data.call_id : "";
     if (e.type === "tool.ended") ended.add(call);
-    else if (e.type === "tool.started" && !ended.has(call)) return isInput(e.data.input) ? e.data.input : undefined;
+    else if (e.type === "tool.started") {
+      if (callId && call === callId) return isInput(e.data.input) ? e.data.input : undefined;
+      if (!ended.has(call)) newest ??= e;
+    }
   }
-  return undefined;
+  return newest && isInput(newest.data.input) ? newest.data.input : undefined;
 }
 
 /** The input an open, answerable permission asks about, once read. */
@@ -46,7 +52,7 @@ export function useAskedInput(session: SessionSummary, attention: Attention | un
       p = store.transport
         .session(session.harness, session.id, { tail: true, limit: 50 })
         .then(
-          (d) => void asked.set(id, pickAskedInput(d.events, tool) ?? null),
+          (d) => void asked.set(id, pickAskedInput(d.events, tool, id) ?? null),
           () => void asked.set(id, null),
         )
         .finally(() => reading.delete(id));

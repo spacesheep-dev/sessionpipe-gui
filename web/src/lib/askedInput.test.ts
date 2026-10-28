@@ -46,6 +46,15 @@ describe("pickAskedInput", () => {
     expect(pickAskedInput(events.slice(1, 3), "Bash")).toBeUndefined();
   });
 
+  it("takes the prompt's own call when its id is the call's, not a newer one of the tool", () => {
+    const events = [
+      ev("tool.started", { tool: "shell", call_id: "c1", input: { command: "rm -rf build" } }),
+      ev("tool.started", { tool: "shell", call_id: "c2", agent_id: "sub", input: { command: "ls" } }),
+    ];
+    expect(pickAskedInput(events, "shell", "c1")).toEqual({ command: "rm -rf build" });
+    expect(pickAskedInput(events, "shell", "perm-0a1b")).toEqual({ command: "ls" });
+  });
+
   it("matches by name when the calls carry no id, and gives nothing for a slim or missing input", () => {
     expect(
       pickAskedInput(
