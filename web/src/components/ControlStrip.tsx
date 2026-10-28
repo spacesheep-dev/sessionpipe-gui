@@ -16,6 +16,7 @@ import {
   type ReactNode,
   type RefObject,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -23,8 +24,10 @@ import {
 import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachments";
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
 import { SETUP_LABEL, signerKind } from "../control/signer";
+import { useAskedInput } from "../lib/askedInput";
 import { attentionMessage, toolLabel } from "../lib/format";
 import { Link } from "../lib/router";
+import { shellLines } from "../lib/shellCommand";
 import { hintFor } from "../lib/shortcuts";
 import { ActionButton, Spinner, StateDot } from "./bits";
 import "../control/control.css";
@@ -141,25 +144,75 @@ export const answerable = (a: Attention): boolean => a.answerable ?? !a.attentio
 /** A shell tool, whose message is the command it wants to run. */
 const SHELL = /^(bash|shell|sh|zsh|powershell|run_shell_command|exec|terminal)$/i;
 
-/** "Allow Bash to run `npm run deploy`?", or "Allow Write?" with its message after it. */
-function Question({ a }: { a: Attention }) {
+/** What the machine says of a command it cut: a message is its first 200 characters. */
+const CUT = "The machine sends the first 200 characters";
+/** A command block shows this many steps until "Show more". */
+const CMD_LINES = 4;
+
+/** "Allow Bash to run `npm run deploy`?", or "Allow Write?" with its message after it. A
+ *  long chained command reads one step per line under "Allow Shell to run:", four steps
+ *  until "Show more"; the whole command comes from the call's own input when the session
+ *  sent it (lib/askedInput.ts), else from the message, cut at 200 characters. */
+function Question({ a, session }: { a: Attention; session: SessionSummary }) {
+  const { input } = useAskedInput(session, a);
+  // The prompt whose steps are all shown: another prompt starts folded.
+  const [unfolded, setUnfolded] = useState<string | null>(null);
+  const blockId = useId();
+  const line = (words: ReactNode) => (
+    <p className="ctl-q">
+      <StateDot state="needs_you" size={8} decorative />
+      <span className="ctl-q-text">{words}</span>
+    </p>
+  );
   if (!a.tool)
-    return (
+    return line(
       <>
         Allow this?<span className="ctl-answer-msg"> {a.message ?? "a permission request"}</span>
-      </>
+      </>,
     );
+  const tool = <span className="ctl-tool">{toolLabel(a.tool)}</span>;
   const msg = attentionMessage(a);
-  if (msg && SHELL.test(a.tool) && !/\b(permission|wants|needs)\b/i.test(msg))
-    return (
+  const shell = SHELL.test(a.tool);
+  const whole = shell && typeof input?.command === "string" && input.command ? input.command : undefined;
+  const cmd = whole ?? (msg && shell && !/\b(permission|wants|needs)\b/i.test(msg) ? msg : undefined);
+  if (!cmd)
+    return line(
       <>
-        Allow <span className="ctl-tool">{toolLabel(a.tool)}</span> to run <code className="ctl-cmd">{msg}</code>?
-      </>
+        Allow {tool}?{msg ? <span className="ctl-answer-msg"> {msg}</span> : null}
+      </>,
     );
+  const steps = shellLines(cmd);
+  if (!steps)
+    return line(
+      <>
+        Allow {tool} to run <code className="ctl-cmd">{cmd}</code>?
+      </>,
+    );
+  const cut = !whole && (cmd.length >= 200 || cmd.endsWith("…"));
+  if (cut && !steps[steps.length - 1]!.endsWith("…")) steps[steps.length - 1] += "…";
+  const more = steps.length - CMD_LINES;
+  const all = more <= 0 || unfolded === a.attentionId;
   return (
     <>
-      Allow <span className="ctl-tool">{toolLabel(a.tool)}</span>?
-      {msg ? <span className="ctl-answer-msg"> {msg}</span> : null}
+      {line(<>Allow {tool} to run:</>)}
+      {/* biome-ignore lint/a11y/useSemanticElements: lines of text, not form controls a fieldset would hold */}
+      <div id={blockId} className="ctl-cmd-block" role="group" aria-label="Command" title={cut ? CUT : undefined}>
+        {(all ? steps : steps.slice(0, CMD_LINES)).map((step, i) => (
+          <div key={i}>{step}</div>
+        ))}
+        {cut && <span className="sr-only">{CUT}</span>}
+      </div>
+      {more > 0 && (
+        <button
+          type="button"
+          className="ctl-more"
+          aria-expanded={all}
+          aria-controls={blockId}
+          onClick={() => setUnfolded(all ? null : a.attentionId)}
+        >
+          {all ? "Show less" : `Show ${more} more ${more === 1 ? "line" : "lines"}`}
+        </button>
+      )}
     </>
   );
 }
@@ -411,12 +464,7 @@ export function ControlStrip({
             data-attention={a.attentionId}
             data-answer={terminal ? "terminal" : (status ?? (early ? "pre-hello" : "open"))}
           >
-            <p className="ctl-q">
-              <StateDot state="needs_you" size={8} decorative />
-              <span className="ctl-q-text">
-                <Question a={a} />
-              </span>
-            </p>
+            <Question a={a} session={session} />
             {why ? (
               <span className="ctl-answer-note">{why}</span>
             ) : suggested && !shut ? (

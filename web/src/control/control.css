@@ -52,6 +52,53 @@
   -webkit-user-select: text;
   user-select: text;
 }
+/* A chained command, one step per line under the question's words (not the dot): plain
+   mono text, nothing behind it. The steps after the first stand in by two characters, and
+   a step that wraps hangs two more, so a token breaks only when it alone is too wide.
+   Unfolded, it scrolls inside half the view. */
+.ctl-cmd-block {
+  grid-column: 1;
+  min-width: 0;
+  max-height: 50dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-left: 16px;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-ligatures: none;
+  line-height: var(--lh);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.ctl-cmd-block > div {
+  padding-inline-start: 2ch;
+  text-indent: -2ch;
+}
+.ctl-cmd-block > div + div {
+  padding-inline-start: 4ch;
+}
+/* "Show 2 more lines": a line of quiet text, no box. */
+.ctl-more {
+  grid-column: 1;
+  justify-self: start;
+  margin: 0 0 0 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .ctl-more:hover {
+    color: var(--fg);
+  }
+}
 .ctl-answer-msg {
   color: var(--fg-2);
   font-size: var(--text-sm);
@@ -235,6 +282,16 @@
   }
   .ctl-q {
     flex: none;
+  }
+  /* The strip stays under half the phone's height (the question, the pair and the field
+     take up to 15rem of it): a long command scrolls inside, never under three lines. */
+  .ctl-cmd-block {
+    max-height: max(calc(3em * var(--lh)), calc(50dvh - 15rem));
+  }
+  .ctl-more {
+    align-self: flex-start;
+    min-height: 44px;
+    margin-block: -8px;
   }
   .ctl-answer-btns {
     display: grid;
