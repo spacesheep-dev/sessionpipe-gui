@@ -40,6 +40,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { forkOf } from "../control/Activity";
 import { PromptBody, promptParts } from "../control/Attachments";
@@ -75,10 +76,9 @@ import {
   toolLabel,
 } from "../lib/format";
 import { labelMenu } from "../lib/labels";
-import { isUnread } from "../lib/marks";
 import { absoluteUrl, agentItems, copyItem, sessionItems } from "../lib/menus";
 import { reducedMotion, useFlip } from "../lib/motion";
-import { type NewLineAt, newLinePlace } from "../lib/newLine";
+import { leftOff, type NewLineAt, newLinePlace } from "../lib/newLine";
 import { AGENT_PARAM, back, Link, navigate, sessionPath, useSearchParam } from "../lib/router";
 import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
@@ -665,16 +665,29 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   // The New line (lib/newLine.ts). Where the person left off is read as the session first
   // shows, before useSeen marks it read, and only when it was unread then; the line is
   // placed once this session's first page is in and stays put while the page is open.
-  const opened = useRef<{ key: string; mark?: string; line?: NewLineAt | null } | null>(null);
-  if (s?.key === key && opened.current?.key !== key) {
-    const marks = store.get().marks;
-    opened.current = { key, mark: isUnread(s, marks) ? (marks.read[key] ?? marks.since) : undefined };
+  // A cold open can have its page before the marks (the stream's snapshot): it waits for
+  // them, re-rendered once when they land (useSeen can't move them before either).
+  const marksIn = useSyncExternalStore(store.subscribe, () => !!store.get().marks.since);
+  const opened = useRef<{ key: string; mark?: string; line?: NewLineAt | null; late?: boolean } | null>(null);
+  if (marksIn && s?.key === key && opened.current?.key !== key) {
+    const mark = leftOff(s, store.get().marks);
+    if (mark !== null) opened.current = { key, mark };
   }
   const first = events[0];
   const pageIn = !loading && !!first && sessionKey(first.harness.name, first.session.id) === key;
-  if (pageIn && opened.current?.key === key && opened.current.line === undefined)
+  if (pageIn && opened.current?.key === key && opened.current.line === undefined) {
     opened.current.line = newLinePlace(allTurns, opened.current.mark, { hasOlder, attended: s?.attended });
+    opened.current.late = !firstPaint.current;
+  }
   const newLineSeq = opened.current?.key === key ? opened.current.line?.seq : undefined;
+  // Placed after the first paint (the marks came after the page): open on it then, the
+  // same way, unless the person has already scrolled away from the bottom.
+  useLayoutEffect(() => {
+    const o = opened.current;
+    if (newLineSeq === undefined || !o?.late) return;
+    o.late = false;
+    if (followRef.current && pinned.current) toNewLine();
+  }, [newLineSeq, toNewLine]);
 
   // The messages sent from here to this session (its start among them), and the turn each
   // became: the turn shows the words as they were signed (tier 2 sends only a length),

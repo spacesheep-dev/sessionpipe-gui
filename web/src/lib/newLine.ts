@@ -4,7 +4,21 @@
 // else the marks' `since`), so the line never moves while the page is open. A turn counts
 // only when it is news under the same rule as the store's `newsAt`: one the person typed
 // at the terminal of an attended session is theirs, not news. Pure, so it is unit-tested.
+import type { Marks, SessionSummary } from "@shared/api";
+import { isUnread } from "./marks";
 import type { Turn } from "./turns";
+
+/** Where the person left off in `s`, read as it opens: its read mark (else the marks'
+ *  `since`) when it is unread, undefined when it is read, and null while the marks are not
+ *  in yet (a cold open whose page came before the stream's snapshot), to be read again
+ *  once they are rather than taken for read. An older server never sends them: no line. */
+export function leftOff(
+  s: Pick<SessionSummary, "key" | "state" | "attended" | "newsAt">,
+  marks: Marks,
+): string | undefined | null {
+  if (!marks.since) return null;
+  return isUnread(s, marks) ? (marks.read[s.key] ?? marks.since) : undefined;
+}
 
 export interface NewLineAt {
   /** The seq of the turn's `turn.ended`: a turn's `n` shifts when older pages load. */

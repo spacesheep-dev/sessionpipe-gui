@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // The New line: it lands on the answer of the first turn that ended after the mark,
 // never on the person's own terminal turn, and not at all when it can't be placed right.
-import type { StoredEvent } from "@shared/api";
+import { EMPTY_MARKS, type Marks, type SessionSummary, type StoredEvent } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { newLinePlace } from "./newLine";
+import { leftOff, newLinePlace } from "./newLine";
 import { groupTurns } from "./turns";
 
 const T0 = Date.parse("2026-10-28T10:00:00.000Z");
@@ -104,5 +104,22 @@ describe("newLinePlace", () => {
     const ev = session();
     const events = [...turn(ev, 0, { reply: "One." }), ...turn(ev, 100)];
     expect(newLinePlace(groupTurns(events), iso(50))?.above).toBe("end");
+  });
+});
+
+describe("leftOff", () => {
+  const since = iso(0);
+  const marks = (m: Partial<Marks> = {}): Marks => ({ rev: 1, since, read: {}, unread: {}, ...m });
+  const row = { key: "claude-code:s1", state: "idle", newsAt: iso(300) } as SessionSummary;
+
+  it("is the read mark, else since, when the session is unread; undefined when it is read", () => {
+    expect(leftOff(row, marks({ read: { "claude-code:s1": iso(100) } }))).toBe(iso(100));
+    expect(leftOff(row, marks())).toBe(since);
+    expect(leftOff(row, marks({ read: { "claude-code:s1": iso(300) } }))).toBeUndefined();
+  });
+
+  it("waits (null) while the marks are not in yet, rather than reading the session as read", () => {
+    // A cold open: the session's page and summary came before the stream's snapshot.
+    expect(leftOff(row, EMPTY_MARKS)).toBeNull();
   });
 });
