@@ -204,6 +204,24 @@ describe("names", () => {
       "goose on x",
     ]);
   });
+  it("puts the accounts with numbers first, and among them the ones a hello names", () => {
+    const rows = [
+      { harness: "claude-code", title: "Claude Code account", machine: "build-box", named: false, quiet: {} },
+      { harness: "claude-code", title: "Claude Code account", machine: "studio-mac", named: false },
+      { harness: "claude-code", title: "work@acme.dev", machine: "lab-mac", named: true, quiet: {} },
+      { harness: "claude-code", title: "dev@example.com", machine: "lab-mac", named: true },
+      { harness: "codex", title: "Codex on lab-mac", machine: "lab-mac", named: false },
+      { harness: "claude-code", title: "api.z.ai", machine: "lab-mac", named: true },
+    ];
+    expect([...rows].sort(byPlace).map((r) => `${r.title} ${r.machine}`)).toEqual([
+      "api.z.ai lab-mac",
+      "dev@example.com lab-mac",
+      "Claude Code account studio-mac",
+      "work@acme.dev lab-mac",
+      "Claude Code account build-box",
+      "Codex on lab-mac lab-mac",
+    ]);
+  });
 });
 
 describe("sentences", () => {

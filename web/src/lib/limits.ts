@@ -226,12 +226,18 @@ export function shortNames(
 }
 
 /** The page's order, which no number moves: Claude Code, then Codex, then any other
- *  harness by name; within one, by title (then machine). */
-export function byPlace<T extends { harness: string; title: string; machine: string }>(a: T, b: T): number {
+ *  harness by name; within one, the accounts with numbers before those that sent none,
+ *  each the ones a hello names first (so "Claude Code account" never falls between two
+ *  emails), then by title (then machine). */
+export function byPlace<
+  T extends { harness: string; title: string; machine: string; named?: boolean; quiet?: unknown },
+>(a: T, b: T): number {
   const rank = (h: string) => (h === "claude-code" ? 0 : h === "codex" ? 1 : 2);
+  const tier = (x: T) => (x.quiet ? 2 : 0) + (x.named ? 0 : 1);
   return (
     rank(a.harness) - rank(b.harness) ||
     harnessMark(a.harness).label.localeCompare(harnessMark(b.harness).label) ||
+    tier(a) - tier(b) ||
     a.title.localeCompare(b.title) ||
     a.machine.localeCompare(b.machine)
   );

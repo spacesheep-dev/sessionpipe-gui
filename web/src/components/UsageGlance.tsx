@@ -16,6 +16,7 @@ import {
   byPlace,
   entryTitle,
   isOut,
+  nameOf,
   type QuietAccount,
   readWindow,
   STATUS_LINE_COMMAND,
@@ -39,6 +40,8 @@ export interface Account {
   key: string;
   harness: string;
   title: string;
+  /** For the order: whether a hello names it (its title is an email or a host). */
+  named: boolean;
   /** For the order: the newest report's machine, or the first the account was seen on. */
   machine: string;
   /** Where it reported, or was seen, newest first. */
@@ -58,6 +61,7 @@ export function useReported(): { accounts: Account[]; names: Map<string, string>
         key: e.key,
         harness: e.harness,
         title: entryTitle(e, names),
+        named: !!nameOf(names, e.harness, e.accountId),
         machine: e.machine,
         machines: e.machines,
         entry: e,

@@ -126,6 +126,21 @@ test("g u and ⌘K open Usage: every window named honestly, and nothing for a ha
   await expect(main).not.toContainText("used");
   // The only colour is on the words that need it.
   await expect(main.locator(".usage-out")).toHaveText(["12% over", "None left"]);
+  // Within a harness, the accounts with numbers first, the ones a hello names before the
+  // rest, then those with none: the page never opens on a setup block.
+  const order = await main
+    .locator("section.usage-acct")
+    .evaluateAll((els) =>
+      els.map(
+        (el) => `${el.querySelector(".usage-title")?.textContent}${el.querySelector(".usage-win") ? "" : " (none)"}`,
+      ),
+    );
+  expect(order.slice(0, 4)).toEqual([
+    "api.z.ai",
+    "dev@example.com",
+    "Claude Code account",
+    "Claude Code account (none)",
+  ]);
 });
 
 test("a report updates the page and the sidebar without a reload; Copy usage and Forget", async ({ page }) => {
