@@ -14,7 +14,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   groups stay whole, a pipeline is one step, and a short command stays on the question's
   line. The command is the call's own, whole, when the session sent it; otherwise the
   first 200 characters the machine sends, ending in "…". Four steps show, then "Show 2
-  more lines".
+  more lines". On a phone a longer one scrolls inside, cut through a line, so you see
+  there is more.
 
 ### Fixed
 

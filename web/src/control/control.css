@@ -283,10 +283,11 @@
   .ctl-q {
     flex: none;
   }
-  /* The strip stays under half the phone's height (the question, the pair and the field
-     take up to 15rem of it): a long command scrolls inside, never under three lines. */
+  /* The strip stays about half the phone's height (the question, "Show less", the pair
+     and the field take 13.25rem of it): a long command scrolls inside, and the cap ends
+     half a line into a step, so a step below it always shows. Never under three lines. */
   .ctl-cmd-block {
-    max-height: max(calc(3em * var(--lh)), calc(50dvh - 15rem));
+    max-height: max(calc(3.5em * var(--lh)), calc(round(down, 50dvh - 13.25rem, 1em * var(--lh)) + 0.5em * var(--lh)));
   }
   .ctl-more {
     align-self: flex-start;
