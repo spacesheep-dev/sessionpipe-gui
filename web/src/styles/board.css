@@ -56,13 +56,16 @@
 }
 /* Done folds away behind a disclosure: the chevron turns as it opens. Its header is a
    row like the ones it hides (a hover fill, the rows' inset), and its hairline stops at
-   the content's edge instead of running out to the window's. */
-.group--done > .group-head {
+   the content's edge instead of running out to the window's. Hidden, after it, is the
+   same fold. */
+.group--done > .group-head,
+.group--hidden > .group-head {
   margin: 0 4px;
   padding: 0;
   border-bottom: 0;
 }
-.group--done > .group-head::after {
+.group--done > .group-head::after,
+.group--hidden > .group-head::after {
   content: "";
   position: absolute;
   left: 8px;
@@ -79,18 +82,21 @@
   color: inherit;
   font: inherit;
 }
-.group--done .group-toggle {
+.group--done .group-toggle,
+.group--hidden .group-toggle {
   flex: 1;
   padding: 0 8px;
   border-radius: var(--radius);
   transition: background-color var(--dur-fast) var(--ease-out);
 }
 @media (hover: hover) {
-  .group--done .group-toggle:hover {
+  .group--done .group-toggle:hover,
+  .group--hidden .group-toggle:hover {
     background: var(--hover);
   }
 }
-.group--done .group-toggle:active {
+.group--done .group-toggle:active,
+.group--hidden .group-toggle:active {
   background: var(--press);
   transition: none;
 }
