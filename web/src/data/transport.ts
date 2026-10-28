@@ -62,6 +62,7 @@ export const STREAM_KINDS = [
   "viewers",
   "suggestion",
   "labels",
+  "marks",
   "viewState",
   "searchIndex",
 ] as const satisfies readonly StreamMessage["kind"][];
