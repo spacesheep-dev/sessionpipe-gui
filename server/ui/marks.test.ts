@@ -22,7 +22,7 @@ describe("MarkStore", () => {
         () => true,
         () => T0,
       );
-      expect(first.get()).toEqual({ rev: 0, since: iso(0), read: {}, unread: {} });
+      expect(first.get()).toEqual({ rev: 0, since: iso(0), read: {}, unread: {}, notify: {} });
       expect(existsSync(file)).toBe(true);
       expect(statSync(file).mode & 0o777).toBe(0o600);
       first.patch({ read: { a: iso(5) } });
@@ -31,7 +31,7 @@ describe("MarkStore", () => {
         () => true,
         () => T0 + 3_600_000,
       );
-      expect(again.get()).toEqual({ rev: 1, since: iso(0), read: { a: iso(5) }, unread: {} });
+      expect(again.get()).toEqual({ rev: 1, since: iso(0), read: { a: iso(5) }, unread: {}, notify: {} });
     } finally {
       tmp.cleanup();
     }
@@ -63,6 +63,7 @@ describe("MarkStore", () => {
         since: iso(0),
         read: { b: iso(3) },
         unread: {},
+        notify: {},
       });
     } finally {
       tmp.cleanup();
@@ -121,6 +122,31 @@ describe("MarkStore", () => {
     }
   });
 
+  it("keeps each session's Notify me, refuses a level it doesn't have, and forgets it with the session", () => {
+    const tmp = tempDir();
+    try {
+      const store = new MarkStore(
+        tmp.dir,
+        (k) => k !== "gone",
+        () => T0,
+      );
+      store.patch({ notify: { a: "never", b: "finishes", gone: "never" } });
+      expect(store.get()).toMatchObject({ rev: 1, notify: { a: "never", b: "finishes" } });
+      // The default is stored as nothing: null puts a session back on it.
+      store.patch({ notify: { b: null } });
+      expect(store.get().notify).toEqual({ a: "never" });
+      for (const bad of ["needs", "always", true, 1])
+        expect(() => store.patch({ notify: { a: bad as never } })).toThrow("bad_notify");
+      expect(() => store.patch({ notify: [] as never })).toThrow("malformed");
+      expect(store.get()).toMatchObject({ rev: 2, notify: { a: "never" } });
+      expect(new MarkStore(tmp.dir, () => true).get().notify).toEqual({ a: "never" });
+      store.forget("a");
+      expect(store.get()).toMatchObject({ rev: 3, notify: {} });
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
   it("skips sessions the store does not know, and a forgotten session drops its keys", () => {
     const tmp = tempDir();
     try {
@@ -174,7 +200,7 @@ describe("MarkStore", () => {
         () => true,
         () => T0,
       );
-      expect(store.get()).toEqual({ rev: 0, since: iso(0), read: {}, unread: {} });
+      expect(store.get()).toEqual({ rev: 0, since: iso(0), read: {}, unread: {}, notify: {} });
       expect(readdirSync(tmp.dir).some((f) => f.startsWith("marks.json.bad-"))).toBe(true);
     } finally {
       tmp.cleanup();
