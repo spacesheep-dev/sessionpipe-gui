@@ -38,6 +38,25 @@ test.describe("board", () => {
     await expect(done.locator("article.card--done")).toHaveCount(n);
   });
 
+  test("Done's head says how many are unread only while it is folded", async ({ page }) => {
+    await openBoard(page);
+    const done = page.locator("section.group--done");
+    const toggle = done.locator("button.group-toggle");
+    await toggle.click();
+    const card = done.locator("article.card--done").first();
+    // A scroll closes a menu, as a native one does, so one that closed is opened again.
+    await expect(async () => {
+      await page.keyboard.press("Escape");
+      await card.locator("a.card-link").click({ button: "right" });
+      await page.getByRole("menuitem", { name: "Mark as unread" }).click({ timeout: 2000 });
+    }).toPass({ timeout: 20_000 });
+    // Open, the row's filled dot says it; the head does not say it again.
+    await expect(card.locator(".card-state")).toBeVisible();
+    await expect(toggle.locator(".group-note")).toHaveCount(0);
+    await toggle.click();
+    await expect(toggle.locator(".group-note")).toHaveText(/^[1-9]\d* unread$/);
+  });
+
   test("a working card shows the tool it is running", async ({ page }) => {
     await openBoard(page);
     // The status of a working row: the glyph (its state word for assistive tech), the

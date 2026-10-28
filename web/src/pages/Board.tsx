@@ -533,7 +533,7 @@ export function Board() {
                 <span key={doneCount} className="group-count num">
                   {doneCount}
                 </span>
-                {doneUnread > 0 && (
+                {!showDone && doneUnread > 0 && (
                   <>
                     {" "}
                     <span className="group-note num">{doneUnread} unread</span>
