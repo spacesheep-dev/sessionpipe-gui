@@ -244,9 +244,9 @@
   margin-left: 0.45em;
 }
 .pool-status .btn {
-  /* The ghost button's 10 px of padding sit past the status column: its text ends where
-     "In use" and "Off" end in the rows around it. */
-  margin: -4px -10px -4px 0;
+  /* The ghost button's 10 px of padding and its (transparent) border sit past the status
+     column: its text ends where "In use" and "Off" end in the rows around it. */
+  margin: -4px calc(-10px - var(--hairline)) -4px 0;
 }
 /* A pooled account's windows: one step further in, the label narrower, so the bars stay
    on the page's bar line (24 + 180 = 48 + 156). The step is a margin, not a padding, so
