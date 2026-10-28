@@ -29,7 +29,15 @@ import { canSign, signHint } from "../control/signer";
 import { sendErrorWords } from "../control/words";
 import { byStateThenRecent, useAppState, useLabels, useStore } from "../data/hooks";
 import { agentLabel, agentMatches, openAgent } from "../lib/agents";
-import { attentionMessage, modelShort, repoShort, STATE_LABEL, sessionTitle, toolLabel } from "../lib/format";
+import {
+  attentionMessage,
+  isPlanReview,
+  modelShort,
+  repoShort,
+  STATE_LABEL,
+  sessionTitle,
+  toolLabel,
+} from "../lib/format";
 import { type FieldsMatch, fuzzyFields } from "../lib/fuzzy";
 import { labelName, labelQuery, setLabel } from "../lib/labels";
 import { navigate, parseRoute, sessionPath, useRoute } from "../lib/router";
@@ -282,6 +290,13 @@ function snapToRows(list: HTMLElement): void {
     bottom = b;
   }
   if (bottom > 0) list.style.maxHeight = `${bottom + 4}px`;
+}
+
+/** A "Needs you" command's words: a plan review's own pair (Approve plan, Keep planning),
+ *  as the strip says it; else the verb and the tool, which the row shows as code. */
+export function answerWords(a: { kind?: string; tool?: string }, allow: boolean): { verb: string; tool?: string } {
+  if (isPlanReview(a)) return { verb: allow ? "Approve plan" : "Keep planning" };
+  return { verb: allow ? "Allow" : "Deny", tool: a.tool ? toolLabel(a.tool) : "this" };
 }
 
 export function PaletteDialog({ closing = false }: { closing?: boolean }) {
@@ -567,7 +582,8 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
           const title = sessionTitle(s);
           for (const allow of [true, false]) {
             const verb = allow ? "Allow" : "Deny";
-            const label = `${verb} ${a.tool ? toolLabel(a.tool) : "this"}`;
+            const words = answerWords(a, allow);
+            const label = words.tool ? `${words.verb} ${words.tool}` : words.verb;
             const m = text ? fuzzyFields(text, [label, title, s.machine ?? ""]) : null;
             if (text && !m) continue;
             out.push({
@@ -576,7 +592,13 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
               mark: <StateDot state="needs_you" decorative />,
               label: (
                 <>
-                  {verb} <code>{a.tool ? toolLabel(a.tool) : "this"}</code> in <Hit text={title} at={m?.positions[1]} />
+                  {words.verb}{" "}
+                  {words.tool && (
+                    <>
+                      <code>{words.tool}</code>{" "}
+                    </>
+                  )}
+                  in <Hit text={title} at={m?.positions[1]} />
                 </>
               ),
               detail: a.message ? a.message : undefined,
