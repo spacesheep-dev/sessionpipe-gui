@@ -455,7 +455,7 @@ export function PoolSection({
       <header className="usage-head" data-nav-item="">
         <HarnessGlyph name={pool.harness} size="md" />
         <h2 className="usage-title">{title}</h2>
-        <span className="pool-meta" data-pool-meta="">
+        <span className="pool-meta" data-pool-meta="" title={meta}>
           {meta}
         </span>
         <MoreButton build={sectionItems} label={`Actions for ${machine}'s accounts`} title={() => title} />

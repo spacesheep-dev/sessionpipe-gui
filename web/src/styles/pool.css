@@ -16,7 +16,11 @@
   margin-top: 2px;
 }
 .pool-meta {
-  flex: none;
+  /* The meta gives way before the title: the title names the machine. */
+  flex: 0 1 auto;
+  min-width: 8ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--fg-3);
   font-size: var(--text-sm);
   white-space: nowrap;
