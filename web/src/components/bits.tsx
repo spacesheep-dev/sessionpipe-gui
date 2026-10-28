@@ -414,11 +414,14 @@ export function Toggle({
   onChange,
   label,
   disabled,
+  describedBy,
 }: {
   on: boolean;
   onChange: (v: boolean) => void;
   label: string;
   disabled?: boolean;
+  /** The id of the hint under its row, read after the label. */
+  describedBy?: string;
 }) {
   return (
     <button
@@ -426,6 +429,7 @@ export function Toggle({
       role="switch"
       aria-checked={on}
       aria-label={label}
+      aria-describedby={describedBy}
       className={`toggle ${on ? "toggle-on" : ""}`}
       onClick={() => onChange(!on)}
       disabled={disabled}

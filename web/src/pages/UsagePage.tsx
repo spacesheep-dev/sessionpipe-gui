@@ -8,15 +8,26 @@
 // its footer. Numbers come only from sessionpipe's limits.observed as the receiver keeps
 // them (lib/limits.ts words them). Claude Code sends its numbers through a status line, so
 // a Claude Code account known here that sent none says how to turn it on; the harnesses
-// with no source get one sentence at the end, never a 0%. The `lists` keys walk the
-// sections; Enter starts a session on the newest machine that can, `.` opens the menu.
-import type { LimitWindow, MachineSummary } from "@shared/api";
+// with no source get one sentence at the end, never a 0%. A machine whose hello carries a
+// pool of Claude accounts gets one section for them first (PoolAccounts.tsx), and those
+// accounts are drawn there and not again; a machine that could pool but has no accounts
+// yet is one footnote sentence with the way in (the Add account sheet). The `lists` keys
+// walk the sections; Enter starts a session on the newest machine that can, `.` opens the
+// menu.
+import type { MachineSummary } from "@shared/api";
 import { useEffect, useMemo } from "react";
 import { CommandWell, EmptyState, HarnessGlyph } from "../components/bits";
-import { MoreButton, useContextMenu } from "../components/ContextMenu";
+import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
 import { PageBar } from "../components/PageBar";
+import { PoolSection } from "../components/PoolAccounts";
+import { PoolAddHost } from "../components/PoolAddSheet";
 import { type Account, startMachines, usageItems, useReported } from "../components/UsageGlance";
+import { WindowRow } from "../components/UsageWindows";
+import { useRpId } from "../control/hooks";
 import { openNewSession } from "../control/newSessionState";
+import { sentence } from "../control/PendingDevices";
+import { openPoolAdd } from "../control/poolAddState";
+import { canSign, signHint } from "../control/signer";
 import { useAppState, useLimits, useMachines, useStore } from "../data/hooks";
 import { useListNav } from "../lib/keys";
 import {
@@ -25,29 +36,41 @@ import {
   entrySubtitle,
   entryTitle,
   footnote,
-  isOut,
   nameOf,
   orderWindows,
   quietAccounts,
-  readWindow,
-  resetClock,
   STATUS_LINE_COMMAND,
   staleWords,
-  windowLabel,
 } from "../lib/limits";
+import { pooledIds } from "../lib/pool";
 import { useNow } from "../lib/time";
 import "../styles/usage.css";
 
 const anchor = (key: string) => encodeURIComponent(key);
 
+/** The machines that pool accounts, by name, and the ones that could but list none yet. */
+function usePools(machines: readonly MachineSummary[]): { pooled: MachineSummary[]; empty: MachineSummary[] } {
+  return useMemo(() => {
+    const withPool = machines.filter((m) => m.control?.pool).sort((a, b) => a.name.localeCompare(b.name));
+    return {
+      pooled: withPool.filter((m) => (m.control?.pool?.accounts.length ?? 0) > 0),
+      empty: withPool.filter((m) => m.control?.pool?.accounts.length === 0),
+    };
+  }, [machines]);
+}
+
 /** Every account: the ones with numbers, and the Claude Code accounts known from a hello
- *  or a session that sent none; and the sentence for the harnesses with no source. */
+ *  or a session that sent none, less the ones some machine pools (their section draws
+ *  them); and the sentence for the harnesses with no source. */
 function useAccounts(): { accounts: Account[]; count: number; note: string } {
   const { accounts: reported, names } = useReported();
   const limits = useLimits();
   const machines = useMachines();
   const { sessions } = useAppState();
   return useMemo(() => {
+    const pooled = new Set<string>();
+    for (const m of machines)
+      for (const [id] of pooledIds([m])) pooled.add(`${m.control?.pool?.harness ?? "claude-code"} a:${id}`);
     const known = [
       ...machines.flatMap((m) =>
         (m.control?.accounts ?? []).map((a) => ({ harness: a.harness, accountId: a.id, machine: m.name })),
@@ -68,7 +91,7 @@ function useAccounts(): { accounts: Account[]; count: number; note: string } {
       ...machines.flatMap((m) => [...Object.keys(m.harnesses), ...(m.control?.harnesses ?? [])]),
     ];
     return {
-      accounts: [...reported, ...quiet].sort(byPlace),
+      accounts: [...reported, ...quiet].filter((a) => !pooled.has(a.key)).sort(byPlace),
       count: reported.length,
       note: footnote(seen, limits),
     };
@@ -80,11 +103,11 @@ function useHashTarget(ready: boolean): void {
   useEffect(() => {
     if (!ready) return;
     const go = () => {
-      const id = location.hash.slice(1);
+      const id = decodeURIComponent(location.hash.slice(1));
       if (!id) return;
       // After the shell has moved focus to the page for the route change.
       requestAnimationFrame(() => {
-        const el = document.getElementById(id);
+        const el = document.getElementById(id) ?? document.getElementById(anchor(id));
         if (!el) return;
         el.scrollIntoView({ block: "start" });
         el.querySelector<HTMLElement>("[data-nav-item]")?.focus({ preventScroll: true });
@@ -99,34 +122,82 @@ function useHashTarget(ready: boolean): void {
 export function Usage() {
   const { accounts, count, note } = useAccounts();
   const machines = useMachines();
+  const limits = useLimits();
+  const { pooled, empty } = usePools(machines);
+  const rp = useRpId();
+  const secure = canSign(rp);
   // "resets in" counts down, and a window turns to "Reset" at its time, with no new report.
   const now = useNow("coarse");
-  const hrefs = useMemo(() => accounts.map((a) => `/usage#${anchor(a.key)}`), [accounts]);
+  const hrefs = useMemo(
+    () => [...pooled.map((m) => `/usage#pool:${m.name}`), ...accounts.map((a) => `/usage#${anchor(a.key)}`)],
+    [pooled, accounts],
+  );
   const { cursor } = useListNav(hrefs, true, undefined, {
-    // Enter: the menu's first item, a session on the newest machine that can start one.
+    // Enter: the menu's first item, a session on the newest machine that can start one;
+    // on a pooled section, a session on that machine.
     open: (i) => {
-      const a = accounts[i];
+      const p = pooled[i];
+      if (p) {
+        openNewSession({ harness: p.control?.pool?.harness ?? "claude-code", machine: p.name });
+        return true;
+      }
+      const a = accounts[i - pooled.length];
       const machine = a ? startMachines(a, machines)[0] : undefined;
       if (!a || !machine) return false;
       openNewSession({ harness: a.harness, machine });
       return true;
     },
   });
-  useHashTarget(accounts.length > 0);
+  useHashTarget(accounts.length + pooled.length > 0);
+  const entryFor = (harness: string) => (accountId: string) =>
+    limits.find((e) => e.harness === harness && e.accountId === accountId);
   return (
     <div className="page page--doc page--grouped usage">
       <PageBar title="Usage" meta={count ? `${count} ${count === 1 ? "account" : "accounts"}` : undefined} />
-      {accounts.length === 0 ? (
+      {pooled.length > 0 && !secure && <p className="machines-note">{sentence(signHint(rp)).replace(/\.?$/, ".")}</p>}
+      {pooled.map((m, i) => (
+        <PoolSection
+          key={m.name}
+          m={m}
+          pool={m.control!.pool!}
+          entryFor={entryFor(m.control!.pool!.harness)}
+          now={now}
+          index={i}
+          cursor={cursor === i}
+        />
+      ))}
+      {accounts.length === 0 && pooled.length === 0 ? (
         <EmptyState center title="No limits yet">
           <p>Codex reports them after a turn. Claude Code needs its status line, on each machine it runs on:</p>
           <CommandWell command={STATUS_LINE_COMMAND} prompt={false} label="Copy setup command" />
         </EmptyState>
       ) : (
         accounts.map((a, i) => (
-          <AccountSection key={a.key} a={a} index={i} cursor={cursor === i} now={now} machines={machines} />
+          <AccountSection
+            key={a.key}
+            a={a}
+            index={pooled.length + i}
+            cursor={cursor === pooled.length + i}
+            now={now}
+            machines={machines}
+            emptyPools={empty}
+          />
         ))
       )}
-      {note && <p className="usage-note">{note}</p>}
+      {(note || empty.length > 0) && (
+        <p className="usage-note">
+          {empty.map((m) => (
+            <span key={m.name} data-pool-setup={m.name}>
+              {m.name} can switch between several Claude accounts.{" "}
+              <button type="button" className="pool-setup" onClick={() => openPoolAdd({ machine: m.name })}>
+                Set it up…
+              </button>{" "}
+            </span>
+          ))}
+          {note}
+        </p>
+      )}
+      <PoolAddHost />
     </div>
   );
 }
@@ -137,21 +208,34 @@ function AccountSection({
   cursor,
   now,
   machines,
+  emptyPools,
 }: {
   a: Account;
   index: number;
   cursor: boolean;
   now: number;
   machines: readonly MachineSummary[];
+  emptyPools: readonly MachineSummary[];
 }) {
   const store = useStore();
-  const build = () =>
-    usageItems(a, {
+  const build = (): MenuList => {
+    const items = usageItems(a, {
       machines,
       from: "page",
       // The entry comes back with its next report; nothing to confirm.
       forget: () => void store.transport.forgetLimits(a.key).catch(() => {}),
     });
+    // A Claude Code account seen on a machine that could pool but has none yet: the way in.
+    const setup: MenuList =
+      a.harness === "claude-code"
+        ? emptyPools
+            .filter((m) => a.machines.includes(m.name))
+            .map((m) => ({ label: `Switch accounts on ${m.name}…`, run: () => openPoolAdd({ machine: m.name }) }))
+        : [];
+    if (!setup.length) return items;
+    const sep = items.findIndex((i) => i && typeof i === "object" && "sep" in i);
+    return sep < 0 ? [...items, ...setup] : [...items.slice(0, sep), ...setup, ...items.slice(sep)];
+  };
   const menu = useContextMenu(build, { title: () => a.title });
   const e = a.entry;
   const stale = e ? staleWords(e, now) : "";
@@ -210,36 +294,5 @@ function AccountSection({
         </ul>
       )}
     </section>
-  );
-}
-
-/** A window: its name, a bar of what is left, the figure, when it resets. A window past
- *  its reset has no bar (an empty one would read as none left) and says when it reset. */
-function WindowRow({ w, now }: { w: LimitWindow; now: number }) {
-  const r = readWindow(w, now);
-  const clock = resetClock(w.resetsAt) || undefined;
-  return (
-    <li className={`usage-win ${r.kind === "reset" ? "usage-win--reset" : ""}`} data-window={w.id}>
-      <span className="usage-label">{windowLabel(w)}</span>
-      {r.fill !== null && (
-        <span className="usage-bar" aria-hidden="true">
-          <span style={{ width: `${r.fill * 100}%` }} />
-        </span>
-      )}
-      {r.kind === "reset" ? (
-        <span className="usage-when num" title={clock}>
-          {r.when}
-        </span>
-      ) : (
-        <>
-          <span className={`usage-value num ${isOut(r) ? "usage-out" : ""}`}>{r.value}</span>
-          {r.when && (
-            <span className="usage-when num" title={clock}>
-              {r.when}
-            </span>
-          )}
-        </>
-      )}
-    </li>
   );
 }

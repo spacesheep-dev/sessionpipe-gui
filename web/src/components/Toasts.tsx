@@ -166,7 +166,15 @@ function useToastEffects(): void {
       for (const a of st.control) {
         const before = outcomes.get(a.id);
         const seen = outcomes.has(a.id);
-        if (a.outcome === "delivered" && seen && before !== "delivered" && !isOwnSend(a.id) && !onScreen(a.session))
+        // A pool command's delivery is the section's to show (the hello redraws it): no toast.
+        if (
+          a.outcome === "delivered" &&
+          a.kind !== "pool" &&
+          seen &&
+          before !== "delivered" &&
+          !isOwnSend(a.id) &&
+          !onScreen(a.session)
+        )
           pushToast(deliveredToast(a, st.sessions));
       }
       outcomes = next;
