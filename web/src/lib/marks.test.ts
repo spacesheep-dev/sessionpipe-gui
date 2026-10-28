@@ -3,7 +3,7 @@
 import type { Marks, MarksPatch, SessionSummary } from "@shared/api";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Store } from "../data/store";
-import { isUnread, markSeen, readsUnread, SEND_EVERY_MS, setUnread } from "./marks";
+import { canMark, isUnread, markSeen, SEND_EVERY_MS, setUnread } from "./marks";
 
 const SINCE = "2026-10-28T10:00:00.000Z";
 const marks = (m: Partial<Marks> = {}): Marks => ({ rev: 1, since: SINCE, read: {}, unread: {}, ...m });
@@ -42,15 +42,18 @@ describe("isUnread", () => {
     expect(isUnread(row({ newsAt: undefined }), m)).toBe(true);
   });
 
-  it("a manual unread on a row that works shows once it settles, and the menu and u read it as unread", () => {
-    const m = marks({ unread: { "claude-code:a": true } });
-    expect(isUnread(row({ state: "working" }), m)).toBe(false);
-    expect(readsUnread(row({ state: "working" }), m)).toBe(true);
-    expect(readsUnread(row({ state: "working" }), marks())).toBe(false);
-  });
-
   it("with no since (an older server) nothing is unread", () => {
     expect(isUnread(row(), { rev: 0, read: {}, unread: { "claude-code:a": true } })).toBe(false);
+  });
+});
+
+describe("canMark", () => {
+  it("only a settled session the board draws can be marked read or unread", () => {
+    expect(canMark(row())).toBe(true);
+    expect(canMark(row({ state: "done" }))).toBe(true);
+    for (const state of ["needs_you", "working", "stale"] as const) expect(canMark(row({ state }))).toBe(false);
+    expect(canMark(row({ parentId: "parent" }))).toBe(false);
+    expect(canMark(row({ state: "done", parentId: "parent" }))).toBe(false);
   });
 });
 

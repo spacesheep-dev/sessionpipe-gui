@@ -22,7 +22,7 @@ import {
 } from "react";
 // The one reading of `answerable` the strip and the inbox share (an older server leaves the field unset).
 import { answerable } from "../components/ControlStrip";
-import { isUnread, markSeen, readsUnread, SEEN_AFTER_MS, setUnread } from "../lib/marks";
+import { canMark, isUnread, markSeen, SEEN_AFTER_MS, setUnread } from "../lib/marks";
 import { useShortcut } from "../lib/shortcuts";
 import type { AppState, Store } from "./store";
 
@@ -175,14 +175,15 @@ export function useSeen(key: SessionKey | null): void {
   }, [store, key, here, ready, newsAt]);
 }
 
-/** `u` marks what a list's cursor is on read when it is unread, else unread. */
+/** `u` marks what a list's cursor is on read when it is unread, else unread; on a row that
+ *  can draw neither it does nothing. */
 export function useUnreadKeys(sessions: () => readonly SessionSummary[]): void {
   const store = useStore();
   useShortcut("list.unread", () => {
-    const list = sessions();
+    const list = sessions().filter(canMark);
     if (!list.length) return false;
     const marks = store.get().marks;
-    setUnread(store, list, !list.every((s) => readsUnread(s, marks)));
+    setUnread(store, list, !list.every((s) => isUnread(s, marks)));
   });
 }
 

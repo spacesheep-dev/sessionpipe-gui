@@ -20,11 +20,10 @@ export function isUnread(s: Pick<SessionSummary, "key" | "state" | "attended" | 
   return s.attended !== false && !!s.newsAt && s.newsAt > (marks.read[s.key] ?? marks.since);
 }
 
-/** What "Mark as read" / "Mark as unread" and `u` go by: unread on the board, or marked
- *  unread by hand while it works or needs you (it shows once it settles), so a second
- *  `u` always takes back the first. */
-export function readsUnread(s: Pick<SessionSummary, "key" | "state" | "attended" | "newsAt">, marks: Marks): boolean {
-  return isUnread(s, marks) || (!!marks.since && !!marks.unread[s.key]);
+/** Whether "Mark as read" / "Mark as unread" and `u` apply: only a row that can draw
+ *  unread, a settled session the board shows (a subagent's row draws no mark). */
+export function canMark(s: Pick<SessionSummary, "state" | "parentId">): boolean {
+  return (s.state === "idle" || s.state === "done") && !s.parentId;
 }
 
 /** Mark sessions read up to the news they carry now, or unread. A manual mark goes at

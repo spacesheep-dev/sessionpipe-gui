@@ -15,7 +15,7 @@ import { copyText } from "./clipboard";
 import { harnessMark, repoBranch, sessionTitle } from "./format";
 import { hide } from "./hidden";
 import { labelMenu } from "./labels";
-import { readsUnread, setUnread } from "./marks";
+import { canMark, isUnread, setUnread } from "./marks";
 import { receiverOrigin } from "./net";
 import { hrefFor, navigate, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath } from "./router";
 import { getSettings } from "./settings";
@@ -173,10 +173,11 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
   return tidy(items);
 }
 
-/** "Mark as read" on an unread session, else "Mark as unread" (lib/marks.ts). Its key, `u`,
- *  works on a list's cursor, so a list shows it. */
-function unreadItem(store: Store, s: SessionSummary, list: boolean): MenuItem {
-  const unread = readsUnread(s, store.get().marks);
+/** "Mark as read" on an unread session, else "Mark as unread" (lib/marks.ts), on a row
+ *  that can draw unread. Its key, `u`, works on a list's cursor, so a list shows it. */
+function unreadItem(store: Store, s: SessionSummary, list: boolean): MenuItem | null {
+  if (!canMark(s)) return null;
+  const unread = isUnread(s, store.get().marks);
   return {
     label: unread ? "Mark as read" : "Mark as unread",
     action: list ? "list.unread" : undefined,

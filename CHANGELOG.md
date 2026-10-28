@@ -14,10 +14,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   panel's tab, marks it read on every device. A turn you typed at the terminal of a
   session you attend is not news; working, needs-you and unattended rows are never
   unread, and nothing from before the first run is.
-- **Mark as read / Mark as unread** in every session menu and the phone's long-press
-  sheet, `u` on the board's cursor, and **Mark all as read** in the board's view menu.
-  The marks live in `<stateDir>/marks.json` (`GET` / `PATCH /api/ui/marks`, a `marks`
-  frame on every change); a forgotten session loses its marks.
+- **Mark as read / Mark as unread** in an idle or done session's menu and the phone's
+  long-press sheet, `u` on the board's cursor, and **Mark all as read** in the board's
+  view menu. The marks live in `<stateDir>/marks.json` (`GET` / `PATCH /api/ui/marks`, a
+  `marks` frame on every change); a forgotten session loses its marks.
 
 ## [0.4.1] - 2026-10-27
 
