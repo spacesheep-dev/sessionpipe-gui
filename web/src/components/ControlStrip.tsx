@@ -251,6 +251,17 @@ function wholeLines(el: HTMLElement, cap: number): number {
   return Math.ceil(fit) || cap;
 }
 
+/** Folds the plan to its clamp, from its top: a plan scrolled while it was whole would
+ *  otherwise fold on its middle, with no way back up. True when it was cut. */
+export function foldPlan(el: HTMLElement): boolean {
+  el.style.maxHeight = "";
+  el.scrollTop = 0;
+  const cap = el.clientHeight;
+  const over = el.scrollHeight > cap + 1;
+  if (over) el.style.maxHeight = `${wholeLines(el, cap)}px`;
+  return over;
+}
+
 /** The plan a plan review asks to start on (its call's `input.plan`, tier 3), as the
  *  timeline reads Markdown, in the question's column: eight lines (six on a phone) until
  *  "Show the whole plan", then up to half the view, scrolling inside. Below tier 3 the
@@ -265,13 +276,7 @@ function PlanText({ a, plan }: { a: Attention; plan: unknown }) {
     if (!el) return;
     el.style.maxHeight = "";
     if (whole) return;
-    const measure = () => {
-      el.style.maxHeight = "";
-      const cap = el.clientHeight;
-      const over = el.scrollHeight > cap + 1;
-      setCut(over);
-      if (over) el.style.maxHeight = `${wholeLines(el, cap)}px`;
-    };
+    const measure = () => setCut(foldPlan(el));
     measure();
     if (typeof ResizeObserver !== "function") return;
     const ro = new ResizeObserver(measure);
