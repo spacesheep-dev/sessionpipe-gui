@@ -136,6 +136,41 @@
     }
   }
 }
+/* A plan review: the plan under its question, in the question's column, read as the
+   timeline reads a reply. No box: eight lines, then "Show the whole plan" opens it to half
+   the view, scrolling inside. Its pair stays beside the question. */
+.ctl-answer--plan > .ctl-answer-btns {
+  grid-row: 1;
+}
+.ctl-plan {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding-top: 2px;
+}
+.ctl-answer > .ctl-plan,
+.ctl-answer > .ctl-plan-msg {
+  grid-column: 1;
+  min-width: 0;
+  margin: 0;
+  padding-left: 16px;
+}
+.ctl-plan-text {
+  align-self: stretch;
+  max-height: calc(8 * 1lh);
+  overflow: hidden;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.ctl-plan > .ctl-more {
+  margin-inline-start: 0;
+}
+.ctl-plan.is-whole > .ctl-plan-text {
+  max-height: 50dvh;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
 .ctl-answer + .ctl-answer {
   padding-top: 8px;
   border-top: var(--hairline) solid var(--line);
@@ -312,6 +347,21 @@
   .ctl-answer-btns .btn {
     min-height: var(--control-lg);
     font-size: var(--text-md);
+  }
+  /* A plan review: six lines, then the pair full width, Approve plan nearest the thumb. */
+  .ctl-answer > .ctl-plan,
+  .ctl-answer > .ctl-plan-msg {
+    padding-left: 0;
+  }
+  .ctl-plan-text {
+    max-height: calc(6 * 1lh);
+  }
+  /* Opened, it leaves the question, the pair and the composer on the screen. */
+  .ctl-plan.is-whole > .ctl-plan-text {
+    max-height: 35dvh;
+  }
+  .ctl-answer--plan .ctl-answer-btns {
+    grid-template-columns: 1fr;
   }
   .ctl-ask textarea {
     font-size: max(1rem, 16px);
