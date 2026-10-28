@@ -797,6 +797,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
         { label: "Board", key: "nav.board", run: () => navigate("/") },
         { label: "Feed", key: "nav.feed", run: () => navigate("/feed") },
         { label: "Machines", key: "nav.machines", run: () => navigate("/machines") },
+        { label: "Workflows", key: "nav.workflows", run: () => navigate("/workflows") },
         { label: "Connect", key: "nav.connect", run: () => navigate("/connect") },
       ];
       for (const p of ["Inbox", "Review", "Setup"]) {

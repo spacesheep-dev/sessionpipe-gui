@@ -20,6 +20,10 @@ export type Route =
   | { name: "setup" }
   | { name: "themes" }
   | { name: "review" }
+  | { name: "workflows" }
+  /** The editor on one workflow (`new` opens a fresh one; `?template=` a template's copy). */
+  | { name: "workflow"; id: string }
+  | { name: "workflowRun"; id: string }
   | { name: "search" }
   | { name: "settings" }
   | { name: "shortcuts" }
@@ -53,6 +57,11 @@ export function parseRoute(pathWithSearch: string): Route {
   if (path === "/setup") return { name: "setup" };
   if (path === "/themes") return { name: "themes" };
   if (path === "/review") return { name: "review" };
+  if (path === "/workflows") return { name: "workflows" };
+  const wr = /^\/workflows\/runs\/([^/]+)\/?$/.exec(path);
+  if (wr?.[1]) return { name: "workflowRun", id: decodeURIComponent(wr[1]) };
+  const wf = /^\/workflows\/([^/]+)\/?$/.exec(path);
+  if (wf?.[1]) return { name: "workflow", id: decodeURIComponent(wf[1]) };
   if (path === "/search") return { name: "search" };
   if (path === "/settings") return { name: "settings" };
   if (path === "/shortcuts") return { name: "shortcuts" };

@@ -26,7 +26,8 @@ export type Scope =
   | "machines"
   | "palette"
   | "compose"
-  | "views";
+  | "views"
+  | "workflow";
 
 export interface Action {
   id: string;
@@ -306,6 +307,7 @@ export const ACTIONS: readonly Action[] = [
   nav("nav.feed", "Feed", "g f"),
   nav("nav.review", "Review", "g r"),
   nav("nav.machines", "Machines", "g m"),
+  nav("nav.workflows", "Workflows", "g w"),
   nav("nav.connect", "Connect", "g c"),
   nav("nav.setup", "Setup", "g s"),
   nav("nav.views", "Views", "g v", "the installed view plugins"),
@@ -516,6 +518,25 @@ export const ACTIONS: readonly Action[] = [
     inInputs: true,
   },
 
+  // The Workflows editor and run view (web/src/orchestrate/workflows).
+  {
+    id: "workflow.run",
+    label: "Run the workflow",
+    group: "Workflows",
+    scope: "workflow",
+    keys: ["mod+enter"],
+    inInputs: true,
+    hint: "saves first; asks for the input when the workflow names one",
+  },
+  { id: "workflow.cancel", label: "Cancel the run", group: "Workflows", scope: "workflow", keys: ["shift+c"] },
+  { id: "workflow.stepUp", label: "Move the open step up", group: "Workflows", scope: "workflow", keys: ["alt+up"] },
+  {
+    id: "workflow.stepDown",
+    label: "Move the open step down",
+    group: "Workflows",
+    scope: "workflow",
+    keys: ["alt+down"],
+  },
 ];
 
 const byId = new Map(ACTIONS.map((a) => [a.id, a]));

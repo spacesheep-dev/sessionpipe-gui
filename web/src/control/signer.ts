@@ -108,9 +108,21 @@ export interface SignOptions {
   fresh?: boolean;
 }
 
+/** Fired on `window` once a day grant was taken or dropped, so every `useGrant` on the
+ *  page re-reads it: the workflows runner (one hook, in the shell) then moves on a grant
+ *  that the run view's "Unlock now" or a composer's send took. */
+export const GRANT_EVENT = "sessionpipe-gui:grant";
+const grantChanged = (): void => {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(GRANT_EVENT));
+};
+
 /** Sign the exact bytes `cmd` for `rp`. */
 export async function sign(rp: string, cmd: string, o: SignOptions = {}): Promise<Signed> {
-  if (inApp()) return (await nativeSigner()).sign(rp, cmd, o);
+  if (inApp()) {
+    const signed = await (await nativeSigner()).sign(rp, cmd, o);
+    grantChanged();
+    return signed;
+  }
   if (o.confirm) {
     o.onTap?.();
     return {
@@ -124,6 +136,7 @@ export async function sign(rp: string, cmd: string, o: SignOptions = {}): Promis
   }
   const d = await day();
   const rec = await d.obtainGrant(rp, o.onTap);
+  grantChanged();
   return { cmd, csig: await d.signWithDayKey(rec, cmd), grant: rec.grant };
 }
 
@@ -134,12 +147,14 @@ export const grantExpiry = async (rp: string): Promise<number | null> =>
 /** Forget the cached grant (the app instead asks Rust for a fresh one, SignOptions.fresh). */
 export const dropGrant = async (rp: string): Promise<void> => {
   if (!inApp()) await (await day()).dropGrant(rp);
+  grantChanged();
 };
 
 /** Take the day grant ahead of the first send ("Unlock now"). */
 export const unlock = async (rp: string): Promise<void> => {
   if (inApp()) await (await nativeSigner()).unlock(rp);
   else await (await day()).obtainGrant(rp);
+  grantChanged();
 };
 
 /** The app's device key for `rp`, made on first use (no prompt: making one needs none). */
