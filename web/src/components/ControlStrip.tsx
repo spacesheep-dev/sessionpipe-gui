@@ -13,8 +13,10 @@
 import type { Attention, MachineControl, SessionSummary, Suggestion } from "@shared/api";
 import {
   type KeyboardEvent,
+  lazy,
   type ReactNode,
   type RefObject,
+  Suspense,
   useEffect,
   useId,
   useLayoutEffect,
@@ -30,8 +32,10 @@ import { Link } from "../lib/router";
 import { askedCommand, shellLines } from "../lib/shellCommand";
 import { hintFor } from "../lib/shortcuts";
 import { ActionButton, Spinner, StateDot } from "./bits";
-import { Markdown } from "./Markdown";
 import "../control/control.css";
+
+// The plan reads as Markdown, whose renderer stays out of the first paint (PlanText.tsx).
+const PlanText = lazy(() => import("./PlanText").then((m) => ({ default: m.PlanText })));
 
 export type ControlAction =
   | { kind: "prompt"; text: string }
@@ -166,13 +170,24 @@ function Question({ a, session }: { a: Attention; session: SessionSummary }) {
       <span className="ctl-q-text">{words}</span>
     </p>
   );
-  if (isPlanReview(a))
+  if (isPlanReview(a)) {
+    // Below tier 3 there is no plan: the prompt's own message, when it says more than the
+    // tool's name.
+    const plan = typeof input?.plan === "string" && input.plan.trim() ? input.plan : null;
+    const said = plan ? undefined : attentionMessage(a);
     return (
       <>
         {line(<>Ready to start on this plan?</>)}
-        <PlanText a={a} plan={input?.plan} />
+        {plan ? (
+          <Suspense fallback={null}>
+            <PlanText text={plan} />
+          </Suspense>
+        ) : said ? (
+          <p className="ctl-answer-msg ctl-plan-msg">{said}</p>
+        ) : null}
       </>
     );
+  }
   if (!a.tool)
     return line(
       <>
@@ -238,82 +253,6 @@ const NOTED = "Send the note with Keep planning, or clear it";
 export function keepPlanning(attentionId: string, text: string): ControlAction {
   const note = text.trim();
   return { kind: "permission.answer", attentionId, allow: false, ...(note ? { note } : {}) };
-}
-
-/** The bottom of the last line that fits whole in the first `cap` pixels of `el`, so a
- *  clamp ends on a line and never halves one (a list item or a code span is taller). A
- *  heading whose next line falls under the fold would read as an empty section, so the
- *  clamp ends above it instead, unless that keeps less than half. */
-function wholeLines(el: HTMLElement, cap: number): number {
-  const top = el.getBoundingClientRect().top;
-  const r = document.createRange();
-  r.selectNodeContents(el);
-  const rects = [...r.getClientRects()];
-  const upTo = (y0: number) => {
-    let fit = 0;
-    for (const b of rects) {
-      const y = b.bottom - top;
-      if (y <= y0 && y > fit) fit = y;
-    }
-    return fit;
-  };
-  let fit = upTo(cap);
-  for (const h of el.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
-    const b = h.getBoundingClientRect();
-    if (b.top - top >= fit || b.bottom - top < fit - 1) continue;
-    const above = upTo(b.top - top);
-    if (above >= cap / 2) fit = above;
-    break;
-  }
-  return Math.ceil(fit) || cap;
-}
-
-/** Folds the plan to its clamp, from its top: a plan scrolled while it was whole would
- *  otherwise fold on its middle, with no way back up. True when it was cut. */
-export function foldPlan(el: HTMLElement): boolean {
-  el.style.maxHeight = "";
-  el.scrollTop = 0;
-  const cap = el.clientHeight;
-  const over = el.scrollHeight > cap + 1;
-  if (over) el.style.maxHeight = `${wholeLines(el, cap)}px`;
-  return over;
-}
-
-/** The plan a plan review asks to start on (its call's `input.plan`, tier 3), as the
- *  timeline reads Markdown, in the question's column: eight lines (six on a phone) until
- *  "Show the whole plan", then up to half the view, scrolling inside. Below tier 3 the
- *  prompt's own message, when it says more than the tool's name. */
-function PlanText({ a, plan }: { a: Attention; plan: unknown }) {
-  const box = useRef<HTMLDivElement>(null);
-  const [whole, setWhole] = useState(false);
-  const [cut, setCut] = useState(false);
-  const text = typeof plan === "string" && plan.trim() ? plan : null;
-  useLayoutEffect(() => {
-    const el = box.current?.querySelector<HTMLElement>(".ctl-plan-text");
-    if (!el) return;
-    el.style.maxHeight = "";
-    if (whole) return;
-    const measure = () => setCut(foldPlan(el));
-    measure();
-    if (typeof ResizeObserver !== "function") return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [text, whole]);
-  if (!text) {
-    const msg = attentionMessage(a);
-    return msg ? <p className="ctl-answer-msg ctl-plan-msg">{msg}</p> : null;
-  }
-  return (
-    <div className={whole ? "ctl-plan is-whole" : "ctl-plan"} ref={box}>
-      <Markdown text={text} className="ctl-plan-text" />
-      {(cut || whole) && (
-        <button type="button" className="ctl-more" aria-expanded={whole} onClick={() => setWhole((w) => !w)}>
-          {whole ? "Show less" : "Show the whole plan"}
-        </button>
-      )}
-    </div>
-  );
 }
 
 /** The textarea grows with its text up to 40 % of the view, then scrolls (CSS caps it). */

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import "../native/test-env";
 import { describe, expect, it } from "vitest";
-import { foldPlan, keepPlanning } from "./ControlStrip";
+import { keepPlanning } from "./ControlStrip";
+import { foldPlan } from "./PlanText";
 
 describe("keepPlanning", () => {
   it("says no to the plan with what the composer says should change", () => {
