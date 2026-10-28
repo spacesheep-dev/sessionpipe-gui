@@ -546,8 +546,13 @@
     font-weight: 600;
     line-height: var(--lh-tight);
   }
-  .glance-head:hover,
+  .glance-head:hover {
+    color: var(--fg);
+  }
+  /* On /usage the heading is the page's link, so it carries the same pill as the others. */
   .glance-head[aria-current="page"] {
+    border-radius: var(--radius);
+    background: var(--sel);
     color: var(--fg);
   }
   .glance-list {
