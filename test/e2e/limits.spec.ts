@@ -2,7 +2,8 @@
 /// <reference lib="dom" />
 // Usage limits: what each account has left, from limits.observed as the demo and a sink send
 // it. The sidebar's lines (the wide sidebar only, none without numbers), the Usage page and
-// its ways in (g u, ⌘K), a report changing both without a reload, the menus (Copy usage,
+// its ways in (g u, ⌘K), a report changing both without a reload, New session's agent hints
+// (two Claude Code accounts on lab-mac: no number; Codex its own), the menus (Copy usage,
 // Forget these numbers, Hide usage in the sidebar), Enter starting a session, and storage
 // that throws. The phone's More › Usage is in mobile.spec.ts.
 import { randomUUID } from "node:crypto";
@@ -167,6 +168,38 @@ test("a report updates the page and the sidebar without a reload; Copy usage and
   await expect(section(page, key).locator(".usage-win")).toHaveCount(0);
   await expect(section(page, key)).toContainText("No numbers yet");
   await expect(glance(page, key)).toHaveCount(0);
+});
+
+test("New session on lab-mac: each agent says what its account has left there", async ({ page }) => {
+  await openPage(page, "/?new=1&machine=lab-mac");
+  const sheet = page.locator("[data-new-session]");
+  await expect(sheet.locator("[data-ns-row=machine] button.sel")).toHaveText(/lab-mac/);
+  await sheet.locator("[data-ns-row=agent] button.sel").click();
+  const opt = (name: string) => page.locator(".sel-opt", { hasText: name });
+  // lab-mac's hello names two Claude Code accounts: a start can't choose, so no number.
+  await expect(opt("Claude Code").locator(".sel-opt-detail")).toHaveText("2 accounts here");
+  await expect(opt("Claude Code").locator(".sel-opt-hint")).toHaveCount(0);
+  await expect(opt("Codex").locator(".sel-opt-hint")).toHaveText("74% left");
+  await expect(opt("Codex").locator(".sel-opt-detail")).toHaveText(/^This week, resets in 4 d \d+ h$/);
+  await expect(opt("Gemini CLI").locator(".sel-opt-hint")).toHaveCount(0);
+  await expect(opt("Gemini CLI").locator(".sel-opt-detail")).toHaveCount(0);
+  await opt("Codex").click();
+  await expect(sheet.locator("[data-ns-left]")).toHaveText("74% left");
+  await expect(sheet.locator("[data-ns-left]")).not.toHaveClass(/ns-aside--out/);
+});
+
+test("New session on a one-account machine: none left, in the attention colour", async ({ page }) => {
+  await page.goto("/?mock=1&new=1&machine=misha-air&harness=claude-code");
+  const sheet = page.locator("[data-new-session]");
+  await expect(sheet.locator("[data-ns-left]")).toHaveText("None left");
+  await expect(sheet.locator("[data-ns-left]")).toHaveClass(/ns-aside--out/);
+  await sheet.locator("[data-ns-row=agent] button.sel").click();
+  const claude = page.locator(".sel-opt", { hasText: "Claude Code" });
+  await expect(claude.locator(".sel-opt-hint")).toHaveText("None left");
+  await expect(claude.locator(".sel-opt-hint")).toHaveClass(/sel-opt-hint--attention/);
+  await expect(claude.locator(".sel-opt-detail")).toHaveText(/^5 hours, resets in 1 h \d{2} m$/);
+  // Listed and choosable all the same.
+  await expect(claude).not.toHaveAttribute("aria-disabled", "true");
 });
 
 test("Enter on an account opens New session there, with its harness", async ({ page }) => {
