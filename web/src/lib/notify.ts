@@ -103,6 +103,19 @@ export function finishedMoment(before: string | undefined, s: SessionSummary): N
   return { kind: "finished" };
 }
 
+/** Whether a "finished" raised for this news is raised again with the turn's own answer.
+ *  A turn's transcript lands just after its end (spec PROTOCOL.md, turn.transcript), so
+ *  the answer the end carried was the turn before's. Only while it is still idle or done:
+ *  a new turn's answer is not this one's. */
+export function answerCame(
+  raisedFor: string | undefined,
+  before: SessionSummary | undefined,
+  s: SessionSummary,
+): boolean {
+  if (!raisedFor || raisedFor !== s.newsAt || (s.state !== "idle" && s.state !== "done")) return false;
+  return !!before && before.lastAssistant !== s.lastAssistant;
+}
+
 /** The notification for one attention. */
 function show(r: OpenAttention): void {
   const s = r.session;
@@ -112,15 +125,19 @@ function show(r: OpenAttention): void {
 }
 
 /** "<title> finished", with its last answer; a newer one replaces it, and a click opens
- *  the session. */
-function showFinished(s: SessionSummary): void {
+ *  the session. A new finish sounds again even when the last one is still in the
+ *  notification centre (`renotify`); the same finish raised again with its answer
+ *  replaces it quietly. */
+export function showFinished(s: SessionSummary, again = false): void {
   const body = s.lastAssistant ? oneLine(s.lastAssistant, 160) : undefined;
-  raise(`${sessionTitle(s)} finished`, { body, tag: `${s.key}|finished` }, sessionPath(s.harness, s.id));
+  const tag = `${s.key}|finished`;
+  raise(`${sessionTitle(s)} finished`, { body, tag, renotify: !again }, sessionPath(s.harness, s.id));
 }
 
 /** From the page when the browser allows it there (desktops), else through the service
- *  worker's registration (Android requires it); a click opens `url`. */
-function raise(title: string, o: NotificationOptions, url: string): void {
+ *  worker's registration (Android requires it); a click opens `url`. `renotify` is
+ *  Chrome's, missing from the DOM types; other browsers ignore it. */
+function raise(title: string, o: NotificationOptions & { renotify?: boolean }, url: string): void {
   const options: NotificationOptions = { ...o, icon: "/brand/apple-touch-icon.png", data: { url } };
   try {
     const n = new Notification(title, options);
@@ -145,30 +162,45 @@ export function useAttentionEffects(): void {
   useEffect(() => {
     /** Ids known so far; null until the first snapshot, which only seeds it. */
     let known: Set<string> | null = null;
-    /** Each session's `newsAt` as last seen. */
-    let news = new Map<string, string | undefined>();
+    /** The sessions as last seen (the store replaces the map on every change). */
+    let prev: ReadonlyMap<string, SessionSummary> = new Map();
+    /** The `newsAt` each "finished" was raised for, until the turn's answer comes. */
+    const raised = new Map<string, string>();
     const check = () => {
       const st = store.get();
       if (!st.snapshotAt) return;
       const rows = openAttentions(st.sessions).filter((r) => r.answerable);
       const ids = new Set(rows.map((r) => `${r.session.key}|${r.attention.attentionId}`));
-      const seen = news;
-      news = new Map([...st.sessions.values()].map((s) => [s.key, s.newsAt]));
+      const seen = prev;
+      prev = st.sessions;
       if (known === null) {
         known = ids;
         return;
       }
       const fresh = rows.filter((r) => !known?.has(`${r.session.key}|${r.attention.attentionId}`));
       known = ids;
-      if (!state.on || !inBackground()) return;
+      if (!state.on || !inBackground()) {
+        raised.clear();
+        return;
+      }
       const level = (s: SessionSummary) => effectiveNotify(s, st.marks, st.sessions);
       // Oldest first, so the newest ends up on top of the stack.
       for (const r of fresh.reverse())
         if (shouldNotify({ kind: "attention", answerable: true }, level(r.session), r.session.attended)) show(r);
       for (const s of st.sessions.values()) {
-        const m = finishedMoment(seen.get(s.key), s);
-        if (m && shouldNotify(m, level(s), s.attended)) showFinished(s);
+        const was = seen.get(s.key);
+        const m = finishedMoment(was?.newsAt, s);
+        if (m) {
+          raised.delete(s.key);
+          if (!shouldNotify(m, level(s), s.attended)) continue;
+          showFinished(s);
+          raised.set(s.key, s.newsAt!);
+        } else if (answerCame(raised.get(s.key), was, s)) {
+          raised.delete(s.key);
+          if (shouldNotify({ kind: "finished" }, level(s), s.attended)) showFinished(s, true);
+        } else if (s.state !== "idle" && s.state !== "done") raised.delete(s.key);
       }
+      for (const k of raised.keys()) if (!st.sessions.has(k)) raised.delete(k);
     };
     check();
     return store.subscribe(check);

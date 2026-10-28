@@ -6,11 +6,22 @@ import type { NotifyMoment } from "./notify";
 
 // The router listens on `window` as it loads; the decision itself needs no page.
 vi.stubGlobal("window", { addEventListener: () => {} });
-const { finishedMoment, shouldNotify } = await import("./notify");
+/** The notifications raised, as the page's constructor got them. */
+const raised: { title: string; options: NotificationOptions & { renotify?: boolean } }[] = [];
+vi.stubGlobal(
+  "Notification",
+  class {
+    constructor(title: string, options: NotificationOptions) {
+      raised.push({ title, options });
+    }
+  },
+);
+const { answerCame, finishedMoment, shouldNotify, showFinished } = await import("./notify");
 
 const T = "2026-10-28T10:00:00.000Z";
 const LATER = "2026-10-28T10:05:00.000Z";
-const at = (o: Partial<SessionSummary>) => ({ key: "claude-code:a", state: "idle", newsAt: T, ...o }) as SessionSummary;
+const at = (o: Partial<SessionSummary>) =>
+  ({ key: "claude-code:a", harness: "claude-code", id: "a", state: "idle", newsAt: T, ...o }) as SessionSummary;
 const prompt: NotifyMoment = { kind: "attention", answerable: true };
 const notice: NotifyMoment = { kind: "attention", answerable: false };
 
@@ -42,5 +53,33 @@ describe("shouldNotify", () => {
   it("never notifies an unattended run", () => {
     expect(shouldNotify(prompt, "needs", false)).toBe(false);
     expect(shouldNotify({ kind: "finished" }, "finishes", false)).toBe(false);
+  });
+});
+
+describe("a finish and its answer", () => {
+  // A turn's end arrives with the answer before it; its transcript lands a moment later.
+  const before = at({ lastAssistant: "the turn before" });
+  const ended = at({ newsAt: LATER, lastAssistant: "the turn before" });
+  const answered = at({ newsAt: LATER, lastAssistant: "Deployed to production." });
+
+  it("raises a finish again once the turn's own answer comes, and only then", () => {
+    expect(finishedMoment(before.newsAt, ended)).toEqual({ kind: "finished" });
+    expect(answerCame(LATER, ended, answered)).toBe(true);
+    // No finish raised for this news (a turn typed at the terminal it is attended at).
+    expect(answerCame(undefined, ended, answered)).toBe(false);
+    expect(answerCame(T, ended, answered)).toBe(false);
+    // Nothing new said, or a new turn already running.
+    expect(answerCame(LATER, answered, answered)).toBe(false);
+    expect(answerCame(LATER, ended, { ...answered, state: "working" })).toBe(false);
+  });
+
+  it("sounds for a new finish, and replaces it quietly with its answer", () => {
+    raised.length = 0;
+    showFinished(ended);
+    showFinished(answered, true);
+    expect(raised.map((r) => [r.title, r.options.body, r.options.tag, r.options.renotify])).toEqual([
+      ["a finished", "the turn before", "claude-code:a|finished", true],
+      ["a finished", "Deployed to production.", "claude-code:a|finished", false],
+    ]);
   });
 });
