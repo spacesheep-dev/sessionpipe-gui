@@ -1,9 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 // Since you looked: which rows are unread against the person's marks, and how seen marks go out.
+// Notify me: how loud a session is under its parents, and which banners it drops.
 import type { Marks, MarksPatch, SessionSummary } from "@shared/api";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Store } from "../data/store";
-import { canMark, isUnread, markSeen, SEND_EVERY_MS, setUnread } from "./marks";
+import {
+  canMark,
+  effectiveNotify,
+  isUnread,
+  markSeen,
+  notifyCap,
+  SEND_EVERY_MS,
+  setUnread,
+  toastAllowed,
+} from "./marks";
 
 const SINCE = "2026-10-28T10:00:00.000Z";
 const marks = (m: Partial<Marks> = {}): Marks => ({ rev: 1, since: SINCE, read: {}, unread: {}, ...m });
@@ -93,5 +103,66 @@ describe("the seen queue", () => {
     expect(sent[2]).toEqual({ unread: { "claude-code:d": true } });
     await vi.advanceTimersByTimeAsync(SEND_EVERY_MS);
     expect(sent).toHaveLength(3);
+  });
+});
+
+// ----- Notify me -----
+
+const tree = (notify: Marks["notify"]) => {
+  const m = marks({ notify });
+  const at = (id: string, parentId?: string) =>
+    ({ key: `claude-code:${id}`, harness: "claude-code", id, parentId }) as SessionSummary;
+  const sessions = new Map([at("root"), at("parent", "root"), at("child", "parent")].map((s) => [s.key, s] as const));
+  const level = (id: string) => effectiveNotify(sessions.get(`claude-code:${id}`)!, m, sessions);
+  return { marks: m, sessions, level };
+};
+
+describe("effectiveNotify", () => {
+  it("is needs for an unset child of an unset parent", () => {
+    expect(tree({}).level("child")).toBe("needs");
+    expect(tree(undefined).level("child")).toBe("needs");
+  });
+
+  it("caps a louder child at the quietest level an ancestor has set", () => {
+    expect(tree({ "claude-code:parent": "never", "claude-code:child": "finishes" }).level("child")).toBe("never");
+    expect(tree({ "claude-code:root": "never", "claude-code:child": "finishes" }).level("child")).toBe("never");
+  });
+
+  it("caps nothing under a parent set to When it needs me, which is the default", () => {
+    // Choosing "When it needs me" clears the parent's own level: it is stored as nothing.
+    const t = tree({ "claude-code:child": "finishes" });
+    expect(t.level("child")).toBe("finishes");
+    expect(notifyCap(t.sessions.get("claude-code:child")!, t.marks, t.sessions)).toBeUndefined();
+  });
+
+  it("says whether the cap is the parent's own or one further up", () => {
+    const t = tree({ "claude-code:root": "never", "claude-code:parent": "finishes" });
+    expect(notifyCap(t.sessions.get("claude-code:child")!, t.marks, t.sessions)).toEqual({
+      level: "never",
+      parent: false,
+    });
+    expect(notifyCap(t.sessions.get("claude-code:parent")!, t.marks, t.sessions)).toEqual({
+      level: "never",
+      parent: true,
+    });
+  });
+
+  it("lets a default parent cap nothing, and never makes a child louder", () => {
+    expect(tree({ "claude-code:child": "finishes" }).level("child")).toBe("finishes");
+    expect(tree({ "claude-code:parent": "finishes", "claude-code:child": "never" }).level("child")).toBe("never");
+    expect(tree({ "claude-code:parent": "finishes" }).level("child")).toBe("needs");
+  });
+});
+
+describe("toastAllowed", () => {
+  const t = tree({ "claude-code:parent": "never" });
+  it("drops a banner about a session set to Never, on its own or under a parent", () => {
+    expect(toastAllowed({ session: "claude-code:parent" }, t.marks, t.sessions)).toBe(false);
+    expect(toastAllowed({ session: "claude-code:child" }, t.marks, t.sessions)).toBe(false);
+  });
+  it("keeps the rest, and a banner about no session", () => {
+    expect(toastAllowed({ session: "claude-code:root" }, t.marks, t.sessions)).toBe(true);
+    expect(toastAllowed({}, t.marks, t.sessions)).toBe(true);
+    expect(toastAllowed({ session: "codex:elsewhere" }, t.marks, t.sessions)).toBe(true);
   });
 });

@@ -11,13 +11,16 @@
 // away. A banner leaves the way it came, then the stack closes over it. The list and its
 // rules live in lib/toasts.ts. Allow and Deny are signed and final: never an undo.
 // On a phone it is iOS's banner (Banner.tsx), one at a time, the Inbox holding the
-// answers; "Hidden · Undo" sits at the bottom, by the thumb that just swiped.
+// answers; "Hidden · Undo" sits at the bottom, by the thumb that just swiped. A session
+// set to Never (its own "Notify me", or a parent's) raises no banner, so no sound either;
+// it still waits in Needs you and the Inbox.
 import type { ControlActivity, SessionKey, SessionSummary, StoredEvent } from "@shared/api";
 import { splitKey } from "@shared/api";
 import { useEffect, useRef, useState } from "react";
 import { type OpenAttention, openAttentions, useAppState, useStore } from "../data/hooks";
 import { ATTENTION_LABEL, attentionMessage, oneLine, sessionTitle, toolLabel } from "../lib/format";
 import { lazyModule, whenIdle } from "../lib/lazy";
+import { toastAllowed } from "../lib/marks";
 import { reducedMotion, tokenMs } from "../lib/motion";
 import { SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath, usePath } from "../lib/router";
 import { useShortcut } from "../lib/shortcuts";
@@ -136,6 +139,11 @@ function useToastEffects(): void {
     let known: Set<string> | null = null;
     /** Control message id → the outcome last seen. */
     let outcomes = new Map<string, string | undefined>();
+    /** A banner, unless its session is set to Never. */
+    const push = (t: Toast) => {
+      const st = store.get();
+      if (toastAllowed(t, st.marks, st.sessions)) pushToast(t);
+    };
     const check = () => {
       const st = store.get();
       if (!st.snapshotAt) return;
@@ -160,14 +168,14 @@ function useToastEffects(): void {
           !r.answerable &&
           r.attention.kind === "permission" &&
           rows.some((x) => x.session.key === r.session.key && x.answerable);
-        if (!twin) pushToast(attentionToast(r));
+        if (!twin) push(attentionToast(r));
       }
       pruneAttentionToasts(ids);
       for (const a of st.control) {
         const before = outcomes.get(a.id);
         const seen = outcomes.has(a.id);
         if (a.outcome === "delivered" && seen && before !== "delivered" && !isOwnSend(a.id) && !onScreen(a.session))
-          pushToast(deliveredToast(a, st.sessions));
+          push(deliveredToast(a, st.sessions));
       }
       outcomes = next;
     };
@@ -175,7 +183,7 @@ function useToastEffects(): void {
     const offState = store.subscribe(check);
     const offEvents = store.onEvent((e, s) => {
       if (known === null || s.parentId || s.attended === false) return;
-      if (e.type === "turn.ended" && e.data.reason === "error" && !onScreen(s.key)) pushToast(errorToast(e, s));
+      if (e.type === "turn.ended" && e.data.reason === "error" && !onScreen(s.key)) push(errorToast(e, s));
     });
     return () => {
       offState();

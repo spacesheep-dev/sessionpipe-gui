@@ -53,7 +53,13 @@ function mergeMarks(doc: Marks, p: MarksPatch, known: (key: string) => boolean):
     if (on === null) delete unread[k];
     else if (known(k)) unread[k] = true;
   }
-  return { ...doc, rev: doc.rev + 1, read, unread };
+  const notify = { ...doc.notify };
+  for (const [k, level] of Object.entries(p.notify ?? {})) {
+    if (level !== null && level !== "finishes" && level !== "never") throw new Error("bad_notify");
+    if (level === null) delete notify[k];
+    else if (known(k)) notify[k] = level;
+  }
+  return { ...doc, rev: doc.rev + 1, read, unread, notify };
 }
 
 export function createMockTransport(): Transport {
@@ -63,7 +69,7 @@ export function createMockTransport(): Transport {
   // Labels live beside the World, as they live beside the store on the server.
   let labels: Labels = { rev: 0, names: {}, sessions: {} };
   // Marks too; the samples made before this page opened are read.
-  let marks: Marks = { rev: 0, since: new Date().toISOString(), read: {}, unread: {} };
+  let marks: Marks = { rev: 0, since: new Date().toISOString(), read: {}, unread: {}, notify: {} };
   const handlers = new Set<(m: StreamMessage) => void>();
   let search: ReturnType<Transport["sessionSearch"]> | null = null;
   return {
