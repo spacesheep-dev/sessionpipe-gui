@@ -348,7 +348,7 @@
     min-height: var(--control-lg);
     font-size: var(--text-md);
   }
-  /* A plan review: six lines, then the pair full width, Approve plan nearest the thumb. */
+  /* A plan review: six lines, then Keep planning | Approve plan, as Deny | Allow. */
   .ctl-answer > .ctl-plan,
   .ctl-answer > .ctl-plan-msg {
     padding-left: 0;
@@ -356,12 +356,10 @@
   .ctl-plan-text {
     max-height: calc(6 * 1lh);
   }
-  /* Opened, it leaves the question, the pair and the composer on the screen. */
+  /* Opened, the strip stays about half the phone's height, as a command's does: the plan
+     scrolls inside, and the cap ends half a line into the next, so more always shows. */
   .ctl-plan.is-whole > .ctl-plan-text {
-    max-height: 35dvh;
-  }
-  .ctl-answer--plan .ctl-answer-btns {
-    grid-template-columns: 1fr;
+    max-height: max(calc(3.5 * 1lh), calc(round(down, 50dvh - 13.25rem, 1lh) + 0.5lh));
   }
   .ctl-ask textarea {
     font-size: max(1rem, 16px);

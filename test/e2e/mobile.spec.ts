@@ -3,9 +3,10 @@
 // On a phone (the `phone` project, 390×844): the bottom tab bar is on every page with at
 // most five tabs (the rest behind More), nothing scrolls sideways, the session page's
 // control strip sits above the tabs, and New session is a full-height sheet.
+import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
 import { CONTROL_BASE, fakeDaemon, passkeyPage, seenSetupHere, sinkToken } from "./control-helpers.js";
-import { openBoard } from "./helpers.js";
+import { openBoard, sessionUrl, ulid } from "./helpers.js";
 
 const noSidewaysScroll = async (page: Page) => {
   const { scrollWidth, innerWidth } = await page.evaluate(() => ({
@@ -189,6 +190,84 @@ test.describe("phone: new session", () => {
       await expect(page).toHaveURL(/\/s\/claude-code\//);
       await expect(page.locator(".starting .chat-bubble")).toHaveText("Run the e2e suite and tell me what fails.");
       await noSidewaysScroll(page);
+    } finally {
+      await d.stop();
+    }
+  });
+});
+
+// A plan review on a phone (tier 3, the plan in the call's input): unfolded, the strip
+// stays about half the screen, as a command's does, and its pair sits side by side.
+test.describe("phone: a plan review", () => {
+  test.skip(({ isMobile }) => !isMobile, "phone project only");
+
+  test("the whole plan scrolls inside half the screen, Keep planning | Approve plan", async ({ context, page }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, {
+      name: `plan-phone-${Math.random().toString(36).slice(2, 8)}`,
+      harnesses: ["claude-code"],
+    });
+    try {
+      const id = randomUUID();
+      const turn = randomUUID();
+      const plan = Array.from({ length: 40 }, (_, i) => `${i + 1}. Step ${i + 1} of the plan.`).join("\n");
+      let seq = 0;
+      let clock = Date.now() - 30_000;
+      const ev = (type: string, data: Record<string, unknown>, hook: string) => {
+        clock += 500;
+        return {
+          protocol: 1,
+          id: ulid(clock),
+          type,
+          time: new Date(clock).toISOString(),
+          tier: 3,
+          harness: { name: "claude-code", version: "2.1.296", event: hook },
+          session: {
+            id,
+            seq: seq++,
+            machine: d.name,
+            cwd: "/Users/e2e/code",
+            title: "Plan on a phone",
+            title_source: "custom",
+          },
+          privacy: { rulesets: ["secrets@1"], pii: false },
+          data,
+        };
+      };
+      const events = [
+        ev("session.started", { source: "startup" }, "SessionStart"),
+        ev("turn.started", { turn_id: turn, prompt_chars: 20 }, "UserPromptSubmit"),
+        ev(
+          "tool.started",
+          { tool: "ExitPlanMode", call_id: "toolu_plan", turn_id: turn, input: { plan } },
+          "PreToolUse",
+        ),
+        ev(
+          "attention.needed",
+          { attention_id: `perm-${id.slice(0, 8)}`, kind: "permission", tool: "ExitPlanMode", message: "ExitPlanMode" },
+          "PermissionRequest",
+        ),
+      ];
+      await fetch(`${CONTROL_BASE}/api/sessionpipe/v1/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "sessionpipe-protocol": "1" },
+        body: JSON.stringify({ events }),
+      });
+      await page.goto(`${CONTROL_BASE}${sessionUrl("claude-code", id)}`);
+      await page.getByRole("button", { name: "Show the whole plan" }).click();
+      await expect(page.getByRole("button", { name: "Show less" })).toBeVisible();
+      const text = page.locator(".ctl-plan-text");
+      expect(await text.evaluate((el) => el.scrollHeight > el.clientHeight), "the plan scrolls inside").toBe(true);
+      const vh = await page.evaluate(() => window.innerHeight);
+      const strip = (await page.locator(".sess-ctl").boundingBox())!;
+      expect(strip.height, `the strip is ${strip.height} of ${vh}`).toBeLessThanOrEqual(vh / 2 + 24);
+      const pair = page.locator(".ctl-answer-btns");
+      const keep = (await pair.getByRole("button", { name: "Keep planning" }).boundingBox())!;
+      const approve = (await pair.getByRole("button", { name: "Approve plan" }).boundingBox())!;
+      expect(Math.abs(keep.y - approve.y), "one row").toBeLessThan(1);
+      expect(keep.x, "Approve plan on the right").toBeLessThan(approve.x);
     } finally {
       await d.stop();
     }
