@@ -120,6 +120,7 @@
 /* The grip: drawn while the pointer is over the row or focus is within it; a non-text
    mark in the lightest tier. */
 .pool-grip {
+  position: relative;
   width: 24px;
   height: 24px;
   min-width: 0;
@@ -137,6 +138,29 @@
 .pool-grip:focus-visible {
   outline: var(--focus-width) solid var(--focus);
   outline-offset: -2px;
+}
+/* The grip's mark is 24 px; its target reaches 8 px out, up and down (32 × 40 in the
+   row's 44), its neighbour on the right being text. A pointer-down on the reach still
+   starts the drag: the event's target is the grip. */
+.pool-grip::after {
+  content: "";
+  position: absolute;
+  inset: -8px 0 -8px -8px;
+}
+/* The Toggle's track is 32 × 18 on a desktop; its target is 44 × 40 around it (44 × 44
+   on a phone, where the track is already 26 tall). Scoped to the pool's switch row; the
+   Settings rows keep the Toggle as shared.css draws it. */
+.pool-switch .toggle {
+  position: relative;
+}
+.pool-switch .toggle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 40px;
+  transform: translate(-50%, -50%);
 }
 @media (hover: hover) {
   .pool-row:hover .pool-grip {
