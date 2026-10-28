@@ -238,15 +238,29 @@ export function keepPlanning(attentionId: string, text: string): ControlAction {
 }
 
 /** The bottom of the last line that fits whole in the first `cap` pixels of `el`, so a
- *  clamp ends on a line and never halves one (a list item or a code span is taller). */
+ *  clamp ends on a line and never halves one (a list item or a code span is taller). A
+ *  heading whose next line falls under the fold would read as an empty section, so the
+ *  clamp ends above it instead, unless that keeps less than half. */
 function wholeLines(el: HTMLElement, cap: number): number {
   const top = el.getBoundingClientRect().top;
   const r = document.createRange();
   r.selectNodeContents(el);
-  let fit = 0;
-  for (const b of r.getClientRects()) {
-    const y = b.bottom - top;
-    if (y <= cap && y > fit) fit = y;
+  const rects = [...r.getClientRects()];
+  const upTo = (y0: number) => {
+    let fit = 0;
+    for (const b of rects) {
+      const y = b.bottom - top;
+      if (y <= y0 && y > fit) fit = y;
+    }
+    return fit;
+  };
+  let fit = upTo(cap);
+  for (const h of el.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
+    const b = h.getBoundingClientRect();
+    if (b.top - top >= fit || b.bottom - top < fit - 1) continue;
+    const above = upTo(b.top - top);
+    if (above >= cap / 2) fit = above;
+    break;
   }
   return Math.ceil(fit) || cap;
 }
