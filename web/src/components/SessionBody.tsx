@@ -55,7 +55,7 @@ import {
   useStartOf,
 } from "../control/Starting";
 import { isFinal } from "../control/words";
-import { useMachines, useMachinesMap, useSession, useStore } from "../data/hooks";
+import { useLimits, useMachines, useMachinesMap, useSession, useStore } from "../data/hooks";
 import { LIST_PREVIEW, TAIL, takeWarm } from "../data/prefetch";
 import { agentLabel, agentsFact, agentType, openAgent, taskNotification } from "../lib/agents";
 import "../lib/acp";
@@ -74,7 +74,8 @@ import {
 import { labelMenu } from "../lib/labels";
 import { absoluteUrl, agentItems, copyItem, sessionItems } from "../lib/menus";
 import { reducedMotion, useFlip } from "../lib/motion";
-import { AGENT_PARAM, back, Link, navigate, sessionPath, useSearchParam } from "../lib/router";
+import { clockTime, eventWindows, leftBecause, sentenceName, servedBy, swaps, swapWords } from "../lib/pool";
+import { AGENT_PARAM, back, hrefFor, Link, navigate, sessionPath, useSearchParam } from "../lib/router";
 import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
@@ -98,6 +99,7 @@ import { LabelDot, useLabelKeys } from "./LabelDot";
 import { CodeFrame, Markdown } from "./Markdown";
 import { BackButton, PageBar } from "./PageBar";
 import { answerItems, SessionLoading, type SessionViewProps } from "./SessionView";
+import { openUsage } from "./UsageGlance";
 
 /** The size of each older page; the newest page (TAIL) is data/prefetch's, which warms
  *  it on hover. Both slim: the full event is fetched only when a row is expanded. */
@@ -702,6 +704,55 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   const startMachine = started ? machineList.find((m) => m.control?.machineId === started.machineId) : undefined;
   const machineName = s?.machine ?? startMachine?.name ?? "the machine";
   const control = s?.machine ? machines.get(s.machine)?.control : startMachine?.control;
+
+  // The pool at work on this session (UX-SPEC §7.1, §7.2): the account serving it when it
+  // is not its own, and each moment it switched, from its own limits.observed events. An
+  // account is named as the machine's pool names it, else by its login's email.
+  const limits = useLimits();
+  const poolAccounts = control?.pool?.accounts;
+  const logins = control?.accounts;
+  const nameFor = useCallback(
+    (id: string | undefined): string | undefined => {
+      if (!id) return undefined;
+      const pooled = poolAccounts?.find((a) => a.id === id);
+      if (pooled) return sentenceName(pooled, poolAccounts);
+      const login = logins?.find((a) => a.id === id);
+      return login?.email ? sentenceName({ id, email: login.email }) : login?.name;
+    },
+    [poolAccounts, logins],
+  );
+  const served = s ? (s.servedBy ?? servedBy(events, s)) : null;
+  const swapRows = useMemo(() => {
+    if (!s) return [];
+    const reports = events.filter((e) => e.type === "limits.observed");
+    return swaps(events, s).map((sw) => {
+      // Why it left: the last report of the account it left, read at that report's time;
+      // failing that, what the hello says of that account now.
+      const prior = reports
+        .filter((e) => e.session.seq < sw.seq && (e.data?.account_id ?? s.accountId) === sw.from)
+        .at(-1);
+      const acct = poolAccounts?.find((a) => a.id === sw.from);
+      const because =
+        (prior ? leftBecause({ entry: { windows: eventWindows(prior) } }, Date.parse(prior.time)) : null) ??
+        (acct
+          ? leftBecause(
+              { status: acct.status, limitedBy: acct.limitedBy, entry: limits.find((e) => e.accountId === sw.from) },
+              Date.now(),
+            )
+          : null);
+      return { seq: sw.seq, text: swapWords(nameFor(sw.to) ?? "another account", nameFor(sw.from), because) };
+    });
+  }, [events, s, poolAccounts, limits, nameFor]);
+  // Each switch goes to the turn it fell in: the last turn whose start precedes it.
+  const swapNotes = useMemo(() => {
+    const by = new Map<number, string[]>();
+    for (const sw of swapRows) {
+      let home: number | undefined;
+      for (const t of turns) if ((t.start?.session.seq ?? -1) <= sw.seq) home = t.n;
+      if (home !== undefined) by.set(home, [...(by.get(home) ?? []), sw.text]);
+    }
+    return by;
+  }, [swapRows, turns]);
   const compose = useCallback(
     (text: string) => window.dispatchEvent(new CustomEvent("sp:compose", { detail: { key, text } })),
     [key],
@@ -968,6 +1019,31 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
               ))}
             </p>
           )}
+          {served && s && (
+            <p className="page-note sess-served" data-served>
+              <span>
+                Served by{" "}
+                <a
+                  href={`${hrefFor("/usage")}#${encodeURIComponent(`pool:${machineName}`)}`}
+                  onClick={(ev) => {
+                    if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+                    ev.preventDefault();
+                    openUsage(`pool:${machineName}`);
+                  }}
+                >
+                  {nameFor(served.accountId) ?? "another account"}
+                </a>{" "}
+                since{" "}
+                <time
+                  className="num"
+                  dateTime={served.since}
+                  title={new Date(served.since).toLocaleString([], { hourCycle: "h23" })}
+                >
+                  {clockTime(served.since)}
+                </time>
+              </span>
+            </p>
+          )}
           {error && s && events.length > 0 && <p className="page-note is-err">{error}</p>}
           {waiting && (
             <p className="page-note sess-waiting">
@@ -1000,6 +1076,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
                 sent={sent}
                 pending={p}
                 flip={fresh}
+                swaps={swapNotes.get(t.n)}
                 label={
                   t.n === 0
                     ? hasOlder
@@ -1188,6 +1265,7 @@ function TurnBlock({
   sent,
   pending = false,
   flip = false,
+  swaps,
 }: {
   turn: Turn;
   lens: Tier;
@@ -1203,6 +1281,8 @@ function TurnBlock({
   pending?: boolean;
   /** Slide into place as the turns around it arrive (a session started here). */
   flip?: boolean;
+  /** The pool switched accounts during this turn: one quiet row each (UX-SPEC §7.2). */
+  swaps?: string[];
 }) {
   // Only a running turn or a running tool shows a moving duration; the other blocks
   // (most of the page) have nothing to redraw each second.
@@ -1273,6 +1353,7 @@ function TurnBlock({
         status={status}
         failure={failure}
         flip={flip}
+        swaps={swaps}
       />
     );
 
@@ -1328,6 +1409,14 @@ function TurnBlock({
           <Reply e={progress.e} turnSeq={startSeq} fill={fill} live />
         )}
         {ackReply && <AckReply text={ackReply} live={!!sent && !isFinal(sent)} />}
+        {swaps?.map((text) => (
+          <li key={text} className="marker marker--swap" data-swap>
+            <Lead />
+            <span className="marker-body">
+              <span>{text}</span>
+            </span>
+          </li>
+        ))}
         {endErr && ended && <EndMarker e={ended.e} />}
         {failure && <li className="turn-failed">{failure}</li>}
       </ol>
@@ -1627,6 +1716,7 @@ function ChatTurn({
   status,
   failure,
   flip,
+  swaps,
 }: {
   turn: Turn;
   lens: Tier;
@@ -1647,6 +1737,7 @@ function ChatTurn({
   status: Status;
   failure: ReactNode;
   flip: boolean;
+  swaps?: string[];
 }) {
   const { open, working } = useTimeline();
   const tools = turn.items.filter((i): i is ToolItem => i.kind === "tool");
@@ -1675,6 +1766,7 @@ function ChatTurn({
     !!row ||
     !!failure ||
     notes.length > 0 ||
+    !!swaps?.length ||
     !!endErr;
   // Before the first turn there is nothing a chat shows (session markers stay out of it).
   if (!turn.start && !agent && !pending) return null;
@@ -1733,6 +1825,11 @@ function ChatTurn({
           )}
           {replyItem && replyText && <Reply e={replyItem.e} turnSeq={startSeq} fill={fill} live={!transcript} chat />}
           {ackReply && <AckReply text={ackReply} live={!!sent && !isFinal(sent)} chat />}
+          {swaps?.map((text) => (
+            <p key={text} className="chat-note" data-swap>
+              {text}
+            </p>
+          ))}
           {failure}
           {row && <StatusRow {...row} chat />}
         </div>
