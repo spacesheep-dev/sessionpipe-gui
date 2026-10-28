@@ -21,7 +21,7 @@ export const CODE_RE = /^[A-Za-z0-9_-]{6,32}$/;
 export const POLL_KEY_RE = /^[A-Za-z0-9_-]{22,128}$/;
 export const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 export const SESSION_REF = /^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/;
-const HARNESS_RE = /^[a-z][a-z0-9-]{0,39}$/;
+export const HARNESS_RE = /^[a-z][a-z0-9-]{0,39}$/;
 const MODES = new Set(["sdk", "waiter", "turn", "api", "resume", "fork"]);
 const OUTCOMES = new Set<string>(["progress", "taken", "delivered", "expired", "unsupported", "failed", "refused"]);
 const ACCOUNT_EMAIL = /^[^@\s]{1,64}@[^@\s]{1,189}$/;
@@ -51,6 +51,11 @@ export interface Hello {
   start: Record<string, HarnessStartOptions> | null;
   /** `key_types` (CONTROL.md §2): the kinds of key it takes; null when not sent (passkeys only). */
   keyTypes: KeyType[] | null;
+  /** `ask`: whether `sessionpipe ask` is on there (CONTROL.md §13); absent when not sent (a
+   *  0.10 daemon says nothing about it). */
+  ask?: boolean;
+  /** `handoff: true`: it takes `reply_to` on a prompt or a start; absent when not sent. */
+  handoff?: boolean;
 }
 
 /** `key_types`: known kinds only, each once; null when absent or empty. */
@@ -87,6 +92,9 @@ export function parseHello(body: unknown): Hello | null {
     promptFiles: b.prompt_files === true,
     start: parseStart(b.start, harnesses, mode),
     keyTypes: parseKeyTypes(b.key_types),
+    // Agents asking agents (CONTROL.md §13): said as booleans, or not at all.
+    ...(typeof b.ask === "boolean" ? { ask: b.ask } : {}),
+    ...(b.handoff === true ? { handoff: true } : {}),
   };
 }
 

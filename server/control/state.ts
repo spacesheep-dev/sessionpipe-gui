@@ -48,6 +48,9 @@ export interface DemoStart {
   mode: string;
   reply?: string;
   applied?: Applied;
+  /** A handoff from this receiver: `reply_to` as it would be signed, and the page's `from`. */
+  replyTo?: string;
+  from?: string;
 }
 
 /** The longest long-poll we hold (HTTP.md §1 control.wait_max_s). */
@@ -133,6 +136,10 @@ export interface MachineRow {
   start?: Record<string, HarnessStartOptions>;
   /** Pairing or hello `key_types`; absent means passkeys only (an older daemon). */
   keyTypes?: KeyType[];
+  /** The last hello's word on agents asking agents (CONTROL.md §13): `ask` on or off there,
+   *  `handoff` when it takes `reply_to`. Absent when the hello said nothing (a 0.10 daemon). */
+  ask?: boolean;
+  handoff?: boolean;
   waiting?: string[];
   lastHelloAt?: string;
   lastPollAt?: string;
@@ -195,6 +202,10 @@ export interface MessageRow {
   files?: StartFile[];
   /** What the machine ran the start with (`taken`, `delivered`). */
   applied?: Applied;
+  /** A handoff: `reply_to` as signed on a prompt or a start (CONTROL.md §3.1). */
+  replyTo?: string;
+  /** The UI's unsigned note of which session's page sent it (SendBody.from). */
+  from?: string;
 }
 
 interface MachinesFile {
@@ -253,6 +264,8 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.model) a.model = m.model;
   if (m.files) a.files = m.files;
   if (m.applied) a.applied = m.applied;
+  if (m.replyTo) a.replyTo = m.replyTo;
+  if (m.from) a.from = m.from;
   return a;
 }
 
@@ -408,6 +421,10 @@ export class ControlState {
     else delete m.start;
     if (h.keyTypes) m.keyTypes = h.keyTypes;
     else delete m.keyTypes;
+    if (h.ask !== undefined) m.ask = h.ask;
+    else delete m.ask;
+    if (h.handoff) m.handoff = true;
+    else delete m.handoff;
   }
 
   /** Mint the machine's own bearer token (once, at its first pairing). Returned in clear
@@ -476,6 +493,8 @@ export class ControlState {
     if (this.takesTilde && machineTakesTilde(m)) c.tilde = true;
     if (m.start) c.start = m.start;
     if (m.keyTypes) c.keyTypes = m.keyTypes;
+    if (m.ask !== undefined) c.ask = m.ask;
+    if (m.handoff) c.handoff = true;
     return c;
   }
 
@@ -575,7 +594,7 @@ export class ControlState {
     m: MachineRow,
     signed: SignedCommand,
     cmd: ControlCommand,
-    o: { expiresInMs?: number; via: string },
+    o: { expiresInMs?: number; via: string; from?: string },
   ): MessageRow {
     const now = Date.now();
     const ttl = Math.min(EXPIRES_MAX_MS, Math.max(1000, o.expiresInMs ?? EXPIRES_DEFAULT_MS));
@@ -594,6 +613,11 @@ export class ControlState {
     if (signed.confirm) row.confirm = signed.confirm;
     const text = describe(cmd);
     if (text !== undefined) row.text = text;
+    if (o.from) row.from = o.from;
+    // A handoff (CONTROL.md §3.1): the session the daemon relays the answer into. Inside the
+    // signed bytes; the caller's second look (ui.ts) held it to the machine's hello.
+    const replyTo = (cmd as ControlCommand & { reply_to?: unknown }).reply_to;
+    if ((cmd.kind === "prompt" || cmd.kind === "start") && typeof replyTo === "string") row.replyTo = replyTo;
     if (cmd.kind === "start") {
       // The fields a start may carry beyond core 0.7's type (CONTROL.md §3.1); the caller's
       // pre-check (ui.ts) already held them to the machine's hello.
@@ -879,6 +903,8 @@ export class ControlState {
       ackedAt: new Date(Date.parse(at) + 4000).toISOString(),
       ...(run.reply ? { reply: run.reply } : {}),
       ...(run.applied ? { applied: run.applied } : {}),
+      ...(run.replyTo ? { replyTo: run.replyTo } : {}),
+      ...(run.from ? { from: run.from } : {}),
     };
     this.queue(id).push(row);
     this.saveQueue(id);

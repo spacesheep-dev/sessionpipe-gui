@@ -25,6 +25,8 @@ import { registerExtras } from "./extensions/extras.js";
 import { bundledDirs } from "./extensions/kind.js";
 import { lanAddresses } from "./http/net.js";
 import { Router } from "./http/router.js";
+import { createOrchestrate, type Orchestrate } from "./orchestrate/index.js";
+import { registerOrchestrate } from "./orchestrate/routes.js";
 import { registerPhone } from "./phone/index.js";
 import { PluginHost, PluginRegistry, PluginSettings, registerPlugins } from "./plugins/index.js";
 import { registerReceiver, wellKnown } from "./receiver/index.js";
@@ -136,6 +138,8 @@ export interface App {
   plugins: PluginHost;
   skins: SkinRegistry;
   search: SearchService;
+  /** Workflows and their runs (server/orchestrate). */
+  orchestrate: Orchestrate;
   close(): Promise<void>;
 }
 
@@ -358,6 +362,10 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     const over = opts.testDoor ? ctx.req.headers["x-spgui-test-remote"] : undefined;
     return isThisMachine(typeof over === "string" && over ? over : ctx.remote.ip);
   });
+  // Workflows (server/orchestrate): runs across agents and machines, moved by control's
+  // acks and a one-second clock, signed only by a browser; their frames ride the broadcast.
+  const orchestrate = createOrchestrate({ stateDir, control, broadcast: (m) => broadcast.emit(m) });
+  registerOrchestrate(router, orchestrate, uiGuard(uiKey));
   const themes = new ThemeRegistry(opts.themesDir ?? path.join(stateDir, "themes"), {
     bundledDir: bundled.view,
     disabled,
@@ -499,12 +507,14 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     plugins,
     skins,
     search,
+    orchestrate,
     close: async () => {
       await plugins.stop();
       setup.pairer.close();
       outbox?.stop();
       setDemo(false);
       replay?.stop();
+      orchestrate.close();
       control.close();
       await search.close();
       await store.close();

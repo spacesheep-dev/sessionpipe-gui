@@ -105,7 +105,7 @@ age window, no nonce store) and only then queues it.
 
 | Route | Body → answer |
 |---|---|
-| `POST /send` | `{ machineId, cmd, csig?, grant?, confirm?, expires_in_s? }` → `201 ControlActivity`; `422 { reason, code }` with the verifier's code (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …) or the second look's (below) when it refuses; `404` unknown machine |
+| `POST /send` | `{ machineId, cmd, csig?, grant?, confirm?, expires_in_s?, from? }` (`SendBody`) → `201 ControlActivity`; `422 { reason, code }` with the verifier's code (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …) or the second look's (below) when it refuses; `404` unknown machine; `400` a `from` that is not a session ref |
 | `POST /files?name=<name>` | One file a `start` will carry: the raw bytes, its media type as `content-type` → `201 StartFile { name, type, size, sha256 }` (sha256 base64url, CONTROL.md §3.1). Held a day under `<stateDir>/control/files/<sha256>`, longer when a queued start needs it; `413` over 25 MiB, `415` no media type, `400` empty or a name a machine would refuse |
 | `GET /activity?limit=` | `{ activity: ControlActivity[] }`, newest first (default 100, at most 1000) |
 | `GET /machines` | `{ machines: (MachineControl & { name, createdAt, pairedAt? })[] }` — paired machines |
@@ -121,7 +121,21 @@ kept) to a final `delivered` / `expired` / `unsupported` / `failed` / `refused` 
 For a `permission.answer`, `text` is `"<decision>"` or `"<decision>: <note>"`; for a
 `key.add`, `"trust <name>"`. A `start`'s activity also carries what was signed (`cwd`,
 `permission`, `model`, `files`) and, from its `taken` / `delivered` ack, `applied`: what
-the machine ran it with.
+the machine ran it with. `from` is the page's own unsigned note of which session's page
+sent it (`SendBody.from`, a `<harness>:<id>`): kept on the activity for the lineage the
+UI shows at once, never carried to the machine.
+
+**A handoff** (sessionpipe CONTROL.md §3.1 `reply_to`). A `prompt` or a `start` may name
+another session on the same machine as `reply_to`, inside the signed bytes: after the
+command's final `delivered` ack the daemon delivers the answer into that session and says
+how it went in that session's events (`delegation.ended.relayed`); the command's own ack
+is unchanged. The receiver's second look (`replyToProblem`, before the one below) holds it
+to a prompt or a start (`bad_fields` on anything else, or a malformed ref, or the
+command's own session), and to a machine whose last hello said `handoff` (`handoff`: an
+older daemon would refuse the whole command, or ignore the relay). The activity carries it
+as `replyTo`. This receiver's own sessionpipe-core verifies every command first, and a
+core from before `ask` (0.10.0) refuses the field `bad_fields` there, whatever the hello
+says (`coreTakesReplyTo`): a handoff goes through once the core is bumped.
 
 **The second look** (`precheck.ts`). After the verifier, the receiver holds a command to
 what the machine's last hello advertised (CONTROL.md §2), because a daemon that predates
@@ -136,7 +150,9 @@ skips this look so a delivery scenario can reach the machine's own refusal.
 
 **Hello facts** kept per machine and shown on `MachineControl`: `mode` (`safe`, `auto`, or
 `inherit` from sessionpipe 0.10: no permission flag), `files`, `prompt_files`
-(`promptFiles`) and `start` (per harness `{ permissions, permission, models?, any_model? }`;
+(`promptFiles`), `ask` (a boolean: whether `sessionpipe ask` is on there, so its agents can
+ask each other) and `handoff` (`true`: it takes `reply_to`; the Handoff sheet offers "bring
+the answer back" only then), both absent from a hello that predates them, and `start` (per harness `{ permissions, permission, models?, any_model? }`;
 an entry for a harness the hello does not list, a default outside its levels (or
 `inherit`), unknown levels and malformed models are dropped; on an `inherit` machine, or
 for a default of `inherit`, the levels are capped at read and safe). `accounts` keep one
