@@ -6,12 +6,14 @@
 // under them. When none is left the reset takes the bar's place; a report older than 15
 // minutes says how old there instead. The line's tooltip has every window; a click opens
 // the account on /usage. Drawn in the wide sidebar only, while there are numbers and this
-// device has not hidden it (Settings › General). The accounts as both surfaces list them,
-// and their menu, live here too.
+// device has not hidden it (Settings › General). A machine that switches between pooled
+// accounts takes one line, its current account's, and those accounts take none of their own
+// (lib/glance.ts). The accounts as both surfaces list them, and their menu, live here too.
 import type { LimitsEntry, MachineSummary } from "@shared/api";
 import { type MouseEvent, useMemo } from "react";
 import { openNewSession } from "../control/newSessionState";
 import { useLimits, useMachines } from "../data/hooks";
+import { glanceLines, type PoolLine } from "../lib/glance";
 import {
   accountNames,
   byPlace,
@@ -29,6 +31,7 @@ import {
   windowShort,
 } from "../lib/limits";
 import { copyText } from "../lib/menus";
+import { firstBack, poolTip, sentenceName } from "../lib/pool";
 import { hrefFor, Link, navigate } from "../lib/router";
 import { setSettings, useAppSettings } from "../lib/settings";
 import { useNow } from "../lib/time";
@@ -123,20 +126,28 @@ export function UsageGlance({ here }: { here: boolean }) {
   const on = useAppSettings().usageInSidebar;
   const { accounts, short } = useReported();
   const machines = useMachines();
+  const limits = useLimits();
+  const all = useMemo(() => glanceLines(accounts, machines, limits), [accounts, machines, limits]);
   // Resets count down and passed ones turn to "Reset" without a new report.
   const now = useNow("coarse");
   const lines = useLines();
-  if (!on || accounts.length === 0 || lines === 0) return null;
-  const more = accounts.length - lines;
+  if (!on || all.length === 0 || lines === 0) return null;
+  const more = all.length - lines;
   return (
     <section className="glance" aria-label="Usage">
       <Link to="/usage" className="glance-head" aria-current={here ? "page" : undefined}>
         Usage
       </Link>
       <ul className="glance-list">
-        {accounts.slice(0, lines).map((a) => (
-          <GlanceLine key={a.key} a={a} name={short.get(a.key) ?? a.title} now={now} machines={machines} />
-        ))}
+        {all
+          .slice(0, lines)
+          .map((a) =>
+            "kind" in a ? (
+              <PoolGlanceLine key={a.key} line={a} now={now} machines={machines} />
+            ) : (
+              <GlanceLine key={a.key} a={a} name={short.get(a.key) ?? a.title} now={now} machines={machines} />
+            ),
+          )}
       </ul>
       {more > 0 && (
         <Link to="/usage" className="glance-more">
@@ -196,6 +207,87 @@ function GlanceLine({
           )}
         </span>
         {out && r?.when ? (
+          <span className="glance-sub num">{r.when}</span>
+        ) : stale ? (
+          <span className="glance-sub">{stale}</span>
+        ) : r?.fill != null ? (
+          <span className="glance-bar" aria-hidden="true">
+            <span style={{ width: `${r.fill * 100}%` }} />
+          </span>
+        ) : null}
+      </a>
+    </li>
+  );
+}
+
+/** A pooled machine's line (UX-SPEC §7.3): the current account's name and tightest window
+ *  as an account's line has them, muted "in use" with no numbers yet, None left with the
+ *  first reset under it when no account has room. The tooltip names the other accounts;
+ *  a click opens the machine's section on /usage. */
+function PoolGlanceLine({ line, now, machines }: { line: PoolLine; now: number; machines: readonly MachineSummary[] }) {
+  const { pool, machine, current, entry } = line;
+  const name = current ? sentenceName(current, pool.accounts) : machine;
+  const title = `${name}, Claude Code on ${machine}`;
+  const starts = machines.find((m) => m.name === machine)?.control;
+  const canStart =
+    !!starts && (starts.start ? pool.harness in starts.start : !!starts.harnesses?.includes(pool.harness));
+  const menu = useContextMenu(
+    () => [
+      canStart && {
+        label: `New session on ${machine}…`,
+        run: () => openNewSession({ harness: pool.harness, machine }),
+      },
+      { label: "Open Usage", action: "nav.usage", run: () => openUsage(line.key) },
+      { label: `Open ${machine}'s accounts`, run: () => openUsage(line.key) },
+      entry && { label: "Copy usage", run: () => copyText(usageText(entry, title, Date.now())) },
+      { sep: true },
+      { label: "Hide usage in the sidebar", run: () => setSettings({ usageInSidebar: false }) },
+    ],
+    { title: () => title },
+  );
+  const t = entry ? tightest(entry, now) : null;
+  const r = t ? readWindow(t, now) : null;
+  const out = !!r && isOut(r);
+  const stale = entry ? staleWords(entry, now) : "";
+  const back = current ? null : firstBack(pool.accounts, now);
+  const onClick = (ev: MouseEvent<HTMLAnchorElement>) => {
+    if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    ev.preventDefault();
+    openUsage(line.key);
+  };
+  return (
+    <li>
+      <a
+        href={`${hrefFor("/usage")}#${encodeURIComponent(line.key)}`}
+        className="glance-line"
+        onClick={onClick}
+        data-tip={poolTip(pool, machine, entry, now)}
+        data-tip-side="right"
+        data-tip-wrap=""
+        data-glance={line.key}
+        {...menu}
+      >
+        <span className="glance-top">
+          <HarnessGlyph name={pool.harness} size="sm" />
+          <span className="glance-name">{name}</span>
+          {!current ? (
+            <span className="glance-val">
+              <span className="glance-fig glance-out">None left</span>
+            </span>
+          ) : t && r ? (
+            <span className="glance-val num">
+              <span className="glance-win">{windowShort(t)}</span>{" "}
+              <span className={`glance-fig ${out ? "glance-out" : ""}`}>{r.value}</span>
+            </span>
+          ) : (
+            <span className="glance-val">
+              <span className="glance-fig glance-win">in use</span>
+            </span>
+          )}
+        </span>
+        {back ? (
+          <span className="glance-sub num">{back}</span>
+        ) : out && r?.when ? (
           <span className="glance-sub num">{r.when}</span>
         ) : stale ? (
           <span className="glance-sub">{stale}</span>
