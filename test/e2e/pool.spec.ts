@@ -9,6 +9,7 @@
 // expired line). The phone project draws the section as one inset group with no
 // horizontal scroll.
 import { randomUUID } from "node:crypto";
+import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 import { CONTROL_BASE, passkeyPage, seenSetupHere } from "./control-helpers.js";
 import { openPage } from "./helpers.js";
@@ -18,6 +19,13 @@ const tag = () => randomUUID().slice(0, 6);
 const section = (page: Page, machine: string) => page.locator(`section[data-pool="${machine}"]`);
 const row = (page: Page, machine: string, name: string) =>
   section(page, machine).locator("li.pool-acct", { has: page.locator(".pool-title", { hasText: name }) });
+/** Axe's serious and critical violations on the page right now, as one line each. */
+async function axeBad(page: Page, label: string): Promise<string[]> {
+  const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+  return r.violations
+    .filter((v) => v.impact === "serious" || v.impact === "critical")
+    .map((v) => `${label}: ${v.id} ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
+}
 
 test.describe("the pooled section, from the demo", () => {
   test("lab-mac, mini-mac and desk-pc: the words, the order, nothing drawn twice", async ({ page, isMobile }) => {
@@ -65,6 +73,13 @@ test.describe("the pooled section, from the demo", () => {
     const html = await page.locator("#main").innerHTML();
     expect(html).not.toMatch(/% used/);
     expect(html).not.toMatch(/01K8[A-Z0-9]{20}/);
+  });
+
+  test("axe: the page with the section has no serious or critical violation", async ({ page, isMobile }) => {
+    test.skip(!!isMobile, "the desktop project");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await openPage(page, "/usage");
+    expect(await axeBad(page, "usage")).toEqual([]);
   });
 
   test("phone: one inset group, the grip at the trailing edge, no horizontal scroll", async ({ page, isMobile }) => {
@@ -320,6 +335,7 @@ test.describe("signed pool commands", () => {
       await expect(sheet.locator("[data-pool-error]")).toHaveText(
         "The sign-in took too long. Start over to get a new link.",
       );
+      expect(await axeBad(page, "sheet")).toEqual([]);
       await sheet.locator("[data-pool-restart]").click();
       await expect
         .poll(() => m.seen.map((c) => c.pool_action))
