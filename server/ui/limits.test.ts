@@ -99,6 +99,27 @@ describe("LimitsStore", () => {
     expect(frames).toHaveLength(3);
   });
 
+  it("is not held off by an entry this machine's clock dated ahead, in the file or since", () => {
+    const later = new Date(Date.now() + 60 * 60_000).toISOString();
+    writeFileSync(
+      path.join(tmp.dir, "limits.json"),
+      JSON.stringify({
+        version: 1,
+        entries: [{ harness: "claude-code", accountId: "a", machine: "lab-mac", windows: [FIVE], observedAt: later }],
+      }),
+    );
+    const reopened = new LimitsStore(tmp.dir);
+    expect(reopened.observe(observed({ windows: [WEEK] }, { account: "a" }))).toBe(true);
+    expect(reopened.list()[0]?.windows.map((w) => w.id)).toEqual(["seven_day"]);
+    // The clock went back an hour while running: what arrives now is the newest there is.
+    const ahead = { ...observed({ windows: [FIVE] }, { account: "b", time: later }), arrivedAt: later };
+    expect(limits.observe(ahead)).toBe(true);
+    expect(limits.observe(observed({ windows: [WEEK] }, { account: "b", time: minutesAgo(1) }))).toBe(true);
+    expect(limits.list()[0]?.windows.map((w) => w.id)).toEqual(["seven_day"]);
+    // Still, of two that arrive now, the older one is ignored.
+    expect(limits.observe(observed({ windows: [FIVE] }, { account: "b", time: minutesAgo(2) }))).toBe(false);
+  });
+
   it("skips windows that do not validate; an event with none changes nothing", () => {
     const bad = [
       { id: "Five Hour", used_percent: 1 },

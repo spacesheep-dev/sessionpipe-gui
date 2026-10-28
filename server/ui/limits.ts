@@ -74,7 +74,8 @@ const readPlan = (v: unknown): string | undefined => {
   return p && p.length <= PLAN_MAX && !CONTROL.test(p) ? p : undefined;
 };
 
-/** An event's time, never after its arrival (the store's clampTime). */
+/** An event's time, never after its arrival (the store's clampTime); with no time, the
+ *  arrival itself. */
 function clamp(time: string, arrivedAt: string | undefined): string {
   const t = Date.parse(time);
   const a = arrivedAt ? Date.parse(arrivedAt) : Date.now();
@@ -116,7 +117,11 @@ export class LimitsStore {
     const isDemo = ev.source === "demo";
     const have = isDemo ? (this.demo.get(key) ?? this.real.get(key)) : this.real.get(key);
     const observedAt = clamp(ev.time, ev.arrivedAt);
-    if (have && observedAt < have.observedAt) return false;
+    // Newest wins, by the event's time. An entry dated after this very arrival was dated by
+    // this machine's clock before it went back (or comes from the file of such a run): it
+    // is newer than nothing, or it would hold every report off until that time.
+    const arrived = clamp("", ev.arrivedAt);
+    if (have && observedAt < have.observedAt && have.observedAt <= arrived) return false;
     const plan = readPlan(ev.data.plan);
     const next: LimitsEntry = {
       key,
