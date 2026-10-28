@@ -676,7 +676,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   const first = events[0];
   const pageIn = !loading && !!first && sessionKey(first.harness.name, first.session.id) === key;
   if (pageIn && opened.current?.key === key && opened.current.line === undefined) {
-    opened.current.line = newLinePlace(allTurns, opened.current.mark, { hasOlder, attended: s?.attended });
+    opened.current.line = newLinePlace(allTurns, opened.current.mark, { attended: s?.attended });
     opened.current.late = !firstPaint.current;
   }
   const newLineSeq = opened.current?.key === key ? opened.current.line?.seq : undefined;

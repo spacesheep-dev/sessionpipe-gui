@@ -84,14 +84,20 @@ describe("newLinePlace", () => {
     expect(newLinePlace(groupTurns(events), iso(50))).toBeNull();
   });
 
+  it("a session never looked at (every loaded turn ended after the mark) gets no line", () => {
+    // Started after `since` and never opened: its mark is `since`, and the whole session
+    // is loaded. Nothing above the first answer was ever read, so there's no line.
+    const ev = session();
+    const events = [...turn(ev, 100, { reply: "Two." }), ...turn(ev, 200, { reply: "Three." })];
+    expect(newLinePlace(groupTurns(events), iso(50))).toBeNull();
+  });
+
   it("draws no line when the mark is older than the loaded page", () => {
     const ev = session();
     const events = [...turn(ev, 100, { reply: "Two." }), ...turn(ev, 200, { reply: "Three." })];
-    expect(newLinePlace(groupTurns(events), iso(50), { hasOlder: true })).toBeNull();
-    // The whole session is loaded: the first turn is the first new one.
-    expect(newLinePlace(groupTurns(events), iso(50))?.seq).toBe(endedSeq(events, 100));
+    expect(newLinePlace(groupTurns(events), iso(50))).toBeNull();
     // The page reaches back past the mark: the line is placed.
-    expect(newLinePlace(groupTurns(events), iso(150), { hasOlder: true })?.seq).toBe(endedSeq(events, 200));
+    expect(newLinePlace(groupTurns(events), iso(150))?.seq).toBe(endedSeq(events, 200));
   });
 
   it("puts a failure-only turn's line above the failure", () => {

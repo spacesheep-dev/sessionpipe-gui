@@ -31,14 +31,15 @@ export interface NewLineAt {
 const ms = (iso: string | undefined): number => (iso ? Date.parse(iso) : Number.NaN);
 
 /** The line for the loaded turns and the mark taken at open, or null: no mark (the
- *  session was read when it opened), no turn after it that is news, or a mark older than
- *  the loaded page (`hasOlder` and its first ended turn is already after the mark), where
- *  the first new turn may not be loaded and no line is better than a wrong one.
- *  `attended` is the session's, for turns whose own events don't say. */
+ *  session was read when it opened), no turn after it that is news, or no loaded turn that
+ *  ended at or before it (the first ended turn is already after the mark). That is a
+ *  session never looked at, where a line under the first prompt says nothing, or a mark
+ *  older than the loaded page, where the first new turn may not be loaded and no line is
+ *  better than a wrong one. `attended` is the session's, for turns whose own events don't say. */
 export function newLinePlace(
   turns: readonly Turn[],
   mark: string | undefined,
-  o: { hasOlder?: boolean; attended?: boolean } = {},
+  o: { attended?: boolean } = {},
 ): NewLineAt | null {
   const since = ms(mark);
   if (!Number.isFinite(since)) return null;
@@ -47,7 +48,7 @@ export function newLinePlace(
     const ended = t.items.find((i) => i.kind === "event" && i.e.type === "turn.ended");
     if (ended?.kind !== "event") continue;
     const at = ms(ended.e.arrivedAt);
-    if (first && o.hasOlder && at > since) return null;
+    if (first && at > since) return null;
     first = false;
     if (!(at > since)) continue;
     const attended = ended.e.session.attended ?? t.start?.session.attended ?? o.attended;
