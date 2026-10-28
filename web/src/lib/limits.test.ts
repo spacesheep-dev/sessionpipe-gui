@@ -266,13 +266,34 @@ describe("accountFor / agentWords", () => {
     const pick = accountFor("claude-code", "lab-mac", [{ harness: "claude-code", id: "acc1" }], all);
     expect(pick).toEqual({ kind: "entry", entry: dev });
   });
-  it("has no number when the hello names two: a start cannot choose", () => {
+  it("has no one number when the hello names two: a start cannot choose, so each says its own", () => {
     const two = [
-      { harness: "claude-code", id: "acc1" },
-      { harness: "claude-code", id: "api-1" },
+      { harness: "claude-code", id: "acc1", email: "dev@example.com" },
+      { harness: "claude-code", id: "acc2", email: "work@acme.dev" },
     ];
-    expect(accountFor("claude-code", "lab-mac", two, all)).toEqual({ kind: "ambiguous", count: 2 });
-    expect(agentWords({ kind: "ambiguous", count: 2 }, NOW)).toEqual({ detail: "2 accounts here" });
+    const work = entry({
+      key: "claude-code a:acc2",
+      accountId: "acc2",
+      windows: [win("five_hour", 40, { resetsAt: at(H) }), win("seven_day", 88, { resetsAt: at(2 * D) })],
+    });
+    const pick = accountFor("claude-code", "lab-mac", two, [...all, work]);
+    expect(pick).toEqual({
+      kind: "ambiguous",
+      count: 2,
+      each: [
+        { name: "dev", entry: dev },
+        { name: "work", entry: work },
+      ],
+    });
+    // No hint, so no number is guessed; the detail has each one's tightest window.
+    expect(agentWords(pick, NOW)).toEqual({ detail: "dev 62% left, work 12% left" });
+    const out = { ...work, windows: [win("five_hour", 100, { resetsAt: at(H) })], observedAt: at(-3 * H) };
+    expect(agentWords({ kind: "ambiguous", count: 2, each: [{ name: "work", entry: out }] }, NOW)).toEqual({
+      detail: "work none left as of 3 h ago",
+    });
+    // Neither has sent numbers.
+    expect(accountFor("claude-code", "lab-mac", two, [codex])).toEqual({ kind: "ambiguous", count: 2, each: [] });
+    expect(agentWords({ kind: "ambiguous", count: 2, each: [] }, NOW)).toEqual({ detail: "2 accounts here" });
   });
   it("with none named, takes the machine's own numbers, else the one account seen there", () => {
     expect(accountFor("codex", "lab-mac", [], all)).toEqual({ kind: "entry", entry: codex });

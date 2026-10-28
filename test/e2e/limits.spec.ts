@@ -191,8 +191,11 @@ test("New session on lab-mac: each agent says what its account has left there", 
   await expect(sheet.locator("[data-ns-row=machine] button.sel")).toHaveText(/lab-mac/);
   await sheet.locator("[data-ns-row=agent] button.sel").click();
   const opt = (name: string) => page.locator(".sel-opt", { hasText: name });
-  // lab-mac's hello names two Claude Code accounts: a start can't choose, so no number.
-  await expect(opt("Claude Code").locator(".sel-opt-detail")).toHaveText("2 accounts here");
+  // lab-mac's hello names two Claude Code accounts: a start can't choose, so no one number,
+  // but each account's own by its name.
+  await expect(opt("Claude Code").locator(".sel-opt-detail")).toHaveText(
+    /^dev ((<1|\d+)% left|none left)[^,]*, api\.z\.ai 12% over/,
+  );
   await expect(opt("Claude Code").locator(".sel-opt-hint")).toHaveCount(0);
   await expect(opt("Codex").locator(".sel-opt-hint")).toHaveText("74% left");
   await expect(opt("Codex").locator(".sel-opt-detail")).toHaveText(/^This week, resets in 4 d \d+ h$/);

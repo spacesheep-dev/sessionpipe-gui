@@ -511,7 +511,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       disabled: !!b,
     };
   });
-  // What each agent's account has left here: its tightest window, or "2 accounts here".
+  // What each agent's account has left here: its tightest window, or each account's by name.
   const limits = useLimits();
   const now = useNow("coarse");
   const left = (h: string) => (machine ? agentWords(accountFor(h, machine, c?.accounts, limits), now) : {});

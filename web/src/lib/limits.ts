@@ -276,11 +276,15 @@ export function usageTip(e: LimitsEntry, title: string, now: number): string {
 
 // ----- New session -----
 
-export type AccountPick = { kind: "entry"; entry: LimitsEntry } | { kind: "ambiguous"; count: number } | null;
+export type AccountPick =
+  | { kind: "entry"; entry: LimitsEntry }
+  | { kind: "ambiguous"; count: number; each: { name: string; entry: LimitsEntry }[] }
+  | null;
 
 /** Whose numbers a start of `harness` on `machine` would use. A start cannot choose an
- *  account, so a machine whose hello names two for the harness has no number; one it names
- *  is that one's; none named, the machine's own (Codex), else the one account seen there. */
+ *  account, so a machine whose hello names two for the harness has no one number, only
+ *  each one's that sent any, by its short name; one it names is that one's; none named,
+ *  the machine's own (Codex), else the one account seen there. */
 export function accountFor(
   harness: string,
   machine: string,
@@ -288,7 +292,11 @@ export function accountFor(
   entries: readonly LimitsEntry[],
 ): AccountPick {
   const mine = (accounts ?? []).filter((a) => a.harness === harness);
-  if (mine.length >= 2) return { kind: "ambiguous", count: mine.length };
+  if (mine.length >= 2) {
+    const each = mine.flatMap((a) => entries.find((e) => e.harness === harness && e.accountId === a.id) ?? []);
+    const short = shortNames(each, accountNames(mine));
+    return { kind: "ambiguous", count: mine.length, each: each.map((e) => ({ name: short.get(e.key)!, entry: e })) };
+  }
   const pick = (e: LimitsEntry | undefined): AccountPick => (e ? { kind: "entry", entry: e } : null);
   if (mine.length === 1) return pick(entries.find((e) => e.harness === harness && e.accountId === mine[0]!.id));
   const own = entries.find((e) => e.harness === harness && !e.accountId && e.machine === machine);
@@ -298,10 +306,20 @@ export function accountFor(
 }
 
 /** An agent's line in New session: the hint at the right ("62% left"), the detail under
- *  its name ("5 hours, resets in 2 h 21 m"), and whether the hint is none left or over. */
+ *  its name ("5 hours, resets in 2 h 21 m"), and whether the hint is none left or over.
+ *  Two accounts have no hint, since no one number is theirs; the detail has each one's
+ *  tightest window ("dev 62% left, work 12% over"), or "2 accounts here" with none. */
 export function agentWords(pick: AccountPick, now: number): { hint?: string; detail?: string; out?: boolean } {
   if (!pick) return {};
-  if (pick.kind === "ambiguous") return { detail: `${pick.count} accounts here` };
+  if (pick.kind === "ambiguous") {
+    const each = pick.each.map(({ name, entry }) => {
+      const t = tightest(entry, now);
+      const value = t ? readWindow(t, now).value : "Reset";
+      const stale = staleWords(entry, now);
+      return `${name} ${value.charAt(0).toLowerCase()}${value.slice(1)}${stale ? ` ${stale}` : ""}`;
+    });
+    return { detail: each.length ? each.join(", ") : `${pick.count} accounts here` };
+  }
   const e = pick.entry;
   const stale = staleWords(e, now);
   const t = tightest(e, now);
