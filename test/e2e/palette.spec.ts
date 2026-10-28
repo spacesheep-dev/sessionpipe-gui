@@ -4,6 +4,7 @@
 // and Enter opens it, shift+Enter opens it beside, `>` keeps only actions, `#<view>` jumps
 // to an installed view, Esc closes it and gives focus back.
 import { expect, type Page, test } from "@playwright/test";
+import { BACKFILL_TITLES } from "../../server/demo/content.js";
 import { openBoard, openPage } from "./helpers.js";
 
 /** The card shows a long title up to its first sentence or an ellipsis; the palette and the
@@ -29,8 +30,12 @@ async function firstCard(page: Page): Promise<{ title: string; href: string; fra
       .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ""))
       .sort((a, b) => b.length - a.length)[0] ?? "";
   const settled = page.locator("section.group--idle, section.group--stale").locator("article.card a.card-link");
-  // Every title on the board, so the word typed picks out one session, not two.
-  const all = (await page.locator("article.card .card-title").allTextContents()).map((t) => t.toLowerCase());
+  // Every title on the board, and the demo's backfilled sessions (the palette lists them; the
+  // board doesn't show them), so the word typed picks out one session, not two.
+  const all = [
+    ...(await page.locator("article.card .card-title").allTextContents()),
+    ...BACKFILL_TITLES.map((t) => t.text),
+  ].map((t) => t.toLowerCase());
   const unique = (t: string) => {
     const w = longest(t).toLowerCase();
     return all.filter((x) => x.includes(w)).length === 1;
