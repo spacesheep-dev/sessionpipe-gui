@@ -133,6 +133,20 @@ export function effectiveNotify(
   return cap ? quieter(own, cap.level) : own;
 }
 
+/** Whether a row draws the bell with a slash: its session is at Never. A row nested
+ *  under its parent (`under`) draws it only when the parent isn't, so a muted parent's
+ *  children don't each repeat it. */
+export function showsNever(
+  s: Pick<SessionSummary, "key" | "harness" | "parentId">,
+  marks: Marks,
+  sessions: ReadonlyMap<SessionKey, SessionSummary>,
+  under = false,
+): boolean {
+  if (effectiveNotify(s, marks, sessions) !== "never") return false;
+  const parent = under && s.parentId ? sessions.get(sessionKey(s.harness, s.parentId)) : undefined;
+  return !parent || effectiveNotify(parent, marks, sessions) !== "never";
+}
+
 /** Whether a banner about `session` may show: none for a session set to Never (itself or
  *  under a parent). One the page doesn't know goes by its own level. */
 export function toastAllowed(

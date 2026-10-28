@@ -39,7 +39,7 @@ import {
 } from "../lib/format";
 import { hide } from "../lib/hidden";
 import { labelItems } from "../lib/labels";
-import { effectiveNotify } from "../lib/marks";
+import { showsNever } from "../lib/marks";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { reducedMotion, tokenMs, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { Link, sessionPath } from "../lib/router";
@@ -469,6 +469,7 @@ function KidRow({
       >
         <StateDot state={c.state} decorative />
         <span className="kid-title ellipsis">{sessionTitle(c)}</span>
+        <NotifyOff s={c} under />
         {c.currentTool && c.state === "working" ? (
           <code className="kid-tool">{toolLabel(c.currentTool.tool)}</code>
         ) : (
@@ -608,11 +609,12 @@ function ErrorMark({ s }: { s: SessionSummary }) {
 }
 
 /** A session set to Never (its own "Notify me", or a parent's): a small bell with a slash
- *  before the time. The other levels draw nothing. It reads the level itself, so a row
- *  re-renders only when that changes. */
-function NotifyOff({ s }: { s: SessionSummary }) {
+ *  before the time. The other levels draw nothing. A child row (`under` its parent) draws
+ *  it only when the parent doesn't. It reads the level itself, so a row re-renders only
+ *  when that changes. */
+function NotifyOff({ s, under = false }: { s: SessionSummary; under?: boolean }) {
   const store = useStore();
-  const read = () => effectiveNotify(s, store.get().marks, store.get().sessions) === "never";
+  const read = () => showsNever(s, store.get().marks, store.get().sessions, under);
   const off = useSyncExternalStore(store.subscribe, read, read);
   if (!off) return null;
   return (

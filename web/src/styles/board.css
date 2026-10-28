@@ -513,6 +513,10 @@
 .kid-state {
   color: var(--fg-3);
 }
+.kid > .card-muted {
+  margin-right: 0;
+  color: var(--fg-3);
+}
 
 /* An agent row (§4.1): the 8 px agent glyph, "Type · description", then what it does
    now; 32 px, 44 on a phone. The open one (its tab is the panel's) is selected. */

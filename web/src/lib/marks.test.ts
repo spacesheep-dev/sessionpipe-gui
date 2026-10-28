@@ -12,6 +12,7 @@ import {
   notifyCap,
   SEND_EVERY_MS,
   setUnread,
+  showsNever,
   toastAllowed,
 } from "./marks";
 
@@ -151,6 +152,26 @@ describe("effectiveNotify", () => {
     expect(tree({ "claude-code:child": "finishes" }).level("child")).toBe("finishes");
     expect(tree({ "claude-code:parent": "finishes", "claude-code:child": "never" }).level("child")).toBe("never");
     expect(tree({ "claude-code:parent": "finishes" }).level("child")).toBe("needs");
+  });
+});
+
+describe("showsNever", () => {
+  const shows = (notify: Marks["notify"], id: string, under?: boolean) => {
+    const t = tree(notify);
+    return showsNever(t.sessions.get(`claude-code:${id}`)!, t.marks, t.sessions, under);
+  };
+  it("draws the bell on a child row set to Never under a parent that isn't", () => {
+    expect(shows({ "claude-code:child": "never" }, "child", true)).toBe(true);
+    expect(shows({ "claude-code:parent": "finishes", "claude-code:child": "never" }, "child", true)).toBe(true);
+  });
+  it("leaves it to the parent's row when the parent is at Never too", () => {
+    expect(shows({ "claude-code:parent": "never" }, "child", true)).toBe(false);
+    expect(shows({ "claude-code:root": "never", "claude-code:child": "never" }, "child", true)).toBe(false);
+  });
+  it("draws it on a row of its own whatever the parent is, and on nothing louder", () => {
+    expect(shows({ "claude-code:parent": "never" }, "child")).toBe(true);
+    expect(shows({ "claude-code:child": "finishes" }, "child", true)).toBe(false);
+    expect(shows({}, "child", true)).toBe(false);
   });
 });
 
