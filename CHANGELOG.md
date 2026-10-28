@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A paired machine you rely on that went offline** gets one quiet line at the top of the
+  board: "build-box is offline, last heard 14:02. 2 messages wait until it's back.", with
+  Machines beside it. Only a paired machine with a message waiting or a session that needs
+  you, works or went stale counts; one that only sends events has no heartbeat and is never
+  called offline. × hides the line on this device until something changes: it clears
+  itself when the machine is back, and a new drop brings it back.
+
 ## [0.4.1] - 2026-10-27
 
 ### Fixed
