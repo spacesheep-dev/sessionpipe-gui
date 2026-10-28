@@ -39,6 +39,7 @@ import {
 } from "../lib/format";
 import { hide } from "../lib/hidden";
 import { labelItems } from "../lib/labels";
+import { effectiveNotify } from "../lib/marks";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { reducedMotion, tokenMs, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { Link, sessionPath } from "../lib/router";
@@ -298,6 +299,7 @@ export const SessionCard = memo(function SessionCard({
                   : `Last event ${new Date(s.lastAt).toLocaleString()}`
               }
             >
+              <NotifyOff s={s} />
               {frozenAt ? <Frozen iso={time} at={frozenAt} /> : <Since iso={time} coarse />}
             </span>
           </span>
@@ -600,6 +602,30 @@ function ErrorMark({ s }: { s: SessionSummary }) {
     <span className="card-err" role="img" aria-label={name} title={name}>
       <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
         <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    </span>
+  );
+}
+
+/** A session set to Never (its own "Notify me", or a parent's): a small bell with a slash
+ *  before the time. The other levels draw nothing. It reads the level itself, so a row
+ *  re-renders only when that changes. */
+function NotifyOff({ s }: { s: SessionSummary }) {
+  const store = useStore();
+  const read = () => effectiveNotify(s, store.get().marks, store.get().sessions) === "never";
+  const off = useSyncExternalStore(store.subscribe, read, read);
+  if (!off) return null;
+  return (
+    <span className="card-muted" role="img" aria-label="Notifications off" title="Notifications off">
+      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+        <path
+          d="M5.1 3.9A3.5 3.5 0 0 1 11.5 6v3.4M4.5 6.6V10L3 12h7.3M6.6 14h2.8M2.5 2.5l11 11"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </svg>
     </span>
   );
