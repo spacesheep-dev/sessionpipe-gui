@@ -182,7 +182,9 @@
   margin: -4px 0;
 }
 /* A pooled account's windows: one step further in, the label narrower, so the bars stay
-   on the page's bar line (24 + 180 = 48 + 156). */
+   on the page's bar line (24 + 180 = 48 + 156). The step is a margin, not a padding, so
+   the hairline over each window starts under its label (an inset separator, the way a
+   list groups rows under their owner) while the account rows' rules keep the full measure. */
 .pool-windows {
   list-style: none;
   margin: 0;
@@ -190,7 +192,8 @@
 }
 .pool-windows .usage-win {
   grid-template-columns: 156px 160px 10ch minmax(0, 1fr);
-  padding-left: 48px;
+  margin-left: 48px;
+  padding-left: 0;
 }
 /* The row in flight: lifted over its siblings, under the pointer (the transform is
    written by the drag), the neighbours sliding (the FLIP in PoolAccounts.tsx). */
@@ -437,7 +440,8 @@
   }
   .pool-windows .usage-win {
     grid-template-columns: minmax(0, 1fr) auto;
-    padding: 10px 16px 10px 16px;
+    margin-left: 16px;
+    padding: 10px 16px 10px 0;
   }
   .pool-add {
     min-height: var(--tap);
