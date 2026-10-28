@@ -39,7 +39,6 @@ import {
 } from "../lib/format";
 import { hide } from "../lib/hidden";
 import { labelItems } from "../lib/labels";
-import { showsNever } from "../lib/marks";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { reducedMotion, tokenMs, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { Link, sessionPath } from "../lib/router";
@@ -51,6 +50,7 @@ import { AgentRow, useAgentsOpen } from "./AgentRow";
 import { HarnessGlyph, Redacted, Since, StateDot } from "./bits";
 import { type MenuItem, type MenuList, openMenu, useContextMenu } from "./ContextMenu";
 import { LabelDot } from "./LabelDot";
+import { NotifyOff } from "./NotifyOff";
 
 interface SessionCardProps {
   s: SessionSummary;
@@ -603,36 +603,6 @@ function ErrorMark({ s }: { s: SessionSummary }) {
     <span className="card-err" role="img" aria-label={name} title={name}>
       <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
         <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      </svg>
-    </span>
-  );
-}
-
-/** A session set to Never (its own "Notify me", or a parent's): a small bell with a slash
- *  before the time, the Inbox bell's drawing. The other levels draw nothing. A child row
- *  (`under` its parent) draws it only when the parent doesn't. It reads the level itself,
- *  so a row re-renders only when that changes. */
-function NotifyOff({ s, under = false }: { s: SessionSummary; under?: boolean }) {
-  const store = useStore();
-  const read = () => showsNever(s, store.get().marks, store.get().sessions, under);
-  const off = useSyncExternalStore(store.subscribe, read, read);
-  if (!off) return null;
-  return (
-    <span className="card-muted" role="img" aria-label="Notifications off" title="Notifications off">
-      <svg
-        viewBox="0 0 20 20"
-        width="12"
-        height="12"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M5.5 13.5V9a4.5 4.5 0 0 1 9 0v4.5l1.2 1.5H4.3z" />
-        <path d="M8.3 17a1.8 1.8 0 0 0 3.4 0" />
-        <path d="M3.5 3.5l13 13" />
       </svg>
     </span>
   );
