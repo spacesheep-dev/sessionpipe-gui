@@ -43,15 +43,24 @@ test.describe("board", () => {
     const done = page.locator("section.group--done");
     const toggle = done.locator("button.group-toggle");
     await toggle.click();
-    const card = done.locator("article.card--done").first();
-    // A scroll closes a menu, as a native one does, so one that closed is opened again.
+    // A session that just finished lands in Done unread already, and its menu offers
+    // "Mark as read"; so take a row that is read (another worker on the same server may
+    // mark it first, so each try takes one afresh), and keep to it by its link as rows
+    // re-sort. A scroll closes a menu, as a native one does, so one that closed is opened
+    // again.
+    let href: string | null = null;
+    const link = () => done.locator(`a.card-link[href="${href}"]`);
     await expect(async () => {
       await page.keyboard.press("Escape");
-      await card.locator("a.card-link").click({ button: "right" });
+      href = await done
+        .locator("article.card--done:not(:has(.dot--unread)) a.card-link")
+        .first()
+        .getAttribute("href", { timeout: 2000 });
+      await link().click({ button: "right" });
       await page.getByRole("menuitem", { name: "Mark as unread" }).click({ timeout: 2000 });
     }).toPass({ timeout: 20_000 });
     // Open, the row's filled dot says it; the head does not say it again.
-    await expect(card.locator(".card-state")).toBeVisible();
+    await expect(link().locator(".dot--unread")).toBeVisible();
     await expect(toggle.locator(".group-note")).toHaveCount(0);
     await toggle.click();
     await expect(toggle.locator(".group-note")).toHaveText(/^[1-9]\d* unread$/);
