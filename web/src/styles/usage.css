@@ -5,8 +5,8 @@
    at 600 and, when the report is old, its age in the meta tier; a muted line of where it
    reported; then a row per window on hairlines. No box, no tint; on a phone each account
    is an inset group, its windows stacked, the where-line its footer. The bar is neutral
-   (a hairline track, the secondary ink for what is left); only "None left" and "N% over"
-   take the attention colour, on their words. */
+   (the second hairline token for the track, the secondary ink for what is left); only
+   "None left" and "N% over" take the attention colour, on their words. */
 
 .usage {
   gap: 32px;
@@ -84,7 +84,9 @@
   display: block;
   height: 3px;
   border-radius: 999px;
-  background: var(--line);
+  /* The second hairline token: in dark the first is the rule between rows, and a track
+     drawn in it reads as another rule beside a nearly empty bar. */
+  background: var(--line-2);
   overflow: hidden;
 }
 .usage-bar > span {
