@@ -146,8 +146,9 @@
 }
 /* The grip's mark is 24 px; its target reaches 8 px out, up and down (32 × 40 in the
    row's 44), its neighbour on the right being text. A pointer-down on the reach still
-   starts the drag: the event's target is the grip. */
-.pool-grip::after {
+   starts the drag: the event's target is the grip. ::before, since a locked grip's
+   tooltip (data-tip, keyboard.css) is the ::after. */
+.pool-grip::before {
   content: "";
   position: absolute;
   inset: -8px 0 -8px -8px;
