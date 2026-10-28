@@ -628,13 +628,12 @@ function AccountRow({
               {s.word}
             </span>
           )}
-          {s.after && (
-            <span className="pool-status-after num">
-              <span className="pool-dot">· </span>
-              {s.after.replace(/^ · /, "")}
+          {(s.after || stale) && (
+            <span className="pool-status-sub num">
+              {s.after && <span className="pool-status-after">{s.after.replace(/^ · /, "")}</span>}
+              {stale && <span className="pool-age">numbers {stale}</span>}
             </span>
           )}
-          {stale && <span className="pool-age">numbers {stale}</span>}
         </span>
         <MoreButton build={items} label={`Actions for ${name}`} title={() => t.title} />
       </div>

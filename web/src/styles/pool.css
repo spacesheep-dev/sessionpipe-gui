@@ -165,9 +165,9 @@
    fits in one line at the page's measure. */
 .pool-status {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 0;
   min-width: 0;
   margin-left: 8px;
   color: var(--fg-2);
@@ -184,10 +184,20 @@
 .pool-status--needs .pool-word {
   color: var(--needs-fg);
 }
-.pool-status-after,
-.pool-age {
+/* What follows the word, in the meta tier on the word's baseline: "resets in 43 m",
+   "numbers as of 1 h ago", each after one middle dot, the header's own separator. */
+.pool-status-sub {
+  display: inline;
   color: var(--fg-3);
   font-size: var(--text-sm);
+}
+.pool-status-sub > * + *::before,
+.pool-status-sub > :first-child::before {
+  content: "· ";
+  margin-left: 0.35em;
+}
+.pool-status-sub > :first-child::before {
+  margin-left: 0.45em;
 }
 .pool-status .btn {
   margin: -4px 0;
@@ -431,13 +441,14 @@
   .pool-status--fg .pool-word {
     color: var(--fg);
   }
-  .pool-status-after,
-  .pool-age {
+  /* The word's trail is the cell's third line, under the email: no dot opens a line. */
+  .pool-status-sub {
     grid-area: after;
+    display: block;
     text-align: left;
   }
-  .pool-dot {
-    display: none;
+  .pool-status-sub > :first-child::before {
+    content: none;
   }
   .pool-grip {
     grid-area: grip;

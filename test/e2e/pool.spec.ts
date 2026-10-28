@@ -43,7 +43,7 @@ test.describe("the pooled section, from the demo", () => {
     await expect(lab.locator("li.pool-acct .pool-title")).toHaveText(["Misha", "Fiction", "Spacesheep"]);
     await expect(lab.locator("li.pool-acct .pool-word")).toHaveText(["In use", "Has room", "Used up"]);
     const sheep = row(page, "lab-mac", "Spacesheep");
-    await expect(sheep.locator(".pool-status-after")).toHaveText(/^· resets in 2 h \d{2} m$/);
+    await expect(sheep.locator(".pool-status-after")).toHaveText(/^resets in 2 h \d{2} m$/);
     await expect(sheep.locator('[data-window="five_hour"] .usage-value')).toHaveText("<1% left");
     // Fiction has no numbers yet: no rows, and no "No numbers yet" either.
     await expect(row(page, "lab-mac", "Fiction").locator(".usage-win")).toHaveCount(0);
