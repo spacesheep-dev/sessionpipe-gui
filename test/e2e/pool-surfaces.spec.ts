@@ -94,6 +94,19 @@ test("New session on lab-mac: Claude Code reads the pool, the other agents their
   const opt = (name: string) => page.locator(".sel-opt", { hasText: name });
   const claude = opt("Claude Code");
   await expect(claude.locator(".sel-opt-detail")).toHaveText(/^3 accounts, 2 with room · Misha(, .+, resets in .+)?$/);
+  // The line wraps like a caption (no time alone on the last line), and an account's
+  // email, which has no break in it, folds inside the list instead of running past it.
+  const detail = claude.locator(".sel-opt-detail");
+  await expect(detail).toHaveCSS("text-wrap", "pretty");
+  expect(
+    await detail.evaluate((d) => {
+      const was = d.textContent;
+      d.textContent = (was ?? "").replace(/· [^,]+/, "· firstname.lastname.longer@examplecompany.com");
+      const fits = d.scrollWidth <= d.clientWidth;
+      d.textContent = was;
+      return fits;
+    }),
+  ).toBe(true);
   // Misha's own numbers come from the demo's status line, which moves; the shape holds.
   const hint = claude.locator(".sel-opt-hint");
   if (await hint.count()) await expect(hint).toHaveText(/^((<1|\d+)% left|None left|\d+% over|Reset)$/);
