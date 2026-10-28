@@ -609,9 +609,9 @@ function ErrorMark({ s }: { s: SessionSummary }) {
 }
 
 /** A session set to Never (its own "Notify me", or a parent's): a small bell with a slash
- *  before the time. The other levels draw nothing. A child row (`under` its parent) draws
- *  it only when the parent doesn't. It reads the level itself, so a row re-renders only
- *  when that changes. */
+ *  before the time, the Inbox bell's drawing. The other levels draw nothing. A child row
+ *  (`under` its parent) draws it only when the parent doesn't. It reads the level itself,
+ *  so a row re-renders only when that changes. */
 function NotifyOff({ s, under = false }: { s: SessionSummary; under?: boolean }) {
   const store = useStore();
   const read = () => showsNever(s, store.get().marks, store.get().sessions, under);
@@ -619,15 +619,20 @@ function NotifyOff({ s, under = false }: { s: SessionSummary; under?: boolean })
   if (!off) return null;
   return (
     <span className="card-muted" role="img" aria-label="Notifications off" title="Notifications off">
-      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-        <path
-          d="M5.1 3.9A3.5 3.5 0 0 1 11.5 6v3.4M4.5 6.6V10L3 12h7.3M6.6 14h2.8M2.5 2.5l11 11"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
+      <svg
+        viewBox="0 0 20 20"
+        width="12"
+        height="12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M5.5 13.5V9a4.5 4.5 0 0 1 9 0v4.5l1.2 1.5H4.3z" />
+        <path d="M8.3 17a1.8 1.8 0 0 0 3.4 0" />
+        <path d="M3.5 3.5l13 13" />
       </svg>
     </span>
   );
