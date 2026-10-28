@@ -158,7 +158,7 @@ ping-a-human Telegram plugin (off until you turn it on). The board runs on port 
 1. **Run `sessionpipe-gui`.** It prints where to open it, and a QR code for your phone:
 
    ```
-   sessionpipe-gui 0.4.1 · ~/.local/state/sessionpipe-gui
+   sessionpipe-gui 0.5.0 · ~/.local/state/sessionpipe-gui
 
      setup   http://localhost:7373/setup   (first run: your sessions, https, pairing, your phone)
      local   http://localhost:7373
@@ -302,8 +302,11 @@ or from a notification. It signs with a key in the Mac's Secure Enclave, unlocke
 ID once a day. Set it up once with **Sign with Touch ID** (on Machines, or Settings › App):
 a browser or phone the machine already trusts approves the Mac with its passkey. This needs
 a receiver and a machine that take device keys (sessionpipe 0.10); where either is older,
-or on Linux, the app says which and you send from a browser, where your passkey signs. An
-iPhone build runs in the simulator and is not released.
+or on Linux, the app says which and you send from a browser, where your passkey signs.
+
+The phone app, for iPhone and Android, is the same UI again: it connects to your computer by
+its address or phone link and shows the board and sessions live. It is in testing (iPhone
+builds go to TestFlight for the team's testers) and not in the stores yet.
 
 ## How it works
 
