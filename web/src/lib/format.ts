@@ -255,10 +255,12 @@ function span(from: string, to: string): string {
 }
 
 /** An attention's message without the tool name it sometimes starts with ("Bash rm -rf
- *  …"), for places that already show the tool beside it. */
+ *  …"), for places that already show the tool beside it; nothing when the message is only
+ *  that name (a plan review's is "ExitPlanMode", beside "Plan"). */
 export function attentionMessage(a: { message?: string; tool?: string }): string | undefined {
   const m = a.message;
   if (!m || !a.tool) return m;
+  if (m.trim() === a.tool) return undefined;
   const t = a.tool.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const rest = m.replace(new RegExp(`^${t}(:\\s*|\\s+)`), "");
   return rest || m;

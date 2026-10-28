@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { isPlanReview, toolLabel } from "./format";
+import { attentionMessage, isPlanReview, toolLabel } from "./format";
 
 describe("toolLabel", () => {
   it("reads an MCP tool as server · tool", () => {
@@ -35,6 +35,18 @@ describe("isPlanReview", () => {
     expect(isPlanReview({ kind: "permission", tool: "update_plan" })).toBe(false);
     expect(isPlanReview({ kind: "question", tool: "ExitPlanMode" })).toBe(false);
     expect(isPlanReview({ kind: "permission" })).toBe(false);
+  });
+});
+
+describe("attentionMessage", () => {
+  it("drops the tool name the message starts with", () => {
+    expect(attentionMessage({ tool: "Bash", message: "Bash: rm -rf dist" })).toBe("rm -rf dist");
+    expect(attentionMessage({ tool: "Bash", message: "Bash rm -rf dist" })).toBe("rm -rf dist");
+    expect(attentionMessage({ message: "Allow this?" })).toBe("Allow this?");
+  });
+  it("says nothing when the message is only the tool's name", () => {
+    expect(attentionMessage({ tool: "ExitPlanMode", message: "ExitPlanMode" })).toBeUndefined();
+    expect(attentionMessage({ tool: "Bash", message: "Bash " })).toBeUndefined();
   });
 });
 

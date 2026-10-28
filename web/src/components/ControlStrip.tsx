@@ -302,7 +302,7 @@ function PlanText({ a, plan }: { a: Attention; plan: unknown }) {
   }, [text, whole]);
   if (!text) {
     const msg = attentionMessage(a);
-    return msg && msg !== a.tool ? <p className="ctl-answer-msg ctl-plan-msg">{msg}</p> : null;
+    return msg ? <p className="ctl-answer-msg ctl-plan-msg">{msg}</p> : null;
   }
   return (
     <div className={whole ? "ctl-plan is-whole" : "ctl-plan"} ref={box}>

@@ -601,7 +601,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
                   in <Hit text={title} at={m?.positions[1]} />
                 </>
               ),
-              detail: a.message ? a.message : undefined,
+              detail: attentionMessage(a),
               at: a.at,
               session: s,
               score: (m?.score ?? 0) + 2,

@@ -306,7 +306,7 @@ export const SessionCard = memo(function SessionCard({
               <span className={`card-attn ${literalAsk(attnTool) ? "mono" : ""}`}>
                 {attention.message && showTools ? (
                   attnTool ? (
-                    <Redacted text={oneLine(attentionMessage(attention) || attention.message, 240)} />
+                    <Redacted text={oneLine(attentionMessage(attention) ?? "", 240)} />
                   ) : (
                     <Inline text={oneLine(attention.message, 240)} />
                   )

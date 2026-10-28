@@ -276,6 +276,7 @@ function InboxRow({
     { title: () => sessionMenuTitle(s), subtitle: () => sessionMenuSubtitle(s) },
   );
   const kind = ATTENTION_LABEL[a.kind] ?? a.kind;
+  const msg = attentionMessage(a);
   // A phone's swipes: trailing hides this prompt here (Undo), leading labels its session.
   // Allow and Deny are never a swipe: they are signed, and final.
   useSwipe(ref, {
@@ -314,9 +315,9 @@ function InboxRow({
         <span className="inbox-what">
           <span className={`inbox-kind ${a.tool ? "sr-only" : ""}`}>{kind}</span>
           {a.tool && <code className="inbox-tool">{toolLabel(a.tool)}</code>}
-          {a.message ? (
+          {msg ? (
             <span className={`inbox-msg ${a.kind === "permission" && literalAsk(a.tool) ? "mono" : ""}`}>
-              <Redacted text={oneLine(attentionMessage(a) ?? a.message, 200)} />
+              <Redacted text={oneLine(msg, 200)} />
             </span>
           ) : !a.tool ? (
             <span className="inbox-msg">{row.answerable ? "a permission request" : "waiting for you"}</span>
