@@ -83,6 +83,10 @@ const rowHidden = (h: Readonly<Hidden>, s: Row) => isHidden(h, s.key, s.stateSin
 /** Whether a session is hidden right now (a menu's builder, outside render). */
 export const hiddenNow = (s: Row): boolean => rowHidden(read(), s);
 
+/** Whether Hide until it needs you is offered: not while the session needs you, which
+ *  shows it anyway, so the row would stay where it is under a toast saying it hid. */
+export const canHideUntilNeeded = (s: Pick<SessionSummary, "state">): boolean => s.state !== "needs_you";
+
 /** The sessions a list keeps in its Hidden group: those its filters pass that are still
  *  hidden, in the list's own order, less those it still `holds` in their old place (a
  *  prompt answered under the pointer stays put until the pointer leaves, not in both). */

@@ -57,7 +57,17 @@ import {
 } from "../data/hooks";
 import { agentMatches } from "../lib/agents";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
-import { hiddenNow, hiddenRows, hide, hideUntilNeeded, inItsPlace, isHidden, unhide, useHidden } from "../lib/hidden";
+import {
+  canHideUntilNeeded,
+  hiddenNow,
+  hiddenRows,
+  hide,
+  hideUntilNeeded,
+  inItsPlace,
+  isHidden,
+  unhide,
+  useHidden,
+} from "../lib/hidden";
 import { focusSearch, useListNav } from "../lib/keys";
 import { type LabelFilter, labelName, labelPasses, labelQuery, requestLabelRename } from "../lib/labels";
 import { type Held, useFlip, useHeldOrder, useListHold, usePresence } from "../lib/motion";
@@ -632,7 +642,7 @@ function useHideKeys(row: () => SessionSummary | undefined, leave: () => void): 
   });
   useShortcut("list.hideUntil", () => {
     const s = row();
-    if (!s || hiddenNow(s)) return false;
+    if (!s || hiddenNow(s) || !canHideUntilNeeded(s)) return false;
     leave();
     hideUntilNeeded(s.key, { title: sessionTitle(s), session: s.key });
   });

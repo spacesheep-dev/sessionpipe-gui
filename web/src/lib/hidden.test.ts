@@ -6,7 +6,7 @@
 // cursor in its place.
 import type { SessionSummary } from "@shared/api";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { hiddenCount, hiddenRows, inItsPlace, isHidden } from "./hidden";
+import { canHideUntilNeeded, hiddenCount, hiddenRows, inItsPlace, isHidden } from "./hidden";
 
 const T0 = "2026-10-28T10:00:00.000Z";
 const T1 = "2026-10-28T10:30:00.000Z";
@@ -29,6 +29,11 @@ describe("isHidden", () => {
     expect(isHidden(h, "a", T1)).toBe(true);
     expect(isHidden(h, "a", T1, false)).toBe(true);
     expect(isHidden(h, "a", T1, true)).toBe(false);
+  });
+
+  it("isn't offered on a session that needs you now, which it would leave in place", () => {
+    expect(canHideUntilNeeded({ state: "needs_you" })).toBe(false);
+    for (const state of ["working", "idle", "done"] as const) expect(canHideUntilNeeded({ state })).toBe(true);
   });
 });
 

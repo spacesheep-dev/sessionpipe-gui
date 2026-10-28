@@ -13,7 +13,7 @@ import type { Store } from "../data/store";
 import { agentGlyph, agentLabel, openAgent } from "./agents";
 import { copyText } from "./clipboard";
 import { harnessMark, repoBranch, sessionTitle } from "./format";
-import { hiddenNow, hide, hideUntilNeeded, unhide } from "./hidden";
+import { canHideUntilNeeded, hiddenNow, hide, hideUntilNeeded, unhide } from "./hidden";
 import { labelMenu } from "./labels";
 import { receiverOrigin } from "./net";
 import { hrefFor, navigate, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath } from "./router";
@@ -161,7 +161,8 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
         run: () => hide(s.key, s.stateSince, { title: sessionTitle(s), session: s.key }),
       },
     hideHere &&
-      !hidden && {
+      !hidden &&
+      canHideUntilNeeded(s) && {
         label: "Hide until it needs you",
         action: onBoard ? "list.hideUntil" : undefined,
         run: () => hideUntilNeeded(s.key, { title: sessionTitle(s), session: s.key }),
