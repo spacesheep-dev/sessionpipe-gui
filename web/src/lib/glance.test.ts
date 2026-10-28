@@ -71,6 +71,24 @@ describe("glanceLines", () => {
     ]);
     expect((out[1] as { current?: MachinePoolAccount }).current?.label).toBe("Work");
   });
+  it("two machines serving with the same account are one line, the first machine's by name", () => {
+    const lab = machine("lab-mac", { on: true, harness: "claude-code", accounts: [misha, fiction] });
+    const mini = machine("mini-mac", { on: true, harness: "claude-code", accounts: [misha, sheep] });
+    const out = glanceLines(accounts, [mini, lab], limits);
+    expect(out.map((l) => ("kind" in l ? l.key : l.entry.accountId))).toEqual(["pool:lab-mac", "d"]);
+    // A machine serving with another account keeps its line.
+    const other = machine("mini-mac", {
+      on: true,
+      harness: "claude-code",
+      accounts: [{ ...misha, current: false }, acc({ id: "w", label: "Work", current: true })],
+    });
+    expect(glanceLines(accounts, [other, lab], limits).map((l) => ("kind" in l ? l.key : l.entry.accountId))).toEqual([
+      "pool:lab-mac",
+      "pool:mini-mac",
+      "c",
+      "d",
+    ]);
+  });
   it("a pool with every account out has a line with no current account; an empty pool has none", () => {
     const lab = machine("lab-mac", {
       on: true,

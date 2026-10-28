@@ -29,12 +29,20 @@ export function glanceLines<T extends { entry?: Pick<LimitsEntry, "harness" | "a
   limits: readonly LimitsEntry[],
 ): (T | PoolLine)[] {
   const pooled = new Set<string>();
+  const drawn = new Set<string>();
   const lines: PoolLine[] = [];
   for (const m of [...machines].sort((a, b) => a.name.localeCompare(b.name))) {
     const pool = m.control?.pool;
     if (!pooling(m) || !pool || pool.accounts.length === 0) continue;
     for (const a of pool.accounts) pooled.add(`${pool.harness} ${a.id}`);
     const current = pool.accounts.find((a) => a.current && hasRoom(a));
+    // Two machines serving with the same account are one line, the first machine's by
+    // name (UX-SPEC §7.3): the account appears once, not "Misha · in use" twice.
+    if (current) {
+      const k = `${pool.harness} ${current.id}`;
+      if (drawn.has(k)) continue;
+      drawn.add(k);
+    }
     const entry = current ? limits.find((e) => e.harness === pool.harness && e.accountId === current.id) : undefined;
     lines.push({
       kind: "pool",
