@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Since you looked: which rows are unread against the person's marks.
-import type { Marks, SessionSummary } from "@shared/api";
-import { describe, expect, it } from "vitest";
-import { isUnread, readsUnread } from "./marks";
+// Since you looked: which rows are unread against the person's marks, and how seen marks go out.
+import type { Marks, MarksPatch, SessionSummary } from "@shared/api";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Store } from "../data/store";
+import { isUnread, markSeen, readsUnread, SEND_EVERY_MS, setUnread } from "./marks";
 
 const SINCE = "2026-10-28T10:00:00.000Z";
 const marks = (m: Partial<Marks> = {}): Marks => ({ rev: 1, since: SINCE, read: {}, unread: {}, ...m });
@@ -50,5 +51,44 @@ describe("isUnread", () => {
 
   it("with no since (an older server) nothing is unread", () => {
     expect(isUnread(row(), { rev: 0, read: {}, unread: { "claude-code:a": true } })).toBe(false);
+  });
+});
+
+describe("the seen queue", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("sends at most once every 2 s, keys merged, and a manual mark takes back what was queued", async () => {
+    vi.useFakeTimers();
+    const sent: MarksPatch[] = [];
+    const m = marks({ unread: { "claude-code:c": true } });
+    const store = {
+      get: () => ({ marks: m }),
+      patchMarks: async (p: MarksPatch) => {
+        sent.push(structuredClone(p));
+        return m;
+      },
+    } as unknown as Store;
+    const at = (min: number) => `2026-10-28T10:${String(min).padStart(2, "0")}:00.000Z`;
+
+    markSeen(store, "claude-code:a", at(1), true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent).toEqual([{ read: { "claude-code:a": at(1) } }]);
+
+    markSeen(store, "claude-code:b", at(2), true);
+    markSeen(store, "claude-code:c", undefined, true);
+    // Already read up to it, and no manual unread: nothing to send.
+    markSeen(store, "claude-code:e", "2026-10-28T09:00:00.000Z", true);
+    await vi.advanceTimersByTimeAsync(SEND_EVERY_MS - 1);
+    expect(sent).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sent[1]).toEqual({ read: { "claude-code:b": at(2) }, unread: { "claude-code:c": null } });
+
+    markSeen(store, "claude-code:d", at(3), true);
+    setUnread(store, [row({ key: "claude-code:d" })], true);
+    expect(sent[2]).toEqual({ unread: { "claude-code:d": true } });
+    await vi.advanceTimersByTimeAsync(SEND_EVERY_MS);
+    expect(sent).toHaveLength(3);
   });
 });
