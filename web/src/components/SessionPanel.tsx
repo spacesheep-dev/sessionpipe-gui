@@ -151,8 +151,6 @@ export function SessionPanel({ phone }: { phone: boolean }) {
   const { tabs, active } = useSplit();
   useHistoryTitles();
   const activeKey = tabs[active] ?? null;
-  // The active tab is on screen beside the page: it is seen as the page would be.
-  useSeen(activeKey ? parseTab(activeKey).session : null);
   const width = useSplitWidth();
   const sessions = useAppState().sessions;
   /** Summaries the views learned, for tabs whose session is not in the snapshot. */
@@ -189,6 +187,9 @@ export function SessionPanel({ phone }: { phone: boolean }) {
   const here = usePanelHere();
   const wasOpen = useRef(tabs.length > 0 && here);
   const open = tabs.length > 0 && here;
+  // The active tab is on screen beside the page: it is seen as the page would be. On a
+  // page the panel steps aside for, its tabs stay in the URL but nothing is on screen.
+  useSeen(open && activeKey ? parseTab(activeKey).session : null);
   const started = useStartTitles();
 
   const panelRect = useCallback(
