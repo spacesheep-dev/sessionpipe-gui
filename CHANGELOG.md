@@ -23,6 +23,7 @@ All notable changes to `sessionpipe-gui`. The format follows
   and on a phone. When there's more than a screen of it, the session opens with the line
   a third of the way down instead of at the bottom. Your own turns at the terminal never
   count, the line doesn't move while the page is open, and it's gone when you come back.
+  A session you haven't opened yet opens at the bottom as before.
 
 ## [0.4.1] - 2026-10-27
 
