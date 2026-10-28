@@ -101,6 +101,11 @@ export const hiddenCount = <S extends Row>(
   holds?: ReadonlySet<string>,
 ) => hiddenRows(h, sessions, passes, holds).length;
 
+/** Where a list's cursor goes when e hides or unhides the row at `i`: to the row that takes
+ *  its place (the next one, or at the end the one before), as Mail's archive does, so a
+ *  second e moves on instead of following the row into Hidden and back. */
+export const inItsPlace = <T>(list: readonly T[], i: number): T | undefined => list[i + 1] ?? list[i - 1];
+
 export function unhide(key: string): void {
   const h = read();
   if (h[key] === undefined) return;

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Hide on this device: a plain Hide comes back with the next state, Hide until it needs
 // you comes back only while the session needs you, entries stored before either keep
-// reading, another tab's Hide is followed, Undo puts back what a Hide replaced, and the
-// board's Hidden group counts what is still hidden under its filters.
+// reading, another tab's Hide is followed, Undo puts back what a Hide replaced, the
+// board's Hidden group counts what is still hidden under its filters, and e leaves the
+// cursor in its place.
 import type { SessionSummary } from "@shared/api";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { hiddenCount, hiddenRows, isHidden } from "./hidden";
+import { hiddenCount, hiddenRows, inItsPlace, isHidden } from "./hidden";
 
 const T0 = "2026-10-28T10:00:00.000Z";
 const T1 = "2026-10-28T10:30:00.000Z";
@@ -124,5 +125,27 @@ describe("hiddenCount", () => {
     const holds = new Set(["codex:c"]);
     expect(hiddenRows(h, sessions, () => true, holds).map((s) => s.key)).toEqual(["claude-code:a", "gemini:e"]);
     expect(hiddenCount(h, sessions, () => true, holds)).toBe(2);
+  });
+});
+
+describe("inItsPlace", () => {
+  it("keeps the cursor at its index when e moves its row into Hidden, so e goes down the list", () => {
+    // the board's rows with Hidden open: Working a, b, c, then Hidden h
+    let rows = ["a", "b", "c", "h"];
+    let cursor = 0;
+    for (const hid of ["a", "b"]) {
+      expect(rows[cursor]).toBe(hid);
+      const next = inItsPlace(rows, cursor)!;
+      rows = [...rows.filter((r) => r !== hid), hid];
+      cursor = rows.indexOf(next);
+    }
+    expect(cursor).toBe(0);
+    expect(rows).toEqual(["c", "h", "a", "b"]);
+  });
+
+  it("takes the row before at the end, and nothing when the row was the only one", () => {
+    // Unhide on the last hidden row: it goes back up, the cursor stays at the bottom
+    expect(inItsPlace(["c", "a", "b"], 2)).toBe("a");
+    expect(inItsPlace(["a"], 0)).toBeUndefined();
   });
 });

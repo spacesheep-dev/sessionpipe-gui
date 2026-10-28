@@ -57,7 +57,7 @@ import {
 } from "../data/hooks";
 import { agentMatches } from "../lib/agents";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
-import { hiddenNow, hiddenRows, hide, hideUntilNeeded, isHidden, unhide, useHidden } from "../lib/hidden";
+import { hiddenNow, hiddenRows, hide, hideUntilNeeded, inItsPlace, isHidden, unhide, useHidden } from "../lib/hidden";
 import { focusSearch, useListNav } from "../lib/keys";
 import { type LabelFilter, labelName, labelPasses, labelQuery, requestLabelRename } from "../lib/labels";
 import { type Held, useFlip, useHeldOrder, useListHold, usePresence } from "../lib/motion";
@@ -346,7 +346,7 @@ export function Board() {
     clear();
     return true;
   };
-  const { cursor } = useListNav(hrefs, true, keys, {
+  const { cursor, follow } = useListNav(hrefs, true, keys, {
     peek: "board.peek",
     clear: () => clearRef.current(),
     store,
@@ -354,8 +354,11 @@ export function Board() {
   const cursorKey = ordered[cursor]?.key;
   // ⌥⌘1 … ⌥⌘7 label the row under the cursor, ⌥⌘0 clears it.
   useLabelKeys(() => (cursorKey ? [cursorKey] : []));
-  // e hides or unhides it, ⇧E hides it until it needs you.
-  useHideKeys(() => ordered[cursor]?.item);
+  // e hides or unhides it, ⇧E hides it until it needs you; the cursor keeps its place.
+  useHideKeys(
+    () => ordered[cursor]?.item,
+    () => follow(inItsPlace(hrefs, cursor)),
+  );
   const hiddenByLens = useMemo(() => ordered.reduce((n, h) => n + cardHides(h.item, lens), 0), [ordered, lens]);
 
   const view = () => viewItems({ filtered, clear, showDone, setShowDone, beside, lens, simple, counts });
@@ -617,17 +620,20 @@ export function Board() {
 }
 
 /** e hides the session `row()` names (the row under a list's cursor) or unhides it, ⇧E
- *  hides it until it needs you; a key with nothing to hide passes. */
-function useHideKeys(row: () => SessionSummary | undefined): void {
+ *  hides it until it needs you; a key with nothing to hide passes. `leave()` runs first,
+ *  so the cursor can stay where the row was. */
+function useHideKeys(row: () => SessionSummary | undefined, leave: () => void): void {
   useShortcut("list.hide", () => {
     const s = row();
     if (!s) return false;
+    leave();
     if (hiddenNow(s)) unhide(s.key);
     else hide(s.key, s.stateSince, { title: sessionTitle(s), session: s.key });
   });
   useShortcut("list.hideUntil", () => {
     const s = row();
     if (!s || hiddenNow(s)) return false;
+    leave();
     hideUntilNeeded(s.key, { title: sessionTitle(s), session: s.key });
   });
 }
