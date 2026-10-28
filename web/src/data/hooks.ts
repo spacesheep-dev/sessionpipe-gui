@@ -139,6 +139,10 @@ export function useSeen(key: SessionKey | null): void {
   const store = useStore();
   const readNews = useCallback(() => (key ? store.get().sessions.get(key)?.newsAt : undefined), [store, key]);
   const newsAt = useSyncExternalStore(store.subscribe, readNews, readNews);
+  // Before the first snapshot there are no marks to go by (no `since`): a second spent then
+  // would spend the arrival too, so the second starts once they come.
+  const readReady = useCallback(() => !!store.get().marks.since, [store]);
+  const ready = useSyncExternalStore(store.subscribe, readReady, readReady);
   const [here, setHere] = useState(looking);
   useEffect(() => {
     const update = () => setHere(looking());
@@ -162,13 +166,13 @@ export function useSeen(key: SessionKey | null): void {
   }
   if (!here) arrived.current = true;
   useEffect(() => {
-    if (!key || !here) return;
+    if (!key || !here || !ready) return;
     const t = window.setTimeout(() => {
       markSeen(store, key, newsAt, arrived.current);
       arrived.current = false;
     }, SEEN_AFTER_MS);
     return () => window.clearTimeout(t);
-  }, [store, key, here, newsAt]);
+  }, [store, key, here, ready, newsAt]);
 }
 
 /** `u` marks what a list's cursor is on read when it is unread, else unread. */
