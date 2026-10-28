@@ -75,16 +75,22 @@ const rowHidden = (h: Readonly<Hidden>, s: Row) => isHidden(h, s.key, s.stateSin
 export const hiddenNow = (s: Row): boolean => rowHidden(read(), s);
 
 /** The sessions a list keeps in its Hidden group: those its filters pass that are still
- *  hidden, in the list's own order. */
+ *  hidden, in the list's own order, less those it still `holds` in their old place (a
+ *  prompt answered under the pointer stays put until the pointer leaves, not in both). */
 export const hiddenRows = <S extends Row>(
   h: Readonly<Hidden>,
   sessions: readonly S[],
   passes: (s: S) => boolean,
-): S[] => sessions.filter((s) => passes(s) && rowHidden(h, s));
+  holds: ReadonlySet<string> = new Set(),
+): S[] => sessions.filter((s) => passes(s) && rowHidden(h, s) && !holds.has(s.key));
 
 /** The Hidden group's count. */
-export const hiddenCount = <S extends Row>(h: Readonly<Hidden>, sessions: readonly S[], passes: (s: S) => boolean) =>
-  hiddenRows(h, sessions, passes).length;
+export const hiddenCount = <S extends Row>(
+  h: Readonly<Hidden>,
+  sessions: readonly S[],
+  passes: (s: S) => boolean,
+  holds?: ReadonlySet<string>,
+) => hiddenRows(h, sessions, passes, holds).length;
 
 export function unhide(key: string): void {
   const h = read();

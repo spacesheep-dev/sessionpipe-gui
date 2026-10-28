@@ -268,8 +268,6 @@ export function Board() {
     () => roots.filter((s) => passes(s) && !isHidden(hidden, s.key, s.stateSince, s.state === "needs_you")),
     [roots, passes, hidden],
   );
-  // The Hidden group, under the same filters (lib/hidden.ts).
-  const hiddenList = useMemo(() => hiddenRows(hidden, roots, passes), [roots, passes, hidden]);
 
   // Held still under the hand: rows keep their place and section; new ones wait.
   const hold = useListHold(listRef, { idle: false });
@@ -281,7 +279,6 @@ export function Board() {
   // A row that leaves the Hidden group (Unhide, or it needs you) takes its place at once.
   const wasHidden = useRef<Set<string>>(new Set());
   for (const h of heldAll) if (wasHidden.current.has(h.key)) known.current.add(h.key);
-  wasHidden.current = new Set(hiddenList.map((s) => s.key));
   // A row the person hid leaves at once, held or not: that was their own hand.
   const held = hold
     ? heldAll.filter(
@@ -290,6 +287,17 @@ export function Board() {
           !(h.gone && isHidden(hidden, h.key, h.item.stateSince, h.item.state === "needs_you")),
       )
     : heldAll;
+  // The Hidden group, under the same filters (lib/hidden.ts), less a row still held in
+  // its old place (a prompt answered under the pointer), which joins it when the hold ends.
+  const holding = held
+    .filter((h) => h.gone)
+    .map((h) => h.key)
+    .join("\n");
+  const hiddenList = useMemo(
+    () => hiddenRows(hidden, roots, passes, new Set(holding.split("\n"))),
+    [roots, passes, hidden, holding],
+  );
+  wasHidden.current = new Set(hiddenList.map((s) => s.key));
   useFlip(listRef);
 
   const groups = useMemo(() => {

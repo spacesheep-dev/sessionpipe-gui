@@ -4,7 +4,7 @@
 // reading, and the board's Hidden group counts what is still hidden under its filters.
 import type { SessionSummary } from "@shared/api";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { hiddenCount, isHidden } from "./hidden";
+import { hiddenCount, hiddenRows, isHidden } from "./hidden";
 
 const T0 = "2026-10-28T10:00:00.000Z";
 const T1 = "2026-10-28T10:30:00.000Z";
@@ -72,5 +72,12 @@ describe("hiddenCount", () => {
     expect(hiddenCount(h, sessions, (s) => s.machine === "mac")).toBe(2);
     expect(hiddenCount(h, sessions, (s) => s.machine === "linux")).toBe(1);
     expect(hiddenCount({}, sessions, () => true)).toBe(0);
+  });
+
+  it("leaves out a row the list still holds in its old place, so it isn't shown twice", () => {
+    // codex:c's prompt was just answered under the pointer: held in Needs you until it leaves
+    const holds = new Set(["codex:c"]);
+    expect(hiddenRows(h, sessions, () => true, holds).map((s) => s.key)).toEqual(["claude-code:a", "gemini:e"]);
+    expect(hiddenCount(h, sessions, () => true, holds)).toBe(2);
   });
 });
