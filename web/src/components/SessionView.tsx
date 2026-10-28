@@ -78,8 +78,16 @@ export function answerItems(root: HTMLElement | null, s: SessionSummary, attenti
   const why = allow.disabled
     ? row.querySelector(".ctl-answer-note")?.textContent?.trim() || "This prompt cannot be answered from here"
     : undefined;
+  // Deny can be off on its own (Keep planning with a note over 2,000 characters): the
+  // item says so rather than pressing a button that cannot go.
+  const denyWhy = why ?? (deny.disabled ? deny.getAttribute("aria-description") || true : undefined);
   return [
     { label: plan ? "Approve plan" : `Allow${name}`, action: "session.allow", disabled: why, run: () => allow.click() },
-    { label: plan ? "Keep planning" : `Deny${name}`, action: "session.deny", disabled: why, run: () => deny.click() },
+    {
+      label: plan ? "Keep planning" : `Deny${name}`,
+      action: "session.deny",
+      disabled: denyWhy,
+      run: () => deny.click(),
+    },
   ];
 }
