@@ -8,12 +8,15 @@
 import type {
   ControlActivity,
   HarnessStartOptions,
+  LimitsEntry,
   MachineControl,
   RunLevel,
   StartFile,
   StartPermission,
 } from "@shared/api";
 import { useSyncExternalStore } from "react";
+import { accountFor, agentWords } from "../lib/limits";
+import { poolPickerWords } from "../lib/pool";
 import { expandHome, machineHome, typedFolder } from "./folders";
 
 /** What an entry point knows: "here" is a session's machine, agent and folder. */
@@ -285,4 +288,21 @@ export function fixedPermission(
   // the machine refuses as in safe (CONTROL.md §6); its own settings decide the rest.
   if (c?.mode === "inherit") return "Its own settings; what it asks is refused";
   return "Set at the machine";
+}
+
+/** What an agent's account has left on a machine, for its row in the Agent menu: on a
+ *  machine whose hello pools that harness with the switch on and an account enabled, the
+ *  pool's line (UX-SPEC §6: a start there goes to the current account, so its tightest
+ *  window and the room count); else the machine's own login as before (`accountFor`). */
+export function agentLeft(
+  harness: string,
+  machine: string,
+  c: MachineControl | undefined,
+  limits: readonly LimitsEntry[],
+  now: number,
+): { hint?: string; detail?: string; out?: boolean } {
+  const pool = c?.pool;
+  if (pool?.on && pool.harness === harness && pool.accounts.some((a) => a.enabled))
+    return poolPickerWords(pool, (id) => limits.find((e) => e.harness === harness && e.accountId === id), now);
+  return agentWords(accountFor(harness, machine, c?.accounts, limits), now);
 }

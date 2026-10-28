@@ -3,7 +3,8 @@
 // Where it runs (machine, agent, folder), what it should do (the message and its files),
 // then the options the machine's hello advertises (permission, model) and nothing it does
 // not. Each agent says how much its account has left on the chosen machine (lib/limits.ts
-// accountFor), and nothing for a harness with no numbers; it orders, disables or picks none. It signs one CONTROL.md §6 `start` with the day grant and hands it to the machine's
+// accountFor; the pool's current account and count where the machine pools them), and
+// nothing for a harness with no numbers; it orders, disables or picks none. It signs one CONTROL.md §6 `start` with the day grant and hands it to the machine's
 // daemon through POST /api/ui/control/send, then opens the new session's page, which fills
 // in as the agent starts (Starting.tsx). The GUI runs nothing itself: the machine is the
 // gate, and a choice it did not advertise is never sent (a daemon that predates a field
@@ -32,7 +33,6 @@ import { useAppState, useLimits, useMachines } from "../data/hooks";
 import { useFocusTrap } from "../lib/focus";
 import "../lib/acp";
 import { bytes, harnessMark } from "../lib/format";
-import { accountFor, agentWords } from "../lib/limits";
 import { reducedMotion, tokenMs, useSheetDrag } from "../lib/motion";
 import { navigate, sessionPath } from "../lib/router";
 import { hintFor, matches, useShortcut } from "../lib/shortcuts";
@@ -43,6 +43,7 @@ import { sendCommand } from "./command";
 import { folderChoices, machineHome, tildify, typedFolder } from "./folders";
 import { useGrant, useRpId } from "./hooks";
 import {
+  agentLeft,
   closeNewSession,
   type Draft,
   fixedPermission,
@@ -511,10 +512,11 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       disabled: !!b,
     };
   });
-  // What each agent's account has left here: its tightest window, or each account's by name.
+  // What each agent's account has left here: its tightest window, or each account's by
+  // name; on a machine that pools the agent's accounts, the pool's current one and the count.
   const limits = useLimits();
   const now = useNow("coarse");
-  const left = (h: string) => (machine ? agentWords(accountFor(h, machine, c?.accounts, limits), now) : {});
+  const left = (h: string) => (machine ? agentLeft(h, machine, c, limits, now) : {});
   const agentOptions: SelectOption<string>[] = harnesses.map((h) => {
     const w = left(h);
     return {
