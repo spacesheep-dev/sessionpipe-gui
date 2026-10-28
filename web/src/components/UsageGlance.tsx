@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // The sidebar's glance at usage limits, after bb's footer: under a "Usage" heading (the
-// way to the page), one line per account in the Usage page's order, at most four: its name,
-// and at the right its tightest window's short name and what is left of it, with a 2 px bar
-// of that under them. When none is left the reset takes the bar's place; a report older
-// than 15 minutes says how old there instead. The line's tooltip has every window; a click
-// opens the account on /usage. Drawn in the wide sidebar only, while there are numbers and
-// this device has not hidden it (Settings › General). The accounts as both surfaces list
-// them, and their menu, live here too.
+// way to the page), one line per account in the Usage page's order, at most four (fewer in
+// a short window, so the navigation above never scrolls for it): its name, and at the
+// right its tightest window's short name and what is left of it, with a 2 px bar of that
+// under them. When none is left the reset takes the bar's place; a report older than 15
+// minutes says how old there instead. The line's tooltip has every window; a click opens
+// the account on /usage. Drawn in the wide sidebar only, while there are numbers and this
+// device has not hidden it (Settings › General). The accounts as both surfaces list them,
+// and their menu, live here too.
 import type { LimitsEntry, MachineSummary } from "@shared/api";
 import { type MouseEvent, useMemo } from "react";
 import { openNewSession } from "../control/newSessionState";
@@ -33,6 +34,7 @@ import { setSettings, useAppSettings } from "../lib/settings";
 import { useNow } from "../lib/time";
 import { HarnessGlyph } from "./bits";
 import { type MenuList, useContextMenu } from "./ContextMenu";
+import { useMedia } from "./Shell";
 
 /** One account as Usage lists it: its numbers, or (on the page only) a Claude Code
  *  account known here that sent none. */
@@ -108,8 +110,14 @@ export function usageItems(
   ];
 }
 
-/** Lines past this go to "2 more". */
-const LINES = 4;
+/** Lines past four go to "2 more"; past two in a window under 760 px tall, and in one
+ *  under 640 there is no block, so it gives way before the navigation would scroll
+ *  (Advanced mode's links take 375 px, four lines 244, the rail's head and foot 93). */
+function useLines(): number {
+  const tall = useMedia("(min-height: 760px)");
+  const short = !useMedia("(min-height: 640px)");
+  return tall ? 4 : short ? 0 : 2;
+}
 
 export function UsageGlance({ here }: { here: boolean }) {
   const on = useAppSettings().usageInSidebar;
@@ -117,15 +125,16 @@ export function UsageGlance({ here }: { here: boolean }) {
   const machines = useMachines();
   // Resets count down and passed ones turn to "Reset" without a new report.
   const now = useNow("coarse");
-  if (!on || accounts.length === 0) return null;
-  const more = accounts.length - LINES;
+  const lines = useLines();
+  if (!on || accounts.length === 0 || lines === 0) return null;
+  const more = accounts.length - lines;
   return (
     <section className="glance" aria-label="Usage">
       <Link to="/usage" className="glance-head" aria-current={here ? "page" : undefined}>
         Usage
       </Link>
       <ul className="glance-list">
-        {accounts.slice(0, LINES).map((a) => (
+        {accounts.slice(0, lines).map((a) => (
           <GlanceLine key={a.key} a={a} name={short.get(a.key) ?? a.title} now={now} machines={machines} />
         ))}
       </ul>

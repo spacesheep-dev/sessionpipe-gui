@@ -5,8 +5,8 @@
 // its ways in (g u, ⌘K), a report changing both without a reload, New session's agent hints
 // (two Claude Code accounts on lab-mac: no one number, each its own; Codex its own), the
 // menus (Copy usage, Forget these numbers, Hide usage in the sidebar), Enter starting a
-// session, a long name in the sidebar, and storage that throws. The phone's More ›
-// Usage is in mobile.spec.ts.
+// session, a long name in the sidebar, a short window, and storage that throws. The
+// phone's More › Usage is in mobile.spec.ts.
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
 import { CONTROL_BASE, seenSetupHere } from "./control-helpers.js";
@@ -285,6 +285,19 @@ test("a long name keeps its room in the sidebar; the window's name gives way", a
   expect(await cut(".glance-fig")).toBe(false);
   await page.request.post("/api/ui/limits/forget", { data: { key } });
   await expect(line).toHaveCount(0);
+});
+
+test("in a short window the sidebar's block gives way, never the navigation", async ({ page }) => {
+  const navScrolls = () => page.locator(".rail-nav").evaluate((el) => el.scrollHeight > el.clientHeight);
+  await page.setViewportSize({ width: 1440, height: 700 });
+  await openPage(page, "/");
+  await expect(page.locator(".glance-line")).toHaveCount(2);
+  await expect(page.locator(".glance-more")).toHaveText(/^\d+ more$/);
+  expect(await navScrolls()).toBe(false);
+  await page.setViewportSize({ width: 1440, height: 600 });
+  await expect(page.locator(".glance")).toHaveCount(0);
+  expect(await navScrolls()).toBe(false);
+  await expect(page.locator(".rail-nav [data-nav]").last()).toBeInViewport();
 });
 
 test("with storage that throws, the page and the sidebar still draw", async ({ page }) => {
