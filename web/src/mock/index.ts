@@ -13,7 +13,7 @@ import {
 import type { Transport } from "../data/transport";
 import { installPhoneMock } from "./phone";
 import { review } from "./review";
-import { World } from "./world";
+import { mockLimits, World } from "./world";
 
 const latency = <T>(v: T, ms = 60): Promise<T> => new Promise((r) => setTimeout(() => r(v), ms));
 
@@ -38,13 +38,14 @@ function mergeLabels(doc: Labels, p: LabelsPatch, known: (key: string) => boolea
 }
 
 export function createMockTransport(): Transport {
-  const world = new World({ empty: new URLSearchParams(location.search).get("empty") === "1" });
+  const empty = new URLSearchParams(location.search).get("empty") === "1";
+  const world = new World({ empty });
   (window as unknown as { __sessionpipeMock?: World }).__sessionpipeMock = world;
   installPhoneMock(new URLSearchParams(location.search), () => world.info());
   // Labels live beside the World, as they live beside the store on the server.
   let labels: Labels = { rev: 0, names: {}, sessions: {} };
-  // So do the usage limits.
-  let limits: LimitsEntry[] = [];
+  // So do the usage limits; the first-run board has none.
+  let limits: LimitsEntry[] = empty ? [] : mockLimits(Date.now());
   const handlers = new Set<(m: StreamMessage) => void>();
   let search: ReturnType<Transport["sessionSearch"]> | null = null;
   return {

@@ -63,6 +63,8 @@ describe("Simulation: a 10-minute run", () => {
       const a = events[i - 1] as ProtocolEvent;
       const b = events[i] as ProtocolEvent;
       if (a.type === "session.backfill" || b.type === "session.backfill") continue;
+      // The usage limits' earlier sessions are dated before the demo began (limitsScene).
+      if (Date.parse(a.time) < T0 || Date.parse(b.time) < T0) continue;
       expect(Date.parse(b.time)).toBeGreaterThanOrEqual(Date.parse(a.time));
       expect(b.id > a.id).toBe(true);
     }
@@ -663,6 +665,77 @@ describe("sessionpipe 0.10 scenes", () => {
     expect(s.machine).toBe("lab-mac");
     expect(events.some((e) => e.session.id === s.id && e.type === "session.started")).toBe(true);
     expect(s.text).toMatch(/^Run the integration suite/);
+  });
+});
+
+describe("usage limits", () => {
+  // As the runner does: the paired machine's hello names lab-mac's account first.
+  const sim = new Simulation({ seed: SEED, startAt: T0, speed: 1 });
+  const lab = sim.account(sim.v010Machine, "claude-code");
+  const events = sim.advance(TEN_MINUTES);
+  const reports = events.filter((e) => e.type === "limits.observed");
+  const ago = (e: ProtocolEvent) => T0 - Date.parse(e.time);
+  const windows = (e: ProtocolEvent) =>
+    (e.data.windows as { id: string; used_percent: number; resets_at?: string; window_minutes?: number }[]).map(
+      (w) =>
+        `${w.id} ${w.used_percent}${w.window_minutes ? ` /${w.window_minutes}` : ""}${w.resets_at ? ` ${(Date.parse(w.resets_at) - T0) / 60_000}m` : ""}`,
+    );
+  const first = (harness: string, machine: string, account?: string) =>
+    reports.find(
+      (e) => e.harness.name === harness && e.session.machine === machine && e.session.account_id === account,
+    )!;
+
+  it("leaves every account's last report at once, in an earlier session of its harness and machine", () => {
+    const studio = first("claude-code", "studio-mac", sim.account("studio-mac", "claude-code"));
+    expect(ago(studio)).toBe(3 * 3_600_000);
+    expect(windows(studio)).toEqual(["five_hour 100 /300 70m", "seven_day 42 /10080 7260m"]);
+    const api = first("claude-code", "lab-mac", DEMO_API_ACCOUNT);
+    expect(ago(api)).toBe(60_000);
+    expect(windows(api)).toEqual(["spend_limit 112 17280m"]);
+    const codexLab = first("codex", "lab-mac");
+    expect(ago(codexLab)).toBe(2 * 60_000);
+    expect(windows(codexLab)).toEqual(["primary 8 /300 223m", "secondary 26 /10080 5880m"]);
+    expect(codexLab.data.plan).toBe("plus");
+    const codexBuild = first("codex", "build-box");
+    expect(ago(codexBuild)).toBe(2 * 3_600_000);
+    expect(windows(codexBuild)).toEqual(["primary 64 /300 -40m", "secondary 91 /10080 1680m"]);
+    expect(codexBuild.data.plan).toBe("pro");
+    const dev = first("claude-code", "lab-mac", lab);
+    expect(ago(dev)).toBe(60_000);
+    expect(windows(dev)).toEqual(["five_hour 38 /300 141m", "seven_day 20 /10080 3960m", "seven_day_fable 29 3960m"]);
+    // Each arrives in the demo's first tick, from Claude Code's status line or Codex's Stop.
+    for (const r of [studio, api, codexLab, codexBuild, dev]) {
+      expect(events.indexOf(r)).toBeLessThan(events.findIndex((e) => Date.parse(e.time) > T0 + 1000));
+      expect(r.harness.event).toBe(r.harness.name === "codex" ? "Stop" : "StatusLine");
+      const session = events.filter((e) => key(e) === key(r));
+      expect(session.map((e) => e.type)).toEqual([
+        "session.started",
+        "turn.started",
+        "turn.ended",
+        "turn.transcript",
+        "limits.observed",
+        "session.ended",
+      ]);
+    }
+    // Codex sends no account id: its numbers are the machine's.
+    expect(reports.filter((e) => e.harness.name === "codex").every((e) => e.session.account_id === undefined)).toBe(
+      true,
+    );
+    expect(reports.flatMap((e) => validate(e))).toEqual([]);
+  });
+
+  it("moves lab-mac's 5-hour window on as its replies come, a point or two at a time", () => {
+    const later = reports.filter((e) => e.session.account_id === lab && Date.parse(e.time) > T0);
+    expect(later.length).toBeGreaterThan(0);
+    let used = 38;
+    for (const r of later) {
+      const [five, ...rest] = windows(r);
+      const now = Number(five!.split(" ")[1]);
+      expect(now - used === 1 || now - used === 2, `${used} → ${now}`).toBe(true);
+      used = now;
+      expect(rest).toEqual(["seven_day 20 /10080 3960m", "seven_day_fable 29 3960m"]);
+      expect(r.session.machine).toBe("lab-mac");
+    }
   });
 });
 

@@ -25,6 +25,7 @@ export const TYPE_TIER: Record<string, 0 | 1 | 2 | 3> = {
   "subagent.started": 1,
   "subagent.ended": 1,
   "context.compacted": 1,
+  "limits.observed": 1,
   native: 3,
 };
 
@@ -51,6 +52,7 @@ type Rule =
   | { kind: "bool" }
   | { kind: "time" }
   | { kind: "paths" }
+  | { kind: "windows" }
   | { kind: "any" };
 
 const DATA_RULES: Record<string, { required: string[]; fields: Record<string, Rule> }> = {
@@ -155,6 +157,10 @@ const DATA_RULES: Record<string, { required: string[]; fields: Record<string, Ru
     fields: { agent_id: { kind: "string", max: 128 }, agent_type: { kind: "string", max: 128 } },
   },
   "context.compacted": { required: ["trigger"], fields: { trigger: { kind: "enum", values: ["manual", "auto"] } } },
+  "limits.observed": {
+    required: ["windows"],
+    fields: { windows: { kind: "windows" }, plan: { kind: "string", max: 64 } },
+  },
   native: { required: [], fields: {} },
 };
 
@@ -191,6 +197,19 @@ function checkField(key: string, value: unknown, rule: Rule, out: string[]): voi
       if (!Array.isArray(value) || value.length > 500 || !value.every((p) => typeof p === "string" && p.length <= 1024))
         out.push(`data.${key}: not an array of <= 500 paths`);
       return;
+    case "windows": {
+      const ok = (w: unknown): boolean =>
+        isObj(w) &&
+        typeof w.id === "string" &&
+        /^[a-z0-9_]{1,64}$/.test(w.id) &&
+        typeof w.used_percent === "number" &&
+        w.used_percent >= 0 &&
+        (w.resets_at === undefined || isTime(w.resets_at)) &&
+        (w.window_minutes === undefined || isInt(w.window_minutes, 1));
+      if (!Array.isArray(value) || value.length < 1 || value.length > 8 || !value.every(ok))
+        out.push(`data.${key}: not 1–8 windows of id, used_percent, resets_at?, window_minutes?`);
+      return;
+    }
     case "any":
       return;
   }
