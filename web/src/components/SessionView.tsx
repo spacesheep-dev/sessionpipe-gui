@@ -7,7 +7,7 @@
 // (the strip's Allow / Deny as menu items) stays here, in the app's own chunk.
 import type { SessionSummary } from "@shared/api";
 import { lazy, type RefObject, Suspense } from "react";
-import { toolLabel } from "../lib/format";
+import { isPlanReview, toolLabel } from "../lib/format";
 import { back } from "../lib/router";
 import type { MenuList } from "./ContextMenu";
 import { BackButton, PageBar } from "./PageBar";
@@ -73,11 +73,13 @@ export function answerItems(root: HTMLElement | null, s: SessionSummary, attenti
   if (!row || !allow || !deny) return [];
   const tool = s.openAttentions.find((a) => a.attentionId === row.dataset.attention)?.tool;
   const name = tool ? ` ${toolLabel(tool)}` : "";
+  // A plan review's pair: the strip's own two buttons, by their own names.
+  const plan = isPlanReview({ kind: "permission", tool });
   const why = allow.disabled
     ? row.querySelector(".ctl-answer-note")?.textContent?.trim() || "This prompt cannot be answered from here"
     : undefined;
   return [
-    { label: `Allow${name}`, action: "session.allow", disabled: why, run: () => allow.click() },
-    { label: `Deny${name}`, action: "session.deny", disabled: why, run: () => deny.click() },
+    { label: plan ? "Approve plan" : `Allow${name}`, action: "session.allow", disabled: why, run: () => allow.click() },
+    { label: plan ? "Keep planning" : `Deny${name}`, action: "session.deny", disabled: why, run: () => deny.click() },
   ];
 }

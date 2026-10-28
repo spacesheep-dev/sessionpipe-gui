@@ -19,4 +19,12 @@ describe("answerItems", () => {
     expect(answerItems("Bash", st, () => {}).map((i) => "label" in i && i.label)).toEqual(["Allow Bash", "Deny Bash"]);
     expect(answerItems(undefined, st, () => {}).map((i) => "label" in i && i.label)).toEqual(["Allow", "Deny"]);
   });
+  it("asks a plan review's own question", () => {
+    const st = { off: false, reason: null };
+    for (const tool of ["ExitPlanMode", "exit_plan_mode"])
+      expect(answerItems(tool, st, () => {}).map((i) => "label" in i && i.label)).toEqual([
+        "Approve plan",
+        "Keep planning",
+      ]);
+  });
 });
