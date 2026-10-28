@@ -4,9 +4,10 @@
 // keyboard-only walk: Tab from the top reaches the skip link, the main region, the rail
 // and a card (New session between the brand and the pages); `g f` navigates; `?` opens the help; a rebinding on /shortcuts takes
 // effect (and the old key stops); a conflict is refused; Esc gives focus back.
+import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
-import { EVENTS, INFO, openBoard, openPage, sessionUrl, tier1Batch } from "./helpers.js";
+import { EVENTS, INFO, openBoard, openPage, sessionUrl, tier1Batch, ulid } from "./helpers.js";
 
 const SHORTCUTS_KEY = "sessionpipe-gui.shortcuts";
 
@@ -84,20 +85,59 @@ test.describe("accessibility", () => {
 
   test("axe: a session that opens on its New line", async ({ page, request }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
-    // A session whose turn ended after this receiver began keeping marks: unread at open.
+    // A session read up to its first turn, then a second turn with an answer: unread at
+    // open, the line above that answer. (One never looked at gets no line: lib/newLine.ts.)
     const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+    const post = async (events: Record<string, unknown>[]) => {
+      const res = await request.post(EVENTS, {
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${sinkToken}`,
+          "sessionpipe-protocol": "1",
+        },
+        data: { events },
+      });
+      expect(res.ok()).toBeTruthy();
+    };
     const batch = tier1Batch({ title: "New line" });
-    const res = await request.post(EVENTS, {
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${sinkToken}`,
-        "sessionpipe-protocol": "1",
-      },
-      data: { events: batch.events },
-    });
-    expect(res.ok()).toBeTruthy();
+    for (const e of batch.events) e.tier = 3;
+    await post(batch.events);
+    const key = `${batch.harness}:${batch.sessionId}`;
+    const snap = (await (await request.get("/api/ui/snapshot")).json()) as {
+      sessions: { key: string; newsAt?: string }[];
+    };
+    const read = snap.sessions.find((s) => s.key === key)?.newsAt;
+    expect(read).toBeTruthy();
+    expect((await request.patch("/api/ui/marks", { data: { read: { [key]: read } } })).ok()).toBeTruthy();
+    const last = batch.events[batch.events.length - 1]!;
+    const turnId = randomUUID();
+    let seq = batch.events.length;
+    let clock = Date.now() - 30_000;
+    const ev = (type: string, data: Record<string, unknown>, hook: string) => {
+      clock += 1000;
+      return {
+        ...last,
+        id: ulid(clock),
+        type,
+        time: new Date(clock).toISOString(),
+        harness: { ...(last.harness as Record<string, unknown>), event: hook },
+        session: { ...(last.session as Record<string, unknown>), seq: seq++ },
+        data,
+      };
+    };
+    await post([
+      ev("turn.started", { turn_id: turnId, prompt_chars: 5 }, "UserPromptSubmit"),
+      ev("turn.transcript", { turn: 2, turn_id: turnId, user: "More?", assistant: "The rest." }, "Stop"),
+      ev("turn.ended", { turn_id: turnId, reason: "stop", ms: 2000 }, "Stop"),
+    ]);
     await openPage(page, sessionUrl(batch.harness, batch.sessionId));
-    await expect(page.getByRole("separator", { name: "New since you looked" })).toBeVisible();
+    const line = page.getByRole("separator", { name: "New since you looked" });
+    await expect(line).toBeVisible();
+    // Under the second turn's prompt, above its answer.
+    const top = async (text: string) => (await page.getByText(text, { exact: true }).boundingBox())!.y;
+    const at = (await line.boundingBox())!.y;
+    expect(at).toBeGreaterThan(await top("More?"));
+    expect(at).toBeLessThan(await top("The rest."));
     await axe(page, "session, New line");
   });
 
