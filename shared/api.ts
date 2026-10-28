@@ -170,6 +170,10 @@ export interface SessionSummary {
   flags: SessionFlag[];
   /** From turn.started / turn.ended: completed turns, their durations, tools per turn. */
   turnStats: TurnStats;
+  /** When the latest news arrived (ISO, the event's `arrivedAt`) for someone away from
+   *  the terminal: a turn's end, unless the person typed that turn there in a session
+   *  they attend, or the session's end. What the read marks (Marks) compare against. */
+  newsAt?: string;
 }
 
 export const SNIPPET_CHARS = 280;

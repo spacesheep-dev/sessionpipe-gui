@@ -110,6 +110,11 @@ function names above.
   value, absent unknown (`attended`); `turn.started.submitted_by` / `injected` ride on
   `currentTurn`, a repeated `turn.started` for the same `turn_id` changes nothing, and an
   injected turn's prompt never becomes `lastUser` (the row's last ask).
+- `newsAt` is the `arrivedAt` of the latest event that is news to someone away from the
+  terminal: a `turn.ended`, unless that turn's `submittedBy` is `user` and the session is
+  `attended: true` (they typed it there and read the answer there), and a `session.ended`.
+  Nothing else moves it (tools, progress, attentions, control sends), a backfill never
+  does, and it rebuilds the same at boot, since `arrivedAt` is in the JSONL.
 - Labels are not a reading: they are the person's (`server/ui/labels.ts`), kept beside
   the store, never on a `SessionSummary`.
 
