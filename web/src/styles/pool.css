@@ -34,8 +34,13 @@
 .usage .machines-note {
   margin-bottom: -16px;
 }
-/* The switch row: the label, the hint as its caption, the Toggle at the right. */
+/* The switch row: the label, the hint as its caption, the Toggle at the right, on the
+   label's line (not centred on the paragraph): the row aligns to its start and the
+   Toggle's wrapper takes the half-difference between the label's line box and the
+   Toggle's own height (18 px; 26 px for a coarse pointer, shared.css), so their
+   centres meet. */
 .pool-switch {
+  align-items: flex-start;
   padding-left: 24px;
 }
 .pool-switch .form-caption {
@@ -45,6 +50,12 @@
 .pool-switch-tip {
   display: inline-flex;
   flex: none;
+  margin-top: calc((var(--lh-tight) * var(--text-md) - 18px) / 2);
+}
+@media (pointer: coarse) {
+  .pool-switch-tip {
+    margin-top: calc((var(--lh-tight) * var(--text-md) - 26px) / 2);
+  }
 }
 
 /* ----- the accounts ----- */
