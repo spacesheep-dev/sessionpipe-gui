@@ -16,6 +16,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   first 200 characters the machine sends, ending in "…". Four steps show, then "Show 2
   more lines", and Deny and Allow keep to the question's line. On a phone a longer one
   scrolls inside, cut through a line, so you see there is more.
+- **A plan review reads as a plan.** When Claude Code asks to leave plan mode, the strip
+  asks "Ready to start on this plan?" and shows the plan under it (at tier 3), eight lines
+  until **Show the whole plan**, with **Approve plan** and **Keep planning** where Allow and
+  Deny were; `a` and `d` are unchanged. Keep planning carries what you type in the composer
+  ("What should change?") to the agent as the answer's note, and Enter there sends it. The
+  row menus and the Inbox name the same two answers, and the tool reads Plan.
 
 ### Fixed
 
