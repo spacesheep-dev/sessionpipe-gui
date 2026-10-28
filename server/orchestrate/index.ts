@@ -144,7 +144,15 @@ export function createOrchestrate(deps: OrchestrateDeps): Orchestrate {
       );
     },
     claim: (runId, stepId, rev) => put(claim(must(runId), stepId, rev, now())),
-    sent: (runId, stepId, commandId, rev) => put(sent(must(runId), stepId, commandId, rev, now(), online())),
+    sent(runId, stepId, commandId, rev) {
+      const run = put(sent(must(runId), stepId, commandId, rev, now(), online()));
+      // The machine may have answered already: a daemon that long-polls takes a command
+      // within milliseconds and refuses one at once, while the tab's PATCH with the id
+      // comes over a slower link. That ack found no step holding its id; look again now.
+      const a = deps.control.activity(1000).find((x) => x.id === commandId);
+      if (a) onActivity(a);
+      return store.run(runId) ?? run;
+    },
     cancel(runId) {
       const run = must(runId);
       const next = cancel(run, now());
