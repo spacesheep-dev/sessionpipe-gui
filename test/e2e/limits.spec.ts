@@ -83,9 +83,13 @@ test("the sidebar says what each account has left, in the wide sidebar only", as
   await openPage(page, "/");
   const block = page.locator(".glance");
   await expect(block).toBeVisible();
-  const dev = block.locator(".glance-line", { hasText: "dev" }).first();
+  // lab-mac pools dev@example.com as "Misha": its numbers are the pooled machine's one line
+  // (pool-surfaces.spec.ts), never a line of their own.
+  const dev = block.locator('.glance-line[data-glance="pool:lab-mac"]');
+  await expect(dev.locator(".glance-name")).toHaveText("Misha");
   await expect(dev.locator(".glance-val")).toHaveText(/^5h (\d+|<1)% left$/);
   await expect(dev.locator(".glance-bar")).toBeVisible();
+  await expect(block.locator(".glance-line", { hasText: /^dev\b/ })).toHaveCount(0);
   // studio-mac's account, which no hello names, by its machine: none left, and when it resets in the bar's place.
   const studio = block.locator(".glance-line", { hasText: /^studio-mac/ }).filter({ hasText: "None left" });
   await expect(studio.locator(".glance-out")).toHaveText("None left");
@@ -203,12 +207,9 @@ test("New session on lab-mac: each agent says what its account has left there", 
   await expect(sheet.locator("[data-ns-row=machine] button.sel")).toHaveText(/lab-mac/);
   await sheet.locator("[data-ns-row=agent] button.sel").click();
   const opt = (name: string) => page.locator(".sel-opt", { hasText: name });
-  // lab-mac's hello names two Claude Code accounts: a start can't choose, so no one number,
-  // but each account's own by its name.
-  await expect(opt("Claude Code").locator(".sel-opt-detail")).toHaveText(
-    /^dev ((<1|\d+)% left|none left)[^,]*, api\.z\.ai 12% over/,
-  );
-  await expect(opt("Claude Code").locator(".sel-opt-hint")).toHaveCount(0);
+  // lab-mac pools its Claude Code accounts with the switch on: a start there goes to the
+  // pool's current account, so its line is the pool's (pool-surfaces.spec.ts has the rest).
+  await expect(opt("Claude Code").locator(".sel-opt-detail")).toHaveText(/^3 accounts, 2 with room · Misha/);
   await expect(opt("Codex").locator(".sel-opt-hint")).toHaveText("74% left");
   await expect(opt("Codex").locator(".sel-opt-detail")).toHaveText(/^This week, resets in 4 d \d+ h$/);
   await expect(opt("Gemini CLI").locator(".sel-opt-hint")).toHaveCount(0);
