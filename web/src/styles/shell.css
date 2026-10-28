@@ -575,8 +575,11 @@
   .glance-line:focus-visible {
     outline-offset: -2px;
   }
+  /* The name tells the lines apart, so it has the room first, up to 60%: the window's
+     short name takes what is left (cut short, or none), and the figure always fits. */
   .glance-top {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto fit-content(60%) minmax(0, 1fr) auto;
     align-items: center;
     gap: 6px;
     min-width: 0;
@@ -584,23 +587,26 @@
     line-height: var(--lh-tight);
   }
   .glance-top .glyph-wrap {
-    flex: none;
     color: var(--fg-3);
   }
-  .glance-name {
-    flex: 1 1 auto;
+  .glance-name,
+  .glance-win {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .glance-val {
-    flex: none;
+    display: contents;
     color: var(--fg-2);
-    white-space: nowrap;
   }
   .glance-win {
+    text-align: right;
     color: var(--fg-3);
+  }
+  .glance-fig {
+    grid-column: 4;
+    white-space: nowrap;
   }
   .glance-out {
     color: var(--needs-fg);

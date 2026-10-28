@@ -178,10 +178,12 @@ function GlanceLine({
           {t && r ? (
             <span className="glance-val num">
               <span className="glance-win">{windowShort(t)}</span>{" "}
-              <span className={out ? "glance-out" : undefined}>{r.value}</span>
+              <span className={`glance-fig ${out ? "glance-out" : ""}`}>{r.value}</span>
             </span>
           ) : (
-            <span className="glance-val glance-win">Reset</span>
+            <span className="glance-val">
+              <span className="glance-fig glance-win">Reset</span>
+            </span>
           )}
         </span>
         {out && r?.when ? (

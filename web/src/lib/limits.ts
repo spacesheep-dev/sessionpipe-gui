@@ -197,8 +197,9 @@ export function entrySubtitle(e: Pick<LimitsEntry, "harness" | "accountId" | "ma
 }
 
 /** The sidebar's short names, by key: an email's local part (the whole email when two
- *  shown accounts share one), a host name as it is, the harness for an account no hello
- *  names or a machine's numbers, with ", <machine>" when two of those need telling apart. */
+ *  shown accounts share one), a host name as it is, and for an account no hello names or a
+ *  machine's numbers the machine, since the glyph beside it already says the harness (the
+ *  harness only when no machine is known). */
 export function shortNames(
   entries: readonly Pick<LimitsEntry, "key" | "harness" | "accountId" | "machine">[],
   names: ReadonlyMap<string, string>,
@@ -207,20 +208,11 @@ export function shortNames(
   const local = (n: string) => (n.includes("@") ? n.slice(0, n.indexOf("@")) : n);
   const locals = new Map<string, number>();
   for (const n of named) if (n) locals.set(local(n), (locals.get(local(n)) ?? 0) + 1);
-  // Unnamed entries (an unknown account, or a machine's) per harness and kind.
-  const group = (e: Pick<LimitsEntry, "harness" | "accountId">) => `${e.harness}\n${e.accountId ? "a" : "m"}`;
-  const unnamed = new Map<string, number>();
-  entries.forEach((e, i) => {
-    if (!named[i]) unnamed.set(group(e), (unnamed.get(group(e)) ?? 0) + 1);
-  });
   const out = new Map<string, string>();
   entries.forEach((e, i) => {
     const n = named[i];
     if (n) out.set(e.key, (locals.get(local(n)) ?? 0) > 1 ? n : local(n));
-    else {
-      const label = harnessMark(e.harness).label;
-      out.set(e.key, (unnamed.get(group(e)) ?? 0) > 1 ? `${label}, ${e.machine}` : label);
-    }
+    else out.set(e.key, e.machine || harnessMark(e.harness).label);
   });
   return out;
 }

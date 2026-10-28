@@ -179,14 +179,16 @@ describe("names", () => {
       ],
       names,
     );
-    expect([...short.values()]).toEqual(["dev", "api.z.ai", "Claude Code", "Codex, lab-mac", "Codex, build-box"]);
+    // The glyph says the harness: an account no hello names, and a machine's numbers, take the machine.
+    expect([...short.values()]).toEqual(["dev", "api.z.ai", "studio-mac", "lab-mac", "build-box"]);
     const both = shortNames([e("a", { accountId: "acc1" }), e("b", { accountId: "acc3" })], names);
     expect([...both.values()]).toEqual(["dev@example.com", "dev@acme.dev"]);
     const twoUnknown = shortNames(
       [e("a", { accountId: "u1", machine: "a-mac" }), e("b", { accountId: "u2", machine: "b-mac" })],
       names,
     );
-    expect([...twoUnknown.values()]).toEqual(["Claude Code, a-mac", "Claude Code, b-mac"]);
+    expect([...twoUnknown.values()]).toEqual(["a-mac", "b-mac"]);
+    expect([...shortNames([e("a", { accountId: "u1", machine: "" })], names).values()]).toEqual(["Claude Code"]);
   });
   it("orders Claude Code, then Codex, then the rest, each by title, never by numbers", () => {
     const rows = [

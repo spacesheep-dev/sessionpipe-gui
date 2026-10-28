@@ -3,9 +3,10 @@
 // Usage limits: what each account has left, from limits.observed as the demo and a sink send
 // it. The sidebar's lines (the wide sidebar only, none without numbers), the Usage page and
 // its ways in (g u, ⌘K), a report changing both without a reload, New session's agent hints
-// (two Claude Code accounts on lab-mac: no number; Codex its own), the menus (Copy usage,
-// Forget these numbers, Hide usage in the sidebar), Enter starting a session, and storage
-// that throws. The phone's More › Usage is in mobile.spec.ts.
+// (two Claude Code accounts on lab-mac: no one number, each its own; Codex its own), the
+// menus (Copy usage, Forget these numbers, Hide usage in the sidebar), Enter starting a
+// session, a long name in the sidebar, and storage that throws. The phone's More ›
+// Usage is in mobile.spec.ts.
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
 import { CONTROL_BASE, seenSetupHere } from "./control-helpers.js";
@@ -23,10 +24,11 @@ const tag = () => randomUUID().slice(0, 8);
 const section = (page: Page, key: string) => page.locator(`section.usage-acct[data-account="${key}"]`);
 const glance = (page: Page, key: string) => page.locator(`.glance-line[data-glance="${key}"]`);
 
-/** One Claude Code status line report from an account no hello names, on its own machine. */
+/** One Claude Code status line report from an account no hello names, on its own machine;
+ *  with `fable`, this week's Fable window too. */
 async function report(
   page: Page,
-  o: { account: string; machine: string; fiveHour: number; seq?: number; at?: number },
+  o: { account: string; machine: string; fiveHour: number; fable?: number; seq?: number; at?: number },
 ): Promise<void> {
   const { sinkToken } = (await (await page.request.get(INFO)).json()) as { sinkToken: string };
   const t = o.at ?? Date.now() - 2000;
@@ -57,6 +59,16 @@ async function report(
                 window_minutes: 10_080,
                 resets_at: new Date(t + 3 * D).toISOString(),
               },
+              ...(o.fable === undefined
+                ? []
+                : [
+                    {
+                      id: "seven_day_fable",
+                      used_percent: o.fable,
+                      window_minutes: 10_080,
+                      resets_at: new Date(t + 3 * D).toISOString(),
+                    },
+                  ]),
             ],
           },
         },
@@ -74,8 +86,8 @@ test("the sidebar says what each account has left, in the wide sidebar only", as
   const dev = block.locator(".glance-line", { hasText: "dev" }).first();
   await expect(dev.locator(".glance-val")).toHaveText(/^5h (\d+|<1)% left$/);
   await expect(dev.locator(".glance-bar")).toBeVisible();
-  // studio-mac's account, which no hello names: none left, and when it resets in the bar's place.
-  const studio = block.locator(".glance-line", { hasText: /^Claude Code/ }).filter({ hasText: "None left" });
+  // studio-mac's account, which no hello names, by its machine: none left, and when it resets in the bar's place.
+  const studio = block.locator(".glance-line", { hasText: /^studio-mac/ }).filter({ hasText: "None left" });
   await expect(studio.locator(".glance-out")).toHaveText("None left");
   await expect(studio.locator(".glance-sub")).toHaveText(/^resets in /);
   await expect(block).not.toContainText("used");
@@ -257,6 +269,22 @@ test("the sidebar line's menu, its tooltip, and hiding it until Settings brings 
   await expect(page.locator(".glance")).toBeVisible();
   await dev.click();
   await expect(page).toHaveURL(/\/usage#claude-code%20a%3A/);
+});
+
+test("a long name keeps its room in the sidebar; the window's name gives way", async ({ page }) => {
+  const account = `e2e-${tag()}`;
+  const key = `claude-code a:${account}`;
+  await openPage(page, "/");
+  // No hello names it, so the sidebar names it by its machine; its tightest is this week's Fable.
+  await report(page, { account, machine: "misha-personal", fiveHour: 10, fable: 62 });
+  const line = glance(page, key);
+  await expect(line.locator(".glance-name")).toHaveText("misha-personal");
+  await expect(line.locator(".glance-val")).toHaveText("week Fable 38% left");
+  const cut = (sel: string) => line.locator(sel).evaluate((el) => el.scrollWidth > el.clientWidth);
+  expect(await cut(".glance-name")).toBe(false);
+  expect(await cut(".glance-fig")).toBe(false);
+  await page.request.post("/api/ui/limits/forget", { data: { key } });
+  await expect(line).toHaveCount(0);
 });
 
 test("with storage that throws, the page and the sidebar still draw", async ({ page }) => {
