@@ -666,7 +666,7 @@ export function ControlStrip({
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKey}
-            placeholder={review ? "What should change? (optional)" : placeholder}
+            placeholder={review ? "What should change?" : placeholder}
             disabled={!enabled}
             aria-label="Message for the next turn"
             rows={1}
