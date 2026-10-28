@@ -73,7 +73,7 @@
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) auto auto;
   align-items: center;
-  column-gap: 8px;
+  column-gap: 0;
   min-height: var(--row-lg);
   padding: var(--row-pad) 0;
   cursor: grab;
@@ -87,9 +87,12 @@
 .pool-row .btn {
   cursor: default;
 }
-.pool-row .icon-btn:last-child {
+.pool-row > .icon-btn:last-child {
+  margin-left: 8px;
   margin-right: -6px;
 }
+/* The grip's column is the glyph's: no gap after it, so the name starts on the title's
+   edge, one lead edge for the title, the switch's label, the names and Add account. */
 /* The grip: drawn while the pointer is over the row or focus is within it; a non-text
    mark in the lightest tier. */
 .pool-grip {
