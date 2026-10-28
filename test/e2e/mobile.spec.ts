@@ -210,7 +210,8 @@ test.describe("phone: usage", () => {
     if (names.includes("Machines")) expect(names.indexOf("Usage")).toBe(names.indexOf("Machines") + 1);
     await page.locator(".more-sheet [data-nav=usage]").click();
     await expect(page).toHaveURL(/\/usage$/);
-    const dev = page.locator("section.usage-acct", { hasText: "dev@example.com" });
+    // A free-standing account (dev@example.com is pooled on lab-mac now, pool.spec.ts).
+    const dev = page.locator("section.usage-acct", { hasText: "api.z.ai" });
     await expect(dev.locator(".usage-win").first()).toBeVisible();
     await noSidewaysScroll(page);
     // The where-line is the group's footer, under its windows.

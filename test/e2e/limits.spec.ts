@@ -143,7 +143,8 @@ test("g u and ⌘K open Usage: every window named honestly, and nothing for a ha
   // The only colour is on the words that need it.
   await expect(main.locator(".usage-out")).toHaveText(["12% over", "None left"]);
   // Within a harness, the accounts with numbers first, the ones a hello names before the
-  // rest, then those with none: the page never opens on a setup block.
+  // rest, then those with none: the page never opens on a setup block. (dev@example.com is
+  // pooled on lab-mac and drawn in that section, pool.spec.ts.)
   const order = await main
     .locator("section.usage-acct")
     .evaluateAll((els) =>
@@ -151,12 +152,7 @@ test("g u and ⌘K open Usage: every window named honestly, and nothing for a ha
         (el) => `${el.querySelector(".usage-title")?.textContent}${el.querySelector(".usage-win") ? "" : " (none)"}`,
       ),
     );
-  expect(order.slice(0, 4)).toEqual([
-    "api.z.ai",
-    "dev@example.com",
-    "Claude Code account",
-    "Claude Code account (none)",
-  ]);
+  expect(order.slice(0, 3)).toEqual(["api.z.ai", "Claude Code account", "Claude Code account (none)"]);
 });
 
 test("a report updates the page and the sidebar without a reload; Copy usage and Forget", async ({ page }) => {
@@ -235,7 +231,7 @@ test("New session on a one-account machine: none left, in the attention colour",
 
 test("Enter on an account opens New session there, with its harness", async ({ page }) => {
   await openPage(page, "/usage");
-  const dev = page.locator("section.usage-acct", { hasText: "dev@example.com" });
+  const dev = page.locator("section.usage-acct", { hasText: "api.z.ai" });
   await dev.locator(".usage-head").focus();
   await expect(dev).toHaveAttribute("aria-current", "true");
   await page.keyboard.press("Enter");

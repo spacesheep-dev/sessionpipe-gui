@@ -1,0 +1,340 @@
+// SPDX-License-Identifier: Apache-2.0
+/// <reference lib="dom" />
+// The Usage page's pooled section (UX-SPEC §3–§5, §9): drawn from the demo's hellos with
+// the right status words and never twice; and, against the test-door instance with a fake
+// daemon whose hello carries a pool, the signed commands it sends: the switch (optimistic,
+// reverting on a refusal), Move down holding the order with "saving order…" until the
+// hello confirms it, Remove asking first, and the Add account sheet's command and sign-in
+// path (login.begin → the link → login.complete with the pasted code; the # check; the
+// expired line). The phone project draws the section as one inset group with no
+// horizontal scroll.
+import { randomUUID } from "node:crypto";
+import { expect, type Page, test } from "@playwright/test";
+import { CONTROL_BASE, passkeyPage, seenSetupHere } from "./control-helpers.js";
+import { openPage } from "./helpers.js";
+import { poolDaemon } from "./pool-helpers.js";
+
+const tag = () => randomUUID().slice(0, 6);
+const section = (page: Page, machine: string) => page.locator(`section[data-pool="${machine}"]`);
+const row = (page: Page, machine: string, name: string) =>
+  section(page, machine).locator("li.pool-acct", { has: page.locator(".pool-title", { hasText: name }) });
+
+test.describe("the pooled section, from the demo", () => {
+  test("lab-mac, mini-mac and desk-pc: the words, the order, nothing drawn twice", async ({ page, isMobile }) => {
+    await openPage(page, "/usage");
+    const lab = section(page, "lab-mac");
+    await expect(lab.locator(".usage-title")).toHaveText("Claude accounts on lab-mac");
+    await expect(lab.locator(isMobile ? ".pool-foot" : "[data-pool-meta]")).toHaveText("3 accounts, 2 with room");
+    await expect(lab.getByRole("switch", { name: "Switch accounts when one runs out" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await expect(lab.locator(".form-caption").first()).toHaveText(
+      "Requests go to the first account in this order that has room; a session stays on its account while it has room. Claude Code on lab-mac sends through sessionpipe while this is on.",
+    );
+    await expect(lab.locator("li.pool-acct .pool-title")).toHaveText(["Misha", "Fiction", "Spacesheep"]);
+    await expect(lab.locator("li.pool-acct .pool-word")).toHaveText(["In use", "Has room", "Used up"]);
+    const sheep = row(page, "lab-mac", "Spacesheep");
+    await expect(sheep.locator(".pool-status-after")).toHaveText(/^· resets in 2 h \d{2} m$/);
+    await expect(sheep.locator('[data-window="five_hour"] .usage-value')).toHaveText("<1% left");
+    // Fiction has no numbers yet: no rows, and no "No numbers yet" either.
+    await expect(row(page, "lab-mac", "Fiction").locator(".usage-win")).toHaveCount(0);
+    await expect(lab).not.toContainText("No numbers yet");
+    // The one accent in the section is "Used up".
+    await expect(lab.locator(".pool-status--needs .pool-word")).toHaveText(["Used up"]);
+    await expect(lab.locator("[data-pool-add]")).toHaveText("Add account…");
+    if (!isMobile) {
+      // Pooled sections come before the free-standing ones; a pooled account is never free-standing.
+      const first = page.locator("#main section").first();
+      await expect(first).toHaveAttribute("data-pool", /./);
+      await expect(page.locator("section.usage-acct", { hasText: "dev@example.com" })).toHaveCount(0);
+    }
+    // mini-mac: an account in error is a quiet button, a disabled one says Off.
+    const mini = section(page, "mini-mac");
+    await expect(mini.getByRole("button", { name: "Sign in again…" })).toBeVisible();
+    await expect(row(page, "mini-mac", "Old").locator(".pool-word")).toHaveText("Off");
+    await expect(mini.locator(isMobile ? ".pool-foot" : "[data-pool-meta]")).toHaveText("3 accounts, 1 with room");
+    // desk-pc: the switch off, never "In use", the hint's off sentence.
+    const desk = section(page, "desk-pc");
+    await expect(desk.getByRole("switch")).toHaveAttribute("aria-checked", "false");
+    await expect(desk).not.toContainText("In use");
+    await expect(desk.locator(".form-caption").first()).toHaveText(/Claude Code on desk-pc uses its own login\.$/);
+    // "None left" is a window's word; no pooled account's status says it.
+    await expect(page.locator("section[data-pool]").filter({ hasText: "None left" })).toHaveCount(0);
+    // Never a "% used", never the account id.
+    const html = await page.locator("#main").innerHTML();
+    expect(html).not.toMatch(/% used/);
+    expect(html).not.toMatch(/01K8[A-Z0-9]{20}/);
+  });
+
+  test("phone: one inset group, the grip at the trailing edge, no horizontal scroll", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "the phone project");
+    await openPage(page, "/usage");
+    const lab = section(page, "lab-mac");
+    await lab.scrollIntoViewIfNeeded();
+    const grip = row(page, "lab-mac", "Fiction").locator(".pool-grip");
+    await expect(grip).toBeVisible();
+    expect(await grip.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+    const rowBox = (await row(page, "lab-mac", "Fiction").boundingBox())!;
+    const gripBox = (await grip.boundingBox())!;
+    expect(gripBox.x + gripBox.width).toBeGreaterThan(rowBox.x + rowBox.width - 60);
+    expect(gripBox.height).toBeGreaterThanOrEqual(44);
+    await expect(lab.locator(".pool-foot")).toHaveText("3 accounts, 2 with room");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    // The row's ··· is the long press's job here; the header's opens the section menu as a sheet.
+    const sheet = page.getByRole("menu");
+    await expect(async () => {
+      await lab.locator(".usage-head .icon-btn").click();
+      await expect(sheet).toBeVisible({ timeout: 1500 });
+    }).toPass();
+    await expect(sheet.getByRole("menuitem")).toHaveText(["Add account…", "Refresh usage", "Copy setup command"]);
+    await page.keyboard.press("Escape");
+  });
+});
+
+// ----- signed commands, against the test door with a fake daemon (pool-helpers.ts) -----
+
+test.describe("signed pool commands", () => {
+  test.skip(({ isMobile }) => !!isMobile, "desktop project");
+  test.describe.configure({ mode: "serial" });
+
+  test("the switch sends off and on, flips at once, and reverts with the note when refused", async ({
+    context,
+    page,
+  }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const name = `lab-${tag()}`;
+    let refuse = false;
+    const m = await poolDaemon(key, name, {
+      refuse: (a) => (refuse && a === "on" ? { code: "pool_unsupported" } : null),
+    });
+    try {
+      await page.goto(`${CONTROL_BASE}/usage`);
+      const s = section(page, name);
+      const sw = s.getByRole("switch", { name: "Switch accounts when one runs out" });
+      await expect(sw).toHaveAttribute("aria-checked", "true");
+      await expect(s.locator("li.pool-acct .pool-word").first()).toHaveText("In use");
+      await sw.click();
+      // Optimistic: off before the machine answers, and "In use" goes with it.
+      await expect(sw).toHaveAttribute("aria-checked", "false");
+      await expect(s.locator("li.pool-acct .pool-word").first()).toHaveText("Has room");
+      await expect.poll(() => m.seen.map((c) => c.pool_action)).toEqual(["off"]);
+      expect(m.seen[0]!.session).toBe("sessionpipe:pool");
+      // The hello confirms it: the hint's off sentence, and the switch stays.
+      await expect(s.locator(".form-caption").first()).toHaveText(/uses its own login\.$/);
+      await expect(sw).toHaveAttribute("aria-checked", "false");
+      await expect(sw).toBeEnabled();
+
+      refuse = true;
+      await sw.click();
+      await expect(sw).toHaveAttribute("aria-checked", "true");
+      await expect(s.locator("[data-pool-note]")).toHaveText(/^lab-.* refused it: /);
+      await expect(s.locator("[data-pool-note]")).toHaveClass(/is-err/);
+      await expect(sw).toHaveAttribute("aria-checked", "false");
+      await expect.poll(() => m.seen.map((c) => c.pool_action)).toEqual(["off", "on"]);
+    } finally {
+      await m.stop();
+    }
+  });
+
+  test("Move down holds the new order with 'saving order…' until the hello; Remove asks first", async ({
+    context,
+    page,
+  }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const name = `lab-${tag()}`;
+    const m = await poolDaemon(key, name);
+    try {
+      await page.goto(`${CONTROL_BASE}/usage`);
+      const s = section(page, name);
+      await expect(s.locator("li.pool-acct .pool-title")).toHaveText(["Misha", "Fiction", "Spacesheep"]);
+      await row(page, name, "Misha").locator(".pool-row").click({ button: "right" });
+      const menu = page.getByRole("menu");
+      await expect(menu.getByRole("menuitem")).toHaveText([
+        "Move up",
+        "Move down",
+        "Turn off",
+        "Refresh usage",
+        "Remove…",
+      ]);
+      await expect(menu.getByRole("menuitem", { name: "Move up" })).toHaveAttribute("aria-disabled", "true");
+      await menu.getByRole("menuitem", { name: "Move down" }).click();
+      // Held at once, named in the header, then confirmed by the hello.
+      await expect(s.locator("li.pool-acct .pool-title")).toHaveText(["Fiction", "Misha", "Spacesheep"]);
+      await expect(s.locator("[data-pool-meta]")).toHaveText("saving order…");
+      await expect.poll(() => m.seen.map((c) => c.pool_action)).toEqual(["order"]);
+      expect(m.seen[0]!.pool_order).toEqual(["a2", "a1", "a3"]);
+      await expect(s.locator("[data-pool-meta]")).toHaveText("3 accounts, 3 with room");
+      await expect(s.locator("li.pool-acct .pool-title")).toHaveText(["Fiction", "Misha", "Spacesheep"]);
+
+      // Remove: the ask, Esc sends nothing; Remove sends it.
+      await page.waitForTimeout(450);
+      await row(page, name, "Spacesheep").locator(".icon-btn").last().click();
+      await page.getByRole("menu").getByRole("menuitem", { name: "Remove…" }).click();
+      const dialog = page.getByRole("alertdialog").or(page.getByRole("dialog"));
+      await expect(dialog).toContainText(`Remove Spacesheep from ${name}?`);
+      await expect(dialog).toContainText(
+        `sessionpipe forgets its sign-in on ${name}. Sessions on it move to the next account with room. Claude Code's own login is not touched.`,
+      );
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+      await page.waitForTimeout(300);
+      expect(m.seen.map((c) => c.pool_action)).toEqual(["order"]);
+      await row(page, name, "Spacesheep").locator(".icon-btn").last().click();
+      await page.getByRole("menu").getByRole("menuitem", { name: "Remove…" }).click();
+      await page.getByRole("button", { name: "Remove", exact: true }).click();
+      await expect.poll(() => m.seen.map((c) => c.pool_action)).toEqual(["order", "remove"]);
+      expect(m.seen[1]!.pool_account).toBe("a3");
+      await expect(s.locator("li.pool-acct .pool-title")).toHaveText(["Fiction", "Misha"]);
+      await expect(s.locator("[data-pool-live]")).toHaveText(`Removed Spacesheep from ${name}`);
+    } finally {
+      await m.stop();
+    }
+  });
+
+  test("the keyboard: Space picks a row up, the arrows move it, Space drops it and sends one order", async ({
+    context,
+    page,
+  }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const name = `lab-${tag()}`;
+    const m = await poolDaemon(key, name);
+    try {
+      await page.goto(`${CONTROL_BASE}/usage`);
+      const s = section(page, name);
+      const grip = row(page, name, "Spacesheep").locator(".pool-grip");
+      await grip.focus();
+      await page.keyboard.press("Space");
+      await expect(s.locator("[data-pool-live]")).toHaveText("Picked up Spacesheep");
+      await expect(row(page, name, "Spacesheep")).toHaveAttribute("data-grabbed", "");
+      await page.keyboard.press("ArrowUp");
+      await expect(s.locator("[data-pool-live]")).toHaveText("Moved to position 2 of 3");
+      await page.keyboard.press("ArrowUp");
+      await expect(s.locator("li.pool-acct .pool-title")).toHaveText(["Spacesheep", "Misha", "Fiction"]);
+      expect(m.seen).toHaveLength(0);
+      await page.keyboard.press("Escape");
+      await expect(s.locator("[data-pool-live]")).toHaveText("Cancelled, order unchanged");
+      await expect(s.locator("li.pool-acct .pool-title")).toHaveText(["Misha", "Fiction", "Spacesheep"]);
+      await grip.focus();
+      await page.keyboard.press("Space");
+      await page.keyboard.press("ArrowUp");
+      await page.keyboard.press("Space");
+      await expect(s.locator("[data-pool-live]")).toHaveText("Dropped");
+      await expect.poll(() => m.seen.map((c) => c.pool_order)).toEqual([["a1", "a3", "a2"]]);
+      await expect(s.locator("li.pool-acct .pool-title")).toHaveText(["Misha", "Spacesheep", "Fiction"]);
+    } finally {
+      await m.stop();
+    }
+  });
+
+  test("the pointer: a row lifts past 6 px, crosses its neighbour, settles, and sends one order", async ({
+    context,
+    page,
+  }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const name = `lab-${tag()}`;
+    const m = await poolDaemon(key, name);
+    try {
+      // The rows' slide after a hello would move the second drag's target under the mouse.
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.goto(`${CONTROL_BASE}/usage`);
+      const s = section(page, name);
+      const fiction = row(page, name, "Fiction");
+      const box = (await fiction.locator(".pool-row").boundingBox())!;
+      const x = box.x + 160;
+      const y = box.y + box.height / 2;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      // Under 6 px nothing lifts.
+      await page.mouse.move(x, y + 3);
+      await expect(fiction).not.toHaveAttribute("data-dragging", "");
+      await page.mouse.move(x, y + 12, { steps: 2 });
+      await expect(fiction).toHaveAttribute("data-dragging", "");
+      await expect(s.locator("[data-pool-live]")).toHaveText("Picked up Fiction");
+      // The lifted row rides under the pointer, inside the list, over its neighbour.
+      await page.mouse.move(x, y + box.height * 1.5, { steps: 6 });
+      const lifted = (await fiction.boundingBox())!;
+      expect(Math.abs(lifted.y + lifted.height / 2 - (y + box.height * 1.5))).toBeLessThan(lifted.height);
+      await expect(s.locator("li.pool-acct .pool-title")).toHaveText(["Misha", "Spacesheep", "Fiction"]);
+      expect(m.seen).toHaveLength(0);
+      await page.mouse.up();
+      await expect(fiction).not.toHaveAttribute("data-dragging", "");
+      await expect(s.locator("[data-pool-meta]")).toHaveText("saving order…");
+      await expect.poll(() => m.seen.map((c) => c.pool_order)).toEqual([["a1", "a3", "a2"]]);
+      await expect(s.locator("li.pool-acct .pool-title")).toHaveText(["Misha", "Spacesheep", "Fiction"]);
+      await expect(s.locator("[data-pool-meta]")).toHaveText("3 accounts, 3 with room");
+      // Esc mid-drag puts the row back and sends nothing.
+      const sheep = row(page, name, "Spacesheep");
+      const b2 = (await sheep.locator(".pool-row").boundingBox())!;
+      await page.mouse.move(b2.x + 160, b2.y + b2.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(b2.x + 160, b2.y + b2.height / 2 + b2.height * 1.5, { steps: 6 });
+      await expect(s.locator("li.pool-acct .pool-title")).toHaveText(["Misha", "Fiction", "Spacesheep"]);
+      await page.keyboard.press("Escape");
+      await expect(s.locator("[data-pool-live]")).toHaveText("Cancelled, order unchanged");
+      await expect(s.locator("li.pool-acct .pool-title")).toHaveText(["Misha", "Spacesheep", "Fiction"]);
+      await page.mouse.up();
+      await page.waitForTimeout(300);
+      expect(m.seen).toHaveLength(1);
+    } finally {
+      await m.stop();
+    }
+  });
+
+  test("the Add account sheet: the command, then the sign-in from link to code", async ({ context, page }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const name = `lab-${tag()}`;
+    const m = await poolDaemon(key, name);
+    try {
+      await page.goto(`${CONTROL_BASE}/usage`);
+      const s = section(page, name);
+      await s.locator("[data-pool-add]").click();
+      const sheet = page.locator("[data-pool-sheet]");
+      await expect(sheet.getByRole("heading", { level: 2 })).toHaveText(`Add a Claude account to ${name}`);
+      // Sign-in first when the pool has accounts; the command group under it.
+      await expect(sheet.locator("section").first()).toHaveAttribute("data-pool-signin-group", "");
+      await expect(sheet.locator("[data-pool-command] .cmdwell")).toContainText("sessionpipe pool add --import");
+      await expect(sheet.locator("[data-pool-command]")).toContainText("sessionpipe pool add --login");
+      await expect(sheet.locator("[data-pool-signin]")).toBeFocused();
+      await sheet.locator("[data-pool-signin]").click();
+      await expect.poll(() => m.seen.map((c) => c.pool_action)).toEqual(["login.begin"]);
+      // Link ready: Open claude.ai, the URL in a well, the code field focused, Done waiting for a #.
+      const open = sheet.locator("[data-pool-open]");
+      await expect(open).toHaveAttribute("href", "https://claude.ai/oauth/authorize?e2e=1");
+      await expect(open).toHaveAttribute("target", "_blank");
+      await expect(sheet.locator(".cmdwell", { hasText: "https://claude.ai" })).toBeVisible();
+      const code = sheet.locator("[data-pool-code]");
+      await expect(code).toBeFocused();
+      await expect(sheet.locator("[data-pool-done]")).toBeDisabled();
+      expect(await sheet.innerHTML()).not.toContain("pl_e2e1");
+      await code.fill("expired#x");
+      await sheet.locator("[data-pool-done]").click();
+      await expect.poll(() => m.seen.map((c) => c.pool_action)).toEqual(["login.begin", "login.complete"]);
+      expect(m.seen[1]!.pool_account).toBe("pl_e2e1");
+      expect(m.seen[1]!.pool_code).toBe("expired#x");
+      await expect(sheet.locator("[data-pool-error]")).toHaveText(
+        "The sign-in took too long. Start over to get a new link.",
+      );
+      await sheet.locator("[data-pool-restart]").click();
+      await expect
+        .poll(() => m.seen.map((c) => c.pool_action))
+        .toEqual(["login.begin", "login.complete", "login.begin"]);
+      await expect(code).toHaveValue("");
+      await code.fill("abc#state");
+      await code.press("Enter");
+      await expect
+        .poll(() => m.seen.map((c) => c.pool_action))
+        .toEqual(["login.begin", "login.complete", "login.begin", "login.complete"]);
+      await expect(sheet).toHaveCount(0);
+      await expect(s.locator("li.pool-acct .pool-title")).toHaveText(["Misha", "Fiction", "Spacesheep", "New"]);
+      await expect(s.locator("[data-pool-live]")).toHaveText(`Added New to ${name}`);
+    } finally {
+      await m.stop();
+    }
+  });
+});
