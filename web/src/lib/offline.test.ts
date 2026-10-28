@@ -2,7 +2,7 @@
 // The board's offline line: which paired machines it names, and hiding it until it changes.
 import type { MachineSummary, SessionSummary } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { ackKey, acknowledge, offlineMachines, offlineWords, pruneAcks, unacknowledged } from "./offline";
+import { ackKey, acknowledge, heldLine, offlineMachines, offlineWords, pruneAcks, unacknowledged } from "./offline";
 
 const POLL = "2026-10-28T14:02:00.000Z";
 
@@ -99,6 +99,18 @@ describe("hiding the line until it changes", () => {
     ];
     const kept = pruneAcks(seen, [machine("build-box", {}), machine("studio", { online: true }), machine("laptop")]);
     expect(kept).toEqual([ackKey({ name: "build-box", lastPollAt: POLL })]);
+  });
+
+  it("holds still while the board does: no line appears or clears under the hand, but × still hides it", () => {
+    const drop = offlineMachines([machine("build-box", { queued: 2 })], []);
+    // Dropped while the pointer rests on a row: nothing above the rows appears yet.
+    expect(heldLine([], drop, [], true)).toEqual([]);
+    expect(heldLine([], drop, [], false)).toEqual(drop);
+    // Back while held: the line stays until the board lets go.
+    expect(heldLine(drop, [], [], true)).toEqual(drop);
+    expect(heldLine(drop, [], [], false)).toEqual([]);
+    // Dismissed by the person's own hand: gone at once, held or not.
+    expect(heldLine(drop, drop, acknowledge([], drop), true)).toEqual([]);
   });
 
   it("hides every machine the line named at once, and only those", () => {

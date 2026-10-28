@@ -47,6 +47,16 @@ export const acknowledge = (seen: readonly string[], list: OfflineMachine[]): st
   ...new Set([...seen, ...list.map(ackKey)]),
 ];
 
+/** What the line shows while the board holds still under the hand (useListHold): the
+ *  machines it showed when the hold began, since appearing or clearing would move every
+ *  row below it. A dismissal still hides it at once: that was the person's own hand. */
+export const heldLine = (
+  shown: OfflineMachine[],
+  live: OfflineMachine[],
+  seen: readonly string[],
+  hold: boolean,
+): OfflineMachine[] => (hold ? unacknowledged(shown, seen) : live);
+
 /** Keep only the keys of drops still going on: a machine that came back (or polled and
  *  dropped again) loses its key, so its next drop shows. */
 export function pruneAcks(seen: readonly string[], machines: Iterable<MachineSummary>): string[] {

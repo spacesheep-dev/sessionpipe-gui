@@ -473,7 +473,7 @@ export function Board() {
       {/* Always there once loaded, so its place is set before the rows (no shift) and the
           first row of all is a new row to useFlip (its entrance). */}
       <div className="board-list" ref={listRef} hidden={!ready || noMatch || undefined}>
-        {ready && <OfflineLine machine={machine} />}
+        {ready && <OfflineLine machine={machine} hold={hold} />}
         {ready &&
           SESSION_STATES.filter((st) => st !== "done").map((st) => {
             const list = groups.get(st)!;

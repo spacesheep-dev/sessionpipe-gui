@@ -3,10 +3,11 @@
 // says which): a sentence in the group headers' tier, Machines, and × to hide it until it
 // changes. No colour, no icon: the rows below keep their own states. On a phone the
 // sentence itself opens Machines and the × is a 44 pt target.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppState } from "../data/hooks";
 import {
   acknowledge,
+  heldLine,
   offlineMachines,
   offlineWords,
   pruneAcks,
@@ -19,13 +20,18 @@ import { useContextMenu } from "./ContextMenu";
 
 const openMachines = () => navigate("/machines");
 
-export function OfflineLine({ machine }: { machine: string }) {
+export function OfflineLine({ machine, hold }: { machine: string; hold: boolean }) {
   const { machines, sessions, snapshotAt } = useAppState();
   const [seen, setSeen] = useState(readAcks);
-  const list = useMemo(
+  const live = useMemo(
     () => unacknowledged(offlineMachines(machines.values(), sessions.values(), machine), seen),
     [machines, sessions, machine, seen],
   );
+  // Held still with the rows under the hand: it neither appears nor clears until the board
+  // lets go, or a resting pointer would find a different row (or this line) under it.
+  const shown = useRef(live);
+  const list = heldLine(shown.current, live, seen, hold);
+  shown.current = list;
   // A machine that came back (or dropped again) forgets its hiding; not before the first
   // snapshot, whose empty list would forget everything.
   useEffect(() => {
