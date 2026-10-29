@@ -13,7 +13,7 @@ import type { Store } from "../data/store";
 import { agentGlyph, agentLabel, openAgent } from "./agents";
 import { copyText } from "./clipboard";
 import { harnessMark, repoBranch, sessionTitle } from "./format";
-import { hide } from "./hidden";
+import { canHideUntilNeeded, hiddenNow, hide, hideUntilNeeded, unhide } from "./hidden";
 import { labelMenu } from "./labels";
 import { canMark, isUnread, notifyMenu, setUnread } from "./marks";
 import { receiverOrigin } from "./net";
@@ -68,6 +68,10 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
   const isActiveTab = tabIndex >= 0 && tabIndex === split.active;
   const onItsPage = location.pathname === path;
   const list = ctx.surface === "list";
+  const hideHere = list && !onItsPage;
+  const hidden = hideHere && hiddenNow(s);
+  // e and ⇧E are the board's (useHideKeys); another list shows Hide without them.
+  const onBoard = location.pathname === "/";
   const phone = !desktop();
   const beside = getSettings().openSessions === "beside";
   const openPage: MenuItem | null = onItsPage
@@ -151,11 +155,21 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
     { sep: true },
     ...(ctx.extra ?? []),
     // Hide (Mail's archive): off this device's lists until it has news; "Hidden · Undo".
-    list &&
-      !onItsPage && {
+    // Hidden, it waits in the board's Hidden group, where Unhide brings it straight back.
+    hideHere &&
+      !hidden && {
         label: "Hide",
+        action: onBoard ? "list.hide" : undefined,
         run: () => hide(s.key, s.stateSince, { title: sessionTitle(s), session: s.key }),
       },
+    hideHere &&
+      !hidden &&
+      canHideUntilNeeded(s) && {
+        label: "Hide until it needs you",
+        action: onBoard ? "list.hideUntil" : undefined,
+        run: () => hideUntilNeeded(s.key, { title: sessionTitle(s), session: s.key }),
+      },
+    hideHere && hidden && { label: "Unhide", action: onBoard ? "list.hide" : undefined, run: () => unhide(s.key) },
     unreadItem(ctx.store, s, list),
     { sep: true },
     {

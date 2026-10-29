@@ -331,7 +331,13 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
   }, [key, store]);
 
   const reset = useCallback(() => setCursor(-1), []);
-  return { cursor, reset };
+  /** The person is about to take the cursor's row out of its place (e on the board): the
+   *  cursor goes with `href`, the row that takes that place, not with the row that left. */
+  const follow = useCallback((href: string | undefined) => {
+    onRow.current = href ?? null;
+    byKey.current = true;
+  }, []);
+  return { cursor, reset, follow };
 }
 
 /** Something open that Esc closes first (a popover, a confirm, the panel): a

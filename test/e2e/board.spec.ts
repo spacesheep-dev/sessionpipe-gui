@@ -3,7 +3,8 @@
 // The board as a person sees it: groups by state, a working card's current tool, an
 // attention banner when the demo asks for a permission, the collapsed done group,
 // live counts without a reload (with Advanced → Show counts), a list that holds still
-// under the pointer, the search that finds nothing, and the keyboard.
+// under the pointer, the search that finds nothing, the keyboard (e with Hidden open
+// too), and the Hidden header's own menu.
 import { expect, test } from "@playwright/test";
 import { openBoard } from "./helpers.js";
 
@@ -229,6 +230,26 @@ test.describe("board", () => {
     await expect(page.locator("article.card[aria-current='true'] a.card-link")).toHaveAttribute("href", opened!);
   });
 
+  test("with Hidden open, e leaves the cursor in its place, so e again hides the next row", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.board.hiddenOpen", "1"));
+    await openBoard(page);
+    await page.locator("section.group--working article.card a.card-link").first().focus();
+    // The cursor stays on the row that took the hidden one's place, not on the row in Hidden
+    // (the live demo may still bring a row back above it, so this reads rows, not indexes).
+    const cursor = page.locator("article.card[aria-current='true']");
+    const link = cursor.locator("a.card-link");
+    const section = cursor.locator("xpath=ancestor::section");
+    const first = await link.getAttribute("href");
+    await page.keyboard.press("e");
+    await expect(link).not.toHaveAttribute("href", first!);
+    await expect(section).not.toHaveClass(/group--hidden/);
+    const second = await link.getAttribute("href");
+    await page.keyboard.press("e");
+    await expect(link).not.toHaveAttribute("href", second!);
+    await expect(link).not.toHaveAttribute("href", first!);
+    await expect(section).not.toHaveClass(/group--hidden/);
+  });
+
   test("Esc clears the search first, then the cursor", async ({ page }) => {
     await openBoard(page);
     const search = page.getByRole("searchbox", { name: "Search sessions" });
@@ -245,5 +266,19 @@ test.describe("board", () => {
     await page.keyboard.press("Escape");
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator("section.group").first()).toBeVisible();
+  });
+
+  test("the Hidden header has its own menu, as Done's does, not the board's", async ({ page }) => {
+    await openBoard(page);
+    await page.locator("section.group--working article.card a.card-link").first().focus();
+    await page.keyboard.press("Shift+E");
+    const toggle = page.locator("section.group--hidden button.group-toggle");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await toggle.click({ button: "right" });
+    const item = page.getByRole("menuitemcheckbox", { name: "Show hidden sessions" });
+    await expect(item).toHaveAttribute("aria-checked", "false");
+    await expect(page.getByRole("menuitemcheckbox", { name: "Show done sessions" })).toHaveCount(0);
+    await item.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
 });

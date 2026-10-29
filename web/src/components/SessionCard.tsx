@@ -38,7 +38,7 @@ import {
   sessionTitle,
   toolLabel,
 } from "../lib/format";
-import { hide } from "../lib/hidden";
+import { hide, unhide } from "../lib/hidden";
 import { labelItems } from "../lib/labels";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { reducedMotion, tokenMs, useFlip, useHeldOrder, useListHold } from "../lib/motion";
@@ -87,6 +87,8 @@ interface SessionCardProps {
   /** The board is holding still (the pointer is on it): the tree under this row holds too,
    *  so a subagent that starts or ends never pushes the rows below. */
   held?: boolean;
+  /** A row of the board's Hidden group: its trailing swipe unhides it. */
+  hidden?: boolean;
 }
 
 /** What the tier lens takes off a row, for the page's "N hidden" line. */
@@ -117,6 +119,7 @@ const sameCard = (a: SessionCardProps, b: SessionCardProps): boolean =>
   a.counts === b.counts &&
   a.jump === b.jump &&
   a.held === b.held &&
+  a.hidden === b.hidden &&
   a.startTitle === b.startTitle &&
   (a.children?.length ?? 0) === (b.children?.length ?? 0) &&
   (a.children ?? []).every((c, i) => c === b.children?.[i]);
@@ -144,6 +147,7 @@ export const SessionCard = memo(function SessionCard({
   counts = false,
   jump,
   held = false,
+  hidden = false,
   startTitle,
 }: SessionCardProps) {
   const store = useStore();
@@ -210,10 +214,11 @@ export const SessionCard = memo(function SessionCard({
   const tip = [title, countsLine(s, showTools)].filter(Boolean).join("\n");
   const warm = prefetchProps(store, s);
   const rowRef = useRef<HTMLDivElement>(null);
-  // A phone's swipes (iOS Mail): trailing hides it (with Undo), leading labels it.
+  // A phone's swipes (iOS Mail): trailing hides it (with Undo), or unhides a hidden one;
+  // leading labels it.
   useSwipe(rowRef, {
     lead: () => openMenu(labelItems(store, [s.key]), rowRef.current!, { source: "touch", title: "Label" }),
-    trail: () => hide(s.key, s.stateSince, { title, session: s.key }),
+    trail: () => (hidden ? unhide(s.key) : hide(s.key, s.stateSince, { title, session: s.key })),
   });
   return (
     <article
@@ -228,7 +233,7 @@ export const SessionCard = memo(function SessionCard({
     >
       {attention?.kind === "permission" && <CardAnswer s={s} into={answer} />}
       <div className="card-row" ref={rowRef} {...warm}>
-        <SwipePanes lead="Label" trail="Hide" />
+        <SwipePanes lead="Label" trail={hidden ? "Unhide" : "Hide"} />
         {agents.length > 0 && (
           <button
             type="button"

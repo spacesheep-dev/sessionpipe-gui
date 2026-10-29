@@ -390,6 +390,8 @@ export const ACTIONS: readonly Action[] = [
     hint: "the right-click menu, at the row",
   },
   { id: "list.unread", label: "Mark as read or unread", group: "Lists", scope: "lists", keys: ["u"] },
+  { id: "list.hide", label: "Hide or unhide", group: "Lists", scope: "lists", keys: ["e"] },
+  { id: "list.hideUntil", label: "Hide until it needs you", group: "Lists", scope: "lists", keys: ["shift+e"] },
   { id: "board.peek", label: "Peek beside the page", group: "Board", scope: "board", keys: ["space"] },
   { id: "search.peek", label: "Peek beside the page", group: "Search", scope: "search", keys: ["space"] },
   { id: "search.copyResume", label: "Copy resume command", group: "Search", scope: "search", keys: ["mod+c"] },

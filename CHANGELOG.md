@@ -41,6 +41,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   a third of the way down instead of at the bottom. Your own turns at the terminal never
   count, the line doesn't move while the page is open, and it's gone when you come back.
   A session you haven't opened yet opens at the bottom as before.
+- **Hidden sessions can be found again.** The board keeps what this device hid in a
+  **Hidden** group after Done, folded like Done and under the same filters; its rows are
+  ordinary rows, and **Unhide** (the row's menu, `e`, a phone's trailing swipe) puts one
+  back in its state's group.
+- **Hide until it needs you**, below Hide in a row's menu (or `⇧E`), for a session that
+  loops ("every 30 minutes, check the nightly build"): new turns leave it hidden, and it
+  shows only while it needs you. `e` hides or unhides the row under the cursor.
 
 ### Changed
 
