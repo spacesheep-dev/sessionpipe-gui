@@ -307,7 +307,8 @@ device.
 The same UI in a small [Tauri 2](https://tauri.app) app that uses the system's own web view
 (the AppImage carries WebKitGTK with it, which is why it is larger). It connects to the
 receiver on this machine; on first run it can start one for you as a service, which needs
-Node 20 or newer (`sessionpipe-gui service install` does the same from a terminal). It
+Node 20 or newer (`sessionpipe-gui service install` does the same from a terminal, and a
+newer version upgrades the service it finds in place). It
 keeps a menu bar item and a Dock badge that count what needs you, notifies you, launches at
 login if you like, and updates itself. Every release is
 on the [releases page](https://github.com/spacesheep-dev/sessionpipe-gui/releases).

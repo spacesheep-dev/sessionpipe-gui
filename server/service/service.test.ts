@@ -2,12 +2,21 @@
 // `service install|uninstall|status` against a temp HOME and a fake launchctl / systemctl
 // (a shell script that logs its arguments): nothing here reaches the real session.
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { writeRunFile } from "../runfile.js";
-import { type Probe, processEnv, runService, SERVICE_LABEL, type ServiceEnv, servicePath } from "./index.js";
+import {
+  installedOptions,
+  isOurs,
+  type Probe,
+  processEnv,
+  runService,
+  SERVICE_LABEL,
+  type ServiceEnv,
+  servicePath,
+} from "./index.js";
 import { launchAgentPath, launchAgentPlist, parseLaunchctlPrint, plistArgv } from "./launchd.js";
 import { parseSystemctlShow, systemdUnit, unitArgv, unitPath } from "./systemd.js";
 
@@ -19,7 +28,9 @@ let errs: string[];
 
 /** A fake launchctl / systemctl: logs "<argv>" to $FAKE_LOG; `print`/`show` succeed only
  *  while $FAKE_LOADED exists, and print $FAKE_PRINT; `bootstrap`/`enable` create the
- *  marker, `bootout`/`disable` remove it; $FAKE_FAIL names a verb that exits 5. */
+ *  marker, `bootout`/`disable` remove it (after 300 ms when $FAKE_SLOW_BOOTOUT is set, as
+ *  launchd lets go of a job a moment after bootout returns); $FAKE_FAIL names a verb that
+ *  exits 5. */
 function fakeTool(name: string): string {
   const p = path.join(dir, name);
   writeFileSync(
@@ -31,7 +42,7 @@ verb="$1"; [ "$1" = "--user" ] && verb="$2"
 case "$verb" in
   print|show) [ -f "${dir}/loaded" ] || { echo "Could not find service" >&2; exit 113; }; cat "${dir}/print" 2>/dev/null; exit 0;;
   bootstrap|enable) touch "${dir}/loaded";;
-  bootout|disable) rm -f "${dir}/loaded";;
+  bootout|disable) if [ -n "$FAKE_SLOW_BOOTOUT" ]; then (sleep 0.3; rm -f "${dir}/loaded") & else rm -f "${dir}/loaded"; fi;;
 esac
 exit 0
 `,
@@ -40,8 +51,11 @@ exit 0
   return p;
 }
 
-function env(over: Partial<ServiceEnv> = {}, probe: Probe | Probe[] = null): ServiceEnv {
+type Version = string | undefined;
+/** `probe` and `running` answer from their lists in turn, repeating the last answer. */
+function env(over: Partial<ServiceEnv> = {}, probe: Probe | Probe[] = null, running: Version | Version[] = undefined) {
   const probes = Array.isArray(probe) ? [...probe] : [probe];
+  const versions = Array.isArray(running) ? [...running] : [running];
   return {
     platform: "darwin",
     home,
@@ -52,18 +66,25 @@ function env(over: Partial<ServiceEnv> = {}, probe: Probe | Probe[] = null): Ser
     node: "/opt/homebrew/Cellar/node/23.6.1/bin/node",
     cli: "/opt/homebrew/lib/node_modules/sessionpipe-gui/dist/cli.js",
     defaultState: path.join(home, ".local", "state", "sessionpipe-gui"),
+    version: "0.6.0",
     exec: (cmd, args) => {
-      const r = spawnSync(cmd, args, { encoding: "utf8", env: { ...process.env, FAKE_FAIL: failVerb } });
+      const r = spawnSync(cmd, args, {
+        encoding: "utf8",
+        env: { ...process.env, FAKE_FAIL: failVerb, FAKE_SLOW_BOOTOUT: slowBootout ? "1" : "" },
+      });
       return { code: r.status ?? 1, stdout: r.stdout, stderr: r.stderr };
     },
     probe: async () => (probes.length > 1 ? probes.shift()! : probes[0]!),
+    running: async () => (versions.length > 1 ? versions.shift() : versions[0]),
     waitMs: 0,
+    settleMs: 1000,
     out: (s) => out.push(s),
     err: (s) => errs.push(s),
     ...over,
-  };
+  } satisfies ServiceEnv;
 }
 let failVerb = "";
+let slowBootout = false;
 const calls = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
 
 beforeEach(() => {
@@ -73,6 +94,7 @@ beforeEach(() => {
   out = [];
   errs = [];
   failVerb = "";
+  slowBootout = false;
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -161,7 +183,7 @@ describe("service install (macOS)", () => {
   });
 
   it("waits for the receiver to answer", async () => {
-    const e = env({ waitMs: 2000 }, [null, null, "gui"]);
+    const e = env({ waitMs: 2000 }, null, [undefined, undefined, "0.6.0"]);
     expect(await runService({ verb: "install", port: 7829, state: path.join(dir, "s") }, e)).toBe(0);
     expect(out.join("\n")).toContain("running on http://127.0.0.1:7829");
   });
@@ -187,15 +209,25 @@ describe("service install (macOS)", () => {
     expect(errs.join("\n")).toContain("port 7829 is in use by another program");
   });
 
-  it("refuses when a service is installed already (file, or loaded without one)", async () => {
+  it("refuses when the label is loaded without a file (nothing says whose it is)", async () => {
     const e = env();
     expect(await runService({ verb: "install", port: 7829, state: path.join(dir, "s") }, e)).toBe(0);
-    expect(await runService({ verb: "install", port: 7830, state: path.join(dir, "s") }, e)).toBe(1);
-    expect(errs.join("\n")).toContain("a service is already installed");
     rmSync(launchAgentPath(home, SERVICE_LABEL));
-    errs = [];
-    expect(await runService({ verb: "install", port: 7830 }, e)).toBe(1); // still loaded
-    expect(errs.join("\n")).toContain("already installed");
+    expect(await runService({ verb: "install", port: 7830 }, e)).toBe(1);
+    expect(errs.join("\n")).toContain("a service is already installed");
+    expect(existsSync(launchAgentPath(home, SERVICE_LABEL))).toBe(false);
+  });
+
+  it("says a slow receiver is still starting (exit 0), and one that isn't running keeps trying", async () => {
+    writeFileSync(path.join(dir, "print"), "\tstate = running\n\tpid = 4242\n");
+    const e = env({ waitMs: 300 });
+    expect(await runService({ verb: "install", port: 7829, state: path.join(dir, "s") }, e)).toBe(0);
+    expect(out.join("\n")).toContain("starting on :7829… a big board takes a minute");
+    expect(out.at(-1)).toMatch(/^still starting on :7829 after 0 s; it keeps going \(.*service\.log\)$/);
+    writeFileSync(path.join(dir, "print"), "\tstate = waiting\n\tlast exit code = 1\n");
+    out = [];
+    expect(await runService({ verb: "install", port: 7829, state: path.join(dir, "s") }, e)).toBe(0);
+    expect(out.at(-1)).toContain("not answering on :7829 after 0 s; it keeps trying");
   });
 
   it("removes the plist again when bootstrap fails", async () => {
@@ -222,14 +254,233 @@ describe("service install (macOS)", () => {
   });
 });
 
+/** The plist an earlier version's `service install` left: its node, its npx-cached cli. */
+const OLD_NODE = "/usr/local/bin/node";
+const OLD_CLI = "/Users/m/.npm/_npx/f2e0e9d72c6b5f2d/node_modules/sessionpipe-gui/dist/cli.js";
+function oldPlist(argvRest: string[], state: string): string {
+  const file = launchAgentPath(home, SERVICE_LABEL);
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(
+    file,
+    launchAgentPlist({
+      label: SERVICE_LABEL,
+      argv: [OLD_NODE, OLD_CLI, ...argvRest],
+      env: { PATH: "/usr/local/bin:/usr/bin:/bin" },
+      logPath: path.join(state, "service.log"),
+      workingDirectory: state,
+    }),
+  );
+  writeFileSync(path.join(dir, "loaded"), "");
+  writeFileSync(path.join(dir, "print"), "\tstate = running\n\tpid = 4242\n");
+  return file;
+}
+
+describe("service install upgrades a service of ours in place", () => {
+  it("tells ours from someone else's under our label", () => {
+    expect(isOurs([OLD_NODE, OLD_CLI, "--port", "7373"])).toBe(true);
+    expect(isOurs(["/opt/homebrew/bin/sessionpipe-gui", "--port", "7373"])).toBe(true);
+    expect(isOurs(["/usr/local/bin/node", "/Users/m/.local/lib/sessionpipe-gui/bin/sessionpipe-gui"])).toBe(true);
+    expect(isOurs(["/usr/bin/python3", "/Users/m/own/server.py"])).toBe(false);
+    expect(isOurs(["/usr/local/bin/node", "/Users/m/sessionpipe-gui-fork/dist/cli.js"])).toBe(false);
+    expect(isOurs([])).toBe(false);
+    expect(isOurs(["/usr/local/bin/node", "/Users/m/src/gui/dist/cli.js"])).toBe(false);
+    expect(isOurs(["/usr/local/bin/node", "/Users/m/src/gui/dist/cli.js"], "/Users/m/src/gui/dist/cli.js")).toBe(true);
+    expect(
+      installedOptions([
+        OLD_NODE,
+        OLD_CLI,
+        "--port",
+        "7373",
+        "--state",
+        "/s",
+        "--quiet",
+        "--host",
+        "0.0.0.0",
+        "--demo",
+      ]),
+    ).toEqual({
+      port: 7373,
+      state: "/s",
+      host: "0.0.0.0",
+      extra: ["--demo"],
+    });
+    expect(installedOptions(["/opt/homebrew/bin/sessionpipe-gui", "--quiet"])).toEqual({ extra: [] });
+  });
+
+  it("rewrites the old plist with this node and cli, keeps its options, restarts it and waits for the new version", async () => {
+    const state = path.join(dir, "state");
+    mkdirSync(path.join(state, "events", "claude-code"), { recursive: true });
+    writeFileSync(path.join(state, "events", "claude-code", "a.jsonl"), "");
+    writeFileSync(path.join(state, "events", "claude-code", "b.jsonl"), "");
+    const file = oldPlist(["--port", "7373", "--state", state, "--quiet", "--demo"], state);
+    const e = env({ waitMs: 3000 }, "gui", ["0.4.1", undefined, "0.4.1", "0.6.0"]);
+    expect(await runService({ verb: "install", port: 7373 }, e)).toBe(0);
+    expect(plistArgv(readFileSync(file, "utf8"))).toEqual([
+      e.node,
+      e.cli,
+      "--port",
+      "7373",
+      "--state",
+      state,
+      "--quiet",
+      "--demo",
+    ]);
+    const c = calls().filter((l) => !l.startsWith("print"));
+    expect(c).toEqual([`bootout gui/501/${SERVICE_LABEL}`, `bootstrap gui/501 ${file}`]);
+    expect(out).toContain("updating dev.spacesheep.sessionpipe-gui: 0.4.1 → 0.6.0");
+    expect(out).toContain(
+      `updated dev.spacesheep.sessionpipe-gui: 0.4.1 → 0.6.0 (~/Library/LaunchAgents/${SERVICE_LABEL}.plist)`,
+    );
+    expect(out).toContain("starting on :7373… 2 sessions to load; a big board takes a minute");
+    expect(out.at(-1)).toBe(`running 0.6.0 on http://127.0.0.1:7373 · state ${state}`);
+    expect(errs).toEqual([]);
+  });
+
+  it("takes the old version from run.json when the old receiver isn't answering, and flags over the old options", async () => {
+    const state = path.join(dir, "state");
+    const file = oldPlist(["--port", "7373", "--state", state, "--quiet"], state);
+    writeRunFile(state, { port: 7373, pid: 999_999, version: "0.4.1", url: "http://127.0.0.1:7373", startedAt: "x" });
+    rmSync(path.join(dir, "loaded")); // installed, not loaded: no bootout
+    const e = env({}, null);
+    expect(await runService({ verb: "install", port: 7374, host: "0.0.0.0" }, e)).toBe(0);
+    expect(plistArgv(readFileSync(file, "utf8"))).toEqual([
+      e.node,
+      e.cli,
+      "--port",
+      "7374",
+      "--state",
+      state,
+      "--quiet",
+      "--host",
+      "0.0.0.0",
+    ]);
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([`bootstrap gui/501 ${file}`]);
+    expect(out).toContain(
+      "updated dev.spacesheep.sessionpipe-gui: 0.4.1 → 0.6.0 (~/Library/LaunchAgents/dev.spacesheep.sessionpipe-gui.plist)",
+    );
+    expect(out.at(-1)).toBe(`starting on http://127.0.0.1:7374 · state ${state}`);
+  });
+
+  it("is idempotent: the same argv answering is already running", async () => {
+    const e = env({}, [null, "gui"], "0.6.0");
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    const file = launchAgentPath(home, SERVICE_LABEL);
+    const before = readFileSync(file, "utf8");
+    out = [];
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    expect(out).toEqual(["already running 0.6.0 on http://127.0.0.1:7829"]);
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(calls().filter((l) => l.startsWith("bootout"))).toEqual([]);
+  });
+
+  it("leaves the same service alone while it is still starting, and waits for it", async () => {
+    const e = env({ waitMs: 2000 }, null, [undefined, undefined, "0.6.0"]);
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    writeFileSync(path.join(dir, "print"), "\tstate = running\n\tpid = 4242\n");
+    out = [];
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    expect(out[0]).toBe("already installed dev.spacesheep.sessionpipe-gui; it is starting");
+    expect(out.at(-1)).toBe(`running 0.6.0 on http://127.0.0.1:7829 · state ${state}`);
+    expect(calls().filter((l) => l.startsWith("bootout") || l.startsWith("bootstrap"))).toEqual([
+      `bootstrap gui/501 ${launchAgentPath(home, SERVICE_LABEL)}`,
+    ]);
+  });
+
+  it("refuses a plist under our label that runs something else, and leaves it alone", async () => {
+    const file = launchAgentPath(home, SERVICE_LABEL);
+    mkdirSync(path.dirname(file), { recursive: true });
+    const theirs = launchAgentPlist({
+      label: SERVICE_LABEL,
+      argv: ["/usr/bin/python3", "/Users/m/own/server.py"],
+      env: {},
+      logPath: "/tmp/x.log",
+      workingDirectory: "/tmp",
+    });
+    writeFileSync(file, theirs);
+    expect(await runService({ verb: "install", port: 7829 }, env())).toBe(1);
+    expect(errs.join("\n")).toContain("isn't sessionpipe-gui's: it runs /usr/bin/python3");
+    expect(readFileSync(file, "utf8")).toBe(theirs);
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([]);
+  });
+
+  it("keeps the port refusal when something else holds the port the service had", async () => {
+    const state = path.join(dir, "state");
+    oldPlist(["--port", "7373", "--state", state, "--quiet"], state);
+    expect(await runService({ verb: "install" }, env({}, "other"))).toBe(1);
+    expect(errs.join("\n")).toContain("port 7373 is in use by another program");
+  });
+
+  it("--dry-run prints the new plist and the restart and changes nothing", async () => {
+    const state = path.join(dir, "state");
+    const file = oldPlist(["--port", "7373", "--state", state, "--quiet"], state);
+    const before = readFileSync(file, "utf8");
+    const e = env({}, "gui", "0.4.1");
+    expect(await runService({ verb: "install", dryRun: true }, e)).toBe(0);
+    expect(readFileSync(file, "utf8")).toBe(before);
+    const text = out.join("\n");
+    expect(text).toContain(`<string>${e.cli}</string>`);
+    expect(text).toContain(`$ ${e.launchctl} bootout gui/501/${SERVICE_LABEL}`);
+    expect(text).toContain(`$ ${e.launchctl} bootstrap gui/501 ${file}`);
+    expect(out.at(-1)).toBe(
+      "dry run: nothing written or restarted; it would update dev.spacesheep.sessionpipe-gui: 0.4.1 → 0.6.0 on http://127.0.0.1:7373",
+    );
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([]);
+  });
+
+  it("on Linux: the unit is rewritten, then daemon-reload and restart", async () => {
+    const e = env({ platform: "linux" }, "gui", ["0.4.1", "0.6.0"]);
+    const state = path.join(dir, "state");
+    const file = unitPath(home, SERVICE_LABEL);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(
+      file,
+      systemdUnit({
+        description: "d",
+        argv: [
+          "/usr/bin/node",
+          "/usr/lib/node_modules/sessionpipe-gui/dist/cli.js",
+          "--port",
+          "7373",
+          "--state",
+          state,
+          "--quiet",
+        ],
+        env: {},
+        logPath: path.join(state, "service.log"),
+        workingDirectory: state,
+      }),
+    );
+    writeFileSync(path.join(dir, "loaded"), "");
+    expect(await runService({ verb: "install" }, { ...e, waitMs: 1000 })).toBe(0);
+    expect(unitArgv(readFileSync(file, "utf8"))).toEqual([
+      e.node,
+      e.cli,
+      "--port",
+      "7373",
+      "--state",
+      state,
+      "--quiet",
+    ]);
+    expect(calls().filter((c) => !c.startsWith("--user show"))).toEqual([
+      "--user daemon-reload",
+      `--user restart ${SERVICE_LABEL}.service`,
+    ]);
+    expect(out).toContain(
+      "updated dev.spacesheep.sessionpipe-gui: 0.4.1 → 0.6.0 (~/.config/systemd/user/dev.spacesheep.sessionpipe-gui.service)",
+    );
+  });
+});
+
 describe("service uninstall and status (macOS)", () => {
   it("status says not installed (exit 3)", async () => {
     expect(await runService({ verb: "status" }, env())).toBe(3);
     expect(out[0]).toContain("not installed");
   });
 
-  it("status prints the label, pid, port, url and run.json", async () => {
-    const e = env();
+  it("status prints the label, pid, running version, port, url and run.json", async () => {
+    const e = env({}, null, "0.2.0");
     const state = path.join(dir, "s");
     await runService({ verb: "install", port: 7829, state }, e);
     writeFileSync(path.join(dir, "print"), "\tstate = running\n\tpid = 4242\n");
@@ -243,7 +494,7 @@ describe("service uninstall and status (macOS)", () => {
     out = [];
     expect(await runService({ verb: "status" }, e)).toBe(0);
     const text = out.join("\n");
-    expect(text).toContain("dev.spacesheep.sessionpipe-gui (launchd) · running · pid 4242");
+    expect(text).toContain("dev.spacesheep.sessionpipe-gui (launchd) · running · pid 4242 · 0.2.0");
     expect(text).toContain("port      7829");
     expect(text).toContain("url       http://127.0.0.1:7829");
     expect(text).toContain(`run.json  pid ${process.pid} · 0.2.0`);
@@ -259,6 +510,17 @@ describe("service uninstall and status (macOS)", () => {
     out = [];
     expect(await runService({ verb: "uninstall" }, e)).toBe(0);
     expect(out[0]).toContain("nothing to do");
+  });
+
+  it("uninstall waits for launchd to let the job go", async () => {
+    const e = env();
+    await runService({ verb: "install", port: 7829, state: path.join(dir, "s") }, e);
+    slowBootout = true;
+    out = [];
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(errs).toEqual([]);
+    expect(out.at(-1)).toContain("removed");
+    expect(existsSync(path.join(dir, "loaded"))).toBe(false);
   });
 
   it("uninstall reports a service that stays loaded", async () => {

@@ -125,11 +125,14 @@ service (the receiver in the background: started at login, restarted if it stops
                                              or a systemd --user unit (Linux) running this
                                              node and this sessionpipe-gui; --port N,
                                              --state DIR and --host H as for the receiver,
-                                             receiver options after -- passed on. Refuses
-                                             when something answers on the port or a
-                                             service is installed already
+                                             receiver options after -- passed on. A service
+                                             of ours already there is upgraded in place (its
+                                             options kept unless flags say otherwise, then
+                                             restarted); one that runs something else, or
+                                             another program on the port, is refused
   sessionpipe-gui service uninstall          stop it and remove it
-  sessionpipe-gui service status             the label, pid, port and url (exit 3: not running)
+  sessionpipe-gui service status             the label, pid, running version, port and url
+                                             (exit 3: not running)
   --dry-run prints the file and the commands and changes nothing. Logs go to
   <state>/service.log. Windows: not yet; run sessionpipe-gui in a terminal.
   A running receiver writes <state>/run.json (port, pid, version, url) so the desktop
