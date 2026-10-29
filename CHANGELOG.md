@@ -17,6 +17,30 @@ All notable changes to `sessionpipe-gui`. The format follows
   failed. A failed check says so in plain words (offline, no manifest, no build for this
   computer, a signature that doesn't match) and leaves nothing half-installed.
 
+### Fixed
+
+- **`service install` upgrades the service it finds instead of refusing.** The app's
+  "Start sessionpipe" (and the command) used to stop at "a service is already installed"
+  whenever an earlier version had installed the LaunchAgent / systemd unit, which is every
+  upgrade of the app. Now a service of ours under the label is rewritten in place with this
+  version's node and cli (its port, state dir and options kept unless flags say otherwise),
+  restarted (`launchctl bootout` + `bootstrap`; `systemctl --user daemon-reload` + `restart`),
+  and waited for until the new version answers: `updated dev.spacesheep.sessionpipe-gui: 0.4.1
+  → 0.6.0`. The same service answering already is `already running 0.6.0 on …` (exit 0); one
+  still starting is left to it. A plist under our label that runs something else is still
+  refused, as is another program on the port. `--dry-run` shows the rewrite and the restart.
+- **A big board gets time to start.** The installer waited 10 s for the receiver and then
+  printed what read as a failure, while a 1 GB state dir takes ~30 s to index at boot. It now
+  waits up to 90 s (`SP_SERVICE_WAIT_MS`), says what it is waiting on ("starting on :7373…
+  283 sessions to load; a big board takes a minute"), and a service that is running but not
+  answering yet ends with "still starting", exit 0. The desktop app shows those lines on the
+  welcome ("Updating sessionpipe 0.4.1 → 0.6.0…", "Starting… this can take a minute on a big
+  board") and waits as long itself.
+- `service uninstall` no longer says "still loaded" on the first call: `launchctl bootout`
+  returns before the job is gone, and the command now waits for it (as the upgrade's
+  restart does before it bootstraps again).
+- `service status` prints the running receiver's version beside the pid.
+
 ## [0.6.0] - 2026-10-29
 
 ### Added
