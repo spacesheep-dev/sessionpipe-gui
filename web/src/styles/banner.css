@@ -5,12 +5,12 @@
    the way it came, from wherever a finger left it. The slot it sits in is toasts.css's. */
 @keyframes banner-in {
   from {
-    transform: translateY(calc(-100% - 12px - env(safe-area-inset-top)));
+    transform: translateY(calc(-100% - 12px - var(--safe-top, env(safe-area-inset-top))));
   }
 }
 @keyframes banner-out {
   to {
-    transform: translateY(calc(-100% - 12px - env(safe-area-inset-top)));
+    transform: translateY(calc(-100% - 12px - var(--safe-top, env(safe-area-inset-top))));
   }
 }
 @media (max-width: 839px) {

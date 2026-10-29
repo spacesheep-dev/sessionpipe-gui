@@ -9,7 +9,7 @@
       "!package-lock.json",
       "!conformance",
       "!apps/crates/*/permissions/schemas",
-      "!apps/ios/src-tauri/gen/apple/Assets.xcassets"
+      "!apps/mobile/src-tauri/gen/apple/Assets.xcassets"
     ]
   },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },

@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: Apache-2.0
+# The phone apps on every PR that changes them (apps/mobile, the network crate they share
+# with the desktop app, the page's native layer): the shell's clippy and tests, an iOS
+# simulator build, and an Android debug build. Nothing is signed or uploaded, and no secret
+# is read: a PR from a fork runs it the same way. The signed builds are "iOS → TestFlight"
+# and "Android release".
+name: Mobile
+
+on:
+  pull_request:
+    paths:
+      - "apps/mobile/**"
+      - "apps/crates/sp-receivers/**"
+      - "web/src/native/**"
+      - ".github/workflows/mobile.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  ios:
+    name: test · iOS simulator build
+    # The Xcode TestFlight builds with (26 or later, which App Store Connect requires).
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/mobile/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-apple-ios-sim
+
+      # The Rust cache keeps build-script output with Xcode's paths in it (swift-rs, the
+      # clang runtime), so each Xcode build gets its own: a macos-15 cache can't link on 26.
+      - name: Xcode
+        run: echo "XCODE_BUILD=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_ENV"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/mobile/src-tauri -> target
+          key: xcode-${{ env.XCODE_BUILD }}
+
+      # The UI the app bundles (frontendDist), which the shell's build also needs for tests.
+      - run: npm ci
+      - run: npm run build
+      - run: npm ci
+        working-directory: apps/mobile
+
+      - name: cargo clippy and test (the shell, on the host)
+        working-directory: apps/mobile/src-tauri
+        run: |
+          cargo clippy --all-targets --locked -- -D warnings
+          cargo test --locked
+
+      - name: tauri ios build --debug (simulator)
+        working-directory: apps/mobile
+        run: npx tauri ios build --debug --target aarch64-sim --ci
+
+  android:
+    name: Android debug build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/mobile/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/mobile/src-tauri -> target
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm ci
+        working-directory: apps/mobile
+
+      - name: tauri android build --debug (arm64)
+        working-directory: apps/mobile
+        run: |
+          export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          npx tauri android build --debug --apk --target aarch64 --ci

@@ -233,18 +233,18 @@ test.describe("split panel", () => {
       const u = new URL(page.url());
       return { s: u.searchParams.get("s"), t: u.searchParams.get("t") };
     };
-    /** The first three distinct board cards: href, key and title, read once (cards re-sort live). */
+    /** The first three distinct board cards: href and key, read once (cards re-sort live). */
     const cards = async (page: Page, n: number) => {
       await openBoard(page);
       const links = page.locator("article.card a.card-link");
       await expect.poll(() => links.count()).toBeGreaterThanOrEqual(n);
       // Held before the read and through the clicks: the pointer stays on the list.
       await holdBoard(page);
-      const out: { href: string; key: string; title: string }[] = [];
+      const out: { href: string; key: string }[] = [];
       for (let i = 0; i < n; i++) {
         const href = (await links.nth(i).getAttribute("href"))!;
         const [, h, id] = /^\/s\/([^/]+)\/(.+)$/.exec(href)!.map(decodeURIComponent) as [string, string, string];
-        out.push({ href, key: `${h}:${id}`, title: (await links.nth(i).locator(".card-title").textContent())! });
+        out.push({ href, key: `${h}:${id}` });
       }
       return out;
     };
@@ -268,7 +268,9 @@ test.describe("split panel", () => {
       await expect(tabs(page)).toHaveCount(2);
       expect(await tabKeys(page)).toEqual([a!.key, b!.key]);
       await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
-      await expect(panel(page).locator(".panel-title")).toHaveText(titleOf(b!.title));
+      // By its key, not its words: a demo session may learn a better title mid-turn.
+      expect(await activeKey(page)).toBe(b!.key);
+      await expect(panel(page).locator(".panel-title")).not.toHaveText("");
       expect(splitParams(page)).toEqual({ s: `${a!.key},${b!.key}`, t: "1" });
 
       await click(page, c!.href, [process.platform === "darwin" ? "Meta" : "Control"]);

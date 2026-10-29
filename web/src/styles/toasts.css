@@ -230,14 +230,14 @@
   }
   .toasts--phone .toast-slot {
     position: absolute;
-    top: calc(env(safe-area-inset-top) + 8px);
-    left: max(8px, env(safe-area-inset-left));
-    right: max(8px, env(safe-area-inset-right));
+    top: calc(var(--safe-top, env(safe-area-inset-top)) + 8px);
+    left: max(8px, var(--safe-left, env(safe-area-inset-left)));
+    right: max(8px, var(--safe-right, env(safe-area-inset-right)));
     padding: 0;
   }
   .toasts--phone .toast-slot--undo {
     top: auto;
-    bottom: calc(var(--tabbar) + env(safe-area-inset-bottom) + 8px);
+    bottom: calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom)) + 8px);
   }
   /* No height to give back: the slots overlap. */
   .toasts--phone .toast-slot[data-closing] {
@@ -262,7 +262,7 @@
     position: absolute;
     left: 16px;
     right: 16px;
-    bottom: calc(var(--tabbar) + env(safe-area-inset-bottom) + 60px);
+    bottom: calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom)) + 60px);
     text-align: center;
   }
 }

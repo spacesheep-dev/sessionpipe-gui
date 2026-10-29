@@ -1,0 +1,20 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "sessionpipe",
+  "version": "../../../package.json",
+  "identifier": "dev.spacesheep.sessionpipe",
+  "build": { "frontendDist": "../../../dist/web" },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": false,
+    "security": {
+      "dangerousDisableAssetCspModification": ["style-src"],
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' rx: http://rx.localhost; img-src 'self' data: blob: rx: http://rx.localhost; font-src 'self' rx: http://rx.localhost; media-src 'self' rx: http://rx.localhost; connect-src 'self' ipc: http://ipc.localhost rx: http://rx.localhost http://shell.localhost; frame-src 'none'; object-src 'none'; base-uri 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": ["icons/icon.png"],
+    "iOS": { "minimumSystemVersion": "17.0", "developmentTeam": "QR7H8ARENW" }
+  }
+}

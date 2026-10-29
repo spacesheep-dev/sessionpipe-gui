@@ -13,7 +13,7 @@ import { invoke, listen } from "./bridge";
 import { installKeyFilter, type MenuPayload, restoreSidebar, runMenu } from "./menu";
 import { openStream, resyncAll } from "./stream";
 
-export type Platform = "macos" | "windows" | "linux" | "ios";
+export type Platform = "macos" | "windows" | "linux" | "ios" | "android";
 export type Feature =
   | "tray"
   | "notifications"
@@ -39,7 +39,7 @@ export interface ShellInfo {
   rxBase: string | null;
 }
 
-const PLATFORMS: readonly string[] = ["macos", "windows", "linux", "ios"];
+const PLATFORMS: readonly string[] = ["macos", "windows", "linux", "ios", "android"];
 const FEATURES: readonly string[] = [
   "tray",
   "notifications",
@@ -102,6 +102,23 @@ export async function useLocalReceiver(): Promise<boolean> {
   }
 }
 
+/** Android's WebView has no env(safe-area-inset-*) for the system bars, so the shell's
+ *  `spInsets` (MainActivity.kt) says them, "top right bottom left" in CSS px, and fires
+ *  `sp-insets` when they change. The stylesheets read them as --safe-*. */
+export function followInsets(): void {
+  const bridge = (globalThis as { spInsets?: { get(): string } }).spInsets;
+  if (!bridge) return;
+  const apply = () => {
+    const sides = bridge.get().split(" ").map(Number);
+    if (sides.length !== 4 || sides.some((n) => !Number.isFinite(n) || n < 0)) return;
+    const style = document.documentElement.style;
+    for (const [i, side] of ["top", "right", "bottom", "left"].entries())
+      style.setProperty(`--safe-${side}`, `${sides[i]}px`);
+  };
+  apply();
+  addEventListener("sp-insets", apply);
+}
+
 /** How long the page waits for the shell to replace its window after selecting the
  *  receiver it found (a new window is up in well under a second). */
 export const HANDOFF_MS = 8000;
@@ -113,7 +130,9 @@ export async function start(): Promise<boolean> {
   const d = document.documentElement;
   d.dataset.shell = info.platform;
   d.toggleAttribute("data-vibrancy", info.features.includes("vibrancy"));
-  if (info.platform === "ios") for (const load of Object.values(import.meta.glob("./ios.css"))) await load();
+  if (info.platform === "ios" || info.platform === "android")
+    for (const load of Object.values(import.meta.glob("./mobile.css"))) await load();
+  if (info.platform === "android") followInsets();
   if (!info.receiver && !isDemo()) {
     // A receiver already running on this machine (the default port, or the one its run.json
     // names) is the one to use; the welcome is for when there is none. Selecting it opens

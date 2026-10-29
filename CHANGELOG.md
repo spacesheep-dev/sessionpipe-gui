@@ -42,6 +42,38 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **Demo mode** plays an ask and a handoff on lab-mac, whose hello now says `ask` and
   `handoff`; the mock stream has the same.
 
+## [0.5.0] - 2026-10-28
+
+### Added
+
+- **sessionpipe for Android** (`apps/mobile`, formerly `apps/ios`): the iPhone app's
+  Tauri shell now also builds for Android, with the same bundled UI. It connects to your
+  computer by its address or phone link (asking first, in the system dialog), shows the
+  board and sessions live, follows the system's dark mode, and draws edge to edge clear of
+  the status and gesture bars. Sending from a phone comes in a later version, on both.
+- **A phone's welcome** offers your computer and the demo; a phone runs no sessionpipe of
+  its own, so the "This Mac" row is gone there.
+- **Phone releases.** *Android release* builds the Android app for a tag (arm64, armv7,
+  x86_64; about 11 MB on arm64), signs it with the upload key and checks the signer,
+  attaches the `.apk` to the draft release and uploads the `.aab` to a Google Play track. A
+  *Mobile* check builds both phone apps on every PR that touches them. RELEASING.md has the
+  steps.
+
+### Changed
+
+- **iOS → TestFlight, end to end.** The build runs on Xcode 26 (App Store Connect refuses
+  builds from older SDKs since April 2026), checks the `.ipa` before uploading it (ids,
+  numbers, SDK, signer, profile, privacy manifest), uploads to the app by its Apple ID with
+  the App Store Connect API key, and passes only once App Store Connect has processed the
+  build, with the TestFlight link in the summary. Without a tag it is a dry run of the
+  branch. The app carries a privacy manifest (no tracking, no data collected).
+- The phone apps are called **sessionpipe** (they were "sessionpipe Dev").
+
+### Fixed
+
+- **TestFlight builds** set `CFBundleVersion` to the run number alone. Appending it to the
+  version (`0.4.1.12`) gave App Store Connect four numbers, and it takes at most three.
+
 ## [0.4.1] - 2026-10-27
 
 ### Fixed
@@ -361,7 +393,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.1...v0.3.2

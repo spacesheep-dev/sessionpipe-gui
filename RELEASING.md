@@ -30,6 +30,10 @@ not be published for a release of the GUI.
    with the changelog section as its notes and the tarball attached. A failed run is re-run
    once the cause is fixed. The draft goes out with the desktop app: *Desktop release*,
    then *Publish update* (The desktop app, below).
+6. The phones, from the same tag: *Android release* (attaches the `.apk` to the draft, so
+   run it before *Publish update*; uploads the `.aab` to Google Play on a track) and
+   *iOS → TestFlight* (The Android app, The iOS app, below). Each waits for the `release`
+   environment's approval.
 
 Installs pin a tag with `npx github:spacesheep-dev/sessionpipe-gui#v0.2.0`; without one
 they follow `main`.
@@ -98,11 +102,13 @@ environment, so each run waits for the owner's approval before it can read a sec
    they see the update. Nothing else publishes a desktop release.
 
 **iOS → TestFlight** (`ios-testflight.yml`; inputs `tag`, `upload`) runs any time after
-the tag: it builds the iOS app (bundle id `dev.spacesheep.sessionpipe`, team `QR7H8ARENW`,
-build number = the run number), signs it with the Apple Distribution certificate and the
-*sessionpipe App Store* profile from a temporary keychain, exports an `.ipa`
-(app-store-connect, manual signing), keeps it as a workflow artifact and uploads it with
-`xcrun altool`. The keychain and keys are deleted at the end, pass or fail.
+the tag: it builds the iOS app with Xcode 26 (bundle id `dev.spacesheep.sessionpipe`, team
+`QR7H8ARENW`, build number = the run number), signs it with the Apple Distribution
+certificate and the *sessionpipe App Store* profile from a temporary keychain, exports and
+checks an `.ipa` (app-store-connect, manual signing), keeps it as a workflow artifact,
+uploads it with `xcrun altool` and waits until App Store Connect has processed it. The
+keychain and keys are deleted at the end, pass or fail. Without a tag it is a dry run of
+the branch it runs on: everything up to the upload.
 
 ### Once: the `release` environment and its secrets
 
@@ -116,7 +122,7 @@ a private script outside the repo, and every workflow says which one is missing)
 | `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD` | the Developer ID Application certificate | Keychain Access → export "Developer ID Application: Michael Petrov (QR7H8ARENW)" with its key as .p12, then `base64 -i cert.p12 \| pbcopy` |
 | `APPLE_SIGNING_IDENTITY` | `Developer ID Application: Michael Petrov (QR7H8ARENW)` | |
 | `APPLE_TEAM_ID` | `QR7H8ARENW` | |
-| `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_PRIVATE_KEY` | an App Store Connect API key, for notarization (preferred) and the TestFlight upload | App Store Connect → Users and Access → Integrations → Team Keys, role *Developer* (*App Manager* to upload builds): the issuer id, the key id, and the downloaded `AuthKey_<id>.p8`'s text |
+| `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_PRIVATE_KEY` | an App Store Connect API key, for notarization (preferred) and the TestFlight upload | App Store Connect → Users and Access → Integrations → App Store Connect API → Team Keys, role *App Manager* (it uploads builds and reads TestFlight; *Developer* only notarizes): the issuer id, the key id, and the downloaded `AuthKey_<id>.p8`'s text |
 | `APPLE_ID`, `APPLE_PASSWORD` | the other way to notarize, used when the API key's three are not all set | the Apple ID of a member of team `QR7H8ARENW`, and an app-specific password made for it at account.apple.com → Sign-In and Security → App-Specific Passwords (never the account's own password) |
 | `IOS_DIST_P12`, `IOS_DIST_P12_PASSWORD` | the Apple Distribution certificate with its key | export it from Keychain Access as .p12, base64 |
 | `IOS_APPSTORE_PROFILE` | the *sessionpipe App Store* provisioning profile | the downloaded `.mobileprovision`, base64 |
@@ -189,7 +195,7 @@ online by Gatekeeper on first open.
 
 ## The iOS app
 
-`apps/ios` is one App ID with the Mac app: **`dev.spacesheep.sessionpipe`**, team
+`apps/mobile` on iOS is one App ID with the Mac app: **`dev.spacesheep.sessionpipe`**, team
 **`QR7H8ARENW`**, one capability (*Time Sensitive Notifications*,
 `com.apple.developer.usernotifications.time-sensitive`, in
 `sessionpipe-shell_iOS.entitlements`). No Push, App Groups, Keychain Sharing or Associated
@@ -212,9 +218,107 @@ In the Apple portal (developer.apple.com → Certificates, IDs & Profiles), once
 4. Profiles: *iOS App Development* named exactly `sessionpipe iOS Development` (the
    development certificate, the iPhone) and *App Store Connect* named exactly
    `sessionpipe App Store` (the distribution certificate).
-5. App Store Connect → Apps → New App, iOS, the same bundle id (before the first TestFlight
-   upload).
+5. App Store Connect → Apps → New App: iOS, name *sessionpipe*, the same bundle id, SKU
+   `sessionpipe-ios` (before the first TestFlight upload; the API can't make an app).
+6. App Store Connect → Users and Access → Integrations → App Store Connect API: a Team key
+   with the *App Manager* role (the `APPLE_API_*` secrets).
 
 The CI secrets for TestFlight are `IOS_DIST_P12`, `IOS_DIST_P12_PASSWORD`,
-`IOS_APPSTORE_PROFILE` and the `APPLE_API_*` key (the table above). Never commit a
-certificate, a key, a profile or a password.
+`IOS_APPSTORE_PROFILE` and, for the upload, the `APPLE_API_*` key (the table above). Never
+commit a certificate, a key, a profile or a password. The App Store profile lasts a year:
+the workflow says when it has expired, and a new one with the same name (Profiles → the
+profile → Edit → Save, then download) goes into `IOS_APPSTORE_PROFILE`.
+
+*iOS → TestFlight* (`ios-testflight.yml`) takes the tag and:
+1. checks the iOS SDK is 26 or later (App Store Connect refuses older builds since
+   2026-04-28; the job runs on `macos-26`), the secrets, and that the app's record is in
+   App Store Connect;
+2. builds, signs and exports the `.ipa`, then checks what App Store Connect checks first:
+   the bundle id, the version, the build number, the SDK, the Apple Distribution signer,
+   the embedded profile, no `get-task-allow`, and the privacy manifest
+   (`PrivacyInfo.xcprivacy`); the `.ipa` is kept as a workflow artifact;
+3. uploads it with `xcrun altool`, naming the app by its Apple ID (Xcode 26's altool can
+   otherwise pick another app whose bundle id starts the same);
+4. waits until App Store Connect has processed the build (`VALID`) and puts the TestFlight
+   link in the run's summary. A build that never shows up fails the run, whatever altool
+   said.
+
+The privacy manifest declares no tracking, no data collected, and the one required-reason
+API the binary links (`stat`/`fstat`: file timestamps, for files in the app's container).
+If App Store Connect emails *ITMS-91053: Missing API declaration*, a dependency has started
+using another one; `nm -u` on the binary in the `.ipa` names it, and its category and reason
+go into the manifest.
+
+`CFBundleVersion` is the workflow's run number (`bundle.iOS.bundleVersion`), so every upload
+is new to App Store Connect; `CFBundleShortVersionString` is the version. Re-running a run
+that uploaded reuses its number and is refused: start a new run instead. With no tag it is a
+dry run of the branch it runs on (the tag check, the upload and the wait are skipped), the
+way to try a signing change before tagging. `ITSAppUsesNonExemptEncryption` is false in
+Info.plist, so a build needs no export-compliance answer before testers get it. Internal
+testers (App Store Connect users on the team, in a group with access to all builds) get each
+build as soon as it is processed, without App Review; external testers wait for Beta App
+Review.
+
+`apps/mobile/scripts/asc.mjs` speaks to the App Store Connect API with the same key, by
+hand too:
+
+```sh
+node apps/mobile/scripts/asc.mjs app                  # the app's Apple ID
+node apps/mobile/scripts/asc.mjs wait 0.5.0 42        # until build 42 of 0.5.0 is processed
+node apps/mobile/scripts/asc.mjs get /v1/betaGroups   # any GET
+```
+
+with `APPLE_API_ISSUER`, `APPLE_API_KEY` and `APPLE_API_PRIVATE_KEY` (or
+`APPLE_API_KEY_PATH`) in the environment.
+
+## The Android app
+
+`apps/mobile` on Android is the package **`dev.spacesheep.sessionpipe`** (minSdk 24, arm64,
+armv7 and x86_64). `versionName` is the version and `versionCode` comes from it
+(`major·1000000 + minor·1000 + patch`: 0.4.1 is 4001), so Google Play takes one upload per
+version.
+
+Signing is **Play App Signing**: Google keeps the key the store signs with, and our
+**upload key** signs what we send. It is a PKCS12 keystore with the alias `upload`,
+certificate `CN=sessionpipe, O=spacesheep, C=US`, SHA-256
+`92:14:30:AE:A4:B1:A7:C4:06:36:EC:52:56:21:F5:14:12:62:3E:9B:BB:16:6E:D4:1B:EA:3A:4C:28:CA:6C:69`.
+The release workflow refuses anything signed by another key. If the upload key is lost,
+Play can reset it; the app signing key never leaves Google. The `.apk` attached to the
+GitHub release is signed by the upload key, not Play's key, so an install from GitHub and
+one from Play don't update each other: uninstall one before installing the other.
+
+The Gradle project (`gen/android/app/build.gradle.kts`) signs the release build when
+`ANDROID_UPLOAD_KEYSTORE` (the keystore's path) and `ANDROID_UPLOAD_KEYSTORE_PASSWORD` are
+set, and leaves it unsigned otherwise. They are only ever environment variables, never a
+file in the repo. On the Mac that holds the key:
+
+```sh
+cd apps/mobile
+ANDROID_UPLOAD_KEYSTORE=<path to the keystore> \
+ANDROID_UPLOAD_KEYSTORE_PASSWORD="$(security find-generic-password -s <service> -a <account> -w)" \
+  npx tauri android build --aab --apk --target aarch64 armv7 x86_64 --ci
+```
+
+It needs JDK 17, the Android SDK and NDK (`ANDROID_HOME`, `NDK_HOME`), and the Rust
+targets `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android`.
+
+*Android release* (`android-release.yml`) takes the tag and builds both, checks the signer,
+keeps them as workflow artifacts, attaches `sessionpipe_<version>_android.apk` to the tag's
+**draft** release (`attach`), and uploads the `.aab` to Google Play when `track` is
+`internal`, `alpha` or `beta`. Its secrets, in the `release` environment:
+
+| Secret | Value |
+|---|---|
+| `ANDROID_UPLOAD_KEYSTORE` | the keystore, base64 |
+| `ANDROID_UPLOAD_KEYSTORE_PASSWORD` | its password (the store's and the key's) |
+| `PLAY_SERVICE_ACCOUNT_JSON` | a Play Console service account's JSON key, for `track` only |
+
+In the Google Play Console, once:
+1. A developer account, then **Create app**: *sessionpipe*, app, free.
+2. **Play App Signing** on (the default); upload the first `.aab` by hand to **Internal
+   testing**. The API can't create an app or make its first release.
+3. **Users and permissions**: a Google Cloud service account (with the *Google Play Android
+   Developer API* enabled) invited with *Release to testing tracks*; its JSON key becomes
+   `PLAY_SERVICE_ACCOUNT_JSON`.
+4. The store listing, content rating, data safety (sessionpipe collects nothing: the app
+   talks only to your own computer) and the testers' list.
