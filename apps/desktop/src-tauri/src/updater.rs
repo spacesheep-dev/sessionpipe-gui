@@ -2,6 +2,8 @@
 //! "Check for updates automatically" is on (Settings › App › Updates, on by default),
 //! downloaded in the background, verified (minisign), then "Install and relaunch" in the
 //! menu bar menu and Settings › App. No modal while the window is up, no auto-restart.
+//! "Check for Updates…" in the app menu runs the same check; with no window open it
+//! answers in a native dialog instead.
 //!
 //! A failed download leaves nothing behind: the plugin keeps the archive in memory until
 //! it is verified, and installs by unpacking into a temp dir beside the app and swapping
@@ -136,6 +138,10 @@ fn publish<R: Runtime>(app: &AppHandle<R>, f: impl FnOnce(&mut UpdateState)) {
     crate::tray::refresh(app);
 }
 
+fn current<R: Runtime>(app: &AppHandle<R>) -> UpdateOut {
+    app.state::<Shell>().update.lock().unwrap().out()
+}
+
 /// Where to check, or None (dev without SP_UPDATE_URL).
 pub fn endpoint() -> Option<Option<url::Url>> {
     match std::env::var("SP_UPDATE_URL")
@@ -172,6 +178,70 @@ pub fn schedule<R: Runtime>(app: AppHandle<R>) {
 /// A check the person asked for (Check now, or the toggle just turned on).
 pub fn check_now<R: Runtime>(app: AppHandle<R>) {
     tauri::async_runtime::spawn(async move { check(&app).await });
+}
+
+/// "Check for Updates…" in the app menu: the same check; Settings › App shows how it goes
+/// when the window is up, a native dialog says what came of it when it isn't.
+pub fn check_from_menu<R: Runtime>(app: AppHandle<R>) {
+    if app.get_webview_window(crate::window::MAIN).is_some() {
+        crate::actions::menu_action(&app, "settings");
+        check_now(app);
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        check(&app).await;
+        let out = current(&app);
+        let version = app.package_info().version.to_string();
+        let (title, message, install) = dialog_words(&out, &version);
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+        let buttons = if install {
+            MessageDialogButtons::OkCancelCustom("Install and relaunch".into(), "Later".into())
+        } else {
+            MessageDialogButtons::Ok
+        };
+        let h = app.clone();
+        app.dialog()
+            .message(message)
+            .title(title)
+            .kind(MessageDialogKind::Info)
+            .buttons(buttons)
+            .show(move |ok| {
+                if ok && install {
+                    restart(h);
+                }
+            });
+    });
+}
+
+/// The dialog's title, text, and whether it offers Install and relaunch.
+pub fn dialog_words(u: &UpdateOut, app_version: &str) -> (String, String, bool) {
+    match u.state {
+        Phase::Ready => (
+            format!(
+                "sessionpipe {} is ready",
+                u.version.as_deref().unwrap_or("update")
+            ),
+            format!(
+                "You have {app_version}. Install it and relaunch now, or later from the menu bar."
+            ),
+            true,
+        ),
+        Phase::Error => (
+            "Couldn't check for updates".into(),
+            u.error.clone().unwrap_or_else(|| "Try again later.".into()),
+            false,
+        ),
+        Phase::Checking | Phase::Downloading => (
+            "Checking for updates…".into(),
+            "The menu bar item says when one is ready.".into(),
+            false,
+        ),
+        Phase::Idle => (
+            "You're up to date".into(),
+            format!("sessionpipe {app_version} is the newest version."),
+            false,
+        ),
+    }
 }
 
 #[cfg(desktop)]
@@ -340,6 +410,27 @@ mod tests {
             s.phase = p;
             assert!(!due(true, &s), "{p:?} is left alone");
         }
+    }
+
+    #[test]
+    fn the_menu_dialog_says_what_came_of_it() {
+        let mut s = UpdateState::default();
+        s.up_to_date("t");
+        let (title, msg, install) = dialog_words(&s.out(), "0.6.0");
+        assert_eq!(title, "You're up to date");
+        assert_eq!(msg, "sessionpipe 0.6.0 is the newest version.");
+        assert!(!install);
+        s.found("0.7.0");
+        s.verified("t");
+        let (title, msg, install) = dialog_words(&s.out(), "0.6.0");
+        assert_eq!(title, "sessionpipe 0.7.0 is ready");
+        assert!(msg.starts_with("You have 0.6.0."));
+        assert!(install);
+        s.failed("The release has no update manifest.", "t");
+        let (title, msg, install) = dialog_words(&s.out(), "0.6.0");
+        assert_eq!(title, "Couldn't check for updates");
+        assert_eq!(msg, "The release has no update manifest.");
+        assert!(!install);
     }
 
     #[cfg(desktop)]

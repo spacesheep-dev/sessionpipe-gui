@@ -159,7 +159,7 @@ pub fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
         "help:github" => {
             crate::actions::open_external("https://github.com/spacesheep-dev/sessionpipe-gui")
         }
-        "check-updates" => crate::updater::check_now(app.clone()),
+        "check-updates" => crate::updater::check_from_menu(app.clone()),
         "new-session" => crate::actions::new_session(app, None),
         a if action_ids().contains(&a) => crate::actions::menu_action(app, a),
         // Tray items share the global menu-event stream on some platforms.
