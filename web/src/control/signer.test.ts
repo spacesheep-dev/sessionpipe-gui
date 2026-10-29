@@ -12,7 +12,10 @@ import {
   approveBlocker,
   approveTarget,
   canSign,
+  dropGrant,
+  grantExpiry,
   machineTakes,
+  NoGrantError,
   nativeErrorWords,
   nativeSigner,
   ownKeys,
@@ -21,6 +24,7 @@ import {
   signerKind,
   signerLabel,
   signHint,
+  unlock,
   updateWords,
 } from "./signer";
 
@@ -242,6 +246,37 @@ describe("the native adapter (mocked invoke)", () => {
     const add = commandString(MACHINE, { kind: "key.add", key: DEVICE });
     await sign("localhost", add);
     expect(calls.at(-1)?.args).toMatchObject({ cmd: add, mode: "confirm" });
+  });
+
+  it("a grant a machine refused reads as gone in the app until a fresh one is taken", async () => {
+    const exp = Date.now() + 3_600_000;
+    const calls = inShell((cmd, args) =>
+      cmd === "plugin:identity|status"
+        ? { available: true, key: DEVICE, grantExp: exp }
+        : cmd === "plugin:identity|sign"
+          ? { cmd: args.cmd, csig: "c", grant: { cred: DEVICE.id, sig: "s", str: "{}" } }
+          : null,
+    );
+    const cmd = commandString(MACHINE, { kind: "prompt", session: "claude-code:x", text: "hi" });
+    await nativeSigner();
+    expect(await grantExpiry("localhost")).toBe(exp);
+    // The machine refused it (command.ts drops it): Rust still says it holds one, the page
+    // reads none, and the runner's no-prompt signing stops here instead of looping.
+    await dropGrant("localhost");
+    expect(await grantExpiry("localhost")).toBeNull();
+    await expect(sign("localhost", cmd, { noPrompt: true })).rejects.toBeInstanceOf(NoGrantError);
+    expect(calls.filter((c) => c.cmd === "plugin:identity|sign")).toHaveLength(0);
+    // A send that asks Rust for a fresh grant puts it back; so does Unlock now.
+    await sign("localhost", cmd, { fresh: true });
+    expect(await grantExpiry("localhost")).toBe(exp);
+    await dropGrant("localhost");
+    expect(await grantExpiry("localhost")).toBeNull();
+    await unlock("localhost");
+    expect(await grantExpiry("localhost")).toBe(exp);
+    // Another rp id is its own: dropping one leaves the other.
+    await dropGrant("other.example");
+    expect(await grantExpiry("localhost")).toBe(exp);
+    await unlock("other.example");
   });
 
   it("status fills this Mac's key for the rp id; nothing is made and no prompt shows", async () => {

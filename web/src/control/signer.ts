@@ -149,6 +149,8 @@ export async function sign(rp: string, cmd: string, o: SignOptions = {}): Promis
   if (o.noPrompt && (o.confirm || o.fresh || (await grantExpiry(rp)) === null)) throw new NoGrantError(rp);
   if (inApp()) {
     const signed = await (await nativeSigner()).sign(rp, cmd, o);
+    // A fresh grant (or a confirm's own tap) stands in for the one a machine refused.
+    if (o.fresh || o.confirm) refused.delete(rp);
     grantChanged();
     return signed;
   }
@@ -169,20 +171,32 @@ export async function sign(rp: string, cmd: string, o: SignOptions = {}): Promis
   return { cmd, csig: await d.signWithDayKey(rec, cmd), grant: rec.grant };
 }
 
-/** When the day grant for `rp` ends (ms), or null when the next send asks. */
-export const grantExpiry = async (rp: string): Promise<number | null> =>
-  inApp() ? (await nativeSigner()).grantExpiry(rp) : (await day()).grantExpiry(rp);
+/** In the app, the rp ids whose grant a machine refused: Rust still holds it and would sign
+ *  with it again, so this page reads it as gone (grantExpiry null: the runner signs
+ *  nothing, the run view asks for Touch ID) until a fresh one is taken, by Unlock now or by
+ *  a send that asked for one. The browser's day key drops its grant for real instead. */
+const refused = new Set<string>();
 
-/** Forget the cached grant (the app instead asks Rust for a fresh one, SignOptions.fresh). */
+/** When the day grant for `rp` ends (ms), or null when the next send asks. */
+export const grantExpiry = async (rp: string): Promise<number | null> => {
+  if (!inApp()) return (await day()).grantExpiry(rp);
+  return refused.has(rp) ? null : (await nativeSigner()).grantExpiry(rp);
+};
+
+/** Forget the cached grant: dropped in the browser; in the app, read as gone until a fresh
+ *  one is taken (SignOptions.fresh asks Rust for it). */
 export const dropGrant = async (rp: string): Promise<void> => {
-  if (!inApp()) await (await day()).dropGrant(rp);
+  if (inApp()) refused.add(rp);
+  else await (await day()).dropGrant(rp);
   grantChanged();
 };
 
 /** Take the day grant ahead of the first send ("Unlock now"). */
 export const unlock = async (rp: string): Promise<void> => {
-  if (inApp()) await (await nativeSigner()).unlock(rp);
-  else await (await day()).obtainGrant(rp);
+  if (inApp()) {
+    await (await nativeSigner()).unlock(rp);
+    refused.delete(rp);
+  } else await (await day()).obtainGrant(rp);
   grantChanged();
 };
 
