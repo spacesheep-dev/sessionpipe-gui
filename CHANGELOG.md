@@ -6,6 +6,8 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-30
+
 ### Added
 
 - **The Mac app updates itself.** Settings › App › Updates has "Check for updates
@@ -40,6 +42,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   returns before the job is gone, and the command now waits for it (as the upgrade's
   restart does before it bootstraps again).
 - `service status` prints the running receiver's version beside the pid.
+- The Windows installers build again: `icons/icon.ico` is in the bundle's icon list, where the MSI
+  bundler looks for it.
 
 ## [0.6.0] - 2026-10-29
 
@@ -513,7 +517,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.4.0...v0.4.1
