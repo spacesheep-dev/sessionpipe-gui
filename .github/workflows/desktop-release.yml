@@ -23,6 +23,7 @@
 #                                 (the .p8's text; written to a file for APPLE_API_KEY_PATH)
 #   APPLE_ID, APPLE_PASSWORD      an Apple ID and an app-specific password for it (with
 #                                 APPLE_TEAM_ID); used when the API key's three are not all set
+# The notarize_via input picks one of the two by hand (auto: the key when it is set).
 # With notarize on and neither set, the run fails. With notarize off the dmg is signed but
 # not notarized, and the job summary says so in a warning.
 name: Desktop release
@@ -42,6 +43,11 @@ on:
         description: "Notarize and staple the macOS app and dmg"
         type: boolean
         default: true
+      notarize_via:
+        description: "Notarize with the App Store Connect API key or the Apple ID (auto: the key when its three secrets are set)"
+        type: choice
+        options: [auto, api-key, apple-id]
+        default: auto
 
 permissions:
   contents: write # upload to the tag's draft release
@@ -150,6 +156,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           NOTARIZE: ${{ inputs.notarize }}
+          NOTARIZE_VIA: ${{ inputs.notarize_via || 'auto' }}
           PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
@@ -165,17 +172,18 @@ jobs:
             exit 1
           fi
           # How to notarize: the App Store Connect API key when all three are set, else the
-          # Apple ID with its app-specific password; none when the input is off.
+          # Apple ID with its app-specific password; none when the input is off. notarize_via
+          # names one of the two and skips the other.
           notarize=false
           via=none
           if [ "$PLATFORM" = macos ]; then
             if [ "$NOTARIZE" != true ]; then
               echo "::warning::notarize is off: the dmg is signed but NOT notarized, and Gatekeeper will warn on open"
               echo "> [!WARNING]"$'\n'"> **Not notarized** (the run's notarize input is off). Gatekeeper warns on open; do not publish this build." >> "$GITHUB_STEP_SUMMARY"
-            elif [ -n "$APPLE_API_ISSUER" ] && [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_API_PRIVATE_KEY" ]; then
+            elif [ "$NOTARIZE_VIA" != apple-id ] && [ -n "$APPLE_API_ISSUER" ] && [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_API_PRIVATE_KEY" ]; then
               notarize=true
               via=api-key
-            elif [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ]; then
+            elif [ "$NOTARIZE_VIA" != api-key ] && [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ]; then
               notarize=true
               via=apple-id
             else
