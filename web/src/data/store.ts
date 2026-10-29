@@ -267,7 +267,12 @@ export class Store {
       if (on === null) delete unread[k];
       else unread[k] = true;
     }
-    this.set({ marks: { ...before, read, unread } });
+    const notify = { ...before.notify };
+    for (const [k, level] of Object.entries(p.notify ?? {})) {
+      if (level === null) delete notify[k];
+      else notify[k] = level;
+    }
+    this.set({ marks: { ...before, read, unread, ...(p.notify && { notify }) } });
     try {
       const next = await this.transport.patchMarks(p);
       if (next.rev >= this.state.marks.rev) this.set({ marks: next });

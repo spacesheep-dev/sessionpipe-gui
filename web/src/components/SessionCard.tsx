@@ -51,6 +51,7 @@ import { AgentRow, useAgentsOpen } from "./AgentRow";
 import { HarnessGlyph, Redacted, Since, StateDot } from "./bits";
 import { type MenuItem, type MenuList, openMenu, useContextMenu } from "./ContextMenu";
 import { LabelDot } from "./LabelDot";
+import { NotifyOff } from "./NotifyOff";
 
 interface SessionCardProps {
   s: SessionSummary;
@@ -299,6 +300,7 @@ export const SessionCard = memo(function SessionCard({
                   : `Last event ${new Date(s.lastAt).toLocaleString()}`
               }
             >
+              <NotifyOff s={s} />
               {frozenAt ? <Frozen iso={time} at={frozenAt} /> : <Since iso={time} coarse />}
             </span>
           </span>
@@ -468,6 +470,7 @@ function KidRow({
       >
         <StateDot state={c.state} decorative />
         <span className="kid-title ellipsis">{sessionTitle(c)}</span>
+        <NotifyOff s={c} under />
         {c.currentTool && c.state === "working" ? (
           <code className="kid-tool">{toolLabel(c.currentTool.tool)}</code>
         ) : (

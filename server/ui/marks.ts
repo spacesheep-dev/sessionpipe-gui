@@ -5,13 +5,15 @@
 // the file was made, so news from before this receiver kept marks is read. Like labels it
 // is the person's, not a reading, so it lives beside the store: GET reads it, PATCH merges
 // into it, and every change goes to every page as one `marks` stream frame. Forgetting a
-// session forgets its marks.
+// session forgets its marks. It also keeps each session's own "Notify me" when it is not
+// the default (`notify`), so a muted session is muted on every device.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   MARKS_MAX,
   type Marks,
   type MarksPatch,
+  type NotifyLevel,
   ROUTES,
   type SessionKey,
   type StreamMessage,
@@ -27,6 +29,11 @@ const PATCH_MAX = MARKS_FILE_MAX;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const isIso = (v: unknown): v is string => typeof v === "string" && ISO.test(v) && !Number.isNaN(Date.parse(v));
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+/** The levels a session may be set to; the default, "needs", is stored as nothing. */
+const isLevel = (v: unknown): v is Exclude<NotifyLevel, "needs"> => v === "finishes" || v === "never";
+
+/** The document as this server keeps it: `since` set and `notify` always present. */
+type Doc = Marks & { since: string; notify: NonNullable<Marks["notify"]> };
 
 /** Why a patch was refused, as the route's `reason`. */
 export class MarksError extends Error {
@@ -39,7 +46,7 @@ export class MarksError extends Error {
 }
 
 export class MarkStore {
-  private doc: Marks & { since: string };
+  private doc: Doc;
   private readonly file: string;
   private readonly listeners = new Set<(m: StreamMessage) => void>();
 
@@ -54,7 +61,7 @@ export class MarkStore {
     const had = this.load();
     // The first run makes the file, so `since` is set once, when this receiver began to
     // keep marks, and never moves.
-    this.doc = had ?? { rev: 0, since: new Date(now()).toISOString(), read: {}, unread: {} };
+    this.doc = had ?? { rev: 0, since: new Date(now()).toISOString(), read: {}, unread: {}, notify: {} };
     if (!had) {
       try {
         this.write(this.doc);
@@ -71,16 +78,21 @@ export class MarkStore {
   /** Apply a merge; returns the document after it. Throws MarksError. */
   patch(p: MarksPatch): Marks {
     if (!isMap(p)) throw new MarksError(400, "malformed");
-    for (const k of Object.keys(p)) if (k !== "read" && k !== "unread") throw new MarksError(400, "malformed");
+    for (const k of Object.keys(p))
+      if (k !== "read" && k !== "unread" && k !== "notify") throw new MarksError(400, "malformed");
     if (p.read !== undefined && !isMap(p.read)) throw new MarksError(400, "malformed");
     if (p.unread !== undefined && !isMap(p.unread)) throw new MarksError(400, "malformed");
+    if (p.notify !== undefined && !isMap(p.notify)) throw new MarksError(400, "malformed");
     const reads = Object.entries(p.read ?? {}) as [SessionKey, unknown][];
     const unreads = Object.entries(p.unread ?? {}) as [SessionKey, unknown][];
+    const levels = Object.entries(p.notify ?? {}) as [SessionKey, unknown][];
     // Every value first: a refused patch changes nothing.
     for (const [, v] of reads) if (v !== null && !isIso(v)) throw new MarksError(400, "bad_read");
     for (const [, v] of unreads) if (v !== null && v !== true) throw new MarksError(400, "bad_unread");
+    for (const [, v] of levels) if (v !== null && !isLevel(v)) throw new MarksError(400, "bad_notify");
     const read = { ...this.doc.read };
     const unread = { ...this.doc.unread };
+    const notify = { ...this.doc.notify };
     let changed = false;
     // A read mark only moves on: a second device sending the older `newsAt` it saw (its
     // PATCH late, or held in its 2 s queue) never makes news already seen unread again.
@@ -106,19 +118,32 @@ export class MarkStore {
         changed = true;
       }
     }
+    for (const [key, level] of levels as [SessionKey, Doc["notify"][SessionKey] | null][]) {
+      if (level === null) {
+        if (key in notify) {
+          delete notify[key];
+          changed = true;
+        }
+      } else if (notify[key] !== level && this.known(key)) {
+        notify[key] = level;
+        changed = true;
+      }
+    }
     if (!changed) return this.doc;
-    this.commit({ ...this.doc, rev: this.doc.rev + 1, read, unread });
+    this.commit({ ...this.doc, rev: this.doc.rev + 1, read, unread, notify });
     return this.doc;
   }
 
   /** The session is gone (the UI's forget, or a session.forgotten): so are its marks. */
   forget(key: SessionKey): void {
-    if (!(key in this.doc.read) && !(key in this.doc.unread)) return;
+    if (!(key in this.doc.read) && !(key in this.doc.unread) && !(key in this.doc.notify)) return;
     const read = { ...this.doc.read };
     const unread = { ...this.doc.unread };
+    const notify = { ...this.doc.notify };
     delete read[key];
     delete unread[key];
-    this.commit({ ...this.doc, rev: this.doc.rev + 1, read, unread });
+    delete notify[key];
+    this.commit({ ...this.doc, rev: this.doc.rev + 1, read, unread, notify });
   }
 
   /** Follow the store: a `forgotten` message drops that session's marks. */
@@ -135,7 +160,7 @@ export class MarkStore {
     };
   }
 
-  private commit(next: Marks & { since: string }): void {
+  private commit(next: Doc): void {
     const kept = fit(next);
     this.write(kept);
     this.doc = kept;
@@ -157,7 +182,7 @@ export class MarkStore {
 
   /** The file as it is, or null when there is none; a broken one is set aside (never
    *  lost) and the marks start again. Entries that do not validate are dropped. */
-  private load(): (Marks & { since: string }) | null {
+  private load(): Doc | null {
     let text: string;
     try {
       text = readFileSync(this.file, "utf8");
@@ -169,10 +194,12 @@ export class MarkStore {
       if (!isIso(raw.since)) throw new Error("no since");
       const read: Marks["read"] = {};
       const unread: Marks["unread"] = {};
+      const notify: Doc["notify"] = {};
       for (const [k, v] of Object.entries(isMap(raw.read) ? raw.read : {})) if (isIso(v)) read[k] = v;
       for (const [k, v] of Object.entries(isMap(raw.unread) ? raw.unread : {})) if (v === true) unread[k] = true;
+      for (const [k, v] of Object.entries(isMap(raw.notify) ? raw.notify : {})) if (isLevel(v)) notify[k] = v;
       const rev = typeof raw.rev === "number" && Number.isInteger(raw.rev) && raw.rev >= 0 ? raw.rev : 0;
-      return fit({ rev, since: raw.since, read, unread });
+      return fit({ rev, since: raw.since, read, unread, notify });
     } catch {
       try {
         renameSync(this.file, `${this.file}.bad-${Date.now()}`);
@@ -185,12 +212,14 @@ export class MarkStore {
 }
 
 /** Within the caps: MARKS_MAX keys a map and MARKS_FILE_MAX for the file, the oldest read
- *  values going first (that session falls back to `since`), then the earliest unread. */
+ *  values going first (that session falls back to `since`), then the earliest unread; past
+ *  MARKS_MAX, the earliest notify levels go back to the default. */
 function fit<T extends Marks>(doc: T): T {
   const size = (d: Marks) => Buffer.byteLength(JSON.stringify({ v: 1, ...d }));
   if (
     Object.keys(doc.read).length <= MARKS_MAX &&
     Object.keys(doc.unread).length <= MARKS_MAX &&
+    Object.keys(doc.notify ?? {}).length <= MARKS_MAX &&
     size(doc) <= MARKS_FILE_MAX
   )
     return doc;
@@ -202,6 +231,7 @@ function fit<T extends Marks>(doc: T): T {
     ...doc,
     read: Object.fromEntries(read),
     unread: Object.fromEntries(unread.map((k) => [k, true])),
+    ...(doc.notify && { notify: Object.fromEntries(Object.entries(doc.notify).slice(-MARKS_MAX)) }),
   });
   let next = build();
   // A twentieth at a time: a few passes even for a file far over.

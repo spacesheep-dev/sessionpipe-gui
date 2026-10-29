@@ -224,6 +224,12 @@
   line-height: var(--lh-tight);
   white-space: nowrap;
 }
+/* Notifications off: the bell with a slash, before the time, quiet as the time is. */
+.card-muted {
+  display: inline-flex;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
 /* Line 2: a tool name (or the kind of prompt) in the UI font, then the command in mono
    or the latest text, one line. */
 .card-tool,
@@ -505,6 +511,10 @@
   font-size: var(--text-sm);
 }
 .kid-state {
+  color: var(--fg-3);
+}
+.kid > .card-muted {
+  margin-right: 0;
   color: var(--fg-3);
 }
 

@@ -27,6 +27,14 @@ All notable changes to `sessionpipe-gui`. The format follows
   long-press sheet, `u` on the board's cursor, and **Mark all as read** in the board's
   view menu. The marks live in `<stateDir>/marks.json` (`GET` / `PATCH /api/ui/marks`, a
   `marks` frame on every change); a forgotten session loses its marks.
+- **Notify me, per session.** Every session's menu (and the phone's long-press sheet) has
+  **Notify me**: When it needs me, as before; **When it needs me or finishes**, which
+  also sends "Deploy billing finished" with its last answer each time it has news and is
+  idle or done (a click opens it); or **Never**, which sends no notification, banner or
+  sound for it while it still waits in Needs you and the Inbox. A row set to Never shows a
+  small bell with a slash. A parent session can quiet its subagent sessions, never make
+  them louder. The choice is kept in `marks.json` (`notify`), so it holds on every device;
+  the browser's permission, the global Notify me and sounds stay per device.
 
 ### Changed
 

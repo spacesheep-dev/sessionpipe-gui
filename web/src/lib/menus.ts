@@ -15,7 +15,7 @@ import { copyText } from "./clipboard";
 import { harnessMark, repoBranch, sessionTitle } from "./format";
 import { hide } from "./hidden";
 import { labelMenu } from "./labels";
-import { canMark, isUnread, setUnread } from "./marks";
+import { canMark, isUnread, notifyMenu, setUnread } from "./marks";
 import { receiverOrigin } from "./net";
 import { hrefFor, navigate, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath } from "./router";
 import { getSettings } from "./settings";
@@ -122,6 +122,7 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
     ...(ctx.answer ?? []),
     { sep: true },
     labelMenu(ctx.store, [s.key]),
+    notifyMenu(ctx.store, s),
     { sep: true },
     s.parentId && {
       label: "Open parent session",

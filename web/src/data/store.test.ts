@@ -86,4 +86,13 @@ describe("marks in the store", () => {
     await expect(refusing.patchMarks({ unread: { a: true } })).rejects.toThrow("bad_read");
     expect(refusing.get().marks).toEqual(marks(1));
   });
+
+  it("shows a Notify me level at once, and puts it back on a refusal", async () => {
+    const store = storeWith(() => Promise.reject(new Error("bad_notify")));
+    store.apply({ kind: "marks", marks: { ...marks(1), notify: { a: "finishes" } } });
+    const done = store.patchMarks({ notify: { a: null, b: "never" } });
+    expect(store.get().marks.notify).toEqual({ b: "never" });
+    await expect(done).rejects.toThrow("bad_notify");
+    expect(store.get().marks.notify).toEqual({ a: "finishes" });
+  });
 });

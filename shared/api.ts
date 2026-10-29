@@ -511,12 +511,22 @@ export interface Marks {
   read: Record<SessionKey, string>;
   /** Marked unread by hand. */
   unread: Record<SessionKey, true>;
+  /** Each session's own "Notify me", when not the default ("needs"). Absent on an older
+   *  server, where every session is on the default. */
+  notify?: Record<SessionKey, Exclude<NotifyLevel, "needs">>;
 }
+
+/** How loud a session is: "needs" (the default) notifies when a prompt needs you,
+ *  "finishes" also when it has news and is idle or done, "never" not at all. A parent's
+ *  own level caps its children's. */
+export type NotifyLevel = "needs" | "finishes" | "never";
 
 /** A merge (PATCH): `null` clears. */
 export interface MarksPatch {
   read?: Record<SessionKey, string | null>;
   unread?: Record<SessionKey, true | null>;
+  /** `null` puts a session back on the default, "needs". */
+  notify?: Record<SessionKey, Exclude<NotifyLevel, "needs"> | null>;
 }
 
 export const EMPTY_MARKS: Marks = Object.freeze({ rev: 0, read: {}, unread: {} }) as Marks;
@@ -1329,8 +1339,8 @@ export const ROUTES = {
      *  `too_many` / `too_large`, 415 `json_only`. Every change is a `labels` stream frame. */
     labels: "/api/ui/labels",
     /** GET → Marks; PATCH MarksPatch (application/json) → Marks. 400 `malformed` /
-     *  `bad_read` / `bad_unread`, 413 `too_large`, 415 `json_only`. A key the store does
-     *  not know is skipped. Every change is a `marks` stream frame. */
+     *  `bad_read` / `bad_unread` / `bad_notify`, 413 `too_large`, 415 `json_only`. A key
+     *  the store does not know is skipped. Every change is a `marks` stream frame. */
     marks: "/api/ui/marks",
   },
   /** GET / DELETE /attachments/<id>.<ext>, UI key: the uploaded image itself (served
