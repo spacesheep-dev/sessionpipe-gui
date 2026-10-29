@@ -9,7 +9,14 @@ use serde_json::{Map, Value};
 pub const CMD_MAX: usize = 48_000;
 /// `iat` must be this close to the signer's own clock: nobody stockpiles commands.
 pub const IAT_SLACK_MS: i64 = 60_000;
-pub const KINDS: [&str; 6] = ["prompt", "permission.answer", "cancel", "start", "key.add", "pool"];
+pub const KINDS: [&str; 6] = [
+    "prompt",
+    "permission.answer",
+    "cancel",
+    "start",
+    "key.add",
+    "pool",
+];
 pub const KEY_STORE_SESSION: &str = "sessionpipe:keys";
 /// The session a `pool` command names: the machine's own account pool.
 pub const POOL_SESSION: &str = "sessionpipe:pool";
@@ -161,7 +168,9 @@ pub fn check(cmd: &str, mode: Mode, now_ms: u64) -> Result<Checked, Error> {
         let id_ok = |v: Option<&Value>| {
             v.and_then(Value::as_str).is_some_and(|x| {
                 (1..=128).contains(&x.len())
-                    && x.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'-'))
+                    && x.bytes().all(|b| {
+                        b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'-')
+                    })
             })
         };
         match c.get("pool_account") {
@@ -291,11 +300,31 @@ mod tests {
         assert_eq!(on.pool_action.as_deref(), Some("on"));
         // on, off, remove and login.complete only with Touch ID; the rest under the grant too.
         assert!(check(&pool(json!({"pool_action":"on"})), Mode::Grant, NOW).is_err());
-        assert!(check(&pool(json!({"pool_action":"remove","pool_account":"a"})), Mode::Grant, NOW).is_err());
-        assert!(check(&pool(json!({"pool_action":"enable","pool_account":"acc_1.x:y-z"})), Mode::Grant, NOW).is_ok());
+        assert!(check(
+            &pool(json!({"pool_action":"remove","pool_account":"a"})),
+            Mode::Grant,
+            NOW
+        )
+        .is_err());
+        assert!(check(
+            &pool(json!({"pool_action":"enable","pool_account":"acc_1.x:y-z"})),
+            Mode::Grant,
+            NOW
+        )
+        .is_ok());
         assert!(check(&pool(json!({"pool_action":"refresh"})), Mode::Grant, NOW).is_ok());
-        assert!(check(&pool(json!({"pool_action":"refresh","pool_account":"a"})), Mode::Grant, NOW).is_ok());
-        assert!(check(&pool(json!({"pool_action":"order","pool_order":["a","b"]})), Mode::Grant, NOW).is_ok());
+        assert!(check(
+            &pool(json!({"pool_action":"refresh","pool_account":"a"})),
+            Mode::Grant,
+            NOW
+        )
+        .is_ok());
+        assert!(check(
+            &pool(json!({"pool_action":"order","pool_order":["a","b"]})),
+            Mode::Grant,
+            NOW
+        )
+        .is_ok());
         assert!(check(
             &pool(json!({"pool_action":"login.complete","pool_account":"login_1","pool_code":"abc#xyz"})),
             Mode::Confirm,
@@ -317,7 +346,10 @@ mod tests {
             json!({"pool_action":"on","session":"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e"}),
             json!({"pool_action":"login.complete","pool_account":"l","pool_code":"two\nlines"}),
         ] {
-            assert!(check(&pool(bad.clone()), Mode::Confirm, NOW).is_err(), "{bad}");
+            assert!(
+                check(&pool(bad.clone()), Mode::Confirm, NOW).is_err(),
+                "{bad}"
+            );
         }
         // Pool fields on another kind are refused too.
         assert!(check(&cmd(json!({"pool_action":"on"})), Mode::Grant, NOW).is_err());

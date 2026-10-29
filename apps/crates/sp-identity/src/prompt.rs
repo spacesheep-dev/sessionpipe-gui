@@ -129,14 +129,20 @@ mod tests {
         );
         let mut p = checked("pool", None, None);
         p.pool_action = Some("on".into());
-        assert_eq!(confirm(&p, "lab-mac"), "turn the account pool on on lab-mac");
+        assert_eq!(
+            confirm(&p, "lab-mac"),
+            "turn the account pool on on lab-mac"
+        );
         p.pool_action = Some("remove".into());
         assert_eq!(
             confirm(&p, "lab-mac"),
             "remove an account from the pool on lab-mac"
         );
         p.pool_action = Some("login.begin".into());
-        assert_eq!(confirm(&p, "lab-mac"), "start signing in to Claude on lab-mac");
+        assert_eq!(
+            confirm(&p, "lab-mac"),
+            "start signing in to Claude on lab-mac"
+        );
     }
 
     #[test]
