@@ -245,6 +245,7 @@ describe("the one-move send over a fake control: what lands while the verifier w
   const control = {
     subscribe: () => () => true,
     activity: () => activity,
+    activityById: (id: string) => activity.find((a) => a.id === id),
     machines: () =>
       new Map<string, MachineControl>([["box", { machineId: MACHINE, online: true, keys: [], queued: 0 }]]),
     verifySend: (body: unknown) => verify(body),

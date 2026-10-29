@@ -30,7 +30,7 @@ export interface OrchestrateDeps {
   /** Control: its stream (the acks), the activity (acks that landed while this receiver
    *  was down), the paired machines (which are online), and the two halves of /send for
    *  a step's command (verify, then queue). */
-  control: Pick<Control, "subscribe" | "activity" | "machines" | "verifySend" | "queueSend">;
+  control: Pick<Control, "subscribe" | "activity" | "activityById" | "machines" | "verifySend" | "queueSend">;
   /** Stream frames out (the Broadcast the stream route forwards). */
   broadcast: (m: StreamMessage) => void;
   /** How often runs are read again for the clock rules (default 1 s). */
@@ -98,8 +98,9 @@ export function createOrchestrate(deps: OrchestrateDeps): Orchestrate {
   };
   const markSent = (runId: string, stepId: string, commandId: string, rev: number): WorkflowRun => {
     // The command as queued names the step's session from now on (a start's uuid, a
-    // prompt's target); the ack's own replaces it when the step settles.
-    const a = deps.control.activity(1000).find((x) => x.id === commandId);
+    // prompt's target); the ack's own replaces it when the step settles. By its id, not
+    // through the newest thousand: a busy receiver carries more than that.
+    const a = deps.control.activityById(commandId);
     const run = put(sent(must(runId), stepId, commandId, rev, now(), online(), a?.session));
     // The machine may have answered already: a daemon that long-polls takes a command
     // within milliseconds and refuses one at once, while the tab's PATCH with the id
@@ -117,13 +118,12 @@ export function createOrchestrate(deps: OrchestrateDeps): Orchestrate {
     }
   };
   // Acks that landed while this receiver was down: control kept them in its queue files.
+  // Each sent step's command is looked up by its id; one whose record is gone (its machine
+  // removed, its queue pruned) is left to the sent deadline (runs.ts SENT_TTL_MS).
   const resync = (): void => {
-    const live = store.runs().filter((r) => Object.values(r.steps).some((s) => s.status === "sent"));
-    if (!live.length) return;
-    const acts = new Map(deps.control.activity(1000).map((a) => [a.id, a]));
-    for (const run of live)
+    for (const run of store.runs())
       for (const s of Object.values(run.steps)) {
-        const a = s.status === "sent" && s.commandId ? acts.get(s.commandId) : undefined;
+        const a = s.status === "sent" && s.commandId ? deps.control.activityById(s.commandId) : undefined;
         if (a) onActivity(a);
       }
   };

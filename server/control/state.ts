@@ -986,4 +986,14 @@ export class ControlState {
     all.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
     return all.slice(0, Math.max(0, limit)).map(toActivity);
   }
+
+  /** One carried command by its id, whichever machine's queue holds it; undefined once
+   *  its queue is gone (the machine removed) or it was never here. */
+  activityById(id: string): ControlActivity | undefined {
+    for (const q of this.queues.values()) {
+      const row = q.find((m) => m.id === id);
+      if (row) return toActivity(row);
+    }
+    return undefined;
+  }
 }

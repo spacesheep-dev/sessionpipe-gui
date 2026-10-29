@@ -289,6 +289,7 @@ describe("the service over a fake control", () => {
     activity: () => activity,
     machines: () => new Map<string, MachineControl>([["box", { machineId: MACHINE, online, keys: [], queued: 0 }]]),
     // The one-move send is the routes' (send.test.ts); the service here is driven by hand.
+    activityById: (id: string) => activity.find((a) => a.id === id),
     verifySend: () => Promise.reject(new Error("not here")),
     queueSend: () => {
       throw new Error("not here");

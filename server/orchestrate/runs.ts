@@ -18,10 +18,18 @@ import {
   type WorkflowStep,
 } from "../../shared/api.js";
 import { isFinal } from "../control/parse.js";
+import { EXPIRES_MAX_MS } from "../control/state.js";
 
 /** A claim (`sending`) that brought no command id back within this long (the tab closed,
  *  the passkey prompt was dismissed) is offered to the signers again. */
 export const CLAIM_TTL_MS = 60_000;
+/** The longest a `sent` step waits for its command's final ack: the queue's longest life
+ *  (a day, EXPIRES_MAX_MS) and a minute. The queue itself expires the command and the ack
+ *  settles the step well before; this is for a record that never comes back (its machine
+ *  removed, its queue pruned, an ack lost): the step fails with NO_ANSWER, what depends on
+ *  it skips, and the run ends instead of reading `running` for good. */
+export const SENT_TTL_MS = EXPIRES_MAX_MS + 60_000;
+export const NO_ANSWER = "no answer: the machine never settled the command within a day";
 
 /** Why a step fails when its text is nothing once filled (`{{prev}}` alone after a reply
  *  that never came): no signer could send it, so the run does not wait for one. */
@@ -241,6 +249,8 @@ export function advance(run: WorkflowRun, now: number, online: Online): Workflow
       ) {
         const { claimedAt: _stale, ...rest } = s;
         set(step.id, { ...rest, status: "ready", readyAt: at });
+      } else if (s.status === "sent" && now - Date.parse(s.sentAt ?? at) > SENT_TTL_MS) {
+        set(step.id, { ...s, status: "failed", error: NO_ANSWER, endedAt: at });
       }
     }
   }

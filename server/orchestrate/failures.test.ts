@@ -22,7 +22,7 @@ import {
 import { tempDir } from "../../test/events.js";
 import { type App, createApp } from "../app.js";
 import { createOrchestrate, type Orchestrate } from "./index.js";
-import { CLAIM_TTL_MS, claim, newRun, RunError, sent, settle } from "./runs.js";
+import { advance, CLAIM_TTL_MS, claim, NO_ANSWER, newRun, RunError, SENT_TTL_MS, sent, settle } from "./runs.js";
 
 const MACHINE = "m_failure0000000000001";
 const T0 = Date.parse("2026-10-28T10:00:00.000Z");
@@ -123,12 +123,15 @@ describe("the service over a fake control", () => {
   const frames: StreamMessage[] = [];
   const listeners = new Set<(m: StreamMessage) => void>();
   const activity: ControlActivity[] = [];
+  /** Whether the newest-first list still reaches the acks (a busy receiver's does not). */
+  let listed = true;
   const control = {
     subscribe: (l: (m: StreamMessage) => void) => {
       listeners.add(l);
       return () => listeners.delete(l);
     },
-    activity: () => [...activity].reverse(),
+    activity: () => (listed ? [...activity].reverse() : []),
+    activityById: (id: string) => activity.find((a) => a.id === id),
     machines: () => new Map<string, MachineControl>([["box", { machineId: MACHINE, online, keys: [], queued: 0 }]]),
     // The one-move send is the routes' (send.test.ts); the service here is driven by hand.
     verifySend: () => Promise.reject(new Error("not here")),
@@ -235,6 +238,48 @@ describe("the service over a fake control", () => {
     } finally {
       again.close();
     }
+  });
+
+  it("a restart finds a sent step's ack by its id, not through the newest thousand", () => {
+    const { svc, run } = booted([step("a", "A"), step("b", "Then {{prev}}")]);
+    let r = svc.claim(run.id, "a", run.rev);
+    r = svc.sent(run.id, "a", CMD(7), r.rev);
+    svc.close();
+    // The ack landed while the receiver was down, under more than a thousand newer messages.
+    activity.push(ack(CMD(7), { reply: "found by id", ackSession: "claude-code:s7" }));
+    listed = false;
+    const again = make();
+    try {
+      expect(again.run(run.id)).toMatchObject({
+        status: "running",
+        steps: { a: { status: "done", reply: "found by id" }, b: { status: "ready", text: "Then found by id" } },
+      });
+    } finally {
+      listed = true;
+      again.close();
+    }
+  });
+
+  it("a sent step whose command never comes back fails after a day, and the run ends", () => {
+    const w = {
+      id: "w",
+      name: "W",
+      steps: [step("a", "A"), step("b", "Then {{prev}}")],
+      createdAt: new Date(T0).toISOString(),
+      updatedAt: new Date(T0).toISOString(),
+    };
+    let run = newRun(w, { id: "r", now: T0, online: all });
+    run = claim(run, "a", run.rev, T0);
+    run = sent(run, "a", CMD(9), run.rev, T0, all);
+    expect(run.status).toBe("running");
+    // Just under the deadline: still running (the queue's own expiry would have spoken by now).
+    expect(advance(run, T0 + SENT_TTL_MS, all)).toBe(run);
+    const late = advance(run, T0 + SENT_TTL_MS + 1, all);
+    expect(late.steps.a).toMatchObject({ status: "failed", error: NO_ANSWER, commandId: CMD(9) });
+    expect(late.steps.b!.status).toBe("skipped");
+    expect(late).toMatchObject({ status: "failed", rev: run.rev + 1 });
+    expect(late.endedAt).toBeDefined();
+    expect(SENT_TTL_MS).toBe(24 * 3600_000 + 60_000);
   });
 
   it("a run waiting for its machine at restart runs once the machine is back", () => {
