@@ -54,6 +54,11 @@
 .board-list[data-settled] .group-count {
   animation: fade-in var(--dur-fast) var(--ease-out);
 }
+/* Done's "3 unread" (lib/marks.ts), in the count's tier: a fact about the rows, not a call. */
+.group-note {
+  color: var(--fg-3);
+  font-weight: 400;
+}
 /* Done folds away behind a disclosure: the chevron turns as it opens. Its header is a
    row like the ones it hides (a hover fill, the rows' inset), and its hairline stops at
    the content's edge instead of running out to the window's. */

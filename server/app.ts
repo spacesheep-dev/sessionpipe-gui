@@ -46,6 +46,7 @@ import { AttachmentStore } from "./ui/attachments.js";
 import { uiAuthFor } from "./ui/auth.js";
 import { registerUi, uiGuard } from "./ui/index.js";
 import { LabelStore } from "./ui/labels.js";
+import { MarkStore } from "./ui/marks.js";
 import { Broadcast } from "./ui/stream.js";
 import { ViewerRegistry } from "./ui/viewers.js";
 
@@ -317,10 +318,13 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   // The person's labels follow the store: a forgotten session loses its label.
   const labels = new LabelStore(stateDir, (key) => store.sessionExists(key));
   labels.follow(store);
+  const marks = new MarkStore(stateDir, (key) => store.sessionExists(key));
+  marks.follow(store);
   // Stream messages that come from neither the store nor control: a view's state written.
   const broadcast = new Broadcast();
   registerUi(router, {
     labels,
+    marks,
     broadcast,
     colorThemesDir: path.join(stateDir, "color-themes"),
     store,

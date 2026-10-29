@@ -391,6 +391,11 @@ function closeAgents(s: SessionSummary, at: string): void {
   settleAgents(s);
 }
 
+/** SessionSummary.newsAt: the latest arrival that is news, never moved back. */
+function noteNews(s: SessionSummary, arrivedAt: string): void {
+  if (!s.newsAt || arrivedAt > s.newsAt) s.newsAt = arrivedAt;
+}
+
 export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: string, source: EventSource): void {
   const s = rec.summary;
   const t = rec.track;
@@ -455,6 +460,7 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       s.background = undefined;
       break;
     case "session.ended":
+      noteNews(s, arrivedAt);
       rec.ended = true;
       s.endedAt = at;
       s.background = undefined;
@@ -486,6 +492,9 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       break;
     }
     case "turn.ended": {
+      // A turn the person typed at the terminal of a session they attend, they read
+      // there; any other turn's end is news to someone away from it.
+      if (!(s.currentTurn?.submittedBy === "user" && s.attended === true)) noteNews(s, arrivedAt);
       const ms = num(d.ms) ?? (s.currentTurn ? Date.parse(at) - Date.parse(s.currentTurn.since) : undefined);
       t.turnsEnded++;
       if (ms !== undefined && ms >= 0) {

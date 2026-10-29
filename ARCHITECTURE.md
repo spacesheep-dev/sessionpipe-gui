@@ -48,7 +48,7 @@ client against a receiver you can see into.
 | `server/store/*` | server-core | `Store`: `ingest(events, source) → IngestResult`, `snapshot()`, `session(key)`, `sessionDetail(key, after, limit)`, `feed(query)`, `forget(key)`, `subscribe(listener)`, `stats()`, `close()` |
 | `server/receiver/*` | server-core | `registerReceiver(router, deps)`: well-known, events, errors per HTTP.md §2 |
 | `server/sources/outbox.ts` | server-core | `startOutboxSource(store, opts) → { stop }` |
-| `server/ui/*` | server-core | `registerUi(router, deps)`: info, snapshot, stream (SSE), session, feed, forget, rotate token, demo toggle; `staticFiles(dir)` fallback; `LabelStore` + `registerLabels` (`labels.ts`: `<stateDir>/labels.json`, GET / PATCH `/api/ui/labels`, `labels` frames, a forgotten session loses its label); `Broadcast` (`stream.ts`: stream messages from elsewhere, the theme routes' `viewState`) |
+| `server/ui/*` | server-core | `registerUi(router, deps)`: info, snapshot, stream (SSE), session, feed, forget, rotate token, demo toggle; `staticFiles(dir)` fallback; `LabelStore` + `registerLabels` (`labels.ts`: `<stateDir>/labels.json`, GET / PATCH `/api/ui/labels`, `labels` frames, a forgotten session loses its label); `MarkStore` + `registerMarks` (`marks.ts`: `<stateDir>/marks.json`, its `since` set once when the file is made, GET / PATCH `/api/ui/marks`, `marks` frames, a forgotten session loses its marks); `Broadcast` (`stream.ts`: stream messages from elsewhere, the theme routes' `viewState`) |
 | `server/cli.ts` | server-core | flags, banner with LAN URL + QR + `sink add` line, `--open`, `--tls`, `tls status/trust/reset`, `--public-url`; `search` / `index` hand off to `server/search/cli.ts`; `--search-home` |
 | `server/search/service.ts`, `routes.ts`, `cli.ts`, `filters.ts`, `hints.ts`, `facets.ts`, `resume.ts` | search-service | `createSearch(deps) → SearchService` (reader + live tail, store overlays, the indexer child over IPC, status frames, history switch, reveal; `runSessionSearch` shared with the CLI), `registerSearch(router, svc, guard, isLocal)`, `runSearchCli` / `runIndexCli`; filters → the engine's `allow`, the no-result hint, facets, the quoted resume line |
 | `server/search/engine/*` | search-engine | `openReader`, `runIndexer`, `indexerChildMain`, `removeIndex`: segments, merges, the LOCK, BM25F, snippets |
@@ -67,6 +67,7 @@ client against a receiver you can see into.
 | `web/src/lib/skins.ts`, `theme.ts` | platform | applies a skin to `<html>` (tokens per scheme, `--font-ui`/`--font-mono`, `--radius`, `--hairline`, `data-density`, `@font-face`, the stylesheet); the per-device choice under `sessionpipe-gui.skin` (migrated once from `sessionpipe-gui.colorTheme`) |
 | `web/src/themes/host/*` | platform | loads a theme at `/t/:id` and builds its `ThemeApi` (`shared/theme-api.ts`): the snapshot with `labels`, `labels.set/rename/edit`, `menu.open/session/confirm` (the host's own menu and confirm), `storage.update` (If-Match, retried) and `storage.subscribe` (another device's write, from `viewState` frames) |
 | `web/src/lib/labels.ts`, `components/LabelDot.tsx` | web | a label's name, `setLabel` / `renameLabel` (through `Store.patchLabels`: shown at once, put back on a refusal), the `Label` submenu every session menu carries (`labelMenu`, in `sessionItems`), the `label:` search value (`labelFromQuery`), the "Edit labels" request; `LabelDot` / `LabelSwatch` draw the one dot (`.label-dot`, `--label-*` tokens) |
+| `web/src/lib/marks.ts` | web | `isUnread(s, marks)` (only idle and done rows, never an unattended run; a manual unread wins; no `since`, nothing), `setUnread` (through `Store.patchMarks`), the seen queue (at most one PATCH every 2 s, keys merged); `useUnread`, `useSeen` (the session page and the panel's active tab: read after 1 s on screen in a visible, focused window) and `useUnreadKeys` (`u`) in `data/hooks.ts` |
 | `web/src/plugins/*` | platform | the Plugins section of the Views page: the list from `/api/ui/plugins`, the settings form made from each manifest, Reload; suggestions reach the control strip through `AppState.suggestions` |
 | `web/src/phone/*` | phone-web | `/phone`: one page, laptop side and phone side (`state.ts`, pure and tested), three steps from `GET /api/ui/phone` polled every 2 s; the lane it recommends (Tailscale here, else the same Wi-Fi with the local CA), the phone's own passkey request through `control/useDeviceRequest.ts`, the laptop's Approve through `control/PendingDevices.tsx` |
 | `web/src/control/NewSession.tsx`, `newSessionState.ts`, `folders.ts`, `Starting.tsx` | control-web | New session: one compose sheet (a 640 px sheet under the title bar, a full-height sheet on a phone) mounted in the shell and opened by `openNewSession(target)` from every entry point (`c`, the compose glyph, the palette, `sessionItems`' "New session here", the Machines page, `?new=1`, `ThemeApi.control.compose`); the context precedence, per-machine remembered choices pruned to what the machine still advertises, and the draft (`sp.newSession.*`, try/catch) in `newSessionState.ts`; the folder list and the segment-prefix "under" rule in `folders.ts`; it signs one `start` with `files`, `permission`, `model` only when the hello advertised them, then opens `/s/<harness>/<uuid>`, which `Starting.tsx` draws from the start's activity until the first hook event (the board shows a starting row, and hides the Codex / Antigravity twin for 30 s) |
@@ -114,8 +115,14 @@ function names above.
   value, absent unknown (`attended`); `turn.started.submitted_by` / `injected` ride on
   `currentTurn`, a repeated `turn.started` for the same `turn_id` changes nothing, and an
   injected turn's prompt never becomes `lastUser` (the row's last ask).
+- `newsAt` is the `arrivedAt` of the latest event that is news to someone away from the
+  terminal: a `turn.ended`, unless that turn's `submittedBy` is `user` and the session is
+  `attended: true` (they typed it there and read the answer there), and a `session.ended`.
+  Nothing else moves it (tools, progress, attentions, control sends), a backfill never
+  does, and it rebuilds the same at boot, since `arrivedAt` is in the JSONL.
 - Labels are not a reading: they are the person's (`server/ui/labels.ts`), kept beside
-  the store, never on a `SessionSummary`.
+  the store, never on a `SessionSummary`. Nor are read marks (`server/ui/marks.ts`): the
+  page compares them with `newsAt` (`web/src/lib/marks.ts`).
 
 ## UI API (all under `/api/ui`, JSON, see `ROUTES` in `shared/api.ts`)
 
@@ -123,10 +130,12 @@ function names above.
 |---|---|
 | GET `/info` | `Info` (sink token and UI key only to loopback or an authenticated UI) |
 | GET `/snapshot` | `Snapshot` |
-| GET `/stream` | SSE of `StreamMessage`; `event:` = kind, `data:` = JSON; first frame a snapshot (with plugins' open `suggestions` and the `labels`); a `suggestion` frame when a plugin suggests an answer; a `labels` frame (the whole document, `rev` bumped) on every label change; a `viewState` frame (`id`, `etag`) when a view's state is written; a `: ping` comment every 15 s |
+| GET `/stream` | SSE of `StreamMessage`; `event:` = kind, `data:` = JSON; first frame a snapshot (with plugins' open `suggestions`, the `labels` and the `marks`); a `suggestion` frame when a plugin suggests an answer; a `labels` frame (the whole document, `rev` bumped) on every label change; a `marks` frame (the same) on every change to the read marks; a `viewState` frame (`id`, `etag`) when a view's state is written; a `: ping` comment every 15 s |
 | GET `/sessions/:harness/:id?after=<seq>&limit=<n>&agent=<id>` | `SessionDetail` (full events, read from disk); `agent` keeps one subagent's events |
 | GET `/labels` | `Labels`: `{ rev, names, sessions }` |
 | PATCH `/labels` | `LabelsPatch` (JSON only, 415 otherwise): a merge, `null` clears → `Labels`; 400 `malformed` / `bad_label` / `bad_name`, 404 `not_found` (a session the store does not know), 413 `too_many` / `too_large` |
+| GET `/marks` | `Marks`: `{ rev, since, read, unread }` |
+| PATCH `/marks` | `MarksPatch` (JSON only, 415 otherwise): a merge, `null` clears, a read mark never moves back, a key the store does not know is skipped → `Marks`; 400 `malformed` (an unknown field) / `bad_read` (not an ISO time) / `bad_unread` (not `true`), 413 `too_large`. At most 5,000 keys a map and 256 KB, the oldest read values dropped first |
 | GET `/events?limit&before&harness&machine&type&session&q` | `FeedPage`, newest first |
 | POST `/sessions/:harness/:id/forget` | 204; same effect as a `session.forgotten` event |
 | POST `/token/rotate` | `{ sinkToken }` (loopback only) |

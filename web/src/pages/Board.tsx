@@ -54,12 +54,14 @@ import {
   useSessionTree,
   useStore,
   useStreamDown,
+  useUnreadKeys,
 } from "../data/hooks";
 import { agentMatches } from "../lib/agents";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import { isHidden, useHidden } from "../lib/hidden";
 import { focusSearch, useListNav } from "../lib/keys";
 import { type LabelFilter, labelName, labelPasses, labelQuery, requestLabelRename } from "../lib/labels";
+import { isUnread, setUnread } from "../lib/marks";
 import { type Held, useFlip, useHeldOrder, useListHold, usePresence } from "../lib/motion";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
@@ -111,6 +113,9 @@ function viewItems(o: {
   lens: Lens;
   simple: boolean;
   counts: boolean;
+  /** What the filters show, folded Done rows included, that has news unseen. */
+  unread: SessionSummary[];
+  markRead: () => void;
 }): MenuList {
   return [
     { label: "Find…", action: "search.focus", run: () => void focusSearch() },
@@ -118,6 +123,7 @@ function viewItems(o: {
     { label: "Show done sessions", checked: o.showDone, run: () => o.setShowDone(!o.showDone) },
     !o.simple && { label: "Show counts", checked: o.counts, run: () => setShowCounts(!o.counts) },
     { label: "Edit labels…", run: () => requestLabelRename() },
+    { label: "Mark all as read", disabled: o.unread.length === 0 || undefined, run: o.markRead },
     { sep: true },
     {
       label: "Open sessions",
@@ -306,11 +312,18 @@ export function Board() {
     store,
   });
   const cursorKey = ordered[cursor]?.key;
-  // ⌥⌘1 … ⌥⌘7 label the row under the cursor, ⌥⌘0 clears it.
+  // ⌥⌘1 … ⌥⌘7 label the row under the cursor, ⌥⌘0 clears it; u marks it read or unread.
   useLabelKeys(() => (cursorKey ? [cursorKey] : []));
+  useUnreadKeys(() => (ordered[cursor] ? [ordered[cursor]!.item] : []));
+  const marks = useAppState().marks;
+  const doneUnread = useMemo(() => groups.get("done")!.filter((h) => isUnread(h.item, marks)).length, [groups, marks]);
   const hiddenByLens = useMemo(() => ordered.reduce((n, h) => n + cardHides(h.item, lens), 0), [ordered, lens]);
 
-  const view = () => viewItems({ filtered, clear, showDone, setShowDone, beside, lens, simple, counts });
+  const view = () => {
+    const unread = visible.filter((s) => isUnread(s, store.get().marks));
+    const markRead = () => setUnread(store, unread, false);
+    return viewItems({ filtered, clear, showDone, setShowDone, beside, lens, simple, counts, unread, markRead });
+  };
   const pageMenu = useBackgroundMenu(view, { title: () => "Board" });
   const doneMenu = useContextMenu(() => [
     { label: "Show done sessions", checked: showDone, run: () => setShowDone((v) => !v) },
@@ -522,6 +535,12 @@ export function Board() {
                 <span key={doneCount} className="group-count num">
                   {doneCount}
                 </span>
+                {!showDone && doneUnread > 0 && (
+                  <>
+                    {" "}
+                    <span className="group-note num">{doneUnread} unread</span>
+                  </>
+                )}
                 <svg className="group-caret" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
                   <path
                     d="M6 4l4 4-4 4"

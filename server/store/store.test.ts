@@ -1014,6 +1014,82 @@ describe("sessionpipe 0.10 readings", () => {
   });
 });
 
+describe("newsAt", () => {
+  const arrive = (t: string, events: Parameters<Store["ingest"]>[0]) => {
+    vi.setSystemTime(Date.parse(t));
+    store.ingest(events, "http");
+  };
+
+  it("moves to a turn's end as it arrived, never on tools, progress or attentions", () => {
+    vi.useFakeTimers();
+    const s = new Session();
+    arrive("2026-10-28T10:00:00.000Z", [s.ev("session.started", { source: "startup" })]);
+    arrive("2026-10-28T10:00:01.000Z", [
+      s.ev("turn.started", { turn_id: "t1" }),
+      s.ev("tool.started", { tool: "Read", call_id: "c1" }),
+      s.ev("tool.ended", { tool: "Read", call_id: "c1", ok: true }),
+      s.ev("turn.progress", { turn: 0, user: "Fix it", assistant: "Reading", at: at(1) }),
+      s.ev("attention.needed", { attention_id: "a1", kind: "question", message: "Which one?" }),
+    ]);
+    expect(store.session(KEY)!.newsAt).toBeUndefined();
+    arrive("2026-10-28T10:00:05.000Z", [s.ev("turn.ended", { turn_id: "t1", reason: "stop" })]);
+    expect(store.session(KEY)!.newsAt).toBe("2026-10-28T10:00:05.000Z");
+    arrive("2026-10-28T10:00:09.000Z", [
+      s.ev("turn.started", { turn_id: "t2" }),
+      s.ev("tool.started", { tool: "Edit", call_id: "c2" }),
+    ]);
+    expect(store.session(KEY)!.newsAt).toBe("2026-10-28T10:00:05.000Z");
+  });
+
+  it("a turn typed at the terminal of an attended session is not news; an unknown submitter, an unattended run and the end are", () => {
+    vi.useFakeTimers();
+    const s = new Session();
+    const attended = { session: { attended: true } };
+    arrive("2026-10-28T10:00:00.000Z", [s.ev("session.started", { source: "startup" }, attended)]);
+    arrive("2026-10-28T10:00:01.000Z", [
+      s.ev("turn.started", { turn_id: "t1", submitted_by: "user" }, attended),
+      s.ev("turn.ended", { turn_id: "t1", reason: "stop" }, attended),
+    ]);
+    expect(store.session(KEY)!.newsAt).toBeUndefined();
+    arrive("2026-10-28T10:00:02.000Z", [
+      s.ev("turn.started", { turn_id: "t2" }, attended),
+      s.ev("turn.ended", { turn_id: "t2", reason: "stop" }, attended),
+    ]);
+    expect(store.session(KEY)!.newsAt).toBe("2026-10-28T10:00:02.000Z");
+    arrive("2026-10-28T10:00:03.000Z", [
+      s.ev("turn.started", { turn_id: "t3", submitted_by: "schedule_wakeup" }, attended),
+      s.ev("turn.ended", { turn_id: "t3", reason: "stop" }, attended),
+    ]);
+    expect(store.session(KEY)!.newsAt).toBe("2026-10-28T10:00:03.000Z");
+    // Typed, but nobody says the session is attended: news.
+    const other = new Session("other-1");
+    arrive("2026-10-28T10:00:04.000Z", [
+      other.ev("turn.started", { turn_id: "t1", submitted_by: "user" }),
+      other.ev("turn.ended", { turn_id: "t1", reason: "stop" }),
+    ]);
+    expect(store.session(sessionKey("claude-code", "other-1"))!.newsAt).toBe("2026-10-28T10:00:04.000Z");
+    arrive("2026-10-28T10:00:07.000Z", [s.ev("session.ended", { reason: "exit" }, attended)]);
+    expect(store.session(KEY)!.newsAt).toBe("2026-10-28T10:00:07.000Z");
+  });
+
+  it("a backfill is never news, and a restart reads the same newsAt from the files", async () => {
+    vi.useFakeTimers();
+    const old = new Session("old-one");
+    arrive("2026-10-28T10:00:00.000Z", [old.ev("session.backfill", { started_at: at(0), last_at: at(30), turns: 4 })]);
+    expect(store.session(sessionKey("claude-code", "old-one"))!.newsAt).toBeUndefined();
+    const s = new Session();
+    arrive("2026-10-28T10:00:05.000Z", [
+      s.ev("turn.started", { turn_id: "t1" }),
+      s.ev("turn.ended", { turn_id: "t1", reason: "stop" }),
+    ]);
+    await store.close();
+    vi.setSystemTime(Date.parse("2026-10-28T10:01:00.000Z"));
+    store = new Store(tmp.dir, { tickMs: 1_000, statsMs: 1_000 });
+    expect(store.session(KEY)!.newsAt).toBe("2026-10-28T10:00:05.000Z");
+    expect(store.session(sessionKey("claude-code", "old-one"))!.newsAt).toBeUndefined();
+  });
+});
+
 describe("machines", () => {
   it("keeps a harness's version from the newest session that names one, a backfill before it or not", () => {
     const backfill = new Session("bf-1", "codex");

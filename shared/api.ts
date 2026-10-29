@@ -174,6 +174,10 @@ export interface SessionSummary {
   flags: SessionFlag[];
   /** From turn.started / turn.ended: completed turns, their durations, tools per turn. */
   turnStats: TurnStats;
+  /** When the latest news arrived (ISO, the event's `arrivedAt`) for someone away from
+   *  the terminal: a turn's end, unless the person typed that turn there in a session
+   *  they attend, or the session's end. What the read marks (Marks) compare against. */
+  newsAt?: string;
 }
 
 export const SNIPPET_CHARS = 280;
@@ -408,6 +412,8 @@ export interface Snapshot {
   suggestions?: Suggestion[];
   /** The person's colour labels; present on the stream's first frame. */
   labels?: Labels;
+  /** The person's read marks; present on the stream's first frame. */
+  marks?: Marks;
 }
 
 /** A server plugin's suggested answer to an open permission (shared/plugin-api.ts). Advice
@@ -442,6 +448,8 @@ export type StreamMessage =
   /** The whole label document after a change (small, idempotent; drop one whose `rev`
    *  is older than what the page has). */
   | { kind: "labels"; labels: Labels }
+  /** The whole read-marks document after a change, numbered like `labels`. */
+  | { kind: "marks"; marks: Marks }
   /** A view's server-side state (THEME_ROUTES.state) was written; `etag` names the new
    *  version, so the page that wrote it can tell its own write from another device's. */
   | { kind: "viewState"; id: string; etag: string }
@@ -485,6 +493,33 @@ export interface LabelsPatch {
 }
 
 export const EMPTY_LABELS: Labels = Object.freeze({ rev: 0, names: {}, sessions: {} }) as Labels;
+
+// ---------- marks (what the person has seen; GET / PATCH ROUTES.ui.marks) ----------
+
+/** Keys the server keeps at most in each map of Marks. */
+export const MARKS_MAX = 5000;
+
+/** `<stateDir>/marks.json`, as the server serves it: a session is read up to the
+ *  `newsAt` it had when it was seen, and the person may mark one unread by hand. */
+export interface Marks {
+  /** Bumped on every change: a page drops a frame older than what it has. */
+  rev: number;
+  /** When the file was first made (ISO). News from before it is read. Absent on an older
+   *  server, where nothing is unread. */
+  since?: string;
+  /** The `newsAt` each session had when it was last seen. */
+  read: Record<SessionKey, string>;
+  /** Marked unread by hand. */
+  unread: Record<SessionKey, true>;
+}
+
+/** A merge (PATCH): `null` clears. */
+export interface MarksPatch {
+  read?: Record<SessionKey, string | null>;
+  unread?: Record<SessionKey, true | null>;
+}
+
+export const EMPTY_MARKS: Marks = Object.freeze({ rev: 0, read: {}, unread: {} }) as Marks;
 
 /** A browser connected to this GUI's stream right now: a phone on the LAN, this
  *  laptop's own tab. The receiver's reading of "devices", from the connection only;
@@ -1293,6 +1328,10 @@ export const ROUTES = {
      *  `bad_label` / `bad_name`, 404 `not_found` (a session the store does not know), 413
      *  `too_many` / `too_large`, 415 `json_only`. Every change is a `labels` stream frame. */
     labels: "/api/ui/labels",
+    /** GET → Marks; PATCH MarksPatch (application/json) → Marks. 400 `malformed` /
+     *  `bad_read` / `bad_unread`, 413 `too_large`, 415 `json_only`. A key the store does
+     *  not know is skipped. Every change is a `marks` stream frame. */
+    marks: "/api/ui/marks",
   },
   /** GET / DELETE /attachments/<id>.<ext>, UI key: the uploaded image itself (served
    *  `private, immutable`), and taking it back. */

@@ -17,6 +17,16 @@ All notable changes to `sessionpipe-gui`. The format follows
   you, works or went stale counts; one that only sends events has no heartbeat and is never
   called offline. × hides the line on this device until something changes: it clears
   itself when the machine is back, and a new drop brings it back.
+- **Since you looked.** An idle or done session with news you haven't seen (a turn ended
+  or the session ended since you last had it open) draws its glyph filled in, in ink, and
+  the folded Done header says "3 unread". Opening it for a second, as a page or the
+  panel's tab, marks it read on every device. A turn you typed at the terminal of a
+  session you attend is not news; working, needs-you and unattended rows are never
+  unread, and nothing from before the first run is.
+- **Mark as read / Mark as unread** in an idle or done session's menu and the phone's
+  long-press sheet, `u` on the board's cursor, and **Mark all as read** in the board's
+  view menu. The marks live in `<stateDir>/marks.json` (`GET` / `PATCH /api/ui/marks`, a
+  `marks` frame on every change); a forgotten session loses its marks.
 
 ### Changed
 

@@ -15,6 +15,7 @@ import { copyText } from "./clipboard";
 import { harnessMark, repoBranch, sessionTitle } from "./format";
 import { hide } from "./hidden";
 import { labelMenu } from "./labels";
+import { canMark, isUnread, setUnread } from "./marks";
 import { receiverOrigin } from "./net";
 import { hrefFor, navigate, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath } from "./router";
 import { getSettings } from "./settings";
@@ -154,6 +155,7 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
         label: "Hide",
         run: () => hide(s.key, s.stateSince, { title: sessionTitle(s), session: s.key }),
       },
+    unreadItem(ctx.store, s, list),
     { sep: true },
     {
       label: "Copy",
@@ -169,6 +171,18 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
     { label: "Forget…", danger: true, run: forget },
   ];
   return tidy(items);
+}
+
+/** "Mark as read" on an unread session, else "Mark as unread" (lib/marks.ts), on a row
+ *  that can draw unread. Its key, `u`, works on a list's cursor, so a list shows it. */
+function unreadItem(store: Store, s: SessionSummary, list: boolean): MenuItem | null {
+  if (!canMark(s)) return null;
+  const unread = isUnread(s, store.get().marks);
+  return {
+    label: unread ? "Mark as read" : "Mark as unread",
+    action: list ? "list.unread" : undefined,
+    run: () => setUnread(store, [s], !unread),
+  };
 }
 
 /** The sheet head for a session: its title, and where it runs. */
