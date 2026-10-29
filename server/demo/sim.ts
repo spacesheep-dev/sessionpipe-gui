@@ -59,6 +59,18 @@ export interface DemoStarted {
  *  `api-` and 16 hex of the endpoint's hash; the demo's names api.z.ai. */
 export const DEMO_API_ACCOUNT = "api-3f9c1e0b7d2a4c68";
 
+/** The accounts the demo's pools name besides lab-mac's own login (DESIGN §3, UX-SPEC §13):
+ *  fixed ids, never drawn from the cast's stream, so the cast plays as it always did. The
+ *  own login (dev@example.com, `account(lab, "claude-code")`) is "Misha" in the pool. */
+export const DEMO_POOL = {
+  fiction: { id: "7c2a9e41-3b6d-4f08-9a5e-1d4c8b2f6e03", email: "fiction@example.com", label: "Fiction" },
+  spacesheep: { id: "e19b4d07-6a3c-4e52-8f71-0c9d5b3a2e84", email: "spacesheep@example.com", label: "Spacesheep" },
+  work: { id: "4d8f1c23-9e6b-4a07-b5d2-7f3e0a1c9b46", email: "work@example.com", label: "Work" },
+  old: { id: "b3e7a052-1f4c-4d9e-a86b-5c2d9f0e7a13", email: "old@example.com", label: "Old" },
+} as const;
+/** When Spacesheep's 5-hour window has room again, from the demo's start (its `until`). */
+export const DEMO_POOL_UNTIL_MS = 2 * 3_600_000 + 10 * 60_000;
+
 type Script = Generator<number, void, undefined>;
 interface Actor {
   at: number;
@@ -330,13 +342,15 @@ export class Simulation {
   /** The ids of limitsScene's earlier sessions: a stream of its own, so the cast draws
    *  what it always drew. */
   private readonly sideRng: Rng;
+  private readonly seed: number;
   /** lab-mac's 5-hour window (limitsScene): used, when it resets, replies since it moved. */
   private fiveHour = { used: 38, resetsAt: 0, replies: 0, bumps: 0 };
 
   constructor(opts: SimOptions = {}) {
     this.onStart = opts.onStart;
-    this.rng = new Rng(opts.seed ?? 20261014);
-    this.sideRng = new Rng((opts.seed ?? 20261014) + 1);
+    this.seed = opts.seed ?? 20261014;
+    this.rng = new Rng(this.seed);
+    this.sideRng = new Rng(this.seed + 1);
     const n = Math.min(MACHINE_NAMES.length, Math.max(1, Math.floor(opts.machines ?? 2)));
     this.machines = MACHINE_NAMES.slice(0, n);
     this.v010Machine = n === 1 ? (this.machines[0] as string) : V010_MACHINE;
@@ -568,6 +582,7 @@ export class Simulation {
       });
     this.spawn(parallel(), 10_000);
     this.spawn(this.limitsScene());
+    this.spawn(this.poolScene(), 45_000);
 
     let lastShowcase = this.now;
     yield OPENING_MS;
@@ -965,6 +980,81 @@ export class Simulation {
         "Two: invoice.paid and customer.updated still wait a fixed 30 s; the rest moved to exponential backoff in #418.",
       windows: this.labWindows(t0 - MINUTE),
     });
+  }
+
+  /** The pool at work (DESIGN §3, UX-SPEC §13 #6), on lab-mac: a session on Spacesheep's
+   *  own login whose 5 hours run out after its first turn. The pool sets the account aside
+   *  and sends the next request on Misha's (lab-mac's own, the pool's current account), so
+   *  the session's `limits.observed` first names Spacesheep (99.2 % of its 5 hours, the
+   *  `until` the hello carries) and then Misha, with Misha's windows: "Served by Misha since
+   *  …" on the page, "Switched to Misha: Spacesheep's 5 hours are used up" in the chat. It
+   *  keeps taking a turn every few minutes on Misha's account, and never ends. Its ids
+   *  come from a stream of its own, so the cast and limitsScene draw what they always drew. */
+  private *poolScene(): Script {
+    const lab = this.v010Machine;
+    const rng = new Rng(this.seed + 2);
+    while (!this.accounts.has(`${lab}/claude-code`)) yield 1000;
+    const own = this.accounts.get(`${lab}/claude-code`) as string;
+    const repo = REPOS[2] as Repo;
+    const sess = new Sess(this, PROFILES["claude-code"], rng.uuid(), {
+      machine: lab,
+      cwd: repo.cwd,
+      repo: repo.repo,
+      branch: "main",
+      model: MODELS["claude-code"][0],
+      account_id: DEMO_POOL.spacesheep.id,
+      attended: true,
+    });
+    const ev = sess.profile.ev;
+    const until = new Date(this.startAt + DEMO_POOL_UNTIL_MS).toISOString();
+    const week = new Date(this.startAt + 4 * DAY + 6 * HOUR).toISOString();
+    const turns = [
+      [
+        "Which docs pages still mention the old `--sink` flag?",
+        "Three: the install guide, the CLI reference and the FAQ's last answer. The flag is `sink add` since 0.8.",
+      ],
+      [
+        "Rewrite those three to say `sink add`, keeping each page's own tone.",
+        "Done: the install guide's step 3, the CLI reference's row, and the FAQ answer now say `sessionpipe sink add`. The examples' hosts are unchanged.",
+      ],
+      [
+        "Is anything else in docs/ still on 0.7 wording?",
+        "Two mentions of `--tail` in docs/troubleshooting.md; everything else reads 0.8 or later.",
+      ],
+    ] as const;
+    sess.emit("session.started", { source: "startup" }, ev.start);
+    sess.learn({ title: firstAsk(turns[0][0]), title_source: "first-ask" });
+    for (let i = 0; ; i++) {
+      const [prompt, reply] = turns[i % turns.length] as readonly [string, string];
+      const turnId = rng.uuid();
+      const ms = 24_000 + 3000 * (i % 3);
+      sess.emit("turn.started", { turn_id: turnId, prompt_chars: [...prompt].length }, ev.prompt);
+      yield ms;
+      sess.emit("turn.ended", { turn_id: turnId, reason: "stop", ms }, ev.stop);
+      sess.emit(
+        "turn.transcript",
+        { turn: i, user: prompt, assistant: reply, at: new Date(this.wall()).toISOString() },
+        ev.stop,
+      );
+      if (i === 0) {
+        // The first turn's last request: Spacesheep's 5 hours are at the switch point.
+        sess.emit(
+          "limits.observed",
+          {
+            account_id: DEMO_POOL.spacesheep.id,
+            windows: [
+              { id: "five_hour", used_percent: 99.2, window_minutes: 300, resets_at: until },
+              { id: "seven_day", used_percent: 3, window_minutes: 10_080, resets_at: week },
+            ],
+          },
+          "StatusLine",
+        );
+        yield 1500;
+      }
+      // Served by Misha from here on: every report names the account that answered.
+      sess.emit("limits.observed", { account_id: own, windows: this.labWindows(this.wall()) }, "StatusLine");
+      yield i === 0 ? 20_000 : 4 * MINUTE + 20_000 * (i % 2);
+    }
   }
 
   /** lab-mac's Claude Code windows as its status line reports them at `now`. */

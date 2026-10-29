@@ -3,6 +3,11 @@
 // here and nowhere else for anything that crosses the wire. Change it deliberately:
 // a field added here is a field both sides must handle.
 //
+// The pool (mp/pool, DESIGN §2.3) changes both sides: `MachineControl.pool` from the
+// hello, `SessionSummary.servedBy` from `limits.observed.account_id`, the `pool` control
+// kind with `poolAction` / `poolAccount` on its activity, and the constants under "the
+// pool" below. Every addition is optional, so a page from before it still reads.
+//
 // Protocol events themselves are the sessionpipe v1 envelope (spec/PROTOCOL.md §2);
 // the shapes below are the GUI's *readings* of them (spec §1: a receiver's readings
 // are its own, never part of the protocol).
@@ -114,6 +119,11 @@ export interface SessionSummary {
   attended?: boolean;
   /** The session that launched this one, as a session key; never read as a subagent. */
   launchedBy?: SessionKey;
+  /** The pool is serving this session with another account than its own: the newest
+   *  `limits.observed` on it carries an `account_id` other than `accountId`. `since` is the
+   *  time of the first such report in a row for that account; a report naming the session's
+   *  own account again clears it. Absent when nothing says otherwise. */
+  servedBy?: { accountId: string; since: string };
 
   state: SessionState;
   /** When the current state began (ISO). */
@@ -319,6 +329,12 @@ export interface MachineControl {
   /** Hello `start`: per harness, what a `start` may ask for there (sessionpipe 0.10). A
    *  harness with no entry takes neither `permission` nor `model`, and nothing offers them. */
   start?: Record<string, HarnessStartOptions>;
+  /** Hello `pool` (sessionpipe 0.11, CONTROL.md §2): the machine's pool of Claude accounts
+   *  its daemon switches between when one reaches its limit. A daemon that knows the pool
+   *  sends it in every hello, `{on: false, accounts: []}` when nothing is set up; absent, the
+   *  daemon predates the pool ("needs a newer sessionpipe") and no pool command is offered
+   *  for it. Said again in every hello: one without it takes it away. */
+  pool?: MachinePool;
 }
 
 /** A machine's mode, the person's choice at its own terminal (CONTROL.md §2): `safe`,
@@ -340,6 +356,102 @@ export interface HarnessAccount {
 
 /** What an account is called: its email, else its name, else nothing. */
 export const accountLabel = (a: HarnessAccount): string => a.email ?? a.name ?? "";
+
+// ---------- the pool (hello `pool`, the `pool` command; DESIGN §2.3) ----------
+
+/** The accounts a machine's daemon pools for one harness (today only Claude Code), from
+ *  its hello. `on`: requests on the machine go through the pool; off, the accounts are kept
+ *  but every session runs on its own login. `accounts` are in the machine's order, at most
+ *  POOL_ACCOUNTS_MAX; the receiver only reads them, the machine decides. */
+export interface MachinePool {
+  on: boolean;
+  harness: string;
+  accounts: MachinePoolAccount[];
+}
+
+/** One pooled account. `id` is the same string as `session.account_id` and
+ *  `limits.observed.account_id` (Claude Code: the account UUID), so the three join without
+ *  a map; the matching `HarnessAccount` on `MachineControl.accounts` has its email. */
+export interface MachinePoolAccount {
+  id: string;
+  email?: string;
+  /** What the person called it at the terminal ("Fiction"), when they did. */
+  label?: string;
+  /** `pool enable` / `disable`: a disabled account is never chosen. */
+  enabled: boolean;
+  /** ready: has room. limited: a window is used up (`until` says when it has room again,
+   *  when known). error: its token is no good ("sign in again"). disabled: turned off. */
+  status: PoolAccountStatus;
+  /** Serving new sessions right now (the first in the order with room). */
+  current: boolean;
+  /** limited: RFC 3339, when it has room again, if the machine knows. */
+  until?: string;
+  /** The account's freshest numbers, even while idle (the daemon polls the usage endpoint),
+   *  in the shape `limits.observed` carries, 1–LIMIT_WINDOWS_MAX. The receiver feeds them to
+   *  the account's LimitsEntry when they are newer than what it has (server/ui/limits.ts),
+   *  so the Usage page draws bars for an account no session went through yet. */
+  windows?: LimitWindow[];
+  /** limited / error only: what tripped it: a window id ("seven_day"), `rejected` (the
+   *  vendor's status) or `error` (the token is no good). */
+  limitedBy?: string;
+}
+
+export type PoolAccountStatus = "ready" | "limited" | "error" | "disabled";
+export const POOL_ACCOUNT_STATUSES: readonly PoolAccountStatus[] = ["ready", "limited", "error", "disabled"];
+/** Accounts a hello's `pool` lists at most, and a `pool_order` names at most. */
+export const POOL_ACCOUNTS_MAX = 20;
+
+/** The session a `pool` command names: the machine's own pool, not a coding session
+ *  (like `sessionpipe:keys` for a `key.add`). */
+export const POOL_SESSION = "sessionpipe:pool";
+
+/** What a `pool` command asks for (CONTROL.md, the pool). `on` / `off` switch the pool and
+ *  take nothing else, as does `login.begin`, which starts a sign-in (the ack's detail is
+ *  "<pending login id> <URL>"); `enable`, `disable`, `remove` take `pool_account`;
+ *  `refresh` takes it optionally (every account when absent); `order` takes `pool_order`,
+ *  every account id once; `login.complete` takes the pending login id as `pool_account`
+ *  and the pasted `code#state` as `pool_code`. `refresh`, `login.begin` and
+ *  `login.complete` need the pool on (`pool_off` otherwise); the rest work while it is off. */
+export type PoolAction =
+  | "on"
+  | "off"
+  | "enable"
+  | "disable"
+  | "remove"
+  | "order"
+  | "refresh"
+  | "login.begin"
+  | "login.complete";
+export const POOL_ACTIONS: readonly PoolAction[] = [
+  "on",
+  "off",
+  "enable",
+  "disable",
+  "remove",
+  "order",
+  "refresh",
+  "login.begin",
+  "login.complete",
+];
+/** The actions that must name an account (or, login.complete, the pending login) in
+ *  `pool_account`; `refresh` may. */
+export const POOL_ACCOUNT_REQUIRED: readonly PoolAction[] = ["enable", "disable", "remove", "login.complete"];
+export const POOL_ACCOUNT_ACTIONS: readonly PoolAction[] = [...POOL_ACCOUNT_REQUIRED, "refresh"];
+/** The actions a receiver signs with a fresh confirm (one passkey tap, Touch ID), never
+ *  under the day grant: they change what a machine sends to a vendor, or forget a sign-in. */
+export const POOL_CONFIRM_ACTIONS: readonly PoolAction[] = ["on", "off", "remove", "login.complete"];
+/** `pool_code`'s longest form (the pasted `code#state`), one line. */
+export const POOL_CODE_MAX = 512;
+/** An account id or a pending login id in a command (CONTROL.md, the pool). */
+export const POOL_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
+export const POOL_ID_MAX = 128;
+/** The machine's own refusal and failure codes for a pool command, besides the verifier's:
+ *  `pool_account` (unknown account or pending login, or the login expired), `pool_order`
+ *  (not every account exactly once), `pool_off` (refresh / login while the pool is off);
+ *  `failed` with `login` (the vendor rejected the code) or `pool` (the vendor call did not
+ *  go through); `unsupported` when the daemon knows the kind but this machine cannot pool.
+ *  This receiver adds `pool_unsupported` before anything is queued (a hello with no `pool`). */
+export const POOL_CODES = ["pool_account", "pool_order", "pool_off", "login", "pool", "pool_unsupported"] as const;
 
 // ---------- starting a session (CONTROL.md §6 `start`, its options and files) ----------
 
@@ -1248,7 +1360,10 @@ export interface Applied {
   model?: string;
 }
 
-export type ControlKind = "prompt" | "permission.answer" | "cancel" | "start" | "key.add";
+/** `pool` (sessionpipe 0.11): a machine-level command on `POOL_SESSION`, verified like a
+ *  `key.add` (server/control/pool.ts); its fields are `pool_action`, `pool_account`,
+ *  `pool_order` and `pool_code`. */
+export type ControlKind = "prompt" | "permission.answer" | "cancel" | "start" | "key.add" | "pool";
 export type ControlOutcome = "progress" | "taken" | "delivered" | "expired" | "unsupported" | "failed" | "refused";
 
 /** A control message the receiver carries, as the UI sees it (never the raw signature). */
@@ -1280,6 +1395,12 @@ export interface ControlActivity {
   /** What the machine ran it with, from its `taken` / `delivered` ack (sessionpipe 0.10);
    *  `inherit` when it ran with no permission flag. */
   applied?: Applied;
+  /** A `pool` command's action and, when it names one, its account (or pending login id),
+   *  as signed. The machine's answer is `detail`: the pool's summary line once delivered
+   *  ("on · 3 accounts · 2 with room · serving Fiction"), or, for `login.begin`,
+   *  "<pending login id> <URL>" (web/src/lib/pool.ts `loginFromDetail` reads it). */
+  poolAction?: PoolAction;
+  poolAccount?: string;
 }
 
 // ---------- extras (the curated catalogue; server/extensions/catalog.ts) ----------

@@ -7,6 +7,10 @@
 // only what the store accepted (the receiver's and the outbox's alike), and every change
 // goes to every page as one `limits` frame with the whole list. Demo numbers stay in
 // memory and go when demo mode does, so a real receiver keeps no pretend accounts.
+// A pooled account (DESIGN §2.3) is keyed by the event's `data.account_id` when it has
+// one, the account that served the request, else by the session's own; and a hello's
+// `pool.accounts[].windows`, the daemon's freshest numbers for an idle account, feed the
+// same entries, dated by the hello (followControl).
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
@@ -15,10 +19,12 @@ import {
   LIMITS_MAX,
   type LimitsEntry,
   type LimitWindow,
+  type MachineSummary,
   ROUTES,
   type StoredEvent,
   type StreamMessage,
 } from "../../shared/api.js";
+import { DEMO_MACHINE } from "../control/state.js";
 import type { Handler, Reply, Router } from "../http/router.js";
 import type { Store } from "../store/store.js";
 
@@ -105,42 +111,91 @@ export class LimitsStore {
 
   /** One accepted event. A limits.observed with a window that validates replaces its
    *  entry's windows and plan, unless an entry reported later is there. `machine`: the
-   *  session's, when the event's block leaves it out. Returns whether anything changed. */
+   *  session's, when the event's block leaves it out. The account is the event's
+   *  `data.account_id` when the pool set one (the account that served the request), else
+   *  the session's own. Returns whether anything changed. */
   observe(ev: StoredEvent, machine?: string): boolean {
     if (ev.type !== "limits.observed" || !ev.data || typeof ev.data !== "object") return false;
     const windows = readWindows(ev.data.windows);
     const where = str(ev.session.machine) ?? machine;
     if (!windows.length || !where) return false;
-    const account = str(ev.session.account_id);
-    const harness = ev.harness.name;
-    const key = account ? `${harness} a:${account}` : `${harness} m:${where}`;
-    const isDemo = ev.source === "demo";
-    const have = isDemo ? (this.demo.get(key) ?? this.real.get(key)) : this.real.get(key);
-    const observedAt = clamp(ev.time, ev.arrivedAt);
-    // Newest wins, by the event's time. An entry dated after this very arrival was dated by
+    const account = str(ev.data.account_id) ?? str(ev.session.account_id);
+    return this.put({
+      harness: ev.harness.name,
+      account,
+      machine: where,
+      windows,
+      plan: readPlan(ev.data.plan),
+      observedAt: clamp(ev.time, ev.arrivedAt),
+      arrived: clamp("", ev.arrivedAt),
+      demo: ev.source === "demo",
+    });
+  }
+
+  /** A machine's hello (MachineControl, from the control stream): each pooled account's
+   *  windows, dated by the hello. The same newest-wins rule as an event's, so a session's
+   *  own report a minute ago is not replaced by an idle poll from before it. A demo
+   *  machine's (ids under DEMO_MACHINE) stay in memory like the demo's events. */
+  observeMachine(m: MachineSummary): boolean {
+    const pool = m.control?.pool;
+    if (!pool || !m.control?.lastHelloAt) return false;
+    const observedAt = clamp(m.control.lastHelloAt, undefined);
+    const demo = m.control.machineId.startsWith(DEMO_MACHINE);
+    let changed = false;
+    for (const a of pool.accounts) {
+      if (!a.windows?.length) continue;
+      if (
+        this.put({
+          harness: pool.harness,
+          account: a.id,
+          machine: m.name,
+          windows: a.windows,
+          observedAt,
+          arrived: clamp("", undefined),
+          demo,
+        })
+      )
+        changed = true;
+    }
+    return changed;
+  }
+
+  private put(r: {
+    harness: string;
+    account: string | undefined;
+    machine: string;
+    windows: LimitWindow[];
+    plan?: string;
+    observedAt: string;
+    arrived: string;
+    demo: boolean;
+  }): boolean {
+    const key = r.account ? `${r.harness} a:${r.account}` : `${r.harness} m:${r.machine}`;
+    const have = r.demo ? (this.demo.get(key) ?? this.real.get(key)) : this.real.get(key);
+    // Newest wins, by the report's time. An entry dated after this very arrival was dated by
     // this machine's clock before it went back (or comes from the file of such a run): it
     // is newer than nothing, or it would hold every report off until that time.
-    const arrived = clamp("", ev.arrivedAt);
-    if (have && observedAt < have.observedAt && have.observedAt <= arrived) return false;
-    const plan = readPlan(ev.data.plan);
+    if (have && r.observedAt < have.observedAt && have.observedAt <= r.arrived) return false;
+    // A hello's windows carry no plan: the one already known for the account stays.
+    const plan = r.plan ?? have?.plan;
     const next: LimitsEntry = {
       key,
-      harness,
-      ...(account ? { accountId: account } : {}),
-      machine: where,
-      machines: [where, ...(have?.machines ?? []).filter((m) => m !== where)].slice(0, LIMITS_MACHINES_MAX),
+      harness: r.harness,
+      ...(r.account ? { accountId: r.account } : {}),
+      machine: r.machine,
+      machines: [r.machine, ...(have?.machines ?? []).filter((m) => m !== r.machine)].slice(0, LIMITS_MACHINES_MAX),
       ...(plan ? { plan } : {}),
-      windows,
-      observedAt,
+      windows: r.windows,
+      observedAt: r.observedAt,
     };
     // A real report wins over the demo's for the same key; the demo's never reaches the file.
-    const map = isDemo ? this.demo : this.real;
-    const shadowed = !isDemo && this.demo.has(key);
+    const map = r.demo ? this.demo : this.real;
+    const shadowed = !r.demo && this.demo.has(key);
     if (!shadowed && JSON.stringify(map.get(key)) === JSON.stringify(next)) return false;
     map.set(key, next);
     if (shadowed) this.demo.delete(key);
     cap(map);
-    if (!isDemo) this.save();
+    if (!r.demo) this.save();
     this.emit();
     return true;
   }
@@ -166,6 +221,14 @@ export class LimitsStore {
   follow(store: Store): () => void {
     return store.subscribe((m) => {
       if (m.kind === "event" && m.event.type === "limits.observed") this.observe(m.event, m.session.machine);
+    });
+  }
+
+  /** Follow the control channel: each machine frame (a hello landed, or a poll), read for
+   *  its pooled accounts' windows. */
+  followControl(control: { subscribe(l: (m: StreamMessage) => void): () => void }): () => void {
+    return control.subscribe((m) => {
+      if (m.kind === "machine") this.observeMachine(m.machine);
     });
   }
 

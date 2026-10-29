@@ -9,6 +9,7 @@ import { randomBytes } from "node:crypto";
 import {
   type Assertion,
   b64url,
+  type ControlCommand,
   keyUsable,
   pairChallenge,
   RECEIVER_MAX_AGE_MS,
@@ -21,6 +22,7 @@ import type { Ctx, Handler, Reply, Router } from "../http/router.js";
 import { HttpError } from "../http/router.js";
 import { MEDIA_TYPE_RE } from "./files.js";
 import { CODE_RE, MACHINE_RE } from "./parse.js";
+import { looksLikePool, verifyPoolCommand } from "./pool.js";
 import { filesProblem, precheck } from "./precheck.js";
 import { requestOrigin } from "./routes.js";
 import {
@@ -337,20 +339,21 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
       if (typeof body.csig === "string") signed.csig = body.csig;
       if (body.grant && typeof body.grant === "object") signed.grant = body.grant as SignedCommand["grant"];
       if (body.confirm && typeof body.confirm === "object") signed.confirm = body.confirm as SignedCommand["confirm"];
-      const verdict = await verifyCommand(signed, {
-        machine: m.id,
-        rpId: rpId(),
-        trusted: m.keys,
-        now: Date.now(),
-        maxAgeMs: RECEIVER_MAX_AGE_MS,
-      });
+      const opts = { machine: m.id, rpId: rpId(), trusted: m.keys, now: Date.now(), maxAgeMs: RECEIVER_MAX_AGE_MS };
+      // A `pool` command (DESIGN §2.3) is verified by pool.ts: the same checks on the core's
+      // own primitives, since this core's parseCommand closes the kind set before it looks
+      // at a signature. Everything else is the core's word.
+      const verdict = looksLikePool(signed.cmd)
+        ? await verifyPoolCommand(signed, opts)
+        : await verifyCommand(signed, opts);
       if (!verdict.ok) throw new HttpError(422, { reason: verdict.why, code: verdict.code });
       // The second look: what this machine's hello advertised (precheck.ts). The same
       // refusal shape, so the sheet shows the reason before anything is queued.
       const refused = precheck(JSON.parse(signed.cmd) as Record<string, unknown>, m, state.files);
       if (refused) throw new HttpError(422, { reason: refused.why, code: refused.code });
       const ttl = typeof body.expires_in_s === "number" && body.expires_in_s > 0 ? body.expires_in_s * 1000 : undefined;
-      const row = state.enqueue(m, signed, verdict.cmd, { via: "ui", ...(ttl ? { expiresInMs: ttl } : {}) });
+      const cmd = verdict.cmd as unknown as ControlCommand;
+      const row = state.enqueue(m, signed, cmd, { via: "ui", ...(ttl ? { expiresInMs: ttl } : {}) });
       return { status: 201, json: toActivity(row) };
     }),
   );

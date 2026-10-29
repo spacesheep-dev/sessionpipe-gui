@@ -9,8 +9,29 @@ use serde_json::{Map, Value};
 pub const CMD_MAX: usize = 48_000;
 /// `iat` must be this close to the signer's own clock: nobody stockpiles commands.
 pub const IAT_SLACK_MS: i64 = 60_000;
-pub const KINDS: [&str; 5] = ["prompt", "permission.answer", "cancel", "start", "key.add"];
+pub const KINDS: [&str; 6] = [
+    "prompt",
+    "permission.answer",
+    "cancel",
+    "start",
+    "key.add",
+    "pool",
+];
 pub const KEY_STORE_SESSION: &str = "sessionpipe:keys";
+/// The session a `pool` command names: the machine's own account pool.
+pub const POOL_SESSION: &str = "sessionpipe:pool";
+/// What a `pool` command may ask for (sessionpipe CONTROL.md, the pool).
+pub const POOL_ACTIONS: [&str; 9] = [
+    "on",
+    "off",
+    "enable",
+    "disable",
+    "remove",
+    "order",
+    "refresh",
+    "login.begin",
+    "login.complete",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -27,6 +48,8 @@ pub struct Checked {
     pub decision: Option<String>,
     /// key.add: what the device is called.
     pub name: Option<String>,
+    /// pool: the action, one of POOL_ACTIONS.
+    pub pool_action: Option<String>,
 }
 
 fn refuse(why: impl Into<String>) -> Error {
@@ -125,12 +148,65 @@ pub fn check(cmd: &str, mode: Mode, now_ms: u64) -> Result<Checked, Error> {
     } else if c.contains_key("key") {
         return Err(refuse("only a key.add carries a key"));
     }
+    let mut pool_action = None;
+    if kind == "pool" {
+        if session != POOL_SESSION {
+            return Err(refuse("a pool command names sessionpipe:pool"));
+        }
+        let action = s("pool_action")
+            .filter(|a| POOL_ACTIONS.contains(a))
+            .ok_or_else(|| refuse("a pool command names what it asks for"))?;
+        // on, off, remove and login.complete change what the machine sends to a vendor, or
+        // forget a sign-in: always a fresh Touch ID, never the day grant (CONTROL.md SHOULD).
+        if matches!(action, "on" | "off" | "remove" | "login.complete") && mode != Mode::Confirm {
+            return Err(refuse(
+                "turning the pool on or off, removing an account and finishing a sign-in take Touch ID",
+            ));
+        }
+        let must_name = matches!(action, "enable" | "disable" | "remove" | "login.complete");
+        let may_name = must_name || action == "refresh";
+        let id_ok = |v: Option<&Value>| {
+            v.and_then(Value::as_str).is_some_and(|x| {
+                (1..=128).contains(&x.len())
+                    && x.bytes().all(|b| {
+                        b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'-')
+                    })
+            })
+        };
+        match c.get("pool_account") {
+            Some(v) if may_name && id_ok(Some(v)) => {}
+            Some(_) if may_name => return Err(refuse("the account id is not well formed")),
+            Some(_) => return Err(refuse("this pool command names no account")),
+            None if must_name => return Err(refuse("this pool command names an account")),
+            None => {}
+        }
+        match (action == "order", c.get("pool_order")) {
+            (true, Some(Value::Array(o)))
+                if !o.is_empty() && o.len() <= 20 && o.iter().all(|x| id_ok(Some(x))) => {}
+            (true, _) => return Err(refuse("a pool order lists 1 to 20 account ids")),
+            (false, None) => {}
+            (false, _) => return Err(refuse("only a pool order carries pool_order")),
+        }
+        match (action == "login.complete", c.get("pool_code")) {
+            (true, Some(Value::String(code)))
+                if !code.trim().is_empty()
+                    && code.chars().count() <= 512
+                    && !code.chars().any(char::is_control) => {}
+            (true, _) => return Err(refuse("login.complete carries the pasted code")),
+            (false, None) => {}
+            (false, _) => return Err(refuse("only login.complete carries pool_code")),
+        }
+        pool_action = Some(action.to_string());
+    } else if c.keys().any(|k| k.starts_with("pool_")) {
+        return Err(refuse("only a pool command carries pool fields"));
+    }
     Ok(Checked {
         kind: kind.into(),
         machine: machine.into(),
         session: session.into(),
         decision: s("decision").map(str::to_string),
         name,
+        pool_action,
     })
 }
 
@@ -209,6 +285,74 @@ mod tests {
         // 15 000 astral characters are 30 000 UTF-16 units: under the cap.
         let astral = "😀".repeat(15_000);
         assert!(check(&cmd(json!({"text": astral})), Mode::Grant, NOW).is_ok());
+    }
+
+    #[test]
+    fn pool_commands_name_the_pool_and_their_fields_per_action() {
+        let pool = |over: Value| {
+            let mut v = json!({"kind":"pool","session":POOL_SESSION,"text":null});
+            for (k, x) in over.as_object().unwrap() {
+                v[k] = x.clone();
+            }
+            cmd(v)
+        };
+        let on = check(&pool(json!({"pool_action":"on"})), Mode::Confirm, NOW).unwrap();
+        assert_eq!(on.pool_action.as_deref(), Some("on"));
+        // on, off, remove and login.complete only with Touch ID; the rest under the grant too.
+        assert!(check(&pool(json!({"pool_action":"on"})), Mode::Grant, NOW).is_err());
+        assert!(check(
+            &pool(json!({"pool_action":"remove","pool_account":"a"})),
+            Mode::Grant,
+            NOW
+        )
+        .is_err());
+        assert!(check(
+            &pool(json!({"pool_action":"enable","pool_account":"acc_1.x:y-z"})),
+            Mode::Grant,
+            NOW
+        )
+        .is_ok());
+        assert!(check(&pool(json!({"pool_action":"refresh"})), Mode::Grant, NOW).is_ok());
+        assert!(check(
+            &pool(json!({"pool_action":"refresh","pool_account":"a"})),
+            Mode::Grant,
+            NOW
+        )
+        .is_ok());
+        assert!(check(
+            &pool(json!({"pool_action":"order","pool_order":["a","b"]})),
+            Mode::Grant,
+            NOW
+        )
+        .is_ok());
+        assert!(check(
+            &pool(json!({"pool_action":"login.complete","pool_account":"login_1","pool_code":"abc#xyz"})),
+            Mode::Confirm,
+            NOW
+        )
+        .is_ok());
+        for bad in [
+            json!({"pool_action":"shell"}),
+            json!({"pool_action":"on","pool_account":"acc_1"}),
+            json!({"pool_action":"enable"}),
+            json!({"pool_action":"enable","pool_account":"has space"}),
+            json!({"pool_action":"enable","pool_account":"acc/1"}),
+            json!({"pool_action":"login.begin","pool_account":"a"}),
+            json!({"pool_action":"order"}),
+            json!({"pool_action":"order","pool_order":[]}),
+            json!({"pool_action":"off","pool_order":["a"]}),
+            json!({"pool_action":"login.complete","pool_account":"l"}),
+            json!({"pool_action":"on","pool_code":"x"}),
+            json!({"pool_action":"on","session":"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e"}),
+            json!({"pool_action":"login.complete","pool_account":"l","pool_code":"two\nlines"}),
+        ] {
+            assert!(
+                check(&pool(bad.clone()), Mode::Confirm, NOW).is_err(),
+                "{bad}"
+            );
+        }
+        // Pool fields on another kind are refused too.
+        assert!(check(&cmd(json!({"pool_action":"on"})), Mode::Grant, NOW).is_err());
     }
 
     #[test]

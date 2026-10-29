@@ -1,0 +1,555 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- the pooled section (Usage) ---------- */
+/* One grouped section per machine that pools Claude accounts (components/PoolAccounts.tsx),
+   in the Usage page's grammar: the header row, the switch row in the form grammar, then
+   the accounts in the machine's order on hairlines, each a lead column (the grip, on hover
+   and focus), the name with the email muted after it, the status word at the right and
+   its ···; a pooled account's window rows sit under it, indented one step further with
+   their bars aligned to the page's. The last row is "Add account…", the whole row a
+   button. No card, tint, stripe or chip: the one accent is the words "Used up". On a
+   phone the section is one inset group, the grip at the trailing edge and always drawn. */
+
+.pool-section {
+  scroll-margin-top: calc(var(--bar) + 16px);
+}
+.pool-section > .form-list {
+  margin-top: 2px;
+}
+.pool-meta {
+  /* The meta gives way before the title: the title names the machine. */
+  flex: 0 1 auto;
+  min-width: 8ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.pool-foot {
+  display: none;
+}
+.pool-section .page-note {
+  margin: 2px 0 6px 24px;
+}
+.pool-section .notice {
+  /* The well starts at the text column, as the note under it and the switch's label do. */
+  margin: 4px 0 6px 24px;
+}
+/* Why nothing can be signed here: the Machines page's line, above the first section. */
+.usage .machines-note {
+  margin-bottom: -16px;
+}
+/* The switch row: the label, the hint as its caption, the Toggle at the right, on the
+   label's line (not centred on the paragraph): the row aligns to its start and the
+   Toggle's wrapper takes the half-difference between the label's line box and the
+   Toggle's own height (18 px; 26 px for a coarse pointer, shared.css), so their
+   centres meet. */
+.pool-switch {
+  align-items: flex-start;
+  padding-left: 24px;
+}
+.pool-switch .form-caption {
+  max-width: 64ch;
+  text-wrap: pretty;
+}
+.pool-switch-tip {
+  display: inline-flex;
+  flex: none;
+  margin-top: calc((var(--lh-tight) * var(--text-md) - 18px) / 2);
+}
+@media (pointer: coarse) {
+  .pool-switch-tip {
+    margin-top: calc((var(--lh-tight) * var(--text-md) - 26px) / 2);
+  }
+}
+
+/* ----- the accounts ----- */
+
+.pool-accounts {
+  /* The rows' offsetTop is measured from here: the drag places a row against the list. */
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.pool-windows > li {
+  border-top: var(--hairline) solid var(--line);
+}
+.pool-accounts > li + li {
+  border-top: var(--hairline) solid var(--line);
+}
+.pool-acct {
+  position: relative;
+  background: var(--bg);
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.pool-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: 0;
+  min-height: var(--row-lg);
+  padding: var(--row-pad) 0;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pool-row:active {
+  cursor: grabbing;
+}
+/* While the row's menu is up (right-click or its ···), the row is the selection pill the
+   header and every list row become; the pill clears --dur-release after the menu closes.
+   No background on hover: the grip is the hover cue. */
+.pool-row {
+  transition: background-color var(--dur-release) linear;
+}
+.pool-row[data-menu-open] {
+  background: var(--sel);
+  border-radius: var(--radius);
+}
+.pool-row > .icon-btn,
+.pool-row .btn {
+  cursor: default;
+}
+.pool-row > .icon-btn:last-child {
+  margin-left: 8px;
+  margin-right: -6px;
+}
+/* The grip's column is the glyph's: no gap after it, so the name starts on the title's
+   edge, one lead edge for the title, the switch's label, the names and Add account. */
+/* The grip: drawn while the pointer is over the row or focus is within it; a non-text
+   mark in the lightest tier. */
+.pool-grip {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-4);
+  opacity: 0;
+  cursor: grab;
+  touch-action: none;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.pool-grip:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: -2px;
+}
+/* The grip's mark is 24 px; its target reaches 8 px out, up and down (32 × 40 in the
+   row's 44), its neighbour on the right being text. A pointer-down on the reach still
+   starts the drag: the event's target is the grip. ::before, since a locked grip's
+   tooltip (data-tip, keyboard.css) is the ::after. */
+.pool-grip::before {
+  content: "";
+  position: absolute;
+  inset: -8px 0 -8px -8px;
+}
+/* The Toggle's track is 32 × 18 on a desktop; its target is 44 × 40 around it (44 × 44
+   on a phone, where the track is already 26 tall). Scoped to the pool's switch row; the
+   Settings rows keep the Toggle as shared.css draws it. */
+.pool-switch .toggle {
+  position: relative;
+}
+.pool-switch .toggle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 40px;
+  transform: translate(-50%, -50%);
+}
+@media (hover: hover) {
+  .pool-row:hover .pool-grip {
+    opacity: 1;
+  }
+}
+.pool-row:focus-within .pool-grip,
+.pool-acct[data-dragging] .pool-grip,
+.pool-acct[data-grabbed] .pool-grip {
+  opacity: 1;
+}
+.pool-name {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: var(--text-md);
+}
+.pool-title {
+  flex: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pool-email {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.pool-acct--off .pool-title {
+  color: var(--fg-3);
+}
+/* The status word, right-aligned past 60 % of the row; "Used up · resets in 2 h 10 m"
+   fits in one line at the page's measure. */
+.pool-status {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0;
+  min-width: 0;
+  margin-left: 8px;
+  color: var(--fg-2);
+  font-size: var(--text-md);
+  text-align: right;
+  white-space: nowrap;
+}
+.pool-status--fg {
+  color: var(--fg);
+}
+.pool-status--fg-3 {
+  color: var(--fg-3);
+}
+.pool-status--needs .pool-word {
+  color: var(--needs-fg);
+}
+/* What follows the word, in the meta tier on the word's baseline: "resets in 43 m",
+   "numbers as of 1 h ago", each after one middle dot, the header's own separator. */
+.pool-status-sub {
+  display: inline;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.pool-status-sub > * + *::before,
+.pool-status-sub > :first-child::before {
+  content: "· ";
+  margin-left: 0.35em;
+}
+.pool-status-sub > :first-child::before {
+  margin-left: 0.45em;
+}
+.pool-status .btn {
+  /* The ghost button's 10 px of padding and its (transparent) border sit past the status
+     column: its text ends where "In use" and "Off" end in the rows around it. */
+  margin: -4px calc(-10px - var(--hairline)) -4px 0;
+}
+/* A pooled account's windows: one step further in, the label narrower, so the bars stay
+   on the page's bar line (24 + 180 = 48 + 156). The step is a margin, not a padding, so
+   the hairline over each window starts under its label (an inset separator, the way a
+   list groups rows under their owner) while the account rows' rules keep the full measure. */
+.pool-windows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.pool-windows .usage-win {
+  grid-template-columns: 156px 160px 10ch minmax(0, 1fr);
+  margin-left: 48px;
+  padding-left: 0;
+}
+/* The row in flight: lifted over its siblings, under the pointer (the transform is
+   written by the drag), the neighbours sliding (the FLIP in PoolAccounts.tsx). The lift
+   is a raised surface with corners: the shadow carries it in light, the raised ground
+   (--raised, a step up from the page) in dark, where a shadow on the dark page shows
+   nothing. The lift and the landing tween on the row's own transition; under reduced
+   motion they land at once, and the raised ground stays as the static cue. */
+.pool-acct[data-dragging],
+.pool-acct[data-grabbed] {
+  z-index: 2;
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: var(--shadow-sm);
+  border-top-color: transparent;
+}
+.pool-acct[data-dragging] {
+  cursor: grabbing;
+}
+.pool-acct[data-dragging] .pool-row {
+  cursor: grabbing;
+}
+/* The last row: "Add account…", the whole row a button. */
+.pool-add {
+  width: 100%;
+  min-height: var(--row-lg);
+  padding: var(--row-pad) 0 var(--row-pad) 24px;
+  border: none;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--text-md);
+  text-align: left;
+  cursor: default;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.pool-add:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: -2px;
+}
+@media (hover: hover) {
+  .pool-add:hover:not(:disabled) {
+    color: var(--fg);
+  }
+}
+.pool-add:disabled {
+  color: var(--fg-3);
+}
+/* The footnote's "Set it up…": a link in the page's note tier. */
+.pool-setup {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.pool-setup:hover {
+  color: var(--fg);
+}
+
+/* ----- the Add account sheet ----- */
+
+.pa-group {
+  padding: 12px 20px 14px;
+  border-top: var(--hairline) solid var(--line);
+}
+.pa-head {
+  margin: 0 0 4px;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+.pa-lead {
+  margin: 0 0 10px;
+  max-width: 60ch;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+  text-wrap: pretty;
+}
+.pa-lead code,
+.pa-caption code {
+  font-size: var(--text-sm);
+}
+.pa-caption {
+  margin: 8px 0 0;
+  max-width: 60ch;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+}
+.pa-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.pa-step {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 6px;
+  margin-top: 8px;
+}
+.pa-step-n {
+  align-self: baseline;
+  color: var(--fg-3);
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+}
+.pa-step-text {
+  align-self: baseline;
+  color: var(--fg);
+  font-size: var(--text-md);
+}
+.pa-code {
+  width: 100%;
+  height: var(--control);
+  padding: 0 10px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.pa-step > .cmdwell,
+.pa-step > .pa-code {
+  grid-column: 2 / -1;
+}
+.pa-code::placeholder {
+  color: var(--fg-4);
+}
+.pa-code:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: 0;
+}
+.pa-note {
+  margin-top: 8px;
+}
+.pa-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.pa-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 12px 12px 20px;
+  border-top: var(--hairline) solid var(--line);
+}
+
+/* ----- the phone ----- */
+
+@media (max-width: 839px) {
+  .pool-section > .usage-head {
+    padding: 0 16px 6px;
+  }
+  .pool-meta {
+    display: none;
+  }
+  /* The room count is the group's footer. */
+  .pool-foot {
+    display: block;
+    margin: 8px 0 0;
+    padding: 0 16px;
+    color: var(--fg-3);
+    font-size: var(--text-sm);
+  }
+  .pool-section .page-note {
+    margin: 4px 0 8px;
+    padding: 0 16px;
+  }
+  .pool-section .notice {
+    margin: 0 0 12px;
+  }
+  .usage .machines-note {
+    margin-bottom: -8px;
+  }
+  .pool-switch {
+    padding-left: 0;
+  }
+  .pool-acct {
+    background: var(--bg-2);
+  }
+  /* A cell: name and status on the first line, the email on the second, the grip at the
+     trailing edge, always drawn, 44 pt around its mark. */
+  .pool-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "name status grip"
+      "email email grip"
+      "after after grip";
+    column-gap: 4px;
+    row-gap: 0;
+    min-height: var(--tap);
+    padding: 8px 4px 8px 0;
+    cursor: default;
+  }
+  .pool-name {
+    display: contents;
+  }
+  .pool-title {
+    grid-area: name;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pool-email {
+    grid-area: email;
+    white-space: nowrap;
+  }
+  .pool-status {
+    grid-area: status;
+    margin-left: 8px;
+    display: contents;
+  }
+  .pool-status .pool-word,
+  .pool-status .btn {
+    grid-area: status;
+    justify-self: end;
+    white-space: nowrap;
+  }
+  .pool-status--fg-3 .pool-word {
+    color: var(--fg-3);
+  }
+  .pool-status--fg .pool-word {
+    color: var(--fg);
+  }
+  /* The word's trail is the cell's third line, under the email: no dot opens a line. */
+  .pool-status-sub {
+    grid-area: after;
+    display: block;
+    text-align: left;
+  }
+  .pool-status-sub > :first-child::before {
+    content: none;
+  }
+  .pool-grip {
+    grid-area: grip;
+    width: var(--tap);
+    height: var(--tap);
+    opacity: 1;
+    cursor: default;
+  }
+  .pool-row .icon-btn:last-child {
+    display: none;
+  }
+  .pool-windows .usage-win {
+    grid-template-columns: minmax(0, 1fr) auto;
+    margin-left: 16px;
+    padding: 10px 16px 10px 0;
+  }
+  .pool-add {
+    min-height: var(--tap);
+    padding-left: 0;
+  }
+  .pool-foot + .usage-note {
+    margin-top: 0;
+  }
+  /* The sheet's groups are the phone's inset cells. */
+  .ns-sheet--phone .pa-group {
+    border-top: none;
+    padding: 12px 16px 14px;
+  }
+  .pa-step {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+  .pa-step > .btn {
+    grid-column: 2;
+    justify-self: start;
+  }
+  /* The Ready state's one action fills its cell, a grouped list's full-width action; the
+     link state keeps Start over and Done side by side, Done at the right. */
+  .ns-sheet--phone .pa-actions--ready {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ns-sheet--phone .pa-actions--ready .btn--primary {
+    flex: 1 1 auto;
+  }
+  .ns-sheet--phone .pa-foot {
+    display: none;
+  }
+}

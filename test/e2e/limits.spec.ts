@@ -83,9 +83,13 @@ test("the sidebar says what each account has left, in the wide sidebar only", as
   await openPage(page, "/");
   const block = page.locator(".glance");
   await expect(block).toBeVisible();
-  const dev = block.locator(".glance-line", { hasText: "dev" }).first();
+  // lab-mac pools dev@example.com as "Misha": its numbers are the pooled machine's one line
+  // (pool-surfaces.spec.ts), never a line of their own.
+  const dev = block.locator('.glance-line[data-glance="pool:lab-mac"]');
+  await expect(dev.locator(".glance-name")).toHaveText("Misha");
   await expect(dev.locator(".glance-val")).toHaveText(/^5h (\d+|<1)% left$/);
   await expect(dev.locator(".glance-bar")).toBeVisible();
+  await expect(block.locator(".glance-line", { hasText: /^dev\b/ })).toHaveCount(0);
   // studio-mac's account, which no hello names, by its machine: none left, and when it resets in the bar's place.
   const studio = block.locator(".glance-line", { hasText: /^studio-mac/ }).filter({ hasText: "None left" });
   await expect(studio.locator(".glance-out")).toHaveText("None left");
@@ -139,7 +143,8 @@ test("g u and ⌘K open Usage: every window named honestly, and nothing for a ha
   // The only colour is on the words that need it.
   await expect(main.locator(".usage-out")).toHaveText(["12% over", "None left"]);
   // Within a harness, the accounts with numbers first, the ones a hello names before the
-  // rest, then those with none: the page never opens on a setup block.
+  // rest, then those with none: the page never opens on a setup block. (dev@example.com is
+  // pooled on lab-mac and drawn in that section, pool.spec.ts.)
   const order = await main
     .locator("section.usage-acct")
     .evaluateAll((els) =>
@@ -147,12 +152,7 @@ test("g u and ⌘K open Usage: every window named honestly, and nothing for a ha
         (el) => `${el.querySelector(".usage-title")?.textContent}${el.querySelector(".usage-win") ? "" : " (none)"}`,
       ),
     );
-  expect(order.slice(0, 4)).toEqual([
-    "api.z.ai",
-    "dev@example.com",
-    "Claude Code account",
-    "Claude Code account (none)",
-  ]);
+  expect(order.slice(0, 3)).toEqual(["api.z.ai", "Claude Code account", "Claude Code account (none)"]);
 });
 
 test("a report updates the page and the sidebar without a reload; Copy usage and Forget", async ({ page }) => {
@@ -203,12 +203,9 @@ test("New session on lab-mac: each agent says what its account has left there", 
   await expect(sheet.locator("[data-ns-row=machine] button.sel")).toHaveText(/lab-mac/);
   await sheet.locator("[data-ns-row=agent] button.sel").click();
   const opt = (name: string) => page.locator(".sel-opt", { hasText: name });
-  // lab-mac's hello names two Claude Code accounts: a start can't choose, so no one number,
-  // but each account's own by its name.
-  await expect(opt("Claude Code").locator(".sel-opt-detail")).toHaveText(
-    /^dev ((<1|\d+)% left|none left)[^,]*, api\.z\.ai 12% over/,
-  );
-  await expect(opt("Claude Code").locator(".sel-opt-hint")).toHaveCount(0);
+  // lab-mac pools its Claude Code accounts with the switch on: a start there goes to the
+  // pool's current account, so its line is the pool's (pool-surfaces.spec.ts has the rest).
+  await expect(opt("Claude Code").locator(".sel-opt-detail")).toHaveText(/^3 accounts, 2 with room · Misha/);
   await expect(opt("Codex").locator(".sel-opt-hint")).toHaveText("74% left");
   await expect(opt("Codex").locator(".sel-opt-detail")).toHaveText(/^This week, resets in 4 d \d+ h$/);
   await expect(opt("Gemini CLI").locator(".sel-opt-hint")).toHaveCount(0);
@@ -234,7 +231,7 @@ test("New session on a one-account machine: none left, in the attention colour",
 
 test("Enter on an account opens New session there, with its harness", async ({ page }) => {
   await openPage(page, "/usage");
-  const dev = page.locator("section.usage-acct", { hasText: "dev@example.com" });
+  const dev = page.locator("section.usage-acct", { hasText: "api.z.ai" });
   await dev.locator(".usage-head").focus();
   await expect(dev).toHaveAttribute("aria-current", "true");
   await page.keyboard.press("Enter");
@@ -245,13 +242,18 @@ test("Enter on an account opens New session there, with its harness", async ({ p
 
 test("the sidebar line's menu, its tooltip, and hiding it until Settings brings it back", async ({ page }) => {
   await openPage(page, "/");
-  const dev = page.locator(".glance-line", { hasText: "dev" }).first();
-  await expect(dev).toHaveAttribute("data-tip", /^dev@example\.com, Claude Code\.\n5 hours: .*\nAs of .*\.$/s);
+  // lab-mac pools dev@example.com as "Misha", so its line is the pooled machine's: the
+  // tooltip is the pool's (the account, where, its windows, the others, the age).
+  const dev = page.locator('.glance-line[data-glance="pool:lab-mac"]');
+  await expect(dev).toHaveAttribute(
+    "data-tip",
+    /^Misha, Claude Code on lab-mac, in use\.\n5 hours: .*\nFiction has room\.\nSpacesheep is used up, .*\nAs of .*\.$/s,
+  );
   await dev.click({ button: "right" });
   const menu = page.getByRole("menu");
   await expect(menu.getByRole("menuitem")).toHaveText([
+    /^Open lab-mac's accounts/,
     "New session on lab-mac…",
-    /^Open Usage/,
     "Copy usage",
     "Hide usage in the sidebar",
   ]);
@@ -268,7 +270,7 @@ test("the sidebar line's menu, its tooltip, and hiding it until Settings brings 
   await page.keyboard.press("Escape");
   await expect(page.locator(".glance")).toBeVisible();
   await dev.click();
-  await expect(page).toHaveURL(/\/usage#claude-code%20a%3A/);
+  await expect(page).toHaveURL(/\/usage#pool%3Alab-mac$/);
 });
 
 test("a long name keeps its room in the sidebar; the window's name gives way", async ({ page }) => {

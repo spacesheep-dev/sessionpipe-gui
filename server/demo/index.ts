@@ -41,7 +41,8 @@ export function startDemo(store: Store, opts: DemoOptions = {}): Runner {
     startAt: Date.now(),
     onStart: (s) => paired?.started(s),
   });
-  if (opts.control) paired = startDemoMachines(opts.control, sim.v010Machine, (m) => sim.account(m, "claude-code"));
+  if (opts.control)
+    paired = startDemoMachines(opts.control, sim.v010Machine, (m) => sim.account(m, "claude-code"), sim.startAt);
   let timer: NodeJS.Timeout | undefined;
   let stopped = false;
   const tick = () => {

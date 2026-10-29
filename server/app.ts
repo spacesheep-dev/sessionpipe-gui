@@ -212,6 +212,9 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
 
   registerReceiver(router, { store, sinkToken: () => config.sinkToken, control });
   control.register(router);
+  // A pooled account's windows ride on the hello too (DESIGN §2.3): the limits follow the
+  // machine frames for them, newest wins against the events'.
+  limits.followControl(control);
 
   let outbox: OutboxSource | null = null;
   if (opts.outbox !== false) {

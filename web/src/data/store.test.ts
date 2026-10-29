@@ -17,6 +17,51 @@ function storeWith(patch: (p: LabelsPatch) => Promise<Labels>): Store {
   return new Store({ patchLabels: patch } as unknown as Transport);
 }
 
+describe("machines in the store", () => {
+  it("keeps a machine frame whole, its hello's pool with it", () => {
+    const store = storeWith(async () => doc(0));
+    const pool = {
+      on: true,
+      harness: "claude-code",
+      accounts: [
+        {
+          id: "a",
+          enabled: true,
+          status: "ready" as const,
+          current: true,
+          windows: [{ id: "five_hour", usedPercent: 3 }],
+        },
+      ],
+    };
+    store.apply({
+      kind: "machine",
+      machine: {
+        name: "lab-mac",
+        lastAt: "",
+        harnesses: {},
+        sessions: 0,
+        working: 0,
+        needsYou: 0,
+        control: { machineId: "m", online: true, keys: [], queued: 0, pool },
+      },
+    });
+    expect(store.get().machines.get("lab-mac")?.control?.pool).toEqual(pool);
+    store.apply({
+      kind: "machine",
+      machine: {
+        name: "lab-mac",
+        lastAt: "",
+        harnesses: {},
+        sessions: 0,
+        working: 0,
+        needsYou: 0,
+        control: { machineId: "m", online: true, keys: [], queued: 0 },
+      },
+    });
+    expect(store.get().machines.get("lab-mac")?.control?.pool).toBeUndefined();
+  });
+});
+
 describe("labels in the store", () => {
   it("takes the snapshot's labels, then newer frames only", () => {
     const store = storeWith(async () => doc(0));

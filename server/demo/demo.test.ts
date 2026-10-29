@@ -4,14 +4,14 @@
 import { describe, expect, it } from "vitest";
 import { DONE_AFTER_MS, type EventSource, type ProtocolEvent } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
-import { type Hello, MACHINE_RE } from "../control/parse.js";
+import { type Hello, MACHINE_RE, parseHello } from "../control/parse.js";
 import type { DemoStart } from "../control/state.js";
 import { applyEvent, newRecord, refreshState } from "../store/readings.js";
 import type { Store } from "../store/store.js";
 import { MODELS } from "./content.js";
 import { startDemo } from "./index.js";
 import { DEMO_ACP_SESSION, demoMachineId, startDemoMachines } from "./machine.js";
-import { DEMO_API_ACCOUNT, type DemoStarted, Simulation } from "./sim.js";
+import { DEMO_API_ACCOUNT, DEMO_POOL, DEMO_POOL_UNTIL_MS, type DemoStarted, Simulation } from "./sim.js";
 import { TYPE_TIER, validate } from "./validate.js";
 
 class FakeStore {
@@ -739,6 +739,42 @@ describe("usage limits", () => {
   });
 });
 
+describe("the pool at work", () => {
+  const events = run(SEED, 12);
+  const scene = events.filter(
+    (e) => e.session.account_id === DEMO_POOL.spacesheep.id && e.session.machine === "lab-mac",
+  );
+  it("plays a session on Spacesheep's login that the pool moves to Misha's after its first turn", () => {
+    expect(scene.length).toBeGreaterThan(0);
+    const reports = scene.filter((e) => e.type === "limits.observed");
+    expect(reports[0]?.data).toMatchObject({ account_id: DEMO_POOL.spacesheep.id });
+    expect((reports[0]!.data.windows as { id: string; used_percent: number; resets_at: string }[])[0]).toMatchObject({
+      id: "five_hour",
+      used_percent: 99.2,
+      resets_at: new Date(T0 + DEMO_POOL_UNTIL_MS).toISOString(),
+    });
+    const own = events.find(
+      (e) =>
+        e.session.machine === "lab-mac" &&
+        e.harness.name === "claude-code" &&
+        e.session.account_id !== DEMO_POOL.spacesheep.id &&
+        e.session.account_id !== DEMO_API_ACCOUNT,
+    )?.session.account_id;
+    expect(own).toBeTruthy();
+    expect(reports.slice(1).every((e) => e.data.account_id === own)).toBe(true);
+    expect(reports.length).toBeGreaterThanOrEqual(3);
+    // The first report comes after the first turn; no earlier one names the pool.
+    const firstTurnEnd = scene.findIndex((e) => e.type === "turn.ended");
+    expect(scene.indexOf(reports[0]!)).toBeGreaterThan(firstTurnEnd);
+    expect(scene.some((e) => e.type === "session.ended")).toBe(false);
+    for (const e of scene) expect(validate(e)).toEqual([]);
+  });
+  it("leaves the cast as it was: the same machines, and no other session on that login", () => {
+    expect(new Set(events.map((e) => e.session.machine))).toEqual(new Set(["studio-mac", "build-box", "lab-mac"]));
+    expect(new Set(scene.map((e) => e.session.id)).size).toBe(1);
+  });
+});
+
 describe("demo machines", () => {
   it("pairs the 0.10 scenes' machine in inherit mode, and takes it away on stop", () => {
     const calls: string[] = [];
@@ -758,10 +794,46 @@ describe("demo machines", () => {
         },
       },
     } as unknown as Control;
-    const m = startDemoMachines(control, "lab-mac", () => "acct");
-    expect(calls).toEqual([`machine ${demoMachineId("lab-mac")}`]);
-    const [newer] = hellos;
-    expect(newer).toMatchObject({ mode: "inherit", version: "0.10.0" });
+    const m = startDemoMachines(control, "lab-mac", () => "acct", T0);
+    expect(calls).toEqual([
+      `machine ${demoMachineId("lab-mac")}`,
+      `machine ${demoMachineId("mini-mac")}`,
+      `machine ${demoMachineId("desk-pc")}`,
+    ]);
+    const [newer, mini, desk] = hellos;
+    expect(newer).toMatchObject({ mode: "inherit", version: "0.11.0" });
+    // The pool (DESIGN §3, UX-SPEC §13): on with Misha in use, Fiction with room and no
+    // numbers, Spacesheep used up with when it is back and its idle numbers.
+    expect(newer!.pool).toMatchObject({
+      on: true,
+      harness: "claude-code",
+      accounts: [
+        { id: "acct", label: "Misha", status: "ready", current: true },
+        { id: DEMO_POOL.fiction.id, label: "Fiction", status: "ready", current: false },
+        {
+          id: DEMO_POOL.spacesheep.id,
+          status: "limited",
+          until: new Date(T0 + DEMO_POOL_UNTIL_MS).toISOString(),
+          limitedBy: "five_hour",
+        },
+      ],
+    });
+    expect(newer!.pool?.accounts[1]?.windows).toBeUndefined();
+    expect(newer!.pool?.accounts[2]?.windows?.[0]).toMatchObject({ id: "five_hour", usedPercent: 99.2 });
+    expect(newer!.accounts.map((a) => a.id)).toEqual(
+      expect.arrayContaining([DEMO_POOL.fiction.id, DEMO_POOL.spacesheep.id]),
+    );
+    // An account in error, one in use, one turned off; and a pool that is off.
+    expect(mini!.pool?.accounts.map((a) => [a.label, a.status, a.current])).toEqual([
+      ["Misha", "error", false],
+      ["Work", "ready", true],
+      ["Old", "disabled", false],
+    ]);
+    expect(mini!.pool?.accounts[2]?.enabled).toBe(false);
+    expect(desk!.pool).toMatchObject({ on: false, accounts: [{ label: "Misha" }, { label: "Fiction" }] });
+    expect(desk!.pool?.accounts.some((a) => a.current)).toBe(false);
+    for (const h of hellos)
+      expect(parseHello({ ...h, key_types: h.keyTypes, prompt_files: h.promptFiles })?.pool).toBeTruthy();
     expect(newer!.start?.["claude-code"]).toMatchObject({ permissions: ["read", "safe"], permission: "inherit" });
     expect(newer!.harnesses).toContain("goose");
     expect(newer!.accounts).toContainEqual({ harness: "claude-code", id: DEMO_API_ACCOUNT, name: "api.z.ai" });

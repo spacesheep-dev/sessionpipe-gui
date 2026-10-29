@@ -4,7 +4,7 @@
 // device key in the native app, signer.ts), sent through POST /api/ui/control/send. The
 // string is written once and the signature covers those exact bytes; the server passes it
 // on byte for byte.
-import type { ControlActivity, StartFile, StartPermission } from "@shared/api";
+import { type ControlActivity, POOL_SESSION, type PoolAction, type StartFile, type StartPermission } from "@shared/api";
 import { noteOwnSend } from "../lib/toasts";
 import { ControlError, controlApi, type SendBody, type TrustedKey } from "./api";
 import { nonce } from "./bytes";
@@ -30,11 +30,15 @@ export type CommandFields =
       model?: string;
     }
   /** A device this browser's passkey vouches for: the machine adds `key` to its store. */
-  | { kind: "key.add"; key: TrustedKey; name?: string };
+  | { kind: "key.add"; key: TrustedKey; name?: string }
+  /** The machine's account pool (DESIGN §2.3), on `POOL_SESSION`: `account` for enable,
+   *  disable, remove, refresh and login.complete (there: the pending login id), `order`
+   *  for order (every account id), `code` for login.complete (the pasted `code#state`). */
+  | { kind: "pool"; action: PoolAction; account?: string; order?: string[]; code?: string };
 
 /** The command string, fields in the spec's order, no field a kind does not own. */
 export function commandString(machine: string, f: CommandFields): string {
-  const session = f.kind === "key.add" ? KEY_STORE_SESSION : f.session;
+  const session = f.kind === "key.add" ? KEY_STORE_SESSION : f.kind === "pool" ? POOL_SESSION : f.session;
   const o: Record<string, unknown> = { v: 1, t: COMMAND_TYPE, machine, kind: f.kind, session };
   switch (f.kind) {
     case "prompt":
@@ -64,6 +68,12 @@ export function commandString(machine: string, f: CommandFields): string {
           ? { id: f.key.id, alg: f.key.alg, spki: f.key.spki, type: f.key.type, store: f.key.store, uv: f.key.uv }
           : { id: f.key.id, alg: f.key.alg, spki: f.key.spki };
       if (f.name) o.name = f.name;
+      break;
+    case "pool":
+      o.pool_action = f.action;
+      if (f.account) o.pool_account = f.account;
+      if (f.order) o.pool_order = [...f.order];
+      if (f.code) o.pool_code = f.code;
       break;
   }
   o.nonce = nonce();

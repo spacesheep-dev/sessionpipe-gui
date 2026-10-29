@@ -159,7 +159,11 @@ const DATA_RULES: Record<string, { required: string[]; fields: Record<string, Ru
   "context.compacted": { required: ["trigger"], fields: { trigger: { kind: "enum", values: ["manual", "auto"] } } },
   "limits.observed": {
     required: ["windows"],
-    fields: { windows: { kind: "windows" }, plan: { kind: "string", max: 64 } },
+    fields: {
+      windows: { kind: "windows" },
+      plan: { kind: "string", max: 64 },
+      account_id: { kind: "string", max: 128 },
+    },
   },
   native: { required: [], fields: {} },
 };
