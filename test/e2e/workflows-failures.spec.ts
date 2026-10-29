@@ -138,6 +138,15 @@ test("a start the machine refuses: the run fails at that step, the row says why,
   await expect(greet).toContainText(`Waiting for ${name}.`);
   await signByHand(page, m, run, "greet", "Say hello.");
   await expect(greet).toHaveAttribute("data-status", "sent");
+  // While it runs, Cancel offers to stop it too: the step knows its session from the
+  // command it sent, not only from the ack. Kept running here.
+  await page.locator("[data-wf-cancel]").click();
+  const confirm = page.locator(".confirm");
+  await expect(confirm).toContainText("Cancel this run?");
+  await expect(confirm.locator(".wf-dialog-option")).toContainText(`Also stop Greet on ${name}`);
+  await confirm.locator("[data-cancel]").click();
+  await expect(confirm).toHaveCount(0);
+  await expect(greet).toHaveAttribute("data-status", "sent");
   // The machine polls at last, takes the start and refuses it at once.
   const taken = await pollAndAck(m, [{ outcome: "refused", code: "folder", detail: "/Users/e2e/code is not allowed" }]);
   expect(taken).toHaveLength(1);

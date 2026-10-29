@@ -97,11 +97,13 @@ export function createOrchestrate(deps: OrchestrateDeps): Orchestrate {
     if (s.status !== "sending") throw new RunError(412, "conflict", "the step was not being sent");
   };
   const markSent = (runId: string, stepId: string, commandId: string, rev: number): WorkflowRun => {
-    const run = put(sent(must(runId), stepId, commandId, rev, now(), online()));
+    // The command as queued names the step's session from now on (a start's uuid, a
+    // prompt's target); the ack's own replaces it when the step settles.
+    const a = deps.control.activity(1000).find((x) => x.id === commandId);
+    const run = put(sent(must(runId), stepId, commandId, rev, now(), online(), a?.session));
     // The machine may have answered already: a daemon that long-polls takes a command
     // within milliseconds and refuses one at once, while the tab's PATCH with the id
     // comes over a slower link. That ack found no step holding its id; look again now.
-    const a = deps.control.activity(1000).find((x) => x.id === commandId);
     if (a) onActivity(a);
     return store.run(runId) ?? run;
   };

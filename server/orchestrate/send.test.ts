@@ -163,7 +163,8 @@ describe("the one-move send over real HTTP", () => {
     const r = await patch(run, { step: "a", send: await signed(run) });
     expect(r.status).toBe(200);
     const next = r.body as unknown as WorkflowRun;
-    expect(next.steps.a).toMatchObject({ status: "sent", text: "Look at the diff" });
+    // The session is the command's from this moment: the run view links it, a cancel can stop it.
+    expect(next.steps.a).toMatchObject({ status: "sent", text: "Look at the diff", session: SESSION });
     expect(next.steps.a!.commandId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
     expect(next.status).toBe("running");
     expect(await queued()).toEqual([next.steps.a!.commandId]);

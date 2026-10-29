@@ -176,6 +176,16 @@ describe("a run", () => {
     expect(run.steps.c!.text).toBe("[only B]");
   });
 
+  it("sent records the session the command named, so a running step can be linked and stopped; the ack's own replaces it", () => {
+    const w = workflow([step("a", "A")]);
+    let run = newRun(w, { id: "r", now: T0, online: all });
+    run = claim(run, "a", run.rev, T0);
+    run = sent(run, "a", CMD, run.rev, T0, all, "claude-code:new-1");
+    expect(run.steps.a).toMatchObject({ status: "sent", commandId: CMD, session: "claude-code:new-1" });
+    run = settle(run, ack(CMD, { reply: "done", ackSession: "claude-code:fork-2" }), T0 + 1000, all)!;
+    expect(run.steps.a).toMatchObject({ status: "done", session: "claude-code:fork-2" });
+  });
+
   it("ends done when every step is done, with endedAt", () => {
     const w = workflow([step("a", "A"), step("b", "{{prev}}")]);
     let run = newRun(w, { id: "r", now: T0, online: all });

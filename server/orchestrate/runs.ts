@@ -9,6 +9,7 @@
 import {
   type ControlActivity,
   type RunStatus,
+  type SessionKey,
   type StepRun,
   WAITING_SIGNER_MS,
   WORKFLOW_TEXT_MAX,
@@ -273,7 +274,10 @@ export function claim(run: WorkflowRun, stepId: string, rev: number, now: number
  *  again (a wait for a signer ends). The claim is the guard here, not the rev: between a
  *  tab's claim and its command another step's claim or ack moves the run (two roots
  *  claimed at once), and the id must still land; `rev` is read only to be sure the tab
- *  holds this run at all (a re-offered claim leaves the step `ready`, which refuses). */
+ *  holds this run at all (a re-offered claim leaves the step `ready`, which refuses).
+ *  `session` is the one the command named (the uuid a start chose, the session a prompt
+ *  goes to): known from this moment, so the run view can link it and a cancel can offer
+ *  to stop it while the step runs; the ack's own session replaces it when it settles. */
 export function sent(
   run: WorkflowRun,
   stepId: string,
@@ -281,6 +285,7 @@ export function sent(
   rev: number,
   now: number,
   online: Online,
+  session?: SessionKey,
 ): WorkflowRun {
   if (rev > run.rev) throw new RunError(412, "conflict", "the run moved; read it again");
   const s = stepOf(run, stepId);
@@ -288,7 +293,10 @@ export function sent(
   const next: WorkflowRun = {
     ...run,
     rev: run.rev + 1,
-    steps: { ...run.steps, [stepId]: { ...s, status: "sent", commandId, sentAt: iso(now) } },
+    steps: {
+      ...run.steps,
+      [stepId]: { ...s, status: "sent", commandId, sentAt: iso(now), ...(session ? { session } : {}) },
+    },
   };
   return advance(next, now, online);
 }
