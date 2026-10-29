@@ -19,6 +19,7 @@ import {
   CUT_MARK,
   cancel,
   claim,
+  EMPTY_TEXT,
   fail,
   fitFills,
   newRun,
@@ -174,6 +175,19 @@ describe("a run", () => {
     expect(run.steps.a!.reply).toBeUndefined();
     run = deliver(run, "b", CMD2, "only B", T0);
     expect(run.steps.c!.text).toBe("[only B]");
+  });
+
+  it("a step whose text is nothing once filled fails there, and what depends on it skips: no signer is waited for", () => {
+    const w = workflow([step("a", "A"), step("b", "{{prev}}"), step("c", "After {{step.b}}")]);
+    let run = newRun(w, { id: "r", now: T0, online: all });
+    // A delivered with no reply: b's whole text was that reply.
+    run = claim(run, "a", run.rev, T0);
+    run = sent(run, "a", CMD, run.rev, T0, all);
+    run = settle(run, ack(CMD, { kind: "prompt", session: "codex:thread-1" }), T0 + 1000, all)!;
+    expect(run.steps.b).toEqual({ status: "failed", error: EMPTY_TEXT, endedAt: new Date(T0 + 1000).toISOString() });
+    expect(run.steps.c).toEqual({ status: "skipped", endedAt: new Date(T0 + 1000).toISOString() });
+    expect(run.status).toBe("failed");
+    expect(advance(run, T0 + WAITING_SIGNER_MS + 5000, all)).toBe(run);
   });
 
   it("sent records the session the command named, so a running step can be linked and stopped; the ack's own replaces it", () => {

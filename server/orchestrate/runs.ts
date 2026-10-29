@@ -23,6 +23,10 @@ import { isFinal } from "../control/parse.js";
  *  the passkey prompt was dismissed) is offered to the signers again. */
 export const CLAIM_TTL_MS = 60_000;
 
+/** Why a step fails when its text is nothing once filled (`{{prev}}` alone after a reply
+ *  that never came): no signer could send it, so the run does not wait for one. */
+export const EMPTY_TEXT = "nothing to send: the text was empty once its placeholders were filled";
+
 export const RUN_FINAL = new Set<RunStatus>(["done", "failed", "cancelled"]);
 export const runEnded = (run: Pick<WorkflowRun, "status">): boolean => RUN_FINAL.has(run.status);
 
@@ -222,8 +226,14 @@ export function advance(run: WorkflowRun, now: number, online: Online): Workflow
       if (s.status === "pending") {
         if (after.some((a) => a.status === "failed" || a.status === "skipped"))
           set(step.id, { status: "skipped", endedAt: at });
-        else if (after.every((a) => a.status === "done"))
-          set(step.id, { status: "ready", readyAt: at, text: resolveText({ ...run, steps }, step) });
+        else if (after.every((a) => a.status === "done")) {
+          const text = resolveText({ ...run, steps }, step);
+          // Nothing once filled is nothing a signer could send: the step fails here, what
+          // depends on it skips in this same pass, and the run never waits for a signer
+          // that has nothing to sign.
+          if (text.trim()) set(step.id, { status: "ready", readyAt: at, text });
+          else set(step.id, { status: "failed", error: EMPTY_TEXT, endedAt: at });
+        }
       } else if (
         s.status === "sending" &&
         !s.commandId &&
