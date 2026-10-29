@@ -99,6 +99,22 @@ export function approveBlocker(
     : null;
 }
 
+/** The machine a device request is approved on when nobody chose one and the request
+ *  names none: the first paired machine that can take it. A device key (the request's
+ *  own, or this app's, which signs the key.add) needs a daemon that takes device keys,
+ *  so with such a one paired it comes before a machine Approve would be blocked on. */
+export function approveTarget<M extends { control?: Pick<MachineControl, "keyTypes"> }>(
+  request: { key: Pick<TrustedKey, "type"> },
+  paired: readonly M[],
+  kind = signerKind(),
+): M | undefined {
+  if (request.key.type || kind === "device") {
+    const takes = paired.find((m) => machineTakes(m.control, "device"));
+    if (takes) return takes;
+  }
+  return paired[0];
+}
+
 export interface SignOptions {
   /** One fresh confirm over sha256(cmd) instead of the day grant. */
   confirm?: boolean;
