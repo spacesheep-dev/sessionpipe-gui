@@ -103,6 +103,21 @@ export function finishedMoment(before: string | undefined, s: SessionSummary): N
   return { kind: "finished" };
 }
 
+/** The `newsAt` a session's next finish is read against: what it had when it was last
+ *  idle or done (or first seen), not the summary before this one. News that moves while
+ *  it still works (a subagent open, background work) is not a finish then, and the same
+ *  news must still read as one when it settles; compared with the previous summary alone,
+ *  it never did. `told` is the page's memory of that, per session, updated here. */
+export function newsBefore(
+  told: Map<string, string | undefined>,
+  s: SessionSummary,
+  was: SessionSummary | undefined,
+): string | undefined {
+  const before = told.has(s.key) ? told.get(s.key) : was?.newsAt;
+  if (!told.has(s.key) || s.state === "idle" || s.state === "done") told.set(s.key, s.newsAt);
+  return before;
+}
+
 /** Whether a "finished" raised for this news is raised again with the turn's own answer.
  *  A turn's transcript lands just after its end (spec PROTOCOL.md, turn.transcript), so
  *  the answer the end carried was the turn before's. Only while it is still idle or done:
@@ -166,6 +181,8 @@ export function useAttentionEffects(): void {
     let prev: ReadonlyMap<string, SessionSummary> = new Map();
     /** The `newsAt` each "finished" was raised for, until the turn's answer comes. */
     const raised = new Map<string, string>();
+    /** The `newsAt` each session last settled with (newsBefore). */
+    const told = new Map<string, string | undefined>();
     const check = () => {
       const st = store.get();
       if (!st.snapshotAt) return;
@@ -173,6 +190,11 @@ export function useAttentionEffects(): void {
       const ids = new Set(rows.map((r) => `${r.session.key}|${r.attention.attentionId}`));
       const seen = prev;
       prev = st.sessions;
+      // Read on every pass, foreground or not: a finish seen while the page was looked
+      // at is not raised later.
+      const before = new Map<string, string | undefined>();
+      for (const s of st.sessions.values()) before.set(s.key, newsBefore(told, s, seen.get(s.key)));
+      for (const k of told.keys()) if (!st.sessions.has(k)) told.delete(k);
       if (known === null) {
         known = ids;
         return;
@@ -189,7 +211,7 @@ export function useAttentionEffects(): void {
         if (shouldNotify({ kind: "attention", answerable: true }, level(r.session), r.session.attended)) show(r);
       for (const s of st.sessions.values()) {
         const was = seen.get(s.key);
-        const m = finishedMoment(was?.newsAt, s);
+        const m = finishedMoment(before.get(s.key), s);
         if (m) {
           raised.delete(s.key);
           if (!shouldNotify(m, level(s), s.attended)) continue;

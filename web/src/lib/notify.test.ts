@@ -16,7 +16,7 @@ vi.stubGlobal(
     }
   },
 );
-const { answerCame, finishedMoment, shouldNotify, showFinished } = await import("./notify");
+const { answerCame, finishedMoment, newsBefore, shouldNotify, showFinished } = await import("./notify");
 
 const T = "2026-10-28T10:00:00.000Z";
 const LATER = "2026-10-28T10:05:00.000Z";
@@ -48,6 +48,26 @@ describe("shouldNotify", () => {
     // News while it still works (its own background work) is not a finish.
     expect(finishedMoment(T, at({ state: "working", newsAt: LATER }))).toBeNull();
     expect(finishedMoment(T, at({ state: "done", newsAt: LATER }))).toEqual({ kind: "finished" });
+  });
+
+  it("still finishes when the news moved while it worked on, once it is idle", () => {
+    const told = new Map<string, string | undefined>();
+    const working = at({ state: "working", newsAt: T });
+    // First sight, working: nothing to finish, remembered as it is.
+    expect(finishedMoment(newsBefore(told, working, undefined), working)).toBeNull();
+    // Its turn ends but a subagent keeps it working: the news moves, no finish yet.
+    const stillWorking = at({ state: "working", newsAt: LATER });
+    expect(finishedMoment(newsBefore(told, stillWorking, working), stillWorking)).toBeNull();
+    // The subagent stops: idle with the same newsAt as the summary before. Compared with
+    // that one alone nothing moved; against what it last settled with, it finished.
+    const idle = at({ newsAt: LATER });
+    expect(finishedMoment(stillWorking.newsAt, idle)).toBeNull();
+    expect(finishedMoment(newsBefore(told, idle, stillWorking), idle)).toEqual({ kind: "finished" });
+    // Settled: the same idle summary again is no second finish.
+    expect(finishedMoment(newsBefore(told, idle, idle), idle)).toBeNull();
+    // A session that appears idle with news is read as before (its first sight).
+    const fresh = new Map<string, string | undefined>();
+    expect(finishedMoment(newsBefore(fresh, idle, undefined), idle)).toEqual({ kind: "finished" });
   });
 
   it("never notifies an unattended run", () => {
