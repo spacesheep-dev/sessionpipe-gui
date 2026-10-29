@@ -56,6 +56,7 @@ import {
   useStreamDown,
 } from "../data/hooks";
 import { agentMatches } from "../lib/agents";
+import { nestDelegated } from "../lib/delegated";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import { isHidden, useHidden } from "../lib/hidden";
 import { focusSearch, useListNav } from "../lib/keys";
@@ -179,22 +180,14 @@ export function Board() {
   const [machine, setMachine] = useState("");
   const [harness, setHarness] = useState("");
   // A session another one asked (`delegatedBy`: sessionpipe ask, a handoff) nests under
-  // the asking session the way a subagent does, as long as that session is on the board
-  // (the machine and harness filters may take it away: the asked one then lists as a root)
-  // and on the same machine: the daemon only ever asks there, so a child naming a parent
-  // elsewhere is a hook's say-so, not lineage.
+  // the asking session the way a subagent does, as long as that session is drawn on the
+  // board (the machine and harness filters may take it away: the asked one then lists as
+  // a root) and on the same machine: the daemon only ever asks there, so a child naming a
+  // parent elsewhere is a hook's say-so, not lineage. A chain of asks hangs under its top,
+  // a loop nests nobody (lib/delegated.ts): nothing leaves the board.
   const { roots, childrenOf } = useMemo(() => {
     const shown = (p: SessionSummary) => (!machine || p.machine === machine) && (!harness || p.harness === harness);
-    const nested = new Map<string, SessionSummary[]>();
-    const roots: SessionSummary[] = [];
-    for (const s of tree.roots) {
-      const parent = s.delegatedBy ? all.find((p) => p.key === s.delegatedBy) : undefined;
-      if (parent && parent !== s && parent.machine === s.machine && shown(parent)) {
-        const list = nested.get(parent.key) ?? [];
-        list.push(s);
-        nested.set(parent.key, list);
-      } else roots.push(s);
-    }
+    const { roots, nested } = nestDelegated(tree.roots, all, (s, p) => p.machine === s.machine && shown(p));
     if (nested.size === 0) return { roots, childrenOf: tree.childrenOf };
     const childrenOf = new Map(tree.childrenOf);
     for (const [key, list] of nested)
