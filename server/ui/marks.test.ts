@@ -191,6 +191,55 @@ describe("MarkStore", () => {
     }
   });
 
+  it("moves since up to the newest read mark the caps dropped, so those sessions stay read", () => {
+    const tmp = tempDir();
+    try {
+      const store = new MarkStore(
+        tmp.dir,
+        () => true,
+        () => T0,
+      );
+      // Three over the key cap: k5002, k5001, k5000 (the oldest values) go.
+      const read = Object.fromEntries(Array.from({ length: MARKS_MAX + 3 }, (_, i) => [`k${i}`, iso(MARKS_MAX - i)]));
+      const doc = store.patch({ read });
+      expect(doc.read.k5000).toBeUndefined();
+      expect(doc.since).toBe(iso(0));
+      // The page's rule (web/src/lib/marks.ts): no mark, compare with since. News up to the
+      // newest dropped mark reads as read, newer news as unread.
+      expect(iso(-2) <= doc.since!).toBe(true);
+      expect(iso(1) <= doc.since!).toBe(false);
+    } finally {
+      tmp.cleanup();
+    }
+    // Over the file cap (session keys at their real length): a twentieth of the oldest go
+    // each pass, and since follows them.
+    const wideDir = tempDir();
+    try {
+      const big = new MarkStore(
+        wideDir.dir,
+        () => true,
+        () => T0,
+      );
+      const wide = Object.fromEntries(
+        Array.from({ length: 3600 }, (_, i) => [`claude-code:${String(i).padStart(36, "0")}`, iso(i + 1)]),
+      );
+      const over = big.patch({ read: wide });
+      const kept = Object.keys(over.read).length;
+      expect(kept).toBeLessThan(3600);
+      const gone = Object.entries(wide).filter(([k]) => !(k in over.read));
+      expect(gone).toHaveLength(3600 - kept);
+      // Exactly the oldest went, and since is the newest of them: read up to there.
+      expect(over.since).toBe(iso(gone.length));
+      expect(gone.every(([, at]) => at <= over.since!)).toBe(true);
+      expect(Object.values(over.read).every((at) => at > over.since!)).toBe(true);
+      // The next commit keeps it there: nothing older comes back to be dropped again.
+      expect(big.patch({ unread: {} }).since).toBe(iso(gone.length));
+      expect(statSync(path.join(wideDir.dir, "marks.json")).size).toBeLessThanOrEqual(256 * 1024);
+    } finally {
+      wideDir.cleanup();
+    }
+  });
+
   it("sets a broken file aside and starts again from now", () => {
     const tmp = tempDir();
     try {

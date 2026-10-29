@@ -212,7 +212,7 @@ export class MarkStore {
 }
 
 /** Within the caps: MARKS_MAX keys a map and MARKS_FILE_MAX for the file, the oldest read
- *  values going first (that session falls back to `since`), then the earliest unread; past
+ *  values going first (`since` moves up to the newest dropped, so they stay read), then the earliest unread; past
  *  MARKS_MAX, the earliest notify levels go back to the default. */
 function fit<T extends Marks>(doc: T): T {
   const size = (d: Marks) => Buffer.byteLength(JSON.stringify({ v: 1, ...d }));
@@ -240,6 +240,14 @@ function fit<T extends Marks>(doc: T): T {
     else unread = unread.slice(Math.ceil(unread.length / 20));
     next = build();
   }
+  // A session whose read mark went falls back to `since`; left where it was, every one
+  // of them with news after it came back unread, and Mark all as read put the same old
+  // values back to be dropped again. The oldest marks are the ones dropped, so `since`
+  // moves up to the newest of them: news up to there stays read, as it was marked.
+  const kept = new Set(read.map(([k]) => k));
+  let dropped: string | undefined;
+  for (const [k, at] of Object.entries(doc.read)) if (!kept.has(k) && (!dropped || at > dropped)) dropped = at;
+  if (dropped && doc.since !== undefined && dropped > doc.since) next.since = dropped;
   return next;
 }
 
