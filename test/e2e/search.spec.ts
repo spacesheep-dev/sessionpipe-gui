@@ -242,8 +242,13 @@ test.describe("search: the phone", () => {
       .evaluateAll((els) => els.filter((el) => getComputedStyle(el).display !== "none").length);
     expect(shown).toBeLessThanOrEqual(2);
     // Tapping a history row pushes its transcript (a live session's row opens its live page,
-    // and the mock's live sessions now mention webhooks too).
-    await rows(page).filter({ hasText: "this Mac's history" }).first().tap();
+    // and the mock's live sessions now mention webhooks too). The row says "this Mac's
+    // history" on a Mac and "this machine's history" elsewhere (words.ts macWord), so the
+    // filter takes either: CI's Chromium is Linux.
+    await rows(page)
+      .filter({ hasText: /this (Mac|machine)'s history/ })
+      .first()
+      .tap();
     await expect(page.getByRole("search", { name: "Find in this session" })).toBeVisible();
   });
 });
