@@ -23,7 +23,7 @@ import { type App, createApp } from "../app.js";
 import { commandStr, signCommand, TestDayKey, TestPasskey } from "../control/testkeys.js";
 import type { VerifiedSend } from "../control/ui.js";
 import { HttpError } from "../http/router.js";
-import { createOrchestrate } from "./index.js";
+import { createOrchestrate, STEP_EXPIRES_MS } from "./index.js";
 import { CLAIM_TTL_MS } from "./runs.js";
 
 const WF = ROUTES.ui.workflows;
@@ -241,6 +241,7 @@ describe("the one-move send over a fake control: what lands while the verifier w
   let clock = Date.parse("2026-10-28T12:00:00.000Z");
   const activity: ControlActivity[] = [];
   const queuedCmds: string[] = [];
+  const queuedOpts: VerifiedSend["opts"][] = [];
   let verify: (body: unknown) => Promise<VerifiedSend> = () => Promise.reject(new Error("unset"));
   const control = {
     subscribe: () => () => true,
@@ -252,6 +253,7 @@ describe("the one-move send over a fake control: what lands while the verifier w
     queueSend: (v: VerifiedSend): ControlActivity => {
       const id = `01K8CMD0000000000000${String(queuedCmds.length).padStart(6, "0")}`;
       queuedCmds.push(id);
+      queuedOpts.push(v.opts);
       return {
         id,
         machineId: MACHINE,
@@ -309,13 +311,17 @@ describe("the one-move send over a fake control: what lands while the verifier w
       await expect(late).rejects.toMatchObject({ status: 412, why: "the step was not being sent" });
       expect(queuedCmds).toEqual([]);
 
-      // The usual way: verified, queued, sent, in one move.
-      verify = () => Promise.resolve(verified);
+      // The usual way: verified, queued, sent, in one move. The command is queued for the
+      // queue's longest life, a day, whatever the body asked: a step is an agent's whole
+      // task, and the default hour failed a long one as expired while it still ran.
+      verify = () => Promise.resolve({ ...verified, opts: { expiresInMs: 3600_000, from: "claude-code:x" } });
       let r3 = svc.startRun("w", undefined);
       r3 = svc.claim(r3.id, "a", r3.rev);
       r3 = await svc.send(r3.id, "a", r3.rev, {});
       expect(r3.steps.a).toMatchObject({ status: "sent", commandId: queuedCmds[0] });
       expect(queuedCmds).toHaveLength(1);
+      expect(queuedOpts).toEqual([{ expiresInMs: STEP_EXPIRES_MS, from: "claude-code:x" }]);
+      expect(STEP_EXPIRES_MS).toBe(24 * 3600_000);
     } finally {
       svc.close();
     }

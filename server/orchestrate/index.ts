@@ -20,6 +20,7 @@
 import { ulid } from "sessionpipe-core";
 import type { ControlActivity, StreamMessage, Workflow, WorkflowRun } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
+import { EXPIRES_MAX_MS } from "../control/state.js";
 import { SIGNER_FAULTS } from "../control/ui.js";
 import { HttpError } from "../http/router.js";
 import { advance, cancel, claim, fail, newRun, type Online, RunError, runEnded, sent, settle } from "./runs.js";
@@ -67,6 +68,11 @@ export interface Orchestrate {
 
 /** The longest input a run takes, like a prompt's text. */
 const INPUT_MAX = 20_000;
+/** How long a step's command stays queued: the queue's longest (a day), not its default
+ *  hour. A step is an agent's whole task; expireQueue expires a `taken` row too, so under
+ *  the default an implement step still running after an hour failed as `expired`. The
+ *  body's own `expires_in_s` is not the signer's to shorten here: the run owns the step. */
+export const STEP_EXPIRES_MS = EXPIRES_MAX_MS;
 
 export function createOrchestrate(deps: OrchestrateDeps): Orchestrate {
   const store = new OrchestrateStore(deps.stateDir);
@@ -194,7 +200,7 @@ export function createOrchestrate(deps: OrchestrateDeps): Orchestrate {
         return put(fail(must(runId), stepId, why ? `${code}: ${why}` : code, rev, now(), online()));
       }
       stillSending(must(runId), stepId, rev);
-      const a = deps.control.queueSend(verified);
+      const a = deps.control.queueSend({ ...verified, opts: { ...verified.opts, expiresInMs: STEP_EXPIRES_MS } });
       return markSent(runId, stepId, a.id, rev);
     },
     cancel(runId) {
