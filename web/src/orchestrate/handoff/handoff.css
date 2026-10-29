@@ -1,0 +1,63 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The Handoff sheet (orchestrate/handoff/HandoffSheet.tsx) is the New session sheet's
+   classes (control/newSessionSheet.css) with two rows of its own: the fixed From line and
+   the "Bring the answer back" switch; and the strip's "Ask another agent…" button under
+   the composer (components/ControlStrip.tsx). Nothing else is new: no colour, no row
+   height, no type size. */
+
+/* From: fixed text in the value tier, cut at the row's width, never a control. */
+.hs-from {
+  display: block;
+  min-width: 0;
+  padding-left: 4px;
+  color: var(--fg);
+  font-size: var(--text-md);
+}
+
+/* The options line wraps: with a long permission label ("As your own sessions on this
+   machine") Permission and Model drop to a second line, and the switch's label never
+   breaks into a column of words. */
+.hs-opts {
+  flex-wrap: wrap;
+  row-gap: 4px;
+  padding-bottom: 4px;
+}
+/* Every option starts at the labels' column, on whichever line it lands. */
+.hs-opts > .ns-opt {
+  margin-left: 4px;
+}
+/* The switch and its label in the options line, the label in the body tier (it is the
+   choice, not a caption). */
+.hs-switch {
+  gap: 8px;
+}
+.hs-switch .hs-switch-label {
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+/* The phone's cell: the label at the left, the switch at the right. */
+.ns-sheet--phone .hs-switch .hs-switch-label {
+  color: var(--fg);
+  font-size: var(--text-md);
+}
+.ns-sheet--phone .hs-switch .ns-value {
+  padding-right: 8px;
+}
+
+/* The strip's quiet entry point, at the right end of the line under the field. */
+.ctl-ask-agent {
+  margin-left: auto;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+@media (hover: hover) {
+  .ctl-ask-agent:hover:not(:disabled) {
+    color: var(--fg);
+  }
+}
+/* A thumb's target on a phone. */
+@media (max-width: 599px) {
+  .ctl-ask-agent {
+    min-height: var(--tap);
+  }
+}

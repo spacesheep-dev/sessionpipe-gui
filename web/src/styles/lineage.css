@@ -1,0 +1,198 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- lineage: an agent a session asked, and the answer that came back ---------- */
+
+/* The ask row in a session (components/SessionBody.tsx AskRow): one line in the agent's
+   column, a glyph where a marker's goes, the verb in --fg-2, the rest in the meta tier,
+   the whole row a link to the asked session with a quiet › at the right. Never a bubble,
+   never a box: it is something the agent (or you, through it) did. */
+.ask {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  min-width: 0;
+}
+.ask-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  margin: 0 -8px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  text-decoration: none;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.ask-link--none {
+  cursor: default;
+}
+.ask-text {
+  display: flex;
+  align-items: baseline;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+.ask-verb {
+  flex: none;
+  color: var(--fg-2);
+  font-weight: 500;
+}
+.ask-title {
+  flex: 0 3 auto;
+  max-width: 40%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ask-state {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ask-state.is-err {
+  color: var(--err);
+}
+/* The dots trail the verb and the title, so a row that wraps on a phone never starts a
+   line with one. */
+.ask-text > :not(:last-child)::after {
+  content: "·";
+  margin: 0 6px;
+  color: var(--fg-4);
+}
+.ask-chev {
+  flex: none;
+  color: var(--fg-4);
+  -webkit-user-select: none;
+  user-select: none;
+}
+@media (hover: hover) {
+  a.ask-link:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+  a.ask-link:hover .ask-state:not(.is-err) {
+    color: var(--fg-2);
+  }
+}
+a.ask-link:active {
+  background: var(--press);
+  transition: none;
+}
+[data-menu-open] > .ask-link {
+  background: var(--sel);
+}
+/* The answer, folded under the row like a turn's tools, only when it was not relayed into
+   this session (then the answer is a turn above, and the row says so). */
+.ask-fold {
+  align-self: stretch;
+}
+.ask-fold > .chat-tools-sum {
+  margin-left: 2px;
+}
+.ask-fold > .chat-card {
+  margin: 4px 0 4px 24px;
+}
+@media (max-width: 839px) {
+  .ask-link {
+    min-height: var(--tap);
+  }
+  /* The whole sentence, wrapped, rather than three truncated pieces on one line. */
+  .ask-text {
+    display: block;
+    white-space: normal;
+  }
+  .ask-text > * {
+    display: inline;
+    max-width: none;
+  }
+}
+
+/* The answer a handoff brought back (§3.2): drawn as the asked agent's turn on the left,
+   "Codex · answer", never as your bubble. The agent's own reply follows as usual. */
+.chat-answer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 100%;
+}
+.chat-meta-sub {
+  color: var(--fg-3);
+  font-weight: 400;
+}
+.chat-meta > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+@media (hover: hover) {
+  .chat-meta > a:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+.chat-answer-time {
+  margin-left: 6px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  font-weight: 400;
+}
+
+/* The asked session's bar (§3.3): "for <the asking session>", a link, first in the meta. */
+.sess-for {
+  flex: 0 1 auto;
+  max-width: 30%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sess-for a {
+  color: var(--fg-2);
+  font-weight: 500;
+}
+@media (hover: hover) {
+  .sess-for a:hover {
+    color: var(--fg);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+@media (max-width: 839px) {
+  .sess-for {
+    max-width: 60%;
+  }
+}
+
+/* The board (§3.4): an asked session nests under the one that asked it; being another
+   harness, its kid row carries that harness's glyph after the state dot. */
+.kid-glyph {
+  flex: none;
+  display: inline-flex;
+  color: var(--fg-3);
+}
+
+/* An activity row (§3.6): which session's page asked, and where the answer goes. */
+.ctl-act-via {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.ctl-act-via a {
+  color: var(--fg-2);
+  font-weight: 500;
+}
+@media (hover: hover) {
+  .ctl-act-via a:hover {
+    color: var(--fg);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}

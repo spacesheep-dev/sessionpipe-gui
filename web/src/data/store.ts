@@ -82,6 +82,7 @@ export class Store {
   private state: AppState = initial;
   private listeners = new Set<() => void>();
   private eventListeners = new Set<EventListener>();
+  private frameListeners = new Set<(m: StreamMessage) => void>();
   private stop: (() => void) | null = null;
   private seen = new Set<string>();
 
@@ -104,10 +105,22 @@ export class Store {
     };
   };
 
+  /** Every stream frame, after `apply` took what it knows: a module that owns a kind of
+   *  its own (the workflows' `workflowRun` / `workflows`) reads it from here. */
+  onMessage = (l: (m: StreamMessage) => void): (() => void) => {
+    this.frameListeners.add(l);
+    return () => {
+      this.frameListeners.delete(l);
+    };
+  };
+
   start() {
     if (this.stop) return;
     this.stop = this.transport.openStream({
-      onMessage: (m) => this.apply(m),
+      onMessage: (m) => {
+        this.apply(m);
+        for (const l of this.frameListeners) l(m);
+      },
       onOpen: () => this.set({ connection: this.state.snapshotAt ? "live" : "connecting", retryAt: null }),
       onError: (retryIn) => {
         const offline = typeof navigator !== "undefined" && navigator.onLine === false;

@@ -26,6 +26,8 @@ import { getSkins, isPlain } from "../lib/skins";
 import { restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
 import { getDisplaySettings as getDisplay, setSkin, setTheme, useSettings } from "../lib/theme";
 import { useNow } from "../lib/time";
+import { WORKFLOWS_ICON_PATHS } from "../orchestrate/workflows/glyphs";
+import { RunnerHost } from "../orchestrate/workflows/useRunner";
 import { useSetupStatus } from "../setup/api";
 import { setupComplete } from "../setup/steps";
 import { reloadThemes, setThemeDisabled, useThemes } from "../themes/host/registry";
@@ -124,6 +126,14 @@ const ICON: Record<string, ReactNode> = {
       <path d="M16 14.5 18 16.5" />
     </>
   ),
+  /* Three stacked short rules with a chevron: steps, and what follows them. */
+  workflows: (
+    <>
+      {WORKFLOWS_ICON_PATHS.map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </>
+  ),
   machines: (
     <>
       <rect x="2.5" y="4" width="15" height="10" rx="1.5" />
@@ -214,6 +224,7 @@ const BUILTIN: NavItem[] = [
   { to: "/search", key: "search", label: "Search", glyph: ICON.search },
   { to: "/feed", key: "feed", label: "Feed", glyph: ICON.feed },
   { to: "/review", key: "review", label: "Review", glyph: ICON.review },
+  { to: "/workflows", key: "workflows", label: "Workflows", glyph: ICON.workflows },
   { to: "/machines", key: "machines", label: "Machines", glyph: ICON.machines },
   { to: "/connect", key: "connect", label: "Connect", glyph: ICON.connect },
 ];
@@ -483,7 +494,7 @@ function useSideForm(splitOpen: boolean): boolean {
   return wider || (wide && !splitOpen);
 }
 
-const LISTS = new Set(["board", "inbox", "search", "feed", "review"]);
+const LISTS = new Set(["board", "inbox", "search", "feed", "review", "workflows"]);
 let fromList = "board";
 
 export function Shell({ route, children }: { route: Route; children: ReactNode }) {
@@ -492,7 +503,14 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   useShortcutMap();
   // A session page keeps the list it was opened from lit (Board when it was opened directly).
   if (LISTS.has(route.name)) fromList = route.name;
-  const active = route.name === "session" ? fromList : route.name === "theme" ? `t:${route.id}` : route.name;
+  const active =
+    route.name === "session"
+      ? fromList
+      : route.name === "theme"
+        ? `t:${route.id}`
+        : route.name === "workflow" || route.name === "workflowRun"
+          ? "workflows"
+          : route.name;
   const needs = useAnswerableCount();
   // The Setup entry, with its orange dot, while this machine (and only from this machine:
   // elsewhere the status is 403) still has steps to go.
@@ -561,6 +579,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     />
   );
   const firstView = nav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
+  // The tab bar keeps its four; Workflows is a page for the More sheet on a phone.
+  const tabs = nav.filter((n) => n.key !== "workflows").slice(0, TABS);
   return (
     <div
       className={`shell ${splitOpen && !phone ? "shell--split" : ""} ${side && !phone ? "shell--side" : ""}`}
@@ -659,14 +679,16 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {children}
       </main>
       <nav className="tabbar" aria-label="Pages">
-        {nav.slice(0, TABS).map((n) => entry(n, false))}
-        <MoreTab items={nav.slice(TABS)} active={active} views={views} />
+        {tabs.map((n) => entry(n, false))}
+        <MoreTab items={nav.filter((n) => !tabs.includes(n))} active={active} views={views} />
       </nav>
       {phone && <PhoneConn />}
       <SessionPanel phone={phone} />
       <ShortcutHelp />
       <LabelsHost />
       <NewSessionHost />
+      {/* The workflows' signer: claims and signs a run's ready steps, whichever page is open. */}
+      <RunnerHost />
       <MenuHost />
       <TipHost />
     </div>

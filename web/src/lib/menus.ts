@@ -2,14 +2,16 @@
 // The context-menu items more than one surface shows, built once so a session's menu
 // reads the same on a board row, an inbox row, a panel tab, a toast and the session's own
 // "⋯": open (as a page, beside, in the background, in a new window), New session here,
-// whatever the surface can answer, its colour label, go to the parent or a subagent, copy,
+// Ask another agent (the Handoff sheet), whatever the surface can answer, its colour label, go to the parent or a subagent, copy,
 // forget. Only actions that exist; a surface adds its own groups around these. Builders run when a menu opens, so
 // they read the current URL and settings, never a stale render.
-import type { AgentRun, SessionSummary } from "@shared/api";
+import { type AgentRun, type SessionSummary, splitKey } from "@shared/api";
 import type { MenuItem, MenuList } from "../components/ContextMenu";
 import { confirmAction, tidy } from "../components/ContextMenu";
 import { openNewSession } from "../control/newSessionState";
 import type { Store } from "../data/store";
+import { askOff } from "../orchestrate/handoff/handoff";
+import { openHandoffFor } from "../orchestrate/handoff/handoffState";
 import { agentGlyph, agentLabel, openAgent } from "./agents";
 import { copyText } from "./clipboard";
 import { harnessMark, repoBranch, sessionTitle } from "./format";
@@ -122,6 +124,7 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
       action: "newSession.open",
       run: () => openNewSession({ machine: s.machine, harness: s.harness, ...(s.cwd ? { cwd: s.cwd } : {}) }),
     },
+    askItem(s, ctx.store),
     { sep: true },
     ...(ctx.answer ?? []),
     { sep: true },
@@ -131,6 +134,11 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
     s.parentId && {
       label: "Open parent session",
       run: () => navigate(sessionPath(s.harness, s.parentId!)),
+    },
+    // Started by another session's ask (`delegated_by`): the two never both apply.
+    s.delegatedBy && {
+      label: "Open the asking session",
+      run: () => navigate(sessionPath(splitKey(s.delegatedBy!).harness, splitKey(s.delegatedBy!).id)),
     },
     // Its subagents, read from its events (running first), each opening beside; a session
     // whose summary carries none falls back to the child sessions the surface knows.
@@ -197,6 +205,29 @@ function unreadItem(store: Store, s: SessionSummary, list: boolean): MenuItem | 
     label: unread ? "Mark as read" : "Mark as unread",
     action: list ? "list.unread" : undefined,
     run: () => setUnread(store, [s], !unread),
+  };
+}
+
+/** "Ask another agent…": the Handoff sheet for this session (orchestrate/handoff), with the
+ *  reason it is off when its machine is not paired or its daemon predates asking. A reply's
+ *  own menu passes that reply (`reply`, `turnSeq`) and its own words ("Ask another agent
+ *  about this…"); the sheet is then prefilled with that turn, not the last one. */
+export function askItem(
+  s: SessionSummary,
+  store: Store,
+  o: { label?: string; reply?: string; turnSeq?: number } = {},
+): MenuItem {
+  const control = s.machine ? store.get().machines.get(s.machine)?.control : undefined;
+  const off = askOff(s, control);
+  return {
+    label: o.label ?? "Ask another agent…",
+    action: "session.ask",
+    ...(off ? { disabled: off } : {}),
+    run: () =>
+      openHandoffFor(s, {
+        ...(o.reply !== undefined ? { reply: o.reply } : {}),
+        ...(o.turnSeq !== undefined ? { turnSeq: o.turnSeq } : {}),
+      }),
   };
 }
 

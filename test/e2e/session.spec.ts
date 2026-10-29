@@ -274,8 +274,14 @@ test.describe("session page", () => {
     await expect(first).toBeVisible();
     const href = (await first.getAttribute("href"))!;
     const [, harness, id] = /^\/s\/([^/]+)\/(.+)$/.exec(href)!.map(decodeURIComponent) as [string, string, string];
-    // The done list re-sorts as sessions end, so click the card by its href, not its position.
-    await page.locator(`a.card-link[href="${href}"]`).click();
+    // The done list re-sorts as sessions end, so take the card by its href, not its position,
+    // and open it from the keyboard: a mouse click's down and up can land on two cards when
+    // the list moves between them (the click then reaches the list, not the link), while
+    // Enter on the focused card clicks that card, and a focused row holds the board still
+    // (lib/motion.ts useListHold).
+    const card = page.locator(`a.card-link[href="${href}"]`);
+    await card.focus();
+    await page.keyboard.press("Enter");
     await expect(page).toHaveURL(href);
 
     // Forget is the last item of "⋯", on its own, and it asks first.

@@ -14,7 +14,8 @@
 // The other demo machines (studio-mac, build-box) stay unpaired, as a receiver sees a
 // machine before `control pair`. Each row is the one a daemon's pairing and hello leave
 // (control.demo), kept online by a poll every 20 s; nothing is ever queued for them, and
-// they go when demo mode does.
+// they go when demo mode does. lab-mac's hello says `ask` and `handoff`, so the
+// agents-asking-each-other scenes (sim.ts) run on a machine the GUI offers those on.
 import type { MachinePool } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
 import type { Hello } from "../control/parse.js";
@@ -123,6 +124,10 @@ export function demoHellos(newer: string, account: (machine: string) => string, 
         "claude-code": { permissions: ["read", "safe"], permission: "inherit", anyModel: true },
         codex: { permissions: ["read", "safe"], permission: "inherit", models: ["gpt-5.4-codex"] },
       },
+      // CONTROL.md §13 and §3.1: its agents can ask each other through the daemon, and a
+      // prompt or a start may name a session to bring the answer back into.
+      ask: true,
+      handoff: true,
       pool: labPool,
     },
     {
@@ -191,6 +196,8 @@ export function startDemoMachines(
         at: new Date(s.at - 2000).toISOString(),
         mode: "sdk",
         applied: { permission: "inherit" },
+        ...(s.replyTo ? { replyTo: s.replyTo } : {}),
+        ...(s.from ? { from: s.from } : {}),
       });
     },
     stop() {

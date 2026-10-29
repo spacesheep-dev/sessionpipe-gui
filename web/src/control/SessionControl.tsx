@@ -5,11 +5,16 @@
 // what became of an answer or a stop. A message sent from here and its reply are drawn
 // in the timeline, where its turn is (SessionView), not here. The signing and the answer
 // bookkeeping live in useSend.ts, shared with the inbox; the first send of the day asks
-// for the passkey once (the day grant), and "Unlock now" takes it ahead.
+// for the passkey once (the day grant), and "Unlock now" takes it ahead. "Ask another
+// agent…" under the field opens the Handoff sheet (orchestrate/handoff), hosted here so
+// it opens over whichever surface holds this session.
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
 import { useState } from "react";
 import { ControlStrip } from "../components/ControlStrip";
 import { useAppState, useStore } from "../data/hooks";
+import { HandoffHost } from "../orchestrate/handoff/HandoffHost";
+import { canAskFrom } from "../orchestrate/handoff/handoff";
+import { openHandoff } from "../orchestrate/handoff/handoffState";
 import { ActivityList, forkOf } from "./Activity";
 import {
   machineTakes,
@@ -23,6 +28,7 @@ import {
 import { useSessionSend } from "./useSend";
 import { isFinal, sendErrorWords } from "./words";
 import "./control.css";
+import "../orchestrate/handoff/handoff.css";
 
 /** What stays under the composer: an answer or a Stop on its way, or one that didn't
  *  make it; and a message that went to a copy of this session (CONTROL.md §6), whose turn
@@ -61,7 +67,7 @@ export function SessionControl({
   const old = device && control && !machineTakes(control) ? updateWords(session.machine) : null;
   const secure = canSignHere && !old;
   const own = useOwnKeys(rp);
-  const { connection, suggestions: all } = useAppState();
+  const { connection, suggestions: all, sessions } = useAppState();
   const store = useStore();
   // "Unlock now": take the day grant ahead of the first send (one passkey tap).
   const [unlock, setUnlock] = useState<string | null>(null);
@@ -93,6 +99,8 @@ export function SessionControl({
         : "Confirm with your passkey: it vouches for this browser for a day, so later sends need no tap."
       : (unlock ?? undefined);
   const down = connection === "reconnecting" || connection === "offline" ? connection : null;
+  // Someone to ask on its machine: another session there, or a harness its hello lists.
+  const askable = canAskFrom(session, control, sessions.values(), Date.now());
   return (
     <>
       <ControlStrip
@@ -110,8 +118,10 @@ export function SessionControl({
         untrusted={untrustedHere}
         stream={down ? { state: down, retry: () => store.reconnect() } : undefined}
         unlock={control && secure && grant.exp === null ? () => void unlockNow() : undefined}
+        ask={askable ? () => openHandoff({ session: session.key }) : undefined}
       />
       <ActivityList items={activity.filter(underStrip)} machine={session.machine} online={control?.online} limit={2} />
+      <HandoffHost session={session.key} />
     </>
   );
 }

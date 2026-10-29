@@ -26,6 +26,8 @@ export const TYPE_TIER: Record<string, 0 | 1 | 2 | 3> = {
   "subagent.ended": 1,
   "context.compacted": 1,
   "limits.observed": 1,
+  "delegation.started": 0,
+  "delegation.ended": 0,
   native: 3,
 };
 
@@ -35,6 +37,8 @@ export const TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 export const HARNESS_RE = /^[a-z0-9-]+$/;
 export const SESSION_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
 export const TOOL_RE = /^[A-Za-z0-9_.:-]{1,120}$/;
+/** `<harness>:<id>`: the ref `delegated_by` and a delegation's `to` carry. */
+export const SESSION_REF_RE = /^[a-z0-9-]+:[A-Za-z0-9._:-]{1,128}$/;
 
 const ENVELOPE_KEYS = ["protocol", "id", "type", "time", "tier", "harness", "session", "privacy", "data"];
 const TITLE_SOURCES = ["custom", "harness", "first-ask"];
@@ -165,6 +169,30 @@ const DATA_RULES: Record<string, { required: string[]; fields: Record<string, Ru
       account_id: { kind: "string", max: 128 },
     },
   },
+  // A session asked another agent (sessionpipe ask, or a handoff relayed into it): the
+  // events ride on the asking session (PROTOCOL.md §4 `delegation.*`).
+  "delegation.started": {
+    required: ["ask_id", "via", "harness"],
+    fields: {
+      ask_id: { kind: "string", pattern: ULID_RE },
+      via: { kind: "enum", values: ["ask", "handoff"] },
+      harness: { kind: "string", pattern: HARNESS_RE },
+      to: { kind: "string", pattern: SESSION_REF_RE },
+      text: { kind: "string", max: 200 },
+    },
+  },
+  "delegation.ended": {
+    required: ["ask_id", "ok", "ms"],
+    fields: {
+      ask_id: { kind: "string", pattern: ULID_RE },
+      to: { kind: "string", pattern: SESSION_REF_RE },
+      ok: { kind: "bool" },
+      ms: { kind: "int" },
+      error: { kind: "string", max: 200 },
+      relayed: { kind: "enum", values: ["delivered", "unsupported", "failed"] },
+      reply: { kind: "string", max: 20000 },
+    },
+  },
   native: { required: [], fields: {} },
 };
 
@@ -176,6 +204,8 @@ const TIERED_FIELDS: Record<string, Record<string, number>> = {
   "tool.started": { input: 3 },
   "tool.ended": { input: 3, output: 3 },
   "attention.needed": { tool: 1, message: 1 },
+  "delegation.started": { text: 1 },
+  "delegation.ended": { reply: 2 },
 };
 
 function checkField(key: string, value: unknown, rule: Rule, out: string[]): void {
@@ -255,6 +285,8 @@ export function validate(event: unknown): string[] {
     if (s.parent_id !== undefined && s.parent_id !== null && typeof s.parent_id !== "string")
       out.push("session.parent_id: not a string or null");
     if (s.attended !== undefined && typeof s.attended !== "boolean") out.push("session.attended: not a boolean");
+    if (s.delegated_by !== undefined && (typeof s.delegated_by !== "string" || !SESSION_REF_RE.test(s.delegated_by)))
+      out.push("session.delegated_by: not <harness>:<id>");
   }
 
   if (!isObj(e.privacy)) out.push("privacy: not an object");

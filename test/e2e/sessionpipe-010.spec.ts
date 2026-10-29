@@ -31,7 +31,10 @@ test("Machines: lab-mac in inherit mode, its ACP agent and its account on anothe
   await openPage(page, "/machines");
   const lab = page.locator("section.machine[aria-label='lab-mac']");
   await expect(lab.locator(".machine-control")).toContainText("Paired · inherit mode");
-  await expect(lab.locator(".machine-caution")).toHaveText(/^Sessions run as your own do on lab-mac/);
+  // Two lines from its hello: inherit mode, and (lineage.spec.ts) its agents asking each other.
+  await expect(lab.locator(".machine-caution", { hasText: "Sessions run as your own" })).toHaveText(
+    /^Sessions run as your own do on lab-mac/,
+  );
   await expect(lab.locator(".machine-harness", { hasText: "goose" })).toBeVisible();
   await expect(lab.locator(".machine-accounts")).toContainText("api.z.ai · Claude Code, API");
   await expect(lab.locator(".machine-accounts")).toContainText("dev@example.com · Claude Code");

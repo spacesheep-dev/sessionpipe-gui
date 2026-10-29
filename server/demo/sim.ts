@@ -6,17 +6,23 @@
 // Every event is a tier-3 sessionpipe event exactly as the client would send it:
 // the harness's own hook names, a session block that grows as the worker learns facts,
 // seq monotonic per session, ids in each harness's shape.
+import { createHash } from "node:crypto";
 import { ulid } from "sessionpipe-core";
 import type { ProtocolEvent, ProtocolSession } from "../../shared/api.js";
 import {
   ANTIGRAVITY_TURNS,
+  ASK_TURN,
+  type AskScript,
   BACKFILL_TITLES,
   BACKGROUND_TURNS,
   CLAUDE_TURNS,
   CODEX_TURNS,
   CURSOR_TURNS,
   GEMINI_TURNS,
+  HANDOFF,
+  HANDOFF_PARENT_TURN,
   HARNESS_VERSION,
+  type HandoffScript,
   type HarnessName,
   MACHINE_NAMES,
   MODELS,
@@ -53,6 +59,9 @@ export interface DemoStarted {
   cwd: string;
   text: string;
   at: number;
+  /** A handoff: the session the answer comes back into (`reply_to`), which also sent it. */
+  replyTo?: string;
+  from?: string;
 }
 
 /** The account id sessionpipe 0.10 gives a Claude Code home on another API (#75):
@@ -85,6 +94,24 @@ const PROGRESS_EVERY_MS = 20_000;
 const TITLE_RANK = { "first-ask": 0, harness: 1, custom: 2 } as const;
 /** The curated opening scenes get this long before random sessions join in. */
 const OPENING_MS = 150_000;
+
+/** What the daemon calls the receiver in a handoff's frame (`asked via <host>`). */
+const RECEIVER_HOST = "studio-mac.local:7373";
+
+/** A session's short id as sessionpipe-core prints it (`short-id.ts`): eight hex of a hash
+ *  of its ref, so the frame names the session without quoting a 36-character id. */
+const shortId = (harness: string, id: string): string =>
+  createHash("sha256").update(`sessionpipe.session:${harness}:${id}`).digest("hex").slice(0, 8);
+
+/** The daemon's framing of the question it hands an asked agent (control/route.ts). */
+const askFrame = (text: string, from: string): string =>
+  `${text}\n\n(Asked by ${from} on this machine with sessionpipe ask. Answer here in full: your reply is returned to that session automatically. Don't run a command or call a tool just to send it.)`;
+/** A `start`'s first message as the daemon frames it (control/route.ts). */
+const startFrame = (text: string): string =>
+  `${text}\n\n(Sent via ${RECEIVER_HOST} with sessionpipe control, signed on the sender's device.)`;
+/** The relayed answer as the daemon delivers it into `reply_to` (CONTROL.md §6). */
+const answerFrame = (harness: string, id: string, reply: string): string =>
+  `Answer from ${harness}:${shortId(harness, id)} (sessionpipe handoff, asked via ${RECEIVER_HOST}):\n\n${reply}`;
 
 type HookKey =
   | "start"
@@ -569,6 +596,38 @@ export class Simulation {
       });
     this.spawn(unattended(), 5_000);
 
+    // Agents that ask each other, on the paired machine: a Claude Code session that asks
+    // Codex for a review from inside its turn (sessionpipe ask), and one that a handoff
+    // from here asks Codex about, the answer coming back into it as a message.
+    const asking = () =>
+      this.session({
+        harness: "claude-code",
+        machine: this.v010Machine,
+        repo: REPOS[0] as Repo,
+        branch: "fix/webhook-retry",
+        turns: [ASK_TURN],
+        source: "startup",
+        end: "exit",
+        attended: true,
+        pause: 240_000,
+      });
+    const handed = () =>
+      this.session({
+        harness: "claude-code",
+        machine: this.v010Machine,
+        repo: REPOS[0] as Repo,
+        branch: "fix/webhook-retry",
+        turns: [HANDOFF_PARENT_TURN],
+        source: "startup",
+        end: "exit",
+        attended: true,
+        viaControl: true,
+        handoff: HANDOFF,
+        pause: 20_000,
+      });
+    this.spawn(asking(), 12_000);
+    this.spawn(handed(), 45_000);
+
     // Three reviewers at once, two of them outliving the turn that launched them.
     const parallel = () =>
       this.session({
@@ -595,6 +654,8 @@ export class Simulation {
         this.spawn(unattended(), 50_000);
         this.spawn(waiting(), 20_000);
         this.spawn(scheduled(), 40_000);
+        this.spawn(asking(), 60_000);
+        this.spawn(handed(), 100_000);
         continue;
       }
       if (this.live >= 6) continue;
@@ -692,6 +753,9 @@ export class Simulation {
     account?: string;
     /** Started from this receiver: the demo machine has its `start` (onStart). */
     viaControl?: boolean;
+    /** After its turns, a handoff from here asks another agent and its answer comes back
+     *  into this session (CONTROL.md §3.1 `reply_to`). */
+    handoff?: HandoffScript;
   }): Script {
     const rng = this.rng;
     const profile = PROFILES[p.harness];
@@ -744,6 +808,10 @@ export class Simulation {
         yield* this.notificationTurn(sess, n, turn++);
       }
       yield script.waitAfter ?? p.pause ?? rng.ms(30_000, 5000);
+    }
+    if (p.handoff) {
+      yield* this.handoff(sess, p.handoff, turn++);
+      yield p.pause ?? rng.ms(30_000, 5000);
     }
     // No session-end hook: the session just goes quiet after its last Stop.
     if (!profile.noSessionEnd) sess.emit("session.ended", { reason: p.end }, profile.ev.end);
@@ -812,11 +880,19 @@ export class Simulation {
       const agentId = sub ? rng.agent() : undefined;
       const background = !!sub && (output as { isAsync?: unknown } | undefined)?.isAsync === true;
       const inParent = !!sub && !!profile.agentsInParent;
+      let tookMs = step.ms;
       if (sub && agentId && inParent && !background) {
         // A synchronous agent: it runs while the call is open, and its last message is
         // the call's output.
         yield* this.agentInParent(sess, sub, agentId, turnId);
         output = { status: "completed", agentId, content: [{ type: "text", text: sub.result ?? "" }] };
+      } else if (step.ask) {
+        // `sessionpipe ask`: the daemon runs the asked agent while the call is open, and
+        // the answer is the command's stdout.
+        const begun = this.now;
+        const reply = yield* this.asked(sess, step.ask);
+        tookMs = this.now - begun;
+        output = { stdout: reply, stderr: "", interrupted: false, isImage: false, noOutputExpected: false };
       } else {
         yield step.ms;
         if (sub && agentId)
@@ -839,7 +915,7 @@ export class Simulation {
             tool: step.tool,
             call_id: callId,
             turn_id: turnId,
-            ms: step.ms,
+            ms: tookMs,
             ok,
             error: ok ? undefined : step.error,
             input: step.input,
@@ -1132,6 +1208,118 @@ export class Simulation {
       p.reportAt,
     );
     sess.emit("session.ended", { reason: "exit" }, ev.end, true, p.reportAt + 20_000);
+  }
+
+  /** The session the daemon starts for an ask or a handoff: the asked harness, on the
+   *  asking session's machine and in its folder, `delegated_by` on every event (the hook
+   *  reads it from the env the daemon set). */
+  private child(from: Sess, harness: HarnessName): Sess {
+    const rng = this.rng;
+    const profile = PROFILES[harness];
+    const machine = from.block.machine as string;
+    return new Sess(this, profile, this.newSessionId(harness), {
+      machine,
+      cwd: from.block.cwd,
+      repo: from.block.repo,
+      branch: from.block.branch,
+      account_id: this.account(machine, harness),
+      delegated_by: `${from.profile.name}:${from.id}`,
+      ...(profile.modelAtStart ? { model: rng.pick(MODELS[harness]) } : {}),
+    });
+  }
+
+  /** `sessionpipe ask` from inside `from`'s turn (CONTROL.md §13): delegation.started on
+   *  the asking session, the asked agent's session with the framed question as its first
+   *  prompt, then delegation.ended with the answer. Returns the answer. */
+  private *asked(from: Sess, ask: AskScript): Generator<number, string, undefined> {
+    const rng = this.rng;
+    const askId = this.rng.ulid(this.wall());
+    const child = this.child(from, ask.harness);
+    const to = `${ask.harness}:${child.id}`;
+    const begun = this.now;
+    // The daemon learns the new session's id when the harness reveals it: `to` comes
+    // with the end, not the start.
+    from.emit(
+      "delegation.started",
+      { ask_id: askId, via: "ask", harness: ask.harness, text: ask.text.slice(0, 200) },
+      "",
+    );
+    yield rng.ms(2500, 600);
+    const reply = yield* this.childRun(
+      child,
+      ask.turns,
+      askFrame(ask.turns[0]?.prompt ?? ask.text, `${from.profile.name}:${from.id}`),
+    );
+    from.emit("delegation.ended", { ask_id: askId, to, ok: true, ms: this.now - begun, reply }, "");
+    return reply;
+  }
+
+  /** A handoff (CONTROL.md §3.1 `reply_to`): a `start` signed here named `from` as the
+   *  session to answer into. The daemon starts the asked agent (the demo machine records
+   *  the start), says so on `from` with `via: "handoff"`, and when the child answers,
+   *  delivers the reply into `from` as a framed prompt and closes the delegation with
+   *  `relayed: "delivered"`; `from` then answers that message as any other. */
+  private *handoff(from: Sess, h: HandoffScript, turn: number): Script {
+    const rng = this.rng;
+    const askId = this.rng.ulid(this.wall());
+    const child = this.child(from, h.harness);
+    const to = `${h.harness}:${child.id}`;
+    const begun = this.now;
+    const first = h.turns[0] as TurnScript;
+    const prompt = startFrame(h.text);
+    this.onStart?.({
+      harness: h.harness,
+      id: child.id,
+      machine: from.block.machine as string,
+      cwd: from.block.cwd as string,
+      text: h.text,
+      at: this.wall(),
+      replyTo: `${from.profile.name}:${from.id}`,
+      from: `${from.profile.name}:${from.id}`,
+    });
+    from.emit(
+      "delegation.started",
+      { ask_id: askId, via: "handoff", harness: h.harness, to, text: h.text.slice(0, 200) },
+      "",
+    );
+    yield rng.ms(3000, 800);
+    const reply = yield* this.childRun(child, [{ ...first, prompt }, ...h.turns.slice(1)], prompt);
+    yield rng.ms(1500, 400);
+    from.emit(
+      "delegation.ended",
+      { ask_id: askId, to, ok: true, ms: this.now - begun, relayed: "delivered", reply },
+      "",
+    );
+    yield rng.ms(1200, 300);
+    // The answer arrives as a prompt of its own, framed; the session answers it.
+    yield* this.playTurn(from, { prompt: answerFrame(h.harness, child.id, reply), steps: [], final: h.followUp }, turn);
+  }
+
+  /** The asked agent's session, start to end: its first prompt is the framed question
+   *  (`firstPrompt`), and its last turn's `final` is the answer. */
+  private *childRun(
+    child: Sess,
+    turns: readonly TurnScript[],
+    firstPrompt: string,
+  ): Generator<number, string, undefined> {
+    const rng = this.rng;
+    const profile = child.profile;
+    this.live++;
+    child.emit("session.started", { source: "startup" }, profile.ev.start);
+    yield rng.ms(4000, 1000);
+    let reply = "";
+    for (const [i, script] of turns.entries()) {
+      const s = i === 0 ? { ...script, prompt: firstPrompt } : script;
+      if (i === 0) child.learn({ title: firstAsk(s.prompt), title_source: "first-ask" });
+      yield* this.playTurn(child, s, i);
+      reply = script.final;
+      if (i < turns.length - 1) yield rng.ms(8000, 2000);
+    }
+    yield rng.ms(2000, 500);
+    child.emit("session.ended", { reason: "exit" }, profile.ev.end);
+    this.live--;
+    this.ended.push(child);
+    return reply;
   }
 
   /** A subagent as Claude Code sends it: inside the parent's session, every tool stamped

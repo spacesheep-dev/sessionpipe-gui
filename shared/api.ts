@@ -61,6 +61,9 @@ export interface ProtocolSession {
   parent_id?: string | null;
   /** The session that started this one, `<harness>:<id>` (PROTOCOL.md §3); not a subagent. */
   launched_by?: string;
+  /** `<harness>:<id>` of the session this one was started or resumed for (sessionpipe
+   *  `ask` / a handoff): lineage across harnesses, never authority. Absent otherwise. */
+  delegated_by?: string;
 }
 
 /** The GUI's reading of a session's state (spec §1: made from the facts, never sent).
@@ -124,6 +127,9 @@ export interface SessionSummary {
    *  time of the first such report in a row for that account; a report naming the session's
    *  own account again clears it. Absent when nothing says otherwise. */
   servedBy?: { accountId: string; since: string };
+  /** `session.delegated_by`: the session this one was started for (`sessionpipe ask`, or
+   *  a handoff). Lineage like `parentId`, across harnesses; never authority. */
+  delegatedBy?: SessionKey;
 
   state: SessionState;
   /** When the current state began (ISO). */
@@ -149,6 +155,9 @@ export interface SessionSummary {
     /** Agents in `agents` not yet ended (running or stale). `subagents` above counts every
      *  subagent.started ever; this is the live number. */
     agentsRunning: number;
+    /** Delegations in `delegations` not yet ended. Always set by this server; optional on
+     *  the wire so a page reading an older server (or the mock) still types. */
+    delegationsRunning?: number;
   };
   /** The orchestrator's own tool running right now (tool.started without its tool.ended),
    *  if any. A subagent's tool (one with `agent_id`) runs on its AgentRun instead.
@@ -177,6 +186,11 @@ export interface SessionSummary {
    *  which is how Claude Code and Codex report them; a child session with `parent_id` is
    *  merged in by id with `session` set. Empty when it ran none. */
   agents: AgentRun[];
+  /** The agents this session asked (`delegation.started` / `.ended`: `sessionpipe ask`, or
+   *  a handoff relayed into it), newest last, at most DELEGATIONS_MAX; an open one is
+   *  never dropped. Absent when it asked none. An open delegation keeps the session
+   *  `working` the way an open agent does. */
+  delegations?: Delegation[];
   /** Last tool names, newest last, at most 8 — for a sparkline of activity. */
   recentTools: { tool: string; ok: boolean; ms?: number }[];
   /** The store's smarter readings (ARCHITECTURE.md "The store's readings"): what is
@@ -237,6 +251,37 @@ export interface AgentRun {
   result?: string;
   /** The child session, when the harness sent the agent as one (`parent_id`). */
   session?: SessionKey;
+}
+
+/** At most this many Delegations ride on a summary (open ones are never dropped). */
+export const DELEGATIONS_MAX = 50;
+
+/** One ask this session made of another agent, as the GUI reads it from the events on
+ *  the asking session (sessionpipe PROTOCOL.md `delegation.started` / `delegation.ended`):
+ *  `via: "ask"` for `sessionpipe ask` from inside the session, `"handoff"` for a signed
+ *  `prompt` / `start` with `reply_to` whose answer the daemon relayed into it. Nothing here
+ *  is guessed: a field the events did not carry is absent. */
+export interface Delegation {
+  /** `data.ask_id` (a ULID); the key `delegation.ended` closes it by. */
+  askId: string;
+  via: "ask" | "handoff";
+  /** The agent asked (`data.harness`). */
+  harness: string;
+  /** `data.to`: the child session, once the harness revealed its id. */
+  to?: SessionKey;
+  startedAt: string;
+  endedAt?: string;
+  /** `delegation.ended.ok`. */
+  ok?: boolean;
+  ms?: number;
+  /** The question (tier 1+, ≤ 200 chars as sent). */
+  text?: string;
+  /** The answer (tier 2+), cut to the index's preview length; the event has it whole. */
+  reply?: string;
+  /** `delegation.ended.error`, when not ok. */
+  error?: string;
+  /** A handoff: whether the answer reached `reply_to` (`delegation.ended.relayed`). */
+  relayed?: "delivered" | "unsupported" | "failed";
 }
 
 /** slow_tool: `currentTool` has run longer than SLOW_TOOL_MS. error_streak: the last
@@ -335,6 +380,12 @@ export interface MachineControl {
    *  daemon predates the pool ("needs a newer sessionpipe") and no pool command is offered
    *  for it. Said again in every hello: one without it takes it away. */
   pool?: MachinePool;
+  /** Hello `ask`: whether `sessionpipe ask` is on there (a session may ask another agent
+   *  through the daemon). Absent: the daemon predates it (0.10), so nothing is said. */
+  ask?: boolean;
+  /** Hello `handoff: true`: the daemon takes `reply_to` on a `prompt` or a `start` and
+   *  relays the answer into that session (CONTROL.md §3.1). Absent: never offered. */
+  handoff?: boolean;
 }
 
 /** A machine's mode, the person's choice at its own terminal (CONTROL.md §2): `safe`,
@@ -570,7 +621,12 @@ export type StreamMessage =
    *  version, so the page that wrote it can tell its own write from another device's. */
   | { kind: "viewState"; id: string; etag: string }
   /** The search index's status changed (state, progress, counts). At most one a second. */
-  | { kind: "searchIndex"; status: SearchIndexStatus };
+  | { kind: "searchIndex"; status: SearchIndexStatus }
+  /** A workflow run moved (the whole run, `rev` bumped: drop one older than what the page
+   *  has); `deleted` when it was taken away. */
+  | { kind: "workflowRun"; run: WorkflowRun; deleted?: true }
+  /** The saved workflows after a save or a delete (the whole list). */
+  | { kind: "workflows"; workflows: Workflow[] };
 
 // ---------- labels (the person's colour labels; GET / PATCH ROUTES.ui.labels) ----------
 
@@ -1401,6 +1457,120 @@ export interface ControlActivity {
    *  "<pending login id> <URL>" (web/src/lib/pool.ts `loginFromDetail` reads it). */
   poolAction?: PoolAction;
   poolAccount?: string;
+  /** A handoff: the session the answer is relayed into, as signed (`reply_to` on a
+   *  `prompt` or a `start`, CONTROL.md §3.1). */
+  replyTo?: SessionKey;
+  /** The GUI's own unsigned note of which session's page sent it (`SendBody.from`): the
+   *  lineage shown while the events are on their way. Never part of the command. */
+  from?: SessionKey;
+}
+
+/** POST ROUTES.ui.control + `/send`: the signed command and how it was signed (a day key
+ *  under a passkey grant, or one passkey confirm), as `server/control/README.md` lays it
+ *  out. `from` is the UI's note of the session whose page sent it: unsigned, stored on
+ *  the activity (`ControlActivity.from`), never carried to the machine. */
+export interface SendBody {
+  machineId: string;
+  cmd: string;
+  csig?: string;
+  grant?: Record<string, unknown>;
+  confirm?: Record<string, unknown>;
+  expires_in_s?: number;
+  from?: SessionKey;
+}
+
+// ---------- orchestrate (workflows across agents and machines; server/orchestrate) ----------
+
+/** Who a step asks: a new session of a harness on the step's machine (the browser signs a
+ *  `start`), or an existing session there (a `prompt`). */
+export type StepAgent = { harness: string } | { session: SessionKey };
+
+export interface WorkflowStep {
+  /** Unique within the workflow: letters, digits, `_`, `-`, at most 40. */
+  id: string;
+  name?: string;
+  machineId: string;
+  agent: StepAgent;
+  /** A new session's folder; absent, the runner takes the machine's first folder. */
+  cwd?: string;
+  /** The prompt, with `{{input}}` (the run's input), `{{prev}}` (the reply of the step(s)
+   *  it runs after, joined by a blank line) and `{{step.<id>}}` (a named earlier step's
+   *  reply). Any other placeholder, or one with nothing to fill it, fails at save. */
+  text: string;
+  permission?: StartPermission;
+  model?: string;
+  /** The steps it runs after: absent, the step before it in the list; `[]`, a root. Only
+   *  earlier steps may be named, so a workflow is always a DAG. */
+  after?: string[];
+}
+
+export interface Workflow {
+  id: string;
+  name: string;
+  /** Set, Run asks for an input first (`{{input}}`). */
+  input?: { label: string };
+  steps: WorkflowStep[];
+  createdAt: string;
+  updatedAt: string;
+  /** The template it was made from, when one was. */
+  template?: string;
+}
+
+/** The most steps a workflow has, and the longest a step's text may be. */
+export const WORKFLOW_STEPS_MAX = 20;
+export const WORKFLOW_TEXT_MAX = 20_000;
+
+export type RunStatus = "running" | "waiting" | "done" | "failed" | "cancelled";
+/** pending: waiting on the steps before it. ready: the signer may claim it. sending: a tab
+ *  claimed it and is signing. sent: its command is queued (`commandId`). done / failed:
+ *  the command's final ack. skipped: a step before it failed, or the run was cancelled. */
+export type StepStatus = "pending" | "ready" | "sending" | "sent" | "done" | "failed" | "skipped";
+
+export interface StepRun {
+  status: StepStatus;
+  /** The prompt with its placeholders filled, once the step is ready. */
+  text?: string;
+  /** The queued command (`ControlActivity.id`), once sent. */
+  commandId?: string;
+  /** The session the ack named (the one a start made, a fork), else the one the command named. */
+  session?: SessionKey;
+  reply?: string;
+  /** `failed`: the machine's `code: detail`, or the receiver's word. */
+  error?: string;
+  /** When it became ready, was claimed and was sent (ISO); the server's clocks for the
+   *  signer rule and for a claim that never came back. */
+  readyAt?: string;
+  claimedAt?: string;
+  sentAt?: string;
+  endedAt?: string;
+}
+
+export interface WorkflowRun {
+  id: string;
+  workflowId: string;
+  /** The workflow's name when the run started. */
+  name: string;
+  /** Bumped on every change; a claim names it in `If-Match`. */
+  rev: number;
+  status: RunStatus;
+  input?: string;
+  startedAt: string;
+  endedAt?: string;
+  /** The steps as they were when the run started: what the server resolves and the
+   *  browser signs from, so an edit or a delete of the workflow never changes a run. */
+  plan: WorkflowStep[];
+  steps: Record<string, StepRun>;
+  /** `waiting`: for a device that can sign (a step ready for over WAITING_SIGNER_MS and
+   *  nobody claimed it), or for the step's machine to come online. */
+  waitingFor?: "signer" | "machine";
+}
+
+/** A `ready` step nobody claimed for this long reads `waiting` for a signer. */
+export const WAITING_SIGNER_MS = 2_000;
+
+/** Query of POST ROUTES.ui.workflows + `/:id/run`. */
+export interface RunBody {
+  input?: string;
 }
 
 // ---------- extras (the curated catalogue; server/extensions/catalog.ts) ----------
@@ -1512,6 +1682,23 @@ export const ROUTES = {
     /** POST { key } (application/json) → 204: forget one entry's numbers (its next report
      *  brings it back), and a `limits` frame. 400 `malformed`, 404 `not_found`, 415 `json_only`. */
     limitsForget: "/api/ui/limits/forget",
+    /** Workflows (server/orchestrate; ARCHITECTURE.md "UI API"), UI key like the rest.
+     *  Every write takes JSON only, an empty POST too (415 `json_only`), and 403
+     *  `cross_site` when the browser marks it from another site: a write here sets a
+     *  signer to work. GET → { workflows, runs } · PUT /:id (the whole Workflow) →
+     *  Workflow; 400 `malformed` / `bad_step`, 413 `too_large` (WORKFLOW_STEPS_MAX,
+     *  WORKFLOW_TEXT_MAX; a step's resolved text is cut to fit, never refused) · DELETE
+     *  /:id → 204 · POST /:id/run RunBody → 201 WorkflowRun · PATCH /runs/:id with
+     *  `If-Match: <rev>`: { step, status: "sending" } (a claim), { step, send: SendBody }
+     *  (the signed command: verified as /send does, queued and the step marked sent in one
+     *  move, or nothing queued: 412 when the step is no longer this claim's, 422 with the
+     *  verifier's `code` for a signer's fault; a refusal of the command itself fails the
+     *  step and answers with the run) or { step, commandId } (a command queued through
+     *  /send: the test door) → WorkflowRun; 412 `conflict` with the current run when the
+     *  rev moved or the step is not where the patch expects it · POST /runs/:id/cancel
+     *  `{}` → WorkflowRun · DELETE /runs/:id → 204. Every change is a `workflowRun` or
+     *  `workflows` stream frame. */
+    workflows: "/api/ui/workflows",
   },
   /** GET / DELETE /attachments/<id>.<ext>, UI key: the uploaded image itself (served
    *  `private, immutable`), and taking it back. */

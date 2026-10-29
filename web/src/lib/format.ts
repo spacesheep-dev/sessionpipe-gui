@@ -240,6 +240,16 @@ export function eventSummary(e: ProtocolEvent): string {
       return `compacted · ${str(d.trigger) || "auto"}`;
     case "native":
       return "native hook payload";
+    // An agent this session asked (sessionpipe ask, a handoff): the agent and how it went.
+    case "delegation.started":
+      return `asked ${str(d.harness) || "another agent"}${d.via === "handoff" ? " · handoff" : ""}`;
+    case "delegation.ended": {
+      const bits = [`asked ${str(d.harness) || "another agent"}`, d.ok === false ? "failed" : "answered"];
+      if (num(d.ms) !== undefined) bits.push(durShort(num(d.ms)));
+      if (d.error) bits.push(oneLine(str(d.error), 80));
+      if (d.relayed === "delivered") bits.push("relayed");
+      return bits.join(" · ");
+    }
     default:
       return Object.keys(d).slice(0, 3).join(", ");
   }

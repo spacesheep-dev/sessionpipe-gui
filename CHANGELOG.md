@@ -67,6 +67,39 @@ All notable changes to `sessionpipe-gui`. The format follows
   pool is told so before anything is queued. A session the pool moved to another account
   says which one serves it and since when, and its chat shows the switch. Demo mode has a
   machine with the pool on, one with an account in error, and one with the pool off.
+- **Agents that use agents.** sessionpipe's next release lets a session ask another agent
+  on its machine (`sessionpipe ask codex "…"`) and lets a receiver hand a task to an agent
+  with the answer brought back into a session (`reply_to` on a signed `prompt` or
+  `start`). The GUI reads the two events, `delegation.started` and `delegation.ended`, into
+  the session (`delegations`, `delegatedBy`, `counts.delegationsRunning`), keeps a session
+  working while an ask is open, and shows a capability only where a machine's hello says
+  `ask` or `handoff`, so a 0.10 daemon keeps working as before.
+- **Ask another agent…** on a session's page (the control strip, its menus, a reply's
+  right-click "about this…", ⌘K, ⇧A): one sheet, prefilled with the last reply, that asks
+  an existing session on the same machine or a new one of a harness the hello lists, with
+  "Bring the answer back into this session" where the machine takes handoffs. The asking
+  session shows the row at once.
+- **Lineage.** "Asked Codex · new session · running 1 m 20 s" where the ask happened in the
+  chat and the timeline, the answer folded under it or drawn as that agent's turn when it
+  was brought back; the asked session's bar says "for <parent>" with a link; the board nests
+  it under its parent; Machines says "Agents here can ask each other"; the Feed and the
+  Activity page word the events and the handoff.
+- **Workflows** (`/workflows`, `g w`): chain and fan out steps across your agents and
+  machines (implement → review → fix; two agents in parallel, a third compares). Three
+  templates, an editor of native rows that saves itself, Run with the input it names, and
+  a run view with every step's state, elapsed, reply and session. The server owns a run
+  (`workflows.json`, `workflow-runs.json`, moved by control's acks); the browser is only
+  the signer, from any device that can sign, with claims as the guard across tabs. A
+  browser signs the runs it started on its own; one started elsewhere asks once ("Sign
+  here"), so nothing on the loopback or another site can set your passkey to work. The
+  signed command goes back through the run itself, queued only once the server has seen
+  the step is still that tab's: a step cancelled or re-offered mid-signature queues
+  nothing, and one the receiver refuses fails in place instead of being offered again
+  every minute. A step is never signed without the level or model it names when the
+  machine's hello does not offer it; the run says so. Every write to `/api/ui/workflows`
+  is JSON only, an empty POST too, and refuses a cross-site request.
+- **Demo mode** plays an ask and a handoff on lab-mac, whose hello now says `ask` and
+  `handoff`; the mock stream has the same.
 
 ### Changed
 

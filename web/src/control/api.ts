@@ -12,6 +12,7 @@ import type {
   KeyType,
   MachineControl,
   MachineMode,
+  SessionKey,
   StartFile,
   TlsInfo,
   TrustedKey,
@@ -75,6 +76,8 @@ export interface SendBody {
   grant?: GrantBundle | (DeviceSignature & { str: string });
   confirm?: Assertion | DeviceSignature;
   expires_in_s?: number;
+  /** The session whose page sends it: unsigned, the receiver's own note on the activity. */
+  from?: SessionKey;
 }
 
 export type PairedMachine = MachineControl & { name: string; createdAt: string; pairedAt?: string };

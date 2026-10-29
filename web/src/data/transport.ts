@@ -75,6 +75,8 @@ export const STREAM_KINDS = [
   "limits",
   "viewState",
   "searchIndex",
+  "workflowRun",
+  "workflows",
 ] as const satisfies readonly StreamMessage["kind"][];
 /** Fails to compile while a StreamMessage kind is missing from STREAM_KINDS. */
 const _everyKind: Exclude<StreamMessage["kind"], (typeof STREAM_KINDS)[number]> extends never ? true : never = true;
