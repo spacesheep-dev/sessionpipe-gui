@@ -18,8 +18,10 @@ const MAX = 500;
 
 /** An entry's key: a session key, or `att:<session>|<attention id>` for one inbox prompt.
  *  Its value: when the hidden state began, or, hidden until it needs you, when it was
- *  hidden (a stored string from before that reads as it always did). */
-type Entry = string | { since: string; until: "needs" };
+ *  hidden (a stored string from before that reads as it always did) and, once a plain
+ *  Hide fell on it while it needed you, `dismissed`: that needs-you state's own
+ *  `stateSince`, hidden too; the next one shows, and the setting holds. */
+type Entry = string | { since: string; until: "needs"; dismissed?: string };
 type Hidden = Record<string, Entry>;
 
 let hidden: Hidden | null = null;
@@ -70,11 +72,12 @@ export function useHidden(): Readonly<Hidden> {
 }
 
 /** Whether an entry is still hidden: its state began no later than when it was hidden,
- *  or, hidden until it needs you, it doesn't need you now (whatever its state's age). */
+ *  or, hidden until it needs you, it doesn't need you now (whatever its state's age), or
+ *  needs you in the very state a plain Hide dismissed. */
 export function isHidden(h: Readonly<Hidden>, key: string, since: string, needsYou = false): boolean {
   const e = h[key];
   if (typeof e === "string") return since <= e;
-  return e?.until === "needs" && !needsYou;
+  return e?.until === "needs" && (!needsYou || e.dismissed === since);
 }
 
 type Row = Pick<SessionSummary, "key" | "stateSince" | "state">;
@@ -123,10 +126,14 @@ export function unhide(key: string): void {
 const undoTo = (key: string, was: Entry | undefined) => () =>
   was === undefined ? unhide(key) : write({ ...read(), [key]: was });
 
-/** Hide at once, with "Hidden · Undo" for six seconds (⌘Z too). */
+/** Hide at once, with "Hidden · Undo" for six seconds (⌘Z too). On a session hidden until
+ *  it needs you (showing because it does), this hides that one prompt and keeps the
+ *  setting: a plain stamp would have it back on every later turn, which is what the
+ *  setting was for. */
 export function hide(key: string, since: string, o: { title: string; session?: SessionKey }): void {
   const was = read()[key];
-  write({ ...read(), [key]: since });
+  const entry: Entry = typeof was === "object" && was.until === "needs" ? { ...was, dismissed: since } : since;
+  write({ ...read(), [key]: entry });
   pushUndo({ id: `hide|${key}`, title: "Hidden", body: o.title, session: o.session, undo: undoTo(key, was) });
 }
 

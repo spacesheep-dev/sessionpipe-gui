@@ -31,6 +31,15 @@ describe("isHidden", () => {
     expect(isHidden(h, "a", T1, true)).toBe(false);
   });
 
+  it("hidden until it needs you, a plain Hide dismisses that one prompt and the setting holds", () => {
+    const h = { a: { since: T0, until: "needs" as const, dismissed: T1 } };
+    // The prompt it was hidden on stays hidden; the next needs-you state shows.
+    expect(isHidden(h, "a", T1, true)).toBe(true);
+    expect(isHidden(h, "a", "2026-10-28T11:00:00.000Z", true)).toBe(false);
+    // Working or idle again (a new turn): hidden, as the setting says.
+    expect(isHidden(h, "a", "2026-10-28T11:00:00.000Z")).toBe(true);
+  });
+
   it("isn't offered on a session that needs you now, which it would leave in place", () => {
     expect(canHideUntilNeeded({ state: "needs_you" })).toBe(false);
     for (const state of ["working", "idle", "done"] as const) expect(canHideUntilNeeded({ state })).toBe(true);
@@ -71,6 +80,34 @@ describe("stored entries", () => {
     expect(hiddenNow(a)).toBe(true);
     hide("codex:b", T0, { title: "b" });
     expect(Object.keys(JSON.parse(stored))).toEqual(["claude-code:a", "codex:b"]);
+  });
+});
+
+describe("Hide on a session hidden until it needs you", () => {
+  afterEach(() => {
+    vi.doUnmock("./toasts");
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("keeps the setting: the prompt is hidden, the next turn stays hidden, the next prompt shows", async () => {
+    let stored = JSON.stringify({ "codex:b": { since: T0, until: "needs" } });
+    vi.stubGlobal("localStorage", { getItem: () => stored, setItem: (_: string, v: string) => (stored = v) });
+    vi.doMock("./toasts", () => ({ pushUndo: () => {} }));
+    vi.resetModules();
+    const { hide, hiddenNow } = await import("./hidden");
+    const needs = { key: "codex:b", stateSince: T1, state: "needs_you" } as const;
+    expect(hiddenNow(needs)).toBe(false);
+    hide("codex:b", T1, { title: "nightly build" });
+    expect(JSON.parse(stored)).toEqual({ "codex:b": { since: T0, until: "needs", dismissed: T1 } });
+    expect(hiddenNow(needs)).toBe(true);
+    // Answered, it works on: hidden, as before the prompt.
+    expect(hiddenNow({ key: "codex:b", stateSince: "2026-10-28T11:00:00.000Z", state: "working" })).toBe(true);
+    // The next time it needs you, it shows again.
+    expect(hiddenNow({ key: "codex:b", stateSince: "2026-10-28T11:30:00.000Z", state: "needs_you" })).toBe(false);
+    // A plain Hide on a plain entry is still a stamp.
+    hide("gemini:e", T1, { title: "e" });
+    expect(JSON.parse(stored)["gemini:e"]).toBe(T1);
   });
 });
 
