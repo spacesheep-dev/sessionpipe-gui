@@ -53,7 +53,12 @@ export function writeProblem(ctx: Ctx): Reply | null {
   return null;
 }
 
-export function registerOrchestrate(router: Router, svc: Orchestrate, uiGuard: (h: Handler) => Handler): void {
+export function registerOrchestrate(
+  router: Router,
+  svc: Orchestrate,
+  uiGuard: (h: Handler) => Handler,
+  opts: { testDoor?: boolean } = {},
+): void {
   const base = ROUTES.ui.workflows;
   const jsonOnly = writeProblem;
   /** Every write: the UI guard, then the write guard, before the handler reads a thing. */
@@ -144,7 +149,13 @@ export function registerOrchestrate(router: Router, svc: Orchestrate, uiGuard: (
   // against the run's rev. { step, commandId } is the second move for a command queued
   // through /send itself (the test door; a page never does this: the command would run
   // even when the step is no longer this claim's).
-  const MOVES = 'Send { step, status: "sending" }, { step, send } or { step, commandId }.';
+  // `{ step, commandId }` binds a command queued through /send to a claimed step: the test
+  // door's move (the e2e suite plays the signer that way), never a production route. Open,
+  // any loopback caller could paste a delivered command's reply into a run's next prompts,
+  // which the owner's tab then signs without asking (mine.ts).
+  const MOVES = opts.testDoor
+    ? 'Send { step, status: "sending" }, { step, send } or { step, commandId }.'
+    : 'Send { step, status: "sending" } or { step, send }.';
   router.add(
     "PATCH",
     `${base}/runs/:id`,
@@ -166,6 +177,7 @@ export function registerOrchestrate(router: Router, svc: Orchestrate, uiGuard: (
         if (b.send && typeof b.send === "object" && b.status === undefined && b.commandId === undefined)
           return runReply(await svc.send(rid, b.step, rev, b.send));
         if (
+          opts.testDoor &&
           typeof b.commandId === "string" &&
           /^[0-9A-HJKMNP-TV-Z]{26}$/.test(b.commandId) &&
           b.status === undefined &&

@@ -82,6 +82,40 @@ const harnessStep = (id: string, text: string, extra: Record<string, unknown> = 
   ...extra,
 });
 
+describe("without the test door", () => {
+  let app: App;
+  let tmp: { dir: string; cleanup: () => void };
+
+  beforeAll(async () => {
+    tmp = tempDir();
+    app = await createApp({ port: 0, stateDir: tmp.dir, outbox: false, quiet: true });
+  });
+  afterAll(async () => {
+    await app.close();
+    tmp.cleanup();
+  });
+
+  it("the { step, commandId } move is not a move: a loopback caller cannot bind a command to a step", async () => {
+    expect((await call(app.url, "PUT", `${WF}/w`, { body: doc([harnessStep("a", "A")]) })).status).toBe(200);
+    const run = (await call(app.url, "POST", `${WF}/w/run`, { body: {} })).body as unknown as WorkflowRun;
+    const patch = (body: unknown) =>
+      call(app.url, "PATCH", `${WF}/runs/${run.id}`, { body, headers: { "if-match": String(run.rev) } });
+    const claimed = await patch({ step: "a", status: "sending" });
+    expect(claimed.status).toBe(200);
+    const rev = (claimed.body as unknown as WorkflowRun).rev;
+    const bound = await call(app.url, "PATCH", `${WF}/runs/${run.id}`, {
+      body: { step: "a", commandId: "01K8CMD000000000000000ABCD" },
+      headers: { "if-match": String(rev) },
+    });
+    expect(bound.status).toBe(400);
+    expect(bound.body).toMatchObject({
+      reason: "malformed",
+      error: 'Send { step, status: "sending" } or { step, send }.',
+    });
+    expect((await call(app.url, "GET", WF)).body).toMatchObject({ runs: [{ steps: { a: { status: "sending" } } }] });
+  });
+});
+
 describe("workflow routes", () => {
   let app: App;
   let tmp: { dir: string; cleanup: () => void };

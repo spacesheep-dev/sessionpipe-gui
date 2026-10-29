@@ -379,7 +379,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   // Workflows (server/orchestrate): runs across agents and machines, moved by control's
   // acks and a one-second clock, signed only by a browser; their frames ride the broadcast.
   const orchestrate = createOrchestrate({ stateDir, control, broadcast: (m) => broadcast.emit(m) });
-  registerOrchestrate(router, orchestrate, uiGuard(uiKey));
+  registerOrchestrate(router, orchestrate, uiGuard(uiKey), { testDoor: opts.testDoor ?? false });
   const themes = new ThemeRegistry(opts.themesDir ?? path.join(stateDir, "themes"), {
     bundledDir: bundled.view,
     disabled,
