@@ -106,6 +106,17 @@ export interface SignOptions {
   onTap?: () => void;
   /** The last grant was refused: ask for a new one (the app allows one such retry). */
   fresh?: boolean;
+  /** Sign with the grant already held, or throw NoGrantError: never a prompt. The
+   *  workflows runner signs this way, from whatever page the shell is showing. */
+  noPrompt?: boolean;
+}
+
+/** `sign` with `noPrompt` found no grant good for `rp`: a tap is due, and only a page
+ *  the person is on may ask for it (the run view's Unlock now, a composer's send). */
+export class NoGrantError extends Error {
+  constructor(rp: string) {
+    super(`no day grant held for ${rp}`);
+  }
 }
 
 /** Fired on `window` once a day grant was taken or dropped, so every `useGrant` on the
@@ -118,6 +129,8 @@ const grantChanged = (): void => {
 
 /** Sign the exact bytes `cmd` for `rp`. */
 export async function sign(rp: string, cmd: string, o: SignOptions = {}): Promise<Signed> {
+  // With noPrompt, only a grant good right now signs (a confirm or a fresh grant would ask).
+  if (o.noPrompt && (o.confirm || o.fresh || (await grantExpiry(rp)) === null)) throw new NoGrantError(rp);
   if (inApp()) {
     const signed = await (await nativeSigner()).sign(rp, cmd, o);
     grantChanged();

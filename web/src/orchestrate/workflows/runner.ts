@@ -109,6 +109,13 @@ export function commandFor(
   };
 }
 
+/** Is a grant read as ending at `exp` (useGrant: ms, null when a tap is due, undefined
+ *  while unread) still good at `now`? useGrant re-reads only on a change it hears of, so
+ *  one that lapsed while a run waited still reads as a number: the clock says otherwise,
+ *  and the runner then asks for a fresh read instead of a fresh grant. */
+export const grantGoodAt = (exp: number | null | undefined, now: number): exp is number =>
+  typeof exp === "number" && exp > now;
+
 /** Does the machine trust a key this page signs with? */
 export const trustsOne = (machine: Pick<RunnerMachine, "keys">, keyIds: ReadonlySet<string>): boolean =>
   machine.keys.some((k) => keyIds.has(k.id));

@@ -11,8 +11,10 @@
 // step failed (nothing to retry). A signer's fault (the passkey prompt dismissed, a key
 // the machine stopped trusting) holds the claim off for HOLD_MS, which is when the server
 // offers it again anyway. Nothing here asks for a passkey out of the blue: with no day
-// grant the runner offers nothing, and the run view says "Waiting for your passkey"
-// with Unlock now.
+// grant the runner offers nothing, one that lapsed while a run waited is read again
+// rather than trusted (grantGoodAt), the signing itself is `noPrompt` (a grant the
+// machine refused is dropped, never replaced from here), and the run view says "Waiting
+// for your passkey" with Unlock now.
 import { useEffect, useRef } from "react";
 import { uuid } from "../../control/bytes";
 import { signAndDeliver } from "../../control/command";
@@ -23,7 +25,7 @@ import { useNow } from "../../lib/time";
 import { noteOwnSend } from "../../lib/toasts";
 import { WorkflowsError, workflowsApi } from "./api";
 import { useMine } from "./mine";
-import { type Claim, claimKey, plan } from "./runner";
+import { type Claim, claimKey, grantGoodAt, plan } from "./runner";
 import { applyRun, attachStore, useWorkflowsState } from "./state";
 import { runLive } from "./words";
 
@@ -55,6 +57,11 @@ export function useRunner(): void {
 
   useEffect(() => {
     if (!live || !rp || !secure || grant.exp === undefined || grant.exp === null) return;
+    if (!grantGoodAt(grant.exp, now)) {
+      // Lapsed since it was read: read again (null, and the run view asks), sign nothing.
+      grant.refresh();
+      return;
+    }
     for (const [k, until] of held.current) if (until <= now) held.current.delete(k);
     const paired = [...machines.values()].flatMap((m) => (m.control ? [m.control] : []));
     const claims = plan({
@@ -74,20 +81,26 @@ export function useRunner(): void {
       try {
         let run = await workflowsApi.claim(c.runId, c.stepId, c.rev);
         applyRun(run);
-        run = await signAndDeliver(rp!, c.machineId, c.fields, async (body) => {
-          // The signed body is the server's to queue, once it has seen the step is still
-          // this claim's; a rev that lagged (another step settled) is read again.
-          for (let tries = 0; ; tries++) {
-            try {
-              return await workflowsApi.send(c.runId, c.stepId, body, run.rev);
-            } catch (e) {
-              const stillOurs =
-                e instanceof WorkflowsError && e.status === 412 && e.run?.steps[c.stepId]?.status === "sending";
-              if (!stillOurs || tries >= SENT_RETRIES) throw e;
-              run = e.run!;
+        run = await signAndDeliver(
+          rp!,
+          c.machineId,
+          c.fields,
+          async (body) => {
+            // The signed body is the server's to queue, once it has seen the step is still
+            // this claim's; a rev that lagged (another step settled) is read again.
+            for (let tries = 0; ; tries++) {
+              try {
+                return await workflowsApi.send(c.runId, c.stepId, body, run.rev);
+              } catch (e) {
+                const stillOurs =
+                  e instanceof WorkflowsError && e.status === 412 && e.run?.steps[c.stepId]?.status === "sending";
+                if (!stillOurs || tries >= SENT_RETRIES) throw e;
+                run = e.run!;
+              }
             }
-          }
-        });
+          },
+          { noPrompt: true },
+        );
         const id = run.steps[c.stepId]?.commandId;
         if (id) noteOwnSend(id);
         applyRun(run);
@@ -103,7 +116,7 @@ export function useRunner(): void {
         grantRef.current.refresh();
       }
     }
-  }, [runs, machines, rp, secure, grant.exp, now, live, own, mine]);
+  }, [runs, machines, rp, secure, grant.exp, grant.refresh, now, live, own, mine]);
 }
 
 /** Mounted once, in the Shell: the runner, and nothing drawn. */

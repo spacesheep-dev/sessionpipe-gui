@@ -82,6 +82,9 @@ export interface SendOptions {
   confirm?: boolean;
   /** Fires right before a prompt, so the page can say what the tap is for. */
   onTap?: () => void;
+  /** Sign with the grant already held, never a prompt (signer.ts NoGrantError when none);
+   *  a grant the machine refused is dropped, not replaced. The workflows runner's way. */
+  noPrompt?: boolean;
   expiresInS?: number;
   /** The session whose page sends it (`SendBody.from`): unsigned, the receiver's own note
    *  on the activity, so the page shows the ask at once while the events are on their way. */
@@ -130,6 +133,9 @@ export async function signAndDeliver<T>(
     const code = faultCode(e);
     if (!o.confirm && code && GRANT_FAULTS.has(code)) {
       await dropGrant(rp);
+      // A caller that may not prompt (the workflows runner) stops here: the grant is
+      // gone, every useGrant on the page reads so, and the page the person is on asks.
+      if (o.noPrompt) throw e;
       // The app's signer gets one fresh grant after a refusal (it rate-limits the rest).
       return attempt(signerKind() === "device");
     }

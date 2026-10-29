@@ -8,7 +8,7 @@
 // signed without it), a claim this tab already holds.
 import type { MachineControl, WorkflowRun, WorkflowStep } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { type Claim, claimKey, commandFor, plan, type RunnerMachine, unsignable } from "./runner";
+import { type Claim, claimKey, commandFor, grantGoodAt, plan, type RunnerMachine, unsignable } from "./runner";
 
 const MACHINE = "m_lab00000000000001";
 const KEY = { id: "key-of-this-page", alg: -7, addedAt: "2026-10-28T09:00:00.000Z" };
@@ -221,3 +221,15 @@ describe("runner: when it must do nothing", () => {
 // The runner only ever reads a MachineControl's five fields: a change to the contract shows here.
 const _typed: RunnerMachine = {} as MachineControl;
 void _typed;
+
+describe("grantGoodAt", () => {
+  it("a grant is good while its end is ahead of the clock; lapsed, unread or due, it is not", () => {
+    const now = Date.parse("2026-10-28T12:00:00.000Z");
+    expect(grantGoodAt(now + 60_000, now)).toBe(true);
+    // Read as a number an hour ago, lapsed since: the clock wins, and the runner re-reads.
+    expect(grantGoodAt(now - 1, now)).toBe(false);
+    expect(grantGoodAt(now, now)).toBe(false);
+    expect(grantGoodAt(null, now)).toBe(false);
+    expect(grantGoodAt(undefined, now)).toBe(false);
+  });
+});
