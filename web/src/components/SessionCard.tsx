@@ -507,7 +507,7 @@ export function answerItems(
   answer: (allow: boolean) => unknown,
 ): MenuItem[] {
   const disabled = st.off ? (st.reason ?? true) : undefined;
-  const what = tool ? ` ${tool}` : "";
+  const what = tool ? ` ${toolLabel(tool)}` : "";
   return [
     { label: `Allow${what}`, disabled, run: () => void answer(true) },
     { label: `Deny${what}`, disabled, run: () => void answer(false) },

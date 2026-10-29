@@ -18,6 +18,22 @@ All notable changes to `sessionpipe-gui`. The format follows
   called offline. × hides the line on this device until something changes: it clears
   itself when the machine is back, and a new drop brings it back.
 
+### Changed
+
+- **A chained shell command reads one step per line** on a session's permission strip:
+  "Allow Bash to run:", then `npm run build`, `&& npm test -- bm25`, `&& npm run deploy …`
+  each on its own line, so nothing wraps mid-token before you answer. Quotes, `$( … )` and
+  groups stay whole, a pipeline is one step, and a short command stays on the question's
+  line. The command is the call's own, whole, when the session sent it; otherwise the
+  first 200 characters the machine sends, ending in "…". Four steps show, then "Show 2
+  more lines", and Deny and Allow keep to the question's line. On a phone a longer one
+  scrolls inside, cut through a line, so you see there is more.
+
+### Fixed
+
+- **The row menu says "Allow Shell"** (and Deny), as the strip and the Inbox do, not
+  "Allow run_shell_command".
+
 ## [0.5.0] - 2026-10-28
 
 ### Added
