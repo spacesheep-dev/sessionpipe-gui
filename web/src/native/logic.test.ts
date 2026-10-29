@@ -6,10 +6,12 @@ import {
   hotkeyFrom,
   hotkeyLabel,
   isNoNode,
+  lastCheckedLine,
   notifyToggle,
   parseAddress,
   type StartState,
   startStep,
+  updateHint,
   updateLine,
 } from "./logic";
 
@@ -115,7 +117,37 @@ describe("the shortcut recorder", () => {
 describe("the update row", () => {
   it("says where the update is", () => {
     expect(updateLine("0.3.0", { state: "idle" })).toBe("sessionpipe 0.3.0 is up to date");
+    expect(updateLine("0.3.0", { state: "checking" })).toBe("Checking for updates…");
+    expect(updateLine("0.3.0", { state: "downloading", version: "0.3.1", progress: 42 })).toBe(
+      "Downloading 0.3.1… 42%",
+    );
     expect(updateLine("0.3.0", { state: "ready", version: "0.3.1" })).toBe("0.3.1 is ready");
     expect(updateLine("0.3.0", { state: "error" })).toBe("Couldn't check for updates");
+  });
+  it("says when it last looked", () => {
+    const now = Date.parse("2026-10-30T12:00:00Z");
+    expect(lastCheckedLine(undefined, now)).toBe("");
+    expect(lastCheckedLine("2026-10-30T11:59:40Z", now)).toBe("Last checked just now");
+    expect(lastCheckedLine("2026-10-30T11:35:00Z", now)).toBe("Last checked 25 min ago");
+    expect(lastCheckedLine("2026-10-30T10:59:00Z", now)).toBe("Last checked 1 hour ago");
+    expect(lastCheckedLine("2026-10-30T06:00:00Z", now)).toBe("Last checked 6 hours ago");
+    expect(lastCheckedLine("2026-10-29T08:00:00Z", now)).toBe("Last checked yesterday");
+    expect(lastCheckedLine("2026-10-26T08:00:00Z", now)).toBe("Last checked 4 days ago");
+  });
+  it("captions the row with the reason, the version you have and the last check", () => {
+    const now = Date.parse("2026-10-30T12:00:00Z");
+    const at = "2026-10-30T11:59:50Z";
+    expect(updateHint("0.6.0", { state: "idle" }, now)).toBe("");
+    expect(updateHint("0.6.0", { state: "idle", lastChecked: at }, now)).toBe("Last checked just now.");
+    expect(updateHint("0.6.0", { state: "ready", version: "0.7.0", lastChecked: at }, now)).toBe(
+      "You have 0.6.0. Last checked just now.",
+    );
+    expect(
+      updateHint(
+        "0.6.0",
+        { state: "error", error: "You're offline, or GitHub can't be reached.", lastChecked: at },
+        now,
+      ),
+    ).toBe("You're offline, or GitHub can't be reached. Last checked just now.");
   });
 });

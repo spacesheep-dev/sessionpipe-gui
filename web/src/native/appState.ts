@@ -32,6 +32,12 @@ export type UpdateState = "idle" | "checking" | "downloading" | "ready" | "error
 export interface UpdateStatus {
   state: UpdateState;
   version?: string;
+  /** ISO time the last check finished. */
+  lastChecked?: string;
+  /** Why the last check or install failed, in plain words. */
+  error?: string;
+  /** Percent downloaded, while downloading. */
+  progress?: number;
 }
 export type NotifyStatus = "granted" | "denied" | "undetermined";
 

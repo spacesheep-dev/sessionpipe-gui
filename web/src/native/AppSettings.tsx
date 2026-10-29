@@ -23,7 +23,7 @@ import {
   useCell,
 } from "./appState";
 import { invoke } from "./bridge";
-import { hotkeyFrom, hotkeyLabel, isCancel, notifyToggle, parseAddress, updateLine } from "./logic";
+import { hotkeyFrom, hotkeyLabel, isCancel, notifyToggle, parseAddress, updateHint, updateLine } from "./logic";
 import { features, shellInfo } from "./shell";
 import "./native.css";
 
@@ -315,10 +315,10 @@ function UpdatesGroup({
           onChange={(on) => set({ autoUpdate: on })}
         />
       </Row>
-      <Row label={updateLine(appVersion, u)}>
+      <Row label={updateLine(appVersion, u)} hint={updateHint(appVersion, u) || undefined}>
         {u.state === "ready" ? (
           <ActionButton className="btn btn--sm btn--primary" onClick={() => invoke("app_update_restart")}>
-            Restart to Update
+            Install and relaunch
           </ActionButton>
         ) : (
           <ActionButton
@@ -326,7 +326,7 @@ function UpdatesGroup({
             disabled={u.state === "checking" || u.state === "downloading"}
             onClick={async () => update.set(await invoke("app_update_check"))}
           >
-            Check Now
+            Check now
           </ActionButton>
         )}
       </Row>
