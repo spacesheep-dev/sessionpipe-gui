@@ -82,10 +82,19 @@ export function shellLines(cmd: string): string[] | null {
 
 /** The call's own command, when it is the command the prompt names. A Claude Code prompt
  *  carries no call id, so the call read for it is the newest of its tool, and a subagent's
- *  can be newer: where the message (`said`, its first characters) is a command, the call's
- *  must start with it, or the strip stays on the message. */
-export function askedCommand(input: Record<string, unknown> | undefined, said: string | undefined): string | undefined {
+ *  can be newer: where the message (`said`) is a command, the call's must be that command,
+ *  or, when the message was cut (`cut`: the server keeps 200 characters), start with what
+ *  is left of it; otherwise the strip stays on the message. A prefix alone would take a
+ *  subagent's `npm test -- -u && git push` for a prompt that asked about `npm test`. */
+export function askedCommand(
+  input: Record<string, unknown> | undefined,
+  said: string | undefined,
+  cut = false,
+): string | undefined {
   const cmd = input?.command;
   if (typeof cmd !== "string" || !cmd) return undefined;
-  return !said || cmd.trimStart().startsWith(said.replace(/…$/, "").trimStart()) ? cmd : undefined;
+  if (!said) return cmd;
+  const asked = said.replace(/…$/, "").trim();
+  const own = cmd.trim();
+  return (cut ? own.startsWith(asked) : own === asked) ? cmd : undefined;
 }

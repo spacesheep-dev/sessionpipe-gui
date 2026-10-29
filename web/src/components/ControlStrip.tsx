@@ -202,7 +202,10 @@ function Question({ a, session }: { a: Attention; session: SessionSummary }) {
   const msg = attentionMessage(a);
   const shell = SHELL.test(a.tool);
   const said = msg && shell && !/\b(permission|wants|needs)\b/i.test(msg) ? msg : undefined;
-  const whole = shell ? askedCommand(input, said) : undefined;
+  // Cut is read off the message as sent: the server keeps 200 characters and adds no mark,
+  // and `said` has the tool's name taken off, so its own length never says.
+  const cutMsg = (a.message?.length ?? 0) >= 200 || !!said?.endsWith("…");
+  const whole = shell ? askedCommand(input, said, cutMsg) : undefined;
   const cmd = whole ?? said;
   if (!cmd)
     return line(
@@ -217,7 +220,7 @@ function Question({ a, session }: { a: Attention; session: SessionSummary }) {
         Allow {tool} to run <code className="ctl-cmd">{cmd}</code>?
       </>,
     );
-  const cut = !whole && (cmd.length >= 200 || cmd.endsWith("…"));
+  const cut = !whole && cutMsg;
   if (cut && !steps[steps.length - 1]!.endsWith("…")) steps[steps.length - 1] += "…";
   const more = steps.length - CMD_LINES;
   const all = more <= 0 || unfolded === a.attentionId;

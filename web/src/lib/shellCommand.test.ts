@@ -61,14 +61,24 @@ describe("shellLines", () => {
 });
 
 describe("askedCommand", () => {
-  it("is the call's command only when it starts with the command the prompt names", () => {
+  it("is the call's command when it is the command the prompt names, whole or cut", () => {
     const input = { command: "npm run build && npm test -- bm25 && npm run deploy -- --target staging" };
-    expect(askedCommand(input, "npm run build && npm test")).toBe(input.command);
-    expect(askedCommand(input, `${input.command.slice(0, 30)}…`)).toBe(input.command);
+    expect(askedCommand(input, input.command)).toBe(input.command);
+    expect(askedCommand(input, ` ${input.command}\n`)).toBe(input.command);
+    // The message was cut (the server keeps 200 characters): what is left of it is a prefix.
+    expect(askedCommand(input, "npm run build && npm test", true)).toBe(input.command);
+    expect(askedCommand(input, `${input.command.slice(0, 30)}…`, true)).toBe(input.command);
     expect(askedCommand(input, undefined)).toBe(input.command);
-    // A subagent's newer call of the same tool is not the one this prompt asks about.
-    expect(askedCommand({ command: "ls -la" }, "rm -rf build")).toBeUndefined();
     expect(askedCommand({ file_path: "a.ts" }, undefined)).toBeUndefined();
     expect(askedCommand(undefined, "ls")).toBeUndefined();
+  });
+
+  it("leaves a subagent's newer call alone: a whole message is matched whole, not as a prefix", () => {
+    // The prompt asks about `npm test`; a subagent's Bash call is the newest unended one.
+    const sub = { command: "npm test -- -u && git push --force" };
+    expect(askedCommand(sub, "npm test")).toBeUndefined();
+    expect(askedCommand(sub, "npm test", true)).toBe(sub.command);
+    expect(askedCommand({ command: "ls -la" }, "rm -rf build")).toBeUndefined();
+    expect(askedCommand({ command: "ls -la" }, "rm -rf build", true)).toBeUndefined();
   });
 });
