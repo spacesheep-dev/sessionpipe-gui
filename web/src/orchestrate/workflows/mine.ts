@@ -14,18 +14,23 @@ const KEY = "sessionpipe.workflows.mine";
 /** Run ids kept at most (the newest; a run that ended stays only this long). */
 const MAX = 200;
 
+/** This tab's copy, the same object until something changes (the hook's snapshot). */
 let held: ReadonlySet<string> | null = null;
 const listeners = new Set<() => void>();
 
-const read = (): ReadonlySet<string> => {
-  if (held) return held;
+/** What the storage holds right now: every write starts from this, not from `held`, so
+ *  two tabs' runs add up instead of the later write dropping the other tab's. */
+const load = (): Set<string> => {
   try {
     const raw = localStorage.getItem(KEY);
     const ids = raw ? (JSON.parse(raw) as unknown) : [];
-    held = new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : []);
+    return new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : []);
   } catch {
-    held = new Set();
+    return new Set(held ?? []);
   }
+};
+const read = (): ReadonlySet<string> => {
+  held ??= load();
   return held;
 };
 const write = (ids: string[]): void => {
@@ -38,19 +43,35 @@ const write = (ids: string[]): void => {
   for (const l of listeners) l();
 };
 
+/** Another tab marked or forgot a run: read again, so this tab signs for it too. */
+if (typeof window !== "undefined")
+  window.addEventListener("storage", (e) => {
+    if (e.key !== KEY && e.key !== null) return;
+    held = null;
+    for (const l of listeners) l();
+  });
+
 /** The runs this browser signs for. */
 export const mineNow = (): ReadonlySet<string> => read();
 
 /** This browser signs for `runId` from now on. */
 export function markMine(runId: string): void {
-  if (read().has(runId)) return;
-  write([...[...read()].slice(-(MAX - 1)), runId]);
+  const now = load();
+  if (now.has(runId)) {
+    held = now;
+    return;
+  }
+  write([...[...now].slice(-(MAX - 1)), runId]);
 }
 
 /** Forget a run that is gone (deleted): nothing is signed for an id that comes back. */
 export function forgetMine(runId: string): void {
-  if (!read().has(runId)) return;
-  write([...read()].filter((id) => id !== runId));
+  const now = load();
+  if (!now.has(runId)) {
+    held = now;
+    return;
+  }
+  write([...now].filter((id) => id !== runId));
 }
 
 const subscribe = (l: () => void) => {
