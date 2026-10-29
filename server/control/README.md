@@ -187,8 +187,10 @@ The command is kind `pool` on session `sessionpipe:pool` with `pool_action` (`on
 optionally for refresh, the pending login id for login.complete), `pool_order` (order:
 every account id once, at most 20) and `pool_code` (login.complete: the pasted
 `code#state`, at most 512 characters, one line); on, off and login.begin take nothing
-else. It goes through `POST /send` like any command; the page signs on, off, remove and
-login.complete with a fresh confirm (`POOL_CONFIRM_ACTIONS`), never the day grant. This receiver's sessionpipe-core (0.10.0) closes
+else. It goes through `POST /send` like any command; the page signs on, off, remove, order,
+disable and login.complete with a fresh confirm (`POOL_CONFIRM_ACTIONS`), never the day
+grant, and the early verify refuses one of those signed with a grant alone with
+`confirm_required`, as the daemon does. This receiver's sessionpipe-core (0.10.0) closes
 its kind set in `parseCommand`, which its verifier runs first, so `pool.ts` verifies the
 kind itself: its own strict parser for the fields, then the core's exported primitives
 (`parseGrant`, `verifyAssertion`, `sha256`) in the core's order with the core's refusal

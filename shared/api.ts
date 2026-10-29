@@ -488,9 +488,19 @@ export const POOL_ACTIONS: readonly PoolAction[] = [
  *  `pool_account`; `refresh` may. */
 export const POOL_ACCOUNT_REQUIRED: readonly PoolAction[] = ["enable", "disable", "remove", "login.complete"];
 export const POOL_ACCOUNT_ACTIONS: readonly PoolAction[] = [...POOL_ACCOUNT_REQUIRED, "refresh"];
-/** The actions a receiver signs with a fresh confirm (one passkey tap, Touch ID), never
- *  under the day grant: they change what a machine sends to a vendor, or forget a sign-in. */
-export const POOL_CONFIRM_ACTIONS: readonly PoolAction[] = ["on", "off", "remove", "login.complete"];
+/** The actions signed with a fresh confirm (one passkey tap, Touch ID), never under the
+ *  day grant: they change what a machine sends to a vendor, which account serves, or
+ *  forget a sign-in. The daemon refuses one signed with a grant alone (`confirm_required`),
+ *  and so does this receiver's early verify (server/control/pool.ts); the page signs them
+ *  with a confirm. The same six the daemon names (sessionpipe POOL_CONFIRM). */
+export const POOL_CONFIRM_ACTIONS: readonly PoolAction[] = [
+  "on",
+  "off",
+  "remove",
+  "order",
+  "disable",
+  "login.complete",
+];
 /** `pool_code`'s longest form (the pasted `code#state`), one line. */
 export const POOL_CODE_MAX = 512;
 /** An account id or a pending login id in a command (CONTROL.md, the pool). */

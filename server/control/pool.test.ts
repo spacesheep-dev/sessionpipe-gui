@@ -15,7 +15,16 @@ import {
   verifyCommand,
 } from "sessionpipe-core/control";
 import { afterAll, describe, expect, it } from "vitest";
-import { type ControlActivity, type MachineControl, POOL_SESSION, ROUTES } from "../../shared/api.js";
+import {
+  type ControlActivity,
+  type MachineControl,
+  POOL_ACCOUNT_REQUIRED,
+  POOL_ACTIONS,
+  POOL_CONFIRM_ACTIONS,
+  POOL_SESSION,
+  type PoolAction,
+  ROUTES,
+} from "../../shared/api.js";
 import { Router } from "../http/router.js";
 import { type Control, createControl } from "./index.js";
 import { parseHello, parsePool } from "./parse.js";
@@ -187,9 +196,9 @@ describe("verifyPoolCommand", () => {
   it("takes the grant path and the confirm path on a trusted key, by the core's own primitives", async () => {
     const pk = await TestPasskey.create();
     const day = await TestDayKey.create();
-    const cmd = poolCmd(M, { pool_action: "order", pool_order: [B, A] });
+    const cmd = poolCmd(M, { pool_action: "refresh", pool_account: A });
     const grant = await verifyPoolCommand(await signCommand(pk, day, cmd), await opts(pk));
-    expect(grant).toMatchObject({ ok: true, via: "grant", key: pk.key.id, cmd: { pool_order: [B, A] } });
+    expect(grant).toMatchObject({ ok: true, via: "grant", key: pk.key.id, cmd: { pool_account: A } });
     const confirm = await verifyPoolCommand(await signCommand(pk, day, cmd, { confirm: true }), await opts(pk));
     expect(confirm).toMatchObject({ ok: true, via: "confirm", key: pk.key.id });
     // The core itself still says unknown_kind: that is why pool.ts exists.
@@ -245,22 +254,65 @@ describe("verifyPoolCommand", () => {
     expect(await code({ ...confirmed, cmd: cmd.replace('"on"', '"off"') })).toBe("bad_assertion");
   });
 
+  it("refuses a confirm-only action signed with the day grant alone, as the daemon does", async () => {
+    const pk = await TestPasskey.create();
+    const day = await TestDayKey.create();
+    const o = await opts(pk);
+    const fields = (action: PoolAction): Record<string, unknown> =>
+      action === "order"
+        ? { pool_action: action, pool_order: [B, A] }
+        : action === "login.complete"
+          ? { pool_action: action, pool_account: "pl_1", pool_code: "code#state" }
+          : POOL_ACCOUNT_REQUIRED.includes(action)
+            ? { pool_action: action, pool_account: A }
+            : { pool_action: action };
+    expect(POOL_CONFIRM_ACTIONS).toEqual(["on", "off", "remove", "order", "disable", "login.complete"]);
+    for (const action of POOL_ACTIONS) {
+      const cmd = poolCmd(M, fields(action));
+      const granted = await verifyPoolCommand(await signCommand(pk, day, cmd), o);
+      const confirmed = await verifyPoolCommand(await signCommand(pk, day, cmd, { confirm: true }), o);
+      expect(confirmed).toMatchObject({ ok: true, via: "confirm" });
+      if (POOL_CONFIRM_ACTIONS.includes(action))
+        expect(granted, action).toEqual({
+          ok: false,
+          code: "confirm_required",
+          why: `pool ${action} needs a fresh confirm, not a day grant`,
+        });
+      else expect(granted, action).toMatchObject({ ok: true, via: "grant" });
+    }
+    // The signature checks come first: an untrusted key is refused as such, not as unconfirmed.
+    const other = await TestPasskey.create();
+    const off = await signCommand(pk, day, poolCmd(M, { pool_action: "off" }));
+    expect(await verifyPoolCommand(off, { ...o, trusted: [other.key] })).toMatchObject({ code: "untrusted_key" });
+  });
+
   it("hands the whole check to a core that lists the kind", async () => {
     const pk = await TestPasskey.create();
     const day = await TestDayKey.create();
     const cmd = poolCmd(M, {});
     const calls: unknown[] = [];
+    let via: "grant" | "confirm" = "confirm";
     const newer = {
       CONTROL_KINDS: [...CONTROL_KINDS, "pool"] as unknown as typeof CONTROL_KINDS,
       verifyCommand: async (s: unknown, o: unknown) => {
         calls.push([s, o]);
-        return { ok: true as const, cmd: JSON.parse((s as SignedCommand).cmd), via: "grant" as const, key: "k" };
+        return { ok: true as const, cmd: JSON.parse((s as SignedCommand).cmd), via, key: "k" };
       },
     };
     expect(coreTakesPool(newer)).toBe(true);
-    const v = await verifyPoolCommand(await signCommand(pk, day, cmd), await opts(pk), newer as never);
-    expect(v).toMatchObject({ ok: true, via: "grant", key: "k", cmd: { pool_action: "on" } });
+    const v = await verifyPoolCommand(
+      await signCommand(pk, day, cmd, { confirm: true }),
+      await opts(pk),
+      newer as never,
+    );
+    expect(v).toMatchObject({ ok: true, via: "confirm", key: "k", cmd: { pool_action: "on" } });
     expect(calls).toHaveLength(1);
+    // The confirm rule holds on this path too: `on` under a grant is refused whatever the core said.
+    via = "grant";
+    expect(await verifyPoolCommand(await signCommand(pk, day, cmd), await opts(pk), newer as never)).toMatchObject({
+      ok: false,
+      code: "confirm_required",
+    });
     const refusing = {
       ...newer,
       verifyCommand: async () => ({ ok: false as const, code: "replay" as const, why: "seen" }),
@@ -380,8 +432,9 @@ describe("through the receiver", () => {
       const token = enrolled.body.token as string;
       const send = (signed: SignedCommand) => call(b.url, "POST", `${UI}/send`, { body: { machineId: M, ...signed } });
 
-      // Before the hello says `pool`: refused at the second look, nothing queued.
-      const early = await send(await signCommand(pk, day, poolCmd(M, {})));
+      // Before the hello says `pool`: refused at the second look, nothing queued. (`on` is
+      // confirm-only, so it is signed as the page signs it, with a confirm.)
+      const early = await send(await signCommand(pk, day, poolCmd(M, {}), { confirm: true }));
       expect(early).toMatchObject({ status: 422, body: { code: "pool_unsupported" } });
 
       const h = hello({
@@ -405,11 +458,20 @@ describe("through the receiver", () => {
 
       // An unknown account, a short order: refused with the pool's own codes.
       expect(
-        await send(await signCommand(pk, day, poolCmd(M, { pool_action: "remove", pool_account: "nobody" }))),
+        await send(
+          await signCommand(pk, day, poolCmd(M, { pool_action: "remove", pool_account: "nobody" }), { confirm: true }),
+        ),
       ).toMatchObject({ status: 422, body: { code: "pool_account" } });
       expect(
-        await send(await signCommand(pk, day, poolCmd(M, { pool_action: "order", pool_order: [A] }))),
+        await send(
+          await signCommand(pk, day, poolCmd(M, { pool_action: "order", pool_order: [A] }), { confirm: true }),
+        ),
       ).toMatchObject({ status: 422, body: { code: "pool_order" } });
+      // A confirm-only action under the day grant alone: refused before the second look,
+      // as the daemon would refuse it, nothing queued.
+      expect(
+        await send(await signCommand(pk, day, poolCmd(M, { pool_action: "order", pool_order: [B, A] }))),
+      ).toMatchObject({ status: 422, body: { code: "confirm_required" } });
       // A bad signature is the verifier's word, not the second look's.
       const good = await signCommand(pk, day, poolCmd(M, {}));
       expect(await send({ ...good, csig: "AAAA" })).toMatchObject({ status: 422, body: { code: "bad_csig" } });
@@ -418,7 +480,9 @@ describe("through the receiver", () => {
       b.control.subscribe((m) => {
         if (m.kind === "control") frames.push(m.message);
       });
-      const queued = await send(await signCommand(pk, day, poolCmd(M, { pool_action: "order", pool_order: [B, A] })));
+      const queued = await send(
+        await signCommand(pk, day, poolCmd(M, { pool_action: "order", pool_order: [B, A] }), { confirm: true }),
+      );
       expect(queued.status).toBe(201);
       const act = queued.body as unknown as ControlActivity;
       expect(act).toMatchObject({
@@ -432,7 +496,9 @@ describe("through the receiver", () => {
         await signCommand(pk, day, poolCmd(M, { pool_action: "login.begin" }), { confirm: true }),
       );
       expect(begun.body).toMatchObject({ text: "Sign in to Claude", poolAction: "login.begin" });
-      const disabled = await send(await signCommand(pk, day, poolCmd(M, { pool_action: "disable", pool_account: A })));
+      const disabled = await send(
+        await signCommand(pk, day, poolCmd(M, { pool_action: "disable", pool_account: A }), { confirm: true }),
+      );
       expect(disabled.body).toMatchObject({ text: "Turn Work off", poolAction: "disable", poolAccount: A });
 
       // The machine polls them byte for byte and acks: the detail reaches the activity.
@@ -476,7 +542,7 @@ describe("through the receiver", () => {
         204,
       );
       expect(b.control.machines().get("lab")?.pool).toBeUndefined();
-      expect(await send(await signCommand(pk, day, poolCmd(M, {})))).toMatchObject({
+      expect(await send(await signCommand(pk, day, poolCmd(M, {}), { confirm: true }))).toMatchObject({
         status: 422,
         body: { code: "pool_unsupported" },
       });

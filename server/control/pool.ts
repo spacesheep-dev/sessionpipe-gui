@@ -37,6 +37,7 @@ import {
   POOL_ACCOUNTS_MAX,
   POOL_ACTIONS,
   POOL_CODE_MAX,
+  POOL_CONFIRM_ACTIONS,
   POOL_SESSION,
   type PoolAction,
 } from "../../shared/api.js";
@@ -58,7 +59,9 @@ export interface PoolCommand {
   iat: number;
 }
 
-export type PoolRefusal = RefusalCode | "unknown_kind";
+/** The core's codes, `unknown_kind` (a core that does not list the kind), and the daemon's
+ *  `confirm_required`: a confirm-only action signed with the day grant alone. */
+export type PoolRefusal = RefusalCode | "unknown_kind" | "confirm_required";
 export type PoolParsed = { ok: true; cmd: PoolCommand } | { ok: false; code: PoolRefusal; why: string };
 export type PoolVerdict =
   | { ok: true; cmd: PoolCommand; via: "grant" | "confirm"; key: string }
@@ -198,7 +201,7 @@ export async function verifyPoolCommand(
   const cmd = p.cmd;
   if (coreTakesPool(c)) {
     const v = await c.verifyCommand(s, { ...o, maxAgeMs: o.maxAgeMs ?? RECEIVER_MAX_AGE_MS });
-    return v.ok ? { ok: true, cmd, via: v.via, key: v.key } : bad(v.code, v.why);
+    return v.ok ? (needsConfirm(cmd, v.via) ?? { ok: true, cmd, via: v.via, key: v.key }) : bad(v.code, v.why);
   }
   if (cmd.machine !== o.machine) return bad("wrong_machine", "the command is for another machine");
   let via: "grant" | "confirm" | null = null;
@@ -244,5 +247,14 @@ export async function verifyPoolCommand(
   if (cmd.iat > o.now + SKEW_MS) return bad("future", "the command is dated in the future (is this clock right?)");
   if (o.now - cmd.iat > (o.maxAgeMs ?? RECEIVER_MAX_AGE_MS))
     return bad("too_old", "the command was signed too long ago");
-  return { ok: true, cmd, via, key: keyId };
+  return needsConfirm(cmd, via) ?? { ok: true, cmd, via, key: keyId };
+}
+
+/** The contract's last word on a verified pool command (CONTROL.md §6, POOL_CONFIRM_ACTIONS):
+ *  on, off, remove, order, disable and login.complete take a fresh confirm, never the day
+ *  grant alone. The daemon refuses one with `confirm_required`; so does this early verify,
+ *  so nothing is queued that the machine would only send back. */
+function needsConfirm(cmd: PoolCommand, via: "grant" | "confirm"): ReturnType<typeof bad> | null {
+  if (via === "confirm" || !POOL_CONFIRM_ACTIONS.includes(cmd.pool_action)) return null;
+  return bad("confirm_required", `pool ${cmd.pool_action} needs a fresh confirm, not a day grant`);
 }
