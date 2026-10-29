@@ -212,7 +212,11 @@ jobs:
           workspaces: apps -> target
 
       # build:release refuses to ship without the bundled views; the app carries them too.
+      # The next step is the build, so the prepare script's own is skipped: on Windows it
+      # cannot spawn npm (npm.cmd needs a shell) and fails npm ci with no message.
       - run: npm ci
+        env:
+          SPGUI_SKIP_PREPARE: "1"
       - run: npm run build:release
       - run: npm ci
         working-directory: apps/desktop
