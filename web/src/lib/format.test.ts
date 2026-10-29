@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { toolLabel } from "./format";
+import { attentionMessage, isPlanReview, toolLabel } from "./format";
 
 describe("toolLabel", () => {
   it("reads an MCP tool as server · tool", () => {
@@ -19,6 +19,34 @@ describe("toolLabel", () => {
     expect(toolLabel("read_file")).toBe("Read");
     expect(toolLabel("replace")).toBe("Edit");
     expect(toolLabel("apply_patch")).toBe("Edit");
+  });
+  it("names Claude Code's plan review Plan", () => {
+    expect(toolLabel("ExitPlanMode")).toBe("Plan");
+  });
+});
+
+describe("isPlanReview", () => {
+  it("is a permission to leave plan mode, by either spelling", () => {
+    expect(isPlanReview({ kind: "permission", tool: "ExitPlanMode" })).toBe(true);
+    expect(isPlanReview({ kind: "permission", tool: "exit_plan_mode" })).toBe(true);
+  });
+  it("is nothing else", () => {
+    expect(isPlanReview({ kind: "permission", tool: "Bash" })).toBe(false);
+    expect(isPlanReview({ kind: "permission", tool: "update_plan" })).toBe(false);
+    expect(isPlanReview({ kind: "question", tool: "ExitPlanMode" })).toBe(false);
+    expect(isPlanReview({ kind: "permission" })).toBe(false);
+  });
+});
+
+describe("attentionMessage", () => {
+  it("drops the tool name the message starts with", () => {
+    expect(attentionMessage({ tool: "Bash", message: "Bash: rm -rf dist" })).toBe("rm -rf dist");
+    expect(attentionMessage({ tool: "Bash", message: "Bash rm -rf dist" })).toBe("rm -rf dist");
+    expect(attentionMessage({ message: "Allow this?" })).toBe("Allow this?");
+  });
+  it("says nothing when the message is only the tool's name", () => {
+    expect(attentionMessage({ tool: "ExitPlanMode", message: "ExitPlanMode" })).toBeUndefined();
+    expect(attentionMessage({ tool: "Bash", message: "Bash " })).toBeUndefined();
   });
 });
 

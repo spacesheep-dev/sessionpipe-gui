@@ -63,6 +63,7 @@ const soundFor = (r: OpenAttention): SoundKind =>
 
 function attentionToast(r: OpenAttention): Toast {
   const { session: s, attention: a } = r;
+  const msg = attentionMessage(a);
   return {
     id: `att|${attKey(r)}`,
     kind: "needs-you",
@@ -75,8 +76,8 @@ function attentionToast(r: OpenAttention): Toast {
     verb: ATTENTION_VERB[a.kind] ?? "Needs you",
     label: ATTENTION_LABEL[a.kind] ?? a.kind,
     tool: a.tool ? toolLabel(a.tool) : undefined,
-    body: a.message
-      ? oneLine(attentionMessage(a) ?? a.message, 160)
+    body: msg
+      ? oneLine(msg, 160)
       : a.tool
         ? undefined
         : r.answerable

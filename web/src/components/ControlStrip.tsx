@@ -13,8 +13,10 @@
 import type { Attention, MachineControl, SessionSummary, Suggestion } from "@shared/api";
 import {
   type KeyboardEvent,
+  lazy,
   type ReactNode,
   type RefObject,
+  Suspense,
   useEffect,
   useId,
   useLayoutEffect,
@@ -25,12 +27,15 @@ import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachm
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
 import { SETUP_LABEL, signerKind } from "../control/signer";
 import { useAskedInput } from "../lib/askedInput";
-import { attentionMessage, toolLabel } from "../lib/format";
+import { attentionMessage, isPlanReview, toolLabel } from "../lib/format";
 import { Link } from "../lib/router";
 import { askedCommand, shellLines } from "../lib/shellCommand";
 import { hintFor } from "../lib/shortcuts";
 import { ActionButton, Spinner, StateDot } from "./bits";
 import "../control/control.css";
+
+// The plan reads as Markdown, whose renderer stays out of the first paint (PlanText.tsx).
+const PlanText = lazy(() => import("./PlanText").then((m) => ({ default: m.PlanText })));
 
 export type ControlAction =
   | { kind: "prompt"; text: string }
@@ -152,7 +157,8 @@ const CMD_LINES = 4;
 /** "Allow Bash to run `npm run deploy`?", or "Allow Write?" with its message after it. A
  *  long chained command reads one step per line under "Allow Shell to run:", four steps
  *  until "Show more"; the whole command comes from the call's own input when the session
- *  sent it (lib/askedInput.ts), else from the message, cut at 200 characters. */
+ *  sent it (lib/askedInput.ts), else from the message, cut at 200 characters. A plan
+ *  review asks about the plan, from the same input, and shows it under the question. */
 function Question({ a, session }: { a: Attention; session: SessionSummary }) {
   const { input } = useAskedInput(session, a);
   // The prompt whose steps are all shown: another prompt starts folded.
@@ -164,6 +170,24 @@ function Question({ a, session }: { a: Attention; session: SessionSummary }) {
       <span className="ctl-q-text">{words}</span>
     </p>
   );
+  if (isPlanReview(a)) {
+    // Below tier 3 there is no plan: the prompt's own message, when it says more than the
+    // tool's name.
+    const plan = typeof input?.plan === "string" && input.plan.trim() ? input.plan : null;
+    const said = plan ? undefined : attentionMessage(a);
+    return (
+      <>
+        {line(<>Ready to start on this plan?</>)}
+        {plan ? (
+          <Suspense fallback={null}>
+            <PlanText text={plan} />
+          </Suspense>
+        ) : said ? (
+          <p className="ctl-answer-msg ctl-plan-msg">{said}</p>
+        ) : null}
+      </>
+    );
+  }
   if (!a.tool)
     return line(
       <>
@@ -216,6 +240,19 @@ function Question({ a, session }: { a: Attention; session: SessionSummary }) {
       )}
     </>
   );
+}
+
+/** A note travels with an answer up to this many characters (CONTROL.md §3, `note`). */
+const NOTE_MAX = 2000;
+
+/** Why Approve plan is off while the composer holds a note. */
+const NOTED = "Send the note with Keep planning, or clear it";
+
+/** Keep planning: a no to the plan, carrying what should change when the composer says
+ *  it. The note reaches the model beside the decision, so the plan comes back revised. */
+export function keepPlanning(attentionId: string, text: string): ControlAction {
+  const note = text.trim();
+  return { kind: "permission.answer", attentionId, allow: false, ...(note ? { note } : {}) };
 }
 
 /** The textarea grows with its text up to 40 % of the view, then scrolls (CSS caps it). */
@@ -280,6 +317,19 @@ export function ControlStrip({
   // Images beside the message (control/Attachments.tsx): paperclip, paste, drop, the phone's picker.
   const att = useAttachments({ machine: session.machine, enabled });
   const name = session.machine ?? "the machine";
+  const permissions = (attentions ?? (attention ? [attention] : [])).filter((a) => a.kind === "permission");
+  // The answerable prompt(s) only; a notification twin adds nothing. With no answerable one,
+  // the notification is shown as what it is: a prompt waiting in the terminal.
+  const open = permissions.some(answerable) ? permissions.filter(answerable) : permissions;
+  // A plan review this strip can answer: the composer then says what should change, and
+  // sending it is Keep planning. A prompt could not reach the agent anyway, blocked on it.
+  const review = open.find(
+    (a) => isPlanReview(a) && answerable(a) && !preHello(a, control) && answers?.[a.attentionId] !== "closed",
+  );
+  const tooLong = text.trim().length > NOTE_MAX;
+  // Approve plan carries no note (an allow reaches Claude Code with none), so while the
+  // composer holds one it waits: the words would otherwise stay behind as the next prompt.
+  const noted = !!review && !!text.trim();
   // One reason at a time, most fundamental first (the wrong address or an insecure page
   // come before pairing, which needs the right address too), each with its one way out; none when
   // sending simply works (the composer then carries no caption at all).
@@ -352,6 +402,8 @@ export function ControlStrip({
             ),
           };
     if (!onSend) return null;
+    if (review && tooLong) return { kind: "too-long", text: "Keep it under 2,000 characters", tone: "err" };
+    if (noted) return { kind: "plan-note", text: NOTED };
     if (stream)
       return {
         kind: "stream",
@@ -398,11 +450,9 @@ export function ControlStrip({
         : stream
           ? "waiting for the connection"
           : null;
-  const permissions = (attentions ?? (attention ? [attention] : [])).filter((a) => a.kind === "permission");
-  // The answerable prompt(s) only; a notification twin adds nothing. With no answerable one,
-  // the notification is shown as what it is: a prompt waiting in the terminal.
-  const open = permissions.some(answerable) ? permissions.filter(answerable) : permissions;
-  const canSend = enabled && !busy && !att.uploading && (!!text.trim() || att.items.length > 0);
+  const canSend = review
+    ? enabled && !busy && !!text.trim() && !tooLong && answers?.[review.attentionId] !== "sent"
+    : enabled && !busy && !att.uploading && (!!text.trim() || att.items.length > 0);
 
   const run = (id: string, action: ControlAction, after?: () => void) => {
     if (!enabled || busy) return;
@@ -413,7 +463,15 @@ export function ControlStrip({
       .catch(() => {})
       .finally(() => setBusy(null));
   };
+  // Keep planning with what the composer says; once it went, the composer is clear again.
+  const keep = (id: string, attentionId: string) =>
+    run(id, keepPlanning(attentionId, text), () => {
+      setText("");
+      writeDraft(session.key, "");
+    });
   const sendText = () => {
+    // The press is Send's, so its own spinner says it, not Keep planning's.
+    if (review) return canSend ? keep("prompt", review.attentionId) : undefined;
     const t = text.trim();
     if (!t && att.items.length === 0) return;
     // The signed text: the message, then the attachments block (or null while an upload runs).
@@ -444,6 +502,7 @@ export function ControlStrip({
     >
       {open.map((a) => {
         const status = answers?.[a.attentionId];
+        const plan = isPlanReview(a);
         const terminal = !answerable(a);
         const early = !terminal && preHello(a, control);
         const off = !enabled || !!busy || status === "sent" || early;
@@ -460,7 +519,7 @@ export function ControlStrip({
                 : offWhy;
         return (
           <div
-            className="ctl-answer"
+            className={plan ? "ctl-answer ctl-answer--plan" : "ctl-answer"}
             key={a.attentionId}
             data-attention={a.attentionId}
             data-answer={terminal ? "terminal" : (status ?? (early ? "pre-hello" : "open"))}
@@ -498,26 +557,30 @@ export function ControlStrip({
               <span className="ctl-answer-btns">
                 <ActionButton
                   className="btn btn--deny"
-                  disabled={off && busy !== `deny:${a.attentionId}`}
+                  disabled={(off || (plan && tooLong)) && busy !== `deny:${a.attentionId}`}
                   pending={busy === `deny:${a.attentionId}`}
-                  pendingLabel="Denying…"
+                  pendingLabel={plan ? "Sending…" : "Denying…"}
                   data-tip-keys={hintFor("session.deny") || undefined}
+                  aria-description={plan && tooLong ? "Keep it under 2,000 characters" : undefined}
                   onClick={() =>
-                    run(`deny:${a.attentionId}`, {
-                      kind: "permission.answer",
-                      attentionId: a.attentionId,
-                      allow: false,
-                    })
+                    plan
+                      ? keep(`deny:${a.attentionId}`, a.attentionId)
+                      : run(`deny:${a.attentionId}`, {
+                          kind: "permission.answer",
+                          attentionId: a.attentionId,
+                          allow: false,
+                        })
                   }
                 >
-                  Deny
+                  {plan ? "Keep planning" : "Deny"}
                 </ActionButton>
                 <ActionButton
                   className="btn btn--allow"
-                  disabled={off && busy !== `allow:${a.attentionId}`}
+                  disabled={(off || (plan && noted)) && busy !== `allow:${a.attentionId}`}
                   pending={busy === `allow:${a.attentionId}`}
-                  pendingLabel="Allowing…"
+                  pendingLabel={plan ? "Approving…" : "Allowing…"}
                   data-tip-keys={hintFor("session.allow") || undefined}
+                  aria-description={plan && noted && !off ? NOTED : undefined}
                   onClick={() =>
                     run(`allow:${a.attentionId}`, {
                       kind: "permission.answer",
@@ -526,7 +589,7 @@ export function ControlStrip({
                     })
                   }
                 >
-                  Allow
+                  {plan ? "Approve plan" : "Allow"}
                 </ActionButton>
               </span>
             )}
@@ -536,13 +599,13 @@ export function ControlStrip({
       <div className="ctl-field">
         <AttachmentTray att={att} />
         <div className="ctl-ask">
-          <AttachButton att={att} disabled={!enabled || !!busy} />
+          <AttachButton att={att} disabled={!enabled || !!busy || !!review} />
           <textarea
             ref={field}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKey}
-            placeholder={placeholder}
+            placeholder={review ? "What should change?" : placeholder}
             disabled={!enabled}
             aria-label="Message for the next turn"
             rows={1}
@@ -565,7 +628,7 @@ export function ControlStrip({
             type="submit"
             className={`icon-btn ctl-send ${canSend || busy === "prompt" ? "is-ready" : ""}`}
             disabled={!canSend}
-            aria-label="Send"
+            aria-label={review ? "Keep planning" : "Send"}
             aria-busy={busy === "prompt" || undefined}
             data-tip-keys="↩"
           >

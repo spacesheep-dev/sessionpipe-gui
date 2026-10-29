@@ -31,6 +31,7 @@ import {
   ATTENTION_LABEL,
   attentionMessage,
   harnessMark,
+  isPlanReview,
   oneLine,
   repoShort,
   STATE_LABEL,
@@ -305,7 +306,7 @@ export const SessionCard = memo(function SessionCard({
               <span className={`card-attn ${literalAsk(attnTool) ? "mono" : ""}`}>
                 {attention.message && showTools ? (
                   attnTool ? (
-                    <Redacted text={oneLine(attentionMessage(attention) || attention.message, 240)} />
+                    <Redacted text={oneLine(attentionMessage(attention) ?? "", 240)} />
                   ) : (
                     <Inline text={oneLine(attention.message, 240)} />
                   )
@@ -500,17 +501,19 @@ function CardAnswer({ s, into }: { s: SessionSummary; into: MutableRefObject<Men
   return null;
 }
 
-/** Allow and Deny as menu items, disabled with the reason when nothing can go. */
+/** Allow and Deny as menu items, disabled with the reason when nothing can go; a plan
+ *  review's are Approve plan and Keep planning. */
 export function answerItems(
   tool: string | undefined,
   st: { off: boolean; reason: string | null },
   answer: (allow: boolean) => unknown,
 ): MenuItem[] {
   const disabled = st.off ? (st.reason ?? true) : undefined;
+  const plan = isPlanReview({ kind: "permission", tool });
   const what = tool ? ` ${toolLabel(tool)}` : "";
   return [
-    { label: `Allow${what}`, disabled, run: () => void answer(true) },
-    { label: `Deny${what}`, disabled, run: () => void answer(false) },
+    { label: plan ? "Approve plan" : `Allow${what}`, disabled, run: () => void answer(true) },
+    { label: plan ? "Keep planning" : `Deny${what}`, disabled, run: () => void answer(false) },
   ];
 }
 

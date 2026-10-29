@@ -255,10 +255,12 @@ function span(from: string, to: string): string {
 }
 
 /** An attention's message without the tool name it sometimes starts with ("Bash rm -rf
- *  …"), for places that already show the tool beside it. */
+ *  …"), for places that already show the tool beside it; nothing when the message is only
+ *  that name (a plan review's is "ExitPlanMode", beside "Plan"). */
 export function attentionMessage(a: { message?: string; tool?: string }): string | undefined {
   const m = a.message;
   if (!m || !a.tool) return m;
+  if (m.trim() === a.tool) return undefined;
   const t = a.tool.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const rest = m.replace(new RegExp(`^${t}(:\\s*|\\s+)`), "");
   return rest || m;
@@ -289,7 +291,16 @@ const SNAKE_TOOLS: Record<string, string> = {
   web_search: "Web search",
   save_memory: "Memory",
   update_plan: "Plan",
+  // Claude Code's plan review, asked as a permission: "… needs you · Plan".
+  ExitPlanMode: "Plan",
+  exit_plan_mode: "Plan",
 };
+
+/** A plan review: Claude Code asks to leave plan mode as an ordinary permission, so
+ *  answering it is approving the plan or asking for more planning. Codex's update_plan
+ *  is no permission and stays a row in the timeline. */
+export const isPlanReview = (a: { kind?: string; tool?: string }): boolean =>
+  a.kind === "permission" && (a.tool === "ExitPlanMode" || a.tool === "exit_plan_mode");
 
 /** A tool's name as a person reads it. An MCP tool arrives as `mcp__<server>__<tool>`
  *  and reads "github · search_issues"; a claude.ai connector's server drops its

@@ -29,7 +29,7 @@ import { ComposeButton } from "../control/NewSession";
 import { answerState, useSessionSend } from "../control/useSend";
 import { type OpenAttention, useAppState, useFirstLoad, useLabels, useOpenAttentions, useStore } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
-import { ATTENTION_LABEL, attentionMessage, oneLine, sessionTitle, toolLabel } from "../lib/format";
+import { ATTENTION_LABEL, attentionMessage, isPlanReview, oneLine, sessionTitle, toolLabel } from "../lib/format";
 import { attentionKey, hide, isHidden, useHidden } from "../lib/hidden";
 import { useListNav } from "../lib/keys";
 import { type LabelFilter, labelItems, labelPasses } from "../lib/labels";
@@ -276,6 +276,7 @@ function InboxRow({
     { title: () => sessionMenuTitle(s), subtitle: () => sessionMenuSubtitle(s) },
   );
   const kind = ATTENTION_LABEL[a.kind] ?? a.kind;
+  const msg = attentionMessage(a);
   // A phone's swipes: trailing hides this prompt here (Undo), leading labels its session.
   // Allow and Deny are never a swipe: they are signed, and final.
   useSwipe(ref, {
@@ -314,9 +315,9 @@ function InboxRow({
         <span className="inbox-what">
           <span className={`inbox-kind ${a.tool ? "sr-only" : ""}`}>{kind}</span>
           {a.tool && <code className="inbox-tool">{toolLabel(a.tool)}</code>}
-          {a.message ? (
+          {msg ? (
             <span className={`inbox-msg ${a.kind === "permission" && literalAsk(a.tool) ? "mono" : ""}`}>
-              <Redacted text={oneLine(attentionMessage(a) ?? a.message, 200)} />
+              <Redacted text={oneLine(msg, 200)} />
             </span>
           ) : !a.tool ? (
             <span className="inbox-msg">{row.answerable ? "a permission request" : "waiting for you"}</span>
@@ -360,6 +361,8 @@ function Answer({
   const send = useSessionSend(s, control, s.openAttentions);
   const st = answerState(s, a, control, send);
   const { reason, off, status, tag } = st;
+  // A plan review's pair asks the plan's question (lib/format.ts isPlanReview).
+  const plan = isPlanReview(a);
   /** The answer pressed, from the press until the prompt leaves (or the send fails). */
   const [chosen, setChosen] = useState<boolean | null>(null);
   const answer = (allow: boolean) => {
@@ -403,23 +406,23 @@ function Answer({
             className="btn btn--sm btn--deny"
             disabled={(off && chosen === null) || chosen === true}
             pending={going && chosen === false}
-            pendingLabel="Denying…"
+            pendingLabel={plan ? "Sending…" : "Denying…"}
             onClick={() => answer(false)}
             aria-description={standing ?? undefined}
             aria-pressed={chosen === false || undefined}
           >
-            Deny
+            {plan ? "Keep planning" : "Deny"}
           </ActionButton>
           <ActionButton
             className="btn btn--sm btn--allow"
             disabled={(off && chosen === null) || chosen === false}
             pending={going && chosen === true}
-            pendingLabel="Allowing…"
+            pendingLabel={plan ? "Approving…" : "Allowing…"}
             onClick={() => answer(true)}
             aria-description={standing ?? undefined}
             aria-pressed={chosen === true || undefined}
           >
-            Allow
+            {plan ? "Approve plan" : "Allow"}
           </ActionButton>
         </>
       )}
