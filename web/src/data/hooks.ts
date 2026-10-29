@@ -10,9 +10,19 @@ import type {
   SessionSummary,
 } from "@shared/api";
 import { LABEL_DEFAULT_NAMES, SESSION_STATES } from "@shared/api";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 // The one reading of `answerable` the strip and the inbox share (an older server leaves the field unset).
 import { answerable } from "../components/ControlStrip";
+import { sessionTitle } from "../lib/format";
 import type { AppState, Store } from "./store";
 
 export const StoreContext = createContext<Store | null>(null);
@@ -84,6 +94,24 @@ export function useStreamDown(): number | null {
 export function useSession(key: SessionKey): SessionSummary | undefined {
   const store = useStore();
   const read = useCallback(() => store.get().sessions.get(key), [store, key]);
+  return useSyncExternalStore(store.subscribe, read, read);
+}
+
+/** The sessions that name `key` as their launcher, newest first. The array is kept until
+ *  the set, a title or a state changes, so a launcher's page follows runs that start later. */
+export function useLaunched(key: SessionKey): SessionSummary[] {
+  const store = useStore();
+  const last = useRef<{ sig: string; list: SessionSummary[] }>({ sig: "", list: [] });
+  const read = useCallback(() => {
+    const list: SessionSummary[] = [];
+    for (const s of store.get().sessions.values()) if (s.launchedBy === key && s.key !== key) list.push(s);
+    list.sort((a, b) => b.startedAt.localeCompare(a.startedAt) || a.key.localeCompare(b.key));
+    // What the header renders: the title as sessionTitle derives it, and the state.
+    // ...and the start, which the menu's "ago" and the order read.
+    const sig = list.map((s) => `${s.key}\u0000${sessionTitle(s)}\u0000${s.state}\u0000${s.startedAt}`).join("\u0001");
+    if (sig !== last.current.sig) last.current = { sig, list };
+    return last.current.list;
+  }, [store, key]);
   return useSyncExternalStore(store.subscribe, read, read);
 }
 

@@ -91,6 +91,10 @@ function names above.
   on a timer and emits `session` messages.
 - `session.forgotten` deletes the file and the index entry, then emits `forgotten`.
 - Subagent sessions (`parent_id` set) count toward the parent's `children`.
+- `session.launched_by` (the session a script started this one for, `<harness>:<id>`) is
+  `launchedBy` on the summary: kept like any session field, never read as a subagent. The
+  session header links the launcher, and the launcher's header the session it launched, or several in a menu.
+  Views and plugins see it on `SessionSummary`.
 - `agents` (`AgentRun`): the subagents a session ran, read the way Claude Code and Codex
   send them, inside the parent's session. `subagent.started` opens one (its type; its
   description and launch call from the newest Agent / Task call not matched yet, or the

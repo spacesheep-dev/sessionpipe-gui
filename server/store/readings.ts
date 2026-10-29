@@ -26,6 +26,9 @@ import { changedPaths } from "./paths.js";
 import { detach, PREVIEW_CHARS } from "./slim.js";
 
 const TITLE_RANK: Record<string, number> = { custom: 3, harness: 2, "first-ask": 1 };
+/** `<harness>:<id>` in the protocol's own shapes (schemas/v1/event.json): a harness name is
+ *  `^[a-z][a-z0-9-]{0,39}$`, a session id up to 128 of `[A-Za-z0-9._:-]`. */
+const LAUNCHER_KEY_RE = /^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/;
 const ATTENTION_KINDS = new Set<string>(["permission", "question", "elicitation", "idle", "error"]);
 
 /** Events a worker derives from files or clocks rather than a harness hook. Only a
@@ -245,6 +248,9 @@ export function coalesceSession(s: SessionSummary, ev: ProtocolEvent): void {
   if (typeof b.attended === "boolean") s.attended = b.attended;
   if (typeof b.parent_id === "string" && b.parent_id) s.parentId = b.parent_id;
   else if (b.parent_id === null && s.parentId === undefined) s.parentId = null;
+  // A launcher is a session key (CONTROL.md); anything else is dropped.
+  const launcher = str(b.launched_by)?.trim();
+  if (launcher && LAUNCHER_KEY_RE.test(launcher)) s.launchedBy = launcher;
   const title = str(b.title);
   if (title) {
     const src = b.title_source && TITLE_RANK[b.title_source] ? b.title_source : undefined;

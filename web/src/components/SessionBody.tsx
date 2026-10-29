@@ -55,7 +55,7 @@ import {
   useStartOf,
 } from "../control/Starting";
 import { isFinal } from "../control/words";
-import { useMachines, useMachinesMap, useSession, useStore } from "../data/hooks";
+import { useLaunched, useMachines, useMachinesMap, useSession, useStore } from "../data/hooks";
 import { LIST_PREVIEW, TAIL, takeWarm } from "../data/prefetch";
 import { agentLabel, agentsFact, agentType, openAgent, taskNotification } from "../lib/agents";
 import "../lib/acp";
@@ -79,7 +79,7 @@ import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
-import { clock, dur, ms, useNow } from "../lib/time";
+import { ago, clock, dur, ms, useNow } from "../lib/time";
 import {
   type AgentItem,
   type EventItem,
@@ -590,6 +590,11 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   const originalSummary = useSession(original);
 
   const s = live ?? summary;
+  // The launcher and the runs it launched are subscriptions: a launcher's open page shows a
+  // run that starts later, and a run's page finds a launcher that reports later.
+  const launcherKey = s?.launchedBy && s.launchedBy !== key ? s.launchedBy : "";
+  const launcherSummary = useSession(launcherKey);
+  const launchedRuns = useLaunched(key);
   const sRef = useRef(s);
   sRef.current = s;
   useEffect(() => {
@@ -859,6 +864,17 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
         title: originalSummary ? sessionTitle(originalSummary) : "another session",
       }
     : undefined;
+  // A launcher this receiver never saw is named by its key, so it can be looked up elsewhere.
+  const launcher = launcherKey
+    ? launcherSummary
+      ? { path: sessionPath(launcherSummary.harness, launcherSummary.id), title: sessionTitle(launcherSummary) }
+      : { path: null, title: launcherKey }
+    : undefined;
+  const launched = launchedRuns.map((l) => ({
+    path: sessionPath(l.harness, l.id),
+    title: sessionTitle(l),
+    at: l.startedAt,
+  }));
 
   // The session's "⋯", in three sections at most: what it can be asked now (Allow, Deny,
   // a message, Stop), how the view shows and what it is (Follow, the lens, its own
@@ -939,7 +955,14 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
               meta={
                 s ? (
                   <>
-                    <SessionMeta s={s} total={total} copyOf={copyOf} chat={chat} />
+                    <SessionMeta
+                      s={s}
+                      total={total}
+                      copyOf={copyOf}
+                      launcher={launcher}
+                      launched={launched}
+                      chat={chat}
+                    />
                     {applied && <span className="sess-applied">{applied}</span>}
                   </>
                 ) : (
@@ -1078,12 +1101,18 @@ function SessionMeta({
   s,
   total,
   copyOf,
+  launcher,
+  launched,
   chat,
 }: {
   s: SessionSummary;
   total: number;
   /** This session is a copy (a fork) of that one. */
   copyOf?: { path: string; title: string };
+  /** The session that launched this one (`session.launched_by`); no path when this receiver never saw it. */
+  launcher?: { path: string | null; title: string };
+  /** Sessions this one launched. */
+  launched?: { path: string; title: string; at: string }[];
   chat: boolean;
 }) {
   const repo = chat ? repoShort(s.repo) : repoBranch(s);
@@ -1106,6 +1135,7 @@ function SessionMeta({
   ]
     .filter(Boolean)
     .join(" · ");
+  const first = launched?.[0];
   return (
     <span className="sess-where" title={more} data-events={total}>
       {s.machine && <span className="sess-machine">{s.machine}</span>}
@@ -1115,6 +1145,50 @@ function SessionMeta({
         </span>
       ) : (
         place && <span className="sess-repo">{place}</span>
+      )}
+      {launcher && (
+        <span className="sess-copy sess-launch">
+          Launched by{" "}
+          {launcher.path ? (
+            <Link to={launcher.path} title={launcher.title}>
+              {launcher.title}
+            </Link>
+          ) : (
+            <span title={launcher.title}>{launcher.title}</span>
+          )}
+        </span>
+      )}
+      {launched && first && (
+        <span className="sess-copy sess-launch">
+          Launched{" "}
+          {launched.length === 1 ? (
+            <Link to={first.path} title={first.title}>
+              {first.title}
+            </Link>
+          ) : (
+            <MoreButton
+              className="sess-launched"
+              label={`${launched.length} launched sessions`}
+              title={() => `Launched ${launched.length} sessions`}
+              build={() => {
+                // Newest first, each with when it started (a script's runs share a title); the
+                // twelve newest, then a line for the rest.
+                const now = Date.now();
+                const shown = launched.slice(0, 12);
+                return [
+                  ...shown.map((l) => ({ label: `${l.title} · ${ago(l.at, now)}`, run: () => navigate(l.path) })),
+                  launched.length > shown.length && {
+                    label: `${launched.length - shown.length} more, older`,
+                    run: () => {},
+                    disabled: "The newest twelve are listed",
+                  },
+                ];
+              }}
+            >
+              {launched.length} sessions
+            </MoreButton>
+          )}
+        </span>
       )}
     </span>
   );

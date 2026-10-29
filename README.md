@@ -239,6 +239,10 @@ A parent row says how many subagents are running and opens a tree of what each i
 the session, each agent sits under the turn that started it, with its tools and its result,
 and opens beside its parent as a tab of its own.
 
+A run a script started for a session is not a subagent. When the sender says so
+(`session.launched_by`), the run's header links the session it ran for, and that session's
+header links the run it started, or lists several in a menu.
+
 ### Review
 
 ![Review: the files your agents changed, by repo](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/review.png)
