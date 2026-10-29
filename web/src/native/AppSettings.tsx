@@ -123,7 +123,7 @@ export default function AppSettings() {
         </Suspense>
       )}
 
-      {f.has("updater") && <UpdatesGroup appVersion={info?.appVersion ?? ""} />}
+      {f.has("updater") && <UpdatesGroup appVersion={info?.appVersion ?? ""} s={s} set={set} />}
     </>
   );
 }
@@ -295,10 +295,26 @@ function ReceiversGroup({ current }: { current: string | null }) {
   );
 }
 
-function UpdatesGroup({ appVersion }: { appVersion: string }) {
+function UpdatesGroup({
+  appVersion,
+  s,
+  set,
+}: {
+  appVersion: string;
+  s: Settings | null;
+  set: (p: Partial<Settings>) => void;
+}) {
   const u = useCell(update);
   return (
     <Group label="Updates">
+      <Row label="Check for updates automatically" hint="On launch and every 6 hours.">
+        <Toggle
+          label="Check for updates automatically"
+          on={s?.autoUpdate ?? true}
+          disabled={!s}
+          onChange={(on) => set({ autoUpdate: on })}
+        />
+      </Row>
       <Row label={updateLine(appVersion, u)}>
         {u.state === "ready" ? (
           <ActionButton className="btn btn--sm btn--primary" onClick={() => invoke("app_update_restart")}>

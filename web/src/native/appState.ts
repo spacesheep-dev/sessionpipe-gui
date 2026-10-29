@@ -18,6 +18,8 @@ export interface AppSettings {
   notifications: { enabled: boolean; kinds: Record<string, boolean>; pausedUntil: string | null };
   /** Set once the first-run sheet has been seen (when the shell reports it). */
   firstRunDone?: boolean;
+  /** Check on launch and every six hours (the shell's default: on). */
+  autoUpdate?: boolean;
 }
 export interface Receiver {
   id: string;
