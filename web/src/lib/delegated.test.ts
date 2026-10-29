@@ -4,7 +4,7 @@
 // filter, not a root) ends the climb; nothing is ever lost from the board.
 import type { SessionSummary } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { nestDelegated } from "./delegated";
+import { foldsAway, nestDelegated } from "./delegated";
 
 const s = (key: string, delegatedBy?: string, machine = "lab-mac"): SessionSummary =>
   ({ key, machine, ...(delegatedBy ? { delegatedBy } : {}) }) as unknown as SessionSummary;
@@ -63,5 +63,27 @@ describe("nestDelegated", () => {
   it("a session naming itself stays a root", () => {
     const me = s("claude-code:me", "claude-code:me");
     expect(shape([me])).toEqual({ roots: ["claude-code:me"], nested: {} });
+  });
+
+  it("a parent in a folded Done keeps no live child: the asked session stays a root until Done opens", () => {
+    const done = s("claude-code:a");
+    const live = s("codex:b", done.key);
+    const ended = s("codex:c", done.key);
+    const states = { [done.key]: "done", [live.key]: "working", [ended.key]: "done" } as const;
+    const withState = (x: SessionSummary) => ({ ...x, state: states[x.key as keyof typeof states] }) as SessionSummary;
+    const [d, l, e] = [done, live, ended].map(withState) as [SessionSummary, SessionSummary, SessionSummary];
+    expect(foldsAway(l, d, false)).toBe(true);
+    expect(foldsAway(l, d, true)).toBe(false);
+    expect(foldsAway(e, d, false)).toBe(false);
+    const hangs = (showDone: boolean) => (c: SessionSummary, p: SessionSummary) =>
+      sameMachine(c, p) && !foldsAway(c, p, showDone);
+    expect(shape([d, l, e], [d, l, e], hangs(false))).toEqual({
+      roots: ["claude-code:a", "codex:b"],
+      nested: { "claude-code:a": ["codex:c"] },
+    });
+    expect(shape([d, l, e], [d, l, e], hangs(true))).toEqual({
+      roots: ["claude-code:a"],
+      nested: { "claude-code:a": ["codex:b", "codex:c"] },
+    });
   });
 });

@@ -8,6 +8,15 @@
 // filter, a subagent's child session) ends the climb where it is. Nothing vanishes.
 import type { SessionKey, SessionSummary } from "@shared/api";
 
+/** Whether a parent drawn in a folded Done would take the child out of sight: the parent
+ *  is done and Done is folded while the child still runs or needs you. A done child under
+ *  a done parent folds with it, as a subagent's row does. */
+export const foldsAway = (
+  child: Pick<SessionSummary, "state">,
+  parent: Pick<SessionSummary, "state">,
+  showDone: boolean,
+): boolean => parent.state === "done" && !showDone && child.state !== "done";
+
 export interface Nested {
   /** The sessions drawn as roots, in the order given. */
   roots: SessionSummary[];
