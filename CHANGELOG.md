@@ -11,6 +11,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 - A session another session launched (`session.launched_by`, sessionpipe 0.10.0) says so in its
   header with a link to the launcher, and the launcher's header links what it launched. Neither is
   read as a subagent: no nesting, no muted toasts, no "N subagents" count.
+- **A paired machine you rely on that went offline** gets one quiet line at the top of the
+  board: "build-box is offline, last heard 14:02. 2 messages wait until it's back.", with
+  Machines beside it. Only a paired machine with a message waiting or a session that needs
+  you, works or went stale counts; one that only sends events has no heartbeat and is never
+  called offline. × hides the line on this device until something changes: it clears
+  itself when the machine is back, and a new drop brings it back.
 
 ## [0.5.0] - 2026-10-28
 

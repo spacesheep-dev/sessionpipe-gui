@@ -576,6 +576,58 @@
   font-size: var(--text-sm);
   animation: fade-in var(--dur) var(--ease-out) both;
 }
+/* A paired machine you rely on is offline (OfflineLine): one sentence above the first
+   section, at a section header's size and edge to edge with its hairline, not sticky.
+   No tint, no icon, no orange: the sentence is the whole message. On a phone it wraps to
+   two lines at most and is itself the way to Machines. */
+.offline-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  margin: 0 calc(12px - var(--gutter)) 16px;
+  padding: 0 calc(var(--gutter) - 8px) 0 var(--gutter);
+  border-bottom: var(--hairline) solid var(--line);
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+  line-height: var(--lh-tight);
+  animation: fade-in var(--dur) var(--ease-out) both;
+}
+/* The sentence opens Machines on a phone only; a desktop has the button and the menu. */
+.offline-line-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: inherit;
+  pointer-events: none;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.offline-line-open {
+  color: var(--fg-2);
+  font-weight: 500;
+}
+@media (max-width: 839px) {
+  .offline-line {
+    padding-right: calc(var(--gutter) - 12px);
+  }
+  .offline-line-text {
+    display: -webkit-box;
+    padding: 6px 0;
+    white-space: normal;
+    pointer-events: auto;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .offline-line-open {
+    display: none;
+  }
+  .offline-line-x {
+    width: 44px;
+    height: 44px;
+  }
+}
 /* A filter that hides everything. */
 .board-nomatch .state-title {
   overflow-wrap: anywhere;
