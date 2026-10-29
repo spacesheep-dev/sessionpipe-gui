@@ -6,6 +6,17 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The Mac app updates itself.** Settings › App › Updates has "Check for updates
+  automatically" (on by default: 10 s after launch and every 6 hours), the version you have,
+  "Last checked 5 min ago" and Check now. A newer release is downloaded in the background
+  and verified against sessionpipe's key; then "0.7.0 is ready" with **Install and relaunch**
+  in Settings and the menu bar item. "Check for Updates…" in the app menu runs the same check
+  and, with no window open, answers in a dialog: up to date, ready to install, or why it
+  failed. A failed check says so in plain words (offline, no manifest, no build for this
+  computer, a signature that doesn't match) and leaves nothing half-installed.
+
 ## [0.6.0] - 2026-10-29
 
 ### Added
