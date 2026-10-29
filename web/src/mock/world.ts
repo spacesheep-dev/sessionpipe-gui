@@ -9,6 +9,7 @@ import type {
   FeedPage,
   FeedQuery,
   Info,
+  LimitsEntry,
   MachineSummary,
   ProtocolSession,
   SessionDetail,
@@ -23,6 +24,67 @@ import { DONE_AFTER_MS, SNIPPET_CHARS, STALE_AFTER_MS, sessionKey } from "@share
 import { AgentReading } from "./agents";
 
 // ---------- helpers ----------
+
+/** Each account's usage limits as the server keeps them (server/ui/limits.ts), one per
+ *  machine's Claude account so New session shows a single account's number: misha-air's
+ *  has none left this 5-hour window, studio-mini's has room, Codex on misha-air has its
+ *  plan, and build-box's Codex last reported three hours ago, its 5-hour window reset since. */
+export function mockLimits(now: number): LimitsEntry[] {
+  const at = (ms: number) => new Date(now + ms).toISOString();
+  const H = 3_600_000;
+  const M = 60_000;
+  const D = 24 * H;
+  return [
+    {
+      key: "claude-code a:a1b2c3",
+      harness: "claude-code",
+      accountId: "a1b2c3",
+      machine: "misha-air",
+      machines: ["misha-air"],
+      windows: [
+        { id: "five_hour", usedPercent: 100, windowMinutes: 300, resetsAt: at(H + 10 * M) },
+        { id: "seven_day", usedPercent: 61, windowMinutes: 10_080, resetsAt: at(3 * D + 6 * H) },
+      ],
+      observedAt: at(-M),
+    },
+    {
+      key: "claude-code a:w4e5f6",
+      harness: "claude-code",
+      accountId: "w4e5f6",
+      machine: "studio-mini",
+      machines: ["studio-mini"],
+      windows: [
+        { id: "five_hour", usedPercent: 38, windowMinutes: 300, resetsAt: at(2 * H + 21 * M) },
+        { id: "seven_day", usedPercent: 20, windowMinutes: 10_080, resetsAt: at(2 * D + 18 * H) },
+      ],
+      observedAt: at(-2 * M),
+    },
+    {
+      key: "codex m:misha-air",
+      harness: "codex",
+      machine: "misha-air",
+      machines: ["misha-air"],
+      plan: "plus",
+      windows: [
+        { id: "primary", usedPercent: 8, windowMinutes: 300, resetsAt: at(3 * H + 43 * M) },
+        { id: "secondary", usedPercent: 26, windowMinutes: 10_080, resetsAt: at(4 * D + 2 * H) },
+      ],
+      observedAt: at(-3 * M),
+    },
+    {
+      key: "codex m:build-box",
+      harness: "codex",
+      machine: "build-box",
+      machines: ["build-box"],
+      plan: "pro",
+      windows: [
+        { id: "primary", usedPercent: 64, windowMinutes: 300, resetsAt: at(-40 * M) },
+        { id: "secondary", usedPercent: 91, windowMinutes: 10_080, resetsAt: at(D + 4 * H) },
+      ],
+      observedAt: at(-3 * H),
+    },
+  ];
+}
 
 const ULID_CHARS = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 export function ulid(at = Date.now()): string {
@@ -616,6 +678,7 @@ export class World {
           version: "0.10.0",
           files: true,
           start: { "claude-code": { permissions: ["read", "safe"], permission: "safe", anyModel: true } },
+          accounts: [{ harness: "claude-code", id: "w4e5f6", email: "work@acme.dev" }],
         };
       else
         base.control = {
@@ -1038,7 +1101,7 @@ export class World {
         title: spec.title,
         title_source: spec.title ? (spec.titleSource ?? "harness") : undefined,
         url: spec.url,
-        account_id: spec.harness === "claude-code" ? "a1b2c3" : undefined,
+        account_id: spec.harness === "claude-code" ? (spec.machine === "studio-mini" ? "w4e5f6" : "a1b2c3") : undefined,
         parent_id: spec.parent ? spec.parent.id : null,
       },
       machine: spec.machine,

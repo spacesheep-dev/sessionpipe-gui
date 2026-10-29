@@ -525,6 +525,127 @@
   .shell--side .rail .conn:not(.conn--live) {
     flex-basis: 100%;
   }
+  /* Usage (UsageGlance.tsx), the sidebar's last block, above the footer's hairline: a
+     heading in the section labels' tier, then a line per account, its name and what is
+     left at the right, and a 2 px bar of that under them (the reset, or the report's
+     age, in the bar's place). The bar is neutral; only "None left" and "N% over" take
+     the attention colour, on their words. */
+  .glance {
+    flex: none;
+    padding: 0 8px 8px;
+  }
+  /* Both links keep the 24 px a pointer needs (WCAG 2.5.8). */
+  .glance-head {
+    display: flex;
+    align-items: center;
+    min-height: 24px;
+    margin-top: 4px;
+    padding: 0 8px;
+    color: var(--fg-3);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    line-height: var(--lh-tight);
+  }
+  .glance-head:hover {
+    color: var(--fg);
+  }
+  /* On /usage the heading is the page's link, so it carries the same pill as the others. */
+  .glance-head[aria-current="page"] {
+    border-radius: var(--radius);
+    background: var(--sel);
+    color: var(--fg);
+  }
+  .glance-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .glance-line {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 6px 8px 7px;
+    border-radius: var(--radius);
+    color: var(--fg);
+    transition: background-color var(--dur-release) linear;
+  }
+  .glance-line:hover {
+    background: var(--hover);
+  }
+  .glance-line:active,
+  .glance-line[data-menu-open] {
+    background: var(--sel);
+    transition: none;
+  }
+  .glance-line:focus-visible {
+    outline-offset: -2px;
+  }
+  /* The name tells the lines apart, so it has the room first, up to 60%: the window's
+     short name takes what is left (cut short, or none), and the figure always fits. */
+  .glance-top {
+    display: grid;
+    grid-template-columns: auto fit-content(60%) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-size: var(--text-sm);
+    line-height: var(--lh-tight);
+  }
+  .glance-top .glyph-wrap {
+    color: var(--fg-3);
+  }
+  .glance-name,
+  .glance-win {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .glance-val {
+    display: contents;
+    color: var(--fg-2);
+  }
+  .glance-win {
+    text-align: right;
+    color: var(--fg-3);
+  }
+  .glance-fig {
+    grid-column: 4;
+    white-space: nowrap;
+  }
+  .glance-out {
+    color: var(--needs-fg);
+  }
+  .glance-sub {
+    padding-left: 20px;
+    color: var(--fg-3);
+    font-size: var(--text-xs);
+    line-height: var(--lh-tight);
+  }
+  .glance-bar {
+    display: block;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--line);
+    overflow: hidden;
+  }
+  .glance-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: 1px;
+    background: var(--fg-2);
+  }
+  .glance-more {
+    display: flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 8px;
+    color: var(--fg-3);
+    font-size: var(--text-xs);
+  }
+  .glance-more:hover {
+    color: var(--fg);
+  }
   /* The rail's tooltips name the page and its keys; the sidebar's labels already do. */
   .shell--side .rail .nav-link[data-tip]::after {
     display: none;

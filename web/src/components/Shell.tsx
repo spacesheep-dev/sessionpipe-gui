@@ -8,7 +8,8 @@
 // skin, mode); MenuHost here is the one context-menu policy for the whole app. On a phone
 // it also keeps the status bar on the page's ground (theme-color), scrolls a page to its
 // top when its tab is tapped again, and shows a dropped stream as a pill under the bar
-// that a pull down the page retries.
+// that a pull down the page retries. The wide sidebar ends with what each account has
+// left (UsageGlance.tsx), which the phone reaches as More › Usage.
 import type { InstalledTheme } from "@shared/theme-api";
 import { type CSSProperties, Fragment, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
@@ -36,6 +37,7 @@ import { QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { TipHost } from "./Tip";
+import { UsageGlance } from "./UsageGlance";
 
 /** Whether Setup had steps to go at the last visit: the rail draws its entry from this
  *  until the status answers, so nothing below it moves ~100 ms after the first paint. A
@@ -135,6 +137,13 @@ const ICON: Record<string, ReactNode> = {
       <path d="M13 7l1.5-1.5a2.5 2.5 0 0 1 3.5 3.5L16 11" />
     </>
   ),
+  /* A gauge: how much is left (Usage, a More row on a phone). */
+  usage: (
+    <>
+      <path d="M3 14.5a7 7 0 0 1 14 0" />
+      <path d="M10 14.5l3.2-4.2" />
+    </>
+  ),
   /* A short list with a check: the first-run steps. */
   setup: (
     <>
@@ -231,6 +240,14 @@ export const themeNavItem = (t: InstalledTheme): NavItem => {
 };
 
 const SETUP_ITEM: NavItem = { to: "/setup", key: "setup", label: "Setup", glyph: ICON.setup };
+
+/** Usage is no rail item (the sidebar's Usage lines lead there): on a phone it is a More
+ *  row, after Machines. */
+const USAGE_ITEM: NavItem = { to: "/usage", key: "usage", label: "Usage", glyph: ICON.usage };
+const withUsage = (pages: NavItem[]): NavItem[] => {
+  const at = pages.findIndex((n) => n.key === "connect");
+  return at < 0 ? [...pages, USAGE_ITEM] : [...pages.slice(0, at), USAGE_ITEM, ...pages.slice(at)];
+};
 
 /** The pages Simple mode keeps off the rail (still there through ⌘K and /settings). */
 const ADVANCED_ONLY = new Set(["feed", "review"]);
@@ -406,12 +423,12 @@ function MoreRow({ n, active, action }: { n: NavItem; active: string; action: st
 function MoreTab({ items, active, views }: { items: NavItem[]; active: string; views: NavItem[] }) {
   const [open, setOpen] = useState(false);
   const [display, setDisplay] = useState(false);
-  const inside = items.some((n) => n.key === active);
+  const plugins = items.filter((n) => n.key.startsWith("t:"));
+  const pages = withUsage(items.filter((n) => !n.key.startsWith("t:")));
+  const inside = [...pages, ...plugins].some((n) => n.key === active);
   const { mounted, closing } = usePresence(open);
   // A route change closes the sheet, whichever tab was tapped.
   useEffect(() => setOpen(false), [active]);
-  const plugins = items.filter((n) => n.key.startsWith("t:"));
-  const pages = items.filter((n) => !n.key.startsWith("t:"));
   // The exit copy marks no page current: the tab itself carries that once it closes.
   const row = (n: NavItem) => <MoreRow key={n.key} n={n} active={closing ? "" : active} action={navAction(n, views)} />;
   return (
@@ -598,6 +615,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
             </Fragment>
           ))}
         </div>
+        {side && !phone && <UsageGlance here={route.name === "usage"} />}
         <div className="rail-foot">
           <ConnectionPill />
           <Link

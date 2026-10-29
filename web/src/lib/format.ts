@@ -194,6 +194,8 @@ export function eventSummary(e: ProtocolEvent): string {
       return "forgotten";
     case "session.heartbeat":
       return "heartbeat";
+    case "limits.observed":
+      return "usage limits";
     case "turn.started":
       return d.prompt_chars !== undefined ? `prompt ${str(d.prompt_chars)} chars` : "prompt";
     case "turn.ended": {

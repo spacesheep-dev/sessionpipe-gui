@@ -102,6 +102,10 @@
   line-height: var(--lh-tight);
   text-align: right;
 }
+/* The chosen agent's account has none left, or is over: the words alone carry it. */
+.ns-aside--out {
+  color: var(--needs-fg);
+}
 /* The rows' pop-ups are their values: no well, no border, the chevron after the text. */
 .ns-row .ns-sel {
   border-color: transparent;

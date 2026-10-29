@@ -46,6 +46,7 @@ import { AttachmentStore } from "./ui/attachments.js";
 import { uiAuthFor } from "./ui/auth.js";
 import { registerUi, uiGuard } from "./ui/index.js";
 import { LabelStore } from "./ui/labels.js";
+import { LimitsStore } from "./ui/limits.js";
 import { MarkStore } from "./ui/marks.js";
 import { Broadcast } from "./ui/stream.js";
 import { ViewerRegistry } from "./ui/viewers.js";
@@ -171,6 +172,10 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   const stateDir = opts.stateDir ?? defaultStateDir();
   let config = readGuiConfig(stateDir);
   const store = new Store(stateDir, { tickMs: opts.tickMs, keepDays: opts.keepDays });
+  // Each account's usage limits follow the store from its first event (the outbox's
+  // first read, the demo's) on.
+  const limits = new LimitsStore(stateDir);
+  limits.follow(store);
   const router = new Router();
   let port = opts.port ?? DEFAULT_PORT;
   let tls: TlsMaterial | null = opts.tls
@@ -219,10 +224,11 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
 
   let demo: Runner | null = null;
   /** Synthetic sessions never outlive demo mode: turning it off (or starting without
-   *  --demo) forgets every session the generator wrote. */
+   *  --demo) forgets every session the generator wrote, and its usage limits. */
   const dropDemoSessions = (): number => {
     let n = 0;
     for (const s of store.snapshot().sessions) if (s.source === "demo" && store.forget(s.key)) n++;
+    limits.dropDemo();
     return n;
   };
   const setDemo = (on: boolean): void => {
@@ -325,6 +331,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   registerUi(router, {
     labels,
     marks,
+    limits,
     broadcast,
     colorThemesDir: path.join(stateDir, "color-themes"),
     store,

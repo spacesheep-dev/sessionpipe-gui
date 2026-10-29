@@ -42,6 +42,7 @@ const NAV: Record<string, string> = {
   "nav.feed": "/feed",
   "nav.review": "/review",
   "nav.machines": "/machines",
+  "nav.usage": "/usage",
   "nav.connect": "/connect",
   "nav.setup": "/setup",
   "nav.views": "/themes",
@@ -56,6 +57,7 @@ const TOP = new Set([
   "review",
   "search",
   "machines",
+  "usage",
   "connect",
   "setup",
   "themes",
@@ -150,6 +152,9 @@ export interface ListNavOptions {
   clear?: () => boolean;
   /** Warm the session under a resting cursor (data/prefetch.ts). */
   store?: Store;
+  /** What Enter does with the item at this index, in place of going to its href (Usage
+   *  opens New session there); false when it does nothing. */
+  open?: (index: number) => boolean;
 }
 
 /** A cursor over a list of hrefs, moved by the list actions; Enter opens the one under it,
@@ -214,6 +219,7 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
   const open = (mode: "page" | "beside" | "background") => {
     const href = hrefs[cursor];
     if (!href) return false;
+    if (opts.open) return opts.open(cursor);
     const key = keys?.[cursor];
     if (mode !== "page" && key) {
       openSplit(key, {
@@ -266,6 +272,7 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
   // ⌘1–9, the installed app only: the nth row of the list as it stands.
   const jump = (i: number) => () => {
     if (!installedApp() || inPanel() || !hrefs[i]) return false;
+    if (opts.open) return opts.open(i);
     navigate(hrefs[i]!);
   };
   useShortcut("list.jump1", jump(0), { enabled });

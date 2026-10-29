@@ -7,6 +7,7 @@ import {
   LABEL_NAME_MAX,
   type Labels,
   type LabelsPatch,
+  type LimitsEntry,
   type Marks,
   type MarksPatch,
   type StreamMessage,
@@ -14,7 +15,7 @@ import {
 import type { Transport } from "../data/transport";
 import { installPhoneMock } from "./phone";
 import { review } from "./review";
-import { World } from "./world";
+import { mockLimits, World } from "./world";
 
 const latency = <T>(v: T, ms = 60): Promise<T> => new Promise((r) => setTimeout(() => r(v), ms));
 
@@ -63,13 +64,16 @@ function mergeMarks(doc: Marks, p: MarksPatch, known: (key: string) => boolean):
 }
 
 export function createMockTransport(): Transport {
-  const world = new World({ empty: new URLSearchParams(location.search).get("empty") === "1" });
+  const empty = new URLSearchParams(location.search).get("empty") === "1";
+  const world = new World({ empty });
   (window as unknown as { __sessionpipeMock?: World }).__sessionpipeMock = world;
   installPhoneMock(new URLSearchParams(location.search), () => world.info());
   // Labels live beside the World, as they live beside the store on the server.
   let labels: Labels = { rev: 0, names: {}, sessions: {} };
   // Marks too; the samples made before this page opened are read.
   let marks: Marks = { rev: 0, since: new Date().toISOString(), read: {}, unread: {}, notify: {} };
+  // So do the usage limits; the first-run board has none.
+  let limits: LimitsEntry[] = empty ? [] : mockLimits(Date.now());
   const handlers = new Set<(m: StreamMessage) => void>();
   let search: ReturnType<Transport["sessionSearch"]> | null = null;
   return {
@@ -79,7 +83,9 @@ export function createMockTransport(): Transport {
       const t = setTimeout(() => {
         h.onOpen();
         const first = world.snapshot();
-        h.onMessage(first.kind === "snapshot" ? { ...first, snapshot: { ...first.snapshot, labels, marks } } : first);
+        h.onMessage(
+          first.kind === "snapshot" ? { ...first, snapshot: { ...first.snapshot, labels, marks, limits } } : first,
+        );
         handlers.add(send);
         const off = world.subscribe((m) => {
           if (m.kind === "forgotten" && m.key in labels.sessions) {
@@ -125,6 +131,12 @@ export function createMockTransport(): Transport {
       marks = mergeMarks(marks, p, known);
       for (const l of handlers) l({ kind: "marks", marks });
       return marks;
+    },
+    forgetLimits: async (key) => {
+      await latency(undefined, 60);
+      if (!limits.some((e) => e.key === key)) throw new Error("not_found");
+      limits = limits.filter((e) => e.key !== key);
+      for (const l of handlers) l({ kind: "limits", limits });
     },
     info: () => latency(world.info()),
     session: async (harness, id, q) => {

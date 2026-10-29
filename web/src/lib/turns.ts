@@ -177,6 +177,8 @@ export function groupTurns(events: StoredEvent[], agents: readonly AgentRun[] = 
       (home ?? cur).items.push({ kind: "event", key: e.id, e });
       continue;
     }
+    // A status line's usage report is the account's, not a step of the turn (Usage shows it).
+    if (e.type === "limits.observed") continue;
     cur.items.push({ kind: "event", key: e.id, e });
   }
   return turns.filter((t) => t.start || t.items.length > 0);

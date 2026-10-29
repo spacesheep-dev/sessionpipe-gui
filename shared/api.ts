@@ -414,6 +414,8 @@ export interface Snapshot {
   labels?: Labels;
   /** The person's read marks; present on the stream's first frame. */
   marks?: Marks;
+  /** Each account's newest usage limits; present on the stream's first frame. */
+  limits?: LimitsEntry[];
 }
 
 /** A server plugin's suggested answer to an open permission (shared/plugin-api.ts). Advice
@@ -450,6 +452,8 @@ export type StreamMessage =
   | { kind: "labels"; labels: Labels }
   /** The whole read-marks document after a change, numbered like `labels`. */
   | { kind: "marks"; marks: Marks }
+  /** Every account's usage limits after a change: the whole list (small, idempotent). */
+  | { kind: "limits"; limits: LimitsEntry[] }
   /** A view's server-side state (THEME_ROUTES.state) was written; `etag` names the new
    *  version, so the page that wrote it can tell its own write from another device's. */
   | { kind: "viewState"; id: string; etag: string }
@@ -530,6 +534,45 @@ export interface MarksPatch {
 }
 
 export const EMPTY_MARKS: Marks = Object.freeze({ rev: 0, read: {}, unread: {} }) as Marks;
+
+// ---------- usage limits (limits.observed; GET ROUTES.ui.limits) ----------
+
+/** One window of an account's limits, as the harness named it (PROTOCOL.md limits.observed). */
+export interface LimitWindow {
+  /** "five_hour", "seven_day", "seven_day_fable", "primary", "spend_limit" … */
+  id: string;
+  /** >= 0; above 100 once a spend limit is passed. */
+  usedPercent: number;
+  /** RFC 3339. Once it has passed, the window has reset: its usedPercent is no longer current. */
+  resetsAt?: string;
+  windowMinutes?: number;
+}
+
+/** The newest limits.observed for one (harness, account), or (harness, machine) when the
+ *  events carry no account id. The receiver keeps the numbers; the page words them. An
+ *  account's email or host name is never here: it comes from MachineControl.accounts. */
+export interface LimitsEntry {
+  /** "claude-code a:<account_id>" or "codex m:<machine>". */
+  key: string;
+  harness: string;
+  accountId?: string;
+  /** The machine of the newest report. */
+  machine: string;
+  /** Every machine that reported it, newest first, at most LIMITS_MACHINES_MAX. */
+  machines: string[];
+  plan?: string;
+  /** 1–LIMIT_WINDOWS_MAX, in the event's order. */
+  windows: LimitWindow[];
+  /** The event's time, clamped to its arrival like every event's. */
+  observedAt: string;
+}
+
+/** Windows kept per entry, as the protocol allows. */
+export const LIMIT_WINDOWS_MAX = 8;
+/** Machines remembered per entry. */
+export const LIMITS_MACHINES_MAX = 8;
+/** Entries the receiver keeps; past it, the one reported longest ago goes. */
+export const LIMITS_MAX = 64;
 
 /** A browser connected to this GUI's stream right now: a phone on the LAN, this
  *  laptop's own tab. The receiver's reading of "devices", from the connection only;
@@ -1342,6 +1385,12 @@ export const ROUTES = {
      *  `bad_read` / `bad_unread` / `bad_notify`, 413 `too_large`, 415 `json_only`. A key
      *  the store does not know is skipped. Every change is a `marks` stream frame. */
     marks: "/api/ui/marks",
+    /** GET → { limits: LimitsEntry[] }, each account's newest limits.observed. Every change
+     *  is a `limits` stream frame. */
+    limits: "/api/ui/limits",
+    /** POST { key } (application/json) → 204: forget one entry's numbers (its next report
+     *  brings it back), and a `limits` frame. 400 `malformed`, 404 `not_found`, 415 `json_only`. */
+    limitsForget: "/api/ui/limits/forget",
   },
   /** GET / DELETE /attachments/<id>.<ext>, UI key: the uploaded image itself (served
    *  `private, immutable`), and taking it back. */

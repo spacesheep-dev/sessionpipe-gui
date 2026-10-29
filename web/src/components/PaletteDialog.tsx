@@ -798,10 +798,18 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     }
 
     if (want("Go to")) {
-      const places: { label: string; detail?: string; key?: string; run: () => void }[] = [
+      // `words`: what else finds a place ("limits" finds Usage), matched like its name.
+      const places: { label: string; detail?: string; words?: string; key?: string; run: () => void }[] = [
         { label: "Board", key: "nav.board", run: () => navigate("/") },
         { label: "Feed", key: "nav.feed", run: () => navigate("/feed") },
         { label: "Machines", key: "nav.machines", run: () => navigate("/machines") },
+        {
+          label: "Usage",
+          detail: "what each account has left",
+          words: "limits quota left",
+          key: "nav.usage",
+          run: () => navigate("/usage"),
+        },
         { label: "Connect", key: "nav.connect", run: () => navigate("/connect") },
       ];
       for (const p of ["Inbox", "Review", "Setup"]) {
@@ -836,7 +844,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
       places.push({ label: "Settings", detail: "mode · tier lens · data", run: () => navigate("/settings") });
       const rows: Item[] = [];
       for (const p of places) {
-        const m = text ? fuzzyFields(text, [p.label]) : null;
+        const m = text ? fuzzyFields(text, [p.label, p.words ?? ""]) : null;
         if (text && !m) continue;
         rows.push({
           id: `g:${p.label}`,

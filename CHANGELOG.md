@@ -48,6 +48,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **Hide until it needs you**, below Hide in a row's menu (or `⇧E`), for a session that
   loops ("every 30 minutes, check the nightly build"): new turns leave it hidden, and it
   shows only while it needs you. `e` hides or unhides the row under the cursor.
+- **How much each account has left.** A Usage page, a line per account in the sidebar, and
+  each agent in New session say how much of its 5-hour and weekly windows is left and when
+  they reset, from sessionpipe's `limits.observed`. Claude Code's week is "This week, all
+  models"; a per-model week it adds later shows as its own row ("This week, Fable only").
+  A window past its reset says so instead of its last number, and a report older than 15
+  minutes says how old. On a machine whose agent has two accounts there is no number, since
+  a start can't choose one. Claude Code's numbers need its status line, on Pro and Max:
+  `sessionpipe install --status-line`. Harnesses with no source say so in one line, never
+  0%. `g u` opens the page; the sidebar lines can be hidden in Settings › General.
 
 ### Changed
 

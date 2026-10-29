@@ -23,6 +23,7 @@ export const TYPE_TIER: Record<string, Tier> = {
   "subagent.started": 1,
   "subagent.ended": 1,
   "context.compacted": 1,
+  "limits.observed": 1,
   native: 3,
 };
 

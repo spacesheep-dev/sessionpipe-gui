@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // App settings, per device, in one localStorage key as JSON: the mode (Simple hides what
 // most people never touch; Advanced is everything), the page the app opens on, whether
-// Forget asks first, whether a session opens beside the page or as the page, and the tier
-// lens the whole app looks through (`null` = everything). The appearance, the color theme
-// and the text size stay in lib/theme.ts (the appearance popover). Reading is tolerant:
-// an unknown or malformed field falls back to its default, so a build may add fields.
+// Forget asks first, whether a session opens beside the page or as the page, the tier
+// lens the whole app looks through (`null` = everything), and whether the sidebar shows
+// what each account has left. The appearance, the color theme and the text size stay in
+// lib/theme.ts (the appearance popover). Reading is tolerant: an unknown or malformed
+// field falls back to its default, so a build may add fields.
 
 import type { Tier } from "@shared/api";
 import { useSyncExternalStore } from "react";
@@ -21,6 +22,8 @@ export interface AppSettings {
   openSessions: OpenSessions;
   /** The app-wide tier lens; null = everything. Simple mode reads it as null. */
   tierLens: Lens;
+  /** The sidebar's Usage lines (Shell.tsx UsageGlance), on this device. */
+  usageInSidebar: boolean;
 }
 
 export const KEY = "sessionpipe-gui.settings";
@@ -43,6 +46,7 @@ const defaults = (): AppSettings => ({
   confirmForget: true,
   openSessions: "page",
   tierLens: null,
+  usageInSidebar: true,
 });
 
 const isLens = (v: unknown): v is Lens => v === null || v === 0 || v === 1 || v === 2 || v === 3;
@@ -61,6 +65,7 @@ function read(): AppSettings {
       confirmForget: typeof p.confirmForget === "boolean" ? p.confirmForget : d.confirmForget,
       openSessions: p.openSessions === "beside" || p.openSessions === "page" ? p.openSessions : d.openSessions,
       tierLens: isLens(p.tierLens) ? p.tierLens : d.tierLens,
+      usageInSidebar: typeof p.usageInSidebar === "boolean" ? p.usageInSidebar : d.usageInSidebar,
     };
   } catch {
     return d;

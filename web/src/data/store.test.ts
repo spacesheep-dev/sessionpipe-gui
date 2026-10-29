@@ -2,10 +2,10 @@
 // The page's store: labels arrive whole and numbered, a change shows at once and goes
 // back when the server refuses it, and a view's state version is kept per view. Read
 // marks the same way.
-import type { Labels, LabelsPatch, Marks, MarksPatch } from "@shared/api";
+import type { Labels, LabelsPatch, LimitsEntry, Marks, MarksPatch } from "@shared/api";
 import { describe, expect, it } from "vitest";
 import { Store } from "./store";
-import type { Transport } from "./transport";
+import { STREAM_KINDS, type Transport } from "./transport";
 
 const doc = (rev: number, sessions: Labels["sessions"] = {}, names: Labels["names"] = {}): Labels => ({
   rev,
@@ -94,5 +94,35 @@ describe("marks in the store", () => {
     expect(store.get().marks.notify).toEqual({ b: "never" });
     await expect(done).rejects.toThrow("bad_notify");
     expect(store.get().marks.notify).toEqual({ a: "finishes" });
+  });
+});
+
+describe("usage limits in the store", () => {
+  const entry = (key: string): LimitsEntry => ({
+    key,
+    harness: "claude-code",
+    machine: "lab-mac",
+    machines: ["lab-mac"],
+    windows: [{ id: "five_hour", usedPercent: 38 }],
+    observedAt: "2026-10-29T10:00:00.000Z",
+  });
+
+  it("takes the snapshot's list, then each limits frame whole, and listens for the frame", () => {
+    const store = storeWith(async () => doc(0));
+    expect(store.get().limits).toEqual([]);
+    store.apply({
+      kind: "snapshot",
+      snapshot: {
+        at: "",
+        sessions: [],
+        machines: [],
+        stats: { events: 0, sessions: 0, machines: 0, eventsLastMinute: 0, storageBytes: 0, uptimeS: 0 },
+        limits: [entry("claude-code a:1"), entry("codex m:lab-mac")],
+      },
+    });
+    expect(store.get().limits.map((e) => e.key)).toEqual(["claude-code a:1", "codex m:lab-mac"]);
+    store.apply({ kind: "limits", limits: [entry("codex m:lab-mac")] });
+    expect(store.get().limits.map((e) => e.key)).toEqual(["codex m:lab-mac"]);
+    expect(STREAM_KINDS).toContain("limits");
   });
 });

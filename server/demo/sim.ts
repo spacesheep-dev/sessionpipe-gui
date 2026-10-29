@@ -67,6 +67,8 @@ interface Actor {
 }
 
 const DAY = 86_400_000;
+const HOUR = 3_600_000;
+const MINUTE = 60_000;
 const PROGRESS_EVERY_MS = 20_000;
 const TITLE_RANK = { "first-ask": 0, harness: 1, custom: 2 } as const;
 /** The curated opening scenes get this long before random sessions join in. */
@@ -299,11 +301,12 @@ export class Sess {
       this.block.title_source = title_source;
     }
   }
-  emit(type: string, data: Record<string, unknown>, event: string, version = true): ProtocolEvent {
+  /** `at`: a wall-clock time other than now (an earlier session's, limitsScene). */
+  emit(type: string, data: Record<string, unknown>, event: string, version = true, at?: number): ProtocolEvent {
     const harness: ProtocolEvent["harness"] = { name: this.profile.name };
     if (version) harness.version = HARNESS_VERSION[this.profile.name];
     if (event) harness.event = event;
-    return this.sim.emit(type, harness, { id: this.id, seq: this.seq++, ...this.block }, prune(data));
+    return this.sim.emit(type, harness, { id: this.id, seq: this.seq++, ...this.block }, prune(data), at);
   }
 }
 
@@ -324,10 +327,16 @@ export class Simulation {
   private accounts = new Map<string, string>();
   private ended: Sess[] = [];
   private readonly onStart?: (s: DemoStarted) => void;
+  /** The ids of limitsScene's earlier sessions: a stream of its own, so the cast draws
+   *  what it always drew. */
+  private readonly sideRng: Rng;
+  /** lab-mac's 5-hour window (limitsScene): used, when it resets, replies since it moved. */
+  private fiveHour = { used: 38, resetsAt: 0, replies: 0, bumps: 0 };
 
   constructor(opts: SimOptions = {}) {
     this.onStart = opts.onStart;
     this.rng = new Rng(opts.seed ?? 20261014);
+    this.sideRng = new Rng((opts.seed ?? 20261014) + 1);
     const n = Math.min(MACHINE_NAMES.length, Math.max(1, Math.floor(opts.machines ?? 2)));
     this.machines = MACHINE_NAMES.slice(0, n);
     this.v010Machine = n === 1 ? (this.machines[0] as string) : V010_MACHINE;
@@ -558,6 +567,7 @@ export class Simulation {
         end: "exit",
       });
     this.spawn(parallel(), 10_000);
+    this.spawn(this.limitsScene());
 
     let lastShowcase = this.now;
     yield OPENING_MS;
@@ -872,6 +882,166 @@ export class Simulation {
       { turn, user, assistant: script.final, at: new Date(this.wall()).toISOString() },
       endEvent,
     );
+    this.statusLine(sess);
+  }
+
+  /** sessionpipe 0.10's usage limits (limits.observed), every state the Usage page has:
+   *  each account's last report, left by an earlier session that ended before the demo
+   *  began, then lab-mac's status line as its replies move the 5-hour window. Only an
+   *  account id the cast has drawn is read (the runner's paired machine draws lab-mac's at
+   *  once), never drawn here, so the cast plays as it always did. Codex sends no account
+   *  id: its numbers are the machine's. */
+  private *limitsScene(): Script {
+    const t0 = this.startAt;
+    const lab = this.v010Machine;
+    const studio = this.machines[0] as string;
+    const build = this.machines[1 % this.machines.length] as string;
+    const at = (ms: number) => new Date(t0 + ms).toISOString();
+    this.fiveHour.resetsAt = t0 + 2 * HOUR + 21 * MINUTE;
+    // Studio-mac's Claude Code account, which no paired machine names: none left, three hours ago.
+    while (!this.accounts.has(`${studio}/claude-code`)) yield 1000;
+    this.earlier({
+      harness: "claude-code",
+      machine: studio,
+      account: this.accounts.get(`${studio}/claude-code`),
+      repo: REPOS[2] as Repo,
+      reportAt: t0 - 3 * HOUR,
+      prompt: "Which pages still link to the 2.3 changelog?",
+      reply: "Four: the install guide, the upgrade notes and two API pages. The changelog index already points at 2.4.",
+      windows: [
+        { id: "five_hour", used_percent: 100, window_minutes: 300, resets_at: at(70 * MINUTE) },
+        { id: "seven_day", used_percent: 42, window_minutes: 10_080, resets_at: at(5 * DAY + HOUR) },
+      ],
+    });
+    // A Claude Code home on api.z.ai: the gateway's spend limit, passed.
+    this.earlier({
+      harness: "claude-code",
+      machine: lab,
+      account: DEMO_API_ACCOUNT,
+      repo: REPOS[0] as Repo,
+      reportAt: t0 - MINUTE,
+      prompt: "Summarise yesterday's failed invoice runs.",
+      reply: "Three runs failed, all on the EU shard, all with the same expired card token.",
+      windows: [{ id: "spend_limit", used_percent: 112, resets_at: at(12 * DAY) }],
+    });
+    // Codex on lab-mac, fresh, and on build-box two hours ago, its 5-hour window reset since.
+    this.earlier({
+      harness: "codex",
+      machine: lab,
+      repo: REPOS[1] as Repo,
+      reportAt: t0 - 2 * MINUTE,
+      prompt: "Is the pnpm store cached between CI jobs?",
+      reply: "Yes, keyed on the lockfile's hash; the cache step runs before install in both workflows.",
+      windows: [
+        { id: "primary", used_percent: 8, window_minutes: 300, resets_at: at(3 * HOUR + 43 * MINUTE) },
+        { id: "secondary", used_percent: 26, window_minutes: 10_080, resets_at: at(4 * DAY + 2 * HOUR) },
+      ],
+      plan: "plus",
+    });
+    this.earlier({
+      harness: "codex",
+      machine: build,
+      repo: REPOS[5] as Repo,
+      reportAt: t0 - 2 * HOUR,
+      prompt: "List the jobs that still read the late-events table.",
+      reply: "Two: nightly-rollup and backfill-reconcile. Both read it through the v1 view.",
+      windows: [
+        { id: "primary", used_percent: 64, window_minutes: 300, resets_at: at(-40 * MINUTE) },
+        { id: "secondary", used_percent: 91, window_minutes: 10_080, resets_at: at(DAY + 4 * HOUR) },
+      ],
+      plan: "pro",
+    });
+    // lab-mac's own Claude Code account (dev@example.com): fresh, with this week's Fable
+    // window beside the week across all models. Its replies move it on (statusLine).
+    while (!this.accounts.has(`${lab}/claude-code`)) yield 1000;
+    this.earlier({
+      harness: "claude-code",
+      machine: lab,
+      account: this.accounts.get(`${lab}/claude-code`),
+      repo: REPOS[0] as Repo,
+      reportAt: t0 - MINUTE,
+      prompt: "Which webhook retries are still on the old backoff?",
+      reply:
+        "Two: invoice.paid and customer.updated still wait a fixed 30 s; the rest moved to exponential backoff in #418.",
+      windows: this.labWindows(t0 - MINUTE),
+    });
+  }
+
+  /** lab-mac's Claude Code windows as its status line reports them at `now`. */
+  private labWindows(now: number): Record<string, unknown>[] {
+    const f = this.fiveHour;
+    // Past its reset the window starts again, as the harness's own would.
+    while (f.resetsAt && f.resetsAt <= now) {
+      f.resetsAt += 5 * HOUR;
+      f.used = 3;
+    }
+    const week = new Date(this.startAt + 2 * DAY + 18 * HOUR).toISOString();
+    return [
+      { id: "five_hour", used_percent: f.used, window_minutes: 300, resets_at: new Date(f.resetsAt).toISOString() },
+      { id: "seven_day", used_percent: 20, window_minutes: 10_080, resets_at: week },
+      { id: "seven_day_fable", used_percent: 29, resets_at: week },
+    ];
+  }
+
+  /** lab-mac's status line after a reply on its own account: every third one moves the
+   *  5-hour window a point or two, and the hook reports only what changed. */
+  private statusLine(sess: Sess): void {
+    const lab = this.v010Machine;
+    const account = this.accounts.get(`${lab}/claude-code`);
+    if (sess.profile.name !== "claude-code" || sess.block.machine !== lab || sess.block.account_id !== account) return;
+    const f = this.fiveHour;
+    if (!f.resetsAt || ++f.replies % 3 !== 0) return;
+    f.used = Math.min(99, f.used + (f.bumps++ % 2 ? 2 : 1));
+    sess.emit("limits.observed", { windows: this.labWindows(this.wall()) }, "StatusLine");
+  }
+
+  /** A short session that ended before the demo began and left its account's limits:
+   *  one turn, the report after its reply (Claude Code's status line, Codex's Stop), the end. */
+  private earlier(p: {
+    harness: "claude-code" | "codex";
+    machine: string;
+    account?: string;
+    repo: Repo;
+    reportAt: number;
+    prompt: string;
+    reply: string;
+    windows: Record<string, unknown>[];
+    plan?: string;
+  }): void {
+    const rng = this.sideRng;
+    const codex = p.harness === "codex";
+    const start = p.reportAt - 4 * MINUTE;
+    const sess = new Sess(this, PROFILES[p.harness], codex ? rng.uuid7(start) : rng.uuid(), {
+      machine: p.machine,
+      cwd: p.repo.cwd,
+      repo: p.repo.repo,
+      branch: "main",
+      model: MODELS[p.harness][0],
+      title: firstAsk(p.prompt),
+      title_source: "first-ask",
+      ...(p.account ? { account_id: p.account } : {}),
+    });
+    const ev = sess.profile.ev;
+    const turnId = codex ? rng.uuid7(start) : rng.uuid();
+    const ms = 3 * MINUTE + 40_000;
+    sess.emit("session.started", { source: "startup" }, ev.start, true, start);
+    sess.emit("turn.started", { turn_id: turnId, prompt_chars: [...p.prompt].length }, ev.prompt, true, start + 5000);
+    sess.emit("turn.ended", { turn_id: turnId, reason: "stop", ms }, ev.stop, true, start + 5000 + ms);
+    sess.emit(
+      "turn.transcript",
+      { turn: 0, user: p.prompt, assistant: p.reply, at: new Date(start + 5000 + ms).toISOString() },
+      ev.stop,
+      true,
+      start + 5000 + ms,
+    );
+    sess.emit(
+      "limits.observed",
+      { windows: p.windows, plan: p.plan },
+      codex ? ev.stop : "StatusLine",
+      true,
+      p.reportAt,
+    );
+    sess.emit("session.ended", { reason: "exit" }, ev.end, true, p.reportAt + 20_000);
   }
 
   /** A subagent as Claude Code sends it: inside the parent's session, every tool stamped

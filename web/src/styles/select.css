@@ -168,6 +168,9 @@ button.sel:focus-visible {
   font-size: var(--text-sm);
   white-space: nowrap;
 }
+.sel-opt-hint--attention {
+  color: var(--needs-fg);
+}
 .sel-opt-check {
   display: inline-flex;
   justify-content: center;

@@ -9,6 +9,7 @@ import {
   EMPTY_MARKS,
   type Labels,
   type LabelsPatch,
+  type LimitsEntry,
   type MachineSummary,
   type Marks,
   type MarksPatch,
@@ -45,6 +46,9 @@ export interface AppState {
   labels: Labels;
   /** What the person has seen, the same on every device (server/ui/marks.ts). */
   marks: Marks;
+  /** Each account's newest usage limits (server/ui/limits.ts), the whole list from the
+   *  snapshot and from every `limits` frame. */
+  limits: readonly LimitsEntry[];
   /** The newest ETag of each view's server-side state (`viewState` frames), so a mounted
    *  view can re-read what another device wrote. */
   viewStates: ReadonlyMap<string, string>;
@@ -67,6 +71,7 @@ const initial: AppState = {
   suggestions: [],
   labels: EMPTY_LABELS,
   marks: EMPTY_MARKS,
+  limits: [],
   viewStates: new Map(),
   version: 0,
 };
@@ -145,6 +150,7 @@ export class Store {
           suggestions: s.suggestions ?? [],
           labels: s.labels ?? this.state.labels,
           marks: s.marks ?? this.state.marks,
+          limits: s.limits ?? [],
         });
         return;
       }
@@ -204,6 +210,9 @@ export class Store {
         return;
       case "marks":
         if (m.marks.rev >= this.state.marks.rev) this.set({ marks: m.marks });
+        return;
+      case "limits":
+        this.set({ limits: m.limits });
         return;
       case "viewState": {
         const viewStates = new Map(this.state.viewStates);

@@ -51,6 +51,9 @@ export interface Transport {
    *  the change as a `marks` frame. */
   marks(): Promise<Marks>;
   patchMarks(p: MarksPatch): Promise<Marks>;
+  /** "Forget these numbers": one usage-limits entry goes until its next report; the
+   *  change arrives as a `limits` stream frame. */
+  forgetLimits(key: string): Promise<void>;
   /** Session search (web/src/search): its client arrives with the search code itself. */
   sessionSearch(): Promise<SearchClient>;
 }
@@ -69,6 +72,7 @@ export const STREAM_KINDS = [
   "suggestion",
   "labels",
   "marks",
+  "limits",
   "viewState",
   "searchIndex",
 ] as const satisfies readonly StreamMessage["kind"][];
@@ -235,6 +239,7 @@ export function createHttpTransport(): Transport {
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify(p),
       }).then((r) => json<Marks>(r)),
+    forgetLimits: (key) => post<void>(ROUTES.ui.limitsForget, { key }),
     sessionSearch: () => import("../search/http").then((m) => m.httpSearch(searchFrames)),
   };
 }

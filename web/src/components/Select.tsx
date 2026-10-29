@@ -29,6 +29,8 @@ export interface SelectOption<T> {
   label: string;
   /** A second word in muted text at the row's right, "default", "ding.wav". */
   hint?: string;
+  /** The hint in the attention colour, for the one state it carries ("None left"). */
+  hintTone?: "attention";
   /** A mark in the column before the label (a harness glyph). */
   icon?: ReactNode;
   disabled?: boolean;
@@ -433,7 +435,7 @@ function Picker<T>({
               </span>
             )}
             <span className="sel-opt-label ellipsis">{o.label}</span>
-            {o.hint && <span className="sel-opt-hint">{o.hint}</span>}
+            {o.hint && <span className={`sel-opt-hint ${o.hintTone ? "sel-opt-hint--attention" : ""}`}>{o.hint}</span>}
             {o.detail && <span className="sel-opt-detail">{o.detail}</span>}
           </div>
         );

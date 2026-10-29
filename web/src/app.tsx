@@ -30,6 +30,7 @@ import { SessionPage } from "./pages/Session";
 import { Setup } from "./pages/Setup";
 import { Shortcuts } from "./pages/Shortcuts";
 import { Themes } from "./pages/Themes";
+import { Usage } from "./pages/Usage";
 import { PhonePage } from "./phone/PhonePage";
 import { markSetupSeen, setupSeen, useSetupStatus } from "./setup/api";
 import { needsSetup } from "./setup/steps";
@@ -43,6 +44,7 @@ const TITLES: Record<string, string> = {
   review: "Review",
   search: "Search",
   machines: "Machines",
+  usage: "Usage",
   connect: "Connect",
   setup: "Setup",
   session: "Session",
@@ -131,6 +133,7 @@ export function App() {
       {route.name === "review" && <Review />}
       {route.name === "search" && <Search />}
       {route.name === "machines" && <Machines />}
+      {route.name === "usage" && <Usage />}
       {route.name === "connect" && <Connect />}
       {route.name === "setup" && <Setup />}
       {route.name === "themes" && <Themes />}
