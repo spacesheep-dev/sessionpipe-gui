@@ -6,7 +6,7 @@
 // under the pointer, the search that finds nothing, the keyboard (e with Hidden open
 // too), and the Hidden header's own menu.
 import { expect, test } from "@playwright/test";
-import { openBoard } from "./helpers.js";
+import { holdBoard, openBoard } from "./helpers.js";
 
 test.describe("board", () => {
   test("groups demo sessions by state and collapses done with a count", async ({ page }) => {
@@ -248,6 +248,32 @@ test.describe("board", () => {
     await expect(link).not.toHaveAttribute("href", second!);
     await expect(link).not.toHaveAttribute("href", first!);
     await expect(section).not.toHaveClass(/group--hidden/);
+  });
+
+  test("e and ⇧E leave the board alone while you work in the panel beside it", async ({ page }) => {
+    await openBoard(page);
+    await holdBoard(page);
+    const card = page.locator("section.group--working article.card").first();
+    const href = (await card.locator("a.card-link").getAttribute("href"))!;
+    await page.locator(`article.card a.card-link[href="${href}"]`).click({ modifiers: ["Shift"] });
+    const panel = page.locator("aside.panel");
+    await expect(panel).toHaveClass(/panel--open/);
+    // Working in the panel: focus on one of its controls, with the board's cursor still set.
+    await panel.getByRole("button", { name: "Close panel" }).focus();
+    expect(await page.evaluate(() => !!document.activeElement?.closest("aside.panel"))).toBe(true);
+    await expect(page.locator("article.card[aria-current='true']")).toHaveCount(1);
+    const hiddenStore = () => page.evaluate(() => JSON.parse(localStorage.getItem("sessionpipe-gui.hidden") ?? "{}"));
+    await page.keyboard.press("e");
+    await page.keyboard.press("Shift+E");
+    expect(await hiddenStore()).toEqual({});
+    await expect(page.locator('.toast[data-toast="undo"]')).toHaveCount(0);
+    await expect(page.locator("section.group--hidden")).toHaveCount(0);
+    // Back on the board (focus off the panel), the same key hides the row under the cursor.
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    expect(await page.evaluate(() => !!document.activeElement?.closest("aside.panel"))).toBe(false);
+    await page.keyboard.press("e");
+    await expect.poll(async () => Object.keys(await hiddenStore()).length).toBe(1);
+    await expect(page.locator('.toast[data-toast="undo"]')).toContainText("Hidden");
   });
 
   test("Esc clears the search first, then the cursor", async ({ page }) => {

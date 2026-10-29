@@ -368,7 +368,9 @@ const drawn = (el: HTMLElement): boolean =>
 const openDismiss = (): boolean => [...document.querySelectorAll<HTMLElement>("[data-dismiss]")].some(drawn);
 
 /** Focus is in the side panel: its own keys win there. */
-const inPanel = () => !!document.activeElement?.closest?.("aside.panel");
+/** Focus is inside the panel beside the page: a list's bare keys (its menu, the jumps,
+ *  e and ⇧E) leave the row under the cursor alone, since the person is working there. */
+export const inPanel = (): boolean => !!document.activeElement?.closest?.("aside.panel");
 
 /** Holding ⌘ (ctrl elsewhere) for 600 ms in the installed app marks the document
  *  `data-jump-hints`, so the first nine rows show their number (board.css); letting go

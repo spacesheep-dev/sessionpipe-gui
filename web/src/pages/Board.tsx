@@ -72,7 +72,7 @@ import {
   unhide,
   useHidden,
 } from "../lib/hidden";
-import { focusSearch, useListNav } from "../lib/keys";
+import { focusSearch, inPanel, useListNav } from "../lib/keys";
 import { type LabelFilter, labelName, labelPasses, labelQuery, requestLabelRename } from "../lib/labels";
 import { isUnread, setUnread } from "../lib/marks";
 import { type Held, useFlip, useHeldOrder, useListHold, usePresence } from "../lib/motion";
@@ -673,16 +673,18 @@ export function Board() {
  *  hides it until it needs you; a key with nothing to hide passes. `leave()` runs first,
  *  so the cursor can stay where the row was. */
 function useHideKeys(row: () => SessionSummary | undefined, leave: () => void): void {
+  // Not from inside the panel beside the board (the list's own menu and ⌘1–9 keep the
+  // same rule): e there would hide whatever row the cursor last rested on.
   useShortcut("list.hide", () => {
     const s = row();
-    if (!s) return false;
+    if (!s || inPanel()) return false;
     leave();
     if (hiddenNow(s)) unhide(s.key);
     else hide(s.key, s.stateSince, { title: sessionTitle(s), session: s.key });
   });
   useShortcut("list.hideUntil", () => {
     const s = row();
-    if (!s || hiddenNow(s) || !canHideUntilNeeded(s)) return false;
+    if (!s || inPanel() || hiddenNow(s) || !canHideUntilNeeded(s)) return false;
     leave();
     hideUntilNeeded(s.key, { title: sessionTitle(s), session: s.key });
   });
