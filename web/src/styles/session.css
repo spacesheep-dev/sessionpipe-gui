@@ -324,6 +324,25 @@ html:has(.main > .session) {
   display: flex;
   flex-direction: column;
 }
+/* Where the person left off (SessionBody NewLine): "New", then a hairline across the
+   column, in the meta tier; no accent, no count, it only says where. */
+.new-line {
+  display: flex;
+  align-self: stretch;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  line-height: 1;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.new-line::after {
+  content: "";
+  flex: 1;
+  border-top: var(--hairline) solid var(--line);
+}
 /* The reply: prose where the rows' text starts, no box and no rule. */
 .reply {
   margin: 8px 0 8px var(--tl-lead);

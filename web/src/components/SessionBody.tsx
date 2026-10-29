@@ -7,7 +7,9 @@
 // timeline grouped by turn (newest page first, older pages on demand, the stream
 // appending) and the docked composer. The page scrolls the window; the panel scrolls its
 // own element (`scrollRef`). The view sticks to the bottom while the person is within
-// 48 px of it; scrolled up, nothing moves and an "n new" pill offers the way back. In
+// 48 px of it; scrolled up, nothing moves and an "n new" pill offers the way back. A
+// session with several answers since the person last looked opens on a New line above
+// the first of them instead (lib/newLine.ts). In
 // Simple mode (lib/settings.ts) the same view is a chat: the person's prompts as bubbles
 // on the right, the assistant's replies as plain prose under its name, the tools of a
 // turn folded into one line. A message sent from here is drawn where its turn is or will
@@ -28,6 +30,7 @@ import type {
 import { sessionKey, splitKey } from "@shared/api";
 import {
   createContext,
+  Fragment,
   type ReactNode,
   type RefObject,
   useCallback,
@@ -37,6 +40,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { forkOf } from "../control/Activity";
 import { PromptBody, promptParts } from "../control/Attachments";
@@ -74,6 +78,7 @@ import {
 import { labelMenu } from "../lib/labels";
 import { absoluteUrl, agentItems, copyItem, sessionItems } from "../lib/menus";
 import { reducedMotion, useFlip } from "../lib/motion";
+import { leftOff, type NewLineAt, newLinePlace } from "../lib/newLine";
 import { AGENT_PARAM, back, Link, navigate, sessionPath, useSearchParam } from "../lib/router";
 import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
@@ -446,14 +451,29 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     return () => window.removeEventListener("hashchange", onHash);
   }, [jumpTo]);
 
+  /** Open on the New line when what came since it is taller than two thirds of the view:
+   *  the line a third of the way down, so the first new answer reads from its start. */
+  const toNewLine = useCallback((): boolean => {
+    const line = rootRef.current?.querySelector<HTMLElement>(".new-line");
+    if (!line) return false;
+    const top = line.getBoundingClientRect().top - (sc()?.getBoundingClientRect().top ?? 0) + scrollY();
+    if (scrollHeight() - top <= (viewHeight() * 2) / 3) return false;
+    followRef.current = false;
+    pinned.current = false;
+    setFollow(false);
+    scrollTo(top - viewHeight() / 3);
+    return true;
+  }, [sc, scrollY, scrollHeight, viewHeight, scrollTo]);
+
   // Bottom-anchored first paint (the newest turn is what a session opens on, unless the
-  // URL names a row), before the browser paints, and a still viewport when older events
-  // land above it, whether or not the browser's own scroll anchoring already moved it.
+  // URL names a row or there is a New line to open on), before the browser paints, and a
+  // still viewport when older events land above it, whether or not the browser's own
+  // scroll anchoring already moved it.
   useLayoutEffect(() => {
     if (events.length === 0) return;
     if (firstPaint.current) {
       firstPaint.current = false;
-      if (!jumpTo(hashSeq()) && !jumpToAgent(focusAgent)) toBottom();
+      if (!jumpTo(hashSeq()) && !jumpToAgent(focusAgent) && !toNewLine()) toBottom();
       return;
     }
     const a = anchor.current;
@@ -468,7 +488,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
         if (Math.abs(scrollY() - want) > 1) scrollTo(want);
       }
     }
-  }, [events, scrollTo, scrollBy, scrollHeight, scrollY, jumpTo, jumpToAgent, focusAgent, toBottom]);
+  }, [events, scrollTo, scrollBy, scrollHeight, scrollY, jumpTo, jumpToAgent, focusAgent, toNewLine, toBottom]);
   // Asked for another agent while open (a second "Open beside" on the same tab, the URL).
   const lastFocus = useRef(focusAgent);
   useEffect(() => {
@@ -646,6 +666,33 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   const hidden = events.length - visible.length;
   // Every loaded event's turns, whatever the lens leaves out: what a sent message joins.
   const allTurns = useMemo(() => (lens >= 3 ? turns : groupTurns(events, agentRuns)), [lens, turns, events, agentRuns]);
+
+  // The New line (lib/newLine.ts). Where the person left off is read as the session first
+  // shows, before useSeen marks it read, and only when it was unread then; the line is
+  // placed once this session's first page is in and stays put while the page is open.
+  // A cold open can have its page before the marks (the stream's snapshot): it waits for
+  // them, re-rendered once when they land (useSeen can't move them before either).
+  const marksIn = useSyncExternalStore(store.subscribe, () => !!store.get().marks.since);
+  const opened = useRef<{ key: string; mark?: string; line?: NewLineAt | null; late?: boolean } | null>(null);
+  if (marksIn && s?.key === key && opened.current?.key !== key) {
+    const mark = leftOff(s, store.get().marks);
+    if (mark !== null) opened.current = { key, mark };
+  }
+  const first = events[0];
+  const pageIn = !loading && !!first && sessionKey(first.harness.name, first.session.id) === key;
+  if (pageIn && opened.current?.key === key && opened.current.line === undefined) {
+    opened.current.line = newLinePlace(allTurns, opened.current.mark, { attended: s?.attended });
+    opened.current.late = !firstPaint.current;
+  }
+  const newLineSeq = opened.current?.key === key ? opened.current.line?.seq : undefined;
+  // Placed after the first paint (the marks came after the page): open on it then, the
+  // same way, unless the person has already scrolled away from the bottom.
+  useLayoutEffect(() => {
+    const o = opened.current;
+    if (newLineSeq === undefined || !o?.late) return;
+    o.late = false;
+    if (followRef.current && pinned.current) toNewLine();
+  }, [newLineSeq, toNewLine]);
 
   // The messages sent from here to this session (its start among them), and the turn each
   // became: the turn shows the words as they were signed (tier 2 sends only a length),
@@ -1017,6 +1064,9 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
               <TurnBlock
                 key={t.n}
                 turn={t}
+                newLine={
+                  newLineSeq !== undefined && t.items.some((i) => i.kind === "event" && i.e.session.seq === newLineSeq)
+                }
                 sent={sent}
                 pending={p}
                 flip={fresh}
@@ -1259,6 +1309,7 @@ function TurnBlock({
   sent,
   pending = false,
   flip = false,
+  newLine = false,
 }: {
   turn: Turn;
   lens: Tier;
@@ -1274,6 +1325,8 @@ function TurnBlock({
   pending?: boolean;
   /** Slide into place as the turns around it arrive (a session started here). */
   flip?: boolean;
+  /** The first answer since the person last looked: the New line sits above it. */
+  newLine?: boolean;
 }) {
   // Only a running turn or a running tool shows a moving duration; the other blocks
   // (most of the page) have nothing to redraw each second.
@@ -1344,6 +1397,7 @@ function TurnBlock({
         status={status}
         failure={failure}
         flip={flip}
+        newLine={newLine}
       />
     );
 
@@ -1389,12 +1443,21 @@ function TurnBlock({
           const e = it.e;
           if (e.type === "turn.transcript") {
             if (it !== transcript) return null;
-            return <Reply key={it.key} e={e} turnSeq={startSeq} fill={fill} />;
+            const reply = <Reply key={it.key} e={e} turnSeq={startSeq} fill={fill} />;
+            return newLine ? (
+              <Fragment key={it.key}>
+                <NewLine />
+                {reply}
+              </Fragment>
+            ) : (
+              reply
+            );
           }
           if (e.type === "attention.needed") return <AttentionMarker key={it.key} e={e} />;
           if (e.type === "subagent.started" || e.type === "subagent.ended") return <AgentMarker key={it.key} e={e} />;
           return <EventMarker key={it.key} e={e} />;
         })}
+        {newLine && !transcript && <NewLine />}
         {progress && String(progress.e.data.assistant ?? "").trim() && (
           <Reply e={progress.e} turnSeq={startSeq} fill={fill} live />
         )}
@@ -1698,6 +1761,7 @@ function ChatTurn({
   status,
   failure,
   flip,
+  newLine = false,
 }: {
   turn: Turn;
   lens: Tier;
@@ -1718,6 +1782,7 @@ function ChatTurn({
   status: Status;
   failure: ReactNode;
   flip: boolean;
+  newLine?: boolean;
 }) {
   const { open, working } = useTimeline();
   const tools = turn.items.filter((i): i is ToolItem => i.kind === "tool");
@@ -1796,6 +1861,7 @@ function ChatTurn({
               {typeof it.e.data.tool === "string" ? ` · ${toolLabel(it.e.data.tool)}` : ""}
             </p>
           ))}
+          {newLine && <NewLine chat />}
           {endErr && (
             <p className="chat-err">
               <ErrGlyph />
@@ -1810,6 +1876,21 @@ function ChatTurn({
       )}
     </li>
   );
+}
+
+/** Where the person left off: "New" and a hairline across the column, above the first
+ *  answer since they last looked (lib/newLine.ts). In the meta tier: it says where, and
+ *  asks nothing. */
+function NewLine({ chat = false }: { chat?: boolean }) {
+  const line = (
+    // biome-ignore lint/a11y/useSemanticElements: an <hr> can't hold the word "New"
+    <div className="new-line" role="separator" aria-label="New since you looked">
+      New
+    </div>
+  );
+  // Among a turn's rows it is an item that holds the separator: a list's own children
+  // can't be separators (axe's "list").
+  return chat ? line : <li>{line}</li>;
 }
 
 /** The tools of a turn as one quiet disclosure line, the usual rows when opened. */

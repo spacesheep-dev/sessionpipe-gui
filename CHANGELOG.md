@@ -35,6 +35,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   small bell with a slash. A parent session can quiet its subagent sessions, never make
   them louder. The choice is kept in `marks.json` (`notify`), so it holds on every device;
   the browser's permission, the global Notify me and sounds stay per device.
+- **A New line where you left off.** A session with news since you looked opens with a
+  quiet "New" hairline above the first answer you haven't read, in Simple and Advanced
+  and on a phone. When there's more than a screen of it, the session opens with the line
+  a third of the way down instead of at the bottom. Your own turns at the terminal never
+  count, the line doesn't move while the page is open, and it's gone when you come back.
+  A session you haven't opened yet opens at the bottom as before.
 
 ### Changed
 
