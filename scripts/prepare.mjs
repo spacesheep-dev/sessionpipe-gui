@@ -34,6 +34,10 @@ env.npm_config_global = "false";
 // installing again, and again.
 env.SPGUI_SKIP_PREPARE = "1";
 
+/** One word for cmd.exe: as it is when it is plainly safe, else in double quotes, inside
+ *  which & | < > ( ) ^ and spaces are literal (a Windows path has no " to escape). */
+const cmdArg = (a) => (/^[\w.:\\/=@+-]+$/.test(a) ? a : `"${a}"`);
+
 /** npm, with no shell. npm runs this script with npm_execpath set to its own CLI
  *  (npm-cli.js), which runs under this node. A bare "npm" is npm.cmd on Windows, and
  *  spawnSync can't start a .cmd without a shell: `npx github:…` failed there with no
@@ -44,7 +48,7 @@ function npm(args) {
     cli && /npm-cli\.[cm]?js$/i.test(cli)
       ? spawnSync(process.execPath, [cli, ...args], { cwd: root, stdio: "inherit", env })
       : process.platform === "win32"
-        ? spawnSync(["npm", ...args].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" "), {
+        ? spawnSync(["npm", ...args].map(cmdArg).join(" "), {
             cwd: root,
             stdio: "inherit",
             env,
