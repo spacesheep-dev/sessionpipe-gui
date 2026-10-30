@@ -171,8 +171,7 @@ impl Generators {
                 let _: () = msg_send![g, prepare];
                 g
             };
-            let selection: *mut AnyObject =
-                msg_send![class!(UISelectionFeedbackGenerator), alloc];
+            let selection: *mut AnyObject = msg_send![class!(UISelectionFeedbackGenerator), alloc];
             let selection: *mut AnyObject = msg_send![selection, init];
             let notification: *mut AnyObject =
                 msg_send![class!(UINotificationFeedbackGenerator), alloc];

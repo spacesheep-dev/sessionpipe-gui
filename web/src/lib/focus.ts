@@ -43,7 +43,13 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, active: boolean
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!root.hasAttribute("tabindex")) root.setAttribute("tabindex", "-1");
     const first = () => {
-      const want = optsRef.current.initial ? root.querySelector<HTMLElement>(optsRef.current.initial) : null;
+      // The first match that is drawn: a layout's other form of the same control (a
+      // phone bar's button beside a desktop footer's) may be in the tree, display none.
+      const want = optsRef.current.initial
+        ? ([...root.querySelectorAll<HTMLElement>(optsRef.current.initial)].find(
+            (el) => el.getClientRects().length > 0,
+          ) ?? null)
+        : null;
       (want ?? root.querySelector<HTMLElement>("[autofocus]") ?? focusables(root)[0] ?? root).focus({
         preventScroll: true,
       });

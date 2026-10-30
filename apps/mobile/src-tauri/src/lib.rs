@@ -76,8 +76,7 @@ fn app_notify_open_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String>
 /// is refused.
 #[tauri::command]
 fn app_haptic<R: Runtime>(app: AppHandle<R>, kind: String) -> Result<(), String> {
-    let kind = contract::Haptic::parse(&kind)
-        .ok_or_else(|| format!("unknown haptic {kind:?}"))?;
+    let kind = contract::Haptic::parse(&kind).ok_or_else(|| format!("unknown haptic {kind:?}"))?;
     #[cfg(target_os = "ios")]
     app.run_on_main_thread(move || uikit::haptic(kind))
         .map_err(|e| e.to_string())?;
@@ -92,8 +91,8 @@ fn app_haptic<R: Runtime>(app: AppHandle<R>, kind: String) -> Result<(), String>
 /// MainActivity's `spAppearance` directly.
 #[tauri::command]
 fn app_appearance<R: Runtime>(app: AppHandle<R>, scheme: String) -> Result<(), String> {
-    let scheme = contract::Scheme::parse(&scheme)
-        .ok_or_else(|| format!("unknown scheme {scheme:?}"))?;
+    let scheme =
+        contract::Scheme::parse(&scheme).ok_or_else(|| format!("unknown scheme {scheme:?}"))?;
     #[cfg(target_os = "ios")]
     {
         let win = app.get_webview_window("main").ok_or("no main window")?;
@@ -153,9 +152,8 @@ fn open_main<R: Runtime>(app: &AppHandle<R>, path: Option<&str>) -> tauri::Resul
         .build()?;
     #[cfg(target_os = "ios")]
     {
-        let _ = win.with_webview(|pv| unsafe {
-            uikit::fit(pv.inner() as *mut objc2::runtime::AnyObject)
-        });
+        let _ = win
+            .with_webview(|pv| unsafe { uikit::fit(pv.inner() as *mut objc2::runtime::AnyObject) });
         // The generators warm up with the window, so the first tap's haptic is on time.
         let _ = app.run_on_main_thread(uikit::prepare_haptics);
     }

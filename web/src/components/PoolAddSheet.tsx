@@ -172,10 +172,6 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
           : "";
   const error = failure ?? (send.note?.err ? send.note : null);
 
-  useFocusTrap(ref, !closing, {
-    onClose: close,
-    initial: link ? "[data-pool-code]" : "[data-pool-signin], [data-pool-cancel]",
-  });
   // Esc closes the sheet from wherever focus is (a disabled Done lets it go).
   useShortcut("back", () => close(), { priority: 10, enabled: !closing });
   useEffect(() => {
@@ -184,6 +180,11 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
 
   const commandFirst = !pool || pool.accounts.length === 0 || unsupported;
   const canSignIn = !send.blocked && !waiting && !unsupported;
+  useFocusTrap(ref, !closing, {
+    onClose: close,
+    // One selector, not a list: a list answers in document order, and Cancel comes first.
+    initial: link ? "[data-pool-code]" : canSignIn ? "[data-pool-signin]" : "[data-pool-cancel]",
+  });
   const title = `Add a Claude account to ${m.name}`;
   const command = (
     <section className="pa-group" aria-labelledby="pa-cmd" data-pool-command="">
