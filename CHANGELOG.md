@@ -6,6 +6,8 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-30
+
 ### Added
 
 - **Pull down to refresh** on the phone's list pages (Board, Inbox, Search, Feed, Review,
@@ -570,7 +572,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.4.1...v0.5.0
