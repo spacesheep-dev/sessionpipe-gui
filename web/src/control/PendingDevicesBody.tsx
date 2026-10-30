@@ -13,7 +13,7 @@ import { ControlError, controlApi, type DeviceRequest } from "./api";
 import { sendCommand } from "./command";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
 import { deviceKeyLabel, sentence } from "./PendingDevices";
-import { approveBlocker, canSign, signerKind, signerLabel, signHint } from "./signer";
+import { approveBlocker, approveTarget, canSign, signerKind, signerLabel, signHint } from "./signer";
 import { outcomeWords, sendErrorWords } from "./words";
 
 /** How long a passkey prompt may take to show before the row says what else to try. */
@@ -43,8 +43,8 @@ export function PendingDevicesBody({ bar = false, list }: { bar?: boolean; list:
   const activity = useControlActivity();
 
   const machineFor = (d: DeviceRequest) => {
-    const id = target[d.requestId] ?? d.machineId ?? paired[0]?.control?.machineId;
-    return paired.find((m) => m.control?.machineId === id);
+    const id = target[d.requestId] ?? d.machineId;
+    return id ? paired.find((m) => m.control?.machineId === id) : approveTarget(d, paired);
   };
 
   const approve = async (d: DeviceRequest) => {

@@ -9,7 +9,8 @@
 // it also keeps the status bar on the page's ground (theme-color), scrolls a page to its
 // top when its tab is tapped again, mounts pull to refresh on the list pages
 // (PullRefresh), and shows a dropped stream as a pill under the bar, which that same
-// pull retries.
+// pull retries. The wide sidebar ends with what each account has left (UsageGlance.tsx),
+// which the phone reaches as More › Usage.
 import type { InstalledTheme } from "@shared/theme-api";
 import { type CSSProperties, Fragment, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
@@ -26,6 +27,8 @@ import { getSkins, isPlain } from "../lib/skins";
 import { restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
 import { getDisplaySettings as getDisplay, setSkin, setTheme, useSettings } from "../lib/theme";
 import { useNow } from "../lib/time";
+import { WORKFLOWS_ICON_PATHS } from "../orchestrate/workflows/glyphs";
+import { RunnerHost } from "../orchestrate/workflows/useRunner";
 import { useSetupStatus } from "../setup/api";
 import { setupComplete } from "../setup/steps";
 import { reloadThemes, setThemeDisabled, useThemes } from "../themes/host/registry";
@@ -38,6 +41,7 @@ import { QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { TipHost } from "./Tip";
+import { UsageGlance } from "./UsageGlance";
 
 /** Whether Setup had steps to go at the last visit: the rail draws its entry from this
  *  until the status answers, so nothing below it moves ~100 ms after the first paint. A
@@ -124,6 +128,14 @@ const ICON: Record<string, ReactNode> = {
       <path d="M16 14.5 18 16.5" />
     </>
   ),
+  /* Three stacked short rules with a chevron: steps, and what follows them. */
+  workflows: (
+    <>
+      {WORKFLOWS_ICON_PATHS.map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </>
+  ),
   machines: (
     <>
       <rect x="2.5" y="4" width="15" height="10" rx="1.5" />
@@ -135,6 +147,13 @@ const ICON: Record<string, ReactNode> = {
       <path d="M8.5 11.5l3-3" />
       <path d="M7 13l-1.5 1.5a2.5 2.5 0 0 1-3.5-3.5L4 9" />
       <path d="M13 7l1.5-1.5a2.5 2.5 0 0 1 3.5 3.5L16 11" />
+    </>
+  ),
+  /* A gauge: how much is left (Usage, a More row on a phone). */
+  usage: (
+    <>
+      <path d="M3 14.5a7 7 0 0 1 14 0" />
+      <path d="M10 14.5l3.2-4.2" />
     </>
   ),
   /* A short list with a check: the first-run steps. */
@@ -207,6 +226,7 @@ const BUILTIN: NavItem[] = [
   { to: "/search", key: "search", label: "Search", glyph: ICON.search },
   { to: "/feed", key: "feed", label: "Feed", glyph: ICON.feed },
   { to: "/review", key: "review", label: "Review", glyph: ICON.review },
+  { to: "/workflows", key: "workflows", label: "Workflows", glyph: ICON.workflows },
   { to: "/machines", key: "machines", label: "Machines", glyph: ICON.machines },
   { to: "/connect", key: "connect", label: "Connect", glyph: ICON.connect },
 ];
@@ -233,6 +253,14 @@ export const themeNavItem = (t: InstalledTheme): NavItem => {
 };
 
 const SETUP_ITEM: NavItem = { to: "/setup", key: "setup", label: "Setup", glyph: ICON.setup };
+
+/** Usage is no rail item (the sidebar's Usage lines lead there): on a phone it is a More
+ *  row, after Machines. */
+const USAGE_ITEM: NavItem = { to: "/usage", key: "usage", label: "Usage", glyph: ICON.usage };
+const withUsage = (pages: NavItem[]): NavItem[] => {
+  const at = pages.findIndex((n) => n.key === "connect");
+  return at < 0 ? [...pages, USAGE_ITEM] : [...pages.slice(0, at), USAGE_ITEM, ...pages.slice(at)];
+};
 
 /** The pages Simple mode keeps off the rail (still there through ⌘K and /settings). */
 const ADVANCED_ONLY = new Set(["feed", "review"]);
@@ -408,12 +436,12 @@ function MoreRow({ n, active, action }: { n: NavItem; active: string; action: st
 function MoreTab({ items, active, views }: { items: NavItem[]; active: string; views: NavItem[] }) {
   const [open, setOpen] = useState(false);
   const [display, setDisplay] = useState(false);
-  const inside = items.some((n) => n.key === active);
+  const plugins = items.filter((n) => n.key.startsWith("t:"));
+  const pages = withUsage(items.filter((n) => !n.key.startsWith("t:")));
+  const inside = [...pages, ...plugins].some((n) => n.key === active);
   const { mounted, closing } = usePresence(open);
   // A route change closes the sheet, whichever tab was tapped.
   useEffect(() => setOpen(false), [active]);
-  const plugins = items.filter((n) => n.key.startsWith("t:"));
-  const pages = items.filter((n) => !n.key.startsWith("t:"));
   // The exit copy marks no page current: the tab itself carries that once it closes.
   const row = (n: NavItem) => <MoreRow key={n.key} n={n} active={closing ? "" : active} action={navAction(n, views)} />;
   return (
@@ -468,7 +496,7 @@ function useSideForm(splitOpen: boolean): boolean {
   return wider || (wide && !splitOpen);
 }
 
-const LISTS = new Set(["board", "inbox", "search", "feed", "review"]);
+const LISTS = new Set(["board", "inbox", "search", "feed", "review", "workflows"]);
 let fromList = "board";
 /** The list a session page was opened from (PageBar's BackButton names it). */
 export const listBehind = (): string => fromList;
@@ -479,7 +507,14 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   useShortcutMap();
   // A session page keeps the list it was opened from lit (Board when it was opened directly).
   if (LISTS.has(route.name)) fromList = route.name;
-  const active = route.name === "session" ? fromList : route.name === "theme" ? `t:${route.id}` : route.name;
+  const active =
+    route.name === "session"
+      ? fromList
+      : route.name === "theme"
+        ? `t:${route.id}`
+        : route.name === "workflow" || route.name === "workflowRun"
+          ? "workflows"
+          : route.name;
   const needs = useAnswerableCount();
   // The Setup entry, with its orange dot, while this machine (and only from this machine:
   // elsewhere the status is 403) still has steps to go.
@@ -548,6 +583,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     />
   );
   const firstView = nav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
+  // The tab bar keeps its four; Workflows is a page for the More sheet on a phone.
+  const tabs = nav.filter((n) => n.key !== "workflows").slice(0, TABS);
   return (
     <div
       className={`shell ${splitOpen && !phone ? "shell--split" : ""} ${side && !phone ? "shell--side" : ""}`}
@@ -602,6 +639,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
             </Fragment>
           ))}
         </div>
+        {side && !phone && <UsageGlance here={route.name === "usage"} />}
         <div className="rail-foot">
           <ConnectionPill />
           <Link
@@ -645,8 +683,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {children}
       </main>
       <nav className="tabbar" aria-label="Pages">
-        {nav.slice(0, TABS).map((n) => entry(n, false))}
-        <MoreTab items={nav.slice(TABS)} active={active} views={views} />
+        {tabs.map((n) => entry(n, false))}
+        <MoreTab items={nav.filter((n) => !tabs.includes(n))} active={active} views={views} />
       </nav>
       {phone && <PhoneConn />}
       {phone && PULL_PAGES.has(route.name) && <PullRefresh main={mainRef} />}
@@ -654,6 +692,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       <ShortcutHelp />
       <LabelsHost />
       <NewSessionHost />
+      {/* The workflows' signer: claims and signs a run's ready steps, whichever page is open. */}
+      <RunnerHost />
       <MenuHost />
       <TipHost />
     </div>

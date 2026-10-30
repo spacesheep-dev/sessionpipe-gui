@@ -1,0 +1,189 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- usage ---------- */
+/* One grouped section per account (the grouped form, settings.css), in a reading column
+   centred in the window as Machines' is: a header row with the harness's mark, the title
+   at 600 and, when the report is old, its age in the meta tier; a muted line of where it
+   reported; then a row per window on hairlines. No box, no tint; on a phone each account
+   is an inset group, its windows stacked, the where-line its footer. The bar is neutral
+   (the second hairline token for the track, the secondary ink for what is left); only
+   "None left" and "N% over" take the attention colour, on their words. */
+
+.usage {
+  gap: 32px;
+}
+.usage > :not(.bar):not(.bar-below):not(.sr-only) {
+  margin-inline: auto;
+}
+.usage-acct {
+  scroll-margin-top: calc(var(--bar) + 16px);
+}
+.usage-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  border-radius: var(--radius);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.usage-head > .glyph-wrap {
+  flex: none;
+  color: var(--fg-2);
+}
+.usage-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.usage-age {
+  flex: none;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.usage-head .icon-btn {
+  margin-right: -6px;
+}
+.usage-where {
+  margin: -2px 0 6px 24px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+/* The age is in the header on a desktop; the where-line carries it on a phone. */
+.usage-where-age,
+.usage-where--age {
+  display: none;
+}
+/* A window: name, bar, what is left, when it resets. The step in is a margin, so the
+   hairline between windows starts under the label, not at the glyph's edge. */
+.usage-win {
+  display: grid;
+  grid-template-columns: 180px 160px 10ch minmax(0, 1fr);
+  grid-template-areas: "label bar value when";
+  align-items: center;
+  column-gap: 16px;
+  min-height: var(--row);
+  margin-left: 24px;
+}
+.usage-label {
+  grid-area: label;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: var(--text-md);
+}
+.usage-bar {
+  grid-area: bar;
+  display: block;
+  height: 3px;
+  border-radius: 999px;
+  /* The second hairline token: in dark the first is the rule between rows, and a track
+     drawn in it reads as another rule beside a nearly empty bar. */
+  background: var(--line-2);
+  overflow: hidden;
+}
+.usage-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--fg-2);
+}
+.usage-value {
+  grid-area: value;
+  color: var(--fg);
+  font-size: var(--text-md);
+  text-align: right;
+  white-space: nowrap;
+}
+.usage-out {
+  color: var(--needs-fg);
+}
+.usage-when {
+  grid-area: when;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+/* Reset: no bar, and "Reset 40 m ago" where the figure would be. */
+.usage-win--reset .usage-when {
+  grid-column: 3 / -1;
+}
+.usage-quiet {
+  padding-left: 24px;
+}
+.usage-quiet .cmdwell {
+  max-width: 560px;
+}
+/* The empty page: the command under its sentence, centred with it. */
+.usage .state .cmdwell {
+  max-width: 420px;
+  margin: 12px auto 0;
+  text-align: left;
+}
+.usage-note {
+  margin-top: -8px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 839px) {
+  .usage-acct > .usage-head {
+    order: 0;
+    padding: 0 16px 6px;
+  }
+  .usage-acct > .form-list {
+    order: 1;
+  }
+  /* The where-line is the group's footer, with the age after it. */
+  .usage-where {
+    order: 2;
+    margin: 8px 0 0;
+    padding: 0 16px;
+  }
+  .usage-where-age,
+  .usage-where--age {
+    display: inline;
+  }
+  .usage-where--age {
+    display: block;
+  }
+  .usage-age {
+    display: none;
+  }
+  .usage-win {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "label value"
+      "bar bar"
+      "when when";
+    row-gap: 6px;
+    margin-left: 0;
+    padding: 10px 16px 10px 0;
+  }
+  .usage-bar {
+    margin-top: 2px;
+  }
+  .usage-win--reset .usage-when {
+    grid-area: value;
+  }
+  .usage-quiet {
+    padding-left: 0;
+  }
+  .usage-note {
+    padding: 0 16px;
+  }
+  /* A well straight on the grouped ground reads as a cell. */
+  .usage .state .cmdwell {
+    background: var(--bg-2);
+  }
+}

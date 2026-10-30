@@ -4,16 +4,23 @@
 // app's "Start sessionpipe" runs `service install`). macOS: a LaunchAgent bootstrapped into
 // gui/<uid>. Linux: a systemd --user unit. Windows: not yet.
 //
+// `install` finds a service of ours already there (every app upgrade does: the plist
+// names the cli of the version that installed it) and upgrades it in place: the same port,
+// state dir and options unless flags say otherwise, the new node and cli, a restart, and a
+// wait until the receiver answers with the new version. A plist under our label that runs
+// something else is left alone.
+//
 // Everything outside the process (the platform, HOME, the uid, launchctl / systemctl, the
 // port probe) comes in through `ServiceEnv`, so tests run against a temp HOME and a fake
 // launchctl (`SP_LAUNCHCTL`, `SP_SYSTEMCTL`) and never touch the real session.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { DEFAULT_PORT } from "../../shared/api.js";
-import { readRunFile, runFilePath } from "../runfile.js";
+import { packageVersion } from "../config.js";
+import { readRunFile, readRunFileRaw, runFilePath } from "../runfile.js";
 import { launchAgentPath, launchAgentPlist, parseLaunchctlPrint, plistArgv } from "./launchd.js";
 import { parseSystemctlShow, systemdUnit, unitArgv, unitName, unitPath } from "./systemd.js";
 
@@ -53,10 +60,17 @@ export interface ServiceEnv {
   /** The default state dir, when `--state` is absent. */
   defaultState: string;
   exec(cmd: string, args: string[]): ExecResult;
+  /** This sessionpipe-gui's version: what an installed service is upgraded to. */
+  version: string;
   /** Who answers on 127.0.0.1:<port>: this GUI, something else, or nothing. */
   probe(port: number): Promise<Probe>;
-  /** How long `install` waits for the receiver to answer (0: don't wait). */
+  /** The version a sessionpipe-gui on 127.0.0.1:<port> reports; undefined when none answers. */
+  running(port: number): Promise<string | undefined>;
+  /** How long `install` waits for the receiver to answer (0: don't wait). A big state dir
+   *  rebuilds its index at boot, which can take most of a minute. */
   waitMs: number;
+  /** How long launchd gets to let go of a job after `bootout`. */
+  settleMs: number;
   out(line: string): void;
   err(line: string): void;
 }
@@ -78,6 +92,7 @@ export function processEnv(defaultState: string): ServiceEnv {
     node: process.execPath,
     cli,
     defaultState,
+    version: packageVersion(),
     exec: (cmd, args) => {
       const r = spawnSync(cmd, args, { encoding: "utf8", timeout: 15_000 });
       return {
@@ -87,14 +102,16 @@ export function processEnv(defaultState: string): ServiceEnv {
       };
     },
     probe: probePort,
-    waitMs: env.SP_SERVICE_WAIT_MS !== undefined ? Number(env.SP_SERVICE_WAIT_MS) : 10_000,
+    running: async (port) => (await fetchInfo(port))?.version,
+    waitMs: env.SP_SERVICE_WAIT_MS !== undefined ? Number(env.SP_SERVICE_WAIT_MS) : 90_000,
+    settleMs: 10_000,
     out: (s) => process.stdout.write(`${s}\n`),
     err: (s) => process.stderr.write(`sessionpipe-gui: ${s}\n`),
   };
 }
 
-/** Is anything listening on loopback:<port>, and is it a sessionpipe-gui? */
-export async function probePort(port: number, timeoutMs = 1000): Promise<Probe> {
+/** `GET /api/ui/info` on loopback:<port>, when something listens there. */
+async function fetchInfo(port: number, timeoutMs = 1000): Promise<{ name?: string; version?: string } | null> {
   const open = await new Promise<boolean>((resolve) => {
     const s = net.connect({ host: "127.0.0.1", port });
     const done = (v: boolean) => {
@@ -108,11 +125,17 @@ export async function probePort(port: number, timeoutMs = 1000): Promise<Probe> 
   if (!open) return null;
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/ui/info`, { signal: AbortSignal.timeout(timeoutMs) });
-    const j = (await res.json()) as { name?: string };
-    return j?.name === "sessionpipe-gui" ? "gui" : "other";
+    return (await res.json()) as { name?: string; version?: string };
   } catch {
-    return "other";
+    return {};
   }
+}
+
+/** Is anything listening on loopback:<port>, and is it a sessionpipe-gui? */
+export async function probePort(port: number, timeoutMs = 1000): Promise<Probe> {
+  const info = await fetchInfo(port, timeoutMs);
+  if (!info) return null;
+  return info.name === "sessionpipe-gui" ? "gui" : "other";
 }
 
 const tilde = (p: string, home: string) => (p === home || p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p);
@@ -155,6 +178,33 @@ function flag(argv: string[], name: string): string | undefined {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
+/** Does an installed service's argv run a sessionpipe-gui: `node …/sessionpipe-gui/dist/cli.js`
+ *  (an install, a global npm, an npx cache), the `sessionpipe-gui` bin itself, or the very
+ *  cli this installer runs from (a checkout)? Anything else under our label is someone's
+ *  own, and `install` leaves it alone. */
+export function isOurs(argv: string[], cli?: string): boolean {
+  const [program, script] = argv;
+  if (!program) return false;
+  if (path.basename(program) === "sessionpipe-gui") return true;
+  if (!script) return false;
+  if (cli && script === cli) return true;
+  return /(^|\/)sessionpipe-gui\/dist\/cli\.js$/.test(script) || path.basename(script) === "sessionpipe-gui";
+}
+
+/** The receiver options an installed service was given: port, state, host, and the rest. */
+export function installedOptions(argv: string[]): { port?: number; state?: string; host?: string; extra: string[] } {
+  const rest = argv.slice(path.basename(argv[0] ?? "") === "sessionpipe-gui" ? 1 : 2);
+  const o: { port?: number; state?: string; host?: string; extra: string[] } = { extra: [] };
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i]!;
+    if (a === "--port") o.port = Number(rest[++i]);
+    else if (a === "--state") o.state = rest[++i];
+    else if (a === "--host") o.host = rest[++i];
+    else if (a !== "--quiet") o.extra.push(a);
+  }
+  return o;
+}
+
 /** What the manager says: loaded at all, running, pid. */
 function managerState(env: ServiceEnv): { loaded: boolean; running: boolean; pid?: number } {
   if (env.platform === "darwin") {
@@ -172,6 +222,17 @@ function managerState(env: ServiceEnv): { loaded: boolean; running: boolean; pid
   return { loaded: true, ...parseSystemctlShow(r.stdout) };
 }
 
+/** `launchctl bootout` returns before the job is gone; a bootstrap (or a "still loaded"
+ *  verdict) right after it is too early. Polls the manager until the label is unloaded. */
+async function waitUnloaded(env: ServiceEnv): Promise<boolean> {
+  const until = Date.now() + env.settleMs;
+  for (;;) {
+    if (!managerState(env).loaded) return true;
+    if (Date.now() >= until) return false;
+    await sleep(100);
+  }
+}
+
 /** Run one `service` verb; resolves to the process exit code. */
 export async function runService(o: ServiceOptions, env: ServiceEnv): Promise<number> {
   if (env.platform !== "darwin" && env.platform !== "linux") {
@@ -183,19 +244,93 @@ export async function runService(o: ServiceOptions, env: ServiceEnv): Promise<nu
   return status(env);
 }
 
+const failedCommand = (c: string[], r: ExecResult) =>
+  `${c.slice(0, 3).join(" ")} failed: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
+
+/** The file the service runs from. */
+function serviceText(env: ServiceEnv, argv: string[], state: string): string {
+  const logPath = path.join(state, SERVICE_LOG);
+  const envVars = { PATH: servicePath(env.node) };
+  return env.platform === "darwin"
+    ? launchAgentPlist({ label: env.label, argv, env: envVars, logPath, workingDirectory: state })
+    : systemdUnit({
+        description: "sessionpipe-gui (the board: a sessionpipe receiver)",
+        argv,
+        env: envVars,
+        logPath,
+        workingDirectory: state,
+      });
+}
+
+/** How many sessions a state dir holds (one events file each): the wait's words. */
+function sessionCount(state: string): number {
+  let n = 0;
+  try {
+    for (const h of readdirSync(path.join(state, "events"), { withFileTypes: true })) {
+      if (h.isDirectory())
+        n += readdirSync(path.join(state, "events", h.name)).filter((f) => f.endsWith(".jsonl")).length;
+    }
+  } catch {}
+  return n;
+}
+
+/** Waits (env.waitMs) for a sessionpipe-gui to answer on the port, the given version when
+ *  one is wanted. Every 10 s a progress line, as the desktop app's welcome shows them. */
+async function waitForReceiver(
+  env: ServiceEnv,
+  o: { port: number; state: string; version?: string },
+): Promise<"answered" | "running" | "silent"> {
+  const t0 = Date.now();
+  const until = t0 + env.waitMs;
+  let said = 0;
+  while (Date.now() < until) {
+    const v = await env.running(o.port);
+    if (v !== undefined && (!o.version || v === o.version)) return "answered";
+    const secs = Math.floor((Date.now() - t0) / 1000);
+    if (secs >= said) {
+      const n = sessionCount(o.state);
+      env.out(
+        said === 0
+          ? `starting on :${o.port}…${n ? ` ${n} sessions to load;` : ""} a big board takes a minute`
+          : `still starting after ${secs} s…`,
+      );
+      said = secs + 10;
+    }
+    await sleep(200);
+  }
+  return managerState(env).running ? "running" : "silent";
+}
+
+function afterWait(env: ServiceEnv, verdict: "running" | "silent", port: number, state: string): number {
+  const secs = Math.round(env.waitMs / 1000);
+  const log = tilde(path.join(state, SERVICE_LOG), env.home);
+  if (verdict === "running") {
+    env.out(`still starting on :${port} after ${secs} s; it keeps going (${log})`);
+  } else {
+    env.out(`not answering on :${port} after ${secs} s; it keeps trying: see ${log}`);
+  }
+  return 0;
+}
+
 async function install(o: ServiceOptions, env: ServiceEnv): Promise<number> {
-  const port = o.port ?? DEFAULT_PORT;
-  const state = path.resolve(o.state ?? env.defaultState);
   const file = serviceFile(env)!;
   const prefix = o.dryRun ? "would refuse: " : "";
 
-  // Refusals: one service per label, one receiver per port.
-  if (existsSync(file) || managerState(env).loaded) {
+  // A service under our label already: ours is upgraded in place; anything else is refused.
+  const inst = readInstalled(env);
+  if (inst || managerState(env).loaded) {
+    if (inst && isOurs(inst.argv, env.cli)) return upgrade(o, env, inst);
     env.err(
-      `${prefix}a service is already installed (${tilde(file, env.home)}); \`sessionpipe-gui service status\` shows it, \`service uninstall\` removes it`,
+      inst
+        ? `${prefix}a service is already installed under ${env.label} (${tilde(file, env.home)}), and it isn't sessionpipe-gui's: it runs ${inst.argv[0] ?? "nothing"}; \`service uninstall\` removes it`
+        : `${prefix}a service is already installed (${tilde(file, env.home)}); \`sessionpipe-gui service status\` shows it, \`service uninstall\` removes it`,
     );
     return 1;
   }
+
+  // One receiver per port.
+  const port = o.port ?? DEFAULT_PORT;
+  const state = path.resolve(o.state ?? env.defaultState);
   const who = await env.probe(port);
   if (who === "gui") {
     env.err(`${prefix}a sessionpipe-gui already answers on :${port}; stop it first, or install on another --port`);
@@ -207,18 +342,7 @@ async function install(o: ServiceOptions, env: ServiceEnv): Promise<number> {
   }
 
   const argv = serviceArgv(env, { port, state, host: o.host, extra: o.extra });
-  const logPath = path.join(state, SERVICE_LOG);
-  const envVars = { PATH: servicePath(env.node) };
-  const text =
-    env.platform === "darwin"
-      ? launchAgentPlist({ label: env.label, argv, env: envVars, logPath, workingDirectory: state })
-      : systemdUnit({
-          description: "sessionpipe-gui (the board: a sessionpipe receiver)",
-          argv,
-          env: envVars,
-          logPath,
-          workingDirectory: state,
-        });
+  const text = serviceText(env, argv, state);
   const commands: string[][] =
     env.platform === "darwin"
       ? [[env.launchctl, "bootstrap", `gui/${env.uid}`, file]]
@@ -247,29 +371,106 @@ async function install(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     if (r.code !== 0) {
       rmSync(file, { force: true });
       if (env.platform === "linux") env.exec(env.systemctl, ["--user", "daemon-reload"]);
-      env.err(
-        `${c.slice(0, 3).join(" ")} failed: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`} (nothing installed)`,
-      );
+      env.err(`${failedCommand(c, r)} (nothing installed)`);
       return 1;
     }
   }
   env.out(`installed ${env.label} (${tilde(file, env.home)})`);
 
   if (env.waitMs > 0) {
-    const until = Date.now() + env.waitMs;
-    while (Date.now() < until) {
-      if ((await env.probe(port)) === "gui") {
-        env.out(`running on http://127.0.0.1:${port} · state ${tilde(state, env.home)}`);
-        return 0;
-      }
-      await sleep(200);
-    }
-    env.out(
-      `not answering on :${port} after ${Math.round(env.waitMs / 1000)} s; it keeps trying: see ${tilde(logPath, env.home)}`,
-    );
+    const verdict = await waitForReceiver(env, { port, state });
+    if (verdict !== "answered") return afterWait(env, verdict, port, state);
+    env.out(`running on http://127.0.0.1:${port} · state ${tilde(state, env.home)}`);
     return 0;
   }
   env.out(`starting on http://127.0.0.1:${port} · state ${tilde(state, env.home)}`);
+  return 0;
+}
+
+/** A service of ours is installed: the new node and cli in its file, its options kept
+ *  unless flags replace them, a restart, and the new version answering. */
+async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Promise<number> {
+  const was = installedOptions(inst.argv);
+  const port = o.port ?? was.port ?? DEFAULT_PORT;
+  const state = path.resolve(o.state ?? was.state ?? env.defaultState);
+  const host = o.host ?? was.host;
+  const extra = o.extra ?? was.extra;
+  const argv = serviceArgv(env, { port, state, host, extra });
+  const url = `http://127.0.0.1:${port}`;
+  const same = argv.length === inst.argv.length && argv.every((a, i) => a === inst.argv[i]);
+
+  // Who answers on the port now: this service at its old version, or something that isn't it.
+  const who = await env.probe(port);
+  if (who === "other") {
+    env.err(`${o.dryRun ? "would refuse: " : ""}port ${port} is in use by another program (try --port)`);
+    return 1;
+  }
+  const running = who === "gui" ? await env.running(port) : undefined;
+  if (same && running !== undefined) {
+    env.out(`already running ${running} on ${url}`);
+    return 0;
+  }
+  // The same service, up but not answering yet (a big board loading): leave it to it.
+  if (same && managerState(env).running && !o.dryRun) {
+    env.out(`already installed ${env.label}; it is starting`);
+    if (env.waitMs > 0) {
+      const verdict = await waitForReceiver(env, { port, state, version: env.version });
+      if (verdict !== "answered") return afterWait(env, verdict, port, state);
+    }
+    env.out(`running ${env.version} on ${url} · state ${tilde(state, env.home)}`);
+    return 0;
+  }
+  const from = running ?? readRunFileRaw(state)?.version;
+  const change = `${env.label}: ${from && from !== env.version ? `${from} → ` : ""}${env.version}`;
+
+  const text = serviceText(env, argv, state);
+  const commands: string[][] =
+    env.platform === "darwin"
+      ? [
+          ...(managerState(env).loaded ? [[env.launchctl, "bootout", `gui/${env.uid}/${env.label}`]] : []),
+          [env.launchctl, "bootstrap", `gui/${env.uid}`, inst.file],
+        ]
+      : [
+          [env.systemctl, "--user", "daemon-reload"],
+          [env.systemctl, "--user", "restart", unitName(env.label)],
+        ];
+
+  if (o.dryRun) {
+    env.out(`# ${inst.file}`);
+    env.out(text.trimEnd());
+    env.out("");
+    for (const c of commands) env.out(`$ ${c.join(" ")}`);
+    env.out("");
+    env.out(`dry run: nothing written or restarted; it would update ${change} on ${url}`);
+    return 0;
+  }
+
+  env.out(`updating ${change}`);
+  mkdirSync(state, { recursive: true });
+  writeFileSync(inst.file, text, { mode: 0o644 });
+  for (const c of commands) {
+    const r = env.exec(c[0]!, c.slice(1));
+    if (r.code !== 0) {
+      env.err(
+        `${failedCommand(c, r)} (${tilde(inst.file, env.home)} is rewritten; \`service uninstall\` then \`service install\` starts over)`,
+      );
+      return 1;
+    }
+    // launchd lets go of the old job a moment after bootout; bootstrapping before that fails.
+    if (c[1] === "bootout" && !(await waitUnloaded(env))) {
+      env.err(`${env.label} is still loaded after bootout; try again`);
+      return 1;
+    }
+  }
+  env.out(`updated ${change} (${tilde(inst.file, env.home)})`);
+
+  if (env.waitMs > 0) {
+    const verdict = await waitForReceiver(env, { port, state, version: env.version });
+    if (verdict !== "answered") return afterWait(env, verdict, port, state);
+    env.out(`running ${env.version} on ${url} · state ${tilde(state, env.home)}`);
+    return 0;
+  }
+  env.out(`starting on ${url} · state ${tilde(state, env.home)}`);
   return 0;
 }
 
@@ -301,7 +502,7 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
   }
   rmSync(file, { force: true });
   if (env.platform === "linux") env.exec(env.systemctl, ["--user", "daemon-reload"]);
-  if (managerState(env).loaded) {
+  if (!(await waitUnloaded(env))) {
     env.err(
       `${env.label} is still loaded${failed ? ` (${failed})` : ""}; try again, or \`${env.launchctl} bootout gui/${env.uid}/${env.label}\``,
     );
@@ -325,6 +526,9 @@ async function status(env: ServiceEnv): Promise<number> {
   const state = flag(argv, "--state") ?? env.defaultState;
   const parts = [st.running ? "running" : st.loaded ? "stopped" : "installed, not loaded"];
   if (st.pid) parts.push(`pid ${st.pid}`);
+  const version = st.running ? await env.running(port) : undefined;
+  if (version) parts.push(version);
+  else if (st.running) parts.push(`not answering on :${port} yet`);
   env.out(`service   ${env.label} (${manager}) · ${parts.join(" · ")}`);
   if (inst) env.out(`file      ${tilde(inst.file, env.home)}`);
   env.out(`port      ${port}`);

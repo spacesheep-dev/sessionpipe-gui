@@ -30,6 +30,7 @@ import { useShortcut } from "../lib/shortcuts";
 import { openSplit } from "../lib/split";
 import { atTier } from "../lib/tier";
 import { clock, dayLabel, durShort, useToday } from "../lib/time";
+import { eventWords as turnWords } from "../lib/turns";
 
 const CAP = 1500;
 const TYPES = ["session", "turn", "tool", "files", "attention", "subagent", "context"];
@@ -74,6 +75,7 @@ export function feedSummary(e: StoredEvent): string {
       return how && how !== "unknown" && how !== "answered" ? cap(how.replace(/_/g, " ")) : "";
     }
     case "session.heartbeat":
+    case "limits.observed":
       return "";
     case "turn.started":
       return d.prompt_chars !== undefined ? `${str(d.prompt_chars)} characters` : "";
@@ -98,6 +100,11 @@ export function feedSummary(e: StoredEvent): string {
       return d.agent_id ? "" : str(d.agent_type);
     case "context.compacted":
       return str(d.trigger) === "manual" ? "Manual" : "Automatic";
+    case "delegation.started":
+    case "delegation.ended":
+      // The ask's state ("running", "answered in 2 m 05 s · answer relayed here"); the kind
+      // column names the agent.
+      return turnWords(e).detail ?? "";
     default:
       return eventSummary(e);
   }
@@ -118,6 +125,8 @@ export function eventWords(e: StoredEvent): string {
       return "Forgotten";
     case "session.heartbeat":
       return "Still running";
+    case "limits.observed":
+      return "Usage limits";
     case "turn.started":
       return "Prompt";
     case "turn.ended":
@@ -144,6 +153,10 @@ export function eventWords(e: StoredEvent): string {
       return "Compacted";
     case "native":
       return "Native hook";
+    case "delegation.started":
+    case "delegation.ended":
+      // "Asked Codex" / "You asked Codex"; the ask's state is the detail (feedSummary).
+      return turnWords(e).text;
     default:
       return e.type;
   }

@@ -23,7 +23,7 @@ import {
   useCell,
 } from "./appState";
 import { invoke } from "./bridge";
-import { hotkeyFrom, hotkeyLabel, isCancel, notifyToggle, parseAddress, updateLine } from "./logic";
+import { hotkeyFrom, hotkeyLabel, isCancel, notifyToggle, parseAddress, updateHint, updateLine } from "./logic";
 import { features, shellInfo } from "./shell";
 import "./native.css";
 
@@ -123,7 +123,7 @@ export default function AppSettings() {
         </Suspense>
       )}
 
-      {f.has("updater") && <UpdatesGroup appVersion={info?.appVersion ?? ""} />}
+      {f.has("updater") && <UpdatesGroup appVersion={info?.appVersion ?? ""} s={s} set={set} />}
     </>
   );
 }
@@ -295,14 +295,30 @@ function ReceiversGroup({ current }: { current: string | null }) {
   );
 }
 
-function UpdatesGroup({ appVersion }: { appVersion: string }) {
+function UpdatesGroup({
+  appVersion,
+  s,
+  set,
+}: {
+  appVersion: string;
+  s: Settings | null;
+  set: (p: Partial<Settings>) => void;
+}) {
   const u = useCell(update);
   return (
     <Group label="Updates">
-      <Row label={updateLine(appVersion, u)}>
+      <Row label="Check for updates automatically" hint="On launch and every 6 hours.">
+        <Toggle
+          label="Check for updates automatically"
+          on={s?.autoUpdate ?? true}
+          disabled={!s}
+          onChange={(on) => set({ autoUpdate: on })}
+        />
+      </Row>
+      <Row label={updateLine(appVersion, u)} hint={updateHint(appVersion, u) || undefined}>
         {u.state === "ready" ? (
           <ActionButton className="btn btn--sm btn--primary" onClick={() => invoke("app_update_restart")}>
-            Restart to Update
+            Install and relaunch
           </ActionButton>
         ) : (
           <ActionButton
@@ -310,7 +326,7 @@ function UpdatesGroup({ appVersion }: { appVersion: string }) {
             disabled={u.state === "checking" || u.state === "downloading"}
             onClick={async () => update.set(await invoke("app_update_check"))}
           >
-            Check Now
+            Check now
           </ActionButton>
         )}
       </Row>

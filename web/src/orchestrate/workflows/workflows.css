@@ -1,0 +1,724 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- workflows ---------- */
+/* The Workflows page (orchestrate/workflows, UX-SPEC §4), in the Machines page's column:
+   the list of saved workflows and the templates as 1-line rows under hairlines, the editor
+   as native rows (label | control, the sheet's grammar), the run view as rows with one
+   glyph, one right column and at most one second line. No box per item, no colour but the
+   one accent for "waiting for a signer" and --err for a failure. On a phone the groups
+   are inset cells on the grouped ground, rows 44 px, as the document pages are. */
+
+.workflows {
+  gap: 24px;
+}
+.workflows > :not(.bar):not(.bar-below):not(.sr-only) {
+  margin-inline: auto;
+}
+
+/* ----- a group: a quiet header, then rows ----- */
+
+.wf-group {
+  display: flex;
+  flex-direction: column;
+}
+.wf-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 4px;
+  border-bottom: var(--hairline) solid var(--line);
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.wf-head .group-count {
+  color: var(--fg-3);
+  font-weight: 400;
+}
+.wf-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wf-item {
+  position: relative;
+}
+.wf-item + .wf-item::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 32px;
+  right: 0;
+  border-top: var(--hairline) solid var(--line);
+  pointer-events: none;
+}
+
+/* ----- a row: glyph · name · facts · right column · › ----- */
+
+.wf-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--row-lg);
+  padding: 0 4px 0 4px;
+  border-radius: var(--radius);
+  color: inherit;
+  text-decoration: none;
+  transition: background-color var(--dur-fast) var(--ease-out);
+  -webkit-user-select: none;
+  user-select: none;
+}
+@media (hover: hover) {
+  a.wf-row:hover,
+  button.wf-row:hover {
+    background: var(--hover);
+  }
+}
+a.wf-row:active,
+button.wf-row:active {
+  background: var(--press);
+  transition: none;
+}
+[data-menu-open] > .wf-row,
+.wf-item[data-cursor] > .wf-row {
+  background: var(--sel);
+}
+.wf-lead {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  color: var(--fg-4);
+}
+.wf-glyph {
+  color: var(--fg-4);
+}
+.wf-err {
+  display: inline-flex;
+  color: var(--err);
+}
+.wf-dash {
+  color: var(--fg-4);
+  font-size: var(--text-sm);
+}
+.wf-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+.wf-facts {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.wf-right {
+  flex: none;
+  min-width: var(--meta-col);
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.wf-right.is-needs {
+  color: var(--needs-fg);
+}
+.wf-chev {
+  flex: none;
+  width: 12px;
+  color: var(--fg-4);
+  text-align: center;
+}
+/* A row with no right column (a template) keeps its › at the right edge all the same. */
+.wf-row > .wf-facts + .wf-chev {
+  margin-left: auto;
+}
+/* The empty list: one line over the templates, never a block. */
+.workflows .page-note {
+  margin-bottom: -8px;
+}
+
+/* ----- the editor: the sheet's rows on the page ----- */
+
+.wf-form {
+  display: flex;
+  flex-direction: column;
+  border-top: var(--hairline) solid var(--line);
+}
+.wf-field {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--row-lg);
+  padding: 0 4px;
+  border-bottom: var(--hairline) solid var(--line);
+}
+.wf-label {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.wf-field--text {
+  align-items: start;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.wf-field--text > .wf-label {
+  padding-top: 6px;
+}
+.wf-value {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wf-aside {
+  max-width: 240px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  line-height: var(--lh-tight);
+  text-align: right;
+}
+.wf-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--control);
+  margin-left: -4px;
+  padding: 0 4px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-md);
+}
+.wf-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: 0;
+}
+.wf-input::placeholder {
+  color: var(--fg-4);
+}
+/* The rows' pop-ups are their values: no well, no border, the chevron after the text. */
+.wf-field .wf-sel,
+.wf-opt .wf-sel {
+  max-width: 100%;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  padding-left: 4px;
+  margin-left: -4px;
+  font-size: var(--text-md);
+}
+@media (hover: hover) {
+  .wf-sel:hover:not(:disabled) {
+    background: var(--hover);
+  }
+}
+.wf-sel.sel--open {
+  background: var(--sel);
+}
+.wf-textwrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.wf-text {
+  display: block;
+  width: 100%;
+  min-height: calc(3 * var(--lh) * var(--text-md));
+  margin: 0 0 0 -4px;
+  padding: 6px 4px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-md);
+  line-height: var(--lh);
+  resize: none;
+}
+.wf-text:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: 0;
+}
+.wf-text::placeholder {
+  color: var(--fg-4);
+}
+/* The placeholder hint under the prompt: each a button that inserts itself. */
+.wf-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 4px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.wf-hint-btn {
+  padding: 0 2px;
+  border-radius: var(--radius-inner);
+  color: var(--fg-3);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+@media (hover: hover) {
+  .wf-hint-btn:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+}
+.wf-hint .wf-sel {
+  min-height: 20px;
+  height: 20px;
+  padding: 0 2px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.wf-opts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  min-width: 0;
+}
+.wf-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.wf-opt-label {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.wf-fixed {
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+}
+.wf-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+.wf-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border: var(--hairline) solid var(--line-2);
+  border-radius: var(--radius-pill);
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+/* ----- the steps: one open at a time ----- */
+
+.wf-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wf-steps > * + * {
+  border-top: var(--hairline) solid var(--line);
+}
+.wf-step {
+  display: flex;
+  flex-direction: column;
+}
+.wf-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--row-lg);
+  padding: 0 4px;
+}
+.wf-step-btn {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: var(--row-lg);
+  margin: 0 -4px;
+  padding: 0 4px;
+  border-radius: var(--radius);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .wf-step-btn:hover {
+    background: var(--hover);
+  }
+}
+.wf-step-btn:active {
+  background: var(--press);
+  transition: none;
+}
+.wf-step-n {
+  flex: none;
+  width: 20px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.wf-step-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+.wf-step-name.is-err {
+  color: var(--err);
+}
+.wf-step-line {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.wf-step-line .is-err {
+  color: var(--err);
+}
+/* The open step: its name is a field in the header (focused on open), its rows under it.
+   No fill: its rows say it is open, in both schemes alike. */
+.wf-step-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--control);
+  padding: 0 4px;
+  margin-left: -4px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+.wf-step-name-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: 0;
+}
+.wf-step-rows {
+  display: flex;
+  flex-direction: column;
+  padding-left: 28px;
+  padding-bottom: 4px;
+}
+.wf-step-rows > .wf-field:last-child {
+  border-bottom: none;
+}
+.wf-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--row-lg);
+  padding: 0 4px 0 32px;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-md);
+  text-align: left;
+  border-radius: var(--radius);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .wf-add:hover {
+    background: var(--hover);
+  }
+}
+.wf-add:active {
+  background: var(--press);
+  transition: none;
+}
+
+/* ----- the run view ----- */
+
+.wf-kv {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  min-height: var(--row-lg);
+  padding: var(--row-pad) 4px;
+  border-top: var(--hairline) solid var(--line);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.wf-kv .form-key {
+  width: 72px;
+}
+.wf-kv .form-kv {
+  white-space: pre-wrap;
+}
+.wf-run-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wf-run-step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.wf-run-step + .wf-run-step::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 32px;
+  right: 0;
+  border-top: var(--hairline) solid var(--line);
+  pointer-events: none;
+}
+.wf-run-step > div.wf-row {
+  cursor: default;
+}
+.wf-second {
+  margin: -4px 0 8px 32px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+  text-wrap: pretty;
+}
+.wf-second.is-needs {
+  color: var(--needs-fg);
+}
+.wf-second.is-err {
+  color: var(--err);
+}
+.wf-second a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+}
+.wf-second .link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+/* The reply's fold: the chat's "Ran 2 tools" line and card. */
+.wf-run-step > .chat-tools {
+  margin: -4px 0 8px 32px;
+}
+.wf-run-step > .chat-tools > .chat-tools-sum {
+  margin-left: 0;
+}
+.wf-run-step .chat-card {
+  padding: 8px 0 4px;
+  max-width: 68ch;
+}
+.wf-reply-cut {
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.wf-bar-meta.is-needs {
+  color: var(--needs-fg);
+}
+.wf-bar-meta.is-err {
+  color: var(--err);
+}
+.wf-run-btn {
+  min-width: 64px;
+}
+.wf-kbd {
+  margin-left: 2px;
+  opacity: 0.7;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+}
+
+/* ----- the dialogs: the confirm's frame with one field, or one option ----- */
+
+.wf-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.wf-dialog-label {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.wf-dialog-field .field {
+  width: 100%;
+  font-size: var(--text-md);
+}
+.wf-dialog-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+}
+.wf-dialog-option input {
+  margin: 0;
+}
+
+/* ----- a missing one: an empty state in the column ----- */
+.workflows .state {
+  padding-top: 32px;
+}
+
+/* ----- the phone: grouped cells, 44 px rows ----- */
+
+@media (max-width: 839px) {
+  .wf-head {
+    padding: 0 16px 6px;
+    border-bottom: none;
+  }
+  .wf-list,
+  .wf-form,
+  .wf-steps,
+  .wf-run-steps,
+  .wf-kv {
+    border-radius: var(--radius-pop);
+    border: none;
+    background: var(--bg-2);
+    overflow: hidden;
+  }
+  .wf-row {
+    min-height: var(--tap);
+    padding: 6px 12px 6px 16px;
+    border-radius: 0;
+    flex-wrap: wrap;
+  }
+  .wf-item + .wf-item::before,
+  .wf-run-step + .wf-run-step::before {
+    left: 44px;
+  }
+  .wf-facts {
+    flex: 1 0 100%;
+    order: 10;
+    padding-left: 28px;
+    margin-top: -4px;
+    white-space: normal;
+  }
+  .wf-row .wf-facts:empty {
+    display: none;
+  }
+  .wf-field {
+    grid-template-columns: 72px minmax(0, 1fr);
+    min-height: var(--tap);
+    padding: 0 12px 0 16px;
+  }
+  .wf-field .wf-aside {
+    grid-column: 1 / -1;
+    max-width: none;
+    margin-top: -6px;
+    padding-bottom: 8px;
+    text-align: left;
+  }
+  .wf-field--text {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .wf-field--text > .wf-label {
+    padding-top: 8px;
+  }
+  .wf-step-head,
+  .wf-add {
+    min-height: var(--tap);
+    padding-left: 16px;
+    padding-right: 8px;
+  }
+  /* Add step lines up with the step names (16 px cell + 20 px number + 8 px gap). */
+  .wf-add {
+    padding-left: 44px;
+  }
+  .wf-step-btn {
+    min-height: var(--tap);
+  }
+  .wf-step-rows {
+    padding-left: 0;
+  }
+  .wf-step-line {
+    flex: 1 0 100%;
+    order: 10;
+    padding-left: 28px;
+  }
+  .wf-step-btn {
+    flex-wrap: wrap;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+  .wf-kv {
+    padding: var(--row-pad) 16px;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+  }
+  .wf-second,
+  .wf-run-step > .chat-tools {
+    margin-left: 44px;
+    padding-right: 12px;
+  }
+  .wf-run-step > .chat-tools {
+    margin-bottom: 8px;
+  }
+  .wf-run-step .chat-card {
+    max-width: none;
+  }
+  .workflows .page-note {
+    padding: 0 16px;
+  }
+  /* The meta line under the navigation bar, as the session page sets it. */
+  .workflows > .bar + .bar-below {
+    margin-top: -4px;
+  }
+  .workflows .bar-sub {
+    padding: 0 16px;
+  }
+  /* A text action in the bar (Run, Cancel): the title gives it room. */
+  .workflows .bar--inline .bar-title {
+    max-width: 38%;
+  }
+  .workflows .bar-actions .btn {
+    padding: 0 8px;
+    font-weight: 600;
+  }
+  .wf-right {
+    margin-left: auto;
+  }
+  .wf-step-line {
+    white-space: normal;
+  }
+}

@@ -5,10 +5,13 @@
 import type {
   AgentRun,
   Attention,
+  ControlActivity,
+  Delegation,
   DetailQuery,
   FeedPage,
   FeedQuery,
   Info,
+  LimitsEntry,
   MachineSummary,
   ProtocolSession,
   SessionDetail,
@@ -23,6 +26,67 @@ import { DONE_AFTER_MS, SNIPPET_CHARS, STALE_AFTER_MS, sessionKey } from "@share
 import { AgentReading } from "./agents";
 
 // ---------- helpers ----------
+
+/** Each account's usage limits as the server keeps them (server/ui/limits.ts), one per
+ *  machine's Claude account so New session shows a single account's number: misha-air's
+ *  has none left this 5-hour window, studio-mini's has room, Codex on misha-air has its
+ *  plan, and build-box's Codex last reported three hours ago, its 5-hour window reset since. */
+export function mockLimits(now: number): LimitsEntry[] {
+  const at = (ms: number) => new Date(now + ms).toISOString();
+  const H = 3_600_000;
+  const M = 60_000;
+  const D = 24 * H;
+  return [
+    {
+      key: "claude-code a:a1b2c3",
+      harness: "claude-code",
+      accountId: "a1b2c3",
+      machine: "misha-air",
+      machines: ["misha-air"],
+      windows: [
+        { id: "five_hour", usedPercent: 100, windowMinutes: 300, resetsAt: at(H + 10 * M) },
+        { id: "seven_day", usedPercent: 61, windowMinutes: 10_080, resetsAt: at(3 * D + 6 * H) },
+      ],
+      observedAt: at(-M),
+    },
+    {
+      key: "claude-code a:w4e5f6",
+      harness: "claude-code",
+      accountId: "w4e5f6",
+      machine: "studio-mini",
+      machines: ["studio-mini"],
+      windows: [
+        { id: "five_hour", usedPercent: 38, windowMinutes: 300, resetsAt: at(2 * H + 21 * M) },
+        { id: "seven_day", usedPercent: 20, windowMinutes: 10_080, resetsAt: at(2 * D + 18 * H) },
+      ],
+      observedAt: at(-2 * M),
+    },
+    {
+      key: "codex m:misha-air",
+      harness: "codex",
+      machine: "misha-air",
+      machines: ["misha-air"],
+      plan: "plus",
+      windows: [
+        { id: "primary", usedPercent: 8, windowMinutes: 300, resetsAt: at(3 * H + 43 * M) },
+        { id: "secondary", usedPercent: 26, windowMinutes: 10_080, resetsAt: at(4 * D + 2 * H) },
+      ],
+      observedAt: at(-3 * M),
+    },
+    {
+      key: "codex m:build-box",
+      harness: "codex",
+      machine: "build-box",
+      machines: ["build-box"],
+      plan: "pro",
+      windows: [
+        { id: "primary", usedPercent: 64, windowMinutes: 300, resetsAt: at(-40 * M) },
+        { id: "secondary", usedPercent: 91, windowMinutes: 10_080, resetsAt: at(D + 4 * H) },
+      ],
+      observedAt: at(-3 * H),
+    },
+  ];
+}
 
 const ULID_CHARS = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 export function ulid(at = Date.now()): string {
@@ -57,6 +121,7 @@ export function slim(e: StoredEvent, chars = PREVIEW_CHARS): StoredEvent {
   return Object.keys(preview).length ? { ...e, data, preview } : e;
 }
 const cut = (s: string) => (s.length > SNIPPET_CHARS ? `${s.slice(0, SNIPPET_CHARS - 1)}…` : s);
+const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
 const pick = <T>(xs: readonly T[]): T => xs[Math.floor(Math.random() * xs.length)]!;
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
@@ -207,6 +272,31 @@ interface LiveAgent {
   toolExtra?: Record<string, unknown>;
 }
 
+/** A `sessionpipe ask` on its way: the asking session's open Bash call and turn, and the
+ *  session the daemon started to answer it. */
+interface OpenAsk {
+  parent: SessionRec;
+  child: SessionRec;
+  askId: string;
+  callId: string;
+  turnId: string;
+  input: Record<string, unknown>;
+  prompt: string;
+  startedAt: number;
+  turnStartedAt: number;
+}
+
+/** What the daemon hands an asked agent (sessionpipe control/route.ts): the question, then
+ *  who asked and how the answer travels. */
+const askFrame = (text: string, from: string) =>
+  `${text}\n\n(Asked by ${from} on this machine with sessionpipe ask. Answer here in full: your reply is returned to that session automatically. Don't run a command or call a tool just to send it.)`;
+/** A handoff's answer as the daemon delivers it into `reply_to` (CONTROL.md §6). */
+const answerFrame = (harness: string, shortId: string, reply: string) =>
+  `Answer from ${harness}:${shortId} (sessionpipe handoff, asked via misha-air.local:7373):\n\n${reply}`;
+
+const CODEX_REVIEW =
+  "Two things I'd change.\n\n1. Add jitter. Five failed deliveries to the same endpoint now retry in lockstep (1 s, 2 s, 4 s…), which is the thundering herd the backoff was meant to avoid. `delay * (0.5 + Math.random())` is enough.\n2. `job.attempt >= 5` checks the attempt *before* this delivery, so a job gets six tries, not five. Compare against `attempt + 1`.\n\nThe cap at 16 s is fine for a webhook. The dead-letter path reads right.";
+
 /** The orchestrator's prompt when a background agent stops, in the recorded format. */
 const taskNotification = (n: Notice): string =>
   [
@@ -248,6 +338,11 @@ export class World {
   startedAt = Date.now() - 4 * 3600_000 - 123_000;
   private controlPollAt = Date.now() - 3000;
   private liveAgents: LiveAgent[] = [];
+  /** Asks running now (sessionpipe ask from inside a turn): the parent's open Bash call and
+   *  the Codex session answering it; when that session's turn ends, the answer comes back. */
+  private asksOpen: OpenAsk[] = [];
+  /** Messages the receiver carried (the control activity), newest first. */
+  private control: ControlActivity[] = [];
   private attentionDueAt = Date.now() + 25_000;
   private controlKeys = [
     { id: "k_7f3a", alg: -7, name: "Misha’s iPhone", addedAt: iso(Date.now() - 6 * 86_400_000) },
@@ -347,7 +442,10 @@ export class World {
       filesChanged: 0,
       attentions: 0,
       agentsRunning: 0,
+      delegationsRunning: 0,
     };
+    // The agents it asked (server/store/readings.ts delegations): by ask id, newest last.
+    const delegations: Delegation[] = [];
     let maxTier: Tier = 0;
     let live = false;
     let startedAt = "";
@@ -359,6 +457,8 @@ export class World {
     let lastUser: string | undefined;
     let lastAssistant: string | undefined;
     let lastTurnEnd: string | undefined;
+    // News for someone away (readings.ts noteNews); the mock types no turn at a terminal.
+    let newsAt: string | undefined;
     const open = new Map<string, Attention>();
     const recentTools: SessionSummary["recentTools"] = [];
     let source: SessionSummary["source"] = "outbox";
@@ -401,6 +501,7 @@ export class World {
         case "session.ended":
           live = true;
           endedAt = e.time;
+          if (!newsAt || e.arrivedAt > newsAt) newsAt = e.arrivedAt;
           currentTurn = undefined;
           currentTool = undefined;
           break;
@@ -419,6 +520,7 @@ export class World {
           currentTool = undefined;
           progress = undefined;
           lastTurnEnd = e.time;
+          if (!newsAt || e.arrivedAt > newsAt) newsAt = e.arrivedAt;
           break;
         case "turn.transcript":
           lastUser = cut(String(d.user ?? ""));
@@ -478,15 +580,48 @@ export class World {
         case "context.compacted":
           counts.compactions++;
           break;
+        case "delegation.started":
+        case "delegation.ended": {
+          const askId = str(d.ask_id);
+          if (!askId) break;
+          let x = delegations.find((y) => y.askId === askId);
+          if (!x) {
+            x = {
+              askId,
+              via:
+                d.via === "handoff" || (e.type === "delegation.ended" && d.relayed !== undefined) ? "handoff" : "ask",
+              harness: str(d.harness) ?? (str(d.to) ? str(d.to)!.slice(0, str(d.to)!.indexOf(":")) : ""),
+              startedAt: e.time,
+            };
+            delegations.push(x);
+          }
+          if (str(d.to)) x.to = str(d.to);
+          if (e.type === "delegation.started") {
+            if (str(d.text)) x.text = str(d.text)!.slice(0, 200);
+            break;
+          }
+          x.endedAt = e.time;
+          if (typeof d.ok === "boolean") x.ok = d.ok;
+          if (typeof d.ms === "number") x.ms = d.ms;
+          if (str(d.error)) x.error = str(d.error)!.slice(0, 200);
+          if (str(d.reply)) x.reply = str(d.reply)!.slice(0, PREVIEW_CHARS);
+          if (d.relayed === "delivered" || d.relayed === "unsupported" || d.relayed === "failed") x.relayed = d.relayed;
+          break;
+        }
       }
     }
+    // The session ending closes what it asked; the answer is unknown then.
+    if (endedAt) for (const x of delegations) if (!x.endedAt) x.endedAt = endedAt;
+    counts.delegationsRunning = delegations.filter((x) => !x.endedAt).length;
 
     const lastMs = Date.parse(lastAt);
     let state: SessionSummary["state"];
     let stateSince: string;
     // A subagent still running keeps its orchestrator working after the turn that
-    // launched it ended (readings.ts evaluateState).
+    // launched it ended (readings.ts evaluateState); so does an agent it asked and has no
+    // answer from yet.
     const openAgent = agents.agents.find((a) => a.state !== "done");
+    const openAsk = delegations.find((x) => !x.endedAt);
     if (open.size > 0) {
       state = "needs_you";
       stateSince = [...open.values()][0]!.at;
@@ -496,16 +631,14 @@ export class World {
     } else if (!live || now - lastMs > DONE_AFTER_MS) {
       state = "done";
       stateSince = live ? iso(lastMs + DONE_AFTER_MS) : lastAt;
-    } else if (currentTurn || openAgent) {
+    } else if (currentTurn || openAgent || openAsk) {
       if (now - lastMs > STALE_AFTER_MS) {
         state = "stale";
         stateSince = iso(lastMs + STALE_AFTER_MS);
       } else {
         state = "working";
-        stateSince =
-          currentTurn && (!openAgent || currentTurn.since < openAgent.startedAt)
-            ? currentTurn.since
-            : openAgent!.startedAt;
+        const begun = openAgent?.startedAt ?? openAsk?.startedAt ?? "";
+        stateSince = currentTurn && (!begun || currentTurn.since < begun) ? currentTurn.since : begun;
       }
     } else {
       state = "idle";
@@ -529,6 +662,8 @@ export class World {
       url: block.url,
       accountId: block.account_id,
       parentId: block.parent_id ?? null,
+      launchedBy: block.launched_by,
+      delegatedBy: block.delegated_by,
       state,
       stateSince,
       startedAt,
@@ -546,9 +681,11 @@ export class World {
       lastAssistant,
       children: this.children(r).length,
       agents: agentList,
+      ...(delegations.length ? { delegations } : {}),
       recentTools,
       flags: [],
       turnStats: { count: 0 },
+      newsAt,
     };
   }
 
@@ -587,6 +724,10 @@ export class World {
           version: "0.10.0",
           files: true,
           promptFiles: true,
+          // Its agents ask each other through the daemon, and a prompt or a start may name
+          // the session to bring the answer back into (CONTROL.md §13, §3.1).
+          ask: true,
+          handoff: true,
           start: {
             "claude-code": { permissions: ["read", "safe", "edits", "auto"], permission: "auto", anyModel: true },
             codex: {
@@ -610,6 +751,7 @@ export class World {
           version: "0.10.0",
           files: true,
           start: { "claude-code": { permissions: ["read", "safe"], permission: "safe", anyModel: true } },
+          accounts: [{ harness: "claude-code", id: "w4e5f6", email: "work@acme.dev" }],
         };
       else
         base.control = {
@@ -783,6 +925,7 @@ export class World {
     const now = Date.now();
     for (const r of [...this.sessions.values()]) this.step(r, now);
     for (const a of [...this.liveAgents]) if (this.sessions.has(a.r.key)) this.stepAgent(a, now);
+    for (const a of [...this.asksOpen]) this.stepAsk(a, now);
     if (now - this.lastStatsAt > 5000) {
       this.lastStatsAt = now;
       this.controlPollAt = now - Math.floor(rnd(500, 4000));
@@ -966,6 +1109,42 @@ export class World {
     }
   }
 
+  /** An ask comes back once the Codex session answering it ended its turn: the daemon says
+   *  so on the asking session, the `sessionpipe ask` call returns the answer on stdout, and
+   *  the asking turn ends with it. */
+  private stepAsk(a: OpenAsk, now: number) {
+    const child = this.sessions.get(a.child.key);
+    if (!child || child.script.kind !== "idle") return;
+    const last = [...child.events].reverse().find((e) => e.type === "turn.transcript");
+    const reply = String(last?.data.assistant ?? "Reviewed; nothing to change.");
+    this.asksOpen = this.asksOpen.filter((x) => x !== a);
+    this.send(a.parent, "delegation.ended", {
+      ask_id: a.askId,
+      to: a.child.key,
+      ok: true,
+      ms: now - a.startedAt,
+      reply,
+    });
+    this.send(a.parent, "tool.ended", {
+      tool: "Bash",
+      call_id: a.callId,
+      turn_id: a.turnId,
+      ms: now - a.startedAt,
+      ok: true,
+      input: a.input,
+      output: { stdout: reply, stderr: "", interrupted: false, isImage: false, noOutputExpected: false },
+    });
+    const said = `Codex is back. ${reply.split("\n")[0]} I've applied what it said.`;
+    this.send(a.parent, "turn.ended", { turn_id: a.turnId, reason: "stop", ms: now - a.turnStartedAt });
+    this.send(a.parent, "turn.transcript", { turn: a.parent.turn, user: a.prompt, assistant: said, at: iso(now) });
+    a.parent.script = { kind: "idle", nextTurnAt: now + rnd(90_000, 150_000) };
+  }
+
+  /** The messages the receiver carried, newest first (the control activity). */
+  controlActivity(): ControlActivity[] {
+    return this.control;
+  }
+
   /** Claude Code's follow-up turn when a background agent stopped. */
   private noticeTurn(r: SessionRec, n: Notice, now: number) {
     r.turn++;
@@ -1032,7 +1211,7 @@ export class World {
         title: spec.title,
         title_source: spec.title ? (spec.titleSource ?? "harness") : undefined,
         url: spec.url,
-        account_id: spec.harness === "claude-code" ? "a1b2c3" : undefined,
+        account_id: spec.harness === "claude-code" ? (spec.machine === "studio-mini" ? "w4e5f6" : "a1b2c3") : undefined,
         parent_id: spec.parent ? spec.parent.id : null,
       },
       machine: spec.machine,
@@ -1560,6 +1739,100 @@ export class World {
       "Added; returns 404 with the error envelope.",
       3,
     );
+    {
+      // A handoff from this page: s8 asked Codex for a second opinion (a start signed here
+      // with reply_to = s8), the daemon brought the answer back as a framed prompt, and s8
+      // answered it. The message itself is in the control activity, `from` and `replyTo` set.
+      const askAt = now - 50 * min;
+      const question = `Give a second opinion on the reply below. Point out what you'd do differently and why.\n\n---\nAdded; returns 404 with the error envelope.`;
+      const sH = this.add({
+        harness: "codex",
+        machine: "misha-air",
+        cwd: "~/doc-extractor",
+        repo: "github.com/acme/doc-extractor",
+        branch: "main",
+        model: "gpt-5-codex",
+        title: "Second opinion on the natives test",
+        titleSource: "harness",
+        tier: 3,
+      });
+      sH.block.delegated_by = s8.key;
+      this.push(
+        s8,
+        "delegation.started",
+        {
+          ask_id: "01K8ASK0000000000000MOCK03",
+          via: "handoff",
+          harness: "codex",
+          to: sH.key,
+          text: question.slice(0, 200),
+        },
+        askAt,
+      );
+      this.push(sH, "session.started", { source: "startup" }, askAt + 3000);
+      const reply =
+        "One thing: the test asserts the status but not the envelope's `code`. A 404 from the router (no such route) would pass it too. Assert `body.error.code === 'not_found'`, and add the opposite case, a known fileId, so the route is proven to exist.";
+      const hEnd = this.pastTurn(
+        sH,
+        askAt + 4000,
+        `${question}\n\n(Sent via misha-air.local:7373 with sessionpipe control, signed on the sender's device.)`,
+        reply,
+        2,
+      );
+      this.push(sH, "session.ended", { reason: "exit" }, hEnd + 1000);
+      this.push(
+        s8,
+        "delegation.ended",
+        {
+          ask_id: "01K8ASK0000000000000MOCK03",
+          to: sH.key,
+          ok: true,
+          ms: hEnd + 1500 - askAt,
+          relayed: "delivered",
+          reply,
+        },
+        hEnd + 1500,
+      );
+      const relayed = answerFrame("codex", sH.id.replace(/-/g, "").slice(0, 8), reply);
+      s8.turn++;
+      const rt = `t_${s8.turn}`;
+      this.push(s8, "turn.started", { turn_id: rt, prompt_chars: relayed.length }, hEnd + 2500);
+      this.push(
+        s8,
+        "turn.progress",
+        { turn: s8.turn, user: relayed, assistant: "", at: iso(hEnd + 2500) },
+        hEnd + 2500,
+      );
+      this.push(s8, "turn.ended", { turn_id: rt, reason: "stop", ms: 14_000 }, hEnd + 16_500);
+      this.push(
+        s8,
+        "turn.transcript",
+        {
+          turn: s8.turn,
+          user: relayed,
+          assistant:
+            "Fair point. The test now asserts `error.code === 'not_found'`, and a second one fetches a known fileId and expects 200.",
+          at: iso(hEnd + 16_500),
+        },
+        hEnd + 17_000,
+      );
+      this.control.push({
+        id: ulid(askAt - 2000),
+        machineId: "m_01K6Q3H2A9misha-air",
+        kind: "start",
+        session: sH.key,
+        text: question,
+        at: iso(askAt - 2000),
+        expiresAt: iso(askAt - 2000 + 3600_000),
+        outcome: "delivered",
+        mode: "sdk",
+        cwd: "/Users/misha/doc-extractor",
+        takenAt: iso(askAt - 500),
+        ackedAt: iso(askAt + 3500),
+        replyTo: s8.key,
+        from: s8.key,
+      });
+    }
 
     // 9. needs you: question, antigravity, tier 1
     const s9 = this.add({
@@ -1600,6 +1873,230 @@ export class World {
         turnEndsAt: now + 200_000,
       },
     };
+
+    // Agents that ask each other. A Claude Code session that asked Codex for a review from
+    // inside its turn (sessionpipe ask): once an hour ago, answered (the review folds under
+    // its row), and again now, Codex working in a session of its own, delegated_by this one.
+    const sA = this.add({
+      harness: "claude-code",
+      machine: "misha-air",
+      cwd: "~/sessionpipe",
+      repo: "github.com/spacesheep-dev/sessionpipe",
+      branch: "mp/webhook-backoff",
+      model: "claude-fable-5-1",
+      title: "Webhook retries with backoff",
+      url: "https://claude.ai/code/session_01K6ASKCX",
+      tier: 3,
+    });
+    {
+      t = now - 66 * min;
+      this.push(sA, "session.started", { source: "startup" }, t);
+      const askTool = (text: string) => ({
+        command: `sessionpipe ask codex "${text}"`,
+        description: "Ask Codex to review the diff",
+      });
+      const question =
+        "Review the diff in src/webhooks/send.ts: exponential backoff on webhook retries. Say what you'd do differently.";
+      // The first ask, answered: Codex's session came and went an hour ago.
+      sA.turn++;
+      const turnId = `t_${sA.turn}`;
+      const q1 = "Make the webhook sender retry with exponential backoff; ask Codex for a review before you commit.";
+      t += 3000;
+      this.push(sA, "turn.started", { turn_id: turnId, prompt_chars: q1.length }, t);
+      this.push(sA, "turn.progress", { turn: sA.turn, user: q1, assistant: "", at: iso(t) }, t);
+      const edit = TOOL_INPUTS.Edit!();
+      this.push(sA, "tool.started", { tool: "Edit", call_id: "toolu_bk_edit", turn_id: turnId, input: edit }, t + 4000);
+      this.push(
+        sA,
+        "tool.ended",
+        {
+          tool: "Edit",
+          call_id: "toolu_bk_edit",
+          turn_id: turnId,
+          ms: 9,
+          ok: true,
+          input: edit,
+          output: TOOL_OUTPUTS.Edit!(),
+        },
+        t + 4010,
+      );
+      this.push(sA, "files.changed", { paths: ["src/webhooks/send.ts"] }, t + 4015);
+      const askAt = t + 9000;
+      const input1 = askTool(question);
+      this.push(sA, "tool.started", { tool: "Bash", call_id: "toolu_bk_ask1", turn_id: turnId, input: input1 }, askAt);
+      this.push(
+        sA,
+        "delegation.started",
+        { ask_id: "01K8ASK0000000000000MOCK01", via: "ask", harness: "codex", text: question },
+        askAt + 400,
+      );
+      const c1 = this.add({
+        harness: "codex",
+        machine: "misha-air",
+        cwd: "~/sessionpipe",
+        repo: "github.com/spacesheep-dev/sessionpipe",
+        branch: "mp/webhook-backoff",
+        model: "gpt-5-codex",
+        title: "Review: backoff on webhook retries",
+        titleSource: "harness",
+        tier: 3,
+      });
+      c1.block.delegated_by = sA.key;
+      this.push(c1, "session.started", { source: "startup" }, askAt + 2500);
+      const c1End = this.pastTurn(c1, askAt + 4000, askFrame(question, sA.key), CODEX_REVIEW, 2);
+      this.push(c1, "session.ended", { reason: "exit" }, c1End + 1500);
+      const back = c1End + 2000;
+      this.push(
+        sA,
+        "delegation.ended",
+        { ask_id: "01K8ASK0000000000000MOCK01", to: c1.key, ok: true, ms: back - askAt, reply: CODEX_REVIEW },
+        back,
+      );
+      this.push(
+        sA,
+        "tool.ended",
+        {
+          tool: "Bash",
+          call_id: "toolu_bk_ask1",
+          turn_id: turnId,
+          ms: back - askAt,
+          ok: true,
+          input: input1,
+          output: { stdout: CODEX_REVIEW, stderr: "", interrupted: false, isImage: false, noOutputExpected: false },
+        },
+        back + 50,
+      );
+      const a1 =
+        "Backoff is in, and Codex reviewed the diff: it wants jitter on the delay so a burst of failures doesn't retry in lockstep, and it caught that the try count was off by one. Both applied. Not committed yet.";
+      this.push(sA, "turn.ended", { turn_id: turnId, reason: "stop", ms: back + 20_000 - t }, back + 20_000);
+      this.push(
+        sA,
+        "turn.transcript",
+        { turn: sA.turn, user: q1, assistant: a1, at: iso(back + 20_000) },
+        back + 21_000,
+      );
+
+      // The second ask, running: Codex is at it in a session of its own.
+      const start = now - 2 * min;
+      sA.turn++;
+      const turnId2 = `t_${sA.turn}`;
+      const q2 = "Now do the same for the email sender, and have Codex check it too.";
+      this.push(sA, "turn.started", { turn_id: turnId2, prompt_chars: q2.length }, start);
+      this.push(sA, "turn.progress", { turn: sA.turn, user: q2, assistant: "", at: iso(start) }, start);
+      const edit2 = {
+        file_path: "src/email/send.ts",
+        old_string: "const delay = 30_000;",
+        new_string: "const delay = backoff(job.attempt);",
+      };
+      this.push(
+        sA,
+        "tool.started",
+        { tool: "Edit", call_id: "toolu_bk_edit2", turn_id: turnId2, input: edit2 },
+        start + 6000,
+      );
+      this.push(
+        sA,
+        "tool.ended",
+        {
+          tool: "Edit",
+          call_id: "toolu_bk_edit2",
+          turn_id: turnId2,
+          ms: 7,
+          ok: true,
+          input: edit2,
+          output: "The file src/email/send.ts has been updated.",
+        },
+        start + 6007,
+      );
+      this.push(sA, "files.changed", { paths: ["src/email/send.ts"] }, start + 6010);
+      this.push(
+        sA,
+        "turn.progress",
+        {
+          turn: sA.turn,
+          user: q2,
+          assistant: "Same backoff in the email sender. Asking Codex to look it over.",
+          at: iso(start + 8000),
+        },
+        start + 8000,
+      );
+      const q2text =
+        "Review the diff in src/email/send.ts: the same exponential backoff as the webhook sender. Anything you'd do differently?";
+      const ask2At = now - 80_000;
+      const input2 = askTool(q2text);
+      this.push(
+        sA,
+        "tool.started",
+        { tool: "Bash", call_id: "toolu_bk_ask2", turn_id: turnId2, input: input2 },
+        ask2At,
+      );
+      this.push(
+        sA,
+        "delegation.started",
+        { ask_id: "01K8ASK0000000000000MOCK02", via: "ask", harness: "codex", text: q2text },
+        ask2At + 300,
+      );
+      const c2 = this.add({
+        harness: "codex",
+        machine: "misha-air",
+        cwd: "~/sessionpipe",
+        repo: "github.com/spacesheep-dev/sessionpipe",
+        branch: "mp/webhook-backoff",
+        model: "gpt-5-codex",
+        tier: 3,
+      });
+      c2.block.delegated_by = sA.key;
+      this.push(c2, "session.started", { source: "startup" }, ask2At + 2500);
+      c2.turn++;
+      const prompt2 = askFrame(q2text, sA.key);
+      this.push(c2, "turn.started", { turn_id: `t_${c2.turn}`, prompt_chars: prompt2.length }, ask2At + 4000);
+      this.push(
+        c2,
+        "turn.progress",
+        { turn: c2.turn, user: prompt2, assistant: "", at: iso(ask2At + 4000) },
+        ask2At + 4000,
+      );
+      this.push(
+        c2,
+        "tool.started",
+        { tool: "shell", call_id: "exec-bk-1", input: { command: ["bash", "-lc", "git diff -- src/email/send.ts"] } },
+        ask2At + 7000,
+      );
+      this.push(
+        c2,
+        "tool.ended",
+        {
+          tool: "shell",
+          call_id: "exec-bk-1",
+          ms: 120,
+          ok: true,
+          input: { command: ["bash", "-lc", "git diff -- src/email/send.ts"] },
+          output: "ok",
+        },
+        ask2At + 7120,
+      );
+      c2.script = {
+        kind: "working",
+        nextAt: now + 1500,
+        progressIdx: 0,
+        lastProgressAt: now,
+        turnStartedAt: ask2At + 4000,
+        prompt: prompt2,
+        turnEndsAt: now + rnd(60_000, 110_000),
+      };
+      sA.script = { kind: "none" };
+      this.asksOpen.push({
+        parent: sA,
+        child: c2,
+        askId: "01K8ASK0000000000000MOCK02",
+        callId: "toolu_bk_ask2",
+        turnId: turnId2,
+        input: input2,
+        prompt: q2,
+        startedAt: ask2At,
+        turnStartedAt: start,
+      });
+    }
 
     // 10. done: ended cleanly 3 h ago
     const s10 = this.add({

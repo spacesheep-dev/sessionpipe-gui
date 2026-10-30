@@ -2,7 +2,9 @@
 // Owned by: control-web. New session's sheet: one sheet, Mail's compose (STEER-SPEC B.3).
 // Where it runs (machine, agent, folder), what it should do (the message and its files),
 // then the options the machine's hello advertises (permission, model) and nothing it does
-// not. It signs one CONTROL.md §6 `start` with the day grant and hands it to the machine's
+// not. Each agent says how much its account has left on the chosen machine (lib/limits.ts
+// accountFor; the pool's current account and count where the machine pools them), and
+// nothing for a harness with no numbers; it orders, disables or picks none. It signs one CONTROL.md §6 `start` with the day grant and hands it to the machine's
 // daemon through POST /api/ui/control/send, then opens the new session's page, which fills
 // in as the agent starts (Starting.tsx). The GUI runs nothing itself: the machine is the
 // gate, and a choice it did not advertise is never sent (a daemon that predates a field
@@ -27,19 +29,21 @@ import {
 import { ActionButton, EmptyState, HarnessGlyph } from "../components/bits";
 import { MoreButton } from "../components/ContextMenu";
 import { Select, type SelectOption } from "../components/Select";
-import { useAppState, useMachines } from "../data/hooks";
+import { useAppState, useLimits, useMachines } from "../data/hooks";
 import { useFocusTrap } from "../lib/focus";
 import "../lib/acp";
 import { bytes, harnessMark } from "../lib/format";
 import { reducedMotion, tokenMs, useSheetDrag } from "../lib/motion";
 import { navigate, sessionPath } from "../lib/router";
 import { hintFor, matches, useShortcut } from "../lib/shortcuts";
+import { useNow } from "../lib/time";
 import { controlApi, wrongOriginHere } from "./api";
 import { uuid } from "./bytes";
 import { sendCommand } from "./command";
 import { folderChoices, machineHome, tildify, typedFolder } from "./folders";
 import { useGrant, useRpId } from "./hooks";
 import {
+  agentLeft,
   closeNewSession,
   type Draft,
   fixedPermission,
@@ -518,11 +522,23 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       disabled: !!b,
     };
   });
-  const agentOptions: SelectOption<string>[] = harnesses.map((h) => ({
-    value: h,
-    label: harnessMark(h).label,
-    icon: <HarnessGlyph name={h} size="sm" />,
-  }));
+  // What each agent's account has left here: its tightest window, or each account's by
+  // name; on a machine that pools the agent's accounts, the pool's current one and the count.
+  const limits = useLimits();
+  const now = useNow("coarse");
+  const left = (h: string) => (machine ? agentLeft(h, machine, c, limits, now) : {});
+  const agentOptions: SelectOption<string>[] = harnesses.map((h) => {
+    const w = left(h);
+    return {
+      value: h,
+      label: harnessMark(h).label,
+      icon: <HarnessGlyph name={h} size="sm" />,
+      ...(w.hint ? { hint: w.hint } : {}),
+      ...(w.out ? { hintTone: "attention" as const } : {}),
+      ...(w.detail ? { detail: w.detail } : {}),
+    };
+  });
+  const chosen = harness ? left(harness) : {};
   const choices = useMemo(
     () =>
       machine && c
@@ -601,6 +617,11 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
           disabled={!harnesses.length}
           className="ns-sel"
         />,
+        chosen.hint ? (
+          <span className={`ns-aside num ${chosen.out ? "ns-aside--out" : ""}`} data-ns-left>
+            {chosen.hint}
+          </span>
+        ) : null,
       )}
       {row(
         "folder",

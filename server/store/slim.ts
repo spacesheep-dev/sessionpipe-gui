@@ -11,8 +11,9 @@ export const PREVIEW_CHARS = 2048;
  *  preview would pin the 64 KB it was cut from; copying through a Buffer does not. */
 export const detach = (s: string): string => Buffer.from(s, "utf8").toString("utf8");
 
-/** `data` keys that can be large: tool input/output (≤ 64 KB each) and turn text (≤ 20 000). */
-const BIG_KEYS = ["input", "output", "user", "assistant"] as const;
+/** `data` keys that can be large: tool input/output (≤ 64 KB each), turn text (≤ 20 000)
+ *  and a delegation's reply (≤ 20 000, tier 2). */
+const BIG_KEYS = ["input", "output", "user", "assistant", "reply"] as const;
 
 /** A stored event as the index keeps it. `preview` lists the `data` keys that were cut
  *  and their original length in characters; absent when nothing was. */
@@ -58,6 +59,8 @@ function internEvent(ev: SlimEvent): SlimEvent {
     "title_source",
     "account_id",
     "parent_id",
+    "launched_by",
+    "delegated_by",
   ] as const)
     internField(out.session, k);
   if (ev.privacy && Array.isArray(ev.privacy.rulesets))

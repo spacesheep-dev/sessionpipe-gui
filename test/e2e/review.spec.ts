@@ -33,10 +33,11 @@ test.describe("review", () => {
     await expect(rows.first()).toBeVisible({ timeout: 30_000 });
     const n = await rows.count();
     expect(n).toBeGreaterThan(0);
-    // The machine totals add up to the session rows; the last row is the grand total.
+    // The machine totals add up to the session rows; the last row is the grand total. The
+    // count is read from its own span: a machine named "mac-mini-2" runs into it otherwise.
     const machines = page.locator("table.rv-table tfoot tr").filter({ hasText: /^machine/ });
     const sessionsPer = await machines.evaluateAll((trs) =>
-      trs.map((tr) => Number(/(\d+) sessions?/.exec(tr.textContent ?? "")?.[1] ?? 0)),
+      trs.map((tr) => Number(/^(\d+) sessions?/.exec(tr.querySelector(".rv-span")?.textContent ?? "")?.[1] ?? 0)),
     );
     expect(sessionsPer.reduce((a, b) => a + b, 0)).toBe(n);
     await expect(page.locator("table.rv-table tfoot tr.rv-all")).toHaveText(new RegExp(`all\\s*${n} sessions?`));

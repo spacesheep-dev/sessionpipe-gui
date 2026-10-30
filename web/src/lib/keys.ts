@@ -42,6 +42,8 @@ const NAV: Record<string, string> = {
   "nav.feed": "/feed",
   "nav.review": "/review",
   "nav.machines": "/machines",
+  "nav.usage": "/usage",
+  "nav.workflows": "/workflows",
   "nav.connect": "/connect",
   "nav.setup": "/setup",
   "nav.views": "/themes",
@@ -56,6 +58,8 @@ const TOP = new Set([
   "review",
   "search",
   "machines",
+  "usage",
+  "workflows",
   "connect",
   "setup",
   "themes",
@@ -150,6 +154,9 @@ export interface ListNavOptions {
   clear?: () => boolean;
   /** Warm the session under a resting cursor (data/prefetch.ts). */
   store?: Store;
+  /** What Enter does with the item at this index, in place of going to its href (Usage
+   *  opens New session there); false when it does nothing. */
+  open?: (index: number) => boolean;
 }
 
 /** A cursor over a list of hrefs, moved by the list actions; Enter opens the one under it,
@@ -172,6 +179,8 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
   const onRow = useRef<string | null>(cursor >= 0 ? (hrefs[cursor] ?? null) : null);
   /** True when a key moved the cursor, so focus follows; a click or Tab sets it silently. */
   const byKey = useRef(false);
+  /** The cursor last moved by following focus (a click, Tab), not a key. */
+  const followed = useRef(false);
   const lastHrefs = useRef(hrefs);
   // After every commit: a list that changed under the cursor moves the cursor with its
   // row; otherwise the cursor's index names its row (a key or a click moved it).
@@ -214,6 +223,7 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
   const open = (mode: "page" | "beside" | "background") => {
     const href = hrefs[cursor];
     if (!href) return false;
+    if (opts.open) return opts.open(cursor);
     const key = keys?.[cursor];
     if (mode !== "page" && key) {
       openSplit(key, {
@@ -266,6 +276,7 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
   // ⌘1–9, the installed app only: the nth row of the list as it stands.
   const jump = (i: number) => () => {
     if (!installedApp() || inPanel() || !hrefs[i]) return false;
+    if (opts.open) return opts.open(i);
     navigate(hrefs[i]!);
   };
   useShortcut("list.jump1", jump(0), { enabled });
@@ -292,7 +303,9 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
       const el = (e.target as HTMLElement | null)?.closest?.("[data-nav-item]");
       if (!el) return;
       const i = applyRoving(r, -1).indexOf(el as HTMLElement);
-      if (i >= 0) setCursor(i);
+      if (i < 0 || i === cursor) return;
+      followed.current = true;
+      setCursor(i);
     };
     r.addEventListener("focusin", onFocus);
     return () => r.removeEventListener("focusin", onFocus);
@@ -302,6 +315,12 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
     if (cursor < 0) return;
     // A restored cursor sits where the page put it back; the scroll is already right.
     if (restored.current) return;
+    // A cursor that followed focus (a click, Tab) is already on screen; scrolling the whole
+    // item "nearest" would move one taller than the window out from under the pointer.
+    if (followed.current) {
+      followed.current = false;
+      return;
+    }
     const el = document.querySelector<HTMLElement>(`[data-cursor="${CSS.escape(String(cursor))}"]`);
     el?.scrollIntoView({ block: "nearest" });
   }, [cursor]);
@@ -331,7 +350,13 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
   }, [key, store]);
 
   const reset = useCallback(() => setCursor(-1), []);
-  return { cursor, reset };
+  /** The person is about to take the cursor's row out of its place (e on the board): the
+   *  cursor goes with `href`, the row that takes that place, not with the row that left. */
+  const follow = useCallback((href: string | undefined) => {
+    onRow.current = href ?? null;
+    byKey.current = true;
+  }, []);
+  return { cursor, reset, follow };
 }
 
 /** Something open that Esc closes first (a popover, a confirm, the panel): a
@@ -343,7 +368,9 @@ const drawn = (el: HTMLElement): boolean =>
 const openDismiss = (): boolean => [...document.querySelectorAll<HTMLElement>("[data-dismiss]")].some(drawn);
 
 /** Focus is in the side panel: its own keys win there. */
-const inPanel = () => !!document.activeElement?.closest?.("aside.panel");
+/** Focus is inside the panel beside the page: a list's bare keys (its menu, the jumps,
+ *  e and ⇧E) leave the row under the cursor alone, since the person is working there. */
+export const inPanel = (): boolean => !!document.activeElement?.closest?.("aside.panel");
 
 /** Holding ⌘ (ctrl elsewhere) for 600 ms in the installed app marks the document
  *  `data-jump-hints`, so the first nine rows show their number (board.css); letting go

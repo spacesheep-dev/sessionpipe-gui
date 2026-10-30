@@ -246,6 +246,10 @@ pub fn apply_settings<R: Runtime>(
     crate::settings::save(&shell.home, &next).map_err(|e| e.to_string())?;
     crate::tray::refresh(app);
     crate::tray::update_badge(app, false);
+    // Turned on: check now rather than at the schedule's next six-hour mark.
+    if next.auto_update && !prev.auto_update {
+        crate::updater::check_now(app.clone());
+    }
     Ok(next)
 }
 

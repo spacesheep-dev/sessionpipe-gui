@@ -150,6 +150,27 @@ describe("readings", () => {
     ]);
   });
 
+  it("keeps the launcher a launched session names; a later event without it changes nothing", () => {
+    const launched = new Session("launched-1");
+    const launcher = sessionKey("claude-code", "launcher-1");
+    store.ingest([launched.ev("session.started", {}, { session: { launched_by: launcher } })], "http");
+    store.ingest([launched.ev("turn.started", { turn_id: "t1" })], "http");
+    const s = store.session(sessionKey("claude-code", "launched-1"))!;
+    expect(s.launchedBy).toBe(launcher);
+    expect(s.parentId ?? null).toBeNull();
+  });
+  it("keeps a launched_by only in the protocol's key shape, trimmed", () => {
+    const bad = new Session("launched-2");
+    store.ingest([bad.ev("session.started", {}, { session: { launched_by: "Claude Code:abc" } })], "http");
+    expect(store.session(sessionKey("claude-code", "launched-2"))?.launchedBy).toBeUndefined();
+    const digit = new Session("launched-4");
+    store.ingest([digit.ev("session.started", {}, { session: { launched_by: "9lives:abc" } })], "http");
+    expect(store.session(sessionKey("claude-code", "launched-4"))?.launchedBy).toBeUndefined();
+    const padded = new Session("launched-3");
+    store.ingest([padded.ev("session.started", {}, { session: { launched_by: " codex:thread-9 " } })], "http");
+    expect(store.session(sessionKey("claude-code", "launched-3"))?.launchedBy).toBe("codex:thread-9");
+  });
+
   it("keeps progress until its transcript or the turn's end; snippets are cut", () => {
     const s = new Session();
     store.ingest([s.ev("session.started"), s.ev("turn.started", { turn_id: "t1" })], "http");
@@ -235,6 +256,51 @@ describe("readings", () => {
     // The idle notice that follows is a hook event like any: the question is over.
     store.ingest([{ ...s.ev("attention.needed", { attention_id: "notif-3", kind: "idle" }) }], "http");
     expect(store.session(KEY)!.state).toBe("idle");
+  });
+
+  it("files a limits.observed and counts it, but reads it as no activity", () => {
+    const s = new Session();
+    const windows = [{ id: "five_hour", used_percent: 23.5, window_minutes: 300 }];
+    store.ingest([s.ev("session.started"), s.ev("turn.started")], "http");
+    store.ingest([s.ev("attention.needed", { attention_id: "p1", kind: "permission", tool: "Bash" })], "http");
+    const before = structuredClone(store.session(KEY)!);
+    // The status line redraws while the prompt is open: the prompt stays, so does the state.
+    store.ingest([s.ev("limits.observed", { windows }, { tier: 1 })], "http");
+    let sum = store.session(KEY)!;
+    expect(sum.openAttentions).toMatchObject([{ attentionId: "p1" }]);
+    expect(sum.state).toBe("needs_you");
+    expect(sum.lastAt).toBe(before.lastAt);
+    expect(sum.counts.events).toBe(before.counts.events + 1);
+    // Nor does one wake a session that ended.
+    store.ingest([s.ev("session.ended", { reason: "exit" })], "http");
+    const ended = structuredClone(store.session(KEY)!);
+    store.ingest([s.ev("limits.observed", { windows }, { tier: 1 })], "http");
+    sum = store.session(KEY)!;
+    expect(sum.state).toBe("done");
+    expect(sum.lastAt).toBe(ended.lastAt);
+  });
+
+  it("reads which account the pool serves a session with, from limits.observed.account_id", () => {
+    const s = new Session();
+    const windows = [{ id: "five_hour", used_percent: 23.5, window_minutes: 300 }];
+    store.ingest([s.ev("session.started", {}, { session: { account_id: "own" } }), s.ev("turn.started")], "http");
+    // The session's own account, or no account at all: nothing to say.
+    store.ingest([s.ev("limits.observed", { windows, account_id: "own" }, { tier: 1 })], "http");
+    store.ingest([s.ev("limits.observed", { windows }, { tier: 1 })], "http");
+    expect(store.session(KEY)!.servedBy).toBeUndefined();
+    const moved = s.ev("limits.observed", { windows, account_id: "fiction" }, { tier: 1 });
+    store.ingest([moved], "http");
+    expect(store.session(KEY)!.servedBy).toEqual({ accountId: "fiction", since: moved.time });
+    // The same account again keeps `since`; one without an id changes nothing.
+    store.ingest([s.ev("limits.observed", { windows, account_id: "fiction" }, { tier: 1 })], "http");
+    store.ingest([s.ev("limits.observed", { windows }, { tier: 1 })], "http");
+    expect(store.session(KEY)!.servedBy).toEqual({ accountId: "fiction", since: moved.time });
+    const again = s.ev("limits.observed", { windows, account_id: "work" }, { tier: 1 });
+    store.ingest([again], "http");
+    expect(store.session(KEY)!.servedBy).toEqual({ accountId: "work", since: again.time });
+    // Back on its own account: cleared.
+    store.ingest([s.ev("limits.observed", { windows, account_id: "own" }, { tier: 1 })], "http");
+    expect(store.session(KEY)!.servedBy).toBeUndefined();
   });
 
   it("comes back from done when the session starts again", () => {
@@ -990,6 +1056,82 @@ describe("sessionpipe 0.10 readings", () => {
     );
     expect(store.session(key)!.currentTurn?.injected).toBeUndefined();
     expect(store.session(key)!.counts.turns).toBe(3);
+  });
+});
+
+describe("newsAt", () => {
+  const arrive = (t: string, events: Parameters<Store["ingest"]>[0]) => {
+    vi.setSystemTime(Date.parse(t));
+    store.ingest(events, "http");
+  };
+
+  it("moves to a turn's end as it arrived, never on tools, progress or attentions", () => {
+    vi.useFakeTimers();
+    const s = new Session();
+    arrive("2026-10-28T10:00:00.000Z", [s.ev("session.started", { source: "startup" })]);
+    arrive("2026-10-28T10:00:01.000Z", [
+      s.ev("turn.started", { turn_id: "t1" }),
+      s.ev("tool.started", { tool: "Read", call_id: "c1" }),
+      s.ev("tool.ended", { tool: "Read", call_id: "c1", ok: true }),
+      s.ev("turn.progress", { turn: 0, user: "Fix it", assistant: "Reading", at: at(1) }),
+      s.ev("attention.needed", { attention_id: "a1", kind: "question", message: "Which one?" }),
+    ]);
+    expect(store.session(KEY)!.newsAt).toBeUndefined();
+    arrive("2026-10-28T10:00:05.000Z", [s.ev("turn.ended", { turn_id: "t1", reason: "stop" })]);
+    expect(store.session(KEY)!.newsAt).toBe("2026-10-28T10:00:05.000Z");
+    arrive("2026-10-28T10:00:09.000Z", [
+      s.ev("turn.started", { turn_id: "t2" }),
+      s.ev("tool.started", { tool: "Edit", call_id: "c2" }),
+    ]);
+    expect(store.session(KEY)!.newsAt).toBe("2026-10-28T10:00:05.000Z");
+  });
+
+  it("a turn typed at the terminal of an attended session is not news; an unknown submitter, an unattended run and the end are", () => {
+    vi.useFakeTimers();
+    const s = new Session();
+    const attended = { session: { attended: true } };
+    arrive("2026-10-28T10:00:00.000Z", [s.ev("session.started", { source: "startup" }, attended)]);
+    arrive("2026-10-28T10:00:01.000Z", [
+      s.ev("turn.started", { turn_id: "t1", submitted_by: "user" }, attended),
+      s.ev("turn.ended", { turn_id: "t1", reason: "stop" }, attended),
+    ]);
+    expect(store.session(KEY)!.newsAt).toBeUndefined();
+    arrive("2026-10-28T10:00:02.000Z", [
+      s.ev("turn.started", { turn_id: "t2" }, attended),
+      s.ev("turn.ended", { turn_id: "t2", reason: "stop" }, attended),
+    ]);
+    expect(store.session(KEY)!.newsAt).toBe("2026-10-28T10:00:02.000Z");
+    arrive("2026-10-28T10:00:03.000Z", [
+      s.ev("turn.started", { turn_id: "t3", submitted_by: "schedule_wakeup" }, attended),
+      s.ev("turn.ended", { turn_id: "t3", reason: "stop" }, attended),
+    ]);
+    expect(store.session(KEY)!.newsAt).toBe("2026-10-28T10:00:03.000Z");
+    // Typed, but nobody says the session is attended: news.
+    const other = new Session("other-1");
+    arrive("2026-10-28T10:00:04.000Z", [
+      other.ev("turn.started", { turn_id: "t1", submitted_by: "user" }),
+      other.ev("turn.ended", { turn_id: "t1", reason: "stop" }),
+    ]);
+    expect(store.session(sessionKey("claude-code", "other-1"))!.newsAt).toBe("2026-10-28T10:00:04.000Z");
+    arrive("2026-10-28T10:00:07.000Z", [s.ev("session.ended", { reason: "exit" }, attended)]);
+    expect(store.session(KEY)!.newsAt).toBe("2026-10-28T10:00:07.000Z");
+  });
+
+  it("a backfill is never news, and a restart reads the same newsAt from the files", async () => {
+    vi.useFakeTimers();
+    const old = new Session("old-one");
+    arrive("2026-10-28T10:00:00.000Z", [old.ev("session.backfill", { started_at: at(0), last_at: at(30), turns: 4 })]);
+    expect(store.session(sessionKey("claude-code", "old-one"))!.newsAt).toBeUndefined();
+    const s = new Session();
+    arrive("2026-10-28T10:00:05.000Z", [
+      s.ev("turn.started", { turn_id: "t1" }),
+      s.ev("turn.ended", { turn_id: "t1", reason: "stop" }),
+    ]);
+    await store.close();
+    vi.setSystemTime(Date.parse("2026-10-28T10:01:00.000Z"));
+    store = new Store(tmp.dir, { tickMs: 1_000, statsMs: 1_000 });
+    expect(store.session(KEY)!.newsAt).toBe("2026-10-28T10:00:05.000Z");
+    expect(store.session(sessionKey("claude-code", "old-one"))!.newsAt).toBeUndefined();
   });
 });
 

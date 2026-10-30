@@ -52,6 +52,53 @@
   -webkit-user-select: text;
   user-select: text;
 }
+/* A chained command, one step per line under the question's words (not the dot): plain
+   mono text, nothing behind it. The steps after the first stand in by two characters, and
+   a step that wraps hangs two more, so a token breaks only when it alone is too wide.
+   Unfolded, it scrolls inside half the view. */
+.ctl-cmd-block {
+  grid-column: 1;
+  min-width: 0;
+  max-height: 50dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-left: 16px;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-ligatures: none;
+  line-height: var(--lh);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.ctl-cmd-block > div {
+  padding-inline-start: 2ch;
+  text-indent: -2ch;
+}
+.ctl-cmd-block > div + div {
+  padding-inline-start: 4ch;
+}
+/* "Show 2 more lines": a line of quiet text, no box. */
+.ctl-more {
+  grid-column: 1;
+  justify-self: start;
+  margin: 0 0 0 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .ctl-more:hover {
+    color: var(--fg);
+  }
+}
 .ctl-answer-msg {
   color: var(--fg-2);
   font-size: var(--text-sm);
@@ -78,6 +125,51 @@
 .ctl-answer > .ctl-answer-btns {
   grid-column: 2;
   grid-row: 1 / span 2;
+}
+/* Beside a command block, the pair sits on the question's line, so it stays put when the
+   block unfolds (only the wide bar: the narrow one and the phone put it under). */
+@media (min-width: 840px) {
+  @container ctl (min-width: 561px) {
+    .ctl-answer:has(> .ctl-cmd-block) > .ctl-answer-btns {
+      align-self: start;
+      margin-top: calc((var(--text-md) * var(--lh) - var(--control)) / 2);
+    }
+  }
+}
+/* A plan review: the plan under its question, in the question's column, read as the
+   timeline reads a reply. No box: eight lines, then "Show the whole plan" opens it to half
+   the view, scrolling inside. Its pair stays beside the question. */
+.ctl-answer--plan > .ctl-answer-btns {
+  grid-row: 1;
+}
+.ctl-plan {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding-top: 2px;
+}
+.ctl-answer > .ctl-plan,
+.ctl-answer > .ctl-plan-msg {
+  grid-column: 1;
+  min-width: 0;
+  margin: 0;
+  padding-left: 16px;
+}
+.ctl-plan-text {
+  align-self: stretch;
+  max-height: calc(8 * 1lh);
+  overflow: hidden;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.ctl-plan > .ctl-more {
+  margin-inline-start: 0;
+}
+.ctl-plan.is-whole > .ctl-plan-text {
+  max-height: 50dvh;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 .ctl-answer + .ctl-answer {
   padding-top: 8px;
@@ -236,6 +328,17 @@
   .ctl-q {
     flex: none;
   }
+  /* The strip stays about half the phone's height (the question, "Show less", the pair
+     and the field take 13.25rem of it): a long command scrolls inside, and the cap ends
+     half a line into a step, so a step below it always shows. Never under three lines. */
+  .ctl-cmd-block {
+    max-height: max(calc(3.5em * var(--lh)), calc(round(down, 50dvh - 13.25rem, 1em * var(--lh)) + 0.5em * var(--lh)));
+  }
+  .ctl-more {
+    align-self: flex-start;
+    min-height: 44px;
+    margin-block: -8px;
+  }
   .ctl-answer-btns {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -244,6 +347,19 @@
   .ctl-answer-btns .btn {
     min-height: var(--control-lg);
     font-size: var(--text-md);
+  }
+  /* A plan review: six lines, then Keep planning | Approve plan, as Deny | Allow. */
+  .ctl-answer > .ctl-plan,
+  .ctl-answer > .ctl-plan-msg {
+    padding-left: 0;
+  }
+  .ctl-plan-text {
+    max-height: calc(6 * 1lh);
+  }
+  /* Opened, the strip stays about half the phone's height, as a command's does: the plan
+     scrolls inside, and the cap ends half a line into the next, so more always shows. */
+  .ctl-plan.is-whole > .ctl-plan-text {
+    max-height: max(calc(3.5 * 1lh), calc(round(down, 50dvh - 13.25rem, 1lh) + 0.5lh));
   }
   .ctl-ask textarea {
     font-size: max(1rem, 16px);

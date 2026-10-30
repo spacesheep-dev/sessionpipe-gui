@@ -18,6 +18,8 @@ export interface AppSettings {
   notifications: { enabled: boolean; kinds: Record<string, boolean>; pausedUntil: string | null };
   /** Set once the first-run sheet has been seen (when the shell reports it). */
   firstRunDone?: boolean;
+  /** Check on launch and every six hours (the shell's default: on). */
+  autoUpdate?: boolean;
 }
 export interface Receiver {
   id: string;
@@ -30,6 +32,12 @@ export type UpdateState = "idle" | "checking" | "downloading" | "ready" | "error
 export interface UpdateStatus {
   state: UpdateState;
   version?: string;
+  /** ISO time the last check finished. */
+  lastChecked?: string;
+  /** Why the last check or install failed, in plain words. */
+  error?: string;
+  /** Percent downloaded, while downloading. */
+  progress?: number;
 }
 export type NotifyStatus = "granted" | "denied" | "undetermined";
 

@@ -122,6 +122,22 @@ export function approveBlocker(
     : null;
 }
 
+/** The machine a device request is approved on when nobody chose one and the request
+ *  names none: the first paired machine that can take it. A device key (the request's
+ *  own, or this app's, which signs the key.add) needs a daemon that takes device keys,
+ *  so with such a one paired it comes before a machine Approve would be blocked on. */
+export function approveTarget<M extends { control?: Pick<MachineControl, "keyTypes"> }>(
+  request: { key: Pick<TrustedKey, "type"> },
+  paired: readonly M[],
+  kind = signerKind(),
+): M | undefined {
+  if (request.key.type || kind === "device") {
+    const takes = paired.find((m) => machineTakes(m.control, "device"));
+    if (takes) return takes;
+  }
+  return paired[0];
+}
+
 export interface SignOptions {
   /** One fresh confirm over sha256(cmd) instead of the day grant. */
   confirm?: boolean;
@@ -129,11 +145,38 @@ export interface SignOptions {
   onTap?: () => void;
   /** The last grant was refused: ask for a new one (the app allows one such retry). */
   fresh?: boolean;
+  /** Sign with the grant already held, or throw NoGrantError: never a prompt. The
+   *  workflows runner signs this way, from whatever page the shell is showing. */
+  noPrompt?: boolean;
 }
+
+/** `sign` with `noPrompt` found no grant good for `rp`: a tap is due, and only a page
+ *  the person is on may ask for it (the run view's Unlock now, a composer's send). */
+export class NoGrantError extends Error {
+  constructor(rp: string) {
+    super(`no day grant held for ${rp}`);
+  }
+}
+
+/** Fired on `window` once a day grant was taken or dropped, so every `useGrant` on the
+ *  page re-reads it: the workflows runner (one hook, in the shell) then moves on a grant
+ *  that the run view's "Unlock now" or a composer's send took. */
+export const GRANT_EVENT = "sessionpipe-gui:grant";
+const grantChanged = (): void => {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(GRANT_EVENT));
+};
 
 /** Sign the exact bytes `cmd` for `rp`. */
 export async function sign(rp: string, cmd: string, o: SignOptions = {}): Promise<Signed> {
-  if (inApp()) return (await nativeSigner()).sign(rp, cmd, o);
+  // With noPrompt, only a grant good right now signs (a confirm or a fresh grant would ask).
+  if (o.noPrompt && (o.confirm || o.fresh || (await grantExpiry(rp)) === null)) throw new NoGrantError(rp);
+  if (inApp()) {
+    const signed = await (await nativeSigner()).sign(rp, cmd, o);
+    // A fresh grant (or a confirm's own tap) stands in for the one a machine refused.
+    if (o.fresh || o.confirm) refused.delete(rp);
+    grantChanged();
+    return signed;
+  }
   if (o.confirm) {
     o.onTap?.();
     return {
@@ -147,22 +190,37 @@ export async function sign(rp: string, cmd: string, o: SignOptions = {}): Promis
   }
   const d = await day();
   const rec = await d.obtainGrant(rp, o.onTap);
+  grantChanged();
   return { cmd, csig: await d.signWithDayKey(rec, cmd), grant: rec.grant };
 }
 
-/** When the day grant for `rp` ends (ms), or null when the next send asks. */
-export const grantExpiry = async (rp: string): Promise<number | null> =>
-  inApp() ? (await nativeSigner()).grantExpiry(rp) : (await day()).grantExpiry(rp);
+/** In the app, the rp ids whose grant a machine refused: Rust still holds it and would sign
+ *  with it again, so this page reads it as gone (grantExpiry null: the runner signs
+ *  nothing, the run view asks for Touch ID) until a fresh one is taken, by Unlock now or by
+ *  a send that asked for one. The browser's day key drops its grant for real instead. */
+const refused = new Set<string>();
 
-/** Forget the cached grant (the app instead asks Rust for a fresh one, SignOptions.fresh). */
+/** When the day grant for `rp` ends (ms), or null when the next send asks. */
+export const grantExpiry = async (rp: string): Promise<number | null> => {
+  if (!inApp()) return (await day()).grantExpiry(rp);
+  return refused.has(rp) ? null : (await nativeSigner()).grantExpiry(rp);
+};
+
+/** Forget the cached grant: dropped in the browser; in the app, read as gone until a fresh
+ *  one is taken (SignOptions.fresh asks Rust for it). */
 export const dropGrant = async (rp: string): Promise<void> => {
-  if (!inApp()) await (await day()).dropGrant(rp);
+  if (inApp()) refused.add(rp);
+  else await (await day()).dropGrant(rp);
+  grantChanged();
 };
 
 /** Take the day grant ahead of the first send ("Unlock now"). */
 export const unlock = async (rp: string): Promise<void> => {
-  if (inApp()) await (await nativeSigner()).unlock(rp);
-  else await (await day()).obtainGrant(rp);
+  if (inApp()) {
+    await (await nativeSigner()).unlock(rp);
+    refused.delete(rp);
+  } else await (await day()).obtainGrant(rp);
+  grantChanged();
 };
 
 /** The app's device key for `rp`, made on first use (no prompt: making one needs none). */

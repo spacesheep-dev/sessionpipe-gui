@@ -49,6 +49,9 @@ export function NotificationsSettings() {
                 Notify me
               </span>
               <span className="settings-hint ntf-hint">{notifyHint}</span>
+              <span className="settings-hint ntf-hint">
+                Each session's menu has Notify me: be told when it finishes, or turn it off.
+              </span>
             </div>
             <div className="settings-row-ctl">
               <Switch on={notify.on} onChange={(v) => void setNotifyPref(v)} label="Notify me" disabled={blocked} />

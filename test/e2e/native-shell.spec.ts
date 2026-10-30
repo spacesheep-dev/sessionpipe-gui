@@ -67,6 +67,7 @@ function fakeShell() {
       hotkey: null as string | null,
       notifications: { enabled: false, kinds: {}, pausedUntil: null },
       firstRunDone,
+      autoUpdate: true,
     };
     const send = (id: number, raw: unknown) => callbacks.get(id)?.(raw);
     w.__emit = (event: string, payload: unknown) => {
@@ -143,7 +144,7 @@ function fakeShell() {
           case "app_notify_request":
             return "granted";
           case "app_update_status":
-            return { state: "ready", version: "0.3.1" };
+            return { state: "ready", version: "0.3.1", lastChecked: new Date().toISOString() };
           case "rx_discover":
             if (!discover) throw new Error("fake shell: no rx_discover");
             return { local: { id: "e2erx00001", name: "This Mac", origin: location.origin, local: true } };
@@ -276,7 +277,13 @@ test.describe("inside the native shell", () => {
     await expect(pane.getByRole("switch", { name: "Open at login" })).toBeVisible();
     await expect(pane.getByText("This Mac", { exact: true })).toBeVisible();
     await expect(pane.getByText("0.3.1 is ready")).toBeVisible();
-    await expect(pane.getByRole("button", { name: "Restart to Update" })).toBeVisible();
+    await expect(pane.getByText(/^You have .*Last checked just now\.$/)).toBeVisible();
+    await expect(pane.getByRole("button", { name: "Install and relaunch" })).toBeVisible();
+    const auto = pane.getByRole("switch", { name: "Check for updates automatically" });
+    await expect(auto).toHaveAttribute("aria-checked", "true");
+    await auto.click();
+    await expect(auto).toHaveAttribute("aria-checked", "false");
+    expect(await calls(page)).toContain("app_settings_set");
     await pane.getByRole("button", { name: "Record shortcut" }).click();
     await page.keyboard.press("Control+Alt+KeyN");
     await expect(pane.getByRole("button", { name: /New session shortcut: ⌃⌥N/ })).toBeVisible();

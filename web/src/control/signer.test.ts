@@ -2,6 +2,7 @@
 // Who signs on this page: the passkey in a browser, the app's device key inside the shell
 // (through a mocked Tauri runtime); key.add carries a device key whole; the receiver's and
 // the machine's key_types gate the app; Approve's one line where a daemon is too old.
+import type { KeyType } from "@shared/api";
 import "../native/test-env";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetInfoCache, rpId } from "./api";
@@ -9,9 +10,13 @@ import { commandString } from "./command";
 import { keyTypesOf, refresh } from "./nativeSigner";
 import {
   approveBlocker,
+  approveTarget,
   canSign,
   deviceWords,
+  dropGrant,
+  grantExpiry,
   machineTakes,
+  NoGrantError,
   nativeErrorWords,
   nativeSigner,
   ownKeys,
@@ -21,6 +26,7 @@ import {
   signerKind,
   signerLabel,
   signHint,
+  unlock,
   updateWords,
 } from "./signer";
 
@@ -273,6 +279,37 @@ describe("the native adapter (mocked invoke)", () => {
     expect(calls.at(-1)?.args).toMatchObject({ cmd: add, mode: "confirm" });
   });
 
+  it("a grant a machine refused reads as gone in the app until a fresh one is taken", async () => {
+    const exp = Date.now() + 3_600_000;
+    const calls = inShell((cmd, args) =>
+      cmd === "plugin:identity|status"
+        ? { available: true, key: DEVICE, grantExp: exp }
+        : cmd === "plugin:identity|sign"
+          ? { cmd: args.cmd, csig: "c", grant: { cred: DEVICE.id, sig: "s", str: "{}" } }
+          : null,
+    );
+    const cmd = commandString(MACHINE, { kind: "prompt", session: "claude-code:x", text: "hi" });
+    await nativeSigner();
+    expect(await grantExpiry("localhost")).toBe(exp);
+    // The machine refused it (command.ts drops it): Rust still says it holds one, the page
+    // reads none, and the runner's no-prompt signing stops here instead of looping.
+    await dropGrant("localhost");
+    expect(await grantExpiry("localhost")).toBeNull();
+    await expect(sign("localhost", cmd, { noPrompt: true })).rejects.toBeInstanceOf(NoGrantError);
+    expect(calls.filter((c) => c.cmd === "plugin:identity|sign")).toHaveLength(0);
+    // A send that asks Rust for a fresh grant puts it back; so does Unlock now.
+    await sign("localhost", cmd, { fresh: true });
+    expect(await grantExpiry("localhost")).toBe(exp);
+    await dropGrant("localhost");
+    expect(await grantExpiry("localhost")).toBeNull();
+    await unlock("localhost");
+    expect(await grantExpiry("localhost")).toBe(exp);
+    // Another rp id is its own: dropping one leaves the other.
+    await dropGrant("other.example");
+    expect(await grantExpiry("localhost")).toBe(exp);
+    await unlock("other.example");
+  });
+
   it("status fills this Mac's key for the rp id; nothing is made and no prompt shows", async () => {
     const calls = inShell(() => ({ available: true, key: DEVICE, grantExp: null }));
     await nativeSigner();
@@ -291,5 +328,19 @@ describe("the native adapter (mocked invoke)", () => {
     );
     expect(nativeErrorWords(new Error("no"))).toBeNull();
     expect(nativeErrorWords("busy")).toBeNull();
+  });
+});
+
+describe("the machine a device request is approved on by default", () => {
+  const old = { name: "ho-ask", control: { keyTypes: undefined } };
+  const fresh = { name: "studio-mac", control: { keyTypes: ["passkey", "device"] as KeyType[] } };
+  it("a device key goes to the first machine that takes one, however the list is ordered", () => {
+    expect(approveTarget({ key: { type: "device" } }, [old, fresh], "passkey")).toBe(fresh);
+    expect(approveTarget({ key: {} }, [old, fresh], "device")).toBe(fresh);
+  });
+  it("a passkey from a browser, or no machine that takes device keys: the first paired one", () => {
+    expect(approveTarget({ key: {} }, [old, fresh], "passkey")).toBe(old);
+    expect(approveTarget({ key: { type: "device" } }, [old], "passkey")).toBe(old);
+    expect(approveTarget({ key: { type: "device" } }, [], "passkey")).toBeUndefined();
   });
 });

@@ -25,7 +25,7 @@ import { registerMachineRoutes } from "./routes.js";
 import { ControlState, type DemoStart, type DeviceRequestRow, toActivity, WAIT_MAX_S } from "./state.js";
 import { registerTestDoor } from "./testdoor.js";
 import { coreTakesTilde } from "./tilde.js";
-import { registerUiRoutes } from "./ui.js";
+import { queueSend, registerUiRoutes, type VerifiedSend, verifySend } from "./ui.js";
 
 export interface ControlDeps {
   stateDir: string;
@@ -53,7 +53,15 @@ export interface Control {
   /** Paired machines, keyed by the daemon's `name` (the same name events carry in session.machine). */
   machines(): Map<string, MachineControl>;
   activity(limit?: number): ControlActivity[];
+  /** One command by its id, from whichever queue holds it (a workflow step's ack, found
+   *  without a walk through the newest N). */
+  activityById(id: string): ControlActivity | undefined;
   subscribe(l: (m: StreamMessage) => void): () => void;
+  /** A command a page signed, read and verified as /send does (ui.ts verifySend; throws
+   *  HttpError), and queued (queueSend, synchronous): split so a caller with a guard of
+   *  its own (a workflow step's claim) checks it between the two. */
+  verifySend(body: unknown): Promise<VerifiedSend>;
+  queueSend(v: VerifiedSend): ControlActivity;
   /** Pairings still waiting for a person, newest first (the setup page shows this machine's inline). */
   pendingPairings(): { code: string; check: string; expiresAt: string; machine: string; machineId: string }[];
   /** Device requests a trusted device could still approve, newest first (the phone page). */
@@ -144,6 +152,9 @@ export function createControl(deps: ControlDeps): Control {
       return out;
     },
     activity: (limit) => state.activity(limit),
+    activityById: (id) => state.activityById(id),
+    verifySend: (body) => verifySend({ state, rpId }, body),
+    queueSend: (v) => queueSend(state, v),
     pendingPairings: () =>
       state.pendingPairings().map(({ machine, pairing }) => ({
         code: pairing.code,

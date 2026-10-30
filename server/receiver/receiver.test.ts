@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ROUTES, type SessionDetail } from "../../shared/api.js";
+import { type LimitsEntry, ROUTES, type SessionDetail } from "../../shared/api.js";
 import { Session, SID, tempDir } from "../../test/events.js";
 import { type App, createApp } from "../app.js";
 import { MAX_BYTES, MAX_EVENTS } from "./index.js";
@@ -170,6 +170,19 @@ describe("POST events", () => {
     expect(detail.events[1]!).toMatchObject({ type: "x.y", data: { anything: [1, 2] }, source: "http" });
     expect(Date.parse(detail.events[1]!.arrivedAt)).toBeGreaterThan(0);
     expect(detail.events[1]!.arrivedAt >= detail.events[1]!.time).toBe(true);
+  });
+
+  it("takes limits.observed at tier 1 and keeps its numbers; at tier 0 it is tier_type", async () => {
+    const s = new Session("limits", "codex");
+    const windows = [{ id: "primary", used_percent: 12, window_minutes: 300, resets_at: "2026-10-28T19:43:49.000Z" }];
+    const low = s.ev("limits.observed", { windows }, { tier: 0 });
+    const ok = s.ev("limits.observed", { windows, plan: "pro" }, { tier: 1 });
+    const res = await post({ events: [s.ev("session.started"), low, ok] });
+    expect(await res.json()).toMatchObject({ accepted: 2, rejected: [{ id: low.id, reason: "tier_type" }] });
+    const { limits } = (await (await fetch(`${app.url}${ROUTES.ui.limits}`)).json()) as { limits: LimitsEntry[] };
+    expect(limits).toMatchObject([
+      { key: "codex m:misha-air", plan: "pro", windows: [{ id: "primary", usedPercent: 12, windowMinutes: 300 }] },
+    ]);
   });
 
   it("honours session.forgotten before answering", async () => {

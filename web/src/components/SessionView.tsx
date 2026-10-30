@@ -5,9 +5,10 @@
 // first session opened before that, which meanwhile shows what a session shows while its
 // events load (the bar, nothing under it). What other surfaces read off a mounted view
 // (the strip's Allow / Deny as menu items) stays here, in the app's own chunk.
-import type { SessionSummary } from "@shared/api";
+import { type SessionSummary, sessionKey } from "@shared/api";
 import { lazy, type RefObject, Suspense } from "react";
-import { toolLabel } from "../lib/format";
+import { useSeen } from "../data/hooks";
+import { isPlanReview, toolLabel } from "../lib/format";
 import { back } from "../lib/router";
 import type { MenuList } from "./ContextMenu";
 import { BackButton, PageBar } from "./PageBar";
@@ -38,6 +39,8 @@ if (typeof window !== "undefined") {
 }
 
 export function SessionView(props: SessionViewProps) {
+  // On the page it is what the person is looking at; the panel marks its active tab.
+  useSeen(props.mode === "page" ? sessionKey(props.harness, props.id) : null);
   return (
     <Suspense fallback={<SessionLoading mode={props.mode} />}>
       <Body {...props} />
@@ -73,11 +76,30 @@ export function answerItems(root: HTMLElement | null, s: SessionSummary, attenti
   if (!row || !allow || !deny) return [];
   const tool = s.openAttentions.find((a) => a.attentionId === row.dataset.attention)?.tool;
   const name = tool ? ` ${toolLabel(tool)}` : "";
-  const why = allow.disabled
-    ? row.querySelector(".ctl-answer-note")?.textContent?.trim() || "This prompt cannot be answered from here"
-    : undefined;
+  // A plan review's pair: the strip's own two buttons, by their own names.
+  const plan = isPlanReview({ kind: "permission", tool });
+  // Either button can be off on its own (Approve plan while the composer holds a note, Keep
+  // planning with one over 2,000 characters): its item says so rather than pressing a
+  // button that cannot go.
+  const own = allow.getAttribute("aria-description");
+  const why =
+    allow.disabled && !own
+      ? row.querySelector(".ctl-answer-note")?.textContent?.trim() || "This prompt cannot be answered from here"
+      : undefined;
+  const allowWhy = why ?? (allow.disabled ? own || true : undefined);
+  const denyWhy = why ?? (deny.disabled ? deny.getAttribute("aria-description") || true : undefined);
   return [
-    { label: `Allow${name}`, action: "session.allow", disabled: why, run: () => allow.click() },
-    { label: `Deny${name}`, action: "session.deny", disabled: why, run: () => deny.click() },
+    {
+      label: plan ? "Approve plan" : `Allow${name}`,
+      action: "session.allow",
+      disabled: allowWhy,
+      run: () => allow.click(),
+    },
+    {
+      label: plan ? "Keep planning" : `Deny${name}`,
+      action: "session.deny",
+      disabled: denyWhy,
+      run: () => deny.click(),
+    },
   ];
 }

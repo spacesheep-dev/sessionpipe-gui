@@ -19,6 +19,7 @@ import { markRestoring } from "./lib/keys";
 import { titlePrefix, useAttentionEffects } from "./lib/notify";
 import { Link, navigate, parseRoute, usePath, useRoute } from "./lib/router";
 import { getSettings } from "./lib/settings";
+import { Workflows } from "./orchestrate/workflows/Workflows";
 import { Board } from "./pages/Board";
 import { Connect } from "./pages/Connect";
 import { Feed } from "./pages/Feed";
@@ -30,6 +31,7 @@ import { SessionPage } from "./pages/Session";
 import { Setup } from "./pages/Setup";
 import { Shortcuts } from "./pages/Shortcuts";
 import { Themes } from "./pages/Themes";
+import { Usage } from "./pages/Usage";
 import { PhonePage } from "./phone/PhonePage";
 import { markSetupSeen, setupSeen, useSetupStatus } from "./setup/api";
 import { needsSetup } from "./setup/steps";
@@ -41,8 +43,12 @@ const TITLES: Record<string, string> = {
   inbox: "Inbox",
   feed: "Feed",
   review: "Review",
+  workflows: "Workflows",
+  workflow: "Workflow",
+  workflowRun: "Run",
   search: "Search",
   machines: "Machines",
+  usage: "Usage",
   connect: "Connect",
   setup: "Setup",
   session: "Session",
@@ -129,8 +135,12 @@ export function App() {
       )}
       {route.name === "feed" && <Feed />}
       {route.name === "review" && <Review />}
+      {route.name === "workflows" && <Workflows view="list" />}
+      {route.name === "workflow" && <Workflows key={route.id} view="workflow" id={route.id} />}
+      {route.name === "workflowRun" && <Workflows key={route.id} view="run" id={route.id} />}
       {route.name === "search" && <Search />}
       {route.name === "machines" && <Machines />}
+      {route.name === "usage" && <Usage />}
       {route.name === "connect" && <Connect />}
       {route.name === "setup" && <Setup />}
       {route.name === "themes" && <Themes />}
@@ -157,7 +167,7 @@ const FIRST_RUN_WAIT_MS = 3000;
 
 /** Where each list page was scrolled to, by path, for Back. */
 const scrolled = new Map<string, number>();
-const LIST_PAGES = new Set(["board", "inbox", "feed", "machines", "search"]);
+const LIST_PAGES = new Set(["board", "inbox", "feed", "machines", "search", "workflows"]);
 /** Each history entry this page made is stamped with its place in the walk, so a path
  *  change can tell Back (an entry stamped earlier) from a new page (no stamp yet). The
  *  popstate event cannot: the router reads the URL on any render, and a live stream

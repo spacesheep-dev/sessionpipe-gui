@@ -28,10 +28,13 @@ export function StateDot({
   state,
   size = 10,
   decorative = false,
+  unread = false,
 }: {
   state: SessionState;
   size?: number;
   decorative?: boolean;
+  /** News since the person looked (lib/marks.ts): an idle or done glyph drawn filled in. */
+  unread?: boolean;
 }) {
   // A change of state while on screen is drawn once (shared.css `.dot--arrive`): the new
   // glyph settles in, and a session that finishes in front of you draws its check. A
@@ -44,7 +47,8 @@ export function StateDot({
     setChanges((n) => n + 1);
   }, [state]);
   const style = { width: size, height: size };
-  const cls = `dot dot--${state}${changes ? " dot--arrive" : ""}`;
+  const filled = unread && (state === "idle" || state === "done");
+  const cls = `dot dot--${state}${filled ? " dot--unread" : ""}${changes ? " dot--arrive" : ""}`;
   if (decorative) return <span key={changes} className={cls} style={style} aria-hidden="true" />;
   return (
     <span
@@ -414,11 +418,14 @@ export function Toggle({
   onChange,
   label,
   disabled,
+  describedBy,
 }: {
   on: boolean;
   onChange: (v: boolean) => void;
   label: string;
   disabled?: boolean;
+  /** The id of the hint under its row, read after the label. */
+  describedBy?: string;
 }) {
   return (
     <button
@@ -426,6 +433,7 @@ export function Toggle({
       role="switch"
       aria-checked={on}
       aria-label={label}
+      aria-describedby={describedBy}
       className={`toggle ${on ? "toggle-on" : ""}`}
       onClick={() => onChange(!on)}
       disabled={disabled}

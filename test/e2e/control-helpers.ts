@@ -75,6 +75,11 @@ export interface Hello {
   version?: string;
   /** CONTROL.md §2: the kinds of key the machine takes (`["passkey","device"]` from 0.10). */
   key_types?: string[];
+  /** The machine's account pool (sessionpipe 0.11), as the hello carries it. */
+  pool?: Record<string, unknown>;
+  /** CONTROL.md §13: its agents may ask each other; it takes `reply_to` (a handoff). */
+  ask?: boolean;
+  handoff?: boolean;
 }
 
 type Ack = Record<string, unknown> & { outcome: string };

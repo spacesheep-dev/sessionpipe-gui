@@ -39,7 +39,24 @@ pub fn confirm(c: &Checked, machine: &str) -> String {
         "permission.answer" => format!("allow a permission request on {m}"),
         "start" => format!("start a session on {m}"),
         "cancel" => format!("stop a session on {m}"),
+        "pool" => pool(c.pool_action.as_deref().unwrap_or(""), &m),
         _ => format!("send a message to a session on {m}"),
+    }
+}
+
+/// A pool command, by its action: “Turn the account pool on on lab-mac”.
+fn pool(action: &str, m: &str) -> String {
+    match action {
+        "on" => format!("turn the account pool on on {m}"),
+        "off" => format!("turn the account pool off on {m}"),
+        "enable" => format!("turn an account on in the pool on {m}"),
+        "disable" => format!("turn an account off in the pool on {m}"),
+        "remove" => format!("remove an account from the pool on {m}"),
+        "order" => format!("reorder the accounts in the pool on {m}"),
+        "refresh" => format!("re-read an account's usage in the pool on {m}"),
+        "login.begin" => format!("start signing in to Claude on {m}"),
+        "login.complete" => format!("finish signing in to Claude on {m}"),
+        _ => format!("change the account pool on {m}"),
     }
 }
 
@@ -66,6 +83,7 @@ mod tests {
             session: "s".into(),
             decision: decision.map(Into::into),
             name: name.map(Into::into),
+            pool_action: None,
         }
     }
 
@@ -108,6 +126,22 @@ mod tests {
         assert_eq!(
             pair("build-box", "482913"),
             "pair build-box — check 482 913"
+        );
+        let mut p = checked("pool", None, None);
+        p.pool_action = Some("on".into());
+        assert_eq!(
+            confirm(&p, "lab-mac"),
+            "turn the account pool on on lab-mac"
+        );
+        p.pool_action = Some("remove".into());
+        assert_eq!(
+            confirm(&p, "lab-mac"),
+            "remove an account from the pool on lab-mac"
+        );
+        p.pool_action = Some("login.begin".into());
+        assert_eq!(
+            confirm(&p, "lab-mac"),
+            "start signing in to Claude on lab-mac"
         );
     }
 

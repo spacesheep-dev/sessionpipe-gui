@@ -125,7 +125,10 @@ button.sel:focus-visible {
 .sel-list--icons .sel-opt {
   grid-template-columns: 16px 16px minmax(0, 1fr) auto;
 }
-/* A level's meaning, one muted line under its label (the New session sheet's Permission). */
+/* A level's meaning, one muted line under its label (the New session sheet's Permission;
+   the Agent menu's pooled line). Wrapped like a caption, so a time never sits alone on
+   the last line, and an account's email, which has no break in it, folds before it runs
+   past the list's edge. */
 .sel-opt-detail {
   grid-column: 2 / -1;
   margin: -4px 0 4px;
@@ -133,6 +136,8 @@ button.sel:focus-visible {
   font-size: var(--text-xs);
   line-height: var(--lh-tight);
   white-space: normal;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
 }
 .sel-list--icons .sel-opt-detail {
   grid-column: 3 / -1;
@@ -167,6 +172,9 @@ button.sel:focus-visible {
   color: var(--fg-3);
   font-size: var(--text-sm);
   white-space: nowrap;
+}
+.sel-opt-hint--attention {
+  color: var(--needs-fg);
 }
 .sel-opt-check {
   display: inline-flex;

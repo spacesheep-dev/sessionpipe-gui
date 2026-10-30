@@ -5,9 +5,10 @@
 // control strip sits above the tabs, New session is a full-height sheet, a pull down a
 // list refreshes it, and an inbox row pushes its session's page (never the desktop's
 // panel as a sheet, and nothing of that panel comes back on the next launch).
+import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
 import { CONTROL_BASE, fakeDaemon, passkeyPage, seenSetupHere, sinkToken } from "./control-helpers.js";
-import { openBoard, openPage } from "./helpers.js";
+import { openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
 
 /** A finger down the page from its top, as touch events (page.touchscreen only taps):
  *  lands at y 200, moves `by` px in steps, and stays down until `lift` is called. */
@@ -293,5 +294,150 @@ test.describe("phone: new session", () => {
     } finally {
       await d.stop();
     }
+  });
+});
+
+// A plan review on a phone (tier 3, the plan in the call's input): unfolded, the strip
+// stays about half the screen, as a command's does, and its pair sits side by side.
+test.describe("phone: a plan review", () => {
+  test.skip(({ isMobile }) => !isMobile, "phone project only");
+
+  test("the whole plan scrolls inside half the screen, Keep planning | Approve plan", async ({ context, page }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, {
+      name: `plan-phone-${Math.random().toString(36).slice(2, 8)}`,
+      harnesses: ["claude-code"],
+    });
+    try {
+      const id = randomUUID();
+      const turn = randomUUID();
+      // Headings and paragraphs: their margins put the lines off any grid of whole lines.
+      const plan = Array.from(
+        { length: 8 },
+        (_, i) => `### Part ${i + 1}\n\nWhat part ${i + 1} changes, and why.\n\n1. One step.\n2. \`Another\` step.`,
+      ).join("\n\n");
+      let seq = 0;
+      let clock = Date.now() - 30_000;
+      const ev = (type: string, data: Record<string, unknown>, hook: string) => {
+        clock += 500;
+        return {
+          protocol: 1,
+          id: ulid(clock),
+          type,
+          time: new Date(clock).toISOString(),
+          tier: 3,
+          harness: { name: "claude-code", version: "2.1.296", event: hook },
+          session: {
+            id,
+            seq: seq++,
+            machine: d.name,
+            cwd: "/Users/e2e/code",
+            title: "Plan on a phone",
+            title_source: "custom",
+          },
+          privacy: { rulesets: ["secrets@1"], pii: false },
+          data,
+        };
+      };
+      const events = [
+        ev("session.started", { source: "startup" }, "SessionStart"),
+        ev("turn.started", { turn_id: turn, prompt_chars: 20 }, "UserPromptSubmit"),
+        ev(
+          "tool.started",
+          { tool: "ExitPlanMode", call_id: "toolu_plan", turn_id: turn, input: { plan } },
+          "PreToolUse",
+        ),
+        ev(
+          "attention.needed",
+          { attention_id: `perm-${id.slice(0, 8)}`, kind: "permission", tool: "ExitPlanMode", message: "ExitPlanMode" },
+          "PermissionRequest",
+        ),
+      ];
+      await fetch(`${CONTROL_BASE}/api/sessionpipe/v1/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "sessionpipe-protocol": "1" },
+        body: JSON.stringify({ events }),
+      });
+      await page.goto(`${CONTROL_BASE}${sessionUrl("claude-code", id)}`);
+      await page.getByRole("button", { name: "Show the whole plan" }).click();
+      await expect(page.getByRole("button", { name: "Show less" })).toBeVisible();
+      const text = page.locator(".ctl-plan-text");
+      expect(await text.evaluate((el) => el.scrollHeight > el.clientHeight), "the plan scrolls inside").toBe(true);
+      // It ends halfway down a line, so the line cut in half says there is more, at any
+      // phone's height.
+      const halved = () =>
+        text.evaluate((el) => {
+          const foot = el.getBoundingClientRect().bottom;
+          const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          const r = document.createRange();
+          for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+            r.selectNodeContents(n);
+            for (const b of Array.from(r.getClientRects())) if (b.top + 4 < foot && foot < b.bottom - 4) return true;
+          }
+          return false;
+        });
+      for (const height of [667, 700, 740, 780, 812, 844]) {
+        await page.setViewportSize({ width: 390, height });
+        await expect.poll(halved, `a line is cut in half at the plan's foot, ${height} tall`).toBe(true);
+      }
+      const vh = await page.evaluate(() => window.innerHeight);
+      const strip = (await page.locator(".sess-ctl").boundingBox())!;
+      expect(strip.height, `the strip is ${strip.height} of ${vh}`).toBeLessThanOrEqual(vh / 2 + 24);
+      const pair = page.locator(".ctl-answer-btns");
+      const keep = (await pair.getByRole("button", { name: "Keep planning" }).boundingBox())!;
+      const approve = (await pair.getByRole("button", { name: "Approve plan" }).boundingBox())!;
+      expect(Math.abs(keep.y - approve.y), "one row").toBeLessThan(1);
+      expect(keep.x, "Approve plan on the right").toBeLessThan(approve.x);
+    } finally {
+      await d.stop();
+    }
+  });
+});
+
+// Usage on a phone: More › Usage, after Machines, opens the page as inset groups, nothing
+// scrolls sideways, and a long press on an account's header is its menu as a sheet.
+test.describe("phone: usage", () => {
+  test.skip(({ isMobile }) => !isMobile, "phone project only");
+
+  test("More › Usage, grouped, and a long press opens the account's sheet", async ({ page }) => {
+    await openBoard(page);
+    await page.locator("[data-nav=more]").click();
+    await expect(page.locator(".more-sheet [data-nav=usage]")).toBeVisible();
+    const rows = page.locator(".more-sheet .more-row");
+    const names = await rows.locator(".more-row-name").allTextContents();
+    expect(names.indexOf("Usage")).toBeGreaterThan(-1);
+    if (names.includes("Machines")) expect(names.indexOf("Usage")).toBe(names.indexOf("Machines") + 1);
+    await page.locator(".more-sheet [data-nav=usage]").click();
+    await expect(page).toHaveURL(/\/usage$/);
+    // A free-standing account (dev@example.com is pooled on lab-mac now, pool.spec.ts).
+    const dev = page.locator("section.usage-acct", { hasText: "api.z.ai" });
+    await expect(dev.locator(".usage-win").first()).toBeVisible();
+    await noSidewaysScroll(page);
+    // The where-line is the group's footer, under its windows.
+    const list = (await dev.locator(".form-list").boundingBox())!;
+    const where = (await dev.locator(".usage-where").boundingBox())!;
+    expect(where.y).toBeGreaterThan(list.y + list.height - 1);
+
+    const head = dev.locator(".usage-head");
+    await head.scrollIntoViewIfNeeded();
+    // Held still for the long-press (a scroll cancels one).
+    await page.waitForTimeout(300);
+    await head.locator(".usage-title").evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      el.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          pointerType: "touch",
+          clientX: r.left + 4,
+          clientY: r.top + 4,
+        }),
+      );
+    });
+    const sheet = page.locator(".menu-sheet");
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText("Copy usage");
+    await expect(sheet).toContainText("Forget these numbers");
   });
 });

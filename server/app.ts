@@ -25,6 +25,8 @@ import { registerExtras } from "./extensions/extras.js";
 import { bundledDirs } from "./extensions/kind.js";
 import { lanAddresses } from "./http/net.js";
 import { Router } from "./http/router.js";
+import { createOrchestrate, type Orchestrate } from "./orchestrate/index.js";
+import { registerOrchestrate } from "./orchestrate/routes.js";
 import { registerPhone } from "./phone/index.js";
 import { PluginHost, PluginRegistry, PluginSettings, registerPlugins } from "./plugins/index.js";
 import { registerReceiver, wellKnown } from "./receiver/index.js";
@@ -46,6 +48,8 @@ import { AttachmentStore } from "./ui/attachments.js";
 import { uiAuthFor } from "./ui/auth.js";
 import { registerUi, uiGuard } from "./ui/index.js";
 import { LabelStore } from "./ui/labels.js";
+import { LimitsStore } from "./ui/limits.js";
+import { MarkStore } from "./ui/marks.js";
 import { Broadcast } from "./ui/stream.js";
 import { ViewerRegistry } from "./ui/viewers.js";
 
@@ -136,6 +140,8 @@ export interface App {
   plugins: PluginHost;
   skins: SkinRegistry;
   search: SearchService;
+  /** Workflows and their runs (server/orchestrate). */
+  orchestrate: Orchestrate;
   close(): Promise<void>;
 }
 
@@ -170,6 +176,10 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   const stateDir = opts.stateDir ?? defaultStateDir();
   let config = readGuiConfig(stateDir);
   const store = new Store(stateDir, { tickMs: opts.tickMs, keepDays: opts.keepDays });
+  // Each account's usage limits follow the store from its first event (the outbox's
+  // first read, the demo's) on.
+  const limits = new LimitsStore(stateDir);
+  limits.follow(store);
   const router = new Router();
   let port = opts.port ?? DEFAULT_PORT;
   let tls: TlsMaterial | null = opts.tls
@@ -206,6 +216,9 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
 
   registerReceiver(router, { store, sinkToken: () => config.sinkToken, control });
   control.register(router);
+  // A pooled account's windows ride on the hello too (DESIGN §2.3): the limits follow the
+  // machine frames for them, newest wins against the events'.
+  limits.followControl(control);
 
   let outbox: OutboxSource | null = null;
   if (opts.outbox !== false) {
@@ -218,10 +231,11 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
 
   let demo: Runner | null = null;
   /** Synthetic sessions never outlive demo mode: turning it off (or starting without
-   *  --demo) forgets every session the generator wrote. */
+   *  --demo) forgets every session the generator wrote, and its usage limits. */
   const dropDemoSessions = (): number => {
     let n = 0;
     for (const s of store.snapshot().sessions) if (s.source === "demo" && store.forget(s.key)) n++;
+    limits.dropDemo();
     return n;
   };
   const setDemo = (on: boolean): void => {
@@ -317,10 +331,14 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   // The person's labels follow the store: a forgotten session loses its label.
   const labels = new LabelStore(stateDir, (key) => store.sessionExists(key));
   labels.follow(store);
+  const marks = new MarkStore(stateDir, (key) => store.sessionExists(key));
+  marks.follow(store);
   // Stream messages that come from neither the store nor control: a view's state written.
   const broadcast = new Broadcast();
   registerUi(router, {
     labels,
+    marks,
+    limits,
     broadcast,
     colorThemesDir: path.join(stateDir, "color-themes"),
     store,
@@ -358,6 +376,10 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     const over = opts.testDoor ? ctx.req.headers["x-spgui-test-remote"] : undefined;
     return isThisMachine(typeof over === "string" && over ? over : ctx.remote.ip);
   });
+  // Workflows (server/orchestrate): runs across agents and machines, moved by control's
+  // acks and a one-second clock, signed only by a browser; their frames ride the broadcast.
+  const orchestrate = createOrchestrate({ stateDir, control, broadcast: (m) => broadcast.emit(m) });
+  registerOrchestrate(router, orchestrate, uiGuard(uiKey), { testDoor: opts.testDoor ?? false });
   const themes = new ThemeRegistry(opts.themesDir ?? path.join(stateDir, "themes"), {
     bundledDir: bundled.view,
     disabled,
@@ -499,12 +521,14 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     plugins,
     skins,
     search,
+    orchestrate,
     close: async () => {
       await plugins.stop();
       setup.pairer.close();
       outbox?.stop();
       setDemo(false);
       replay?.stop();
+      orchestrate.close();
       control.close();
       await search.close();
       await store.close();

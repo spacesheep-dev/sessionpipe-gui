@@ -46,6 +46,8 @@ pub struct AppSettings {
     pub notifications: NotifySettings,
     /// The first-run sheet was seen.
     pub first_run_done: bool,
+    /// Check for updates on launch and every six hours (§3.7); off leaves Check now.
+    pub auto_update: bool,
 }
 
 impl Default for AppSettings {
@@ -59,6 +61,7 @@ impl Default for AppSettings {
             hotkey: None,
             notifications: NotifySettings::default(),
             first_run_done: false,
+            auto_update: true,
         }
     }
 }
@@ -116,6 +119,7 @@ mod tests {
             "menuBarOnly",
             "hotkey",
             "notifications",
+            "autoUpdate",
         ] {
             assert!(v.get(k).is_some(), "{k}");
         }
@@ -126,7 +130,7 @@ mod tests {
         // Unknown and missing fields are tolerated.
         std::fs::write(path(&dir), br#"{"menuBar":false,"future":1}"#).unwrap();
         let l = load(&dir);
-        assert!(!l.menu_bar && l.dock_badge);
+        assert!(!l.menu_bar && l.dock_badge && l.auto_update);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

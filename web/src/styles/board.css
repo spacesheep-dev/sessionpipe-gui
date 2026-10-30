@@ -54,15 +54,23 @@
 .board-list[data-settled] .group-count {
   animation: fade-in var(--dur-fast) var(--ease-out);
 }
+/* Done's "3 unread" (lib/marks.ts), in the count's tier: a fact about the rows, not a call. */
+.group-note {
+  color: var(--fg-3);
+  font-weight: 400;
+}
 /* Done folds away behind a disclosure: the chevron turns as it opens. Its header is a
    row like the ones it hides (a hover fill, the rows' inset), and its hairline stops at
-   the content's edge instead of running out to the window's. */
-.group--done > .group-head {
+   the content's edge instead of running out to the window's. Hidden, after it, is the
+   same fold. */
+.group--done > .group-head,
+.group--hidden > .group-head {
   margin: 0 4px;
   padding: 0;
   border-bottom: 0;
 }
-.group--done > .group-head::after {
+.group--done > .group-head::after,
+.group--hidden > .group-head::after {
   content: "";
   position: absolute;
   left: 8px;
@@ -79,18 +87,21 @@
   color: inherit;
   font: inherit;
 }
-.group--done .group-toggle {
+.group--done .group-toggle,
+.group--hidden .group-toggle {
   flex: 1;
   padding: 0 8px;
   border-radius: var(--radius);
   transition: background-color var(--dur-fast) var(--ease-out);
 }
 @media (hover: hover) {
-  .group--done .group-toggle:hover {
+  .group--done .group-toggle:hover,
+  .group--hidden .group-toggle:hover {
     background: var(--hover);
   }
 }
-.group--done .group-toggle:active {
+.group--done .group-toggle:active,
+.group--hidden .group-toggle:active {
   background: var(--press);
   transition: none;
 }
@@ -218,6 +229,12 @@
   font-size: var(--text-sm);
   line-height: var(--lh-tight);
   white-space: nowrap;
+}
+/* Notifications off: the bell with a slash, before the time, quiet as the time is. */
+.card-muted {
+  display: inline-flex;
+  margin-right: 6px;
+  vertical-align: -1px;
 }
 /* Line 2: a tool name (or the kind of prompt) in the UI font, then the command in mono
    or the latest text, one line. */
@@ -502,6 +519,10 @@
 .kid-state {
   color: var(--fg-3);
 }
+.kid > .card-muted {
+  margin-right: 0;
+  color: var(--fg-3);
+}
 
 /* An agent row (§4.1): the 8 px agent glyph, "Type · description", then what it does
    now; 32 px, 44 on a phone. The open one (its tab is the panel's) is selected. */
@@ -575,6 +596,58 @@
   color: var(--fg-3);
   font-size: var(--text-sm);
   animation: fade-in var(--dur) var(--ease-out) both;
+}
+/* A paired machine you rely on is offline (OfflineLine): one sentence above the first
+   section, at a section header's size and edge to edge with its hairline, not sticky.
+   No tint, no icon, no orange: the sentence is the whole message. On a phone it wraps to
+   two lines at most and is itself the way to Machines. */
+.offline-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  margin: 0 calc(12px - var(--gutter)) 16px;
+  padding: 0 calc(var(--gutter) - 8px) 0 var(--gutter);
+  border-bottom: var(--hairline) solid var(--line);
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+  line-height: var(--lh-tight);
+  animation: fade-in var(--dur) var(--ease-out) both;
+}
+/* The sentence opens Machines on a phone only; a desktop has the button and the menu. */
+.offline-line-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: inherit;
+  pointer-events: none;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.offline-line-open {
+  color: var(--fg-2);
+  font-weight: 500;
+}
+@media (max-width: 839px) {
+  .offline-line {
+    padding-right: calc(var(--gutter) - 12px);
+  }
+  .offline-line-text {
+    display: -webkit-box;
+    padding: 6px 0;
+    white-space: normal;
+    pointer-events: auto;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .offline-line-open {
+    display: none;
+  }
+  .offline-line-x {
+    width: 44px;
+    height: 44px;
+  }
 }
 /* A filter that hides everything. */
 .board-nomatch .state-title {

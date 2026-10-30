@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // GET /api/ui/stream: Server-Sent Events. The first frame is a snapshot, then every
 // store message, every control message, every change of who is connected, of the
-// labels and of a view's stored state as it happens, and a `: ping` comment every 15 s so proxies and phones keep the connection.
+// labels, of the usage limits, of a view's stored state and of a workflow run (`workflowRun`,
+// the whole run; `workflows` after a save or a delete; server/orchestrate, through the
+// Broadcast) as it happens, and a `: ping` comment every 15 s so proxies and phones keep the connection.
 // Each stream is one Viewer in the registry for as long as it stays open, except the
 // desktop app's menu-bar stream (`x-sessionpipe-client: shell`), which is not a person.
 import type { Snapshot, StreamMessage } from "../../shared/api.js";
@@ -20,7 +22,7 @@ export interface StreamDeps {
   pingMs?: number;
   /** The plugin host's own messages (suggestions), when plugins are on. */
   plugins?: { subscribe(l: (m: StreamMessage) => void): () => void };
-  /** Other sources forwarded as they are: label changes, view-state writes. */
+  /** Other sources forwarded as they are: label and limits changes, view-state writes. */
   more?: { subscribe(l: (m: StreamMessage) => void): () => void }[];
 }
 

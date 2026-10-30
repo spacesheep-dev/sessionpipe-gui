@@ -6,7 +6,7 @@ import type { ControlActivity } from "@shared/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppState } from "../data/hooks";
 import { controlApi, rpId } from "./api";
-import { grantExpiry } from "./signer";
+import { GRANT_EVENT, grantExpiry } from "./signer";
 
 export function useRpId(): string | null {
   const [rp, setRp] = useState<string | null>(null);
@@ -36,6 +36,11 @@ export function useGrant(rp: string | null): { exp: number | null | undefined; r
     };
   }, [rp, tick]);
   const refresh = useCallback(() => setTick((t) => t + 1), []);
+  // A grant taken or dropped anywhere on the page (a send, Unlock now) is read here too.
+  useEffect(() => {
+    window.addEventListener(GRANT_EVENT, refresh);
+    return () => window.removeEventListener(GRANT_EVENT, refresh);
+  }, [refresh]);
   return { exp, refresh };
 }
 

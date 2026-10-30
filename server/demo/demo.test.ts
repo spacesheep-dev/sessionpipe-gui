@@ -4,14 +4,14 @@
 import { describe, expect, it } from "vitest";
 import { DONE_AFTER_MS, type EventSource, type ProtocolEvent } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
-import { type Hello, MACHINE_RE } from "../control/parse.js";
+import { type Hello, MACHINE_RE, parseHello } from "../control/parse.js";
 import type { DemoStart } from "../control/state.js";
 import { applyEvent, newRecord, refreshState } from "../store/readings.js";
 import type { Store } from "../store/store.js";
 import { MODELS } from "./content.js";
 import { startDemo } from "./index.js";
 import { DEMO_ACP_SESSION, demoMachineId, startDemoMachines } from "./machine.js";
-import { DEMO_API_ACCOUNT, type DemoStarted, Simulation } from "./sim.js";
+import { DEMO_API_ACCOUNT, DEMO_POOL, DEMO_POOL_UNTIL_MS, type DemoStarted, Simulation } from "./sim.js";
 import { TYPE_TIER, validate } from "./validate.js";
 
 class FakeStore {
@@ -63,6 +63,8 @@ describe("Simulation: a 10-minute run", () => {
       const a = events[i - 1] as ProtocolEvent;
       const b = events[i] as ProtocolEvent;
       if (a.type === "session.backfill" || b.type === "session.backfill") continue;
+      // The usage limits' earlier sessions are dated before the demo began (limitsScene).
+      if (Date.parse(a.time) < T0 || Date.parse(b.time) < T0) continue;
       expect(Date.parse(b.time)).toBeGreaterThanOrEqual(Date.parse(a.time));
       expect(b.id > a.id).toBe(true);
     }
@@ -415,8 +417,9 @@ describe("Simulation: a 10-minute run", () => {
       const slice = sim.advance(m * 60_000);
       expect(slice.flatMap((e) => validate(e))).toEqual([]);
       n += slice.length;
-      // The showcase's cycle: the showcase, three reviewers, and sessionpipe 0.10's scenes.
-      expect(sim.live).toBeLessThanOrEqual(9);
+      // The showcase's cycle: the showcase, three reviewers, sessionpipe 0.10's scenes, and
+      // the two sessions that ask Codex, each with the Codex session it asked.
+      expect(sim.live).toBeLessThanOrEqual(13);
     }
     expect(n).toBeGreaterThan(1500);
   });
@@ -664,6 +667,173 @@ describe("sessionpipe 0.10 scenes", () => {
     expect(events.some((e) => e.session.id === s.id && e.type === "session.started")).toBe(true);
     expect(s.text).toMatch(/^Run the integration suite/);
   });
+
+  it("asks Codex from inside a Claude Code turn: the events, the child's delegated_by, the answer", () => {
+    const begun = events.find((e) => e.type === "delegation.started" && e.data.via === "ask")!;
+    expect(begun.harness.name).toBe("claude-code");
+    expect(begun.harness.event).toBeUndefined();
+    expect(begun.data).toMatchObject({ harness: "codex", text: expect.stringMatching(/^Review the diff/) });
+    expect(begun.data.to).toBeUndefined();
+    const ended = events.find((e) => e.type === "delegation.ended" && e.data.ask_id === begun.data.ask_id)!;
+    expect(ended.data).toMatchObject({ ok: true, to: expect.stringMatching(/^codex:/), reply: expect.any(String) });
+    expect(ended.data.relayed).toBeUndefined();
+    // The ask ran inside a Bash call that stayed open for as long as the child did.
+    const call = events.find(
+      (e) => e.type === "tool.ended" && key(e) === key(begun) && Date.parse(e.time) >= Date.parse(ended.time),
+    )!;
+    expect((call.data.input as { command: string }).command).toMatch(/^sessionpipe ask codex /);
+    expect((call.data.output as { stdout: string }).stdout).toBe(ended.data.reply);
+    expect(call.data.ms).toBe(ended.data.ms);
+    // The child: Codex, on the same machine and in the same folder, delegated_by the asker.
+    const child = events.filter((e) => key(e) === ended.data.to);
+    expect(child.length).toBeGreaterThan(3);
+    expect(child[0]!.type).toBe("session.started");
+    for (const e of child) expect(e.session.delegated_by).toBe(key(begun));
+    expect(child[0]!.session.machine).toBe(begun.session.machine);
+    expect(child[0]!.session.cwd).toBe(begun.session.cwd);
+    const first = child.find((e) => e.type === "turn.transcript")!;
+    expect(first.data.user).toMatch(/\n\n\(Asked by claude-code:[^ ]+ on this machine with sessionpipe ask\./);
+    expect(first.data.assistant).toBe(ended.data.reply);
+    // Through the store: open, the ask keeps the asker working; closed, it carries the answer.
+    const mid = read(key(begun), Date.parse(begun.time) + 1000);
+    expect(mid.counts.delegationsRunning).toBe(1);
+    expect(mid.delegations![0]).toMatchObject({ via: "ask", harness: "codex" });
+    const after = read(key(begun), Date.parse(ended.time) + 1000);
+    expect(after.counts.delegationsRunning).toBe(0);
+    expect(after.delegations![0]).toMatchObject({ to: ended.data.to, ok: true, reply: ended.data.reply });
+    expect(read(ended.data.to as string, Date.parse(ended.time)).delegatedBy).toBe(key(begun));
+  });
+
+  it("brings a handoff's answer back as a framed prompt, and says it was relayed", () => {
+    const begun = events.find((e) => e.type === "delegation.started" && e.data.via === "handoff")!;
+    expect(begun.data).toMatchObject({ harness: "codex", to: expect.stringMatching(/^codex:/) });
+    const ended = events.find((e) => e.type === "delegation.ended" && e.data.ask_id === begun.data.ask_id)!;
+    expect(ended.data).toMatchObject({ ok: true, to: begun.data.to, relayed: "delivered" });
+    // The daemon started the child for us: the demo machine has its start.
+    expect(started.some((s) => `${s.harness}:${s.id}` === begun.data.to)).toBe(true);
+    const child = events.filter((e) => key(e) === begun.data.to);
+    for (const e of child) expect(e.session.delegated_by).toBe(key(begun));
+    expect(child.find((e) => e.type === "turn.transcript")!.data.user).toMatch(/with sessionpipe control/);
+    // Then the answer lands in the asking session as a prompt of its own, and it answers.
+    const relay = events.find(
+      (e) => key(e) === key(begun) && e.type === "turn.transcript" && Date.parse(e.time) > Date.parse(ended.time),
+    )!;
+    expect(relay.data.user).toMatch(/^Answer from codex:[0-9a-f]{8} \(sessionpipe handoff, asked via [^)]+\):\n\n/);
+    expect(String(relay.data.user).endsWith(String(ended.data.reply))).toBe(true);
+    expect(relay.data.assistant).toMatch(/^Codex is right/);
+    const after = read(key(begun), Date.parse(relay.time) + 1000);
+    expect(after.delegations!.find((d) => d.askId === begun.data.ask_id)).toMatchObject({
+      via: "handoff",
+      relayed: "delivered",
+    });
+  });
+});
+
+describe("usage limits", () => {
+  // As the runner does: the paired machine's hello names lab-mac's account first.
+  const sim = new Simulation({ seed: SEED, startAt: T0, speed: 1 });
+  const lab = sim.account(sim.v010Machine, "claude-code");
+  const events = sim.advance(TEN_MINUTES);
+  const reports = events.filter((e) => e.type === "limits.observed");
+  const ago = (e: ProtocolEvent) => T0 - Date.parse(e.time);
+  const windows = (e: ProtocolEvent) =>
+    (e.data.windows as { id: string; used_percent: number; resets_at?: string; window_minutes?: number }[]).map(
+      (w) =>
+        `${w.id} ${w.used_percent}${w.window_minutes ? ` /${w.window_minutes}` : ""}${w.resets_at ? ` ${(Date.parse(w.resets_at) - T0) / 60_000}m` : ""}`,
+    );
+  const first = (harness: string, machine: string, account?: string) =>
+    reports.find(
+      (e) => e.harness.name === harness && e.session.machine === machine && e.session.account_id === account,
+    )!;
+
+  it("leaves every account's last report at once, in an earlier session of its harness and machine", () => {
+    const studio = first("claude-code", "studio-mac", sim.account("studio-mac", "claude-code"));
+    expect(ago(studio)).toBe(3 * 3_600_000);
+    expect(windows(studio)).toEqual(["five_hour 100 /300 70m", "seven_day 42 /10080 7260m"]);
+    const api = first("claude-code", "lab-mac", DEMO_API_ACCOUNT);
+    expect(ago(api)).toBe(60_000);
+    expect(windows(api)).toEqual(["spend_limit 112 17280m"]);
+    const codexLab = first("codex", "lab-mac");
+    expect(ago(codexLab)).toBe(2 * 60_000);
+    expect(windows(codexLab)).toEqual(["primary 8 /300 223m", "secondary 26 /10080 5880m"]);
+    expect(codexLab.data.plan).toBe("plus");
+    const codexBuild = first("codex", "build-box");
+    expect(ago(codexBuild)).toBe(2 * 3_600_000);
+    expect(windows(codexBuild)).toEqual(["primary 64 /300 -40m", "secondary 91 /10080 1680m"]);
+    expect(codexBuild.data.plan).toBe("pro");
+    const dev = first("claude-code", "lab-mac", lab);
+    expect(ago(dev)).toBe(60_000);
+    expect(windows(dev)).toEqual(["five_hour 38 /300 141m", "seven_day 20 /10080 3960m", "seven_day_fable 29 3960m"]);
+    // Each arrives in the demo's first tick, from Claude Code's status line or Codex's Stop.
+    for (const r of [studio, api, codexLab, codexBuild, dev]) {
+      expect(events.indexOf(r)).toBeLessThan(events.findIndex((e) => Date.parse(e.time) > T0 + 1000));
+      expect(r.harness.event).toBe(r.harness.name === "codex" ? "Stop" : "StatusLine");
+      const session = events.filter((e) => key(e) === key(r));
+      expect(session.map((e) => e.type)).toEqual([
+        "session.started",
+        "turn.started",
+        "turn.ended",
+        "turn.transcript",
+        "limits.observed",
+        "session.ended",
+      ]);
+    }
+    // Codex sends no account id: its numbers are the machine's.
+    expect(reports.filter((e) => e.harness.name === "codex").every((e) => e.session.account_id === undefined)).toBe(
+      true,
+    );
+    expect(reports.flatMap((e) => validate(e))).toEqual([]);
+  });
+
+  it("moves lab-mac's 5-hour window on as its replies come, a point or two at a time", () => {
+    const later = reports.filter((e) => e.session.account_id === lab && Date.parse(e.time) > T0);
+    expect(later.length).toBeGreaterThan(0);
+    let used = 38;
+    for (const r of later) {
+      const [five, ...rest] = windows(r);
+      const now = Number(five!.split(" ")[1]);
+      expect(now - used === 1 || now - used === 2, `${used} → ${now}`).toBe(true);
+      used = now;
+      expect(rest).toEqual(["seven_day 20 /10080 3960m", "seven_day_fable 29 3960m"]);
+      expect(r.session.machine).toBe("lab-mac");
+    }
+  });
+});
+
+describe("the pool at work", () => {
+  const events = run(SEED, 12);
+  const scene = events.filter(
+    (e) => e.session.account_id === DEMO_POOL.spacesheep.id && e.session.machine === "lab-mac",
+  );
+  it("plays a session on Spacesheep's login that the pool moves to Misha's after its first turn", () => {
+    expect(scene.length).toBeGreaterThan(0);
+    const reports = scene.filter((e) => e.type === "limits.observed");
+    expect(reports[0]?.data).toMatchObject({ account_id: DEMO_POOL.spacesheep.id });
+    expect((reports[0]!.data.windows as { id: string; used_percent: number; resets_at: string }[])[0]).toMatchObject({
+      id: "five_hour",
+      used_percent: 99.2,
+      resets_at: new Date(T0 + DEMO_POOL_UNTIL_MS).toISOString(),
+    });
+    const own = events.find(
+      (e) =>
+        e.session.machine === "lab-mac" &&
+        e.harness.name === "claude-code" &&
+        e.session.account_id !== DEMO_POOL.spacesheep.id &&
+        e.session.account_id !== DEMO_API_ACCOUNT,
+    )?.session.account_id;
+    expect(own).toBeTruthy();
+    expect(reports.slice(1).every((e) => e.data.account_id === own)).toBe(true);
+    expect(reports.length).toBeGreaterThanOrEqual(3);
+    // The first report comes after the first turn; no earlier one names the pool.
+    const firstTurnEnd = scene.findIndex((e) => e.type === "turn.ended");
+    expect(scene.indexOf(reports[0]!)).toBeGreaterThan(firstTurnEnd);
+    expect(scene.some((e) => e.type === "session.ended")).toBe(false);
+    for (const e of scene) expect(validate(e)).toEqual([]);
+  });
+  it("leaves the cast as it was: the same machines, and no other session on that login", () => {
+    expect(new Set(events.map((e) => e.session.machine))).toEqual(new Set(["studio-mac", "build-box", "lab-mac"]));
+    expect(new Set(scene.map((e) => e.session.id)).size).toBe(1);
+  });
 });
 
 describe("demo machines", () => {
@@ -685,12 +855,49 @@ describe("demo machines", () => {
         },
       },
     } as unknown as Control;
-    const m = startDemoMachines(control, "lab-mac", () => "acct");
-    expect(calls).toEqual([`machine ${demoMachineId("lab-mac")}`]);
-    const [newer] = hellos;
-    expect(newer).toMatchObject({ mode: "inherit", version: "0.10.0" });
+    const m = startDemoMachines(control, "lab-mac", () => "acct", T0);
+    expect(calls).toEqual([
+      `machine ${demoMachineId("lab-mac")}`,
+      `machine ${demoMachineId("mini-mac")}`,
+      `machine ${demoMachineId("desk-pc")}`,
+    ]);
+    const [newer, mini, desk] = hellos;
+    expect(newer).toMatchObject({ mode: "inherit", version: "0.11.0" });
+    // The pool (DESIGN §3, UX-SPEC §13): on with Misha in use, Fiction with room and no
+    // numbers, Spacesheep used up with when it is back and its idle numbers.
+    expect(newer!.pool).toMatchObject({
+      on: true,
+      harness: "claude-code",
+      accounts: [
+        { id: "acct", label: "Misha", status: "ready", current: true },
+        { id: DEMO_POOL.fiction.id, label: "Fiction", status: "ready", current: false },
+        {
+          id: DEMO_POOL.spacesheep.id,
+          status: "limited",
+          until: new Date(T0 + DEMO_POOL_UNTIL_MS).toISOString(),
+          limitedBy: "five_hour",
+        },
+      ],
+    });
+    expect(newer!.pool?.accounts[1]?.windows).toBeUndefined();
+    expect(newer!.pool?.accounts[2]?.windows?.[0]).toMatchObject({ id: "five_hour", usedPercent: 99.2 });
+    expect(newer!.accounts.map((a) => a.id)).toEqual(
+      expect.arrayContaining([DEMO_POOL.fiction.id, DEMO_POOL.spacesheep.id]),
+    );
+    // An account in error, one in use, one turned off; and a pool that is off.
+    expect(mini!.pool?.accounts.map((a) => [a.label, a.status, a.current])).toEqual([
+      ["Misha", "error", false],
+      ["Work", "ready", true],
+      ["Old", "disabled", false],
+    ]);
+    expect(mini!.pool?.accounts[2]?.enabled).toBe(false);
+    expect(desk!.pool).toMatchObject({ on: false, accounts: [{ label: "Misha" }, { label: "Fiction" }] });
+    expect(desk!.pool?.accounts.some((a) => a.current)).toBe(false);
+    for (const h of hellos)
+      expect(parseHello({ ...h, key_types: h.keyTypes, prompt_files: h.promptFiles })?.pool).toBeTruthy();
     expect(newer!.start?.["claude-code"]).toMatchObject({ permissions: ["read", "safe"], permission: "inherit" });
     expect(newer!.harnesses).toContain("goose");
+    expect(newer).toMatchObject({ ask: true, handoff: true });
     expect(newer!.accounts).toContainEqual({ harness: "claude-code", id: DEMO_API_ACCOUNT, name: "api.z.ai" });
     // The ACP agent's run: delivered over `api`, its reply in the ack.
     expect(runs[0]).toMatchObject({ session: DEMO_ACP_SESSION, mode: "api" });

@@ -194,6 +194,8 @@ export function eventSummary(e: ProtocolEvent): string {
       return "forgotten";
     case "session.heartbeat":
       return "heartbeat";
+    case "limits.observed":
+      return "usage limits";
     case "turn.started":
       return d.prompt_chars !== undefined ? `prompt ${str(d.prompt_chars)} chars` : "prompt";
     case "turn.ended": {
@@ -238,6 +240,16 @@ export function eventSummary(e: ProtocolEvent): string {
       return `compacted · ${str(d.trigger) || "auto"}`;
     case "native":
       return "native hook payload";
+    // An agent this session asked (sessionpipe ask, a handoff): the agent and how it went.
+    case "delegation.started":
+      return `asked ${str(d.harness) || "another agent"}${d.via === "handoff" ? " · handoff" : ""}`;
+    case "delegation.ended": {
+      const bits = [`asked ${str(d.harness) || "another agent"}`, d.ok === false ? "failed" : "answered"];
+      if (num(d.ms) !== undefined) bits.push(durShort(num(d.ms)));
+      if (d.error) bits.push(oneLine(str(d.error), 80));
+      if (d.relayed === "delivered") bits.push("relayed");
+      return bits.join(" · ");
+    }
     default:
       return Object.keys(d).slice(0, 3).join(", ");
   }
@@ -255,10 +267,12 @@ function span(from: string, to: string): string {
 }
 
 /** An attention's message without the tool name it sometimes starts with ("Bash rm -rf
- *  …"), for places that already show the tool beside it. */
+ *  …"), for places that already show the tool beside it; nothing when the message is only
+ *  that name (a plan review's is "ExitPlanMode", beside "Plan"). */
 export function attentionMessage(a: { message?: string; tool?: string }): string | undefined {
   const m = a.message;
   if (!m || !a.tool) return m;
+  if (m.trim() === a.tool) return undefined;
   const t = a.tool.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const rest = m.replace(new RegExp(`^${t}(:\\s*|\\s+)`), "");
   return rest || m;
@@ -289,7 +303,16 @@ const SNAKE_TOOLS: Record<string, string> = {
   web_search: "Web search",
   save_memory: "Memory",
   update_plan: "Plan",
+  // Claude Code's plan review, asked as a permission: "… needs you · Plan".
+  ExitPlanMode: "Plan",
+  exit_plan_mode: "Plan",
 };
+
+/** A plan review: Claude Code asks to leave plan mode as an ordinary permission, so
+ *  answering it is approving the plan or asking for more planning. Codex's update_plan
+ *  is no permission and stays a row in the timeline. */
+export const isPlanReview = (a: { kind?: string; tool?: string }): boolean =>
+  a.kind === "permission" && (a.tool === "ExitPlanMode" || a.tool === "exit_plan_mode");
 
 /** A tool's name as a person reads it. An MCP tool arrives as `mcp__<server>__<tool>`
  *  and reads "github · search_issues"; a claude.ai connector's server drops its

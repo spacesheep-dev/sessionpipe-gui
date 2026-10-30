@@ -4,6 +4,7 @@
 // something), follow (in "⋯"), back, and Forget (in "⋯").
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
+import { SETTINGS_KEY } from "../../playwright.config.js";
 import { EVENTS, INFO, openBoard, openPage, sessionUrl, tier1Batch, ulid } from "./helpers.js";
 
 /** Opens the first working card from the board and returns its href. */
@@ -176,6 +177,61 @@ test.describe("session page", () => {
     await expect(page.locator(".sess-lens")).toHaveCount(0);
   });
 
+  test("a launched session names and links its launcher, which links it back; neither is a subagent", async ({
+    page,
+    request,
+  }) => {
+    const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+    const post = async (events: Record<string, unknown>[]) => {
+      const res = await request.post(EVENTS, {
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${sinkToken}`,
+          "sessionpipe-protocol": "1",
+        },
+        data: { events },
+      });
+      expect(res.status()).toBe(202);
+    };
+    const launcher = tier1Batch({ title: `E2E launcher ${randomUUID().slice(0, 8)}` });
+    const launchedBy = `${launcher.harness}:${launcher.sessionId}`;
+    const run = (n: number) => tier1Batch({ title: `E2E launched ${n} ${randomUUID().slice(0, 8)}` });
+    const by = (b: ReturnType<typeof tier1Batch>) =>
+      b.events.map((e) => ({ ...e, session: { ...(e.session as object), launched_by: launchedBy } }));
+    await post(launcher.events);
+    // The launcher's page is open before its first run reports: the link appears without a reload.
+    await openPage(page, sessionUrl(launcher.harness, launcher.sessionId));
+    await expect(page.locator(".sess-where .sess-copy")).toHaveCount(0);
+    const first = run(1);
+    await post(by(first));
+    const link = page.locator(".sess-where .sess-copy a", { hasText: first.title });
+    await expect(link).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/subagent/)).toHaveCount(0);
+    await link.click();
+    await expect(page.locator("h1.sess-title")).toHaveText(first.title);
+    await expect(page.locator(".sess-where .sess-copy a", { hasText: launcher.title })).toBeVisible();
+    // Two more runs fold the launcher's entry into one that opens a menu listing them all.
+    const second = run(2);
+    const third = run(3);
+    await post(by(second));
+    await post(by(third));
+    await page.locator(".sess-where .sess-copy a", { hasText: launcher.title }).click();
+    const fold = page.locator(".sess-where .sess-launched");
+    await expect(fold).toHaveText("3 sessions", { timeout: 15_000 });
+    await fold.click();
+    const items = page.locator("[role=menu] .menu-item");
+    await expect(items).toHaveCount(3);
+    for (const t of [first.title, second.title, third.title]) await expect(items.filter({ hasText: t })).toHaveCount(1);
+    await items.filter({ hasText: third.title }).click();
+    await expect(page.locator("h1.sess-title")).toHaveText(third.title);
+    // Simple mode, the default for a new device, shows the links too.
+    await page.evaluate((k) => localStorage.setItem(k, JSON.stringify({ mode: "simple" })), SETTINGS_KEY);
+    await page.reload();
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    await page.locator(".sess-where .sess-copy a", { hasText: launcher.title }).click();
+    await expect(page.locator(".sess-where .sess-launched")).toHaveText("3 sessions");
+  });
+
   test("follow toggles from the menu and back returns to the board", async ({ page, request }) => {
     // A turn of the suite's own that stays open: Follow is for live sessions only, and the
     // demo's working ones can end between the menu's three openings.
@@ -247,8 +303,14 @@ test.describe("session page", () => {
     await expect(first).toBeVisible();
     const href = (await first.getAttribute("href"))!;
     const [, harness, id] = /^\/s\/([^/]+)\/(.+)$/.exec(href)!.map(decodeURIComponent) as [string, string, string];
-    // The done list re-sorts as sessions end, so click the card by its href, not its position.
-    await page.locator(`a.card-link[href="${href}"]`).click();
+    // The done list re-sorts as sessions end, so take the card by its href, not its position,
+    // and open it from the keyboard: a mouse click's down and up can land on two cards when
+    // the list moves between them (the click then reaches the list, not the link), while
+    // Enter on the focused card clicks that card, and a focused row holds the board still
+    // (lib/motion.ts useListHold).
+    const card = page.locator(`a.card-link[href="${href}"]`);
+    await card.focus();
+    await page.keyboard.press("Enter");
     await expect(page).toHaveURL(href);
 
     // Forget is the last item of "⋯", on its own, and it asks first.

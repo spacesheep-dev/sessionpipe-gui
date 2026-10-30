@@ -8,7 +8,8 @@
 // What it reads, on the element or its nearest ancestor that has one:
 //   data-tip="Settings"             the name (a "Name   G S" with three spaces is split);
 //   data-tip-keys="⌘,"              the key, drawn as a cap;
-//   data-tip-side="top|right|bottom" where it sits (below by default, flipped to fit).
+//   data-tip-side="top|right|bottom" where it sits (below by default, flipped to fit);
+//   data-tip-wrap                   a few short lines (a sentence a line) in place of one.
 // Every icon-only button (`.icon-btn` / `.theme-btn` with an aria-label) gets one for
 // free: its aria-label is the name, and its native `title` is held back while the tip is
 // up so the browser's own never shows beside it. Mounted once, by the Shell.
@@ -26,6 +27,7 @@ interface Tip {
   keys: string;
   rect: DOMRect;
   side: "top" | "right" | "bottom";
+  wrap: boolean;
 }
 
 function read(el: HTMLElement): Omit<Tip, "rect"> | null {
@@ -35,7 +37,12 @@ function read(el: HTMLElement): Omit<Tip, "rect"> | null {
   if (!el.hasAttribute("data-tip") && (el.textContent ?? "").trim() && !el.querySelector(".sr-only")) return null;
   const [name, inline] = raw.split(/\s{3,}/);
   const side = (el.getAttribute("data-tip-side") as Tip["side"] | null) ?? "bottom";
-  return { name: name ?? raw, keys: el.getAttribute("data-tip-keys") ?? inline ?? "", side };
+  return {
+    name: name ?? raw,
+    keys: el.getAttribute("data-tip-keys") ?? inline ?? "",
+    side,
+    wrap: el.hasAttribute("data-tip-wrap"),
+  };
 }
 
 export function TipHost() {
@@ -174,7 +181,7 @@ function TipView({ tip }: { tip: Tip }) {
   return (
     <div
       ref={ref}
-      className="tip"
+      className={tip.wrap ? "tip tip--wrap" : "tip"}
       aria-hidden="true"
       style={pos ? { left: pos.left, top: pos.top } : { left: 0, top: 0, visibility: "hidden" }}
     >

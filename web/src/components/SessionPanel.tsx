@@ -26,7 +26,7 @@ import {
   useState,
 } from "react";
 import { useStartTitles } from "../control/Starting";
-import { useAppState, useStore } from "../data/hooks";
+import { useAppState, useSeen, useStore } from "../data/hooks";
 import { agentLabel, parseTab } from "../lib/agents";
 import { focusTab, tablistKey } from "../lib/focus";
 import { repoShort, sessionTitle } from "../lib/format";
@@ -187,6 +187,9 @@ export function SessionPanel({ phone }: { phone: boolean }) {
   const here = usePanelHere();
   const wasOpen = useRef(tabs.length > 0 && here);
   const open = tabs.length > 0 && here;
+  // The active tab is on screen beside the page: it is seen as the page would be. On a
+  // page the panel steps aside for, its tabs stay in the URL but nothing is on screen.
+  useSeen(open && activeKey ? parseTab(activeKey).session : null);
   const started = useStartTitles();
 
   const panelRect = useCallback(

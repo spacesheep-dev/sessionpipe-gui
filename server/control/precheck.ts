@@ -11,6 +11,7 @@ import {
   type HarnessStartOptions,
   INHERIT_LEVELS,
   type MachineMode,
+  type MachinePool,
   START_FILE_MAX_BYTES,
   START_FILES_MAX,
   START_FILES_TOTAL_BYTES,
@@ -25,6 +26,8 @@ export interface PrecheckFacts {
   promptFiles?: boolean;
   start?: Record<string, HarnessStartOptions>;
   mode?: MachineMode;
+  /** Hello `pool` (DESIGN §2.3): the machine pools accounts, and these are they. */
+  pool?: MachinePool;
 }
 
 export interface Refusal {
@@ -80,7 +83,29 @@ const FIELDS: Record<string, readonly string[]> = {
   cancel: [],
   start: ["text", "cwd", "files", "permission", "model"],
   "key.add": ["key", "name"],
+  pool: ["pool_action", "pool_account", "pool_order", "pool_code"],
 };
+
+/** A pool command against the machine's hello (DESIGN §2.3): a machine whose hello has no
+ *  `pool` predates it or has none, and would answer `unsupported` after the wait
+ *  (`pool_unsupported`); an `order` must name every account the hello lists, each once
+ *  and nothing else (`pool_order`); an account to enable, disable, remove or refresh must
+ *  be one the hello lists (`pool_account`). A `login.complete` names a pending login, not
+ *  an account, so its id is not held to the list. The machine checks it all again. */
+export function poolProblem(cmd: Record<string, unknown>, pool: MachinePool | undefined): Refusal | null {
+  if (!pool) return { code: "pool_unsupported", why: "this machine did not say it pools accounts" };
+  const ids = pool.accounts.map((a) => a.id);
+  const action = cmd.pool_action;
+  if (action === "order") {
+    const order = Array.isArray(cmd.pool_order) ? (cmd.pool_order as string[]) : [];
+    const every = order.length === ids.length && ids.every((id) => order.includes(id));
+    if (!every) return { code: "pool_order", why: "an order names every account in the pool, each once" };
+    return null;
+  }
+  if (typeof cmd.pool_account === "string" && action !== "login.complete" && !ids.includes(cmd.pool_account))
+    return { code: "pool_account", why: "this machine's pool has no such account" };
+  return null;
+}
 
 /** A file the receiver no longer holds, which the machine could not fetch. */
 function heldProblem(list: { sha256: string; name: string }[], files: FileStore): Refusal | null {
@@ -96,6 +121,7 @@ export function precheck(cmd: Record<string, unknown>, facts: PrecheckFacts, fil
   const own = FIELDS[String(cmd.kind)];
   const stray = own && Object.keys(cmd).find((k) => !COMMON_FIELDS.has(k) && !own.includes(k));
   if (stray) return { code: "bad_fields", why: `a ${cmd.kind} carries no ${stray}` };
+  if (cmd.kind === "pool") return poolProblem(cmd, facts.pool);
   if (cmd.kind !== "start") {
     if (has("permission") || has("model"))
       return { code: "bad_fields", why: "only a start carries a model or a permission" };

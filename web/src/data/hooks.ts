@@ -4,15 +4,28 @@ import type {
   Attention,
   LabelColor,
   Labels,
+  LimitsEntry,
   MachineSummary,
   SessionKey,
   SessionState,
   SessionSummary,
 } from "@shared/api";
 import { LABEL_DEFAULT_NAMES, SESSION_STATES } from "@shared/api";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 // The one reading of `answerable` the strip and the inbox share (an older server leaves the field unset).
 import { answerable } from "../components/ControlStrip";
+import { sessionTitle } from "../lib/format";
+import { canMark, isUnread, markSeen, SEEN_AFTER_MS, setUnread } from "../lib/marks";
+import { useShortcut } from "../lib/shortcuts";
 import type { AppState, Store } from "./store";
 
 export const StoreContext = createContext<Store | null>(null);
@@ -87,10 +100,36 @@ export function useSession(key: SessionKey): SessionSummary | undefined {
   return useSyncExternalStore(store.subscribe, read, read);
 }
 
+/** The sessions that name `key` as their launcher, newest first. The array is kept until
+ *  the set, a title or a state changes, so a launcher's page follows runs that start later. */
+export function useLaunched(key: SessionKey): SessionSummary[] {
+  const store = useStore();
+  const last = useRef<{ sig: string; list: SessionSummary[] }>({ sig: "", list: [] });
+  const read = useCallback(() => {
+    const list: SessionSummary[] = [];
+    for (const s of store.get().sessions.values()) if (s.launchedBy === key && s.key !== key) list.push(s);
+    list.sort((a, b) => b.startedAt.localeCompare(a.startedAt) || a.key.localeCompare(b.key));
+    // What the header renders: the title as sessionTitle derives it, and the state.
+    // ...and the start, which the menu's "ago" and the order read.
+    const sig = list.map((s) => `${s.key}\u0000${sessionTitle(s)}\u0000${s.state}\u0000${s.startedAt}`).join("\u0001");
+    if (sig !== last.current.sig) last.current = { sig, list };
+    return last.current.list;
+  }, [store, key]);
+  return useSyncExternalStore(store.subscribe, read, read);
+}
+
 /** The person's colour labels (the whole document: names and every session's). */
 export function useLabels(): Labels {
   const store = useStore();
   const read = useCallback(() => store.get().labels, [store]);
+  return useSyncExternalStore(store.subscribe, read, read);
+}
+
+/** Each account's newest usage limits (the whole list; it changes only when a report
+ *  does). The page words them (web/src/lib/limits.ts). */
+export function useLimits(): readonly LimitsEntry[] {
+  const store = useStore();
+  const read = useCallback(() => store.get().limits, [store]);
   return useSyncExternalStore(store.subscribe, read, read);
 }
 
@@ -106,6 +145,74 @@ export function useLabel(key: SessionKey): { color: LabelColor; name: string } |
   );
   const name = useSyncExternalStore(store.subscribe, readName, readName);
   return useMemo(() => (color && name ? { color, name } : undefined), [color, name]);
+}
+
+// ----- read marks (lib/marks.ts) -----
+
+/** A row's unread, re-rendering only when it flips. */
+export function useUnread(s: SessionSummary): boolean {
+  const store = useStore();
+  const read = useCallback(() => isUnread(s, store.get().marks), [store, s]);
+  return useSyncExternalStore(store.subscribe, read, read);
+}
+
+/** On screen: the page is visible and its window has focus. */
+const looking = () => document.visibilityState === "visible" && document.hasFocus();
+
+/** Marks a session read once it has been on screen for SEEN_AFTER_MS, and each newer
+ *  `newsAt` after another SEEN_AFTER_MS while it stays there. A manual unread is cleared
+ *  only on arriving (the session opened, the window come back to): marked unread while on
+ *  screen, it stays unread until the person leaves and comes back. `key` null: nothing. */
+export function useSeen(key: SessionKey | null): void {
+  const store = useStore();
+  const readNews = useCallback(() => (key ? store.get().sessions.get(key)?.newsAt : undefined), [store, key]);
+  const newsAt = useSyncExternalStore(store.subscribe, readNews, readNews);
+  // Before the first snapshot there are no marks to go by (no `since`): a second spent then
+  // would spend the arrival too, so the second starts once they come.
+  const readReady = useCallback(() => !!store.get().marks.since, [store]);
+  const ready = useSyncExternalStore(store.subscribe, readReady, readReady);
+  const [here, setHere] = useState(looking);
+  useEffect(() => {
+    const update = () => setHere(looking());
+    document.addEventListener("visibilitychange", update);
+    window.addEventListener("focus", update);
+    window.addEventListener("blur", update);
+    update();
+    return () => {
+      document.removeEventListener("visibilitychange", update);
+      window.removeEventListener("focus", update);
+      window.removeEventListener("blur", update);
+    };
+  }, []);
+  // Arriving is a new key, or the window coming back: the first mark after it may clear a
+  // manual unread, the ones while it stays only move the read mark.
+  const arrived = useRef(true);
+  const shown = useRef(key);
+  if (shown.current !== key) {
+    shown.current = key;
+    arrived.current = true;
+  }
+  if (!here) arrived.current = true;
+  useEffect(() => {
+    if (!key || !here || !ready) return;
+    const t = window.setTimeout(() => {
+      markSeen(store, key, newsAt, arrived.current);
+      arrived.current = false;
+    }, SEEN_AFTER_MS);
+    return () => window.clearTimeout(t);
+  }, [store, key, here, ready, newsAt]);
+}
+
+/** `u` marks what a list's cursor is on read when it is unread, else unread; on a row that
+ *  can draw neither it does nothing. */
+export function useUnreadKeys(sessions: () => readonly SessionSummary[]): void {
+  const store = useStore();
+  useShortcut("list.unread", () => {
+    const list = sessions().filter(canMark);
+    if (!list.length) return false;
+    const marks = store.get().marks;
+    setUnread(store, list, !list.every((s) => isUnread(s, marks)));
+  });
 }
 
 /** The machines map alone (it changes at most about once a second). */

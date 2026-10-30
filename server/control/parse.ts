@@ -10,18 +10,27 @@ import {
   INHERIT_LEVELS,
   type KeyType,
   type MachineMode,
+  type MachinePool,
+  type MachinePoolAccount,
+  POOL_ACCOUNT_STATUSES,
+  POOL_ACCOUNTS_MAX,
+  POOL_ID_RE,
+  type PoolAccountStatus,
   type RunLevel,
   START_PERMISSIONS,
   type StartPermission,
   validModel,
 } from "../../shared/api.js";
+// The same reader the limits store uses for a limits.observed, so a hello's windows and an
+// event's are one shape (server-core owns it; control only reads with it).
+import { readWindows } from "../ui/limits.js";
 
 export const MACHINE_RE = /^m_[A-Za-z0-9_-]{16,40}$/;
 export const CODE_RE = /^[A-Za-z0-9_-]{6,32}$/;
 export const POLL_KEY_RE = /^[A-Za-z0-9_-]{22,128}$/;
 export const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 export const SESSION_REF = /^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/;
-const HARNESS_RE = /^[a-z][a-z0-9-]{0,39}$/;
+export const HARNESS_RE = /^[a-z][a-z0-9-]{0,39}$/;
 const MODES = new Set(["sdk", "waiter", "turn", "api", "resume", "fork"]);
 const OUTCOMES = new Set<string>(["progress", "taken", "delivered", "expired", "unsupported", "failed", "refused"]);
 const ACCOUNT_EMAIL = /^[^@\s]{1,64}@[^@\s]{1,189}$/;
@@ -51,6 +60,13 @@ export interface Hello {
   start: Record<string, HarnessStartOptions> | null;
   /** `key_types` (CONTROL.md §2): the kinds of key it takes; null when not sent (passkeys only). */
   keyTypes: KeyType[] | null;
+  /** `pool` (sessionpipe 0.11): the accounts its daemon pools; null when not sent or malformed. */
+  pool: MachinePool | null;
+  /** `ask`: whether `sessionpipe ask` is on there (CONTROL.md §13); absent when not sent (a
+   *  0.10 daemon says nothing about it). */
+  ask?: boolean;
+  /** `handoff: true`: it takes `reply_to` on a prompt or a start; absent when not sent. */
+  handoff?: boolean;
 }
 
 /** `key_types`: known kinds only, each once; null when absent or empty. */
@@ -87,7 +103,55 @@ export function parseHello(body: unknown): Hello | null {
     promptFiles: b.prompt_files === true,
     start: parseStart(b.start, harnesses, mode),
     keyTypes: parseKeyTypes(b.key_types),
+    pool: parsePool(b.pool),
+    // Agents asking agents (CONTROL.md §13): said as booleans, or not at all.
+    ...(typeof b.ask === "boolean" ? { ask: b.ask } : {}),
+    ...(b.handoff === true ? { handoff: true } : {}),
   };
+}
+
+const RFC3339 = /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})$/;
+const isTime = (v: unknown): v is string => typeof v === "string" && RFC3339.test(v) && Number.isFinite(Date.parse(v));
+/** A pooled account's id, and a pending login id (CONTROL.md, the pool): the same shape in
+ *  the hello's `pool.accounts[].id` and a command's `pool_account` and `pool_order`. */
+export const poolIdOk = (v: unknown): v is string => typeof v === "string" && POOL_ID_RE.test(v);
+
+/** `pool` (DESIGN §2.3): the machine's pool, read strictly. The object itself must have
+ *  `on`, a harness and an `accounts` list, or there is no pool (null; the rest of the hello
+ *  stands). Within it, an account that breaks its shape (no id, an unknown status, `enabled`
+ *  not a boolean) is dropped, never the pool; a malformed `email`, `label`, `until`,
+ *  `limited_by` or window is dropped from its account. Ids are kept once each, at most POOL_ACCOUNTS_MAX, in the
+ *  machine's order. */
+export function parsePool(v: unknown): MachinePool | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const p = v as Record<string, unknown>;
+  if (typeof p.on !== "boolean" || typeof p.harness !== "string" || !HARNESS_RE.test(p.harness)) return null;
+  if (!Array.isArray(p.accounts)) return null;
+  const accounts: MachinePoolAccount[] = [];
+  for (const raw of p.accounts) {
+    if (accounts.length >= POOL_ACCOUNTS_MAX) break;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const a = raw as Record<string, unknown>;
+    if (!poolIdOk(a.id) || typeof a.enabled !== "boolean") continue;
+    if (typeof a.status !== "string" || !(POOL_ACCOUNT_STATUSES as readonly string[]).includes(a.status)) continue;
+    if (accounts.some((x) => x.id === a.id)) continue;
+    const acc: MachinePoolAccount = {
+      id: a.id,
+      enabled: a.enabled,
+      status: a.status as PoolAccountStatus,
+      current: a.current === true,
+    };
+    const email = typeof a.email === "string" ? a.email.trim() : "";
+    if (ACCOUNT_EMAIL.test(email)) acc.email = email;
+    const label = typeof a.label === "string" ? stripControl(a.label).trim().slice(0, 80) : "";
+    if (label) acc.label = label;
+    if (isTime(a.until)) acc.until = new Date(a.until).toISOString();
+    const windows = readWindows(a.windows);
+    if (windows.length) acc.windows = windows;
+    if (typeof a.limited_by === "string" && /^[a-z0-9_]{1,64}$/.test(a.limited_by)) acc.limitedBy = a.limited_by;
+    accounts.push(acc);
+  }
+  return { on: p.on, harness: p.harness, accounts };
 }
 
 const isLevel = (v: unknown): v is StartPermission =>

@@ -3,9 +3,10 @@
 // The board as a person sees it: groups by state, a working card's current tool, an
 // attention banner when the demo asks for a permission, the collapsed done group,
 // live counts without a reload (with Advanced → Show counts), a list that holds still
-// under the pointer, the search that finds nothing, and the keyboard.
+// under the pointer, the search that finds nothing, the keyboard (e with Hidden open
+// too), and the Hidden header's own menu.
 import { expect, test } from "@playwright/test";
-import { openBoard } from "./helpers.js";
+import { holdBoard, openBoard } from "./helpers.js";
 
 test.describe("board", () => {
   test("groups demo sessions by state and collapses done with a count", async ({ page }) => {
@@ -36,6 +37,34 @@ test.describe("board", () => {
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     const n = Number(await toggle.locator(".group-count").innerText());
     await expect(done.locator("article.card--done")).toHaveCount(n);
+  });
+
+  test("Done's head says how many are unread only while it is folded", async ({ page }) => {
+    await openBoard(page);
+    const done = page.locator("section.group--done");
+    const toggle = done.locator("button.group-toggle");
+    await toggle.click();
+    // A session that just finished lands in Done unread already, and its menu offers
+    // "Mark as read"; so take a row that is read (another worker on the same server may
+    // mark it first, so each try takes one afresh), and keep to it by its link as rows
+    // re-sort. A scroll closes a menu, as a native one does, so one that closed is opened
+    // again.
+    let href: string | null = null;
+    const link = () => done.locator(`a.card-link[href="${href}"]`);
+    await expect(async () => {
+      await page.keyboard.press("Escape");
+      href = await done
+        .locator("article.card--done:not(:has(.dot--unread)) a.card-link")
+        .first()
+        .getAttribute("href", { timeout: 2000 });
+      await link().click({ button: "right" });
+      await page.getByRole("menuitem", { name: "Mark as unread" }).click({ timeout: 2000 });
+    }).toPass({ timeout: 20_000 });
+    // Open, the row's filled dot says it; the head does not say it again.
+    await expect(link().locator(".dot--unread")).toBeVisible();
+    await expect(toggle.locator(".group-note")).toHaveCount(0);
+    await toggle.click();
+    await expect(toggle.locator(".group-note")).toHaveText(/^[1-9]\d* unread$/);
   });
 
   test("a working card shows the tool it is running", async ({ page }) => {
@@ -201,6 +230,52 @@ test.describe("board", () => {
     await expect(page.locator("article.card[aria-current='true'] a.card-link")).toHaveAttribute("href", opened!);
   });
 
+  test("with Hidden open, e leaves the cursor in its place, so e again hides the next row", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.board.hiddenOpen", "1"));
+    await openBoard(page);
+    await page.locator("section.group--working article.card a.card-link").first().focus();
+    // The cursor stays on the row that took the hidden one's place, not on the row in Hidden
+    // (the live demo may still bring a row back above it, so this reads rows, not indexes).
+    const cursor = page.locator("article.card[aria-current='true']");
+    const link = cursor.locator("a.card-link");
+    const section = cursor.locator("xpath=ancestor::section");
+    const first = await link.getAttribute("href");
+    await page.keyboard.press("e");
+    await expect(link).not.toHaveAttribute("href", first!);
+    await expect(section).not.toHaveClass(/group--hidden/);
+    const second = await link.getAttribute("href");
+    await page.keyboard.press("e");
+    await expect(link).not.toHaveAttribute("href", second!);
+    await expect(link).not.toHaveAttribute("href", first!);
+    await expect(section).not.toHaveClass(/group--hidden/);
+  });
+
+  test("e and ⇧E leave the board alone while you work in the panel beside it", async ({ page }) => {
+    await openBoard(page);
+    await holdBoard(page);
+    const card = page.locator("section.group--working article.card").first();
+    const href = (await card.locator("a.card-link").getAttribute("href"))!;
+    await page.locator(`article.card a.card-link[href="${href}"]`).click({ modifiers: ["Shift"] });
+    const panel = page.locator("aside.panel");
+    await expect(panel).toHaveClass(/panel--open/);
+    // Working in the panel: focus on one of its controls, with the board's cursor still set.
+    await panel.getByRole("button", { name: "Close panel" }).focus();
+    expect(await page.evaluate(() => !!document.activeElement?.closest("aside.panel"))).toBe(true);
+    await expect(page.locator("article.card[aria-current='true']")).toHaveCount(1);
+    const hiddenStore = () => page.evaluate(() => JSON.parse(localStorage.getItem("sessionpipe-gui.hidden") ?? "{}"));
+    await page.keyboard.press("e");
+    await page.keyboard.press("Shift+E");
+    expect(await hiddenStore()).toEqual({});
+    await expect(page.locator('.toast[data-toast="undo"]')).toHaveCount(0);
+    await expect(page.locator("section.group--hidden")).toHaveCount(0);
+    // Back on the board (focus off the panel), the same key hides the row under the cursor.
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    expect(await page.evaluate(() => !!document.activeElement?.closest("aside.panel"))).toBe(false);
+    await page.keyboard.press("e");
+    await expect.poll(async () => Object.keys(await hiddenStore()).length).toBe(1);
+    await expect(page.locator('.toast[data-toast="undo"]')).toContainText("Hidden");
+  });
+
   test("Esc clears the search first, then the cursor", async ({ page }) => {
     await openBoard(page);
     const search = page.getByRole("searchbox", { name: "Search sessions" });
@@ -217,5 +292,19 @@ test.describe("board", () => {
     await page.keyboard.press("Escape");
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator("section.group").first()).toBeVisible();
+  });
+
+  test("the Hidden header has its own menu, as Done's does, not the board's", async ({ page }) => {
+    await openBoard(page);
+    await page.locator("section.group--working article.card a.card-link").first().focus();
+    await page.keyboard.press("Shift+E");
+    const toggle = page.locator("section.group--hidden button.group-toggle");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await toggle.click({ button: "right" });
+    const item = page.getByRole("menuitemcheckbox", { name: "Show hidden sessions" });
+    await expect(item).toHaveAttribute("aria-checked", "false");
+    await expect(page.getByRole("menuitemcheckbox", { name: "Show done sessions" })).toHaveCount(0);
+    await item.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
 });

@@ -7,7 +7,9 @@
 // timeline grouped by turn (newest page first, older pages on demand, the stream
 // appending) and the docked composer. The page scrolls the window; the panel scrolls its
 // own element (`scrollRef`). The view sticks to the bottom while the person is within
-// 48 px of it; scrolled up, nothing moves and an "n new" pill offers the way back. In
+// 48 px of it; scrolled up, nothing moves and an "n new" pill offers the way back. A
+// session with several answers since the person last looked opens on a New line above
+// the first of them instead (lib/newLine.ts). In
 // Simple mode (lib/settings.ts) the same view is a chat: the person's prompts as bubbles
 // on the right, the assistant's replies as plain prose under its name, the tools of a
 // turn folded into one line. A message sent from here is drawn where its turn is or will
@@ -19,7 +21,9 @@
 import type {
   AgentRun,
   ControlActivity,
+  Delegation,
   MachineControl,
+  SessionKey,
   SessionState,
   SessionSummary,
   StoredEvent,
@@ -28,6 +32,8 @@ import type {
 import { sessionKey, splitKey } from "@shared/api";
 import {
   createContext,
+  Fragment,
+  type MutableRefObject,
   type ReactNode,
   type RefObject,
   useCallback,
@@ -37,6 +43,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { forkOf } from "../control/Activity";
 import { PromptBody, promptParts } from "../control/Attachments";
@@ -54,8 +61,10 @@ import {
   startTitle,
   useStartOf,
 } from "../control/Starting";
-import { isFinal } from "../control/words";
-import { useMachines, useMachinesMap, useSession, useStore } from "../data/hooks";
+import { signHint } from "../control/signer";
+import { useSessionSend } from "../control/useSend";
+import { harnessCommand, isFinal, REFUSAL_WORDS, refusalWords, sentLine } from "../control/words";
+import { useLaunched, useLimits, useMachines, useMachinesMap, useSession, useStore } from "../data/hooks";
 import { LIST_PREVIEW, TAIL, takeWarm } from "../data/prefetch";
 import { agentLabel, agentsFact, agentType, openAgent, taskNotification } from "../lib/agents";
 import "../lib/acp";
@@ -73,19 +82,24 @@ import {
 } from "../lib/format";
 import { useKeyboardInset } from "../lib/keyboardInset";
 import { labelMenu } from "../lib/labels";
-import { absoluteUrl, agentItems, copyItem, sessionItems } from "../lib/menus";
+import { absoluteUrl, agentItems, askItem, copyItem, sessionItems } from "../lib/menus";
 import { reducedMotion, useFlip } from "../lib/motion";
-import { AGENT_PARAM, back, Link, navigate, sessionPath, useSearchParam } from "../lib/router";
+import { leftOff, type NewLineAt, newLinePlace } from "../lib/newLine";
+import { clockTime, eventWindows, leftBecause, sentenceName, servedBy, swaps, swapWords } from "../lib/pool";
+import { AGENT_PARAM, back, hrefFor, Link, navigate, sessionPath, useSearchParam } from "../lib/router";
 import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
+import { openSplit } from "../lib/split";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
-import { clock, dur, ms, useNow } from "../lib/time";
+import { ago, clock, dur, ms, useNow } from "../lib/time";
 import {
   type AgentItem,
+  type DelegationItem,
   type EventItem,
   eventWords,
   groupTurns,
+  handoffAnswer,
   sentTurns,
   type ToolItem,
   type Turn,
@@ -93,12 +107,15 @@ import {
 } from "../lib/turns";
 import { HistoryOrMissing } from "../search/HistoryEntry";
 import { AgentGlyph, AgentNow, AgentText } from "./AgentRow";
-import { CopyIconButton, HarnessGlyph, Redacted, Segmented, Spinner, StateDot } from "./bits";
+import { CopyIconButton, HarnessGlyph, Redacted, Segmented, Since, Spinner, StateDot } from "./bits";
 import { confirmAction, type MenuItem, type MenuList, MoreButton, openMenu, tidy, useContextMenu } from "./ContextMenu";
 import { LabelDot, useLabelKeys } from "./LabelDot";
 import { CodeFrame, Markdown } from "./Markdown";
 import { BackButton, PageBar } from "./PageBar";
+import { askingFact } from "./SessionCard";
 import { answerItems, SessionLoading, type SessionViewProps } from "./SessionView";
+import { openUsage } from "./UsageGlance";
+import "../styles/lineage.css";
 
 /** The size of each older page; the newest page (TAIL) is data/prefetch's, which warms
  *  it on hover. Both slim: the full event is fetched only when a row is expanded. */
@@ -108,6 +125,9 @@ const OLDER = 200;
 const LIVE_CAP = TAIL + 2 * OLDER;
 /** The view sticks to the bottom only while the person is this close to it. */
 const PIN_PX = 48;
+/** Arrivals the "new below" pill doesn't count: a reply growing, a heartbeat, a status
+ *  line's usage report (none is a row of its own). */
+const QUIET_TYPES = new Set(["turn.progress", "session.heartbeat", "limits.observed"]);
 /** A delivered message with no turn of its own yet keeps its row this long. */
 const DELIVERED_HOLD_MS = 120_000;
 
@@ -447,14 +467,29 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     return () => window.removeEventListener("hashchange", onHash);
   }, [jumpTo]);
 
+  /** Open on the New line when what came since it is taller than two thirds of the view:
+   *  the line a third of the way down, so the first new answer reads from its start. */
+  const toNewLine = useCallback((): boolean => {
+    const line = rootRef.current?.querySelector<HTMLElement>(".new-line");
+    if (!line) return false;
+    const top = line.getBoundingClientRect().top - (sc()?.getBoundingClientRect().top ?? 0) + scrollY();
+    if (scrollHeight() - top <= (viewHeight() * 2) / 3) return false;
+    followRef.current = false;
+    pinned.current = false;
+    setFollow(false);
+    scrollTo(top - viewHeight() / 3);
+    return true;
+  }, [sc, scrollY, scrollHeight, viewHeight, scrollTo]);
+
   // Bottom-anchored first paint (the newest turn is what a session opens on, unless the
-  // URL names a row), before the browser paints, and a still viewport when older events
-  // land above it, whether or not the browser's own scroll anchoring already moved it.
+  // URL names a row or there is a New line to open on), before the browser paints, and a
+  // still viewport when older events land above it, whether or not the browser's own
+  // scroll anchoring already moved it.
   useLayoutEffect(() => {
     if (events.length === 0) return;
     if (firstPaint.current) {
       firstPaint.current = false;
-      if (!jumpTo(hashSeq()) && !jumpToAgent(focusAgent)) toBottom();
+      if (!jumpTo(hashSeq()) && !jumpToAgent(focusAgent) && !toNewLine()) toBottom();
       return;
     }
     const a = anchor.current;
@@ -469,7 +504,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
         if (Math.abs(scrollY() - want) > 1) scrollTo(want);
       }
     }
-  }, [events, scrollTo, scrollBy, scrollHeight, scrollY, jumpTo, jumpToAgent, focusAgent, toBottom]);
+  }, [events, scrollTo, scrollBy, scrollHeight, scrollY, jumpTo, jumpToAgent, focusAgent, toNewLine, toBottom]);
   // Asked for another agent while open (a second "Open beside" on the same tab, the URL).
   const lastFocus = useRef(focusAgent);
   useEffect(() => {
@@ -496,7 +531,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
       });
       setTotal((t) => t + 1);
       // The pill counts what landed below the fold; a growing reply is one thing, not many.
-      if (!pinned.current && e.type !== "turn.progress" && e.type !== "session.heartbeat") setUnseen((n) => n + 1);
+      if (!pinned.current && !QUIET_TYPES.has(e.type)) setUnseen((n) => n + 1);
     });
   }, [store, key, loading]);
 
@@ -589,8 +624,20 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   const isCopy = useCallback((a: ControlActivity) => forkOf(a) === key, [key]);
   const original = useControlActivity(isCopy)[0]?.session ?? "";
   const originalSummary = useSession(original);
+  // The agents this page asked (the handoff sheet's `from`): their rows at the end of the
+  // view until the events say what became of them (AskRows).
+  const isFromHere = useCallback(
+    (a: ControlActivity) => a.from === key && a.session !== key && (a.kind === "prompt" || a.kind === "start"),
+    [key],
+  );
+  const askedFromHere = useControlActivity(isFromHere);
 
   const s = live ?? summary;
+  // The launcher and the runs it launched are subscriptions: a launcher's open page shows a
+  // run that starts later, and a run's page finds a launcher that reports later.
+  const launcherKey = s?.launchedBy && s.launchedBy !== key ? s.launchedBy : "";
+  const launcherSummary = useSession(launcherKey);
+  const launchedRuns = useLaunched(key);
   const sRef = useRef(s);
   sRef.current = s;
   useEffect(() => {
@@ -626,6 +673,33 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   const hidden = events.length - visible.length;
   // Every loaded event's turns, whatever the lens leaves out: what a sent message joins.
   const allTurns = useMemo(() => (lens >= 3 ? turns : groupTurns(events, agentRuns)), [lens, turns, events, agentRuns]);
+
+  // The New line (lib/newLine.ts). Where the person left off is read as the session first
+  // shows, before useSeen marks it read, and only when it was unread then; the line is
+  // placed once this session's first page is in and stays put while the page is open.
+  // A cold open can have its page before the marks (the stream's snapshot): it waits for
+  // them, re-rendered once when they land (useSeen can't move them before either).
+  const marksIn = useSyncExternalStore(store.subscribe, () => !!store.get().marks.since);
+  const opened = useRef<{ key: string; mark?: string; line?: NewLineAt | null; late?: boolean } | null>(null);
+  if (marksIn && s?.key === key && opened.current?.key !== key) {
+    const mark = leftOff(s, store.get().marks);
+    if (mark !== null) opened.current = { key, mark };
+  }
+  const first = events[0];
+  const pageIn = !loading && !!first && sessionKey(first.harness.name, first.session.id) === key;
+  if (pageIn && opened.current?.key === key && opened.current.line === undefined) {
+    opened.current.line = newLinePlace(allTurns, opened.current.mark, { attended: s?.attended });
+    opened.current.late = !firstPaint.current;
+  }
+  const newLineSeq = opened.current?.key === key ? opened.current.line?.seq : undefined;
+  // Placed after the first paint (the marks came after the page): open on it then, the
+  // same way, unless the person has already scrolled away from the bottom.
+  useLayoutEffect(() => {
+    const o = opened.current;
+    if (newLineSeq === undefined || !o?.late) return;
+    o.late = false;
+    if (followRef.current && pinned.current) toNewLine();
+  }, [newLineSeq, toNewLine]);
 
   // The messages sent from here to this session (its start among them), and the turn each
   // became: the turn shows the words as they were signed (tier 2 sends only a length),
@@ -684,6 +758,55 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   const startMachine = started ? machineList.find((m) => m.control?.machineId === started.machineId) : undefined;
   const machineName = s?.machine ?? startMachine?.name ?? "the machine";
   const control = s?.machine ? machines.get(s.machine)?.control : startMachine?.control;
+
+  // The pool at work on this session (UX-SPEC §7.1, §7.2): the account serving it when it
+  // is not its own, and each moment it switched, from its own limits.observed events. An
+  // account is named as the machine's pool names it, else by its login's email.
+  const limits = useLimits();
+  const poolAccounts = control?.pool?.accounts;
+  const logins = control?.accounts;
+  const nameFor = useCallback(
+    (id: string | undefined): string | undefined => {
+      if (!id) return undefined;
+      const pooled = poolAccounts?.find((a) => a.id === id);
+      if (pooled) return sentenceName(pooled, poolAccounts);
+      const login = logins?.find((a) => a.id === id);
+      return login?.email ? sentenceName({ id, email: login.email }) : login?.name;
+    },
+    [poolAccounts, logins],
+  );
+  const served = s ? (s.servedBy ?? servedBy(events, s)) : null;
+  const swapRows = useMemo(() => {
+    if (!s) return [];
+    const reports = events.filter((e) => e.type === "limits.observed");
+    return swaps(events, s).map((sw) => {
+      // Why it left: the last report of the account it left, read at that report's time;
+      // failing that, what the hello says of that account now.
+      const prior = reports
+        .filter((e) => e.session.seq < sw.seq && (e.data?.account_id ?? s.accountId) === sw.from)
+        .at(-1);
+      const acct = poolAccounts?.find((a) => a.id === sw.from);
+      const because =
+        (prior ? leftBecause({ entry: { windows: eventWindows(prior) } }, Date.parse(prior.time)) : null) ??
+        (acct
+          ? leftBecause(
+              { status: acct.status, limitedBy: acct.limitedBy, entry: limits.find((e) => e.accountId === sw.from) },
+              Date.now(),
+            )
+          : null);
+      return { seq: sw.seq, text: swapWords(nameFor(sw.to) ?? "another account", nameFor(sw.from), because) };
+    });
+  }, [events, s, poolAccounts, limits, nameFor]);
+  // Each switch goes to the turn it fell in: the last turn whose start precedes it.
+  const swapNotes = useMemo(() => {
+    const by = new Map<number, string[]>();
+    for (const sw of swapRows) {
+      let home: number | undefined;
+      for (const t of turns) if ((t.start?.session.seq ?? -1) <= sw.seq) home = t.n;
+      if (home !== undefined) by.set(home, [...(by.get(home) ?? []), sw.text]);
+    }
+    return by;
+  }, [swapRows, turns]);
   const compose = useCallback(
     (text: string) => window.dispatchEvent(new CustomEvent("sp:compose", { detail: { key, text } })),
     [key],
@@ -731,6 +854,8 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   useShortcut("session.older", () => (inert() || !hasOlder || olderBusy ? false : void loadOlder()), keyOpts);
   // The "n new" pill's way back, from the keyboard.
   useShortcut("session.latest", () => (inert() ? false : setFollowing(true)), keyOpts);
+  // ⇧A: the strip's "Ask another agent…" (the Handoff sheet), where the strip offers it.
+  useShortcut("session.ask", () => click("[data-ctl-ask]:not(:disabled)"), keyOpts);
   // ⌥⌘1 … ⌥⌘7 label this session, ⌥⌘0 clears it.
   useLabelKeys(() => (inert() ? [] : [key]), keyOpts);
 
@@ -844,6 +969,17 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
         title: originalSummary ? sessionTitle(originalSummary) : "another session",
       }
     : undefined;
+  // A launcher this receiver never saw is named by its key, so it can be looked up elsewhere.
+  const launcher = launcherKey
+    ? launcherSummary
+      ? { path: sessionPath(launcherSummary.harness, launcherSummary.id), title: sessionTitle(launcherSummary) }
+      : { path: null, title: launcherKey }
+    : undefined;
+  const launched = launchedRuns.map((l) => ({
+    path: sessionPath(l.harness, l.id),
+    title: sessionTitle(l),
+    at: l.startedAt,
+  }));
 
   // The session's "⋯", in three sections at most: what it can be asked now (Allow, Deny,
   // a message, Stop), how the view shows and what it is (Follow, the lens, its own
@@ -924,7 +1060,14 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
               meta={
                 s ? (
                   <>
-                    <SessionMeta s={s} total={total} copyOf={copyOf} chat={chat} />
+                    <SessionMeta
+                      s={s}
+                      total={total}
+                      copyOf={copyOf}
+                      launcher={launcher}
+                      launched={launched}
+                      chat={chat}
+                    />
                     {applied && <span className="sess-applied">{applied}</span>}
                   </>
                 ) : (
@@ -948,6 +1091,31 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
                   {f.detail}
                 </span>
               ))}
+            </p>
+          )}
+          {served && s && (
+            <p className="page-note sess-served" data-served>
+              <span>
+                Served by{" "}
+                <a
+                  href={`${hrefFor("/usage")}#${encodeURIComponent(`pool:${machineName}`)}`}
+                  onClick={(ev) => {
+                    if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+                    ev.preventDefault();
+                    openUsage(`pool:${machineName}`);
+                  }}
+                >
+                  {nameFor(served.accountId) ?? "another account"}
+                </a>{" "}
+                since{" "}
+                <time
+                  className="num"
+                  dateTime={served.since}
+                  title={new Date(served.since).toLocaleString([], { hourCycle: "h23" })}
+                >
+                  {clockTime(served.since)}
+                </time>
+              </span>
             </p>
           )}
           {error && s && events.length > 0 && <p className="page-note is-err">{error}</p>}
@@ -979,9 +1147,13 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
               <TurnBlock
                 key={t.n}
                 turn={t}
+                newLine={
+                  newLineSeq !== undefined && t.items.some((i) => i.kind === "event" && i.e.session.seq === newLineSeq)
+                }
                 sent={sent}
                 pending={p}
                 flip={fresh}
+                swaps={swapNotes.get(t.n)}
                 label={
                   t.n === 0
                     ? hasOlder
@@ -998,6 +1170,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
                 harness={s?.harness ?? harness}
               />
             ))}
+            {s && <AskRows sent={askedFromHere} delegations={s.delegations ?? []} chat={chat} />}
             {!loading && s && visible.length === 0 && rows.length === 0 && (
               <li className="page-note">No events at this tier.</li>
             )}
@@ -1063,20 +1236,31 @@ function SessionMeta({
   s,
   total,
   copyOf,
+  launcher,
+  launched,
   chat,
 }: {
   s: SessionSummary;
   total: number;
   /** This session is a copy (a fork) of that one. */
   copyOf?: { path: string; title: string };
+  /** The session that launched this one (`session.launched_by`); no path when this receiver never saw it. */
+  launcher?: { path: string | null; title: string };
+  /** Sessions this one launched. */
+  launched?: { path: string; title: string; at: string }[];
   chat: boolean;
 }) {
   const repo = chat ? repoShort(s.repo) : repoBranch(s);
   const place = repo || (s.cwd ? basename(s.cwd) : "");
   const fact = agentsFact(s);
+  // Asked by another session (sessionpipe ask, a handoff): that session, named and linked,
+  // first; a `delegatedBy` session is not a subagent, so "for" never meets "parent".
+  const parent = useSession(s.delegatedBy ?? "");
+  const askedBy = s.delegatedBy ? splitKey(s.delegatedBy) : null;
   const more = [
     STATE_LABEL[s.state],
     fact,
+    askingFact(s),
     s.attended === false && "unattended",
     s.model && modelShort(s.model),
     `started ${new Date(s.startedAt).toLocaleString([], { hourCycle: "h23" })}`,
@@ -1091,8 +1275,17 @@ function SessionMeta({
   ]
     .filter(Boolean)
     .join(" · ");
+  const first = launched?.[0];
   return (
     <span className="sess-where" title={more} data-events={total}>
+      {askedBy && (
+        <span className="sess-for">
+          for{" "}
+          <Link to={sessionPath(askedBy.harness, askedBy.id)} title={parent ? sessionTitle(parent) : s.delegatedBy}>
+            {parent ? sessionTitle(parent) : `a ${harnessMark(askedBy.harness).label} session`}
+          </Link>
+        </span>
+      )}
       {s.machine && <span className="sess-machine">{s.machine}</span>}
       {copyOf ? (
         <span className="sess-copy">
@@ -1100,6 +1293,50 @@ function SessionMeta({
         </span>
       ) : (
         place && <span className="sess-repo">{place}</span>
+      )}
+      {launcher && (
+        <span className="sess-copy sess-launch">
+          Launched by{" "}
+          {launcher.path ? (
+            <Link to={launcher.path} title={launcher.title}>
+              {launcher.title}
+            </Link>
+          ) : (
+            <span title={launcher.title}>{launcher.title}</span>
+          )}
+        </span>
+      )}
+      {launched && first && (
+        <span className="sess-copy sess-launch">
+          Launched{" "}
+          {launched.length === 1 ? (
+            <Link to={first.path} title={first.title}>
+              {first.title}
+            </Link>
+          ) : (
+            <MoreButton
+              className="sess-launched"
+              label={`${launched.length} launched sessions`}
+              title={() => `Launched ${launched.length} sessions`}
+              build={() => {
+                // Newest first, each with when it started (a script's runs share a title); the
+                // twelve newest, then a line for the rest.
+                const now = Date.now();
+                const shown = launched.slice(0, 12);
+                return [
+                  ...shown.map((l) => ({ label: `${l.title} · ${ago(l.at, now)}`, run: () => navigate(l.path) })),
+                  launched.length > shown.length && {
+                    label: `${launched.length - shown.length} more, older`,
+                    run: () => {},
+                    disabled: "The newest twelve are listed",
+                  },
+                ];
+              }}
+            >
+              {launched.length} sessions
+            </MoreButton>
+          )}
+        </span>
       )}
     </span>
   );
@@ -1170,6 +1407,8 @@ function TurnBlock({
   sent,
   pending = false,
   flip = false,
+  newLine = false,
+  swaps,
 }: {
   turn: Turn;
   lens: Tier;
@@ -1185,6 +1424,10 @@ function TurnBlock({
   pending?: boolean;
   /** Slide into place as the turns around it arrive (a session started here). */
   flip?: boolean;
+  /** The first answer since the person last looked: the New line sits above it. */
+  newLine?: boolean;
+  /** The pool switched accounts during this turn: one quiet row each (UX-SPEC §7.2). */
+  swaps?: string[];
 }) {
   // Only a running turn or a running tool shows a moving duration; the other blocks
   // (most of the page) have nothing to redraw each second.
@@ -1192,7 +1435,7 @@ function TurnBlock({
     (i) => (i.kind === "tool" && !i.ended) || (i.kind === "agent" && i.tools.some((t) => !t.ended)),
   );
   const now = useNow(liveTurn || hasRunningTool ? "fine" : "off");
-  const { machine, online, control, compose } = useTimeline();
+  const { machine, online, control, compose, session } = useTimeline();
   const transcript = [...turn.items].reverse().find((i) => i.kind === "event" && i.e.type === "turn.transcript") as
     | EventItem
     | undefined;
@@ -1214,6 +1457,12 @@ function TurnBlock({
   const startSeq = turn.start?.session.seq;
   // Claude Code's own follow-up when a background agent stops: not a person's prompt.
   const notice = taskNotification(prompt);
+  // An answer a handoff brought back (CONTROL.md §6): the asked agent's words, not the
+  // person's, but only once the events say a handoff was relayed here (a prompt anyone
+  // writes can wear the frame; without the delegation it shows as the message it is).
+  const framed = prompt ? handoffAnswer(prompt) : undefined;
+  const answer =
+    framed && relayedFrom(session()?.delegations, framed.harness, turn.start?.time ?? sent?.at) ? framed : undefined;
   // What the machine said of the message sent from here: its failure, in place; while
   // it is on its way (or the agent is at it with nothing to show yet) the one status row.
   const failed = !!sent && isFinal(sent) && sent.outcome !== "delivered";
@@ -1245,6 +1494,7 @@ function TurnBlock({
         harness={harness}
         prompt={prompt}
         notice={notice?.agentId}
+        answer={answer}
         promptChars={promptChars}
         transcript={transcript}
         progress={progress}
@@ -1255,6 +1505,8 @@ function TurnBlock({
         status={status}
         failure={failure}
         flip={flip}
+        newLine={newLine}
+        swaps={swaps}
       />
     );
 
@@ -1297,19 +1549,37 @@ function TurnBlock({
         {items.map((it) => {
           if (it.kind === "tool") return <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} />;
           if (it.kind === "agent") return <AgentBlock key={it.key} item={it} lens={lens} now={now} fill={fill} />;
+          if (it.kind === "delegation") return <AskRow key={it.key} item={it} as="li" />;
           const e = it.e;
           if (e.type === "turn.transcript") {
             if (it !== transcript) return null;
-            return <Reply key={it.key} e={e} turnSeq={startSeq} fill={fill} />;
+            const reply = <Reply key={it.key} e={e} turnSeq={startSeq} fill={fill} />;
+            return newLine ? (
+              <Fragment key={it.key}>
+                <NewLine />
+                {reply}
+              </Fragment>
+            ) : (
+              reply
+            );
           }
           if (e.type === "attention.needed") return <AttentionMarker key={it.key} e={e} />;
           if (e.type === "subagent.started" || e.type === "subagent.ended") return <AgentMarker key={it.key} e={e} />;
           return <EventMarker key={it.key} e={e} />;
         })}
+        {newLine && !transcript && <NewLine />}
         {progress && String(progress.e.data.assistant ?? "").trim() && (
           <Reply e={progress.e} turnSeq={startSeq} fill={fill} live />
         )}
         {ackReply && <AckReply text={ackReply} live={!!sent && !isFinal(sent)} />}
+        {swaps?.map((text) => (
+          <li key={text} className="marker marker--swap" data-swap>
+            <Lead />
+            <span className="marker-body">
+              <span>{text}</span>
+            </span>
+          </li>
+        ))}
         {endErr && ended && <EndMarker e={ended.e} />}
         {failure && <li className="turn-failed">{failure}</li>}
       </ol>
@@ -1395,10 +1665,13 @@ function Prompt({
   /** Who submitted the turn, when the harness said it was not the person ("Scheduled"). */
   by?: string;
 }) {
-  const { path, root } = useTimeline();
+  const { path, root, machine } = useTimeline();
   // A message sent through sessionpipe arrives framed ("Message via … (sessionpipe
   // control, …):"); the words show as written, and where they came from as a quiet line.
-  const { text: words, via } = unframe(text);
+  // A question another session asked (sessionpipe ask) says who asked under it; an answer
+  // a handoff brought back shows raw here (the chat draws it as the agent's turn).
+  const { text: words, via, askedBy } = unframe(text);
+  const answer = bubble ? undefined : handoffAnswer(text);
   const menu = useContextMenu(() => [
     copyItem("Copy message", words),
     copyItem("Copy link to this turn", seqLink(path, seq)),
@@ -1411,6 +1684,16 @@ function Prompt({
       <blockquote className={cls} data-start-message={sent?.kind === "start" ? "" : undefined} {...menu}>
         <PromptBody text={words} />
         {via && <span className="prompt-via">Sent from {via}</span>}
+        {askedBy && (
+          <span className="prompt-via">
+            Asked by {harnessMark(splitKey(askedBy).harness).label} with sessionpipe ask
+          </span>
+        )}
+        {answer && (
+          <span className="prompt-via">
+            answer from {harnessMark(answer.harness).label}, brought back by {machine}
+          </span>
+        )}
         {by && <span className="prompt-via">{by}</span>}
       </blockquote>
       <SentFiles files={sent?.files} />
@@ -1421,7 +1704,15 @@ function Prompt({
 /** The reply the machine streamed back with its acks, for a turn that has no reply event
  *  of its own yet: rendered as the reply will be, in the same place. */
 function AckReply({ text, live, chat = false }: { text: string; live: boolean; chat?: boolean }) {
-  const menu = useContextMenu(() => [copyItem("Copy reply", text)]);
+  const { session } = useTimeline();
+  const store = useStore();
+  const menu = useContextMenu(() => {
+    const s = session();
+    return [
+      copyItem("Copy reply", text),
+      s && askItem(s, store, { label: "Ask another agent about this…", reply: text }),
+    ];
+  });
   if (chat)
     return (
       <div className="chat-card" {...menu}>
@@ -1449,15 +1740,22 @@ function Reply({
   live?: boolean;
   chat?: boolean;
 }) {
-  const { path } = useTimeline();
+  const { path, session } = useTimeline();
+  const store = useStore();
   const text = String(e.data.assistant ?? "");
   const cut = e.preview?.assistant !== undefined;
-  const menu = useContextMenu(() => [
-    copyItem(cut ? "Copy reply (preview)" : "Copy reply", text),
-    copyItem("Copy link to this turn", seqLink(path, turnSeq ?? e.session.seq)),
-    cut && { sep: true },
-    cut && { label: "Load full text", run: () => fill(e) },
-  ]);
+  const menu = useContextMenu(() => {
+    const s = session();
+    return [
+      copyItem(cut ? "Copy reply (preview)" : "Copy reply", text),
+      copyItem("Copy link to this turn", seqLink(path, turnSeq ?? e.session.seq)),
+      // The Handoff sheet prefilled with this reply, not the last one.
+      s &&
+        askItem(s, store, { label: "Ask another agent about this…", reply: text, turnSeq: turnSeq ?? e.session.seq }),
+      cut && { sep: true },
+      cut && { label: "Load full text", run: () => fill(e) },
+    ];
+  });
   if (chat)
     return (
       <div className="chat-card" data-seq={e.session.seq} {...menu}>
@@ -1599,6 +1897,7 @@ function ChatTurn({
   harness,
   prompt,
   notice,
+  answer,
   promptChars,
   transcript,
   progress,
@@ -1609,6 +1908,8 @@ function ChatTurn({
   status,
   failure,
   flip,
+  newLine = false,
+  swaps,
 }: {
   turn: Turn;
   lens: Tier;
@@ -1619,6 +1920,8 @@ function ChatTurn({
   prompt: string | undefined;
   /** The agent a `<task-notification>` prompt reports on: a quiet line, not a bubble. */
   notice?: string;
+  /** The prompt is an answer a handoff brought back: the asked agent's turn, not a bubble. */
+  answer?: HandoffAnswer;
   promptChars: number | undefined;
   transcript: EventItem | undefined;
   progress: EventItem | undefined;
@@ -1629,10 +1932,19 @@ function ChatTurn({
   status: Status;
   failure: ReactNode;
   flip: boolean;
+  newLine?: boolean;
+  swaps?: string[];
 }) {
   const { open, working } = useTimeline();
   const tools = turn.items.filter((i): i is ToolItem => i.kind === "tool");
   const agentItems = turn.items.filter((i): i is AgentItem => i.kind === "agent");
+  const asks = turn.items.filter((i): i is DelegationItem => i.kind === "delegation");
+  // An ask the agent made while it worked sits with its tools; one made after the turn
+  // ended (a handoff from here, once the reply was in) sits after the reply.
+  const endedMs = ended ? ms(ended.e.time) : Number.NaN;
+  const after = (it: DelegationItem) => Number.isFinite(endedMs) && ms((it.started ?? it.ended)?.time) > endedMs;
+  const asksDuring = asks.filter((it) => !after(it));
+  const asksAfter = asks.filter(after);
   // The harness's idle notice ("waiting for your input") asked for nothing: no note.
   const notes = turn.items.filter(
     (i): i is EventItem =>
@@ -1652,11 +1964,13 @@ function ChatTurn({
   const agent =
     tools.length > 0 ||
     agentItems.length > 0 ||
+    asks.length > 0 ||
     !!replyText ||
     !!ackReply ||
     !!row ||
     !!failure ||
     notes.length > 0 ||
+    !!swaps?.length ||
     !!endErr;
   // Before the first turn there is nothing a chat shows (session markers stay out of it).
   if (!turn.start && !agent && !pending) return null;
@@ -1669,6 +1983,8 @@ function ChatTurn({
     >
       {turn.start && notice ? (
         <AgentNotice agentId={notice} seq={startSeq} />
+      ) : turn.start && answer ? (
+        <AnswerTurn answer={answer} at={at} seq={startSeq} e={(transcript ?? progress)?.e} fill={fill} />
       ) : turn.start || (pending && sent) ? (
         <div className="chat-you">
           {at && (
@@ -1701,12 +2017,16 @@ function ChatTurn({
               ))}
             </ol>
           )}
+          {asksDuring.map((it) => (
+            <AskRow key={it.key} item={it} as="div" />
+          ))}
           {notes.map((it) => (
             <p key={it.key} className="chat-note" data-seq={it.e.session.seq}>
               {cap(ATTENTION_LABEL[String(it.e.data.kind)] ?? String(it.e.data.kind))}
               {typeof it.e.data.tool === "string" ? ` · ${toolLabel(it.e.data.tool)}` : ""}
             </p>
           ))}
+          {newLine && <NewLine chat />}
           {endErr && (
             <p className="chat-err">
               <ErrGlyph />
@@ -1715,12 +2035,35 @@ function ChatTurn({
           )}
           {replyItem && replyText && <Reply e={replyItem.e} turnSeq={startSeq} fill={fill} live={!transcript} chat />}
           {ackReply && <AckReply text={ackReply} live={!!sent && !isFinal(sent)} chat />}
+          {swaps?.map((text) => (
+            <p key={text} className="chat-note" data-swap>
+              {text}
+            </p>
+          ))}
+          {asksAfter.map((it) => (
+            <AskRow key={it.key} item={it} as="div" />
+          ))}
           {failure}
           {row && <StatusRow {...row} chat />}
         </div>
       )}
     </li>
   );
+}
+
+/** Where the person left off: "New" and a hairline across the column, above the first
+ *  answer since they last looked (lib/newLine.ts). In the meta tier: it says where, and
+ *  asks nothing. */
+function NewLine({ chat = false }: { chat?: boolean }) {
+  const line = (
+    // biome-ignore lint/a11y/useSemanticElements: an <hr> can't hold the word "New"
+    <div className="new-line" role="separator" aria-label="New since you looked">
+      New
+    </div>
+  );
+  // Among a turn's rows it is an item that holds the separator: a list's own children
+  // can't be separators (axe's "list").
+  return chat ? line : <li>{line}</li>;
 }
 
 /** The tools of a turn as one quiet disclosure line, the usual rows when opened. */
@@ -2181,6 +2524,392 @@ function AgentNotice({ agentId, seq }: { agentId: string; seq?: number }) {
           Subagent finished: {run ? agentLabel(run) : "a background agent"}
         </span>
       </button>
+    </div>
+  );
+}
+
+// ----- the agents this session asked (sessionpipe ask, a handoff): the lineage rows -----
+
+type HandoffAnswer = NonNullable<ReturnType<typeof handoffAnswer>>;
+
+/** One ask as its row reads it: from the summary's `Delegation` (the store's reading),
+ *  from the turn's own events when the summary has none for it (past DELEGATIONS_MAX, or
+ *  a reading still on its way), or from the activity of a message this page sent to
+ *  another agent (`from`) before any event said what became of it. */
+interface Ask {
+  askId?: string;
+  /** "You asked …": a handoff, or a message sent from here; else the agent asked on its own. */
+  you: boolean;
+  harness: string;
+  to?: SessionKey;
+  startedAt: string;
+  endedAt?: string;
+  ok?: boolean;
+  ms?: number;
+  reply?: string;
+  error?: string;
+  relayed?: Delegation["relayed"];
+  /** The message, while the row is the activity's alone. */
+  activity?: ControlActivity;
+}
+
+const askOf = (d: Delegation): Ask => ({
+  askId: d.askId,
+  you: d.via === "handoff",
+  harness: d.harness,
+  to: d.to,
+  startedAt: d.startedAt,
+  endedAt: d.endedAt,
+  ok: d.ok,
+  reply: d.reply,
+  error: d.error,
+  relayed: d.relayed,
+  ...(d.ms !== undefined ? { ms: d.ms } : {}),
+});
+
+const strOf = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
+
+/** The events' own reading of an ask the summary has no Delegation for. */
+function askFromItem(item: DelegationItem): Ask {
+  const sd = item.started?.data ?? {};
+  const ed = item.ended?.data ?? {};
+  const to = strOf(ed.to) ?? strOf(sd.to);
+  const relayed = ed.relayed;
+  return {
+    askId: item.askId,
+    you: sd.via === "handoff" || relayed !== undefined,
+    harness: strOf(sd.harness) ?? (to ? splitKey(to).harness : ""),
+    to,
+    startedAt: item.started?.time ?? item.ended?.time ?? new Date().toISOString(),
+    endedAt: item.ended?.time,
+    ok: typeof ed.ok === "boolean" ? ed.ok : undefined,
+    ...(typeof ed.ms === "number" ? { ms: ed.ms } : {}),
+    reply: strOf(ed.reply),
+    error: strOf(ed.error),
+    relayed: relayed === "delivered" || relayed === "unsupported" || relayed === "failed" ? relayed : undefined,
+  };
+}
+
+/** A message this page sent to another agent, before the events: the session it named
+ *  (a start's new one, or the one the ack said it went to). */
+function askFromActivity(a: ControlActivity): Ask {
+  const to = a.ackSession ?? a.session;
+  return { you: true, harness: to ? splitKey(to).harness : "", to, startedAt: a.at, activity: a };
+}
+
+/** A daemon's refusal of an ask (CONTROL.md §13 codes), when the error starts with its
+ *  code ("harness: gemini-cli is not installed here"); the control codes keep their words. */
+const ASK_REFUSALS: Record<string, (machine: string) => string> = {
+  ask_off: (m) => `asking between agents is off on ${m} (sessionpipe ask on)`,
+  harness: (m) => `${m} can't run that agent`,
+  depth: () => "an asked agent can't ask a third one",
+  loop: () => "it would be asking itself",
+};
+function askRefusal(error: string, machine: string): string | null {
+  const m = /^([a-z_]+)(?::\s|$)/.exec(error);
+  if (!m) return null;
+  const code = m[1]!;
+  const own = ASK_REFUSALS[code];
+  if (own) return own(machine);
+  return REFUSAL_WORDS[code] ? refusalWords(code) : null;
+}
+
+/** A machine's detail ends the sentence it is quoted in; most arrive without a full stop. */
+const stopped = (s: string): string => (/[.!?…]$/.test(s) ? s : `${s}.`);
+const lower = (s: string): string => s.charAt(0).toLowerCase() + s.slice(1);
+
+/** The row's state (UX-SPEC §3.1): one phrase in the meta tier, a live timer while it
+ *  runs, red only when it went wrong. `child` is the asked session when the store has it. */
+function askState(
+  a: Ask,
+  o: { machine: string; online: boolean; child?: SessionSummary },
+): { text: string; since?: string; err?: boolean; glyph: "run" | "ok" | "err" | "none" } {
+  const act = a.activity;
+  if (act) {
+    const harness = a.to ? splitKey(a.to).harness : "";
+    if (isFinal(act) && act.outcome !== "delivered")
+      return {
+        text: `not sent · ${act.outcome === "refused" ? refusalWords(act.code) : (act.detail ?? act.outcome)}`,
+        err: true,
+        glyph: "err",
+      };
+    if (act.outcome === "delivered" && o.child)
+      return o.child.state === "working" || o.child.state === "needs_you"
+        ? { text: "running", since: o.child.stateSince, glyph: "run" }
+        : { text: STATE_LABEL[o.child.state], glyph: o.child.state === "done" ? "ok" : "none" };
+    if (!act.outcome && !o.online)
+      return { text: `waiting for ${o.machine}. It asks when the machine is back.`, glyph: "run" };
+    const line = sentLine(act, {
+      machine: o.machine,
+      online: o.online,
+      command: harnessCommand(harness, harnessMark(harness).label),
+    });
+    return { text: line ? lower(line.text).replace(/[.…]?$/, "…") : "sent…", glyph: "run" };
+  }
+  if (!a.endedAt) return { text: "running", since: a.startedAt, glyph: "run" };
+  const took = a.ms !== undefined ? dur(a.ms) : dur(ms(a.endedAt) - ms(a.startedAt));
+  if (a.ok === false) {
+    const refusal = a.error ? askRefusal(a.error, o.machine) : null;
+    if (refusal) return { text: `refused · ${refusal}`, err: true, glyph: "err" };
+    return { text: `failed after ${took}${a.error ? ` · ${a.error}` : ""}`, err: true, glyph: "err" };
+  }
+  if (a.ok === undefined) return { text: "no answer", glyph: "none" };
+  const relay =
+    a.relayed === "delivered"
+      ? " · answer below"
+      : a.relayed === "unsupported"
+        ? ` · couldn't bring it back: ${o.machine} can't message this session`
+        : a.relayed === "failed"
+          ? ` · couldn't bring it back: ${stopped(a.error ?? "it didn't arrive")}`
+          : "";
+  return { text: `answered in ${took}${relay}`, glyph: "ok" };
+}
+
+const isWide = () => typeof matchMedia === "function" && matchMedia("(min-width: 840px)").matches;
+
+/** One agent this session asked, where the ask happened (UX-SPEC §3.1): one line in the
+ *  agent's column, a glyph, "Asked Codex · <its title> · <state>", the whole row a link to
+ *  the asked session; the answer folded under it only when it was not relayed here. */
+function AskRow({ item, ask: given, as }: { item?: DelegationItem; ask?: Ask; as: "li" | "div" }) {
+  const { session, machine, online, control } = useTimeline();
+  const s = session();
+  const d = item ? s?.delegations?.find((x) => x.askId === item.askId) : undefined;
+  const a = given ?? (d ? askOf(d) : askFromItem(item!));
+  const child = useSession(a.to ?? "");
+  const st = askState(a, { machine, online, child });
+  const label = harnessMark(a.harness).label;
+  const verb = `${a.you ? "You asked" : "Asked"} ${label}`;
+  const title = child ? sessionTitle(child) : "new session";
+  const target = a.to ? splitKey(a.to) : null;
+  const path = target ? sessionPath(target.harness, target.id) : null;
+  const running = st.glyph === "run" && !a.activity;
+  const stop = useRef<MenuList>([]);
+  const menu = useContextMenu(
+    () => [
+      path && { label: "Open the asked session", run: () => navigate(path) },
+      path && isWide() && { label: "Open beside", run: () => openSplit(a.to!) },
+      copyItem("Copy the answer", a.reply ?? null),
+      target && copyItem("Copy session ID", target.id),
+      { sep: true },
+      ...stop.current,
+    ],
+    { title: () => verb, subtitle: () => st.text },
+  );
+  const glyph =
+    st.glyph === "run" ? (
+      <span className="spinner spinner--sm" aria-hidden="true" />
+    ) : st.glyph === "ok" ? (
+      <StateDot state="done" size={10} decorative />
+    ) : st.glyph === "err" ? (
+      <ErrGlyph />
+    ) : null;
+  const body = (
+    <>
+      <span className="marker-glyph">{glyph}</span>
+      <span className="ask-text">
+        <span className="ask-verb">{verb}</span>
+        <span className="ask-title" title={title}>
+          {title}
+        </span>
+        <span className={`ask-state ${st.err ? "is-err" : ""}`}>
+          {st.text}
+          {st.since && (
+            <>
+              {" "}
+              <Since iso={st.since} />
+            </>
+          )}
+        </span>
+      </span>
+      <span className="ask-chev" aria-hidden="true">
+        ›
+      </span>
+    </>
+  );
+  const Tag = as;
+  return (
+    <Tag
+      className="ask"
+      data-ask={a.askId ?? a.activity?.id}
+      data-seq={item?.started?.session.seq ?? item?.ended?.session.seq}
+      {...menu}
+    >
+      {path ? (
+        <Link to={path} className="ask-link" modClick={(o) => openSplit(a.to!, { background: o.background })}>
+          {body}
+        </Link>
+      ) : (
+        <span className="ask-link ask-link--none">{body}</span>
+      )}
+      {a.reply && a.relayed !== "delivered" && <AskFold reply={a.reply} />}
+      {running && child && control && <AskStop child={child} control={control} label={label} into={stop} />}
+    </Tag>
+  );
+}
+
+/** The answer, folded like a turn's tools: "Show the answer", the reply as prose. */
+function AskFold({ reply }: { reply: string }) {
+  const [open, setOpen] = useState(false);
+  const menu = useContextMenu(() => [copyItem("Copy the answer", reply)]);
+  return (
+    <details
+      className="chat-tools ask-fold"
+      open={open}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary className="chat-tools-sum" {...menu}>
+        <Chevron />
+        <span>{open ? "Hide the answer" : "Show the answer"}</span>
+      </summary>
+      <div className="chat-card">
+        <Markdown text={reply} />
+      </div>
+    </details>
+  );
+}
+
+/** "Stop Codex…" for a running ask: a `cancel` on the asked session through the one
+ *  signed send path, mounted only while the row can offer it. Writes the menu item into
+ *  the row's ref, as the board's rows keep their Allow / Deny. */
+function AskStop({
+  child,
+  control,
+  label,
+  into,
+}: {
+  child: SessionSummary;
+  control: MachineControl;
+  label: string;
+  into: MutableRefObject<MenuList>;
+}) {
+  const send = useSessionSend(child, control, child.openAttentions);
+  useLayoutEffect(() => {
+    into.current = [
+      {
+        label: `Stop ${label}…`,
+        disabled: send.secure ? undefined : signHint(send.rp),
+        run: async () => {
+          const ok = await confirmAction({
+            title: `Stop ${label}?`,
+            body: "Its session keeps what it did so far.",
+            action: "Stop",
+          });
+          if (ok) await send.onSend({ kind: "cancel" }).catch(() => {});
+        },
+      },
+    ];
+  });
+  useEffect(
+    () => () => {
+      into.current = [];
+    },
+    [into],
+  );
+  return null;
+}
+
+/** A message that did not go keeps its row this long before it folds to the activity. */
+const ASK_FAILED_HOLD_MS = 60_000;
+
+/** The messages this page sent to other agents that no event has caught up with yet (the
+ *  handoff sheet's `from`): their rows at the end of the view, oldest first, each gone
+ *  once a Delegation names the session it made, or a minute after one failed. */
+function AskRows({
+  sent,
+  delegations,
+  chat,
+}: {
+  sent: ControlActivity[];
+  delegations: readonly Delegation[];
+  chat: boolean;
+}) {
+  const failed = sent.some((a) => isFinal(a) && a.outcome !== "delivered");
+  const now = useNow(failed ? "coarse" : "off");
+  const rows = sent.filter((a) => {
+    const to = a.ackSession ?? a.session;
+    if (to && delegations.some((d) => d.to === to)) return false;
+    if (isFinal(a) && a.outcome !== "delivered") return now - Date.parse(a.ackedAt ?? a.at) < ASK_FAILED_HOLD_MS;
+    return true;
+  });
+  if (rows.length === 0) return null;
+  const items = [...rows].reverse().map((a) => <AskRow key={a.id} ask={askFromActivity(a)} as={chat ? "div" : "li"} />);
+  return chat ? (
+    <li className="turn turn--chat">
+      <div className="chat-ai">{items}</div>
+    </li>
+  ) : (
+    <li className="turn">
+      <ol className="turn-items">{items}</ol>
+    </li>
+  );
+}
+
+/** The session whose answer a handoff relayed into this one just before `at`: the newest
+ *  delegation of that harness that reads `relayed: "delivered"` and ended by then. */
+function relayedFrom(ds: readonly Delegation[] | undefined, harness: string, at?: string): SessionKey | undefined {
+  const t = ms(at);
+  let best: Delegation | undefined;
+  for (const d of ds ?? []) {
+    if (d.relayed !== "delivered" || !d.to || d.harness !== harness) continue;
+    const e = ms(d.endedAt);
+    if (Number.isFinite(t) && Number.isFinite(e) && e > t + 60_000) continue;
+    if (!best || ms(best.endedAt) < e) best = d;
+  }
+  return best?.to;
+}
+
+/** The answer a handoff brought back (UX-SPEC §3.2): the asked agent's glyph and name with
+ *  "answer", the reply as prose, in the agent's column; linked to the asked session when
+ *  the reading knows it. The session's own reply to it follows as usual. */
+function AnswerTurn({
+  answer,
+  at,
+  seq,
+  e,
+  fill,
+}: {
+  answer: HandoffAnswer;
+  at?: string;
+  seq?: number;
+  /** The transcript (or progress) the answer was read from: slim, its `user` may be cut. */
+  e?: StoredEvent;
+  fill: Fill;
+}) {
+  const { session, path } = useTimeline();
+  const from = relayedFrom(session()?.delegations, answer.harness, at);
+  const target = from ? splitKey(from) : null;
+  const label = harnessMark(answer.harness).label;
+  const menu = useContextMenu(() => [
+    copyItem("Copy the answer", answer.reply),
+    copyItem("Copy link to this turn", seqLink(path, seq)),
+    { sep: true },
+    target && { label: "Open the asked session", run: () => navigate(sessionPath(target.harness, target.id)) },
+  ]);
+  const meta = (
+    <>
+      <HarnessGlyph name={answer.harness} size="sm" />
+      {label}
+      <span className="chat-meta-sub"> · answer</span>
+    </>
+  );
+  return (
+    <div className="chat-ai chat-answer" data-seq={seq} {...menu}>
+      <span className="chat-meta">
+        {target ? <Link to={sessionPath(target.harness, target.id)}>{meta}</Link> : meta}
+        {at && (
+          <time
+            className="chat-answer-time num"
+            dateTime={at}
+            title={new Date(at).toLocaleString([], { hourCycle: "h23" })}
+          >
+            {clock(at).slice(0, 5)}
+          </time>
+        )}
+      </span>
+      <div className="chat-card">
+        <Markdown text={answer.reply} />
+        {e && <Cut e={e} field="user" fill={fill} />}
+      </div>
     </div>
   );
 }

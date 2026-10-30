@@ -6,17 +6,23 @@
 // Every event is a tier-3 sessionpipe event exactly as the client would send it:
 // the harness's own hook names, a session block that grows as the worker learns facts,
 // seq monotonic per session, ids in each harness's shape.
+import { createHash } from "node:crypto";
 import { ulid } from "sessionpipe-core";
 import type { ProtocolEvent, ProtocolSession } from "../../shared/api.js";
 import {
   ANTIGRAVITY_TURNS,
+  ASK_TURN,
+  type AskScript,
   BACKFILL_TITLES,
   BACKGROUND_TURNS,
   CLAUDE_TURNS,
   CODEX_TURNS,
   CURSOR_TURNS,
   GEMINI_TURNS,
+  HANDOFF,
+  HANDOFF_PARENT_TURN,
   HARNESS_VERSION,
+  type HandoffScript,
   type HarnessName,
   MACHINE_NAMES,
   MODELS,
@@ -53,11 +59,26 @@ export interface DemoStarted {
   cwd: string;
   text: string;
   at: number;
+  /** A handoff: the session the answer comes back into (`reply_to`), which also sent it. */
+  replyTo?: string;
+  from?: string;
 }
 
 /** The account id sessionpipe 0.10 gives a Claude Code home on another API (#75):
  *  `api-` and 16 hex of the endpoint's hash; the demo's names api.z.ai. */
 export const DEMO_API_ACCOUNT = "api-3f9c1e0b7d2a4c68";
+
+/** The accounts the demo's pools name besides lab-mac's own login (DESIGN §3, UX-SPEC §13):
+ *  fixed ids, never drawn from the cast's stream, so the cast plays as it always did. The
+ *  own login (dev@example.com, `account(lab, "claude-code")`) is "Misha" in the pool. */
+export const DEMO_POOL = {
+  fiction: { id: "7c2a9e41-3b6d-4f08-9a5e-1d4c8b2f6e03", email: "fiction@example.com", label: "Fiction" },
+  spacesheep: { id: "e19b4d07-6a3c-4e52-8f71-0c9d5b3a2e84", email: "spacesheep@example.com", label: "Spacesheep" },
+  work: { id: "4d8f1c23-9e6b-4a07-b5d2-7f3e0a1c9b46", email: "work@example.com", label: "Work" },
+  old: { id: "b3e7a052-1f4c-4d9e-a86b-5c2d9f0e7a13", email: "old@example.com", label: "Old" },
+} as const;
+/** When Spacesheep's 5-hour window has room again, from the demo's start (its `until`). */
+export const DEMO_POOL_UNTIL_MS = 2 * 3_600_000 + 10 * 60_000;
 
 type Script = Generator<number, void, undefined>;
 interface Actor {
@@ -67,10 +88,30 @@ interface Actor {
 }
 
 const DAY = 86_400_000;
+const HOUR = 3_600_000;
+const MINUTE = 60_000;
 const PROGRESS_EVERY_MS = 20_000;
 const TITLE_RANK = { "first-ask": 0, harness: 1, custom: 2 } as const;
 /** The curated opening scenes get this long before random sessions join in. */
 const OPENING_MS = 150_000;
+
+/** What the daemon calls the receiver in a handoff's frame (`asked via <host>`). */
+const RECEIVER_HOST = "studio-mac.local:7373";
+
+/** A session's short id as sessionpipe-core prints it (`short-id.ts`): eight hex of a hash
+ *  of its ref, so the frame names the session without quoting a 36-character id. */
+const shortId = (harness: string, id: string): string =>
+  createHash("sha256").update(`sessionpipe.session:${harness}:${id}`).digest("hex").slice(0, 8);
+
+/** The daemon's framing of the question it hands an asked agent (control/route.ts). */
+const askFrame = (text: string, from: string): string =>
+  `${text}\n\n(Asked by ${from} on this machine with sessionpipe ask. Answer here in full: your reply is returned to that session automatically. Don't run a command or call a tool just to send it.)`;
+/** A `start`'s first message as the daemon frames it (control/route.ts). */
+const startFrame = (text: string): string =>
+  `${text}\n\n(Sent via ${RECEIVER_HOST} with sessionpipe control, signed on the sender's device.)`;
+/** The relayed answer as the daemon delivers it into `reply_to` (CONTROL.md §6). */
+const answerFrame = (harness: string, id: string, reply: string): string =>
+  `Answer from ${harness}:${shortId(harness, id)} (sessionpipe handoff, asked via ${RECEIVER_HOST}):\n\n${reply}`;
 
 type HookKey =
   | "start"
@@ -299,11 +340,12 @@ export class Sess {
       this.block.title_source = title_source;
     }
   }
-  emit(type: string, data: Record<string, unknown>, event: string, version = true): ProtocolEvent {
+  /** `at`: a wall-clock time other than now (an earlier session's, limitsScene). */
+  emit(type: string, data: Record<string, unknown>, event: string, version = true, at?: number): ProtocolEvent {
     const harness: ProtocolEvent["harness"] = { name: this.profile.name };
     if (version) harness.version = HARNESS_VERSION[this.profile.name];
     if (event) harness.event = event;
-    return this.sim.emit(type, harness, { id: this.id, seq: this.seq++, ...this.block }, prune(data));
+    return this.sim.emit(type, harness, { id: this.id, seq: this.seq++, ...this.block }, prune(data), at);
   }
 }
 
@@ -324,10 +366,18 @@ export class Simulation {
   private accounts = new Map<string, string>();
   private ended: Sess[] = [];
   private readonly onStart?: (s: DemoStarted) => void;
+  /** The ids of limitsScene's earlier sessions: a stream of its own, so the cast draws
+   *  what it always drew. */
+  private readonly sideRng: Rng;
+  private readonly seed: number;
+  /** lab-mac's 5-hour window (limitsScene): used, when it resets, replies since it moved. */
+  private fiveHour = { used: 38, resetsAt: 0, replies: 0, bumps: 0 };
 
   constructor(opts: SimOptions = {}) {
     this.onStart = opts.onStart;
-    this.rng = new Rng(opts.seed ?? 20261014);
+    this.seed = opts.seed ?? 20261014;
+    this.rng = new Rng(this.seed);
+    this.sideRng = new Rng(this.seed + 1);
     const n = Math.min(MACHINE_NAMES.length, Math.max(1, Math.floor(opts.machines ?? 2)));
     this.machines = MACHINE_NAMES.slice(0, n);
     this.v010Machine = n === 1 ? (this.machines[0] as string) : V010_MACHINE;
@@ -546,6 +596,38 @@ export class Simulation {
       });
     this.spawn(unattended(), 5_000);
 
+    // Agents that ask each other, on the paired machine: a Claude Code session that asks
+    // Codex for a review from inside its turn (sessionpipe ask), and one that a handoff
+    // from here asks Codex about, the answer coming back into it as a message.
+    const asking = () =>
+      this.session({
+        harness: "claude-code",
+        machine: this.v010Machine,
+        repo: REPOS[0] as Repo,
+        branch: "fix/webhook-retry",
+        turns: [ASK_TURN],
+        source: "startup",
+        end: "exit",
+        attended: true,
+        pause: 240_000,
+      });
+    const handed = () =>
+      this.session({
+        harness: "claude-code",
+        machine: this.v010Machine,
+        repo: REPOS[0] as Repo,
+        branch: "fix/webhook-retry",
+        turns: [HANDOFF_PARENT_TURN],
+        source: "startup",
+        end: "exit",
+        attended: true,
+        viaControl: true,
+        handoff: HANDOFF,
+        pause: 20_000,
+      });
+    this.spawn(asking(), 12_000);
+    this.spawn(handed(), 45_000);
+
     // Three reviewers at once, two of them outliving the turn that launched them.
     const parallel = () =>
       this.session({
@@ -558,6 +640,8 @@ export class Simulation {
         end: "exit",
       });
     this.spawn(parallel(), 10_000);
+    this.spawn(this.limitsScene());
+    this.spawn(this.poolScene(), 45_000);
 
     let lastShowcase = this.now;
     yield OPENING_MS;
@@ -570,6 +654,8 @@ export class Simulation {
         this.spawn(unattended(), 50_000);
         this.spawn(waiting(), 20_000);
         this.spawn(scheduled(), 40_000);
+        this.spawn(asking(), 60_000);
+        this.spawn(handed(), 100_000);
         continue;
       }
       if (this.live >= 6) continue;
@@ -667,6 +753,9 @@ export class Simulation {
     account?: string;
     /** Started from this receiver: the demo machine has its `start` (onStart). */
     viaControl?: boolean;
+    /** After its turns, a handoff from here asks another agent and its answer comes back
+     *  into this session (CONTROL.md §3.1 `reply_to`). */
+    handoff?: HandoffScript;
   }): Script {
     const rng = this.rng;
     const profile = PROFILES[p.harness];
@@ -719,6 +808,10 @@ export class Simulation {
         yield* this.notificationTurn(sess, n, turn++);
       }
       yield script.waitAfter ?? p.pause ?? rng.ms(30_000, 5000);
+    }
+    if (p.handoff) {
+      yield* this.handoff(sess, p.handoff, turn++);
+      yield p.pause ?? rng.ms(30_000, 5000);
     }
     // No session-end hook: the session just goes quiet after its last Stop.
     if (!profile.noSessionEnd) sess.emit("session.ended", { reason: p.end }, profile.ev.end);
@@ -787,11 +880,19 @@ export class Simulation {
       const agentId = sub ? rng.agent() : undefined;
       const background = !!sub && (output as { isAsync?: unknown } | undefined)?.isAsync === true;
       const inParent = !!sub && !!profile.agentsInParent;
+      let tookMs = step.ms;
       if (sub && agentId && inParent && !background) {
         // A synchronous agent: it runs while the call is open, and its last message is
         // the call's output.
         yield* this.agentInParent(sess, sub, agentId, turnId);
         output = { status: "completed", agentId, content: [{ type: "text", text: sub.result ?? "" }] };
+      } else if (step.ask) {
+        // `sessionpipe ask`: the daemon runs the asked agent while the call is open, and
+        // the answer is the command's stdout.
+        const begun = this.now;
+        const reply = yield* this.asked(sess, step.ask);
+        tookMs = this.now - begun;
+        output = { stdout: reply, stderr: "", interrupted: false, isImage: false, noOutputExpected: false };
       } else {
         yield step.ms;
         if (sub && agentId)
@@ -814,7 +915,7 @@ export class Simulation {
             tool: step.tool,
             call_id: callId,
             turn_id: turnId,
-            ms: step.ms,
+            ms: tookMs,
             ok,
             error: ok ? undefined : step.error,
             input: step.input,
@@ -872,6 +973,353 @@ export class Simulation {
       { turn, user, assistant: script.final, at: new Date(this.wall()).toISOString() },
       endEvent,
     );
+    this.statusLine(sess);
+  }
+
+  /** sessionpipe 0.10's usage limits (limits.observed), every state the Usage page has:
+   *  each account's last report, left by an earlier session that ended before the demo
+   *  began, then lab-mac's status line as its replies move the 5-hour window. Only an
+   *  account id the cast has drawn is read (the runner's paired machine draws lab-mac's at
+   *  once), never drawn here, so the cast plays as it always did. Codex sends no account
+   *  id: its numbers are the machine's. */
+  private *limitsScene(): Script {
+    const t0 = this.startAt;
+    const lab = this.v010Machine;
+    const studio = this.machines[0] as string;
+    const build = this.machines[1 % this.machines.length] as string;
+    const at = (ms: number) => new Date(t0 + ms).toISOString();
+    this.fiveHour.resetsAt = t0 + 2 * HOUR + 21 * MINUTE;
+    // Studio-mac's Claude Code account, which no paired machine names: none left, three hours ago.
+    while (!this.accounts.has(`${studio}/claude-code`)) yield 1000;
+    this.earlier({
+      harness: "claude-code",
+      machine: studio,
+      account: this.accounts.get(`${studio}/claude-code`),
+      repo: REPOS[2] as Repo,
+      reportAt: t0 - 3 * HOUR,
+      prompt: "Which pages still link to the 2.3 changelog?",
+      reply: "Four: the install guide, the upgrade notes and two API pages. The changelog index already points at 2.4.",
+      windows: [
+        { id: "five_hour", used_percent: 100, window_minutes: 300, resets_at: at(70 * MINUTE) },
+        { id: "seven_day", used_percent: 42, window_minutes: 10_080, resets_at: at(5 * DAY + HOUR) },
+      ],
+    });
+    // A Claude Code home on api.z.ai: the gateway's spend limit, passed.
+    this.earlier({
+      harness: "claude-code",
+      machine: lab,
+      account: DEMO_API_ACCOUNT,
+      repo: REPOS[0] as Repo,
+      reportAt: t0 - MINUTE,
+      prompt: "Summarise yesterday's failed invoice runs.",
+      reply: "Three runs failed, all on the EU shard, all with the same expired card token.",
+      windows: [{ id: "spend_limit", used_percent: 112, resets_at: at(12 * DAY) }],
+    });
+    // Codex on lab-mac, fresh, and on build-box two hours ago, its 5-hour window reset since.
+    this.earlier({
+      harness: "codex",
+      machine: lab,
+      repo: REPOS[1] as Repo,
+      reportAt: t0 - 2 * MINUTE,
+      prompt: "Is the pnpm store cached between CI jobs?",
+      reply: "Yes, keyed on the lockfile's hash; the cache step runs before install in both workflows.",
+      windows: [
+        { id: "primary", used_percent: 8, window_minutes: 300, resets_at: at(3 * HOUR + 43 * MINUTE) },
+        { id: "secondary", used_percent: 26, window_minutes: 10_080, resets_at: at(4 * DAY + 2 * HOUR) },
+      ],
+      plan: "plus",
+    });
+    this.earlier({
+      harness: "codex",
+      machine: build,
+      repo: REPOS[5] as Repo,
+      reportAt: t0 - 2 * HOUR,
+      prompt: "List the jobs that still read the late-events table.",
+      reply: "Two: nightly-rollup and backfill-reconcile. Both read it through the v1 view.",
+      windows: [
+        { id: "primary", used_percent: 64, window_minutes: 300, resets_at: at(-40 * MINUTE) },
+        { id: "secondary", used_percent: 91, window_minutes: 10_080, resets_at: at(DAY + 4 * HOUR) },
+      ],
+      plan: "pro",
+    });
+    // lab-mac's own Claude Code account (dev@example.com): fresh, with this week's Fable
+    // window beside the week across all models. Its replies move it on (statusLine).
+    while (!this.accounts.has(`${lab}/claude-code`)) yield 1000;
+    this.earlier({
+      harness: "claude-code",
+      machine: lab,
+      account: this.accounts.get(`${lab}/claude-code`),
+      repo: REPOS[0] as Repo,
+      reportAt: t0 - MINUTE,
+      prompt: "Which webhook retries are still on the old backoff?",
+      reply:
+        "Two: invoice.paid and customer.updated still wait a fixed 30 s; the rest moved to exponential backoff in #418.",
+      windows: this.labWindows(t0 - MINUTE),
+    });
+  }
+
+  /** The pool at work (DESIGN §3, UX-SPEC §13 #6), on lab-mac: a session on Spacesheep's
+   *  own login whose 5 hours run out after its first turn. The pool sets the account aside
+   *  and sends the next request on Misha's (lab-mac's own, the pool's current account), so
+   *  the session's `limits.observed` first names Spacesheep (99.2 % of its 5 hours, the
+   *  `until` the hello carries) and then Misha, with Misha's windows: "Served by Misha since
+   *  …" on the page, "Switched to Misha: Spacesheep's 5 hours are used up" in the chat. It
+   *  keeps taking a turn every few minutes on Misha's account, and never ends. Its ids
+   *  come from a stream of its own, so the cast and limitsScene draw what they always drew. */
+  private *poolScene(): Script {
+    const lab = this.v010Machine;
+    const rng = new Rng(this.seed + 2);
+    while (!this.accounts.has(`${lab}/claude-code`)) yield 1000;
+    const own = this.accounts.get(`${lab}/claude-code`) as string;
+    const repo = REPOS[2] as Repo;
+    const sess = new Sess(this, PROFILES["claude-code"], rng.uuid(), {
+      machine: lab,
+      cwd: repo.cwd,
+      repo: repo.repo,
+      branch: "main",
+      model: MODELS["claude-code"][0],
+      account_id: DEMO_POOL.spacesheep.id,
+      attended: true,
+    });
+    const ev = sess.profile.ev;
+    const until = new Date(this.startAt + DEMO_POOL_UNTIL_MS).toISOString();
+    const week = new Date(this.startAt + 4 * DAY + 6 * HOUR).toISOString();
+    const turns = [
+      [
+        "Which docs pages still mention the old `--sink` flag?",
+        "Three: the install guide, the CLI reference and the FAQ's last answer. The flag is `sink add` since 0.8.",
+      ],
+      [
+        "Rewrite those three to say `sink add`, keeping each page's own tone.",
+        "Done: the install guide's step 3, the CLI reference's row, and the FAQ answer now say `sessionpipe sink add`. The examples' hosts are unchanged.",
+      ],
+      [
+        "Is anything else in docs/ still on 0.7 wording?",
+        "Two mentions of `--tail` in docs/troubleshooting.md; everything else reads 0.8 or later.",
+      ],
+    ] as const;
+    sess.emit("session.started", { source: "startup" }, ev.start);
+    sess.learn({ title: firstAsk(turns[0][0]), title_source: "first-ask" });
+    for (let i = 0; ; i++) {
+      const [prompt, reply] = turns[i % turns.length] as readonly [string, string];
+      const turnId = rng.uuid();
+      const ms = 24_000 + 3000 * (i % 3);
+      sess.emit("turn.started", { turn_id: turnId, prompt_chars: [...prompt].length }, ev.prompt);
+      yield ms;
+      sess.emit("turn.ended", { turn_id: turnId, reason: "stop", ms }, ev.stop);
+      sess.emit(
+        "turn.transcript",
+        { turn: i, user: prompt, assistant: reply, at: new Date(this.wall()).toISOString() },
+        ev.stop,
+      );
+      if (i === 0) {
+        // The first turn's last request: Spacesheep's 5 hours are at the switch point.
+        sess.emit(
+          "limits.observed",
+          {
+            account_id: DEMO_POOL.spacesheep.id,
+            windows: [
+              { id: "five_hour", used_percent: 99.2, window_minutes: 300, resets_at: until },
+              { id: "seven_day", used_percent: 3, window_minutes: 10_080, resets_at: week },
+            ],
+          },
+          "StatusLine",
+        );
+        yield 1500;
+      }
+      // Served by Misha from here on: every report names the account that answered.
+      sess.emit("limits.observed", { account_id: own, windows: this.labWindows(this.wall()) }, "StatusLine");
+      yield i === 0 ? 20_000 : 4 * MINUTE + 20_000 * (i % 2);
+    }
+  }
+
+  /** lab-mac's Claude Code windows as its status line reports them at `now`. */
+  private labWindows(now: number): Record<string, unknown>[] {
+    const f = this.fiveHour;
+    // Past its reset the window starts again, as the harness's own would.
+    while (f.resetsAt && f.resetsAt <= now) {
+      f.resetsAt += 5 * HOUR;
+      f.used = 3;
+    }
+    const week = new Date(this.startAt + 2 * DAY + 18 * HOUR).toISOString();
+    return [
+      { id: "five_hour", used_percent: f.used, window_minutes: 300, resets_at: new Date(f.resetsAt).toISOString() },
+      { id: "seven_day", used_percent: 20, window_minutes: 10_080, resets_at: week },
+      { id: "seven_day_fable", used_percent: 29, resets_at: week },
+    ];
+  }
+
+  /** lab-mac's status line after a reply on its own account: every third one moves the
+   *  5-hour window a point or two, and the hook reports only what changed. */
+  private statusLine(sess: Sess): void {
+    const lab = this.v010Machine;
+    const account = this.accounts.get(`${lab}/claude-code`);
+    if (sess.profile.name !== "claude-code" || sess.block.machine !== lab || sess.block.account_id !== account) return;
+    const f = this.fiveHour;
+    if (!f.resetsAt || ++f.replies % 3 !== 0) return;
+    f.used = Math.min(99, f.used + (f.bumps++ % 2 ? 2 : 1));
+    sess.emit("limits.observed", { windows: this.labWindows(this.wall()) }, "StatusLine");
+  }
+
+  /** A short session that ended before the demo began and left its account's limits:
+   *  one turn, the report after its reply (Claude Code's status line, Codex's Stop), the end. */
+  private earlier(p: {
+    harness: "claude-code" | "codex";
+    machine: string;
+    account?: string;
+    repo: Repo;
+    reportAt: number;
+    prompt: string;
+    reply: string;
+    windows: Record<string, unknown>[];
+    plan?: string;
+  }): void {
+    const rng = this.sideRng;
+    const codex = p.harness === "codex";
+    const start = p.reportAt - 4 * MINUTE;
+    const sess = new Sess(this, PROFILES[p.harness], codex ? rng.uuid7(start) : rng.uuid(), {
+      machine: p.machine,
+      cwd: p.repo.cwd,
+      repo: p.repo.repo,
+      branch: "main",
+      model: MODELS[p.harness][0],
+      title: firstAsk(p.prompt),
+      title_source: "first-ask",
+      ...(p.account ? { account_id: p.account } : {}),
+    });
+    const ev = sess.profile.ev;
+    const turnId = codex ? rng.uuid7(start) : rng.uuid();
+    const ms = 3 * MINUTE + 40_000;
+    sess.emit("session.started", { source: "startup" }, ev.start, true, start);
+    sess.emit("turn.started", { turn_id: turnId, prompt_chars: [...p.prompt].length }, ev.prompt, true, start + 5000);
+    sess.emit("turn.ended", { turn_id: turnId, reason: "stop", ms }, ev.stop, true, start + 5000 + ms);
+    sess.emit(
+      "turn.transcript",
+      { turn: 0, user: p.prompt, assistant: p.reply, at: new Date(start + 5000 + ms).toISOString() },
+      ev.stop,
+      true,
+      start + 5000 + ms,
+    );
+    sess.emit(
+      "limits.observed",
+      { windows: p.windows, plan: p.plan },
+      codex ? ev.stop : "StatusLine",
+      true,
+      p.reportAt,
+    );
+    sess.emit("session.ended", { reason: "exit" }, ev.end, true, p.reportAt + 20_000);
+  }
+
+  /** The session the daemon starts for an ask or a handoff: the asked harness, on the
+   *  asking session's machine and in its folder, `delegated_by` on every event (the hook
+   *  reads it from the env the daemon set). */
+  private child(from: Sess, harness: HarnessName): Sess {
+    const rng = this.rng;
+    const profile = PROFILES[harness];
+    const machine = from.block.machine as string;
+    return new Sess(this, profile, this.newSessionId(harness), {
+      machine,
+      cwd: from.block.cwd,
+      repo: from.block.repo,
+      branch: from.block.branch,
+      account_id: this.account(machine, harness),
+      delegated_by: `${from.profile.name}:${from.id}`,
+      ...(profile.modelAtStart ? { model: rng.pick(MODELS[harness]) } : {}),
+    });
+  }
+
+  /** `sessionpipe ask` from inside `from`'s turn (CONTROL.md §13): delegation.started on
+   *  the asking session, the asked agent's session with the framed question as its first
+   *  prompt, then delegation.ended with the answer. Returns the answer. */
+  private *asked(from: Sess, ask: AskScript): Generator<number, string, undefined> {
+    const rng = this.rng;
+    const askId = this.rng.ulid(this.wall());
+    const child = this.child(from, ask.harness);
+    const to = `${ask.harness}:${child.id}`;
+    const begun = this.now;
+    // The daemon learns the new session's id when the harness reveals it: `to` comes
+    // with the end, not the start.
+    from.emit(
+      "delegation.started",
+      { ask_id: askId, via: "ask", harness: ask.harness, text: ask.text.slice(0, 200) },
+      "",
+    );
+    yield rng.ms(2500, 600);
+    const reply = yield* this.childRun(
+      child,
+      ask.turns,
+      askFrame(ask.turns[0]?.prompt ?? ask.text, `${from.profile.name}:${from.id}`),
+    );
+    from.emit("delegation.ended", { ask_id: askId, to, ok: true, ms: this.now - begun, reply }, "");
+    return reply;
+  }
+
+  /** A handoff (CONTROL.md §3.1 `reply_to`): a `start` signed here named `from` as the
+   *  session to answer into. The daemon starts the asked agent (the demo machine records
+   *  the start), says so on `from` with `via: "handoff"`, and when the child answers,
+   *  delivers the reply into `from` as a framed prompt and closes the delegation with
+   *  `relayed: "delivered"`; `from` then answers that message as any other. */
+  private *handoff(from: Sess, h: HandoffScript, turn: number): Script {
+    const rng = this.rng;
+    const askId = this.rng.ulid(this.wall());
+    const child = this.child(from, h.harness);
+    const to = `${h.harness}:${child.id}`;
+    const begun = this.now;
+    const first = h.turns[0] as TurnScript;
+    const prompt = startFrame(h.text);
+    this.onStart?.({
+      harness: h.harness,
+      id: child.id,
+      machine: from.block.machine as string,
+      cwd: from.block.cwd as string,
+      text: h.text,
+      at: this.wall(),
+      replyTo: `${from.profile.name}:${from.id}`,
+      from: `${from.profile.name}:${from.id}`,
+    });
+    from.emit(
+      "delegation.started",
+      { ask_id: askId, via: "handoff", harness: h.harness, to, text: h.text.slice(0, 200) },
+      "",
+    );
+    yield rng.ms(3000, 800);
+    const reply = yield* this.childRun(child, [{ ...first, prompt }, ...h.turns.slice(1)], prompt);
+    yield rng.ms(1500, 400);
+    from.emit(
+      "delegation.ended",
+      { ask_id: askId, to, ok: true, ms: this.now - begun, relayed: "delivered", reply },
+      "",
+    );
+    yield rng.ms(1200, 300);
+    // The answer arrives as a prompt of its own, framed; the session answers it.
+    yield* this.playTurn(from, { prompt: answerFrame(h.harness, child.id, reply), steps: [], final: h.followUp }, turn);
+  }
+
+  /** The asked agent's session, start to end: its first prompt is the framed question
+   *  (`firstPrompt`), and its last turn's `final` is the answer. */
+  private *childRun(
+    child: Sess,
+    turns: readonly TurnScript[],
+    firstPrompt: string,
+  ): Generator<number, string, undefined> {
+    const rng = this.rng;
+    const profile = child.profile;
+    this.live++;
+    child.emit("session.started", { source: "startup" }, profile.ev.start);
+    yield rng.ms(4000, 1000);
+    let reply = "";
+    for (const [i, script] of turns.entries()) {
+      const s = i === 0 ? { ...script, prompt: firstPrompt } : script;
+      if (i === 0) child.learn({ title: firstAsk(s.prompt), title_source: "first-ask" });
+      yield* this.playTurn(child, s, i);
+      reply = script.final;
+      if (i < turns.length - 1) yield rng.ms(8000, 2000);
+    }
+    yield rng.ms(2000, 500);
+    child.emit("session.ended", { reason: "exit" }, profile.ev.end);
+    this.live--;
+    this.ended.push(child);
+    return reply;
   }
 
   /** A subagent as Claude Code sends it: inside the parent's session, every tool stamped

@@ -12,6 +12,8 @@ import type {
   Info,
   Labels,
   LabelsPatch,
+  Marks,
+  MarksPatch,
   SearchIndexStatus,
   SessionDetail,
   StreamMessage,
@@ -45,6 +47,13 @@ export interface Transport {
    *  arrives as a `labels` stream frame on every page. */
   labels(): Promise<Labels>;
   patchLabels(p: LabelsPatch): Promise<Labels>;
+  /** The person's read marks, and a merge into them (`null` clears); every page also gets
+   *  the change as a `marks` frame. */
+  marks(): Promise<Marks>;
+  patchMarks(p: MarksPatch): Promise<Marks>;
+  /** "Forget these numbers": one usage-limits entry goes until its next report; the
+   *  change arrives as a `limits` stream frame. */
+  forgetLimits(key: string): Promise<void>;
   /** Session search (web/src/search): its client arrives with the search code itself. */
   sessionSearch(): Promise<SearchClient>;
 }
@@ -62,8 +71,12 @@ export const STREAM_KINDS = [
   "viewers",
   "suggestion",
   "labels",
+  "marks",
+  "limits",
   "viewState",
   "searchIndex",
+  "workflowRun",
+  "workflows",
 ] as const satisfies readonly StreamMessage["kind"][];
 /** Fails to compile while a StreamMessage kind is missing from STREAM_KINDS. */
 const _everyKind: Exclude<StreamMessage["kind"], (typeof STREAM_KINDS)[number]> extends never ? true : never = true;
@@ -221,6 +234,14 @@ export function createHttpTransport(): Transport {
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify(p),
       }).then((r) => json<Labels>(r)),
+    marks: () => get<Marks>(ROUTES.ui.marks),
+    patchMarks: (p) =>
+      fetch(apiUrl(ROUTES.ui.marks), {
+        method: "PATCH",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify(p),
+      }).then((r) => json<Marks>(r)),
+    forgetLimits: (key) => post<void>(ROUTES.ui.limitsForget, { key }),
     sessionSearch: () => import("../search/http").then((m) => m.httpSearch(searchFrames)),
   };
 }

@@ -105,7 +105,7 @@ age window, no nonce store) and only then queues it.
 
 | Route | Body → answer |
 |---|---|
-| `POST /send` | `{ machineId, cmd, csig?, grant?, confirm?, expires_in_s? }` → `201 ControlActivity`; `422 { reason, code }` with the verifier's code (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …) or the second look's (below) when it refuses; `404` unknown machine |
+| `POST /send` | `{ machineId, cmd, csig?, grant?, confirm?, expires_in_s?, from? }` (`SendBody`) → `201 ControlActivity`; `422 { reason, code }` with the verifier's code (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …) or the second look's (below) when it refuses; `404` unknown machine; `400` a `from` that is not a session ref |
 | `POST /files?name=<name>` | One file a `start` will carry: the raw bytes, its media type as `content-type` → `201 StartFile { name, type, size, sha256 }` (sha256 base64url, CONTROL.md §3.1). Held a day under `<stateDir>/control/files/<sha256>`, longer when a queued start needs it; `413` over 25 MiB, `415` no media type, `400` empty or a name a machine would refuse |
 | `GET /activity?limit=` | `{ activity: ControlActivity[] }`, newest first (default 100, at most 1000) |
 | `GET /machines` | `{ machines: (MachineControl & { name, createdAt, pairedAt? })[] }` — paired machines |
@@ -121,7 +121,21 @@ kept) to a final `delivered` / `expired` / `unsupported` / `failed` / `refused` 
 For a `permission.answer`, `text` is `"<decision>"` or `"<decision>: <note>"`; for a
 `key.add`, `"trust <name>"`. A `start`'s activity also carries what was signed (`cwd`,
 `permission`, `model`, `files`) and, from its `taken` / `delivered` ack, `applied`: what
-the machine ran it with.
+the machine ran it with. `from` is the page's own unsigned note of which session's page
+sent it (`SendBody.from`, a `<harness>:<id>`): kept on the activity for the lineage the
+UI shows at once, never carried to the machine.
+
+**A handoff** (sessionpipe CONTROL.md §3.1 `reply_to`). A `prompt` or a `start` may name
+another session on the same machine as `reply_to`, inside the signed bytes: after the
+command's final `delivered` ack the daemon delivers the answer into that session and says
+how it went in that session's events (`delegation.ended.relayed`); the command's own ack
+is unchanged. The receiver's second look (`replyToProblem`, before the one below) holds it
+to a prompt or a start (`bad_fields` on anything else, or a malformed ref, or the
+command's own session), and to a machine whose last hello said `handoff` (`handoff`: an
+older daemon would refuse the whole command, or ignore the relay). The activity carries it
+as `replyTo`. This receiver's own sessionpipe-core verifies every command first, and a
+core from before `ask` (0.10.0) refuses the field `bad_fields` there, whatever the hello
+says (`coreTakesReplyTo`): a handoff goes through once the core is bumped.
 
 **The second look** (`precheck.ts`). After the verifier, the receiver holds a command to
 what the machine's last hello advertised (CONTROL.md §2), because a daemon that predates
@@ -136,7 +150,9 @@ skips this look so a delivery scenario can reach the machine's own refusal.
 
 **Hello facts** kept per machine and shown on `MachineControl`: `mode` (`safe`, `auto`, or
 `inherit` from sessionpipe 0.10: no permission flag), `files`, `prompt_files`
-(`promptFiles`) and `start` (per harness `{ permissions, permission, models?, any_model? }`;
+(`promptFiles`), `ask` (a boolean: whether `sessionpipe ask` is on there, so its agents can
+ask each other) and `handoff` (`true`: it takes `reply_to`; the Handoff sheet offers "bring
+the answer back" only then), both absent from a hello that predates them, and `start` (per harness `{ permissions, permission, models?, any_model? }`;
 an entry for a harness the hello does not list, a default outside its levels (or
 `inherit`), unknown levels and malformed models are dropped; on an `inherit` machine, or
 for a default of `inherit`, the levels are capped at read and safe). `accounts` keep one
@@ -147,6 +163,50 @@ the machine expands: set when this receiver's sessionpipe-core takes one and the
 away. The well-known's `control.inherit: true` tells a daemon this receiver shows an
 inherit machine as that, so it may pair or switch to inherit with it (CONTROL.md §2).
 Demo mode puts its machines here through `demo` (ids `m_demo-…`, server/demo/machine.ts).
+
+## The pool (DESIGN §2.3: hello `pool`, the `pool` command)
+
+A machine whose sessionpipe (0.11) pools Claude accounts sends `pool` in every hello
+(`{on, harness, accounts[]}`, `{on: false, accounts: []}` when nothing is set up), and a
+hello at once when the pool changes. `parse.ts` reads it strictly: the object needs `on`,
+a harness and an `accounts` list, or there is no pool (the rest of the hello stands); an
+account that breaks its shape (no id, an unknown `status`, `enabled` not a boolean) is
+dropped, never the pool; a malformed `email`, `label`, `until`, `limited_by` or window is
+dropped from its account; ids once each, at most 20, in the machine's order. It lands on
+`MachineControl.pool` (`shared/api.ts` `MachinePool`, `MachinePoolAccount`: `id`, `email?`,
+`label?`, `enabled`, `status` ready · limited · error · disabled, `current`, `until?`,
+`windows?`, `limitedBy?`) and, like every hello fact, a hello without it takes it away. An
+account's `windows` (its freshest numbers, idle or not) feed the limits store
+(`server/ui/limits.ts` `followControl`), dated by the hello, newest wins against the
+events'; a `limits.observed` with `data.account_id` is keyed by that account, the one that
+served the request.
+
+The command is kind `pool` on session `sessionpipe:pool` with `pool_action` (`on`, `off`,
+`enable`, `disable`, `remove`, `order`, `refresh`, `login.begin`, `login.complete`),
+`pool_account` (`^[A-Za-z0-9._:-]{1,128}$`: the account for enable / disable / remove,
+optionally for refresh, the pending login id for login.complete), `pool_order` (order:
+every account id once, at most 20) and `pool_code` (login.complete: the pasted
+`code#state`, at most 512 characters, one line); on, off and login.begin take nothing
+else. It goes through `POST /send` like any command; the page signs on, off, remove, order,
+disable and login.complete with a fresh confirm (`POOL_CONFIRM_ACTIONS`), never the day
+grant, and the early verify refuses one of those signed with a grant alone with
+`confirm_required`, as the daemon does. This receiver's sessionpipe-core (0.10.0) closes
+its kind set in `parseCommand`, which its verifier runs first, so `pool.ts` verifies the
+kind itself: its own strict parser for the fields, then the core's exported primitives
+(`parseGrant`, `verifyAssertion`, `sha256`) in the core's order with the core's refusal
+codes, and the day key's P-256 signature over the exact bytes checked here; once a core
+that lists `pool` is installed (`coreTakesPool()`), the core's `verifyCommand` decides.
+The second look (`precheck.ts`) refuses `pool_unsupported` for a machine whose hello has
+no `pool`, `pool_account` for an id the pool does not list (login.complete's pending id
+excepted), `pool_order` for an order that does not name every account once. The activity
+carries `poolAction` and `poolAccount`, its `text` the command in words ("Turn the pool
+on", "Move Fiction first", "Refresh fiction@example.com"), and the machine's ack `detail`
+as it came: the pool's summary line ("on · 3 accounts · 2 with room · serving Fiction"),
+or for `login.begin` "<pending login id> <URL>" (`web/src/lib/pool.ts` reads it). The
+machine's own codes (`shared/api.ts` `POOL_CODES`): refused `pool_account` (unknown, or a
+sign-in older than ten minutes), `pool_order`, `pool_off` (refresh and the sign-ins need
+the pool on); failed `login` (the vendor rejected the code), `pool` (the vendor call did
+not go through); `unsupported` when the daemon knows the kind but the machine cannot pool.
 
 ## The machine wire (for reference)
 

@@ -53,6 +53,7 @@ describe("MachineControl.tilde", () => {
       promptFiles: false,
       start,
       keyTypes: null,
+      pool: null,
     });
     // CONTROL.md §3.1: a machine whose hello has `start` takes a `~` folder; another doesn't.
     const opts = { "claude-code": { permissions: ["read" as const, "safe" as const], permission: "inherit" as const } };

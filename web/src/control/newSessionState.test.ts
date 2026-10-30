@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // The New session sheet's state (newSessionState.ts): which machine a plain "New session…"
 // means, a remembered choice pruned to what the machine still advertises, the alias window.
-import type { ControlActivity, MachineControl } from "@shared/api";
+import type { ControlActivity, LimitsEntry, MachineControl, MachinePool } from "@shared/api";
 import { describe, expect, it } from "vitest";
 import {
+  agentLeft,
   aliasHidden,
   fixedPermission,
   machineFacts,
@@ -213,5 +214,79 @@ describe("machineFacts and fixedPermission", () => {
     ).toBe("Safe");
     expect(fixedPermission({ ...base, mode: "safe" }, "claude-code", L)).toBe("Safe mode, set at the machine");
     expect(fixedPermission(base, "claude-code", L)).toBe("Set at the machine");
+  });
+});
+
+describe("agentLeft", () => {
+  const NOW = Date.UTC(2026, 9, 29, 12, 0, 0);
+  const H = 3_600_000;
+  const misha = { id: "a", email: "misha@example.com", label: "Misha", enabled: true, status: "ready" as const };
+  const pool: MachinePool = {
+    on: true,
+    harness: "claude-code",
+    accounts: [
+      { ...misha, current: true },
+      { id: "b", email: "fiction@example.com", label: "Fiction", enabled: true, status: "ready", current: false },
+      {
+        id: "c",
+        email: "spacesheep@example.com",
+        label: "Spacesheep",
+        enabled: true,
+        status: "limited",
+        current: false,
+        until: new Date(NOW + 2 * H + 10 * 60_000).toISOString(),
+      },
+    ],
+  };
+  const control = (p: MachinePool | undefined): MachineControl =>
+    ({
+      machineId: "m",
+      online: true,
+      keys: [],
+      queued: 0,
+      accounts: [{ harness: "claude-code", id: "a", email: "misha@example.com" }],
+      ...(p ? { pool: p } : {}),
+    }) as MachineControl;
+  const entry: LimitsEntry = {
+    key: "claude-code a:a",
+    harness: "claude-code",
+    accountId: "a",
+    machine: "lab-mac",
+    machines: ["lab-mac"],
+    windows: [
+      {
+        id: "five_hour",
+        usedPercent: 38,
+        windowMinutes: 300,
+        resetsAt: new Date(NOW + 2 * H + 21 * 60_000).toISOString(),
+      },
+    ],
+    observedAt: new Date(NOW).toISOString(),
+  };
+  it("reads the pool's current account on a machine with the switch on", () => {
+    expect(agentLeft("claude-code", "lab-mac", control(pool), [entry], NOW)).toEqual({
+      hint: "62% left",
+      detail: "3 accounts, 2 with room · Misha, 5 hours, resets in 2 h 21 m",
+      out: false,
+    });
+  });
+  it("leaves other agents, a pool that is off and a machine without one to the login's own numbers", () => {
+    expect(agentLeft("codex", "lab-mac", control(pool), [entry], NOW)).toEqual({});
+    const own = { hint: "62% left", detail: "5 hours, resets in 2 h 21 m", out: false };
+    expect(agentLeft("claude-code", "lab-mac", control({ ...pool, on: false }), [entry], NOW)).toEqual(own);
+    expect(agentLeft("claude-code", "lab-mac", control(undefined), [entry], NOW)).toEqual(own);
+    const allOff = {
+      ...pool,
+      accounts: pool.accounts.map((a) => ({ ...a, enabled: false, status: "disabled" as const })),
+    };
+    expect(agentLeft("claude-code", "lab-mac", control(allOff), [entry], NOW)).toEqual(own);
+  });
+  it("says None left when no pooled account has room", () => {
+    const out = { ...pool, accounts: pool.accounts.map((a) => ({ ...a, current: false, status: "limited" as const })) };
+    expect(agentLeft("claude-code", "lab-mac", control(out), [entry], NOW)).toEqual({
+      hint: "None left",
+      detail: "3 accounts, none with room · first back in 2 h 10 m",
+      out: true,
+    });
   });
 });

@@ -509,6 +509,13 @@ function General() {
             label="Confirm before Forget"
           />
         </Row>
+        <Row label="Usage in the sidebar" hint="This device only.">
+          <Toggle
+            on={s.usageInSidebar}
+            onChange={(usageInSidebar) => setSettings({ usageInSidebar })}
+            label="Usage in the sidebar"
+          />
+        </Row>
       </Group>
       <Display />
     </>

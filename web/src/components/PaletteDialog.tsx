@@ -29,7 +29,15 @@ import { canSign, signHint } from "../control/signer";
 import { sendErrorWords } from "../control/words";
 import { byStateThenRecent, useAppState, useLabels, useStore } from "../data/hooks";
 import { agentLabel, agentMatches, openAgent } from "../lib/agents";
-import { attentionMessage, modelShort, repoShort, STATE_LABEL, sessionTitle, toolLabel } from "../lib/format";
+import {
+  attentionMessage,
+  isPlanReview,
+  modelShort,
+  repoShort,
+  STATE_LABEL,
+  sessionTitle,
+  toolLabel,
+} from "../lib/format";
 import { type FieldsMatch, fuzzyFields } from "../lib/fuzzy";
 import { labelName, labelQuery, setLabel } from "../lib/labels";
 import { navigate, parseRoute, sessionPath, useRoute } from "../lib/router";
@@ -37,6 +45,8 @@ import { useSimple } from "../lib/settings";
 import { hintFor, IS_MAC, matches, useShortcutMap } from "../lib/shortcuts";
 import { openSplit, useSplitKey } from "../lib/split";
 import { setSkin, setTextSize, setTheme, TEXT_SIZES, type Theme, useSettings } from "../lib/theme";
+import { askOff } from "../orchestrate/handoff/handoff";
+import { openHandoffFor } from "../orchestrate/handoff/handoffState";
 import {
   openTranscriptRow,
   PALETTE_MIN,
@@ -282,6 +292,13 @@ function snapToRows(list: HTMLElement): void {
     bottom = b;
   }
   if (bottom > 0) list.style.maxHeight = `${bottom + 4}px`;
+}
+
+/** A "Needs you" command's words: a plan review's own pair (Approve plan, Keep planning),
+ *  as the strip says it; else the verb and the tool, which the row shows as code. */
+export function answerWords(a: { kind?: string; tool?: string }, allow: boolean): { verb: string; tool?: string } {
+  if (isPlanReview(a)) return { verb: allow ? "Approve plan" : "Keep planning" };
+  return { verb: allow ? "Allow" : "Deny", tool: a.tool ? toolLabel(a.tool) : "this" };
 }
 
 export function PaletteDialog({ closing = false }: { closing?: boolean }) {
@@ -567,7 +584,8 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
           const title = sessionTitle(s);
           for (const allow of [true, false]) {
             const verb = allow ? "Allow" : "Deny";
-            const label = `${verb} ${a.tool ? toolLabel(a.tool) : "this"}`;
+            const words = answerWords(a, allow);
+            const label = words.tool ? `${words.verb} ${words.tool}` : words.verb;
             const m = text ? fuzzyFields(text, [label, title, s.machine ?? ""]) : null;
             if (text && !m) continue;
             out.push({
@@ -576,10 +594,16 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
               mark: <StateDot state="needs_you" decorative />,
               label: (
                 <>
-                  {verb} <code>{a.tool ? toolLabel(a.tool) : "this"}</code> in <Hit text={title} at={m?.positions[1]} />
+                  {words.verb}{" "}
+                  {words.tool && (
+                    <>
+                      <code>{words.tool}</code>{" "}
+                    </>
+                  )}
+                  in <Hit text={title} at={m?.positions[1]} />
                 </>
               ),
-              detail: a.message ? a.message : undefined,
+              detail: attentionMessage(a),
               at: a.at,
               session: s,
               score: (m?.score ?? 0) + 2,
@@ -644,6 +668,21 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
             if (!can.ok) setNote({ text: can.why, err: true });
           },
           onItsPage(s) ? hintFor("session.prompt") : undefined,
+        );
+        // The Handoff sheet (orchestrate/handoff): the row runs when its machine can take
+        // an ask; else it says why, the way a message that cannot be sent does.
+        add(
+          "Ask another agent…",
+          () => {
+            const off = askOff(s, s.machine ? machines.get(s.machine)?.control : undefined);
+            if (off) {
+              setNote({ text: off, err: true });
+              return;
+            }
+            closePalette();
+            openHandoffFor(s);
+          },
+          hintFor("session.ask") || undefined,
         );
         if (!simple && !(isCtx && splitActive === s.key && !onItsPage(s)))
           add(
@@ -776,10 +815,19 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     }
 
     if (want("Go to")) {
-      const places: { label: string; detail?: string; key?: string; run: () => void }[] = [
+      // `words`: what else finds a place ("limits" finds Usage), matched like its name.
+      const places: { label: string; detail?: string; words?: string; key?: string; run: () => void }[] = [
         { label: "Board", key: "nav.board", run: () => navigate("/") },
         { label: "Feed", key: "nav.feed", run: () => navigate("/feed") },
         { label: "Machines", key: "nav.machines", run: () => navigate("/machines") },
+        {
+          label: "Usage",
+          detail: "what each account has left",
+          words: "limits quota left",
+          key: "nav.usage",
+          run: () => navigate("/usage"),
+        },
+        { label: "Workflows", key: "nav.workflows", run: () => navigate("/workflows") },
         { label: "Connect", key: "nav.connect", run: () => navigate("/connect") },
       ];
       for (const p of ["Inbox", "Review", "Setup"]) {
@@ -814,7 +862,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
       places.push({ label: "Settings", detail: "mode · tier lens · data", run: () => navigate("/settings") });
       const rows: Item[] = [];
       for (const p of places) {
-        const m = text ? fuzzyFields(text, [p.label]) : null;
+        const m = text ? fuzzyFields(text, [p.label, p.words ?? ""]) : null;
         if (text && !m) continue;
         rows.push({
           id: `g:${p.label}`,

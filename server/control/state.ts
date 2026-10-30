@@ -27,6 +27,8 @@ import type {
   KeyType,
   MachineControl,
   MachineMode,
+  MachinePool,
+  PoolAction,
   StartFile,
   StartPermission,
   TrustedKey,
@@ -34,6 +36,7 @@ import type {
 import type { DeviceSignature } from "./devicekeys.js";
 import { FileStore } from "./files.js";
 import { type AckIn, type HarnessAccount, type Hello, isFinal } from "./parse.js";
+import type { PoolCommand } from "./pool.js";
 import { machineTakesTilde } from "./tilde.js";
 
 /** Demo mode's machines have ids under this prefix (MACHINE_RE: `m_` and 16–40 more). */
@@ -48,6 +51,9 @@ export interface DemoStart {
   mode: string;
   reply?: string;
   applied?: Applied;
+  /** A handoff from this receiver: `reply_to` as it would be signed, and the page's `from`. */
+  replyTo?: string;
+  from?: string;
 }
 
 /** The longest long-poll we hold (HTTP.md §1 control.wait_max_s). */
@@ -133,6 +139,12 @@ export interface MachineRow {
   start?: Record<string, HarnessStartOptions>;
   /** Pairing or hello `key_types`; absent means passkeys only (an older daemon). */
   keyTypes?: KeyType[];
+  /** The last hello's `pool` (sessionpipe 0.11); said again each time, so absent is absent. */
+  pool?: MachinePool;
+  /** The last hello's word on agents asking agents (CONTROL.md §13): `ask` on or off there,
+   *  `handoff` when it takes `reply_to`. Absent when the hello said nothing (a 0.10 daemon). */
+  ask?: boolean;
+  handoff?: boolean;
   waiting?: string[];
   lastHelloAt?: string;
   lastPollAt?: string;
@@ -195,6 +207,13 @@ export interface MessageRow {
   files?: StartFile[];
   /** What the machine ran the start with (`taken`, `delivered`). */
   applied?: Applied;
+  /** A pool command's action and account, as signed (pool.ts read them). */
+  poolAction?: PoolAction;
+  poolAccount?: string;
+  /** A handoff: `reply_to` as signed on a prompt or a start (CONTROL.md §3.1). */
+  replyTo?: string;
+  /** The UI's unsigned note of which session's page sent it (SendBody.from). */
+  from?: string;
 }
 
 interface MachinesFile {
@@ -253,6 +272,10 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.model) a.model = m.model;
   if (m.files) a.files = m.files;
   if (m.applied) a.applied = m.applied;
+  if (m.poolAction) a.poolAction = m.poolAction;
+  if (m.poolAccount) a.poolAccount = m.poolAccount;
+  if (m.replyTo) a.replyTo = m.replyTo;
+  if (m.from) a.from = m.from;
   return a;
 }
 
@@ -261,7 +284,38 @@ function describe(cmd: ControlCommand): string | undefined {
   if (typeof cmd.text === "string") return cmd.text;
   if (cmd.kind === "permission.answer") return cmd.note ? `${cmd.decision}: ${cmd.note}` : cmd.decision;
   if (cmd.kind === "key.add") return cmd.name ? `trust ${cmd.name}` : "trust a new device";
+  if ((cmd.kind as string) === "pool") return describePool(cmd as unknown as PoolCommand);
   return cmd.note;
+}
+
+/** A pool command in words, as the activity shows it: "Turn the pool on", "Move Fiction
+ *  first", "Refresh dev@example.com". `names` turns an account id into what the person
+ *  calls it (its label, else its email, else the id itself); the activity keeps the id. */
+export function describePool(cmd: PoolCommand, names: (id: string) => string = (id) => id): string {
+  const who = cmd.pool_account ? names(cmd.pool_account) : "an account";
+  if (cmd.pool_action === "refresh" && !cmd.pool_account) return "Refresh usage";
+  switch (cmd.pool_action) {
+    case "on":
+      return "Turn the pool on";
+    case "off":
+      return "Turn the pool off";
+    case "enable":
+      return `Turn ${who} on`;
+    case "disable":
+      return `Turn ${who} off`;
+    case "remove":
+      return `Remove ${who}`;
+    case "refresh":
+      return `Refresh ${who}`;
+    case "order": {
+      const first = cmd.pool_order?.[0];
+      return first ? `Move ${names(first)} first` : "Reorder the accounts";
+    }
+    case "login.begin":
+      return "Sign in to Claude";
+    case "login.complete":
+      return "Finish signing in";
+  }
 }
 
 type Waiter = { resolve: (messages: MessageRow[]) => void; timer: NodeJS.Timeout };
@@ -408,6 +462,12 @@ export class ControlState {
     else delete m.start;
     if (h.keyTypes) m.keyTypes = h.keyTypes;
     else delete m.keyTypes;
+    if (h.pool) m.pool = h.pool;
+    else delete m.pool;
+    if (h.ask !== undefined) m.ask = h.ask;
+    else delete m.ask;
+    if (h.handoff) m.handoff = true;
+    else delete m.handoff;
   }
 
   /** Mint the machine's own bearer token (once, at its first pairing). Returned in clear
@@ -476,6 +536,9 @@ export class ControlState {
     if (this.takesTilde && machineTakesTilde(m)) c.tilde = true;
     if (m.start) c.start = m.start;
     if (m.keyTypes) c.keyTypes = m.keyTypes;
+    if (m.pool) c.pool = m.pool;
+    if (m.ask !== undefined) c.ask = m.ask;
+    if (m.handoff) c.handoff = true;
     return c;
   }
 
@@ -575,7 +638,7 @@ export class ControlState {
     m: MachineRow,
     signed: SignedCommand,
     cmd: ControlCommand,
-    o: { expiresInMs?: number; via: string },
+    o: { expiresInMs?: number; via: string; from?: string },
   ): MessageRow {
     const now = Date.now();
     const ttl = Math.min(EXPIRES_MAX_MS, Math.max(1000, o.expiresInMs ?? EXPIRES_DEFAULT_MS));
@@ -592,8 +655,21 @@ export class ControlState {
     if (signed.csig) row.csig = signed.csig;
     if (signed.grant) row.grant = signed.grant;
     if (signed.confirm) row.confirm = signed.confirm;
-    const text = describe(cmd);
+    const text =
+      (cmd.kind as string) === "pool"
+        ? describePool(cmd as unknown as PoolCommand, (id) => this.accountName(m, id))
+        : describe(cmd);
     if (text !== undefined) row.text = text;
+    if ((cmd.kind as string) === "pool") {
+      const c = cmd as unknown as PoolCommand;
+      row.poolAction = c.pool_action;
+      if (c.pool_account) row.poolAccount = c.pool_account;
+    }
+    if (o.from) row.from = o.from;
+    // A handoff (CONTROL.md §3.1): the session the daemon relays the answer into. Inside the
+    // signed bytes; the caller's second look (ui.ts) held it to the machine's hello.
+    const replyTo = (cmd as ControlCommand & { reply_to?: unknown }).reply_to;
+    if ((cmd.kind === "prompt" || cmd.kind === "start") && typeof replyTo === "string") row.replyTo = replyTo;
     if (cmd.kind === "start") {
       // The fields a start may carry beyond core 0.7's type (CONTROL.md §3.1); the caller's
       // pre-check (ui.ts) already held them to the machine's hello.
@@ -612,6 +688,16 @@ export class ControlState {
     this.onMessage(row);
     this.wake(m.id);
     return row;
+  }
+
+  /** What the person calls a pooled account on this machine: its pool label, else its
+   *  email (from the pool or the hello's accounts), else the id as it is. */
+  private accountName(m: MachineRow, id: string): string {
+    const pooled = m.pool?.accounts.find((a) => a.id === id);
+    if (pooled?.label) return pooled.label;
+    if (pooled?.email) return pooled.email;
+    const named = m.accounts?.find((a) => a.id === id);
+    return named?.email ?? named?.name ?? id;
   }
 
   message(machineId: string, id: string): MessageRow | undefined {
@@ -879,6 +965,8 @@ export class ControlState {
       ackedAt: new Date(Date.parse(at) + 4000).toISOString(),
       ...(run.reply ? { reply: run.reply } : {}),
       ...(run.applied ? { applied: run.applied } : {}),
+      ...(run.replyTo ? { replyTo: run.replyTo } : {}),
+      ...(run.from ? { from: run.from } : {}),
     };
     this.queue(id).push(row);
     this.saveQueue(id);
@@ -897,5 +985,15 @@ export class ControlState {
     for (const q of this.queues.values()) all.push(...q);
     all.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
     return all.slice(0, Math.max(0, limit)).map(toActivity);
+  }
+
+  /** One carried command by its id, whichever machine's queue holds it; undefined once
+   *  its queue is gone (the machine removed) or it was never here. */
+  activityById(id: string): ControlActivity | undefined {
+    for (const q of this.queues.values()) {
+      const row = q.find((m) => m.id === id);
+      if (row) return toActivity(row);
+    }
+    return undefined;
   }
 }

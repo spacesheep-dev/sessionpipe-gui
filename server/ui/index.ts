@@ -21,6 +21,8 @@ import { registerAttachments } from "./attachments.js";
 import { uiAuth } from "./auth.js";
 import { readColorThemes } from "./colorThemes.js";
 import { type LabelStore, registerLabels } from "./labels.js";
+import { type LimitsStore, registerLimits } from "./limits.js";
+import { type MarkStore, registerMarks } from "./marks.js";
 import { cutPreview } from "./preview.js";
 import { registerProcessStats } from "./process.js";
 import { registerReview } from "./review.js";
@@ -48,6 +50,11 @@ export interface UiDeps {
   /** The person's colour labels (labels.ts): on the snapshot, on the stream, and their
    *  own routes. */
   labels?: LabelStore;
+  /** The person's read marks (marks.ts): the same three places as labels. */
+  marks?: MarkStore;
+  /** Each account's usage limits (limits.ts): on the snapshot, on the stream, and their
+   *  own routes. */
+  limits?: LimitsStore;
   /** More stream messages from elsewhere (a view's state written, themes/routes.ts). */
   broadcast?: { subscribe(l: (m: StreamMessage) => void): () => void };
 }
@@ -95,6 +102,8 @@ export function registerUi(router: Router, deps: UiDeps): void {
     viewers: viewers.list(),
     ...(deps.plugins ? { suggestions: deps.plugins.currentSuggestions() } : {}),
     ...(deps.labels ? { labels: deps.labels.get() } : {}),
+    ...(deps.marks ? { marks: deps.marks.get() } : {}),
+    ...(deps.limits ? { limits: deps.limits.list() } : {}),
   });
 
   router.get(
@@ -117,7 +126,7 @@ export function registerUi(router: Router, deps: UiDeps): void {
         viewers,
         pingMs: deps.pingMs,
         plugins: deps.plugins,
-        more: [deps.labels, deps.broadcast].filter((x) => x !== undefined),
+        more: [deps.labels, deps.marks, deps.limits, deps.broadcast].filter((x) => x !== undefined),
       });
     }),
   );
@@ -180,6 +189,8 @@ export function registerUi(router: Router, deps: UiDeps): void {
 
   registerReview(router, deps.store, guard);
   if (deps.labels) registerLabels(router, deps.labels, guard);
+  if (deps.marks) registerMarks(router, deps.marks, guard);
+  if (deps.limits) registerLimits(router, deps.limits, guard);
 
   router.post(
     ROUTES.ui.rotateToken,

@@ -149,12 +149,22 @@ export const isCancel = (e: unknown): boolean => (e instanceof Error ? e.message
 
 // ----- Settings › App: updates -----
 
-export function updateLine(appVersion: string, u: { state: string; version?: string }): string {
+export interface UpdateWords {
+  state: string;
+  version?: string;
+  lastChecked?: string;
+  error?: string;
+  progress?: number;
+}
+
+export function updateLine(appVersion: string, u: UpdateWords): string {
   switch (u.state) {
     case "checking":
       return "Checking for updates…";
-    case "downloading":
-      return u.version ? `Downloading ${u.version}…` : "Downloading the update…";
+    case "downloading": {
+      const pct = typeof u.progress === "number" ? ` ${Math.round(u.progress)}%` : "";
+      return u.version ? `Downloading ${u.version}…${pct}` : `Downloading the update…${pct}`;
+    }
     case "ready":
       return u.version ? `${u.version} is ready` : "An update is ready";
     case "error":
@@ -162,4 +172,28 @@ export function updateLine(appVersion: string, u: { state: string; version?: str
     default:
       return appVersion ? `sessionpipe ${appVersion} is up to date` : "sessionpipe is up to date";
   }
+}
+
+/** "Last checked just now" … "Last checked 3 days ago", or "" before the first check. */
+export function lastCheckedLine(iso: string | undefined, now = Date.now()): string {
+  const t = iso ? Date.parse(iso) : Number.NaN;
+  if (Number.isNaN(t)) return "";
+  const m = Math.max(0, Math.floor((now - t) / 60_000));
+  if (m < 1) return "Last checked just now";
+  if (m < 60) return `Last checked ${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `Last checked ${h} ${h === 1 ? "hour" : "hours"} ago`;
+  const d = Math.floor(h / 24);
+  return `Last checked ${d === 1 ? "yesterday" : `${d} days ago`}`;
+}
+
+/** The caption under the update row: the reason it failed, the version you have while
+ *  another is on its way, and when it last looked. */
+export function updateHint(appVersion: string, u: UpdateWords, now = Date.now()): string {
+  const parts: string[] = [];
+  if (u.state === "error" && u.error) parts.push(u.error);
+  if (appVersion && (u.state === "ready" || u.state === "downloading")) parts.push(`You have ${appVersion}.`);
+  const last = lastCheckedLine(u.lastChecked, now);
+  if (last) parts.push(`${last}.`);
+  return parts.join(" ");
 }

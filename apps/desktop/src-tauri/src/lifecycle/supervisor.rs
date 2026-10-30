@@ -8,11 +8,16 @@
 //! service install` (the GUI is not on npm; its GitHub release carries the tarball). No Node: the
 //! welcome shows the one-line installer.
 //!
+//! `service install` upgrades a service it finds in place (every app update does), so its
+//! lines are read as they come and shown on the welcome: "Updating sessionpipe 0.4.1 →
+//! 0.6.0…", "Starting… this can take a minute on a big board" (a big state dir rebuilds its
+//! index at boot). Exit 0 is success, whatever it said; exit 1 is its last line.
+//!
 //! Debug builds never install anything and never touch :7373: they run the install with
 //! `--dry-run`, then start a demo receiver as a child on SP_DEV_RECEIVER_PORT (7828),
 //! which dies with the app.
 
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -24,8 +29,11 @@ use tauri::{plugin::TauriPlugin, AppHandle, Runtime};
 
 pub const SERVICE_PORT: u16 = 7373;
 pub const DEV_PORT: u16 = 7828;
-pub const READY_TIMEOUT: Duration = Duration::from_secs(10);
-const INSTALL_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long the receiver gets to answer after the install: a 1 GB state dir takes ~30 s
+/// to index at boot (the installer itself waits 90 s for it).
+pub const READY_TIMEOUT: Duration = Duration::from_secs(90);
+/// npx may download the release first, then the installer waits READY_TIMEOUT.
+const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Debug)]
 pub enum StartError {
@@ -43,7 +51,10 @@ impl std::fmt::Display for StartError {
             StartError::NoNode => write!(f, "sessionpipe needs Node 20 or later"),
             StartError::Failed(m) => write!(f, "{m}"),
             StartError::Timeout(p) => {
-                write!(f, "sessionpipe started but isn't answering on port {p} yet")
+                write!(
+                    f,
+                    "sessionpipe started but isn't answering on port {p} yet; a big board takes a while to load"
+                )
             }
         }
     }
@@ -155,7 +166,7 @@ fn login_shell_lookup() -> Option<String> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    let out = wait_output(child, Duration::from_secs(5)).ok()?;
+    let out = wait_output(child, Duration::from_secs(5), |_| {}).ok()?;
     Some(out.1)
 }
 
@@ -259,17 +270,25 @@ pub fn release_tarball(version: &str) -> String {
     )
 }
 
-/// Waits for a child with a deadline, collecting (status, stdout, stderr).
-fn wait_output(mut child: Child, timeout: Duration) -> Result<(i32, String, String), StartError> {
+/// Waits for a child with a deadline, collecting (status, stdout, stderr); each stdout
+/// line goes to `on_line` as it arrives.
+fn wait_output(
+    mut child: Child,
+    timeout: Duration,
+    mut on_line: impl FnMut(&str),
+) -> Result<(i32, String, String), StartError> {
     let deadline = Instant::now() + timeout;
-    let mut stdout = child.stdout.take();
+    let stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
     let out_t = std::thread::spawn(move || {
-        let mut s = String::new();
-        if let Some(o) = stdout.as_mut() {
-            let _ = o.read_to_string(&mut s);
+        if let Some(o) = stdout {
+            for line in BufReader::new(o).lines().map_while(Result::ok) {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
         }
-        s
     });
     let err_t = std::thread::spawn(move || {
         let mut s = String::new();
@@ -278,10 +297,20 @@ fn wait_output(mut child: Child, timeout: Duration) -> Result<(i32, String, Stri
         }
         s
     });
+    let mut out = String::new();
+    let mut drain = |out: &mut String| {
+        while let Ok(line) = rx.try_recv() {
+            on_line(&line);
+            out.push_str(&line);
+            out.push('\n');
+        }
+    };
     loop {
+        drain(&mut out);
         match child.try_wait() {
             Ok(Some(st)) => {
-                let out = out_t.join().unwrap_or_default();
+                let _ = out_t.join();
+                drain(&mut out);
                 let err = err_t.join().unwrap_or_default();
                 return Ok((st.code().unwrap_or(-1), out, err));
             }
@@ -299,8 +328,13 @@ fn wait_output(mut child: Child, timeout: Duration) -> Result<(i32, String, Stri
     }
 }
 
-/// Runs an invocation; Ok(stdout) on exit 0, else the last line it printed.
-pub fn run(inv: &Invocation, timeout: Duration) -> Result<String, StartError> {
+/// Runs an invocation; Ok(stdout) on exit 0, else the last line it printed. `on_line`
+/// sees each stdout line as the program prints it.
+pub fn run(
+    inv: &Invocation,
+    timeout: Duration,
+    on_line: impl FnMut(&str),
+) -> Result<String, StartError> {
     let child = Command::new(&inv.program)
         .args(&inv.args)
         .env("PATH", &inv.path)
@@ -309,7 +343,7 @@ pub fn run(inv: &Invocation, timeout: Duration) -> Result<String, StartError> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| StartError::Failed(format!("couldn't run {}: {e}", inv.program.display())))?;
-    let (code, out, err) = wait_output(child, timeout)?;
+    let (code, out, err) = wait_output(child, timeout, on_line)?;
     if code == 0 {
         return Ok(out);
     }
@@ -329,6 +363,52 @@ pub fn run(inv: &Invocation, timeout: Duration) -> Result<String, StartError> {
     } else {
         why
     }))
+}
+
+/// The welcome's words for a line `service install` printed, when it is one worth showing:
+/// `updating <label>: 0.4.1 → 0.6.0`, `updated …`, `already running 0.6.0 on <url>`,
+/// `installed <label> (…)`, and the wait's `starting on :7373… 283 sessions to load; …` /
+/// `still starting after 30 s…`.
+pub fn progress_for(line: &str) -> Option<String> {
+    let line = line.trim();
+    let versions = |rest: &str| -> String {
+        // "<label>: 0.4.1 → 0.6.0 (…)" or "<label>: 0.6.0 (…)"
+        let after = rest.split_once(": ").map(|(_, v)| v).unwrap_or(rest);
+        let v = after.split(" (").next().unwrap_or(after).trim();
+        if v.contains('→') {
+            v.to_string()
+        } else {
+            format!("to {v}")
+        }
+    };
+    if let Some(rest) = line.strip_prefix("updating ") {
+        return Some(format!("Updating sessionpipe {}…", versions(rest)));
+    }
+    if let Some(rest) = line.strip_prefix("updated ") {
+        return Some(format!(
+            "Updated sessionpipe {}; waiting for it to answer…",
+            versions(rest)
+        ));
+    }
+    if let Some(rest) = line.strip_prefix("already running ") {
+        let v = rest.split_whitespace().next().unwrap_or("");
+        return Some(format!("sessionpipe {v} is already running"));
+    }
+    if line.starts_with("installed ") {
+        return Some("Installed the background service; waiting for it to answer…".into());
+    }
+    if line.starts_with("starting on :") || line.starts_with("still starting") {
+        let sessions = line
+            .split("… ")
+            .nth(1)
+            .and_then(|r| r.split_once(" sessions to load"))
+            .map(|(n, _)| n.trim());
+        return Some(match sessions {
+            Some(n) => format!("Starting… {n} sessions to load; this can take a minute"),
+            None => "Starting… this can take a minute on a big board".into(),
+        });
+    }
+    None
 }
 
 // ---- waiting for it ----
@@ -470,8 +550,22 @@ pub async fn start_local_receiver(
             "Installing the background service…"
         },
     );
+    // The installer's lines, as it prints them: an upgrade in place and a slow start both
+    // say what they are doing, and the welcome shows it.
     let inv2 = inv.clone();
-    tauri::async_runtime::spawn_blocking(move || run(&inv2, INSTALL_TIMEOUT))
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let install = tauri::async_runtime::spawn_blocking(move || {
+        run(&inv2, INSTALL_TIMEOUT, |line| {
+            let _ = tx.send(line.to_string());
+        })
+    });
+    while let Some(line) = rx.recv().await {
+        log::info!(target: "sessionpipe::lifecycle", "service install: {line}");
+        if let Some(words) = progress_for(&line) {
+            progress("install", &words);
+        }
+    }
+    install
         .await
         .map_err(|e| StartError::Failed(e.to_string()))??;
 
@@ -479,7 +573,7 @@ pub async fn start_local_receiver(
         progress("start", "Starting a demo receiver…");
         start_dev_child(&tools, port, state.as_deref().unwrap())?;
     }
-    progress("wait", "Waiting for sessionpipe to answer…");
+    progress("wait", "Starting… this can take a minute on a big board");
     let ready = tauri::async_runtime::spawn_blocking(move || wait_ready(port, READY_TIMEOUT))
         .await
         .unwrap_or(false);
@@ -843,10 +937,14 @@ mod tests {
             args: vec!["service".into(), "install".into()],
             path: "/usr/bin:/bin".into(),
         };
+        let mut seen = Vec::new();
         assert_eq!(
-            run(&inv, Duration::from_secs(5)).unwrap().trim(),
+            run(&inv, Duration::from_secs(5), |l| seen.push(l.to_string()))
+                .unwrap()
+                .trim(),
             "installed service install"
         );
+        assert_eq!(seen, ["installed service install"]);
         let refuse = d.0.join("refuse");
         exe(
             &refuse,
@@ -857,12 +955,88 @@ mod tests {
             args: vec![],
             path: "/usr/bin:/bin".into(),
         };
-        match run(&inv, Duration::from_secs(5)) {
+        match run(&inv, Duration::from_secs(5), |_| {}) {
             Err(StartError::Failed(m)) => {
                 assert_eq!(m, "port 7828 is in use by another program (try --port)")
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn streams_the_installer_s_lines_as_they_come() {
+        let d = Temp::new("stream");
+        let slow = d.0.join("slow");
+        exe(
+            &slow,
+            "#!/bin/sh\necho 'updating dev.spacesheep.sessionpipe-gui: 0.4.1 → 0.6.0'\nsleep 0.3\necho 'starting on :7373… 283 sessions to load; a big board takes a minute'\n",
+        );
+        let inv = Invocation {
+            program: slow,
+            args: vec![],
+            path: "/usr/bin:/bin".into(),
+        };
+        let t0 = Instant::now();
+        let mut at = Vec::new();
+        let out = run(&inv, Duration::from_secs(5), |l| {
+            at.push((l.to_string(), t0.elapsed()))
+        })
+        .unwrap();
+        assert_eq!(out.lines().count(), 2);
+        assert_eq!(at.len(), 2);
+        // The first line arrived while the script still slept before the second: the gap
+        // between the two is the script's sleep, not zero (a spawn under load can itself
+        // take a while, so the first line's absolute time proves nothing).
+        let gap = at[1].1.saturating_sub(at[0].1);
+        assert!(gap >= Duration::from_millis(200), "{at:?}");
+    }
+
+    #[test]
+    fn words_for_the_welcome_from_the_installer_s_lines() {
+        assert_eq!(
+            progress_for("updating dev.spacesheep.sessionpipe-gui: 0.4.1 → 0.6.0").as_deref(),
+            Some("Updating sessionpipe 0.4.1 → 0.6.0…")
+        );
+        assert_eq!(
+            progress_for("updating dev.spacesheep.sessionpipe-gui: 0.6.0").as_deref(),
+            Some("Updating sessionpipe to 0.6.0…")
+        );
+        assert_eq!(
+            progress_for(
+                "updated dev.spacesheep.sessionpipe-gui: 0.4.1 → 0.6.0 (~/Library/LaunchAgents/dev.spacesheep.sessionpipe-gui.plist)"
+            )
+            .as_deref(),
+            Some("Updated sessionpipe 0.4.1 → 0.6.0; waiting for it to answer…")
+        );
+        assert_eq!(
+            progress_for("already running 0.6.0 on http://127.0.0.1:7373").as_deref(),
+            Some("sessionpipe 0.6.0 is already running")
+        );
+        assert_eq!(
+            progress_for(
+                "installed dev.spacesheep.sessionpipe-gui (~/Library/LaunchAgents/x.plist)"
+            )
+            .as_deref(),
+            Some("Installed the background service; waiting for it to answer…")
+        );
+        assert_eq!(
+            progress_for("starting on :7373… 283 sessions to load; a big board takes a minute")
+                .as_deref(),
+            Some("Starting… 283 sessions to load; this can take a minute")
+        );
+        assert_eq!(
+            progress_for("starting on :7373… a big board takes a minute").as_deref(),
+            Some("Starting… this can take a minute on a big board")
+        );
+        assert_eq!(
+            progress_for("still starting after 30 s…").as_deref(),
+            Some("Starting… this can take a minute on a big board")
+        );
+        assert_eq!(
+            progress_for("running 0.6.0 on http://127.0.0.1:7373 · state ~/x"),
+            None
+        );
+        assert_eq!(progress_for(""), None);
     }
 
     #[test]
@@ -877,7 +1051,7 @@ mod tests {
         };
         let t0 = Instant::now();
         assert!(
-            matches!(run(&inv, Duration::from_millis(400)), Err(StartError::Failed(m)) if m.contains("didn't finish"))
+            matches!(run(&inv, Duration::from_millis(400), |_| {}), Err(StartError::Failed(m)) if m.contains("didn't finish"))
         );
         assert!(t0.elapsed() < Duration::from_secs(3));
     }

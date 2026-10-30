@@ -3,6 +3,11 @@
 // here and nowhere else for anything that crosses the wire. Change it deliberately:
 // a field added here is a field both sides must handle.
 //
+// The pool (mp/pool, DESIGN §2.3) changes both sides: `MachineControl.pool` from the
+// hello, `SessionSummary.servedBy` from `limits.observed.account_id`, the `pool` control
+// kind with `poolAction` / `poolAccount` on its activity, and the constants under "the
+// pool" below. Every addition is optional, so a page from before it still reads.
+//
 // Protocol events themselves are the sessionpipe v1 envelope (spec/PROTOCOL.md §2);
 // the shapes below are the GUI's *readings* of them (spec §1: a receiver's readings
 // are its own, never part of the protocol).
@@ -54,6 +59,11 @@ export interface ProtocolSession {
    *  never `false`. */
   attended?: boolean;
   parent_id?: string | null;
+  /** The session that started this one, `<harness>:<id>` (PROTOCOL.md §3); not a subagent. */
+  launched_by?: string;
+  /** `<harness>:<id>` of the session this one was started or resumed for (sessionpipe
+   *  `ask` / a handoff): lineage across harnesses, never authority. Absent otherwise. */
+  delegated_by?: string;
 }
 
 /** The GUI's reading of a session's state (spec §1: made from the facts, never sent).
@@ -110,6 +120,16 @@ export interface SessionSummary {
   /** `session.attended`, the latest value (sessionpipe 0.10). Absent means unknown, never
    *  false: only `false` marks an unattended run. */
   attended?: boolean;
+  /** The session that launched this one, as a session key; never read as a subagent. */
+  launchedBy?: SessionKey;
+  /** The pool is serving this session with another account than its own: the newest
+   *  `limits.observed` on it carries an `account_id` other than `accountId`. `since` is the
+   *  time of the first such report in a row for that account; a report naming the session's
+   *  own account again clears it. Absent when nothing says otherwise. */
+  servedBy?: { accountId: string; since: string };
+  /** `session.delegated_by`: the session this one was started for (`sessionpipe ask`, or
+   *  a handoff). Lineage like `parentId`, across harnesses; never authority. */
+  delegatedBy?: SessionKey;
 
   state: SessionState;
   /** When the current state began (ISO). */
@@ -135,6 +155,9 @@ export interface SessionSummary {
     /** Agents in `agents` not yet ended (running or stale). `subagents` above counts every
      *  subagent.started ever; this is the live number. */
     agentsRunning: number;
+    /** Delegations in `delegations` not yet ended. Always set by this server; optional on
+     *  the wire so a page reading an older server (or the mock) still types. */
+    delegationsRunning?: number;
   };
   /** The orchestrator's own tool running right now (tool.started without its tool.ended),
    *  if any. A subagent's tool (one with `agent_id`) runs on its AgentRun instead.
@@ -163,6 +186,11 @@ export interface SessionSummary {
    *  which is how Claude Code and Codex report them; a child session with `parent_id` is
    *  merged in by id with `session` set. Empty when it ran none. */
   agents: AgentRun[];
+  /** The agents this session asked (`delegation.started` / `.ended`: `sessionpipe ask`, or
+   *  a handoff relayed into it), newest last, at most DELEGATIONS_MAX; an open one is
+   *  never dropped. Absent when it asked none. An open delegation keeps the session
+   *  `working` the way an open agent does. */
+  delegations?: Delegation[];
   /** Last tool names, newest last, at most 8 — for a sparkline of activity. */
   recentTools: { tool: string; ok: boolean; ms?: number }[];
   /** The store's smarter readings (ARCHITECTURE.md "The store's readings"): what is
@@ -170,6 +198,10 @@ export interface SessionSummary {
   flags: SessionFlag[];
   /** From turn.started / turn.ended: completed turns, their durations, tools per turn. */
   turnStats: TurnStats;
+  /** When the latest news arrived (ISO, the event's `arrivedAt`) for someone away from
+   *  the terminal: a turn's end, unless the person typed that turn there in a session
+   *  they attend, or the session's end. What the read marks (Marks) compare against. */
+  newsAt?: string;
 }
 
 export const SNIPPET_CHARS = 280;
@@ -219,6 +251,37 @@ export interface AgentRun {
   result?: string;
   /** The child session, when the harness sent the agent as one (`parent_id`). */
   session?: SessionKey;
+}
+
+/** At most this many Delegations ride on a summary (open ones are never dropped). */
+export const DELEGATIONS_MAX = 50;
+
+/** One ask this session made of another agent, as the GUI reads it from the events on
+ *  the asking session (sessionpipe PROTOCOL.md `delegation.started` / `delegation.ended`):
+ *  `via: "ask"` for `sessionpipe ask` from inside the session, `"handoff"` for a signed
+ *  `prompt` / `start` with `reply_to` whose answer the daemon relayed into it. Nothing here
+ *  is guessed: a field the events did not carry is absent. */
+export interface Delegation {
+  /** `data.ask_id` (a ULID); the key `delegation.ended` closes it by. */
+  askId: string;
+  via: "ask" | "handoff";
+  /** The agent asked (`data.harness`). */
+  harness: string;
+  /** `data.to`: the child session, once the harness revealed its id. */
+  to?: SessionKey;
+  startedAt: string;
+  endedAt?: string;
+  /** `delegation.ended.ok`. */
+  ok?: boolean;
+  ms?: number;
+  /** The question (tier 1+, ≤ 200 chars as sent). */
+  text?: string;
+  /** The answer (tier 2+), cut to the index's preview length; the event has it whole. */
+  reply?: string;
+  /** `delegation.ended.error`, when not ok. */
+  error?: string;
+  /** A handoff: whether the answer reached `reply_to` (`delegation.ended.relayed`). */
+  relayed?: "delivered" | "unsupported" | "failed";
 }
 
 /** slow_tool: `currentTool` has run longer than SLOW_TOOL_MS. error_streak: the last
@@ -311,6 +374,18 @@ export interface MachineControl {
   /** Hello `start`: per harness, what a `start` may ask for there (sessionpipe 0.10). A
    *  harness with no entry takes neither `permission` nor `model`, and nothing offers them. */
   start?: Record<string, HarnessStartOptions>;
+  /** Hello `pool` (sessionpipe 0.11, CONTROL.md §2): the machine's pool of Claude accounts
+   *  its daemon switches between when one reaches its limit. A daemon that knows the pool
+   *  sends it in every hello, `{on: false, accounts: []}` when nothing is set up; absent, the
+   *  daemon predates the pool ("needs a newer sessionpipe") and no pool command is offered
+   *  for it. Said again in every hello: one without it takes it away. */
+  pool?: MachinePool;
+  /** Hello `ask`: whether `sessionpipe ask` is on there (a session may ask another agent
+   *  through the daemon). Absent: the daemon predates it (0.10), so nothing is said. */
+  ask?: boolean;
+  /** Hello `handoff: true`: the daemon takes `reply_to` on a `prompt` or a `start` and
+   *  relays the answer into that session (CONTROL.md §3.1). Absent: never offered. */
+  handoff?: boolean;
 }
 
 /** A machine's mode, the person's choice at its own terminal (CONTROL.md §2): `safe`,
@@ -332,6 +407,112 @@ export interface HarnessAccount {
 
 /** What an account is called: its email, else its name, else nothing. */
 export const accountLabel = (a: HarnessAccount): string => a.email ?? a.name ?? "";
+
+// ---------- the pool (hello `pool`, the `pool` command; DESIGN §2.3) ----------
+
+/** The accounts a machine's daemon pools for one harness (today only Claude Code), from
+ *  its hello. `on`: requests on the machine go through the pool; off, the accounts are kept
+ *  but every session runs on its own login. `accounts` are in the machine's order, at most
+ *  POOL_ACCOUNTS_MAX; the receiver only reads them, the machine decides. */
+export interface MachinePool {
+  on: boolean;
+  harness: string;
+  accounts: MachinePoolAccount[];
+}
+
+/** One pooled account. `id` is the same string as `session.account_id` and
+ *  `limits.observed.account_id` (Claude Code: the account UUID), so the three join without
+ *  a map; the matching `HarnessAccount` on `MachineControl.accounts` has its email. */
+export interface MachinePoolAccount {
+  id: string;
+  email?: string;
+  /** What the person called it at the terminal ("Fiction"), when they did. */
+  label?: string;
+  /** `pool enable` / `disable`: a disabled account is never chosen. */
+  enabled: boolean;
+  /** ready: has room. limited: a window is used up (`until` says when it has room again,
+   *  when known). error: its token is no good ("sign in again"). disabled: turned off. */
+  status: PoolAccountStatus;
+  /** Serving new sessions right now (the first in the order with room). */
+  current: boolean;
+  /** limited: RFC 3339, when it has room again, if the machine knows. */
+  until?: string;
+  /** The account's freshest numbers, even while idle (the daemon polls the usage endpoint),
+   *  in the shape `limits.observed` carries, 1–LIMIT_WINDOWS_MAX. The receiver feeds them to
+   *  the account's LimitsEntry when they are newer than what it has (server/ui/limits.ts),
+   *  so the Usage page draws bars for an account no session went through yet. */
+  windows?: LimitWindow[];
+  /** limited / error only: what tripped it: a window id ("seven_day"), `rejected` (the
+   *  vendor's status) or `error` (the token is no good). */
+  limitedBy?: string;
+}
+
+export type PoolAccountStatus = "ready" | "limited" | "error" | "disabled";
+export const POOL_ACCOUNT_STATUSES: readonly PoolAccountStatus[] = ["ready", "limited", "error", "disabled"];
+/** Accounts a hello's `pool` lists at most, and a `pool_order` names at most. */
+export const POOL_ACCOUNTS_MAX = 20;
+
+/** The session a `pool` command names: the machine's own pool, not a coding session
+ *  (like `sessionpipe:keys` for a `key.add`). */
+export const POOL_SESSION = "sessionpipe:pool";
+
+/** What a `pool` command asks for (CONTROL.md, the pool). `on` / `off` switch the pool and
+ *  take nothing else, as does `login.begin`, which starts a sign-in (the ack's detail is
+ *  "<pending login id> <URL>"); `enable`, `disable`, `remove` take `pool_account`;
+ *  `refresh` takes it optionally (every account when absent); `order` takes `pool_order`,
+ *  every account id once; `login.complete` takes the pending login id as `pool_account`
+ *  and the pasted `code#state` as `pool_code`. `refresh`, `login.begin` and
+ *  `login.complete` need the pool on (`pool_off` otherwise); the rest work while it is off. */
+export type PoolAction =
+  | "on"
+  | "off"
+  | "enable"
+  | "disable"
+  | "remove"
+  | "order"
+  | "refresh"
+  | "login.begin"
+  | "login.complete";
+export const POOL_ACTIONS: readonly PoolAction[] = [
+  "on",
+  "off",
+  "enable",
+  "disable",
+  "remove",
+  "order",
+  "refresh",
+  "login.begin",
+  "login.complete",
+];
+/** The actions that must name an account (or, login.complete, the pending login) in
+ *  `pool_account`; `refresh` may. */
+export const POOL_ACCOUNT_REQUIRED: readonly PoolAction[] = ["enable", "disable", "remove", "login.complete"];
+export const POOL_ACCOUNT_ACTIONS: readonly PoolAction[] = [...POOL_ACCOUNT_REQUIRED, "refresh"];
+/** The actions signed with a fresh confirm (one passkey tap, Touch ID), never under the
+ *  day grant: they change what a machine sends to a vendor, which account serves, or
+ *  forget a sign-in. The daemon refuses one signed with a grant alone (`confirm_required`),
+ *  and so does this receiver's early verify (server/control/pool.ts); the page signs them
+ *  with a confirm. The same six the daemon names (sessionpipe POOL_CONFIRM). */
+export const POOL_CONFIRM_ACTIONS: readonly PoolAction[] = [
+  "on",
+  "off",
+  "remove",
+  "order",
+  "disable",
+  "login.complete",
+];
+/** `pool_code`'s longest form (the pasted `code#state`), one line. */
+export const POOL_CODE_MAX = 512;
+/** An account id or a pending login id in a command (CONTROL.md, the pool). */
+export const POOL_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
+export const POOL_ID_MAX = 128;
+/** The machine's own refusal and failure codes for a pool command, besides the verifier's:
+ *  `pool_account` (unknown account or pending login, or the login expired), `pool_order`
+ *  (not every account exactly once), `pool_off` (refresh / login while the pool is off);
+ *  `failed` with `login` (the vendor rejected the code) or `pool` (the vendor call did not
+ *  go through); `unsupported` when the daemon knows the kind but this machine cannot pool.
+ *  This receiver adds `pool_unsupported` before anything is queued (a hello with no `pool`). */
+export const POOL_CODES = ["pool_account", "pool_order", "pool_off", "login", "pool", "pool_unsupported"] as const;
 
 // ---------- starting a session (CONTROL.md §6 `start`, its options and files) ----------
 
@@ -404,6 +585,10 @@ export interface Snapshot {
   suggestions?: Suggestion[];
   /** The person's colour labels; present on the stream's first frame. */
   labels?: Labels;
+  /** The person's read marks; present on the stream's first frame. */
+  marks?: Marks;
+  /** Each account's newest usage limits; present on the stream's first frame. */
+  limits?: LimitsEntry[];
 }
 
 /** A server plugin's suggested answer to an open permission (shared/plugin-api.ts). Advice
@@ -438,11 +623,20 @@ export type StreamMessage =
   /** The whole label document after a change (small, idempotent; drop one whose `rev`
    *  is older than what the page has). */
   | { kind: "labels"; labels: Labels }
+  /** The whole read-marks document after a change, numbered like `labels`. */
+  | { kind: "marks"; marks: Marks }
+  /** Every account's usage limits after a change: the whole list (small, idempotent). */
+  | { kind: "limits"; limits: LimitsEntry[] }
   /** A view's server-side state (THEME_ROUTES.state) was written; `etag` names the new
    *  version, so the page that wrote it can tell its own write from another device's. */
   | { kind: "viewState"; id: string; etag: string }
   /** The search index's status changed (state, progress, counts). At most one a second. */
-  | { kind: "searchIndex"; status: SearchIndexStatus };
+  | { kind: "searchIndex"; status: SearchIndexStatus }
+  /** A workflow run moved (the whole run, `rev` bumped: drop one older than what the page
+   *  has); `deleted` when it was taken away. */
+  | { kind: "workflowRun"; run: WorkflowRun; deleted?: true }
+  /** The saved workflows after a save or a delete (the whole list). */
+  | { kind: "workflows"; workflows: Workflow[] };
 
 // ---------- labels (the person's colour labels; GET / PATCH ROUTES.ui.labels) ----------
 
@@ -481,6 +675,82 @@ export interface LabelsPatch {
 }
 
 export const EMPTY_LABELS: Labels = Object.freeze({ rev: 0, names: {}, sessions: {} }) as Labels;
+
+// ---------- marks (what the person has seen; GET / PATCH ROUTES.ui.marks) ----------
+
+/** Keys the server keeps at most in each map of Marks. */
+export const MARKS_MAX = 5000;
+
+/** `<stateDir>/marks.json`, as the server serves it: a session is read up to the
+ *  `newsAt` it had when it was seen, and the person may mark one unread by hand. */
+export interface Marks {
+  /** Bumped on every change: a page drops a frame older than what it has. */
+  rev: number;
+  /** When the file was first made (ISO). News from before it is read. Absent on an older
+   *  server, where nothing is unread. */
+  since?: string;
+  /** The `newsAt` each session had when it was last seen. */
+  read: Record<SessionKey, string>;
+  /** Marked unread by hand. */
+  unread: Record<SessionKey, true>;
+  /** Each session's own "Notify me", when not the default ("needs"). Absent on an older
+   *  server, where every session is on the default. */
+  notify?: Record<SessionKey, Exclude<NotifyLevel, "needs">>;
+}
+
+/** How loud a session is: "needs" (the default) notifies when a prompt needs you,
+ *  "finishes" also when it has news and is idle or done, "never" not at all. A parent's
+ *  own level caps its children's. */
+export type NotifyLevel = "needs" | "finishes" | "never";
+
+/** A merge (PATCH): `null` clears. */
+export interface MarksPatch {
+  read?: Record<SessionKey, string | null>;
+  unread?: Record<SessionKey, true | null>;
+  /** `null` puts a session back on the default, "needs". */
+  notify?: Record<SessionKey, Exclude<NotifyLevel, "needs"> | null>;
+}
+
+export const EMPTY_MARKS: Marks = Object.freeze({ rev: 0, read: {}, unread: {} }) as Marks;
+
+// ---------- usage limits (limits.observed; GET ROUTES.ui.limits) ----------
+
+/** One window of an account's limits, as the harness named it (PROTOCOL.md limits.observed). */
+export interface LimitWindow {
+  /** "five_hour", "seven_day", "seven_day_fable", "primary", "spend_limit" … */
+  id: string;
+  /** >= 0; above 100 once a spend limit is passed. */
+  usedPercent: number;
+  /** RFC 3339. Once it has passed, the window has reset: its usedPercent is no longer current. */
+  resetsAt?: string;
+  windowMinutes?: number;
+}
+
+/** The newest limits.observed for one (harness, account), or (harness, machine) when the
+ *  events carry no account id. The receiver keeps the numbers; the page words them. An
+ *  account's email or host name is never here: it comes from MachineControl.accounts. */
+export interface LimitsEntry {
+  /** "claude-code a:<account_id>" or "codex m:<machine>". */
+  key: string;
+  harness: string;
+  accountId?: string;
+  /** The machine of the newest report. */
+  machine: string;
+  /** Every machine that reported it, newest first, at most LIMITS_MACHINES_MAX. */
+  machines: string[];
+  plan?: string;
+  /** 1–LIMIT_WINDOWS_MAX, in the event's order. */
+  windows: LimitWindow[];
+  /** The event's time, clamped to its arrival like every event's. */
+  observedAt: string;
+}
+
+/** Windows kept per entry, as the protocol allows. */
+export const LIMIT_WINDOWS_MAX = 8;
+/** Machines remembered per entry. */
+export const LIMITS_MACHINES_MAX = 8;
+/** Entries the receiver keeps; past it, the one reported longest ago goes. */
+export const LIMITS_MAX = 64;
 
 /** A browser connected to this GUI's stream right now: a phone on the LAN, this
  *  laptop's own tab. The receiver's reading of "devices", from the connection only;
@@ -1156,7 +1426,10 @@ export interface Applied {
   model?: string;
 }
 
-export type ControlKind = "prompt" | "permission.answer" | "cancel" | "start" | "key.add";
+/** `pool` (sessionpipe 0.11): a machine-level command on `POOL_SESSION`, verified like a
+ *  `key.add` (server/control/pool.ts); its fields are `pool_action`, `pool_account`,
+ *  `pool_order` and `pool_code`. */
+export type ControlKind = "prompt" | "permission.answer" | "cancel" | "start" | "key.add" | "pool";
 export type ControlOutcome = "progress" | "taken" | "delivered" | "expired" | "unsupported" | "failed" | "refused";
 
 /** A control message the receiver carries, as the UI sees it (never the raw signature). */
@@ -1188,6 +1461,126 @@ export interface ControlActivity {
   /** What the machine ran it with, from its `taken` / `delivered` ack (sessionpipe 0.10);
    *  `inherit` when it ran with no permission flag. */
   applied?: Applied;
+  /** A `pool` command's action and, when it names one, its account (or pending login id),
+   *  as signed. The machine's answer is `detail`: the pool's summary line once delivered
+   *  ("on · 3 accounts · 2 with room · serving Fiction"), or, for `login.begin`,
+   *  "<pending login id> <URL>" (web/src/lib/pool.ts `loginFromDetail` reads it). */
+  poolAction?: PoolAction;
+  poolAccount?: string;
+  /** A handoff: the session the answer is relayed into, as signed (`reply_to` on a
+   *  `prompt` or a `start`, CONTROL.md §3.1). */
+  replyTo?: SessionKey;
+  /** The GUI's own unsigned note of which session's page sent it (`SendBody.from`): the
+   *  lineage shown while the events are on their way. Never part of the command. */
+  from?: SessionKey;
+}
+
+/** POST ROUTES.ui.control + `/send`: the signed command and how it was signed (a day key
+ *  under a passkey grant, or one passkey confirm), as `server/control/README.md` lays it
+ *  out. `from` is the UI's note of the session whose page sent it: unsigned, stored on
+ *  the activity (`ControlActivity.from`), never carried to the machine. */
+export interface SendBody {
+  machineId: string;
+  cmd: string;
+  csig?: string;
+  grant?: Record<string, unknown>;
+  confirm?: Record<string, unknown>;
+  expires_in_s?: number;
+  from?: SessionKey;
+}
+
+// ---------- orchestrate (workflows across agents and machines; server/orchestrate) ----------
+
+/** Who a step asks: a new session of a harness on the step's machine (the browser signs a
+ *  `start`), or an existing session there (a `prompt`). */
+export type StepAgent = { harness: string } | { session: SessionKey };
+
+export interface WorkflowStep {
+  /** Unique within the workflow: letters, digits, `_`, `-`, at most 40. */
+  id: string;
+  name?: string;
+  machineId: string;
+  agent: StepAgent;
+  /** A new session's folder; absent, the runner takes the machine's first folder. */
+  cwd?: string;
+  /** The prompt, with `{{input}}` (the run's input), `{{prev}}` (the reply of the step(s)
+   *  it runs after, joined by a blank line) and `{{step.<id>}}` (a named earlier step's
+   *  reply). Any other placeholder, or one with nothing to fill it, fails at save. */
+  text: string;
+  permission?: StartPermission;
+  model?: string;
+  /** The steps it runs after: absent, the step before it in the list; `[]`, a root. Only
+   *  earlier steps may be named, so a workflow is always a DAG. */
+  after?: string[];
+}
+
+export interface Workflow {
+  id: string;
+  name: string;
+  /** Set, Run asks for an input first (`{{input}}`). */
+  input?: { label: string };
+  steps: WorkflowStep[];
+  createdAt: string;
+  updatedAt: string;
+  /** The template it was made from, when one was. */
+  template?: string;
+}
+
+/** The most steps a workflow has, and the longest a step's text may be. */
+export const WORKFLOW_STEPS_MAX = 20;
+export const WORKFLOW_TEXT_MAX = 20_000;
+
+export type RunStatus = "running" | "waiting" | "done" | "failed" | "cancelled";
+/** pending: waiting on the steps before it. ready: the signer may claim it. sending: a tab
+ *  claimed it and is signing. sent: its command is queued (`commandId`). done / failed:
+ *  the command's final ack. skipped: a step before it failed, or the run was cancelled. */
+export type StepStatus = "pending" | "ready" | "sending" | "sent" | "done" | "failed" | "skipped";
+
+export interface StepRun {
+  status: StepStatus;
+  /** The prompt with its placeholders filled, once the step is ready. */
+  text?: string;
+  /** The queued command (`ControlActivity.id`), once sent. */
+  commandId?: string;
+  /** The session the ack named (the one a start made, a fork), else the one the command named. */
+  session?: SessionKey;
+  reply?: string;
+  /** `failed`: the machine's `code: detail`, or the receiver's word. */
+  error?: string;
+  /** When it became ready, was claimed and was sent (ISO); the server's clocks for the
+   *  signer rule and for a claim that never came back. */
+  readyAt?: string;
+  claimedAt?: string;
+  sentAt?: string;
+  endedAt?: string;
+}
+
+export interface WorkflowRun {
+  id: string;
+  workflowId: string;
+  /** The workflow's name when the run started. */
+  name: string;
+  /** Bumped on every change; a claim names it in `If-Match`. */
+  rev: number;
+  status: RunStatus;
+  input?: string;
+  startedAt: string;
+  endedAt?: string;
+  /** The steps as they were when the run started: what the server resolves and the
+   *  browser signs from, so an edit or a delete of the workflow never changes a run. */
+  plan: WorkflowStep[];
+  steps: Record<string, StepRun>;
+  /** `waiting`: for a device that can sign (a step ready for over WAITING_SIGNER_MS and
+   *  nobody claimed it), or for the step's machine to come online. */
+  waitingFor?: "signer" | "machine";
+}
+
+/** A `ready` step nobody claimed for this long reads `waiting` for a signer. */
+export const WAITING_SIGNER_MS = 2_000;
+
+/** Query of POST ROUTES.ui.workflows + `/:id/run`. */
+export interface RunBody {
+  input?: string;
 }
 
 // ---------- extras (the curated catalogue; server/extensions/catalog.ts) ----------
@@ -1289,6 +1682,33 @@ export const ROUTES = {
      *  `bad_label` / `bad_name`, 404 `not_found` (a session the store does not know), 413
      *  `too_many` / `too_large`, 415 `json_only`. Every change is a `labels` stream frame. */
     labels: "/api/ui/labels",
+    /** GET → Marks; PATCH MarksPatch (application/json) → Marks. 400 `malformed` /
+     *  `bad_read` / `bad_unread` / `bad_notify`, 413 `too_large`, 415 `json_only`. A key
+     *  the store does not know is skipped. Every change is a `marks` stream frame. */
+    marks: "/api/ui/marks",
+    /** GET → { limits: LimitsEntry[] }, each account's newest limits.observed. Every change
+     *  is a `limits` stream frame. */
+    limits: "/api/ui/limits",
+    /** POST { key } (application/json) → 204: forget one entry's numbers (its next report
+     *  brings it back), and a `limits` frame. 400 `malformed`, 404 `not_found`, 415 `json_only`. */
+    limitsForget: "/api/ui/limits/forget",
+    /** Workflows (server/orchestrate; ARCHITECTURE.md "UI API"), UI key like the rest.
+     *  Every write takes JSON only, an empty POST too (415 `json_only`), and 403
+     *  `cross_site` when the browser marks it from another site: a write here sets a
+     *  signer to work. GET → { workflows, runs } · PUT /:id (the whole Workflow) →
+     *  Workflow; 400 `malformed` / `bad_step`, 413 `too_large` (WORKFLOW_STEPS_MAX,
+     *  WORKFLOW_TEXT_MAX; a step's resolved text is cut to fit, never refused) · DELETE
+     *  /:id → 204 · POST /:id/run RunBody → 201 WorkflowRun · PATCH /runs/:id with
+     *  `If-Match: <rev>`: { step, status: "sending" } (a claim), { step, send: SendBody }
+     *  (the signed command: verified as /send does, queued and the step marked sent in one
+     *  move, or nothing queued: 412 when the step is no longer this claim's, 422 with the
+     *  verifier's `code` for a signer's fault; a refusal of the command itself fails the
+     *  step and answers with the run) or { step, commandId } (a command queued through
+     *  /send: the test door) → WorkflowRun; 412 `conflict` with the current run when the
+     *  rev moved or the step is not where the patch expects it · POST /runs/:id/cancel
+     *  `{}` → WorkflowRun · DELETE /runs/:id → 204. Every change is a `workflowRun` or
+     *  `workflows` stream frame. */
+    workflows: "/api/ui/workflows",
   },
   /** GET / DELETE /attachments/<id>.<ext>, UI key: the uploaded image itself (served
    *  `private, immutable`), and taking it back. */

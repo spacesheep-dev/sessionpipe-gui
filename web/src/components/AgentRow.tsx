@@ -25,6 +25,7 @@ import { useNow } from "../lib/time";
 import { StateDot } from "./bits";
 import { useContextMenu } from "./ContextMenu";
 import { LabelDot } from "./LabelDot";
+import { NotifyOff } from "./NotifyOff";
 
 /** The agent glyph: the session glyph's shapes, at 8 px. */
 export function AgentGlyph({ a, size = 8 }: { a: Pick<AgentRun, "state">; size?: number }) {
@@ -117,6 +118,7 @@ export function AgentRow({
         {/* A child session's own title says what it was asked, when its launch did not. */}
         <AgentText a={child && !a.description ? { type: a.type, description: sessionTitle(child) } : a} />
         <span className="sr-only">, {a.state === "running" ? "running" : a.state === "stale" ? "quiet" : "done"}</span>
+        {child && <NotifyOff s={child} under />}
         <AgentNow a={a} />
       </Link>
     </li>

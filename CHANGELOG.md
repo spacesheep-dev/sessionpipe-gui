@@ -49,6 +49,166 @@ All notable changes to `sessionpipe-gui`. The format follows
 - Notification banners on the phone fit the screen on every title length and sit under
   the status bar; a long one ends in an ellipsis instead of running off the edge.
 
+## [0.6.1] - 2026-10-30
+
+### Added
+
+- **The Mac app updates itself.** Settings › App › Updates has "Check for updates
+  automatically" (on by default: 10 s after launch and every 6 hours), the version you have,
+  "Last checked 5 min ago" and Check now. A newer release is downloaded in the background
+  and verified against sessionpipe's key; then "0.7.0 is ready" with **Install and relaunch**
+  in Settings and the menu bar item. "Check for Updates…" in the app menu runs the same check
+  and, with no window open, answers in a dialog: up to date, ready to install, or why it
+  failed. A failed check says so in plain words (offline, no manifest, no build for this
+  computer, a signature that doesn't match) and leaves nothing half-installed.
+
+### Fixed
+
+- **`service install` upgrades the service it finds instead of refusing.** The app's
+  "Start sessionpipe" (and the command) used to stop at "a service is already installed"
+  whenever an earlier version had installed the LaunchAgent / systemd unit, which is every
+  upgrade of the app. Now a service of ours under the label is rewritten in place with this
+  version's node and cli (its port, state dir and options kept unless flags say otherwise),
+  restarted (`launchctl bootout` + `bootstrap`; `systemctl --user daemon-reload` + `restart`),
+  and waited for until the new version answers: `updated dev.spacesheep.sessionpipe-gui: 0.4.1
+  → 0.6.0`. The same service answering already is `already running 0.6.0 on …` (exit 0); one
+  still starting is left to it. A plist under our label that runs something else is still
+  refused, as is another program on the port. `--dry-run` shows the rewrite and the restart.
+- **A big board gets time to start.** The installer waited 10 s for the receiver and then
+  printed what read as a failure, while a 1 GB state dir takes ~30 s to index at boot. It now
+  waits up to 90 s (`SP_SERVICE_WAIT_MS`), says what it is waiting on ("starting on :7373…
+  283 sessions to load; a big board takes a minute"), and a service that is running but not
+  answering yet ends with "still starting", exit 0. The desktop app shows those lines on the
+  welcome ("Updating sessionpipe 0.4.1 → 0.6.0…", "Starting… this can take a minute on a big
+  board") and waits as long itself.
+- `service uninstall` no longer says "still loaded" on the first call: `launchctl bootout`
+  returns before the job is gone, and the command now waits for it (as the upgrade's
+  restart does before it bootstraps again).
+- `service status` prints the running receiver's version beside the pid.
+- The Windows installers build again: `icons/icon.ico` is in the bundle's icon list, where the MSI
+  bundler looks for it.
+
+## [0.6.0] - 2026-10-29
+
+### Added
+
+- A session another session launched (`session.launched_by`, sessionpipe 0.10.0) says so in its
+  header with a link to the launcher, and the launcher's header links what it launched. Neither is
+  read as a subagent: no nesting, no muted toasts, no "N subagents" count.
+- **A paired machine you rely on that went offline** gets one quiet line at the top of the
+  board: "build-box is offline, last heard 14:02. 2 messages wait until it's back.", with
+  Machines beside it. Only a paired machine with a message waiting or a session that needs
+  you, works or went stale counts; one that only sends events has no heartbeat and is never
+  called offline. × hides the line on this device until something changes: it clears
+  itself when the machine is back, and a new drop brings it back.
+- **Since you looked.** An idle or done session with news you haven't seen (a turn ended
+  or the session ended since you last had it open) draws its glyph filled in, in ink, and
+  the folded Done header says "3 unread". Opening it for a second, as a page or the
+  panel's tab, marks it read on every device. A turn you typed at the terminal of a
+  session you attend is not news; working, needs-you and unattended rows are never
+  unread, and nothing from before the first run is.
+- **Mark as read / Mark as unread** in an idle or done session's menu and the phone's
+  long-press sheet, `u` on the board's cursor, and **Mark all as read** in the board's
+  view menu. The marks live in `<stateDir>/marks.json` (`GET` / `PATCH /api/ui/marks`, a
+  `marks` frame on every change); a forgotten session loses its marks.
+- **Notify me, per session.** Every session's menu (and the phone's long-press sheet) has
+  **Notify me**: When it needs me, as before; **When it needs me or finishes**, which
+  also sends "Deploy billing finished" with its last answer each time it has news and is
+  idle or done (a click opens it); or **Never**, which sends no notification, banner or
+  sound for it while it still waits in Needs you and the Inbox. A row set to Never shows a
+  small bell with a slash. A parent session can quiet its subagent sessions, never make
+  them louder. The choice is kept in `marks.json` (`notify`), so it holds on every device;
+  the browser's permission, the global Notify me and sounds stay per device.
+- **A New line where you left off.** A session with news since you looked opens with a
+  quiet "New" hairline above the first answer you haven't read, in Simple and Advanced
+  and on a phone. When there's more than a screen of it, the session opens with the line
+  a third of the way down instead of at the bottom. Your own turns at the terminal never
+  count, the line doesn't move while the page is open, and it's gone when you come back.
+  A session you haven't opened yet opens at the bottom as before.
+- **Hidden sessions can be found again.** The board keeps what this device hid in a
+  **Hidden** group after Done, folded like Done and under the same filters; its rows are
+  ordinary rows, and **Unhide** (the row's menu, `e`, a phone's trailing swipe) puts one
+  back in its state's group.
+- **Hide until it needs you**, below Hide in a row's menu (or `⇧E`), for a session that
+  loops ("every 30 minutes, check the nightly build"): new turns leave it hidden, and it
+  shows only while it needs you. `e` hides or unhides the row under the cursor.
+- **How much each account has left.** A Usage page, a line per account in the sidebar, and
+  each agent in New session say how much of its 5-hour and weekly windows is left and when
+  they reset, from sessionpipe's `limits.observed`. Claude Code's week is "This week, all
+  models"; a per-model week it adds later shows as its own row ("This week, Fable only").
+  A window past its reset says so instead of its last number, and a report older than 15
+  minutes says how old. On a machine whose agent has two accounts there is no number, since
+  a start can't choose one. Claude Code's numbers need its status line, on Pro and Max:
+  `sessionpipe install --status-line`. Harnesses with no source say so in one line, never
+  0%. `g u` opens the page; the sidebar lines can be hidden in Settings › General.
+- **Several Claude accounts on one machine.** A machine whose sessionpipe pools accounts
+  (`sessionpipe pool`, 0.11) says so in its hello, and the GUI reads the pool: the accounts
+  in the machine's order, which one is in use, which is used up and when it is back, which
+  needs signing in again, and each one's freshest numbers on the Usage page even while it is
+  idle. Turning the pool on or off, reordering, enabling, disabling, removing and refreshing
+  an account, and signing a new one in, are signed `pool` commands through the same channel
+  as everything else, verified here before they are carried; a machine whose hello has no
+  pool is told so before anything is queued. A session the pool moved to another account
+  says which one serves it and since when, and its chat shows the switch. Demo mode has a
+  machine with the pool on, one with an account in error, and one with the pool off.
+- **Agents that use agents.** sessionpipe's next release lets a session ask another agent
+  on its machine (`sessionpipe ask codex "…"`) and lets a receiver hand a task to an agent
+  with the answer brought back into a session (`reply_to` on a signed `prompt` or
+  `start`). The GUI reads the two events, `delegation.started` and `delegation.ended`, into
+  the session (`delegations`, `delegatedBy`, `counts.delegationsRunning`), keeps a session
+  working while an ask is open, and shows a capability only where a machine's hello says
+  `ask` or `handoff`, so a 0.10 daemon keeps working as before.
+- **Ask another agent…** on a session's page (the control strip, its menus, a reply's
+  right-click "about this…", ⌘K, ⇧A): one sheet, prefilled with the last reply, that asks
+  an existing session on the same machine or a new one of a harness the hello lists, with
+  "Bring the answer back into this session" where the machine takes handoffs. The asking
+  session shows the row at once.
+- **Lineage.** "Asked Codex · new session · running 1 m 20 s" where the ask happened in the
+  chat and the timeline, the answer folded under it or drawn as that agent's turn when it
+  was brought back; the asked session's bar says "for <parent>" with a link; the board nests
+  it under its parent; Machines says "Agents here can ask each other"; the Feed and the
+  Activity page word the events and the handoff.
+- **Workflows** (`/workflows`, `g w`): chain and fan out steps across your agents and
+  machines (implement → review → fix; two agents in parallel, a third compares). Three
+  templates, an editor of native rows that saves itself, Run with the input it names, and
+  a run view with every step's state, elapsed, reply and session. The server owns a run
+  (`workflows.json`, `workflow-runs.json`, moved by control's acks); the browser is only
+  the signer, from any device that can sign, with claims as the guard across tabs. A
+  browser signs the runs it started on its own; one started elsewhere asks once ("Sign
+  here"), so nothing on the loopback or another site can set your passkey to work. The
+  signed command goes back through the run itself, queued only once the server has seen
+  the step is still that tab's: a step cancelled or re-offered mid-signature queues
+  nothing, and one the receiver refuses fails in place instead of being offered again
+  every minute. A step is never signed without the level or model it names when the
+  machine's hello does not offer it; the run says so. Every write to `/api/ui/workflows`
+  is JSON only, an empty POST too, and refuses a cross-site request.
+- **Demo mode** plays an ask and a handoff on lab-mac, whose hello now says `ask` and
+  `handoff`; the mock stream has the same.
+
+### Changed
+
+- **A chained shell command reads one step per line** on a session's permission strip:
+  "Allow Bash to run:", then `npm run build`, `&& npm test -- bm25`, `&& npm run deploy …`
+  each on its own line, so nothing wraps mid-token before you answer. Quotes, `$( … )` and
+  groups stay whole, a pipeline is one step, and a short command stays on the question's
+  line. The command is the call's own, whole, when the session sent it; otherwise the
+  first 200 characters the machine sends, ending in "…". Four steps show, then "Show 2
+  more lines", and Deny and Allow keep to the question's line. On a phone a longer one
+  scrolls inside, cut through a line, so you see there is more.
+- **A plan review reads as a plan.** When Claude Code asks to leave plan mode, the strip
+  asks "Ready to start on this plan?" and shows the plan under it (at tier 3), eight lines
+  until **Show the whole plan**, with **Approve plan** and **Keep planning** where Allow and
+  Deny were; `a` and `d` are unchanged. Keep planning carries what you type in the composer
+  ("What should change?") to the agent as the answer's note, and Enter there sends it.
+  While the composer holds a note, Approve plan waits, so the note is never dropped: send
+  it with Keep planning, or clear it. The row menus, the command palette and the Inbox
+  name the same two answers, and the tool reads Plan.
+
+### Fixed
+
+- **The row menu says "Allow Shell"** (and Deny), as the strip and the Inbox do, not
+  "Allow run_shell_command".
+
 ## [0.5.0] - 2026-10-28
 
 ### Added
@@ -400,7 +560,9 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.3.2...v0.4.0

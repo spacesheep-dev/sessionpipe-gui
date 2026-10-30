@@ -196,7 +196,7 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>, m: &Model) -> tauri::Result<Menu<R
         menu.append(&MenuItem::with_id(
             app,
             "update:restart",
-            format!("Restart to Update to {v}"),
+            format!("Install {v} and relaunch"),
             true,
             None::<&str>,
         )?)?;

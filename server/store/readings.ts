@@ -8,6 +8,8 @@ import {
   type Attention,
   type AttentionKind,
   COMPACTING_WINDOW_MS,
+  DELEGATIONS_MAX,
+  type Delegation,
   DONE_AFTER_MS,
   type EventSource,
   GAP_AFTER_MS,
@@ -22,16 +24,27 @@ import {
   type Tier,
   type TurnStats,
 } from "../../shared/api.js";
+import { SESSION_REF } from "../control/parse.js";
 import { changedPaths } from "./paths.js";
 import { detach, PREVIEW_CHARS } from "./slim.js";
 
 const TITLE_RANK: Record<string, number> = { custom: 3, harness: 2, "first-ask": 1 };
+/** `<harness>:<id>` in the protocol's own shapes (schemas/v1/event.json): a harness name is
+ *  `^[a-z][a-z0-9-]{0,39}$`, a session id up to 128 of `[A-Za-z0-9._:-]`. */
+const LAUNCHER_KEY_RE = /^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/;
 const ATTENTION_KINDS = new Set<string>(["permission", "question", "elicitation", "idle", "error"]);
 
 /** Events a worker derives from files or clocks rather than a harness hook. Only a
  *  hook event proves the harness moved on, so only a hook event closes an attention
- *  (CONTROL.md §7). */
-const NOT_HOOK = new Set(["turn.progress", "turn.transcript", "session.heartbeat", "session.backfill"]);
+ *  (CONTROL.md §7). A status line redraws on its own clock, prompt open or not, so the
+ *  usage limits it reports (limits.observed) are not one either. */
+const NOT_HOOK = new Set([
+  "turn.progress",
+  "turn.transcript",
+  "session.heartbeat",
+  "session.backfill",
+  "limits.observed",
+]);
 
 /** `turn.started.submitted_by`: a bare word (PROTOCOL.md §4), kept as the harness sent it. */
 const SUBMITTED_BY = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
@@ -126,6 +139,7 @@ export function newRecord(harness: string, id: string, at: string, source: Event
         filesChanged: 0,
         attentions: 0,
         agentsRunning: 0,
+        delegationsRunning: 0,
       },
       openAttentions: [],
       children: 0,
@@ -245,6 +259,13 @@ export function coalesceSession(s: SessionSummary, ev: ProtocolEvent): void {
   if (typeof b.attended === "boolean") s.attended = b.attended;
   if (typeof b.parent_id === "string" && b.parent_id) s.parentId = b.parent_id;
   else if (b.parent_id === null && s.parentId === undefined) s.parentId = null;
+  // A launcher is a session key (CONTROL.md); anything else is dropped.
+  const launcher = str(b.launched_by)?.trim();
+  if (launcher && LAUNCHER_KEY_RE.test(launcher)) s.launchedBy = launcher;
+  // The session this one was started for (sessionpipe ask, a handoff): a `<harness>:<id>`
+  // ref, kept like parent_id, across harnesses; the shape control reads, nothing looser.
+  const by = str(b.delegated_by);
+  if (by && SESSION_REF.test(by)) s.delegatedBy = by;
   const title = str(b.title);
   if (title) {
     const src = b.title_source && TITLE_RANK[b.title_source] ? b.title_source : undefined;
@@ -385,6 +406,53 @@ function closeAgents(s: SessionSummary, at: string): void {
   settleAgents(s);
 }
 
+/** SessionSummary.newsAt: the latest arrival that is news, never moved back. */
+function noteNews(s: SessionSummary, arrivedAt: string): void {
+  if (!s.newsAt || arrivedAt > s.newsAt) s.newsAt = arrivedAt;
+}
+
+/** The harness a `<harness>:<id>` ref names. */
+const harnessOf = (ref: string | undefined): string => (ref ? ref.slice(0, Math.max(0, ref.indexOf(":"))) : "");
+
+/** The delegation with this ask id, or a fresh open one from `at` when this is the first
+ *  word of it (a sink that joined after the start saw only the end). */
+function delegationFor(s: SessionSummary, askId: string, at: string, d: Record<string, unknown>): Delegation {
+  const have = s.delegations?.find((x) => x.askId === askId);
+  if (have) return { ...have };
+  // Only a handoff reports how it was relayed; the asked harness is the one `to` names.
+  return {
+    askId,
+    via: d.relayed !== undefined ? "handoff" : "ask",
+    harness: str(d.harness) ?? harnessOf(str(d.to)),
+    startedAt: at,
+  };
+}
+
+/** Put one delegation back (by ask id), keep at most DELEGATIONS_MAX by dropping the oldest
+ *  ended ones (never an open one), and count the open ones. */
+export function settleDelegations(s: SessionSummary, next?: Delegation): void {
+  let list = s.delegations ?? [];
+  if (next)
+    list = list.some((x) => x.askId === next.askId)
+      ? list.map((x) => (x.askId === next.askId ? next : x))
+      : [...list, next];
+  for (let i = 0; list.length > DELEGATIONS_MAX && i < list.length; ) {
+    if (list[i]!.endedAt) list = [...list.slice(0, i), ...list.slice(i + 1)];
+    else i++;
+  }
+  s.delegations = list;
+  s.counts.delegationsRunning = list.filter((x) => !x.endedAt).length;
+}
+
+/** Close every open delegation: its session ended (or went silent for good). The answer
+ *  is unknown then, so `ok` stays unset. True when any was open. */
+function closeDelegations(s: SessionSummary, at: string): boolean {
+  if (!s.delegations?.some((x) => !x.endedAt)) return false;
+  s.delegations = s.delegations.map((x) => (x.endedAt ? x : { ...x, endedAt: at }));
+  s.counts.delegationsRunning = 0;
+  return true;
+}
+
 export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: string, source: EventSource): void {
   const s = rec.summary;
   const t = rec.track;
@@ -410,6 +478,17 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
     }
     const turns = num(d.turns);
     if (turns !== undefined && turns > s.counts.turns) s.counts.turns = turns;
+  } else if (ev.type === "limits.observed" && !first) {
+    // The account's numbers, not the session's activity (server/ui/limits.ts keeps them):
+    // they never move lastAt, so they never wake a session or keep it working. One thing
+    // is the session's: `data.account_id` (the pool, DESIGN §2.3) names the account that
+    // served the request. Another than the session's own means the pool moved it there;
+    // `since` is the first such report in a row for that account. Its own account again
+    // clears it; a report with no account id says nothing either way.
+    const served = str(d.account_id);
+    if (served && served !== s.accountId) {
+      if (s.servedBy?.accountId !== served) s.servedBy = { accountId: served, since: at };
+    } else if (served) delete s.servedBy;
   } else {
     if (first || !rec.live) {
       // The first live event: a backfill's span, if any, is history before it.
@@ -449,6 +528,7 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       s.background = undefined;
       break;
     case "session.ended":
+      noteNews(s, arrivedAt);
       rec.ended = true;
       s.endedAt = at;
       s.background = undefined;
@@ -457,6 +537,7 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       s.progress = undefined;
       s.openAttentions = [];
       closeAgents(s, at);
+      closeDelegations(s, at);
       break;
     case "turn.started": {
       const turnId = str(d.turn_id);
@@ -480,6 +561,9 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       break;
     }
     case "turn.ended": {
+      // A turn the person typed at the terminal of a session they attend, they read
+      // there; any other turn's end is news to someone away from it.
+      if (!(s.currentTurn?.submittedBy === "user" && s.attended === true)) noteNews(s, arrivedAt);
       const ms = num(d.ms) ?? (s.currentTurn ? Date.parse(at) - Date.parse(s.currentTurn.since) : undefined);
       t.turnsEnded++;
       if (ms !== undefined && ms >= 0) {
@@ -696,6 +780,42 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       }
       break;
     }
+    case "delegation.started": {
+      // This session asked another agent (sessionpipe ask from inside it, or a handoff
+      // relayed into it): an open delegation, like an open agent, keeps it working; unlike
+      // a subagent it opens no turn of its own.
+      const askId = str(d.ask_id);
+      if (!askId) break;
+      const x = delegationFor(s, askId, at, d);
+      if (d.via === "ask" || d.via === "handoff") x.via = d.via;
+      const harness = str(d.harness);
+      if (harness) x.harness = harness;
+      const to = str(d.to);
+      if (to && SESSION_REF.test(to)) x.to = to;
+      const text = str(d.text);
+      if (text) x.text = cut(text, 200);
+      settleDelegations(s, x);
+      break;
+    }
+    case "delegation.ended": {
+      const askId = str(d.ask_id);
+      if (!askId) break;
+      const x = delegationFor(s, askId, at, d);
+      x.endedAt = at;
+      if (typeof d.ok === "boolean") x.ok = d.ok;
+      const ms = num(d.ms);
+      if (ms !== undefined) x.ms = ms;
+      const to = str(d.to);
+      if (to && SESSION_REF.test(to)) x.to = to;
+      const error = str(d.error);
+      if (error) x.error = cut(error, 200);
+      // The answer (tier 2+) as the index keeps it; the event on disk has it whole.
+      const reply = str(d.reply);
+      if (reply) x.reply = cut(reply, PREVIEW_CHARS);
+      if (d.relayed === "delivered" || d.relayed === "unsupported" || d.relayed === "failed") x.relayed = d.relayed;
+      settleDelegations(s, x);
+      break;
+    }
     case "session.heartbeat":
       s.currentTurn ??= { since: at };
       break;
@@ -722,16 +842,15 @@ export function evaluateState(rec: SessionRecord, now: number): { state: Session
   if (silent >= DONE_AFTER_MS) return { state: "done", since: new Date(last + DONE_AFTER_MS).toISOString() };
   // A subagent still running keeps its orchestrator working, even after the turn that
   // launched it ended (Claude Code's background agents report after the Stop); so does
-  // background work the last turn's Stop said is still in flight (`turn.ended.background`).
+  // background work the last turn's Stop said is still in flight (`turn.ended.background`),
+  // and so does an agent it asked and has no answer from yet (an open delegation).
   const open = s.agents.find((a) => a.state !== "done");
-  if (s.currentTurn || open || s.background) {
-    const since = s.currentTurn
-      ? !open || s.currentTurn.since < open.startedAt
-        ? s.currentTurn.since
-        : open.startedAt
-      : open && (!s.background || open.startedAt < s.background.since)
-        ? open.startedAt
-        : s.background!.since;
+  const asked = s.delegations?.find((x) => !x.endedAt);
+  if (s.currentTurn || open || s.background || asked) {
+    // Since the earliest of what keeps it busy (all ISO, so they sort as text).
+    const since = [s.currentTurn?.since, open?.startedAt, s.background?.since, asked?.startedAt]
+      .filter((x): x is string => x !== undefined)
+      .sort()[0]!;
     if (silent < STALE_AFTER_MS) return { state: "working", since };
     return { state: "stale", since: new Date(last + STALE_AFTER_MS).toISOString() };
   }
@@ -749,7 +868,9 @@ export function refreshState(rec: SessionRecord, now: number): boolean {
     s.currentTool = undefined;
   }
   const agents = refreshAgents(s, state, now);
-  if (s.state === state && s.stateSince === since) return agents;
+  // Read done (silent a day): what it asked is closed with it, answer unknown.
+  const asked = state === "done" && closeDelegations(s, s.endedAt ?? s.lastAt);
+  if (s.state === state && s.stateSince === since) return agents || asked;
   s.state = state;
   s.stateSince = since;
   return true;

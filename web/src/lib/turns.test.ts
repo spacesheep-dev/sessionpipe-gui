@@ -3,7 +3,7 @@
 // gave it; and a message sent from here finds its own turn, two in a row included.
 import type { AgentRun, StoredEvent } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { eventWords, groupTurns, sentTurns, type Turn, turnPrompt, unframe } from "./turns";
+import { eventWords, groupTurns, handoffAnswer, sentTurns, type Turn, turnPrompt, unframe } from "./turns";
 
 const T0 = Date.parse("2026-10-22T10:00:00.000Z");
 const iso = (s: number) => new Date(T0 + s * 1000).toISOString();
@@ -30,6 +30,17 @@ const prompts = (turns: Turn[]) => started(turns).map(turnPrompt);
 const FRAME = "Message via studio-mac.local:7373 (sessionpipe control, signed on the sender's device):\n\n";
 
 describe("groupTurns", () => {
+  it("leaves a status line's usage report out of the turn: it is the account's, not a step", () => {
+    const ev = session();
+    const turns = groupTurns([
+      ev("turn.started", 1),
+      ev("turn.ended", 5),
+      ev("limits.observed", 6, { windows: [{ id: "five_hour", used_percent: 38 }] }),
+    ]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.items.map((i) => (i.kind === "event" ? i.e.type : i.kind))).toEqual(["turn.ended"]);
+  });
+
   it("puts each transcript on its own turn when they come one per turn", () => {
     const ev = session();
     const turns = groupTurns([
@@ -233,6 +244,75 @@ describe("unframe", () => {
       via: "studio-mac.local:7373",
     });
     expect(unframe("Message via email please")).toEqual({ text: "Message via email please" });
+  });
+
+  it("takes the ask trailer off and keeps who asked", () => {
+    const asked =
+      "Review the diff.\n\n(Asked by claude-code:abc-1 on this machine with sessionpipe ask. Answer here in full: your reply is returned to that session automatically. Don't run a command or call a tool just to send it.)";
+    expect(unframe(asked)).toEqual({ text: "Review the diff.", askedBy: "claude-code:abc-1" });
+  });
+});
+
+describe("handoffAnswer", () => {
+  it("reads the daemon's frame on an answer brought back, and nothing else", () => {
+    expect(
+      handoffAnswer(
+        "Answer from codex:1f3a9c0e (sessionpipe handoff, asked via studio-mac.local:7373):\n\nTwo things.",
+      ),
+    ).toEqual({ harness: "codex", shortId: "1f3a9c0e", via: "studio-mac.local:7373", reply: "Two things." });
+    expect(handoffAnswer("Answer from the review: it's fine")).toBeUndefined();
+    expect(handoffAnswer("hi")).toBeUndefined();
+  });
+});
+
+describe("groupTurns: asks", () => {
+  it("puts the ask in the turn it began in and closes it by ask id, wherever the end lands", () => {
+    const ev = session();
+    const turns = groupTurns([
+      ev("turn.started", 1),
+      ev("tool.started", 2, { tool: "Bash", call_id: "c1", input: { command: "sessionpipe ask codex 'review'" } }),
+      ev("delegation.started", 3, { ask_id: "01A", via: "ask", harness: "codex", text: "review" }),
+      ev("turn.ended", 40),
+      ev("delegation.ended", 41, { ask_id: "01A", to: "codex:t1", ok: true, ms: 38_000, reply: "Fine." }),
+      ev("turn.started", 50),
+      ev("delegation.ended", 51, { ask_id: "01B", to: "codex:t2", ok: false, ms: 10, error: "harness: no" }),
+    ]);
+    const [first, second] = started(turns);
+    const asks = first!.items.filter((i) => i.kind === "delegation");
+    expect(asks).toHaveLength(1);
+    expect(asks[0]).toMatchObject({
+      askId: "01A",
+      started: { type: "delegation.started" },
+      ended: { type: "delegation.ended" },
+    });
+    // After the tool that ran it: the ask reads where it happened.
+    expect(first!.items.map((i) => i.kind)).toEqual(["tool", "delegation", "event"]);
+    const alone = second!.items.filter((i) => i.kind === "delegation");
+    expect(alone).toHaveLength(1);
+    expect(alone[0]).toMatchObject({ askId: "01B" });
+    expect((alone[0] as { started?: unknown }).started).toBeUndefined();
+  });
+
+  it("words the events for the feed", () => {
+    expect(eventWords({ type: "delegation.started", data: { via: "ask", harness: "codex" } })).toEqual({
+      text: "Asked Codex",
+      detail: "running",
+    });
+    expect(eventWords({ type: "delegation.started", data: { via: "handoff", harness: "gemini-cli" } }).text).toBe(
+      "You asked Gemini CLI",
+    );
+    expect(
+      eventWords({ type: "delegation.ended", data: { to: "codex:t1", ok: true, ms: 125_000, relayed: "delivered" } }),
+    ).toEqual({
+      text: "Asked Codex",
+      detail: "answered in 2 m · answer relayed here",
+    });
+    expect(
+      eventWords({
+        type: "delegation.ended",
+        data: { harness: "codex", ok: false, ms: 40_000, error: "harness: gemini-cli is not installed here" },
+      }).detail,
+    ).toBe("failed after 40 s · harness: gemini-cli is not installed here");
   });
 });
 

@@ -26,7 +26,8 @@ export type Scope =
   | "machines"
   | "palette"
   | "compose"
-  | "views";
+  | "views"
+  | "workflow";
 
 export interface Action {
   id: string;
@@ -306,6 +307,8 @@ export const ACTIONS: readonly Action[] = [
   nav("nav.feed", "Feed", "g f"),
   nav("nav.review", "Review", "g r"),
   nav("nav.machines", "Machines", "g m"),
+  nav("nav.usage", "Usage", "g u", "what each account has left"),
+  nav("nav.workflows", "Workflows", "g w"),
   nav("nav.connect", "Connect", "g c"),
   nav("nav.setup", "Setup", "g s"),
   nav("nav.views", "Views", "g v", "the installed view plugins"),
@@ -389,6 +392,9 @@ export const ACTIONS: readonly Action[] = [
     keys: ["."],
     hint: "the right-click menu, at the row",
   },
+  { id: "list.unread", label: "Mark as read or unread", group: "Lists", scope: "lists", keys: ["u"] },
+  { id: "list.hide", label: "Hide or unhide", group: "Lists", scope: "lists", keys: ["e"] },
+  { id: "list.hideUntil", label: "Hide until it needs you", group: "Lists", scope: "lists", keys: ["shift+e"] },
   { id: "board.peek", label: "Peek beside the page", group: "Board", scope: "board", keys: ["space"] },
   { id: "search.peek", label: "Peek beside the page", group: "Search", scope: "search", keys: ["space"] },
   { id: "search.copyResume", label: "Copy resume command", group: "Search", scope: "search", keys: ["mod+c"] },
@@ -434,6 +440,14 @@ export const ACTIONS: readonly Action[] = [
   { id: "session.openPage", label: "Open as a page", group: "Session", scope: "session", keys: ["o"] },
   { id: "session.older", label: "Older turns", group: "Session", scope: "session", keys: ["."] },
   { id: "session.latest", label: "Jump to the newest", group: "Session", scope: "session", keys: ["end", "shift+g"] },
+  {
+    id: "session.ask",
+    label: "Ask another agent",
+    group: "Session",
+    scope: "session",
+    keys: ["shift+a"],
+    hint: "the Handoff sheet: another agent on the same machine, its answer brought back here",
+  },
 
   { id: "panel.prev", label: "Previous tab", group: "Side panel", scope: "panel", keys: ["[", "ctrl+shift+tab"] },
   { id: "panel.next", label: "Next tab", group: "Side panel", scope: "panel", keys: ["]", "ctrl+tab"] },
@@ -506,6 +520,26 @@ export const ACTIONS: readonly Action[] = [
     scope: "compose",
     keys: ["mod+shift+f"],
     inInputs: true,
+  },
+
+  // The Workflows editor and run view (web/src/orchestrate/workflows).
+  {
+    id: "workflow.run",
+    label: "Run the workflow",
+    group: "Workflows",
+    scope: "workflow",
+    keys: ["mod+enter"],
+    inInputs: true,
+    hint: "saves first; asks for the input when the workflow names one",
+  },
+  { id: "workflow.cancel", label: "Cancel the run", group: "Workflows", scope: "workflow", keys: ["shift+c"] },
+  { id: "workflow.stepUp", label: "Move the open step up", group: "Workflows", scope: "workflow", keys: ["alt+up"] },
+  {
+    id: "workflow.stepDown",
+    label: "Move the open step down",
+    group: "Workflows",
+    scope: "workflow",
+    keys: ["alt+down"],
   },
 ];
 

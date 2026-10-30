@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The board: every session in one grouped list, needs_you first, under sticky section
 // headers. Filters by machine, harness and text in the page bar; done sessions folded
-// behind a disclosure with a count. A session started from here shows at once, as a
+// behind a disclosure with a count, and after them, folded the same way, the ones this
+// device hid (lib/hidden.ts). A session started from here shows at once, as a
 // "starting" row from its signed start, until its first event makes it an ordinary row
 // (STEER-SPEC B.5). A right-click on the page's empty space has the view options.
 // It holds still under the hand (POLISH-PLAN.md §6 #1): within a section rows keep the
@@ -28,6 +29,7 @@ import {
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
 import { LabelChip, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
+import { OfflineLine } from "../components/OfflineLine";
 import { PageBar } from "../components/PageBar";
 import {
   BesideButton,
@@ -46,6 +48,7 @@ import { ALIAS_WINDOW_MS, aliasHidden, openNewSession, setBoardFilter } from "..
 import { useStartTitles } from "../control/Starting";
 import { isFinal } from "../control/words";
 import {
+  byStateThenRecent,
   useAppState,
   useFirstLoad,
   useLabels,
@@ -53,15 +56,29 @@ import {
   useSessionTree,
   useStore,
   useStreamDown,
+  useUnreadKeys,
 } from "../data/hooks";
 import { agentMatches } from "../lib/agents";
+import { foldsAway, nestDelegated } from "../lib/delegated";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
-import { isHidden, useHidden } from "../lib/hidden";
-import { focusSearch, useListNav } from "../lib/keys";
+import {
+  canHideUntilNeeded,
+  hiddenNow,
+  hiddenRows,
+  hide,
+  hideUntilNeeded,
+  inItsPlace,
+  isHidden,
+  unhide,
+  useHidden,
+} from "../lib/hidden";
+import { focusSearch, inPanel, useListNav } from "../lib/keys";
 import { type LabelFilter, labelName, labelPasses, labelQuery, requestLabelRename } from "../lib/labels";
+import { isUnread, setUnread } from "../lib/marks";
 import { type Held, useFlip, useHeldOrder, useListHold, usePresence } from "../lib/motion";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
+import { useShortcut } from "../lib/shortcuts";
 import { openSplit, useSplitKey } from "../lib/split";
 import { useNow } from "../lib/time";
 import { useSetupStatus } from "../setup/api";
@@ -110,6 +127,9 @@ function viewItems(o: {
   lens: Lens;
   simple: boolean;
   counts: boolean;
+  /** What the filters show, folded Done rows included, that has news unseen. */
+  unread: SessionSummary[];
+  markRead: () => void;
 }): MenuList {
   return [
     { label: "Find…", action: "search.focus", run: () => void focusSearch() },
@@ -117,6 +137,7 @@ function viewItems(o: {
     { label: "Show done sessions", checked: o.showDone, run: () => o.setShowDone(!o.showDone) },
     !o.simple && { label: "Show counts", checked: o.counts, run: () => setShowCounts(!o.counts) },
     { label: "Edit labels…", run: () => requestLabelRename() },
+    { label: "Mark all as read", disabled: o.unread.length === 0 || undefined, run: o.markRead },
     { sep: true },
     {
       label: "Open sessions",
@@ -144,6 +165,15 @@ function viewItems(o: {
 
 /** Done stays open or folded across a visit to a session and back (Mail keeps it). */
 let doneOpen = false;
+/** Hidden stays open or folded too, and across reloads on this device. */
+const HIDDEN_OPEN_KEY = "sessionpipe-gui.board.hiddenOpen";
+let hiddenOpen = (() => {
+  try {
+    return localStorage.getItem(HIDDEN_OPEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+})();
 /** The once-only line under the first row ever seen on this device. */
 const FIRST_ROW_KEY = "sessionpipe-gui.board.firstRow";
 const firstRowSeen = () => {
@@ -170,7 +200,8 @@ const either = (names: string[]) =>
 
 export function Board() {
   const store = useStore();
-  const { roots, childrenOf, all } = useSessionTree();
+  const tree = useSessionTree();
+  const { all } = tree;
   const { snapshotAt } = useAppState();
   const firstLoad = useFirstLoad();
   const [q, setQ] = useState("");
@@ -241,21 +272,47 @@ export function Board() {
     [recentStart, starts, paired, now],
   );
 
+  // A session another one asked (`delegatedBy`: sessionpipe ask, a handoff) nests under
+  // the asking session the way a subagent does, as long as that session is drawn on the
+  // board and on the same machine: the daemon only ever asks there, so a child naming a
+  // parent elsewhere is a hook's say-so, not lineage. Drawn means every filter the roots
+  // go through (machine, harness, label, the query's label part, hidden on this device,
+  // an alias of a start) and not folded away in Done while the child still runs; a parent
+  // any of those takes off the board leaves the asked one a root of its own. A chain of
+  // asks hangs under its top, a loop nests nobody (lib/delegated.ts): nothing leaves the board.
+  const { roots, childrenOf } = useMemo(() => {
+    const drawn = (p: SessionSummary) =>
+      (!machine || p.machine === machine) &&
+      (!harness || p.harness === harness) &&
+      labelPasses(labels, p.key, label) &&
+      lq.test(p.key) &&
+      !aliased(p) &&
+      !isHidden(hidden, p.key, p.stateSince, p.state === "needs_you");
+    const hangs = (s: SessionSummary, p: SessionSummary) =>
+      p.machine === s.machine && drawn(p) && !foldsAway(s, p, showDone);
+    const { roots, nested } = nestDelegated(tree.roots, all, hangs);
+    if (nested.size === 0) return { roots, childrenOf: tree.childrenOf };
+    const childrenOf = new Map(tree.childrenOf);
+    for (const [key, list] of nested)
+      childrenOf.set(key, [...(childrenOf.get(key) ?? []), ...list].sort(byStateThenRecent));
+    return { roots, childrenOf };
+  }, [tree, all, machine, harness, labels, label, lq, aliased, hidden, showDone]);
+
+  const passes = useCallback(
+    (s: SessionSummary) =>
+      !aliased(s) &&
+      (!machine || s.machine === machine) &&
+      (!harness || s.harness === harness) &&
+      labelPasses(labels, s.key, label) &&
+      lq.test(s.key) &&
+      (matches(s, lq.rest) ||
+        agentsMatch(s, lq.rest) ||
+        (childrenOf.get(s.key) ?? []).some((c) => matches(c, lq.rest))),
+    [machine, harness, label, labels, lq, childrenOf, aliased],
+  );
   const visible = useMemo(
-    () =>
-      roots.filter(
-        (s) =>
-          !aliased(s) &&
-          !isHidden(hidden, s.key, s.stateSince) &&
-          (!machine || s.machine === machine) &&
-          (!harness || s.harness === harness) &&
-          labelPasses(labels, s.key, label) &&
-          lq.test(s.key) &&
-          (matches(s, lq.rest) ||
-            agentsMatch(s, lq.rest) ||
-            (childrenOf.get(s.key) ?? []).some((c) => matches(c, lq.rest))),
-      ),
-    [roots, machine, harness, label, labels, lq, childrenOf, aliased, hidden],
+    () => roots.filter((s) => passes(s) && !isHidden(hidden, s.key, s.stateSince, s.state === "needs_you")),
+    [roots, passes, hidden],
   );
 
   // Held still under the hand: rows keep their place and section; new ones wait.
@@ -265,10 +322,28 @@ export function Board() {
   // Held, new rows wait; but a list that has shown nothing yet (a first snapshot, a tree
   // just opened, the very first session) shows what it has at once.
   if (!hold || known.current.size === 0) known.current = new Set(heldAll.map((h) => h.key));
+  // A row that leaves the Hidden group (Unhide, or it needs you) takes its place at once.
+  const wasHidden = useRef<Set<string>>(new Set());
+  for (const h of heldAll) if (wasHidden.current.has(h.key)) known.current.add(h.key);
   // A row the person hid leaves at once, held or not: that was their own hand.
   const held = hold
-    ? heldAll.filter((h) => known.current.has(h.key) && !(h.gone && isHidden(hidden, h.key, h.item.stateSince)))
+    ? heldAll.filter(
+        (h) =>
+          known.current.has(h.key) &&
+          !(h.gone && isHidden(hidden, h.key, h.item.stateSince, h.item.state === "needs_you")),
+      )
     : heldAll;
+  // The Hidden group, under the same filters (lib/hidden.ts), less a row still held in
+  // its old place (a prompt answered under the pointer), which joins it when the hold ends.
+  const holding = held
+    .filter((h) => h.gone)
+    .map((h) => h.key)
+    .join("\n");
+  const hiddenList = useMemo(
+    () => hiddenRows(hidden, roots, passes, new Set(holding.split("\n"))),
+    [roots, passes, hidden, holding],
+  );
+  wasHidden.current = new Set(hiddenList.map((s) => s.key));
   useFlip(listRef);
 
   const groups = useMemo(() => {
@@ -278,11 +353,29 @@ export function Board() {
     return g;
   }, [held]);
 
+  const [showHidden, setShowHiddenState] = useState(hiddenOpen);
+  const toggleHidden = useCallback(() => {
+    setShowHiddenState((was) => {
+      hiddenOpen = !was;
+      try {
+        localStorage.setItem(HIDDEN_OPEN_KEY, hiddenOpen ? "1" : "0");
+      } catch {
+        // a private window: it stays as it is for this visit
+      }
+      return hiddenOpen;
+    });
+  }, []);
+  const hiddenHeld = useMemo(
+    () => hiddenList.map((s) => ({ key: s.key, item: s, group: "hidden", gone: false })),
+    [hiddenList],
+  );
+
   const ordered = useMemo(() => {
     const list: Held<SessionSummary>[] = [];
     for (const st of SESSION_STATES) if (st !== "done" || showDone) list.push(...groups.get(st)!);
+    if (showHidden) list.push(...hiddenHeld);
     return list;
-  }, [groups, showDone]);
+  }, [groups, showDone, showHidden, hiddenHeld]);
   const hrefs = useMemo(() => ordered.map((h) => sessionPath(h.item.harness, h.item.id)), [ordered]);
   const keys = useMemo(() => ordered.map((h) => h.key), [ordered]);
 
@@ -299,21 +392,34 @@ export function Board() {
     clear();
     return true;
   };
-  const { cursor } = useListNav(hrefs, true, keys, {
+  const { cursor, follow } = useListNav(hrefs, true, keys, {
     peek: "board.peek",
     clear: () => clearRef.current(),
     store,
   });
   const cursorKey = ordered[cursor]?.key;
-  // ⌥⌘1 … ⌥⌘7 label the row under the cursor, ⌥⌘0 clears it.
+  // ⌥⌘1 … ⌥⌘7 label the row under the cursor, ⌥⌘0 clears it; u marks it read or unread.
   useLabelKeys(() => (cursorKey ? [cursorKey] : []));
+  useUnreadKeys(() => (ordered[cursor] ? [ordered[cursor]!.item] : []));
+  const marks = useAppState().marks;
+  const doneUnread = useMemo(() => groups.get("done")!.filter((h) => isUnread(h.item, marks)).length, [groups, marks]);
+  // e hides or unhides it, ⇧E hides it until it needs you; the cursor keeps its place.
+  useHideKeys(
+    () => ordered[cursor]?.item,
+    () => follow(inItsPlace(hrefs, cursor)),
+  );
   const hiddenByLens = useMemo(() => ordered.reduce((n, h) => n + cardHides(h.item, lens), 0), [ordered, lens]);
 
-  const view = () => viewItems({ filtered, clear, showDone, setShowDone, beside, lens, simple, counts });
+  const view = () => {
+    const unread = visible.filter((s) => isUnread(s, store.get().marks));
+    const markRead = () => setUnread(store, unread, false);
+    return viewItems({ filtered, clear, showDone, setShowDone, beside, lens, simple, counts, unread, markRead });
+  };
   const pageMenu = useBackgroundMenu(view, { title: () => "Board" });
   const doneMenu = useContextMenu(() => [
     { label: "Show done sessions", checked: showDone, run: () => setShowDone((v) => !v) },
   ]);
+  const hiddenMenu = useContextMenu(() => [{ label: "Show hidden sessions", checked: showHidden, run: toggleHidden }]);
 
   const doneCount = groups.get("done")!.length;
   const loaded = !!snapshotAt;
@@ -330,7 +436,7 @@ export function Board() {
     if (firstHint) markFirstRow();
   }, [firstHint]);
 
-  const row = (h: Held<SessionSummary>, i: number) => {
+  const row = (h: Held<SessionSummary>, i: number, hiddenRow?: boolean) => {
     const s = h.item;
     return (
       <SessionCard
@@ -352,6 +458,7 @@ export function Board() {
         counts={counts}
         jump={i < 9 ? i + 1 : undefined}
         held={hold}
+        hidden={hiddenRow}
       />
     );
   };
@@ -362,7 +469,8 @@ export function Board() {
   useEffect(() => {
     if (ready) listRef.current?.setAttribute("data-settled", "");
   }, [ready]);
-  const noMatch = ready && !empty && visible.length === 0 && pending.length === 0 && all.length > 0;
+  const noMatch =
+    ready && !empty && visible.length === 0 && hiddenList.length === 0 && pending.length === 0 && all.length > 0;
 
   return (
     <div
@@ -472,6 +580,7 @@ export function Board() {
       {/* Always there once loaded, so its place is set before the rows (no shift) and the
           first row of all is a new row to useFlip (its entrance). */}
       <div className="board-list" ref={listRef} hidden={!ready || noMatch || undefined}>
+        {ready && <OfflineLine machine={machine} hold={hold} />}
         {ready &&
           SESSION_STATES.filter((st) => st !== "done").map((st) => {
             const list = groups.get(st)!;
@@ -520,6 +629,12 @@ export function Board() {
                 <span key={doneCount} className="group-count num">
                   {doneCount}
                 </span>
+                {!showDone && doneUnread > 0 && (
+                  <>
+                    {" "}
+                    <span className="group-note num">{doneUnread} unread</span>
+                  </>
+                )}
                 <svg className="group-caret" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
                   <path
                     d="M6 4l4 4-4 4"
@@ -535,9 +650,55 @@ export function Board() {
             {showDone && <div className="grid grid--done">{groups.get("done")!.map((h) => row(h, index++))}</div>}
           </section>
         )}
+
+        {/* What this device hid, under the same filters: folded, the fold is the switch. */}
+        {ready && hiddenHeld.length > 0 && (
+          <section className="group group--hidden" aria-label={`${hiddenHeld.length} hidden`}>
+            <h2 className="group-head" {...hiddenMenu}>
+              <button type="button" className="group-toggle" onClick={toggleHidden} aria-expanded={showHidden}>
+                Hidden
+                <span key={hiddenHeld.length} className="group-count num">
+                  {hiddenHeld.length}
+                </span>
+                <svg className="group-caret" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                  <path
+                    d="M6 4l4 4-4 4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </h2>
+            {showHidden && <div className="grid grid--hidden">{hiddenHeld.map((h) => row(h, index++, true))}</div>}
+          </section>
+        )}
       </div>
     </div>
   );
+}
+
+/** e hides the session `row()` names (the row under a list's cursor) or unhides it, ⇧E
+ *  hides it until it needs you; a key with nothing to hide passes. `leave()` runs first,
+ *  so the cursor can stay where the row was. */
+function useHideKeys(row: () => SessionSummary | undefined, leave: () => void): void {
+  // Not from inside the panel beside the board (the list's own menu and ⌘1–9 keep the
+  // same rule): e there would hide whatever row the cursor last rested on.
+  useShortcut("list.hide", () => {
+    const s = row();
+    if (!s || inPanel()) return false;
+    leave();
+    if (hiddenNow(s)) unhide(s.key);
+    else hide(s.key, s.stateSince, { title: sessionTitle(s), session: s.key });
+  });
+  useShortcut("list.hideUntil", () => {
+    const s = row();
+    if (!s || inPanel() || hiddenNow(s) || !canHideUntilNeeded(s)) return false;
+    leave();
+    hideUntilNeeded(s.key, { title: sessionTitle(s), session: s.key });
+  });
 }
 
 const keyOf = (s: SessionSummary) => s.key;

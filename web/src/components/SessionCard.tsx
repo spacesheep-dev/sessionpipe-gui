@@ -24,20 +24,21 @@ import {
   useSyncExternalStore,
 } from "react";
 import { answerState, useSessionSend } from "../control/useSend";
-import { useAppState, useStore } from "../data/hooks";
+import { useAppState, useStore, useUnread } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
 import { agentsChoice, agentsFact, agentsShown, agentTabKey, setAgentsChoice } from "../lib/agents";
 import {
   ATTENTION_LABEL,
   attentionMessage,
   harnessMark,
+  isPlanReview,
   oneLine,
   repoShort,
   STATE_LABEL,
   sessionTitle,
   toolLabel,
 } from "../lib/format";
-import { hide } from "../lib/hidden";
+import { hide, unhide } from "../lib/hidden";
 import { labelItems } from "../lib/labels";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { reducedMotion, tokenMs, useFlip, useHeldOrder, useListHold } from "../lib/motion";
@@ -50,6 +51,18 @@ import { AgentRow, useAgentsOpen } from "./AgentRow";
 import { HarnessGlyph, Redacted, Since, StateDot } from "./bits";
 import { type MenuItem, type MenuList, openMenu, useContextMenu } from "./ContextMenu";
 import { LabelDot } from "./LabelDot";
+import { NotifyOff } from "./NotifyOff";
+import "../styles/lineage.css";
+
+/** The row's trailing fact while the session waits on an agent it asked (sessionpipe ask,
+ *  a handoff): "asking Codex", or "asking 2 agents". Null when it asked none. */
+export function askingFact(s: Pick<SessionSummary, "delegations" | "counts">): string | null {
+  const n = s.counts.delegationsRunning ?? 0;
+  if (n <= 0) return null;
+  if (n > 1) return `asking ${n} agents`;
+  const open = (s.delegations ?? []).find((d) => !d.endedAt);
+  return open ? `asking ${harnessMark(open.harness).label}` : "asking another agent";
+}
 
 interface SessionCardProps {
   s: SessionSummary;
@@ -85,6 +98,8 @@ interface SessionCardProps {
   /** The board is holding still (the pointer is on it): the tree under this row holds too,
    *  so a subagent that starts or ends never pushes the rows below. */
   held?: boolean;
+  /** A row of the board's Hidden group: its trailing swipe unhides it. */
+  hidden?: boolean;
 }
 
 /** What the tier lens takes off a row, for the page's "N hidden" line. */
@@ -115,6 +130,7 @@ const sameCard = (a: SessionCardProps, b: SessionCardProps): boolean =>
   a.counts === b.counts &&
   a.jump === b.jump &&
   a.held === b.held &&
+  a.hidden === b.hidden &&
   a.startTitle === b.startTitle &&
   (a.children?.length ?? 0) === (b.children?.length ?? 0) &&
   (a.children ?? []).every((c, i) => c === b.children?.[i]);
@@ -142,6 +158,7 @@ export const SessionCard = memo(function SessionCard({
   counts = false,
   jump,
   held = false,
+  hidden = false,
   startTitle,
 }: SessionCardProps) {
   const store = useStore();
@@ -160,7 +177,9 @@ export const SessionCard = memo(function SessionCard({
   const toggleAgents = (to = !showAgents) => {
     if (agents.length > 0 && to !== showAgents) setAgentsChoice(s.key, to);
   };
-  const fact = agentsFact(s);
+  // The subagents running, and the agents it asked (one fact when both: "2 subagents
+  // running · asking Codex").
+  const fact = [agentsFact(s), askingFact(s)].filter(Boolean).join(" · ") || null;
   // sessionpipe 0.10: paused on its own background work, a turn nobody typed, a run
   // nobody attended. One trailing fact at most, after the subagents'.
   const quiet = quietRun(s);
@@ -170,6 +189,7 @@ export const SessionCard = memo(function SessionCard({
       (s.state === "working" && submittedLabel(s.currentTurn?.submittedBy)) ||
       (quiet && "unattended"));
   const attention = s.openAttentions[0];
+  const unread = useUnread(s);
   const live = s.state === "working" || s.state === "needs_you";
   const showText = lens === null || lens >= 2;
   const showTools = lens === null || lens >= 1;
@@ -207,10 +227,11 @@ export const SessionCard = memo(function SessionCard({
   const tip = [title, countsLine(s, showTools)].filter(Boolean).join("\n");
   const warm = prefetchProps(store, s);
   const rowRef = useRef<HTMLDivElement>(null);
-  // A phone's swipes (iOS Mail): trailing hides it (with Undo), leading labels it.
+  // A phone's swipes (iOS Mail): trailing hides it (with Undo), or unhides a hidden one;
+  // leading labels it.
   useSwipe(rowRef, {
     lead: () => openMenu(labelItems(store, [s.key]), rowRef.current!, { source: "touch", title: "Label" }),
-    trail: () => hide(s.key, s.stateSince, { title, session: s.key }),
+    trail: () => (hidden ? unhide(s.key) : hide(s.key, s.stateSince, { title, session: s.key })),
   });
   return (
     <article
@@ -225,7 +246,7 @@ export const SessionCard = memo(function SessionCard({
     >
       {attention?.kind === "permission" && <CardAnswer s={s} into={answer} />}
       <div className="card-row" ref={rowRef} {...warm}>
-        <SwipePanes lead="Label" trail="Hide" />
+        <SwipePanes lead="Label" trail={hidden ? "Unhide" : "Hide"} />
         {agents.length > 0 && (
           <button
             type="button"
@@ -276,8 +297,9 @@ export const SessionCard = memo(function SessionCard({
               row's two lines (the glyph in the lead, the time at line 1's end). */}
           <span className="card-status">
             <span className="card-state" data-jump={jump}>
-              <StateDot state={s.state} decorative />
+              <StateDot state={s.state} decorative unread={unread} />
               <span className="sr-only">{STATE_LABEL[s.state]}</span>
+              {unread && <span className="sr-only">Unread</span>}
               <LabelDot session={s.key} />
             </span>
             {attention && (
@@ -296,6 +318,7 @@ export const SessionCard = memo(function SessionCard({
                   : `Last event ${new Date(s.lastAt).toLocaleString()}`
               }
             >
+              <NotifyOff s={s} />
               {frozenAt ? <Frozen iso={time} at={frozenAt} /> : <Since iso={time} coarse />}
             </span>
           </span>
@@ -305,7 +328,7 @@ export const SessionCard = memo(function SessionCard({
               <span className={`card-attn ${literalAsk(attnTool) ? "mono" : ""}`}>
                 {attention.message && showTools ? (
                   attnTool ? (
-                    <Redacted text={oneLine(attentionMessage(attention) || attention.message, 240)} />
+                    <Redacted text={oneLine(attentionMessage(attention) ?? "", 240)} />
                   ) : (
                     <Inline text={oneLine(attention.message, 240)} />
                   )
@@ -443,7 +466,8 @@ function KidList({
   );
 }
 
-/** A subagent: one line under its parent, on the tree guide, with the session menu. */
+/** A subagent, or a session this one asked (`delegatedBy`): one line under its parent,
+ *  on the tree guide, with the session menu. */
 function KidRow({
   c,
   flip,
@@ -464,7 +488,15 @@ function KidRow({
         modClick={(o) => openSplit(c.key, { background: o.background })}
       >
         <StateDot state={c.state} decorative />
+        {/* An asked session is another harness's: its glyph says which (a subagent shares
+            its parent's and keeps the row bare). */}
+        {c.delegatedBy && (
+          <span className="kid-glyph">
+            <HarnessGlyph name={c.harness} size="sm" />
+          </span>
+        )}
         <span className="kid-title ellipsis">{sessionTitle(c)}</span>
+        <NotifyOff s={c} under />
         {c.currentTool && c.state === "working" ? (
           <code className="kid-tool">{toolLabel(c.currentTool.tool)}</code>
         ) : (
@@ -500,17 +532,19 @@ function CardAnswer({ s, into }: { s: SessionSummary; into: MutableRefObject<Men
   return null;
 }
 
-/** Allow and Deny as menu items, disabled with the reason when nothing can go. */
+/** Allow and Deny as menu items, disabled with the reason when nothing can go; a plan
+ *  review's are Approve plan and Keep planning. */
 export function answerItems(
   tool: string | undefined,
   st: { off: boolean; reason: string | null },
   answer: (allow: boolean) => unknown,
 ): MenuItem[] {
   const disabled = st.off ? (st.reason ?? true) : undefined;
-  const what = tool ? ` ${tool}` : "";
+  const plan = isPlanReview({ kind: "permission", tool });
+  const what = tool ? ` ${toolLabel(tool)}` : "";
   return [
-    { label: `Allow${what}`, disabled, run: () => void answer(true) },
-    { label: `Deny${what}`, disabled, run: () => void answer(false) },
+    { label: plan ? "Approve plan" : `Allow${what}`, disabled, run: () => void answer(true) },
+    { label: plan ? "Keep planning" : `Deny${what}`, disabled, run: () => void answer(false) },
   ];
 }
 

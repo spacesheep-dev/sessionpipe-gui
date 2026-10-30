@@ -2,9 +2,13 @@
 // A session's events grouped by turn, as the timeline and the chat draw them, which of
 // those turns a message sent from here became, and an event row's words. A subagent's
 // events (`agent_id`) are one group inside the turn that spawned it, wherever they arrive
-// (a background agent works on after that turn's Stop). Pure, so all three are
-// unit-tested.
+// (a background agent works on after that turn's Stop); an agent the session asked
+// (`delegation.started` / `.ended`, sessionpipe ask or a handoff) is one row in the turn
+// the ask began in, and the answer a handoff brought back is told apart from a prompt the
+// person typed by the daemon's frame. Pure, so all of it is unit-tested.
 import type { AgentRun, StoredEvent } from "@shared/api";
+import { harnessMark } from "./format";
+import { dur } from "./time";
 
 export interface Turn {
   n: number;
@@ -14,9 +18,21 @@ export interface Turn {
 export type Item =
   | { kind: "tool"; key: string; started?: StoredEvent; ended?: StoredEvent }
   | { kind: "event"; key: string; e: StoredEvent }
-  | AgentItem;
+  | AgentItem
+  | DelegationItem;
 export type EventItem = Extract<Item, { kind: "event" }>;
 export type ToolItem = Extract<Item, { kind: "tool" }>;
+
+/** One agent this session asked, where the ask began: its delegation.started and, once
+ *  the answer is in, its delegation.ended (an end whose start the loaded window lacks
+ *  stands alone). The summary's `Delegation` of the same `askId` has the reading. */
+export interface DelegationItem {
+  kind: "delegation";
+  key: string;
+  askId: string;
+  started?: StoredEvent;
+  ended?: StoredEvent;
+}
 
 /** One subagent in its spawning turn: the Agent / Task call that launched it (the block's
  *  head), its subagent.started / .ended, and its own tool calls. */
@@ -107,6 +123,7 @@ export function groupTurns(events: StoredEvent[], agents: readonly AgentRun[] = 
   const runs = new Map(agents.map((a) => [a.id, a]));
   const byCall = new Map(agents.filter((a) => a.callId).map((a) => [a.callId!, a.id]));
   const groups = new Map<string, { item: AgentItem; open: Map<string, ToolItem> }>();
+  const asks = new Map<string, DelegationItem>();
   /** An agent's group, made in its spawning turn (the turn its events name, else the one
    *  the summary names, else the current one) the first time it is heard of. */
   const group = (id: string, e: StoredEvent, at?: Turn) => {
@@ -126,6 +143,19 @@ export function groupTurns(events: StoredEvent[], agents: readonly AgentRun[] = 
       openTools = new Map();
       const tid = str(e.data.turn_id);
       if (tid) byTurnId.set(tid, cur);
+      continue;
+    }
+    if (e.type === "delegation.started" || e.type === "delegation.ended") {
+      // Where the ask began; an end alone sits where it arrived.
+      const askId = str(e.data.ask_id) ?? e.id;
+      let item = asks.get(askId);
+      if (!item) {
+        item = { kind: "delegation", key: `d:${askId}`, askId };
+        asks.set(askId, item);
+        cur.items.push(item);
+      }
+      if (e.type === "delegation.started") item.started ??= e;
+      else item.ended = e;
       continue;
     }
     const agentId = str(e.data.agent_id);
@@ -177,6 +207,8 @@ export function groupTurns(events: StoredEvent[], agents: readonly AgentRun[] = 
       (home ?? cur).items.push({ kind: "event", key: e.id, e });
       continue;
     }
+    // A status line's usage report is the account's, not a step of the turn (Usage shows it).
+    if (e.type === "limits.observed") continue;
     cur.items.push({ kind: "event", key: e.id, e });
   }
   return turns.filter((t) => t.start || t.items.length > 0);
@@ -217,16 +249,40 @@ const SENT_PREFIX_MIN = 24;
 // line before a message to a running session, a source note after a new session's first.
 const FRAME_HEAD = /^Message via [^\n]*\(sessionpipe control[^\n]*\):\s*/;
 const FRAME_TAIL = /\s*\(Sent via [^\n]* with sessionpipe control[^\n]*\)\s*$/;
+// The daemon's trailer on the question it hands an agent another session asked
+// (`sessionpipe ask`, CONTROL.md §13): the asker's `<harness>:<id>`, in the shape a
+// session ref has (control's SESSION_REF), or the trailer is just words in the prompt.
+const ASK_TAIL =
+  /\s*\(Asked by ([a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}) on this machine with sessionpipe ask\.[^)]*\)\s*$/;
 const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 
 /** A prompt as the person wrote it: the machine's framing taken off, and where it was sent
- *  from ("localhost", "studio-mac.local:7373") when the framing said. */
-export function unframe(prompt: string): { text: string; via?: string } {
+ *  from ("localhost", "studio-mac.local:7373") when the framing said; `askedBy` when it
+ *  was another session's question (the `<harness>:<id>` of the asker). */
+export function unframe(prompt: string): { text: string; via?: string; askedBy?: string } {
+  const asked = ASK_TAIL.exec(prompt);
+  if (asked) return { text: prompt.replace(ASK_TAIL, ""), askedBy: asked[1] };
   const head = /^Message via ([^\n(]*?)\s*\(sessionpipe control/.exec(prompt);
   const text = prompt.replace(FRAME_HEAD, "").replace(FRAME_TAIL, "");
   if (text === prompt) return { text };
   const tail = /\(Sent via ([^\n]*?) with sessionpipe control/.exec(prompt);
   return { text, via: head?.[1] || tail?.[1] || undefined };
+}
+
+// A handoff's answer as the daemon delivers it into `reply_to` (CONTROL.md §6): the
+// asked session by its harness and short id, the receiver it was asked through, the reply.
+const ANSWER_HEAD = /^Answer from ([a-z0-9-]+):([^\s]+) \(sessionpipe handoff[^)]*\):\n\n/;
+
+/** A prompt that is an agent's answer brought back by a handoff, not the person's words:
+ *  who answered (the harness, and the daemon's short id of its session), through which
+ *  receiver it was asked, and the answer itself. Undefined for any other prompt. */
+export function handoffAnswer(
+  prompt: string,
+): { harness: string; shortId: string; via?: string; reply: string } | undefined {
+  const m = ANSWER_HEAD.exec(prompt);
+  if (!m) return undefined;
+  const via = /asked via ([^)]+)\)/.exec(m[0])?.[1];
+  return { harness: m[1]!, shortId: m[2]!, ...(via ? { via } : {}), reply: prompt.slice(m[0].length) };
 }
 
 /** Whether a turn's prompt is this message's words, once the machine's framing is off. */
@@ -304,6 +360,8 @@ const base = (p: string): string => {
   return i >= 0 ? clean.slice(i + 1) || clean : clean;
 };
 const word = (v: unknown): string => (typeof v === "string" ? v.replace(/_/g, " ") : "");
+/** A harness as a sentence names it ("Claude Code", "Codex"). */
+const harnessWord = (v: unknown): string => (typeof v === "string" && v ? harnessMark(v).label : "another agent");
 
 /** Why a session ended, as a person says it (word() has already turned `_` into spaces). */
 const ENDED_WHY: Record<string, string> = {
@@ -363,6 +421,19 @@ export function eventWords(e: Pick<StoredEvent, "type" | "data">): { text: strin
       return { text: "Context compacted", ...(word(d.trigger) === "manual" ? { detail: "by hand" } : {}) };
     case "native":
       return { text: "A hook payload sessionpipe passed through as it came" };
+    // An agent this session asked (sessionpipe ask, or a handoff relayed into it): the
+    // harness's own name is the words' subject; the chat draws the row from the reading.
+    case "delegation.started":
+      return { text: `${d.via === "handoff" ? "You asked" : "Asked"} ${harnessWord(d.harness)}`, detail: "running" };
+    case "delegation.ended": {
+      const who = harnessWord(d.harness ?? (typeof d.to === "string" ? d.to.slice(0, d.to.indexOf(":")) : ""));
+      const took = typeof d.ms === "number" ? dur(d.ms) : "";
+      const detail =
+        d.ok === false
+          ? `failed${took ? ` after ${took}` : ""}${typeof d.error === "string" && d.error ? ` · ${d.error}` : ""}`
+          : `answered${took ? ` in ${took}` : ""}${d.relayed === "delivered" ? " · answer relayed here" : ""}`;
+      return { text: `Asked ${who}`, detail };
+    }
     default: {
       const [noun, verb] = e.type.split(".");
       const t = [noun, verb].filter(Boolean).join(" ").replace(/_/g, " ");
