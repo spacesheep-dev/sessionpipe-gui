@@ -33,14 +33,40 @@ const env = { ...process.env };
 for (const k of Object.keys(env))
   if (/^npm_config_(global|prefix|location|save|package_lock_only|dry_run)$/i.test(k)) delete env[k];
 env.npm_config_global = "false";
+
+/** npm, with no shell. npm runs this script with npm_execpath set to its own CLI
+ *  (npm-cli.js), which runs under this node. A bare "npm" is npm.cmd on Windows, and
+ *  spawnSync can't start a .cmd without a shell: `npx github:…` failed there with no
+ *  message. Run by hand (no npm_execpath), Windows gets one quoted command under a shell. */
+function npm(args) {
+  const cli = process.env.npm_execpath;
+  const r =
+    cli && /npm-cli\.[cm]?js$/i.test(cli)
+      ? spawnSync(process.execPath, [cli, ...args], { cwd: root, stdio: "inherit", env })
+      : process.platform === "win32"
+        ? spawnSync(["npm", ...args].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" "), {
+            cwd: root,
+            stdio: "inherit",
+            env,
+            shell: true,
+          })
+        : spawnSync("npm", args, { cwd: root, stdio: "inherit", env });
+  if (r.error) console.error(`sessionpipe-gui: couldn't run npm ${args[0]}: ${r.error.message}`);
+  return r;
+}
 if (!haveTools) {
   console.log("sessionpipe-gui: installing the build tools into the checkout (one time)…");
-  const i = spawnSync(
-    "npm",
-    ["install", "--include=dev", "--no-save", "--no-audit", "--no-fund", "--ignore-scripts", "--prefix", root],
-    { cwd: root, stdio: "inherit", env },
-  );
+  const i = npm([
+    "install",
+    "--include=dev",
+    "--no-save",
+    "--no-audit",
+    "--no-fund",
+    "--ignore-scripts",
+    "--prefix",
+    root,
+  ]);
   if (i.status !== 0) process.exit(i.status ?? 1);
 }
-const r = spawnSync("npm", ["run", "build", "--silent"], { cwd: root, stdio: "inherit", env });
+const r = npm(["run", "build", "--silent"]);
 process.exit(r.status ?? 1);
