@@ -93,9 +93,10 @@ jobs:
           PLATFORMS: ${{ inputs.platforms }}
         run: |
           set -euo pipefail
+          # macos-15: GitHub retires the macOS 14 image on 2026-11-02, with brownouts before
+          # (actions/runner-images#13518); the v0.6.2 run lost its Mac job to one. The list
+          # below is JSON for jq: no comments inside it.
           all='[
-            # macos-15: GitHub retires the macOS 14 image on 2026-11-02, with brownouts before
-            # (actions/runner-images#13518); the v0.6.2 run lost its Mac job to one.
             {"name":"macOS universal","platform":"macos","os":"macos-15","args":"--target universal-apple-darwin --bundles app,dmg --features identity","rust-targets":"aarch64-apple-darwin,x86_64-apple-darwin"},
             {"name":"Windows x64","platform":"windows","os":"windows-latest","args":"--bundles nsis,msi","rust-targets":""},
             {"name":"Linux x64","platform":"linux","os":"ubuntu-22.04","args":"--bundles appimage,deb","rust-targets":""}
