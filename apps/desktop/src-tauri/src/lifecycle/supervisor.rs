@@ -1183,7 +1183,10 @@ mod tests {
         );
         write(std::process::id(), port, "t2"); // the same receiver, started again
         assert_ne!(run_stamp(&d.0), first);
-        write(99_999_990, port, "t3"); // a stale file
+        // A stale file: a dead pid is caught on Unix. pid_alive can't tell on Windows
+        // (always true there), so the port probe alone decides, and this port answers.
+        write(99_999_990, port, "t3");
+        #[cfg(unix)]
         assert_eq!(run_state(&d.0, &here), RunState::Nothing);
     }
 }
