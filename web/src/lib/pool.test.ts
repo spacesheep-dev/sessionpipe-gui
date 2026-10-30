@@ -25,11 +25,13 @@ import {
   servedBy,
   servedWords,
   signInLead,
+  signInPlan,
   statusWords,
   stillSaving,
   swaps,
   swapWords,
   switchHint,
+  turningOn,
 } from "./pool";
 
 const NOW = Date.UTC(2026, 9, 29, 12, 0, 0);
@@ -422,6 +424,27 @@ describe("the section's words", () => {
     });
     expect(loginFailure({ poolAction: "login.begin" }, "lab-mac", refusal)?.text).toBe("Sending to lab-mac…");
     expect(loginFailure({ poolAction: "login.begin", outcome: "delivered" }, "lab-mac", refusal)).toBeNull();
+  });
+  it("plans the sign-in from the hello: the pool off is turned on first, never refused", () => {
+    // On: one command, the plain lead.
+    expect(signInPlan({ on: true }, "lab-mac")).toEqual({
+      actions: ["login.begin"],
+      lead: signInLead("lab-mac"),
+      button: "Sign in to Claude…",
+    });
+    // Off: `on` goes first, and the lead says what the one button does.
+    const off = signInPlan({ on: false }, "desk-pc");
+    expect(off.actions).toEqual(["on", "login.begin"]);
+    expect(off.button).toBe("Sign in to Claude…");
+    expect(off.lead).toBe(
+      "desk-pc turns its pool on, then opens a sign-in link; you sign in on claude.ai and paste the code it shows. Nothing from the account reaches this device.",
+    );
+    expect(signInPlan({ on: false }, "desk-pc", "misha@example.com").lead).toMatch(
+      /^Sign in again as misha@example\.com\. desk-pc turns its pool on, then opens/,
+    );
+    // No pool in the hello: nothing to turn on; the daemon's answer says the rest.
+    expect(signInPlan(undefined, "old-box").actions).toEqual(["login.begin"]);
+    expect(turningOn("desk-pc")).toBe("Turning desk-pc's pool on…");
   });
   it("asks before a remove, and says what one account left leaves", () => {
     expect(removeConfirm("Fiction", "lab-mac", false)).toEqual({

@@ -529,6 +529,9 @@
     overflow-y: auto;
     scrollbar-width: none;
   }
+  .shell--side .rail-nav::-webkit-scrollbar {
+    display: none;
+  }
   .shell--side .rail .nav-link {
     flex-direction: row;
     justify-content: flex-start;

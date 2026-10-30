@@ -13,8 +13,72 @@ html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
-  /* Thin themed scrollbars, the window's included. */
-  scrollbar-color: var(--line-2) transparent;
+}
+
+/* The scrollbars, the window's included: a thin bar on no track, its thumb a hairline
+   grey that darkens under the pointer, no arrows. Set twice, since the engines split:
+   Chromium and Firefox take the standard properties (and Chromium ignores the pseudo-
+   elements once those are set, so the two must agree); WebKit, the Mac app's window and
+   Safari, draws the OS's bar unless the pseudo-elements say otherwise. scrollbar-color
+   inherits, scrollbar-width does not, so the width goes on every element. Pointer devices
+   only: a phone (the ios and android shells, and a phone's browser) keeps the OS's overlay
+   bars, which show on a scroll and fade as every app's do. A surface that hides its bar
+   says so with both (scrollbar-width: none and ::-webkit-scrollbar { display: none }, as
+   tabstrip.css does); :where() keeps these at no specificity, so such a rule always wins. */
+@media (hover: hover) {
+  :where(html:not([data-shell="ios"]):not([data-shell="android"])) {
+    scrollbar-color: var(--line-2) transparent;
+  }
+  :where(
+    html:not([data-shell="ios"]):not([data-shell="android"]),
+    html:not([data-shell="ios"]):not([data-shell="android"]) *
+  ) {
+    scrollbar-width: thin;
+  }
+  /* 10 px, of which the thumb paints 6: a 2 px clear inset each side. */
+  :where(
+    html:not([data-shell="ios"]):not([data-shell="android"]),
+    html:not([data-shell="ios"]):not([data-shell="android"]) *
+  )::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+    background: transparent;
+  }
+  :where(
+    html:not([data-shell="ios"]):not([data-shell="android"]),
+    html:not([data-shell="ios"]):not([data-shell="android"]) *
+  )::-webkit-scrollbar-track,
+  :where(
+    html:not([data-shell="ios"]):not([data-shell="android"]),
+    html:not([data-shell="ios"]):not([data-shell="android"]) *
+  )::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  :where(
+    html:not([data-shell="ios"]):not([data-shell="android"]),
+    html:not([data-shell="ios"]):not([data-shell="android"]) *
+  )::-webkit-scrollbar-button {
+    display: none;
+  }
+  :where(
+    html:not([data-shell="ios"]):not([data-shell="android"]),
+    html:not([data-shell="ios"]):not([data-shell="android"]) *
+  )::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: var(--radius-pill);
+    background-color: var(--line-2);
+    background-clip: content-box;
+  }
+  :where(
+    html:not([data-shell="ios"]):not([data-shell="android"]),
+    html:not([data-shell="ios"]):not([data-shell="android"]) *
+  )::-webkit-scrollbar-thumb:hover,
+  :where(
+    html:not([data-shell="ios"]):not([data-shell="android"]),
+    html:not([data-shell="ios"]):not([data-shell="android"]) *
+  )::-webkit-scrollbar-thumb:active {
+    background-color: var(--fg-4);
+  }
 }
 
 body {

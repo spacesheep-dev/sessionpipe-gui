@@ -482,4 +482,34 @@ test.describe("signed pool commands", () => {
       await m.stop();
     }
   });
+
+  test("the Add account sheet turns a pool that is off on before the sign-in, never refused", async ({
+    context,
+    page,
+  }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const name = `lab-${tag()}`;
+    const m = await poolDaemon(key, name, { on: false });
+    try {
+      await page.goto(`${CONTROL_BASE}/usage`);
+      const s = section(page, name);
+      await s.locator("[data-pool-add]").click();
+      const sheet = page.locator("[data-pool-sheet]");
+      // The lead says what the one button does; the button reads as it always does.
+      await expect(sheet.locator("[data-pool-lead]")).toHaveText(
+        `${name} turns its pool on, then opens a sign-in link; you sign in on claude.ai and paste the code it shows. Nothing from the account reaches this device.`,
+      );
+      await expect(sheet.locator("[data-pool-signin]")).toHaveText(/Sign in/);
+      await sheet.locator("[data-pool-signin]").click();
+      // `on` first (the page's own switch command, a fresh confirm), then login.begin once
+      // its ack is delivered; the link arrives and no pool_off line is ever shown.
+      await expect.poll(() => m.seen.map((c) => c.pool_action)).toEqual(["on", "login.begin"]);
+      await expect(sheet.locator("[data-pool-code]")).toBeVisible();
+      await expect(sheet.locator("[data-pool-error]")).toHaveCount(0);
+      expect(m.state.on).toBe(true);
+    } finally {
+      await m.stop();
+    }
+  });
 });

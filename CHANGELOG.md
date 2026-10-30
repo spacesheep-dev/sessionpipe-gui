@@ -48,6 +48,16 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 - Notification banners on the phone fit the screen on every title length and sit under
   the status bar; a long one ends in an ellipsis instead of running off the edge.
+- **Every scrollbar on a desktop is the app's own**: a thin grey thumb on no track, the
+  window's and the popovers' included (the Mac app showed the OS's), and the Display
+  popover can no longer scroll sideways.
+- **The Add account sheet is New session's dialog**: 640 px under the title bar over a
+  scrim that dims the whole window, Cancel and Sign in in its footer (in the top bar on a
+  phone), the command and the sign-in as grouped rows. It had taken the Usage page's
+  reading measure and left the sidebar undimmed.
+- **"Sign in to Claude…" on a machine whose pool is off turns the pool on first**, then
+  opens the sign-in, and says so, instead of being refused with "the pool is off on that
+  machine".
 
 ## [0.6.1] - 2026-10-30
 

@@ -132,15 +132,25 @@ test("the fake daemon: the held order, a drag, the sheet, offline, none with roo
     const sheet = page.locator("[data-pool-sheet]");
     await expect(sheet).toBeVisible();
     if (isMobile) {
-      // The Ready state's one action fills its cell, 44 pt tall.
-      const cell = (await sheet.locator(".pa-actions--ready").boundingBox())!;
+      // Sign in is the bar's trailing button, 44 pt tall, as New session's Start is.
       const btn = (await sheet.locator("[data-pool-signin]").boundingBox())!;
-      expect(btn.width).toBe(cell.width);
       expect(btn.height).toBeGreaterThanOrEqual(44);
+      expect(await sheet.locator(".ns-bar [data-pool-signin]").count()).toBe(1);
+    } else {
+      // The desktop dialog is New session's: 640 wide under the title bar, the scrim over
+      // the whole window, Cancel and Sign in in the footer.
+      const box = (await sheet.boundingBox())!;
+      expect(box.width).toBe(640);
+      expect(box.y).toBe(48);
+      const scrim = (await page.locator(".ns-scrim").boundingBox())!;
+      expect(scrim.x).toBe(0);
+      expect(scrim.width).toBe(1440);
+      await expect(sheet.locator(".ns-foot [data-pool-cancel]")).toHaveText("Cancel");
+      await expect(sheet.locator(".ns-foot [data-pool-signin]")).toHaveText("Sign in to Claude…");
     }
     await shot(page, `${p}9-sheet-ready`);
     await sheet.locator("[data-pool-signin]").click();
-    await expect(sheet.locator(".pa-status")).toHaveText(/Sending to lab-slow-/);
+    await expect(sheet.locator(".ns-status")).toHaveText(/Sending to lab-slow-/);
     await shot(page, `${p}9b-sheet-sending`);
     await expect(sheet.locator("[data-pool-code]")).toBeVisible({ timeout: 15_000 });
     await sheet.locator("[data-pool-code]").fill("expired#state");

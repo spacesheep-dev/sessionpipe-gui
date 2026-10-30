@@ -393,6 +393,36 @@ export const signInLead = (machine: string, again?: string): string =>
   `${again ? `Sign in again as ${again}. ` : ""}${machine} opens a sign-in link; you sign in on claude.ai and paste the code it shows. Nothing from the account reaches this device.`;
 export const CODE_INCOMPLETE =
   "That isn't the whole code. Paste everything the page showed, including the part after #.";
+
+/** What "Sign in to Claude…" does, decided from the hello before anything is sent. */
+export interface SignInPlan {
+  /** The pool commands, in order: `login.begin` alone with the pool on; with it off, `on`
+   *  first (its delivered ack starts the sign-in), since the daemon refuses a `login.begin`
+   *  while the pool is off (`pool_off`), a refusal the sheet can see coming. */
+  actions: readonly ("on" | "login.begin")[];
+  /** The sign-in group's lead sentence: what pressing the button does, in words. */
+  lead: string;
+  /** The primary's label. */
+  button: string;
+}
+
+/** The sign-in's plan for a machine (§4): a pool that is off is turned on as part of
+ *  signing in, and the lead says so; `again` is the account to sign in again as. A hello
+ *  with no pool at all plans the plain sign-in: the daemon's own answer (unsupported) says
+ *  what it cannot do. */
+export function signInPlan(pool: Pick<MachinePool, "on"> | undefined, machine: string, again?: string): SignInPlan {
+  const off = !!pool && !pool.on;
+  const prefix = again ? `Sign in again as ${again}. ` : "";
+  return {
+    actions: off ? ["on", "login.begin"] : ["login.begin"],
+    lead: off
+      ? `${prefix}${machine} turns its pool on, then opens a sign-in link; you sign in on claude.ai and paste the code it shows. Nothing from the account reaches this device.`
+      : signInLead(machine, again),
+    button: "Sign in to Claude…",
+  };
+}
+/** The status line while the `on` step is on its way. */
+export const turningOn = (machine: string): string => `Turning ${possessive(machine)} pool on…`;
 export const LOGIN_EXPIRED = "The sign-in took too long. Start over to get a new link.";
 export const cannotSignInHere = (machine: string): string =>
   `${machine}'s sessionpipe can't sign in from here. Use the command below.`;

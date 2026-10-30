@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Add account sheet (UX-SPEC §4): "Add a Claude account to lab-mac", in the New session
-// sheet's frame (a dialog under the title bar on a desktop, a full-height sheet on a
-// phone). Two groups: the command to run on that machine (`sessionpipe pool add
-// --import`, with Copy), and the sign-in the daemon runs: "Sign in to Claude…" sends
-// `login.begin`; its delivered ack carries a URL and a pending login id (lib/pool.ts
+// sheet's frame and grammar: on a desktop a 640 px dialog dropped from under the title bar
+// over a scrim that dims the whole window, the title at its top, the groups as rows split
+// by inset hairlines, and the footer New session has (the status at the left, Cancel and
+// the primary at the right); on a phone a full-height sheet with Cancel and the primary in
+// its top bar and the groups as inset cells. Mounted in document.body (a portal), never in
+// the page: the Usage page is a document page, whose children take its reading measure,
+// and a modal is not one of them. Two groups: the command to run on that machine
+// (`sessionpipe pool add --import`, with Copy), and the sign-in the daemon runs: "Sign in
+// to Claude…" sends `login.begin` (first `on` when the pool is off, lib/pool.ts
+// signInPlan: the daemon would refuse a sign-in while it is off, and the lead says the
+// button turns it on); its delivered ack carries a URL and a pending login id (lib/pool.ts
 // loginFromDetail), shown as "Open claude.ai" and a well; the pasted `code#state` goes
 // back as `login.complete` with a fresh confirm; delivered, the sheet closes and the new
 // row arrives with the hello. Every failure line is §4.2's. The GUI never sees a token:
@@ -12,6 +19,7 @@
 // from here. Mounted by the Usage page (PoolAddHost) while open.
 import type { MachineSummary } from "@shared/api";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMessage } from "../control/hooks";
 import { closePoolAdd, type PoolAddTarget, usePoolAdd } from "../control/poolAddState";
 import { signerLabel } from "../control/signer";
@@ -27,10 +35,11 @@ import {
   LOGIN_COMMAND,
   loginFailure,
   loginFromDetail,
-  signInLead,
+  signInPlan,
+  turningOn,
 } from "../lib/pool";
 import { useShortcut } from "../lib/shortcuts";
-import { CommandWell } from "./bits";
+import { ActionButton, CommandWell } from "./bits";
 import { useMedia } from "./Shell";
 import "../control/newSessionSheet.css";
 
@@ -42,6 +51,8 @@ export function PoolAddHost() {
 }
 
 type Link = { url: string; pendingId: string };
+
+const settled = (outcome: string | undefined): boolean => !!outcome && outcome !== "taken" && outcome !== "progress";
 
 export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closing: boolean }) {
   const phone = useMedia("(max-width: 839px)");
@@ -55,6 +66,7 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
   const codeRef = useRef<HTMLInputElement>(null);
   const close = useCallback(() => closePoolAdd(), []);
 
+  const [onId, setOnId] = useState<string | null>(null);
   const [beginId, setBeginId] = useState<string | null>(null);
   const [completeId, setCompleteId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -62,13 +74,33 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
   const [code, setCode] = useState("");
   const [failure, setFailure] = useState<CommandNote | null>(null);
   const [unsupported, setUnsupported] = useState(false);
+  const on = useMessage(onId);
   const begin = useMessage(beginId);
   const complete = useMessage(completeId);
+  const plan = signInPlan(pool, m.name, target.again);
 
+  const beginLogin = useCallback(async () => {
+    setSending(true);
+    const a = await send.send({ action: "login.begin" });
+    setSending(false);
+    if (a) setBeginId(a.id);
+  }, [send.send]);
+
+  // The `on` step's answer (a pool that was off): delivered, the sign-in begins; else why not.
+  useEffect(() => {
+    if (!settled(on?.outcome)) return;
+    setOnId(null);
+    if (on?.outcome === "delivered") {
+      void beginLogin();
+      return;
+    }
+    if (on?.outcome === "unsupported") setUnsupported(true);
+    if (on) setFailure(loginFailure(on, m.name, refusalWords));
+  }, [on, m.name, beginLogin]);
   // login.begin's answer: the link, or why not.
   useEffect(() => {
-    if (!begin?.outcome || begin.outcome === "taken" || begin.outcome === "progress") return;
-    if (begin.outcome === "delivered") {
+    if (!settled(begin?.outcome)) return;
+    if (begin?.outcome === "delivered") {
       const got = loginFromDetail(begin.detail);
       if (got.url && got.pendingId) {
         setLink({ url: got.url, pendingId: got.pendingId });
@@ -76,18 +108,18 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
       } else setFailure({ text: `${m.name} sent no sign-in link. Use the command below.`, err: true, sticky: true });
       return;
     }
-    if (begin.outcome === "unsupported") setUnsupported(true);
-    setFailure(loginFailure(begin, m.name, refusalWords));
+    if (begin?.outcome === "unsupported") setUnsupported(true);
+    if (begin) setFailure(loginFailure(begin, m.name, refusalWords));
   }, [begin, m.name]);
   // login.complete's answer: done (the hello brings the row), or why not.
   useEffect(() => {
-    if (!complete?.outcome || complete.outcome === "taken" || complete.outcome === "progress") return;
-    if (complete.outcome === "delivered") {
+    if (!settled(complete?.outcome)) return;
+    if (complete?.outcome === "delivered") {
       close();
       return;
     }
-    if (complete.outcome === "unsupported") setUnsupported(true);
-    setFailure(loginFailure(complete, m.name, refusalWords));
+    if (complete?.outcome === "unsupported") setUnsupported(true);
+    if (complete) setFailure(loginFailure(complete, m.name, refusalWords));
     setCompleteId(null);
   }, [complete, m.name, close]);
 
@@ -96,10 +128,16 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
     setLink(null);
     setCode("");
     setCompleteId(null);
-    setSending(true);
-    const a = await send.send({ action: "login.begin" });
-    setSending(false);
-    if (a) setBeginId(a.id);
+    setBeginId(null);
+    if (plan.actions[0] === "on") {
+      // The same signed command the page's switch sends; its delivered ack begins the sign-in.
+      setSending(true);
+      const a = await send.send({ action: "on" });
+      setSending(false);
+      if (a) setOnId(a.id);
+      return;
+    }
+    await beginLogin();
   };
   const finish = async () => {
     if (!link) return;
@@ -116,15 +154,22 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
     if (a) setCompleteId(a.id);
   };
 
+  const turning = !!onId && !settled(on?.outcome);
   const waiting =
-    sending || (!!beginId && !link && !begin?.outcome) || (!!completeId && !complete?.outcome) || send.tap;
+    sending ||
+    turning ||
+    (!!beginId && !link && !settled(begin?.outcome)) ||
+    (!!completeId && !settled(complete?.outcome)) ||
+    send.tap;
   const pendingLine = send.tap
     ? `Confirm with ${signerLabel()}`
-    : waiting
-      ? (send.note?.text ?? `Sending to ${m.name}…`)
-      : send.note && !send.note.err
-        ? send.note.text
-        : "";
+    : turning
+      ? turningOn(m.name)
+      : waiting
+        ? (send.note?.text ?? `Sending to ${m.name}…`)
+        : send.note && !send.note.err
+          ? send.note.text
+          : "";
   const error = failure ?? (send.note?.err ? send.note : null);
 
   useFocusTrap(ref, !closing, {
@@ -138,6 +183,7 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
   }, [link]);
 
   const commandFirst = !pool || pool.accounts.length === 0 || unsupported;
+  const canSignIn = !send.blocked && !waiting && !unsupported;
   const title = `Add a Claude account to ${m.name}`;
   const command = (
     <section className="pa-group" aria-labelledby="pa-cmd" data-pool-command="">
@@ -145,7 +191,7 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
         On {m.name}, in a terminal
       </h3>
       <CommandWell command={IMPORT_COMMAND} prompt={false} label="Copy setup command" />
-      <p className="pa-caption">
+      <p className="pa-lead">
         Imports every Claude Code login already on {m.name}. For another account there, <code>{LOGIN_COMMAND}</code>.
       </p>
     </section>
@@ -156,26 +202,9 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
         Sign in to Claude
       </h3>
       {!link ? (
-        <>
-          <p className="pa-lead">{signInLead(m.name, target.again)}</p>
-          <div className="pa-actions pa-actions--ready">
-            {pendingLine && (
-              <p className="pa-status" role="status">
-                {pendingLine}
-              </p>
-            )}
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={() => void startSignIn()}
-              disabled={!!send.blocked || waiting || unsupported}
-              data-tip={send.blocked ?? undefined}
-              data-pool-signin=""
-            >
-              Sign in to Claude…
-            </button>
-          </div>
-        </>
+        <p className="pa-lead" data-pool-lead="">
+          {plan.lead}
+        </p>
       ) : (
         <>
           <div className="pa-step">
@@ -209,45 +238,25 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
               data-pool-code=""
             />
           </div>
-          <div className="pa-actions">
-            {pendingLine && (
-              <p className="pa-status" role="status">
-                {pendingLine}
-              </p>
-            )}
-            <button
-              type="button"
-              className="btn"
-              onClick={() => void startSignIn()}
-              disabled={waiting}
-              data-pool-restart=""
-            >
-              Start over
-            </button>
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={() => void finish()}
-              disabled={!code.includes("#") || waiting}
-              data-pool-done=""
-            >
-              Done
-            </button>
-          </div>
         </>
-      )}
-      {error && (
-        <p className="page-note is-err pa-note" role="alert" data-pool-error="">
-          {error.text}
-        </p>
       )}
     </section>
   );
+  // The one status line, New session's: what is on its way, or the §4.2 failure in red.
+  const statusLine = error ? (
+    <p className="ns-status ns-status--err" role="alert" data-pool-error="">
+      {error.text}
+    </p>
+  ) : pendingLine ? (
+    <p className="ns-status" role="status" aria-live="polite">
+      {pendingLine}
+    </p>
+  ) : null;
 
   if (phone)
-    return (
+    return createPortal(
       <div
-        className="ns-sheet ns-sheet--phone"
+        className="ns-sheet ns-sheet--phone pa-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby="pa-title"
@@ -257,22 +266,60 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
       >
         <header className="ns-bar">
           <button type="button" className="ns-bar-btn" onClick={close} data-pool-cancel="">
-            Cancel
+            {link ? "Close" : "Cancel"}
           </button>
           <h2 className="ns-bar-title" id="pa-title">
             {title}
           </h2>
-          <span />
+          {!link ? (
+            <button
+              type="button"
+              className="ns-bar-btn ns-bar-btn--start"
+              onClick={() => void startSignIn()}
+              disabled={!canSignIn}
+              aria-busy={waiting || undefined}
+              data-tip={send.blocked ?? undefined}
+              data-pool-signin=""
+            >
+              Sign in
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="ns-bar-btn ns-bar-btn--start"
+              onClick={() => void finish()}
+              disabled={!code.includes("#") || waiting}
+              aria-busy={waiting || undefined}
+              data-pool-done=""
+            >
+              Done
+            </button>
+          )}
           <span className="ns-grab" aria-hidden="true" />
         </header>
         <div className="ns-scroll">
           <div className="ns-group">{commandFirst ? command : signIn}</div>
           <div className="ns-group">{commandFirst ? signIn : command}</div>
+          <div className="ns-group-foot">
+            {statusLine}
+            {link && (
+              <button
+                type="button"
+                className="ns-discard"
+                onClick={() => void startSignIn()}
+                disabled={waiting}
+                data-pool-restart=""
+              >
+                Start over
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      </div>,
+      document.body,
     );
 
-  return (
+  return createPortal(
     <>
       <button
         type="button"
@@ -283,7 +330,7 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
         data-dismiss
       />
       <div
-        className="ns-sheet"
+        className="ns-sheet pa-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby="pa-title"
@@ -294,14 +341,56 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
         <h2 className="ns-title" id="pa-title">
           {title}
         </h2>
-        {commandFirst ? command : signIn}
-        {commandFirst ? signIn : command}
-        <footer className="pa-foot">
-          <button type="button" className="btn" onClick={close} data-pool-cancel="">
-            {link ? "Close" : "Cancel"}
-          </button>
+        <div className="pa-groups">
+          {commandFirst ? command : signIn}
+          {commandFirst ? signIn : command}
+        </div>
+        <footer className="ns-foot pa-foot">
+          {statusLine}
+          <span className="ns-actions">
+            {link && (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void startSignIn()}
+                disabled={waiting}
+                data-pool-restart=""
+              >
+                Start over
+              </button>
+            )}
+            <button type="button" className="btn" onClick={close} data-pool-cancel="">
+              {link ? "Close" : "Cancel"}
+            </button>
+            {!link ? (
+              <ActionButton
+                className="btn btn--primary pa-primary"
+                onClick={startSignIn}
+                disabled={!canSignIn}
+                pending={waiting}
+                pendingLabel="Signing in…"
+                data-tip={send.blocked ?? undefined}
+                data-tip-side="top"
+                data-pool-signin=""
+              >
+                {plan.button}
+              </ActionButton>
+            ) : (
+              <ActionButton
+                className="btn btn--primary pa-primary"
+                onClick={finish}
+                disabled={!code.includes("#") || waiting}
+                pending={waiting}
+                pendingLabel="Finishing…"
+                data-pool-done=""
+              >
+                Done
+              </ActionButton>
+            )}
+          </span>
         </footer>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

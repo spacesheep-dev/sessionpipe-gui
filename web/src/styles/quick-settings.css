@@ -20,7 +20,11 @@
   z-index: var(--z-pop);
   width: 260px;
   max-height: calc(100dvh - 24px);
-  overflow: auto;
+  /* It scrolls down only: with the OS's classic bars (a mouse plugged in, or Show scroll
+     bars: Always) WebKit lays the column out before the vertical bar takes its width and
+     then offers a sideways scroll of that much, which nothing in here needs. */
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 12px;
   border-radius: var(--radius-pop);
   border: var(--hairline) solid var(--line);
@@ -79,6 +83,10 @@
   padding: 0;
   display: flex;
   flex-direction: column;
+}
+/* A row is never wider than the list: a long name ellipsises (.qs-theme-name). */
+.qs-themes > li {
+  min-width: 0;
 }
 .qs-divider {
   padding: 6px 8px 2px 28px;
