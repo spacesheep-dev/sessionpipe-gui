@@ -23,8 +23,17 @@ import {
   useCell,
 } from "./appState";
 import { invoke } from "./bridge";
-import { hotkeyFrom, hotkeyLabel, isCancel, notifyToggle, parseAddress, updateHint, updateLine } from "./logic";
-import { features, shellInfo } from "./shell";
+import {
+  hotkeyFrom,
+  hotkeyLabel,
+  isCancel,
+  notifyToggle,
+  parseAddress,
+  settingsApp,
+  updateHint,
+  updateLine,
+} from "./logic";
+import { features, platform, shellInfo } from "./shell";
 import "./native.css";
 
 /** identity's panel (web/src/control/DeviceKeySettings.tsx), once it exists. */
@@ -52,6 +61,8 @@ export default function AppSettings() {
   const s = useCell(settings);
   const f = features();
   const info = shellInfo();
+  // The phone has no Dock and no window to close: those rows are the desktop's.
+  const desktop = !(platform() === "ios" || platform() === "android");
   useEffect(() => {
     void loadSettings();
     void loadReceivers();
@@ -77,22 +88,26 @@ export default function AppSettings() {
             <Toggle label="Show in menu bar" on={!!s?.menuBar} disabled={!s} onChange={(on) => set({ menuBar: on })} />
           </Row>
         )}
-        <Row label="Show count on the Dock icon">
-          <Toggle
-            label="Show count on the Dock icon"
-            on={!!s?.dockBadge}
-            disabled={!s || !!s.menuBarOnly}
-            onChange={(on) => set({ dockBadge: on })}
-          />
-        </Row>
-        <Row label="Keep running when the window is closed">
-          <Toggle
-            label="Keep running when the window is closed"
-            on={!!s?.keepRunning}
-            disabled={!s}
-            onChange={(on) => set({ keepRunning: on })}
-          />
-        </Row>
+        {desktop && (
+          <Row label="Show count on the Dock icon">
+            <Toggle
+              label="Show count on the Dock icon"
+              on={!!s?.dockBadge}
+              disabled={!s || !!s.menuBarOnly}
+              onChange={(on) => set({ dockBadge: on })}
+            />
+          </Row>
+        )}
+        {desktop && (
+          <Row label="Keep running when the window is closed">
+            <Toggle
+              label="Keep running when the window is closed"
+              on={!!s?.keepRunning}
+              disabled={!s}
+              onChange={(on) => set({ keepRunning: on })}
+            />
+          </Row>
+        )}
         {f.has("tray") && (
           <Row label="Menu bar only" hint="Hides the Dock icon.">
             <Toggle
@@ -135,16 +150,17 @@ function NotificationsGroup({ s, set }: { s: Settings | null; set: (p: Partial<S
   const until = n?.pausedUntil ? Date.parse(n.pausedUntil) : Number.NaN;
   const paused = until > Date.now();
   const denied = status === "denied";
+  const where = settingsApp(platform());
   return (
     <Group label="Notifications" note={denied ? undefined : note}>
       {denied && (
-        <Row label="Notifications are off for sessionpipe" hint="Turn them on in System Settings › Notifications.">
+        <Row label="Notifications are off for sessionpipe" hint={`Turn them on in ${where} › Notifications.`}>
           <button
             type="button"
             className="btn btn--sm"
             onClick={() => void invoke("app_notify_open_settings").catch(() => {})}
           >
-            Open System Settings
+            Open {where}
           </button>
         </Row>
       )}
@@ -154,7 +170,7 @@ function NotificationsGroup({ s, set }: { s: Settings | null; set: (p: Partial<S
           on={!!n?.enabled && !denied}
           disabled={!n || denied}
           onChange={async (on) => {
-            const r = await notifyToggle(on, requestNotify);
+            const r = await notifyToggle(on, requestNotify, where);
             setNote(r.note);
             if (n) set({ notifications: { ...n, enabled: r.enabled } });
           }}

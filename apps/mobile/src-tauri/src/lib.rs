@@ -1,5 +1,5 @@
 //! sessionpipe for iPhone and Android: a thin Tauri 2 shell around the same bundled web UI
-//! as the Mac app (NATIVE-SPEC §2, §6). The window shows only the bundled origin
+//! as the desktop app (NATIVE-SPEC §2, §6). The window shows only the bundled origin
 //! (`contract::Os::app_origin`); receivers are
 //! reached through Rust (shell's `sp-receivers`: the `rx:` scheme and the stream channel),
 //! never by loading their pages.
@@ -394,8 +394,12 @@ mod notifications {
 pub fn run() {
     let entry = now_ms();
     let builder = tauri::Builder::default().plugin(identity::init());
+    // The scanner (§11.5) is the page's: `plugin:barcode-scanner|scan` runs the camera
+    // behind the webview, and `net::rx_add` reads the receiver out of what it decoded.
     #[cfg(mobile)]
-    let builder = builder.plugin(tauri_plugin_notification::init());
+    let builder = builder
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_barcode_scanner::init());
     #[cfg(target_os = "android")]
     let builder = builder
         .plugin(tauri_plugin_opener::init())

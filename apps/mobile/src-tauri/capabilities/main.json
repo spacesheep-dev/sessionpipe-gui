@@ -1,7 +1,16 @@
 {
   "$schema": "../gen/schemas/mobile-schema.json",
   "identifier": "main",
-  "description": "The bundled UI in the main window: events, the identity status (no signer on this build) and whether notifications are allowed (the notification plugin's own page script asks). Notifications are posted by Rust. No remote block, ever.",
+  "description": "The bundled UI in the main window: events, the identity status (no signer on this build), whether notifications are allowed (the notification plugin's own page script asks), and the QR scanner (the camera's standing, a scan, its cancel, and the app's page in Settings when the camera is refused; not the plugin's vibrate: a scan's haptic is app_haptic's). Notifications are posted by Rust. No remote block, ever.",
   "windows": ["main"],
-  "permissions": ["core:event:default", "identity:default", "notification:allow-is-permission-granted"]
+  "permissions": [
+    "core:event:default",
+    "identity:default",
+    "notification:allow-is-permission-granted",
+    "barcode-scanner:allow-check-permissions",
+    "barcode-scanner:allow-request-permissions",
+    "barcode-scanner:allow-scan",
+    "barcode-scanner:allow-cancel",
+    "barcode-scanner:allow-open-app-settings"
+  ]
 }

@@ -128,3 +128,39 @@ html:is([data-shell="ios"], [data-shell="android"]) .menu-sheet {
   padding-bottom: max(calc(var(--safe-bottom, env(safe-area-inset-bottom)) + 8px), 16px);
   max-height: calc(100dvh - var(--safe-top, env(safe-area-inset-top)) - 24px);
 }
+
+/* A scan in progress (native/scanner.ts): the camera is behind the webview, so the page's
+   ground goes transparent and the viewfinder (PhoneOnboarding.tsx) is all that shows. */
+html[data-scanning],
+html[data-scanning] body,
+html[data-scanning] #root,
+html[data-scanning] .onb {
+  background: transparent !important;
+}
+
+/* The tablet (an iPad, a phone turned wide): the shell is still the app, so the status
+   bar still sits over the top. The ≥ 840 px layout (shell.css) pads nothing for it, so
+   here the rail's head and the page bar start under the safe area; and inside the rail,
+   whose head is 72 px wide, the compose glyph keeps the desktop's size (the coarse-pointer
+   rule in shared.css would grow it to 44 px and push the mark past the edge), its finger
+   target reaching out past the glyph instead. */
+@media (min-width: 840px) {
+  html:is([data-shell="ios"], [data-shell="android"]) .rail-head {
+    box-sizing: content-box;
+    padding-top: var(--safe-top, env(safe-area-inset-top));
+  }
+  html:is([data-shell="ios"], [data-shell="android"]) .main > .page > .bar,
+  html:is([data-shell="ios"], [data-shell="android"]) .boot .bar {
+    padding-top: var(--safe-top, env(safe-area-inset-top));
+  }
+  html:is([data-shell="ios"], [data-shell="android"]) .shell:not(.shell--side) .rail-compose {
+    position: relative;
+    width: var(--control);
+    height: var(--control);
+  }
+  html:is([data-shell="ios"], [data-shell="android"]) .shell:not(.shell--side) .rail-compose::after {
+    content: "";
+    position: absolute;
+    inset: calc((var(--control) - 44px) / 2) 0;
+  }
+}

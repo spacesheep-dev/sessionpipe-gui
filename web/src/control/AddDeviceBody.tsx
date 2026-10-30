@@ -5,10 +5,10 @@
 // person compares them and approves, which sends a signed `key.add` carrying this key.
 // The machine verifies it like any command, adds the key and acks `delivered`; this page
 // polls until then. Nothing here is trusted on its own word.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActionButton } from "../components/bits";
 import { BackButton, PageBar } from "../components/PageBar";
-import { back, Link } from "../lib/router";
+import { back, Link, useSearchParam } from "../lib/router";
 import { ms, useNow } from "../lib/time";
 import { controlApi, httpsHere, httpsPath, lastInfo } from "./api";
 import { useRpId } from "./hooks";
@@ -26,7 +26,16 @@ export function AddDevicePage() {
   const w = deviceWords();
   const now = useNow();
   const { phase, error, known, ask } = useDeviceRequest(rp);
-  const [name, setName] = useState(device ? "Mac app" : guessDeviceName());
+  const [name, setName] = useState(device ? w.app : guessDeviceName());
+  // `?ask=1` (the phone's connected sheet, "Ask now"): file the request as soon as the app
+  // can sign, once, instead of waiting for a second tap here.
+  const auto = useSearchParam("ask") === "1" && device;
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!auto || asked.current || !secure || !rp || phase.k !== "idle") return;
+    asked.current = true;
+    void ask(name);
+  }, [auto, secure, rp, phase.k, ask, name]);
   const [paired, setPaired] = useState<number | null>(null);
   const httpsHref = secure || device ? null : httpsHere();
 

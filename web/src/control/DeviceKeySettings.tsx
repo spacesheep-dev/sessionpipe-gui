@@ -22,10 +22,13 @@ import {
   shellReceiver,
   status,
 } from "./nativeSigner";
-import { setupLabel } from "./signer";
+import { deviceWords, setupLabel } from "./signer";
 
 /** A key id as people compare it with `sessionpipe control keys`: its first 16 characters. */
 export const shortKeyId = (id: string): string => (id.length > 16 ? `${id.slice(0, 16)}…` : id);
+
+/** "this iPhone's" as a row's label: "This iPhone's". */
+const cap = (w: string): string => w.charAt(0).toUpperCase() + w.slice(1);
 
 const until = (ms: number): string => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
@@ -40,6 +43,7 @@ export default function DeviceKeySettings({ receiverId }: { receiverId: string }
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
   const machines = useMachines();
+  const w = deviceWords();
 
   useEffect(() => {
     if (here && !rp) return;
@@ -100,15 +104,15 @@ export default function DeviceKeySettings({ receiverId }: { receiverId: string }
         }
       >
         <Row
-          label="This Mac's key"
+          label={`${cap(w.its)} key`}
           hint={
             setup
-              ? "Not set up yet: a browser or phone the machine trusts approves this Mac once"
+              ? `Not set up yet: a browser or phone the machine trusts approves ${w.this} once`
               : key
                 ? s?.grantExp
                   ? `Unlocked for sending until ${until(s.grantExp)}`
-                  : "The next send asks for Touch ID, once for the day"
-                : "Made the first time this Mac is added to a machine"
+                  : `The next send asks for ${w.auth}, once for the day`
+                : `Made the first time ${w.this} is added to a machine`
           }
         >
           {setup ? (
@@ -125,8 +129,8 @@ export default function DeviceKeySettings({ receiverId }: { receiverId: string }
         </Row>
         {key && (
           <Row
-            label={confirming ? "Forget this Mac's key?" : "Forget this Mac's key"}
-            hint="Sending from the app stops until you add this Mac again."
+            label={confirming ? `Forget ${w.its} key?` : `Forget ${w.its} key`}
+            hint={`Sending from the app stops until you add ${w.this} again.`}
           >
             {confirming ? (
               <>

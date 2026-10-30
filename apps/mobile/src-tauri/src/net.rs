@@ -90,6 +90,42 @@ pub(crate) fn shell_response(
         .expect("static response")
 }
 
+/// A link a person scanned or pasted, as `rx_add` takes it (NATIVE-SPEC §11.5). The page
+/// hands over the text as it is (`web/src/native/scanner.ts`); the shell finds the
+/// receiver and the key in it. The forms:
+///
+/// - `http://10.0.0.128:7397/?k=<key>`: the code the Connect page shows (plain http,
+///   `server/phone/index.ts` `lanPhoneUrl`). The receiver is the origin; `?k=` is the UI
+///   key, which the Hub keeps (`keys.json`) and the page never sees.
+/// - `https://studio.local:7373/trust?k=<key>`: the same code when the receiver runs TLS.
+///   It points at the receiver's trust page (`shared/api.ts` `ROUTES.trust`), where a phone
+///   installs the CA; the receiver is the origin and the key is the same. Until that
+///   certificate is trusted on this phone the receiver can't be reached, so the page tells
+///   this form by its path and offers the link (opened outside the app) before connecting.
+/// - `http://192.168.1.4:7373`, `https://studio.tail1234.ts.net`: a pasted address (the
+///   page puts `http://` before a bare host first, `logic.ts` `parseAddress`). No key.
+///
+/// Anything else (`javascript:`, `rx:`, a bare host, no host) is refused with a message
+/// the page can show. The path and anything after the key are dropped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectLink {
+    /// The receiver, as the registry writes it (scheme, lowercase host, port).
+    pub origin: String,
+    /// `?k=`, decoded; none when absent or empty.
+    pub key: Option<String>,
+}
+
+impl ConnectLink {
+    pub fn parse(text: &str) -> Result<ConnectLink, String> {
+        let (r, key) = sp_receivers::Receiver::from_url(text)
+            .ok_or("That isn't an http or https address.")?;
+        Ok(ConnectLink {
+            origin: r.origin,
+            key,
+        })
+    }
+}
+
 /// A row of `rx_list` (§11.1).
 #[derive(Debug, Clone, Serialize)]
 pub struct ListedReceiver {
@@ -124,7 +160,8 @@ pub fn rx_list<R: Runtime>(
 }
 
 /// Adds a receiver after the person confirms it in a native alert. The page then calls
-/// `rx_select` to show it (§11.1).
+/// `rx_select` to show it (§11.1). `url` is a `ConnectLink`: a scanned code or a pasted
+/// address, its `?k=` the key unless `key` is given; `ca` pins the CA's SHA-256.
 #[tauri::command]
 pub async fn rx_add<R: Runtime>(
     app: AppHandle<R>,
@@ -135,18 +172,21 @@ pub async fn rx_add<R: Runtime>(
     ca: Option<String>,
 ) -> Result<ReceiverRef, String> {
     main_only(&webview)?;
-    let shown = sp_receivers::Receiver::from_url(&url)
-        .ok_or("That isn't an http or https address.")?
-        .0;
+    let link = ConnectLink::parse(&url)?;
     if !crate::confirm::ask(
         &app,
-        &crate::confirm::add_receiver(Os::current(), &shown.origin, ca.is_some()),
+        &crate::confirm::add_receiver(Os::current(), &link.origin, ca.is_some()),
     )
     .await
     {
         return Err("cancelled".into());
     }
-    hub.add(&url, key.as_deref(), ca.as_deref()).await
+    hub.add(
+        &url,
+        key.as_deref().or(link.key.as_deref()),
+        ca.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -224,6 +264,45 @@ mod tests {
         // The UI key never reaches the page.
         assert!(!crate::contract::init_script(&info).contains("abc\""));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_scanned_code_names_the_receiver_and_its_key() {
+        // The Connect page's code: the LAN address with the UI key.
+        assert_eq!(
+            ConnectLink::parse("http://10.0.0.128:7397/?k=uik_abc123").unwrap(),
+            ConnectLink {
+                origin: "http://10.0.0.128:7397".into(),
+                key: Some("uik_abc123".into()),
+            }
+        );
+        // TLS on: the code points at the trust page; same receiver, same key. The key
+        // arrives percent-encoded (encodeURIComponent) and comes out plain.
+        assert_eq!(
+            ConnectLink::parse("https://Studio.local:7373/trust?k=uik%2Babc%3D").unwrap(),
+            ConnectLink {
+                origin: "https://studio.local:7373".into(),
+                key: Some("uik+abc=".into()),
+            }
+        );
+        // Pasted: no key, whitespace around it forgiven.
+        assert_eq!(
+            ConnectLink::parse(" http://192.168.1.4:7373 ").unwrap(),
+            ConnectLink {
+                origin: "http://192.168.1.4:7373".into(),
+                key: None,
+            }
+        );
+        // An empty key is none; a fragment never is the key.
+        assert!(ConnectLink::parse("http://192.168.1.4:7373/?k=").unwrap().key.is_none());
+        assert!(ConnectLink::parse("http://192.168.1.4:7373/#k=x").unwrap().key.is_none());
+        for bad in ["javascript:alert(1)", "rx://localhost/abc", "studio.local:7373", "", "tauri://localhost/"] {
+            assert_eq!(
+                ConnectLink::parse(bad),
+                Err("That isn't an http or https address.".into()),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

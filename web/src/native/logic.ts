@@ -66,6 +66,11 @@ export function parseAddress(raw: string): string | null {
 
 // ----- the first-run sheet -----
 
+/** Where a permission is changed: the Mac's System Settings, the phone's Settings. */
+export const SETTINGS_APP = "System Settings";
+export const settingsApp = (platform: string | null): string =>
+  platform === "ios" || platform === "android" ? "Settings" : SETTINGS_APP;
+
 export const FIRST_RUN_KEY = "sessionpipe-gui.native.firstRun";
 
 /** Once: when the shell says it was seen (firstRunDone), or this device remembers it. */
@@ -79,11 +84,12 @@ export function firstRunDue(settings: AppSettings | null, seenHere: boolean): bo
 export async function notifyToggle(
   on: boolean,
   ask: () => Promise<NotifyStatus | null>,
+  where = SETTINGS_APP,
 ): Promise<{ enabled: boolean; note: string | null }> {
   if (!on) return { enabled: false, note: null };
   const status = await ask();
   if (status === "granted") return { enabled: true, note: null };
-  if (status === "denied") return { enabled: false, note: "Notifications are off for sessionpipe in System Settings." };
+  if (status === "denied") return { enabled: false, note: `Notifications are off for sessionpipe in ${where}.` };
   return { enabled: false, note: null };
 }
 

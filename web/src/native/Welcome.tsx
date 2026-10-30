@@ -2,13 +2,14 @@
 // The welcome (NATIVE-SPEC §3.9): the app found no receiver. One grouped list, no cards:
 // start sessionpipe on this Mac (the background service, with its progress), connect to
 // another computer by its address or its phone link, or try the demo board offline. A
-// phone runs no receiver of its own, so there it connects to your computer or shows the
-// demo.
+// phone runs no receiver of its own, so there the first run is Onboarding.tsx: scan the
+// code on your computer, or type its address.
 import { StrictMode, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CommandWell } from "../components/bits";
 import { channel, invoke } from "./bridge";
 import { INSTALL_COMMAND, isCancel, parseAddress, type StartState, startStep } from "./logic";
+import { Onboarding } from "./PhoneOnboarding";
 import type { ShellInfo } from "./shell";
 import "./native.css";
 
@@ -20,19 +21,16 @@ export function showWelcome(info: ShellInfo): void {
   const root = document.getElementById("root");
   if (!root) return;
   document.title = "Welcome · sessionpipe";
-  createRoot(root).render(
-    <StrictMode>
-      <Welcome info={info} />
-    </StrictMode>,
-  );
+  const phone = info.platform === "ios" || info.platform === "android";
+  createRoot(root).render(<StrictMode>{phone ? <Onboarding info={info} /> : <Welcome info={info} />}</StrictMode>);
 }
 
 const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-export function Welcome({ info }: { info: ShellInfo }) {
-  const phone = info.platform === "ios" || info.platform === "android";
+/** The Mac's welcome (a phone never reaches it: Onboarding.tsx is its first run). */
+export function Welcome(_: { info: ShellInfo }) {
   const [start, setStart] = useState<StartState>({ kind: "idle" });
-  const [connecting, setConnecting] = useState(phone);
+  const [connecting, setConnecting] = useState(false);
   const [address, setAddress] = useState("");
   const [connectError, setConnectError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -82,31 +80,29 @@ export function Welcome({ info }: { info: ShellInfo }) {
         </div>
         <section className="form-group" aria-label="Get started">
           <ul className="form-list welcome-list">
-            {!phone && (
-              <li className="form-row" data-welcome="start">
-                <span className="form-row-text">
-                  <span className="form-label">This Mac</span>
-                  <span className="form-caption" aria-live="polite">
-                    {start.kind === "starting"
-                      ? start.message
-                      : start.kind === "failed"
-                        ? `It didn't start: ${start.message}`
-                        : start.kind === "needsNode"
-                          ? "sessionpipe needs Node 20 or later. Install it from nodejs.org, then run:"
-                          : "Runs sessionpipe in the background, so this Mac's sessions show up here."}
-                  </span>
+            <li className="form-row" data-welcome="start">
+              <span className="form-row-text">
+                <span className="form-label">This Mac</span>
+                <span className="form-caption" aria-live="polite">
+                  {start.kind === "starting"
+                    ? start.message
+                    : start.kind === "failed"
+                      ? `It didn't start: ${start.message}`
+                      : start.kind === "needsNode"
+                        ? "sessionpipe needs Node 20 or later. Install it from nodejs.org, then run:"
+                        : "Runs sessionpipe in the background, so this Mac's sessions show up here."}
                 </span>
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  onClick={() => void startHere()}
-                  disabled={busy}
-                  aria-busy={busy || undefined}
-                >
-                  {start.kind === "failed" || start.kind === "needsNode" ? "Try again" : "Start sessionpipe"}
-                </button>
-              </li>
-            )}
+              </span>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => void startHere()}
+                disabled={busy}
+                aria-busy={busy || undefined}
+              >
+                {start.kind === "failed" || start.kind === "needsNode" ? "Try again" : "Start sessionpipe"}
+              </button>
+            </li>
             {start.kind === "needsNode" && (
               <li className="form-row form-row--stack">
                 <CommandWell command={INSTALL_COMMAND} />
@@ -114,7 +110,7 @@ export function Welcome({ info }: { info: ShellInfo }) {
             )}
             <li className="form-row" data-welcome="connect">
               <span className="form-row-text">
-                <span className="form-label">{phone ? "Your computer" : "Another computer"}</span>
+                <span className="form-label">Another computer</span>
                 <span className="form-caption">Its address, or the link from its phone code.</span>
               </span>
               {!connecting && (
@@ -148,7 +144,7 @@ export function Welcome({ info }: { info: ShellInfo }) {
                     autoCorrect="off"
                     spellCheck={false}
                     placeholder="studio-mac.local:7373"
-                    aria-label={phone ? "Address of your computer" : "Address of the other computer"}
+                    aria-label="Address of the other computer"
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}
                     onKeyDown={(e) => {
@@ -168,9 +164,7 @@ export function Welcome({ info }: { info: ShellInfo }) {
             <li className="form-row" data-welcome="demo">
               <span className="form-row-text">
                 <span className="form-label">Just looking</span>
-                <span className="form-caption">
-                  A board of made-up sessions. Nothing leaves this {phone ? "phone" : "Mac"}.
-                </span>
+                <span className="form-caption">A board of made-up sessions. Nothing leaves this Mac.</span>
               </span>
               <button type="button" className="btn" onClick={() => location.assign("/?mock=1")}>
                 Try the demo

@@ -23,7 +23,8 @@ export type Feature =
   | "updater"
   | "signer"
   | "vibrancy"
-  | "haptics";
+  | "haptics"
+  | "scanner";
 export interface ShellReceiver {
   id: string;
   name: string;
@@ -51,6 +52,7 @@ const FEATURES: readonly string[] = [
   "signer",
   "vibrancy",
   "haptics",
+  "scanner",
 ];
 const str = (v: unknown): v is string => typeof v === "string";
 

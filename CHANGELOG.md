@@ -6,6 +6,27 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The phone's first run.** With no computer connected yet, the iPhone and Android
+  apps open on the lockup and three ways in: scan the code under Connect on your
+  computer (a full-screen viewfinder; the camera is asked for only then), enter its
+  address, or try the demo. A code the app can't use, a refused camera, a computer out
+  of reach and the TLS code's trust page each get one plain screen. Once the board is
+  up, one sheet says the step left: approve this iPhone once on the computer, with Ask
+  now (which files the request) and Later, plus the notifications switch.
+
+### Changed
+
+- The phone's Settings › App no longer shows the Mac's rows (the Dock badge, keeping
+  the app running with the window closed) or names System Settings; the device key's
+  rows and the device request say "this iPhone" / "this phone".
+
+### Fixed
+
+- The phone app at tablet width (an iPad): the rail's head and the page bar start under
+  the status bar, and the compose glyph no longer pushes the mark off the rail's edge.
+
 ## [0.6.2] - 2026-10-30
 
 ### Added

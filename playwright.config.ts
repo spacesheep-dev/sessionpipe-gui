@@ -62,12 +62,12 @@ export default defineConfig({
   projects: [
     {
       name: "desktop",
-      testIgnore: /mobile\.spec\.ts/,
+      testIgnore: /(mobile|onboarding)\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
     },
     {
       name: "phone",
-      testMatch: /(mobile|screenshots|split|select|pool|pool\.shots)\.spec\.ts/,
+      testMatch: /(mobile|onboarding|screenshots|split|select|pool|pool\.shots)\.spec\.ts/,
       use: {
         ...devices["iPhone 13"],
         browserName: "chromium",

@@ -64,6 +64,27 @@ async function open(page: Page) {
  *  by a better one mid-test) whose title is a phrase with a word worth typing (3+ words, one of
  *  7+ letters, found in no other card's title: one session, not a repo, a machine or a near
  *  namesake), else the first card; its title, and that word. */
+/** The palette's own entries (pages, views, actions): a session's word must not read as one. */
+const PAGE_WORDS = [
+  "board",
+  "inbox",
+  "search",
+  "feed",
+  "review",
+  "machines",
+  "connect",
+  "setup",
+  "workflow",
+  "usage",
+  "settings",
+  "shortcut",
+  "views",
+  "display",
+  "session",
+  "canvas",
+  "office",
+];
+
 async function firstCard(page: Page): Promise<{ title: string; href: string; fragment: string }> {
   const longest = (t: string) =>
     t
@@ -76,8 +97,11 @@ async function firstCard(page: Page): Promise<{ title: string; href: string; fra
   const all = [...(await page.locator("article.card .card-title").allTextContents()), ...DEMO_TITLES].map((t) =>
     t.toLowerCase(),
   );
+  // A word that names a page or an action ("workflow" → Workflows) ranks that entry above
+  // every session, so such a word never picks the card either.
   const unique = (t: string) => {
     const w = longest(t).toLowerCase();
+    if (PAGE_WORDS.some((pw) => pw.includes(w) || w.includes(pw))) return false;
     return all.filter((x) => x.includes(w)).length === 1;
   };
   let link = page.locator("article.card a.card-link").first();

@@ -80,7 +80,9 @@ impl ShellInfo {
             // makes a key in this build (identity.rs).
             // "haptics": `app_haptic` plays a `Haptic` on the phone's engine (§11.3); on
             // Android the page calls MainActivity's `spHaptic.perform` directly.
-            features: vec!["notifications", "signer", "haptics"],
+            // "scanner": the QR scanner (§11.5, `web/src/native/scanner.ts`):
+            // tauri-plugin-barcode-scanner's commands, and `rx_add` takes what it decodes.
+            features: vec!["notifications", "signer", "haptics", "scanner"],
             receiver,
             rx_base,
         }
@@ -251,7 +253,7 @@ mod tests {
         assert_eq!(
             v,
             serde_json::json!({
-                "v": 1, "platform": "ios", "appVersion": "0.2.0", "features": ["notifications", "signer", "haptics"],
+                "v": 1, "platform": "ios", "appVersion": "0.2.0", "features": ["notifications", "signer", "haptics", "scanner"],
                 "receiver": { "id": "abcdefghij", "name": "studio-mac", "origin": "http://127.0.0.1:7823", "local": true },
                 "rxBase": "rx://localhost/abcdefghij"
             })
@@ -287,6 +289,15 @@ mod tests {
             assert!(ShellInfo::new(os, "0.2.0", None)
                 .features
                 .contains(&"haptics"));
+        }
+    }
+
+    #[test]
+    fn both_phones_list_the_scanner() {
+        for os in [Os::Ios, Os::Android] {
+            assert!(ShellInfo::new(os, "0.2.0", None)
+                .features
+                .contains(&"scanner"));
         }
     }
 

@@ -28,6 +28,10 @@ sp-receivers = { path = "../../crates/sp-receivers" }
 # Local notifications (used on iOS; a dependency everywhere so the capability resolves in
 # host `cargo test`).
 tauri-plugin-notification = "2.7"
+# The QR scanner (NATIVE-SPEC §11.5): the camera behind the webview, the page's
+# `plugin:barcode-scanner|scan`. The crate is `#![cfg(mobile)]` inside, so on the host it
+# is empty and only its permissions resolve; lib.rs adds it on the phones only.
+tauri-plugin-barcode-scanner = "2.5"
 
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = "0.6"

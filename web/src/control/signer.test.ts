@@ -76,9 +76,19 @@ afterEach(() => {
 
 describe("the device's words", () => {
   it("name the device and what confirms on it, by the shell's platform", () => {
-    expect(deviceWords("macos")).toEqual({ this: "this Mac", auth: "Touch ID", its: "this Mac's" });
-    expect(deviceWords("ios")).toEqual({ this: "this iPhone", auth: "Face ID", its: "this iPhone's" });
-    expect(deviceWords("android")).toEqual({ this: "this phone", auth: "your fingerprint", its: "this phone's" });
+    expect(deviceWords("macos")).toEqual({ this: "this Mac", auth: "Touch ID", its: "this Mac's", app: "Mac app" });
+    expect(deviceWords("ios")).toEqual({
+      this: "this iPhone",
+      auth: "Face ID",
+      its: "this iPhone's",
+      app: "iPhone app",
+    });
+    expect(deviceWords("android")).toEqual({
+      this: "this phone",
+      auth: "your fingerprint",
+      its: "this phone's",
+      app: "Android app",
+    });
     // A browser, or a desktop shell without a signer: the Mac's words, as before.
     expect(deviceWords(null)).toEqual(deviceWords("macos"));
     expect(deviceWords("linux")).toEqual(deviceWords("macos"));

@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ControlError, controlApi, type DeviceRequest } from "./api";
 import { registerPasskey } from "./ceremony";
-import { deviceKey, nativeErrorWords, signerKind } from "./signer";
+import { deviceKey, deviceWords, nativeErrorWords, signerKind } from "./signer";
 import { guessDeviceName, type StoredPasskey, storedPasskeys, webauthnError } from "./webauthn";
 
 const POLL_MS = 2000;
@@ -126,10 +126,10 @@ export function useDeviceRequest(
       const deviceName = name.trim().slice(0, NAME_MAX) || guessDeviceName();
       if (signerKind() === "device") {
         try {
-          setPhase({ k: "busy", what: "Reading this Mac's key…" });
+          setPhase({ k: "busy", what: `Reading ${deviceWords().its} key…` });
           const key = await deviceKey(rp);
           setPhase({ k: "busy", what: "Asking to be trusted…" });
-          const d = await controlApi.deviceRequest({ key, name: name.trim().slice(0, NAME_MAX) || "Mac app" });
+          const d = await controlApi.deviceRequest({ key, name: name.trim().slice(0, NAME_MAX) || deviceWords().app });
           remember(d);
           setPhase({ k: "waiting", d });
         } catch (e) {

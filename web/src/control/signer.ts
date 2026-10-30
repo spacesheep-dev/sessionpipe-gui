@@ -36,11 +36,14 @@ export interface DeviceWords {
   auth: string;
   /** "this Mac's": the possessive. */
   its: string;
+  /** "Mac app": the app itself, the device request's default name. */
+  app: string;
 }
 export function deviceWords(platform: ShellPlatform | null = shellPlatform()): DeviceWords {
-  if (platform === "ios") return { this: "this iPhone", auth: "Face ID", its: "this iPhone's" };
-  if (platform === "android") return { this: "this phone", auth: "your fingerprint", its: "this phone's" };
-  return { this: "this Mac", auth: "Touch ID", its: "this Mac's" };
+  if (platform === "ios") return { this: "this iPhone", auth: "Face ID", its: "this iPhone's", app: "iPhone app" };
+  if (platform === "android")
+    return { this: "this phone", auth: "your fingerprint", its: "this phone's", app: "Android app" };
+  return { this: "this Mac", auth: "Touch ID", its: "this Mac's", app: "Mac app" };
 }
 
 // The browser's day key (IndexedDB, a passkey's grant) loads with the first send, the

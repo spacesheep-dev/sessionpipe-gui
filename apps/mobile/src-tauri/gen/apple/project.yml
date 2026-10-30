@@ -64,8 +64,10 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         UIStatusBarStyle: UIStatusBarStyleDefault
         UIViewControllerBasedStatusBarAppearance: false
-        # Receivers on the local network (a Mac's receiver over http, by IP or .local).
-        NSLocalNetworkUsageDescription: sessionpipe connects to the receiver on your Mac over your local network.
+        # Receivers on the local network (a computer's receiver over http, by IP or .local).
+        NSLocalNetworkUsageDescription: sessionpipe connects to the receiver on your computer over your local network.
+        # The QR scanner (tauri-plugin-barcode-scanner refuses to scan without this key).
+        NSCameraUsageDescription: sessionpipe reads the code your computer shows, to connect to it.
         NSBonjourServices: [_sessionpipe._tcp]
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
