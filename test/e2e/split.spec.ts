@@ -393,7 +393,8 @@ test.describe("split panel", () => {
       await expect(page.locator("ol.timeline li.turn").first()).toBeVisible();
       await expect(panel(page)).not.toHaveClass(/panel--open/);
       await expect(page.locator(".bar-back-label")).toHaveText("Board");
-      await page.getByRole("button", { name: "Back" }).click();
+      // The bar's own Back (by name a subagent's "…a background agent" notice matches too).
+      await page.locator(".bar .bar-back").click();
       await expect(page).toHaveURL(/\/$/);
       await expect(page.locator("section.group").first()).toBeVisible();
     });
