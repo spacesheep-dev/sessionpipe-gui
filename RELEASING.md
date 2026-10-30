@@ -35,6 +35,11 @@ not be published for a release of the GUI.
    *iOS → TestFlight* (The Android app, The iOS app, below). Each waits for the `release`
    environment's approval.
 
+7. **The README's download links move with the release.** Once *Publish update* has run,
+   every `releases/download/v<old>/…` link in README.md (the two buttons, the AppImage, the
+   tarball line, the table at the end) points at the new tag, in a one-line PR. A release
+   is not done while the README offers the one before it.
+
 Installs pin a tag with `npx github:spacesheep-dev/sessionpipe-gui#v0.2.0`; without one
 they follow `main`.
 
