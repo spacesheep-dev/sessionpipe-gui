@@ -11,7 +11,6 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,19 +19,20 @@ if (process.env.SPGUI_SKIP_PREPARE === "1") process.exit(0);
 if (existsSync(path.join(root, "dist", "cli.js")) && existsSync(path.join(root, "dist", "web", "index.html"))) {
   process.exit(0);
 }
-const require = createRequire(path.join(root, "package.json"));
-const haveTools = ["esbuild", "vite", "@vitejs/plugin-react", "react", "react-dom", "typescript"].every((m) => {
-  try {
-    require.resolve(`${m}/package.json`);
-    return true;
-  } catch {
-    return false;
-  }
-});
+// Each tool's package.json on disk, not require.resolve("<tool>/package.json"): a package
+// whose "exports" leave package.json out (@vitejs/plugin-react) never resolves that way,
+// so the tools always looked missing and were installed again on every run.
+const haveTools = ["esbuild", "vite", "@vitejs/plugin-react", "react", "react-dom", "typescript"].every((m) =>
+  existsSync(path.join(root, "node_modules", ...m.split("/"), "package.json")),
+);
 const env = { ...process.env };
 for (const k of Object.keys(env))
   if (/^npm_config_(global|prefix|location|save|package_lock_only|dry_run)$/i.test(k)) delete env[k];
 env.npm_config_global = "false";
+// The install below is for the tools only: should npm run this script again inside it
+// (npm on Windows does, --ignore-scripts or not), it returns at once instead of
+// installing again, and again.
+env.SPGUI_SKIP_PREPARE = "1";
 
 /** npm, with no shell. npm runs this script with npm_execpath set to its own CLI
  *  (npm-cli.js), which runs under this node. A bare "npm" is npm.cmd on Windows, and
