@@ -3,7 +3,7 @@
 // store; the this-machine guard; TLS mode turned on while running on a plain-http app;
 // the pairing child (a fake CLI script) and the install hint when there is none. Nothing
 // here runs `security` or the real CLI: exec is mocked and the CLI is a shell script.
-import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import path from "node:path";
@@ -18,7 +18,7 @@ import { ensureCerts, opensslAvailable } from "../tls/certs.js";
 import { ViewerRegistry } from "../ui/viewers.js";
 import { realHarnessFs } from "./harnesses.js";
 import { INSTALL_COMMAND, registerSetup, SETUP_ROUTES, type SetupDeps } from "./index.js";
-import { type ExecResult, findCli, isThisMachine, sameMachine } from "./local.js";
+import { cliCommand, cmdShimTarget, type ExecResult, findCli, isThisMachine, sameMachine } from "./local.js";
 import { lookupWithTimeout } from "./status.js";
 
 const HAVE_OPENSSL = opensslAvailable();
@@ -172,6 +172,47 @@ describe("this machine", () => {
       mkdirSync(path.join(tmp.dir, ".local"), { recursive: true });
       writeFileSync(path.join(tmp.dir, ".local", "bin"), ""); // not a dir: skipped quietly
       expect(findCli({ PATH: bin }, tmp.dir)?.path).toBe(path.join(bin, "sessionpipe"));
+    } finally {
+      tmp.cleanup();
+    }
+  });
+  it("runs a Windows .cmd shim's script under our node, with no shell to split a folder's space", () => {
+    const tmp = tempDir("spgui-setup-shim-");
+    try {
+      const dir = path.join(tmp.dir, "node");
+      mkdirSync(path.join(dir, "node_modules", "sessionpipe", "dist"), { recursive: true });
+      const script = path.join(dir, "node_modules", "sessionpipe", "dist", "cli.js");
+      writeFileSync(script, "// sessionpipe 9.9.9\n");
+      const shim = path.join(dir, "sessionpipe.cmd");
+      // npm's cmd-shim, as `npm install -g` writes it.
+      writeFileSync(
+        shim,
+        '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%dp0%\\node_modules\\sessionpipe\\dist\\cli.js"   %*\r\n',
+      );
+      expect(cmdShimTarget(shim)).toBe(script);
+      const args = ["control", "pair", "http://localhost:7373", "--folder", "C:\\sp user\\code"];
+      expect(cliCommand(shim, args, "win32")).toEqual({
+        file: process.execPath,
+        args: [script, ...args],
+        shell: false,
+      });
+      // A shim that names nothing there: one quoted command under a shell, the space kept.
+      const bare = path.join(dir, "other.cmd");
+      writeFileSync(bare, '"%dp0%\\nowhere\\cli.js" %*\r\n');
+      expect(cmdShimTarget(bare)).toBeNull();
+      expect(cliCommand(bare, args, "win32")).toEqual({
+        file: `${bare} control pair http://localhost:7373 --folder "C:\\sp user\\code"`,
+        args: [],
+        shell: true,
+      });
+      expect(cmdShimTarget(path.join(dir, "missing.cmd"))).toBeNull();
+      // Elsewhere a .cmd is just a file, and a JavaScript entry runs under our node anywhere.
+      expect(cliCommand(shim, args, "linux")).toEqual({ file: shim, args, shell: false });
+      expect(cliCommand(script, args, "linux")).toEqual({
+        file: process.execPath,
+        args: [realpathSync(script), ...args],
+        shell: false,
+      });
     } finally {
       tmp.cleanup();
     }

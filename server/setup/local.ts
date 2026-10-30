@@ -86,6 +86,45 @@ export function findCli(env: NodeJS.ProcessEnv = process.env, home: string = os.
   return null;
 }
 
+/** The script an npm-style `.cmd` shim runs on Windows: the one `"%dp0%\…"` or
+ *  `"%~dp0\…"` word before `%*` (npm's cmd-shim, old and new; pnpm's is the same shape),
+ *  resolved beside the shim. Null when the file is no such shim, or names nothing there. */
+export function cmdShimTarget(shim: string): string | null {
+  let text = "";
+  try {
+    text = readFileSync(shim, "utf8");
+  } catch {
+    return null;
+  }
+  const m = /"%(?:~dp0|dp0%)\\([^"]+)"\s+%\*/.exec(text);
+  if (!m) return null;
+  const target = path.resolve(path.dirname(shim), (m[1] as string).split("\\").join(path.sep));
+  return existsSync(target) ? target : null;
+}
+
+/** How to run the CLI as a child with no shell. A JavaScript entry (the installed CLI is
+ *  `#!/usr/bin/env node`; a GUI started by launchd may have no node on its PATH) runs
+ *  under our own node. On Windows an `npm install -g` leaves `sessionpipe.cmd`, which
+ *  node refuses to spawn bare (CVE-2024-27980): the script the shim names runs under our
+ *  node instead. A shim that names no script runs as one quoted command under a shell,
+ *  since a shell given the arguments splits one with a space (`--folder C:\sp user\code`)
+ *  into two words. */
+export function cliCommand(
+  cli: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+): { file: string; args: string[]; shell: boolean } {
+  try {
+    const real = realpathSync(cli);
+    if (/\.(c|m)?js$/.test(real)) return { file: process.execPath, args: [real, ...args], shell: false };
+  } catch {}
+  if (platform !== "win32" || !/\.(cmd|bat)$/i.test(cli)) return { file: cli, args, shell: false };
+  const target = cmdShimTarget(cli);
+  if (target && /\.[cm]?js$/i.test(target)) return { file: process.execPath, args: [target, ...args], shell: false };
+  const quote = (a: string) => (/\s/.test(a) ? `"${a}"` : a);
+  return { file: [cli, ...args].map(quote).join(" "), args: [], shell: true };
+}
+
 export function cliVersion(bin: string): string | undefined {
   try {
     const real = realpathSync(bin);
