@@ -88,6 +88,19 @@ export function linuxTrustSteps(caCertPath: string): string[] {
   ];
 }
 
+export function windowsTrustSteps(caCertPath: string): string[] {
+  return [
+    `certutil -user -addstore Root "${caCertPath}" (Windows asks once; Edge and Chrome read this store)`,
+    "By hand: open ca.crt → Install Certificate… → Current User → Place all certificates in the following store → Trusted Root Certification Authorities.",
+    "Firefox keeps its own store: Settings → Privacy & Security → Certificates → View Certificates → Authorities → Import.",
+    "The .local name resolves on Windows 10 and later with nothing to install.",
+  ];
+}
+
+/** The CA-trust steps for a platform `tls trust` can't do itself. */
+export const trustSteps = (platform: NodeJS.Platform, caCertPath: string): string[] =>
+  platform === "win32" ? windowsTrustSteps(caCertPath) : linuxTrustSteps(caCertPath);
+
 export function registerSetup(router: Router, deps: SetupDeps): { pairer: Pairer } {
   const exec = deps.exec ?? execDefault;
   const env = deps.env ?? process.env;
@@ -182,7 +195,7 @@ export function registerSetup(router: Router, deps: SetupDeps): { pairer: Pairer
       if (platform !== "darwin")
         return {
           status: 200,
-          json: { trusted: false, platform, caCertPath: m.caCertPath, steps: linuxTrustSteps(m.caCertPath) },
+          json: { trusted: false, platform, caCertPath: m.caCertPath, steps: trustSteps(platform, m.caCertPath) },
         };
       const keychain = path.join(home, "Library", "Keychains", "login.keychain-db");
       // The user trust domain (no -d): the admin domain needs sudo and otherwise imports

@@ -585,6 +585,13 @@ function tlsCommand(parsed: Args): void {
           throw e;
         }
       }
+      if (process.platform === "win32") {
+        out(`On Windows add the CA by hand: ${m.caCertPath}`);
+        out(`  certutil -user -addstore Root "${m.caCertPath}"   (Windows asks once; Edge and Chrome read this store)`);
+        out("  or open ca.crt → Install Certificate… → Current User → Trusted Root Certification Authorities.");
+        out("  Firefox keeps its own store: Settings → Privacy & Security → Certificates → Authorities → Import.");
+        return;
+      }
       if (process.platform !== "darwin") {
         out(`On this platform add the CA by hand: ${m.caCertPath}`);
         out(

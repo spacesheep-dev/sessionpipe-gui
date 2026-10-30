@@ -140,6 +140,11 @@ export function trustPage(input: TrustPageInput): string {
 <h2>Linux</h2>
 <p class="note">Debian and Ubuntu: copy <code>ca.crt</code> to <code>/usr/local/share/ca-certificates/sessionpipe-gui.crt</code> and run <code>sudo update-ca-certificates</code>. Fedora and friends: <code>sudo trust anchor ca.crt</code>. Firefox and Chrome keep their own stores: import the file under Settings → Certificates → Authorities. Resolving <code>${esc(tls.hostname)}</code> needs avahi-daemon (or nss-mdns) on the machine that opens the page.</p>
 </section>
+
+<section>
+<h2>Windows</h2>
+<p class="note">Where the receiver runs, in a terminal: <code>certutil -user -addstore Root ca.crt</code> (Windows asks once; Edge and Chrome read this store). By hand: open <code>ca.crt</code> → <b>Install Certificate…</b> → <b>Current User</b> → <b>Place all certificates in the following store</b> → <b>Trusted Root Certification Authorities</b>. Firefox keeps its own store: Settings → Privacy &amp; Security → Certificates → Authorities → Import. The <code>.local</code> name resolves on Windows 10 and later with nothing to install.</p>
+</section>
 `;
 
   return `<!doctype html>
