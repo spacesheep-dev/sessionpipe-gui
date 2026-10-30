@@ -80,6 +80,9 @@
   display: block;
   flex: none;
 }
+.nav-link--on {
+  color: var(--fg);
+}
 /* A tab under the finger dims at once and comes back over --dur-release, as UIKit's do;
    the glyph gives a little (transform only), so a tap reads even without haptics. */
 .tabbar .nav-link {
@@ -92,6 +95,17 @@
   height: 22px;
   transition: transform var(--dur-release) linear;
 }
+/* The selected tab wears the phone's tint (tokens.css --tint), as every iOS tab bar's
+   does: the glyph in the fill cut, the label in the text cut (it is 11 px on a light
+   ground), and the glyph's line a half point heavier, the way a selected SF Symbol fills
+   in. The More tab's dots are a fill, so the weight leaves them alone. */
+.tabbar .nav-link--on {
+  color: var(--tint-fg);
+}
+.tabbar .nav-link--on .nav-glyph {
+  color: var(--tint);
+  stroke-width: 2;
+}
 .tabbar .nav-link:active {
   opacity: 0.55;
   transition: none;
@@ -100,6 +114,15 @@
   transform: scale(var(--press-scale));
   transition: none;
 }
+/* While the More sheet is up, More is the selected tab, as on iOS: the page's own tab
+   steps back to the resting tier until the sheet closes, so one tab is tinted at a time. */
+.tabbar:has(.more-tab[aria-expanded="true"]) .nav-link--on:not(.more-tab) {
+  color: var(--fg-3);
+}
+.tabbar:has(.more-tab[aria-expanded="true"]) .nav-link--on:not(.more-tab) .nav-glyph {
+  color: inherit;
+  stroke-width: 1.5;
+}
 /* A label never clips: it is one line, cut with an ellipsis if a plugin's name is long. */
 .nav-label {
   display: block;
@@ -107,9 +130,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.nav-link--on {
-  color: var(--fg);
 }
 /* The Inbox count: orange, because it is the needs-you count. */
 .nav-badge {
@@ -220,13 +240,16 @@
   }
 }
 
-/* A dropped stream on the phone (Shell.tsx PhoneConn): one raised pill under the bar,
+/* A dropped stream on the phone. On a page with a large title it is the bar's subtitle
+   line (PageBar.tsx PhoneSub, below), where iOS keeps "Connecting…". On a page without
+   one (a session, whose title sits in the bar) it is this pill (Shell.tsx PhoneConn):
+   raised, under the bar's content (its own line, the meta, scrolls away under the bar),
    the whole pill the Retry button; a pull down the page moves it (transform only). It
    floats over the page, so its arrival moves nothing. */
 .phone-conn {
   position: fixed;
   z-index: var(--z-chrome);
-  top: calc(var(--safe-top, env(safe-area-inset-top)) + var(--bar) + 8px);
+  top: calc(var(--safe-top, env(safe-area-inset-top)) + var(--bar) + 36px);
   inset-inline: 0;
   display: flex;
   align-items: center;
@@ -268,6 +291,44 @@
 .phone-conn-act {
   color: var(--fg);
   font-weight: 600;
+}
+/* Where a large title is on the page, its subtitle line says it instead. */
+.shell:has(.main > .page > .bar--large) .phone-conn {
+  display: none;
+}
+/* The subtitle line itself: the meta's own place and type, the dot and the words of
+   the pill, and Retry as a link in the tint. The words are the live region; the link
+   is 44 px to a finger on a 20 px line. */
+.phone-conn-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.phone-conn-sub .conn-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--fg-3);
+}
+.phone-conn-sub--offline .conn-dot {
+  background: var(--err);
+  box-shadow: none;
+}
+.phone-conn-sub .phone-conn-act {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--tint, var(--fg));
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.phone-conn-sub .phone-conn-act::before {
+  content: "";
+  position: absolute;
+  inset: -12px -8px;
 }
 
 /* ----- the static first frame (index.html) ----- */
@@ -716,6 +777,18 @@
     width: 44px;
     height: 44px;
   }
+  /* The back chevron is the tint, as UIKit's is: the one glyph in the bar that is a way
+     out, so it reads apart from the actions beside the title, which stay in the meta
+     tier. */
+  .bar .bar-back {
+    color: var(--tint);
+  }
+  /* A text button in the bar (Pause, Add a phone…, Set up…) is the tint too, as every bar
+     button item is; the icon buttons beside the title (…, compose, the bell) stay ink, so
+     the bar spends a tiny bit of orange, never a stripe of it. */
+  .bar-actions .btn {
+    color: var(--tint-fg);
+  }
   .bar-actions {
     margin-right: -10px;
   }
@@ -766,6 +839,10 @@
     overflow-x: auto;
     overscroll-behavior-x: contain;
     scrollbar-width: none;
+    /* A chip that runs past the screen fades under its edge rather than being cut; the
+       right pad is the gutter, so the last chip stands clear of the fade once scrolled. */
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
   }
   .bar-filters::-webkit-scrollbar {
     display: none;

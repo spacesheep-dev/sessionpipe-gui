@@ -22,7 +22,7 @@ import {
   shellReceiver,
   status,
 } from "./nativeSigner";
-import { SETUP_LABEL } from "./signer";
+import { setupLabel } from "./signer";
 
 /** A key id as people compare it with `sessionpipe control keys`: its first 16 characters. */
 export const shortKeyId = (id: string): string => (id.length > 16 ? `${id.slice(0, 16)}…` : id);
@@ -113,7 +113,7 @@ export default function DeviceKeySettings({ receiverId }: { receiverId: string }
         >
           {setup ? (
             <Link to="/add-device" className="btn btn--sm" data-setup>
-              {SETUP_LABEL}…
+              {setupLabel()}…
             </Link>
           ) : (
             (value ?? (

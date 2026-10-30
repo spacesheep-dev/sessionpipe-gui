@@ -78,9 +78,69 @@ impl ShellInfo {
             // "signer": the identity plugin answers `status` here, so the page shows the
             // Signing row and why sending is off ("Sending needs a real phone"). It never
             // makes a key in this build (identity.rs).
-            features: vec!["notifications", "signer"],
+            // "haptics": `app_haptic` plays a `Haptic` on the phone's engine (§11.3); on
+            // Android the page calls MainActivity's `spHaptic.perform` directly.
+            features: vec!["notifications", "signer", "haptics"],
             receiver,
             rx_base,
+        }
+    }
+}
+
+/// A haptic the page asks for (`app_haptic`, `web/src/lib/haptics.ts`), named as Apple's
+/// generators name them: a selection ticking over, a touch landing, an outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Haptic {
+    Selection,
+    Light,
+    Medium,
+    Success,
+    Warning,
+    Error,
+}
+
+impl Haptic {
+    /// The page's word for it; anything else is refused (the command answers Err).
+    pub fn parse(kind: &str) -> Option<Haptic> {
+        Some(match kind {
+            "selection" => Haptic::Selection,
+            "light" => Haptic::Light,
+            "medium" => Haptic::Medium,
+            "success" => Haptic::Success,
+            "warning" => Haptic::Warning,
+            "error" => Haptic::Error,
+            _ => return None,
+        })
+    }
+}
+
+/// The scheme the page renders in (`app_appearance`, `web/src/native/appearance.ts`): what
+/// `<html data-theme>` says, or Auto when it is absent and the page follows the OS. The
+/// system bars follow it, so the status bar's text is readable over a forced dark page
+/// on a light phone and the other way round.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scheme {
+    Light,
+    Dark,
+    Auto,
+}
+
+impl Scheme {
+    pub fn parse(scheme: &str) -> Option<Scheme> {
+        Some(match scheme {
+            "light" => Scheme::Light,
+            "dark" => Scheme::Dark,
+            "auto" => Scheme::Auto,
+            _ => return None,
+        })
+    }
+
+    /// UIKit's `UIUserInterfaceStyle`: unspecified 0, light 1, dark 2.
+    pub const fn ui_user_interface_style(self) -> isize {
+        match self {
+            Scheme::Auto => 0,
+            Scheme::Light => 1,
+            Scheme::Dark => 2,
         }
     }
 }
@@ -191,7 +251,7 @@ mod tests {
         assert_eq!(
             v,
             serde_json::json!({
-                "v": 1, "platform": "ios", "appVersion": "0.2.0", "features": ["notifications", "signer"],
+                "v": 1, "platform": "ios", "appVersion": "0.2.0", "features": ["notifications", "signer", "haptics"],
                 "receiver": { "id": "abcdefghij", "name": "studio-mac", "origin": "http://127.0.0.1:7823", "local": true },
                 "rxBase": "rx://localhost/abcdefghij"
             })
@@ -219,6 +279,40 @@ mod tests {
             .features
             .contains(&"signer"));
         assert!(!crate::identity::current().available);
+    }
+
+    #[test]
+    fn both_phones_list_haptics() {
+        for os in [Os::Ios, Os::Android] {
+            assert!(ShellInfo::new(os, "0.2.0", None)
+                .features
+                .contains(&"haptics"));
+        }
+    }
+
+    #[test]
+    fn haptic_kinds_are_the_pages_words_and_nothing_else() {
+        assert_eq!(Haptic::parse("selection"), Some(Haptic::Selection));
+        assert_eq!(Haptic::parse("light"), Some(Haptic::Light));
+        assert_eq!(Haptic::parse("medium"), Some(Haptic::Medium));
+        assert_eq!(Haptic::parse("success"), Some(Haptic::Success));
+        assert_eq!(Haptic::parse("warning"), Some(Haptic::Warning));
+        assert_eq!(Haptic::parse("error"), Some(Haptic::Error));
+        for bad in ["heavy", "Light", "", "impact"] {
+            assert_eq!(Haptic::parse(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn schemes_map_to_uikits_styles() {
+        assert_eq!(Scheme::parse("light"), Some(Scheme::Light));
+        assert_eq!(Scheme::parse("dark"), Some(Scheme::Dark));
+        assert_eq!(Scheme::parse("auto"), Some(Scheme::Auto));
+        assert_eq!(Scheme::parse("system"), None);
+        assert_eq!(Scheme::parse(""), None);
+        assert_eq!(Scheme::Auto.ui_user_interface_style(), 0);
+        assert_eq!(Scheme::Light.ui_user_interface_style(), 1);
+        assert_eq!(Scheme::Dark.ui_user_interface_style(), 2);
     }
 
     #[test]

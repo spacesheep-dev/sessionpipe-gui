@@ -75,6 +75,8 @@ equal), so the first frame is already on brand.
 | `--needs` | #FF5A1F (3.1:1) | #FF5A1F (5.9:1) | needs you: dots, glyphs, the badge |
 | `--needs-fg` | #C13B01 (5.4:1) | #FF5A1F | needs you as text |
 | `--needs-ink` | #141414 (5.9:1 on the orange) | #141414 | text on an orange fill |
+| `--tint` | #FF5A1F (3.1:1) | #FF5A1F (5.9:1) | the phone's tint: the selected tab's glyph, the back chevron, a switch on |
+| `--tint-fg` | #C13B01 (5.4:1) | #FF5A1F | the tint as text: the selected tab's label, a bar's buttons, a link |
 | `--err` | #CB234D (5.4:1) | #EF4C73 (5.2:1) | errors only |
 | `--focus` | #F24D06 (3.6:1) | #FF5A1F | the focus ring |
 | `--mark` / `--mark-fg` | #FFE1D7 / #141414 | #512617 / #F5F5F3 | a search hit |
@@ -86,9 +88,19 @@ in every shipped skin and scheme (`shared/skins-builtin.test.ts`). Working, stal
 done are neutral tiers. The colour labels stay muted dots at half the accent's chroma, the
 orange one leaning to ochre so it never reads as needs you.
 
+**The phone's tint.** The phone app spends the same orange a second way, as every iOS app
+has one tint colour: the selected tab (its glyph in `--tint`, its label in `--tint-fg`, the
+line a half point heavier), the back chevron, a bar's text buttons (Done, Pause, Add a
+phone…; its icon buttons stay ink), a sheet's Cancel and Start, a switch that is on, a
+slider's filled track, the caret, and a link in running text. That is the whole list:
+titles, body text, filled buttons and the rest of the chrome stay ink and graphite, and a
+view never reads `--tint`. The two tokens are the same two cuts as needs you, so the rule
+above still holds: never small text in #FF5A1F on a light ground. The tint says "this is
+a control"; the needs-you dot still says "this needs you", and nothing else is orange.
+
 **Paper**, the other shipped skin, is the brand's warm paper (#F5F4EF ground, #FAF9F5 cards,
-#1F1E1D ink), light only. Its needs-you dot is the orange's 3:1 cut (#F24D06), since
-#FF5A1F on warm paper is 2.8:1.
+#1F1E1D ink), light only. Its needs-you dot, and its tint with it, is the orange's 3:1 cut
+(#F24D06), since #FF5A1F on warm paper is 2.8:1.
 
 A device that had chosen **Spacesheep** (the default before the brand) moves to sessionpipe
 once, silently (lib/theme.ts, and the boot script in index.html for the first frame).

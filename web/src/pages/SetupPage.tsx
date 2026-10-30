@@ -21,7 +21,7 @@ import { controlApi, httpsPath, resetInfoCache } from "../control/api";
 import { sendCommand } from "../control/command";
 import { useMessage } from "../control/hooks";
 import { PairBody } from "../control/PairBody";
-import { SETUP_LABEL, signerKind, signerLabel, useOwnKeys } from "../control/signer";
+import { deviceWords, setupLabel, signerKind, signerLabel, useOwnKeys } from "../control/signer";
 import { noteOriginTrust, passkeysAvailable } from "../control/webauthn";
 import { sendErrorWords } from "../control/words";
 import { useAppState, useMachines, useStore } from "../data/hooks";
@@ -408,7 +408,7 @@ function SecureStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark } 
       caption={
         sub === "done" ? (
           signerKind() === "device" ? (
-            "Touch ID signs from this app; the https address is for your phone."
+            `${deviceWords().auth} signs from this app; the https address is for your phone.`
           ) : (
             <>
               Passkeys work here, on <code>{location.host}</code>
@@ -615,11 +615,11 @@ function PairStep({
   if (mark === "done") {
     caption = `${name} is listening.`;
   } else if (d.pairedHere && d.online && macTrusted === false) {
-    caption = `${name} is paired. Approve this Mac once, and Touch ID signs what you send.`;
+    caption = `${name} is paired. Approve ${deviceWords().this} once, and ${deviceWords().auth} signs what you send.`;
     body = (
       <div className="step-action">
         <Link to="/add-device" className="btn btn--primary" data-action="approve-mac">
-          {SETUP_LABEL}…
+          {setupLabel()}…
         </Link>
       </div>
     );

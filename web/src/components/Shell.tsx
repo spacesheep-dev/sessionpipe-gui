@@ -7,8 +7,9 @@
 // Every sidebar entry has a right-click menu, and so does the sidebar itself (appearance,
 // skin, mode); MenuHost here is the one context-menu policy for the whole app. On a phone
 // it also keeps the status bar on the page's ground (theme-color), scrolls a page to its
-// top when its tab is tapped again, and shows a dropped stream as a pill under the bar
-// that a pull down the page retries.
+// top when its tab is tapped again, mounts pull to refresh on the list pages
+// (PullRefresh), and shows a dropped stream as a pill under the bar, which that same
+// pull retries.
 import type { InstalledTheme } from "@shared/theme-api";
 import { type CSSProperties, Fragment, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
@@ -32,6 +33,7 @@ import { Mark } from "./Brand";
 import { MenuHost, type MenuList, useContextMenu } from "./ContextMenu";
 import type { MoreSheetProps } from "./MoreSheet";
 import { openPalette } from "./Palette";
+import { PULL_PAGES, PullRefresh } from "./PullRefresh";
 import { QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
 import { ShortcutHelp } from "./ShortcutHelp";
@@ -468,6 +470,8 @@ function useSideForm(splitOpen: boolean): boolean {
 
 const LISTS = new Set(["board", "inbox", "search", "feed", "review"]);
 let fromList = "board";
+/** The list a session page was opened from (PageBar's BackButton names it). */
+export const listBehind = (): string => fromList;
 
 export function Shell({ route, children }: { route: Route; children: ReactNode }) {
   useGlobalKeys();
@@ -645,6 +649,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         <MoreTab items={nav.slice(TABS)} active={active} views={views} />
       </nav>
       {phone && <PhoneConn />}
+      {phone && PULL_PAGES.has(route.name) && <PullRefresh main={mainRef} />}
       <SessionPanel phone={phone} />
       <ShortcutHelp />
       <LabelsHost />
@@ -661,7 +666,9 @@ const RECONNECT_GRACE_MS = 400;
 /** The stream's state as the footer says it: what to draw ("live" inside the grace) and
  *  its words. "Reconnecting · 4 s" once a drop has lasted 400 ms, "Offline" when the
  *  device is. */
-function useConnection(): { as: string; label: string; down: boolean } {
+/** The stream's state in words, after a short grace (a reconnect that lands within it is
+ *  never shown). The phone's bar reads it too (PageBar.tsx PhoneSub). */
+export function useConnection(): { as: string; label: string; down: boolean } {
   const { connection, retryAt } = useAppState();
   const down = connection === "reconnecting" || connection === "offline";
   const [shown, setShown] = useState(!down);
@@ -717,73 +724,27 @@ export function ConnectionPill() {
   );
 }
 
-/** How far the page is pulled down at its top before letting go retries. */
-const PULL_RETRY_PX = 56;
-
-/** The phone has no sidebar footer: a dropped stream is a pill under the bar, the whole
- *  pill the Retry button. A pull down the page from its top follows the finger with the
- *  pill and, past PULL_RETRY_PX, retries on release, as a native list refreshes; while
- *  the stream is live there is nothing to refresh and no pill. */
+/** The phone has no sidebar footer: a dropped stream is said in the bar's subtitle slot
+ *  on a page with a large title (PageBar.tsx PhoneSub, where iOS keeps "Connecting…"),
+ *  and on a page without one (a session) as this pill, floated under the bar's content;
+ *  the whole pill is the Retry button, and while the stream is live there is none. The
+ *  pill is always mounted on the phone and shell.css shows it only where no large title
+ *  is on the page. The pull down a list that refreshes it (PullRefresh) is the other way
+ *  to retry: the pill rides with the content (pull.css) and the reconnect is the same one. */
 function PhoneConn() {
   const { as, label, down } = useConnection();
   const store = useStore();
-  const ref = useRef<HTMLButtonElement>(null);
-  const [armed, setArmed] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!down || !el) return;
-    let y0: number | null = null;
-    let on = false;
-    const place = (d: number, settle: boolean) => {
-      el.style.transition = settle ? `transform ${reducedMotion() ? 0 : 200}ms cubic-bezier(0.22, 1, 0.36, 1)` : "none";
-      el.style.transform = d ? `translateY(${d}px)` : "";
-    };
-    const start = (e: TouchEvent) => {
-      y0 = window.scrollY <= 0 && e.touches.length === 1 ? (e.touches[0]?.clientY ?? null) : null;
-    };
-    const move = (e: TouchEvent) => {
-      if (y0 === null) return;
-      const raw = (e.touches[0]?.clientY ?? y0) - y0;
-      if (raw <= 0 || window.scrollY > 0) return place(0, false);
-      // Rubber-banded: the pill gives less the further it goes.
-      const d = Math.min(96, raw * 0.5);
-      place(d, false);
-      if (on !== d >= PULL_RETRY_PX) {
-        on = d >= PULL_RETRY_PX;
-        setArmed(on);
-      }
-    };
-    const end = () => {
-      if (y0 === null) return;
-      y0 = null;
-      place(0, true);
-      if (on) store.reconnect();
-      on = false;
-      setArmed(false);
-    };
-    window.addEventListener("touchstart", start, { passive: true });
-    window.addEventListener("touchmove", move, { passive: true });
-    window.addEventListener("touchend", end, { passive: true });
-    window.addEventListener("touchcancel", end, { passive: true });
-    return () => {
-      window.removeEventListener("touchstart", start);
-      window.removeEventListener("touchmove", move);
-      window.removeEventListener("touchend", end);
-      window.removeEventListener("touchcancel", end);
-    };
-  }, [down, store]);
   if (!down) return null;
   return (
     <button
       type="button"
-      ref={ref}
       className={`phone-conn phone-conn--${as}`}
       onClick={() => store.reconnect()}
       aria-label={`${label}. Retry now`}
     >
       <span className="conn-dot" aria-hidden="true" />
-      <span className="phone-conn-label">{armed ? "Release to retry" : label}</span>
-      {!armed && <span className="phone-conn-act">Retry</span>}
+      <span className="phone-conn-label">{label}</span>
+      <span className="phone-conn-act">Retry</span>
     </button>
   );
 }

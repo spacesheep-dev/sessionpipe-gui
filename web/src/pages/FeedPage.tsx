@@ -716,8 +716,9 @@ const FeedRow = memo(function FeedRow({
         action: beside ? "list.open" : "list.beside",
         run: () => openSplit(key, { from: rect() }),
       };
+      // The phone has no beside: a session opened "beside" is its page (lib/split.ts).
       return [
-        ...(beside ? [openBeside, openPage] : [openPage, openBeside]),
+        ...(wide ? (beside ? [openBeside, openPage] : [openPage, openBeside]) : [openPage]),
         wide && {
           label: "Open in background tab",
           action: "list.background",

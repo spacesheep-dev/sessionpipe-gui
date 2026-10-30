@@ -74,6 +74,7 @@ the **colour tokens**; the scheme's defaults fill the rest:
 | Hairlines | `--line`, `--line-2` |
 | Text | `--fg` (body), `--fg-2` (secondary, ≥ 7:1 on the page), `--fg-3` (meta, ≥ 5:1), `--fg-4` (marks, ≥ 3:1) |
 | Needs you | `--needs` (the accent), `--needs-fg`, `--needs-bg`, `--needs-line`, `--needs-ink` (text on a `--needs` fill) |
+| The phone's tint | `--tint` (a glyph or a fill: the selected tab, a switch, the slider), `--tint-fg` (the same as words: the back button, links); the stock skins set both to the brand orange |
 | State colours (views that colour-code) | `--state-working`, `--state-working-bg`, `--state-stale`, `--state-stale-bg` |
 | Working / stale / idle / done shades | `--work`, `--work-fg`, `--work-bg`, `--work-line`, `--stale`, `--stale-fg`, `--stale-bg`, `--idle`, `--idle-fg`, `--done`, `--done-fg` |
 | Outcomes | `--ok`, `--err`, `--err-soft`, `--err-bg` |

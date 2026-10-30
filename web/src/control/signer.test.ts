@@ -10,10 +10,12 @@ import { keyTypesOf, refresh } from "./nativeSigner";
 import {
   approveBlocker,
   canSign,
+  deviceWords,
   machineTakes,
   nativeErrorWords,
   nativeSigner,
   ownKeys,
+  setupLabel,
   setupWords,
   sign,
   signerKind,
@@ -61,8 +63,37 @@ function inShell(
 afterEach(() => {
   delete g.sessionpipeShell;
   delete g.__TAURI_INTERNALS__;
+  delete (document.documentElement as unknown as { dataset: Record<string, string | undefined> }).dataset.shell;
   vi.unstubAllGlobals();
   resetInfoCache();
+});
+
+describe("the device's words", () => {
+  it("name the device and what confirms on it, by the shell's platform", () => {
+    expect(deviceWords("macos")).toEqual({ this: "this Mac", auth: "Touch ID", its: "this Mac's" });
+    expect(deviceWords("ios")).toEqual({ this: "this iPhone", auth: "Face ID", its: "this iPhone's" });
+    expect(deviceWords("android")).toEqual({ this: "this phone", auth: "your fingerprint", its: "this phone's" });
+    // A browser, or a desktop shell without a signer: the Mac's words, as before.
+    expect(deviceWords(null)).toEqual(deviceWords("macos"));
+    expect(deviceWords("linux")).toEqual(deviceWords("macos"));
+    expect(deviceWords("windows")).toEqual(deviceWords("macos"));
+  });
+
+  it("every line built on them follows the shell the page is in", () => {
+    inShell(() => null, ["signer"], { platform: "ios" });
+    expect(signerLabel()).toBe("Face ID");
+    expect(setupLabel()).toBe("Approve this iPhone");
+    expect(setupWords("studio-mac")).toBe(
+      "studio-mac doesn't trust this iPhone yet. Approve it once, and Face ID signs what you send from here.",
+    );
+    expect(signHint("localhost")).toBe("reading this iPhone's key…");
+    inShell(() => null, ["signer"], { platform: "android" });
+    expect(signerLabel()).toBe("your fingerprint");
+    expect(setupLabel()).toBe("Approve this phone");
+    // The <html> mark shell.ts sets wins over the flag once it is there.
+    (document.documentElement as unknown as { dataset: Record<string, string> }).dataset.shell = "macos";
+    expect(setupLabel()).toBe("Approve this Mac");
+  });
 });
 
 describe("signer selection", () => {

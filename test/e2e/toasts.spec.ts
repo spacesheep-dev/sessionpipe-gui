@@ -179,6 +179,39 @@ test.describe("toasts", () => {
     await s.done();
   });
 
+  test("on a phone the banner fits the screen, 8 px from each edge, its lines cut inside it", async ({
+    page,
+    request,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const s = sink(
+      request,
+      await token(request),
+      `A toast with a title long enough to run past the edge of any phone ${randomUUID().slice(0, 6)}`,
+    );
+    await openPage(page, "/feed");
+    await s.start();
+    const card = page.locator(`.toast[data-session="${s.key}"]`);
+    await s.permission("Bash", "git push origin main --force-with-lease");
+    await expect(card).toBeVisible();
+    await expect(card).toHaveClass(/toast--banner/);
+    // Once its entrance has played.
+    await page.waitForTimeout(500);
+    const box = (await card.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(8);
+    expect(box.x + box.width).toBeLessThanOrEqual(390 - 8 + 0.5);
+    // Both lines end inside the banner (an ellipsis), not past it.
+    const inside = await card.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return Array.from(el.querySelectorAll(".toast-head, .toast-top")).every((n) => {
+        const b = n.getBoundingClientRect();
+        return b.right <= r.right + 0.5 && b.left >= r.left - 0.5;
+      });
+    });
+    expect(inside).toBe(true);
+    await s.done();
+  });
+
   test("a turn that ends with an error is a card that leaves by itself", async ({ page, request }) => {
     const s = sink(request, await token(request), `Toast error ${randomUUID().slice(0, 6)}`);
     await openPage(page, "/feed");

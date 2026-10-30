@@ -22,7 +22,8 @@ export type Feature =
   | "deeplink"
   | "updater"
   | "signer"
-  | "vibrancy";
+  | "vibrancy"
+  | "haptics";
 export interface ShellReceiver {
   id: string;
   name: string;
@@ -49,6 +50,7 @@ const FEATURES: readonly string[] = [
   "updater",
   "signer",
   "vibrancy",
+  "haptics",
 ];
 const str = (v: unknown): v is string => typeof v === "string";
 
@@ -133,6 +135,11 @@ export async function start(): Promise<boolean> {
   if (info.platform === "ios" || info.platform === "android")
     for (const load of Object.values(import.meta.glob("./mobile.css"))) await load();
   if (info.platform === "android") followInsets();
+  // The phone's engine behind lib/haptics.ts, when the shell has one.
+  if (info.features.includes("haptics")) (await import("./haptics")).wireHaptics();
+  // The phone's system bars follow the page's scheme (a forced Light or Dark, a one-scheme
+  // skin), so the status bar's text stays readable over it.
+  if (info.platform === "ios" || info.platform === "android") (await import("./appearance")).followAppearance();
   if (!info.receiver && !isDemo()) {
     // A receiver already running on this machine (the default port, or the one its run.json
     // names) is the one to use; the welcome is for when there is none. Selecting it opens

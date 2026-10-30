@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // A history router: pushState, no hash. `useRoute()` gives the parsed location; `navigate`
-// and `<Link>` move; the browser's back button works because we listen to popstate.
+// and `<Link>` move; the browser's back button works because we listen to popstate. On a
+// phone a session opened from a list pushes in and our Back pops it (lib/transitions.ts
+// decides, styles/transitions.css draws), through document.startViewTransition.
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -9,6 +11,8 @@ import {
   useMemo,
   useSyncExternalStore,
 } from "react";
+import { flushSync } from "react-dom";
+import { type NavDirection, type NavKind, navDirection } from "./transitions";
 
 export type Route =
   | { name: "board" }
@@ -30,10 +34,67 @@ export type Route =
   | { name: "missing"; path: string };
 
 const listeners = new Set<() => void>();
+/** The path the app shows: what `current()` reported at the last emit. A popstate's URL
+ *  has already moved when it arrives, so this is where a pop comes from. (Guarded: a unit
+ *  test imports this module without a window.) */
+let shownPath = typeof location === "undefined" ? "/" : location.pathname + location.search;
+/** The path `current()` keeps reporting while a transition waits for its frame: the URL
+ *  has moved (a pushState, a popstate), the page must not until the update runs. */
+let heldPath: string | null = null;
+const current = () => heldPath ?? location.pathname + location.search;
 const emit = () => {
   for (const l of listeners) l();
+  shownPath = current();
 };
-window.addEventListener("popstate", emit);
+
+const PHONE = "(max-width: 839px)";
+/** What the device says of a move right now (lib/transitions.ts decides with it). */
+const navEnv = () => ({
+  phone: typeof matchMedia === "function" && matchMedia(PHONE).matches,
+  reduced: typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches,
+  supported: "startViewTransition" in document,
+});
+
+/** Plays a push or pop view transition around `apply` (the emit that renders the new
+ *  page), or runs it at once when there is none to play. The URL has moved already (the
+ *  caller's pushState, or the popstate): `from` is held as the path the app shows until
+ *  the browser has captured the old page and calls back, which can take it more than a
+ *  frame on a long page; the URL never waits for that. `data-nav` on <html> names the
+ *  direction for the transition's life (styles/transitions.css). The render is flushed
+ *  synchronously, so the new page is in the DOM for its snapshot; one task more lets a
+ *  lazy page's retry land (the session's body is its own chunk) before it is taken. */
+function transition(dir: NavDirection | null, from: string, apply: () => void): void {
+  if (!dir) {
+    apply();
+    return;
+  }
+  heldPath = from;
+  const html = document.documentElement;
+  html.dataset.nav = dir;
+  const vt = document.startViewTransition(async () => {
+    heldPath = null;
+    flushSync(apply);
+    await new Promise<void>((r) => setTimeout(r, 0));
+  });
+  vt.finished.finally(() => {
+    if (html.dataset.nav === dir) delete html.dataset.nav;
+  });
+}
+
+/** Set while our own Back's history.back() is in flight: the popstate it brings is ours to
+ *  animate as a pop. It times out, so a Back that left the document (or never came back
+ *  as a popstate) cannot claim a later gesture's. */
+let ownBack = 0;
+if (typeof window !== "undefined")
+  window.addEventListener("popstate", () => {
+    const ours = ownBack !== 0;
+    window.clearTimeout(ownBack);
+    ownBack = 0;
+    const from = shownPath;
+    const to = location.pathname + location.search;
+    const dir = navDirection(parseRoute(from).name, parseRoute(to).name, ours ? "back" : "popstate", navEnv());
+    transition(dir, from, emit);
+  });
 
 const subscribe = (l: () => void) => {
   listeners.add(l);
@@ -41,7 +102,6 @@ const subscribe = (l: () => void) => {
     listeners.delete(l);
   };
 };
-const current = () => location.pathname + location.search;
 
 export function parseRoute(pathWithSearch: string): Route {
   const path = pathWithSearch.split("?")[0] ?? "/";
@@ -108,15 +168,18 @@ export const hrefFor = keepParams;
 let pushed = 0;
 export const hasInAppHistory = (): boolean => pushed > 0;
 
-export function navigate(to: string, opts: { replace?: boolean } = {}) {
+export function navigate(to: string, opts: { replace?: boolean; back?: boolean } = {}) {
   const target = keepParams(to);
   if (target === current()) return;
+  const from = current();
+  const kind: NavKind = opts.replace ? "replace" : opts.back ? "back" : "navigate";
+  const dir = navDirection(parseRoute(from).name, parseRoute(target).name, kind, navEnv());
   if (opts.replace) history.replaceState(null, "", target);
   else {
     history.pushState(null, "", target);
     pushed++;
   }
-  emit();
+  transition(dir, from, emit);
 }
 
 /** Sets or removes one query parameter on the current URL (a history entry each time, so
@@ -147,10 +210,16 @@ export function useSearchParam(name: string): string | null {
   return i < 0 ? null : new URLSearchParams(p.slice(i)).get(name);
 }
 
+/** Our own Back: the entry behind when there is one (its popstate plays as a pop on the
+ *  phone), else `fallback` as a pop of its own. */
 export function back(fallback = "/") {
-  if (history.length > 1 && document.referrer.startsWith(location.origin)) history.back();
-  else if (history.length > 1) history.back();
-  else navigate(fallback);
+  if (history.length > 1) {
+    window.clearTimeout(ownBack);
+    ownBack = window.setTimeout(() => {
+      ownBack = 0;
+    }, 1000);
+    history.back();
+  } else navigate(fallback, { back: true });
 }
 
 export const sessionPath = (harness: string, id: string) =>

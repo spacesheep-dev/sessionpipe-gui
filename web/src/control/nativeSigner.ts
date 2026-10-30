@@ -8,7 +8,7 @@
 import type { Info, KeyType } from "@shared/api";
 import { invoke } from "../native/bridge";
 import { type DeviceSignature, lastInfo, rpId, type SendBody, type TrustedKey } from "./api";
-import { notifySigner, type SignOptions } from "./signer";
+import { deviceWords, notifySigner, type SignOptions } from "./signer";
 
 /** What Rust answers `status` with: no key is made and no prompt shows. */
 export interface NativeStatus {
@@ -162,8 +162,8 @@ export function signHint(rp?: string | null): string {
   if (!shellReceiver()) return "no receiver is open in this window";
   // Its sessionpipe-core can't verify a device key (server/control/devicekeys.ts).
   if (!receiverTakesDevice())
-    return `the receiver can't check this Mac's key yet: update sessionpipe-gui${receiverAt()} to send from the app, or send from a browser`;
-  return "reading this Mac's key…";
+    return `the receiver can't check ${deviceWords().its} key yet: update sessionpipe-gui${receiverAt()} to send from the app, or send from a browser`;
+  return `reading ${deviceWords().its} key…`;
 }
 
 /** Where the receiver this window shows runs, as the person knows it. */
@@ -181,11 +181,11 @@ export function errorWords(e: unknown): string | null {
   if (!n || typeof n !== "object" || n instanceof Error || typeof n.code !== "string") return null;
   switch (n.code) {
     case "busy":
-      return "finish the Touch ID prompt first";
+      return `finish the ${deviceWords().auth} prompt first`;
     case "cancelled":
-      return "Touch ID was cancelled, so nothing was signed";
+      return `${deviceWords().auth} was cancelled, so nothing was signed`;
     case "lockout":
-      return "Touch ID is locked: unlock it with your password, then try again";
+      return `${deviceWords().auth} is locked: unlock it with your ${shell()?.platform === "macos" ? "password" : "passcode"}, then try again`;
     case "rate_limited":
       return "slow down: too many sends in a row";
     default:
@@ -193,10 +193,13 @@ export function errorWords(e: unknown): string | null {
   }
 }
 
-const REFUSALS: Record<string, string> = {
-  untrusted_key: "the machine doesn't trust this Mac yet: approve it once (Machines, Approve this Mac)",
-  bad_assertion: "this Mac's signature did not verify",
-  bad_grant: "the day grant did not verify; the next send asks for Touch ID again",
-  outside_grant: "signed outside the grant's window; the next send asks for Touch ID again",
+const refusals = (): Record<string, string> => {
+  const w = deviceWords();
+  return {
+    untrusted_key: `the machine doesn't trust ${w.this} yet: approve it once (Machines, Approve ${w.this})`,
+    bad_assertion: `${w.its} signature did not verify`,
+    bad_grant: `the day grant did not verify; the next send asks for ${w.auth} again`,
+    outside_grant: `signed outside the grant's window; the next send asks for ${w.auth} again`,
+  };
 };
-export const refusal = (code: string): string | null => REFUSALS[code] ?? null;
+export const refusal = (code: string): string | null => refusals()[code] ?? null;

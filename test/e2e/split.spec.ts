@@ -375,7 +375,7 @@ test.describe("split panel", () => {
   test.describe("phone", () => {
     test.skip(({ isMobile }) => !isMobile, "phone project only");
 
-    test("the panel is a sheet covering the view; close returns to the board", async ({ page }) => {
+    test("open beside pushes the session's own page; Back returns to the board", async ({ page }) => {
       await openBoard(page);
       // The pointer rests on the list first, so the board holds still (Board.tsx): the row
       // read is the row tapped, by its key, wherever the live demo would have moved it.
@@ -384,21 +384,17 @@ test.describe("split panel", () => {
       await expect(page.locator(".page.board")).toHaveAttribute("data-held", "");
       const key = await page.locator("article.card").first().getAttribute("data-flip");
       const card = page.locator(`article.card[data-flip="${key}"]`);
+      // A phone has no panel: "beside" opens the session's page (lib/split.ts), pushed
+      // over the board with Board behind its back button, and nothing in the URL's `s`.
       await card.locator("a.card-link").click({ modifiers: ["Shift"] });
-      const sheet = panel(page);
-      await expect(sheet).toHaveClass(/panel--open/);
-      // That session, by its key (a demo session may learn a better title meanwhile, as
-      // openBeside says), under a title of its own.
-      expect(decodeURIComponent(new URL(page.url()).searchParams.get("s") ?? "")).toBe(key);
-      await expect(sheet.locator(".panel-title")).not.toHaveText("");
-      await expect(sheet.locator("ol.timeline li.turn").first()).toBeVisible();
-      const box = (await sheet.boundingBox())!;
-      const vp = page.viewportSize()!;
-      expect(box.width).toBeGreaterThanOrEqual(vp.width - 1);
-      expect(box.height).toBeGreaterThanOrEqual(vp.height - 1);
-      await sheet.getByRole("button", { name: "Close panel" }).click();
-      await expect(sheet).not.toHaveClass(/panel--open/);
+      await expect(page).toHaveURL(/\/s\//);
       await expect(page).not.toHaveURL(/[?&]s=/);
+      await expect(page.locator("h1.sess-title")).not.toHaveText("");
+      await expect(page.locator("ol.timeline li.turn").first()).toBeVisible();
+      await expect(panel(page)).not.toHaveClass(/panel--open/);
+      await expect(page.locator(".bar-back-label")).toHaveText("Board");
+      await page.getByRole("button", { name: "Back" }).click();
+      await expect(page).toHaveURL(/\/$/);
       await expect(page.locator("section.group").first()).toBeVisible();
     });
   });

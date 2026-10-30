@@ -4,9 +4,13 @@
 // "⋯" menu) at the right. Sticky and opaque, --bar tall, its hairline in line with the
 // sidebar's and the panel's (styles/shell.css). On a phone it is a 44 px navigation bar
 // over an iOS large title: the bar's own title fades in once the large one scrolls under
-// it, and the tools sit below the large title, scrolling with the page.
+// it, and the tools sit below the large title, scrolling with the page. The line under
+// the large title is the bar's subtitle slot: the page's meta, or, while the stream is
+// down, its state with Retry, where iOS keeps "Connecting…".
 import { Children, Fragment, isValidElement, type ReactNode, useEffect, useRef, useState } from "react";
+import { useStore } from "../data/hooks";
 import { SearchInput } from "./bits";
+import { listBehind, useConnection } from "./Shell";
 
 const PHONE = "(max-width: 839px)";
 
@@ -20,6 +24,24 @@ function usePhone(): boolean {
     return () => mq.removeEventListener("change", up);
   }, []);
   return on;
+}
+
+/** The phone's subtitle line under a large title: the meta, or while the stream is down
+ *  its state and Retry (the same reconnect as the pull down the page). Its own component,
+ *  so only a phone's bar subscribes to the stream's state. */
+function PhoneSub({ meta }: { meta?: ReactNode }) {
+  const { as, label, down } = useConnection();
+  const store = useStore();
+  if (!down) return meta ? <div className="bar-sub">{meta}</div> : null;
+  return (
+    <div className={`bar-sub phone-conn-sub phone-conn-sub--${as}`} role="status" aria-live="polite">
+      <span className="conn-dot" aria-hidden="true" />
+      <span className="phone-conn-label">{label}</span>
+      <button type="button" className="phone-conn-act" onClick={() => store.reconnect()}>
+        Retry
+      </button>
+    </div>
+  );
 }
 
 /** The tools as a flat list (fragments opened), so the phone can lift the search out. */
@@ -111,7 +133,7 @@ export function PageBar({
               {title}
             </div>
           ) : null}
-          {meta ? <div className="bar-sub">{meta}</div> : null}
+          {bigTitle ? <PhoneSub meta={meta} /> : meta ? <div className="bar-sub">{meta}</div> : null}
           {tools ? <PhoneTools tools={tools} /> : null}
         </div>
       ) : null}
@@ -119,10 +141,30 @@ export function PageBar({
   );
 }
 
-/** The chevron back to where the page was opened from (the label is its tooltip). */
-export function BackButton({ onClick, label = "Board" }: { onClick: () => void; label?: string }) {
+/** The list pages by route name, as the back button says them. */
+const LIST_TITLE: Record<string, string> = {
+  board: "Board",
+  inbox: "Inbox",
+  search: "Search",
+  feed: "Feed",
+  review: "Review",
+};
+
+/** The chevron back to where the page was opened from. `label` names that page; a session
+ *  page leaves it out and gets the list it was opened from (Shell.tsx). On a desktop the
+ *  label is the tooltip; on a phone it stands beside the chevron in the tint, as iOS's
+ *  back button does, cut with an ellipsis before it reaches the title. */
+export function BackButton({ onClick, label }: { onClick: () => void; label?: string }) {
+  const phone = usePhone();
+  const text = label ?? LIST_TITLE[listBehind()] ?? "Board";
   return (
-    <button type="button" className="icon-btn bar-back" onClick={onClick} aria-label="Back" title={`Back to ${label}`}>
+    <button
+      type="button"
+      className={`icon-btn bar-back${phone ? " bar-back--labelled" : ""}`}
+      onClick={onClick}
+      aria-label="Back"
+      title={`Back to ${text}`}
+    >
       <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
         <path
           d="M12.5 4.5 7 10l5.5 5.5"
@@ -133,6 +175,11 @@ export function BackButton({ onClick, label = "Board" }: { onClick: () => void; 
           strokeLinejoin="round"
         />
       </svg>
+      {phone ? (
+        <span className="bar-back-label" aria-hidden="true">
+          {text}
+        </span>
+      ) : null}
     </button>
   );
 }

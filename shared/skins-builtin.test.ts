@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // The default skin is tokens.css word for word (so the first frame, before any script, is
 // already on brand), and both shipped skins keep the brand's colour rules (docs/brand.md):
-// the orange reads as a dot or glyph (3:1) and as text in its text cut (4.5:1), ink on an
-// orange fill reads, the ring reads, and the error crimson never comes near the orange.
+// the orange reads as a dot or glyph (3:1) and as text in its text cut (4.5:1), the phone's
+// tint keeps the same two cuts, ink on an orange fill reads, the ring reads, and the error
+// crimson never comes near the orange.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { contrastRatio, parseCssColor, STOCK_TEXT_TOKENS } from "./contrast.js";
@@ -68,6 +69,8 @@ describe("the brand's colour rules, in every shipped skin and scheme", () => {
       for (const ground of ["--bg", "--bg-2"] as const) {
         expect(ratio("--needs", ground), `needs dot on ${ground}`).toBeGreaterThanOrEqual(3);
         expect(ratio("--needs-fg", ground), `needs text on ${ground}`).toBeGreaterThanOrEqual(4.5);
+        expect(ratio("--tint", ground), `tint glyph on ${ground}`).toBeGreaterThanOrEqual(3);
+        expect(ratio("--tint-fg", ground), `tint text on ${ground}`).toBeGreaterThanOrEqual(4.5);
         expect(ratio("--err", ground), `error text on ${ground}`).toBeGreaterThanOrEqual(4.5);
         expect(ratio("--focus", ground), `ring on ${ground}`).toBeGreaterThanOrEqual(3);
       }

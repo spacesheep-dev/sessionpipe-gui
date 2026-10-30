@@ -17,6 +17,7 @@ import "./styles/fonts.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/shell.css";
+import "./styles/pull.css";
 import "./styles/shared.css";
 import "./styles/board.css";
 import "./styles/brand.css";
@@ -37,6 +38,7 @@ import "./styles/lens.css";
 import "./styles/chat.css";
 import "./styles/keyboard.css";
 import "./styles/shortcuts.css";
+import "./styles/transitions.css";
 import "./styles/narrow.css";
 import "./styles/density.css";
 

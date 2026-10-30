@@ -9,6 +9,7 @@
 // exact command and gets the signed body back.
 import type { MachineControl } from "@shared/api";
 import { useEffect, useMemo, useState } from "react";
+import { type ShellPlatform, shellPlatform } from "../lib/device";
 import type { DeviceSignature, SendBody, TrustedKey } from "./api";
 import { sha256 } from "./bytes";
 import type * as Native from "./nativeSigner";
@@ -20,8 +21,27 @@ export type Signed = Omit<SendBody, "machineId">;
 const inApp = (): boolean => !!(globalThis as { sessionpipeShell?: unknown }).sessionpipeShell;
 /** The app's device key signs where the shell is; a passkey everywhere else. */
 export const signerKind = (): SignerKind => (inApp() ? "device" : "passkey");
-/** What the person confirms with: "your passkey", or "Touch ID" in the app. */
-export const signerLabel = (): string => (inApp() ? "Touch ID" : "your passkey");
+/** What the person confirms with: "your passkey", or the app's own ("Touch ID", "Face ID"). */
+export const signerLabel = (): string => (inApp() ? deviceWords().auth : "your passkey");
+
+/** The app's words for the device it runs on, by the shell's platform (lib/device.ts):
+ *  the Mac app says "this Mac" and "Touch ID", the iPhone app "this iPhone" and "Face ID",
+ *  Android "this phone" and "your fingerprint". A desktop browser, and a shell with no
+ *  signer of its own (Linux, Windows), read as the Mac app did: a browser never shows
+ *  these lines, and the setup they describe is the Mac's. */
+export interface DeviceWords {
+  /** "this Mac": the device, as the subject of a sentence. */
+  this: string;
+  /** "Touch ID": what confirms a send here. */
+  auth: string;
+  /** "this Mac's": the possessive. */
+  its: string;
+}
+export function deviceWords(platform: ShellPlatform | null = shellPlatform()): DeviceWords {
+  if (platform === "ios") return { this: "this iPhone", auth: "Face ID", its: "this iPhone's" };
+  if (platform === "android") return { this: "this phone", auth: "your fingerprint", its: "this phone's" };
+  return { this: "this Mac", auth: "Touch ID", its: "this Mac's" };
+}
 
 // The browser's day key (IndexedDB, a passkey's grant) loads with the first send, the
 // first grant read or "Unlock now", not with the page: the entry carries only this switch.
@@ -50,7 +70,7 @@ export const canSign = (rp?: string | null): boolean => (dev ? dev.canSign(rp) :
 
 /** Why `canSign` is false, as one line. */
 export const signHint = (rp?: string | null): string =>
-  dev ? dev.signHint(rp) : inApp() ? "reading this Mac's key…" : insecureHint();
+  dev ? dev.signHint(rp) : inApp() ? `reading ${deviceWords().its} key…` : insecureHint();
 
 /** The keys this device holds for `rp` (the passkeys this browser made, or the app's one
  *  device key once Rust reported it). Synchronous. */
@@ -80,11 +100,14 @@ export const machineTakes = (control: Pick<MachineControl, "keyTypes"> | undefin
 export const updateWords = (machine: string | undefined): string =>
   `Update sessionpipe on ${machine || "that machine"} to send from the app.`;
 
-/** The app's setup, where its device key is made and a trusted device approves it once. */
-export const SETUP_LABEL = "Approve this Mac";
-/** The one line where a machine takes device keys but doesn't trust this Mac's yet. */
-export const setupWords = (machine: string | undefined): string =>
-  `${machine || "That machine"} doesn't trust this Mac yet. Approve it once, and Touch ID signs what you send from here.`;
+/** The app's setup, where its device key is made and a trusted device approves it once:
+ *  "Approve this Mac" (or this iPhone, this phone). */
+export const setupLabel = (): string => `Approve ${deviceWords().this}`;
+/** The one line where a machine takes device keys but doesn't trust this device's yet. */
+export const setupWords = (machine: string | undefined): string => {
+  const w = deviceWords();
+  return `${machine || "That machine"} doesn't trust ${w.this} yet. Approve it once, and ${w.auth} signs what you send from here.`;
+};
 
 /** Why Approve can't go for a device request on `machine`, or null: a device key (the
  *  request's own, or this app's, which signs the key.add) needs a machine that takes one. */
@@ -102,7 +125,7 @@ export function approveBlocker(
 export interface SignOptions {
   /** One fresh confirm over sha256(cmd) instead of the day grant. */
   confirm?: boolean;
-  /** Fires right before a prompt (passkey or Touch ID), so the page can say what it is for. */
+  /** Fires right before a prompt (a passkey, Touch ID, Face ID), so the page can say what it is for. */
   onTap?: () => void;
   /** The last grant was refused: ask for a new one (the app allows one such retry). */
   fresh?: boolean;

@@ -6,6 +6,49 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Pull down to refresh** on the phone's list pages (Board, Inbox, Search, Feed, Review,
+  Machines), as a native list does: a ring draws in the tint as you pull, a tick as it
+  arms, and the stream reopens for a fresh snapshot. While the stream is down the same
+  pull is the retry.
+- **The phone's tint.** The sessionpipe orange on the selected tab, the back chevron, a
+  sheet's Cancel and Start, a switch that is on, the text-size slider, the caret and
+  links. Needs you keeps its own orange; everything else stays graphite. Skins may set
+  `--tint` and `--tint-fg`.
+- **The phone app feels native.** Taps and outcomes play the phone's haptics; the status
+  and navigation bars follow a forced Light or Dark (or a one-scheme skin); the edge swipe
+  goes back on iPhone and the back button goes back on Android instead of closing the
+  app; the session's message bar rises above the keyboard on iPhone.
+- **Push and pop.** Opening a session from a list slides it in as a native push and Back
+  slides it out, the tab bar staying put; the back button names the page it returns to.
+
+### Changed
+
+- The phone's tab bar and bars are translucent material, as iOS's are, with the page
+  blurring under them (solid under Reduce Transparency).
+- Rows highlight under the finger and release as native cells do; an empty Inbox or Feed
+  centres on the screen.
+- **The phone names the device it runs on:** "Approve this iPhone", "Face ID signs what
+  you send" (on Android "this phone" and "your fingerprint") everywhere it said "this
+  Mac" and "Touch ID".
+- On the phone an Inbox row, and anything that opens a session "beside", opens the
+  session's own page, pushed with Inbox behind Back, instead of the desktop's panel as a
+  sheet; the panel is never restored on the phone at launch.
+- A dropped stream on the phone is said under the large title ("Reconnecting · 3 s ·
+  Retry") instead of a pill over it; the pill stays only on pages without one.
+- With a permission pending on a machine the phone isn't paired with, the session's dock is
+  the Allow and Deny card alone with one hint, and a command moves to the next line whole
+  with its question mark.
+- In the phone app the Inbox's notification banner and bell read the app's own permission
+  ("Notifications are off · Turn on", or "Open Settings" once refused), and the empty
+  Inbox no longer talks about "this page" or "your phone".
+
+### Fixed
+
+- Notification banners on the phone fit the screen on every title length and sit under
+  the status bar; a long one ends in an ellipsis instead of running off the edge.
+
 ## [0.5.0] - 2026-10-28
 
 ### Added

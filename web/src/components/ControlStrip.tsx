@@ -6,7 +6,9 @@
 // ask for something, with its one action, and nothing at all when all is well. Every
 // press shows at once: Allow, Deny, Stop and Send take their pending face until the
 // receiver has the signed command, and what the machine did next is said by the
-// machine's own acks, never here.
+// machine's own acks, never here. On the phone, unpaired with a prompt to answer, the
+// bar is the card alone: one sentence says how to pair (for answering and messaging
+// both), and the composer, which could do nothing, takes no room.
 // The draft is kept per session. Disabled with its reason until the machine paired and
 // `onSend` is wired (web/src/control/SessionControl.tsx signs and sends). Keep this
 // component self-contained: everything it needs comes through props.
@@ -22,7 +24,8 @@ import {
 } from "react";
 import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachments";
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
-import { SETUP_LABEL, signerKind } from "../control/signer";
+import { deviceWords, setupLabel, signerKind } from "../control/signer";
+import { usePhoneLayout } from "../lib/device";
 import { attentionMessage, toolLabel } from "../lib/format";
 import { Link } from "../lib/router";
 import { hintFor } from "../lib/shortcuts";
@@ -218,6 +221,7 @@ export function ControlStrip({
     return () => window.removeEventListener("sp:compose", on);
   }, [session.key]);
   const paired = !!control;
+  const phone = usePhoneLayout();
   // The wrong address (control/origin.ts): the hint is the one line naming where sending
   // works, as a link to this very page there; never an offer to add a device.
   const wrong = blocked ? wrongOriginHere() : null;
@@ -275,12 +279,12 @@ export function ControlStrip({
             kind: "untrusted",
             text: (
               <>
-                <strong>{name}</strong> doesn't trust this Mac yet.
+                <strong>{name}</strong> doesn't trust {deviceWords().this} yet.
               </>
             ),
             action: (
               <Link to="/add-device" className="ctl-link">
-                {SETUP_LABEL}
+                {setupLabel()}
               </Link>
             ),
           }
@@ -332,22 +336,34 @@ export function ControlStrip({
       };
     return null;
   })();
-  // Why Allow / Deny are off, said on their own bar (the line under the field says the rest).
-  const offWhy = enabled
-    ? null
-    : !paired
-      ? `pair ${name} to answer here`
-      : blocked
-        ? wrong
-          ? "answer it where sending works"
-          : "this page cannot sign an answer"
-        : stream
-          ? "waiting for the connection"
-          : null;
   const permissions = (attentions ?? (attention ? [attention] : [])).filter((a) => a.kind === "permission");
   // The answerable prompt(s) only; a notification twin adds nothing. With no answerable one,
   // the notification is shown as what it is: a prompt waiting in the terminal.
   const open = permissions.some(answerable) ? permissions.filter(answerable) : permissions;
+  // The phone, unpaired, with a prompt to answer: one state, one sentence (on the card),
+  // and no composer. A desktop keeps its field and the line under it.
+  const folded = phone && !paired && !blocked && open.some(answerable);
+  // Why Allow / Deny are off, said on their own bar (the line under the field says the rest).
+  const offWhy: ReactNode = enabled ? null : !paired ? (
+    folded ? (
+      <>
+        Pair <strong>{name}</strong> to answer and message from here ·{"\u00a0"}
+        <Link to="/connect" className="ctl-link">
+          How to pair
+        </Link>
+      </>
+    ) : (
+      `pair ${name} to answer here`
+    )
+  ) : blocked ? (
+    wrong ? (
+      "answer it where sending works"
+    ) : (
+      "this page cannot sign an answer"
+    )
+  ) : stream ? (
+    "waiting for the connection"
+  ) : null;
   const canSend = enabled && !busy && !att.uploading && (!!text.trim() || att.items.length > 0);
 
   const run = (id: string, action: ControlAction, after?: () => void) => {
@@ -380,7 +396,7 @@ export function ControlStrip({
 
   return (
     <form
-      className={`ctl ${enabled ? "" : "ctl--off"} ${blocked ? "ctl--blocked" : ""} ${chat ? "ctl--chat" : ""} ${att.dragging ? "ctl--drop" : ""}`}
+      className={`ctl ${enabled ? "" : "ctl--off"} ${blocked ? "ctl--blocked" : ""} ${folded ? "ctl--folded" : ""} ${chat ? "ctl--chat" : ""} ${att.dragging ? "ctl--drop" : ""}`}
       aria-label="Control"
       {...att.handlers}
       onSubmit={(e) => {
@@ -395,7 +411,7 @@ export function ControlStrip({
         const off = !enabled || !!busy || status === "sent" || early;
         const suggested = suggestions?.find((s) => s.attentionId === a.attentionId);
         const shut = terminal || status === "closed";
-        const why = terminal
+        const why: ReactNode = terminal
           ? "waiting in the terminal"
           : status === "closed"
             ? "answered in the terminal, or expired"
@@ -484,47 +500,49 @@ export function ControlStrip({
           </div>
         );
       })}
-      <div className="ctl-field">
-        <AttachmentTray att={att} />
-        <div className="ctl-ask">
-          <AttachButton att={att} disabled={!enabled || !!busy} />
-          <textarea
-            ref={field}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={onKey}
-            placeholder={placeholder}
-            disabled={!enabled}
-            aria-label="Message for the next turn"
-            rows={1}
-            enterKeyHint="send"
-          />
-          {working && (
+      {!folded && (
+        <div className="ctl-field">
+          <AttachmentTray att={att} />
+          <div className="ctl-ask">
+            <AttachButton att={att} disabled={!enabled || !!busy} />
+            <textarea
+              ref={field}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={onKey}
+              placeholder={placeholder}
+              disabled={!enabled}
+              aria-label="Message for the next turn"
+              rows={1}
+              enterKeyHint="send"
+            />
+            {working && (
+              <button
+                type="button"
+                className="icon-btn ctl-cancel"
+                disabled={!enabled || (!!busy && busy !== "cancel")}
+                onClick={() => run("cancel", { kind: "cancel" })}
+                aria-label="Stop the turn"
+                aria-busy={busy === "cancel" || undefined}
+                data-tip-keys={hintFor("session.cancel") || undefined}
+              >
+                {busy === "cancel" ? <Spinner label="Stopping" /> : <StopIcon />}
+              </button>
+            )}
             <button
-              type="button"
-              className="icon-btn ctl-cancel"
-              disabled={!enabled || (!!busy && busy !== "cancel")}
-              onClick={() => run("cancel", { kind: "cancel" })}
-              aria-label="Stop the turn"
-              aria-busy={busy === "cancel" || undefined}
-              data-tip-keys={hintFor("session.cancel") || undefined}
+              type="submit"
+              className={`icon-btn ctl-send ${canSend || busy === "prompt" ? "is-ready" : ""}`}
+              disabled={!canSend}
+              aria-label="Send"
+              aria-busy={busy === "prompt" || undefined}
+              data-tip-keys="↩"
             >
-              {busy === "cancel" ? <Spinner label="Stopping" /> : <StopIcon />}
+              {busy === "prompt" ? <Spinner label="Sending" /> : <SendIcon />}
             </button>
-          )}
-          <button
-            type="submit"
-            className={`icon-btn ctl-send ${canSend || busy === "prompt" ? "is-ready" : ""}`}
-            disabled={!canSend}
-            aria-label="Send"
-            aria-busy={busy === "prompt" || undefined}
-            data-tip-keys="↩"
-          >
-            {busy === "prompt" ? <Spinner label="Sending" /> : <SendIcon />}
-          </button>
+          </div>
         </div>
-      </div>
-      {reason && (
+      )}
+      {reason && !folded && (
         <p className="ctl-foot" data-reason={reason.kind}>
           <span
             className={`ctl-hint ctl-context ${reason.tone === "err" ? "ctl-note--err" : ""}`}

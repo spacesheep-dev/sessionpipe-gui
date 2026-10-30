@@ -57,7 +57,16 @@ import {
   saveDraft,
 } from "./newSessionState";
 import { sentence } from "./PendingDevices";
-import { canSign, machineTakes, setupWords, signerKind, signHint, updateWords, useOwnKeys } from "./signer";
+import {
+  canSign,
+  deviceWords,
+  machineTakes,
+  setupWords,
+  signerKind,
+  signHint,
+  updateWords,
+  useOwnKeys,
+} from "./signer";
 import { PERMISSION_LABEL, sendErrorWords, WRONG_ORIGIN } from "./words";
 import "./newSessionSheet.css";
 
@@ -110,7 +119,7 @@ function blocker(
   if (!machineTakes(c)) return { short: "needs a newer sessionpipe", long: updateWords(m.name) };
   if (!c.keys.some((k) => o.mine.has(k.id)))
     return device
-      ? { short: `${m.name} doesn't trust this Mac`, long: setupWords(m.name) }
+      ? { short: `${m.name} doesn't trust ${deviceWords().this}`, long: setupWords(m.name) }
       : {
           short: `no passkey here that ${m.name} trusts`,
           long: `${m.name} trusts no passkey from this browser. Add this device from one it trusts.`,
@@ -473,7 +482,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   // ----- the one-fact status line -----
   const status = ((): { text: string; tone?: "err" } | null => {
     if (error) return { text: error, tone: "err" };
-    if (tap) return { text: signerKind() === "device" ? "Confirm with Touch ID…" : "Confirm with your passkey…" };
+    if (tap)
+      return { text: signerKind() === "device" ? `Confirm with ${deviceWords().auth}…` : "Confirm with your passkey…" };
     if (busy) return { text: `Sending to ${machine}…` };
     if (!m) return { text: listed.length ? "Choose a machine" : "Pair a machine to start sessions on it." };
     if (blocked) return { text: blocked.long };
@@ -492,7 +502,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const passkeyNote =
     grant.exp === null && !blocked
       ? signerKind() === "device"
-        ? "Start asks for Touch ID, once today."
+        ? `Start asks for ${deviceWords().auth}, once today.`
         : "Start asks for your passkey, once today."
       : null;
 

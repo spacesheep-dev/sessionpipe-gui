@@ -819,8 +819,13 @@
     margin-right: calc(-1 * var(--gutter));
     padding: 0 var(--gutter);
   }
+  /* The chips run edge to edge as the bar's filter row does (shell.css .bar-filters): the
+     words line up with the field, and a chip past the screen fades under its edge. */
   .sx-chips {
-    margin-left: -8px;
+    margin: 0 calc(-1 * var(--gutter));
+    padding: 0 var(--gutter) 0 calc(var(--gutter) - 8px);
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
   }
   .sx--phone .sx-resline {
     display: none;

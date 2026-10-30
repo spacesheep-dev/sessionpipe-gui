@@ -3,8 +3,9 @@
    self-hosted (fonts.css). Neutrals carry the whole interface: ink, graphite and paper
    greys, all of one warm-neutral axis at near-zero chroma, so nothing reads as tinted.
    The muted tiers stay readable: fg-2 is secondary body (≥ 7:1 on the page), fg-3 is meta
-   (≥ 5:1), fg-4 is for marks only (≥ 3:1). One accent, the brand's orange, for "needs you"
-   and nothing else; a crimson only where there is an error, never close to the orange.
+   (≥ 5:1), fg-4 is for marks only (≥ 3:1). One accent, the brand's orange: for "needs you",
+   and on the phone as the tint its controls share (--tint); a crimson only where there is
+   an error, never close to the orange.
    Working, stale, idle and done are neutral tiers. These are the "sessionpipe" skin's
    values word for word (shared/skins-builtin.ts), so the first frame is already on brand.
    Every name here is public to views (themes/host/api.ts reads this file): keep it one
@@ -136,6 +137,14 @@
   --needs-line: #ffc5b1;
   /* Text on a --needs fill (the unread badge, the "new" pill): ink, 5.9:1. */
   --needs-ink: #141414;
+  /* The phone's tint: the one colour an app's controls share, as every iOS app has one.
+     The same orange, so the eye learns one colour, and it is spent where UIKit spends the
+     tint (the selected tab, the back chevron, a bar's text buttons, a switch on, the caret,
+     a link) and nowhere a view draws. As a glyph or a fill it is the brand cut; as text it
+     is the text cut, since the orange is never small text on a light ground. Needs you
+     keeps --needs: the two are the same colour, not the same meaning. */
+  --tint: #ff5a1f;
+  --tint-fg: #c13b01;
   /* The states views colour-code (the canvas) are neutral tiers: the orange stays the one
      accent. The names are kept for views and installed skins. */
   --state-working: var(--fg-2);
@@ -193,7 +202,8 @@
   --sel: color-mix(in oklch, var(--fg) 9%, transparent);
   --press: color-mix(in oklch, var(--fg) 13%, transparent);
   --scrim: oklch(0.191 0 0 / 0.24);
-  /* A switch's track off and on, and the knob of a switch or a slider: always light. */
+  /* A switch's track off and on (ink on a desktop; the phone's is the tint, shared.css), and
+     the knob of a switch or a slider: always light. */
   --switch-off: var(--line-2);
   --switch-on: var(--fg);
   --knob: oklch(0.99 0 0);
@@ -241,6 +251,8 @@
     --needs-bg: #221815;
     --needs-line: #662d18;
     --needs-ink: #141414;
+    --tint: #ff5a1f;
+    --tint-fg: #ff5a1f;
 
     --label-red: oklch(0.68 0.12 22);
     --label-orange: oklch(0.75 0.095 64);
@@ -289,6 +301,8 @@
   --needs-bg: #221815;
   --needs-line: #662d18;
   --needs-ink: #141414;
+  --tint: #ff5a1f;
+  --tint-fg: #ff5a1f;
 
   --label-red: oklch(0.68 0.12 22);
   --label-orange: oklch(0.75 0.095 64);

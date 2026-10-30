@@ -6,10 +6,23 @@
 // handed over once and consumed by the panel. The panel belongs beside the pages that
 // list sessions (and a session's own page, and Settings, a window over the board); on
 // the others (Setup, Connect, /phone, a missing page) it steps aside, its tabs kept for
-// the way back.
-import type { SessionKey } from "@shared/api";
+// the way back. On the phone there is no beside: a session opened "beside" is its page,
+// pushed over the list (lib/transitions.ts), and nothing of the panel is restored on the
+// next launch (a modal sheet over every page is not how a phone wakes up).
+import { type SessionKey, splitKey } from "@shared/api";
 import { useMemo, useSyncExternalStore } from "react";
-import { parseRoute, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, setSearchParams, usePath, useSearchParam } from "./router";
+import { phoneLayout } from "./device";
+import {
+  agentPath,
+  navigate,
+  parseRoute,
+  SPLIT_ACTIVE_PARAM,
+  SPLIT_PARAM,
+  sessionPath,
+  setSearchParams,
+  usePath,
+  useSearchParam,
+} from "./router";
 
 export interface Rect {
   x: number;
@@ -126,7 +139,9 @@ function current(): SplitState {
   return parseSplit(q.get(SPLIT_PARAM), q.get(SPLIT_ACTIVE_PARAM));
 }
 
+/** The mirror for a plain reload; the phone keeps none (nothing modal survives a relaunch). */
 function remember(state: SplitState): void {
+  if (phoneLayout()) return;
   try {
     if (state.tabs.length === 0) localStorage.removeItem(KEY_TABS);
     else localStorage.setItem(KEY_TABS, JSON.stringify(state));
@@ -150,8 +165,10 @@ function commit(state: SplitState, opts: { replace?: boolean } = {}): void {
   );
 }
 
-/** At boot, with no `?s=` in the URL: the tabs of the last visit, if any. */
+/** At boot, with no `?s=` in the URL: the tabs of the last visit, if any. Never on the
+ *  phone, whose pages open clean; its mirror (a desktop visit's) stays for a desktop. */
 export function restoreSplit(): void {
+  if (phoneLayout()) return;
   if (new URLSearchParams(location.search).has(SPLIT_PARAM)) return;
   try {
     const raw = localStorage.getItem(KEY_TABS);
@@ -173,7 +190,20 @@ export interface OpenSplitOptions {
   background?: boolean;
 }
 
+/** The page a tab opens as on the phone: the session's, on its agent for an agent tab. */
+export function tabPath(tab: SessionKey): string {
+  const { session, agent } = parseTab(tab);
+  const { harness, id } = splitKey(session);
+  return agent ? agentPath(harness, id, agent) : sessionPath(harness, id);
+}
+
+/** Opens `key` beside the page. On the phone that is its page, pushed (a row opens its
+ *  detail, with the list behind the back button); `background` has no meaning there. */
 export function openSplit(key: SessionKey, opts: OpenSplitOptions = {}): void {
+  if (phoneLayout()) {
+    navigate(tabPath(key));
+    return;
+  }
   const st = current();
   const i = st.tabs.indexOf(key);
   if (i >= 0) {

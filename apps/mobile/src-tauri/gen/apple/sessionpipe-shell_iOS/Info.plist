@@ -55,7 +55,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- The status bar takes its style from the root view controller (tao's leaves it at
+	     .default), which follows the window's interface style: app_appearance (uikit.rs)
+	     overrides that when the page forces Light or Dark, and the text flips with it.
+	     UIStatusBarStyle above is for the launch screen only. -->
 	<key>UIViewControllerBasedStatusBarAppearance</key>
-	<false/>
+	<true/>
 </dict>
 </plist>

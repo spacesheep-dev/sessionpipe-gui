@@ -1,0 +1,111 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- the phone's push and pop (lib/router.tsx, lib/transitions.ts) ---------- */
+
+/* A session opened from a list slides in from the right as a UINavigationController push,
+   the list sliding a third of the way out under it with a scrim over it; Back pops it the
+   same way in reverse. The router sets data-nav="push|pop" on <html> for the transition's
+   life and drives it through document.startViewTransition; without it (an older WebKit),
+   on a desktop, under reduced motion, or on a popstate the browser already animated (its
+   own back, the native edge swipe) the page just swaps. The tab bar, the bar and a banner
+   carry names of their own, so they are not in the page that slides: the tab bar stays
+   put, the bar cross-fades as iOS's does. */
+@media (max-width: 839px) {
+  .tabbar {
+    view-transition-name: tabbar;
+  }
+  .main > .page > .bar {
+    view-transition-name: bar;
+  }
+  .toasts--phone {
+    view-transition-name: toasts;
+  }
+}
+
+/* The page's two snapshots are opaque pages over each other, not the default cross-fade
+   (plus-lighter would show the one through the other), on a black ground: the page under
+   the moving one is drawn at 90 %, which is the scrim. The moving one casts the raised
+   surface's shadow on its edge. */
+html[data-nav] ::view-transition-image-pair(root) {
+  background: #000;
+}
+html[data-nav] ::view-transition-old(root),
+html[data-nav] ::view-transition-new(root) {
+  mix-blend-mode: normal;
+  animation-timing-function: var(--ease-out);
+  animation-fill-mode: both;
+}
+/* The bar cross-fades over the same time as the slide. */
+html[data-nav] ::view-transition-old(bar),
+html[data-nav] ::view-transition-new(bar),
+html[data-nav] ::view-transition-old(toasts),
+html[data-nav] ::view-transition-new(toasts) {
+  animation-timing-function: var(--ease-out);
+}
+
+/* Push: the session comes in from the right over the list going left. */
+html[data-nav="push"] ::view-transition-old(root) {
+  animation-name: nav-push-under;
+}
+html[data-nav="push"] ::view-transition-new(root) {
+  animation-name: nav-push-in;
+  box-shadow: var(--shadow-pop);
+}
+html[data-nav="push"] ::view-transition-old(root),
+html[data-nav="push"] ::view-transition-new(root),
+html[data-nav="push"] ::view-transition-old(bar),
+html[data-nav="push"] ::view-transition-new(bar),
+html[data-nav="push"] ::view-transition-old(toasts),
+html[data-nav="push"] ::view-transition-new(toasts) {
+  animation-duration: var(--dur-land);
+}
+@keyframes nav-push-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes nav-push-under {
+  to {
+    transform: translateX(-30%);
+    opacity: 0.9;
+  }
+}
+
+/* Pop: the session (the old page, drawn on top) goes out to the right and the list comes
+   back from a third of the way left. */
+html[data-nav="pop"] ::view-transition-old(root) {
+  z-index: 1;
+  animation-name: nav-pop-out;
+  box-shadow: var(--shadow-pop);
+}
+html[data-nav="pop"] ::view-transition-new(root) {
+  animation-name: nav-pop-back;
+}
+html[data-nav="pop"] ::view-transition-old(root),
+html[data-nav="pop"] ::view-transition-new(root),
+html[data-nav="pop"] ::view-transition-old(bar),
+html[data-nav="pop"] ::view-transition-new(bar),
+html[data-nav="pop"] ::view-transition-old(toasts),
+html[data-nav="pop"] ::view-transition-new(toasts) {
+  animation-duration: var(--dur-slow);
+}
+@keyframes nav-pop-out {
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes nav-pop-back {
+  from {
+    transform: translateX(-30%);
+    opacity: 0.9;
+  }
+}
+
+/* The router never starts one under reduced motion; should one be running when the
+   setting changes, it ends as a plain swap. */
+@media (prefers-reduced-motion: reduce) {
+  html[data-nav] ::view-transition-group(*),
+  html[data-nav] ::view-transition-old(*),
+  html[data-nav] ::view-transition-new(*) {
+    animation: none;
+  }
+}

@@ -23,6 +23,8 @@ export const COLOR_TOKEN_NAMES = [
   "--needs-bg",
   "--needs-line",
   "--needs-ink",
+  "--tint",
+  "--tint-fg",
   "--state-working",
   "--state-working-bg",
   "--state-stale",

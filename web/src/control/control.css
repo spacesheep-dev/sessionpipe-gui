@@ -248,6 +248,18 @@
   .ctl-ask textarea {
     font-size: max(1rem, 16px);
   }
+  /* The command is one thing: it moves to the next line whole, its "?" with it, and
+     only a command longer than the line wraps inside itself. */
+  .ctl-q .ctl-cmd {
+    display: inline-block;
+    max-width: 100%;
+    vertical-align: baseline;
+  }
+  /* Unpaired, with a prompt to answer (ControlStrip.tsx `folded`): the card alone, its
+     one line saying how to pair; the line's link reads as the card's other words do. */
+  .ctl--folded .ctl-answer-note .ctl-link {
+    color: var(--fg-2);
+  }
 }
 
 /* ---------- activity ---------- */

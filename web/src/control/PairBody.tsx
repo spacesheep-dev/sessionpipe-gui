@@ -18,7 +18,15 @@ import { ControlError, controlApi, httpsHere, type Pairing } from "./api";
 import { fromB64url } from "./bytes";
 import { assertPasskey, registerPasskey } from "./ceremony";
 import { sentence } from "./PendingDevices";
-import { machineTakes, nativeErrorWords, pairWithDevice, signerKind, signHint, updateWords } from "./signer";
+import {
+  deviceWords,
+  machineTakes,
+  nativeErrorWords,
+  pairWithDevice,
+  signerKind,
+  signHint,
+  updateWords,
+} from "./signer";
 import {
   forgetPasskey,
   guessDeviceName,
@@ -108,7 +116,7 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
     const deviceName = name.trim() || guessDeviceName();
     if (device) {
       try {
-        setPhase({ k: "busy", p, what: "Confirm with Touch ID: the prompt shows the same digits…" });
+        setPhase({ k: "busy", p, what: `Confirm with ${deviceWords().auth}: the prompt shows the same digits…` });
         const { key, proof } = await pairWithDevice(p.code);
         setPhase({ k: "busy", p, what: "Sending the proof to the receiver…" });
         const r = await controlApi.approve(p.code, { key, proof, name: "Mac app" });
@@ -186,7 +194,7 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
       {!compact && (
         <p className="caption pair-lead">
           A terminal on {m.name} asked to be controlled from here. Compare the six digits with the ones it printed, then
-          approve with {device ? "Touch ID" : "a passkey"}.
+          approve with {device ? deviceWords().auth : "a passkey"}.
         </p>
       )}
 
@@ -270,7 +278,7 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
         <div className="pair-note pair-note--ok" role="status">
           <strong>Approved.</strong> The terminal on {m.name} will finish by itself
           {phase.firstPairing ? " and collect its own token" : ""}. {m.name} now trusts{" "}
-          {device ? "this Mac's key" : `the passkey “${phase.keyName}” from this browser`}.
+          {device ? `${deviceWords().its} key` : `the passkey “${phase.keyName}” from this browser`}.
           <br />
           Every device you send from needs its own approval: on another phone or laptop, run{" "}
           <code>sessionpipe control pair</code> again on {m.name} and approve there.
@@ -284,7 +292,7 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
           {m.firstPairing && (
             <p className="pair-note">
               First pairing: approving hands {m.name} its own token for polls and acks, and makes{" "}
-              {device ? "this Mac's key" : "this browser's passkey"} the first one it trusts.
+              {device ? `${deviceWords().its} key` : "this browser's passkey"} the first one it trusts.
             </p>
           )}
           {p.open && (
@@ -345,7 +353,7 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
                 pendingLabel="Approving…"
               >
                 {device
-                  ? "Approve with Touch ID"
+                  ? `Approve with ${deviceWords().auth}`
                   : known.length
                     ? `Approve with passkey “${known[0]?.name ?? "this browser"}”`
                     : "Approve with passkey"}

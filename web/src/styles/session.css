@@ -598,8 +598,10 @@ html:has(.main > .session) {
   background: color-mix(in oklch, var(--bg-2), var(--fg) 10%);
 }
 @media (max-width: 839px) {
-  /* Over the tab bar, or over the keyboard when it is up (SessionView reads it from
-     visualViewport). */
+  /* Over the tab bar, or on the keyboard when it is up: --kb is its height
+     (lib/keyboardInset.ts, from visualViewport; absent, so 0, without one), and the tab bar
+     stays where it is, under the keyboard, as iOS's does. The larger of the two, not their
+     sum, so the strip sits on the keys with no gap. */
   .sess-ctl {
     bottom: max(calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom))), var(--kb, 0px));
     padding: 8px var(--gutter);

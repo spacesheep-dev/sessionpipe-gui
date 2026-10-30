@@ -20,7 +20,7 @@ import { useRpId } from "../control/hooks";
 import { openNewSession } from "../control/newSessionState";
 import { PendingDevices, sentence } from "../control/PendingDevices";
 import { PendingPairings } from "../control/PendingPairings";
-import { canSign, machineTakes, SETUP_LABEL, signerKind, signHint, useOwnKeys } from "../control/signer";
+import { canSign, machineTakes, setupLabel, signerKind, signHint, useOwnKeys } from "../control/signer";
 import { useMachines, useStore } from "../data/hooks";
 import "../lib/acp";
 import { harnessMark } from "../lib/format";
@@ -261,7 +261,7 @@ function MachineBlock({
                 <>
                   {" · "}
                   <Link to="/add-device" className="link" data-setup>
-                    {SETUP_LABEL}
+                    {setupLabel()}
                   </Link>
                 </>
               )}

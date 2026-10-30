@@ -169,12 +169,12 @@
   .page--grouped > .bar {
     background: var(--grouped-ground);
   }
-  /* A text button in a navigation bar, as iOS draws one: the words, no bezel. */
+  /* A text button in a navigation bar, as iOS draws one: the words in the tint, no bezel. */
   .page--grouped > .bar .bar-actions .btn {
     border-color: transparent;
     background: none;
     box-shadow: none;
-    color: var(--fg);
+    color: var(--tint-fg);
     font-size: max(1rem, 16px);
     font-weight: 400;
     padding: 0 10px;
@@ -618,6 +618,7 @@ a.settings-row:focus-visible {
   .settings-x {
     display: none;
   }
+  /* Back and Done are the bar's buttons, so they wear the tint, Done semibold. */
   .settings-back,
   .settings-done {
     display: inline-flex;
@@ -625,7 +626,7 @@ a.settings-row:focus-visible {
     gap: 2px;
     min-height: 44px;
     padding: 0 8px;
-    color: var(--fg);
+    color: var(--tint-fg);
     font-size: max(1rem, 16px);
   }
   .settings-done {

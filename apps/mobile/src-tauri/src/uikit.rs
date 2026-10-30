@@ -1,6 +1,8 @@
 //! UIKit and WebKit touches Tauri doesn't make for us (arch-mobile §3.4). iOS only.
 
+use crate::contract::{Haptic, Scheme};
 use objc2::{class, msg_send, runtime::AnyObject, runtime::Bool};
+use std::cell::RefCell;
 use std::ffi::CString;
 
 unsafe fn nsstring(s: &str) -> *mut AnyObject {
@@ -13,6 +15,9 @@ unsafe fn nsstring(s: &str) -> *mut AnyObject {
 ///   content insets go (they doubled the band under the tab bar), and the outer scroll view
 ///   doesn't rubber-band the whole chrome;
 /// - link previews off, so the web's own long-press menus win;
+/// - the edge swipe goes back, as in every pushed page on the phone: the page is a
+///   pushState app, and WebKit's back-forward list holds those entries too, so the swipe
+///   pops the page and the router hears `popstate` as for the browser's own back;
 /// - the launch screen's background (the skin's `--bg`, light and dark, from the asset
 ///   catalog) behind the page until its first paint: no white flash in dark mode.
 ///
@@ -26,6 +31,7 @@ pub unsafe fn fit(wk: *mut AnyObject) {
     let _: () = msg_send![sv, setContentInsetAdjustmentBehavior: 2isize]; // .never
     let _: () = msg_send![sv, setBounces: false];
     let _: () = msg_send![wk, setAllowsLinkPreview: false];
+    let _: () = msg_send![wk, setAllowsBackForwardNavigationGestures: true];
     let color: *mut AnyObject =
         msg_send![class!(UIColor), colorNamed: nsstring("LaunchBackground")];
     if !color.is_null() {
@@ -84,6 +90,17 @@ pub fn open_external(url: &str) {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return;
     }
+    open_url(url);
+}
+
+/// Opens the app's own page in Settings (UIApplicationOpenSettingsURLString): where
+/// notifications are turned back on once refused. Main thread.
+pub fn open_settings() {
+    open_url("app-settings:");
+}
+
+/// Hands a URL to UIKit. Main thread.
+fn open_url(url: &str) {
     unsafe {
         let u: *mut AnyObject = msg_send![class!(NSURL), URLWithString: nsstring(url)];
         if u.is_null() {
@@ -96,9 +113,9 @@ pub fn open_external(url: &str) {
     }
 }
 
-/// The view controller on top of the webview's window (tao doesn't make its window the
-/// application's key window in the UIKit sense, so start from the webview).
-unsafe fn top_view_controller(wk: *mut AnyObject) -> *mut AnyObject {
+/// The webview's window (tao doesn't make its window the application's key window in the
+/// UIKit sense, so start from the webview; the key window is the fallback).
+unsafe fn window_of(wk: *mut AnyObject) -> *mut AnyObject {
     let mut win: *mut AnyObject = if wk.is_null() {
         std::ptr::null_mut()
     } else {
@@ -108,6 +125,116 @@ unsafe fn top_view_controller(wk: *mut AnyObject) -> *mut AnyObject {
         let app: *mut AnyObject = msg_send![class!(UIApplication), sharedApplication];
         win = msg_send![app, keyWindow];
     }
+    win
+}
+
+/// Gives the window the page's scheme: light or dark whatever the phone is set to, or
+/// `Auto` to hand it back. The status bar's style is the root view controller's
+/// `.default` (Info.plist: `UIViewControllerBasedStatusBarAppearance`), which reads the
+/// window's style, so its text flips with the page; the nudge after is for the frame the
+/// trait change lands in. Main thread.
+///
+/// # Safety
+/// `wk` must be the live WKWebView, on the main thread.
+pub unsafe fn set_appearance(wk: *mut AnyObject, scheme: Scheme) {
+    let win = window_of(wk);
+    if win.is_null() {
+        return;
+    }
+    let _: () = msg_send![win, setOverrideUserInterfaceStyle: scheme.ui_user_interface_style()];
+    let vc: *mut AnyObject = msg_send![win, rootViewController];
+    if !vc.is_null() {
+        let _: () = msg_send![vc, setNeedsStatusBarAppearanceUpdate];
+    }
+}
+
+/// The feedback generators, one of each kind, made once on the main thread and kept for
+/// the app's life. Apple's advice: a generator you `prepare` plays the moment it is asked
+/// (a cold one can land a frame after the touch), so each is prepared when made and again
+/// after every play; the engine idles on its own after a few seconds.
+struct Generators {
+    selection: *mut AnyObject,
+    light: *mut AnyObject,
+    medium: *mut AnyObject,
+    notification: *mut AnyObject,
+}
+
+thread_local! {
+    // Main thread only (`run_on_main_thread`), as UIKit wants; a thread local says so.
+    static GENERATORS: RefCell<Option<Generators>> = const { RefCell::new(None) };
+}
+
+impl Generators {
+    fn new() -> Generators {
+        unsafe {
+            let prepared = |g: *mut AnyObject| {
+                let _: () = msg_send![g, prepare];
+                g
+            };
+            let selection: *mut AnyObject =
+                msg_send![class!(UISelectionFeedbackGenerator), alloc];
+            let selection: *mut AnyObject = msg_send![selection, init];
+            let notification: *mut AnyObject =
+                msg_send![class!(UINotificationFeedbackGenerator), alloc];
+            let notification: *mut AnyObject = msg_send![notification, init];
+            // UIImpactFeedbackStyle: light 0, medium 1.
+            let light: *mut AnyObject = msg_send![class!(UIImpactFeedbackGenerator), alloc];
+            let light: *mut AnyObject = msg_send![light, initWithStyle: 0isize];
+            let medium: *mut AnyObject = msg_send![class!(UIImpactFeedbackGenerator), alloc];
+            let medium: *mut AnyObject = msg_send![medium, initWithStyle: 1isize];
+            Generators {
+                selection: prepared(selection),
+                light: prepared(light),
+                medium: prepared(medium),
+                notification: prepared(notification),
+            }
+        }
+    }
+}
+
+fn with_generators(f: impl FnOnce(&Generators)) {
+    GENERATORS.with(|g| f(g.borrow_mut().get_or_insert_with(Generators::new)));
+}
+
+/// Makes the generators and prepares them, so the first haptic is on time. Main thread.
+pub fn prepare_haptics() {
+    with_generators(|_| {});
+}
+
+/// Plays `kind` and prepares its generator for the next. Main thread.
+pub fn haptic(kind: Haptic) {
+    with_generators(|g| unsafe {
+        let used = match kind {
+            Haptic::Selection => {
+                let _: () = msg_send![g.selection, selectionChanged];
+                g.selection
+            }
+            Haptic::Light => {
+                let _: () = msg_send![g.light, impactOccurred];
+                g.light
+            }
+            Haptic::Medium => {
+                let _: () = msg_send![g.medium, impactOccurred];
+                g.medium
+            }
+            // UINotificationFeedbackType: success 0, warning 1, error 2.
+            Haptic::Success | Haptic::Warning | Haptic::Error => {
+                let kind: isize = match kind {
+                    Haptic::Success => 0,
+                    Haptic::Warning => 1,
+                    _ => 2,
+                };
+                let _: () = msg_send![g.notification, notificationOccurred: kind];
+                g.notification
+            }
+        };
+        let _: () = msg_send![used, prepare];
+    });
+}
+
+/// The view controller on top of the webview's window.
+unsafe fn top_view_controller(wk: *mut AnyObject) -> *mut AnyObject {
+    let win = window_of(wk);
     if win.is_null() {
         return std::ptr::null_mut();
     }

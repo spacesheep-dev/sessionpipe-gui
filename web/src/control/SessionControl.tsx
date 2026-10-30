@@ -12,6 +12,7 @@ import { ControlStrip } from "../components/ControlStrip";
 import { useAppState, useStore } from "../data/hooks";
 import { ActivityList, forkOf } from "./Activity";
 import {
+  deviceWords,
   machineTakes,
   signerKind,
   signerLabel,
@@ -67,7 +68,7 @@ export function SessionControl({
   const [unlock, setUnlock] = useState<string | null>(null);
   const unlockNow = async () => {
     if (!rp) return;
-    setUnlock(`Confirm with ${device ? "Touch ID" : "your passkey"}…`);
+    setUnlock(`Confirm with ${signerLabel()}…`);
     try {
       await takeGrant(rp);
       grant.refresh();
@@ -89,7 +90,7 @@ export function SessionControl({
     ? error.replace(/^not sent · /, "Not sent: ")
     : tap
       ? device
-        ? "Confirm with Touch ID: it vouches for this Mac for a day, so later sends need no prompt."
+        ? `Confirm with ${deviceWords().auth}: it vouches for ${deviceWords().this} for a day, so later sends need no prompt.`
         : "Confirm with your passkey: it vouches for this browser for a day, so later sends need no tap."
       : (unlock ?? undefined);
   const down = connection === "reconnecting" || connection === "offline" ? connection : null;

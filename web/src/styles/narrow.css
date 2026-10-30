@@ -121,3 +121,77 @@
     z-index: 1;
   }
 }
+
+/* ---------- the phone's back button and empty states ---------- */
+
+@media (max-width: 839px) {
+  /* The chevron with the previous page's name beside it, both in the tint's ink (the name
+     is text, so the readable --tint-fg, and the chevron matches it), as iOS's back button
+     (PageBar.tsx BackButton): the name gives way to an ellipsis before it reaches the
+     centred title, and the title keeps clear of it. The bar is a container, so cqi is its
+     width: 28 % for the button, the title centred in the 44 % after it. */
+  .bar .bar-back--labelled {
+    display: inline-flex;
+    align-items: center;
+    width: auto;
+    min-width: 44px;
+    margin-left: -10px;
+    padding: 0 10px 0 6px;
+    color: var(--tint-fg, var(--fg));
+  }
+  .bar-back-label {
+    max-width: calc(28cqi - 44px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-lg);
+    line-height: var(--lh-tight);
+  }
+  .bar:has(.bar-back--labelled) .bar-title {
+    max-width: 44%;
+  }
+  /* An empty list page (nothing needs you, no events) centres in what is left under its
+     title and its notes, in the muted tier, no card: not at a desktop's 36 % mark. */
+  .main > .page > .state--center {
+    margin-block: auto;
+    padding: 24px 0 48px;
+  }
+  .main > .page > .state--center .state-title {
+    color: var(--fg-2);
+  }
+  .main > .page > .state--center .state-text {
+    color: var(--fg-3);
+  }
+}
+
+/* ---------- touch: rows press as UITableViewCell highlights ---------- */
+
+/* A row under the finger shows the press ground at once (each row's own :active rule in
+   its stylesheet) and lets it go over --dur-release once the finger lifts, as the tab
+   bar's tabs and the More sheet's rows do, not over the pointer's hover fade. The state
+   is on the row the finger is on: :active reaches it from the link or button inside. */
+@media (pointer: coarse) {
+  .card-row,
+  .kid,
+  .inbox-row,
+  .ev,
+  .hit {
+    transition: background-color var(--dur-release) linear;
+  }
+}
+/* On the phone the press ground runs edge to edge with square corners, as a plain cell's
+   does, not an inset pill. The row keeps its box (nothing moves under the finger): two
+   flat shadows, each the row's own height, carry the ground over the 4 px margin and the
+   gutter on either side. Not while a swipe has the row, whose pane has its own ground. */
+@media (hover: none) and (max-width: 839px) {
+  .card-row:active:not([data-swipe]),
+  .kid:active,
+  .inbox-row:not([data-swipe]):has(.inbox-main:active),
+  .ev:active,
+  .hit:active {
+    border-radius: 0;
+    box-shadow:
+      calc(-1 * (var(--gutter) + 4px)) 0 0 var(--press),
+      calc(var(--gutter) + 4px) 0 0 var(--press);
+  }
+}

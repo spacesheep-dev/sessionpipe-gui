@@ -54,6 +54,59 @@ fn app_notify_request<R: Runtime>(app: AppHandle<R>) -> String {
     notifications::request(&app)
 }
 
+/// "Open Settings" when notifications are off for the app: iOS opens the app's page in
+/// Settings. Android's page opens its notification settings through MainActivity's
+/// `spNotify` instead, so there this answers Err.
+#[tauri::command]
+fn app_notify_open_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    return app
+        .run_on_main_thread(uikit::open_settings)
+        .map_err(|e| e.to_string());
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = app;
+        Err("not on this platform".into())
+    }
+}
+
+/// Plays one of the page's haptics (§11.3, `contract::Haptic`) on UIKit's generators,
+/// which uikit.rs keeps prepared so the first one isn't late. Android's page talks to
+/// MainActivity's `spHaptic` directly, so here the word is only checked. An unknown kind
+/// is refused.
+#[tauri::command]
+fn app_haptic<R: Runtime>(app: AppHandle<R>, kind: String) -> Result<(), String> {
+    let kind = contract::Haptic::parse(&kind)
+        .ok_or_else(|| format!("unknown haptic {kind:?}"))?;
+    #[cfg(target_os = "ios")]
+    app.run_on_main_thread(move || uikit::haptic(kind))
+        .map_err(|e| e.to_string())?;
+    #[cfg(not(target_os = "ios"))]
+    let _ = (app, kind);
+    Ok(())
+}
+
+/// The system bars follow the page's scheme (§11.4, `contract::Scheme`): `"light"`,
+/// `"dark"` or `"auto"`, as `<html data-theme>` says. iOS overrides the window's
+/// interface style, so the status bar's text flips with the page; Android's page tells
+/// MainActivity's `spAppearance` directly.
+#[tauri::command]
+fn app_appearance<R: Runtime>(app: AppHandle<R>, scheme: String) -> Result<(), String> {
+    let scheme = contract::Scheme::parse(&scheme)
+        .ok_or_else(|| format!("unknown scheme {scheme:?}"))?;
+    #[cfg(target_os = "ios")]
+    {
+        let win = app.get_webview_window("main").ok_or("no main window")?;
+        win.with_webview(move |pv| unsafe {
+            uikit::set_appearance(pv.inner() as *mut objc2::runtime::AnyObject, scheme)
+        })
+        .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(target_os = "ios"))]
+    let _ = (app, scheme);
+    Ok(())
+}
+
 fn now_ms() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -99,8 +152,13 @@ fn open_main<R: Runtime>(app: &AppHandle<R>, path: Option<&str>) -> tauri::Resul
         })
         .build()?;
     #[cfg(target_os = "ios")]
-    let _ =
-        win.with_webview(|pv| unsafe { uikit::fit(pv.inner() as *mut objc2::runtime::AnyObject) });
+    {
+        let _ = win.with_webview(|pv| unsafe {
+            uikit::fit(pv.inner() as *mut objc2::runtime::AnyObject)
+        });
+        // The generators warm up with the window, so the first tap's haptic is on time.
+        let _ = app.run_on_main_thread(uikit::prepare_haptics);
+    }
     #[cfg(not(target_os = "ios"))]
     let _ = win;
     Ok(())
@@ -351,6 +409,9 @@ pub fn run() {
             app_open_external,
             app_notify_status,
             app_notify_request,
+            app_notify_open_settings,
+            app_haptic,
+            app_appearance,
             net::rx_list,
             net::rx_add,
             net::rx_select,

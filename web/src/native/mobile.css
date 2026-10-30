@@ -60,6 +60,66 @@ html:is([data-shell="ios"], [data-shell="android"]) :is(input, textarea, [conten
   user-select: text;
 }
 
+/* The bars are material, as UIKit's are: the page shows through the tab bar, the session's
+   control strip, the sheet's bar and the collapsed navigation bar, blurred, so a list reads
+   as running under them rather than stopping at them. At rest the navigation bar is the
+   page's own ground (its large title sits under it, and the title scrolls up under the
+   bar before it collapses), and it turns to the chrome's with its hairline once collapsed.
+   The material is a pseudo-element under the bar's content, never a filter on the bar
+   itself: a filtered box is the containing block for every fixed descendant, and the tab
+   bar holds the More sheet, its scrim and the Display sheet, which would then measure
+   the tab bar instead of the screen. The bars are 88 % ground over a 24 px blur, so what
+   runs under reads as a glow, never as words; the control strip stays at 78 %, as the
+   keyboard's accessory does. Solid where there is no blur to be had, and again when the
+   person has asked for less transparency. */
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  html:is([data-shell="ios"], [data-shell="android"]) :is(.tabbar, .sess-ctl, .ns-bar, .bar) {
+    isolation: isolate;
+    background: transparent;
+  }
+  html:is([data-shell="ios"], [data-shell="android"]) :is(.tabbar, .sess-ctl, .ns-bar, .bar)::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: color-mix(in oklch, var(--chrome) 88%, transparent);
+    -webkit-backdrop-filter: saturate(180%) blur(24px);
+    backdrop-filter: saturate(180%) blur(24px);
+    transition: background-color var(--dur-fast) var(--ease-out);
+  }
+  html:is([data-shell="ios"], [data-shell="android"]) .sess-ctl::before {
+    background: color-mix(in oklch, var(--chrome) 78%, transparent);
+  }
+  html:is([data-shell="ios"], [data-shell="android"]) .bar:not([data-collapsed])::before {
+    background: color-mix(in oklch, var(--bg) 88%, transparent);
+  }
+  /* A grouped page (Machines, Connect, Settings) is on the grouped ground, so its bar at
+     rest is that ground, no seam; collapsed, the same ground as material, so the title
+     band stays the page's own under its hairline. */
+  html:is([data-shell="ios"], [data-shell="android"]) .page--grouped > .bar::before {
+    background: color-mix(in oklch, var(--grouped-ground) 88%, transparent);
+  }
+  html:is([data-shell="ios"], [data-shell="android"]) .page--grouped > .bar:not([data-collapsed])::before {
+    background: var(--grouped-ground);
+  }
+  html:is([data-shell="ios"], [data-shell="android"]) .bar {
+    transition: border-color var(--dur-fast) var(--ease-out);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    html:is([data-shell="ios"], [data-shell="android"]) :is(.tabbar, .sess-ctl, .ns-bar, .bar)::before {
+      background: var(--chrome);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+    html:is([data-shell="ios"], [data-shell="android"]) .bar:not([data-collapsed])::before {
+      background: var(--bg);
+    }
+    html:is([data-shell="ios"], [data-shell="android"]) .page--grouped > .bar::before {
+      background: var(--grouped-ground);
+    }
+  }
+}
+
 /* Action sheets sit on the home indicator, never under it: the last row clears the
    indicator by its inset plus the system's 8 px (16 px on a phone without one), and a tall
    one stops below the status bar, as UIKit's large detent does. (The More sheet stands on

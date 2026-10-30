@@ -68,7 +68,8 @@ PR there is the normal route. Each kind has an authoring guide in this repo:
 
 Develop against a running GUI with `sessionpipe-gui view link <folder>` (or `skin link`,
 `plugin link`), and keep the house rules: hairlines, the host's tokens by name, amber
-only for *needs you*, `prefers-reduced-motion` honoured.
+only for *needs you* (the phone's tint, `--tint`, is the shell's own; a view never spends
+it), `prefers-reduced-motion` honoured.
 
 ## Changelog
 

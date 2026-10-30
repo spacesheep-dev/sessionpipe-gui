@@ -1,0 +1,116 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- pull to refresh ---------- */
+/* The phone's list pages (components/PullRefresh.tsx). While a pull is on, <html>
+   carries data-pull (pulling, refreshing, settling), --pull-y (how far the content is
+   drawn down) and --pull (the ring's arc, 0 → 1). The content follows the finger and
+   the nav bar stays put, so a gap opens under the bar; the ring lives in that gap and is
+   clipped to it, emerging as the gap opens, as a native list's spinner does. Transform
+   only: nothing is laid out twice while the finger moves. */
+
+@media (max-width: 839px) and (prefers-reduced-motion: no-preference) {
+  html[data-pull] .main {
+    transform: translateY(var(--pull-y, 0px));
+  }
+  /* The bar is the one thing that stays: it is inside the page, so it moves back. */
+  html[data-pull] .main > .page > .bar {
+    transform: translateY(calc(-1 * var(--pull-y, 0px)));
+  }
+  /* The dropped-stream pill rides with the content, under the ring. Its arrival's rise
+     would otherwise hold its transform. */
+  html[data-pull] .phone-conn {
+    animation: none;
+    transform: translateY(var(--pull-y, 0px));
+  }
+  /* Let go: the content settles to the resting line, or all the way back. */
+  html[data-pull="refreshing"] :is(.main, .main > .page > .bar, .phone-conn),
+  html[data-pull="refreshing"] .pull {
+    transition:
+      transform var(--dur) var(--ease-out),
+      height var(--dur) var(--ease-out);
+  }
+  html[data-pull="settling"] :is(.main, .main > .page > .bar, .phone-conn),
+  html[data-pull="settling"] .pull {
+    transition:
+      transform var(--dur-slow) var(--ease-out),
+      height var(--dur-slow) var(--ease-out);
+  }
+}
+
+/* The gap under the nav bar, exactly as tall as the pull; the ring centred in it. Never
+   something to touch. Idle it is 0 px tall and transparent, but still in the document:
+   the live region must exist before it has anything to say. */
+.pull {
+  position: fixed;
+  z-index: var(--z-sticky);
+  top: calc(var(--safe-top, env(safe-area-inset-top)) + var(--bar));
+  inset-inline: 0;
+  display: grid;
+  place-items: center;
+  height: var(--pull-y, 0px);
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+html[data-pull="pulling"] .pull,
+html[data-pull="refreshing"] .pull {
+  opacity: 1;
+}
+/* The ease back takes the ring with it. */
+html[data-pull="settling"] .pull {
+  transition: opacity var(--dur-slow) var(--ease-in);
+}
+@media (min-width: 840px) {
+  .pull {
+    display: none;
+  }
+}
+
+/* The ring: a hairline track and the arc in the tint, drawn from twelve o'clock in
+   proportion to the pull, complete at the arm distance. 28 px, the spinner's own
+   weight. */
+.pull-ring {
+  display: block;
+  flex: none;
+  transform: rotate(-90deg);
+}
+.pull-track,
+.pull-arc {
+  fill: none;
+  stroke-width: 1.5;
+}
+.pull-track {
+  stroke: var(--line-2);
+}
+.pull-arc {
+  stroke: var(--tint, var(--needs));
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: calc(1 - var(--pull, 0));
+}
+/* Spinning: the app's own spinner (shared.css, which loads after this file: hence the
+   weight) at this size, its moving quarter in the tint. It keeps turning under reduced
+   motion, as base.css lets every spinner. */
+.pull .pull-spin {
+  width: 28px;
+  height: 28px;
+  border-width: 1.5px;
+  border-top-color: var(--tint, var(--needs));
+  vertical-align: 0;
+}
+
+/* Reduced motion: nothing moves. The ring fades in where it would have rested, on a
+   disc of the ground so it reads over the large title, and fades out when done. The
+   fade itself is the one transition base.css must not shorten. */
+@media (prefers-reduced-motion: reduce) {
+  .pull {
+    height: 56px;
+    /* biome-ignore lint/complexity/noImportantStyles: base.css shortens every transition to nothing with the same weight; the fade is the one that stays */
+    transition: opacity var(--dur) var(--ease-out) !important;
+  }
+  .pull-ring,
+  .pull-spin {
+    box-shadow: 0 0 0 6px var(--bg);
+    border-radius: 50%;
+    background: var(--bg);
+  }
+}

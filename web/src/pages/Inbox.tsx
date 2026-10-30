@@ -2,19 +2,20 @@
 // The inbox: every open attention across all sessions and machines, newest first, as
 // Mail lays out a mailbox: rows in two groups, the prompts a control answer can reach
 // (Allow / Deny, the same signed send as the session page, control/useSend.ts) and the
-// ones waiting in a terminal. A row click opens its session beside the page; rows leave
-// as the stream clears them, but never from under the pointer: the list holds still while
-// it is read (lib/motion.ts), a prompt that cleared stays faded until the hand leaves.
-// "Notify me" and the sounds live behind one bell in the page bar; why the buttons are
-// off (the machine is not paired, this page cannot use passkeys, notifications are off
-// for the site) is said once under the bar, not on every row.
+// ones waiting in a terminal. A row click opens its session beside the page (on the phone,
+// as its page, pushed: lib/split.ts); rows leave as the stream clears them, but never from
+// under the pointer: the list holds still while it is read (lib/motion.ts), a prompt that
+// cleared stays faded until the hand leaves. "Notify me" and the sounds live behind one
+// bell in the page bar; why the buttons are off (the machine is not paired, this page
+// cannot use passkeys, notifications are off for the site or the app) is said once under
+// the bar, not on every row.
 import type { MachineControl } from "@shared/api";
 import { type MutableRefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActionButton, Ago, EmptyState, HarnessGlyph, Redacted, StateDot } from "../components/bits";
 import { type MenuList, openMenu, useContextMenu } from "../components/ContextMenu";
 import { LabelChip, LabelDot, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
-import { NotifyBlocked, NotifyMenu } from "../components/NotifyToggle";
+import { NotifyBlocked, NotifyMenu, notifyBlocked, useAppNotify } from "../components/NotifyToggle";
 import { PageBar } from "../components/PageBar";
 import {
   answerItems,
@@ -29,6 +30,7 @@ import { ComposeButton } from "../control/NewSession";
 import { answerState, useSessionSend } from "../control/useSend";
 import { type OpenAttention, useAppState, useFirstLoad, useLabels, useOpenAttentions, useStore } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
+import { phoneLayout, usePhoneLayout } from "../lib/device";
 import { ATTENTION_LABEL, attentionMessage, oneLine, sessionTitle, toolLabel } from "../lib/format";
 import { attentionKey, hide, isHidden, useHidden } from "../lib/hidden";
 import { useListNav } from "../lib/keys";
@@ -93,6 +95,8 @@ export function Inbox() {
   const simple = useAppSettings().mode === "simple";
   const hiddenByLens = lens === 0 ? rows.filter((r) => r.attention.message || r.attention.tool).length : 0;
   const notify = useNotifyPref();
+  const app = useAppNotify();
+  const phone = usePhoneLayout();
   const page = useRef<HTMLDivElement>(null);
   useStickyTop(page);
 
@@ -111,17 +115,24 @@ export function Inbox() {
 
   const bgMenu = useBackgroundMenu(
     () => [
-      {
-        label: "Notify me",
-        checked: notify.on,
-        disabled:
-          notify.permission === "denied"
-            ? "Blocked for this site in the browser's settings"
-            : notify.permission === "unsupported"
-              ? "Not available in this browser"
-              : undefined,
-        run: () => void setNotifyPref(!notify.on),
-      },
+      app
+        ? {
+            label: "Notify me",
+            checked: app.enabled && app.status === "granted",
+            disabled: app.status === "denied" ? "Off for sessionpipe in Settings" : undefined,
+            run: () => void (app.enabled && app.status === "granted" ? app.turnOff() : app.turnOn()),
+          }
+        : {
+            label: "Notify me",
+            checked: notify.on,
+            disabled:
+              notify.permission === "denied"
+                ? "Blocked for this site in the browser's settings"
+                : notify.permission === "unsupported"
+                  ? "Not available in this browser"
+                  : undefined,
+            run: () => void setNotifyPref(!notify.on),
+          },
       { label: "Notification sounds…", run: () => navigate("/settings?section=notifications") },
       { sep: true },
       ...lensMenu(lens, simple),
@@ -161,7 +172,7 @@ export function Inbox() {
       </section>
     );
 
-  const blocked = notify.permission === "denied" || notify.permission === "unsupported";
+  const blocked = notifyBlocked(app, notify.permission);
 
   return (
     <div className="page inbox" ref={page} {...bgMenu}>
@@ -180,7 +191,7 @@ export function Inbox() {
       />
       {(blocked || said.length > 0 || hiddenByLens > 0) && (
         <div className="inbox-notes">
-          <NotifyBlocked permission={notify.permission} />
+          <NotifyBlocked permission={notify.permission} app={app} />
           {said.map((r) => (
             <p key={r} className="page-note inbox-reason">
               Allow and Deny are off: {r}.
@@ -221,7 +232,9 @@ export function Inbox() {
         </EmptyState>
       ) : held.length === 0 ? (
         <EmptyState center className="inbox-empty" title="Nothing needs you">
-          Prompts and permissions from any machine land here. Allow and Deny from this page, or from your phone.
+          {phone
+            ? "Prompts and permissions from every machine land here."
+            : "Prompts and permissions from any machine land here. Allow and Deny from this page, or from your phone."}
         </EmptyState>
       ) : null}
       {/* Always there once loaded, so a first prompt is a new row to useFlip (its entrance). */}
@@ -300,7 +313,7 @@ function InboxRow({
         className="inbox-main"
         data-nav-item=""
         onClick={(e) => open(e.metaKey || e.ctrlKey)}
-        title="Open the session beside this page"
+        title={phoneLayout() ? "Open the session" : "Open the session beside this page"}
         {...prefetchProps(store, s)}
       >
         <span className="inbox-lead">

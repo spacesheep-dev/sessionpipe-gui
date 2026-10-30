@@ -667,6 +667,22 @@ textarea.field {
     font-size: max(1rem, 16px);
   }
 }
+/* A tapped field shows the tint caret and nothing else, as on iOS: the accent border and
+   its halo are a pointer's, and a text field matches :focus-visible on touch as well, so
+   the whole state goes here. The well steps one tier darker, and a bordered field's
+   hairline one tier darker, so the live field still reads as the live one. */
+@media (hover: none) {
+  .search:focus-within {
+    background: var(--bg-4);
+    border-color: transparent;
+    box-shadow: none;
+  }
+  .field:focus,
+  .field:focus-visible {
+    border-color: var(--fg-4);
+    box-shadow: none;
+  }
+}
 
 /* ----- the segmented control ----- */
 
@@ -715,6 +731,16 @@ textarea.field {
 }
 .seg:disabled .seg-opt {
   opacity: 0.5;
+}
+/* On the grouped ground (a phone's Display sheet, a grouped page) the track is the ground
+   itself, so the control would be a floating white pill and loose labels: there it is one
+   step into the ink from that ground, --bg-4's tier in light, and in dark still a step
+   under the raised segment (which is --bg-4 there, so --bg-4 itself would swallow it). */
+@media (max-width: 839px) {
+  .qs--tabbar .seg,
+  .page--grouped .seg {
+    background: color-mix(in oklch, var(--grouped-ground), var(--fg) 5%);
+  }
 }
 
 /* ----- the toolbar pop-up (ChipSelect) ----- */
@@ -854,6 +880,33 @@ textarea.field {
 }
 .slider:disabled {
   opacity: 0.45;
+}
+
+/* ----- the phone's tint (tokens.css --tint) ----- */
+
+/* The controls UIKit tints, tinted: a switch on, a slider's filled track, the caret, and
+   a link in running text (in the text cut: a link is words). A desktop keeps ink for all
+   of them. The tab bar and the back chevron are in shell.css, the sheet's bar buttons in
+   control/newSessionSheet.css; a view never reads the tint. */
+@media (max-width: 839px) {
+  .toggle-on {
+    background: var(--tint);
+  }
+  .slider::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, var(--tint) var(--slider-pct), var(--line-2) var(--slider-pct));
+  }
+  .slider::-moz-range-progress {
+    background: var(--tint);
+  }
+  input,
+  textarea,
+  [contenteditable] {
+    caret-color: var(--tint);
+  }
+  .link,
+  .md a {
+    color: var(--tint-fg);
+  }
 }
 
 /* ----- layout helpers ----- */
@@ -1079,6 +1132,16 @@ textarea.field {
 .cmdwell-text::-webkit-scrollbar {
   display: none;
 }
+/* On the phone a command longer than the well runs under a fade at its end, which says it
+   goes on (there is no scrollbar to); the end pad keeps the command's last token clear of
+   the fade once scrolled to it. */
+@media (max-width: 839px) {
+  .cmdwell-text {
+    padding-right: 20px;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+  }
+}
 .cmdwell-prompt {
   color: var(--fg-4);
   -webkit-user-select: none;
@@ -1118,6 +1181,12 @@ textarea.field {
   flex: none;
   display: inline-flex;
   gap: 4px;
+}
+/* On the phone the notice's plain action ("How to allow") is the tint, as a row's action is. */
+@media (max-width: 839px) {
+  .notice-action .btn--ghost {
+    color: var(--tint-fg);
+  }
 }
 
 /* A list row's right column: tabular and at least --meta-col wide, so a ticking time

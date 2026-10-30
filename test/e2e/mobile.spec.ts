@@ -2,10 +2,40 @@
 /// <reference lib="dom" />
 // On a phone (the `phone` project, 390×844): the bottom tab bar is on every page with at
 // most five tabs (the rest behind More), nothing scrolls sideways, the session page's
-// control strip sits above the tabs, and New session is a full-height sheet.
+// control strip sits above the tabs, New session is a full-height sheet, a pull down a
+// list refreshes it, and an inbox row pushes its session's page (never the desktop's
+// panel as a sheet, and nothing of that panel comes back on the next launch).
 import { expect, type Page, test } from "@playwright/test";
 import { CONTROL_BASE, fakeDaemon, passkeyPage, seenSetupHere, sinkToken } from "./control-helpers.js";
-import { openBoard } from "./helpers.js";
+import { openBoard, openPage } from "./helpers.js";
+
+/** A finger down the page from its top, as touch events (page.touchscreen only taps):
+ *  lands at y 200, moves `by` px in steps, and stays down until `lift` is called. */
+async function pullDown(page: Page, by: number): Promise<{ lift: () => Promise<void> }> {
+  const step = async (y: number, type: "touchstart" | "touchmove" | "touchend") => {
+    await page.evaluate(
+      ({ y, type }) => {
+        const target = document.querySelector(".page") ?? document.body;
+        const t = new Touch({ identifier: 1, target, clientX: 195, clientY: y });
+        const live = type === "touchend" ? [] : [t];
+        target.dispatchEvent(
+          new TouchEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            touches: live,
+            targetTouches: live,
+            changedTouches: [t],
+          }),
+        );
+      },
+      { y, type },
+    );
+  };
+  await step(200, "touchstart");
+  for (let d = 20; d <= by; d += 20) await step(200 + d, "touchmove");
+  await step(200 + by, "touchmove");
+  return { lift: () => step(200 + by, "touchend") };
+}
 
 const noSidewaysScroll = async (page: Page) => {
   const { scrollWidth, innerWidth } = await page.evaluate(() => ({
@@ -147,6 +177,77 @@ test.describe("phone", () => {
     const ib = (await input.boundingBox())!;
     const tb = (await page.locator("nav.tabbar").boundingBox())!;
     expect(ib.y + ib.height).toBeLessThanOrEqual(tb.y);
+  });
+
+  test("an inbox row pushes its session's page, with Inbox behind Back; no panel survives a relaunch", async ({
+    page,
+  }) => {
+    await openPage(page, "/inbox");
+    await expect.poll(() => page.locator(".inbox-row").count(), { timeout: 60_000 }).toBeGreaterThan(0);
+    const row = page.locator(".inbox-row").first();
+    const key = await row.getAttribute("data-session");
+    await row.locator(".inbox-main").click();
+    // The session's own page, pushed: its URL, its title in the bar, Inbox as the way back.
+    await expect(page).toHaveURL(/\/s\//);
+    await expect(page.locator("h1.sess-title")).toBeVisible();
+    await expect(page.locator(".bar-back-label")).toHaveText("Inbox");
+    // Not the desktop's panel as a sheet, and nothing of it in the URL or the mirror.
+    await expect(page.locator(".panel--open")).toHaveCount(0);
+    expect(page.url()).not.toContain("?s=");
+    expect(await page.evaluate(() => localStorage.getItem("sessionpipe-gui.splitTabs"))).toBeNull();
+    await tabBarIsOn(page);
+    await noSidewaysScroll(page);
+    // Back pops to the inbox.
+    await page.locator(".bar-back").click();
+    await expect(page).toHaveURL(/\/inbox$/);
+    // A relaunch on another page: even a desktop visit's mirror of the panel (the same
+    // origin, seen wide) opens nothing over it on the phone.
+    await page.evaluate(
+      (k) => localStorage.setItem("sessionpipe-gui.splitTabs", JSON.stringify({ tabs: [k], active: 0 })),
+      key,
+    );
+    await openPage(page, "/machines");
+    await expect(page.locator("section.machine").first()).toBeVisible();
+    await expect(page.locator(".session--panel")).toHaveCount(0);
+    await expect(page.locator(".panel--open")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/machines$/);
+  });
+
+  test("a pull down the board past the arm distance reopens the stream; a short one does nothing", async ({ page }) => {
+    await openBoard(page);
+    const html = page.locator("html");
+    const ring = page.locator(".pull");
+    const conn = page.locator(".conn").first();
+    const streams: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/api/ui/stream")) streams.push(r.url());
+    });
+    // Short of the arm distance: the page follows, the ring shows, letting go does nothing.
+    let finger = await pullDown(page, 60);
+    await expect(html).toHaveAttribute("data-pull", "pulling");
+    await expect(ring).toBeVisible();
+    await expect(ring).not.toHaveAttribute("data-armed", "");
+    await finger.lift();
+    await expect(html).not.toHaveAttribute("data-pull", /./);
+    await page.waitForTimeout(500);
+    expect(streams, "a short pull reopens nothing").toEqual([]);
+    await expect(conn).toHaveText("live");
+    // Past it: armed, said, and on release the stream reopens and lands live again.
+    finger = await pullDown(page, 160);
+    await expect(html).toHaveAttribute("data-pull", "pulling");
+    await expect(ring).toHaveAttribute("data-armed", "");
+    await expect(ring).toHaveText("Release to refresh");
+    const reopened = page.waitForRequest((r) => r.url().includes("/api/ui/stream"));
+    await finger.lift();
+    await expect(html).toHaveAttribute("data-pull", "refreshing");
+    await expect(page.locator("main#main")).toHaveAttribute("aria-busy", "true");
+    await expect(ring.locator(".spinner")).toBeVisible();
+    await reopened;
+    await expect(ring).toHaveText("Up to date");
+    await expect(html).not.toHaveAttribute("data-pull", /./);
+    await expect(page.locator("main#main")).not.toHaveAttribute("aria-busy", /./);
+    await expect(conn).toHaveText("live");
+    await noSidewaysScroll(page);
   });
 });
 

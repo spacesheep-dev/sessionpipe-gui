@@ -76,7 +76,7 @@
   border-radius: 50%;
   background: var(--needs);
 }
-.toast-mark--error::before {
+.toast-mark.toast-mark--error::before {
   content: "";
   width: 10px;
   height: 10px;
@@ -234,6 +234,15 @@
     left: max(8px, var(--safe-left, env(safe-area-inset-left)));
     right: max(8px, var(--safe-right, env(safe-area-inset-right)));
     padding: 0;
+    /* One track that can shrink: the banner's two lines never wrap, and an implicit track
+       would take their min-content width, which ran the banner off the screen's edge. */
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* The banner fits the screen whatever its words: 8 px from each edge, its lines cut
+     with an ellipsis inside it (banner.css), never clipped by the edge. */
+  .toasts--phone .toast {
+    min-width: 0;
+    max-width: calc(100vw - 16px);
   }
   .toasts--phone .toast-slot--undo {
     top: auto;

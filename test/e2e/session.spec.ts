@@ -4,7 +4,7 @@
 // something), follow (in "⋯"), back, and Forget (in "⋯").
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
-import { EVENTS, INFO, openBoard, sessionUrl, tier1Batch, ulid } from "./helpers.js";
+import { EVENTS, INFO, openBoard, openPage, sessionUrl, tier1Batch, ulid } from "./helpers.js";
 
 /** Opens the first working card from the board and returns its href. */
 async function openWorking(page: Page): Promise<string> {
@@ -207,6 +207,35 @@ test.describe("session page", () => {
     await page.getByRole("button", { name: "Back" }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator("section.group").first()).toBeVisible();
+  });
+
+  test("on a phone the back button names the list the session was opened from, clear of the title", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openBoard(page);
+    const link = page.locator("article.card a.card-link").first();
+    await expect(link).toBeVisible({ timeout: 30_000 });
+    await link.click();
+    await expect(page).toHaveURL(/\/s\//);
+    const back = page.getByRole("button", { name: "Back" });
+    await expect(back.locator(".bar-back-label")).toHaveText("Board");
+    // The label ends before the centred title starts: cut with an ellipsis, never under it.
+    const title = page.locator(".sess-bar .bar-title");
+    await expect(title).toBeVisible();
+    const [b, t] = await Promise.all([back.boundingBox(), title.boundingBox()]);
+    expect(b!.x + b!.width).toBeLessThanOrEqual(t!.x + 1);
+    await back.click();
+    await expect(page).toHaveURL(/\/$/);
+    // Opened from the Feed, it says Feed. The feed is paused first: the demo's live rows
+    // never hold still long enough for a click otherwise.
+    await openPage(page, "/feed");
+    await page.getByRole("button", { name: "Pause" }).click();
+    const row = page.locator(".ev a.ev-session").first();
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await row.click();
+    await expect(page).toHaveURL(/\/s\//);
+    await expect(page.getByRole("button", { name: "Back" }).locator(".bar-back-label")).toHaveText("Feed");
   });
 
   test("Forget asks first, then POSTs and removes the session from the board", async ({ page, request }) => {

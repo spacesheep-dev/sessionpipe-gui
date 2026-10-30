@@ -359,19 +359,20 @@
   font-size: var(--text-md);
   font-weight: 600;
 }
+/* Cancel and Start are the bar's actions, so they take the phone's tint in its text cut,
+   as a navigation bar's buttons do; Start keeps its weight as the sheet's primary. */
 .ns-bar-btn {
   justify-self: start;
   min-height: var(--tap);
   padding: 0 8px;
   border: none;
   background: none;
-  color: var(--fg-2);
+  color: var(--tint-fg);
   font: inherit;
   font-size: var(--text-md);
 }
 .ns-bar-btn--start {
   justify-self: end;
-  color: var(--fg);
   font-weight: 600;
 }
 /* A disabled Start is the same ink, faded: never grey on grey. */
@@ -465,8 +466,9 @@
   font-size: var(--text-md);
   text-align: left;
 }
+/* A cell that is only an action (Add photos or files) is the tint, as iOS draws one. */
 .ns-cell--action {
-  color: var(--fg);
+  color: var(--tint-fg);
 }
 .ns-group-foot {
   display: flex;
@@ -495,6 +497,21 @@
 }
 .ns-sheet--phone [data-ns-row="options"] .ns-value {
   padding-right: 8px;
+}
+/* The permission's words are the value ("As your own sessions on this machine"): too long
+   for one line beside its label, so the value wraps to a second line, ragged left against
+   the chevron, rather than losing its end to an ellipsis. */
+.ns-sheet--phone [data-ns-row="permission"] .ns-sel {
+  height: auto;
+  min-height: var(--tap);
+  padding-top: 8px;
+  padding-bottom: 8px;
+  white-space: normal;
+}
+.ns-sheet--phone [data-ns-row="permission"] .ns-sel .sel-text {
+  white-space: normal;
+  text-align: right;
+  line-height: var(--lh-tight);
 }
 /* On a phone the empty sheet is the screen's own empty state: centred, no platter. */
 .ns-sheet--phone .ns-empty {
