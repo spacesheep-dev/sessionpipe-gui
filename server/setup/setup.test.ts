@@ -205,6 +205,12 @@ describe("this machine", () => {
         args: [],
         shell: true,
       });
+      // cmd.exe syntax in a folder's name is quoted too, and a trailing backslash can't
+      // swallow the closing quote.
+      expect(cliCommand(bare, ["--folder", "C:\\R&D(x)\\code"], "win32").file).toBe(
+        `${bare} --folder "C:\\R&D(x)\\code"`,
+      );
+      expect(cliCommand(bare, ["--folder", "C:\\a|b^c\\"], "win32").file).toBe(`${bare} --folder "C:\\a|b^c\\\\"`);
       expect(cmdShimTarget(path.join(dir, "missing.cmd"))).toBeNull();
       // Elsewhere a .cmd is just a file, and a JavaScript entry runs under our node anywhere.
       expect(cliCommand(shim, args, "linux")).toEqual({ file: shim, args, shell: false });

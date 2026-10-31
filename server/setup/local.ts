@@ -108,7 +108,7 @@ export function cmdShimTarget(shim: string): string | null {
  *  node refuses to spawn bare (CVE-2024-27980): the script the shim names runs under our
  *  node instead. A shim that names no script runs as one quoted command under a shell,
  *  since a shell given the arguments splits one with a space (`--folder C:\sp user\code`)
- *  into two words. */
+ *  into two words; `cmdArg` says what its quoting covers. */
 export function cliCommand(
   cli: string,
   args: string[],
@@ -121,9 +121,15 @@ export function cliCommand(
   if (platform !== "win32" || !/\.(cmd|bat)$/i.test(cli)) return { file: cli, args, shell: false };
   const target = cmdShimTarget(cli);
   if (target && /\.[cm]?js$/i.test(target)) return { file: process.execPath, args: [target, ...args], shell: false };
-  const quote = (a: string) => (/\s/.test(a) ? `"${a}"` : a);
-  return { file: [cli, ...args].map(quote).join(" "), args: [], shell: true };
+  return { file: [cli, ...args].map(cmdArg).join(" "), args: [], shell: true };
 }
+
+/** One word for cmd.exe: as it is when it is plainly safe, else in double quotes, inside
+ *  which & | < > ( ) ^ and spaces are literal (a Windows path has no " to escape). Trailing
+ *  backslashes are doubled, so the script's argv parser doesn't read the last one as
+ *  escaping the closing quote. `%NAME%` still expands inside quotes when NAME is set;
+ *  cmd.exe has no escape for it there. */
+const cmdArg = (a: string): string => (/^[\w.:\\/=@+-]+$/.test(a) ? a : `"${a.replace(/(\\+)$/, "$1$1")}"`);
 
 export function cliVersion(bin: string): string | undefined {
   try {
