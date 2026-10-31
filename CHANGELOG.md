@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Setup speaks Windows.** On a Windows receiver the secure-address step pointed at
+  `brew install openssl` and gave Debian and Fedora commands for trusting the certificate; the
+  pair step's button said "Pair this Mac". It now names Git for Windows' openssl (or winget),
+  gives `certutil -user -addstore Root ca.crt` and the Install Certificate… steps (also on the
+  trust page and from `sessionpipe-gui tls trust`), and the button says "Pair this machine"
+  off a Mac.
+
 ## [0.7.0] - 2026-10-31
 
 ### Added

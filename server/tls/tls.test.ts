@@ -191,6 +191,7 @@ describe.skipIf(!HAVE_OPENSSL)("TLS mode in the app", () => {
     expect(r.body).toContain("Install a certificate");
     expect(r.body).toContain("sessionpipe-gui tls trust");
     expect(r.body).toContain("update-ca-certificates");
+    expect(r.body).toContain("certutil -user -addstore Root ca.crt");
     expect(r.body).toContain(`https://test-box.local:${app.port}/`);
     expect(r.body).toContain('href="/ca.crt"'); // loopback: no key in the links
     expect(r.body).toContain("prefers-color-scheme");
