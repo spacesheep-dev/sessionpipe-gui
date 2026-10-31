@@ -6,6 +6,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Setup's "Pair this machine" works on Windows.** The receiver ran `sessionpipe.cmd` through
+  cmd.exe, which never handed its output back (the step sat at "Starting the pairing…") and
+  split a folder with a space, such as `C:\\Users\\Ann Lee\\code`, into two words. It now runs the
+  script the npm shim names under its own node, with no shell, as it does on a Mac.
+
 ## [0.7.0] - 2026-10-31
 
 ### Added
