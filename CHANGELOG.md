@@ -12,9 +12,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   apps open on the lockup and three ways in: scan the code under Connect on your
   computer (a full-screen viewfinder; the camera is asked for only then), enter its
   address, or try the demo. A code the app can't use, a refused camera, a computer out
-  of reach and the TLS code's trust page each get one plain screen. Once the board is
-  up, one sheet says the step left: approve this iPhone once on the computer, with Ask
-  now (which files the request) and Later, plus the notifications switch.
+  of reach and the TLS code's trust page (open it in Safari, come back, Connect) each
+  get one plain screen. Once the board is up, one sheet says the step left: the
+  computer approves this iPhone once, where that is in the computer's own labels, "Ask
+  <computer> to approve" (which files the request) and Later.
 
 ### Changed
 

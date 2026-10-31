@@ -128,8 +128,10 @@
 
 /* ----- the phone's first run (PhoneOnboarding.tsx) ----- */
 /* One idea per screen: the lockup, one line, the actions stacked and full width, the
-   primary one filled in the tint (the orange as a fill under ink, the one way the brand
-   lets it carry words). Safe areas on every side; nothing scrolls but the install card. */
+   primary one the app's primary (the ink fill): the orange stays the tint's (Back and
+   Cancel as text buttons, a link) and the viewfinder's corners, never a filled button,
+   so needs-you keeps its colour (docs/brand.md). Safe areas on every side; nothing
+   scrolls but the install card. */
 
 .onb {
   min-height: 100dvh;
@@ -189,7 +191,7 @@
 }
 .onb-lede {
   color: var(--fg-2);
-  font-size: var(--text-lg);
+  font-size: max(1rem, 17px);
   line-height: var(--lh);
   text-wrap: balance;
   max-width: 24ch;
@@ -203,13 +205,13 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
   padding: 24px 0 32px;
   text-align: center;
 }
 .onb-title {
   color: var(--fg);
-  font-size: var(--text-xl);
+  font-size: clamp(1.5rem, 1.25rem + 1.2vw, 1.75rem);
   font-weight: 600;
   line-height: var(--lh-tight);
   letter-spacing: -0.01em;
@@ -217,11 +219,14 @@
 }
 .onb-text {
   color: var(--fg-2);
-  font-size: var(--text-md);
+  font-size: max(1rem, 17px);
   line-height: var(--lh);
   text-wrap: pretty;
   max-width: 36ch;
   margin: 0 auto;
+}
+.onb-nowrap {
+  white-space: nowrap;
 }
 .onb-actions {
   flex: none;
@@ -235,15 +240,6 @@
   border-radius: 14px;
   font-size: max(1rem, 17px);
   font-weight: 500;
-}
-.onb-primary {
-  border-color: transparent;
-  background: var(--tint);
-  color: var(--needs-ink);
-  box-shadow: none;
-}
-.onb-primary:active:not(:disabled) {
-  background: color-mix(in oklch, var(--tint), var(--needs-ink) 14%);
 }
 .onb-secondary {
   background: var(--bg-3);
@@ -263,17 +259,33 @@
   border-width: 2px;
   margin: 0 auto 8px;
 }
+/* "No sessionpipe on your computer yet?": a disclosure, between the ways in and the
+   demo, with a small chevron that turns when its card is open. */
 .onb-help {
   flex: none;
   align-self: center;
-  margin-top: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
   min-height: 44px;
   padding: 0 12px;
-  color: var(--fg-3);
-  font-size: var(--text-sm);
-}
-.onb-help[aria-expanded="true"] {
   color: var(--fg-2);
+  font-size: var(--text-md);
+}
+.onb-help-chevron {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-top: -3px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  rotate: 45deg;
+  transition: rotate var(--dur-fast) var(--ease-out);
+}
+.onb-help[aria-expanded="true"] .onb-help-chevron {
+  margin-top: 3px;
+  rotate: 225deg;
 }
 .onb-link {
   color: var(--tint-fg);
@@ -322,9 +334,20 @@
 }
 .onb-steps .cmdwell {
   background: var(--bg-4);
+  padding: 8px 12px;
 }
-.onb-install-done {
-  align-self: center;
+/* The command wraps: it is read here and typed on the computer, never scrolled. */
+.onb-steps .cmdwell-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: var(--lh);
+}
+/* The address step: the field sits under its title, in reach of the thumb and clear of
+   the keyboard, Connect under the field. */
+.onb[data-step="address"] .onb-head {
+  flex: none;
+  justify-content: flex-start;
+  padding: 24px 0 24px;
 }
 /* The address step. */
 .onb-form {
@@ -370,7 +393,7 @@
   aspect-ratio: 1;
   translate: -50% -56%;
   border-radius: 28px;
-  box-shadow: 0 0 0 200vmax oklch(0 0 0 / 0.58);
+  box-shadow: 0 0 0 200vmax oklch(0 0 0 / 0.72);
 }
 /* Each corner is an L whose inner edge is the cut-out's own radius (28), so the orange
    sits on the opening, 4 px thick, with a 12 px leg each way. */
@@ -408,6 +431,7 @@
 }
 .onb-cancel {
   color: #fff;
+  text-shadow: 0 1px 2px oklch(0 0 0 / 0.5);
 }
 .onb-caption {
   position: relative;
@@ -415,7 +439,8 @@
   padding: 0 32px calc(15vh);
   max-width: 34ch;
   color: #fff;
-  font-size: var(--text-md);
+  font-size: max(1rem, 17px);
+  text-shadow: 0 1px 2px oklch(0 0 0 / 0.5);
   line-height: var(--lh);
   text-align: center;
   text-wrap: balance;
@@ -442,12 +467,19 @@
   margin-bottom: 8px;
 }
 .first-run--phone .confirm-title {
-  font-size: var(--text-xl);
+  font-size: clamp(1.5rem, 1.25rem + 1.2vw, 1.75rem);
+  line-height: var(--lh-tight);
   letter-spacing: -0.01em;
 }
 .first-run--phone .confirm-body {
-  font-size: var(--text-md);
+  font-size: max(1rem, 17px);
   color: var(--fg-2);
+  line-height: var(--lh);
+}
+/* Where to approve, in the computer's own labels: one quiet line. */
+.first-run-where {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
   line-height: var(--lh);
 }
 .first-run--phone .first-run-list {
@@ -469,4 +501,28 @@
   min-height: 50px;
   border-radius: 14px;
   font-size: max(1rem, 17px);
+}
+
+/* The tablet: a step keeps its title and actions in one glance, and the connected sheet
+   is a centred form sheet rather than a strip along the bottom edge. The welcome keeps
+   its full-height hero. */
+@media (min-width: 840px) {
+  .onb-body--step {
+    max-height: 720px;
+    margin: auto;
+  }
+  .first-run--phone {
+    left: 50%;
+    top: 50%;
+    right: auto;
+    bottom: auto;
+    translate: -50% -50%;
+    width: min(440px, calc(100vw - 48px));
+    padding: 20px 24px 24px;
+    border-radius: var(--radius-sheet);
+    animation: rise var(--dur) var(--ease-out) both;
+  }
+  .first-run--phone .menu-grab {
+    display: none;
+  }
 }

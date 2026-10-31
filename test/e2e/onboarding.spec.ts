@@ -20,6 +20,17 @@ import {
 const welcome = (page: Page) => page.locator(".onb[data-step='welcome']");
 const button = (page: Page, name: string | RegExp) => page.getByRole("button", { name });
 
+/** The app comes back to the foreground (from Safari, from Settings). */
+const foreground = (page: Page) =>
+  page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+const setCamera = (page: Page, camera: string) =>
+  page.evaluate((c) => {
+    (window as unknown as { __fake: { camera: string } }).__fake.camera = c;
+  }, camera);
+
 test.describe("the phone's first run", () => {
   test("the welcome: the lockup, one line, three ways in, nothing fetched", async ({ page }) => {
     const hits: string[] = [];
@@ -34,16 +45,22 @@ test.describe("the phone's first run", () => {
     const address = button(page, "Enter an address");
     const demo = button(page, "Try the demo");
     for (const b of [scan, address, demo]) await expect(b).toBeVisible();
-    // One primary action, in the tint; the demo is the quiet one.
-    await expect(scan).toHaveClass(/onb-primary/);
-    await expect(address).not.toHaveClass(/onb-primary/);
+    // One primary action, the app's ink primary (never an orange fill); the demo is the quiet one.
+    await expect(scan).toHaveClass(/btn--primary/);
+    await expect(address).not.toHaveClass(/btn--primary/);
     await expect(demo).toHaveClass(/btn--ghost/);
+    expect(await scan.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe("rgb(255, 90, 31)");
     // Stacked, in that order, each a full-width finger target.
     const boxes = await Promise.all([scan, address, demo].map((b) => b.boundingBox()));
     expect(boxes[0]!.y).toBeLessThan(boxes[1]!.y);
     expect(boxes[1]!.y).toBeLessThan(boxes[2]!.y);
     for (const b of boxes) expect(b!.height).toBeGreaterThanOrEqual(44);
     expect(boxes[0]!.width).toBeGreaterThan(300);
+    // The disclosure sits between the ways in and the demo.
+    const help = button(page, "No sessionpipe on your computer yet?");
+    const hb = await help.boundingBox();
+    expect(hb!.y).toBeGreaterThan(boxes[1]!.y);
+    expect(hb!.y).toBeLessThan(boxes[2]!.y);
     // Nothing of the Mac's welcome, and no request left the phone.
     await expect(page.getByText("This Mac")).toHaveCount(0);
     await expect(page.getByText(/\bMac\b/)).toHaveCount(0);
@@ -62,7 +79,7 @@ test.describe("the phone's first run", () => {
     await openInPhone(page, "/", { features: PHONE_FEATURES.filter((f) => f !== "scanner") });
     await expect(welcome(page)).toBeVisible();
     await expect(button(page, "Scan the code on your computer")).toHaveCount(0);
-    await expect(button(page, "Enter an address")).toHaveClass(/onb-primary/);
+    await expect(button(page, "Enter an address")).toHaveClass(/btn--primary/);
     await page.route(/\/(api|\.well-known|themes|skins|attachments)\//, (r) => r.abort());
     await button(page, "Try the demo").click();
     await expect(page).toHaveURL(/\?mock=1/);
@@ -77,14 +94,21 @@ test.describe("the phone's first run", () => {
     await expect(help).toHaveAttribute("aria-expanded", "true");
     const card = page.getByRole("region", { name: "Three steps on your computer" });
     await expect(card).toBeVisible();
-    await expect(card.getByText("Install sessionpipe there")).toBeVisible();
-    await expect(card.getByText("Open Connect")).toBeVisible();
-    await expect(card.getByText("Come back here and scan it")).toBeVisible();
-    await expect(card.locator(".cmdwell-text")).toContainText("npx -y sessionpipe-gui service install");
+    await expect(card.getByText("Install sessionpipe on your computer")).toBeVisible();
+    await expect(card.getByText("Open sessionpipe there and choose Connect")).toBeVisible();
+    await expect(card.getByText("Connect shows a code made for this phone.")).toBeVisible();
+    await expect(card.getByText("Scan it with this phone")).toBeVisible();
+    const cmd = card.locator(".cmdwell-text");
+    await expect(cmd).toHaveText("npx -y sessionpipe-gui service install");
+    // The command wraps instead of scrolling, and there is nothing to copy with.
+    expect(await cmd.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await expect(card.getByRole("button")).toHaveCount(0);
     await card.getByRole("link", { name: "sessionpipe.org/gui" }).click();
     expect(await shellCallArgs(page, "app_open_external")).toEqual([{ url: "https://sessionpipe.org/gui" }]);
-    await card.getByRole("button", { name: "Done" }).click();
+    // The question is the toggle.
+    await help.click();
     await expect(card).toBeHidden();
+    await expect(help).toHaveAttribute("aria-expanded", "false");
   });
 
   test("scan → connecting → the board, then the connected sheet", async ({ page }) => {
@@ -100,7 +124,8 @@ test.describe("the phone's first run", () => {
     );
     const finder = page.getByRole("dialog", { name: "Scan the code on your computer" });
     await expect(finder).toBeVisible();
-    await expect(finder.getByText(/open sessionpipe → Connect and point the camera/)).toBeVisible();
+    await expect(finder.getByText("Point the camera at the code under Connect.")).toBeVisible();
+    await expect(finder).toHaveAttribute("aria-describedby", "onb-scan-caption");
     await expect(finder.getByRole("button", { name: "Cancel" })).toBeVisible();
     for (const el of ["html", "body", ".onb"])
       expect(await page.locator(el).evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
@@ -124,35 +149,33 @@ test.describe("the phone's first run", () => {
     // The shell rebuilt the window on it: the board streams.
     await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
     await expect(page.locator("section.group").first()).toBeVisible();
-    // The connected sheet: one step left, said in the phone's words, with Ask now.
+    // The connected sheet: one step left, in the phone's words, where to do it in the
+    // computer's own labels, and the one action that files the request.
     const sheet = page.getByRole("dialog", { name: "You're in." });
     await expect(sheet).toBeVisible();
     await expect(sheet).toContainText(
-      "To answer prompts from this iPhone, approve it once on studio-mac: Machines → Devices → Approve this iPhone.",
+      "Reading works now. To answer prompts from this iPhone, studio-mac has to approve it once.",
     );
-    await expect(sheet.getByRole("switch", { name: "Notify me when a session needs me" })).toBeVisible();
-    expect(await shellCalls(page)).not.toContain("app_notify_request");
+    await expect(sheet).toContainText("On studio-mac: Machines › studio-mac › Devices › Approve.");
+    await expect(sheet.getByRole("switch")).toHaveCount(0);
     await expect(sheet.getByRole("button", { name: "Later" })).toBeVisible();
+    const ask = sheet.getByRole("button", { name: "Ask studio-mac to approve" });
+    await expect(ask).toHaveClass(/btn--primary/);
     // It is a sheet: on the bottom edge.
     const box = await sheet.boundingBox();
     expect(box!.y + box!.height).toBeGreaterThanOrEqual(843);
-    await sheet.getByRole("button", { name: "Ask now" }).click();
+    await ask.click();
     await expect(sheet).toBeHidden();
     await expect(page).toHaveURL(/\/add-device\?ask=1$/);
     await expect(page.getByRole("heading", { name: "Approve this iPhone" })).toBeVisible();
     expect(await shellCalls(page)).toContain("app_first_run_done");
   });
 
-  test("Later closes the sheet for good; the switch asks only when turned on", async ({ page }) => {
+  test("Later closes the sheet for good, and nothing was asked for", async ({ page }) => {
     await openInPhone(page, "/", { receiver: true, firstRunDone: false });
     const sheet = page.getByRole("dialog", { name: "You're in." });
     await expect(sheet).toBeVisible({ timeout: 15_000 });
-    await sheet.getByRole("switch", { name: "Notify me when a session needs me" }).click();
-    await expect(sheet.getByRole("switch", { name: "Notify me when a session needs me" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-    expect(await shellCalls(page)).toContain("app_notify_request");
+    expect(await shellCalls(page)).not.toContain("app_notify_request");
     await sheet.getByRole("button", { name: "Later" }).click();
     await expect(sheet).toBeHidden();
     expect(await shellCalls(page)).toContain("app_first_run_done");
@@ -165,7 +188,7 @@ test.describe("the phone's first run", () => {
     await expect(page.getByRole("heading", { name: "That code isn't from sessionpipe" })).toBeVisible();
     expect(await haptics(page)).toContain("error");
     expect(await shellCalls(page)).not.toContain("rx_add");
-    await expect(button(page, "Scan again")).toHaveClass(/onb-primary/);
+    await expect(button(page, "Scan again")).toHaveClass(/btn--primary/);
     await expect(button(page, "Enter an address")).toBeVisible();
     await button(page, "Scan again").click();
     await expect
@@ -176,16 +199,26 @@ test.describe("the phone's first run", () => {
     await expect(welcome(page)).toBeVisible();
   });
 
-  test("the TLS code: the trust page first, then Connect", async ({ page }) => {
+  test("the TLS code, in two beats: open the trust page in Safari; back again, Connect", async ({ page }) => {
     await openInPhone(page, "/", { scan: { text: "https://studio-mac.local:7373/trust?k=uik_e2e" }, add: "hold" });
     await button(page, "Scan the code on your computer").click();
-    await expect(page.getByRole("heading", { name: "studio-mac uses a certificate of its own" })).toBeVisible();
-    await expect(page.getByText(/The trust page opens in Safari/)).toBeVisible();
-    await expect(button(page, "Open the trust page")).toHaveClass(/onb-primary/);
-    await button(page, "Open the trust page").click();
+    await expect(page.getByRole("heading", { name: "Trust studio-mac on this phone" })).toBeVisible();
+    await expect(
+      page.getByText("Safari opens a page that installs studio-mac's certificate. Follow it, then come back here."),
+    ).toBeVisible();
+    // The first beat: one button.
+    await expect(button(page, "Open in Safari")).toHaveClass(/btn--primary/);
+    await expect(button(page, "Connect")).toHaveCount(0);
+    await button(page, "Open in Safari").click();
     expect(await shellCallArgs(page, "app_open_external")).toEqual([
       { url: "https://studio-mac.local:7373/trust?k=uik_e2e" },
     ]);
+    // The second beat, once the app is back in front.
+    await foreground(page);
+    await expect(button(page, "Connect")).toHaveClass(/btn--primary/);
+    await expect(button(page, "Open in Safari")).toHaveCount(0);
+    await button(page, "Open the page again").click();
+    expect(await shellCallArgs(page, "app_open_external")).toHaveLength(2);
     await button(page, "Connect").click();
     await expect(page.getByRole("heading", { name: "Connecting to studio-mac…" })).toBeVisible();
     expect(await shellCallArgs(page, "rx_add")).toEqual([{ url: "https://studio-mac.local:7373/trust?k=uik_e2e" }]);
@@ -212,15 +245,30 @@ test.describe("the phone's first run", () => {
     expect(calls).not.toContain("plugin:barcode-scanner|scan");
     await button(page, "Open Settings").click();
     expect(await shellCalls(page)).toContain("plugin:barcode-scanner|open_app_settings");
+    // Back from Settings with the camera still off: the screen stays.
+    await foreground(page);
+    await expect(page.getByRole("heading", { name: "sessionpipe can't use the camera" })).toBeVisible();
+    expect(await shellCalls(page)).not.toContain("plugin:barcode-scanner|scan");
     await button(page, "Enter the address instead").click();
     await expect(page.getByRole("heading", { name: "Your computer's address" })).toBeVisible();
+  });
+
+  test("the camera turned on in Settings: back in the app, the scan starts by itself", async ({ page }) => {
+    await openInPhone(page, "/", { camera: "denied", scan: { hold: true } });
+    await button(page, "Scan the code on your computer").click();
+    await expect(page.getByRole("heading", { name: "sessionpipe can't use the camera" })).toBeVisible();
+    await setCamera(page, "granted");
+    await foreground(page);
+    await expect(page.locator("html")).toHaveAttribute("data-scanning", "");
+    await expect(page.getByRole("dialog", { name: "Scan the code on your computer" })).toBeVisible();
   });
 
   test("a scan that can't run (the simulator) is said, with the address as the way out", async ({ page }) => {
     await openInPhone(page, "/", { scan: { throws: "No camera available on this device" } });
     await button(page, "Scan the code on your computer").click();
     await expect(page.getByRole("heading", { name: "The camera isn't available" })).toBeVisible();
-    await expect(page.getByText("No camera available on this device")).toBeVisible();
+    await expect(page.getByText("Enter the address from Connect instead.")).toBeVisible();
+    await expect(page.getByText("No camera available on this device")).toHaveCount(0);
     await expect(page.locator("html")).not.toHaveAttribute("data-scanning");
     await button(page, "Enter the address instead").click();
     await expect(page.getByRole("heading", { name: "Your computer's address" })).toBeVisible();
@@ -232,6 +280,12 @@ test.describe("the phone's first run", () => {
     const field = page.getByRole("textbox", { name: "Your computer's address" });
     await expect(field).toBeFocused();
     await expect(field).toHaveAttribute("inputmode", "url");
+    await expect(field).toHaveAttribute("enterkeyhint", "go");
+    // The form sits under the title, in the upper half, Connect right under the field.
+    const fb = await field.boundingBox();
+    expect(fb!.y).toBeLessThan(844 / 2);
+    const cb = await button(page, "Connect").boundingBox();
+    expect(cb!.y - (fb!.y + fb!.height)).toBeLessThan(24);
     await expect(field).toHaveAttribute("placeholder", "studio-mac.local:7373");
     await expect(page.getByText("It's under Connect in sessionpipe on your computer.")).toBeVisible();
     await expect(button(page, "Connect")).toBeDisabled();
@@ -244,11 +298,13 @@ test.describe("the phone's first run", () => {
     await button(page, "Connect").click();
     await expect(page.getByRole("heading", { name: "Couldn't reach studio-mac" })).toBeVisible();
     await expect(
-      page.getByText("Make sure the phone and the computer are on the same Wi-Fi, or both on your tailnet."),
+      page.getByText(
+        "Check that sessionpipe is running on studio-mac and that both are on the same Wi-Fi (or the same tailnet).",
+      ),
     ).toBeVisible();
     expect(await shellCallArgs(page, "rx_add")).toEqual([{ url: "http://studio-mac.local:7373/" }]);
     // After a typed address, Try again is the one action (Back keeps the address).
-    await expect(button(page, "Try again")).toHaveClass(/onb-primary/);
+    await expect(button(page, "Try again")).toHaveClass(/btn--primary/);
     await expect(button(page, "Enter an address")).toHaveCount(0);
     await setAdd(page, "ok");
     await button(page, "Try again").click();
@@ -270,8 +326,7 @@ test.describe("the phone's first run", () => {
     await openInPhone(page, "/", { platform: "android", receiver: true, firstRunDone: false });
     const sheet = page.getByRole("dialog", { name: "You're in." });
     await expect(sheet).toBeVisible({ timeout: 15_000 });
-    await expect(sheet).toContainText("To answer prompts from this phone, approve it once on studio-mac");
-    await expect(sheet).toContainText("Approve this phone.");
+    await expect(sheet).toContainText("To answer prompts from this phone, studio-mac has to approve it once.");
   });
 
   test("never a Mac on the phone: Settings › App", async ({ page }) => {
@@ -317,6 +372,27 @@ test.describe("the phone shell at tablet width", () => {
     const head = page.locator(".rail-head");
     expect(await head.evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingTop))).toBe(24);
     expect(mark!.y).toBeGreaterThanOrEqual(24);
+  });
+
+  test("the connected sheet is a centred form sheet, and a step keeps to one glance", async ({ page }) => {
+    await page.setViewportSize({ width: 1032, height: 1376 });
+    await openInPhone(page, "/", { receiver: true, firstRunDone: false });
+    const sheet = page.getByRole("dialog", { name: "You're in." });
+    await expect(sheet).toBeVisible({ timeout: 15_000 });
+    const box = await sheet.boundingBox();
+    expect(box!.width).toBeLessThanOrEqual(440);
+    expect(Math.abs(box!.x + box!.width / 2 - 516)).toBeLessThan(2);
+    expect(box!.y + box!.height).toBeLessThan(1376 - 200);
+    expect(box!.y).toBeGreaterThan(200);
+  });
+
+  test("a step at tablet width keeps its title and actions together", async ({ page }) => {
+    await page.setViewportSize({ width: 1032, height: 1376 });
+    await openInPhone(page, "/", { camera: "denied" });
+    await button(page, "Scan the code on your computer").click();
+    const title = await page.getByRole("heading", { name: "sessionpipe can't use the camera" }).boundingBox();
+    const action = await button(page, "Open Settings").boundingBox();
+    expect(action!.y + action!.height - title!.y).toBeLessThanOrEqual(720);
   });
 
   test("the page bar starts under the status bar", async ({ page }) => {

@@ -11,6 +11,7 @@ import {
   phoneNoun,
   type Step,
   step,
+  trustBrowser,
   WORDS,
 } from "./onboarding";
 
@@ -131,8 +132,19 @@ describe("the steps", () => {
   it("the TLS code: the trust page first, then Connect goes on to the receiver", () => {
     const scanning: Step = { kind: "scan", status: "scanning" };
     const t = step(scanning, { type: "scanned", text: "https://studio-mac.local:7373/trust?k=uik_abc" });
-    expect(t).toEqual({ kind: "trust", url: "https://studio-mac.local:7373/trust?k=uik_abc", host: "studio-mac" });
-    expect(step(t, { type: "connect" })).toEqual({
+    expect(t).toEqual({
+      kind: "trust",
+      url: "https://studio-mac.local:7373/trust?k=uik_abc",
+      host: "studio-mac",
+      opened: false,
+    });
+    // The second beat: the app came back from the browser.
+    const back = step(t, { type: "returned" });
+    expect(back).toEqual({ ...t, opened: true });
+    expect(step(back, { type: "returned" })).toEqual(back);
+    expect(step(INITIAL, { type: "returned" })).toEqual(INITIAL);
+    expect(step({ kind: "denied" }, { type: "returned" })).toEqual({ kind: "denied" });
+    expect(step(back, { type: "connect" })).toEqual({
       kind: "connecting",
       url: "https://studio-mac.local:7373/trust?k=uik_abc",
       host: "studio-mac",
@@ -187,12 +199,14 @@ describe("the steps", () => {
     const c: Step = { kind: "connecting", url: "http://studio-mac.local:7373/", host: "studio-mac", from: "scan" };
     expect(step(c, { type: "connected" })).toEqual({ kind: "done", host: "studio-mac" });
     const failed = step(c, { type: "error", error: new Error("connection refused (os error 61)") });
-    expect(failed).toEqual({ ...c, kind: "failed", message: WORDS.failed.unreachable });
+    expect(failed).toEqual({ ...c, kind: "failed", message: WORDS.failed.unreachable("studio-mac") });
     expect(step(c, { type: "error", error: new Error("That key was refused.") })).toMatchObject({
       kind: "failed",
       message: "That key was refused.",
     });
-    expect(step(c, { type: "error", error: { message: "" } })).toMatchObject({ message: WORDS.failed.unreachable });
+    expect(step(c, { type: "error", error: { message: "" } })).toMatchObject({
+      message: WORDS.failed.unreachable("studio-mac"),
+    });
     // Cancel in the shell's own sheet: back where the address came from.
     expect(step(c, { type: "error", error: new Error("cancelled") })).toEqual(INITIAL);
     expect(step({ ...c, from: "address" }, { type: "error", error: "cancelled" })).toEqual({
@@ -210,7 +224,7 @@ describe("the steps", () => {
       kind: "failed",
       url: "http://studio-mac.local:7373/",
       host: "studio-mac",
-      message: WORDS.failed.unreachable,
+      message: WORDS.failed.unreachable("studio-mac"),
       from: "address",
     };
     expect(step(f, { type: "retry" })).toEqual({
@@ -246,15 +260,27 @@ describe("the words", () => {
     ])
       expect(isUnreachable(new Error(m)), m).toBe(true);
     expect(isUnreachable(new Error("That key was refused."))).toBe(false);
-    expect(failureWords(new Error("connection refused"))).toBe(WORDS.failed.unreachable);
-    expect(failureWords(undefined)).toBe(WORDS.failed.unreachable);
+    expect(failureWords(new Error("connection refused"), "studio-mac")).toBe(
+      "Check that sessionpipe is running on studio-mac and that both are on the same Wi-Fi (or the same tailnet).",
+    );
+    expect(failureWords(undefined, "studio-mac")).toBe(WORDS.failed.unreachable("studio-mac"));
+    expect(failureWords(new Error("That key was refused."), "studio-mac")).toBe("That key was refused.");
   });
   it("names the phone and the computer in the connected sheet", () => {
     expect(phoneNoun("ios")).toBe("this iPhone");
     expect(phoneNoun("android")).toBe("this phone");
     expect(WORDS.connected.body("ios", "studio-mac")).toBe(
-      "To answer prompts from this iPhone, approve it once on studio-mac: Machines → Devices → Approve this iPhone.",
+      "Reading works now. To answer prompts from this iPhone, studio-mac has to approve it once.",
     );
+    expect(WORDS.connected.where("studio-mac")).toBe("On studio-mac: Machines › studio-mac › Devices › Approve.");
+    expect(WORDS.connected.ask("studio-mac")).toBe("Ask studio-mac to approve");
+    expect(trustBrowser("ios")).toBe("Safari");
+    expect(trustBrowser("android")).toBe("your browser");
+    expect(WORDS.trust.body("studio-mac", trustBrowser("android"))).toBe(
+      "Your browser opens a page that installs studio-mac's certificate. Follow it, then come back here.",
+    );
+    expect(WORDS.trust.open("Safari")).toBe("Open in Safari");
+    expect(WORDS.trust.title("studio-mac")).toBe("Trust studio-mac on this phone");
     expect(WORDS.connecting("studio-mac")).toBe("Connecting to studio-mac…");
     expect(WORDS.failed.title("studio-mac")).toBe("Couldn't reach studio-mac");
   });

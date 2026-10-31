@@ -23,15 +23,18 @@ export const WORDS = {
   install: {
     title: "Three steps on your computer",
     steps: [
-      { label: "Install sessionpipe there", caption: "In a terminal, or from sessionpipe.org/gui." },
-      { label: "Open Connect", caption: "It shows a code for this phone." },
-      { label: "Come back here and scan it", caption: "The board opens on this phone." },
+      {
+        label: "Install sessionpipe on your computer",
+        caption: "Download it from sessionpipe.org/gui, or with Node 20 in a terminal:",
+      },
+      { label: "Open sessionpipe there and choose Connect", caption: "Connect shows a code made for this phone." },
+      { label: "Scan it with this phone", caption: "The board opens here." },
     ],
     site: "https://sessionpipe.org/gui",
-    done: "Done",
+    siteLabel: "sessionpipe.org/gui",
   },
   scanning: {
-    caption: "On your computer, open sessionpipe → Connect and point the camera at the code",
+    caption: "Point the camera at the code under Connect.",
     cancel: "Cancel",
   },
   denied: {
@@ -45,18 +48,23 @@ export const WORDS = {
   },
   noCamera: {
     title: "The camera isn't available",
+    body: "Enter the address from Connect instead.",
   },
+  /** Two beats: before the trust page was opened, and once the app is back from it. */
   trust: {
-    title: (host: string) => `${host} uses a certificate of its own`,
-    body: "Trust it once on this phone, then connect. The trust page opens in Safari.",
-    bodyAndroid: "Trust it once on this phone, then connect. The trust page opens in your browser.",
-    open: "Open the trust page",
+    title: (host: string) => `Trust ${host} on this phone`,
+    /** `browser`: "Safari" or "your browser" (trustBrowser). */
+    body: (host: string, browser: string) =>
+      `${browser.charAt(0).toUpperCase()}${browser.slice(1)} opens a page that installs ${host}'s certificate. Follow it, then come back here.`,
+    open: (browser: string) => `Open in ${browser}`,
+    again: "Open the page again",
     connect: "Connect",
   },
   connecting: (host: string) => `Connecting to ${host}…`,
   failed: {
     title: (host: string) => `Couldn't reach ${host}`,
-    unreachable: "Make sure the phone and the computer are on the same Wi-Fi, or both on your tailnet.",
+    unreachable: (host: string) =>
+      `Check that sessionpipe is running on ${host} and that both are on the same Wi-Fi (or the same tailnet).`,
     retry: "Try again",
   },
   addressStep: {
@@ -70,13 +78,20 @@ export const WORDS = {
   connected: {
     title: "You're in.",
     body: (phone: Phone | null, computer: string) =>
-      `To answer prompts from ${phoneNoun(phone)}, approve it once on ${computer}: Machines → Devices → Approve ${phoneNoun(phone)}.`,
+      `Reading works now. To answer prompts from ${phoneNoun(phone)}, ${computer} has to approve it once.`,
+    /** Where that is, in the computer's own labels (pages/MachinesPage.tsx: the Machines
+     *  page, the machine's section by its name, its Devices row; control/PendingDevices:
+     *  Approve). */
+    where: (computer: string) => `On ${computer}: Machines › ${computer} › Devices › Approve.`,
     bodyNoSigner: "Reading works now. Sending from the app comes with a build that signs.",
-    notify: "Notify me when a session needs me",
-    askNow: "Ask now",
+    ask: (computer: string) => `Ask ${computer} to approve`,
     later: "Later",
+    done: "Done",
   },
 } as const;
+
+/** The browser the trust page opens in, by platform. */
+export const trustBrowser = (p: Phone | null): string => (p === "android" ? "your browser" : "Safari");
 
 // ----- reading a code or a typed address -----
 
@@ -147,8 +162,9 @@ export type Step =
   /** The scan itself failed (no camera on this device, the plugin's words kept). */
   | { kind: "no-camera"; message: string }
   | { kind: "bad-code"; message: string }
-  /** The TLS form of the code: the trust page first, then Connect. */
-  | { kind: "trust"; url: string; host: string }
+  /** The TLS form of the code: the trust page first (`opened` once the app has been
+   *  away to it and come back), then Connect. */
+  | { kind: "trust"; url: string; host: string; opened: boolean }
   | { kind: "address"; value: string; error: string | null }
   | { kind: "connecting"; url: string; host: string; from: "scan" | "address" }
   | { kind: "failed"; url: string; host: string; message: string; from: "scan" | "address" }
@@ -163,6 +179,8 @@ export type Event =
   | { type: "scanned"; text: string | null }
   /** The scan threw (scanner.ts: no camera, not granted, a scan over a scan). */
   | { type: "scan-failed"; error: unknown }
+  /** The app is in the foreground again (back from Safari or Settings). */
+  | { type: "returned" }
   | { type: "address" }
   | { type: "typed"; value: string }
   | { type: "connect" }
@@ -189,11 +207,11 @@ export const isUnreachable = (e: unknown): boolean =>
     text(e),
   );
 
-/** The failure, in plain words. */
-export function failureWords(e: unknown): string {
-  if (isUnreachable(e)) return WORDS.failed.unreachable;
+/** The failure, in plain words, naming the computer. */
+export function failureWords(e: unknown, host: string): string {
+  if (isUnreachable(e)) return WORDS.failed.unreachable(host);
   const t = text(e).trim();
-  return t || WORDS.failed.unreachable;
+  return t || WORDS.failed.unreachable(host);
 }
 
 export function step(prev: Step, ev: Event): Step {
@@ -215,11 +233,15 @@ export function step(prev: Step, ev: Event): Step {
       if (ev.text === null) return INITIAL;
       const p = parsePayload(ev.text, { scanned: true });
       if (!p.ok) return { kind: "bad-code", message: p.message };
-      if (p.trust) return { kind: "trust", url: p.url, host: p.host };
+      if (p.trust) return { kind: "trust", url: p.url, host: p.host, opened: false };
       return { kind: "connecting", url: p.url, host: p.host, from: "scan" };
     }
     case "scan-failed":
       return prev.kind === "scan" ? { kind: "no-camera", message: text(ev.error) || WORDS.noCamera.title } : prev;
+    case "returned":
+      // Back from the trust page: the second beat. (A refused camera re-checks its standing
+      // in PhoneOnboarding.tsx and sends "scan" when it was granted meanwhile.)
+      return prev.kind === "trust" ? { ...prev, opened: true } : prev;
     case "address":
       if (prev.kind === "connecting" || prev.kind === "done") return prev;
       if (prev.kind === "address") return prev;
@@ -241,7 +263,13 @@ export function step(prev: Step, ev: Event): Step {
       // Cancel in the shell's own sheet: not a failure, back where the address came from.
       if (isCancel(ev.error))
         return prev.from === "address" ? { kind: "address", value: prev.url, error: null } : INITIAL;
-      return { kind: "failed", url: prev.url, host: prev.host, message: failureWords(ev.error), from: prev.from };
+      return {
+        kind: "failed",
+        url: prev.url,
+        host: prev.host,
+        message: failureWords(ev.error, prev.host),
+        from: prev.from,
+      };
     }
     case "retry":
       return prev.kind === "failed" ? { kind: "connecting", url: prev.url, host: prev.host, from: prev.from } : prev;

@@ -3,8 +3,9 @@
 // front. On the Mac, three switches, all off; each takes effect when turned on
 // (notification permission is asked only then), and Done closes it for good. On the
 // phone it is the last screen of the onboarding: "You're in", the one step left
-// (approve this iPhone once on the computer, so it can answer prompts), the
-// notifications switch, Ask now and Later.
+// (the computer approves this iPhone once, so it can answer prompts), where that is in
+// the computer's own labels, Ask <computer> to approve and Later. Notifications are
+// offered where they belong (Settings › App, the inbox's banner), not here.
 import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Toggle } from "../components/bits";
@@ -72,15 +73,16 @@ function NotifyRow({ label, where, onNote }: { label: string; where: string; onN
 export function Connected({ phone, onDone }: { phone: Phone; onDone: () => void }) {
   const f = features();
   const computer = shellInfo()?.receiver?.name || "your computer";
-  const [note, setNote] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.focus({ preventScroll: true });
   }, []);
-  const askNow = () => {
+  // /add-device?ask=1 files the device request itself: "Ask studio-mac to approve" is one tap.
+  const ask = () => {
     onDone();
     navigate("/add-device?ask=1");
   };
+  const signer = f.has("signer");
   return (
     <>
       <div className="menu-scrim menu-scrim--dialog first-run-scrim" aria-hidden="true" />
@@ -99,21 +101,16 @@ export function Connected({ phone, onDone }: { phone: Phone; onDone: () => void 
           {WORDS.connected.title}
         </h2>
         <p className="confirm-body" id="first-run-body">
-          {f.has("signer") ? WORDS.connected.body(phone, computer) : WORDS.connected.bodyNoSigner}
+          {signer ? WORDS.connected.body(phone, computer) : WORDS.connected.bodyNoSigner}
         </p>
-        {f.has("notifications") && (
-          <ul className="first-run-list">
-            <NotifyRow label={WORDS.connected.notify} where={settingsApp(phone)} onNote={setNote} />
-          </ul>
-        )}
-        {note && <p className="first-run-note">{note}</p>}
+        {signer && <p className="first-run-where">{WORDS.connected.where(computer)}</p>}
         <div className="confirm-actions">
           <button type="button" className="btn btn--ghost onb-quiet" data-later onClick={onDone}>
-            {f.has("signer") ? WORDS.connected.later : WORDS.install.done}
+            {signer ? WORDS.connected.later : WORDS.connected.done}
           </button>
-          {f.has("signer") && (
-            <button type="button" className="btn onb-primary" data-ask onClick={askNow}>
-              {WORDS.connected.askNow}
+          {signer && (
+            <button type="button" className="btn btn--primary onb-primary" data-ask onClick={ask}>
+              {WORDS.connected.ask(computer)}
             </button>
           )}
         </div>
