@@ -6,6 +6,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The desktop app's welcome and tray say "this computer" off a Mac.** On Windows and
+  Linux the welcome offered to start sessionpipe on "This Mac" ("so this Mac's sessions show
+  up here", "Nothing leaves this Mac"), and the tray listed an unreachable local receiver as
+  "This Mac". A Mac still reads exactly as before.
+
 ## [0.7.0] - 2026-10-31
 
 ### Added

@@ -37,6 +37,13 @@ pub struct Model {
 }
 
 /// One row's text: title, the machine when there are several receivers, then what it needs.
+/// The tray's name for the receiver on this machine.
+const THIS_MACHINE: &str = if cfg!(target_os = "macos") {
+    "This Mac"
+} else {
+    "This computer"
+};
+
 fn row_label(i: &NeedsYouItem, multi: bool, receivers: &[(ReceiverRef, bool)]) -> String {
     let title = crate::tools::one_line(&i.display_title(), 42);
     let what = crate::tools::item_short(i);
@@ -79,7 +86,7 @@ pub fn model(
             .filter(|(_, c)| !c)
             .map(|(r, _)| {
                 if r.local {
-                    "This Mac".to_string()
+                    THIS_MACHINE.to_string()
                 } else {
                     r.name.clone()
                 }
@@ -563,7 +570,7 @@ mod tests {
         );
         assert!(m.dimmed);
         assert_eq!(m.title, None, "no number when disconnected");
-        assert_eq!(m.unreachable, vec!["This Mac".to_string()]);
+        assert_eq!(m.unreachable, vec![THIS_MACHINE.to_string()]);
         let m = model(
             &[],
             &[
