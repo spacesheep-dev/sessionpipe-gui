@@ -1,0 +1,770 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- files: the drawer beside a session (web/src/files) ---------- */
+
+/* On a wide page the session makes room at its right and the drawer stands there, fixed,
+   from the top of the window to its bottom, a hairline at its left edge like the panel's;
+   the bar and the docked composer end where it begins. Below 1000 px, and in the side
+   panel, there is no room beside: the drawer covers the view (the view under it is inert
+   meanwhile). The width follows the window, within reason. */
+:root {
+  --files-w: clamp(360px, 28vw, 520px);
+}
+.session--files:not(.session--panel) {
+  padding-right: var(--files-w);
+}
+/* A child of the session, so the session's reading-measure rule for its children
+   (session.css: width 100 %, max-width, auto margins) would size it; this selector
+   outweighs that one. */
+.page.session.session--files > .files {
+  display: flex;
+  flex-direction: column;
+  width: var(--files-w);
+  max-width: none;
+  min-height: 0;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  z-index: calc(var(--z-sticky) + 1);
+}
+.files--page {
+  position: fixed;
+  top: 0;
+  right: var(--split-width, 0px);
+  bottom: 0;
+  border-left: var(--hairline) solid var(--line);
+}
+/* It arrives as the panel does, a short slide in; none when the person asked for less motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .files {
+    animation: files-in var(--dur) var(--ease-out);
+  }
+  @keyframes files-in {
+    from {
+      opacity: 0;
+      transform: translateX(12px);
+    }
+  }
+}
+@media (max-width: 999px) {
+  .session--files:not(.session--panel) {
+    padding-right: 0;
+  }
+  .page.session.session--files > .files--page {
+    left: 0;
+    width: auto;
+    border-left: 0;
+    z-index: var(--z-panel);
+  }
+}
+@media (max-width: 839px) {
+  .files--page {
+    bottom: calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom)));
+    padding-top: var(--safe-top, env(safe-area-inset-top));
+  }
+}
+/* In the panel the drawer takes the panel body whole; the timeline under it stays
+   mounted (and inert), so a tab switch back keeps its place. */
+.panel-body:has(> .session--files) {
+  overflow: hidden;
+}
+.page.session.session--files > .files--panel {
+  position: absolute;
+  inset: 0;
+  width: auto;
+}
+
+/* The head: as tall as the page bar, so the hairlines meet; on a phone a navigation bar. */
+.files-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--bar);
+  padding: 0 8px 0 12px;
+  border-bottom: var(--hairline) solid var(--line);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.files-head .seg {
+  flex: none;
+}
+.files-back {
+  margin-left: -6px;
+}
+.files-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--fg);
+  outline: none;
+}
+.files-title:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus);
+  border-radius: var(--radius-inner);
+}
+/* The name stays in view however long the folder: the path reads from its end. */
+.files-title-path {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.files-title-text {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.files-title-dir {
+  color: var(--fg-3);
+}
+.files-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+.files-done {
+  display: none;
+}
+@media (max-width: 839px) {
+  .files-head {
+    height: 44px;
+    padding-left: 8px;
+  }
+  .files-close {
+    width: auto;
+    padding: 0 12px;
+  }
+  .files-close svg {
+    display: none;
+  }
+  .files-done {
+    display: inline;
+    color: var(--tint-fg, var(--fg));
+    font-size: var(--text-md);
+    font-weight: 600;
+  }
+}
+.files-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* The list: a filter, then the files by folder in path order, as an editor's tree. */
+.files-tools {
+  padding: 8px 12px 4px;
+}
+.files-tools-note {
+  justify-content: space-between;
+  margin: 6px 0 0;
+}
+.files-note {
+  padding: 4px 12px;
+}
+.files-list,
+.files-list ul,
+.files-problems,
+.files-review-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.files-group + .files-group {
+  border-top: var(--hairline) solid var(--line);
+}
+.files-group {
+  padding: 4px 0 6px;
+}
+.files-dir {
+  padding: 8px 12px 2px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--fg-3);
+}
+.files-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-areas:
+    "glyph name"
+    "glyph fact";
+  column-gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: var(--row);
+  padding: 4px 12px;
+  text-align: left;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+  border-radius: 0;
+}
+@media (hover: hover) {
+  .files-row:hover {
+    background: var(--hover);
+  }
+}
+.files-row:active {
+  background: var(--press);
+}
+.files-row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.files-row.is-viewed .files-row-name,
+.files-row.is-viewed .files-row-fact {
+  color: var(--fg-3);
+}
+.files-glyph {
+  grid-area: glyph;
+  display: inline-grid;
+  place-items: center;
+  width: 10px;
+  height: 10px;
+  margin: 0 auto;
+  border-radius: 50%;
+  border: 1.5px solid var(--fg-3);
+  color: var(--bg);
+}
+.files-glyph.is-changed {
+  background: var(--fg-2);
+  border-color: var(--fg-2);
+}
+.files-glyph.is-err {
+  background: var(--err);
+  border-color: var(--err);
+}
+.files-glyph.is-viewed {
+  background: var(--fg-3);
+  border-color: var(--fg-3);
+}
+/* Changed since the review: the tint, the one accent, where there is news to look at. */
+.files-glyph.is-fresh {
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 3.5px var(--tint, var(--needs-fg));
+}
+.files-row-name {
+  grid-area: name;
+  min-width: 0;
+  color: var(--fg);
+}
+.files-row-dir {
+  color: var(--fg-3);
+}
+.files-row-fact {
+  grid-area: fact;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--fg-3);
+}
+.files-empty {
+  padding: 24px 16px;
+}
+
+/* One file: the view switch and the versions, the note of what the text is, the code
+   with its gutter in one horizontal scroller, the edits the text does not hold. */
+.fv {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0 16px;
+}
+.fv-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px;
+  min-height: var(--control);
+}
+.fv-bar:empty {
+  display: none;
+}
+.fv-bar .seg {
+  flex: none;
+}
+/* The drawer's switches have labels of unequal length ("Changes", "Text"): each option
+   takes its own width rather than an equal share, which would clip the longer. */
+.files .seg-opt {
+  flex: 0 0 auto;
+}
+.fv-versions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--fg-3);
+}
+.fv-versions .icon-btn {
+  width: var(--control-sm);
+  height: var(--control-sm);
+}
+.fv-note {
+  display: block;
+  padding: 0 12px;
+  line-height: var(--lh);
+}
+.fv-note > span + span {
+  margin-left: 6px;
+}
+.fv-fresh {
+  color: var(--tint-fg, var(--fg-2));
+}
+.fv-link {
+  color: var(--fg-2);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  border-radius: var(--radius-inner);
+}
+.fv-link:hover {
+  color: var(--fg);
+}
+.fv-link:focus-visible {
+  outline: 2px solid var(--focus);
+}
+/* One scroller for the whole listing: long lines scroll together, the gutter stays. */
+.fv-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.fv-code {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 100%;
+  width: max-content;
+  font-size: var(--text-xs);
+  line-height: 24px;
+  tab-size: 4;
+}
+.fv-line {
+  position: relative;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  min-width: 100%;
+}
+.fv-line.is-changed,
+.fv-line.is-add {
+  background: color-mix(in oklch, var(--fg) 5%, transparent);
+}
+.fv-line.is-add .fv-text {
+  color: var(--ok);
+}
+.fv-line.is-del {
+  background: color-mix(in oklch, var(--err) 6%, transparent);
+}
+.fv-line.is-del .fv-text {
+  color: var(--err);
+}
+.fv-line.is-changed::before,
+.fv-line.is-add::before,
+.fv-line.is-del::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--fg-3);
+  pointer-events: none;
+}
+.fv-line.is-add::before {
+  background: var(--ok);
+}
+.fv-line.is-del::before {
+  background: var(--err);
+}
+.fv-line.is-sel {
+  background: var(--sel);
+}
+.fv-line.is-sel::before {
+  background: var(--fg);
+}
+.fv-gutter {
+  position: sticky;
+  left: 0;
+  display: block;
+  min-height: 24px;
+  padding: 0 10px 0 0;
+  text-align: right;
+  color: var(--fg-3);
+  background: var(--bg);
+  font: inherit;
+  cursor: pointer;
+  border-radius: 0;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.fv-line.is-changed .fv-gutter,
+.fv-line.is-add .fv-gutter,
+.fv-line.is-del .fv-gutter,
+.fv-line.is-sel .fv-gutter {
+  background: inherit;
+}
+span.fv-gutter {
+  cursor: default;
+}
+@media (hover: hover) {
+  button.fv-gutter:hover {
+    color: var(--fg);
+    background: var(--hover);
+  }
+}
+.fv-line.is-sel .fv-gutter {
+  color: var(--fg);
+}
+.fv-gutter:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.fv-text {
+  min-width: 0;
+  padding-right: 16px;
+  white-space: pre;
+}
+.fv-fold {
+  display: block;
+  position: sticky;
+  left: 0;
+}
+.fv-fold-btn {
+  display: block;
+  width: 100%;
+  padding: 0 12px 0 52px;
+  text-align: left;
+  color: var(--fg-3);
+  background: var(--bg-3);
+  font: inherit;
+  font-size: var(--text-xs);
+  line-height: 24px;
+  border-radius: 0;
+}
+@media (hover: hover) {
+  .fv-fold-btn:hover {
+    color: var(--fg);
+  }
+}
+.fv-fold-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.fv-more {
+  align-self: flex-start;
+  margin: 4px 12px;
+}
+/* The comment field, under the last selected line, across the text column; the form
+   itself does not scroll with the code. */
+.fv-form {
+  grid-column: 1 / -1;
+  position: sticky;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(100%, var(--files-w, 100%));
+  margin: 4px 0 8px;
+  padding: 8px 12px 8px 52px;
+  border-top: var(--hairline) solid var(--line);
+  border-bottom: var(--hairline) solid var(--line);
+  background: var(--bg-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+  white-space: normal;
+}
+.fv > .fv-form {
+  margin: 0;
+  width: auto;
+}
+.fv-form-where {
+  color: var(--fg-2);
+  font-weight: 500;
+}
+.fv-form-hint {
+  color: var(--fg-3);
+  font-weight: 400;
+}
+@media (hover: none) {
+  .fv-form-hint {
+    display: none;
+  }
+}
+.fv-form textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: var(--hairline) solid var(--line-2);
+  border-radius: var(--radius-inner);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  line-height: var(--lh);
+}
+.fv-form textarea.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre;
+}
+.fv-form textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+.fv-form-suggest {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fv-form-suggest-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--fg-3);
+}
+.fv-form-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.fv-form-left {
+  margin-right: auto;
+}
+.fv-hunks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px 0;
+}
+.fv-hunks-title {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--fg-3);
+}
+.fv-hunk {
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  overflow: hidden;
+}
+.fv-hunk-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px 4px;
+  font-size: var(--text-xs);
+  color: var(--fg-3);
+}
+/* The sign sits in a gutter of its own, so a copy takes the code alone. */
+.fv-diff {
+  margin: 0;
+  padding: 0 12px 6px 0;
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  max-height: 320px;
+  overflow: auto;
+}
+.fv-diff > span {
+  display: block;
+  padding-left: 24px;
+  position: relative;
+  white-space: pre;
+}
+.fv-diff > span::before {
+  position: absolute;
+  left: 10px;
+  color: var(--fg-4);
+}
+.fv-diff .is-add {
+  color: var(--ok);
+}
+.fv-diff .is-add::before {
+  content: "+";
+  color: var(--ok);
+}
+.fv-diff .is-del {
+  color: var(--err);
+}
+.fv-diff .is-del::before {
+  content: "−";
+  color: var(--err);
+}
+.fv-diff--del + .fv-diff--add {
+  border-top: var(--hairline) solid var(--line);
+  padding-top: 6px;
+}
+.fv-foot {
+  padding: 0 12px;
+  gap: 12px;
+}
+.fv-foot:empty {
+  display: none;
+}
+
+/* The review foot: the comments waiting, and the one way they go. */
+.files-review {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: var(--hairline) solid var(--line);
+  background: var(--bg);
+}
+.files-review-list {
+  max-height: 120px;
+  overflow: auto;
+}
+/* The place keeps its width and the words give way; both cut with an ellipsis only when
+   they must. */
+.files-review-item {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-height: 24px;
+  font-size: var(--text-sm);
+}
+.files-review-where {
+  flex: 0 1 auto;
+  min-width: 4ch;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+}
+.files-review-text {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--fg);
+}
+.files-review-kind {
+  margin-right: 6px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.files-review-x {
+  width: 24px;
+  height: 24px;
+  align-self: center;
+}
+.files-review-btns {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.files-review-note {
+  margin: 0;
+}
+
+/* Problems: a failed tool, an error raised, newest first; each a jump to its row. */
+.files-problem {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+  border-radius: 0;
+}
+.files-problems > li + li .files-problem {
+  border-top: var(--hairline) solid var(--line);
+}
+@media (hover: hover) {
+  .files-problem:hover {
+    background: var(--hover);
+  }
+}
+.files-problem:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.files-problem-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: var(--err);
+}
+.files-problem-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.files-problem-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.files-problem-tool {
+  font-weight: 500;
+  white-space: nowrap;
+}
+.files-problem-subject {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.files-problem-when {
+  margin-left: auto;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.files-problem-text {
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Touch: a line number and a comment's × are finger-sized. */
+@media (hover: none) {
+  .fv-code {
+    line-height: 36px;
+  }
+  .fv-gutter {
+    min-height: 36px;
+  }
+  .files-review-x {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* Forced colours: the tints go, so a change is a border and a selection an outline. */
+@media (forced-colors: active) {
+  .fv-line.is-changed,
+  .fv-line.is-add,
+  .fv-line.is-del {
+    border-left: 3px solid Highlight;
+  }
+  .fv-line.is-del {
+    border-left-style: dotted;
+  }
+  .fv-line.is-sel {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .fv-line::before {
+    display: none;
+  }
+}

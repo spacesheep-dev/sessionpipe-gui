@@ -1075,6 +1075,40 @@ export interface SearchRevealRequest {
   what: "folder" | "transcript";
 }
 
+// ---------- one session's files (GET ROUTES.ui.session/:harness/:id/files) ----------
+
+/** One tool call on a file, as the index saw it (shared/files.ts `indexTouches`). */
+export interface SessionFileTouch {
+  /** The end's seq once the tool ended, else the start's. */
+  seq: number;
+  at: string;
+  tool: string;
+  kind: "read" | "edit" | "write" | "patch" | "notebook" | "changed";
+  /** `tool.ended` with `ok: false`. */
+  failed?: true;
+  /** A `tool.started` with no end yet. */
+  pending?: true;
+  /** The event's input or output was cut in the index (the full event is on disk). */
+  cut?: true;
+}
+
+export interface SessionFile {
+  /** Repo-relative, as `relativePath` gives it. */
+  path: string;
+  /** As the harness named it. */
+  given: string;
+  /** Ascending by seq. */
+  touches: SessionFileTouch[];
+}
+
+/** Every file the session's tools named, from the index alone (no disk read); the page
+ *  follows live events after `lastSeq`. */
+export interface SessionFiles {
+  files: SessionFile[];
+  /** The highest seq the index held when this was read; -1 for a session with no events. */
+  lastSeq: number;
+}
+
 /** Query of GET /api/ui/files. `since` is an ISO time; `repo` an exact `session.repo`. */
 export interface FilesQuery {
   since?: string;
@@ -1622,7 +1656,8 @@ export const ROUTES = {
     info: "/api/ui/info",
     snapshot: "/api/ui/snapshot",
     stream: "/api/ui/stream",
-    /** GET /api/ui/sessions/:harness/:id?after=|before=<seq>&tail=1&limit=<n>&slim=1 → SessionDetail */
+    /** GET /api/ui/sessions/:harness/:id?after=|before=<seq>&tail=1&limit=<n>&slim=1 → SessionDetail;
+     *  GET /api/ui/sessions/:harness/:id/files → SessionFiles (the whole session's files, from the index) */
     session: "/api/ui/sessions",
     /** GET /api/ui/events?<FeedQuery> → FeedPage */
     feed: "/api/ui/events",

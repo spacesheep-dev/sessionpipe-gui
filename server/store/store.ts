@@ -560,6 +560,14 @@ export class Store {
     return [...this.sessions.keys()];
   }
 
+  /** Every slim record of a session in seq order (the index's copies, no disk read), or
+   *  undefined for a session the store does not know. The session files route reads the
+   *  whole session through this, since a page is capped at DETAIL_MAX. */
+  slimEvents(key: SessionKey): readonly SlimEvent[] | undefined {
+    const entry = this.sessions.get(key);
+    return entry ? entry.recs.map((r) => r.ev) : undefined;
+  }
+
   /** A page of a session's events in seq order, at most `limit`: forwards after `after`
    *  (a seq; -1 or undefined for the start), or backwards with `opts.before` (the newest
    *  events with seq below it) or `opts.tail` (the newest events). Full lines are read

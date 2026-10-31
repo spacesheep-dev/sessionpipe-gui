@@ -206,6 +206,16 @@ call's input, output and duration, and a tier lens that shows the session as a l
 receiver would have got it. Send the next message, attach up to six images, stop a turn, or
 answer the prompt in place.
 
+**Files** (the folder on the bar, `⇧F`) opens the files the session read and changed
+beside the timeline, from its own events, as the repo's tree. A file opens on its changes
+against the text the agent last read, or the whole text as it stands, every version the
+agent made one step away. Click a line number to comment on it, as in a code review, or
+suggest the lines it should become; the comments go to the session as one message, or
+into the composer, and the list then says which files changed since your review. A
+second tab lists the tools that failed, each a jump to its row; where the session runs on
+this machine, a file opens in your editor. Everything works from the keyboard: ↓ ↑ over
+files and lines, Enter to open or comment, n and p between changes, Esc to step back.
+
 ### New session
 
 ![New session: machine, agent, folder, what it should do](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/new-session.png)
@@ -286,7 +296,8 @@ home screen and it opens like an app. Details: [docs/remote.md](docs/remote.md).
 
 ### Keyboard, ⌘K and the look
 
-`⌘K` finds any session, page or action, and searches text across sessions. `c` starts a
+`⌘K` finds any session, page or action, and searches text across sessions; `/` then a
+path goes to a file any session changed, in its Files drawer. `c` starts a
 session, `j` `k` move, `Enter` opens, `Shift+Enter` opens beside, `a` and `d` allow or deny,
 `g` then a letter jumps between pages. `?` lists every binding in force; `/shortcuts`
 rebinds them, with vim and emacs presets.

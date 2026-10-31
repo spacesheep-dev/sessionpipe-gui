@@ -146,6 +146,11 @@ export function createMockTransport(): Transport {
       if (!d) throw new Error("not_found");
       return latency(d, 120);
     },
+    sessionFiles: async (harness, id) => {
+      const files = world.sessionFiles(harness, id);
+      if (!files) throw new Error("not_found");
+      return latency(files, 100);
+    },
     feed: (q) => latency(world.feed(q), 90),
     files: (q) => latency(review(world).files(q), 90),
     digest: (q) => latency(review(world).digest(q), 90),

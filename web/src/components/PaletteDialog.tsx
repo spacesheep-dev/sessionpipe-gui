@@ -28,6 +28,7 @@ import { type NewSessionTarget, openNewSession } from "../control/newSessionStat
 import { canSign, signHint } from "../control/signer";
 import { sendErrorWords } from "../control/words";
 import { byStateThenRecent, useAppState, useLabels, useStore } from "../data/hooks";
+import { openDrawer, toggleDrawer } from "../files/state";
 import { agentLabel, agentMatches, openAgent } from "../lib/agents";
 import {
   attentionMessage,
@@ -58,6 +59,7 @@ import {
   TxTitle,
   usePaletteTranscripts,
 } from "../search/palette";
+import { FileMark, type FileRow, looksLikePath, matchFiles, usePaletteFiles } from "../search/paletteFiles";
 import { useThemes } from "../themes/host/registry";
 import { AgentGlyph } from "./AgentRow";
 import { Ago, Kbd, Since, StateDot } from "./bits";
@@ -81,8 +83,8 @@ function openDisplaySettings(): void {
 
 // ----- the rows -----
 
-type Section = "Sessions" | "In transcripts" | "Needs you" | "Actions" | "Go to";
-const SECTIONS: Section[] = ["Sessions", "In transcripts", "Needs you", "Actions", "Go to"];
+type Section = "Sessions" | "In transcripts" | "Files" | "Needs you" | "Actions" | "Go to";
+const SECTIONS: Section[] = ["Sessions", "In transcripts", "Files", "Needs you", "Actions", "Go to"];
 
 interface Item {
   id: string;
@@ -129,7 +131,9 @@ type Sub =
   | { id: "appearance" }
   | { id: "skin" }
   | { id: "text" }
-  | { id: "label"; session: string };
+  | { id: "label"; session: string }
+  /** The sessions that touched one file (the Files section's ›). */
+  | { id: "file"; repo: string; path: string };
 
 const SUB_TITLE = (s: Sub): string =>
   s.id === "new"
@@ -142,7 +146,9 @@ const SUB_TITLE = (s: Sub): string =>
           ? "Skin"
           : s.id === "text"
             ? "Text size"
-            : "Label";
+            : s.id === "file"
+              ? (s.path.split("/").pop() ?? s.path)
+              : "Label";
 
 /** What a paired machine can do, in the picker's words: "safe mode", "offline",
  *  "sessionpipe 0.9" (no start options). */
@@ -158,12 +164,13 @@ export function machineHint(m: MachineSummary): string {
     .join(" · ");
 }
 
-/** `>` keeps only actions, `#` only places; the rest is the text to match. `is:subagent`
- *  keeps only subagents (it is taken off the text). */
+/** `>` keeps only actions, `#` only places, `/` only files; the rest is the text to match.
+ *  `is:subagent` keeps only subagents (it is taken off the text). */
 function parseQuery(q: string): { only: Section | null; text: string; agentsOnly: boolean } {
   const s = q.trimStart();
   if (s.startsWith(">")) return { only: "Actions", text: s.slice(1).trim(), agentsOnly: false };
   if (s.startsWith("#")) return { only: "Go to", text: s.slice(1).trim(), agentsOnly: false };
+  if (s.startsWith("/")) return { only: "Files", text: s.slice(1).trim(), agentsOnly: false };
   const words = s.trim().split(/\s+/);
   const agentsOnly = words.some((w) => /^is:subagents?$/i.test(w));
   return {
@@ -336,8 +343,14 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
   const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
   const peek = useWide();
   // What was said, across every session and this machine's history (search/palette.tsx).
-  const txOn = mode.kind === "search" && !stack.length && !/^\s*[>#]/.test(q) && !/\bis:subagent\b/i.test(q);
+  const txOn = mode.kind === "search" && !stack.length && !/^\s*[>#/]/.test(q) && !/\bis:subagent\b/i.test(q);
   const tx = usePaletteTranscripts(store, q, txOn);
+  // Files: asked for with `/`, or brought in when the words read as a path; the file
+  // sub-list needs them too.
+  const filesOn =
+    mode.kind === "search" &&
+    (/^\s*\//.test(q) || (!stack.length && !/^\s*[>#]/.test(q) && looksLikePath(q.trim())) || sub?.id === "file");
+  const fileList = usePaletteFiles(store, filesOn);
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -577,6 +590,13 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
       });
     }
 
+    // Files: with `/`, the files changed lately; without it, only when the words read as a
+    // path. A row opens the newest session that touched the file, on that file; › lists
+    // the other sessions.
+    if (want("Files") && filesOn && fileList && (only === "Files" || text)) {
+      for (const hit of matchFiles(fileList, text)) out.push(fileRow(hit.row, hit.at, hit.score));
+    }
+
     if (want("Needs you")) {
       for (const s of sorted) {
         for (const a of s.openAttentions) {
@@ -703,6 +723,15 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
             splitActive === s.key ? hintFor("session.openPage") : undefined,
           );
         if (isCtx) add("Label…", () => push({ id: "label", session: s.key }), undefined, { sub: true });
+        if (isCtx && !simple)
+          add(
+            "Files of this session",
+            () => {
+              closePalette();
+              toggleDrawer(s.key);
+            },
+            hintFor("session.files") || undefined,
+          );
         if (!simple) add("Forget…", () => setMode({ kind: "forget", session: s }));
       }
       // New session: the sheet as it is (c), the machines to start on (›), and when the
@@ -900,7 +929,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     // first, a title fragment the sessions. A typed machine puts its start first; with
     // nothing typed, sessions lead.
     let order = SECTIONS;
-    if (promote) order = ["Actions", "Sessions", "In transcripts", "Needs you", "Go to"];
+    if (promote) order = ["Actions", "Sessions", "In transcripts", "Files", "Needs you", "Go to"];
     else if (text && !only) {
       const best = (sec: Section) =>
         out.reduce((m, it) => (it.section === sec ? Math.max(m, it.score) : m), Number.NEGATIVE_INFINITY);
@@ -1057,9 +1086,59 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
               await setLabel(store, sub.session, null);
             },
           });
+      } else if (sub.id === "file") {
+        // Every session that touched the file, newest first; each opens on it.
+        const file = fileList?.find((f) => f.repo === sub.repo && f.path === sub.path);
+        for (const fs of file?.sessions ?? []) {
+          const live = sessions.get(fs.key);
+          row({
+            id: `sub:f:${fs.key}`,
+            mark: live ? <StateDot state={live.state} decorative /> : <Glyph> </Glyph>,
+            label: live ? sessionTitle(live) : fs.title,
+            detail:
+              [live?.machine, fs.count > 1 ? `${fs.count} changes` : undefined].filter(Boolean).join(" · ") ||
+              undefined,
+            at: fs.lastAt,
+            session: live,
+            run: ({ beside }) => openFileIn(fs.key, sub.path, beside),
+          });
+        }
       }
       if (text) rows.sort((a, b) => b.score - a.score);
       return rows;
+    }
+
+    /** The newest session that touched the file, opened on it: as the page (`?file=`), or
+     *  beside, where the panel's drawer takes the file. */
+    function openFileIn(key: string, path: string, beside: boolean): void {
+      closePalette();
+      const { harness, id } = splitKey(key);
+      if (beside) {
+        openSplit(key);
+        openDrawer(key, path, "panel");
+      } else navigate(`${sessionPath(harness, id)}?file=${encodeURIComponent(path)}`);
+    }
+    function fileRow(f: FileRow, at: number[], score: number): Item {
+      const latest = f.sessions[0];
+      const live = latest ? sessions.get(latest.key) : undefined;
+      const where = [repoShort(f.repo), live ? sessionTitle(live) : latest?.title].filter(Boolean).join(" · ");
+      return {
+        id: `f:${f.repo}:${f.path}`,
+        section: "Files",
+        mark: <FileMark />,
+        label: <Hit text={f.path} at={at} />,
+        detail: where || undefined,
+        at: f.lastAt,
+        session: live,
+        // Touched by several sessions: Enter asks which (›), as every pushed list does.
+        sub: f.sessions.length > 1,
+        score,
+        run: ({ beside }) => {
+          if (!latest) return;
+          if (f.sessions.length > 1) push({ id: "file", repo: f.repo, path: f.path });
+          else openFileIn(latest.key, f.path, beside);
+        },
+      };
     }
   }, [
     sub,
@@ -1085,6 +1164,8 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     simple,
     tx,
     txOn,
+    filesOn,
+    fileList,
   ]);
 
   // A new query (or a pushed list) starts at the top, in this same render; a shorter list
@@ -1272,7 +1353,9 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
           ? "An action…"
           : only === "Go to"
             ? "A page or a view…"
-            : "Sessions, actions, pages…";
+            : only === "Files"
+              ? "A file path…"
+              : "Sessions, actions, pages…";
   const activeId = items[at] ? `pal-opt-${at}` : undefined;
   const paired = [...machines.values()].some((m) => m.control);
   const noResults = items.every((it) => it.id === "t:all") && mode.kind === "search";
@@ -1472,6 +1555,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
                 <>
                   <FootKey keys=">">Actions</FootKey>
                   <FootKey keys="#">Go to</FootKey>
+                  <FootKey keys="/">Files</FootKey>
                 </>
               )}
             </>

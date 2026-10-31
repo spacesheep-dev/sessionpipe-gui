@@ -448,6 +448,14 @@ export const ACTIONS: readonly Action[] = [
     keys: ["shift+a"],
     hint: "the Handoff sheet: another agent on the same machine, its answer brought back here",
   },
+  {
+    id: "session.files",
+    label: "Files",
+    group: "Session",
+    scope: "session",
+    keys: ["shift+f"],
+    hint: "the files this session read and changed, beside the timeline; comment on a line to ask for a change",
+  },
 
   { id: "panel.prev", label: "Previous tab", group: "Side panel", scope: "panel", keys: ["[", "ctrl+shift+tab"] },
   { id: "panel.next", label: "Next tab", group: "Side panel", scope: "panel", keys: ["]", "ctrl+tab"] },

@@ -15,6 +15,7 @@ import type {
   MachineSummary,
   ProtocolSession,
   SessionDetail,
+  SessionFiles,
   SessionKey,
   SessionSummary,
   Stats,
@@ -23,6 +24,7 @@ import type {
   Tier,
 } from "@shared/api";
 import { DONE_AFTER_MS, SNIPPET_CHARS, STALE_AFTER_MS, sessionKey } from "@shared/api";
+import { indexTouches } from "@shared/files";
 import { AgentReading } from "./agents";
 
 // ---------- helpers ----------
@@ -819,6 +821,14 @@ export class World {
       },
       control: { enabled: true, rpId: "localhost", machines: 1 },
     };
+  }
+
+  /** The session files route over the mock's events (the same pairing the server runs). */
+  sessionFiles(harness: string, id: string): SessionFiles | null {
+    const r = this.sessions.get(sessionKey(harness, id));
+    if (!r) return null;
+    const sorted = [...r.events].sort((a, b) => a.session.seq - b.session.seq);
+    return { files: indexTouches(sorted, r.block.cwd), lastSeq: sorted[sorted.length - 1]?.session.seq ?? -1 };
   }
 
   detail(harness: string, id: string, q: DetailQuery = {}): SessionDetail | null {

@@ -16,6 +16,7 @@ import type {
   MarksPatch,
   SearchIndexStatus,
   SessionDetail,
+  SessionFiles,
   StreamMessage,
 } from "@shared/api";
 import { ROUTES } from "@shared/api";
@@ -34,6 +35,8 @@ export interface Transport {
   openStream(h: StreamHandlers): () => void;
   info(): Promise<Info>;
   session(harness: string, id: string, q: DetailQuery): Promise<SessionDetail>;
+  /** The Files drawer: every file the whole session's tools named, from the index. */
+  sessionFiles(harness: string, id: string): Promise<SessionFiles>;
   feed(q: FeedQuery): Promise<FeedPage>;
   /** The Review page: files changed since a time, a day's digest. */
   files(q: FilesQuery): Promise<FilesPage>;
@@ -215,6 +218,7 @@ export function createHttpTransport(): Transport {
       const qs = p.toString();
       return get<SessionDetail>(`${ROUTES.ui.session}/${enc(harness)}/${enc(id)}${qs ? `?${qs}` : ""}`);
     },
+    sessionFiles: (harness, id) => get<SessionFiles>(`${ROUTES.ui.session}/${enc(harness)}/${enc(id)}/files`),
     feed: (q) => {
       const p = new URLSearchParams();
       for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== "") p.set(k, String(v));

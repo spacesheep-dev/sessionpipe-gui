@@ -310,12 +310,13 @@ export function ControlStrip({
     const t = window.setTimeout(() => writeDraft(session.key, text), 300);
     return () => window.clearTimeout(t);
   }, [session.key, text]);
-  // "Edit and send again" on a message that didn't make it: its words come back here.
+  // "Edit and send again" on a message that didn't make it: its words come back here;
+  // the Files drawer's "Put in composer" adds its review under what is already typed.
   useEffect(() => {
     const on = (e: Event) => {
-      const d = (e as CustomEvent<{ key: string; text: string }>).detail;
+      const d = (e as CustomEvent<{ key: string; text: string; append?: boolean }>).detail;
       if (d?.key !== session.key) return;
-      setText(d.text);
+      setText((cur) => (d.append && cur.trim() ? `${cur.replace(/\s+$/, "")}\n\n${d.text}` : d.text));
       requestAnimationFrame(() => field.current?.focus());
     };
     window.addEventListener("sp:compose", on);

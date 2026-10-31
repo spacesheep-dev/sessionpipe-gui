@@ -27,6 +27,7 @@ import {
 } from "react";
 import { useStartTitles } from "../control/Starting";
 import { useAppState, useSeen, useStore } from "../data/hooks";
+import { FilesButton } from "../files/FilesButton";
 import { agentLabel, parseTab } from "../lib/agents";
 import { focusTab, tablistKey } from "../lib/focus";
 import { repoShort, sessionTitle } from "../lib/format";
@@ -534,6 +535,9 @@ export function SessionPanel({ phone }: { phone: boolean }) {
         </h2>
         {activeAgentId && s && <span className="panel-status panel-parent ellipsis">{sessionTitle(s)}</span>}
         <span className="panel-actions">
+          {activeKey && !activeAgentId && (
+            <FilesButton session={parseTab(activeKey).session} mode="panel" className="panel-btn" />
+          )}
           <MoreButton build={headMenu} title={() => title} className="panel-btn" />
           {activeKey && (
             <Link

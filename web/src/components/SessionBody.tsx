@@ -68,6 +68,9 @@ import { useLaunched, useLimits, useMachines, useMachinesMap, useSession, useSto
 import { LIST_PREVIEW, TAIL, takeWarm } from "../data/prefetch";
 import { agentLabel, agentsFact, agentType, openAgent, taskNotification } from "../lib/agents";
 import "../lib/acp";
+import { FilesButton } from "../files/FilesButton";
+import { BESIDE, FilesDrawer } from "../files/FilesDrawer";
+import { closeDrawer, FILE_PARAM, openDrawer, toggleDrawer, useDrawer } from "../files/state";
 import {
   ATTENTION_LABEL,
   attentionMessage,
@@ -86,7 +89,7 @@ import { absoluteUrl, agentItems, askItem, copyItem, sessionItems } from "../lib
 import { reducedMotion, useFlip } from "../lib/motion";
 import { leftOff, type NewLineAt, newLinePlace } from "../lib/newLine";
 import { clockTime, eventWindows, leftBecause, sentenceName, servedBy, swaps, swapWords } from "../lib/pool";
-import { AGENT_PARAM, back, hrefFor, Link, navigate, sessionPath, useSearchParam } from "../lib/router";
+import { AGENT_PARAM, back, hrefFor, Link, navigate, sessionPath, setSearchParam, useSearchParam } from "../lib/router";
 import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
@@ -812,6 +815,52 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     [key],
   );
 
+  // The Files drawer (web/src/files): the files this session read and changed, from the
+  // receiver's index and the loaded events at the lens. One drawer per surface (the
+  // page's and the panel's), toggled from the bar, the panel's head and ⇧F; on the page,
+  // `?file=<path>` opens it on one file and follows the one shown.
+  const drawer = useDrawer(key, mode);
+  const fileParam = useSearchParam(FILE_PARAM);
+  useEffect(() => {
+    if (mode === "page" && fileParam) openDrawer(key, fileParam, "page");
+  }, [mode, fileParam, key]);
+  useEffect(() => {
+    if (mode !== "page") return;
+    const shown = drawer.open ? drawer.path : null;
+    if (fileParam !== shown) setSearchParam(FILE_PARAM, shown, { replace: true });
+  }, [mode, drawer.open, drawer.path, fileParam]);
+  // Over the timeline (the panel, a narrow page) the drawer covers it: what is under it
+  // leaves the tab order and the accessibility tree until the drawer closes.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || !drawer.open) return;
+    const mq = window.matchMedia(BESIDE);
+    const covered = () => [
+      ...root.querySelectorAll<HTMLElement>(":scope > .timeline, :scope > .sess-ctl, :scope > .page-note"),
+    ];
+    const apply = () => {
+      const on = mode === "panel" || !mq.matches;
+      for (const el of covered()) el.toggleAttribute("inert", on);
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => {
+      mq.removeEventListener("change", apply);
+      for (const el of covered()) el.removeAttribute("inert");
+    };
+  }, [drawer.open, mode]);
+  /** A jump the drawer asks for: beside the timeline the row is in view; over it the
+   *  drawer steps aside first. */
+  const jumpFromFiles = useCallback(
+    (seq: number): boolean => {
+      if (mode === "page" && window.matchMedia(BESIDE).matches) return jumpTo(seq);
+      closeDrawer(key, mode);
+      requestAnimationFrame(() => jumpTo(seq));
+      return true;
+    },
+    [mode, key, jumpTo],
+  );
+
   // The session keys (lib/shortcuts.ts). A view in the panel answers only while it is the
   // active tab; the page's view wins over the panel's unless focus is inside the panel.
   const inert = () => !rootRef.current || !!rootRef.current.closest(".panel-body--off") || !s;
@@ -856,6 +905,8 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   useShortcut("session.latest", () => (inert() ? false : setFollowing(true)), keyOpts);
   // ⇧A: the strip's "Ask another agent…" (the Handoff sheet), where the strip offers it.
   useShortcut("session.ask", () => click("[data-ctl-ask]:not(:disabled)"), keyOpts);
+  // ⇧F: the Files drawer.
+  useShortcut("session.files", () => (inert() ? false : toggleDrawer(key, mode)), keyOpts);
   // ⌥⌘1 … ⌥⌘7 label this session, ⌥⌘0 clears it.
   useLabelKeys(() => (inert() ? [] : [key]), keyOpts);
 
@@ -995,6 +1046,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
       cancel,
       { sep: true },
       followItem(),
+      { label: "Files", action: "session.files", checked: drawer.open, run: () => toggleDrawer(key, mode) },
       !chat && lensMenu(lens),
       ...own,
     ]);
@@ -1032,7 +1084,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     <TimelineCtx.Provider value={timeline}>
       <CodeFrame.Provider value={CodeWell}>
         <div
-          className={`page session ${mode === "panel" ? "session--panel" : ""} ${chat ? "session--chat" : ""} ${s ? "" : "starting"}`}
+          className={`page session ${mode === "panel" ? "session--panel" : ""} ${chat ? "session--chat" : ""} ${drawer.open && s ? "session--files" : ""} ${s ? "" : "starting"}`}
           ref={rootRef}
           data-ui={chat ? "simple" : "advanced"}
           data-starting={
@@ -1079,7 +1131,12 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
                   </>
                 )
               }
-              actions={<MoreButton build={pageMenu} title={() => title} />}
+              actions={
+                <>
+                  {s && <FilesButton session={key} mode="page" />}
+                  <MoreButton build={pageMenu} title={() => title} />
+                </>
+              }
             />
           )}
 
@@ -1189,6 +1246,17 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
                 </li>
               )}
           </ol>
+
+          {s && drawer.open && (
+            <FilesDrawer
+              session={s}
+              control={control}
+              mode={mode}
+              events={visible}
+              onJump={jumpFromFiles}
+              chat={chat}
+            />
+          )}
 
           {s && (
             <div

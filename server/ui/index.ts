@@ -20,6 +20,7 @@ import type { Store } from "../store/store.js";
 import { registerAttachments } from "./attachments.js";
 import { uiAuth } from "./auth.js";
 import { readColorThemes } from "./colorThemes.js";
+import { registerSessionFiles } from "./files.js";
 import { type LabelStore, registerLabels } from "./labels.js";
 import { type LimitsStore, registerLimits } from "./limits.js";
 import { type MarkStore, registerMarks } from "./marks.js";
@@ -188,6 +189,7 @@ export function registerUi(router: Router, deps: UiDeps): void {
   );
 
   registerReview(router, deps.store, guard);
+  registerSessionFiles(router, deps.store, guard);
   if (deps.labels) registerLabels(router, deps.labels, guard);
   if (deps.marks) registerMarks(router, deps.marks, guard);
   if (deps.limits) registerLimits(router, deps.limits, guard);
