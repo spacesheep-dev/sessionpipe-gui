@@ -97,7 +97,8 @@ fn the_macos_release_carries_the_signer_and_no_entitlement() {
         );
     }
     assert!(read("../scripts/build-mac.sh").contains("features=identity"));
-    let plist = read("Entitlements.plist");
+    // A Windows checkout has CRLF line ends (core.autocrlf); the shape is what counts.
+    let plist = read("Entitlements.plist").replace("\r\n", "\n");
     let dict = &plist[plist.find("<dict>").unwrap()..];
     assert!(
         dict.starts_with("<dict>\n</dict>"),

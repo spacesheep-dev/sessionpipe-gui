@@ -377,7 +377,8 @@ mod tests {
             rx_base: Some(rx_base("abcdefgh23")),
         };
         let s = init_script(&c, Some("/inbox"));
-        assert!(s.contains(r#""rxBase":"rx://localhost/abcdefgh23""#));
+        // rx://localhost/… here, http://rx.localhost/… on Windows (WebView2's form).
+        assert!(s.contains(&format!(r#""rxBase":"{}""#, rx_base("abcdefgh23"))));
         assert!(s.contains(r#""appVersion":"0.2.0""#));
         assert!(s.contains("dataset.shell = s.platform"));
         assert!(s.contains(r#"var p = "/inbox";"#));

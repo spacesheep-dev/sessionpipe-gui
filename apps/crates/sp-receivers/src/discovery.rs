@@ -66,7 +66,35 @@ pub fn pid_alive(pid: u32) -> bool {
         // EPERM: it exists but belongs to someone else.
         std::io::Error::last_os_error().raw_os_error() == Some(1)
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        type Handle = *mut core::ffi::c_void;
+        const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+        const STILL_ACTIVE: u32 = 259;
+        const ERROR_ACCESS_DENIED: i32 = 5;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
+            fn GetExitCodeProcess(process: Handle, code: *mut u32) -> i32;
+            fn CloseHandle(handle: Handle) -> i32;
+        }
+        // SAFETY: OpenProcess only asks for the right to read the process's exit code;
+        // the handle is closed before returning.
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if h.is_null() {
+                // Access denied: it exists but belongs to someone else.
+                return std::io::Error::last_os_error().raw_os_error() == Some(ERROR_ACCESS_DENIED);
+            }
+            let mut code = 0u32;
+            let ok = GetExitCodeProcess(h, &mut code) != 0;
+            CloseHandle(h);
+            // An exited process keeps a handle while one is open; its code is no longer
+            // STILL_ACTIVE.
+            ok && code == STILL_ACTIVE
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         true
     }
