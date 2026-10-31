@@ -117,8 +117,8 @@ pub struct ConnectLink {
 
 impl ConnectLink {
     pub fn parse(text: &str) -> Result<ConnectLink, String> {
-        let (r, key) = sp_receivers::Receiver::from_url(text)
-            .ok_or("That isn't an http or https address.")?;
+        let (r, key) =
+            sp_receivers::Receiver::from_url(text).ok_or("That isn't an http or https address.")?;
         Ok(ConnectLink {
             origin: r.origin,
             key,
@@ -181,12 +181,8 @@ pub async fn rx_add<R: Runtime>(
     {
         return Err("cancelled".into());
     }
-    hub.add(
-        &url,
-        key.as_deref().or(link.key.as_deref()),
-        ca.as_deref(),
-    )
-    .await
+    hub.add(&url, key.as_deref().or(link.key.as_deref()), ca.as_deref())
+        .await
 }
 
 #[tauri::command]
@@ -294,9 +290,21 @@ mod tests {
             }
         );
         // An empty key is none; a fragment never is the key.
-        assert!(ConnectLink::parse("http://192.168.1.4:7373/?k=").unwrap().key.is_none());
-        assert!(ConnectLink::parse("http://192.168.1.4:7373/#k=x").unwrap().key.is_none());
-        for bad in ["javascript:alert(1)", "rx://localhost/abc", "studio.local:7373", "", "tauri://localhost/"] {
+        assert!(ConnectLink::parse("http://192.168.1.4:7373/?k=")
+            .unwrap()
+            .key
+            .is_none());
+        assert!(ConnectLink::parse("http://192.168.1.4:7373/#k=x")
+            .unwrap()
+            .key
+            .is_none());
+        for bad in [
+            "javascript:alert(1)",
+            "rx://localhost/abc",
+            "studio.local:7373",
+            "",
+            "tauri://localhost/",
+        ] {
             assert_eq!(
                 ConnectLink::parse(bad),
                 Err("That isn't an http or https address.".into()),
