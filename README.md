@@ -13,19 +13,19 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.6.2/sessionpipe_0.6.2_universal.dmg"><picture>
+  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_universal.dmg"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/macos-dark.svg">
     <img src="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/macos.svg" alt="Download for macOS: Apple silicon and Intel" width="272" height="56">
   </picture></a>
   &nbsp;
-  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.6.2/sessionpipe_0.6.2_amd64.deb"><picture>
+  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_amd64.deb"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/linux-dark.svg">
     <img src="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/linux.svg" alt="Download for Linux: .deb, x86-64" width="272" height="56">
   </picture></a>
 </p>
 
 <p align="center">
-  <sub>Signed and notarized for macOS 11 or newer · Linux <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.6.2/sessionpipe_0.6.2_amd64.AppImage">AppImage</a> · <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases">All releases</a> · or <a href="#install">install with npm</a></sub>
+  <sub>Signed and notarized for macOS 11 or newer · Linux <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_amd64.AppImage">AppImage</a> · <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases">All releases</a> · or <a href="#install">install with npm</a></sub>
 </p>
 
 <p align="center">
@@ -143,7 +143,7 @@ To keep it on the PATH as `sessionpipe-gui`, install a [release](https://github.
 tarball:
 
 ```sh
-npm i -g https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.6.2/sessionpipe-gui-0.6.2.tgz
+npm i -g https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe-gui-0.7.0.tgz
 ```
 
 Or from a clone: `git clone https://github.com/spacesheep-dev/sessionpipe-gui && cd
@@ -312,8 +312,8 @@ device.
 
 | Platform | Download |
 |---|---|
-| macOS 11 or newer, Apple silicon and Intel | [sessionpipe_0.6.2_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.6.2/sessionpipe_0.6.2_universal.dmg), signed and notarized |
-| Linux, x86-64 | [.deb](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.6.2/sessionpipe_0.6.2_amd64.deb) · [AppImage](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.6.2/sessionpipe_0.6.2_amd64.AppImage), for any distribution |
+| macOS 11 or newer, Apple silicon and Intel | [sessionpipe_0.7.0_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_universal.dmg), signed and notarized |
+| Linux, x86-64 | [.deb](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_amd64.deb) · [AppImage](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_amd64.AppImage), for any distribution |
 
 The same UI in a small [Tauri 2](https://tauri.app) app that uses the system's own web view
 (the AppImage carries WebKitGTK with it, which is why it is larger). It connects to the
