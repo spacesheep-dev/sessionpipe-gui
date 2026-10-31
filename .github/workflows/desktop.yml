@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["macos-15","windows-latest","ubuntu-22.04"]') || fromJSON('["macos-14"]') }}
+        os: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["macos-15","windows-latest","ubuntu-22.04"]') || fromJSON('["macos-15"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     defaults:
