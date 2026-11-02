@@ -16,7 +16,7 @@ export const REMOTE_HEADING = "Attached images (fetch them; they are on the boar
 /** One attachment reference as it appears in text: `/attachments/<ulid>.<ext>`, bare or
  *  inside an absolute URL, with an optional `?k=` and an optional ` (W×H)` after it. */
 export const ATTACHMENT_REF_RE =
-  /(?:https?:\/\/[^\s/]+)?\/attachments\/([0-9A-HJKMNP-TV-Z]{26})\.(png|jpe?g|gif|webp)(?:\?k=[A-Za-z0-9_-]+)?(?: \((\d+)×(\d+)\))?/g;
+  /(?:https?:\/\/[^\s/]+)?[/\\]{1,4}attachments[/\\]{1,4}([0-9A-HJKMNP-TV-Z]{26})\.(png|jpe?g|gif|webp)(?:\?k=[A-Za-z0-9_-]+)?(?: \((\d+)×(\d+)\))?/g;
 
 /** The text that goes into the signed command: the message, a blank line, the block. A
  *  message with nothing but images is just the block. */
@@ -50,7 +50,7 @@ export function splitAttachments(text: string): { body: string; items: Attachmen
     const block = text.slice(from);
     // Only a block made of our lines counts; anything else after the heading stays text.
     const rest = block.split("\n").slice(startsWithHeading ? 1 : 2);
-    if (rest.length > 0 && rest.every((l) => /^- \S+ \(\d+×\d+\)$/.test(l) || l === "")) body = text.slice(0, from);
+    if (rest.length > 0 && rest.every((l) => /^- .+ \(\d+×\d+\)$/.test(l) || l === "")) body = text.slice(0, from);
   }
   for (const m of text.matchAll(ATTACHMENT_REF_RE)) {
     const id = m[1]!;
