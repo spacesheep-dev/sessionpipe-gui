@@ -351,6 +351,13 @@ describe("the text block", () => {
     expect(remote.items).toEqual([{ id: A, ext: "png", src: `/attachments/${A}.png`, width: 1, height: 2 }]);
     const plain = splitAttachments("Nothing attached here");
     expect(plain).toEqual({ body: "Nothing attached here", items: [] });
+    const winAttachment: Attachment = {
+      ...a(A, 800, 600),
+      path: `C:\\Users\\dev name\\.local\\state\\sessionpipe-gui\\attachments\\${A}.png`,
+    };
+    const win = splitAttachments(composePrompt("Windows path", [winAttachment], true));
+    expect(win.body).toBe("Windows path");
+    expect(win.items).toEqual([{ id: A, ext: "png", src: `/attachments/${A}.png`, width: 800, height: 600 }]);
   });
 });
 
