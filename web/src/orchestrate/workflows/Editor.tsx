@@ -27,7 +27,7 @@ import { MultiSelect, Select, type SelectOption } from "../../components/Select"
 import { folderChoices, machineHome, tildify, typedFolder } from "../../control/folders";
 import { fixedPermission, permissionChoices } from "../../control/newSessionState";
 import { PERMISSION_LABEL } from "../../control/words";
-import { useAppState, useMachines } from "../../data/hooks";
+import { useAppState, useListedSessions, useMachines } from "../../data/hooks";
 import "../../lib/acp";
 import { sessionTitle } from "../../lib/format";
 import { Link, navigate, useSearchParam } from "../../lib/router";
@@ -381,7 +381,9 @@ function EditorForm({
 
   // ----- the agent pop-up's options -----
   const icon = useCallback((h: string) => <HarnessGlyph name={h} size="sm" />, []);
-  const sessionList = useMemo(() => [...sessions.values()], [sessions]);
+  // A step's agent and folder are picked among the sessions the board lists.
+  const listedSessions = useListedSessions();
+  const sessionList = useMemo(() => [...listedSessions.values()], [listedSessions]);
   const title = useCallback(
     (key: string) => {
       const s = sessions.get(key);

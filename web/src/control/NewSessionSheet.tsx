@@ -29,7 +29,7 @@ import {
 import { ActionButton, EmptyState, HarnessGlyph } from "../components/bits";
 import { MoreButton } from "../components/ContextMenu";
 import { Select, type SelectOption } from "../components/Select";
-import { useAppState, useLimits, useMachines } from "../data/hooks";
+import { useAppState, useLimits, useListedSessions, useMachines } from "../data/hooks";
 import { useFocusTrap } from "../lib/focus";
 import "../lib/acp";
 import { bytes, harnessMark } from "../lib/format";
@@ -134,7 +134,10 @@ function blocker(
 export function Sheet({ target, closing }: { target: NewSessionTarget; closing: boolean }) {
   const phone = usePhone();
   const machines = useMachines();
-  const { sessions, snapshotAt } = useAppState();
+  const { snapshotAt } = useAppState();
+  // Recent folders come from the sessions the board lists, not from a harness a program
+  // only started (isEmptySession).
+  const sessions = useListedSessions();
   const rp = useRpId();
   const grant = useGrant(rp);
   const secure = canSign(rp);

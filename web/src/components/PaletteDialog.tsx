@@ -11,7 +11,7 @@
 // window the session under the cursor is previewed beside the list. Messages and answers
 // leave the way the control strip sends them (web/src/control/command.ts).
 import type { AgentRun, MachineSummary, SessionMatch, SessionSummary } from "@shared/api";
-import { LABEL_COLORS, SNIPPET_CHARS, sessionKey, splitKey } from "@shared/api";
+import { isEmptySession, LABEL_COLORS, SNIPPET_CHARS, sessionKey, splitKey } from "@shared/api";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -413,7 +413,8 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     const lq = labelQuery(labels, parsed.text);
     const text = lq.rest;
     const want = (s: Section) => only === null || only === s;
-    let sorted = [...sessions.values()].filter((s) => lq.test(s.key)).sort(byStateThenRecent);
+    // The sessions the board lists: one nothing has happened in yet stays out (isEmptySession).
+    let sorted = [...sessions.values()].filter((s) => !isEmptySession(s) && lq.test(s.key)).sort(byStateThenRecent);
     const hold = held.current?.q === q ? held.current : null;
     if (hold) {
       const rank = (k: string) => hold.sessions.get(k) ?? Number.POSITIVE_INFINITY;
@@ -991,7 +992,8 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
         });
         const seen = new Set<string>();
         for (const s of [...sessions.values()].sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1))) {
-          if (s.machine !== sub.machine || !s.cwd || seen.has(s.cwd)) continue;
+          // A folder a program only started the harness in is nobody's recent folder.
+          if (s.machine !== sub.machine || !s.cwd || seen.has(s.cwd) || isEmptySession(s)) continue;
           seen.add(s.cwd);
           if (seen.size > 8) break;
           row({

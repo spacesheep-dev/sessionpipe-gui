@@ -11,7 +11,7 @@
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
 import { useState } from "react";
 import { ControlStrip } from "../components/ControlStrip";
-import { useAppState, useStore } from "../data/hooks";
+import { useAppState, useListedSessions, useStore } from "../data/hooks";
 import { HandoffHost } from "../orchestrate/handoff/HandoffHost";
 import { canAskFrom } from "../orchestrate/handoff/handoff";
 import { openHandoff } from "../orchestrate/handoff/handoffState";
@@ -68,7 +68,8 @@ export function SessionControl({
   const old = device && control && !machineTakes(control) ? updateWords(session.machine) : null;
   const secure = canSignHere && !old;
   const own = useOwnKeys(rp);
-  const { connection, suggestions: all, sessions } = useAppState();
+  const { connection, suggestions: all } = useAppState();
+  const sessions = useListedSessions();
   const store = useStore();
   // "Unlock now": take the day grant ahead of the first send (one passkey tap).
   const [unlock, setUnlock] = useState<string | null>(null);

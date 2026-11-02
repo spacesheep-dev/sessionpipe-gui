@@ -6,6 +6,18 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A harness that a program starts and stops no longer fills the board.** An IDE that
+  probes its provider (bb's `provider-maintenance-workspace`, for one) starts Claude Code
+  and stops it without a prompt, many times a day, and each probe was a row: untitled,
+  "unattended", under Idle or Done. A session nothing has happened in (no turn, tool,
+  subagent, prompt or ask) that is unattended or has already ended now stays off the
+  board, the palette, and the folders and agents New session, Ask another agent and a
+  workflow step offer, until its first turn; its end is no longer news. The receiver
+  keeps it, so its page and Search still find it. A terminal someone has just opened
+  stays on the board, so its first message can come from here.
+
 ## [0.7.0] - 2026-10-31
 
 ### Added

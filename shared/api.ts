@@ -101,6 +101,30 @@ export const splitKey = (key: SessionKey): { harness: string; id: string } => {
   return { harness: key.slice(0, i), id: key.slice(i + 1) };
 };
 
+/** Nothing has happened in the session: no turn, no tool, no subagent, no prompt for the
+ *  person, no ask of another agent, nothing changed. Its end is not news. */
+export const nothingHappened = (
+  s: Pick<SessionSummary, "counts" | "currentTurn" | "openAttentions" | "delegations">,
+): boolean =>
+  s.counts.turns === 0 &&
+  s.counts.tools === 0 &&
+  s.counts.subagents === 0 &&
+  s.counts.attentions === 0 &&
+  s.counts.filesChanged === 0 &&
+  s.counts.compactions === 0 &&
+  !s.currentTurn &&
+  s.openAttentions.length === 0 &&
+  !s.delegations?.length;
+
+/** A session the lists leave out until its first turn: nothing happened in it, and nobody
+ *  is at it (the harness says unattended) or it has already ended. A program that starts
+ *  a harness and stops it (an IDE probing its provider, a health check) sends exactly
+ *  that; a terminal someone has just opened stays listed, so its first message can come
+ *  from here. The receiver keeps every such session; its page and Search find it. */
+export const isEmptySession = (
+  s: Pick<SessionSummary, "counts" | "currentTurn" | "openAttentions" | "delegations" | "attended" | "endedAt">,
+): boolean => nothingHappened(s) && (s.attended === false || !!s.endedAt);
+
 export interface SessionSummary {
   key: SessionKey;
   harness: string;

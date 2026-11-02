@@ -24,7 +24,7 @@ import { fixedPermission, permissionChoices, permissionToSend } from "../../cont
 import { sentence } from "../../control/PendingDevices";
 import { canSign, machineTakes, setupWords, signerKind, signHint, updateWords, useOwnKeys } from "../../control/signer";
 import { PERMISSION_LABEL, sendErrorWords, WRONG_ORIGIN } from "../../control/words";
-import { useAppState, useMachinesMap, useSession, useStore } from "../../data/hooks";
+import { useListedSessions, useMachinesMap, useSession, useStore } from "../../data/hooks";
 import { useFocusTrap } from "../../lib/focus";
 import { harnessMark, STATE_LABEL, sessionTitle } from "../../lib/format";
 import { useSheetDrag } from "../../lib/motion";
@@ -89,7 +89,8 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   const phone = usePhone();
   const session = useSession(open.session);
   const machines = useMachinesMap();
-  const { sessions } = useAppState();
+  // The agents to ask and the recent folders: the sessions the board lists.
+  const sessions = useListedSessions();
   const store = useStore();
   const rp = useRpId();
   const grant = useGrant(rp);
