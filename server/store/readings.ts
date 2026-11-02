@@ -13,6 +13,7 @@ import {
   DONE_AFTER_MS,
   type EventSource,
   GAP_AFTER_MS,
+  nothingHappened,
   type ProtocolEvent,
   type SessionFlag,
   type SessionState,
@@ -528,7 +529,9 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       s.background = undefined;
       break;
     case "session.ended":
-      noteNews(s, arrivedAt);
+      // The end of a session nothing happened in (a program started the harness and
+      // stopped it) tells nobody anything.
+      if (!nothingHappened(s)) noteNews(s, arrivedAt);
       rec.ended = true;
       s.endedAt = at;
       s.background = undefined;

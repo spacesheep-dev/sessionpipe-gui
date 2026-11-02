@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DONE_AFTER_MS,
   GAP_AFTER_MS,
+  isEmptySession,
   SLOW_TOOL_MS,
   SNIPPET_CHARS,
   STALE_AFTER_MS,
@@ -1115,6 +1116,29 @@ describe("newsAt", () => {
     expect(store.session(sessionKey("claude-code", "other-1"))!.newsAt).toBe("2026-10-28T10:00:04.000Z");
     arrive("2026-10-28T10:00:07.000Z", [s.ev("session.ended", { reason: "exit" }, attended)]);
     expect(store.session(KEY)!.newsAt).toBe("2026-10-28T10:00:07.000Z");
+  });
+
+  it("the end of a session nothing happened in is not news (a program started and stopped the harness)", () => {
+    vi.useFakeTimers();
+    // What an IDE's provider probe sends: a start and an end, unattended, nothing between.
+    const probe = new Session("probe-1");
+    const unattended = { session: { attended: false, cwd: "~/.ide/provider-maintenance-workspace" } };
+    arrive("2026-10-28T10:00:00.000Z", [probe.ev("session.started", { source: "startup" }, unattended)]);
+    arrive("2026-10-28T10:00:00.500Z", [probe.ev("session.ended", { reason: "other" }, unattended)]);
+    const k = sessionKey("claude-code", "probe-1");
+    expect(store.session(k)!.state).toBe("done");
+    expect(store.session(k)!.newsAt).toBeUndefined();
+    expect(isEmptySession(store.session(k)!)).toBe(true);
+    // A session that did something is news when it ends, even with no turn of its own.
+    const tools = new Session("tools-1");
+    arrive("2026-10-28T10:00:01.000Z", [
+      tools.ev("session.started", { source: "startup" }),
+      tools.ev("tool.started", { tool: "Read", call_id: "c1" }),
+      tools.ev("tool.ended", { tool: "Read", call_id: "c1", ok: true }),
+    ]);
+    arrive("2026-10-28T10:00:02.000Z", [tools.ev("session.ended", { reason: "exit" })]);
+    expect(isEmptySession(store.session(sessionKey("claude-code", "tools-1"))!)).toBe(false);
+    expect(store.session(sessionKey("claude-code", "tools-1"))!.newsAt).toBe("2026-10-28T10:00:02.000Z");
   });
 
   it("a backfill is never news, and a restart reads the same newsAt from the files", async () => {

@@ -10,7 +10,7 @@ import type {
   SessionState,
   SessionSummary,
 } from "@shared/api";
-import { LABEL_DEFAULT_NAMES, SESSION_STATES } from "@shared/api";
+import { isEmptySession, LABEL_DEFAULT_NAMES, SESSION_STATES } from "@shared/api";
 import {
   createContext,
   useCallback,
@@ -237,7 +237,26 @@ export const byStateThenRecent = (a: SessionSummary, b: SessionSummary) =>
   b.startedAt.localeCompare(a.startedAt) ||
   (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
 
-/** All sessions, top-level ones sorted by state then start, with children attached. */
+/** The sessions a list or a picker offers: every one the store holds but those nothing has
+ *  happened in yet (shared/api.ts `isEmptySession`). The same map, so `get` and `values`
+ *  read as before; kept while the set does not change. */
+export function useListedSessions(): ReadonlyMap<SessionKey, SessionSummary> {
+  const { sessions } = useAppState();
+  return useMemo(() => {
+    let out: Map<SessionKey, SessionSummary> | null = null;
+    for (const [k, s] of sessions)
+      if (isEmptySession(s)) {
+        out ??= new Map(sessions);
+        out.delete(k);
+      }
+    return out ?? sessions;
+  }, [sessions]);
+}
+
+/** The sessions the lists show, top-level ones sorted by state then start, with children
+ *  attached. A session nothing has happened in yet (shared/api.ts `isEmptySession`: a
+ *  harness a program started and stopped) is left out until its first turn; its page and
+ *  Search still find it. */
 export function useSessionTree(): {
   all: SessionSummary[];
   roots: SessionSummary[];
@@ -245,13 +264,15 @@ export function useSessionTree(): {
 } {
   const { sessions } = useAppState();
   return useMemo(() => {
-    const all = [...sessions.values()];
+    const all = [...sessions.values()].filter((s) => !isEmptySession(s));
+    const listed = new Set(all.map((s) => s.key));
     const childrenOf = new Map<SessionKey, SessionSummary[]>();
     const roots: SessionSummary[] = [];
     for (const s of all) {
       if (s.parentId) {
         const pk: SessionKey = `${s.harness}:${s.parentId}`;
-        if (sessions.has(pk)) {
+        // Under a parent the list shows; a child of one it leaves out is a root of its own.
+        if (listed.has(pk)) {
           const list = childrenOf.get(pk) ?? [];
           list.push(s);
           childrenOf.set(pk, list);

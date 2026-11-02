@@ -13,7 +13,7 @@
 // state that names this machine and its hooked agents, and dissolves into the first row.
 // While the stream is down the rows stay, quiet, their clocks stopped.
 import type { ControlActivity, SessionState, SessionSummary } from "@shared/api";
-import { SESSION_STATES, splitKey } from "@shared/api";
+import { isEmptySession, SESSION_STATES, splitKey } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChipSelect,
@@ -245,19 +245,28 @@ export function Board() {
   const { sessions } = useAppState();
   const recentStart = starts.some((a) => Date.now() - Date.parse(a.at) < ALIAS_WINDOW_MS);
   const now = useNow(recentStart ? "fine" : "coarse");
+  // A start's session takes over from its row once the list shows it: at its first turn,
+  // not at its bare start (useSessionTree leaves an empty session out).
+  const listed = useCallback(
+    (key: string | undefined) => {
+      const s = key ? sessions.get(key) : undefined;
+      return !!s && !isEmptySession(s);
+    },
+    [sessions],
+  );
   const pending = useMemo(
     () =>
       starts.filter(
         (a) =>
           !!a.session &&
-          !sessions.has(a.session) &&
-          !(a.ackSession && sessions.has(a.ackSession)) &&
+          !listed(a.session) &&
+          !listed(a.ackSession) &&
           !isFinal(a) &&
           now - Date.parse(a.at) < PENDING_MAX_MS &&
           (!machine || paired.find((m) => m.control?.machineId === a.machineId)?.name === machine) &&
           (!harness || splitKey(a.session).harness === harness),
       ),
-    [starts, sessions, now, machine, harness, paired],
+    [starts, listed, now, machine, harness, paired],
   );
   const aliased = useCallback(
     (s: SessionSummary) =>
