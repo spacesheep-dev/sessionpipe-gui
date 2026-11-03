@@ -26,7 +26,7 @@ export interface StoredEvent extends ProtocolEvent {
   preview?: Record<string, number>;
 }
 
-export type EventSource = "http" | "outbox" | "demo";
+export type EventSource = "http" | "outbox" | "demo" | "spacesheep";
 
 /** The sessionpipe v1 envelope. Kept structural (not imported from sessionpipe-core) so
  *  the web bundle never pulls the core package in. */
@@ -1224,6 +1224,33 @@ export interface Digest {
   totals: DigestGroup;
 }
 
+/** Info.sources.spacesheep (server/sources/spacesheep.ts): the account this GUI reads
+ *  through, how the relay is doing, and what it has brought in. */
+export interface SpacesheepSourceStatus {
+  origin: string;
+  email: string;
+  connectedAt: string;
+  /** Events handed to the store since start. */
+  events: number;
+  /** The relay cursor: the last seq read. */
+  cursor: number;
+  /** `ok` after a good poll; `unauthorized` when the key was revoked; `offline` when the
+   *  origin can't be reached; `gap` when the relay no longer holds the cursor's past. */
+  state: "starting" | "ok" | "unauthorized" | "offline" | "gap";
+  lastAt?: string;
+  lastError?: string;
+  /** The machines paired on spacesheep, as its hellos last said (names only here). */
+  machines: string[];
+}
+
+/** POST ROUTES.ui.spacesheep (connect): what the page shows while the person confirms. */
+export interface SpacesheepConnectStart {
+  code: string;
+  digits: string;
+  url: string;
+  expiresAt: string;
+}
+
 export interface Info {
   name: "sessionpipe-gui";
   version: string;
@@ -1242,6 +1269,8 @@ export interface Info {
     http: true;
     outbox: { path: string; sessions: number; enabled: boolean; events?: number } | null;
     demo: boolean;
+    /** A spacesheep account used as a backend (RFC 08): absent on older servers, null when off. */
+    spacesheep?: SpacesheepSourceStatus | null;
   };
   /** `bytes` is everything under `dir`: the event files, plus `attachments` (the images
    *  uploaded from the composer, ROUTES.ui.attachments). Absent on older servers. */
@@ -1691,6 +1720,10 @@ export const ROUTES = {
     rotateToken: "/api/ui/token/rotate",
     /** POST { on: boolean } → Info.sources.demo */
     demo: "/api/ui/demo",
+    /** GET → { link: SpacesheepSourceStatus | null, pending: SpacesheepConnectStart | null };
+     *  POST { origin? } → SpacesheepConnectStart (then the server polls and connects);
+     *  DELETE → disconnected (the key is forgotten here; revoke it on spacesheep to be sure). */
+    spacesheep: "/api/ui/spacesheep",
     /** GET → image/svg+xml: the LAN URL with the UI key, for a phone camera. */
     qr: "/api/ui/qr.svg",
     /** Everything under it is the control channel's UI side (server/control/README.md),
