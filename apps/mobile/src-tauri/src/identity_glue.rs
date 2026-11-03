@@ -24,9 +24,19 @@ impl sp_identity::ReceiverLookup for Lookup {
     }
     fn get(&self, id: &str, path: &str) -> Fut<'_, sp_identity::Result<Vec<u8>>> {
         let (id, path) = (id.to_string(), path.to_string());
-        Box::pin(async move { self.0.get(&id, &path).await.map_err(sp_identity::Error::network) })
+        Box::pin(async move {
+            self.0
+                .get(&id, &path)
+                .await
+                .map_err(sp_identity::Error::network)
+        })
     }
-    fn post_json(&self, id: &str, path: &str, body: Vec<u8>) -> Fut<'_, sp_identity::Result<(u16, Vec<u8>)>> {
+    fn post_json(
+        &self,
+        id: &str,
+        path: &str,
+        body: Vec<u8>,
+    ) -> Fut<'_, sp_identity::Result<(u16, Vec<u8>)>> {
         let (id, path) = (id.to_string(), path.to_string());
         Box::pin(async move {
             self.0
@@ -38,6 +48,7 @@ impl sp_identity::ReceiverLookup for Lookup {
 }
 
 pub fn init<R: Runtime>(app: &mut tauri::App<R>, hub: Hub) -> tauri::Result<()> {
-    app.handle().plugin(sp_identity::init(Arc::new(Lookup(hub))))?;
+    app.handle()
+        .plugin(sp_identity::init(Arc::new(Lookup(hub))))?;
     Ok(())
 }
