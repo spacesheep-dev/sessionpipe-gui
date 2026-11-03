@@ -91,6 +91,23 @@ export const indexFiles = (events: readonly StoredEvent[], cwd?: string): FileEn
 
 // ---------- the text of one file ----------
 
+/** The text a Read's output carries, by line, and the number of its first line; null when
+ *  it carries none. Claude Code (2.1.3xx) hands a hook the result as an object,
+ *  `{ type: "text", file: { filePath, content, startLine, numLines, totalLines } }`, the
+ *  file's own lines with no numbers; an older build, or another harness's read tool, a
+ *  string (parseRead below). An image or a notebook read has no `content`. */
+export function readText(output: unknown): { lines: string[]; start: number } | null {
+  if (typeof output === "string") return output ? parseRead(output) : null;
+  if (!output || typeof output !== "object") return null;
+  const file = (output as { file?: unknown }).file;
+  if (!file || typeof file !== "object") return null;
+  const f = file as { content?: unknown; startLine?: unknown };
+  if (typeof f.content !== "string") return null;
+  const start = typeof f.startLine === "number" && f.startLine >= 1 ? Math.floor(f.startLine) : 1;
+  const content = f.content.endsWith("\n") ? f.content.slice(0, -1) : f.content;
+  return { lines: content.split("\n").map((l) => l.replace(/\r$/, "")), start };
+}
+
 /** A Read's output as Claude Code numbers it (`     1→text`, older builds `     1\ttext`),
  *  or plain text (Gemini's read_file). A <system-reminder> block is the harness's, not
  *  the file's, wherever it sits; CRLF endings are the file's and go. */
@@ -215,7 +232,7 @@ const whole = (events: EventsBySeq, t: Touch): StoredEvent | undefined => {
 const isBase = (events: EventsBySeq, t: Touch): boolean => {
   if (t.pending || t.failed) return false;
   const e = events.get(t.seq);
-  if (t.kind === "read") return !e || (typeof e.data.output === "string" && e.data.output !== "");
+  if (t.kind === "read") return !e || readText(e.data.output) !== null;
   if (t.kind === "write") return !e || contentIn(e.data.input) !== null;
   return false;
 };
@@ -269,9 +286,9 @@ export function fileText(entry: SessionFile, events: EventsBySeq, until = Number
     }
     const d = e.data;
     if (t.kind === "read") {
-      if (t.failed || typeof d.output !== "string" || !d.output) continue;
+      const r = t.failed ? null : readText(d.output);
+      if (!r) continue;
       // A read after the base is the truth from then on: the edits before it are in it.
-      const r = parseRead(d.output);
       lines = r.lines;
       base = r.lines;
       start = r.start;
