@@ -260,7 +260,9 @@ function referencedIds(eventsDir: string): Set<string> {
       else if (name.isFile() && name.name.endsWith(".jsonl")) {
         try {
           readLines(p, (text) => {
-            if (text.includes("/attachments/")) for (const id of attachmentIdsIn(text)) ids.add(id);
+            if (text.includes("attachments")) {
+              for (const id of attachmentIdsIn(text)) ids.add(id);
+            }
           });
         } catch {
           // a file being rewritten; the next daily pass sees it
