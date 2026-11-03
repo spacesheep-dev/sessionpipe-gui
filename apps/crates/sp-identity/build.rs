@@ -15,6 +15,13 @@ fn main() {
     let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     if target_os == "macos" {
         build_swift(&arch);
+    } else if target_os == "ios" {
+        // The phone app's main is Objective-C++ and Rust ships a static library, so the
+        // Swift runtime and the frameworks are linked by the Xcode target, not here: the
+        // same swift/Identity.swift is a source of that target (apps/mobile/src-tauri/
+        // gen/apple/Sources/sessionpipe-shell/Identity.swift, kept identical by the
+        // phone crate's test), and the `spid_*` symbols resolve at the app's link.
+        println!("cargo::rustc-cfg=spid_swift");
     }
     #[cfg(feature = "plugin")]
     tauri_plugin::Builder::new(COMMANDS).build();

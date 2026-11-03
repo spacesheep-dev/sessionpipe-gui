@@ -6,7 +6,22 @@
 
 mod confirm;
 pub mod contract;
+#[cfg(not(target_os = "ios"))]
 mod identity;
+#[cfg(target_os = "ios")]
+mod identity_glue;
+#[cfg(all(test, not(target_os = "ios")))]
+mod swift_sync {
+    /// The Xcode target compiles its own copy of sp-identity's Swift (its build.rs says
+    /// why): the two files stay identical, or the phone signs with code the Mac never tested.
+    #[test]
+    fn the_swift_is_the_crates() {
+        let here = env!("CARGO_MANIFEST_DIR");
+        let a = std::fs::read_to_string(format!("{here}/../../crates/sp-identity/swift/Identity.swift")).unwrap();
+        let b = std::fs::read_to_string(format!("{here}/gen/apple/Sources/sessionpipe-shell/Identity.swift")).unwrap();
+        assert_eq!(a, b, "copy apps/crates/sp-identity/swift/Identity.swift into gen/apple/Sources/sessionpipe-shell/");
+    }
+}
 mod net;
 pub mod notify;
 mod settings;
@@ -393,7 +408,11 @@ mod notifications {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let entry = now_ms();
-    let builder = tauri::Builder::default().plugin(identity::init());
+    let builder = tauri::Builder::default();
+    // The signer: sp-identity on iOS (registered in setup, with the Hub); the status-only
+    // stand-in elsewhere (identity.rs).
+    #[cfg(not(target_os = "ios"))]
+    let builder = builder.plugin(identity::init());
     // The scanner (§11.5) is the page's: `plugin:barcode-scanner|scan` runs the camera
     // behind the webview, and `net::rx_add` reads the receiver out of what it decoded.
     #[cfg(mobile)]
@@ -436,6 +455,8 @@ pub fn run() {
             let hub = Hub::new(net::config(home, &version));
             hub.start(tauri::async_runtime::handle().inner().clone());
             app.manage(hub.clone());
+            #[cfg(target_os = "ios")]
+            identity_glue::init(app, hub.clone())?;
             #[cfg(mobile)]
             notifications::start(app.handle(), hub);
             #[cfg(not(mobile))]

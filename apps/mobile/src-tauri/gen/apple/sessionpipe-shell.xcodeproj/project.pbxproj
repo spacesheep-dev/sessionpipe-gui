@@ -14,6 +14,7 @@
 		C667FF7BB2646256310552B5 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 697D1214F199DB40A6D24363 /* LaunchScreen.storyboard */; };
 		C73A2F70CD398EF981E9BC0B /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 37A02AC5F5899CFD0F00BB02 /* MetalKit.framework */; };
 		CDDB990266310BE63AC914D9 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 351C9E04F367955281E56DE6 /* main.mm */; };
+		A1D3E5F7B9C2D4E6F8A0B1C3 /* Identity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2E4F6A8C0D2E4F6A8B0C2D4 /* Identity.swift */; };
 		D015063EBDB50492309CCB97 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3262860AC2D7313B97B118C5 /* Metal.framework */; };
 		D8FD317F3E0CDB4A7F9579B9 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 69A390F63E313BAC4E71BEEB /* libapp.a */; };
 		DDF0CD3B4EF708888021A2C5 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9A42679FD43B37607C45E03B /* UIKit.framework */; };
@@ -28,6 +29,7 @@
 		2A33B26339CC583EEF6EC7C1 /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
 		3262860AC2D7313B97B118C5 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		351C9E04F367955281E56DE6 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
+		B2E4F6A8C0D2E4F6A8B0C2D4 /* Identity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Identity.swift; sourceTree = "<group>"; };
 		37A02AC5F5899CFD0F00BB02 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		3A4A8F9A351AA38069A4D7FD /* contract.rs */ = {isa = PBXFileReference; path = contract.rs; sourceTree = "<group>"; };
 		593C77B9573428F4AB7EB96B /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
@@ -84,6 +86,7 @@
 		17FF2C0CA80495B01B4A5444 /* sessionpipe-shell */ = {
 			isa = PBXGroup;
 			children = (
+				B2E4F6A8C0D2E4F6A8B0C2D4 /* Identity.swift */,
 				351C9E04F367955281E56DE6 /* main.mm */,
 				F9315038D297C1A0590DD9EF /* bindings */,
 			);
@@ -262,6 +265,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1D3E5F7B9C2D4E6F8A0B1C3 /* Identity.swift in Sources */,
 				CDDB990266310BE63AC914D9 /* main.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
