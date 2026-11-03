@@ -6,6 +6,14 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Files shows the text of a file the agent read.** Claude Code hands a Read's result
+  to its hooks as an object (the file's lines, from the line it started at), and the
+  drawer only knew the numbered text older builds sent, so every file the agent only read
+  said "Nothing to show yet", and an edited one showed its edits with no text around them.
+  Both forms read now, and the edits apply to the text they changed.
+
 ## [0.7.1] - 2026-11-02
 
 ### Fixed

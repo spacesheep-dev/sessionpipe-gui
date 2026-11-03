@@ -10,6 +10,7 @@ import {
   mergeFiles,
   parseRead,
   problemsOf,
+  readText,
   reviewPrompt,
   versionsOf,
 } from "./model";
@@ -125,6 +126,40 @@ describe("parseRead", () => {
     });
     const mid = "<system-reminder>one</system-reminder>\nkeep\n<system-reminder>two</system-reminder>";
     expect(parseRead(mid).lines).toEqual(["keep"]);
+  });
+});
+
+describe("readText", () => {
+  it("reads Claude Code's Read result object, from its start line, without numbers", () => {
+    // The shape Claude Code 2.1.312 hands a PostToolUse hook for Read (recorded 2026-11-02).
+    const out = {
+      type: "text",
+      file: { filePath: "/Users/me/app/a.ts", content: "one\r\ntwo\n", numLines: 2, startLine: 40, totalLines: 90 },
+    };
+    expect(readText(out)).toEqual({ lines: ["one", "two"], start: 40 });
+    expect(readText({ type: "text", file: { filePath: "a", content: "x" } })).toEqual({ lines: ["x"], start: 1 });
+  });
+  it("still reads a numbered string, and nothing from an image, a notebook or nothing", () => {
+    expect(readText(numbered(["a", "b"]))).toEqual({ lines: ["a", "b"], start: 1 });
+    expect(readText({ type: "image", file: { base64: "…", type: "image/png" } })).toBeNull();
+    expect(readText("")).toBeNull();
+    expect(readText(null)).toBeNull();
+  });
+  it("is a base for the edits after it", () => {
+    seq = 0;
+    const read = {
+      type: "text",
+      file: { filePath: "a.ts", content: "a\nb\n", startLine: 1, numLines: 2, totalLines: 2 },
+    };
+    const events = [
+      ...tool("Read", { file_path: "a.ts" }, undefined),
+      ...tool("Edit", { file_path: "a.ts", old_string: "b", new_string: "B" }, "ok"),
+    ];
+    (events[1]!.data as Record<string, unknown>).output = read;
+    const t = textOf(events);
+    expect(t.basis?.kind).toBe("read");
+    expect(t.lines).toEqual(["a", "B"]);
+    expect([...t.changed]).toEqual([2]);
   });
 });
 

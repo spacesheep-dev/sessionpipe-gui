@@ -8,9 +8,14 @@ import { randomUUID } from "node:crypto";
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
 import { EVENTS, INFO, openPage, sessionUrl, ulid } from "./helpers.js";
 
-const numbered = (lines: string[]) => lines.map((l, i) => `${String(i + 1).padStart(6)}→${l}`).join("\n");
+/** A Read's result as Claude Code (2.1.3xx) hands it to the PostToolUse hook: an object,
+ *  the file's own lines with no numbers. */
+const readResult = (filePath: string, lines: string[]) => ({
+  type: "text",
+  file: { filePath, content: `${lines.join("\n")}\n`, numLines: lines.length, startLine: 1, totalLines: lines.length },
+});
 
-/** One tier-3 Claude Code session: a Read of a file (numbered, as Claude Code returns
+/** One tier-3 Claude Code session: a Read of a file (the result object Claude Code returns
  *  it), two Edits to it, a Write of a new file, a Bash that failed, then a second Read of
  *  the first file (a later version). */
 async function postSession(request: APIRequestContext) {
@@ -44,7 +49,7 @@ async function postSession(request: APIRequestContext) {
       data,
     };
   };
-  const tool = (name: string, input: Record<string, unknown>, output: string, ok = true) => {
+  const tool = (name: string, input: Record<string, unknown>, output: unknown, ok = true) => {
     const call_id = `c${seq}`;
     return [
       ev("tool.started", { tool: name, call_id, turn_id: "t1", input }),
@@ -60,7 +65,7 @@ async function postSession(request: APIRequestContext) {
     ...tool(
       "Read",
       { file_path: file },
-      numbered([banner, "import { open } from 'node:fs';", "const limit = 1 << 20;", "export { limit };"]),
+      readResult(file, [banner, "import { open } from 'node:fs';", "const limit = 1 << 20;", "export { limit };"]),
     ),
     ...tool(
       "Edit",

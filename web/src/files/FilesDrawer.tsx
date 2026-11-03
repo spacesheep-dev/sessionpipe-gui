@@ -1038,7 +1038,7 @@ function FileView({
           <p className="state-text">
             {entry.pending
               ? "A tool is still running on this file."
-              : "The events name this file but carry none of its text at this lens."}
+              : "The agent named this file, but its events carry none of its text: a lower tier or lens leaves tool inputs and outputs out."}
           </p>
         </div>
       )}
