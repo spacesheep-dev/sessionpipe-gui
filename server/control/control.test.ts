@@ -3,7 +3,7 @@
 // open, renewal, expiry, wrong poll key), machine-token isolation, the long-poll,
 // redelivery, the `taken` pause, acks, expiry, off, the early verification against
 // every control vector, the approval proof, persistence and the stream.
-import { pairUrlFor } from "./routes.js";
+
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -17,6 +17,7 @@ import { coreTakesDevice, receiverKeyTypes } from "./devicekeys.js";
 import { fileHash } from "./files.js";
 import { type Control, createControl } from "./index.js";
 import { parseAccounts, parseAcks, parseHello } from "./parse.js";
+import { pairUrlFor } from "./routes.js";
 import { commandStr, signCommand, signWithDevice, TestDayKey, TestDeviceKey, TestPasskey } from "./testkeys.js";
 import { coreTakesTilde } from "./tilde.js";
 import { readKey, readProof } from "./ui.js";
@@ -1573,9 +1574,13 @@ it("sha256 is the WebCrypto one the verifier uses", async () => {
 describe("the pairing link the terminal prints (pairUrlFor)", () => {
   it("names a passkey origin, keeping the daemon's own when that is one", () => {
     const origins = ["https://misha-laptop.local:7373", "http://localhost:7373"];
-    expect(pairUrlFor("http://100.68.187.81:7373", origins, "abc")).toBe("https://misha-laptop.local:7373/pair?code=abc");
+    expect(pairUrlFor("http://100.68.187.81:7373", origins, "abc")).toBe(
+      "https://misha-laptop.local:7373/pair?code=abc",
+    );
     expect(pairUrlFor("http://localhost:7373", origins, "abc")).toBe("http://localhost:7373/pair?code=abc");
-    expect(pairUrlFor("https://misha-laptop.local:7373/", origins, "a b")).toBe("https://misha-laptop.local:7373/pair?code=a%20b");
+    expect(pairUrlFor("https://misha-laptop.local:7373/", origins, "a b")).toBe(
+      "https://misha-laptop.local:7373/pair?code=a%20b",
+    );
   });
   it("falls back to the daemon's address when no passkey origin is known", () => {
     expect(pairUrlFor("http://100.68.187.81:7373", [], "abc")).toBe("http://100.68.187.81:7373/pair?code=abc");
