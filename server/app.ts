@@ -212,6 +212,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     testDoor: opts.testDoor ?? false,
     uiAuth,
     sessionExists: (key) => store.sessionExists(key),
+    origins,
   });
 
   registerReceiver(router, { store, sinkToken: () => config.sinkToken, control });

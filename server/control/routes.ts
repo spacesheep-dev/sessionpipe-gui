@@ -14,6 +14,22 @@ export interface MachineRouteDeps {
   sinkToken: () => string;
   /** ROUTES.control */
   base: string;
+  /** The browser origins passkeys work on (app.ts `origins`): the pairing link the
+   *  terminal prints names one of these, never a bare LAN or tailnet address. */
+  origins?: () => string[];
+}
+
+/** The pairing link a terminal prints (CONTROL.md §2 step 2). A daemon reaches the
+ *  receiver on whatever address it was given — http://100.x.y.z:7373, a tailnet name —
+ *  and a page opened on that address can't make or use a passkey (the rp id is the
+ *  https host, or localhost). So the link names a passkey origin: the one the daemon
+ *  came in on when that is one, else the first. On 2026-11-03 a person opened the
+ *  printed http://100.68.187.81:7373/pair link on the Mac that runs the GUI and met the
+ *  UI-key wall, then "sending works from https://…; open it there". */
+export function pairUrlFor(requestOrigin: string, origins: readonly string[], code: string): string {
+  const same = origins.find((o) => o.replace(/\/+$/, "") === requestOrigin.replace(/\/+$/, ""));
+  const base = (same ?? origins[0] ?? requestOrigin).replace(/\/+$/, "");
+  return `${base}/pair?code=${encodeURIComponent(code)}`;
 }
 
 /** Equal secrets, in constant time whatever their lengths. */
@@ -96,7 +112,7 @@ export function registerMachineRoutes(router: Router, d: MachineRouteDeps): void
       json: {
         machine: m.id,
         code: p.code,
-        url: `${requestOrigin(ctx)}/pair?code=${encodeURIComponent(p.code)}`,
+        url: pairUrlFor(requestOrigin(ctx), d.origins?.() ?? [], p.code),
         check: p.check,
         expires_at: p.expiresAt,
       },
