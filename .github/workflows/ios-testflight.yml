@@ -263,7 +263,15 @@ jobs:
           chmod 600 "$dir/AuthKey_$APPLE_API_KEY.p8"
           xcrun altool --upload-app --type ios --file "$IPA" --apple-id "$ASC_APP_ID" \
             --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER" 2>&1 | tee "$RUNNER_TEMP/altool.log"
-          if grep -E '^\*\*\* Error|ERROR:|UPLOAD FAILED|Failed to upload' "$RUNNER_TEMP/altool.log" >/dev/null; then
+          # altool's verdict is its last word: "UPLOAD SUCCEEDED" means the build is on App
+          # Store Connect even when its status polling logged transient 500s on the way
+          # (2026-11-03, v0.7.3: two "received status code 500" ERROR lines, then "UPLOAD
+          # SUCCEEDED with no errors", and this step failed the run on the first grep).
+          if grep -q 'UPLOAD SUCCEEDED' "$RUNNER_TEMP/altool.log"; then
+            if grep -E 'ERROR:' "$RUNNER_TEMP/altool.log" >/dev/null; then
+              echo "::warning::altool reported errors on the way but the upload succeeded: $(grep -E 'ERROR:' "$RUNNER_TEMP/altool.log" | head -1)"
+            fi
+          elif grep -E '^\*\*\* Error|ERROR:|UPLOAD FAILED|Failed to upload' "$RUNNER_TEMP/altool.log" >/dev/null; then
             echo "::error::altool: $(grep -E '^\*\*\* Error|ERROR:|UPLOAD FAILED|Failed to upload' "$RUNNER_TEMP/altool.log" | head -1)"
             exit 1
           fi
