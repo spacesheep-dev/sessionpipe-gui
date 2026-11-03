@@ -175,6 +175,74 @@ export function registerSpacesheepUi(
     }),
   );
 
+  // The app's device key, asked to be trusted on spacesheep (its /api/gui/device): the
+  // answer carries the match code the app shows and the Devices link where a trusted
+  // passkey approves it, per machine, as for a phone.
+  router.post(
+    `${ROUTES.ui.spacesheep}/device`,
+    guard(async (ctx): Promise<Reply> => {
+      const link = deps.link();
+      if (!link)
+        return { status: 409, json: { reason: "not_connected", error: "Connect a spacesheep account first." } };
+      let body: { key?: unknown; name?: unknown } = {};
+      try {
+        body = await ctx.json<{ key?: unknown; name?: unknown }>(4096);
+      } catch {
+        return { status: 400, json: { reason: "malformed" } };
+      }
+      let res: Response;
+      try {
+        res = await f(`${link.origin}/api/gui/device`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${link.key}`,
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({ key: body.key, name: typeof body.name === "string" ? body.name : deps.deviceName() }),
+        });
+      } catch (e) {
+        return {
+          status: 502,
+          json: { reason: "unreachable", error: `Couldn't reach ${link.origin}: ${(e as Error).message}` },
+        };
+      }
+      const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok)
+        return {
+          status: res.status === 401 ? 401 : res.status === 403 ? 403 : 502,
+          json: {
+            reason: String(j.code ?? "refused"),
+            error: String(j.error ?? `${link.origin} answered ${res.status}`),
+          },
+        };
+      return {
+        status: 200,
+        json: { code: j.code, keyId: j.key_id, trustedOn: j.trusted_on ?? [], devicesUrl: j.devices_url },
+      };
+    }),
+  );
+  router.get(
+    `${ROUTES.ui.spacesheep}/device`,
+    guard(async (ctx): Promise<Reply> => {
+      const link = deps.link();
+      if (!link) return { status: 409, json: { reason: "not_connected" } };
+      const id = ctx.url.searchParams.get("id") ?? "";
+      if (!/^[A-Za-z0-9_-]{43}$/.test(id)) return { status: 400, json: { reason: "bad_request" } };
+      let res: Response;
+      try {
+        res = await f(`${link.origin}/api/gui/device?id=${encodeURIComponent(id)}`, {
+          headers: { authorization: `Bearer ${link.key}`, accept: "application/json" },
+        });
+      } catch (e) {
+        return { status: 502, json: { reason: "unreachable", error: (e as Error).message } };
+      }
+      const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) return { status: 502, json: { reason: String(j.code ?? "refused"), error: String(j.error ?? "") } };
+      return { status: 200, json: { trustedOn: j.trusted_on ?? [], machines: j.machines ?? [], pending: !!j.pending } };
+    }),
+  );
+
   router.add(
     "DELETE",
     ROUTES.ui.spacesheep,
