@@ -289,6 +289,34 @@ describe("the native adapter (mocked invoke)", () => {
     expect(calls.at(-1)?.args).toMatchObject({ cmd: add, mode: "confirm" });
   });
 
+  it("says Touch ID will ask only when it will: a confirm, a fresh grant, or no grant held", async () => {
+    let exp: number | null = Date.now() + 3_600_000;
+    inShell((cmd, args) =>
+      cmd === "plugin:identity|status"
+        ? { available: true, key: DEVICE, grantExp: exp }
+        : cmd === "plugin:identity|sign"
+          ? { cmd: args.cmd, csig: "c", grant: { cred: DEVICE.id, sig: "s", str: "{}" } }
+          : null,
+    );
+    const cmd = commandString(MACHINE, { kind: "prompt", session: "claude-code:x", text: "hi" });
+    let tapped = 0;
+    const onTap = () => tapped++;
+    // A grant held: the day key signs, no sheet comes, nothing says Touch ID.
+    await sign("localhost", cmd, { onTap });
+    expect(tapped).toBe(0);
+    await sign("localhost", cmd, { onTap, confirm: true });
+    expect(tapped).toBe(1);
+    await sign("localhost", cmd, { onTap, fresh: true });
+    expect(tapped).toBe(2);
+    // The grant ended, or none was taken today: Touch ID asks for one.
+    exp = Date.now() - 1;
+    await sign("localhost", cmd, { onTap });
+    expect(tapped).toBe(3);
+    exp = null;
+    await sign("localhost", cmd, { onTap });
+    expect(tapped).toBe(4);
+  });
+
   it("a grant a machine refused reads as gone in the app until a fresh one is taken", async () => {
     const exp = Date.now() + 3_600_000;
     const calls = inShell((cmd, args) =>
