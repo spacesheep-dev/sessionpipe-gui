@@ -144,7 +144,12 @@ export function createControl(deps: ControlDeps): Control {
   return {
     keyTypes,
     register(router) {
-      registerMachineRoutes(router, { state, sinkToken: deps.sinkToken, base: ROUTES.control, ...(deps.origins ? { origins: deps.origins } : {}) });
+      registerMachineRoutes(router, {
+        state,
+        sinkToken: deps.sinkToken,
+        base: ROUTES.control,
+        ...(deps.origins ? { origins: deps.origins } : {}),
+      });
       registerUiRoutes(router, { state, rpId, uiAuth: deps.uiAuth, base: ROUTES.ui.control, device });
       if (deps.testDoor) registerTestDoor(router, { state, rpId, base: ROUTES.control, device });
     },
