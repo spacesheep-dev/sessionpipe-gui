@@ -6,6 +6,18 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-11-03
+
+### Fixed
+
+- **The pairing link the terminal prints names a passkey origin.** `sessionpipe control
+  pair` printed the address the daemon reached the GUI on (a tailnet IP, a LAN name), and
+  a page on that address can neither read the board without its key nor make or use a
+  passkey, which belongs to the https host or to localhost. The link now names an origin
+  passkeys work on: the daemon's own when it is one, else the first. Seen pairing a Mac
+  mini with the GUI on a laptop: the printed `http://100.68.187.81:7373/pair` link met the
+  key wall, then "Sending works from https://…; open it there".
+
 ## [0.7.2] - 2026-11-02
 
 ### Fixed
@@ -663,7 +675,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.2...v0.7.0
