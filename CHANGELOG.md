@@ -13,6 +13,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   drawer only knew the numbered text older builds sent, so every file the agent only read
   said "Nothing to show yet", and an edited one showed its edits with no text around them.
   Both forms read now, and the edits apply to the text they changed.
+- **The app says "confirm with Touch ID" only when Touch ID will ask.** With the day's
+  grant held, an answer or a message is signed with the day key and no sheet comes, but
+  the app said "confirm with Touch ID" while it signed, so a slow send read as a Touch ID
+  prompt that never showed. It now says so only for a confirm, a fresh grant, or when no
+  grant is held, as the browser does.
 
 ## [0.7.1] - 2026-11-02
 

@@ -70,8 +70,11 @@ const call = (rp: string, cmd: string | null, mode: "grant" | "confirm", fresh: 
   invoke<Omit<SendBody, "machineId">>("plugin:identity|sign", { receiver: receiver(), rp, cmd, mode, fresh });
 
 /** Sign the exact bytes. A `key.add` always goes as a confirm: one Touch ID that names
- *  the device (Rust refuses it under the grant anyway). */
-export function sign(rp: string, cmd: string, o: SignOptions = {}) {
+ *  the device (Rust refuses it under the grant anyway). `onTap` fires only when Touch ID
+ *  will ask (a confirm, a fresh grant, or no grant held now), as the browser's day key
+ *  does: with a grant held Rust signs with the day key, no sheet comes, and the page must
+ *  not say "confirm with Touch ID" while it waits. */
+export async function sign(rp: string, cmd: string, o: SignOptions = {}) {
   const keyAdd = (() => {
     try {
       return (JSON.parse(cmd) as { kind?: unknown }).kind === "key.add";
@@ -79,8 +82,12 @@ export function sign(rp: string, cmd: string, o: SignOptions = {}) {
       return false;
     }
   })();
-  o.onTap?.();
-  return call(rp, cmd, o.confirm || keyAdd ? "confirm" : "grant", !!o.fresh);
+  const confirm = !!o.confirm || keyAdd;
+  if (o.onTap) {
+    const exp = confirm || o.fresh ? null : await grantExpiry(rp);
+    if (exp === null || exp <= Date.now()) o.onTap();
+  }
+  return call(rp, cmd, confirm ? "confirm" : "grant", !!o.fresh);
 }
 
 /** One Touch ID now for the day grant, ahead of the first send. */
