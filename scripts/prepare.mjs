@@ -23,24 +23,30 @@ if (existsSync(path.join(root, "dist", "cli.js")) && existsSync(path.join(root, 
 const require = createRequire(path.join(root, "package.json"));
 const haveTools = ["esbuild", "vite", "@vitejs/plugin-react", "react", "react-dom", "typescript"].every((m) => {
   try {
-    require.resolve(`${m}/package.json`);
+    require.resolve(m);
     return true;
   } catch {
-    return false;
+    try {
+      require.resolve(`${m}/package.json`);
+      return true;
+    } catch {
+      return false;
+    }
   }
 });
 const env = { ...process.env };
 for (const k of Object.keys(env))
   if (/^npm_config_(global|prefix|location|save|package_lock_only|dry_run)$/i.test(k)) delete env[k];
 env.npm_config_global = "false";
+const shell = process.platform === "win32";
 if (!haveTools) {
   console.log("sessionpipe-gui: installing the build tools into the checkout (one time)…");
   const i = spawnSync(
     "npm",
     ["install", "--include=dev", "--no-save", "--no-audit", "--no-fund", "--ignore-scripts", "--prefix", root],
-    { cwd: root, stdio: "inherit", env },
+    { cwd: root, stdio: "inherit", env, shell },
   );
   if (i.status !== 0) process.exit(i.status ?? 1);
 }
-const r = spawnSync("npm", ["run", "build", "--silent"], { cwd: root, stdio: "inherit", env });
+const r = spawnSync("npm", ["run", "build", "--silent"], { cwd: root, stdio: "inherit", env, shell });
 process.exit(r.status ?? 1);
