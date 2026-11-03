@@ -1,7 +1,7 @@
 //! The phone's side of the signer (NATIVE-SPEC §5.5): sp-identity takes a `ReceiverLookup`
 //! the shell implements over the Hub, the same as the Mac app's identity_glue. iOS only:
 //! the device key lives in the iPhone's Secure Enclave and Face ID (or the passcode)
-//! signs each command; the Swift half is the Xcode target's Identity.swift.
+//! signs each command; the Swift half is the crate's, built by its build.rs for iOS.
 use sp_receivers::Hub;
 use std::future::Future;
 use std::pin::Pin;
@@ -40,17 +40,4 @@ impl sp_identity::ReceiverLookup for Lookup {
 pub fn init<R: Runtime>(app: &mut tauri::App<R>, hub: Hub) -> tauri::Result<()> {
     app.handle().plugin(sp_identity::init(Arc::new(Lookup(hub))))?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    /// The Xcode target compiles its own copy of the crate's Swift (build.rs says why):
-    /// the two files stay identical, or the phone signs with code the Mac never tested.
-    #[test]
-    fn the_swift_is_the_crates() {
-        let here = env!("CARGO_MANIFEST_DIR");
-        let crate_swift = std::fs::read_to_string(format!("{here}/../../crates/sp-identity/swift/Identity.swift")).unwrap();
-        let xcode_swift = std::fs::read_to_string(format!("{here}/gen/apple/Sources/sessionpipe-shell/Identity.swift")).unwrap();
-        assert_eq!(crate_swift, xcode_swift, "copy apps/crates/sp-identity/swift/Identity.swift into gen/apple/Sources/sessionpipe-shell/");
-    }
 }

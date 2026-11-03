@@ -10,18 +10,6 @@ pub mod contract;
 mod identity;
 #[cfg(target_os = "ios")]
 mod identity_glue;
-#[cfg(all(test, not(target_os = "ios")))]
-mod swift_sync {
-    /// The Xcode target compiles its own copy of sp-identity's Swift (its build.rs says
-    /// why): the two files stay identical, or the phone signs with code the Mac never tested.
-    #[test]
-    fn the_swift_is_the_crates() {
-        let here = env!("CARGO_MANIFEST_DIR");
-        let a = std::fs::read_to_string(format!("{here}/../../crates/sp-identity/swift/Identity.swift")).unwrap();
-        let b = std::fs::read_to_string(format!("{here}/gen/apple/Sources/sessionpipe-shell/Identity.swift")).unwrap();
-        assert_eq!(a, b, "copy apps/crates/sp-identity/swift/Identity.swift into gen/apple/Sources/sessionpipe-shell/");
-    }
-}
 mod net;
 pub mod notify;
 mod settings;
