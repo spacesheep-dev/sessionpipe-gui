@@ -33,6 +33,8 @@
 	<array>
 		<string>_sessionpipe._tcp</string>
 	</array>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Face ID signs what you send to your computers, so only you can.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>sessionpipe reads the code your computer shows, to connect to it.</string>
 	<key>NSLocalNetworkUsageDescription</key>

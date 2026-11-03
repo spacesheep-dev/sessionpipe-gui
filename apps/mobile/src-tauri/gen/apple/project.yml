@@ -68,6 +68,7 @@ targets:
         NSLocalNetworkUsageDescription: sessionpipe connects to the receiver on your computer over your local network.
         # The QR scanner (tauri-plugin-barcode-scanner refuses to scan without this key).
         NSCameraUsageDescription: sessionpipe reads the code your computer shows, to connect to it.
+        NSFaceIDUsageDescription: Face ID signs what you send to your computers, so only you can.
         NSBonjourServices: [_sessionpipe._tcp]
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
