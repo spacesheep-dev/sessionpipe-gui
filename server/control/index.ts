@@ -44,6 +44,8 @@ export interface ControlDeps {
   deviceKeys?: boolean;
   /** Queue starts with a `~/…` folder (tilde.ts); by default only when this core takes one. */
   tilde?: boolean;
+  /** The browser origins passkeys work on (routes.ts pairUrlFor): the pairing link names one. */
+  origins?: () => string[];
 }
 
 export interface Control {
@@ -142,7 +144,7 @@ export function createControl(deps: ControlDeps): Control {
   return {
     keyTypes,
     register(router) {
-      registerMachineRoutes(router, { state, sinkToken: deps.sinkToken, base: ROUTES.control });
+      registerMachineRoutes(router, { state, sinkToken: deps.sinkToken, base: ROUTES.control, ...(deps.origins ? { origins: deps.origins } : {}) });
       registerUiRoutes(router, { state, rpId, uiAuth: deps.uiAuth, base: ROUTES.ui.control, device });
       if (deps.testDoor) registerTestDoor(router, { state, rpId, base: ROUTES.control, device });
     },
