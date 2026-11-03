@@ -213,6 +213,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     uiAuth,
     sessionExists: (key) => store.sessionExists(key),
     origins,
+    uiKey,
   });
 
   registerReceiver(router, { store, sinkToken: () => config.sinkToken, control });

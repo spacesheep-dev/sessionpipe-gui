@@ -46,6 +46,8 @@ export interface ControlDeps {
   tilde?: boolean;
   /** The browser origins passkeys work on (routes.ts pairUrlFor): the pairing link names one. */
   origins?: () => string[];
+  /** The UI key (routes.ts pairUrlFor): the pairing link carries it. */
+  uiKey?: () => string;
 }
 
 export interface Control {
@@ -148,6 +150,7 @@ export function createControl(deps: ControlDeps): Control {
         state,
         sinkToken: deps.sinkToken,
         base: ROUTES.control,
+        ...(deps.uiKey ? { uiKey: deps.uiKey } : {}),
         ...(deps.origins ? { origins: deps.origins } : {}),
       });
       registerUiRoutes(router, { state, rpId, uiAuth: deps.uiAuth, base: ROUTES.ui.control, device });

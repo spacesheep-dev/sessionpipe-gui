@@ -285,3 +285,20 @@
   display: grid;
   gap: 6px;
 }
+
+/* The pairing page as a QR for the phone that holds the passkey (PairBody). */
+.pair-phone {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin: 0.25rem 0 0.75rem;
+}
+.pair-phone img {
+  flex: none;
+  padding: 4px;
+  border-radius: 6px;
+  background: #fff;
+}
+.pair-phone .caption {
+  max-width: 24rem;
+}

@@ -1585,4 +1585,12 @@ describe("the pairing link the terminal prints (pairUrlFor)", () => {
   it("falls back to the daemon's address when no passkey origin is known", () => {
     expect(pairUrlFor("http://100.68.187.81:7373", [], "abc")).toBe("http://100.68.187.81:7373/pair?code=abc");
   });
+  it("carries the UI key when it has one, so a browser that never saw the board is let in", () => {
+    expect(pairUrlFor("http://localhost:7373", ["http://localhost:7373"], "abc", "k3y/+=")).toBe(
+      "http://localhost:7373/pair?code=abc&k=k3y%2F%2B%3D",
+    );
+    expect(pairUrlFor("http://localhost:7373", ["http://localhost:7373"], "abc", "")).toBe(
+      "http://localhost:7373/pair?code=abc",
+    );
+  });
 });
