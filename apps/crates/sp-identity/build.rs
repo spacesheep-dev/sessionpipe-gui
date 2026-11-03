@@ -75,7 +75,14 @@ fn build_swift(platform: Platform, arch: &str) {
             "-parse-as-library",
             "-O",
         ])
-        .args(["-sdk", &sdk_path, "-target", &target, "swift/Identity.swift", "-o"])
+        .args([
+            "-sdk",
+            &sdk_path,
+            "-target",
+            &target,
+            "swift/Identity.swift",
+            "-o",
+        ])
         .arg(&lib)
         .status()
         .expect("xcrun swiftc (set DEVELOPER_DIR to Xcode)");
