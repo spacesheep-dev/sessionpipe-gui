@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`sessionpipe-gui service install` on Windows.** The receiver runs in the background as a
+  scheduled task that starts at your logon (`\sessionpipe\dev.spacesheep.sessionpipe-gui`
+  in Task Scheduler), with no console window and no administrator rights; `uninstall`,
+  `status`, `--dry-run` and the in-place upgrade work as on macOS and Linux, and the output
+  goes to `<state>/service.log`. Until now it said "a background service on Windows is not
+  here yet".
+
 ## [0.7.4] - 2026-11-03
 
 ### Added

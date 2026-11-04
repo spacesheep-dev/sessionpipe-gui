@@ -121,8 +121,10 @@ search (every session's prompts, replies and tool calls; works offline, no brows
 
 service (the receiver in the background: started at login, restarted if it stops):
 
-  sessionpipe-gui service install            a LaunchAgent (macOS, dev.spacesheep.sessionpipe-gui)
-                                             or a systemd --user unit (Linux) running this
+  sessionpipe-gui service install            a LaunchAgent (macOS, dev.spacesheep.sessionpipe-gui),
+                                             a systemd --user unit (Linux) or a scheduled
+                                             task at your logon (Windows, under \\sessionpipe\\
+                                             in Task Scheduler; no admin) running this
                                              node and this sessionpipe-gui; --port N,
                                              --state DIR and --host H as for the receiver,
                                              receiver options after -- passed on. A service
@@ -134,7 +136,7 @@ service (the receiver in the background: started at login, restarted if it stops
   sessionpipe-gui service status             the label, pid, running version, port and url
                                              (exit 3: not running)
   --dry-run prints the file and the commands and changes nothing. Logs go to
-  <state>/service.log. Windows: not yet; run sessionpipe-gui in a terminal.
+  <state>/service.log.
   A running receiver writes <state>/run.json (port, pid, version, url) so the desktop
   app finds it on any port; it is removed when the receiver stops.
 
