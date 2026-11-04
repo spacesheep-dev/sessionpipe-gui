@@ -25,7 +25,7 @@ import { type Control, createControl } from "./control/index.js";
 import { type Runner, startDemo, startReplay } from "./demo/index.js";
 import { registerExtras } from "./extensions/extras.js";
 import { bundledDirs } from "./extensions/kind.js";
-import { lanAddresses } from "./http/net.js";
+import { isLoopback, lanAddresses } from "./http/net.js";
 import { Router } from "./http/router.js";
 import { createOrchestrate, type Orchestrate } from "./orchestrate/index.js";
 import { registerOrchestrate } from "./orchestrate/routes.js";
@@ -132,9 +132,10 @@ export interface App {
   store: Store;
   control: Control;
   port: number;
-  /** http://127.0.0.1:<port> */
+  /** http://127.0.0.1:<port>, or the address --host bound when it is not a wildcard. */
   url: string;
-  /** http://<lan ip>:<port> for every LAN address, most likely first. */
+  /** http://<lan ip>:<port> for every LAN address the listener answers on, most likely
+   *  first: all of them on a wildcard bind, the one bound address otherwise, none on loopback. */
   lanUrls: string[];
   stateDir: string;
   config: () => GuiConfig;
@@ -301,12 +302,26 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   let replay: Runner | null = null;
   if (opts.replay) replay = startReplay(store, opts.replay, { speed: opts.speed ?? 0, rebase: true, maxGapMs: 10_000 });
 
-  const lanUrls = (): string[] => lanAddresses().map((ip) => `http://${ip}:${port}`);
+  // What --host bound. A wildcard (the default 0.0.0.0, or ::) answers on every LAN
+  // address; one address answers there alone, so a loopback bind offers no LAN URL and
+  // the sink command names the loopback address that was bound (::1 refuses 127.0.0.1).
+  // Null until the listener is bound, and for a wildcard.
+  // An address with a zone id (fe80::1%en0) has no URL form browsers or fetch accept, so
+  // it is never put in a URL; the fallback stays 127.0.0.1, as before.
+  let bound: string | null = null;
+  const urlHost = (ip: string): string => (ip.includes(":") ? `[${ip}]` : ip);
+  const usable = (): string | null => (bound !== null && !bound.includes("%") ? bound : null);
+  const selfUrl = (): string => `http://${urlHost(usable() ?? "127.0.0.1")}:${port}`;
+  const lanUrls = (): string[] => {
+    if (bound === null) return lanAddresses().map((ip) => `http://${ip}:${port}`);
+    const ip = usable();
+    return ip === null || isLoopback(ip) ? [] : [`http://${urlHost(ip)}:${port}`];
+  };
   const httpsUrl = (): string | undefined => (tls ? `https://${tls.hostname}:${port}` : undefined);
   const attachments = AttachmentStore.for(stateDir);
   const info = (): Info => {
     const lan = lanUrls();
-    const base = lan[0] ?? `http://127.0.0.1:${port}`;
+    const base = lan[0] ?? selfUrl();
     const stats = store.stats();
     const ob = outbox?.status();
     return {
@@ -546,6 +561,9 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
 
   const host = opts.host ?? "0.0.0.0";
   port = await listen(listener, opts.port ?? DEFAULT_PORT, host);
+  const addr = listener.address();
+  // Node reports every wildcard spelling (0, ::0, ::ffff:0.0.0.0) as one of these two.
+  if (typeof addr === "object" && addr && addr.address !== "0.0.0.0" && addr.address !== "::") bound = addr.address;
   // Plugins start once the port is known: their api names the URLs a message can carry.
   // Plugins can reach out of the machine (a Telegram bot, say). Demo mode exists to look
   // at the UI with synthetic sessions, so it never activates them: a throwaway server
@@ -575,7 +593,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     store,
     control,
     port,
-    url: `http://127.0.0.1:${port}`,
+    url: selfUrl(),
     get lanUrls() {
       return lanUrls();
     },

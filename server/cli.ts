@@ -358,7 +358,8 @@ async function banner(app: App): Promise<string> {
     const qr = await QRCode.toString(phoneUrl, { type: "terminal", small: true });
     for (const l of qr.split("\n")) lines.push(`  ${l}`);
   }
-  lines.push("  from another machine:");
+  // No LAN URL (a loopback --host, or no network): the sink command reaches this machine only.
+  lines.push(info.urls.lan.length ? "  from another machine:" : "  from this machine:");
   lines.push(`    ${info.sinkCommand}`);
   if (info.remote) {
     lines.push("  from a machine anywhere (through the proxy):");
