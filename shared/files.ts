@@ -102,9 +102,12 @@ export function tildify(p: string): string {
 
 /** A path as the repo sees it: under the session's cwd it loses that prefix; a path
  *  elsewhere keeps its place, with the home directory as `~`. Already-relative paths
- *  stay as they are. */
+ *  stay as they are. A Windows path (`C:\…`) under the cwd loses that prefix too: the cwd
+ *  is matched with `\` and `/` alike and in any case, and the rest is written with `/`,
+ *  as a POSIX path's is; the rest keeps its own case. */
 export function relativePath(p: string, cwd?: string): string {
   const path = p.trim();
+  if (WIN_ABS.test(path)) return winRelative(path, cwd);
   if (!path.startsWith("/") && !path.startsWith("~")) return path;
   const tp = tildify(path);
   if (cwd) {
@@ -113,6 +116,19 @@ export function relativePath(p: string, cwd?: string): string {
     if (tp === base) return ".";
   }
   return tp;
+}
+
+const WIN_ABS = /^[A-Za-z]:[\\/]/;
+const winKey = (s: string): string => s.replace(/\\/g, "/").toLowerCase();
+
+function winRelative(path: string, cwd?: string): string {
+  const c = cwd?.trim();
+  if (!c || !WIN_ABS.test(c)) return path;
+  const base = c.replace(/[\\/]+$/, "");
+  if (winKey(path.slice(0, base.length)) !== winKey(base)) return path;
+  if (path.length === base.length) return ".";
+  if (path[base.length] !== "\\" && path[base.length] !== "/") return path;
+  return normalizeRel(path.slice(base.length + 1).replace(/^[\\/]+/, "")) || ".";
 }
 
 /** A relative path with its spelling settled: `\` as `/`, no leading `./`. For callers

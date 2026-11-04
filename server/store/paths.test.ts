@@ -70,6 +70,45 @@ describe("relativePath / changedPaths", () => {
     expect(relativePath(`${HOME}/Desktop/Projects/sessionpipe`, CWD)).toBe(".");
   });
 
+  it("strips a Windows cwd the way Windows matches it, either slash and any case, and writes the rest with /", () => {
+    const cwd = "C:\\Users\\dev\\code\\acme";
+    expect(relativePath("C:\\Users\\dev\\code\\acme\\src\\index.ts", cwd)).toBe("src/index.ts");
+    expect(relativePath("c:\\users\\dev\\code\\acme\\src\\index.ts", cwd)).toBe("src/index.ts");
+    expect(relativePath("C:/Users/dev/code/acme/src/index.ts", cwd)).toBe("src/index.ts");
+    expect(relativePath("C:\\Users\\dev\\code\\acme\\src\\index.ts", "C:/Users/dev/code/acme/")).toBe("src/index.ts");
+    expect(relativePath("C:\\Users\\dev\\code\\acme", cwd)).toBe(".");
+    expect(relativePath("C:\\Users\\dev\\code\\acme\\", cwd)).toBe(".");
+    expect(relativePath("D:\\a.ts", "D:\\")).toBe("a.ts");
+    expect(relativePath("C:\\Users\\dev\\code\\acme\\\\src\\a.ts", cwd)).toBe("src/a.ts");
+    // Not under the cwd: a sibling sharing its prefix, another drive, a POSIX cwd, a bare
+    // drive (C: alone is a drive's current folder, not its root), none.
+    expect(relativePath("C:\\Users\\dev\\code\\acme2\\a.ts", cwd)).toBe("C:\\Users\\dev\\code\\acme2\\a.ts");
+    expect(relativePath("D:\\Users\\dev\\code\\acme\\a.ts", cwd)).toBe("D:\\Users\\dev\\code\\acme\\a.ts");
+    expect(relativePath("C:\\Users\\dev\\code\\acme\\a.ts", "~/code/acme")).toBe("C:\\Users\\dev\\code\\acme\\a.ts");
+    expect(relativePath("C:\\Users\\dev\\code\\acme\\a.ts", "C:")).toBe("C:\\Users\\dev\\code\\acme\\a.ts");
+    expect(relativePath("C:\\Users\\dev\\code\\acme\\a.ts")).toBe("C:\\Users\\dev\\code\\acme\\a.ts");
+    // A relative path, and a POSIX one, are read as before.
+    expect(relativePath("src\\index.ts", cwd)).toBe("src\\index.ts");
+    expect(relativePath("/home/dev/code/acme/src/a.ts", cwd)).toBe("~/code/acme/src/a.ts");
+  });
+
+  it("gives one changed file for a Windows path however it is spelled, and for the files.changed after it", () => {
+    const cwd = "C:\\Users\\dev\\code\\acme";
+    const edit = (file_path: string) => ({
+      type: "tool.ended",
+      data: { tool: "Edit", ok: true, input: { file_path } },
+    });
+    const paths = new Set([
+      ...[
+        "C:\\Users\\dev\\code\\acme\\src\\index.ts",
+        "C:/Users/dev/code/acme/src/index.ts",
+        "c:\\users\\dev\\code\\acme\\src\\index.ts",
+      ].flatMap((p) => changedPaths(edit(p), cwd)),
+      ...changedPaths({ type: "files.changed", data: { paths: ["src/index.ts"] } }, cwd),
+    ]);
+    expect([...paths]).toEqual(["src/index.ts"]);
+  });
+
   it("gives the same repo-relative paths for a files.changed and for the write tool it followed", () => {
     const write = {
       type: "tool.ended",
