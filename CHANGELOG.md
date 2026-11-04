@@ -6,6 +6,11 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Search keeps a commit request received while publishing an earlier commit, so newly
+  indexed messages do not wait for the next timed flush.
+
 ## [0.7.4] - 2026-11-03
 
 ### Added

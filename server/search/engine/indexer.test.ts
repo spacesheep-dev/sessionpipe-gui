@@ -254,6 +254,45 @@ describe("watch mode", () => {
     r.close();
   });
 
+  it("keeps a commit request received while publishing the previous commit", async () => {
+    const w = world();
+    writeFileSync(w.file("a"), fakeLine({ k: "p", text: "first marker", at }));
+    let commits = 0;
+    const ix = startIndexer(
+      {
+        dir: w.dir,
+        env: w.env,
+        adapters: [w.adapter],
+        history: true,
+        mode: "watch",
+        onCommit: () => {
+          commits++;
+          if (commits !== 2) return;
+          appendFileSync(w.file("a"), fakeLine({ k: "p", text: "third marker", at: at + 2 }));
+          ix.send({ t: "hint", path: w.file("a") });
+          ix.send({ t: "commit" });
+        },
+      },
+      { inProcess: true, tickMs: 10, sweepMs: 50, idleExitMs: 60_000 },
+    );
+    const r = await openReader({ dir: w.dir, sources: ["history"] });
+    const matched = () => {
+      r.refresh();
+      return r.search(q("marker")).matches[0]?.matched;
+    };
+    try {
+      await expect.poll(matched, { timeout: 5000 }).toBe(1);
+      appendFileSync(w.file("a"), fakeLine({ k: "p", text: "second marker", at: at + 1 }));
+      ix.send({ t: "hint", path: w.file("a") });
+      ix.send({ t: "commit" });
+      await expect.poll(matched, { timeout: 5000 }).toBe(3);
+    } finally {
+      ix.send({ t: "stop" });
+      await ix.done;
+      r.close();
+    }
+  });
+
   it("exits on its own after the idle time", async () => {
     const w = world();
     writeFileSync(w.file("a"), fakeLine({ k: "p", text: "x", at }));
