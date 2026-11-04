@@ -167,6 +167,21 @@ describe("sessionpipe-gui search", () => {
     expect(r.code).toBe(1);
     expect((JSON.parse(r.out) as SessionSearchPage).index.history).toBe(false);
   });
+
+  it("reads history off past a byte-order mark in config.json", async () => {
+    writeFileSync(path.join(tmp.dir, "config.json"), `\uFEFF${JSON.stringify({ searchHistory: false })}`);
+    const r = await run(runSearchCli, ["webhook", "--json"]);
+    expect(r.code).toBe(1);
+    expect((JSON.parse(r.out) as SessionSearchPage).index.history).toBe(false);
+  });
+
+  it("treats a config.json the GUI refuses to read as history off, not on", async () => {
+    // A cut-short write: the GUI itself stops on this file rather than write over it.
+    writeFileSync(path.join(tmp.dir, "config.json"), '{"searchHistory": false, "sinkToken": "spg_');
+    const r = await run(runSearchCli, ["webhook", "--json"]);
+    expect(r.code).toBe(1);
+    expect((JSON.parse(r.out) as SessionSearchPage).index.history).toBe(false);
+  });
 });
 
 describe("sessionpipe-gui index", () => {

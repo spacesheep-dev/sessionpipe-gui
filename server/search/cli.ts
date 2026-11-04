@@ -21,6 +21,7 @@ import {
   type SessionSearchPage,
 } from "../../shared/api.js";
 import { isEmptySearch, parseSearch } from "../../shared/searchQuery.js";
+import { readConfigFile } from "../config.js";
 import { HARNESS_LABELS } from "./facets.js";
 import { homePath } from "./resume.js";
 import {
@@ -158,13 +159,15 @@ export function parseSearchArgs(argv: string[]): SearchArgs | "help" {
   return a;
 }
 
-/** The GUI's own settings, read without creating anything (the CLI never writes config). */
+/** The GUI's own settings, read without creating anything (the CLI never writes config).
+ *  No config.json yet means history on, the default; one the GUI itself refuses to read
+ *  (unreadable, empty, does not parse) means off, so a setting that turned history off is
+ *  not undone by a damaged file. */
 function readHistorySetting(stateDir: string): boolean {
   try {
-    const c = JSON.parse(readFileSync(path.join(stateDir, "config.json"), "utf8")) as { searchHistory?: unknown };
-    return c.searchHistory !== false;
+    return readConfigFile(path.join(stateDir, "config.json"))?.searchHistory !== false;
   } catch {
-    return true;
+    return false;
   }
 }
 

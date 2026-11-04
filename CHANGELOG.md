@@ -6,6 +6,19 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `config.json` that does not parse is never written over.** A `config.json` left empty or
+  half-written by a write that died, or hand-edited so it no longer parses, was silently
+  replaced with fresh secrets on the next start, so every sender paired with the old sink
+  token got 401 and every phone and browser holding the old UI key was refused, with nothing
+  said. The GUI now stops with a message that names the file and what to do, and leaves it
+  byte for byte as it was; one it cannot read (a folder of that name, no permission) stops
+  it the same way instead of with a stack trace. A `config.json` with a UTF-8 byte-order
+  mark (PowerShell 5's `UTF8` encoding, older Windows editors) is read past it, instead of
+  being replaced the same way. `sessionpipe-gui search` reads its history setting past a
+  byte-order mark too, and treats a `config.json` the GUI refuses as history off, not on.
+
 ## [0.7.4] - 2026-11-03
 
 ### Added
