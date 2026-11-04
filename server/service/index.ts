@@ -2,7 +2,8 @@
 // Owned by: packaging. `sessionpipe-gui service install|uninstall|status`: the receiver as a
 // per-user background service, so it runs at login and outlives any window (the desktop
 // app's "Start sessionpipe" runs `service install`). macOS: a LaunchAgent bootstrapped into
-// gui/<uid>. Linux: a systemd --user unit. Windows: not yet.
+// gui/<uid>. Linux: a systemd --user unit. Windows: a scheduled task at this user's logon
+// (windows.ts), under \\sessionpipe\\ in Task Scheduler.
 //
 // `install` finds a service of ours already there (every app upgrade does: the plist
 // names the cli of the version that installed it) and upgrades it in place: the same port,
@@ -12,7 +13,8 @@
 //
 // Everything outside the process (the platform, HOME, the uid, launchctl / systemctl, the
 // port probe) comes in through `ServiceEnv`, so tests run against a temp HOME and a fake
-// launchctl (`SP_LAUNCHCTL`, `SP_SYSTEMCTL`) and never touch the real session.
+// launchctl (`SP_LAUNCHCTL`, `SP_SYSTEMCTL`, `SP_SCHTASKS`, `SP_TASKKILL`) and never touch
+// the real session.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
@@ -23,11 +25,12 @@ import { packageVersion } from "../config.js";
 import { readRunFile, readRunFileRaw, runFilePath } from "../runfile.js";
 import { launchAgentPath, launchAgentPlist, parseLaunchctlPrint, plistArgv } from "./launchd.js";
 import { parseSystemctlShow, systemdUnit, unitArgv, unitName, unitPath } from "./systemd.js";
+import { parseSchtasksQuery, taskArgv, taskName, taskXml, unsafeWord } from "./windows.js";
 
 export const SERVICE_LABEL = "dev.spacesheep.sessionpipe-gui";
 export const SERVICE_LOG = "service.log";
-export const WINDOWS_NOTE =
-  "a background service on Windows is not here yet: run `sessionpipe-gui` in a terminal, or add it to Startup apps yourself";
+/** Where `install` writes the task definition for `schtasks /Create /XML` (then removes it). */
+export const TASK_XML = "service-task.xml";
 
 export type Verb = "install" | "uninstall" | "status";
 export interface ServiceOptions {
@@ -54,6 +57,10 @@ export interface ServiceEnv {
   label: string;
   launchctl: string;
   systemctl: string;
+  schtasks: string;
+  taskkill: string;
+  /** Windows: DOMAIN\\user, whose logon starts the task. */
+  user: string;
   /** The node binary and the CLI the service runs, both absolute. */
   node: string;
   cli: string;
@@ -89,6 +96,9 @@ export function processEnv(defaultState: string): ServiceEnv {
     label: env.SP_SERVICE_LABEL || SERVICE_LABEL,
     launchctl: env.SP_LAUNCHCTL || "launchctl",
     systemctl: env.SP_SYSTEMCTL || "systemctl",
+    schtasks: env.SP_SCHTASKS || "schtasks",
+    taskkill: env.SP_TASKKILL || "taskkill",
+    user: env.USERDOMAIN && env.USERNAME ? `${env.USERDOMAIN}\\${env.USERNAME}` : os.userInfo().username,
     node: process.execPath,
     cli,
     defaultState,
@@ -138,7 +148,10 @@ export async function probePort(port: number, timeoutMs = 1000): Promise<Probe> 
   return info.name === "sessionpipe-gui" ? "gui" : "other";
 }
 
-const tilde = (p: string, home: string) => (p === home || p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p);
+const tilde = (p: string, home: string) =>
+  p === home || p.startsWith(`${home}/`) || p.startsWith(`${home}\\`) ? `~${p.slice(home.length)}` : p;
+/** The last part of a path written with either separator (a Windows argv read on any OS). */
+const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** The PATH the service runs with: launchd and systemd start programs with a bare one, and
@@ -160,18 +173,26 @@ interface Installed {
   argv: string[];
 }
 
-function serviceFile(env: ServiceEnv): string | null {
+/** The plist or unit file; on Windows the task's name (the task lives in Task Scheduler). */
+function serviceFile(env: ServiceEnv): string {
   if (env.platform === "darwin") return launchAgentPath(env.home, env.label);
-  if (env.platform === "linux") return unitPath(env.home, env.label);
-  return null;
+  if (env.platform === "win32") return taskName(env.label);
+  return unitPath(env.home, env.label);
 }
 
 function readInstalled(env: ServiceEnv): Installed | null {
   const file = serviceFile(env);
-  if (!file || !existsSync(file)) return null;
+  if (env.platform === "win32") {
+    const r = env.exec(env.schtasks, ["/Query", "/TN", file, "/XML"]);
+    return r.code === 0 ? { file, argv: taskArgv(r.stdout) } : null;
+  }
+  if (!existsSync(file)) return null;
   const text = readFileSync(file, "utf8");
   return { file, argv: env.platform === "darwin" ? plistArgv(text) : unitArgv(text) };
 }
+
+/** Where the service file is shown: a path under ~, or the task's name. */
+const where = (env: ServiceEnv, file: string) => (env.platform === "win32" ? `task ${file}` : tilde(file, env.home));
 
 function flag(argv: string[], name: string): string | undefined {
   const i = argv.indexOf(name);
@@ -185,15 +206,15 @@ function flag(argv: string[], name: string): string | undefined {
 export function isOurs(argv: string[], cli?: string): boolean {
   const [program, script] = argv;
   if (!program) return false;
-  if (path.basename(program) === "sessionpipe-gui") return true;
+  if (base(program) === "sessionpipe-gui") return true;
   if (!script) return false;
   if (cli && script === cli) return true;
-  return /(^|\/)sessionpipe-gui\/dist\/cli\.js$/.test(script) || path.basename(script) === "sessionpipe-gui";
+  return /(^|[\\/])sessionpipe-gui[\\/]dist[\\/]cli\.js$/.test(script) || base(script) === "sessionpipe-gui";
 }
 
 /** The receiver options an installed service was given: port, state, host, and the rest. */
 export function installedOptions(argv: string[]): { port?: number; state?: string; host?: string; extra: string[] } {
-  const rest = argv.slice(path.basename(argv[0] ?? "") === "sessionpipe-gui" ? 1 : 2);
+  const rest = argv.slice(base(argv[0] ?? "") === "sessionpipe-gui" ? 1 : 2);
   const o: { port?: number; state?: string; host?: string; extra: string[] } = { extra: [] };
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]!;
@@ -211,6 +232,11 @@ function managerState(env: ServiceEnv): { loaded: boolean; running: boolean; pid
     const r = env.exec(env.launchctl, ["print", `gui/${env.uid}/${env.label}`]);
     if (r.code !== 0) return { loaded: false, running: false };
     return { loaded: true, ...parseLaunchctlPrint(r.stdout) };
+  }
+  if (env.platform === "win32") {
+    const r = env.exec(env.schtasks, ["/Query", "/TN", taskName(env.label), "/FO", "CSV", "/NH", "/V"]);
+    if (r.code !== 0) return { loaded: false, running: false };
+    return { loaded: true, ...parseSchtasksQuery(r.stdout) };
   }
   const r = env.exec(env.systemctl, [
     "--user",
@@ -235,8 +261,8 @@ async function waitUnloaded(env: ServiceEnv): Promise<boolean> {
 
 /** Run one `service` verb; resolves to the process exit code. */
 export async function runService(o: ServiceOptions, env: ServiceEnv): Promise<number> {
-  if (env.platform !== "darwin" && env.platform !== "linux") {
-    env.err(WINDOWS_NOTE);
+  if (env.platform !== "darwin" && env.platform !== "linux" && env.platform !== "win32") {
+    env.err(`a background service on ${env.platform} is not here yet: run \`sessionpipe-gui\` in a terminal`);
     return 1;
   }
   if (o.verb === "install") return install(o, env);
@@ -250,6 +276,15 @@ const failedCommand = (c: string[], r: ExecResult) =>
 /** The file the service runs from. */
 function serviceText(env: ServiceEnv, argv: string[], state: string): string {
   const logPath = path.join(state, SERVICE_LOG);
+  if (env.platform === "win32") {
+    return taskXml({
+      description: "sessionpipe-gui (the board: a sessionpipe receiver)",
+      user: env.user,
+      argv,
+      logPath,
+      workingDirectory: state,
+    });
+  }
   const envVars = { PATH: servicePath(env.node) };
   return env.platform === "darwin"
     ? launchAgentPlist({ label: env.label, argv, env: envVars, logPath, workingDirectory: state })
@@ -312,8 +347,34 @@ function afterWait(env: ServiceEnv, verdict: "running" | "silent", port: number,
   return 0;
 }
 
+/** `schtasks /Create /XML` reads UTF-16 with a byte-order mark. */
+function writeTaskXml(file: string, text: string): void {
+  writeFileSync(file, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text.replace(/\n/g, "\r\n"), "utf16le")]));
+}
+
+/** Windows: ending the task stops conhost, not the receiver under it; the receiver goes by
+ *  the pid in its run.json, with its tree. */
+function stopTask(env: ServiceEnv, state: string): string[][] {
+  const run = readRunFileRaw(state);
+  return [
+    [env.schtasks, "/End", "/TN", taskName(env.label)],
+    ...(run?.pid ? [[env.taskkill, "/PID", String(run.pid), "/T", "/F"]] : []),
+  ];
+}
+/** Windows: every word of the task's command line goes through conhost and cmd as it is. */
+function taskCarries(env: ServiceEnv, argv: string[], state: string, dryRun?: boolean): boolean {
+  if (env.platform !== "win32") return true;
+  const bad = unsafeWord([...argv, path.join(state, SERVICE_LOG)]);
+  if (bad === undefined) return true;
+  env.err(
+    `${dryRun ? "would refuse: " : ""}the scheduled task can't carry ${JSON.stringify(bad)} (a quote, & | < > ^ or %); choose another --state or option`,
+  );
+  return false;
+}
+const isStop = (env: ServiceEnv, c: string[]) => c[0] === env.taskkill || (c[0] === env.schtasks && c[1] === "/End");
+
 async function install(o: ServiceOptions, env: ServiceEnv): Promise<number> {
-  const file = serviceFile(env)!;
+  const file = serviceFile(env);
   const prefix = o.dryRun ? "would refuse: " : "";
 
   // A service under our label already: ours is upgraded in place; anything else is refused.
@@ -322,8 +383,8 @@ async function install(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     if (inst && isOurs(inst.argv, env.cli)) return upgrade(o, env, inst);
     env.err(
       inst
-        ? `${prefix}a service is already installed under ${env.label} (${tilde(file, env.home)}), and it isn't sessionpipe-gui's: it runs ${inst.argv[0] ?? "nothing"}; \`service uninstall\` removes it`
-        : `${prefix}a service is already installed (${tilde(file, env.home)}); \`sessionpipe-gui service status\` shows it, \`service uninstall\` removes it`,
+        ? `${prefix}a service is already installed under ${env.label} (${where(env, file)}), and it isn't sessionpipe-gui's: it runs ${inst.argv[0] ?? "nothing"}; \`service uninstall\` removes it`
+        : `${prefix}a service is already installed (${where(env, file)}); \`sessionpipe-gui service status\` shows it, \`service uninstall\` removes it`,
     );
     return 1;
   }
@@ -342,17 +403,25 @@ async function install(o: ServiceOptions, env: ServiceEnv): Promise<number> {
   }
 
   const argv = serviceArgv(env, { port, state, host: o.host, extra: o.extra });
+  if (!taskCarries(env, argv, state, o.dryRun)) return 1;
   const text = serviceText(env, argv, state);
+  // Windows: the definition goes through a file in the state dir, then into Task Scheduler.
+  const xmlFile = path.join(state, TASK_XML);
   const commands: string[][] =
     env.platform === "darwin"
       ? [[env.launchctl, "bootstrap", `gui/${env.uid}`, file]]
-      : [
-          [env.systemctl, "--user", "daemon-reload"],
-          [env.systemctl, "--user", "enable", "--now", unitName(env.label)],
-        ];
+      : env.platform === "win32"
+        ? [
+            [env.schtasks, "/Create", "/TN", file, "/XML", xmlFile, "/F"],
+            [env.schtasks, "/Run", "/TN", file],
+          ]
+        : [
+            [env.systemctl, "--user", "daemon-reload"],
+            [env.systemctl, "--user", "enable", "--now", unitName(env.label)],
+          ];
 
   if (o.dryRun) {
-    env.out(`# ${file}`);
+    env.out(`# ${env.platform === "win32" ? xmlFile : file}`);
     env.out(text.trimEnd());
     env.out("");
     for (const c of commands) env.out(`$ ${c.join(" ")}`);
@@ -363,19 +432,26 @@ async function install(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     return 0;
   }
 
-  mkdirSync(path.dirname(file), { recursive: true });
   mkdirSync(state, { recursive: true });
-  writeFileSync(file, text, { mode: 0o644 });
+  if (env.platform === "win32") writeTaskXml(xmlFile, text);
+  else {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, text, { mode: 0o644 });
+  }
   for (const c of commands) {
     const r = env.exec(c[0]!, c.slice(1));
     if (r.code !== 0) {
-      rmSync(file, { force: true });
+      if (env.platform === "win32") {
+        if (c[1] !== "/Create") env.exec(env.schtasks, ["/Delete", "/TN", file, "/F"]);
+        rmSync(xmlFile, { force: true });
+      } else rmSync(file, { force: true });
       if (env.platform === "linux") env.exec(env.systemctl, ["--user", "daemon-reload"]);
       env.err(`${failedCommand(c, r)} (nothing installed)`);
       return 1;
     }
   }
-  env.out(`installed ${env.label} (${tilde(file, env.home)})`);
+  if (env.platform === "win32") rmSync(xmlFile, { force: true });
+  env.out(`installed ${env.label} (${where(env, file)})`);
 
   if (env.waitMs > 0) {
     const verdict = await waitForReceiver(env, { port, state });
@@ -423,20 +499,28 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
   const from = running ?? readRunFileRaw(state)?.version;
   const change = `${env.label}: ${from && from !== env.version ? `${from} → ` : ""}${env.version}`;
 
+  if (!taskCarries(env, argv, state, o.dryRun)) return 1;
   const text = serviceText(env, argv, state);
+  const xmlFile = path.join(state, TASK_XML);
   const commands: string[][] =
     env.platform === "darwin"
       ? [
           ...(managerState(env).loaded ? [[env.launchctl, "bootout", `gui/${env.uid}/${env.label}`]] : []),
           [env.launchctl, "bootstrap", `gui/${env.uid}`, inst.file],
         ]
-      : [
-          [env.systemctl, "--user", "daemon-reload"],
-          [env.systemctl, "--user", "restart", unitName(env.label)],
-        ];
+      : env.platform === "win32"
+        ? [
+            [env.schtasks, "/Create", "/TN", inst.file, "/XML", xmlFile, "/F"],
+            ...stopTask(env, was.state ?? env.defaultState),
+            [env.schtasks, "/Run", "/TN", inst.file],
+          ]
+        : [
+            [env.systemctl, "--user", "daemon-reload"],
+            [env.systemctl, "--user", "restart", unitName(env.label)],
+          ];
 
   if (o.dryRun) {
-    env.out(`# ${inst.file}`);
+    env.out(`# ${env.platform === "win32" ? xmlFile : inst.file}`);
     env.out(text.trimEnd());
     env.out("");
     for (const c of commands) env.out(`$ ${c.join(" ")}`);
@@ -447,12 +531,15 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
 
   env.out(`updating ${change}`);
   mkdirSync(state, { recursive: true });
-  writeFileSync(inst.file, text, { mode: 0o644 });
+  if (env.platform === "win32") writeTaskXml(xmlFile, text);
+  else writeFileSync(inst.file, text, { mode: 0o644 });
   for (const c of commands) {
     const r = env.exec(c[0]!, c.slice(1));
-    if (r.code !== 0) {
+    // Stopping what isn't running fails, and is fine.
+    if (r.code !== 0 && !isStop(env, c)) {
+      if (env.platform === "win32") rmSync(xmlFile, { force: true });
       env.err(
-        `${failedCommand(c, r)} (${tilde(inst.file, env.home)} is rewritten; \`service uninstall\` then \`service install\` starts over)`,
+        `${failedCommand(c, r)} (${where(env, inst.file)} is rewritten; \`service uninstall\` then \`service install\` starts over)`,
       );
       return 1;
     }
@@ -462,7 +549,8 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
       return 1;
     }
   }
-  env.out(`updated ${change} (${tilde(inst.file, env.home)})`);
+  if (env.platform === "win32") rmSync(xmlFile, { force: true });
+  env.out(`updated ${change} (${where(env, inst.file)})`);
 
   if (env.waitMs > 0) {
     const verdict = await waitForReceiver(env, { port, state, version: env.version });
@@ -475,9 +563,10 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
 }
 
 async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
-  const file = serviceFile(env)!;
+  const file = serviceFile(env);
   const st = managerState(env);
-  const has = existsSync(file);
+  const inst = env.platform === "win32" ? readInstalled(env) : null;
+  const has = env.platform === "win32" ? st.loaded : existsSync(file);
   if (!has && !st.loaded) {
     env.out(`no service ${env.label} installed: nothing to do`);
     return 0;
@@ -487,10 +576,15 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
       ? st.loaded
         ? [[env.launchctl, "bootout", `gui/${env.uid}/${env.label}`]]
         : []
-      : [[env.systemctl, "--user", "disable", "--now", unitName(env.label)]];
+      : env.platform === "win32"
+        ? [
+            ...stopTask(env, (inst && installedOptions(inst.argv).state) || env.defaultState),
+            [env.schtasks, "/Delete", "/TN", file, "/F"],
+          ]
+        : [[env.systemctl, "--user", "disable", "--now", unitName(env.label)]];
   if (o.dryRun) {
     for (const c of commands) env.out(`$ ${c.join(" ")}`);
-    if (has) env.out(`$ rm ${file}`);
+    if (has && env.platform !== "win32") env.out(`$ rm ${file}`);
     if (env.platform === "linux") env.out(`$ ${env.systemctl} --user daemon-reload`);
     env.out("dry run: nothing stopped or removed");
     return 0;
@@ -498,13 +592,18 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
   let failed = "";
   for (const c of commands) {
     const r = env.exec(c[0]!, c.slice(1));
-    if (r.code !== 0) failed = `${c.slice(0, 3).join(" ")}: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
+    if (r.code !== 0 && !isStop(env, c))
+      failed = `${c.slice(0, 3).join(" ")}: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
   }
-  rmSync(file, { force: true });
+  if (env.platform !== "win32") rmSync(file, { force: true });
   if (env.platform === "linux") env.exec(env.systemctl, ["--user", "daemon-reload"]);
   if (!(await waitUnloaded(env))) {
     env.err(
-      `${env.label} is still loaded${failed ? ` (${failed})` : ""}; try again, or \`${env.launchctl} bootout gui/${env.uid}/${env.label}\``,
+      `${env.label} is still loaded${failed ? ` (${failed})` : ""}; try again, or ${
+        env.platform === "win32"
+          ? `\`${env.schtasks} /Delete /TN ${file} /F\``
+          : `\`${env.launchctl} bootout gui/${env.uid}/${env.label}\``
+      }`,
     );
     return 1;
   }
@@ -515,7 +614,8 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
 async function status(env: ServiceEnv): Promise<number> {
   const inst = readInstalled(env);
   const st = managerState(env);
-  const manager = env.platform === "darwin" ? "launchd" : "systemd --user";
+  const manager =
+    env.platform === "darwin" ? "launchd" : env.platform === "win32" ? "Task Scheduler" : "systemd --user";
   if (!inst && !st.loaded) {
     env.out(`service   ${env.label} (${manager}) · not installed`);
     env.out("          `sessionpipe-gui service install` runs the receiver at login");
@@ -530,7 +630,8 @@ async function status(env: ServiceEnv): Promise<number> {
   if (version) parts.push(version);
   else if (st.running) parts.push(`not answering on :${port} yet`);
   env.out(`service   ${env.label} (${manager}) · ${parts.join(" · ")}`);
-  if (inst) env.out(`file      ${tilde(inst.file, env.home)}`);
+  if (inst)
+    env.out(`${env.platform === "win32" ? "task" : "file"}      ${where(env, inst.file).replace(/^task /, "")}`);
   env.out(`port      ${port}`);
   env.out(`url       http://127.0.0.1:${port}`);
   if (state) {
