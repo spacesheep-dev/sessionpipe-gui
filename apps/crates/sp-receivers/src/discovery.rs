@@ -18,6 +18,15 @@ pub fn enabled(env_receiver_url: Option<&str>) -> bool {
     cfg!(not(debug_assertions)) && env_receiver_url.is_none_or(|s| s.trim().is_empty())
 }
 
+/// The home the receiver's `os.homedir()` names: HOME, else (Windows, where only a Git Bash
+/// sets HOME) USERPROFILE.
+pub fn home_dir(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    env("HOME")
+        .filter(|h| !h.is_empty())
+        .or_else(|| env("USERPROFILE").filter(|h| !h.is_empty()))
+        .map(PathBuf::from)
+}
+
 /// The receiver's default state dir for a given home, as server/config.ts
 /// `defaultStateDir()` computes it (env first).
 pub fn default_state_dir(home: &Path, env: &dyn Fn(&str) -> Option<String>) -> PathBuf {
@@ -162,8 +171,9 @@ async fn find_default(client: &reqwest::Client) -> Option<String> {
     if !enabled(std::env::var("SP_RECEIVER_URL").ok().as_deref()) {
         return None;
     }
-    let home = PathBuf::from(std::env::var_os("HOME")?);
-    let state = default_state_dir(&home, &|k| std::env::var(k).ok());
+    let env = |k: &str| std::env::var(k).ok();
+    let home = home_dir(&env)?;
+    let state = default_state_dir(&home, &env);
     find_local(client, &format!("http://127.0.0.1:{DEFAULT_PORT}"), &state).await
 }
 
@@ -176,6 +186,28 @@ async fn find_default(_client: &reqwest::Client) -> Option<String> {
 mod tests {
     use super::*;
     use crate::testutil::{serve_once_forever, TempDir};
+
+    #[test]
+    fn home_is_home_else_userprofile() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        assert_eq!(
+            home_dir(&env(&[("HOME", "/h"), ("USERPROFILE", "/u")])),
+            Some("/h".into())
+        );
+        assert_eq!(
+            home_dir(&env(&[("HOME", ""), ("USERPROFILE", "/u")])),
+            Some("/u".into())
+        );
+        assert_eq!(home_dir(&env(&[("USERPROFILE", "/u")])), Some("/u".into()));
+        assert_eq!(home_dir(&env(&[])), None);
+    }
 
     #[test]
     fn disabled_in_debug_and_by_env() {

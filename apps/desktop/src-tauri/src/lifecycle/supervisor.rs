@@ -724,12 +724,7 @@ pub fn local_state_dir_with(
     if !discovery_on {
         return None;
     }
-    // Windows has no HOME (unless a Git Bash set one); the receiver's home is USERPROFILE.
-    let home = PathBuf::from(
-        env("HOME")
-            .filter(|h| !h.is_empty())
-            .or_else(|| env("USERPROFILE"))?,
-    );
+    let home = discovery::home_dir(env)?;
     Some(discovery::default_state_dir(&home, env))
 }
 
