@@ -6,6 +6,10 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Board filters apply immediately even while focus or the pointer holds the row order.
+
 ## [0.7.4] - 2026-11-03
 
 ### Added
