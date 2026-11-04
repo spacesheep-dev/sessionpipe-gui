@@ -1,9 +1,13 @@
 //! The local receiver: starting it (the welcome's "Start sessionpipe", NATIVE-SPEC §1.1,
 //! §3.9) and finding it again when it moves (§4 "Receiver restarts on a new port").
 //!
-//! Starting runs `sessionpipe-gui service install` (a LaunchAgent / systemd unit: the
-//! receiver must outlive the window, so it is never the app's child), found through a login
-//! shell, because an app opened from Finder has no user PATH, then the known prefixes.
+//! Starting runs `sessionpipe-gui service install` (a LaunchAgent / systemd unit / Windows
+//! scheduled task: the receiver must outlive the window, so it is never the app's child),
+//! found through a login shell, because an app opened from Finder has no user PATH, then the
+//! known prefixes. On Windows the app has the user's PATH already: that, then the places
+//! Node's installers put it. There npm's shims are .cmd files, which node can't run and Rust
+//! runs only through cmd, so the CLI and npx are found as the scripts behind them and run
+//! under node.
 //! With only npx: `npx -y --package=<this version's release tarball> -- sessionpipe-gui
 //! service install` (the GUI is not on npm; its GitHub release carries the tarball). No Node: the
 //! welcome shows the one-line installer.
@@ -143,6 +147,9 @@ fn executable(p: &Path) -> bool {
 }
 
 pub fn search(dirs: &[PathBuf]) -> Tools {
+    if cfg!(windows) {
+        return search_windows(dirs);
+    }
     let find = |name: &str| dirs.iter().map(|d| d.join(name)).find(|p| executable(p));
     Tools {
         cli: find("sessionpipe-gui"),
@@ -151,9 +158,90 @@ pub fn search(dirs: &[PathBuf]) -> Tools {
     }
 }
 
+// ---- Windows ----
+
+/// The script behind an npm shim `<dir>\<name>.cmd`: npm puts the package under
+/// `<dir>\node_modules` beside it.
+fn shim_script(dir: &Path, name: &str, script: &[&str]) -> Option<PathBuf> {
+    if !dir.join(format!("{name}.cmd")).is_file() {
+        return None;
+    }
+    let p = script
+        .iter()
+        .fold(dir.join("node_modules"), |p, part| p.join(part));
+    p.is_file().then_some(p)
+}
+
+/// node.exe; the CLI as `node_modules\sessionpipe-gui\dist\cli.js` beside its shim; npx
+/// as `node_modules\npm\bin\npx-cli.js` beside npx.cmd (Node's installer, nvm-windows,
+/// Scoop), or an npx.exe (Volta's shim) as it is.
+pub fn search_windows(dirs: &[PathBuf]) -> Tools {
+    Tools {
+        cli: dirs.iter().find_map(|d| {
+            shim_script(d, "sessionpipe-gui", &["sessionpipe-gui", "dist", "cli.js"])
+        }),
+        node: dirs
+            .iter()
+            .map(|d| d.join("node.exe"))
+            .find(|p| p.is_file()),
+        npx: dirs.iter().find_map(|d| {
+            shim_script(d, "npx", &["npm", "bin", "npx-cli.js"])
+                .or_else(|| Some(d.join("npx.exe")).filter(|p| p.is_file()))
+        }),
+    }
+}
+
+/// Where Node lives on Windows when PATH doesn't say: Node's installer (Program Files), npm's
+/// global folder (%APPDATA%\npm), nvm-windows' active version (%NVM_SYMLINK%), Volta's shims
+/// and Scoop's current version.
+pub fn windows_prefixes(env: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+    let var = |k: &str| env(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let mut v = vec![var("ProgramFiles")
+        .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"))
+        .join("nodejs")];
+    v.extend(var("APPDATA").map(|a| a.join("npm")));
+    v.extend(var("NVM_SYMLINK"));
+    v.extend(var("LOCALAPPDATA").map(|l| l.join("Volta").join("bin")));
+    if let Some(home) = var("USERPROFILE") {
+        let scoop = home
+            .join("scoop")
+            .join("apps")
+            .join("nodejs")
+            .join("current");
+        v.push(scoop.join("bin"));
+        v.push(scoop);
+    }
+    v
+}
+
+/// The folders on a PATH string, as Windows writes it (`;`, entries may be quoted).
+pub fn windows_path_dirs(path: &str) -> Vec<PathBuf> {
+    path.split(';')
+        .map(|d| d.trim().trim_matches('"'))
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// A child of the app runs with no console window (a GUI app's console child gets a new one).
+#[cfg(windows)]
+fn no_window(c: &mut Command) -> &mut Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    c.creation_flags(CREATE_NO_WINDOW)
+}
+#[cfg(not(windows))]
+fn no_window(c: &mut Command) -> &mut Command {
+    c
+}
+
 /// `/bin/zsh -lc 'command -v sessionpipe-gui node npx'` (the person's own PATH), with a
-/// timeout: a login shell that waits on something must not hang the welcome.
+/// timeout: a login shell that waits on something must not hang the welcome. Windows has
+/// none: the app already runs with the user's PATH.
 fn login_shell_lookup() -> Option<String> {
+    if cfg!(windows) {
+        return None;
+    }
     let shell = if Path::new("/bin/zsh").exists() {
         "/bin/zsh"
     } else {
@@ -170,8 +258,14 @@ fn login_shell_lookup() -> Option<String> {
     Some(out.1)
 }
 
-/// Login shell first, then the known prefixes for whatever it didn't find.
+/// Login shell first, then the known prefixes for whatever it didn't find. Windows: the
+/// app's PATH, then the places Node's installers use.
 pub fn discover_tools(home: &Path, login_shell: Option<String>) -> Tools {
+    if cfg!(windows) {
+        let mut dirs = windows_path_dirs(&std::env::var("PATH").unwrap_or_default());
+        dirs.extend(windows_prefixes(&|k| std::env::var(k).ok()));
+        return search(&dirs);
+    }
     let t = login_shell
         .as_deref()
         .map(parse_command_v)
@@ -206,10 +300,21 @@ fn child_path(t: &Tools) -> String {
         .flatten()
         .filter_map(|p| p.parent().map(|d| d.to_string_lossy().into_owned()))
         .collect();
-    dirs.extend(["/usr/bin", "/bin", "/usr/sbin", "/sbin"].map(String::from));
+    if cfg!(windows) {
+        // The rest of the app's own PATH: the installer runs schtasks and taskkill.
+        let path = std::env::var("PATH").unwrap_or_default();
+        dirs.extend(path.split(';').filter(|d| !d.is_empty()).map(String::from));
+    } else {
+        dirs.extend(["/usr/bin", "/bin", "/usr/sbin", "/sbin"].map(String::from));
+    }
     let mut seen = std::collections::HashSet::new();
     dirs.retain(|d| seen.insert(d.clone()));
-    dirs.join(":")
+    dirs.join(if cfg!(windows) { ";" } else { ":" })
+}
+
+/// A script node runs (`cli.js`, `npx-cli.js`), as Windows finds them, not a program.
+fn is_script(p: &Path) -> bool {
+    p.extension().is_some_and(|e| e == "js")
 }
 
 /// `sessionpipe-gui service install …`, or the npx form, or NoNode.
@@ -238,7 +343,7 @@ pub fn install_invocation(t: &Tools, o: &InstallOpts) -> Result<Invocation, Star
                 path,
             })
         }
-        (Some(cli), None, _) => Ok(Invocation {
+        (Some(cli), None, _) if !is_script(cli) => Ok(Invocation {
             program: cli.clone(),
             args: rest,
             path,
@@ -253,6 +358,15 @@ pub fn install_invocation(t: &Tools, o: &InstallOpts) -> Result<Invocation, Star
                 "sessionpipe-gui".to_string(),
             ];
             args.extend(rest);
+            if is_script(npx) {
+                let node = t.node.clone().ok_or(StartError::NoNode)?;
+                args.insert(0, npx.to_string_lossy().into_owned());
+                return Ok(Invocation {
+                    program: node,
+                    args,
+                    path,
+                });
+            }
             Ok(Invocation {
                 program: npx.clone(),
                 args,
@@ -335,7 +449,7 @@ pub fn run(
     timeout: Duration,
     on_line: impl FnMut(&str),
 ) -> Result<String, StartError> {
-    let child = Command::new(&inv.program)
+    let child = no_window(&mut Command::new(&inv.program))
         .args(&inv.args)
         .env("PATH", &inv.path)
         .stdin(Stdio::null())
@@ -484,7 +598,7 @@ fn start_dev_child(t: &Tools, port: u16, state: &Path) -> Result<(), StartError>
         .or_else(|| t.cli.clone())
         .ok_or(StartError::NoNode)?;
     let node = t.node.clone().ok_or(StartError::NoNode)?;
-    let child = Command::new(node)
+    let child = no_window(&mut Command::new(node))
         .arg(&cli)
         .args([
             "--demo",
@@ -610,7 +724,12 @@ pub fn local_state_dir_with(
     if !discovery_on {
         return None;
     }
-    let home = PathBuf::from(env("HOME")?);
+    // Windows has no HOME (unless a Git Bash set one); the receiver's home is USERPROFILE.
+    let home = PathBuf::from(
+        env("HOME")
+            .filter(|h| !h.is_empty())
+            .or_else(|| env("USERPROFILE"))?,
+    );
     Some(discovery::default_state_dir(&home, env))
 }
 
@@ -890,7 +1009,9 @@ mod tests {
                 "--dry-run"
             ]
         );
-        assert!(inv.path.starts_with("/n:/c:"));
+        // node's and the CLI's folders first, in the platform's PATH form.
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        assert!(inv.path.starts_with(&format!("/n{sep}/c{sep}")));
         let npx = Tools {
             cli: None,
             node: Some("/n/node".into()),
@@ -928,6 +1049,116 @@ mod tests {
                     version: "x".into()
                 }
             ),
+            Err(StartError::NoNode)
+        ));
+    }
+
+    #[test]
+    fn finds_node_and_the_scripts_behind_npm_shims_on_windows() {
+        let h = Temp::new("win");
+        let file = |p: &Path| {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, "").unwrap();
+        };
+        // Node's installer: node.exe, npx.cmd and npm under node_modules.
+        let nodejs = h.0.join("Program Files").join("nodejs");
+        file(&nodejs.join("node.exe"));
+        file(&nodejs.join("npx.cmd"));
+        file(&nodejs.join("node_modules/npm/bin/npx-cli.js"));
+        // npm's global folder: the GUI's shim and its package.
+        let npm = h.0.join("AppData/Roaming/npm");
+        file(&npm.join("sessionpipe-gui.cmd"));
+        file(&npm.join("node_modules/sessionpipe-gui/dist/cli.js"));
+        // A shim whose package is gone is no CLI.
+        let stale = h.0.join("stale");
+        file(&stale.join("sessionpipe-gui.cmd"));
+        let t = search_windows(&[stale.clone(), npm.clone(), nodejs.clone()]);
+        assert_eq!(
+            t.cli,
+            Some(npm.join("node_modules/sessionpipe-gui/dist/cli.js"))
+        );
+        assert_eq!(t.node, Some(nodejs.join("node.exe")));
+        assert_eq!(t.npx, Some(nodejs.join("node_modules/npm/bin/npx-cli.js")));
+        // Volta's npx is an .exe, run as it is.
+        let volta = h.0.join("Volta/bin");
+        file(&volta.join("npx.exe"));
+        assert_eq!(
+            search_windows(std::slice::from_ref(&volta)).npx,
+            Some(volta.join("npx.exe"))
+        );
+        assert_eq!(search_windows(&[stale]), Tools::default());
+    }
+
+    #[test]
+    fn looks_where_windows_installers_put_node() {
+        let env = |k: &str| {
+            match k {
+                "ProgramFiles" => Some(r"C:\Program Files"),
+                "APPDATA" => Some(r"C:\Users\c\AppData\Roaming"),
+                "NVM_SYMLINK" => Some(r"C:\nvm4w\nodejs"),
+                "LOCALAPPDATA" => Some(r"C:\Users\c\AppData\Local"),
+                "USERPROFILE" => Some(r"C:\Users\c"),
+                _ => None,
+            }
+            .map(String::from)
+        };
+        let dirs = windows_prefixes(&env);
+        assert_eq!(dirs[0], PathBuf::from(r"C:\Program Files").join("nodejs"));
+        assert!(dirs.contains(&PathBuf::from(r"C:\Users\c\AppData\Roaming").join("npm")));
+        assert!(dirs.contains(&PathBuf::from(r"C:\nvm4w\nodejs")));
+        assert!(dirs.contains(
+            &PathBuf::from(r"C:\Users\c\AppData\Local")
+                .join("Volta")
+                .join("bin")
+        ));
+        assert_eq!(dirs.len(), 6);
+        // Nothing set: Program Files' default only.
+        assert_eq!(
+            windows_prefixes(&|_| None),
+            [PathBuf::from(r"C:\Program Files").join("nodejs")]
+        );
+        assert_eq!(
+            windows_path_dirs(r#"C:\a;;"C:\Program Files\nodejs";C:\b "#),
+            [
+                PathBuf::from(r"C:\a"),
+                PathBuf::from(r"C:\Program Files\nodejs"),
+                PathBuf::from(r"C:\b")
+            ]
+        );
+    }
+
+    #[test]
+    fn runs_a_script_under_node_and_never_a_script_alone() {
+        let o = InstallOpts {
+            port: 7373,
+            state: None,
+            dry_run: false,
+            version: "0.7.5".into(),
+        };
+        // npx found as npx-cli.js: node runs it.
+        let t = Tools {
+            cli: None,
+            node: Some("/n/node.exe".into()),
+            npx: Some("/n/node_modules/npm/bin/npx-cli.js".into()),
+        };
+        let inv = install_invocation(&t, &o).unwrap();
+        assert_eq!(inv.program, PathBuf::from("/n/node.exe"));
+        assert_eq!(inv.args[0], "/n/node_modules/npm/bin/npx-cli.js");
+        assert_eq!(inv.args[1], "-y");
+        // …and with no node there is nothing to run it with.
+        let no_node = Tools { node: None, ..t };
+        assert!(matches!(
+            install_invocation(&no_node, &o),
+            Err(StartError::NoNode)
+        ));
+        // The CLI's cli.js with no node is not a program either.
+        let js = Tools {
+            cli: Some("/g/node_modules/sessionpipe-gui/dist/cli.js".into()),
+            node: None,
+            npx: None,
+        };
+        assert!(matches!(
+            install_invocation(&js, &o),
             Err(StartError::NoNode)
         ));
     }
@@ -1152,6 +1383,12 @@ mod tests {
         assert_eq!(
             local_state_dir_with(&env, true),
             Some(PathBuf::from("/h/.local/state/sessionpipe-gui"))
+        );
+        // Windows: no HOME, the receiver's home is USERPROFILE.
+        let win = |k: &str| (k == "USERPROFILE").then(|| "/u".to_string());
+        assert_eq!(
+            local_state_dir_with(&win, true),
+            Some(PathBuf::from("/u/.local/state/sessionpipe-gui"))
         );
         let tests = |k: &str| (k == "SP_LOCAL_STATE").then(|| "/scratch/state".to_string());
         assert_eq!(

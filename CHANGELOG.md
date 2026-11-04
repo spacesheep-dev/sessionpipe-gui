@@ -182,6 +182,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   requested." are never shown as what the agent said, a turn stopped at its terminal no
   longer shows the raw word "interrupt" beside a duration that ran to the next prompt, and
   a tool call the stop cut off no longer spins.
+- **The desktop app's "Start sessionpipe" finds Node on Windows.** It looked through a login
+  shell and for `node` and `npx` in Homebrew, nvm and Volta folders only, so on Windows it
+  always said "sessionpipe needs Node 20 or later". It now reads the app's own PATH, then
+  Program Files, `%APPDATA%\npm`, nvm-windows, Volta and Scoop; runs the scripts behind
+  npm's `.cmd` shims under node; starts them with no console window; and finds the
+  receiver's run.json under USERPROFILE.
 
 ## [0.7.5] - 2026-11-06
 
