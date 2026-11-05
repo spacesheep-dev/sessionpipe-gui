@@ -6,6 +6,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The desktop app's first-run sheet speaks Windows and Linux.** The New session shortcut
+  reads Ctrl+Alt+N there (it read ⌃⌥N, the Mac's symbols, everywhere), as does the
+  recorder in Settings › App; the sheet says sessionpipe is in your system tray, not your
+  menu bar; and a refused notification points at Windows' Settings, not System Settings.
+
 ## [0.7.4] - 2026-11-03
 
 ### Added
