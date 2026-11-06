@@ -158,7 +158,7 @@ ping-a-human Telegram plugin (off until you turn it on). The board runs on port 
 1. **Run `sessionpipe-gui`.** It prints where to open it, and a QR code for your phone:
 
    ```
-   sessionpipe-gui 0.7.4 · ~/.local/state/sessionpipe-gui
+   sessionpipe-gui 0.7.5 · ~/.local/state/sessionpipe-gui
 
      setup   http://localhost:7373/setup   (first run: your sessions, https, pairing, your phone)
      local   http://localhost:7373
@@ -180,6 +180,18 @@ ping-a-human Telegram plugin (off until you turn it on). The board runs on port 
    you, and you approve the six digits with your passkey.
 5. **Add your phone.** Scan the QR code; Setup's phone step gets it sending, over the same
    Wi-Fi or [Tailscale](https://tailscale.com).
+
+### Or a spacesheep account
+
+Nothing to host, if you'd rather not: **Settings → Data → Use a spacesheep account**
+connects this GUI to a [spacesheep](https://spacesheep.dev) account. The GUI shows a
+code, the account's page shows the same four digits, you confirm once, and from then on
+every machine paired on that account (`sessionpipe control pair spacesheep.dev`, one
+command per machine, no port to open) shows up here with its sessions, through
+spacesheep's relay. Messages to those sessions go back the same way, signed by the desktop
+app's own key, which you approve once per machine on spacesheep's Devices. It is an
+option, not the default: a GUI that never connects keeps everything on this machine
+([docs/rfcs/08](docs/rfcs/08-spacesheep-as-a-hosted-backend.md)).
 
 No agent handy? `sessionpipe-gui --demo` fills the board with a synthetic team.
 
