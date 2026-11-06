@@ -453,6 +453,18 @@ describe.skipIf(!HAVE_OPENSSL)("trusting the CA (mocked security)", () => {
       expect(b.execCalls).toEqual([]);
     } finally {
       await b.close();
+    }
+    // Windows: the certificate store's own command, not a Linux package manager's.
+    const w = await boot(tmp.dir, { platform: "win32" });
+    try {
+      const r = await fetchJson(`${w.url}${SETUP_ROUTES.tlsTrust}`, { method: "POST" });
+      expect(r.body).toMatchObject({ trusted: false, platform: "win32", caCertPath: m.caCertPath });
+      const steps = (r.body.steps as string[]).join("\n");
+      expect(steps).toContain(`certutil -user -addstore Root "${m.caCertPath}"`);
+      expect(steps).not.toContain("update-ca-certificates");
+      expect(w.execCalls).toEqual([]);
+    } finally {
+      await w.close();
       tmp.cleanup();
     }
   });
