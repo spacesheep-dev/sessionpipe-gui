@@ -220,7 +220,8 @@ function noteSeq(t: Tracking, seq: number, arrivedAt: string): void {
     t.seqLo = seq;
   } else return;
   if (to < from || to - from + 1 > GAP_MAX_HOLE) return;
-  for (let i = from; i <= to; i++) t.missing.add(i);
+  // Count, don't step from `from`: past 2^53 - 1, i++ would stop moving.
+  for (let n = 0; n <= to - from; n++) t.missing.add(from + n);
   t.missingSince ??= arrivedAt;
 }
 
