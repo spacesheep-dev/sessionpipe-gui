@@ -196,6 +196,9 @@ function span(ms: number): string {
  *  until its seqs arrive. A hole in front of the first seq seen is never one: that
  *  is where the session began for this receiver. */
 function noteSeq(t: Tracking, seq: number, arrivedAt: string): void {
+  // Ingest rejects a seq above 2^53 - 1 (the schema's bound), but an older release
+  // stored such lines; past it i++ stops counting, so boot would never finish.
+  if (!Number.isSafeInteger(seq)) return;
   if (t.seqHi < 0) {
     t.seqLo = seq;
     t.seqHi = seq;

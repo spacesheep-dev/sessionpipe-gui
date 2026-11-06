@@ -13,6 +13,7 @@ import {
   sessionKey,
 } from "../../shared/api.js";
 import { Session, SID, tempDir } from "../../test/events.js";
+import { EventFiles } from "./files.js";
 import { Store } from "./store.js";
 
 const KEY = sessionKey("claude-code", SID);
@@ -584,6 +585,29 @@ describe("reboot", () => {
     const detail = store.sessionDetail(KEY)!;
     expect(detail.events.map((e) => e.session.seq)).toEqual([0, 1, 2, 3]);
     expect(detail.events[0]!.arrivedAt).toBeDefined();
+  });
+});
+
+describe("seq bound", () => {
+  it("rejects a seq above 2^53 - 1 from every source, as the receiver does", () => {
+    const s = new Session();
+    const a = s.ev("session.started", { source: "startup" }, { seq: Number.MAX_SAFE_INTEGER });
+    const b = s.ev("turn.started", { turn_id: "t1" }, { seq: 2 ** 53 + 2 });
+    expect(store.ingest([a, b], "outbox")).toMatchObject({ accepted: 1, rejected: [{ id: b.id, reason: "bad_seq" }] });
+    expect(store.ingest([{ ...b, id: s.ev("turn.started").id }], "demo").rejected[0]?.reason).toBe("bad_seq");
+  });
+
+  it("boots a store whose files hold seqs past 2^53 - 1 from an older release", async () => {
+    const s = new Session();
+    const arrivedAt = new Date().toISOString();
+    const lines = [
+      s.ev("session.started", { source: "startup" }, { seq: Number.MAX_SAFE_INTEGER }),
+      s.ev("turn.started", { turn_id: "t1" }, { seq: 2 ** 53 + 2 }),
+    ].map((ev) => ({ ...ev, arrivedAt, source: "http" as const }));
+    await store.close();
+    new EventFiles(tmp.dir).append("claude-code", SID, lines, 0);
+    store = new Store(tmp.dir, { tickMs: 1_000, statsMs: 1_000 });
+    expect(store.session(KEY)?.counts.events).toBe(2);
   });
 });
 

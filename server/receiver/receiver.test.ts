@@ -100,6 +100,21 @@ describe("POST events", () => {
     expect(app.store.session("claude-code:tier")).toBeUndefined();
   });
 
+  it("rejects a seq above 2^53 - 1 as bad_seq, the schema's bound, so the gap tracker never spins on it", async () => {
+    const s = new Session("seq-bound");
+    const top = s.ev("session.started", { source: "startup" }, { seq: Number.MAX_SAFE_INTEGER });
+    const past = s.ev("turn.started", { turn_id: "t1" }, { seq: 2 ** 53 + 2 });
+    const huge = s.ev("turn.started", { turn_id: "t2" }, { seq: 1e21 });
+    const res = await post({ events: [top, past, huge] });
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { accepted: number; rejected: { id: string; reason: string }[] };
+    expect(body.accepted).toBe(1);
+    expect(body.rejected).toEqual([
+      { id: past.id, reason: "bad_seq" },
+      { id: huge.id, reason: "bad_seq" },
+    ]);
+  });
+
   it("validates per event: rejected with a reason, counts add up, the rest is stored", async () => {
     const s = new Session("valid");
     const ok = s.ev("session.started", { source: "startup" });
