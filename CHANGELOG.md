@@ -6,6 +6,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `session.seq` above 2^53 − 1 is rejected as `bad_seq`**, the schema's bound, from the
+  receiver, the outbox and the demo alike. Two such seqs in one session hung the GUI server
+  at 100% CPU while it listed the hole between them; a store an older release already wrote
+  them into now boots instead of hanging.
+
 ## [0.7.4] - 2026-11-03
 
 ### Added
