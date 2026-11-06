@@ -384,6 +384,10 @@ export interface MachineControl {
   /** Pairing or hello `key_types`: the kinds of key this machine takes. Absent (an older
    *  daemon) means passkeys only, so the app never offers it a device key. */
   keyTypes?: KeyType[];
+  /** A machine paired on a spacesheep account this GUI reads through (docs/rfcs/08):
+   *  commands to it are signed for that receiver's rp id and carried by it; its keys here
+   *  are ids only. Absent for a machine paired with this receiver. */
+  remote?: { via: "spacesheep"; origin: string; rpId: string };
   /** Messages queued for it and not yet finally acked. */
   queued: number;
   /** Hello `files: true`: the machine takes `files` on a `start` (CONTROL.md §3.1, §6). */
@@ -1722,7 +1726,9 @@ export const ROUTES = {
     demo: "/api/ui/demo",
     /** GET → { link: SpacesheepSourceStatus | null, pending: SpacesheepConnectStart | null };
      *  POST { origin? } → SpacesheepConnectStart (then the server polls and connects);
-     *  DELETE → disconnected (the key is forgotten here; revoke it on spacesheep to be sure). */
+     *  DELETE → disconnected (the key is forgotten here; revoke it on spacesheep to be sure).
+     *  POST …/device { key } → the app's device key asked to be trusted there: { code, devicesUrl, trustedOn };
+     *  GET …/device?id= → { trustedOn, machines, pending }. */
     spacesheep: "/api/ui/spacesheep",
     /** GET → image/svg+xml: the LAN URL with the UI key, for a phone camera. */
     qr: "/api/ui/qr.svg",

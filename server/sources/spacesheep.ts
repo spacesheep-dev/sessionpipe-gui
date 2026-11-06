@@ -26,6 +26,15 @@ export interface SpacesheepSourceOptions {
   fetch?: typeof fetch;
   /** The pause after an error, before it grows (tests). */
   retryMs?: number;
+  /** The relay's machine list, each time it is read (every minute): the control state
+   *  keeps them as rows paired there (state.upsertRemoteMachines). */
+  onMachines?: (machines: unknown[], origin: string, rpId: string) => void;
+  /** The lowest spacesheep job id still unsettled here, or null: while there is one, the
+   *  jobs door is read every few seconds and its word handed to `onJobs`. */
+  pendingJobsFrom?: () => number | null;
+  onJobs?: (
+    jobs: Array<{ id: number; status: string; note: string | null; done_at: number | null; created_at: number }>,
+  ) => void;
 }
 
 export interface SpacesheepSource {
@@ -33,6 +42,10 @@ export interface SpacesheepSource {
   status(): SpacesheepSourceStatus;
   /** One poll now, with no wait (tests): how many events were taken. */
   tick(): Promise<number>;
+  /** One read of the jobs door now (tests). */
+  pollJobs(): Promise<void>;
+  /** One read of the machines door now (tests). */
+  pollMachines(): Promise<void>;
 }
 
 /** The relay's page, as the server sends it; `events` are wire events, checked here. */
@@ -118,12 +131,41 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
         headers: { authorization: `Bearer ${opts.key}`, accept: "application/json" },
       });
       if (!res.ok) return;
-      const j = (await res.json()) as { machines?: Array<{ name?: unknown }> };
+      const j = (await res.json()) as { machines?: Array<{ name?: unknown }>; rp_id?: unknown };
       machines = (j.machines ?? []).map((m) => String(m.name ?? "")).filter(Boolean);
+      if (opts.onMachines && typeof j.rp_id === "string") opts.onMachines(j.machines ?? [], opts.origin, j.rp_id);
     } catch {
       /* the names are a nicety */
     }
   };
+
+  // How the sends spacesheep carried are going: read while any is unsettled here.
+  let jobsTimer: NodeJS.Timeout | undefined;
+  const jobsPoll = async (): Promise<void> => {
+    const from = opts.pendingJobsFrom?.();
+    if (from === null || from === undefined) return;
+    try {
+      const res = await f(`${opts.origin}${RELAY_PATH}/jobs?since=${Math.max(0, from - 1)}`, {
+        headers: { authorization: `Bearer ${opts.key}`, accept: "application/json" },
+      });
+      if (!res.ok) return;
+      const j = (await res.json()) as {
+        jobs?: Array<{ id: number; status: string; note: string | null; done_at: number | null; created_at: number }>;
+      };
+      if (j.jobs?.length) opts.onJobs?.(j.jobs);
+    } catch {
+      /* next tick */
+    }
+  };
+  const scheduleJobs = (): void => {
+    if (stopped) return;
+    jobsTimer = setTimeout(async () => {
+      await jobsPoll();
+      scheduleJobs();
+    }, 3000);
+    jobsTimer.unref();
+  };
+  scheduleJobs();
 
   const loop = async (): Promise<void> => {
     let sinceMachines = 0;
@@ -163,6 +205,7 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
   return {
     stop() {
       stopped = true;
+      if (jobsTimer) clearTimeout(jobsTimer);
       abort?.abort();
     },
     status: () => ({
@@ -177,6 +220,8 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
       machines,
     }),
     tick: () => inFlight ?? poll(0),
+    pollJobs: jobsPoll,
+    pollMachines: machinesPoll,
   };
 }
 

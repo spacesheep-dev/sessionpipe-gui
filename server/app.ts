@@ -218,6 +218,24 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     sessionExists: (key) => store.sessionExists(key),
     origins,
     uiKey,
+    // A send for a machine paired on spacesheep: the signed body to its jobs route, as
+    // this account (the gui key), which verifies it against the machine's keys.
+    remoteSend: async (m, body) => {
+      const link = config.spacesheep;
+      if (!link || m.remote?.origin !== link.origin)
+        return { status: 503, json: { code: "no_relay", error: "Not connected to spacesheep any more." } };
+      const res = await fetch(`${link.origin}/api/machines/${encodeURIComponent(m.id)}/jobs`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${link.key}`,
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      return { status: res.status, json };
+    },
   });
 
   registerReceiver(router, { store, sinkToken: () => config.sinkToken, control });
@@ -232,7 +250,14 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   const startSpacesheep = (link: SpacesheepLink): void => {
     spacesheep?.stop();
     try {
-      spacesheep = startSpacesheepSource(store, { ...link });
+      spacesheep = startSpacesheepSource(store, {
+        ...link,
+        // The machines paired there become rows here (control.remote), their sends settled
+        // by the relay's word on spacesheep's jobs.
+        onMachines: (list, origin, rpId) => control.remote.upsert(list as never, { via: "spacesheep", origin, rpId }),
+        pendingJobsFrom: () => control.remote.pendingFrom(),
+        onJobs: (jobs) => control.remote.applyJobs(jobs),
+      });
     } catch (e) {
       if (!opts.quiet) process.stderr.write(`[sessionpipe-gui] spacesheep: ${(e as Error).message}\n`);
     }
@@ -414,6 +439,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
         spacesheep?.stop();
         spacesheep = null;
         config = setSpacesheep(stateDir, config, undefined);
+        control.remote.drop("spacesheep");
       },
       deviceName: () => `${os.hostname().replace(/\.(local|lan|home)$/i, "")}`,
       version: () => packageVersion(),
