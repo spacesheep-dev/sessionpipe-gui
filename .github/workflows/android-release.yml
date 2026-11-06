@@ -152,7 +152,7 @@ jobs:
             (cd "$out" && du -h ./*) | sed 's/^/    /'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sessionpipe-android-${{ inputs.tag }}-${{ github.run_number }}
           path: ${{ env.OUT }}
