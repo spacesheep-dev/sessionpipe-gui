@@ -6,6 +6,16 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The desktop app's "Start sessionpipe" finds Node on Windows.** It looked through a login
+  shell and for `node` and `npx` in Homebrew, nvm and Volta folders only, so on Windows it
+  always said "sessionpipe needs Node 20 or later". It now reads the app's own PATH, then
+  Program Files, `%APPDATA%\npm`, nvm-windows, Volta and Scoop; runs the scripts behind
+  npm's `.cmd` shims under node; and starts them with no console window. Opened again, the
+  app finds the receiver on this computer (it looked for it only under HOME, which Windows
+  doesn't set, and showed the welcome instead).
+
 ## [0.7.5] - 2026-11-06
 
 ### Added
