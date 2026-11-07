@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--host 127.0.0.1` (or `::1`, `localhost`) no longer offers LAN URLs nothing listens
+  on.** The banner listed every LAN address as a `network` URL, its phone QR and the sink
+  command pointed at one of them, and a bind to `::1` gave a sink command on `127.0.0.1`;
+  all of them refused connections. A loopback bind now offers no LAN URL, and the sink
+  command names the address it bound, under "from this machine"; a bind to one LAN
+  address lists that address alone as its network URL.
+
 ## [0.7.5] - 2026-11-06
 
 ### Added
