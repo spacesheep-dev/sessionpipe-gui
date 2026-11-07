@@ -4,7 +4,11 @@
 // rebuild, merges, the live tail, the LOCK and recovery.
 import {
   appendFileSync,
+  chmodSync,
+  closeSync,
+  mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -177,6 +181,36 @@ describe("runIndexer once", () => {
     await runIndexer({ dir: w.dir, env: w.env, adapters: [w.adapter], history: false, mode: "once" });
     expect(readdirSync(w.dir)).not.toContain("history");
     await removeIndex(w.dir, "history");
+  });
+
+  it("history off: a history/ it cannot delete is left for the next start, the rest still indexed", async () => {
+    if (process.platform !== "win32" && process.getuid?.() === 0) return; // root deletes it anyway
+    const w = world();
+    writeFileSync(w.file("a"), fakeLine({ k: "p", text: "secret history", at }));
+    const events = fakeAdapter("sessionpipe", "claude-code", "events-fake");
+    mkdirSync(join(w.home, "events-fake"), { recursive: true });
+    writeFileSync(join(w.home, "events-fake", "e.jsonl"), fakeLine({ k: "p", text: "delivered webhook", at }));
+    await runIndexer({ dir: w.dir, env: w.env, adapters: [w.adapter], history: true, mode: "once" });
+    // Held open by another process, as Windows sees it (EPERM); off Windows, a read-only folder.
+    const hist = join(w.dir, "history");
+    const seg = readdirSync(hist).find((f) => f.startsWith("seg-"))!;
+    const fd = process.platform === "win32" ? openSync(join(hist, seg), "r") : -1;
+    if (fd < 0) chmodSync(hist, 0o500);
+    try {
+      const off = { dir: w.dir, env: w.env, adapters: [w.adapter, events], history: false, mode: "once" } as const;
+      await runIndexer(off);
+      expect(readdirSync(w.dir)).toContain("history");
+      const r = await openReader({ dir: w.dir, sources: ["sessionpipe"] });
+      expect(r.search(q("webhook", ["sessionpipe"])).total).toBe(1);
+      r.close();
+      await runIndexer({ ...off, rebuild: true });
+      expect(readdirSync(w.dir)).toContain("history");
+    } finally {
+      if (fd >= 0) closeSync(fd);
+      else chmodSync(hist, 0o700);
+    }
+    await runIndexer({ dir: w.dir, env: w.env, adapters: [w.adapter, events], history: false, mode: "once" });
+    expect(readdirSync(w.dir)).not.toContain("history");
   });
 
   it("takes the LOCK; a second writer is refused, a stale lock taken over", async () => {
