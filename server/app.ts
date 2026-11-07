@@ -176,6 +176,10 @@ function remoteInfo(url: string, sinkToken: string): RemoteInfo {
   };
 }
 
+/** The addresses `server.address()` gives for a wildcard bind: every address of its family,
+ *  or every IPv4 address for the IPv4-mapped ::ffff:0.0.0.0. */
+const WILDCARDS = new Set(["0.0.0.0", "::", "::ffff:0.0.0.0"]);
+
 export async function createApp(opts: AppOptions = {}): Promise<App> {
   const startedAt = new Date().toISOString();
   const stateDir = opts.stateDir ?? defaultStateDir();
@@ -302,7 +306,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   let replay: Runner | null = null;
   if (opts.replay) replay = startReplay(store, opts.replay, { speed: opts.speed ?? 0, rebase: true, maxGapMs: 10_000 });
 
-  // What --host bound. A wildcard (the default 0.0.0.0, or ::) answers on every LAN
+  // What --host bound. A wildcard (the default 0.0.0.0, ::, or ::ffff:0.0.0.0) answers on every LAN
   // address; one address answers there alone, so a loopback bind offers no LAN URL and
   // the sink command names the loopback address that was bound (::1 refuses 127.0.0.1).
   // Null until the listener is bound, and for a wildcard.
@@ -562,8 +566,10 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   const host = opts.host ?? "0.0.0.0";
   port = await listen(listener, opts.port ?? DEFAULT_PORT, host);
   const addr = listener.address();
-  // Node reports every wildcard spelling (0, ::0, ::ffff:0.0.0.0) as one of these two.
-  if (typeof addr === "object" && addr && addr.address !== "0.0.0.0" && addr.address !== "::") bound = addr.address;
+  // Node reports 0 as 0.0.0.0 and ::0 as ::. The IPv4-mapped wildcard (::ffff:0.0.0.0, or
+  // ::ffff:0:0) comes back as :: on macOS but as ::ffff:0.0.0.0 on Linux, and answers on
+  // every IPv4 address there too.
+  if (typeof addr === "object" && addr && !WILDCARDS.has(addr.address)) bound = addr.address;
   // Plugins start once the port is known: their api names the URLs a message can carry.
   // Plugins can reach out of the machine (a Telegram bot, say). Demo mode exists to look
   // at the UI with synthetic sessions, so it never activates them: a throwaway server

@@ -81,4 +81,13 @@ describe("--host and the URLs the receiver offers", () => {
     expect(a.info().urls.lan).toEqual(lanAddresses().map((ip) => `http://${ip}:${a.port}`));
     expect(a.url).toBe(`http://127.0.0.1:${a.port}`);
   });
+
+  // Linux reports this bind as ::ffff:0.0.0.0, macOS as ::; either way it is a wildcard.
+  // It needs an IPv6 socket, like the ::1 tests above.
+  it.skipIf(!hasIpv6Loopback)("the IPv4-mapped wildcard ::ffff:0.0.0.0 offers every LAN address too", async () => {
+    const a = await start("::ffff:0.0.0.0");
+    expect(a.info().urls.lan).toEqual(lanAddresses().map((ip) => `http://${ip}:${a.port}`));
+    expect(a.url).toBe(`http://127.0.0.1:${a.port}`);
+    expect(await answers(a.url)).toBe(200);
+  });
 });
