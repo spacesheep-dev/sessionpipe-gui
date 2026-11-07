@@ -18,12 +18,23 @@ pub fn enabled(env_receiver_url: Option<&str>) -> bool {
     cfg!(not(debug_assertions)) && env_receiver_url.is_none_or(|s| s.trim().is_empty())
 }
 
-/// The home the receiver's `os.homedir()` names: HOME, else (Windows, where only a Git Bash
-/// sets HOME) USERPROFILE.
+/// The home the receiver's `os.homedir()` names. Node reads it through libuv's
+/// `uv_os_homedir`: HOME on macOS and Linux, but USERPROFILE on Windows, where a HOME set by
+/// Git Bash, MSYS2 or Emacs is never looked at. Each falls back to the other here.
 pub fn home_dir(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    env("HOME")
+    home_dir_on(cfg!(windows), env)
+}
+
+/// [`home_dir`] for a given platform (tests run both on any machine).
+fn home_dir_on(windows: bool, env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let (first, then) = if windows {
+        ("USERPROFILE", "HOME")
+    } else {
+        ("HOME", "USERPROFILE")
+    };
+    env(first)
         .filter(|h| !h.is_empty())
-        .or_else(|| env("USERPROFILE").filter(|h| !h.is_empty()))
+        .or_else(|| env(then).filter(|h| !h.is_empty()))
         .map(PathBuf::from)
 }
 
@@ -188,6 +199,35 @@ mod tests {
     use crate::testutil::{serve_once_forever, TempDir};
 
     #[test]
+    fn home_on_windows_is_userprofile_else_home() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        // A Git Bash or an MSYS2 HOME beside the profile: the receiver writes under the profile.
+        assert_eq!(
+            home_dir_on(
+                true,
+                &env(&[("HOME", "/c/Users/x"), ("USERPROFILE", r"C:\Users\x")])
+            ),
+            Some(r"C:\Users\x".into())
+        );
+        assert_eq!(
+            home_dir_on(true, &env(&[("HOME", "/h"), ("USERPROFILE", "")])),
+            Some("/h".into())
+        );
+        assert_eq!(
+            home_dir_on(true, &env(&[("HOME", "/h")])),
+            Some("/h".into())
+        );
+        assert_eq!(home_dir_on(true, &env(&[])), None);
+    }
+
+    #[test]
     fn home_is_home_else_userprofile() {
         let env = |pairs: &'static [(&'static str, &'static str)]| {
             move |k: &str| {
@@ -198,15 +238,18 @@ mod tests {
             }
         };
         assert_eq!(
-            home_dir(&env(&[("HOME", "/h"), ("USERPROFILE", "/u")])),
+            home_dir_on(false, &env(&[("HOME", "/h"), ("USERPROFILE", "/u")])),
             Some("/h".into())
         );
         assert_eq!(
-            home_dir(&env(&[("HOME", ""), ("USERPROFILE", "/u")])),
+            home_dir_on(false, &env(&[("HOME", ""), ("USERPROFILE", "/u")])),
             Some("/u".into())
         );
-        assert_eq!(home_dir(&env(&[("USERPROFILE", "/u")])), Some("/u".into()));
-        assert_eq!(home_dir(&env(&[])), None);
+        assert_eq!(
+            home_dir_on(false, &env(&[("USERPROFILE", "/u")])),
+            Some("/u".into())
+        );
+        assert_eq!(home_dir_on(false, &env(&[])), None);
     }
 
     #[test]
