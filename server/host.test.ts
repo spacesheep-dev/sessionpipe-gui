@@ -69,6 +69,25 @@ describe("--host and the URLs the receiver offers", () => {
     expect(sinkBase(a.info())).toBe(`http://${lan}:${a.port}`);
   });
 
+  // An IPv4-mapped bind needs an IPv6 socket, like the ::1 tests above. Node reports it as
+  // ::ffff:127.0.0.1; the URLs name 127.0.0.1, which answers on that socket.
+  it.skipIf(!hasIpv6Loopback)("bound to ::ffff:127.0.0.1: no LAN URL, and the URLs name 127.0.0.1", async () => {
+    const a = await start("::ffff:127.0.0.1");
+    const info = a.info();
+    expect(info.urls.lan).toEqual([]);
+    expect(a.url).toBe(`http://127.0.0.1:${a.port}`);
+    expect(sinkBase(info)).toBe(`http://127.0.0.1:${a.port}`);
+    expect(await answers(a.url)).toBe(200);
+  });
+
+  it.skipIf(!lan || !hasIpv6Loopback)("bound to a LAN address, IPv4-mapped: that IPv4 address alone", async () => {
+    const a = await start(`::ffff:${lan}`);
+    expect(a.info().urls.lan).toEqual([`http://${lan}:${a.port}`]);
+    expect(a.url).toBe(`http://${lan}:${a.port}`);
+    // It answers (a 401 when the UI asks for its key off loopback); a refused connection throws.
+    expect([200, 401]).toContain(await answers(a.url));
+  });
+
   it.skipIf(!zoned)("bound to an address with a zone id: no LAN URL, and no URL that does not parse", async () => {
     const a = await start(zoned);
     const info = a.info();

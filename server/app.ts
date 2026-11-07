@@ -569,7 +569,10 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   // Node reports 0 as 0.0.0.0 and ::0 as ::. The IPv4-mapped wildcard (::ffff:0.0.0.0, or
   // ::ffff:0:0) comes back as :: on macOS but as ::ffff:0.0.0.0 on Linux, and answers on
   // every IPv4 address there too.
-  if (typeof addr === "object" && addr && !WILDCARDS.has(addr.address)) bound = addr.address;
+  // An IPv4-mapped address (::ffff:127.0.0.1) answers on its IPv4 address too, so URLs name
+  // that form: the one main always gave, and the one the desktop's loopback check knows.
+  if (typeof addr === "object" && addr && !WILDCARDS.has(addr.address))
+    bound = addr.address.replace(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i, "$1");
   // Plugins start once the port is known: their api names the URLs a message can carry.
   // Plugins can reach out of the machine (a Telegram bot, say). Demo mode exists to look
   // at the UI with synthetic sessions, so it never activates them: a throwaway server
