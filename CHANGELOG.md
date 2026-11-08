@@ -6,6 +6,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Search no longer says "“c:” isn't a filter" over a pasted Windows path (`C:\Users\…`,
+  `D:/repo`) or a URL (`https://…`). They were, and still are, searched as text; the notice
+  now stays for something that looks like a filter, such as `foo:bar` or `cwd:/x`.
+
 ## [0.7.5] - 2026-11-06
 
 ### Added

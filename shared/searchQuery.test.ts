@@ -45,6 +45,27 @@ describe("parseSearch", () => {
     expect(p.clauses.map((c) => c.text)).toEqual(["foo:bar", "baz"]);
   });
 
+  it("does not call a pasted Windows path or URL an unknown filter", () => {
+    for (const q of [
+      "C:\\Users\\dev\\x.ts",
+      "C:/repo/a.ts",
+      "D:\\x",
+      "-C:\\x",
+      "https://example.com/x",
+      "file:///tmp/a",
+    ]) {
+      const p = parseSearch(q);
+      expect(p.unknown, q).toEqual([]);
+      // Still searched as text, exactly as before.
+      expect(p.clauses, q).toEqual([{ kind: "word", text: q.replace(/^-/, ""), not: q.startsWith("-") }]);
+    }
+    expect(parseSearch("C:\\x", { live: true }).clauses).toEqual([{ kind: "word", text: "C:\\x", not: false }]);
+    // Something that still looks like a filter is still reported.
+    expect(parseSearch("x:y e: D:\\x").unknown).toEqual(["x", "e"]);
+    expect(parseSearch('c:"\\x"').unknown).toEqual(["c"]);
+    expect(parseSearch("cwd:/x path:\\\\srv\\a").unknown).toEqual(["cwd", "path"]);
+  });
+
   it("makes the last word a live prefix only while typing", () => {
     expect(parseSearch("webhook ret", { live: true }).clauses.at(-1)).toEqual({
       kind: "prefix",
