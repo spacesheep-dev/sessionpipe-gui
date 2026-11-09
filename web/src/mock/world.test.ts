@@ -48,7 +48,7 @@ describe("World: agents that ask each other", () => {
     expect(String(relayed!.data.user)).toMatch(/\(sessionpipe handoff, asked via [^)]+\):\n\n/);
     const a = world.controlActivity().find((x) => x.replyTo === parent.key)!;
     expect(a).toMatchObject({ kind: "start", session: d.to, from: parent.key, outcome: "delivered" });
-    const machine = snap.kind === "snapshot" ? snap.snapshot.machines.find((m) => m.name === "misha-air") : undefined;
+    const machine = snap.kind === "snapshot" ? snap.snapshot.machines.find((m) => m.name === "demo-laptop") : undefined;
     expect(machine?.control).toMatchObject({ ask: true, handoff: true });
   });
 });
