@@ -35,7 +35,7 @@ import {
 import type { SearchClient } from "../search/types";
 import type { World } from "./world";
 
-const HERE = "misha-air";
+const HERE = "demo-laptop";
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
