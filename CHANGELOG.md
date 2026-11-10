@@ -6,6 +6,14 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A plugin turned on with `sessionpipe-gui plugin enable` while the receiver runs starts
+  on Reload plugins, as the CLI says. And a plugin or view the CLI turns on or off
+  while it runs is no longer undone by the receiver's next write of config.json (a token
+  rotation, a toggle in Settings, a spacesheep connect), which put back the lists it held
+  in memory.
+
 ## [0.7.5] - 2026-11-06
 
 ### Added
