@@ -125,11 +125,15 @@ export function cliCommand(
 }
 
 /** One word for cmd.exe: as it is when it is plainly safe, else in double quotes, inside
- *  which & | < > ( ) ^ and spaces are literal (a Windows path has no " to escape). Trailing
- *  backslashes are doubled, so the script's argv parser doesn't read the last one as
- *  escaping the closing quote. `%NAME%` still expands inside quotes when NAME is set;
- *  cmd.exe has no escape for it there. */
-const cmdArg = (a: string): string => (/^[\w.:\\/=@+-]+$/.test(a) ? a : `"${a.replace(/(\\+)$/, "$1$1")}"`);
+ *  which & | < > ( ) ^ and spaces are literal. A double quote would end that quoting and
+ *  hand the rest of the word to cmd.exe, which has no escape for one there, and a line
+ *  break ends the command; no Windows path holds either, and the folders come from a
+ *  request body, not from the file system, so both are dropped. Trailing backslashes are
+ *  doubled, so the script's argv parser doesn't read the last one as escaping the closing
+ *  quote. `%NAME%` still expands inside quotes when NAME is set; cmd.exe has no escape for
+ *  it there. */
+const cmdArg = (a: string): string =>
+  /^[\w.:\\/=@+-]+$/.test(a) ? a : `"${a.replace(/["\p{Cc}]/gu, "").replace(/(\\+)$/, "$1$1")}"`;
 
 export function cliVersion(bin: string): string | undefined {
   try {

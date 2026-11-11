@@ -211,6 +211,11 @@ describe("this machine", () => {
         `${bare} --folder "C:\\R&D(x)\\code"`,
       );
       expect(cliCommand(bare, ["--folder", "C:\\a|b^c\\"], "win32").file).toBe(`${bare} --folder "C:\\a|b^c\\\\"`);
+      // A quote would end the quoting and a line break the command: neither is in a Windows
+      // path, and the folders come from a request body, so both are dropped.
+      expect(cliCommand(bare, ["--folder", 'C:\\a" & calc & "\r\nb\\"'], "win32").file).toBe(
+        `${bare} --folder "C:\\a & calc & b\\\\"`,
+      );
       expect(cmdShimTarget(path.join(dir, "missing.cmd"))).toBeNull();
       // Elsewhere a .cmd is just a file, and a JavaScript entry runs under our node anywhere.
       expect(cliCommand(shim, args, "linux")).toEqual({ file: shim, args, shell: false });
