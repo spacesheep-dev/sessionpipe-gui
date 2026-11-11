@@ -15,6 +15,7 @@ import {
 import { noteOwnSend } from "../lib/toasts";
 import { controlApi, type SendBody, type TrustedKey } from "./api";
 import { nonce } from "./bytes";
+import { remoteRpFor } from "./remoteRp";
 import { dropGrant, sign, signerKind } from "./signer";
 
 export const COMMAND_TYPE = "sessionpipe.control";
@@ -137,8 +138,10 @@ export async function signAndDeliver<T>(
   o: SendOptions = {},
 ): Promise<T> {
   const cmd = commandString(machineId, fields);
+  // A machine paired on spacesheep (remoteRp.ts) takes a signature for that rp id.
+  const rpUse = remoteRpFor(machineId) ?? rp;
   const attempt = async (fresh = false): Promise<T> => {
-    const signed = await signCommand(rp, cmd, { ...o, fresh });
+    const signed = await signCommand(rpUse, cmd, { ...o, fresh });
     const body: SendBody = { machineId, ...signed };
     if (o.expiresInS) body.expires_in_s = o.expiresInS;
     if (o.from) body.from = o.from;
@@ -149,7 +152,7 @@ export async function signAndDeliver<T>(
   } catch (e) {
     const code = faultCode(e);
     if (!o.confirm && code && GRANT_FAULTS.has(code)) {
-      await dropGrant(rp);
+      await dropGrant(rpUse);
       // A caller that may not prompt (the workflows runner) stops here: the grant is
       // gone, every useGrant on the page reads so, and the page the person is on asks.
       if (o.noPrompt) throw e;
