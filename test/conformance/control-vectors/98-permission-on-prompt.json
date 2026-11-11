@@ -1,0 +1,31 @@
+{
+  "name": "permission-on-prompt",
+  "description": "Only a start carries a permission.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"prompt\",\"session\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\",\"text\":\"Add the Oct 8 row\",\"nonce\":\"C8sbVKlDCGbJExH-MKW4AA\",\"iat\":1790800000000,\"permission\":\"safe\"}",
+      "csig": "Pm0mLwE7CVoKl5WWsq3FTrXGiL9I6BtFtAOFGimFvpu5ozBelMJrSDjtvpGCMxKFNnf0ITZ0l6NpbSpeabYE1Q",
+      "grant": {
+        "cred": "Z06m_POo6nuq-svh-BgXNta2sx1nz0To",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiV3VNUUpFYTZPMFIxRjg3MzFHLWhheVlNa3RpUTRXcWRUMjh2eHpxeTBlOCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCID88X857FcV9YqN63oRfMa-XP2yxYDv8enPKy7vXhvG8AiEAu0Pgu5fvr_zOJsE5P_jChGbq_igHbbEC2Pdf-nC9O3A",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEp5HQwvAkp-apR6WkrQdF7RplNelBCtZ6_wCaAZJs7wrxsAIT_vlyLqZYbvXj1qMDM7iJPtE3fZMwiO-eUzo1Xw\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "Z06m_POo6nuq-svh-BgXNta2sx1nz0To",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4887MC68Vfbb2iYIKfVZ3p-757sPNy-3vpRc-Xu6dKn6CfbemFsJ9IXCiSYcyd9rqfkFC4G-ADShR-8dbNYjqA"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}

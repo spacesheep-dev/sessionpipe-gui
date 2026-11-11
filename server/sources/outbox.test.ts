@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmdirSync, statSync, utimesSync } from "node:fs";
 import path from "node:path";
 import { Outbox } from "sessionpipe-core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Session, tempDir } from "../../test/events.js";
 import { Store } from "../store/store.js";
 import { resolveOutboxRoot, startOutboxSource } from "./outbox.js";
@@ -77,6 +77,88 @@ describe("outbox source", () => {
     src.stop();
     expect(src.status().sessions).toBe(0);
   });
+
+  it("skips a session file it can't read and carries on with the others", () => {
+    const a = new Session("aaa");
+    const c = new Session("ccc");
+    write(a, [a.ev("session.started")]);
+    write(c, [c.ev("session.started")]);
+    // A folder named like a session file, between the two in mtime order (newest first).
+    const bad = path.join(spState, "outbox", "claude-code", "bbb.jsonl");
+    mkdirSync(bad);
+    const now = Date.now() / 1000;
+    utimesSync(path.join(spState, "outbox", "claude-code", "aaa.jsonl"), now, now);
+    utimesSync(bad, now - 10, now - 10);
+    utimesSync(path.join(spState, "outbox", "claude-code", "ccc.jsonl"), now - 20, now - 20);
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const src = startOutboxSource(store, { path: spState });
+    try {
+      expect(src.status()).toMatchObject({ sessions: 3, enabled: true, events: 2 });
+      expect(store.session("claude-code:aaa")!.counts.events).toBe(1);
+      expect(store.session("claude-code:ccc")!.counts.events).toBe(1);
+      write(a, [a.ev("turn.started")]);
+      write(c, [c.ev("turn.started")]);
+      src.tick();
+      src.tick();
+      expect(src.status().events).toBe(4);
+      expect(store.session("claude-code:ccc")!.counts.events).toBe(2);
+      const offsets = JSON.parse(readFileSync(path.join(store.dir, "outbox-offsets.json"), "utf8"));
+      expect(Object.keys(offsets).sort()).toEqual(["claude-code/aaa", "claude-code/ccc"]);
+      // Said once for that file, not on every tick. (Where a folder's size is 0, as on
+      // NTFS, Outbox.read finds nothing to read in it and never throws.)
+      const said = err.mock.calls.map((x) => String(x[0])).filter((x) => x.includes("claude-code/bbb"));
+      expect(said).toHaveLength(statSync(bad).size > 0 ? 1 : 0);
+      if (said.length)
+        expect(said[0]).toMatch(/^\[outbox\] can't read claude-code\/bbb: .*; skipped, its offset stays\n$/);
+      // Gone and back, it is said again.
+      rmdirSync(bad);
+      src.tick();
+      mkdirSync(bad);
+      src.tick();
+      const again = err.mock.calls.filter((x) => String(x[0]).includes("claude-code/bbb"));
+      expect(again).toHaveLength(statSync(bad).size > 0 ? 2 : 0);
+    } finally {
+      src.stop();
+      err.mockRestore();
+    }
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "resumes a file that turned unreadable from its kept offset once it can be read again",
+    () => {
+      const a = new Session("aaa");
+      const b = new Session("bbb");
+      write(a, [a.ev("session.started")]);
+      write(b, [b.ev("session.started")]);
+      const fileB = path.join(spState, "outbox", "claude-code", "bbb.jsonl");
+      const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      const src = startOutboxSource(store, { path: spState });
+      try {
+        expect(src.status().events).toBe(2);
+        const kept = JSON.parse(readFileSync(path.join(store.dir, "outbox-offsets.json"), "utf8"))["claude-code/bbb"];
+        expect(kept).toBeGreaterThan(0);
+        write(b, [b.ev("turn.started")]);
+        chmodSync(fileB, 0o000);
+        write(a, [a.ev("turn.started")]);
+        src.tick();
+        src.tick();
+        expect(store.session("claude-code:aaa")!.counts.events).toBe(2);
+        expect(store.session("claude-code:bbb")!.counts.events).toBe(1);
+        const offsets = JSON.parse(readFileSync(path.join(store.dir, "outbox-offsets.json"), "utf8"));
+        expect(offsets["claude-code/bbb"]).toBe(kept);
+        expect(err.mock.calls.filter((x) => String(x[0]).includes("claude-code/bbb"))).toHaveLength(1);
+        chmodSync(fileB, 0o600);
+        src.tick();
+        expect(store.session("claude-code:bbb")!.counts.events).toBe(2);
+        expect(store.stats().events).toBe(4);
+        expect(src.status()).toMatchObject({ enabled: true, events: 4 });
+      } finally {
+        chmodSync(fileB, 0o600);
+        src.stop();
+        err.mockRestore();
+      }
+    },
+  );
 
   it("resolves the state dir from either spelling", () => {
     write(new Session("x"), [new Session("x").ev("session.started")]);

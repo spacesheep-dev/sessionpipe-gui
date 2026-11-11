@@ -7,11 +7,12 @@
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ROUTES, type Snapshot, type StreamMessage } from "../../shared/api.js";
 import { type InstalledPlugin, PLUGIN_ROUTES } from "../../shared/plugin-api.js";
 import { Session, tempDir } from "../../test/events.js";
 import { type App, createApp } from "../app.js";
+import { readGuiConfig, setDisabled, setEnabled } from "../config.js";
 import { addPlugin, linkPlugin, listPlugins, removePlugin } from "./install.js";
 import { validatePluginManifest } from "./registry.js";
 
@@ -544,6 +545,118 @@ export default { activate() { g.__bundledPlugin.activations++; return { deactiva
       listPlugins(plugins, { ...opts, enabled: () => ["plugin:shipped"] }).find((p) => p.id === "shipped")!.disabled,
     ).toBeUndefined();
     expect(() => removePlugin(plugins, "nope", opts)).toThrow(/no plugin "nope"/);
+  });
+});
+
+describe("a plugin or view the CLI turns on or off while the server runs", () => {
+  let app: App;
+  let tmp: { dir: string; cleanup: () => void };
+  let local: { dir: string; cleanup: () => void };
+  const JS = "export default { activate() { return { deactivate() {} }; } };";
+
+  beforeAll(async () => {
+    tmp = tempDir();
+    local = inRepoTempDir();
+    makePlugin(path.join(local.dir, "bundled", "plugins", "shipped"), { name: "Shipped", settings: [] }, JS);
+    makePlugin(path.join(local.dir, "plugins", "other"), { name: "Other", settings: [] }, JS);
+    app = await createApp({
+      port: 0,
+      stateDir: tmp.dir,
+      pluginsDir: path.join(local.dir, "plugins"),
+      outbox: false,
+      quiet: true,
+      webDir: tmp.dir,
+      bundledDir: path.join(local.dir, "bundled", "views"),
+    });
+  });
+  afterAll(async () => {
+    await app.close();
+    tmp.cleanup();
+    local.cleanup();
+  });
+
+  const url = (p: string) => `${app.url}${p}`;
+  const status = async (id: string) =>
+    ((await (await fetch(url(PLUGIN_ROUTES.list))).json()) as { plugins: InstalledPlugin[] }).plugins.find(
+      (p) => p.id === id,
+    )!.status;
+  const file = () =>
+    JSON.parse(readFileSync(path.join(tmp.dir, "config.json"), "utf8")) as {
+      sinkToken: string;
+      uiKey: string;
+      enabled?: string[];
+      disabled?: string[];
+    };
+  // What `sessionpipe-gui plugin|view enable|disable` does (server/cli.ts), from its own process.
+  const cli = (key: string, on: boolean) =>
+    key.startsWith("view:")
+      ? setDisabled(tmp.dir, readGuiConfig(tmp.dir), key, !on)
+      : setEnabled(tmp.dir, readGuiConfig(tmp.dir), key, on);
+  // Each test starts from the server's own file with neither list: nothing on or off.
+  beforeEach(async () => {
+    const { sinkToken, uiKey, createdAt } = app.config();
+    writeFileSync(path.join(tmp.dir, "config.json"), JSON.stringify({ sinkToken, uiKey, createdAt }));
+    await fetch(url(PLUGIN_ROUTES.reload), { method: "POST" });
+    expect(await status("shipped")).toBe("inactive");
+    expect(await status("other")).toBe("active");
+  });
+
+  it("Reload plugins starts one the CLI enabled, and a later write of the server's keeps it", async () => {
+    expect(await status("shipped")).toBe("inactive");
+    cli("plugin:shipped", true);
+    await fetch(url(PLUGIN_ROUTES.reload), { method: "POST" });
+    expect(await status("shipped")).toBe("active");
+    const before = file();
+    const rotated = await fetch(url(ROUTES.ui.rotateToken), { method: "POST" });
+    const { sinkToken } = (await rotated.json()) as { sinkToken: string };
+    expect(file()).toMatchObject({ sinkToken, uiKey: before.uiKey, enabled: ["plugin:shipped"] });
+    await fetch(url(PLUGIN_ROUTES.reload), { method: "POST" });
+    expect(await status("shipped")).toBe("active");
+  });
+
+  it("a view or plugin the CLI turned off stays off through the server's writes", async () => {
+    cli("view:canvas", false);
+    cli("plugin:shipped", false);
+    await fetch(url(PLUGIN_ROUTES.reload), { method: "POST" });
+    expect(await status("shipped")).toBe("inactive");
+    await fetch(url(ROUTES.ui.rotateToken), { method: "POST" });
+    expect(file().disabled).toEqual(["view:canvas", "plugin:shipped"]);
+    expect(file().enabled).toBeUndefined();
+  });
+
+  it("the server's secrets stay its own, and a bad file, or one with other secrets, changes nothing", async () => {
+    cli("view:canvas", false);
+    const { sinkToken, uiKey } = app.config();
+    const f = path.join(tmp.dir, "config.json");
+    const { disabled, enabled } = file();
+    writeFileSync(f, "{ not json");
+    await fetch(url(PLUGIN_ROUTES.reload), { method: "POST" });
+    expect(readFileSync(f, "utf8")).toBe("{ not json");
+    expect(app.config()).toMatchObject({ sinkToken, uiKey, disabled });
+    expect(app.config().enabled).toEqual(enabled);
+    // A file with other secrets than the server's (another install's, or the old token a
+    // CLI command wrote back across a rotation): its lists are not an edit of ours, so
+    // none is taken from it.
+    writeFileSync(f, JSON.stringify({ sinkToken: "spg_test_other", uiKey: "uik_other", enabled: ["plugin:shipped"] }));
+    await fetch(url(PLUGIN_ROUTES.reload), { method: "POST" });
+    expect(await status("shipped")).toBe("inactive");
+    expect(app.config()).toMatchObject({ sinkToken, uiKey, disabled });
+    expect(app.config().enabled).toEqual(enabled);
+  });
+
+  it("a toggle in the GUI also starts or stops a plugin the CLI turned on or off meanwhile", async () => {
+    cli("plugin:shipped", true);
+    await fetch(url(PLUGIN_ROUTES.reload), { method: "POST" });
+    expect(await status("other")).toBe("active");
+    expect(await status("shipped")).toBe("active");
+    cli("plugin:shipped", false);
+    await fetch(url(`${PLUGIN_ROUTES.toggle}/other/disable`), { method: "POST" });
+    expect(await status("other")).toBe("inactive");
+    expect(await status("shipped")).toBe("inactive");
+    cli("plugin:shipped", true);
+    await fetch(url(`${PLUGIN_ROUTES.toggle}/other/enable`), { method: "POST" });
+    expect(await status("other")).toBe("active");
+    expect(await status("shipped")).toBe("active");
   });
 });
 

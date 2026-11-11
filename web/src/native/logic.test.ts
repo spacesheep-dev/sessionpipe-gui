@@ -10,7 +10,9 @@ import {
   notifyToggle,
   parseAddress,
   type StartState,
+  settingsApp,
   startStep,
+  trayPlace,
   updateHint,
   updateLine,
 } from "./logic";
@@ -82,6 +84,14 @@ describe("the first-run sheet", () => {
     expect(denied.note).toMatch(/System Settings/);
     expect(await notifyToggle(true, async () => null)).toEqual({ enabled: false, note: null });
   });
+  it("names the tray and the settings app as each computer does", () => {
+    expect(trayPlace("macos")).toBe("menu bar");
+    expect(trayPlace("windows")).toBe("system tray");
+    expect(trayPlace("linux")).toBe("system tray");
+    expect(settingsApp("macos")).toBe("System Settings");
+    expect(settingsApp("windows")).toBe("Settings");
+    expect(settingsApp("ios")).toBe("Settings");
+  });
 });
 
 describe("the shortcut recorder", () => {
@@ -111,6 +121,16 @@ describe("the shortcut recorder", () => {
     expect(hotkeyLabel("Shift+Command+Space")).toBe("⇧⌘Space");
     expect(hotkeyLabel("Command+Control+KeyK")).toBe("⌃⌘K");
     expect(hotkeyLabel(null)).toBe("");
+  });
+  it("writes it in words on Windows and Linux, where ⌃⌥ means nothing", () => {
+    expect(hotkeyLabel("Control+Alt+N", "windows")).toBe("Ctrl+Alt+N");
+    expect(hotkeyLabel("Shift+Command+Space", "windows")).toBe("Shift+Win+Space");
+    expect(hotkeyLabel("Command+Control+KeyK", "linux")).toBe("Ctrl+Super+K");
+    expect(hotkeyLabel("CmdOrCtrl+Shift+Digit5", "windows")).toBe("Ctrl+Shift+5");
+    // CmdOrCtrl and Control are one key off a Mac: named once.
+    expect(hotkeyLabel("CmdOrCtrl+Control+N", "windows")).toBe("Ctrl+N");
+    expect(hotkeyLabel("Control+Alt+N", "macos")).toBe("⌃⌥N");
+    expect(hotkeyLabel(null, "windows")).toBe("");
   });
 });
 

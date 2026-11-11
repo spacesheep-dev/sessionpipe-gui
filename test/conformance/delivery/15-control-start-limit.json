@@ -1,0 +1,48 @@
+{
+  "name": "control-start-limit",
+  "spec": "CONTROL.md \u00a76 start",
+  "capability": "control",
+  "note": "A machine past its own start caps acks a start refused with code start_limit; the receiver records it as final and never redelivers it.",
+  "steps": [
+    {
+      "enqueue": {
+        "machine": "m_conformance{run}0000",
+        "message": {
+          "kind": "start",
+          "session": "claude-code:00000000-0000-4000-8000-{run12}",
+          "cwd": "/tmp/conformance",
+          "text": "start limit probe",
+          "expires_in_s": 60
+        }
+      }
+    },
+    {
+      "poll": {
+        "machine": "m_conformance{run}0000",
+        "wait": 1
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "ack": {
+        "outcome": "refused",
+        "code": "start_limit",
+        "detail": "this machine is already starting 2 new session(s)"
+      },
+      "expect": {
+        "status": 202
+      }
+    },
+    {
+      "poll": {
+        "machine": "m_conformance{run}0000",
+        "wait": 1
+      },
+      "expect": {
+        "status": 204
+      }
+    }
+  ]
+}

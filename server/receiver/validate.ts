@@ -31,7 +31,7 @@ export function eventProblem(e: unknown): string | null {
     return "bad_harness";
   if (!isObject(e.session) || typeof e.session.id !== "string" || !SESSION_ID_RE.test(e.session.id))
     return "bad_session";
-  if (!Number.isInteger(e.session.seq) || (e.session.seq as number) < 0) return "bad_seq";
+  if (!Number.isSafeInteger(e.session.seq) || (e.session.seq as number) < 0) return "bad_seq";
   if (!isObject(e.privacy) || !Array.isArray(e.privacy.rulesets) || typeof e.privacy.pii !== "boolean")
     return "bad_privacy";
   if (!isObject(e.data)) return "bad_data";
