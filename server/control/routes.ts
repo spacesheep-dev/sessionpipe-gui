@@ -17,6 +17,9 @@ export interface MachineRouteDeps {
   /** The browser origins passkeys work on (app.ts `origins`): the pairing link the
    *  terminal prints names one of these, never a bare LAN or tailnet address. */
   origins?: () => string[];
+  /** The UI key (config.ts): the pairing link carries it, so any browser that opens the
+   *  link is let in. The machine already holds the sink token, a secret of the same rank. */
+  uiKey?: () => string;
 }
 
 /** The pairing link a terminal prints (CONTROL.md §2 step 2). A daemon reaches the
@@ -26,10 +29,12 @@ export interface MachineRouteDeps {
  *  came in on when that is one, else the first. On 2026-11-03 a person opened the
  *  printed http://100.68.187.81:7373/pair link on the Mac that runs the GUI and met the
  *  UI-key wall, then "sending works from https://…; open it there". */
-export function pairUrlFor(requestOrigin: string, origins: readonly string[], code: string): string {
+export function pairUrlFor(requestOrigin: string, origins: readonly string[], code: string, uiKey?: string): string {
   const same = origins.find((o) => o.replace(/\/+$/, "") === requestOrigin.replace(/\/+$/, ""));
   const base = (same ?? origins[0] ?? requestOrigin).replace(/\/+$/, "");
-  return `${base}/pair?code=${encodeURIComponent(code)}`;
+  // The key rides along (UI_KEY_PARAM): a phone or a laptop that never saw this board
+  // opens the link and is let in, instead of "This board needs its key".
+  return `${base}/pair?code=${encodeURIComponent(code)}${uiKey ? `&k=${encodeURIComponent(uiKey)}` : ""}`;
 }
 
 /** Equal secrets, in constant time whatever their lengths. */
@@ -112,7 +117,7 @@ export function registerMachineRoutes(router: Router, d: MachineRouteDeps): void
       json: {
         machine: m.id,
         code: p.code,
-        url: pairUrlFor(requestOrigin(ctx), d.origins?.() ?? [], p.code),
+        url: pairUrlFor(requestOrigin(ctx), d.origins?.() ?? [], p.code, d.uiKey?.()),
         check: p.check,
         expires_at: p.expiresAt,
       },

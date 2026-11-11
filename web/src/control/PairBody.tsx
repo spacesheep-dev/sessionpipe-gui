@@ -14,6 +14,7 @@ import { ActionButton, HarnessGlyph } from "../components/bits";
 import "../lib/acp";
 import { harnessMark } from "../lib/format";
 import { ms, useNow } from "../lib/time";
+import { Qr } from "../phone/Qr";
 import { ControlError, controlApi, httpsHere, type Pairing } from "./api";
 import { fromB64url } from "./bytes";
 import { assertPasskey, registerPasskey } from "./ceremony";
@@ -216,6 +217,15 @@ export function PairBody({ code, compact = false }: { code: string; compact?: bo
           </span>
         )}
       </div>
+
+      {/* The same page on the https origin, with the key, as a QR: the phone that holds
+          the passkey scans it and approves there, no typing, no key wall. */}
+      {!compact && phase.k !== "approved" && phase.k !== "rejected" && httpsHere() && (
+        <div className="pair-phone">
+          <Qr url={httpsHere()} alt="QR code of this pairing page, with the board's key" size={112} />
+          <span className="caption">Or scan this with the phone that holds the passkey, and approve there.</span>
+        </div>
+      )}
 
       <section className="form-group" aria-label="The machine">
         <ul className="form-list pair-facts">

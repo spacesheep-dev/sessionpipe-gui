@@ -13,19 +13,19 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.2/sessionpipe_0.7.2_universal.dmg"><picture>
+  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.5/sessionpipe_0.7.5_universal.dmg"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/macos-dark.svg">
     <img src="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/macos.svg" alt="Download for macOS: Apple silicon and Intel" width="272" height="56">
   </picture></a>
   &nbsp;
-  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.2/sessionpipe_0.7.2_amd64.deb"><picture>
+  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.5/sessionpipe_0.7.5_amd64.deb"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/linux-dark.svg">
     <img src="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/linux.svg" alt="Download for Linux: .deb, x86-64" width="272" height="56">
   </picture></a>
 </p>
 
 <p align="center">
-  <sub>Signed and notarized for macOS 11 or newer · Linux <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.2/sessionpipe_0.7.2_amd64.AppImage">AppImage</a> · <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases">All releases</a> · or <a href="#install">install with npm</a></sub>
+  <sub>Signed and notarized for macOS 11 or newer · Linux <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.5/sessionpipe_0.7.5_amd64.AppImage">AppImage</a> · <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases">All releases</a> · or <a href="#install">install with npm</a></sub>
 </p>
 
 <p align="center">
@@ -143,7 +143,7 @@ To keep it on the PATH as `sessionpipe-gui`, install a [release](https://github.
 tarball:
 
 ```sh
-npm i -g https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.2/sessionpipe-gui-0.7.2.tgz
+npm i -g https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.5/sessionpipe-gui-0.7.5.tgz
 ```
 
 Or from a clone: `git clone https://github.com/spacesheep-dev/sessionpipe-gui && cd
@@ -158,7 +158,7 @@ ping-a-human Telegram plugin (off until you turn it on). The board runs on port 
 1. **Run `sessionpipe-gui`.** It prints where to open it, and a QR code for your phone:
 
    ```
-   sessionpipe-gui 0.7.3 · ~/.local/state/sessionpipe-gui
+   sessionpipe-gui 0.7.5 · ~/.local/state/sessionpipe-gui
 
      setup   http://localhost:7373/setup   (first run: your sessions, https, pairing, your phone)
      local   http://localhost:7373
@@ -180,6 +180,18 @@ ping-a-human Telegram plugin (off until you turn it on). The board runs on port 
    you, and you approve the six digits with your passkey.
 5. **Add your phone.** Scan the QR code; Setup's phone step gets it sending, over the same
    Wi-Fi or [Tailscale](https://tailscale.com).
+
+### Or a spacesheep account
+
+Nothing to host, if you'd rather not: **Settings → Data → Use a spacesheep account**
+connects this GUI to a [spacesheep](https://spacesheep.dev) account. The GUI shows a
+code, the account's page shows the same four digits, you confirm once, and from then on
+every machine paired on that account (`sessionpipe control pair spacesheep.dev`, one
+command per machine, no port to open) shows up here with its sessions, through
+spacesheep's relay. Messages to those sessions go back the same way, signed by the desktop
+app's own key, which you approve once per machine on spacesheep's Devices. It is an
+option, not the default: a GUI that never connects keeps everything on this machine
+([docs/rfcs/08](docs/rfcs/08-spacesheep-as-a-hosted-backend.md)).
 
 No agent handy? `sessionpipe-gui --demo` fills the board with a synthetic team.
 
@@ -312,8 +324,8 @@ device.
 
 | Platform | Download |
 |---|---|
-| macOS 11 or newer, Apple silicon and Intel | [sessionpipe_0.7.2_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.2/sessionpipe_0.7.2_universal.dmg), signed and notarized |
-| Linux, x86-64 | [.deb](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.2/sessionpipe_0.7.2_amd64.deb) · [AppImage](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.2/sessionpipe_0.7.2_amd64.AppImage), for any distribution |
+| macOS 11 or newer, Apple silicon and Intel | [sessionpipe_0.7.2_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.5/sessionpipe_0.7.5_universal.dmg), signed and notarized |
+| Linux, x86-64 | [.deb](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.5/sessionpipe_0.7.5_amd64.deb) · [AppImage](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.5/sessionpipe_0.7.5_amd64.AppImage), for any distribution |
 
 The same UI in a small [Tauri 2](https://tauri.app) app that uses the system's own web view
 (the AppImage carries WebKitGTK with it, which is why it is larger). It connects to the

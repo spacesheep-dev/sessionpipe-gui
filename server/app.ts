@@ -13,10 +13,12 @@ import {
   packageVersion,
   readGuiConfig,
   rotateSinkToken,
+  type SpacesheepLink,
   setDisabled,
   setEnabled,
   setPublicUrl,
   setSearchHistory,
+  setSpacesheep,
   setTlsPreference,
 } from "./config.js";
 import { type Control, createControl } from "./control/index.js";
@@ -38,6 +40,7 @@ import { execDefault, isThisMachine } from "./setup/local.js";
 import { createTailscaleProbe } from "./setup/tailscale.js";
 import { registerSkins, SkinRegistry } from "./skins/index.js";
 import { type OutboxSource, startOutboxSource } from "./sources/outbox.js";
+import { type SpacesheepSource, startSpacesheepSource } from "./sources/spacesheep.js";
 import { staticFiles, webDir } from "./static.js";
 import { Store } from "./store/store.js";
 import { registerThemes, ThemeRegistry } from "./themes/index.js";
@@ -50,6 +53,7 @@ import { registerUi, uiGuard } from "./ui/index.js";
 import { LabelStore } from "./ui/labels.js";
 import { LimitsStore } from "./ui/limits.js";
 import { MarkStore } from "./ui/marks.js";
+import { registerSpacesheepUi } from "./ui/spacesheep.js";
 import { Broadcast } from "./ui/stream.js";
 import { ViewerRegistry } from "./ui/viewers.js";
 
@@ -213,6 +217,25 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     uiAuth,
     sessionExists: (key) => store.sessionExists(key),
     origins,
+    uiKey,
+    // A send for a machine paired on spacesheep: the signed body to its jobs route, as
+    // this account (the gui key), which verifies it against the machine's keys.
+    remoteSend: async (m, body) => {
+      const link = config.spacesheep;
+      if (!link || m.remote?.origin !== link.origin)
+        return { status: 503, json: { code: "no_relay", error: "Not connected to spacesheep any more." } };
+      const res = await fetch(`${link.origin}/api/machines/${encodeURIComponent(m.id)}/jobs`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${link.key}`,
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      return { status: res.status, json };
+    },
   });
 
   registerReceiver(router, { store, sinkToken: () => config.sinkToken, control });
@@ -220,6 +243,26 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   // A pooled account's windows ride on the hello too (DESIGN §2.3): the limits follow the
   // machine frames for them, newest wins against the events'.
   limits.followControl(control);
+
+  // A spacesheep account as the backend (docs/rfcs/08): the relay feeds the store like
+  // the outbox does; on by the link in config, started again when a connect lands.
+  let spacesheep: SpacesheepSource | null = null;
+  const startSpacesheep = (link: SpacesheepLink): void => {
+    spacesheep?.stop();
+    try {
+      spacesheep = startSpacesheepSource(store, {
+        ...link,
+        // The machines paired there become rows here (control.remote), their sends settled
+        // by the relay's word on spacesheep's jobs.
+        onMachines: (list, origin, rpId) => control.remote.upsert(list as never, { via: "spacesheep", origin, rpId }),
+        pendingJobsFrom: () => control.remote.pendingFrom(),
+        onJobs: (jobs) => control.remote.applyJobs(jobs),
+      });
+    } catch (e) {
+      if (!opts.quiet) process.stderr.write(`[sessionpipe-gui] spacesheep: ${(e as Error).message}\n`);
+    }
+  };
+  if (config.spacesheep) startSpacesheep(config.spacesheep);
 
   let outbox: OutboxSource | null = null;
   if (opts.outbox !== false) {
@@ -284,6 +327,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
         http: true,
         outbox: ob ? { path: ob.path, sessions: ob.sessions, enabled: true, events: ob.events } : null,
         demo: demo !== null,
+        spacesheep: spacesheep?.status() ?? null,
       },
       storage: { dir: stateDir, bytes: stats.storageBytes + attachments.bytes(), attachments: attachments.bytes() },
       wellKnown: wellKnown(control),
@@ -381,6 +425,27 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   // acks and a one-second clock, signed only by a browser; their frames ride the broadcast.
   const orchestrate = createOrchestrate({ stateDir, control, broadcast: (m) => broadcast.emit(m) });
   registerOrchestrate(router, orchestrate, uiGuard(uiKey), { testDoor: opts.testDoor ?? false });
+  registerSpacesheepUi(
+    router,
+    {
+      link: () => config.spacesheep,
+      status: () => spacesheep?.status() ?? null,
+      connect: (link) => {
+        config = setSpacesheep(stateDir, config, link);
+        startSpacesheep(link);
+        broadcast.emit({ kind: "info" } as never);
+      },
+      disconnect: () => {
+        spacesheep?.stop();
+        spacesheep = null;
+        config = setSpacesheep(stateDir, config, undefined);
+        control.remote.drop("spacesheep");
+      },
+      deviceName: () => `${os.hostname().replace(/\.(local|lan|home)$/i, "")}`,
+      version: () => packageVersion(),
+    },
+    uiGuard(uiKey),
+  );
   const themes = new ThemeRegistry(opts.themesDir ?? path.join(stateDir, "themes"), {
     bundledDir: bundled.view,
     disabled,
@@ -527,6 +592,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       await plugins.stop();
       setup.pairer.close();
       outbox?.stop();
+      spacesheep?.stop();
       setDemo(false);
       replay?.stop();
       orchestrate.close();

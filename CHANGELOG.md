@@ -6,6 +6,48 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-11-06
+
+### Added
+
+- **spacesheep as the backend (an option).** Settings → spacesheep connects this GUI to a
+  spacesheep account: the GUI asks for a code, the account's page shows the same four
+  digits, one confirm, and from then on the account's sessions and paired machines arrive
+  here through spacesheep's relay, no receiver of your own to host. The machines paired
+  there show on Machines as remote ones; a message to one of their sessions goes through
+  spacesheep's jobs door, signed by the app's own device key, which "Approve this app on
+  spacesheep" asks to be trusted (approved once per machine on spacesheep's Devices with
+  the two-digit number the app shows). How each send went (delivered, refused, why)
+  settles from spacesheep's word. Not a default: a GUI that never connects works as before
+  (docs/rfcs/08).
+
+### Fixed
+
+- The desktop release workflow retries `stapler staple` and `stapler validate`, which
+  Apple's ticket service failed twice in a row with the dmg already notarized.
+
+## [0.7.4] - 2026-11-03
+
+### Added
+
+- **Sending from the iPhone app.** The phone app signs with a device key in the iPhone's
+  Secure Enclave, Face ID (or the passcode) on each send, the same signer as the Mac app's:
+  "Add this iPhone" on Machines makes the key, a passkey approves it once per machine on
+  the computer's Devices, and from then on the phone answers prompts and sends messages
+  like the Mac. Until now the phone said "Sending from this phone comes in a later
+  version", and "Add this iPhone" met the plugin's ACL.
+
+### Fixed
+
+- **The pairing link the terminal prints carries the board's key** (`&k=…`), so a browser
+  that never saw this board opens it and is let in, instead of "This board needs its key";
+  the pair page also draws itself as a QR for the phone that holds the passkey.
+- **The app says it can't approve its own key**, and hands off to the browser or phone
+  that holds a trusted passkey, instead of "not sent · the machine doesn't trust this Mac
+  yet" on its own request.
+- The iOS release workflow reads altool's verdict ("UPLOAD SUCCEEDED") rather than failing
+  on a transient status-poll error on the way.
+
 ## [0.7.3] - 2026-11-03
 
 ### Fixed
@@ -675,7 +717,9 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.5...HEAD
+[0.7.5]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.4...v0.7.5
+[0.7.4]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.0...v0.7.1

@@ -51,6 +51,7 @@ async function boot() {
   const native = "sessionpipeShell" in window ? await import("./native/shell") : null;
   if (native && (await native.start())) return;
   const transport = isMockMode() ? (await import("./mock/index")).createMockTransport() : createHttpTransport();
+  if (isMockMode()) (await import("./mock/banner")).showDemoBanner();
   const store = new Store(transport);
   store.start();
   native?.markFirstSnapshot(store);
