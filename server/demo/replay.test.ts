@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ulid } from "sessionpipe-core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { EventSource, ProtocolEvent } from "../../shared/api.js";
 import type { Store } from "../store/store.js";
 import { startReplay } from "./index.js";
@@ -114,19 +114,27 @@ describe("startReplay", () => {
   });
 
   it("paces by the original gaps divided by speed", async () => {
-    const lines = [event(0, T0), event(1, T0 + 1000), event(2, T0 + 3000)];
-    const store = new FakeStore();
-    const t = Date.now();
-    const runner = startReplay(asStore(store), fileOf(lines), { speed: 20 });
-    expect(store.events.map((e) => e.session.seq)).toEqual([0]);
-    await runner.done;
-    const took = Date.now() - t;
-    expect(store.events.map((e) => e.session.seq)).toEqual([0, 1, 2]);
-    expect(took).toBeGreaterThanOrEqual(140);
-    expect(took).toBeLessThan(1000);
-    const [a, b, c] = store.batches.map((x) => x.at) as [number, number, number];
-    expect(b - a).toBeGreaterThanOrEqual(45);
-    expect(c - b).toBeGreaterThanOrEqual(95);
+    vi.useFakeTimers();
+    try {
+      const lines = [event(0, T0), event(1, T0 + 1000), event(2, T0 + 3000)];
+      const store = new FakeStore();
+      const runner = startReplay(asStore(store), fileOf(lines), { speed: 20 });
+      expect(store.events.map((e) => e.session.seq)).toEqual([0]);
+      await vi.advanceTimersByTimeAsync(49);
+      expect(store.events.map((e) => e.session.seq)).toEqual([0]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(store.events.map((e) => e.session.seq)).toEqual([0, 1]);
+      await vi.advanceTimersByTimeAsync(99);
+      expect(store.events.map((e) => e.session.seq)).toEqual([0, 1]);
+      await vi.advanceTimersByTimeAsync(1);
+      await runner.done;
+      expect(store.events.map((e) => e.session.seq)).toEqual([0, 1, 2]);
+      const [a, b, c] = store.batches.map((x) => x.at) as [number, number, number];
+      expect(b - a).toBe(50);
+      expect(c - b).toBe(100);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stop() cancels what is still to come", async () => {
