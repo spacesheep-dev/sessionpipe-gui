@@ -35,7 +35,7 @@ import type {
 } from "../../shared/api.js";
 import type { DeviceSignature } from "./devicekeys.js";
 import { FileStore } from "./files.js";
-import { type AckIn, type HarnessAccount, type Hello, isFinal } from "./parse.js";
+import { type AckIn, type HarnessAccount, type Hello, isFinal, MACHINE_RE } from "./parse.js";
 import type { PoolCommand } from "./pool.js";
 import { machineTakesTilde } from "./tilde.js";
 
@@ -119,6 +119,27 @@ export interface PairingRow {
   deliveredAt?: string;
 }
 
+/** A machine as spacesheep's relay lists it (its publicMachine shape, the fields read here). */
+export interface RemoteMachine {
+  id: string;
+  name: string;
+  online?: boolean;
+  last_seen?: number | null;
+  folders?: string[];
+  mode?: string;
+  agents?: string[];
+  cli_version?: string | null;
+  modes?: string[];
+  passkey_ids?: string[];
+  files?: boolean;
+  prompt_files?: boolean;
+  key_types?: string[];
+  ask?: boolean;
+  handoff?: boolean;
+  start?: Record<string, HarnessStartOptions>;
+  pool?: MachinePool | null;
+}
+
 export interface MachineRow {
   id: string;
   name: string;
@@ -148,6 +169,9 @@ export interface MachineRow {
   waiting?: string[];
   lastHelloAt?: string;
   lastPollAt?: string;
+  /** A machine paired on a spacesheep account (docs/rfcs/08): held in memory from the
+   *  relay's list, never saved, never polled here; its keys are ids only. */
+  remote?: { via: "spacesheep"; origin: string; rpId: string; online: boolean; lastSeen?: string };
   pairings: PairingRow[];
 }
 
@@ -179,6 +203,9 @@ export interface DeviceRequestRow {
 export interface MessageRow {
   id: string;
   machineId: string;
+  /** A send carried by spacesheep (a remote machine): its job id there, whose status the
+   *  relay reports (state.applyRemoteJobs). */
+  remoteJob?: number;
   cmd: string;
   csig?: string | null;
   grant?: SignedCommand["grant"];
@@ -370,9 +397,142 @@ export class ControlState {
         const dead = p.deliveredAt ? Date.parse(p.deliveredAt) : Date.parse(p.expiresAt);
         return now - dead < PAIRING_TTL_MS;
       });
-    writeAtomic(this.machinesFile, { v: 1, machines: [...this.machinesById.values()] } satisfies MachinesFile);
+    writeAtomic(this.machinesFile, {
+      v: 1,
+      machines: [...this.machinesById.values()].filter((m) => !m.remote),
+    } satisfies MachinesFile);
     this.checkOnline();
     this.onMachines();
+  }
+
+  // --- machines paired elsewhere (docs/rfcs/08: a spacesheep account as the backend) ---
+
+  /** The relay's machine list, as rows: created or refreshed in memory, with the facts
+   *  spacesheep's hellos kept and the keys it trusts (ids only; the signature is the
+   *  receiver's check). Rows the list no longer has go. */
+  upsertRemoteMachines(list: RemoteMachine[], remote: { via: "spacesheep"; origin: string; rpId: string }): void {
+    const seen = new Set<string>();
+    let changed = false;
+    for (const r of list) {
+      if (!MACHINE_RE.test(r.id)) continue;
+      seen.add(r.id);
+      const facts: Hello = {
+        name: r.name,
+        harnesses: r.agents ?? [],
+        modes: r.modes ?? [],
+        version: r.cli_version ?? "",
+        folders: r.folders ?? undefined,
+        mode: r.mode === "auto" || r.mode === "inherit" || r.mode === "safe" ? r.mode : undefined,
+        accounts: [],
+        files: !!r.files,
+        promptFiles: !!r.prompt_files,
+        keyTypes: r.key_types?.includes("device") ? ["passkey", "device"] : ["passkey"],
+        ask: r.ask,
+        handoff: !!r.handoff,
+        start: r.start,
+        pool: r.pool ?? undefined,
+      } as unknown as Hello;
+      let m = this.machinesById.get(r.id);
+      if (!m) {
+        m = {
+          id: r.id,
+          name: r.name,
+          createdAt: nowIso(),
+          keys: [],
+          harnesses: facts.harnesses,
+          modes: facts.modes,
+          version: facts.version,
+          pairings: [],
+        };
+        this.machinesById.set(r.id, m);
+        changed = true;
+      }
+      this.applyFacts(m, facts);
+      m.pairedAt = m.pairedAt ?? nowIso();
+      m.remote = {
+        ...remote,
+        online: !!r.online,
+        lastSeen: r.last_seen ? new Date(r.last_seen).toISOString() : undefined,
+      };
+      m.lastHelloAt = m.remote.lastSeen;
+      const keys = (r.passkey_ids ?? []).map((id) => ({ id, alg: -7, spki: "", addedAt: nowIso() }));
+      if (keys.map((k) => k.id).join() !== m.keys.map((k) => k.id).join()) {
+        m.keys = keys;
+        changed = true;
+      }
+    }
+    for (const m of [...this.machinesById.values()]) {
+      if (m.remote?.via === remote.via && !seen.has(m.id)) {
+        this.machinesById.delete(m.id);
+        changed = true;
+      }
+    }
+    if (changed) this.checkOnline();
+    this.onMachines();
+  }
+
+  /** Disconnected: the rows paired there leave the board. */
+  dropRemoteMachines(via: "spacesheep"): void {
+    for (const m of [...this.machinesById.values()]) if (m.remote?.via === via) this.machinesById.delete(m.id);
+    this.onMachines();
+  }
+
+  /** A send spacesheep carried for a remote machine: its row here, settled by the relay's
+   *  job status (applyRemoteJobs), never by a poll of this receiver. */
+  enqueueRemote(
+    m: MachineRow,
+    signed: SignedCommand,
+    cmd: ControlCommand,
+    o: { via: string; from?: string },
+    remoteJob: number,
+  ): MessageRow {
+    const row = this.enqueue(m, signed, cmd, { via: o.via, ...(o.from ? { from: o.from } : {}) });
+    row.remoteJob = remoteJob;
+    this.saveQueue(m.id);
+    return row;
+  }
+
+  /** The lowest spacesheep job id still unsettled here, for the relay's `since`. */
+  pendingRemoteJobsFrom(): number | null {
+    let min: number | null = null;
+    for (const [, rows] of this.queues)
+      for (const row of rows) {
+        if (row.remoteJob === undefined || isFinal(row.outcome)) continue;
+        if (min === null || row.remoteJob < min) min = row.remoteJob;
+      }
+    return min;
+  }
+
+  /** The relay's word on the jobs spacesheep carried (its status column, worded there):
+   *  queued keeps waiting, taken/running is taken, done is delivered, refused and failed
+   *  are themselves, with the note as the detail. */
+  applyRemoteJobs(
+    jobs: Array<{ id: number; status: string; note: string | null; done_at: number | null; created_at: number }>,
+  ): number {
+    let n = 0;
+    const byJob = new Map(jobs.map((j) => [j.id, j]));
+    for (const [id, rows] of this.queues) {
+      let changed = false;
+      for (const row of rows) {
+        if (row.remoteJob === undefined || isFinal(row.outcome)) continue;
+        const j = byJob.get(row.remoteJob);
+        if (!j || j.status === "queued") continue;
+        if (j.status === "taken" || j.status === "running") {
+          if (row.outcome === "taken") continue;
+          row.outcome = "taken";
+          row.takenAt = nowIso();
+        } else {
+          row.outcome = j.status === "done" ? "delivered" : j.status === "refused" ? "refused" : "failed";
+          row.ackedAt = j.done_at ? new Date(j.done_at).toISOString() : nowIso();
+          if (j.note) row.detail = j.note;
+        }
+        changed = true;
+        n++;
+        this.onMessage(row);
+      }
+      if (changed) this.saveQueue(id);
+    }
+    return n;
   }
   private saveQueue(id: string): void {
     const q = this.queues.get(id);
@@ -513,7 +673,8 @@ export class ControlState {
   machineControl(m: MachineRow): MachineControl {
     const c: MachineControl = {
       machineId: m.id,
-      online: !!m.lastPollAt && Date.now() - Date.parse(m.lastPollAt) < ONLINE_WINDOW_MS,
+      online: m.remote ? m.remote.online : !!m.lastPollAt && Date.now() - Date.parse(m.lastPollAt) < ONLINE_WINDOW_MS,
+      ...(m.remote ? { remote: { via: m.remote.via, origin: m.remote.origin, rpId: m.remote.rpId } } : {}),
       keys: m.keys.map((k) => ({
         id: k.id,
         alg: k.alg,
