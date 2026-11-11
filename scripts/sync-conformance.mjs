@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The sessionpipe conformance fixtures this receiver is held to, copied into
-// test/conformance/ at the version of sessionpipe-core that package-lock.json pins:
+// test/conformance/ at the one version of sessionpipe-core that package.json pins:
 // conformance/control-vectors (signed commands and enrollment proofs, each with the verdict
 // every verifier must reach, CONTROL.md §11) and conformance/delivery (receiver scenarios,
 // HTTP.md §7). The sessionpipe-conformance package on npm ships a runner and no fixtures,
@@ -12,19 +12,25 @@
 //
 // The files are read from the checkout's git objects at the tag `v<version>`, never from
 // its working tree, so a checkout on another commit, or with edits, gives the same copy.
-// manifest.json records the version, the tag's commit and a SHA-256 per file, taken over
-// the JSON written out again so that a checkout's line endings don't count.
-// test/conformance.test.ts fails when the copy, the manifest and the pinned version
-// disagree: run this after every bump of sessionpipe-core.
+// The tag's tree is data, not instructions: a path it lists is written only when
+// conformance-paths.mjs says it is one of ours, and anything else there stops the sync
+// before a byte is written. manifest.json records the version, the tag's commit and a
+// SHA-256 per file, taken over the JSON written out again so that a checkout's line
+// endings don't count.
+//
+// Two things hold the copy to this. test/conformance.test.ts fails when the copy, the
+// manifest and the pin disagree, with nothing but this repo; it trusts the manifest. CI
+// then runs `--check` against a clone of sessionpipe at the tag, which is what catches a
+// vector edited together with its hash. Moving the pin means running this in the same change.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { FILES, FOLDERS, fixtureRel } from "./conformance-paths.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const out = path.join(root, "test", "conformance");
-const FOLDERS = ["control-vectors", "delivery"];
 const SOURCE = "https://github.com/spacesheep-dev/sessionpipe";
 
 const args = process.argv.slice(2);
@@ -38,9 +44,14 @@ const fail = (why) => {
   process.exit(1);
 };
 
+// The pin is one exact version: the fixtures are that version's, and a range would let an
+// install with no lockfile run a verifier they were never run against.
+const version = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).dependencies?.["sessionpipe-core"];
+if (typeof version !== "string" || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version))
+  fail(`package.json pins sessionpipe-core as ${JSON.stringify(version)}: it takes one exact version, no range`);
 const lock = JSON.parse(readFileSync(path.join(root, "package-lock.json"), "utf8"));
-const version = lock.packages?.["node_modules/sessionpipe-core"]?.version;
-if (!version) fail("package-lock.json pins no sessionpipe-core");
+if (lock.packages?.["node_modules/sessionpipe-core"]?.version !== version)
+  fail(`package-lock.json is not at sessionpipe-core ${version}, which package.json pins: run npm install`);
 const tag = `v${version}`;
 const repo = path.resolve(root, flag("--from") ?? process.env.SESSIONPIPE_REPO ?? "../sessionpipe");
 if (!existsSync(repo)) fail(`no sessionpipe checkout at ${repo}: pass --from <checkout>, or set SESSIONPIPE_REPO`);
@@ -51,7 +62,7 @@ let commit;
 try {
   commit = git("rev-parse", "--verify", "--quiet", `${tag}^{commit}`).toString().trim();
 } catch {
-  fail(`${repo} has no tag ${tag}, the sessionpipe-core package-lock.json pins: git -C ${repo} fetch --tags`);
+  fail(`${repo} has no tag ${tag}, the sessionpipe-core package.json pins: git -C ${repo} fetch --tags`);
 }
 
 /** A fixture's content, whatever its line endings and spacing: SHA-256 of the JSON written out again. */
@@ -60,16 +71,34 @@ const digest = (bytes) =>
     .update(JSON.stringify(JSON.parse(bytes.toString("utf8"))))
     .digest("hex");
 
-// What the tag holds: <folder>/<name>.json → its bytes, as git has them.
+// What the tag holds: <folder>/<name>.json → its bytes, as git has them. Every path the
+// tree lists there is checked before any is read or written (conformance-paths.mjs): a
+// tree can name `control-vectors/../../../package.json`, and the copy is not the tree's to place.
 const upstream = new Map();
-const listed = git("ls-tree", "-r", "-z", "--name-only", tag, "--", ...FOLDERS.map((f) => `conformance/${f}`))
+const listed = git(
+  "ls-tree",
+  "-r",
+  "-z",
+  "--name-only",
+  tag,
+  "--",
+  ...[...FOLDERS, ...FILES].map((f) => `conformance/${f}`),
+)
   .toString()
   .split("\0")
-  .filter((p) => p.endsWith(".json"))
+  .filter(Boolean)
   .sort();
-for (const p of listed) upstream.set(p.slice("conformance/".length), git("show", `${tag}:${p}`));
+const strays = listed.filter((p) => fixtureRel(p) === null);
+if (strays.length) {
+  for (const p of strays.slice(0, 40)) console.error(`  ✘ ${JSON.stringify(p)}`);
+  fail(
+    `${tag} lists ${strays.length === 1 ? "a path that is" : "paths that are"} not a fixture of ours (conformance/<${FOLDERS.join("|")}>/<name>.json): nothing was read or written`,
+  );
+}
+for (const p of listed) upstream.set(fixtureRel(p), git("show", `${tag}:${p}`));
 for (const f of FOLDERS)
   if (![...upstream.keys()].some((rel) => rel.startsWith(`${f}/`))) fail(`${tag} has no conformance/${f}/*.json`);
+for (const f of FILES) if (!upstream.has(f)) fail(`${tag} has no conformance/${f}`);
 
 const manifest = {
   source: SOURCE,
@@ -86,16 +115,19 @@ const what = `${count("control-vectors")} control vectors and ${count("delivery"
 if (check) {
   const problems = [];
   const held = new Map();
+  const hold = (rel) => {
+    let d = "unreadable";
+    try {
+      d = digest(readFileSync(path.join(out, ...rel.split("/"))));
+    } catch {}
+    held.set(rel, d);
+  };
+  // What the suites read: the .json files of each folder (test/conformance.ts), and the named files.
   for (const f of FOLDERS) {
     const dir = path.join(out, f);
-    for (const name of existsSync(dir) ? readdirSync(dir) : []) {
-      let d = "unreadable";
-      try {
-        d = digest(readFileSync(path.join(dir, name)));
-      } catch {}
-      held.set(`${f}/${name}`, d);
-    }
+    for (const name of existsSync(dir) ? readdirSync(dir) : []) if (name.endsWith(".json")) hold(`${f}/${name}`);
   }
+  for (const f of FILES) if (existsSync(path.join(out, f))) hold(f);
   for (const [rel, d] of Object.entries(manifest.files)) {
     if (!held.has(rel)) problems.push(`missing ${rel}`);
     else if (held.get(rel) !== d) problems.push(`differs ${rel}`);
@@ -114,9 +146,12 @@ if (check) {
   process.exit(0);
 }
 
-for (const f of FOLDERS) rmSync(path.join(out, f), { recursive: true, force: true });
+for (const f of [...FOLDERS, ...FILES]) rmSync(path.join(out, f), { recursive: true, force: true });
 for (const [rel, bytes] of upstream) {
   const file = path.join(out, ...rel.split("/"));
+  // Said twice on purpose: the rule above, and where the path really lands.
+  if (path.relative(out, file).startsWith("..") || path.isAbsolute(path.relative(out, file)))
+    fail(`${JSON.stringify(rel)} would be written outside test/conformance`);
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, bytes);
 }
