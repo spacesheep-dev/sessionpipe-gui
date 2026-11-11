@@ -384,12 +384,25 @@ test.describe("inside the native shell", () => {
     await expect(page.getByRole("heading", { name: "Welcome to sessionpipe" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Start sessionpipe" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Connect…" })).toBeVisible();
+    // A Mac's welcome names the Mac.
+    await expect(page.getByText("This Mac", { exact: true })).toBeVisible();
+    await expect(page.getByText("so this Mac's sessions show up here")).toBeVisible();
+    await expect(page.getByText("Nothing leaves this Mac.")).toBeVisible();
     expect(hits).toEqual([]);
     // Offline from here on: the demo needs no receiver.
     await page.route(/\/(api|\.well-known|themes|skins|attachments)\//, (r) => r.abort());
     await page.getByRole("button", { name: "Try the demo" }).click();
     await expect(page).toHaveURL(/\?mock=1/);
     await expect(page.locator("section.group").first()).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("on Windows the welcome says this computer, not this Mac", async ({ page }) => {
+    await openInShell(page, "/", { receiver: false, platform: "windows" });
+    await expect(page.getByRole("heading", { name: "Welcome to sessionpipe" })).toBeVisible();
+    await expect(page.getByText("This computer", { exact: true })).toBeVisible();
+    await expect(page.getByText("so this computer's sessions show up here")).toBeVisible();
+    await expect(page.getByText("Nothing leaves this computer.")).toBeVisible();
+    await expect(page.locator("main")).not.toContainText("Mac");
   });
 });
 
