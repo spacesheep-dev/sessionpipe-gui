@@ -47,9 +47,11 @@ you turn on: a plugin, which runs in the server process once installed or enable
 Data). Connecting sends this machine's name and the GUI's version to the spacesheep
 account's origin (spacesheep.dev) to get the four-digit code. Once connected, every
 request there carries the account's key: the server polls the relay, lists its machines
-and jobs, and forwards the messages you send. Installing an extension from a URL, npm or
-git is the `view add` CLI command's request, in the CLI process, not the running server.
-Putting the port on the public internet is not a supported configuration.
+and jobs, forwards the messages you send and, when you approve the app on spacesheep
+(Machines), sends the app's public device key with this machine's name. Installing an
+extension from a URL, npm or git is the `view add` CLI command's request, in the CLI
+process, not the running server. Putting the port on the public internet is not a
+supported configuration.
 
 ## In scope
 
