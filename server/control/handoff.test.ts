@@ -10,7 +10,7 @@ import type { ControlCommand } from "sessionpipe-core/control";
 import { afterAll, describe, expect, it } from "vitest";
 import { ROUTES } from "../../shared/api.js";
 import { Router } from "../http/router.js";
-import { type Control, createControl } from "./index.js";
+import { type Control, type ControlDeps, createControl } from "./index.js";
 import { parseHello } from "./parse.js";
 import { ControlState, toActivity } from "./state.js";
 import { commandStr, signCommand, TestDayKey, TestPasskey } from "./testkeys.js";
@@ -28,7 +28,9 @@ afterAll(() => {
   for (const d of tmpDirs) rmSync(d, { recursive: true, force: true });
 });
 
-async function boot(): Promise<{ url: string; control: Control; close(): Promise<void> }> {
+async function boot(
+  o: Pick<ControlDeps, "remoteSend"> = {},
+): Promise<{ url: string; control: Control; close(): Promise<void> }> {
   const stateDir = mkdtempSync(path.join(os.tmpdir(), "spgui-handoff-"));
   tmpDirs.push(stateDir);
   const control = createControl({
@@ -37,6 +39,7 @@ async function boot(): Promise<{ url: string; control: Control; close(): Promise
     rpId: "localhost",
     testDoor: true,
     uiAuth: (ctx) => ctx.remote.loopback,
+    ...o,
   });
   const router = new Router();
   control.register(router);
@@ -237,6 +240,45 @@ describe("reply_to", () => {
           });
         }
       expect(b.control.activity()).toHaveLength(before);
+    } finally {
+      await b.close();
+    }
+  });
+
+  it("a remote machine's handoff the relay refuses comes back as any refusal does: 422, the relay's code and words", async () => {
+    // A machine paired on spacesheep: the command is carried there unverified, and what the
+    // relay answers is mapped to the shape the page reads (forwardSend). A `bad_fields` from
+    // there reaches the Handoff sheet exactly as one from this receiver's own verifier does.
+    const why = "a reply_to can't name the command's own session";
+    const asked: Record<string, unknown>[] = [];
+    const b = await boot({
+      remoteSend: async (_m, body) => {
+        asked.push(body);
+        return { status: 400, json: { code: "bad", refusal: "bad_fields", error: why } };
+      },
+    });
+    try {
+      const machine = "m_handoffremote0000001";
+      b.control.remote.upsert(
+        [
+          {
+            id: machine,
+            name: "lab-mac",
+            online: true,
+            agents: ["claude-code", "codex"],
+            passkey_ids: ["k1"],
+            ask: true,
+            handoff: true,
+          },
+        ],
+        { via: "spacesheep", origin: "https://spacesheep.dev", rpId: "spacesheep.dev" },
+      );
+      expect(b.control.machines().get("lab-mac")).toMatchObject({ handoff: true, remote: { via: "spacesheep" } });
+      const cmd = commandStr(machine, { iat: Date.now(), reply_to: OTHER });
+      const sent = await call(b.url, "POST", `${UI}/send`, { body: { machineId: machine, cmd, csig: "c2ln" } });
+      expect(sent).toEqual({ status: 422, body: { reason: why, code: "bad_fields" } });
+      expect(asked).toEqual([{ cmd, csig: "c2ln", grant: null, confirm: null }]);
+      expect(b.control.activity()).toHaveLength(0);
     } finally {
       await b.close();
     }
