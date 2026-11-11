@@ -121,6 +121,67 @@ All notable changes to `sessionpipe-gui`. The format follows
   request to commit that arrived while an earlier commit was being published was dropped:
   the new messages then waited for the timed commit, up to a minute. The forked indexer
   never dropped one.
+- **Turning history search off works on Windows.** With Node 20, Settings › Data answered
+  "internal", left the history index on disk and stopped the indexer until the GUI was
+  restarted: the server still had that index open while it deleted it, which Windows
+  refused. It now lets go of it first. If another program still holds a file of it, the
+  setting is saved anyway, indexing goes on, and the status is an error naming the index
+  left on disk until a later try (the indexer's next start, or Rebuild) deletes it.
+- **A Windows file is listed once.** A full path from Claude Code on Windows
+  (`C:\Users\…\acme\src\index.ts`, with either slash or the drive in another case) is shown
+  relative to the session's folder, as `src/index.ts`, as on a Mac, so the Files drawer, the
+  Review page and the changed-files count no longer give one file a row for each
+  spelling of its full path.
+- **`view`, `skin` and `plugin add` and `link` work on Windows.** A .zip is unpacked with
+  the tar.exe Windows ships instead of failing with "unzip is not installed"; an npm
+  package or a git URL runs npm's own script under the GUI's node instead of failing with
+  "npm is not installed" while npm is on PATH; and `link` makes a junction where Windows
+  refuses a symlink, so it no longer fails with EPERM when Developer Mode is off.
+- **A finished session stays finished.** A sender records a hook when it gets to it, so a
+  tool call that fired just before a turn's Stop can be recorded after it; the receiver
+  read that late event as a new turn, and the session went back to "working" (then
+  "stale") until its next prompt. An event from before the last end of the turn, or of the
+  session, now takes nothing back: it is filed and counted, and the session stays idle or
+  done. The same for an agent whose start is recorded after its end, and for the end of a
+  run recorded after the session started again. Only an event timed within two seconds
+  before that end is read so (the furthest a hook was found recorded behind, on a real
+  machine, is 1.3 s). Further back than that it is the sender's clock that moved: a clock
+  that stepped back, a session resumed where the clock is behind, or a batch from a clock
+  ahead of the receiver's is read in the order it was recorded, so a running session never
+  reads idle or done because of its clock.
+- **A page that was away shows what is true now.** After the live stream dropped and came
+  back, an open session page kept the events it had: a turn still drawn as running, a
+  message still "handing it over", a reply missing, until a reload. The page now reads
+  what it missed, once, when the stream is back, with nothing redrawn, the scroll where it
+  was and the draft in the composer kept. A tab shown again after a long time hidden, a
+  page restored by Back, a laptop awake again and a network that returned all ask for a
+  fresh stream instead of trusting the old one, and coming back online no longer waits
+  out a retry timer.
+- While the stream is down a session page stops its spinners and its clocks where they
+  were, as the board's rows do, and the page counts as live again when the fresh state
+  has arrived, not when the connection opens: nothing reads as running, or can be sent
+  or stopped, on what the page knew before.
+- An event that arrived in the instant a session page finished loading no longer goes
+  missing from its timeline.
+- **One conversation, drawn once.** A message sent from a session's page and the turn it
+  became are one block, in the cases where they were two or the wrong one. A message
+  handed to a terminal session at its turn's Stop (sessionpipe 0.13.4) is its own exchange
+  after that turn, "Turn 4, continued": it used to take the typed turn's place, so the
+  typed prompt and its reply were gone, or, when that turn had begun over a minute
+  before, to be drawn again at the end for two minutes. A prompt the machine scrubbed a
+  secret, an email address or a phone number out of, and any message to a machine whose
+  clock is behind, is its turn (both showed twice while the turn ran). A refused or
+  expired message no longer takes a later turn that says the same words, which drew the
+  refusal on a turn that ran; and a machine whose clock is ahead no longer hides it. The
+  turn after one that was stopped keeps its own words, which were drawn on the stopped turn.
+- **A stopped turn reads as stopped.** After Stop the turn stays where it was, with what
+  it had written and a quiet "Stopped" where a running turn says "Running"; one stopped
+  before it wrote anything says "Stopped before the first word.", and so does a message
+  stopped before its turn began, which read "Delivered. Its turn shows here when it
+  begins." The daemon's "(The turn was cancelled.)" and Claude Code's "No response
+  requested." are never shown as what the agent said, a turn stopped at its terminal no
+  longer shows the raw word "interrupt" beside a duration that ran to the next prompt, and
+  a tool call the stop cut off no longer spins.
 
 ## [0.7.5] - 2026-11-06
 

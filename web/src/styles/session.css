@@ -25,6 +25,14 @@ html:has(.main > .session) {
   scroll-padding-top: calc(var(--bar) + var(--safe-top, env(safe-area-inset-top)) + 28px);
   scroll-padding-bottom: calc(var(--sess-ctl-h, 120px) + 8px);
 }
+/* The stream is down (data/hooks.ts useStreamMark): what the session is doing is not known
+   while nothing arrives. Its rings stop where they are, one quiet tier, and its clocks
+   stand with them (lib/time.ts ClockHold), as the board's rows do; the shell's footer,
+   the phone's pill and the line under the composer say why. */
+[data-stream="down"] .session :is(.dot, .spinner) {
+  animation-play-state: paused;
+  opacity: 0.55;
+}
 .session {
   /* Where a row's text starts: a 16 px glyph, then 8 px. When a row happened is its turn
      head's (on hover) and its menu's, not a column on every row. */

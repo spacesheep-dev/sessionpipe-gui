@@ -276,8 +276,17 @@ export class Indexer {
       w.close();
       this.writers.delete("history");
     }
-    removeIndexDir(this.o.dir, "history");
+    this.removeHistory();
     for (const [p, k] of this.known) if (k.adapter.source === "history") this.known.delete(p);
+  }
+
+  /** history/ off the disk. A file of it another process holds open (Windows) keeps it there:
+   *  no reason to stop indexing what sessionpipe delivered. Tried again at each start and
+   *  rebuild; the service tells the person. */
+  private removeHistory(): void {
+    try {
+      removeIndexDir(this.o.dir, "history");
+    } catch {}
   }
 
   // ───────────────────────────── the loop ─────────────────────────────
@@ -286,7 +295,7 @@ export class Indexer {
     ensureDir(this.o.dir);
     this.release = acquireLock(this.o.dir);
     try {
-      if (!this.history) removeIndexDir(this.o.dir, "history");
+      if (!this.history) this.removeHistory();
       for (const s of new Set(this.adapters().map((a) => a.source))) this.writer(s);
       this.status.firstRun = this.firstRun();
       this.status.gen = this.gens();
@@ -411,6 +420,7 @@ export class Indexer {
     this.lastSweep = Date.now();
     this.passStart = Date.now();
     this.rootsMoved();
+    if (rebuild && !this.history) this.removeHistory();
     if (rebuild) for (const w of this.writers.values()) this.beginRebuild(w);
     this.setStatus({ phase: "scanning", doneBytes: 0, totalBytes: 0 }, first);
     const files: Known[] = [];
