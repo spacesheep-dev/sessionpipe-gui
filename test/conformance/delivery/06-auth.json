@@ -1,0 +1,40 @@
+{
+  "name": "auth",
+  "spec": "HTTP.md §2 Errors",
+  "steps": [
+    {
+      "send": {
+        "auth": "wrong",
+        "events": [
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "session.started",
+            "time": "*",
+            "tier": 0,
+            "harness": {
+              "name": "conformance",
+              "event": "test"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 0
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "source": "startup"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": 401
+      }
+    }
+  ]
+}

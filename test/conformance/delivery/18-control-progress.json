@@ -1,0 +1,66 @@
+{
+  "name": "control-progress",
+  "spec": "CONTROL.md \u00a710 progress",
+  "capability": "control",
+  "steps": [
+    {
+      "enqueue": {
+        "machine": "{machine}",
+        "sign": {
+          "session": "claude-code:{uuid}",
+          "kind": "prompt",
+          "text": "stream it"
+        },
+        "expires_in_s": 60
+      }
+    },
+    {
+      "poll": {
+        "machine": "{machine}",
+        "wait": 1
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "ack": {
+        "outcome": "progress",
+        "reply": "Work",
+        "seq": 1
+      },
+      "expect": {
+        "status": 202
+      }
+    },
+    {
+      "ack": {
+        "outcome": "progress",
+        "reply": "Working on",
+        "seq": 2
+      },
+      "expect": {
+        "status": 202
+      }
+    },
+    {
+      "ack": {
+        "outcome": "delivered",
+        "mode": "resume",
+        "reply": "Working on it. Done."
+      },
+      "expect": {
+        "status": 202
+      }
+    },
+    {
+      "poll": {
+        "machine": "{machine}",
+        "wait": 1
+      },
+      "expect": {
+        "status": 204
+      }
+    }
+  ]
+}
