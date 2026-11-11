@@ -35,6 +35,58 @@ describe("lanAddresses", () => {
     expect(list).toEqual(["172.20.10.13", "10.6.0.27", "10.211.55.2", "169.254.136.80"]);
     expect(list[0]).not.toMatch(/^169\.254\./);
   });
+  it("sorts Windows' WSL, Hyper-V, VirtualBox and VMware adapters after Wi-Fi", () => {
+    const list = lanAddresses({
+      "Wi-Fi": [v4("192.168.1.20"), v6("fe80::1")],
+      "vEthernet (WSL)": [v4("172.20.16.1")],
+      "vEthernet (Default Switch)": [v4("172.28.0.1")],
+      "VirtualBox Host-Only Network": [v4("192.168.56.1")],
+      "VMware Network Adapter VMnet8": [v4("192.168.146.1")],
+      "Loopback Pseudo-Interface 1": [v4("127.0.0.1", true)],
+    });
+    expect(list).toEqual(["192.168.1.20", "172.20.16.1", "172.28.0.1", "192.168.56.1", "192.168.146.1"]);
+  });
+  it("sorts Linux's libvirt, LXD, Incus, LXC, Multipass, Podman and Docker bridges after the wireless interface", () => {
+    const list = lanAddresses({
+      lo: [v4("127.0.0.1", true)],
+      wlp3s0: [v4("192.168.1.30"), v6("fe80::2")],
+      virbr0: [v4("192.168.122.1")],
+      lxdbr0: [v4("10.10.10.1")],
+      incusbr0: [v4("10.20.20.1")],
+      lxcbr0: [v4("10.0.3.1")],
+      mpqemubr0: [v4("10.30.30.1")],
+      podman0: [v4("10.88.0.1")],
+      docker0: [v4("172.17.0.1")],
+    });
+    expect(list).toEqual([
+      "192.168.1.30",
+      "192.168.122.1",
+      "10.10.10.1",
+      "10.20.20.1",
+      "10.0.3.1",
+      "10.30.30.1",
+      "10.88.0.1",
+      "172.17.0.1",
+    ]);
+  });
+  it("matches a virtual name whatever its case; a localized Windows name keeps its prefix", () => {
+    const list = lanAddresses({
+      WLAN: [v4("192.168.178.20")],
+      "vEthernet (Standardswitch)": [v4("172.28.0.1")],
+      "VIRTUALBOX HOST-ONLY NETWORK": [v4("192.168.56.1")],
+      vboxnet0: [v4("192.168.57.1")],
+    });
+    expect(list).toEqual(["192.168.178.20", "172.28.0.1", "192.168.56.1", "192.168.57.1"]);
+  });
+  it("keeps every address when all interfaces are virtual, as under a Hyper-V external switch", () => {
+    // Bridging Wi-Fi through an external switch moves the host's LAN address onto
+    // "vEthernet (External Switch)": nothing real is left to come first, and nothing is dropped.
+    const list = lanAddresses({
+      "vEthernet (External Switch)": [v4("192.168.1.20")],
+      "vEthernet (WSL)": [v4("172.20.16.1")],
+    });
+    expect(list).toEqual(["192.168.1.20", "172.20.16.1"]);
+  });
   it("reads the machine's own interfaces by default", () => {
     for (const ip of lanAddresses()) expect(isLoopback(ip)).toBe(false);
   });
