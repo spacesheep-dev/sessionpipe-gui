@@ -75,11 +75,30 @@ export function sanSet(hostname: string, addresses: string[]): string[] {
   return [...[...dns].map((d) => `DNS:${d}`), ...[...ips].map((ip) => `IP:${ip}`)];
 }
 
+/** How the lookup touches the machine: run a command, and ask whether a file is there. */
+export interface OpensslProbe {
+  run(command: string, args: string[], cwd?: string): void;
+  exists(file: string): boolean;
+}
+/** A probe that hangs must not hold the receiver: `openssl version` answers at once. */
+const VERSION_TIMEOUT_MS = 5000;
+const machine: OpensslProbe = {
+  run: (command, args, cwd) => {
+    execFileSync(command, args, {
+      cwd,
+      stdio: ["ignore", "ignore", "pipe"],
+      timeout: args[0] === "version" ? VERSION_TIMEOUT_MS : undefined,
+    });
+  },
+  exists: existsSync,
+};
+
 /** Where Windows installers put openssl.exe without putting it on the PATH: Git for Windows
- *  (its usr\bin; only Git\cmd goes on the PATH, so a `cmd` folder there names a Git
- *  wherever it was installed) and `winget install ShiningLight.OpenSSL.Light`
- *  (OpenSSL-Win64\bin under Program Files, -ARM on arm64). */
-export function windowsOpensslPaths(env: NodeJS.ProcessEnv): string[] {
+ *  (its usr\bin; only Git\cmd goes on the PATH, so a `cmd` folder there that holds git.exe
+ *  names a Git wherever it was installed) and `winget install ShiningLight.OpenSSL.Light`
+ *  (OpenSSL-Win64\bin under Program Files, -ARM on arm64). Absolute drive paths only: a
+ *  relative PATH entry would be read against wherever the receiver was started. */
+export function windowsOpensslPaths(env: NodeJS.ProcessEnv, exists: (file: string) => boolean = existsSync): string[] {
   const join = path.win32.join;
   const gits = (env.PATH ?? env.Path ?? "")
     .split(";")
@@ -89,26 +108,25 @@ export function windowsOpensslPaths(env: NodeJS.ProcessEnv): string[] {
         .replace(/^"|"$/g, "")
         .replace(/[\\/]+$/, ""),
     )
-    .filter((d) => /[\\/]cmd$/i.test(d))
+    .filter((d) => /^[a-z]:[\\/]/i.test(d) && /[\\/]cmd$/i.test(d) && exists(join(d, "git.exe")))
     .map((d) => join(d, "..", "usr", "bin"));
-  const roots = [env.ProgramW6432, env.ProgramFiles, env["ProgramFiles(x86)"]].filter((r): r is string => Boolean(r));
+  const roots = [env.ProgramW6432, env.ProgramFiles, env["ProgramFiles(x86)"]].filter((r): r is string =>
+    /^[a-z]:[\\/]/i.test(r ?? ""),
+  );
+  const local = /^[a-z]:[\\/]/i.test(env.LOCALAPPDATA ?? "") ? env.LOCALAPPDATA : undefined;
   const dirs = [
     ...gits,
     ...roots.flatMap((r) =>
       ["Git\\usr\\bin", "OpenSSL-Win64\\bin", "OpenSSL-Win64-ARM\\bin", "OpenSSL-Win32\\bin"].map((d) => join(r, d)),
     ),
-    ...(env.LOCALAPPDATA ? [join(env.LOCALAPPDATA, "Programs", "Git", "usr", "bin")] : []),
+    ...(local ? [join(local, "Programs", "Git", "usr", "bin")] : []),
   ];
   return [...new Set(dirs.map((d) => join(d, "openssl.exe")))];
 }
 
-type Exec = (command: string, args: string[], cwd?: string) => void;
-const exec: Exec = (command, args, cwd) => {
-  execFileSync(command, args, { cwd, stdio: ["ignore", "ignore", "pipe"] });
-};
-const runsVersion = (command: string, run: Exec): boolean => {
+const runsVersion = (command: string, probe: OpensslProbe): boolean => {
   try {
-    run(command, ["version"]);
+    probe.run(command, ["version"]);
     return true;
   } catch {
     return false;
@@ -118,12 +136,20 @@ const runsVersion = (command: string, run: Exec): boolean => {
 /** The Windows openssl found last, kept while its file is there: the setup page asks every
  *  two seconds, and each look would start it again. */
 let found: string | undefined;
+/** Forget it (tests: each case has its own machine). */
+export function forgetOpenssl(): void {
+  found = undefined;
+}
 
-/** On Windows, an openssl.exe off the PATH that runs. Looked for again whenever there is
- *  none, so an install shows without restarting the receiver (which keeps its PATH). */
-export function windowsOpenssl(env: NodeJS.ProcessEnv = process.env, run: Exec = exec): string | undefined {
-  if (found && existsSync(found)) return found;
-  found = windowsOpensslPaths(env).find((p) => runsVersion(p, run));
+/** On Windows, an openssl.exe off the PATH that runs. Only files that are there are run,
+ *  and it is looked for again whenever there is none, so an install shows without
+ *  restarting the receiver (which keeps its PATH). */
+export function windowsOpenssl(
+  env: NodeJS.ProcessEnv = process.env,
+  probe: OpensslProbe = machine,
+): string | undefined {
+  if (found && probe.exists(found)) return found;
+  found = windowsOpensslPaths(env, probe.exists).find((p) => probe.exists(p) && runsVersion(p, probe));
   return found;
 }
 
@@ -131,10 +157,10 @@ export function windowsOpenssl(env: NodeJS.ProcessEnv = process.env, run: Exec =
 export function opensslCommand(
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
-  run: Exec = exec,
+  probe: OpensslProbe = machine,
 ): string | undefined {
-  if (runsVersion("openssl", run)) return "openssl";
-  return platform === "win32" ? windowsOpenssl(env, run) : undefined;
+  if (runsVersion("openssl", probe)) return "openssl";
+  return platform === "win32" ? windowsOpenssl(env, probe) : undefined;
 }
 
 /** Is there an openssl CLI to run? */
@@ -142,33 +168,29 @@ export function opensslAvailable(): boolean {
   return opensslCommand() !== undefined;
 }
 
-/** Runs openssl: the PATH's; when there is none, on Windows the one its installers left
- *  off the PATH. */
+/** Runs openssl. On Windows the one `opensslCommand` names, so the setup page and TLS mode
+ *  agree on which; elsewhere the PATH's, as ever. */
 export function openssl(
   args: string[],
   cwd: string,
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
-  run: Exec = exec,
+  probe: OpensslProbe = machine,
 ): void {
-  const attempt = (command: string): boolean => {
-    try {
-      run(command, args, cwd);
-      return true;
-    } catch (e) {
-      const err = e as NodeJS.ErrnoException & { stderr?: Buffer };
-      if (err.code === "ENOENT") return false;
+  const command = platform === "win32" ? opensslCommand(platform, env, probe) : "openssl";
+  try {
+    if (command === undefined) throw Object.assign(new Error("no openssl"), { code: "ENOENT" });
+    probe.run(command, args, cwd);
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException & { stderr?: Buffer };
+    if (err.code !== "ENOENT")
       throw new TlsError(`openssl ${args[0]} failed: ${(err.stderr?.toString() ?? err.message).trim()}`);
-    }
-  };
-  if (attempt("openssl")) return;
-  const other = platform === "win32" ? windowsOpenssl(env, run) : undefined;
-  if (other && attempt(other)) return;
-  throw new TlsError(
-    platform === "win32"
-      ? "TLS mode needs the `openssl` command, and none was found on the PATH, in Git for Windows or in an OpenSSL folder under Program Files. Install Git for Windows, or run `winget install ShiningLight.OpenSSL.Light`."
-      : "TLS mode needs the `openssl` command, which is not on the PATH. macOS and most Linux distributions ship it (brew install openssl / apt install openssl).",
-  );
+    throw new TlsError(
+      platform === "win32"
+        ? "TLS mode needs the `openssl` command, and none was found on the PATH, in Git for Windows or in an OpenSSL folder under Program Files. Install Git for Windows, or run `winget install ShiningLight.OpenSSL.Light`."
+        : "TLS mode needs the `openssl` command, which is not on the PATH. macOS and most Linux distributions ship it (brew install openssl / apt install openssl).",
+    );
+  }
 }
 
 /** PEM → `AB:CD:…` SHA-256 of the DER, the form every OS's certificate viewer shows. */
