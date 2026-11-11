@@ -24,6 +24,8 @@ const COLD: DetailQuery = { tail: true, limit: TAIL, slim: true, preview: LIST_P
 
 interface Warm {
   at: number;
+  /** The store's `resyncs` when the fetch went out: the stream it listens on since. */
+  epoch: number;
   answer: Promise<SessionDetail>;
   /** Events of this session the stream brought after the fetch went out. */
   since: StoredEvent[];
@@ -50,7 +52,7 @@ export function prefetchSession(store: Store, s: Pick<SessionSummary, "harness" 
     if (`${e.harness.name}:${e.session.id}` === key) since.push(e);
   });
   const answer = store.transport.session(s.harness, s.id, COLD);
-  const w: Warm = { at: Date.now(), answer, since, off };
+  const w: Warm = { at: Date.now(), epoch: store.get().resyncs, answer, since, off };
   warm.set(key, w);
   answer.catch(() => drop(key));
   window.setTimeout(() => {
@@ -59,12 +61,17 @@ export function prefetchSession(store: Store, s: Pick<SessionSummary, "harness" 
 }
 
 /** The cold open's answer fetched ahead for `key` ("harness:id"), if still fresh, with
- *  the events streamed since; taking it removes it. */
-export function takeWarm(key: string): { answer: Promise<SessionDetail>; since: StoredEvent[] } | undefined {
+ *  the events streamed since; taking it removes it. One fetched before the stream last
+ *  came back (`epoch`, the store's `resyncs` now) is not taken: the events of the drop
+ *  are in neither the answer nor `since`, and nothing would bring them later. */
+export function takeWarm(
+  key: string,
+  epoch: number,
+): { answer: Promise<SessionDetail>; since: StoredEvent[] } | undefined {
   const w = warm.get(key);
   if (!w) return undefined;
   drop(key);
-  return Date.now() - w.at < KEEP_MS ? w : undefined;
+  return Date.now() - w.at < KEEP_MS && w.epoch === epoch ? w : undefined;
 }
 
 /** Props for a row (or its wrapper) that warm its session on a resting pointer or a

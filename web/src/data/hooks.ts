@@ -92,6 +92,14 @@ export function useStreamDown(): number | null {
   return down ? at : null;
 }
 
+/** How many times the stream has come back with a fresh snapshot (AppState.resyncs):
+ *  what a page read on its own, it reads again when this moves. */
+export function useResyncs(): number {
+  const store = useStore();
+  const read = useCallback(() => store.get().resyncs, [store]);
+  return useSyncExternalStore(store.subscribe, read, read);
+}
+
 /** One session's summary: re-renders only when that session changes, not on every event
  *  of every other session (a whole-state subscription did, at one render per event). */
 export function useSession(key: SessionKey): SessionSummary | undefined {
