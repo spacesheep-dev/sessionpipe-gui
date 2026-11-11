@@ -8,6 +8,36 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **A `session.seq` above 2^53 − 1 is refused**, the schema's bound: the receiver answers
+  `bad_seq`, and the outbox reader and the demo drop it. Two such seqs in one session hung
+  the GUI server at 100% CPU while it listed the hole between them; a store an older
+  release already wrote them into now boots instead of hanging.
+- **One session file the outbox can't read no longer stops the outbox.** A file the GUI
+  may not open (its mode, another user's) or a folder named `*.jsonl` made the first read
+  fail, and no session from the outbox reached the board while that file stayed so,
+  restart or not; one that turned unreadable while running kept every older session from
+  being read and the offsets from being saved, with a line on stderr every 500 ms. That
+  file is now skipped for the tick, said once, and read on from its offset once it can be
+  read again.
+- **Setup's "Pair this machine" works on Windows.** The receiver ran `sessionpipe.cmd` through
+  cmd.exe, which never handed its output back (the step sat at "Starting the pairing…") and
+  split a folder with a space, such as `C:\Users\Ann Lee\code`, into two words. It now runs the
+  script the npm shim names under its own node, with no shell, as it does on a Mac.
+- **Setup speaks Windows.** On a Windows receiver the secure-address step pointed at
+  `brew install openssl` and gave Debian and Fedora commands for trusting the certificate; the
+  pair step's button said "Pair this Mac". It now names Git for Windows' openssl (or winget),
+  gives `certutil -user -addstore Root ca.crt` and the Install Certificate… steps (also on the
+  trust page and from `sessionpipe-gui tls trust`), and the button says "Pair this machine"
+  off a Mac.
+- A self-assigned 169.254 address (no DHCP answered on that link) no longer comes first among
+  the receiver's LAN addresses, so the Machines page's pair command, Connect and the phone
+  link name an address the other device can reach.
+- **A virtual adapter no longer comes first.** Windows' "vEthernet (…)" switches (WSL 2,
+  Hyper-V), VirtualBox and VMware host adapters, and Linux's libvirt, LXD, Incus, LXC,
+  Multipass and Podman bridges sort after the real interfaces, whatever their case, so the
+  phone's QR code, Connect and the `sink add` command name an address the other device can
+  reach. No address is dropped: a Hyper-V external switch keeps the host's LAN address on
+  "vEthernet (External…)", after any real-named interface.
 - **`--host 127.0.0.1` (or `::1`, `localhost`) no longer offers LAN URLs nothing listens
   on.** The banner listed every LAN address as a `network` URL, its phone QR and the sink
   command pointed at one of them, and a bind to `::1` gave a sink command on `127.0.0.1`;
