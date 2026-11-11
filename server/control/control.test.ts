@@ -9,9 +9,22 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RECEIVER_MAX_AGE_MS, sha256 } from "sessionpipe-core/control";
+import {
+  type Assertion,
+  RECEIVER_MAX_AGE_MS,
+  type SignedCommand,
+  sha256,
+  verifyCommand,
+  verifyEnrollment,
+} from "sessionpipe-core/control";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { ROUTES, type StreamMessage } from "../../shared/api.js";
+import {
+  POOL_CONFIRM_ACTIONS,
+  type PoolAction,
+  ROUTES,
+  type StreamMessage,
+  type TrustedKey,
+} from "../../shared/api.js";
 import { Router } from "../http/router.js";
 import { coreTakesDevice, receiverKeyTypes } from "./devicekeys.js";
 import { fileHash } from "./files.js";
@@ -19,7 +32,6 @@ import { type Control, createControl } from "./index.js";
 import { parseAccounts, parseAcks, parseHello } from "./parse.js";
 import { pairUrlFor } from "./routes.js";
 import { commandStr, signCommand, signWithDevice, TestDayKey, TestDeviceKey, TestPasskey } from "./testkeys.js";
-import { coreTakesTilde } from "./tilde.js";
 import { readKey, readProof } from "./ui.js";
 
 const SINK = "spg_test_sink_token_0123456789";
@@ -1438,7 +1450,10 @@ describe("a start's options, files and applied, through POST send", () => {
   });
 });
 
-// --- the early verification against every control vector ---------------------------
+// --- every control vector (CONTROL.md §11) ------------------------------------------
+// "The reference verifier and every receiver that pre-checks MUST agree with all of them."
+// Twice over: the verdict the verifier this receiver runs reaches on each vector, as it is
+// written; and what the receiver then does with the command through POST send.
 
 const repo =
   process.env.SESSIONPIPE_REPO ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../sessionpipe");
@@ -1453,29 +1468,112 @@ try {
 interface Vector {
   name: string;
   input: {
-    signed?: { cmd: string; csig?: string | null; grant?: unknown; confirm?: unknown };
-    proof?: unknown;
+    signed?: SignedCommand;
+    proof?: Assertion;
+    key?: TrustedKey;
+    code?: string;
     machine: string;
     rp_id: string;
-    trusted?: { id: string; alg: number; spki: string }[];
+    trusted?: TrustedKey[];
     now?: number;
+    max_age_ms?: number;
     seen_nonces?: string[];
   };
-  expect: { ok: boolean; code?: string };
+  expect: { ok: boolean; code?: string; via?: "grant" | "confirm"; kind?: string };
 }
+const readVector = (f: string): Vector => JSON.parse(readFileSync(path.join(vectorsDir, f), "utf8")) as Vector;
 
-describe.skipIf(!vectorFiles.length)("early verification: conformance/control-vectors through POST send", () => {
+/** The pool the vector machine's hello lists: the two accounts the pool vectors name
+ *  (139 to 144), which are the whole order vector 142 signs. */
+const VECTOR_POOL = {
+  on: true,
+  harness: "claude-code",
+  accounts: [
+    { id: "b3f0c1d2-4e5f-4a6b-8c7d-9e0f1a2b3c4d", enabled: true, status: "ready", current: true },
+    { id: "7a1e2f3b-9c4d-4e5f-a6b7-c8d9e0f1a2b3", enabled: true, status: "ready" },
+  ],
+};
+/** The bytes behind the two hashes the file vectors sign (66 to 68, 93, 109): sessionpipe's
+ *  generator hashes these words. Uploaded, so the receiver holds what the commands name. */
+const VECTOR_FILE_BYTES = ["png bytes", "pdf bytes"];
+
+describe.skipIf(!vectorFiles.length)("control vectors: the verdict of the verifier this receiver runs", () => {
+  for (const f of vectorFiles) {
+    const v = readVector(f);
+    it(f, async () => {
+      // An enrollment proof (§2): what the approval route asks before it trusts a key.
+      if (v.input.proof) {
+        const r = await verifyEnrollment({
+          machine: v.input.machine,
+          code: v.input.code!,
+          key: v.input.key!,
+          proof: v.input.proof,
+          rpId: v.input.rp_id,
+        });
+        expect(r.ok, JSON.stringify(r)).toBe(v.expect.ok);
+        return;
+      }
+      // A signed command (§5), with the vector's own clock, window and nonce store.
+      const seen = new Set(v.input.seen_nonces ?? []);
+      const r = await verifyCommand(v.input.signed, {
+        machine: v.input.machine,
+        rpId: v.input.rp_id,
+        trusted: v.input.trusted ?? [],
+        now: v.input.now ?? Date.now(),
+        ...(v.input.max_age_ms ? { maxAgeMs: v.input.max_age_ms } : {}),
+        seenNonce: (n) => {
+          if (seen.has(n)) return true;
+          seen.add(n);
+          return false;
+        },
+      });
+      if (v.expect.ok) {
+        expect(r, JSON.stringify(r)).toMatchObject({ ok: true, via: v.expect.via });
+        if (r.ok) expect(r.cmd.kind).toBe(v.expect.kind);
+      } else {
+        expect(r.ok, JSON.stringify(r)).toBe(false);
+        if (!r.ok) expect(r.code).toBe(v.expect.code);
+      }
+    });
+  }
+});
+
+describe.skipIf(!vectorFiles.length)("control vectors: carried or refused through POST send", () => {
   if (!vectorFiles.length) console.log(`control vectors not found at ${vectorsDir}; set SESSIONPIPE_REPO`);
   for (const f of vectorFiles) {
-    const v = JSON.parse(readFileSync(path.join(vectorsDir, f), "utf8")) as Vector;
-    if (!v.input.signed) continue; // enrollment vectors are verifyEnrollment's; covered above
+    const v = readVector(f);
+    if (!v.input.signed) continue; // an enrollment proof names a pairing code only its machine made
     it(f, async () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(v.input.now ?? Date.now());
       const b = await boot({ rpId: v.input.rp_id });
       tmpDirs.push(b.stateDir);
       try {
-        const trusted = v.input.trusted ?? [];
+        const s = v.input.signed!;
+        let cmd: Record<string, unknown> = {};
+        try {
+          const c = JSON.parse(s.cmd) as unknown;
+          if (c && typeof c === "object" && !Array.isArray(c)) cmd = c as Record<string, unknown>;
+        } catch {}
+        // A receiver's early word differs from the machine's gate in two places (CONTROL.md
+        // §5): it allows ten minutes, not a day, and it keeps no nonce store.
+        let expectOk = v.expect.ok;
+        let code = v.expect.code;
+        if (expectOk && typeof cmd.iat === "number" && Date.now() - cmd.iat > RECEIVER_MAX_AGE_MS) {
+          expectOk = false;
+          code = "too_old";
+        }
+        if (!expectOk && code === "replay") expectOk = true;
+        // And it asks for what the machine will ask for (§6 `pool`): on, off, remove, order,
+        // disable and login.complete take a fresh confirm, so one that verifies on a day
+        // grant is refused `confirm_required` here as it is there, and carried once a key
+        // the machine trusts has confirmed the very bytes the vector signed.
+        const fresh =
+          expectOk && cmd.kind === "pool" && POOL_CONFIRM_ACTIONS.includes(cmd.pool_action as PoolAction) && !s.confirm
+            ? await TestPasskey.create({ rpId: v.input.rp_id })
+            : null;
+
+        const trusted = [...(v.input.trusted ?? []), ...(fresh ? [fresh.key] : [])];
         const r0 = await call(b.url, "POST", `${CONTROL}/_test/enroll`, {
           body: { machine: v.input.machine, key: trusted[0] },
         });
@@ -1485,10 +1583,10 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
           r0.body.token = (
             await call(b.url, "POST", `${CONTROL}/_test/enroll`, { body: { machine: v.input.machine, key: k } })
           ).body.token;
-        // A machine that takes every option a hello can advertise (CONTROL.md §2): files on a
-        // start and a prompt, every level and any model, so the receiver's second look lets
-        // through what the verifier lets through.
-        await call(b.url, "POST", `${CONTROL}/hello`, {
+        // A machine that takes everything a hello can advertise (CONTROL.md §2): files on a
+        // start and a prompt, every level and any model, a handoff's `reply_to`, and a pool,
+        // so the receiver's second look lets through what the verifier lets through.
+        const said = await call(b.url, "POST", `${CONTROL}/hello`, {
           bearer: r0.body.token as string,
           body: {
             ...facts,
@@ -1496,55 +1594,43 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
             harnesses: ["claude-code", "codex"],
             mode: "auto",
             files: true,
-            // Files on a prompt are 0.10's (S2): only for a vector set that has them.
-            prompt_files: vectorFiles.some((x) => x.includes("prompt-with-files")),
+            prompt_files: true,
             start: {
               "claude-code": { permissions: ["read", "safe", "edits", "auto"], permission: "auto", any_model: true },
               codex: { permissions: ["read", "safe", "edits", "auto"], permission: "auto", any_model: true },
             },
+            ask: true,
+            handoff: true,
+            pool: VECTOR_POOL,
           },
         });
-        const s = v.input.signed!;
-        const r = await call(b.url, "POST", `${UI}/send`, {
-          body: {
-            machineId: v.input.machine,
-            cmd: s.cmd,
-            csig: s.csig ?? undefined,
-            grant: s.grant ?? undefined,
-            confirm: s.confirm ?? undefined,
-          },
-        });
-        // A receiver's early word differs from the machine's gate in two places (CONTROL.md §5):
-        // it allows ten minutes, not a day, and it keeps no nonce store.
-        let expectOk = v.expect.ok;
-        let code = v.expect.code;
-        let iat = Number.NaN;
-        try {
-          iat = JSON.parse(s.cmd).iat;
-        } catch {}
-        if (expectOk && Number.isFinite(iat) && Date.now() - iat > RECEIVER_MAX_AGE_MS) {
-          expectOk = false;
-          code = "too_old";
+        expect(said.status).toBe(204);
+        // And a receiver that holds the files the commands name (HTTP.md §3).
+        for (const bytes of VECTOR_FILE_BYTES) {
+          const up = await fetch(`${b.url}${UI}/files?name=vector.bin`, {
+            method: "POST",
+            headers: { "content-type": "application/octet-stream" },
+            body: bytes,
+          });
+          expect(up.status).toBe(201);
         }
-        if (!expectOk && code === "replay") expectOk = true;
-        // And in a third: it holds the bytes a start's files name, and nobody uploaded these.
-        let carriesFiles = false;
-        try {
-          carriesFiles = Array.isArray(JSON.parse(s.cmd).files);
-        } catch {}
-        if (expectOk && carriesFiles) {
-          expectOk = false;
-          code = "file";
-        }
-        // And in a fourth, until this receiver's sessionpipe-core is 0.10: a start's `~/…`
-        // folder (tilde.ts). Its core wants an absolute one and refuses it, which fails closed.
-        let tildeCwd = false;
-        try {
-          tildeCwd = /^~(?:[/\\]|$)/.test(String(JSON.parse(s.cmd).cwd ?? ""));
-        } catch {}
-        if (expectOk && tildeCwd && !coreTakesTilde()) {
-          expectOk = false;
-          code = "bad_fields";
+
+        const send = (signed: SignedCommand) =>
+          call(b.url, "POST", `${UI}/send`, {
+            body: {
+              machineId: v.input.machine,
+              cmd: signed.cmd,
+              csig: signed.csig ?? undefined,
+              grant: signed.grant ?? undefined,
+              confirm: signed.confirm ?? undefined,
+            },
+          });
+        let r = await send(s);
+        if (fresh) {
+          expect(r.status, JSON.stringify(r.body)).toBe(422);
+          expect(r.body.code).toBe("confirm_required");
+          expect(b.control.activity()).toHaveLength(0);
+          r = await send({ cmd: s.cmd, confirm: await fresh.assert(await sha256(s.cmd)) });
         }
         if (expectOk) {
           expect(r.status, JSON.stringify(r.body)).toBe(201);
@@ -1554,6 +1640,7 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
             bearer: r0.body.token as string,
           });
           expect(got.status).toBe(200);
+          expect(got.body.messages).toHaveLength(1);
           expect(got.body.messages![0]!.cmd).toBe(s.cmd);
         } else {
           expect(r.status, JSON.stringify(r.body)).toBe(422);

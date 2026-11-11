@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **sessionpipe 0.13.6.** The receiver verifies commands with sessionpipe-core 0.13.6 (it
+  was 0.10.0). "Bring the answer back" in the Ask another agent sheet now sends: a machine
+  whose hello says `handoff` used to get "Not sent: this receiver's sessionpipe is older
+  than bringing answers back", because this receiver's own verifier refused `reply_to`
+  before the machine saw it. A pool command is verified by the core itself, and still
+  refused here on a day grant alone where the machine wants a fresh confirm.
+
 ## [0.7.5] - 2026-11-06
 
 ### Added

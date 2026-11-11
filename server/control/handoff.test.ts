@@ -14,7 +14,7 @@ import { type Control, createControl } from "./index.js";
 import { parseHello } from "./parse.js";
 import { ControlState, toActivity } from "./state.js";
 import { commandStr, signCommand, TestDayKey, TestPasskey } from "./testkeys.js";
-import { coreTakesReplyTo, replyToProblem } from "./ui.js";
+import { replyToProblem } from "./ui.js";
 
 const SINK = "spg_test_sink_token_0123456789";
 const CONTROL = ROUTES.control;
@@ -183,7 +183,7 @@ describe("reply_to", () => {
     }
   });
 
-  it("/send with reply_to: carried to a machine that said handoff once this core takes the field", async () => {
+  it("/send with reply_to: refused until the hello says handoff, then carried byte for byte", async () => {
     const b = await boot();
     try {
       const pk = await TestPasskey.create();
@@ -193,24 +193,24 @@ describe("reply_to", () => {
       const token = r.body.token as string;
       const cmd = commandStr(machine, { iat: Date.now(), text: "Second opinion?", reply_to: OTHER });
       const signed = await signCommand(pk, day, cmd);
-      // Before the hello says handoff: refused, by the second look or by an older core first.
+      // Before the hello says handoff: the verifier takes the field, the second look does not.
       const early = await call(b.url, "POST", `${UI}/send`, { body: { machineId: machine, ...signed } });
       expect(early.status).toBe(422);
+      expect(early.body.code).toBe("handoff");
+      expect(b.control.activity()).toHaveLength(0);
       await call(b.url, "POST", `${CONTROL}/hello`, { bearer: token, body: { ...facts, ask: true, handoff: true } });
       const sent = await call(b.url, "POST", `${UI}/send`, { body: { machineId: machine, ...signed, from: SESSION } });
-      if (coreTakesReplyTo()) {
-        expect(early.body.code).toBe("handoff");
-        expect(sent.status).toBe(201);
-        expect(sent.body).toMatchObject({ replyTo: OTHER, from: SESSION });
-        // Carried byte for byte: the field is inside what was signed.
-        const polled = await call(b.url, "GET", `${CONTROL}?machine=${machine}&wait=0`, { bearer: token });
-        expect((polled.body.messages as { cmd: string }[])[0]!.cmd).toBe(cmd);
-      } else {
-        // sessionpipe-core 0.10.0: its verifier's closed field list refuses it before our look.
-        expect(early.body.code).toBe("bad_fields");
-        expect(sent.status).toBe(422);
-        expect(sent.body.code).toBe("bad_fields");
-      }
+      expect(sent.status, JSON.stringify(sent.body)).toBe(201);
+      expect(sent.body).toMatchObject({ replyTo: OTHER, from: SESSION });
+      // Carried byte for byte: the field is inside what was signed.
+      const polled = await call(b.url, "GET", `${CONTROL}?machine=${machine}&wait=0`, { bearer: token });
+      expect((polled.body.messages as { cmd: string }[])[0]!.cmd).toBe(cmd);
+      // The verifier's own refusals of the field come first, with its code (vectors 167 to 169).
+      const own = commandStr(machine, { iat: Date.now(), reply_to: SESSION });
+      const refused = await call(b.url, "POST", `${UI}/send`, {
+        body: { machineId: machine, ...(await signCommand(pk, day, own)) },
+      });
+      expect(refused).toMatchObject({ status: 422, body: { code: "bad_fields" } });
     } finally {
       await b.close();
     }

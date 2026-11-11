@@ -6,7 +6,6 @@
 // trusts signs a `key.add` for it, CONTROL.md §2). Every route needs the UI's own auth (loopback, or the UI key cookie).
 // Documented route by route in README.md beside this file.
 import { randomBytes } from "node:crypto";
-import * as core from "sessionpipe-core/control";
 import {
   type Assertion,
   b64url,
@@ -108,30 +107,6 @@ export function replyToProblem(cmd: Record<string, unknown>, facts: { handoff?: 
   if (!facts.handoff)
     return { code: "handoff", why: "this machine did not say it takes handoffs; the answer would not come back" };
   return null;
-}
-
-/** Does this receiver's own sessionpipe-core take `reply_to` on a prompt? Its verifier runs
- *  on every command before the second look, and a core from before `ask` (0.10.0) refuses
- *  the field `bad_fields` there, so until the core is bumped no handoff is queued through
- *  this receiver, whatever the machine's hello says. Feature detection, as tilde.ts does:
- *  the core's own parser is asked. */
-export function coreTakesReplyTo(c: Pick<typeof core, "parseCommand" | "COMMAND_TYPE"> = core): boolean {
-  const cmd = {
-    v: 1,
-    t: c.COMMAND_TYPE,
-    machine: `m_${"a".repeat(22)}`,
-    kind: "prompt",
-    session: "claude-code:00000000-0000-4000-8000-000000000000",
-    text: "x",
-    reply_to: "codex:00000000-0000-4000-8000-000000000001",
-    nonce: "A".repeat(22),
-    iat: 1_700_000_000,
-  };
-  try {
-    return c.parseCommand(JSON.stringify(cmd)).ok === true;
-  } catch {
-    return false;
-  }
 }
 
 /** The command without `reply_to`, for the closed field lists that predate it. */
@@ -267,9 +242,8 @@ export async function verifySend(d: Pick<UiRouteDeps, "state" | "rpId">, raw: un
   if (body.grant && typeof body.grant === "object") signed.grant = body.grant as SignedCommand["grant"];
   if (body.confirm && typeof body.confirm === "object") signed.confirm = body.confirm as SignedCommand["confirm"];
   const opts = { machine: m.id, rpId: d.rpId(), trusted: m.keys, now: Date.now(), maxAgeMs: RECEIVER_MAX_AGE_MS };
-  // A `pool` command (DESIGN §2.3) is verified by pool.ts: the same checks on the core's
-  // own primitives, since this core's parseCommand closes the kind set before it looks
-  // at a signature. Everything else is the core's word.
+  // A `pool` command (CONTROL.md §6 `pool`) goes through pool.ts: the core's verdict, held
+  // to the fresh confirm some of its actions take. Everything else is the core's word alone.
   const verdict = looksLikePool(signed.cmd) ? await verifyPoolCommand(signed, opts) : await verifyCommand(signed, opts);
   if (!verdict.ok) throw new HttpError(422, { reason: verdict.why, code: verdict.code });
   // The second look: what this machine's hello advertised (precheck.ts). The same

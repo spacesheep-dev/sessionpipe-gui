@@ -133,9 +133,9 @@ is unchanged. The receiver's second look (`replyToProblem`, before the one below
 to a prompt or a start (`bad_fields` on anything else, or a malformed ref, or the
 command's own session), and to a machine whose last hello said `handoff` (`handoff`: an
 older daemon would refuse the whole command, or ignore the relay). The activity carries it
-as `replyTo`. This receiver's own sessionpipe-core verifies every command first, and a
-core from before `ask` (0.10.0) refuses the field `bad_fields` there, whatever the hello
-says (`coreTakesReplyTo`): a handoff goes through once the core is bumped.
+as `replyTo`. The verifier (sessionpipe-core 0.13) runs first and takes the field on those
+two kinds only, as a session ref that is not the command's own: anything else is its
+`bad_fields` (vectors 165 to 169).
 
 **The second look** (`precheck.ts`). After the verifier, the receiver holds a command to
 what the machine's last hello advertised (CONTROL.md §2), because a daemon that predates
@@ -190,12 +190,10 @@ every account id once, at most 20) and `pool_code` (login.complete: the pasted
 else. It goes through `POST /send` like any command; the page signs on, off, remove, order,
 disable and login.complete with a fresh confirm (`POOL_CONFIRM_ACTIONS`), never the day
 grant, and the early verify refuses one of those signed with a grant alone with
-`confirm_required`, as the daemon does. This receiver's sessionpipe-core (0.10.0) closes
-its kind set in `parseCommand`, which its verifier runs first, so `pool.ts` verifies the
-kind itself: its own strict parser for the fields, then the core's exported primitives
-(`parseGrant`, `verifyAssertion`, `sha256`) in the core's order with the core's refusal
-codes, and the day key's P-256 signature over the exact bytes checked here; once a core
-that lists `pool` is installed (`coreTakesPool()`), the core's `verifyCommand` decides.
+`confirm_required`, as the daemon does. `pool.ts` reads the fields with its own strict
+parser, then sessionpipe-core's `verifyCommand` decides (it has listed the kind since
+0.11), and the confirm rule is held on the core's verdict: a command that verifies on a
+day grant (vectors 137, 138, 140 to 142) is the verifier's yes and this receiver's no.
 The second look (`precheck.ts`) refuses `pool_unsupported` for a machine whose hello has
 no `pool`, `pool_account` for an id the pool does not list (login.complete's pending id
 excepted), `pool_order` for an order that does not name every account once. The activity
