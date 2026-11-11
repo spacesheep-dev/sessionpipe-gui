@@ -23,6 +23,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   cmd.exe, which never handed its output back (the step sat at "Starting the pairing…") and
   split a folder with a space, such as `C:\Users\Ann Lee\code`, into two words. It now runs the
   script the npm shim names under its own node, with no shell, as it does on a Mac.
+- **Setup speaks Windows.** On a Windows receiver the secure-address step pointed at
+  `brew install openssl` and gave Debian and Fedora commands for trusting the certificate; the
+  pair step's button said "Pair this Mac". It now names Git for Windows' openssl (or winget),
+  gives `certutil -user -addstore Root ca.crt` and the Install Certificate… steps (also on the
+  trust page and from `sessionpipe-gui tls trust`), and the button says "Pair this machine"
+  off a Mac.
 
 ## [0.7.5] - 2026-11-06
 
