@@ -127,7 +127,8 @@ search (every session's prompts, replies and tool calls; works offline, no brows
                                              bring the search index up to date (asks the
                                              running GUI when there is one)
 
-service (the receiver in the background: started at login, restarted if it stops):
+service (the receiver in the background: started at login; on macOS and Linux also
+         restarted if it stops):
 
   sessionpipe-gui service install            a LaunchAgent (macOS, dev.spacesheep.sessionpipe-gui),
                                              a systemd --user unit (Linux) or a scheduled
