@@ -173,8 +173,11 @@ test.describe("setup on the TLS instance", () => {
     if (mark !== "done") await expect(pair).toContainText("Finish step 2 first");
     else {
       await openStep(pair);
+      // "Pair this Mac" on a Mac, "Pair this machine" anywhere else.
       await expect(
-        pair.getByRole("button", { name: "Pair this Mac" }).or(pair.locator(".step-what", { hasText: "is listening" })),
+        pair
+          .getByRole("button", { name: /^Pair this (Mac|machine)$/ })
+          .or(pair.locator(".step-what", { hasText: "is listening" })),
       ).toBeVisible();
     }
   });
