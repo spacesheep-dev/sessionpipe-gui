@@ -1,0 +1,32 @@
+{
+  "name": "valid-start-reply-to",
+  "description": "A new Codex session whose answer goes to the Claude Code session that asked for it.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"start\",\"session\":\"codex:0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c\",\"text\":\"Review the diff on this branch\",\"nonce\":\"d5uhYUrr2EGBAYi7If4xRQ\",\"iat\":1790800000000,\"cwd\":\"/Users/misha/spacesheep\",\"reply_to\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\"}",
+      "csig": "kzyDeoDmJI903Whqp_5zs1932Su_39K3pmXeEjZSW_f2tiT0axqxHGoJCxhczdT5tlbJkW51DUb1biQVdI2fvg",
+      "grant": {
+        "cred": "po4y-Btkuhpyz6Es9FRVUHHKX4ZdqX58",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiRmFHNHRsOXk4ZmluUDVyQlNsSGJfZzBHUjJYOUtPTy10UTJBb0NSM0N4NCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIFovJvY_yyLGQu9_JJF3r0YO3BnU278yf05T9BZbB6eeAiEAuHEWJMmbab_-da3aEtkyEmPAwFMt16eoV56kAmrZxuE",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEvX1Kna2HyRqE2U8t5iaH0ihW4wiDJaevvKiYAxACvYL5D_8HVAdIFzTvDay4dX83u2qnnRIa8SoJronVMg0MoQ\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "po4y-Btkuhpyz6Es9FRVUHHKX4ZdqX58",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbH-EFAvuL42tRfx5lZlbUBfxQk6DrXHkREYNKfJkkWRWuFSaFihU9flFhRJpPzJy3dLQ05pPoI80oaeq2Gw2wg"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": true,
+    "via": "grant",
+    "kind": "start"
+  }
+}

@@ -70,8 +70,11 @@ jobs:
           cargo fmt --all --manifest-path apps/Cargo.toml -- --check
           cargo fmt --all --manifest-path apps/mobile/src-tauri/Cargo.toml -- --check
 
-      # The web UI the app bundles: the same build the npm package ships.
+      # The web UI the app bundles: the same build the npm package ships. The prepare
+      # build is skipped as in desktop-release (#50): the next step builds.
       - run: npm ci
+        env:
+          SPGUI_SKIP_PREPARE: "1"
       - run: npm run build
       - run: npm ci
         working-directory: apps/desktop

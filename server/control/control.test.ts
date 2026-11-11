@@ -4,14 +4,28 @@
 // redelivery, the `taken` pause, acks, expiry, off, the early verification against
 // every control vector, the approval proof, persistence and the stream.
 
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { RECEIVER_MAX_AGE_MS, sha256 } from "sessionpipe-core/control";
+import {
+  type Assertion,
+  RECEIVER_MAX_AGE_MS,
+  type SignedCommand,
+  sha256,
+  verifyCommand,
+  verifyEnrollment,
+} from "sessionpipe-core/control";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { ROUTES, type StreamMessage } from "../../shared/api.js";
+import {
+  type ControlActivity,
+  DELIVERY_MODES,
+  type MachineControl,
+  ROUTES,
+  type StreamMessage,
+  type TrustedKey,
+} from "../../shared/api.js";
+import { fixtures } from "../../test/conformance.js";
 import { Router } from "../http/router.js";
 import { coreTakesDevice, receiverKeyTypes } from "./devicekeys.js";
 import { fileHash } from "./files.js";
@@ -19,7 +33,6 @@ import { type Control, createControl } from "./index.js";
 import { parseAccounts, parseAcks, parseHello } from "./parse.js";
 import { pairUrlFor } from "./routes.js";
 import { commandStr, signCommand, signWithDevice, TestDayKey, TestDeviceKey, TestPasskey } from "./testkeys.js";
-import { coreTakesTilde } from "./tilde.js";
 import { readKey, readProof } from "./ui.js";
 
 const SINK = "spg_test_sink_token_0123456789";
@@ -1217,6 +1230,203 @@ describe("parseAcks: applied", () => {
   });
 });
 
+// --- what a 0.13 daemon says that a 0.10 one did not (CONTROL.md §2, §6, §10) ---------
+
+describe("a 0.13 daemon's hello and acks: the inbox mode, copy_of, signed_in", () => {
+  const now = () => "2026-11-10T10:00:00.000Z";
+  const id = "01K8ZQ6X4N3T5V7W9Y1A2B3C4D";
+  const SESSION = "claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e";
+  const COPY = "claude-code:0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b";
+
+  it("parseHello keeps inbox among the delivery modes, and drops a word that is not one", () => {
+    const h = parseHello({
+      ...facts,
+      modes: ["sdk", "waiter", "turn", "inbox", "api", "resume", "fork", "teleport", 7],
+    });
+    expect(h?.modes).toEqual(["sdk", "waiter", "turn", "inbox", "api", "resume", "fork"]);
+    expect([...DELIVERY_MODES]).toEqual(h?.modes);
+    // What a 0.12 daemon lists reads as before.
+    expect(parseHello({ ...facts, modes: ["waiter", "turn", "resume"] })?.modes).toEqual(["waiter", "turn", "resume"]);
+  });
+
+  it("parseAccounts keeps signed_in as a boolean, and leaves anything else unsaid", () => {
+    expect(
+      parseAccounts([
+        { harness: "claude-code", id: "a1", email: "dev@example.com", signed_in: false },
+        { harness: "claude-code", id: "a2", email: "work@example.com", signed_in: true },
+        { harness: "claude-code", id: "a3", email: "old@example.com" },
+        { harness: "claude-code", id: "api-3f9c1e0b7d2a4c68", name: "api.z.ai", signed_in: "no" },
+        { harness: "codex", id: "c1", email: "codex@example.com", signed_in: null },
+      ]),
+    ).toEqual([
+      { harness: "claude-code", id: "a1", email: "dev@example.com", signedIn: false },
+      { harness: "claude-code", id: "a2", email: "work@example.com", signedIn: true },
+      { harness: "claude-code", id: "a3", email: "old@example.com" },
+      { harness: "claude-code", id: "api-3f9c1e0b7d2a4c68", name: "api.z.ai" },
+      { harness: "codex", id: "c1", email: "codex@example.com" },
+    ]);
+  });
+
+  it("parseAcks keeps the inbox mode and a copy_of that is a session, and drops one that is not", () => {
+    const [inbox] = parseAcks({ acks: [{ id, outcome: "delivered", at: now(), mode: "inbox", reply: "Yes." }] }, now)!;
+    expect(inbox).toEqual({ id, outcome: "delivered", at: now(), mode: "inbox", reply: "Yes." });
+    const [copy] = parseAcks(
+      { acks: [{ id, outcome: "delivered", at: now(), mode: "fork", session: COPY, copy_of: SESSION }] },
+      now,
+    )!;
+    expect(copy).toEqual({ id, outcome: "delivered", at: now(), mode: "fork", session: COPY, copyOf: SESSION });
+    for (const bad of ["8c132906", "Claude-Code:x", 7, null, { harness: "claude-code" }, ""]) {
+      const [a] = parseAcks({ acks: [{ id, outcome: "delivered", at: now(), mode: "fork", copy_of: bad }] }, now)!;
+      // The field goes; the ack stands.
+      expect(a, JSON.stringify(bad)).toEqual({ id, outcome: "delivered", at: now(), mode: "fork" });
+    }
+    const [unknown] = parseAcks({ acks: [{ id, outcome: "delivered", at: now(), mode: "teleport" }] }, now)!;
+    expect(unknown).toEqual({ id, outcome: "delivered", at: now() });
+  });
+
+  it("a hello's modes and each account's signed_in reach the machine, the API and a restart", async () => {
+    const b = await boot();
+    tmpDirs.push(b.stateDir);
+    const pk = await TestPasskey.create();
+    const m = await enrolled(b, pk, "m_daemon0130000000001");
+    const say = (accounts: unknown[]) =>
+      call(b.url, "POST", `${CONTROL}/hello`, {
+        bearer: m.token,
+        body: {
+          ...facts,
+          name: "studio-mac",
+          version: "0.13.6",
+          modes: ["sdk", "waiter", "turn", "inbox", "resume", "fork"],
+          accounts,
+        },
+      });
+    const accounts = [
+      { harness: "claude-code", id: "a1", email: "dev@example.com", signed_in: false },
+      { harness: "claude-code", id: "a2", email: "work@example.com", signed_in: true },
+      { harness: "codex", id: "c1", email: "codex@example.com" },
+    ];
+    const read = [
+      { harness: "claude-code", id: "a1", email: "dev@example.com", signedIn: false },
+      { harness: "claude-code", id: "a2", email: "work@example.com", signedIn: true },
+      { harness: "codex", id: "c1", email: "codex@example.com" },
+    ];
+    try {
+      expect((await say(accounts)).status).toBe(204);
+      const c = b.control.machines().get("studio-mac")!;
+      expect(c.modes).toEqual(["sdk", "waiter", "turn", "inbox", "resume", "fork"]);
+      expect(c.accounts).toEqual(read);
+      const listed = (await call(b.url, "GET", `${UI}/machines`)).body.machines as MachineControl[];
+      expect(listed.find((x) => x.machineId === m.machine)).toMatchObject({ modes: c.modes, accounts: read });
+      // Said again in every hello: signed in now, and a daemon that can no longer tell says nothing.
+      expect(
+        (
+          await say([
+            { ...accounts[0], signed_in: true },
+            { harness: "claude-code", id: "a2", name: "Work" },
+          ])
+        ).status,
+      ).toBe(204);
+      expect(b.control.machines().get("studio-mac")!.accounts).toEqual([
+        { harness: "claude-code", id: "a1", email: "dev@example.com", signedIn: true },
+        { harness: "claude-code", id: "a2", name: "Work" },
+      ]);
+      expect((await say(accounts)).status).toBe(204);
+    } finally {
+      await b.close();
+    }
+    const b2 = await boot({ stateDir: b.stateDir });
+    try {
+      expect(b2.control.machines().get("studio-mac")).toMatchObject({
+        modes: ["sdk", "waiter", "turn", "inbox", "resume", "fork"],
+        accounts: read,
+      });
+    } finally {
+      await b2.close();
+    }
+  });
+
+  it("an ack's inbox mode and copy_of reach the activity, the API, the stream and a restart", async () => {
+    const b = await boot();
+    tmpDirs.push(b.stateDir);
+    const pk = await TestPasskey.create();
+    const day = await TestDayKey.create();
+    const m = await enrolled(b, pk, "m_daemon0130000000002");
+    const seen: ControlActivity[] = [];
+    const off = b.control.subscribe((msg) => {
+      if (msg.kind === "control") seen.push(msg.message);
+    });
+    const sendPrompt = async () => {
+      const r = await call(b.url, "POST", `${UI}/send`, {
+        body: { machineId: m.machine, ...(await signedPrompt(pk, day, m.machine, { session: SESSION })) },
+      });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      return r.body.id as string;
+    };
+    const ack = (a: Record<string, unknown>) =>
+      call(b.url, "POST", `${CONTROL}/ack`, {
+        bearer: m.token,
+        body: { acks: [{ at: new Date().toISOString(), ...a }] },
+      });
+    const why =
+      "ran in a copy, because the session was open in Claude Code on this computer (a terminal window or the Claude app)";
+    let inbox = "";
+    let copied = "";
+    let plain = "";
+    try {
+      // The session's own inbox took it: its own answer, no copy.
+      inbox = await sendPrompt();
+      expect((await ack({ id: inbox, outcome: "taken" })).status).toBe(202);
+      expect((await ack({ id: inbox, outcome: "delivered", mode: "inbox", reply: "Yes, all three." })).status).toBe(
+        202,
+      );
+      const a = b.control.activityById(inbox)!;
+      expect(a).toMatchObject({ outcome: "delivered", mode: "inbox", reply: "Yes, all three." });
+      expect(a).not.toHaveProperty("copyOf");
+      // A copy answered: the ack names the copy in `session` and the session asked in `copy_of`.
+      copied = await sendPrompt();
+      expect(
+        (await ack({ id: copied, outcome: "delivered", mode: "fork", session: COPY, copy_of: SESSION, detail: why }))
+          .status,
+      ).toBe(202);
+      const want = {
+        outcome: "delivered",
+        mode: "fork",
+        session: SESSION,
+        ackSession: COPY,
+        copyOf: SESSION,
+        detail: why,
+      };
+      expect(b.control.activityById(copied)).toMatchObject(want);
+      // A copy_of that names no session is dropped, and the ack is still applied.
+      plain = await sendPrompt();
+      expect(
+        (await ack({ id: plain, outcome: "delivered", mode: "fork", session: COPY, copy_of: "the original" })).body,
+      ).toEqual({
+        applied: 1,
+        unknown: 0,
+      });
+      expect(b.control.activityById(plain)).toMatchObject({ outcome: "delivered", ackSession: COPY });
+      expect(b.control.activityById(plain)).not.toHaveProperty("copyOf");
+
+      const listed = (await call(b.url, "GET", `${UI}/activity`)).body.activity as ControlActivity[];
+      expect(listed.find((x) => x.id === copied)).toMatchObject(want);
+      expect(listed.find((x) => x.id === inbox)).toMatchObject({ mode: "inbox" });
+      expect(seen.filter((x) => x.id === copied).at(-1)).toMatchObject(want);
+      expect(seen.filter((x) => x.id === inbox).at(-1)).toMatchObject({ outcome: "delivered", mode: "inbox" });
+    } finally {
+      off();
+      await b.close();
+    }
+    const b2 = await boot({ stateDir: b.stateDir });
+    try {
+      expect(b2.control.activityById(copied)).toMatchObject({ mode: "fork", ackSession: COPY, copyOf: SESSION });
+      expect(b2.control.activityById(inbox)).toMatchObject({ mode: "inbox" });
+    } finally {
+      await b2.close();
+    }
+  });
+});
+
 describe("a start's options, files and applied, through POST send", () => {
   let b: Booted;
   let pk: TestPasskey;
@@ -1438,44 +1648,129 @@ describe("a start's options, files and applied, through POST send", () => {
   });
 });
 
-// --- the early verification against every control vector ---------------------------
+// --- every control vector (CONTROL.md §11) ------------------------------------------
+// "The reference verifier and every receiver that pre-checks MUST agree with all of them."
+// Twice over: the verdict the verifier this receiver runs reaches on each vector, as it is
+// written; and what the receiver then does with the command through POST send. The vectors
+// are the pinned sessionpipe's, in this repo (test/conformance.ts): never skipped.
 
-const repo =
-  process.env.SESSIONPIPE_REPO ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../sessionpipe");
-const vectorsDir = path.join(repo, "conformance/control-vectors");
-let vectorFiles: string[] = [];
-try {
-  vectorFiles = readdirSync(vectorsDir)
-    .filter((f) => f.endsWith(".json"))
-    .sort();
-} catch {}
+const { dir: vectorsDir, files: vectorFiles } = fixtures("control-vectors");
 
 interface Vector {
   name: string;
   input: {
-    signed?: { cmd: string; csig?: string | null; grant?: unknown; confirm?: unknown };
-    proof?: unknown;
+    signed?: SignedCommand;
+    proof?: Assertion;
+    key?: TrustedKey;
+    code?: string;
     machine: string;
     rp_id: string;
-    trusted?: { id: string; alg: number; spki: string }[];
+    trusted?: TrustedKey[];
     now?: number;
+    max_age_ms?: number;
     seen_nonces?: string[];
   };
-  expect: { ok: boolean; code?: string };
+  expect: { ok: boolean; code?: string; via?: "grant" | "confirm"; kind?: string };
 }
+const readVector = (f: string): Vector => JSON.parse(readFileSync(path.join(vectorsDir, f), "utf8")) as Vector;
 
-describe.skipIf(!vectorFiles.length)("early verification: conformance/control-vectors through POST send", () => {
-  if (!vectorFiles.length) console.log(`control vectors not found at ${vectorsDir}; set SESSIONPIPE_REPO`);
+/** The pool the vector machine's hello lists: the two accounts the pool vectors name
+ *  (139 to 144), which are the whole order vector 142 signs. */
+const VECTOR_POOL = {
+  on: true,
+  harness: "claude-code",
+  accounts: [
+    { id: "b3f0c1d2-4e5f-4a6b-8c7d-9e0f1a2b3c4d", enabled: true, status: "ready", current: true },
+    { id: "7a1e2f3b-9c4d-4e5f-a6b7-c8d9e0f1a2b3", enabled: true, status: "ready" },
+  ],
+};
+/** The bytes behind the two hashes the file vectors sign (66 to 68, 93, 109): sessionpipe's
+ *  generator hashes these words. Uploaded, so the receiver holds what the commands name. */
+const VECTOR_FILE_BYTES = ["png bytes", "pdf bytes"];
+
+describe("control vectors: the verdict of the verifier this receiver runs", () => {
   for (const f of vectorFiles) {
-    const v = JSON.parse(readFileSync(path.join(vectorsDir, f), "utf8")) as Vector;
-    if (!v.input.signed) continue; // enrollment vectors are verifyEnrollment's; covered above
+    const v = readVector(f);
+    it(f, async () => {
+      // An enrollment proof (§2): what the approval route asks before it trusts a key.
+      if (v.input.proof) {
+        const r = await verifyEnrollment({
+          machine: v.input.machine,
+          code: v.input.code!,
+          key: v.input.key!,
+          proof: v.input.proof,
+          rpId: v.input.rp_id,
+        });
+        expect(r.ok, JSON.stringify(r)).toBe(v.expect.ok);
+        return;
+      }
+      // A signed command (§5), with the vector's own clock, window and nonce store.
+      const seen = new Set(v.input.seen_nonces ?? []);
+      const r = await verifyCommand(v.input.signed, {
+        machine: v.input.machine,
+        rpId: v.input.rp_id,
+        trusted: v.input.trusted ?? [],
+        now: v.input.now ?? Date.now(),
+        ...(v.input.max_age_ms ? { maxAgeMs: v.input.max_age_ms } : {}),
+        seenNonce: (n) => {
+          if (seen.has(n)) return true;
+          seen.add(n);
+          return false;
+        },
+      });
+      if (v.expect.ok) {
+        expect(r, JSON.stringify(r)).toMatchObject({ ok: true, via: v.expect.via });
+        if (r.ok) expect(r.cmd.kind).toBe(v.expect.kind);
+      } else {
+        expect(r.ok, JSON.stringify(r)).toBe(false);
+        if (!r.ok) expect(r.code).toBe(v.expect.code);
+      }
+    });
+  }
+});
+
+describe("control vectors: carried or refused through POST send", () => {
+  for (const f of vectorFiles) {
+    const v = readVector(f);
+    if (!v.input.signed) continue; // an enrollment proof names a pairing code only its machine made
     it(f, async () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(v.input.now ?? Date.now());
       const b = await boot({ rpId: v.input.rp_id });
       tmpDirs.push(b.stateDir);
       try {
-        const trusted = v.input.trusted ?? [];
+        const s = v.input.signed!;
+        let cmd: Record<string, unknown> = {};
+        try {
+          const c = JSON.parse(s.cmd) as unknown;
+          if (c && typeof c === "object" && !Array.isArray(c)) cmd = c as Record<string, unknown>;
+        } catch {}
+        // A receiver's early word differs from the machine's gate in two places (CONTROL.md
+        // §5): it allows ten minutes, not a day, and it keeps no nonce store.
+        let expectOk = v.expect.ok;
+        let code = v.expect.code;
+        if (expectOk && typeof cmd.iat === "number" && Date.now() - cmd.iat > RECEIVER_MAX_AGE_MS) {
+          expectOk = false;
+          code = "too_old";
+        }
+        if (!expectOk && code === "replay") expectOk = true;
+        // And it asks for what the machine will ask for (§6 `pool`): on, off, remove, order,
+        // disable and login.complete take a fresh confirm, so one that verifies on a day
+        // grant is refused `confirm_required` here as it is there, and carried once a key
+        // the machine trusts has confirmed the very bytes the vector signed. The five the
+        // vectors sign with a grant (137, 138, 140, 141, 142) are named here, in the test's
+        // own words and not by the constant the receiver reads: an action dropped from that
+        // constant would be carried on a grant, and has to fail here. (login.complete, the
+        // sixth, is signed with a confirm in its vector, 146.)
+        const fresh =
+          expectOk &&
+          cmd.kind === "pool" &&
+          ["on", "off", "disable", "remove", "order"].includes(String(cmd.pool_action)) &&
+          !s.confirm
+            ? await TestPasskey.create({ rpId: v.input.rp_id })
+            : null;
+
+        const trusted = [...(v.input.trusted ?? []), ...(fresh ? [fresh.key] : [])];
         const r0 = await call(b.url, "POST", `${CONTROL}/_test/enroll`, {
           body: { machine: v.input.machine, key: trusted[0] },
         });
@@ -1485,10 +1780,10 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
           r0.body.token = (
             await call(b.url, "POST", `${CONTROL}/_test/enroll`, { body: { machine: v.input.machine, key: k } })
           ).body.token;
-        // A machine that takes every option a hello can advertise (CONTROL.md §2): files on a
-        // start and a prompt, every level and any model, so the receiver's second look lets
-        // through what the verifier lets through.
-        await call(b.url, "POST", `${CONTROL}/hello`, {
+        // A machine that takes everything a hello can advertise (CONTROL.md §2): files on a
+        // start and a prompt, every level and any model, a handoff's `reply_to`, and a pool,
+        // so the receiver's second look lets through what the verifier lets through.
+        const said = await call(b.url, "POST", `${CONTROL}/hello`, {
           bearer: r0.body.token as string,
           body: {
             ...facts,
@@ -1496,55 +1791,43 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
             harnesses: ["claude-code", "codex"],
             mode: "auto",
             files: true,
-            // Files on a prompt are 0.10's (S2): only for a vector set that has them.
-            prompt_files: vectorFiles.some((x) => x.includes("prompt-with-files")),
+            prompt_files: true,
             start: {
               "claude-code": { permissions: ["read", "safe", "edits", "auto"], permission: "auto", any_model: true },
               codex: { permissions: ["read", "safe", "edits", "auto"], permission: "auto", any_model: true },
             },
+            ask: true,
+            handoff: true,
+            pool: VECTOR_POOL,
           },
         });
-        const s = v.input.signed!;
-        const r = await call(b.url, "POST", `${UI}/send`, {
-          body: {
-            machineId: v.input.machine,
-            cmd: s.cmd,
-            csig: s.csig ?? undefined,
-            grant: s.grant ?? undefined,
-            confirm: s.confirm ?? undefined,
-          },
-        });
-        // A receiver's early word differs from the machine's gate in two places (CONTROL.md §5):
-        // it allows ten minutes, not a day, and it keeps no nonce store.
-        let expectOk = v.expect.ok;
-        let code = v.expect.code;
-        let iat = Number.NaN;
-        try {
-          iat = JSON.parse(s.cmd).iat;
-        } catch {}
-        if (expectOk && Number.isFinite(iat) && Date.now() - iat > RECEIVER_MAX_AGE_MS) {
-          expectOk = false;
-          code = "too_old";
+        expect(said.status).toBe(204);
+        // And a receiver that holds the files the commands name (HTTP.md §3).
+        for (const bytes of VECTOR_FILE_BYTES) {
+          const up = await fetch(`${b.url}${UI}/files?name=vector.bin`, {
+            method: "POST",
+            headers: { "content-type": "application/octet-stream" },
+            body: bytes,
+          });
+          expect(up.status).toBe(201);
         }
-        if (!expectOk && code === "replay") expectOk = true;
-        // And in a third: it holds the bytes a start's files name, and nobody uploaded these.
-        let carriesFiles = false;
-        try {
-          carriesFiles = Array.isArray(JSON.parse(s.cmd).files);
-        } catch {}
-        if (expectOk && carriesFiles) {
-          expectOk = false;
-          code = "file";
-        }
-        // And in a fourth, until this receiver's sessionpipe-core is 0.10: a start's `~/…`
-        // folder (tilde.ts). Its core wants an absolute one and refuses it, which fails closed.
-        let tildeCwd = false;
-        try {
-          tildeCwd = /^~(?:[/\\]|$)/.test(String(JSON.parse(s.cmd).cwd ?? ""));
-        } catch {}
-        if (expectOk && tildeCwd && !coreTakesTilde()) {
-          expectOk = false;
-          code = "bad_fields";
+
+        const send = (signed: SignedCommand) =>
+          call(b.url, "POST", `${UI}/send`, {
+            body: {
+              machineId: v.input.machine,
+              cmd: signed.cmd,
+              csig: signed.csig ?? undefined,
+              grant: signed.grant ?? undefined,
+              confirm: signed.confirm ?? undefined,
+            },
+          });
+        let r = await send(s);
+        if (fresh) {
+          expect(r.status, JSON.stringify(r.body)).toBe(422);
+          expect(r.body.code).toBe("confirm_required");
+          expect(b.control.activity()).toHaveLength(0);
+          r = await send({ cmd: s.cmd, confirm: await fresh.assert(await sha256(s.cmd)) });
         }
         if (expectOk) {
           expect(r.status, JSON.stringify(r.body)).toBe(201);
@@ -1554,6 +1837,7 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
             bearer: r0.body.token as string,
           });
           expect(got.status).toBe(200);
+          expect(got.body.messages).toHaveLength(1);
           expect(got.body.messages![0]!.cmd).toBe(s.cmd);
         } else {
           expect(r.status, JSON.stringify(r.body)).toBe(422);

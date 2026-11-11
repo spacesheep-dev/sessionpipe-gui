@@ -2,7 +2,17 @@
 // Owned by: search-service. The service over a fake backend whose reader is perf's oracle
 // (server/search/oracle.ts): shaping, filters, hints, paging, overlays from the store,
 // facets, transcripts, status and its frames, the history switch, reveal, the indexer.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type SearchIndexStatus, type StreamMessage, sessionKey } from "../../shared/api.js";
@@ -70,12 +80,21 @@ interface Fake {
   indexer: IndexerOptions[];
   emit(s: Partial<IndexerStatus>): void;
   removed: string[];
+  /** Readers opened and closed, and removals, in order ("open:sessionpipe,history"). */
+  steps: string[];
+  /** Set: removeIndex throws this instead of removing. */
+  failRemove?: NodeJS.ErrnoException;
 }
 
-function fakeBackend(): Fake {
+function fakeBackend(onStep?: (step: string) => void): Fake {
   const { docs, facts } = corpus();
   const indexer: IndexerOptions[] = [];
   const removed: string[] = [];
+  const steps: string[] = [];
+  const step = (s: string) => {
+    steps.push(s);
+    onStep?.(s);
+  };
   const events: SourceAdapter = {
     id: "events",
     source: "sessionpipe",
@@ -86,6 +105,7 @@ function fakeBackend(): Fake {
   const f: Fake = {
     indexer,
     removed,
+    steps,
     emit: (s) =>
       indexer.at(-1)?.onStatus?.({
         phase: "idle",
@@ -96,18 +116,24 @@ function fakeBackend(): Fake {
         ...s,
       }),
     backend: {
-      openReader: async (o) =>
-        fromDocs(
+      openReader: async (o) => {
+        const r = fromDocs(
           docs.filter((d) => o.sources.includes(d.source ?? "history")),
           facts,
           { sources: o.sources },
-        ),
+        );
+        step(`open:${o.sources}`);
+        r.close = () => step(`close:${o.sources}`);
+        return r;
+      },
       runIndexer: (o) =>
         new Promise<void>((resolve) => {
           indexer.push(o);
           o.signal?.addEventListener("abort", () => resolve());
         }),
       removeIndex: async (dir, source) => {
+        step(`remove:${source}`);
+        if (f.failRemove) throw f.failRemove;
         removed.push(source);
         await import("node:fs").then((fs) => fs.rmSync(path.join(dir, source), { recursive: true, force: true }));
       },
@@ -177,6 +203,23 @@ afterEach(async () => {
 
 const local = { local: true };
 const remote = { local: false };
+
+/** history/ with a file in it that cannot be deleted, as on Windows while another program
+ *  holds it: removeIndex throws EPERM, and the plain rmSync after it fails too (a file held
+ *  open on Windows with Node 20, a read-only folder elsewhere). Returns the undo. */
+function stuckHistory(f?: Fake): () => void {
+  const hist = path.join(tmp.dir, "search", "history");
+  mkdirSync(hist, { recursive: true });
+  writeFileSync(path.join(hist, "seg-1.sps"), "x");
+  if (f) f.failRemove = Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" });
+  const fd = process.platform === "win32" ? openSync(path.join(hist, "seg-1.sps"), "r") : -1;
+  if (fd < 0) chmodSync(hist, 0o500);
+  return () => {
+    if (fd >= 0) closeSync(fd);
+    else if (existsSync(hist)) chmodSync(hist, 0o700);
+    if (f) f.failRemove = undefined;
+  };
+}
 
 describe("search: shaping", () => {
   it("one row per session, best first, with marks, the resume line and the folder", () => {
@@ -454,6 +497,97 @@ describe("status, frames and the history switch", () => {
     expect(svc.search({ q: "webhook" }, local).sessions).toHaveLength(1);
   });
 
+  it("history off: the reader lets go of history/ before anything removes it", async () => {
+    mkdirSync(path.join(tmp.dir, "search", "history"), { recursive: true });
+    fake.steps.length = 0;
+    await svc.setHistory(false);
+    // Windows deletes no open file: the reader without history opens, the one with it closes
+    // (and its segments with it), and only then is history/ removed.
+    expect(fake.steps).toEqual(["open:sessionpipe", "close:sessionpipe,history", "remove:history"]);
+  });
+
+  it("history off with a removal that fails: answers, keeps an indexer running, and says so", async () => {
+    if (process.platform !== "win32" && process.getuid?.() === 0) return; // root deletes it anyway
+    const undo = stuckHistory(fake);
+    try {
+      const n = fake.indexer.length;
+      const s = await svc.setHistory(false);
+      expect(history).toBe(false);
+      expect(s).toMatchObject({ state: "error", history: false, sources: [] });
+      // with the last try's code: ENOTEMPTY or EPERM for a held file on Windows, EACCES here
+      expect(s.error).toMatch(
+        /^History search is off, but its index is still on disk: it could not be deleted \(E[A-Z]+\)\. It is tried again each time the indexer starts, and on Rebuild\.$/,
+      );
+      expect(fake.indexer.length).toBe(n + 1);
+      expect(fake.indexer.at(-1)).toMatchObject({ history: false });
+      expect(fake.indexer.at(-1)!.signal!.aborted).toBe(false);
+      expect(svc.search({ q: "webhook" }, local).sessions).toEqual([]);
+    } finally {
+      undo();
+    }
+    // once history/ is gone (the indexer's next start deletes it), it is plain "off"
+    rmSync(path.join(tmp.dir, "search", "history"), { recursive: true, force: true });
+    expect(svc.status()).toMatchObject({ state: "off" });
+    expect(svc.status().error).toBeUndefined();
+  });
+
+  it("after a restart, a history/ the indexer could not delete is still reported", async () => {
+    await svc.close();
+    history = false;
+    const undo = stuckHistory();
+    try {
+      fake = fakeBackend();
+      svc = await createSearch({
+        stateDir: tmp.dir,
+        store,
+        labels,
+        hostname: HOST,
+        home: HOME,
+        history: () => history,
+        setHistory: (on) => {
+          history = on;
+        },
+        broadcast: (m) => frames.push(m),
+        port: () => 7919,
+        backend: fake.backend,
+        tickMs: 0,
+        quiet: true,
+      });
+      // until the indexer has had its try at start, it is just off
+      expect(svc.status()).toMatchObject({ state: "off" });
+      fake.emit({ phase: "idle", firstRun: false });
+      expect(svc.status()).toMatchObject({
+        state: "error",
+        error:
+          "History search is off, but its index is still on disk: it could not be deleted. It is tried again each time the indexer starts, and on Rebuild.",
+      });
+    } finally {
+      undo();
+    }
+    rmSync(path.join(tmp.dir, "search", "history"), { recursive: true, force: true });
+    expect(svc.status()).toMatchObject({ state: "off" });
+  });
+
+  it("two switches at once run one after the other, and the last one stands", async () => {
+    mkdirSync(path.join(tmp.dir, "search", "history"), { recursive: true });
+    fake.steps.length = 0;
+    const off = svc.setHistory(false);
+    const on = svc.setHistory(true);
+    expect((await off).history).toBe(false);
+    expect((await on).history).toBe(true);
+    expect(history).toBe(true);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(fake.indexer.at(-1)!.history).toBe(true);
+    expect(fake.steps).toEqual([
+      "open:sessionpipe",
+      "close:sessionpipe,history",
+      "remove:history",
+      "open:sessionpipe,history",
+      "close:sessionpipe",
+    ]);
+    expect(svc.search({ q: "webhook" }, local).sessions).toHaveLength(1);
+  });
+
   it("writes server.json for `sessionpipe-gui index`, and removes it on close", async () => {
     const f = path.join(tmp.dir, "search", "server.json");
     expect(JSON.parse(readFileSync(f, "utf8"))).toEqual({ pid: process.pid, port: 7919 });
@@ -489,6 +623,20 @@ describe("reveal", () => {
   });
 });
 
+const childLogLines = (text: string): Record<string, unknown>[] =>
+  text
+    .split("\n")
+    .slice(0, -1)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+it("waits for complete child log records without hiding malformed records", () => {
+  expect(childLogLines("")).toEqual([]);
+  expect(childLogLines('{"got":')).toEqual([]);
+  expect(childLogLines('{"got":1}\n{"got":')).toEqual([{ got: 1 }]);
+  expect(childLogLines('{"got":1}\n{"got":2}\n')).toEqual([{ got: 1 }, { got: 2 }]);
+  expect(() => childLogLines("invalid\n")).toThrow();
+});
+
 describe("the indexer child (fork, nice, IPC)", () => {
   /** A stand-in for `dist/cli.js index --ipc`: logs its argv, priority and every message. */
   const CHILD = `
@@ -507,12 +655,7 @@ process.on("message", (m) => {
 `;
   let logFile: string;
   const lines = (): Record<string, unknown>[] =>
-    existsSync(logFile)
-      ? readFileSync(logFile, "utf8")
-          .trim()
-          .split("\n")
-          .map((l) => JSON.parse(l) as Record<string, unknown>)
-      : [];
+    existsSync(logFile) ? childLogLines(readFileSync(logFile, "utf8")) : [];
   const until = async (f: () => boolean, ms = 3000) => {
     const t0 = Date.now();
     while (!f() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 20));
@@ -525,7 +668,7 @@ process.on("message", (m) => {
     writeFileSync(script, CHILD);
     logFile = path.join(tmp.dir, "child.log");
     process.env.FAKE_CHILD_LOG = logFile;
-    fake = fakeBackend();
+    fake = fakeBackend((step) => appendFileSync(logFile, `${JSON.stringify({ step })}\n`));
     svc = await createSearch({
       stateDir: tmp.dir,
       store,
@@ -550,7 +693,8 @@ process.on("message", (m) => {
 
   it("forks `index --ipc --state … --search-home …` at nice 10 and runs no indexer in-process", async () => {
     expect(await until(() => lines().some((l) => "nice" in l))).toBe(true);
-    expect(lines()[0]!.argv).toEqual(["index", "--ipc", "--state", tmp.dir, "--search-home", HOME, "--hostname", HOST]);
+    const argv = lines().find((l) => "argv" in l)!.argv;
+    expect(argv).toEqual(["index", "--ipc", "--state", tmp.dir, "--search-home", HOME, "--hostname", HOST]);
     expect(lines().find((l) => "nice" in l)!.nice).toBe(10);
     expect(fake.indexer).toHaveLength(0);
   });
@@ -584,6 +728,30 @@ process.on("message", (m) => {
     expect(s.state).toBe("off");
     expect(lines().some((l) => JSON.stringify(l.got) === JSON.stringify({ t: "history", on: false }))).toBe(true);
     expect(existsSync(path.join(tmp.dir, "search", "history"))).toBe(false);
+    // The reader had closed history's segments before the child was told to delete them.
+    const order = lines().flatMap((l) =>
+      l.step === "close:sessionpipe,history"
+        ? ["reader closed"]
+        : JSON.stringify(l.got) === JSON.stringify({ t: "history", on: false })
+          ? ["child told"]
+          : [],
+    );
+    expect(order).toEqual(["reader closed", "child told"]);
+  });
+
+  it("history off with a removal that fails: answers, and a child indexer runs again without history", async () => {
+    if (process.platform !== "win32" && process.getuid?.() === 0) return; // root deletes it anyway
+    expect(await until(() => lines().length > 0)).toBe(true);
+    const undo = stuckHistory(fake);
+    try {
+      const s = await svc.setHistory(false);
+      expect(s).toMatchObject({ state: "error", history: false });
+      const forks = () => lines().filter((l) => "argv" in l);
+      expect(await until(() => forks().length === 2)).toBe(true);
+      expect(forks()[1]!.argv).toContain("--no-history");
+    } finally {
+      undo();
+    }
   });
 });
 

@@ -12,7 +12,7 @@ export interface RunInfo {
   port: number;
   pid: number;
   version: string;
-  /** http://127.0.0.1:<port> */
+  /** http://127.0.0.1:<port>, or the address --host bound when it is not a wildcard. */
   url: string;
   /** ISO 8601 */
   startedAt: string;

@@ -366,7 +366,9 @@ function HotkeyRecorder({ value, disabled }: { value: string | null; disabled?: 
         className="btn btn--sm app-settings-key"
         data-recording={recording || undefined}
         disabled={disabled}
-        aria-label={value ? `New session shortcut: ${hotkeyLabel(value)}. Click to record another` : "Record shortcut"}
+        aria-label={
+          value ? `New session shortcut: ${hotkeyLabel(value, platform())}. Click to record another` : "Record shortcut"
+        }
         onClick={() => setRecording((r) => !r)}
         onBlur={() => setRecording(false)}
         onKeyDown={(e) => {
@@ -384,7 +386,7 @@ function HotkeyRecorder({ value, disabled }: { value: string | null; disabled?: 
           onChange(h);
         }}
       >
-        {recording ? "Type a shortcut…" : value ? hotkeyLabel(value) : "Record Shortcut"}
+        {recording ? "Type a shortcut…" : value ? hotkeyLabel(value, platform()) : "Record Shortcut"}
       </button>
       {value && !recording && (
         <button type="button" className="btn btn--sm btn--ghost" disabled={disabled} onClick={() => onChange(null)}>

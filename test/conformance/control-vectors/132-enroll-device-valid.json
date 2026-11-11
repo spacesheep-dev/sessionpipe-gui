@@ -1,0 +1,24 @@
+{
+  "name": "enroll-device-valid",
+  "description": "A device key proves itself with a signature for purpose pair over sha256(\"sessionpipe.pair:<machine>:<code>\").",
+  "input": {
+    "machine": "m_testmachine0000000001",
+    "code": "K7Q2-9XMV",
+    "key": {
+      "id": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+      "alg": -7,
+      "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENgDnTWZNrbM16SqfjnsZdCU_qNtzB0bdkXDpBZfAja2bd9ozG1YsA6gOkaqWBSt0MaHSLKJKB3ZILVnuBHzkcA",
+      "type": "device",
+      "store": "hardware",
+      "uv": "each-use"
+    },
+    "proof": {
+      "cred": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+      "sig": "B-cWWEOie9FSKTxzbrHwhympTQ3h6C8wggZ6jpFu4D_0flMspekFxafcjusILU3fRvFZlxRs8OvWdPEw8672Ow"
+    },
+    "rp_id": "receiver.example"
+  },
+  "expect": {
+    "ok": true
+  }
+}
