@@ -21,6 +21,7 @@ import {
   type Suggestion,
   type Viewer,
 } from "@shared/api";
+import { noteMachineControl } from "../control/remoteRp";
 import type { Transport } from "./transport";
 
 export type Connection = "connecting" | "live" | "reconnecting" | "offline";
@@ -157,7 +158,7 @@ export class Store {
           retryAt: null,
           snapshotAt: s.at,
           sessions: new Map(s.sessions.map((x) => [x.key, x])),
-          machines: new Map(s.machines.map((x) => [x.name, x])),
+          machines: new Map(s.machines.map((x) => (noteMachineControl(x.control), [x.name, x]))),
           stats: s.stats,
           viewers: s.viewers ?? [],
           suggestions: s.suggestions ?? [],
@@ -201,6 +202,7 @@ export class Store {
       }
       case "machine": {
         const machines = new Map(this.state.machines);
+        noteMachineControl(m.machine.control);
         machines.set(m.machine.name, m.machine);
         this.set({ machines });
         return;
