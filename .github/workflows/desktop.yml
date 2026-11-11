@@ -38,7 +38,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Linux packages (WebKitGTK 4.1, the tray, SVG icons)
         if: runner.os == 'Linux'
