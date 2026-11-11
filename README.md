@@ -54,7 +54,8 @@ of it.
   passkey and checked on the machine that runs the agent; the GUI carries commands and
   cannot forge one.
 - **Yours, on your machine.** Plain files on your disk, no database, no account, no service
-  of ours in between, no Electron. The server makes no outbound request of its own.
+  of ours in between, no Electron. The server calls out only for what you turn on: a plugin
+  you enable or a spacesheep account you connect.
 
 ## Search
 
@@ -400,8 +401,11 @@ and secrets are redacted before the outbox. The GUI shows what arrived and nothi
    where sending does, instead of offering to enrol a new device.
 4. **Setup is local.** Setup's actions, token rotation and plugin settings answer only on
    this machine.
-5. **Nothing phones home.** No telemetry; the web app calls only its own origin, and the
-   server's only outbound request is an extension you ask it to install by URL.
+5. **Nothing phones home.** No telemetry; the web app calls only its own origin. The
+   server's outbound requests are the ones you turn on: a plugin you enable (ping-a-human
+   talks to Telegram) and a spacesheep account you connect in Settings → Data (the server
+   then polls its relay and sends your messages through it). Installing an extension from a
+   URL is the `view add` CLI command's request, not the running server's.
    [SECURITY.md](SECURITY.md) has the details.
 
 The GUI is meant for your own network. For outside it, use Tailscale or another https proxy
@@ -543,8 +547,11 @@ Antigravity and Gemini CLI on this machine.
 <summary><b>Does anything leave my machine?</b></summary>
 
 Not unless you ask. No telemetry, no analytics, no account; search runs here, on files here.
-The server's one outbound request is an extension you install by URL. What other machines
-send to this one is up to each machine's sink tier.
+The server calls out only for what you turn on: a plugin you enable (ping-a-human talks to
+Telegram) and a spacesheep account you connect (the server then polls its relay and sends
+your messages through it). Installing an extension from a URL is the `view add` CLI
+command's request, not the running server's. What other machines send to this one is up to
+each machine's sink tier.
 
 </details>
 
