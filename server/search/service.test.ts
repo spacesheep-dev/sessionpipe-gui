@@ -507,6 +507,7 @@ describe("status, frames and the history switch", () => {
   });
 
   it("history off with a removal that fails: answers, keeps an indexer running, and says so", async () => {
+    if (process.platform !== "win32" && process.getuid?.() === 0) return; // root deletes it anyway
     const undo = stuckHistory(fake);
     try {
       const n = fake.indexer.length;
@@ -730,6 +731,7 @@ process.on("message", (m) => {
   });
 
   it("history off with a removal that fails: answers, and a child indexer runs again without history", async () => {
+    if (process.platform !== "win32" && process.getuid?.() === 0) return; // root deletes it anyway
     expect(await until(() => lines().length > 0)).toBe(true);
     const undo = stuckHistory(fake);
     try {
