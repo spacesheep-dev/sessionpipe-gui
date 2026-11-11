@@ -20,4 +20,11 @@ describe("the README's download links", () => {
   it("name each file with that release's version", () => {
     expect(links.filter((l) => !l.file.includes(l.tag))).toEqual([]);
   });
+
+  // A link's words too: the table once read sessionpipe_0.7.2_universal.dmg over a 0.7.5 link.
+  it("write no other version's file name anywhere on the page", () => {
+    const tag = links[0]?.tag;
+    const named = [...readme.matchAll(/sessionpipe(?:-gui)?[_-](\d+\.\d+\.\d+)[_.-]/g)].map((m) => m[1]!);
+    expect(named.filter((v) => v !== tag)).toEqual([]);
+  });
 });
