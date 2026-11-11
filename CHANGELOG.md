@@ -99,6 +99,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   longer taken for the one that dropped. The hand-run Desktop workflow also passes on
   `windows-latest`: its `npm ci` skips the prepare build, as desktop-release does, two tests
   no longer assume macOS, and the four that run a shell script are compiled on Unix only.
+- **The desktop app's first-run sheet speaks Windows and Linux.** The New session shortcut
+  reads Ctrl+Alt+N there (it read ⌃⌥N, the Mac's symbols, everywhere), as does the
+  recorder in Settings › App; the sheet says sessionpipe is in your system tray, not your
+  menu bar; and a refused notification points at Windows' Settings, not System Settings.
 
 ## [0.7.5] - 2026-11-06
 
