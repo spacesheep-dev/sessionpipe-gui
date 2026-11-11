@@ -33,14 +33,36 @@ jobs:
 
       - run: npm run typecheck
       - run: npm run lint
+      # With sessionpipe's own conformance fixtures (every control vector, every delivery
+      # scenario) from test/conformance/, the copy at the pinned sessionpipe-core's version:
+      # nothing here needs a second checkout, and none of it is skipped.
       - run: npm test
+
+      # That copy against sessionpipe itself. The test above holds the copy to manifest.json,
+      # which sits beside it, so a vector edited together with its hash, or taken out
+      # together with its line, passes there. Here both are compared with the tag of the
+      # version package.json pins, cloned for this step alone: one commit deep, at the tag,
+      # with no credential (the repo is public; this job's token reads this repo only, and
+      # the clone is made outside the checkout that holds it). Nothing is written back.
+      - name: Conformance fixtures are sessionpipe's own, at the pinned tag
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').dependencies['sessionpipe-core']")"
+          git -C "$RUNNER_TEMP" -c advice.detachedHead=false clone --quiet --depth 1 --branch "v$version" \
+            https://github.com/spacesheep-dev/sessionpipe.git sessionpipe
+          npm run conformance:sync -- --check --from "$RUNNER_TEMP/sessionpipe"
 
       # The bundled-views step looks for ../sessionpipe-gui-themes and skips with a note
       # when it is absent, so a bare clone builds.
       - run: npm run build
 
+      # --with-deps asks apt for the libraries and fonts Chromium wants. The runner's image
+      # has the libraries already, and apt there can lose Ubuntu's archive for an hour at a
+      # time ("Temporary failure resolving 'archive.ubuntu.com'", 2026-11-11: every run red
+      # at this step). When apt fails, the browser alone is installed: no test here compares
+      # pixels, and a browser that cannot start fails the suites below all the same.
       - name: Playwright browsers
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium || npx playwright install chromium
 
       - name: Playwright (desktop + phone, demo mode on :7311 / :7312)
         run: npm run test:e2e
