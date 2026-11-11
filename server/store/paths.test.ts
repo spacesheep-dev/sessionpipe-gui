@@ -84,12 +84,38 @@ describe("relativePath / changedPaths", () => {
     // drive (C: alone is a drive's current folder, not its root), none.
     expect(relativePath("C:\\Users\\dev\\code\\acme2\\a.ts", cwd)).toBe("C:\\Users\\dev\\code\\acme2\\a.ts");
     expect(relativePath("D:\\Users\\dev\\code\\acme\\a.ts", cwd)).toBe("D:\\Users\\dev\\code\\acme\\a.ts");
-    expect(relativePath("C:\\Users\\dev\\code\\acme\\a.ts", "~/code/acme")).toBe("C:\\Users\\dev\\code\\acme\\a.ts");
+    expect(relativePath("C:\\Users\\dev\\code\\acme\\a.ts", "/home/dev/code/acme")).toBe(
+      "C:\\Users\\dev\\code\\acme\\a.ts",
+    );
     expect(relativePath("C:\\Users\\dev\\code\\acme\\a.ts", "C:")).toBe("C:\\Users\\dev\\code\\acme\\a.ts");
     expect(relativePath("C:\\Users\\dev\\code\\acme\\a.ts")).toBe("C:\\Users\\dev\\code\\acme\\a.ts");
     // A relative path, and a POSIX one, are read as before.
     expect(relativePath("src\\index.ts", cwd)).toBe("src\\index.ts");
     expect(relativePath("/home/dev/code/acme/src/a.ts", cwd)).toBe("~/code/acme/src/a.ts");
+  });
+
+  it("strips a Windows cwd the client wrote with ~, which is how a session under the home folder arrives", () => {
+    // sessionpipe-core's tilde(): C:\\Users\\dev\\code\\acme is sent as ~\\code\\acme.
+    const cwd = "~\\code\\acme";
+    expect(relativePath("C:\\Users\\dev\\code\\acme\\src\\index.ts", cwd)).toBe("src/index.ts");
+    expect(relativePath("c:/users/dev/code/acme/src/index.ts", cwd)).toBe("src/index.ts");
+    expect(relativePath("C:\\Users\\dev\\code\\acme\\src\\index.ts", "~/code/acme/")).toBe("src/index.ts");
+    expect(relativePath("C:\\Users\\dev\\code\\acme", cwd)).toBe(".");
+    expect(relativePath("C:\\Users\\dev\\notes.txt", "~")).toBe("notes.txt");
+    // Not under it: a sibling, a folder outside the home, a name that only starts like Users.
+    expect(relativePath("C:\\Users\\dev\\code\\acme2\\a.ts", cwd)).toBe("C:\\Users\\dev\\code\\acme2\\a.ts");
+    expect(relativePath("C:\\code\\acme\\a.ts", cwd)).toBe("C:\\code\\acme\\a.ts");
+    expect(relativePath("C:\\Users2\\dev\\code\\acme\\a.ts", cwd)).toBe("C:\\Users2\\dev\\code\\acme\\a.ts");
+    const edit = (file_path: string) => ({
+      type: "tool.ended",
+      data: { tool: "Edit", ok: true, input: { file_path } },
+    });
+    const paths = new Set([
+      ...changedPaths(edit("C:\\Users\\dev\\code\\acme\\src\\index.ts"), cwd),
+      ...changedPaths(edit("c:\\users\\dev\\code\\acme\\src\\index.ts"), cwd),
+      ...changedPaths({ type: "files.changed", data: { paths: ["src/index.ts"] } }, cwd),
+    ]);
+    expect([...paths]).toEqual(["src/index.ts"]);
   });
 
   it("gives one changed file for a Windows path however it is spelled, and for the files.changed after it", () => {

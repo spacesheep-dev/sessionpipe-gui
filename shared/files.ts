@@ -104,7 +104,9 @@ export function tildify(p: string): string {
  *  elsewhere keeps its place, with the home directory as `~`. Already-relative paths
  *  stay as they are. A Windows path (`C:\…`) under the cwd loses that prefix too: the cwd
  *  is matched with `\` and `/` alike and in any case, and the rest is written with `/`,
- *  as a POSIX path's is; the rest keeps its own case. */
+ *  as a POSIX path's is; the rest keeps its own case. The client writes a cwd under the
+ *  home folder with `~` (`~\code\acme`), so against such a cwd the path's `C:\Users\<name>`
+ *  is read as `~` first. */
 export function relativePath(p: string, cwd?: string): string {
   const path = p.trim();
   if (WIN_ABS.test(path)) return winRelative(path, cwd);
@@ -119,16 +121,23 @@ export function relativePath(p: string, cwd?: string): string {
 }
 
 const WIN_ABS = /^[A-Za-z]:[\\/]/;
+/** A Windows home folder, `C:\Users\<name>`: what the client's `~` stands for there. */
+const WIN_HOME = /^[A-Za-z]:[\\/]Users[\\/][^\\/]+(?=[\\/]|$)/i;
 const winKey = (s: string): string => s.replace(/\\/g, "/").toLowerCase();
 
 function winRelative(path: string, cwd?: string): string {
   const c = cwd?.trim();
-  if (!c || !WIN_ABS.test(c)) return path;
+  if (!c) return path;
+  // sessionpipe writes a session's cwd under the home folder as `~\code\acme` (core's
+  // `tilde`), which is most sessions: the path is read the same way before the two meet.
+  const home = /^~(?=[\\/]|$)/.test(c);
+  if (!home && !WIN_ABS.test(c)) return path;
+  const p = home ? path.replace(WIN_HOME, "~") : path;
   const base = c.replace(/[\\/]+$/, "");
-  if (winKey(path.slice(0, base.length)) !== winKey(base)) return path;
-  if (path.length === base.length) return ".";
-  if (path[base.length] !== "\\" && path[base.length] !== "/") return path;
-  return normalizeRel(path.slice(base.length + 1).replace(/^[\\/]+/, "")) || ".";
+  if (winKey(p.slice(0, base.length)) !== winKey(base)) return path;
+  if (p.length === base.length) return ".";
+  if (p[base.length] !== "\\" && p[base.length] !== "/") return path;
+  return normalizeRel(p.slice(base.length + 1).replace(/^[\\/]+/, "")) || ".";
 }
 
 /** A relative path with its spelling settled: `\` as `/`, no leading `./`. For callers
