@@ -56,13 +56,14 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "conformance": "node dist/conformance.js",
+    "conformance:sync": "node scripts/sync-conformance.mjs",
     "bench:search": "node bench/search/run.mjs",
     "prepare": "node scripts/prepare.mjs",
     "bundle:sync": "node scripts/build.mjs --sync-bundle"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
-    "sessionpipe-core": "^0.10.0"
+    "sessionpipe-core": "0.13.6"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",

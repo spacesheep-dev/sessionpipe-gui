@@ -2,6 +2,7 @@
 // Everything that crosses the wire goes through a Transport: the real one speaks SSE and
 // fetch to our own origin, the mock one (web/src/mock) simulates a server in the page.
 import type {
+  ControlActivity,
   DetailQuery,
   Digest,
   DigestQuery,
@@ -59,6 +60,10 @@ export interface Transport {
   forgetLimits(key: string): Promise<void>;
   /** Session search (web/src/search): its client arrives with the search code itself. */
   sessionSearch(): Promise<SearchClient>;
+  /** The receiver's control activity, newest first (GET /api/ui/control/activity): what
+   *  the stream's `control` frames said while this page was not listening. Absent where
+   *  there is no receiver to ask (the mock). */
+  controlActivity?(limit: number): Promise<ControlActivity[]>;
 }
 
 /** Every StreamMessage kind: EventSource only delivers the named events listened for, so
@@ -247,5 +252,7 @@ export function createHttpTransport(): Transport {
       }).then((r) => json<Marks>(r)),
     forgetLimits: (key) => post<void>(ROUTES.ui.limitsForget, { key }),
     sessionSearch: () => import("../search/http").then((m) => m.httpSearch(searchFrames)),
+    controlActivity: (limit) =>
+      get<{ activity: ControlActivity[] }>(`${ROUTES.ui.control}/activity?limit=${limit}`).then((r) => r.activity),
   };
 }

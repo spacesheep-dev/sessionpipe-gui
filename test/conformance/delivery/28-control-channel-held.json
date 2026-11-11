@@ -1,0 +1,47 @@
+{
+  "name": "control-channel-held",
+  "spec": "CONTROL.md §8 sessionpipe channel, §10 failed/held",
+  "capability": "control",
+  "note": "The machine handed the message to the session's `sessionpipe channel`, and the session began no turn for it: Claude Code acknowledges nothing a channel sends and drops a notification in silence where it didn't register the channel (a --print session, the Agent SDK, an organization with channels off). It is acked `failed` with code `held` ONCE: the message went out, so it is not tried on another mode, and the channel is handed nothing more. The receiver's part is to show that it was sent and not duplicated, and not to redeliver it.",
+  "steps": [
+    {
+      "enqueue": {
+        "machine": "{machine}",
+        "sign": {
+          "session": "claude-code:{uuid}",
+          "kind": "prompt",
+          "text": "are you there?"
+        },
+        "expires_in_s": 60
+      }
+    },
+    {
+      "poll": {
+        "machine": "{machine}",
+        "wait": 1
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "ack": {
+        "outcome": "failed",
+        "code": "held",
+        "detail": "handed to the session's sessionpipe channel on this computer; it didn't begin a turn for it, so Claude Code may have dropped the message or be holding it. Nothing was duplicated and nothing else was tried; the next message to it goes another way."
+      },
+      "expect": {
+        "status": 202
+      }
+    },
+    {
+      "poll": {
+        "machine": "{machine}",
+        "wait": 1
+      },
+      "expect": {
+        "status": 204
+      }
+    }
+  ]
+}

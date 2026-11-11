@@ -6,12 +6,159 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The receiver keeps three things a sessionpipe 0.13 machine says. `inbox` among a
+  machine's delivery modes and as the mode of an ack, which it used to drop as a word it
+  did not know: the line under a message a live session took through its own inbox now
+  reads "delivered · inbox" ("taken · … · inbox" on the way), where it read "delivered"
+  with no mode. The other two are kept for the pages that will show them, and nothing
+  draws them yet: the session a copy answered for (an ack's `copy_of`,
+  `ControlActivity.copyOf`), and whether the command line is signed in to each account (a
+  hello's `signed_in`, `HarnessAccount.signedIn`).
+
+### Changed
+
+- **sessionpipe 0.13.6.** The receiver verifies commands with sessionpipe-core 0.13.6 (it
+  was 0.10.0), pinned to that one version. "Bring the answer back" in the Ask another agent
+  sheet now sends: a machine whose hello says `handoff` used to get "Not sent: this
+  receiver's sessionpipe is older than bringing answers back", because this receiver's own
+  verifier refused `reply_to` before the machine saw it. That line is gone from the sheet;
+  a command the verifier does refuse with the switch on reads there as it does on any
+  send. A pool command is verified by the core itself, and still refused here on a day
+  grant alone where the machine wants a fresh confirm.
+- sessionpipe's conformance fixtures for 0.13.6 (169 control vectors, 33 delivery scenarios)
+  are in the repo under `test/conformance/` and run with `npm test`, in CI too. They were
+  read from a sessionpipe checkout beside the clone and skipped without one, so CI never
+  ran them, and with one the pool vectors failed (#71).
+
 ### Fixed
 
 - **A `session.seq` above 2^53 − 1 is refused**, the schema's bound: the receiver answers
   `bad_seq`, and the outbox reader and the demo drop it. Two such seqs in one session hung
   the GUI server at 100% CPU while it listed the hole between them; a store an older
   release already wrote them into now boots instead of hanging.
+- **One session file the outbox can't read no longer stops the outbox.** A file the GUI
+  may not open (its mode, another user's) or a folder named `*.jsonl` made the first read
+  fail, and no session from the outbox reached the board while that file stayed so,
+  restart or not; one that turned unreadable while running kept every older session from
+  being read and the offsets from being saved, with a line on stderr every 500 ms. That
+  file is now skipped for the tick, said once, and read on from its offset once it can be
+  read again.
+- **Setup's "Pair this machine" works on Windows.** The receiver ran `sessionpipe.cmd` through
+  cmd.exe, which never handed its output back (the step sat at "Starting the pairing…") and
+  split a folder with a space, such as `C:\Users\Ann Lee\code`, into two words. It now runs the
+  script the npm shim names under its own node, with no shell, as it does on a Mac.
+- **Setup speaks Windows.** On a Windows receiver the secure-address step pointed at
+  `brew install openssl` and gave Debian and Fedora commands for trusting the certificate; the
+  pair step's button said "Pair this Mac". It now names Git for Windows' openssl (or winget),
+  gives `certutil -user -addstore Root ca.crt` and the Install Certificate… steps (also on the
+  trust page and from `sessionpipe-gui tls trust`), and the button says "Pair this machine"
+  off a Mac.
+- A self-assigned 169.254 address (no DHCP answered on that link) no longer comes first among
+  the receiver's LAN addresses, so the Machines page's pair command, Connect and the phone
+  link name an address the other device can reach.
+- **A virtual adapter no longer comes first.** Windows' "vEthernet (…)" switches (WSL 2,
+  Hyper-V), VirtualBox and VMware host adapters, and Linux's libvirt, LXD, Incus, LXC,
+  Multipass and Podman bridges sort after the real interfaces, whatever their case, so the
+  phone's QR code, Connect and the `sink add` command name an address the other device can
+  reach. No address is dropped: a Hyper-V external switch keeps the host's LAN address on
+  "vEthernet (External…)", after any real-named interface.
+- **`--host 127.0.0.1` (or `::1`, `localhost`) no longer offers LAN URLs nothing listens
+  on.** The banner listed every LAN address as a `network` URL, its phone QR and the sink
+  command pointed at one of them, and a bind to `::1` gave a sink command on `127.0.0.1`;
+  all of them refused connections. A loopback bind now offers no LAN URL, and the sink
+  command names the address it bound, under "from this machine"; a bind to one LAN
+  address lists that address alone as its network URL.
+- **A `config.json` that does not parse is never written over.** A `config.json` left empty or
+  half-written by a write that died, or hand-edited so it no longer parses, was silently
+  replaced with fresh secrets on the next start, so every sender paired with the old sink
+  token got 401 and every phone and browser holding the old UI key was refused, with nothing
+  said. The GUI now stops with a message that names the file and what to do, and leaves it
+  byte for byte as it was; one it cannot read (a folder of that name, no permission) stops
+  it the same way instead of with a stack trace. A `config.json` with a UTF-8 byte-order
+  mark (PowerShell 5's `UTF8` encoding, older Windows editors) is read past it, instead of
+  being replaced the same way. `sessionpipe-gui search` and `index` read the history setting
+  past a byte-order mark too, and stop the same way on a `config.json` the GUI refuses,
+  instead of reading it as history on.
+- A plugin turned on with `sessionpipe-gui plugin enable` while the receiver runs starts
+  on Reload plugins, as the CLI says. And a plugin or view the CLI turns on or off
+  while it runs is no longer undone by the receiver's next write of config.json (a token
+  rotation, a toggle in Settings, a spacesheep connect), which put back the lists it held
+  in memory.
+- **`npx github:spacesheep-dev/sessionpipe-gui` works on Windows.** Its one-time build
+  spawned a bare `npm`, which is `npm.cmd` there and can't start without a shell, so the
+  command exited 1 with no message. The build now runs npm through npm's own entry under the
+  same node, and says why if npm can't be started. Its check for the build tools also looked
+  for `@vitejs/plugin-react/package.json` through the package's exports, which leave it out,
+  so on every platform the tools were installed a second time; on Windows that install ran
+  the build script again, and again, until the PATH outgrew cmd.exe.
+- **The desktop app on Windows tells a stale receiver from a live one.** It decides whether
+  the receiver that wrote `run.json` still runs by its process id, and on Windows that check
+  always said yes. It now asks Windows, so a file left by a receiver that has stopped is no
+  longer taken for the one that dropped. The hand-run Desktop workflow also passes on
+  `windows-latest`: its `npm ci` skips the prepare build, as desktop-release does, two tests
+  no longer assume macOS, and the four that run a shell script are compiled on Unix only.
+- **The desktop app's first-run sheet speaks Windows and Linux.** The New session shortcut
+  reads Ctrl+Alt+N there (it read ⌃⌥N, the Mac's symbols, everywhere), as does the
+  recorder in Settings › App; the sheet says sessionpipe is in your system tray, not your
+  menu bar; and a refused notification points at Windows' Settings, not System Settings.
+- Search no longer says "“c:” isn't a filter" over a pasted Windows path (`C:\Users\…`,
+  `D:/repo`) or a URL (`https://…`). They were, and still are, searched as text; the notice
+  now stays for something that looks like a filter, such as `foo:bar` or `cwd:/x`.
+- **The tier lens shows prompts, turn ends and attentions as a lower-tier receiver gets
+  them:** under a lens below tier 3, who submitted a prompt (`submitted_by`, `injected`)
+  and the background work still running when a turn ends (`background`) now stay, and an
+  attention's `turn_id` and `call_id`, which the client never sends, go, as does its
+  `agent_id` at tier 0.
+- Board filters apply immediately even while focus or the pointer holds the row order.
+- **Search shows a message just indexed at once when the indexer runs inside the server.**
+  Where the indexer cannot be forked it runs in the server's own process, and there a
+  request to commit that arrived while an earlier commit was being published was dropped:
+  the new messages then waited for the timed commit, up to a minute. The forked indexer
+  never dropped one.
+- **Turning history search off works on Windows.** With Node 20, Settings › Data answered
+  "internal", left the history index on disk and stopped the indexer until the GUI was
+  restarted: the server still had that index open while it deleted it, which Windows
+  refused. It now lets go of it first. If another program still holds a file of it, the
+  setting is saved anyway, indexing goes on, and the status is an error naming the index
+  left on disk until a later try (the indexer's next start, or Rebuild) deletes it.
+- **A Windows file is listed once.** A full path from Claude Code on Windows
+  (`C:\Users\…\acme\src\index.ts`, with either slash or the drive in another case) is shown
+  relative to the session's folder, as `src/index.ts`, as on a Mac, so the Files drawer, the
+  Review page and the changed-files count no longer give one file a row for each
+  spelling of its full path.
+- **`view`, `skin` and `plugin add` and `link` work on Windows.** A .zip is unpacked with
+  the tar.exe Windows ships instead of failing with "unzip is not installed"; an npm
+  package or a git URL runs npm's own script under the GUI's node instead of failing with
+  "npm is not installed" while npm is on PATH; and `link` makes a junction where Windows
+  refuses a symlink, so it no longer fails with EPERM when Developer Mode is off.
+- **A finished session stays finished.** A sender records a hook when it gets to it, so a
+  tool call that fired just before a turn's Stop can be recorded after it; the receiver
+  read that late event as a new turn, and the session went back to "working" (then
+  "stale") until its next prompt. An event from before the last end of the turn, or of the
+  session, now takes nothing back: it is filed and counted, and the session stays idle or
+  done. The same for an agent whose start is recorded after its end, and for the end of a
+  run recorded after the session started again. Only an event timed within two seconds
+  before that end is read so (the furthest a hook was found recorded behind, on a real
+  machine, is 1.3 s). Further back than that it is the sender's clock that moved: a clock
+  that stepped back, a session resumed where the clock is behind, or a batch from a clock
+  ahead of the receiver's is read in the order it was recorded, so a running session never
+  reads idle or done because of its clock.
+- **A page that was away shows what is true now.** After the live stream dropped and came
+  back, an open session page kept the events it had: a turn still drawn as running, a
+  message still "handing it over", a reply missing, until a reload. The page now reads
+  what it missed, once, when the stream is back, with nothing redrawn, the scroll where it
+  was and the draft in the composer kept. A tab shown again after a long time hidden, a
+  page restored by Back, a laptop awake again and a network that returned all ask for a
+  fresh stream instead of trusting the old one, and coming back online no longer waits
+  out a retry timer.
+- While the stream is down a session page stops its spinners and its clocks where they
+  were, as the board's rows do, and the page counts as live again when the fresh state
+  has arrived, not when the connection opens: nothing reads as running, or can be sent
+  or stopped, on what the page knew before.
+- An event that arrived in the instant a session page finished loading no longer goes
+  missing from its timeline.
 - **One conversation, drawn once.** A message sent from a session's page and the turn it
   became are one block, in the cases where they were two or the wrong one. A message
   handed to a terminal session at its turn's Stop (sessionpipe 0.13.4) is its own exchange

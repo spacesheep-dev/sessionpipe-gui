@@ -92,6 +92,29 @@ export function useStreamDown(): number | null {
   return down ? at : null;
 }
 
+/** Says on <html> that the stream is down (`data-stream="down"`, from the same instant as
+ *  useStreamDown), so a surface can go quiet in its stylesheet alone. Mounted once, by
+ *  the shell. */
+export function useStreamMark(): void {
+  const down = useStreamDown() !== null;
+  useEffect(() => {
+    const root = document.documentElement;
+    if (down) root.dataset.stream = "down";
+    else delete root.dataset.stream;
+    return () => {
+      delete root.dataset.stream;
+    };
+  }, [down]);
+}
+
+/** How many times the stream has come back with a fresh snapshot (AppState.resyncs):
+ *  what a page read on its own, it reads again when this moves. */
+export function useResyncs(): number {
+  const store = useStore();
+  const read = useCallback(() => store.get().resyncs, [store]);
+  return useSyncExternalStore(store.subscribe, read, read);
+}
+
 /** One session's summary: re-renders only when that session changes, not on every event
  *  of every other session (a whole-state subscription did, at one render per event). */
 export function useSession(key: SessionKey): SessionSummary | undefined {

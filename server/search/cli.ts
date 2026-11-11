@@ -9,7 +9,7 @@
 // `search` opens the index read-only in this process (with the live tail) and prints the
 // same page the API answers. `index` asks a running server to do it (one writer: the
 // server's child holds the LOCK), else indexes in the foreground.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -21,10 +21,12 @@ import {
   type SessionSearchPage,
 } from "../../shared/api.js";
 import { isEmptySearch, parseSearch } from "../../shared/searchQuery.js";
+import { ConfigError, readConfigFile } from "../config.js";
 import { HARNESS_LABELS } from "./facets.js";
 import { homePath } from "./resume.js";
 import {
   emptyReader,
+  indexSubdir,
   LIMIT_MAX,
   loadBackend,
   type QueryContext,
@@ -158,13 +160,25 @@ export function parseSearchArgs(argv: string[]): SearchArgs | "help" {
   return a;
 }
 
-/** The GUI's own settings, read without creating anything (the CLI never writes config). */
+/** The GUI's own settings, read without creating anything (the CLI never writes config).
+ *  No config.json yet means history on, the default. One the GUI itself refuses to read
+ *  (unreadable, empty, does not parse) throws its ConfigError, which `refused` turns into
+ *  the message and exit 2, as every other command stops: read as "on" it would undo a
+ *  setting that turned history off, and read as "off" the indexer would delete the
+ *  history index. */
 function readHistorySetting(stateDir: string): boolean {
+  return readConfigFile(path.join(stateDir, "config.json"))?.searchHistory !== false;
+}
+
+/** Exit 2, with the reason said, when config.json is one the GUI refuses to read. */
+function refused(io: CliIo): number | undefined {
   try {
-    const c = JSON.parse(readFileSync(path.join(stateDir, "config.json"), "utf8")) as { searchHistory?: unknown };
-    return c.searchHistory !== false;
-  } catch {
-    return true;
+    readHistorySetting(io.stateDir);
+    return undefined;
+  } catch (e) {
+    if (!(e instanceof ConfigError)) throw e;
+    io.stderr.write(`sessionpipe-gui: ${e.message}\n`);
+    return 2;
   }
 }
 
@@ -317,6 +331,8 @@ export async function runSearchCli(argv: string[], io: CliIo): Promise<number> {
     io.stdout.write(SEARCH_USAGE);
     return 0;
   }
+  const stop = refused(io);
+  if (stop !== undefined) return stop;
   let opened: Opened;
   try {
     opened = await openForCli(io);
@@ -498,6 +514,8 @@ export async function runIndexCli(argv: string[], io: CliIo): Promise<number> {
         return 2;
     }
   }
+  const stop = refused(io);
+  if (stop !== undefined) return stop;
   const server = runningServer(io.stateDir);
   const http = io.fetch ?? fetch;
   const base = server ? `http://127.0.0.1:${server.port}` : undefined;
@@ -567,5 +585,17 @@ export async function runIndexCli(argv: string[], io: CliIo): Promise<number> {
       io.stderr.write(`sessionpipe-gui: the GUI did not answer (${(e as Error).message}); indexing here instead.\n`);
     }
   }
-  return indexForeground(io, rebuild);
+  const code = await indexForeground(io, rebuild);
+  return code === 0 ? historyLeftOver(io) : code;
+}
+
+/** With history off the indexer deletes history/ first; still there, another program holds a
+ *  file of it (Windows). Said, and exit 1, as `index` against a running GUI does. */
+function historyLeftOver(io: CliIo): number {
+  const left = path.join(searchDir(io.stateDir), indexSubdir("history"));
+  if (readHistorySetting(io.stateDir) || !existsSync(left)) return 0;
+  io.stderr.write(
+    `sessionpipe-gui: history search is off, but its index is still on disk: ${left} could not be deleted. It is tried again on the next sessionpipe-gui index.\n`,
+  );
+  return 1;
 }

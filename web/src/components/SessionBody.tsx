@@ -66,8 +66,9 @@ import {
 import { signHint } from "../control/signer";
 import { useSessionSend } from "../control/useSend";
 import { harnessCommand, isFinal, REFUSAL_WORDS, refusalWords, sentLine } from "../control/words";
-import { useLaunched, useLimits, useMachines, useMachinesMap, useSession, useStore } from "../data/hooks";
+import { useLaunched, useLimits, useMachines, useMachinesMap, useResyncs, useSession, useStore } from "../data/hooks";
 import { LIST_PREVIEW, TAIL, takeWarm } from "../data/prefetch";
+import { mergeBySeq, rereadQuery, rereadShort, tapSession } from "../data/sessionFeed";
 import { agentLabel, agentsFact, agentType, openAgent, taskNotification } from "../lib/agents";
 import "../lib/acp";
 import { FilesButton } from "../files/FilesButton";
@@ -356,7 +357,16 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     [toBottom],
   );
 
-  // The newest page in one round trip, then let the stream append. Older pages load on demand.
+  // The newest page in one round trip, with one listener on the stream from the open to
+  // the close (data/sessionFeed.ts): what arrives while the page is read is merged into
+  // it, what arrives after is appended. Older pages load on demand.
+  const resyncs = useResyncs();
+  /** The `resyncs` this view's events were last read at. */
+  const readAt = useRef(0);
+  const eventsRef = useRef(events);
+  eventsRef.current = events;
+  const errorRef = useRef(error);
+  errorRef.current = error;
   useEffect(() => {
     let cancelled = false;
     lastSeq.current = -1;
@@ -366,11 +376,26 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     setLoading(true);
     setError(null);
     setHasOlder(false);
-    const ahead = reload === 0 ? takeWarm(key) : undefined;
-    const buffered: StoredEvent[] = ahead ? [...ahead.since] : [];
-    const unsub = store.onEvent((e) => {
-      if (`${e.harness.name}:${e.session.id}` === key) buffered.push(e);
-    });
+    readAt.current = store.get().resyncs;
+    const ahead = reload === 0 ? takeWarm(key, readAt.current) : undefined;
+    const append = (e: StoredEvent) => {
+      setEvents((prev) => {
+        if (prev.some((p) => p.session.seq === e.session.seq)) return prev;
+        let next = [...prev, e];
+        if (e.session.seq < lastSeq.current) next.sort((a, b) => a.session.seq - b.session.seq);
+        lastSeq.current = Math.max(lastSeq.current, e.session.seq);
+        if (followRef.current && next.length > LIVE_CAP) {
+          next = next.slice(next.length - LIVE_CAP);
+          firstSeq.current = next[0]!.session.seq;
+          setHasOlder(true);
+        }
+        return next;
+      });
+      setTotal((t) => t + 1);
+      // The pill counts what landed below the fold; a growing reply is one thing, not many.
+      if (!pinned.current && !QUIET_TYPES.has(e.type)) setUnseen((n) => n + 1);
+    };
+    const tap = tapSession(store, key, append, ahead ? [...ahead.since] : []);
     (async () => {
       try {
         const d = await (ahead?.answer ??
@@ -381,10 +406,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
             preview: LIST_PREVIEW,
           }));
         if (cancelled) return;
-        const acc = d.events.slice();
-        const seen = new Set(acc.map((e) => e.session.seq));
-        for (const e of buffered) if (!seen.has(e.session.seq)) acc.push(e);
-        acc.sort((a, b) => a.session.seq - b.session.seq);
+        const acc = mergeBySeq(d.events.slice(), tap.release());
         lastSeq.current = acc[acc.length - 1]?.session.seq ?? -1;
         firstSeq.current = d.firstSeq ?? acc[0]?.session.seq;
         setSummary(d.session);
@@ -393,17 +415,96 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
         setHasOlder(!!d.hasOlder);
         setEvents(acc);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (cancelled) return;
+        tap.release();
+        setError(err instanceof Error ? err.message : String(err));
       } finally {
-        unsub();
         if (!cancelled) setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
-      unsub();
+      tap.stop();
     };
   }, [store, harness, id, key, reload]);
+
+  // The stream came back (a drop, a page shown again after a long time away): the events
+  // it kept from this view are read, once, and put where they belong. What the view shows
+  // stays as it is, and so does where it is scrolled to; nothing is drawn twice or taken
+  // away. An answer that comes back full means more than a page was missed: the view then
+  // opens on the newest page as it does cold, without the skeleton. A page that had not
+  // loaded is opened again.
+  useEffect(() => {
+    if (loading || resyncs === readAt.current) return;
+    readAt.current = resyncs;
+    if (errorRef.current && !eventsRef.current.length) {
+      setReload((n) => n + 1);
+      return;
+    }
+    let cancelled = false;
+    let timer = 0;
+    const page = { slim: true, preview: LIST_PREVIEW };
+    const read = async (tries: number) => {
+      try {
+        const q = rereadQuery(eventsRef.current, TAIL);
+        let d = await store.transport.session(harness, id, { ...q, ...page });
+        const afresh = !!q.tail || rereadShort(d.events);
+        if (afresh && !q.tail) d = await store.transport.session(harness, id, { tail: true, limit: TAIL, ...page });
+        if (cancelled) return;
+        setSummary(d.session);
+        setChildren(d.children);
+        setTotal(d.total);
+        const held = eventsRef.current;
+        const from = d.events[0]?.session.seq ?? Number.POSITIVE_INFINITY;
+        const merged = (prev: StoredEvent[]) =>
+          afresh
+            ? mergeBySeq(
+                d.events.slice(),
+                prev.filter((e) => e.session.seq > from),
+              )
+            : mergeBySeq(prev, d.events);
+        const next = merged(held);
+        if (next === held) return;
+        if (afresh) {
+          firstSeq.current = d.firstSeq ?? next[0]?.session.seq;
+          setHasOlder(!!d.hasOlder);
+        } else if (!(followRef.current && pinned.current)) {
+          // Rows may land above what is on screen (recorded late): the first row in view
+          // stays put. The anchor is this change's alone: dropped if the stream brought the
+          // same events first and nothing is drawn for it.
+          const row = firstVisibleRow(rootRef.current, sc());
+          if (row.seq !== null) {
+            const mine = { ...row, height: scrollHeight(), y: scrollY() };
+            anchor.current = mine;
+            requestAnimationFrame(() => {
+              if (anchor.current === mine) anchor.current = null;
+            });
+          }
+        }
+        const seen = new Set(held.map((e) => e.session.seq));
+        const added = next.filter((e) => !seen.has(e.session.seq) && !QUIET_TYPES.has(e.type)).length;
+        if (!pinned.current && added) setUnseen((n) => n + added);
+        setEvents((prev) => {
+          let list = merged(prev);
+          lastSeq.current = Math.max(lastSeq.current, list[list.length - 1]?.session.seq ?? -1);
+          if (followRef.current && list.length > LIVE_CAP) {
+            list = list.slice(list.length - LIVE_CAP);
+            firstSeq.current = list[0]!.session.seq;
+            setHasOlder(true);
+          }
+          return list;
+        });
+      } catch {
+        // Not read (the connection went again): asked again a few times; the next snapshot asks anyway.
+        if (!cancelled && tries < 3) timer = window.setTimeout(() => void read(tries + 1), 1500 * (tries + 1));
+      }
+    };
+    void read(0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [store, harness, id, loading, resyncs, sc, scrollHeight, scrollY]);
 
   // A session started from here was not on the receiver when the page opened (404); once
   // its first event lands, read it again, once.
@@ -523,28 +624,6 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     lastFocus.current = focusAgent;
     if (focusAgent) requestAnimationFrame(() => jumpToAgent(focusAgent));
   }, [focusAgent, jumpToAgent]);
-
-  useEffect(() => {
-    if (loading) return;
-    return store.onEvent((e, s) => {
-      if (s.key !== key) return;
-      setEvents((prev) => {
-        if (prev.some((p) => p.session.seq === e.session.seq)) return prev;
-        let next = [...prev, e];
-        if (e.session.seq < lastSeq.current) next.sort((a, b) => a.session.seq - b.session.seq);
-        lastSeq.current = Math.max(lastSeq.current, e.session.seq);
-        if (followRef.current && next.length > LIVE_CAP) {
-          next = next.slice(next.length - LIVE_CAP);
-          firstSeq.current = next[0]!.session.seq;
-          setHasOlder(true);
-        }
-        return next;
-      });
-      setTotal((t) => t + 1);
-      // The pill counts what landed below the fold; a growing reply is one thing, not many.
-      if (!pinned.current && !QUIET_TYPES.has(e.type)) setUnseen((n) => n + 1);
-    });
-  }, [store, key, loading]);
 
   // Sticking to the bottom (Slack's, iMessage's): whatever grows the view (a new row, a
   // reply streaming, the composer's own lines, a font arriving) keeps the end in sight,
