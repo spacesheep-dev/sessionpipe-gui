@@ -107,17 +107,21 @@ export interface Tracking {
  *  hook fired (PROTOCOL.md §2), then `seq`, the number the sender gave it when it got to
  *  recording it (§3). A sender records a hook when it gets to it, so of two hooks fired
  *  close together the later may be recorded first: `time` leads, and `seq` settles only
- *  the events of one millisecond (one hook's events share its `time`). Never the arrival,
- *  which is this receiver's own and which a rebuild in seq order would not read the same. */
+ *  the events of one millisecond (one hook's events share its `time`). The order events
+ *  arrive in never decides, which a rebuild in seq order would not read the same. */
 export interface Mark {
   t: number;
   seq: number;
 }
 
-/** An event's mark. A `time` that is no date falls back to the arrival, as clampTime does. */
+/** An event's mark. A sender's clock may run ahead, so here as everywhere in the reducer
+ *  (clampTime) a `time` counts for no later than its arrival: an end dated next year
+ *  cannot hold a session ended against everything that follows it. A `time` that is no
+ *  date is the arrival. */
 export function markOf(ev: Pick<ProtocolEvent, "time" | "session">, arrivedAt: string): Mark {
   const t = Date.parse(ev.time);
-  return { t: Number.isFinite(t) ? t : Date.parse(arrivedAt), seq: ev.session.seq };
+  const arrived = Date.parse(arrivedAt);
+  return { t: Number.isFinite(t) && t < arrived ? t : arrived, seq: ev.session.seq };
 }
 
 /** Whether `a` is older than `b`: timed before it, or in its millisecond with a lower

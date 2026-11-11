@@ -95,7 +95,8 @@ function names above.
   sender's clock as the hook fired), then by `seq` (the order the sender recorded them in)
   within one millisecond: a sender records a hook when it gets to it, so `seq` and arrival
   can both put an earlier hook after a later one (PROTOCOL.md §3, §4; `Mark`, `markOf`,
-  `older` in `readings.ts`). An event older than the last `turn.ended` or `session.ended`
+  `older` in `readings.ts`). A `time` ahead of this receiver's clock counts as its
+  arrival, as `clampTime` has it, so a wrong clock holds nothing back. An event older than the last `turn.ended` or `session.ended`
   is filed and counted and changes neither `currentTurn`, `currentTool`, `progress` nor
   the state. A `turn.started` opens a turn when it is newer than that end (and than the
   start of the turn that is open); an event that only implies a turn (a tool, progress, a

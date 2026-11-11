@@ -2,7 +2,7 @@
 // The reducer alone, out of order. A sender records a hook when it gets to it and a
 // receiver takes batches as they come, so a session's events reach applyEvent in other
 // orders than the hooks fired in. Whatever the order, the session must read as it does
-// when they come in the order they fired.
+// when they come in the order they fired. And a clock that runs ahead holds nothing.
 import { describe, expect, it } from "vitest";
 import type { ProtocolEvent } from "../../shared/api.js";
 import { Session } from "../../test/events.js";
@@ -80,6 +80,29 @@ describe("events out of order: the cases", () => {
     expect(rec.summary.currentTool).toBeUndefined();
     // Two calls on the same input are two starts, not four: no loop yet.
     expect(rec.track.starts).toHaveLength(2);
+  });
+});
+
+describe("a sender whose clock runs ahead", () => {
+  it("an end dated far ahead stands at its arrival: the next turn is not held back by it", () => {
+    const ev = recorder();
+    const at = (ms: number) => new Date(BASE + ms).toISOString();
+    const rec = newRecord("claude-code", "s", at(0), "http");
+    const arrive = (e: ProtocolEvent, ms: number) => applyEvent(rec, e, at(ms), "http");
+    arrive(ev("session.started", 0), 100);
+    arrive(ev("turn.started", 1000, { turn_id: "p1" }), 1100);
+    // The Stop's `time` is a day ahead of this receiver's clock.
+    arrive(ev("turn.ended", 86_400_000, { turn_id: "p1", reason: "stop" }), 9100);
+    expect(rec.summary.currentTurn).toBeUndefined();
+    // What fired before it arrived is still the ended turn's…
+    arrive(ev("tool.ended", 9000, { tool: "Read", call_id: "c1", turn_id: "p1", ok: true }), 9200);
+    expect(rec.summary.currentTurn).toBeUndefined();
+    // …and the next prompt, timed by an honest clock again, is a turn.
+    arrive(ev("turn.started", 20_000, { turn_id: "p2" }), 20_100);
+    expect(rec.summary.currentTurn?.turnId).toBe("p2");
+    arrive(ev("session.ended", 2 * 86_400_000, { reason: "exit" }), 30_000);
+    arrive(ev("session.started", 40_000, { source: "resume" }), 40_100);
+    expect(rec.ended).toBe(false);
   });
 });
 
