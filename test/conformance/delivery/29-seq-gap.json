@@ -1,0 +1,156 @@
+{
+  "name": "seq-gap",
+  "spec": "PROTOCOL.md \u00a74 thinned tool events; HTTP.md \u00a76",
+  "steps": [
+    {
+      "send": {
+        "events": [
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "session.started",
+            "time": "*",
+            "tier": 0,
+            "harness": {
+              "name": "conformance",
+              "event": "test"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 0
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "source": "startup"
+            }
+          },
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "turn.started",
+            "time": "*",
+            "tier": 0,
+            "harness": {
+              "name": "conformance",
+              "event": "test"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 1
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {}
+          },
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "tool.started",
+            "time": "*",
+            "tier": 1,
+            "harness": {
+              "name": "conformance",
+              "event": "test"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 4
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "tool": "Bash",
+              "call_id": "call-1",
+              "agent_id": "agent-1"
+            }
+          },
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "turn.ended",
+            "time": "*",
+            "tier": 0,
+            "harness": {
+              "name": "conformance",
+              "event": "test"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 9
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "reason": "stop"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": 202,
+        "body": {
+          "accepted": 4,
+          "duplicates": 0,
+          "rejected": []
+        }
+      }
+    },
+    {
+      "send": {
+        "events": [
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "tool.started",
+            "time": "*",
+            "tier": 1,
+            "harness": {
+              "name": "conformance",
+              "event": "test"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 4
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "tool": "Bash",
+              "call_id": "call-1",
+              "agent_id": "agent-1"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": 202,
+        "body": {
+          "accepted": 0,
+          "duplicates": 1,
+          "rejected": []
+        }
+      }
+    }
+  ]
+}

@@ -325,7 +325,12 @@ export function Board() {
   );
 
   // Held still under the hand: rows keep their place and section; new ones wait.
-  const hold = useListHold(listRef, { idle: false });
+  const listHold = useListHold(listRef, { idle: false });
+  // A filter is an explicit change: apply it even while focus holds the old rows.
+  const filterKey = JSON.stringify([q, machine, harness, label]);
+  const heldFilter = useRef(filterKey);
+  const hold = listHold && heldFilter.current === filterKey;
+  heldFilter.current = filterKey;
   const heldAll = useHeldOrder(visible, keyOf, hold, stateOf);
   const known = useRef<Set<string>>(new Set());
   // Held, new rows wait; but a list that has shown nothing yet (a first snapshot, a tree

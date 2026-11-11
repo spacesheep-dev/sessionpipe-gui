@@ -1,0 +1,87 @@
+{
+  "name": "control-pair-renew",
+  "spec": "CONTROL.md §2 step 3, renewal",
+  "capability": "control",
+  "note": "A code nobody approved in time is renewed from the same terminal: a second pair start that names the machine the first start made. The receiver answers with the same machine and a new code, keeps one machine row, and the first code answers nothing once it has expired (that wait is longer than a run; a receiver tests it with its own clock). {machine} is the machine the first step returned. The runner holds a sink key.",
+  "steps": [
+    {
+      "pair_start": {
+        "auth": "sink",
+        "body": {
+          "name": "conformance",
+          "harnesses": [
+            "claude-code"
+          ],
+          "modes": [
+            "waiter"
+          ],
+          "version": "0.0.0"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "body": {
+          "machine": "*",
+          "code": "*",
+          "check": "*",
+          "expires_at": "*"
+        }
+      }
+    },
+    {
+      "pair_start": {
+        "auth": "sink",
+        "body": {
+          "name": "conformance",
+          "harnesses": [
+            "claude-code"
+          ],
+          "modes": [
+            "waiter"
+          ],
+          "version": "0.0.0",
+          "machine": "{machine}"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "body": {
+          "machine": "{machine}",
+          "code": "*",
+          "check": "*",
+          "expires_at": "*"
+        }
+      }
+    },
+    {
+      "pair_status": {
+        "auth": "sink"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "status": "pending"
+        }
+      }
+    },
+    {
+      "approve": {
+        "as": "test-person"
+      }
+    },
+    {
+      "pair_status": {
+        "auth": "sink"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "status": "paired",
+          "token": "*",
+          "key": "*",
+          "proof": "*"
+        }
+      }
+    }
+  ]
+}

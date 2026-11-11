@@ -1,0 +1,39 @@
+{
+  "name": "key-add-device-id-not-spki-hash",
+  "description": "A device key whose id is 43 base64url characters but not its SPKI's SHA-256.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"key.add\",\"session\":\"sessionpipe:keys\",\"nonce\":\"LvBPTTxHHXYpoHFrGOP9dw\",\"iat\":1790800000000,\"key\":{\"id\":\"so9yI4AZ1Lr-WlUxf9d8UxdlPmcgWvlOSNu2bJfYWJE\",\"alg\":-7,\"spki\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE9Z16in88XYz_ezFJGWmyxefIiq1UcvXAovg_t4QI8gNZtigCujoJeAUEpQVSMAMM3YtFKjRGpcgvQmFXn65DDA\",\"type\":\"device\",\"store\":\"hardware\",\"uv\":\"each-use\"},\"name\":\"Mac app\"}",
+      "csig": "cpFvh2vWlPoS38yoFWlefPoF_m9Nqjae19Q9ArWLR592DBDAWgpEXfyCvwLusBMITQqGpVErLImvHKt37qDs3A",
+      "grant": {
+        "cred": "-XI3B3JNIS6D9Ft-nSQ9nzDMQdIQzjCB",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiWUNCaWFIYTROdFpiU0Z5R21lcTVyM3VVZGVQSGF3LU5RRHpQU0NuV08yWSIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEQCIHkENeDMpvqan8avIGMJRiMN7o3MopE7yfwJmuIz9uUiAiAh0mGyTb0o4tk2h2UrmnuVt4IhD82WZ-qzg8Qaka9rjg",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4lrecDEerGRu-OqPHkl4nxvfdteUDFSjP7O4JlW4gPKMxK3F2BLw8OACnCy7wxa-F2Z8J81xTm-JasGu3_JIrw\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "-XI3B3JNIS6D9Ft-nSQ9nzDMQdIQzjCB",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEnBYOZ9CSzoMtBlJ-WUR6uE2Hwtrt6r_7d9YkrKFQvDLp6uHGzGrVGRG0gP7UrdEkfnK4VYXJD3MizA7AOsabLg"
+      },
+      {
+        "id": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENgDnTWZNrbM16SqfjnsZdCU_qNtzB0bdkXDpBZfAja2bd9ozG1YsA6gOkaqWBSt0MaHSLKJKB3ZILVnuBHzkcA",
+        "type": "device",
+        "store": "hardware",
+        "uv": "each-use"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}

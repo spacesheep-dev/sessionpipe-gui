@@ -33,7 +33,8 @@ interface Pairing {
   startedAt: string; expiresAt: string;
   machine: { id: string; name: string; harnesses: string[]; modes: string[]; version: string;
              folders?: string[]; mode?: "safe" | "auto" | "inherit";
-             accounts?: { harness: string; id: string; email?: string; name?: string }[];
+             accounts?: { harness: string; id: string; email?: string; name?: string;
+                          signedIn?: boolean }[];
              firstPairing: boolean;    // no token yet: approving hands the machine its token
              keys: number };           // passkeys already trusted for it
   rpId: string;
@@ -115,8 +116,14 @@ age window, no nonce store) and only then queues it.
 (`shared/api.ts`) is the receiver's reading of a carried message — never the signature:
 `outcome` moves through `taken` / `progress` (with `reply` and `replySeq`, the highest
 kept) to a final `delivered` / `expired` / `unsupported` / `failed` / `refused` (with
-`code`), `mode` says how it was delivered. The same objects arrive on the SSE stream as
-`{ kind: "control", message }` whenever one is queued, acked or expires.
+`code`), `mode` says how it was delivered (`shared/api.ts` `DELIVERY_MODES`: `sdk`,
+`waiter`, `turn`, `inbox`, `api`, `resume`, `fork`; an ack's mode that is none of these is
+dropped, the ack kept). `ackSession` is the session the final ack named when it is not the
+command's, and `copyOf` the ack's `copy_of` (sessionpipe 0.13): a copy of the session
+answered, `ackSession` is that copy and `copyOf` the session that was asked, with the
+machine's reason in `detail`; a `copy_of` that is not a session ref is dropped. The same
+objects arrive on the SSE stream as `{ kind: "control", message }` whenever one is queued,
+acked or expires.
 
 For a `permission.answer`, `text` is `"<decision>"` or `"<decision>: <note>"`; for a
 `key.add`, `"trust <name>"`. A `start`'s activity also carries what was signed (`cwd`,
@@ -131,11 +138,13 @@ command's final `delivered` ack the daemon delivers the answer into that session
 how it went in that session's events (`delegation.ended.relayed`); the command's own ack
 is unchanged. The receiver's second look (`replyToProblem`, before the one below) holds it
 to a prompt or a start (`bad_fields` on anything else, or a malformed ref, or the
-command's own session), and to a machine whose last hello said `handoff` (`handoff`: an
-older daemon would refuse the whole command, or ignore the relay). The activity carries it
-as `replyTo`. This receiver's own sessionpipe-core verifies every command first, and a
-core from before `ask` (0.10.0) refuses the field `bad_fields` there, whatever the hello
-says (`coreTakesReplyTo`): a handoff goes through once the core is bumped.
+command's own session, or the machine's own `sessionpipe:keys` or `sessionpipe:pool`, which
+are no session an answer could go into), and to a machine whose last hello said `handoff`
+(`handoff`: an older daemon would refuse the whole command, or ignore the relay). The
+activity carries it as `replyTo`. The verifier (sessionpipe-core 0.13) runs first and
+takes the field on those two kinds only, as a session ref that is not the command's own:
+anything else is its `bad_fields` (vectors 165 to 169). It takes any well-formed ref,
+the two pseudo-sessions included, which is why the second look names them.
 
 **The second look** (`precheck.ts`). After the verifier, the receiver holds a command to
 what the machine's last hello advertised (CONTROL.md §2), because a daemon that predates
@@ -155,8 +164,11 @@ ask each other) and `handoff` (`true`: it takes `reply_to`; the Handoff sheet of
 the answer back" only then), both absent from a hello that predates them, and `start` (per harness `{ permissions, permission, models?, any_model? }`;
 an entry for a harness the hello does not list, a default outside its levels (or
 `inherit`), unknown levels and malformed models are dropped; on an `inherit` machine, or
-for a default of `inherit`, the levels are capped at read and safe). `accounts` keep one
-named by `email`, else by `name` (an API home, `api.z.ai`). No home folder: sessionpipe
+for a default of `inherit`, the levels are capped at read and safe). `modes` are the
+delivery modes it has, among `DELIVERY_MODES` (`inbox` from sessionpipe 0.13). `accounts`
+keep one named by `email`, else by `name` (an API home, `api.z.ai`), and its `signed_in`
+(sessionpipe 0.13.3) as `signedIn` when it is a boolean: `false` is a command line that
+would fail a resume until `claude auth login` is run there, absent is unknown. No home folder: sessionpipe
 0.10's hello has none. `MachineControl.tilde` says a start may name a `~/…` folder, which
 the machine expands: set when this receiver's sessionpipe-core takes one and the hello has
 `start` (CONTROL.md §3.1: "a machine that sends `start` also takes a `~` folder"; `tilde.ts`). Each hello says them again: one without them takes them
@@ -190,12 +202,10 @@ every account id once, at most 20) and `pool_code` (login.complete: the pasted
 else. It goes through `POST /send` like any command; the page signs on, off, remove, order,
 disable and login.complete with a fresh confirm (`POOL_CONFIRM_ACTIONS`), never the day
 grant, and the early verify refuses one of those signed with a grant alone with
-`confirm_required`, as the daemon does. This receiver's sessionpipe-core (0.10.0) closes
-its kind set in `parseCommand`, which its verifier runs first, so `pool.ts` verifies the
-kind itself: its own strict parser for the fields, then the core's exported primitives
-(`parseGrant`, `verifyAssertion`, `sha256`) in the core's order with the core's refusal
-codes, and the day key's P-256 signature over the exact bytes checked here; once a core
-that lists `pool` is installed (`coreTakesPool()`), the core's `verifyCommand` decides.
+`confirm_required`, as the daemon does. `pool.ts` reads the fields with its own strict
+parser, then sessionpipe-core's `verifyCommand` decides (it has listed the kind since
+0.11), and the confirm rule is held on the core's verdict: a command that verifies on a
+day grant (vectors 137, 138, 140 to 142) is the verifier's yes and this receiver's no.
 The second look (`precheck.ts`) refuses `pool_unsupported` for a machine whose hello has
 no `pool`, `pool_account` for an id the pool does not list (login.complete's pending id
 excepted), `pool_order` for an order that does not name every account once. The activity
