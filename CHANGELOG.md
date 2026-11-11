@@ -23,6 +23,27 @@ All notable changes to `sessionpipe-gui`. The format follows
   cmd.exe, which never handed its output back (the step sat at "Starting the pairing…") and
   split a folder with a space, such as `C:\Users\Ann Lee\code`, into two words. It now runs the
   script the npm shim names under its own node, with no shell, as it does on a Mac.
+- **A finished session stays finished.** A sender records a hook when it gets to it, so a
+  tool call that fired just before a turn's Stop can be recorded after it; the receiver
+  read that late event as a new turn, and the session went back to "working" (then
+  "stale") until its next prompt. An event from before the last end of the turn, or of the
+  session, now takes nothing back: it is filed and counted, and the session stays idle or
+  done. The same for an agent whose start is recorded after its end, and for the end of a
+  run recorded after the session started again.
+- **A page that was away shows what is true now.** After the live stream dropped and came
+  back, an open session page kept the events it had: a turn still drawn as running, a
+  message still "handing it over", a reply missing, until a reload. The page now reads
+  what it missed, once, when the stream is back, with nothing redrawn, the scroll where it
+  was and the draft in the composer kept. A tab shown again after a long time hidden, a
+  page restored by Back, a laptop awake again and a network that returned all ask for a
+  fresh stream instead of trusting the old one, and coming back online no longer waits
+  out a retry timer.
+- While the stream is down a session page stops its spinners and its clocks where they
+  were, as the board's rows do, and the page counts as live again when the fresh state
+  has arrived, not when the connection opens: nothing reads as running, or can be sent
+  or stopped, on what the page knew before.
+- An event that arrived in the instant a session page finished loading no longer goes
+  missing from its timeline.
 
 ## [0.7.5] - 2026-11-06
 
