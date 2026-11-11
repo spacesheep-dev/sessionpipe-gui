@@ -6,6 +6,32 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The receiver keeps three things a sessionpipe 0.13 machine says. `inbox` among a
+  machine's delivery modes and as the mode of an ack, which it used to drop as a word it
+  did not know: the line under a message a live session took through its own inbox now
+  reads "delivered · inbox" ("taken · … · inbox" on the way), where it read "delivered"
+  with no mode. The other two are kept for the pages that will show them, and nothing
+  draws them yet: the session a copy answered for (an ack's `copy_of`,
+  `ControlActivity.copyOf`), and whether the command line is signed in to each account (a
+  hello's `signed_in`, `HarnessAccount.signedIn`).
+
+### Changed
+
+- **sessionpipe 0.13.6.** The receiver verifies commands with sessionpipe-core 0.13.6 (it
+  was 0.10.0), pinned to that one version. "Bring the answer back" in the Ask another agent
+  sheet now sends: a machine whose hello says `handoff` used to get "Not sent: this
+  receiver's sessionpipe is older than bringing answers back", because this receiver's own
+  verifier refused `reply_to` before the machine saw it. That line is gone from the sheet;
+  a command the verifier does refuse with the switch on reads there as it does on any
+  send. A pool command is verified by the core itself, and still refused here on a day
+  grant alone where the machine wants a fresh confirm.
+- sessionpipe's conformance fixtures for 0.13.6 (169 control vectors, 33 delivery scenarios)
+  are in the repo under `test/conformance/` and run with `npm test`, in CI too. They were
+  read from a sessionpipe checkout beside the clone and skipped without one, so CI never
+  ran them, and with one the pool vectors failed (#71).
+
 ### Fixed
 
 - **A `session.seq` above 2^53 − 1 is refused**, the schema's bound: the receiver answers
