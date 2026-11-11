@@ -117,6 +117,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   request to commit that arrived while an earlier commit was being published was dropped:
   the new messages then waited for the timed commit, up to a minute. The forked indexer
   never dropped one.
+- **Turning history search off works on Windows.** With Node 20, Settings › Data answered
+  "internal", left the history index on disk and stopped the indexer until the GUI was
+  restarted: the server still had that index open while it deleted it, which Windows
+  refused. It now lets go of it first. If another program still holds a file of it, the
+  setting is saved anyway, indexing goes on, and the status is an error naming the index
+  left on disk until a later try (the indexer's next start, or Rebuild) deletes it.
 
 ## [0.7.5] - 2026-11-06
 

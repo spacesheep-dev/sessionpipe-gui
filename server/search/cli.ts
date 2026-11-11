@@ -9,7 +9,7 @@
 // `search` opens the index read-only in this process (with the live tail) and prints the
 // same page the API answers. `index` asks a running server to do it (one writer: the
 // server's child holds the LOCK), else indexes in the foreground.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -26,6 +26,7 @@ import { HARNESS_LABELS } from "./facets.js";
 import { homePath } from "./resume.js";
 import {
   emptyReader,
+  indexSubdir,
   LIMIT_MAX,
   loadBackend,
   type QueryContext,
@@ -584,5 +585,17 @@ export async function runIndexCli(argv: string[], io: CliIo): Promise<number> {
       io.stderr.write(`sessionpipe-gui: the GUI did not answer (${(e as Error).message}); indexing here instead.\n`);
     }
   }
-  return indexForeground(io, rebuild);
+  const code = await indexForeground(io, rebuild);
+  return code === 0 ? historyLeftOver(io) : code;
+}
+
+/** With history off the indexer deletes history/ first; still there, another program holds a
+ *  file of it (Windows). Said, and exit 1, as `index` against a running GUI does. */
+function historyLeftOver(io: CliIo): number {
+  const left = path.join(searchDir(io.stateDir), indexSubdir("history"));
+  if (readHistorySetting(io.stateDir) || !existsSync(left)) return 0;
+  io.stderr.write(
+    `sessionpipe-gui: history search is off, but its index is still on disk: ${left} could not be deleted. It is tried again on the next sessionpipe-gui index.\n`,
+  );
+  return 1;
 }
