@@ -1,0 +1,93 @@
+{
+  "name": "control-hello-pool",
+  "spec": "CONTROL.md §2 pool, §6 pool",
+  "capability": "control",
+  "note": "A hello with pool (on, harness, accounts in the machine's order with status, current, until, limited_by and the idle poll's windows) and with signed_in on an account (§2 accounts) fits control-hello.json and is accepted. The receiver keeps it per machine and shows the pool from it, never from its own guess; a hello without pool is a daemon that predates the pool, for which it offers no pool controls. (What the receiver stored is its own to check; this scenario holds it to accepting the hello.)",
+  "steps": [
+    {
+      "hello": {
+        "machine": "{machine}",
+        "body": {
+          "name": "conformance",
+          "harnesses": [
+            "claude-code"
+          ],
+          "modes": [
+            "resume",
+            "fork"
+          ],
+          "keys": [],
+          "version": "0.11.0",
+          "mode": "auto",
+          "accounts": [
+            {
+              "harness": "claude-code",
+              "id": "b3f0c1d2-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+              "email": "a@example.com",
+              "signed_in": true
+            }
+          ],
+          "pool": {
+            "on": true,
+            "harness": "claude-code",
+            "accounts": [
+              {
+                "id": "b3f0c1d2-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+                "email": "a@example.com",
+                "label": "Fiction",
+                "enabled": true,
+                "status": "ready",
+                "current": true,
+                "windows": [
+                  {
+                    "id": "five_hour",
+                    "used_percent": 23,
+                    "resets_at": "2026-10-29T08:00:00.000Z",
+                    "window_minutes": 300
+                  },
+                  {
+                    "id": "seven_day",
+                    "used_percent": 41,
+                    "resets_at": "2026-11-02T10:00:00.000Z",
+                    "window_minutes": 10080
+                  }
+                ]
+              },
+              {
+                "id": "7a1e2f3b-9c4d-4e5f-a6b7-c8d9e0f1a2b3",
+                "email": "m@example.com",
+                "enabled": true,
+                "status": "limited",
+                "until": "2026-10-29T10:00:00.000Z",
+                "limited_by": "seven_day",
+                "windows": [
+                  {
+                    "id": "five_hour",
+                    "used_percent": 12,
+                    "resets_at": "2026-10-29T08:00:00.000Z",
+                    "window_minutes": 300
+                  },
+                  {
+                    "id": "seven_day",
+                    "used_percent": 100,
+                    "resets_at": "2026-10-29T10:00:00.000Z",
+                    "window_minutes": 10080
+                  }
+                ]
+              },
+              {
+                "id": "c9d8e7f6-1a2b-4c3d-9e8f-7a6b5c4d3e2f",
+                "email": "s@example.com",
+                "enabled": false,
+                "status": "disabled"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "status": 204
+      }
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "name": "tier",
+  "spec": "PROTOCOL.md §2 tier",
+  "skip_when": "max_tier == 3",
+  "steps": [
+    {
+      "send": {
+        "events": [
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "tool.ended",
+            "time": "*",
+            "tier": "{max_tier+1}",
+            "harness": {
+              "name": "conformance",
+              "event": "test"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 0
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "tool": "Bash",
+              "ok": true
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": 403,
+        "body": {
+          "reason": "tier_above_max",
+          "max_tier": "{max_tier}"
+        }
+      }
+    }
+  ]
+}

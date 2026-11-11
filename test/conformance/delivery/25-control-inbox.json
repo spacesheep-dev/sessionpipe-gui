@@ -1,0 +1,22 @@
+{
+  "name": "control-inbox",
+  "spec": "CONTROL.md §6.3 inbox",
+  "capability": "control",
+  "note": "A prompt the machine wrote into the live session's own local inbox, so the session answered it in its own turn and in its own permission mode. The receiver's part is to accept `inbox` as a delivery mode and to show the reply as that session's own answer, not a copy's.",
+  "steps": [
+    {
+      "enqueue": {
+        "machine": "{machine}",
+        "sign": { "session": "claude-code:{uuid}", "kind": "prompt", "text": "are we done with the three PRs?" },
+        "expires_in_s": 60
+      }
+    },
+    { "poll": { "machine": "{machine}", "wait": 1 }, "expect": { "status": 200 } },
+    { "ack": { "outcome": "taken" }, "expect": { "status": 202 } },
+    {
+      "ack": { "outcome": "delivered", "mode": "inbox", "reply": "Yes - all three are merged." },
+      "expect": { "status": 202 }
+    },
+    { "poll": { "machine": "{machine}", "wait": 1 }, "expect": { "status": 204 } }
+  ]
+}
