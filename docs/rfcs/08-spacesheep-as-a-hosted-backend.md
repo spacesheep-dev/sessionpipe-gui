@@ -1,6 +1,9 @@
 # RFC 08: spacesheep as a hosted backend (the relay option)
 
-Status: Draft, being built · 2026-11-03 · Owner: the GUI and spacesheep together
+Status: Shipped in 0.7.5 (2026-11-06): phase A in #88, phase B in #89 · Drafted 2026-11-03 ·
+Owner: the GUI and spacesheep together. The text below is the design as it was written;
+[As built](#as-built-075) says where the GUI's build went another way and what is not
+built.
 
 ## Why
 
@@ -98,3 +101,32 @@ with nothing hosted; answering still happens on spacesheep.dev. Then phase B.
   and turning it off drops the key and keeps the local store.
 - Tier caps: the GUI shows what spacesheep has, which is at most tier 2; tier 3 (inputs,
   outputs, the files drawer's text) only ever exists on a self-hosted receiver.
+
+## As built (0.7.5)
+
+The GUI's side, read from the code at 0.7.5. spacesheep's side (retention, the key's scope)
+is in its own repository.
+
+- **The setting** is Settings → Data → "A spacesheep account", one row, "Use a spacesheep
+  account". There is no Receivers section.
+- **The source** is `server/sources/spacesheep.ts` (the connect flow is
+  `server/ui/spacesheep.ts`), not `server/relay/`. It hands each page to the store's ingest
+  in process, `store.ingest(events, "spacesheep")`, not through the local
+  `/api/sessionpipe/v1/events` route. A session read this way has `source: "spacesheep"`
+  (beside `http`, `outbox` and `demo`); there is no `via` on a session. A machine has it
+  (`control.remote.via`), and Machines says "paired on spacesheep.dev".
+- **The relay's doors.** Events: `GET /api/sessionpipe/v1/relay?since=<seq>&limit=500&wait=25`.
+  The machines paired there: `GET /api/sessionpipe/v1/relay/machines`, read once a
+  minute, not `/api/machines`. How a send went: `GET /api/sessionpipe/v1/relay/jobs?since=<id>`,
+  read every three seconds while a send is unsettled, rather than acks relayed as events. A
+  send goes to `POST /api/machines/:id/jobs` with the GUI's key, as designed.
+- **Connecting** shows four digits ("48 21"), where the newcomer's path says two. Two digits
+  is the number a device approval shows.
+- **The app's device key** is not raised by the connect flow. Machines offers "Approve this
+  app on spacesheep.dev…" on each machine paired there that does not trust it yet; that
+  posts the key's public half (`POST /api/gui/device`) and shows the number to match on
+  spacesheep's Devices page.
+- **Not built:** the "Answer on spacesheep.dev →" link for a browser; the first run's second
+  route ("Use a spacesheep account": the welcome still offers this computer, another
+  computer and the demo); the one line to paste, `npx -y sessionpipe@latest control pair
+  spacesheep.dev`, shown by the app.
