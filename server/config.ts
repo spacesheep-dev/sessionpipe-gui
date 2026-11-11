@@ -3,7 +3,7 @@
 // makes on first run: the sink token (what senders present) and the UI key (what a
 // phone presents). Both live in <stateDir>/config.json, mode 0600.
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -112,7 +112,7 @@ export function readConfigFile(f: string): Partial<GuiConfig> | undefined {
 /** Read the config, making it (or any missing secret) on first run. A file that cannot be
  *  read or does not parse throws a ConfigError and is left byte for byte as it was; one
  *  with a byte-order mark is read past it (and written back without one, the GUI's own
- *  format). */
+ *  format). A file it reads is also brought to mode 0600 if it is looser (tightenMode). */
 export function readGuiConfig(dir: string): GuiConfig {
   const f = path.join(dir, "config.json");
   const cfg = readConfigFile(f) ?? {};
@@ -130,12 +130,39 @@ export function readGuiConfig(dir: string): GuiConfig {
   const link = readSpacesheepLink(cfg.spacesheep);
   if (link) full.spacesheep = link;
   if (!complete) writeGuiConfig(dir, full);
+  else tightenMode(f);
   return full;
 }
 
 export function writeGuiConfig(dir: string, cfg: GuiConfig): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(path.join(dir, "config.json"), `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
+  const f = path.join(dir, "config.json");
+  // Before the write, so a secret never lands in a file others can read; a new file is
+  // made at 0600 by the write itself.
+  tightenMode(f);
+  writeFileSync(f, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
+}
+
+/** Take the group and other bits off config.json. A write's `mode` applies only when the
+ *  file is made, so one that already existed (saved by an editor at its own umask,
+ *  restored from a backup) keeps its bits. Nothing to do for a file that is not there yet,
+ *  nor on Windows, where the mode bits are not the file's access rules. A chmod that fails
+ *  (a share that refuses it, a file owned by someone else) warns, once per file in this
+ *  process, and goes on: the secrets are already in the file either way. */
+const warnedMode = new Set<string>();
+export function tightenMode(f: string, platform: NodeJS.Platform = process.platform): void {
+  if (platform === "win32") return;
+  try {
+    const mode = statSync(f).mode & 0o777;
+    if ((mode & 0o077) === 0) return;
+    chmodSync(f, mode & 0o700);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT" || warnedMode.has(f)) return;
+    warnedMode.add(f);
+    process.stderr.write(
+      `sessionpipe-gui: could not take the group and other bits off ${f} (${(e as Error).message}); it holds the sink token and the UI key, so make it readable by you alone\n`,
+    );
+  }
 }
 
 /** A new sink token, written; the old one stops working at once. */
