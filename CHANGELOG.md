@@ -27,6 +27,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   read from a sessionpipe checkout beside the clone and skipped without one, so CI never
   ran them, and with one the pool vectors failed (#71).
 
+### Fixed
+
+- **A `session.seq` above 2^53 − 1 is refused**, the schema's bound: the receiver answers
+  `bad_seq`, and the outbox reader and the demo drop it. Two such seqs in one session hung
+  the GUI server at 100% CPU while it listed the hole between them; a store an older
+  release already wrote them into now boots instead of hanging.
+
 ## [0.7.5] - 2026-11-06
 
 ### Added
