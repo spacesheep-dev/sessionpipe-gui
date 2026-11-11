@@ -123,6 +123,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   refused. It now lets go of it first. If another program still holds a file of it, the
   setting is saved anyway, indexing goes on, and the status is an error naming the index
   left on disk until a later try (the indexer's next start, or Rebuild) deletes it.
+- **A Windows file is listed once.** A full path from Claude Code on Windows
+  (`C:\Users\…\acme\src\index.ts`, with either slash or the drive in another case) is shown
+  relative to the session's folder, as `src/index.ts`, as on a Mac, so the Files drawer, the
+  Review page and the changed-files count no longer give one file a row for each
+  spelling of its full path.
 
 ## [0.7.5] - 2026-11-06
 
