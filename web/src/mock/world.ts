@@ -30,8 +30,8 @@ import { AgentReading } from "./agents";
 // ---------- helpers ----------
 
 /** Each account's usage limits as the server keeps them (server/ui/limits.ts), one per
- *  machine's Claude account so New session shows a single account's number: misha-air's
- *  has none left this 5-hour window, studio-mini's has room, Codex on misha-air has its
+ *  machine's Claude account so New session shows a single account's number: demo-laptop's
+ *  has none left this 5-hour window, demo-desktop's has room, Codex on demo-laptop has its
  *  plan, and build-box's Codex last reported three hours ago, its 5-hour window reset since. */
 export function mockLimits(now: number): LimitsEntry[] {
   const at = (ms: number) => new Date(now + ms).toISOString();
@@ -43,8 +43,8 @@ export function mockLimits(now: number): LimitsEntry[] {
       key: "claude-code a:a1b2c3",
       harness: "claude-code",
       accountId: "a1b2c3",
-      machine: "misha-air",
-      machines: ["misha-air"],
+      machine: "demo-laptop",
+      machines: ["demo-laptop"],
       windows: [
         { id: "five_hour", usedPercent: 100, windowMinutes: 300, resetsAt: at(H + 10 * M) },
         { id: "seven_day", usedPercent: 61, windowMinutes: 10_080, resetsAt: at(3 * D + 6 * H) },
@@ -55,8 +55,8 @@ export function mockLimits(now: number): LimitsEntry[] {
       key: "claude-code a:w4e5f6",
       harness: "claude-code",
       accountId: "w4e5f6",
-      machine: "studio-mini",
-      machines: ["studio-mini"],
+      machine: "demo-desktop",
+      machines: ["demo-desktop"],
       windows: [
         { id: "five_hour", usedPercent: 38, windowMinutes: 300, resetsAt: at(2 * H + 21 * M) },
         { id: "seven_day", usedPercent: 20, windowMinutes: 10_080, resetsAt: at(2 * D + 18 * H) },
@@ -64,10 +64,10 @@ export function mockLimits(now: number): LimitsEntry[] {
       observedAt: at(-2 * M),
     },
     {
-      key: "codex m:misha-air",
+      key: "codex m:demo-laptop",
       harness: "codex",
-      machine: "misha-air",
-      machines: ["misha-air"],
+      machine: "demo-laptop",
+      machines: ["demo-laptop"],
       plan: "plus",
       windows: [
         { id: "primary", usedPercent: 8, windowMinutes: 300, resetsAt: at(3 * H + 43 * M) },
@@ -133,8 +133,8 @@ interface MachineSpec {
 }
 
 const MACHINES: MachineSpec[] = [
-  { name: "misha-air", harnesses: { "claude-code": "2.1.290", codex: "0.157.1", "gemini-cli": "0.14.2" } },
-  { name: "studio-mini", harnesses: { "claude-code": "2.1.288", "gemini-cli": "0.14.2", antigravity: "1.4.0" } },
+  { name: "demo-laptop", harnesses: { "claude-code": "2.1.290", codex: "0.157.1", "gemini-cli": "0.14.2" } },
+  { name: "demo-desktop", harnesses: { "claude-code": "2.1.288", "gemini-cli": "0.14.2", antigravity: "1.4.0" } },
   { name: "build-box", harnesses: { "claude-code": "2.1.270", codex: "0.150.0" } },
 ];
 
@@ -294,7 +294,7 @@ const askFrame = (text: string, from: string) =>
   `${text}\n\n(Asked by ${from} on this machine with sessionpipe ask. Answer here in full: your reply is returned to that session automatically. Don't run a command or call a tool just to send it.)`;
 /** A handoff's answer as the daemon delivers it into `reply_to` (CONTROL.md §6). */
 const answerFrame = (harness: string, shortId: string, reply: string) =>
-  `Answer from ${harness}:${shortId} (sessionpipe handoff, asked via misha-air.local:7373):\n\n${reply}`;
+  `Answer from ${harness}:${shortId} (sessionpipe handoff, asked via demo-laptop.local:7373):\n\n${reply}`;
 
 const CODEX_REVIEW =
   "Two things I'd change.\n\n1. Add jitter. Five failed deliveries to the same endpoint now retry in lockstep (1 s, 2 s, 4 s…), which is the thundering herd the backoff was meant to avoid. `delay * (0.5 + Math.random())` is enough.\n2. `job.attempt >= 5` checks the attempt *before* this delivery, so a job gets six tries, not five. Compare against `attempt + 1`.\n\nThe cap at 16 s is fine for a webhook. The dead-letter path reads right.";
@@ -347,7 +347,7 @@ export class World {
   private control: ControlActivity[] = [];
   private attentionDueAt = Date.now() + 25_000;
   private controlKeys = [
-    { id: "k_7f3a", alg: -7, name: "Misha’s iPhone", addedAt: iso(Date.now() - 6 * 86_400_000) },
+    { id: "k_7f3a", alg: -7, name: "Demo iPhone", addedAt: iso(Date.now() - 6 * 86_400_000) },
     { id: "k_2c91", alg: -7, name: "MacBook Touch ID", addedAt: iso(Date.now() - 6 * 86_400_000) },
   ];
 
@@ -717,10 +717,10 @@ export class World {
       if (i === 0)
         base.control = {
           ...common,
-          machineId: "m_01K6Q3H2A9misha-air",
+          machineId: "m_01K6Q3H2A9demo-laptop",
           online: true,
           mode: "auto",
-          folders: ["/Users/misha/spacesheep", "/Users/misha/sessionpipe"],
+          folders: ["/Users/demo/code/storefront", "/Users/demo/code/relay"],
           tilde: true,
           harnesses: ["claude-code", "codex", "gemini-cli"],
           version: "0.10.0",
@@ -744,7 +744,7 @@ export class World {
       else if (i === 1)
         base.control = {
           ...common,
-          machineId: "m_01K6Q3H2A9studio-mini",
+          machineId: "m_01K6Q3H2A9demo-desktop",
           online: true,
           mode: "safe",
           folders: ["/Users/studio/acme"],
@@ -805,7 +805,7 @@ export class World {
         http: true,
         outbox: {
           path: "~/.local/state/sessionpipe/outbox",
-          sessions: [...this.sessions.values()].filter((r) => r.machine === "misha-air").length,
+          sessions: [...this.sessions.values()].filter((r) => r.machine === "demo-laptop").length,
           enabled: true,
         },
         demo: this.demoOn,
@@ -910,7 +910,7 @@ export class World {
       privacy: { rulesets: r.tier > 0 ? ["secrets@1"] : [], pii: false },
       data,
       arrivedAt: iso(at + (at > Date.now() - 1000 ? rnd(5, 40) : rnd(400, 900))),
-      source: r.machine === "misha-air" ? "outbox" : "http",
+      source: r.machine === "demo-laptop" ? "outbox" : "http",
     };
     r.events.push(e);
     return e;
@@ -958,7 +958,7 @@ export class World {
       kind === "permission"
         ? pick([
             "rm -rf dist && npm run build",
-            "git push origin mp/outbox-read-linear",
+            "git push origin demo/outbox-read-linear",
             "curl -X POST http://localhost:7373/api/ui/demo",
           ])
         : pick(["Should the deprecated alias log once or on every call?", "Keep the 1 MB cap configurable?"]);
@@ -1221,7 +1221,8 @@ export class World {
         title: spec.title,
         title_source: spec.title ? (spec.titleSource ?? "harness") : undefined,
         url: spec.url,
-        account_id: spec.harness === "claude-code" ? (spec.machine === "studio-mini" ? "w4e5f6" : "a1b2c3") : undefined,
+        account_id:
+          spec.harness === "claude-code" ? (spec.machine === "demo-desktop" ? "w4e5f6" : "a1b2c3") : undefined,
         parent_id: spec.parent ? spec.parent.id : null,
       },
       machine: spec.machine,
@@ -1366,9 +1367,9 @@ export class World {
     // 1. working, tier 3, with a subagent
     const s1 = this.add({
       harness: "claude-code",
-      machine: "misha-air",
-      cwd: "~/spacesheep",
-      repo: "github.com/spacesheep-dev/spacesheep",
+      machine: "demo-laptop",
+      cwd: "~/code/storefront",
+      repo: "github.com/acme/storefront",
       branch: "main",
       model: "claude-fable-5-1",
       title: "Open-source session hooks",
@@ -1434,9 +1435,9 @@ export class World {
     // 3. a finished subagent of s1
     const s3 = this.add({
       harness: "claude-code",
-      machine: "misha-air",
-      cwd: "~/spacesheep",
-      repo: "github.com/spacesheep-dev/spacesheep",
+      machine: "demo-laptop",
+      cwd: "~/code/storefront",
+      repo: "github.com/acme/storefront",
       branch: "main",
       model: "claude-fable-5-1",
       title: "general-purpose: run the suite",
@@ -1463,7 +1464,7 @@ export class World {
     // reported back through a <task-notification> turn; the other is still working.
     const sb = this.add({
       harness: "claude-code",
-      machine: "studio-mini",
+      machine: "demo-desktop",
       cwd: "~/code/search-api",
       repo: "github.com/acme/search-api",
       branch: "perf/bm25-cache",
@@ -1579,10 +1580,10 @@ export class World {
     // 4. needs you: permission, codex, tier 2
     const s4 = this.add({
       harness: "codex",
-      machine: "misha-air",
-      cwd: "~/sessionpipe",
-      repo: "github.com/spacesheep-dev/sessionpipe",
-      branch: "mp/outbox-read-linear",
+      machine: "demo-laptop",
+      cwd: "~/code/relay",
+      repo: "github.com/acme/relay",
+      branch: "demo/outbox-read-linear",
       model: "gpt-5-codex",
       title: "Outbox: a batch reads 1 MB of a session file",
       titleSource: "first-ask",
@@ -1610,7 +1611,7 @@ export class World {
           attention_id: "att_push1",
           kind: "permission",
           tool: "shell",
-          message: "git push origin mp/outbox-read-linear",
+          message: "git push origin demo/outbox-read-linear",
         },
         now - 48_000,
       );
@@ -1633,7 +1634,7 @@ export class World {
     // 5. working, gemini on the other machine, tier 2
     const s5 = this.add({
       harness: "gemini-cli",
-      machine: "studio-mini",
+      machine: "demo-desktop",
       cwd: "~/charity-site",
       repo: "github.com/acme/charity-site",
       branch: "feat/cancer-type-pages",
@@ -1679,7 +1680,7 @@ export class World {
     // 6. stale: turn started 26 min ago, silent 14 min
     const s6 = this.add({
       harness: "claude-code",
-      machine: "studio-mini",
+      machine: "demo-desktop",
       cwd: "~/brand-kit",
       repo: "github.com/acme/brand-kit",
       branch: "main",
@@ -1706,10 +1707,10 @@ export class World {
     // 7. idle, codex
     const s7 = this.add({
       harness: "codex",
-      machine: "misha-air",
+      machine: "demo-laptop",
       cwd: "~/ui-kit",
       repo: "github.com/acme/ui-kit",
-      branch: "mp/datatable-density",
+      branch: "demo/datatable-density",
       model: "gpt-5-codex",
       title: "DataTable density toggle",
       tier: 1,
@@ -1723,7 +1724,7 @@ export class World {
     // 8. idle, claude-code, custom title, tier 3
     const s8 = this.add({
       harness: "claude-code",
-      machine: "misha-air",
+      machine: "demo-laptop",
       cwd: "~/doc-extractor",
       repo: "github.com/acme/doc-extractor",
       branch: "main",
@@ -1757,7 +1758,7 @@ export class World {
       const question = `Give a second opinion on the reply below. Point out what you'd do differently and why.\n\n---\nAdded; returns 404 with the error envelope.`;
       const sH = this.add({
         harness: "codex",
-        machine: "misha-air",
+        machine: "demo-laptop",
         cwd: "~/doc-extractor",
         repo: "github.com/acme/doc-extractor",
         branch: "main",
@@ -1785,7 +1786,7 @@ export class World {
       const hEnd = this.pastTurn(
         sH,
         askAt + 4000,
-        `${question}\n\n(Sent via misha-air.local:7373 with sessionpipe control, signed on the sender's device.)`,
+        `${question}\n\n(Sent via demo-laptop.local:7373 with sessionpipe control, signed on the sender's device.)`,
         reply,
         2,
       );
@@ -1828,7 +1829,7 @@ export class World {
       );
       this.control.push({
         id: ulid(askAt - 2000),
-        machineId: "m_01K6Q3H2A9misha-air",
+        machineId: "m_01K6Q3H2A9demo-laptop",
         kind: "start",
         session: sH.key,
         text: question,
@@ -1836,7 +1837,7 @@ export class World {
         expiresAt: iso(askAt - 2000 + 3600_000),
         outcome: "delivered",
         mode: "sdk",
-        cwd: "/Users/misha/doc-extractor",
+        cwd: "/Users/demo/doc-extractor",
         takenAt: iso(askAt - 500),
         ackedAt: iso(askAt + 3500),
         replyTo: s8.key,
@@ -1847,7 +1848,7 @@ export class World {
     // 9. needs you: question, antigravity, tier 1
     const s9 = this.add({
       harness: "antigravity",
-      machine: "studio-mini",
+      machine: "demo-desktop",
       cwd: "~/playground/seed-scripts",
       model: "gemini-3-pro",
       title: "Seed script for staging",
@@ -1889,10 +1890,10 @@ export class World {
     // its row), and again now, Codex working in a session of its own, delegated_by this one.
     const sA = this.add({
       harness: "claude-code",
-      machine: "misha-air",
-      cwd: "~/sessionpipe",
-      repo: "github.com/spacesheep-dev/sessionpipe",
-      branch: "mp/webhook-backoff",
+      machine: "demo-laptop",
+      cwd: "~/code/relay",
+      repo: "github.com/acme/relay",
+      branch: "demo/webhook-backoff",
       model: "claude-fable-5-1",
       title: "Webhook retries with backoff",
       url: "https://claude.ai/code/session_01K6ASKCX",
@@ -1942,10 +1943,10 @@ export class World {
       );
       const c1 = this.add({
         harness: "codex",
-        machine: "misha-air",
-        cwd: "~/sessionpipe",
-        repo: "github.com/spacesheep-dev/sessionpipe",
-        branch: "mp/webhook-backoff",
+        machine: "demo-laptop",
+        cwd: "~/code/relay",
+        repo: "github.com/acme/relay",
+        branch: "demo/webhook-backoff",
         model: "gpt-5-codex",
         title: "Review: backoff on webhook retries",
         titleSource: "harness",
@@ -2048,10 +2049,10 @@ export class World {
       );
       const c2 = this.add({
         harness: "codex",
-        machine: "misha-air",
-        cwd: "~/sessionpipe",
-        repo: "github.com/spacesheep-dev/sessionpipe",
-        branch: "mp/webhook-backoff",
+        machine: "demo-laptop",
+        cwd: "~/code/relay",
+        repo: "github.com/acme/relay",
+        branch: "demo/webhook-backoff",
         model: "gpt-5-codex",
         tier: 3,
       });
@@ -2111,10 +2112,10 @@ export class World {
     // 10. done: ended cleanly 3 h ago
     const s10 = this.add({
       harness: "claude-code",
-      machine: "misha-air",
-      cwd: "~/sessionpipe",
-      repo: "github.com/spacesheep-dev/sessionpipe",
-      branch: "mp/flaky-worker-test",
+      machine: "demo-laptop",
+      cwd: "~/code/relay",
+      repo: "github.com/acme/relay",
+      branch: "demo/flaky-worker-test",
       model: "claude-fable-5-1",
       title: "Fix flaky worker test",
       tier: 2,
@@ -2133,7 +2134,7 @@ export class World {
     // 11. done: backfill only, two days ago
     const s11 = this.add({
       harness: "codex",
-      machine: "studio-mini",
+      machine: "demo-desktop",
       cwd: "~/marketing-site",
       repo: "github.com/acme/marketing-site",
       branch: "main",
@@ -2152,7 +2153,7 @@ export class World {
     // 12. done: ended on a turn error
     const s12 = this.add({
       harness: "gemini-cli",
-      machine: "misha-air",
+      machine: "demo-laptop",
       cwd: "~/ibs-workflow-ads",
       model: "gemini-2.5-flash",
       title: "Ad copy variants",
