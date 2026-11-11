@@ -44,6 +44,12 @@ export interface UiRouteDeps {
   base: string;
   /** Device keys are taken (devicekeys.ts); off, a device key or signature is a 400. */
   device: boolean;
+  /** A send for a machine paired on spacesheep (docs/rfcs/08): the signed body goes to
+   *  spacesheep's jobs route as this account; the answer is its job id, or why not. */
+  remoteSend?: (
+    m: MachineRow,
+    body: Record<string, unknown>,
+  ) => Promise<{ status: number; json: Record<string, unknown> }>;
 }
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
@@ -281,6 +287,56 @@ export async function verifySend(d: Pick<UiRouteDeps, "state" | "rpId">, raw: un
   };
 }
 
+/** A send for a machine paired on spacesheep: not verified here (its keys are ids only,
+ *  its rp id is spacesheep's), carried to spacesheep's jobs route, which verifies it
+ *  against the machine's keys and queues it; the row here follows the job's status.
+ *  spacesheep's refusals come back in the shape the page already reads (422 + code). */
+async function forwardSend(
+  state: ControlState,
+  m: MachineRow,
+  body: Record<string, unknown>,
+  remoteSend: UiRouteDeps["remoteSend"],
+): Promise<Reply> {
+  if (!remoteSend) throw new HttpError(503, { reason: "no_relay", error: "Not connected to spacesheep any more." });
+  if (typeof body.cmd !== "string")
+    throw new HttpError(400, { reason: "bad_request", error: "cmd is the signed command string." });
+  let cmd: ControlCommand;
+  try {
+    cmd = JSON.parse(body.cmd) as ControlCommand;
+  } catch {
+    throw new HttpError(400, { reason: "bad_request", error: "cmd is not JSON." });
+  }
+  const signed: SignedCommand = { cmd: body.cmd };
+  if (typeof body.csig === "string") signed.csig = body.csig;
+  if (body.grant && typeof body.grant === "object") signed.grant = body.grant as SignedCommand["grant"];
+  if (body.confirm && typeof body.confirm === "object") signed.confirm = body.confirm as SignedCommand["confirm"];
+  const r = await remoteSend(m, {
+    cmd: signed.cmd,
+    csig: signed.csig ?? null,
+    grant: signed.grant ?? null,
+    confirm: signed.confirm ?? null,
+  });
+  if (r.status === 202) {
+    const job = Number(r.json.job);
+    const row = state.enqueueRemote(
+      m,
+      signed,
+      cmd,
+      { via: "ui", ...(typeof body.from === "string" ? { from: body.from } : {}) },
+      job,
+    );
+    return { status: 201, json: toActivity(row) };
+  }
+  const code = String(r.json.code ?? "");
+  const error = String(r.json.error ?? "spacesheep did not take it");
+  // The second look there wants a fresh tap: the same word the page knows from a machine.
+  if (r.status === 409 && code === "confirm") throw new HttpError(422, { reason: error, code: "confirm_required" });
+  if (r.status === 401 && code === "unlock") throw new HttpError(422, { reason: error, code: "bad_grant" });
+  if (r.status === 400 && (code === "bad" || code === "unlock"))
+    throw new HttpError(422, { reason: error, code: String(r.json.refusal ?? "untrusted_key") });
+  throw new HttpError(r.status >= 500 ? 502 : r.status, { reason: error, code: code || "refused" });
+}
+
 /** Queue a verified command for its machine (synchronous): the activity row as the page reads it. */
 export function queueSend(state: ControlState, v: VerifiedSend): ControlActivity {
   return toActivity(state.enqueue(v.machine, v.signed, v.cmd, { via: "ui", ...v.opts }));
@@ -453,7 +509,13 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
   router.post(
     `${base}/send`,
     guarded(async (ctx): Promise<Reply> => {
-      const verified = await verifySend({ state, rpId }, await ctx.json<unknown>(SEND_BODY_MAX));
+      const raw = await ctx.json<unknown>(SEND_BODY_MAX);
+      const target =
+        raw && typeof raw === "object"
+          ? state.machine(String((raw as { machineId?: unknown }).machineId ?? ""))
+          : undefined;
+      if (target?.remote) return forwardSend(state, target, raw as Record<string, unknown>, d.remoteSend);
+      const verified = await verifySend({ state, rpId }, raw);
       return { status: 201, json: queueSend(state, verified) };
     }),
   );
