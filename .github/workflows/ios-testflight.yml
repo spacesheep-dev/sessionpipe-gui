@@ -241,7 +241,7 @@ jobs:
           echo "Built $(basename "$IPA") ($(du -h "$IPA" | cut -f1)): $(plist CFBundleDisplayName) $VERSION ($BUILD), $sdk, Apple Distribution, \"$PROFILE_NAME\"." >> "$GITHUB_STEP_SUMMARY"
           rm -rf "$x"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sessionpipe-ios-${{ env.VERSION }}-${{ github.run_number }}
           path: ${{ env.IPA }}
