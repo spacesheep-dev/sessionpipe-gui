@@ -9,7 +9,15 @@ import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
 import { DEFAULT_PORT, type ExtraEntry, ROUTES, UI_KEY_PARAM } from "../shared/api.js";
 import { type App, createApp } from "./app.js";
-import { defaultStateDir, packageVersion, readGuiConfig, setDisabled, setEnabled, setTlsPreference } from "./config.js";
+import {
+  ConfigError,
+  defaultStateDir,
+  packageVersion,
+  readGuiConfig,
+  setDisabled,
+  setEnabled,
+  setTlsPreference,
+} from "./config.js";
 import { findExtra, formatCatalog, installableExtras } from "./extensions/catalog.js";
 import { extraInstalled, installExtra } from "./extensions/extras.js";
 import { InstallError } from "./extensions/install.js";
@@ -765,4 +773,9 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
-void main();
+main().catch((e: unknown) => {
+  // A config.json that cannot be read stops every command the same way, before it writes
+  // anything: the message says what the file holds and what to do.
+  if (e instanceof ConfigError) fail(e.message);
+  throw e;
+});

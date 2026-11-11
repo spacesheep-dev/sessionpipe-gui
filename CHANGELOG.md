@@ -70,6 +70,17 @@ All notable changes to `sessionpipe-gui`. The format follows
   all of them refused connections. A loopback bind now offers no LAN URL, and the sink
   command names the address it bound, under "from this machine"; a bind to one LAN
   address lists that address alone as its network URL.
+- **A `config.json` that does not parse is never written over.** A `config.json` left empty or
+  half-written by a write that died, or hand-edited so it no longer parses, was silently
+  replaced with fresh secrets on the next start, so every sender paired with the old sink
+  token got 401 and every phone and browser holding the old UI key was refused, with nothing
+  said. The GUI now stops with a message that names the file and what to do, and leaves it
+  byte for byte as it was; one it cannot read (a folder of that name, no permission) stops
+  it the same way instead of with a stack trace. A `config.json` with a UTF-8 byte-order
+  mark (PowerShell 5's `UTF8` encoding, older Windows editors) is read past it, instead of
+  being replaced the same way. `sessionpipe-gui search` and `index` read the history setting
+  past a byte-order mark too, and stop the same way on a `config.json` the GUI refuses,
+  instead of reading it as history on.
 - **A finished session stays finished.** A sender records a hook when it gets to it, so a
   tool call that fired just before a turn's Stop can be recorded after it; the receiver
   read that late event as a new turn, and the session went back to "working" (then
