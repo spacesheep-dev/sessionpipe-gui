@@ -15,7 +15,9 @@
 // turn folded into one line. A message sent from here is drawn where its turn is or will
 // be: a session this device started is its layout from the first frame (its first
 // message as the title and the first bubble, one status row following the machine's
-// acks), and the first hook event fills it in place (control/Starting.tsx). Every row of
+// acks), and the first hook event fills it in place (control/Starting.tsx). A turn that
+// was stopped is drawn once, in its place, with what it had written and "Stopped" where
+// a running turn says it is running (lib/replies.ts). Every row of
 // the timeline has its own right-click menu (long-press on touch); the empty space around
 // it has the view's options.
 import type {
@@ -90,6 +92,7 @@ import { absoluteUrl, agentItems, askItem, copyItem, sessionItems } from "../lib
 import { reducedMotion, useFlip } from "../lib/motion";
 import { leftOff, type NewLineAt, newLinePlace } from "../lib/newLine";
 import { clockTime, eventWindows, leftBecause, sentenceName, servedBy, swaps, swapWords } from "../lib/pool";
+import { said, stoppedWords, turnWords } from "../lib/replies";
 import { AGENT_PARAM, back, hrefFor, Link, navigate, sessionPath, setSearchParam, useSearchParam } from "../lib/router";
 import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
@@ -107,6 +110,8 @@ import {
   sentTurns,
   type ToolItem,
   type Turn,
+  turnBegan,
+  turnSeq,
   unframe,
 } from "../lib/turns";
 import { HistoryOrMissing } from "../search/HistoryEntry";
@@ -230,14 +235,17 @@ const seqLink = (path: string, seq: number | undefined) =>
   seq === undefined ? null : `${absoluteUrl(path)}#seq-${seq}`;
 
 /** Whether a message sent from here, with no turn of its own in the view, still gets its
- *  row at the end of the timeline: while it is on its way; once it failed or was just
- *  delivered, only when nothing began after it. A start without its session yet always. */
+ *  row at the end of the timeline: while it is on its way; once it failed, was stopped or
+ *  was just delivered, only when nothing began after it (`lastStart`: when the latest
+ *  turn began). A stopped one has no turn to wait for (its row is where what it had
+ *  written is), so it stays like a failure's words. A start without its session yet
+ *  always. */
 function stillPending(a: ControlActivity, lastStart: number, hasTurns: boolean, now: number): boolean {
   if (a.kind === "start") return !hasTurns;
   if (!isFinal(a)) return true;
   const at = Date.parse(a.at);
   if (Number.isFinite(lastStart) && at < lastStart) return false;
-  if (a.outcome !== "delivered") return true;
+  if (a.outcome !== "delivered" || stoppedWords(a.reply ?? "") !== null) return true;
   return now - Date.parse(a.ackedAt ?? a.at) < DELIVERED_HOLD_MS;
 }
 
@@ -801,6 +809,9 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
           takenAt: a.takenAt,
           text: promptParts(a.text ?? "").body,
           start: a.kind === "start",
+          outcome: a.outcome,
+          code: a.code,
+          ackedAt: a.ackedAt,
         })),
         allTurns,
         (t) => promptParts(t).body,
@@ -821,12 +832,16 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   const clockNow = useNow(holding ? "coarse" : "off");
   const pending = useMemo(() => {
     const begun = allTurns.filter((t) => t.start);
-    const lastStart = ms(begun[begun.length - 1]?.start?.time);
+    // When the latest turn began: by its own date, but never later than its start reached
+    // the receiver, whose clock a message's `at` is on. By the date alone a machine whose
+    // clock is ahead dropped a failure the moment it was drawn.
+    const last = begun[begun.length - 1]?.start;
+    const lastStart = Math.min(ms(last?.time), ms(last?.arrivedAt));
     return sentAll.filter((a) => !joined.has(a.id) && stillPending(a, lastStart, begun.length > 0, clockNow)).reverse();
   }, [sentAll, joined, allTurns, clockNow]);
   // A pending turn takes the number (and so the key) its real turn will have: the first
   // hook event fills the same block in place.
-  const lastN = Math.max(0, ...turns.map((t) => t.n), ...allTurns.map((t) => t.n));
+  const lastN = Math.floor(Math.max(0, ...turns.map((t) => t.n), ...allTurns.map((t) => t.n)));
   /** The loaded window ends at the latest turn, so its last turn is turn `counts.turns`. */
   const loadedTurns = turns.filter((t) => t.start).length;
   const turnOffset = Math.max(0, (s?.counts.turns ?? loadedTurns) - loadedTurns);
@@ -884,7 +899,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     const by = new Map<number, string[]>();
     for (const sw of swapRows) {
       let home: number | undefined;
-      for (const t of turns) if ((t.start?.session.seq ?? -1) <= sw.seq) home = t.n;
+      for (const t of turns) if ((turnSeq(t) ?? -1) <= sw.seq) home = t.n;
       if (home !== undefined) by.set(home, [...(by.get(home) ?? []), sw.text]);
     }
     return by;
@@ -1150,8 +1165,24 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
         i.e.type === "session.started" &&
         ["", "startup", undefined].includes(i.e.data?.source as string | undefined),
     );
+  // A message a Stop handed over is an exchange made of its transcript, which a lens under
+  // "conversation" leaves out: the message sent from here still has its row there.
+  const shown = new Set(turns.map((t) => t.n));
+  const veiled = allTurns
+    .filter((t) => t.continues !== undefined && !shown.has(t.n) && sentByTurn.has(t.n))
+    .map((t): Turn => ({ n: t.n, items: [], continues: t.continues }));
+  const turnLabel = (n: number) =>
+    n === 0
+      ? hasOlder
+        ? turnOffset > 0
+          ? `Turn ${turnOffset}, continued`
+          : "Earlier"
+        : "Session"
+      : `Turn ${n + turnOffset}`;
   const rows = [
-    ...turns.filter((t) => !onlyStarted(t)).map((t) => ({ t, sent: sentByTurn.get(t.n), pending: false })),
+    ...[...turns.filter((t) => !onlyStarted(t)), ...veiled]
+      .sort((a, b) => a.n - b.n)
+      .map((t) => ({ t, sent: sentByTurn.get(t.n), pending: false })),
     ...pending.map((a, i) => ({
       t: { n: lastN + 1 + i, items: [] } as Turn,
       sent: a as ControlActivity | undefined,
@@ -1291,13 +1322,8 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
                 flip={fresh}
                 swaps={swapNotes.get(t.n)}
                 label={
-                  t.n === 0
-                    ? hasOlder
-                      ? turnOffset > 0
-                        ? `Turn ${turnOffset}, continued`
-                        : "Earlier"
-                      : "Session"
-                    : `Turn ${t.n + turnOffset}`
+                  // The harness counts a message its Stop handed over as the same turn.
+                  t.continues ? `${turnLabel(t.continues)}, continued` : turnLabel(t.continues ?? t.n)
                 }
                 lens={lens}
                 liveTurn={!p && !!s?.currentTurn && t === turns[turns.length - 1]}
@@ -1576,12 +1602,6 @@ function TurnBlock({
   /** The pool switched accounts during this turn: one quiet row each (UX-SPEC §7.2). */
   swaps?: string[];
 }) {
-  // Only a running turn or a running tool shows a moving duration; the other blocks
-  // (most of the page) have nothing to redraw each second.
-  const hasRunningTool = turn.items.some(
-    (i) => (i.kind === "tool" && !i.ended) || (i.kind === "agent" && i.tools.some((t) => !t.ended)),
-  );
-  const now = useNow(liveTurn || hasRunningTool ? "fine" : "off");
   const { machine, online, control, compose, session } = useTimeline();
   const transcript = [...turn.items].reverse().find((i) => i.kind === "event" && i.e.type === "turn.transcript") as
     | EventItem
@@ -1592,13 +1612,36 @@ function TurnBlock({
         | EventItem
         | undefined);
   const ended = turn.items.find((i) => i.kind === "event" && i.e.type === "turn.ended") as EventItem | undefined;
+  // What it said, from its own record and from the acks of the message that became it,
+  // and whether it was stopped (lib/replies.ts). A stopped turn is over whatever the
+  // session's reading still says: its process is gone, and no hook of its own said so.
+  const words = turnWords({
+    own: (transcript ?? progress)?.e.data.assistant,
+    reply: sent?.reply,
+    final: !!sent && isFinal(sent),
+    reason: ended?.e.data.reason,
+  });
+  const live = liveTurn && !words.stopped;
+  // Only a running turn or a running tool shows a moving duration; the other blocks
+  // (most of the page) have nothing to redraw each second.
+  const hasRunningTool =
+    !words.stopped &&
+    turn.items.some((i) => (i.kind === "tool" && !i.ended) || (i.kind === "agent" && i.tools.some((t) => !t.ended)));
+  const now = useNow(live || hasRunningTool ? "fine" : "off");
   const prompt = (transcript?.e.data.user as string | undefined) ?? (progress?.e.data.user as string | undefined);
   const promptChars = turn.start?.data.prompt_chars as number | undefined;
-  const startMs = ms(turn.start?.time);
+  // A turn someone asked for: it began with a prompt, or with a message its Stop handed over.
+  const asked = !!turn.start || turn.continues !== undefined;
+  const began = turnBegan(turn);
+  const startMs = ms(began);
   const endMs = ms(ended?.e.time);
+  // A Stop's own `ms` counts from the turn's start, not from the message it handed over.
+  // A stopped turn's end is stamped by the hook that began the next turn, however much
+  // later that was: without an `ms` of its own, how long it ran is not known.
   const elapsed = ended
-    ? ((ended.e.data.ms as number | undefined) ?? endMs - startMs)
-    : liveTurn
+    ? ((turn.start ? (ended.e.data.ms as number | undefined) : undefined) ??
+      (words.stopped ? undefined : endMs - startMs))
+    : live
       ? now - startMs
       : undefined;
   const startSeq = turn.start?.session.seq;
@@ -1613,15 +1656,16 @@ function TurnBlock({
   // What the machine said of the message sent from here: its failure, in place; while
   // it is on its way (or the agent is at it with nothing to show yet) the one status row.
   const failed = !!sent && isFinal(sent) && sent.outcome !== "delivered";
-  const ownReply = String((transcript ?? progress)?.e.data.assistant ?? "").trim();
-  const ackReply = sent?.reply?.trim() && !ownReply ? sent.reply : undefined;
+  const ackReply = words.ack;
+  // The row a link to the turn's reply lands on, whichever record its words came from.
+  const replySeq = (transcript ?? progress)?.e.session.seq;
   const status = (() => {
-    if (!sent || failed) return null;
+    if (!sent || failed || words.stopped) return null;
     if (pending) return sentRow(sent, { machine, online });
-    if (liveTurn && !ended)
+    if (live && !ended)
       return {
         text: "Running",
-        since: sent.takenAt ?? turn.start?.time,
+        since: sent.takenAt ?? began,
         spinning: true,
         tip: undefined,
         state: "running",
@@ -1629,13 +1673,16 @@ function TurnBlock({
     return null;
   })();
   const failure = failed && sent ? <SentFailure a={sent} machine={machine} control={control} onEdit={compose} /> : null;
+  // Where a running turn says it is running, a stopped one says so: one quiet line, a
+  // sentence when it had written nothing.
+  const stoppedLine = words.stopped ? (words.own || words.ack ? "Stopped" : "Stopped before the first word.") : null;
 
   if (chat)
     return (
       <ChatTurn
         turn={turn}
         lens={lens}
-        liveTurn={liveTurn}
+        liveTurn={live}
         fill={fill}
         now={now}
         harness={harness}
@@ -1648,7 +1695,9 @@ function TurnBlock({
         ended={ended}
         sent={sent}
         pending={pending}
+        ownReply={words.own}
         ackReply={ackReply}
+        stopped={stoppedLine}
         status={status}
         failure={failure}
         flip={flip}
@@ -1659,28 +1708,31 @@ function TurnBlock({
 
   const endReason = ended ? String(ended.e.data.reason ?? "stop") : undefined;
   const endErr = endReason === "error";
+  // How it ended, when not the usual way. A turn stopped at its terminal ends with
+  // `interrupt`: its Stopped line says that, in words.
+  const endOdd = endReason && endReason !== "stop" && endReason !== "interrupt" && !endErr ? endReason : undefined;
   const items = turn.items.filter(
     (it) => !(it.kind === "event" && (it.e.type === "turn.progress" || it.e.type === "turn.ended")),
   );
   return (
     <li
-      className={`turn ${liveTurn || (pending && !failed) ? "turn--live" : ""} ${turn.n === 0 ? "turn--pre" : ""}`}
+      className={`turn ${live || (pending && !failed && !words.stopped) ? "turn--live" : ""} ${turn.n === 0 ? "turn--pre" : ""}`}
       data-flip={flip ? String(turn.n) : undefined}
     >
       <TurnHead
         label={label}
         start={turn.start}
-        at={turn.start?.time ?? sent?.at}
+        at={began ?? sent?.at}
         elapsed={elapsed}
-        running={(liveTurn && !ended) || (pending && !!sent && !isFinal(sent))}
-        reason={endReason && endReason !== "stop" && !endErr ? endReason : undefined}
+        running={(live && !ended) || (pending && !!sent && !isFinal(sent))}
+        reason={endOdd}
         error={endErr ? String(ended?.e.data.error ?? "the turn ended with an error") : undefined}
       />
-      {turn.start ? (
+      {asked ? (
         notice ? (
           <AgentNotice agentId={notice.agentId} seq={startSeq} />
         ) : prompt ? (
-          <Prompt text={prompt} seq={startSeq} by={submittedLabel(turn.start.data.submitted_by)} />
+          <Prompt text={prompt} seq={startSeq} by={submittedLabel(turn.start?.data.submitted_by)} />
         ) : sent?.text ? (
           <Prompt text={sent.text} seq={startSeq} sent={sent} />
         ) : (
@@ -1694,13 +1746,17 @@ function TurnBlock({
       <ol className="turn-items">
         {items.length === 0 && status && <StatusRow {...status} chat={false} />}
         {items.map((it) => {
-          if (it.kind === "tool") return <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} />;
+          if (it.kind === "tool")
+            return <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} halted={words.stopped} />;
           if (it.kind === "agent") return <AgentBlock key={it.key} item={it} lens={lens} now={now} fill={fill} />;
           if (it.kind === "delegation") return <AskRow key={it.key} item={it} as="li" />;
           const e = it.e;
           if (e.type === "turn.transcript") {
             if (it !== transcript) return null;
-            const reply = <Reply key={it.key} e={e} turnSeq={startSeq} fill={fill} />;
+            // The acks' reply stands for its words, or it was stopped with nothing said:
+            // what is drawn below is this row.
+            if (!words.own && (ackReply || words.stopped)) return newLine ? <NewLine key={it.key} /> : null;
+            const reply = <Reply key={it.key} e={e} text={words.own} turnSeq={startSeq} fill={fill} />;
             return newLine ? (
               <Fragment key={it.key}>
                 <NewLine />
@@ -1715,10 +1771,11 @@ function TurnBlock({
           return <EventMarker key={it.key} e={e} />;
         })}
         {newLine && !transcript && <NewLine />}
-        {progress && String(progress.e.data.assistant ?? "").trim() && (
-          <Reply e={progress.e} turnSeq={startSeq} fill={fill} live />
+        {progress && words.own && (
+          <Reply e={progress.e} text={words.own} turnSeq={startSeq} fill={fill} live={!words.stopped} />
         )}
-        {ackReply && <AckReply text={ackReply} live={!!sent && !isFinal(sent)} />}
+        {ackReply && <AckReply text={ackReply} live={!!sent && !isFinal(sent)} seq={replySeq} />}
+        {stoppedLine && <StatusRow text={stoppedLine} spinning={false} chat={false} state="stopped" />}
         {swaps?.map((text) => (
           <li key={text} className="marker marker--swap" data-swap>
             <Lead />
@@ -1849,8 +1906,9 @@ function Prompt({
 }
 
 /** The reply the machine streamed back with its acks, for a turn that has no reply event
- *  of its own yet: rendered as the reply will be, in the same place. */
-function AckReply({ text, live, chat = false }: { text: string; live: boolean; chat?: boolean }) {
+ *  of its own yet, or whose own holds less (a stopped turn's): rendered as the reply will
+ *  be, in the same place. `seq`: the turn's own record of its words, when it has one. */
+function AckReply({ text, live, seq, chat = false }: { text: string; live: boolean; seq?: number; chat?: boolean }) {
   const { session } = useTimeline();
   const store = useStore();
   const menu = useContextMenu(() => {
@@ -1862,12 +1920,12 @@ function AckReply({ text, live, chat = false }: { text: string; live: boolean; c
   });
   if (chat)
     return (
-      <div className="chat-card" {...menu}>
+      <div className="chat-card" data-seq={seq} {...menu}>
         <Markdown text={text} />
       </div>
     );
   return (
-    <li className={`reply ${live ? "reply--live" : ""}`} {...menu}>
+    <li className={`reply ${live ? "reply--live" : ""}`} data-seq={seq} {...menu}>
       <Markdown text={text} />
     </li>
   );
@@ -1876,12 +1934,16 @@ function AckReply({ text, live, chat = false }: { text: string; live: boolean; c
 /** The assistant's text as markdown: plain prose, no box. `live` while it is still arriving. */
 function Reply({
   e,
+  text: given,
   turnSeq,
   fill,
   live = false,
   chat = false,
 }: {
   e: StoredEvent;
+  /** The words as the turn's reading has them (lib/replies.ts `turnWords`): nothing where
+   *  the acks' reply stands for the transcript's. Absent, the event's own. */
+  text?: string;
   turnSeq?: number;
   fill: Fill;
   live?: boolean;
@@ -1889,7 +1951,8 @@ function Reply({
 }) {
   const { path, session } = useTimeline();
   const store = useStore();
-  const text = String(e.data.assistant ?? "");
+  // Never Claude Code's stand-in for a reply that never came: nobody said that.
+  const text = given ?? said(String(e.data.assistant ?? ""));
   const cut = e.preview?.assistant !== undefined;
   const menu = useContextMenu(() => {
     const s = session();
@@ -1907,13 +1970,13 @@ function Reply({
     return (
       <div className="chat-card" data-seq={e.session.seq} {...menu}>
         <Markdown text={text} />
-        <Cut e={e} field="assistant" fill={fill} />
+        {text && <Cut e={e} field="assistant" fill={fill} />}
       </div>
     );
   return (
     <li className={`reply ${live ? "reply--live" : ""}`} data-seq={e.session.seq} {...menu}>
       <Markdown text={text} />
-      <Cut e={e} field="assistant" fill={fill} />
+      {text && <Cut e={e} field="assistant" fill={fill} />}
     </li>
   );
 }
@@ -2051,7 +2114,9 @@ function ChatTurn({
   ended,
   sent,
   pending,
+  ownReply,
   ackReply,
+  stopped: stoppedLine,
   status,
   failure,
   flip,
@@ -2075,7 +2140,11 @@ function ChatTurn({
   ended: EventItem | undefined;
   sent?: ControlActivity;
   pending: boolean;
+  /** The turn's own words as they are drawn, and the acks' reply where it stands for them. */
+  ownReply: string;
   ackReply?: string;
+  /** The turn was stopped: the line that says so, in the running row's place. */
+  stopped: string | null;
   status: Status;
   failure: ReactNode;
   flip: boolean;
@@ -2102,12 +2171,12 @@ function ChatTurn({
   );
   const endErr = ended && String(ended.e.data.reason) === "error" ? ((ended.e.data.error as string) ?? "error") : null;
   const replyItem = transcript ?? progress;
-  const replyText = replyItem ? String(replyItem.e.data.assistant ?? "").trim() : "";
+  const replyText = replyItem ? ownReply.trim() : "";
   const busy = liveTurn && !ended && working;
   const startSeq = turn.start?.session.seq;
   // A running turn's one row: the sent message's status, else Running with its timer.
   const row: Status =
-    status ?? (busy ? { text: "Running", since: turn.start?.time, spinning: true, state: "running" } : null);
+    status ?? (busy ? { text: "Running", since: turnBegan(turn), spinning: true, state: "running" } : null);
   const agent =
     tools.length > 0 ||
     agentItems.length > 0 ||
@@ -2115,24 +2184,27 @@ function ChatTurn({
     !!replyText ||
     !!ackReply ||
     !!row ||
+    !!stoppedLine ||
     !!failure ||
     notes.length > 0 ||
     !!swaps?.length ||
     !!endErr;
   // Before the first turn there is nothing a chat shows (session markers stay out of it).
-  if (!turn.start && !agent && !pending) return null;
-  const at = turn.start?.time ?? sent?.at;
+  // A turn someone asked for began with a prompt, or with a message its Stop handed over.
+  const asked = !!turn.start || turn.continues !== undefined;
+  if (!asked && !agent && !pending) return null;
+  const at = turnBegan(turn) ?? sent?.at;
   return (
     <li
-      className={`turn turn--chat ${liveTurn || (pending && !failure) ? "turn--live" : ""}`}
+      className={`turn turn--chat ${liveTurn || (pending && !failure && !stoppedLine) ? "turn--live" : ""}`}
       data-seq={startSeq}
       data-flip={flip ? String(turn.n) : undefined}
     >
-      {turn.start && notice ? (
+      {asked && notice ? (
         <AgentNotice agentId={notice} seq={startSeq} />
-      ) : turn.start && answer ? (
+      ) : asked && answer ? (
         <AnswerTurn answer={answer} at={at} seq={startSeq} e={(transcript ?? progress)?.e} fill={fill} />
-      ) : turn.start || (pending && sent) ? (
+      ) : asked || (pending && sent) ? (
         <div className="chat-you">
           {at && (
             <time className="chat-time num" dateTime={at} title={new Date(at).toLocaleString([], { hourCycle: "h23" })}>
@@ -2156,7 +2228,7 @@ function ChatTurn({
             <HarnessGlyph name={harness} size="sm" />
             {harnessMark(harness).label}
           </span>
-          {tools.length > 0 && <ChatTools tools={tools} lens={lens} now={now} fill={fill} />}
+          {tools.length > 0 && <ChatTools tools={tools} lens={lens} now={now} fill={fill} halted={!!stoppedLine} />}
           {agentItems.length > 0 && (
             <ol className="turn-items chat-agents">
               {agentItems.map((it) => (
@@ -2180,8 +2252,17 @@ function ChatTurn({
               The turn ended with an error: {endErr}
             </p>
           )}
-          {replyItem && replyText && <Reply e={replyItem.e} turnSeq={startSeq} fill={fill} live={!transcript} chat />}
-          {ackReply && <AckReply text={ackReply} live={!!sent && !isFinal(sent)} chat />}
+          {replyItem && replyText && (
+            <Reply
+              e={replyItem.e}
+              text={ownReply}
+              turnSeq={startSeq}
+              fill={fill}
+              live={!transcript && !stoppedLine}
+              chat
+            />
+          )}
+          {ackReply && <AckReply text={ackReply} live={!!sent && !isFinal(sent)} seq={replyItem?.e.session.seq} chat />}
           {swaps?.map((text) => (
             <p key={text} className="chat-note" data-swap>
               {text}
@@ -2192,6 +2273,7 @@ function ChatTurn({
           ))}
           {failure}
           {row && <StatusRow {...row} chat />}
+          {stoppedLine && <StatusRow text={stoppedLine} spinning={false} chat state="stopped" />}
         </div>
       )}
     </li>
@@ -2214,10 +2296,23 @@ function NewLine({ chat = false }: { chat?: boolean }) {
 }
 
 /** The tools of a turn as one quiet disclosure line, the usual rows when opened. */
-function ChatTools({ tools, lens, now, fill }: { tools: ToolItem[]; lens: Tier; now: number; fill: Fill }) {
+function ChatTools({
+  tools,
+  lens,
+  now,
+  fill,
+  halted = false,
+}: {
+  tools: ToolItem[];
+  lens: Tier;
+  now: number;
+  fill: Fill;
+  /** The turn was stopped: a call with no end was cut off, and is not running. */
+  halted?: boolean;
+}) {
   const ref = useRef<HTMLDetailsElement>(null);
   const errors = tools.filter((t) => t.ended && t.ended.data.ok === false).length;
-  const running = tools.find((t) => !t.ended);
+  const running = halted ? undefined : tools.find((t) => !t.ended);
   const menu = useContextMenu(() => {
     const d = ref.current;
     if (!d) return null;
@@ -2255,7 +2350,7 @@ function ChatTools({ tools, lens, now, fill }: { tools: ToolItem[]; lens: Tier; 
       </summary>
       <ol className="turn-items">
         {tools.map((it) => (
-          <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} />
+          <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} halted={halted} />
         ))}
       </ol>
     </details>
@@ -2329,13 +2424,27 @@ function toolSubject(input: unknown): string {
   return "";
 }
 
-function ToolRow({ item, lens, now, fill }: { item: ToolItem; lens: Tier; now: number; fill: Fill }) {
+function ToolRow({
+  item,
+  lens,
+  now,
+  fill,
+  halted = false,
+}: {
+  item: ToolItem;
+  lens: Tier;
+  now: number;
+  fill: Fill;
+  /** Its turn was stopped: a call with no end was cut off with it, and is not running. */
+  halted?: boolean;
+}) {
   const e = item.ended ?? item.started!;
   const tool = String(e.data.tool);
   const label = toolLabel(tool);
-  const running = !item.ended;
+  const cut = !item.ended && halted;
+  const running = !item.ended && !halted;
   const ok = item.ended ? item.ended.data.ok !== false : undefined;
-  const msv = item.ended ? (item.ended.data.ms as number | undefined) : now - ms(item.started?.time);
+  const msv = item.ended ? (item.ended.data.ms as number | undefined) : cut ? undefined : now - ms(item.started?.time);
   const input = lens >= 3 ? (item.ended?.data.input ?? item.started?.data.input) : undefined;
   const output = lens >= 3 ? item.ended?.data.output : undefined;
   const error = item.ended?.data.error as string | undefined;
@@ -2369,13 +2478,13 @@ function ToolRow({ item, lens, now, fill }: { item: ToolItem; lens: Tier; now: n
   const head = (
     <>
       <span
-        className={`tool-status ${running ? "is-run" : ok ? "is-ok" : "is-err"}`}
+        className={`tool-status ${running ? "is-run" : cut ? "is-cut" : ok ? "is-ok" : "is-err"}`}
         role="img"
-        aria-label={running ? "running" : ok ? "ok" : "error"}
+        aria-label={running ? "running" : cut ? "stopped" : ok ? "ok" : "error"}
       >
         {running ? (
           <span className="spinner spinner--sm" aria-hidden="true" />
-        ) : ok ? (
+        ) : cut ? null : ok ? (
           <StateDot state="done" size={10} decorative />
         ) : (
           <ErrGlyph />
