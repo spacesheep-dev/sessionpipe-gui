@@ -1,0 +1,31 @@
+{
+  "name": "start-tilde-user-cwd",
+  "description": "A new session in `~root/spacesheep`: only `~` alone or `~/…` is read under the machine's home, never another user's.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"start\",\"session\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\",\"text\":\"Add the Oct 8 row\",\"nonce\":\"OdrseFGhrFd7D_HYQ-IGVQ\",\"iat\":1790800000000,\"cwd\":\"~root/spacesheep\"}",
+      "csig": "MyTpRpKKB3W1Df6qnk9oCbuABLJJDXDwAkTr1WY6bJWMWiliqJpm6Ise_wNAiZvC86ifzK6hsG0PYPgiNeOOuw",
+      "grant": {
+        "cred": "muKOVE3ONY_FHq72bYDwL4uocF1A0D7F",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiMFg1STQ0RWo4UVlkNUlXQjh1d1VJem55YlU4dUxEbE11YmR5bm5scEk5TSIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIFu3NyXixiF8jO5LLX_yzD783MlPlQVcqjcCmBn8XedBAiEAqOOTzd4p64W8rIIuy4FFfAwQMcDPUpy8yDpeYC6g-pI",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEeJfV73ePDIGLGAnBO1kzYYnACL5FqegoHbwZBZYBu-LgqXdHmefGzdvl0gTyUzALnxB2el43t8IVymqGh9sPpQ\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "muKOVE3ONY_FHq72bYDwL4uocF1A0D7F",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmL_a0b_HoNcPmMmx0Tdlp_In_Q5nmdnquPe9n-9NaIP_P29oLGT5eBTM4bIqTbWRSXCYUYR9i20BuWtOwIxmEQ"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "files-on-permission-answer",
+  "description": "Only a start or a prompt may carry files.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"permission.answer\",\"session\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\",\"nonce\":\"XMqdYJ6QQyCv2HeJZOX0RA\",\"iat\":1790800000000,\"for\":\"perm-1\",\"decision\":\"deny\",\"files\":[{\"name\":\"screenshot.png\",\"type\":\"image/png\",\"size\":183402,\"sha256\":\"0BNhTcFKN-4g_pIAVzerfTQn5-k1gK1W74pCIF5_ek4\"}]}",
+      "csig": "DOcM5joICBxMl2_CeTpZSe4ifF3wXieou8spafPhXRc6EnpP8aHaRhcgChi3rUeCaamPKEhMx3Yud6r2WVD0Xw",
+      "grant": {
+        "cred": "hYkRDtOWWM6xFVlDwzGpMSw69Ifou2k6",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiSGNiOW1pdVBlTHo5VHZGS0RJU3g2OHNpRkNmbzMwMmJ3eUF2MzRQaXEzVSIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEQCIH2TKj3PqD8SBnXKX0r7ZYQrxHjVKIhMTjiT6t2iiY63AiAhB-YRx1ksEpLiabSEITXwN3S17S2Gg3pLw883yD8ypQ",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEGYe0jwz3zvt2ro718z8E-TlkCEBcvKXtXiM1uRMZH98t005RbyNMHlHdMSnUVL_0cDEV8-qlP2144aiQvXuvoQ\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "hYkRDtOWWM6xFVlDwzGpMSw69Ifou2k6",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEa0FY9P718O0d0VOlYkMUEHxhFZvAIyTACv_DTxsMDJwhxzaHxao7H-Q4w_YTs2kYRy-Mfo7dozHHj3Eku_eooA"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}

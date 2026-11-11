@@ -1,0 +1,40 @@
+{
+  "name": "control-inherit",
+  "spec": "CONTROL.md §2 mode, HTTP.md §1 control.inherit",
+  "capability": "control",
+  "note": "Only for a receiver whose well-known file sets control.inherit: true. It accepts a hello whose mode is inherit; it then shows the machine as inherit, never as safe or auto (that part is the receiver's own to check).",
+  "steps": [
+    {
+      "well_known": {},
+      "expect": {
+        "status": 200,
+        "body": {
+          "control": {
+            "inherit": true
+          }
+        }
+      }
+    },
+    {
+      "hello": {
+        "machine": "{machine}",
+        "body": {
+          "name": "conformance",
+          "harnesses": [
+            "claude-code"
+          ],
+          "modes": [
+            "resume",
+            "fork"
+          ],
+          "keys": [],
+          "version": "0.10.0",
+          "mode": "inherit"
+        }
+      },
+      "expect": {
+        "status": 204
+      }
+    }
+  ]
+}
