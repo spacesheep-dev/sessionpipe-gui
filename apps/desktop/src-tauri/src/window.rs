@@ -377,8 +377,14 @@ mod tests {
             rx_base: Some(rx_base("abcdefgh23")),
         };
         let s = init_script(&c, Some("/inbox"));
-        // rx://localhost/… here, http://rx.localhost/… on Windows (WebView2's form).
-        assert!(s.contains(&format!(r#""rxBase":"{}""#, rx_base("abcdefgh23"))));
+        // rx://localhost/… here, http://rx.localhost/… on Windows (WebView2's form): each
+        // spelled out, so the test still says what the page is given.
+        let want = if cfg!(target_os = "windows") {
+            "http://rx.localhost/abcdefgh23"
+        } else {
+            "rx://localhost/abcdefgh23"
+        };
+        assert!(s.contains(&format!(r#""rxBase":"{want}""#)));
         assert!(s.contains(r#""appVersion":"0.2.0""#));
         assert!(s.contains("dataset.shell = s.platform"));
         assert!(s.contains(r#"var p = "/inbox";"#));
