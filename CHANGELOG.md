@@ -8,6 +8,10 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **A `session.seq` above 2^53 − 1 is refused**, the schema's bound: the receiver answers
+  `bad_seq`, and the outbox reader and the demo drop it. Two such seqs in one session hung
+  the GUI server at 100% CPU while it listed the hole between them; a store an older
+  release already wrote them into now boots instead of hanging.
 - **One session file the outbox can't read no longer stops the outbox.** A file the GUI
   may not open (its mode, another user's) or a folder named `*.jsonl` made the first read
   fail, and no session from the outbox reached the board while that file stayed so,
