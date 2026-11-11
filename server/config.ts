@@ -27,6 +27,31 @@ export interface GuiConfig {
   /** Session search reads this machine's own agent history (Claude Code, Codex,
    *  Antigravity, Gemini CLI logs), read-only. Absent = on; Settings ▸ Data turns it off. */
   searchHistory?: boolean;
+  /** A spacesheep account used as a backend (server/sources/spacesheep.ts, RFC 08): the
+   *  relay's origin, the `gui` key it minted for this install, and who. Absent = off. */
+  spacesheep?: SpacesheepLink;
+}
+
+export interface SpacesheepLink {
+  origin: string;
+  key: string;
+  email: string;
+  connectedAt: string;
+}
+
+/** The link as it is kept, or undefined when the record is not one. */
+export function readSpacesheepLink(v: unknown): SpacesheepLink | undefined {
+  const r = v as Partial<SpacesheepLink> | null;
+  if (!r || typeof r !== "object") return undefined;
+  if (typeof r.origin !== "string" || !/^https?:\/\/[^/\s]+$/.test(r.origin)) return undefined;
+  if (typeof r.key !== "string" || !/^ss_[A-Za-z0-9_-]{8,}$/.test(r.key)) return undefined;
+  if (typeof r.email !== "string" || !r.email) return undefined;
+  return {
+    origin: r.origin,
+    key: r.key,
+    email: r.email,
+    connectedAt: typeof r.connectedAt === "string" ? r.connectedAt : new Date().toISOString(),
+  };
 }
 
 export function defaultStateDir(): string {
@@ -102,6 +127,8 @@ export function readGuiConfig(dir: string): GuiConfig {
   if (Array.isArray(cfg.disabled)) full.disabled = cfg.disabled.filter((d): d is string => typeof d === "string");
   if (Array.isArray(cfg.enabled)) full.enabled = cfg.enabled.filter((d): d is string => typeof d === "string");
   if (typeof cfg.searchHistory === "boolean") full.searchHistory = cfg.searchHistory;
+  const link = readSpacesheepLink(cfg.spacesheep);
+  if (link) full.spacesheep = link;
   if (!complete) writeGuiConfig(dir, full);
   return full;
 }
@@ -136,6 +163,15 @@ export function setPublicUrl(dir: string, cfg: GuiConfig, url: string | undefine
 }
 
 /** Session search's history setting (`POST /api/ui/search/settings`), remembered. */
+/** Connect to, or disconnect from, a spacesheep account; written at once. */
+export function setSpacesheep(dir: string, cfg: GuiConfig, link: SpacesheepLink | undefined): GuiConfig {
+  const next = { ...cfg };
+  if (link) next.spacesheep = link;
+  else delete next.spacesheep;
+  writeGuiConfig(dir, next);
+  return next;
+}
+
 export function setSearchHistory(dir: string, cfg: GuiConfig, on: boolean): GuiConfig {
   if ((cfg.searchHistory !== false) === on) return cfg;
   const next = { ...cfg, searchHistory: on };

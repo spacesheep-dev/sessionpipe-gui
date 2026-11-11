@@ -10,7 +10,7 @@
 // arrived in the last minute or its control daemon is online. Requests waiting for a
 // person (pairings, devices) come first; on an address that cannot sign, one line says so
 // above the machines.
-import { accountLabel, type HarnessAccount, type MachinePool, type MachineSummary } from "@shared/api";
+import { accountLabel, type HarnessAccount, type MachinePool, type MachineSummary, ROUTES } from "@shared/api";
 import { useEffect, useState } from "react";
 import { Ago, CommandWell, EmptyState, HarnessGlyph } from "../components/bits";
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
@@ -20,8 +20,9 @@ import { useRpId } from "../control/hooks";
 import { openNewSession } from "../control/newSessionState";
 import { PendingDevices, sentence } from "../control/PendingDevices";
 import { PendingPairings } from "../control/PendingPairings";
-import { canSign, machineTakes, setupLabel, signerKind, signHint, useOwnKeys } from "../control/signer";
+import { canSign, deviceKey, machineTakes, setupLabel, signerKind, signHint, useOwnKeys } from "../control/signer";
 import { useMachines, useStore } from "../data/hooks";
+import { apiUrl } from "../lib/net";
 import "../lib/acp";
 import { harnessMark } from "../lib/format";
 import { copyText } from "../lib/menus";
@@ -169,6 +170,7 @@ function MachineBlock({
         <h2 className="machine-name">{m.name}</h2>
         <span className="machine-last">
           {online ? "online" : "quiet"} · last event <Ago iso={m.lastAt} />
+          {c?.remote && <> · paired on {new URL(c.remote.origin).host}</>}
         </span>
         <MoreButton build={items} label={`Actions for ${m.name}`} title={() => m.name} />
       </header>
@@ -264,7 +266,7 @@ function MachineBlock({
               {devices}
               {c.queued > 0 && <span className="machine-sub"> · {c.queued} queued</span>}
               {app === "update" && <span className="machine-sub"> · update sessionpipe here to send from the app</span>}
-              {app === "setup" && (
+              {app === "setup" && !c?.remote && (
                 <>
                   {" · "}
                   <Link to="/add-device" className="link" data-setup>
@@ -272,6 +274,7 @@ function MachineBlock({
                   </Link>
                 </>
               )}
+              {app === "setup" && c?.remote && <RemoteAppSetup rpId={c.remote.rpId} origin={c.remote.origin} />}
             </span>
           </li>
         )}
@@ -330,5 +333,61 @@ function FolderName({ machine, path, home }: { machine: string; path: string; ho
     <span className="mono machine-folder" title={path} {...menu}>
       {tildify(path, home)}
     </span>
+  );
+}
+
+/** In the app, a machine paired on spacesheep that doesn't trust this app's key yet: the
+ *  app's device key for that receiver's rp id goes to spacesheep (docs/rfcs/08 phase B),
+ *  which shows the request on its Devices page with the number shown here; a passkey
+ *  there approves it, once per machine. */
+function RemoteAppSetup({ rpId, origin }: { rpId: string; origin: string }) {
+  const [asked, setAsked] = useState<{ code?: string; devicesUrl?: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const host = new URL(origin).host;
+  const ask = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const key = await deviceKey(rpId);
+      const res = await fetch(apiUrl(`${ROUTES.ui.spacesheep}/device`), {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ key }),
+      });
+      const j = (await res.json()) as { code?: string; devicesUrl?: string; error?: string };
+      if (!res.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
+      setAsked({ code: j.code, devicesUrl: j.devicesUrl });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (asked)
+    return (
+      <>
+        {" · "}
+        <span data-remote-setup>
+          Approve this app on {host}: it shows <strong className="num">{asked.code}</strong>
+          {asked.devicesUrl && (
+            <>
+              {" · "}
+              <a href={asked.devicesUrl} target="_blank" rel="noreferrer" className="link">
+                open Devices there →
+              </a>
+            </>
+          )}
+        </span>
+      </>
+    );
+  return (
+    <>
+      {" · "}
+      <button type="button" className="link" disabled={busy} onClick={() => void ask()} data-remote-setup>
+        {busy ? "Asking…" : `Approve this app on ${host}…`}
+      </button>
+      {err && <span className="machine-sub machine-err"> · {err}</span>}
+    </>
   );
 }

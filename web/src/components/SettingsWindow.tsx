@@ -377,6 +377,7 @@ export function Settings() {
                   {section === "notifications" && <Notifications />}
                   {section === "keyboard" && <Keyboard />}
                   {section === "views" && <Views />}
+                  {section === "data" && <SpacesheepGroup Group={Group} Row={Row} />}
                   {section === "data" && <SearchDataGroup Group={Group} Row={Row} />}
                   {section === "data" && <Data />}
                   {section === "about" && <About />}
@@ -815,6 +816,108 @@ const AGES: { days: number; label: string }[] = [
   { days: 30, label: "a month" },
   { days: 90, label: "three months" },
 ];
+
+/** "Use a spacesheep account": the relay option (docs/rfcs/08). Off by default; the copy
+ *  names the trade. Connect opens spacesheep's confirm page with four digits; the server
+ *  polls and connects; the group follows through the info it re-reads. */
+function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeof Row }) {
+  type Status = {
+    link: NonNullable<Info["sources"]["spacesheep"]> | null;
+    pending: { code: string; digits: string; url: string; expiresAt: string; state: string; error?: string } | null;
+  };
+  const [st, setSt] = useState<Status | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const read = async () => {
+    try {
+      const res = await fetch(apiUrl(ROUTES.ui.spacesheep), { headers: { accept: "application/json" } });
+      if (res.ok) setSt((await res.json()) as Status);
+    } catch {}
+  };
+  useEffect(() => {
+    void read();
+  }, []);
+  useEffect(() => {
+    if (!st?.pending || st.pending.state !== "pending") return;
+    const t = setInterval(() => void read(), 2000);
+    return () => clearInterval(t);
+  }, [st?.pending]);
+  const connect = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch(apiUrl(ROUTES.ui.spacesheep), {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: "{}",
+      });
+      const j = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
+      if (j.url) window.open(j.url, "_blank", "noopener");
+      await read();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const disconnect = async () => {
+    setBusy(true);
+    try {
+      await fetch(apiUrl(ROUTES.ui.spacesheep), { method: "DELETE" });
+      await read();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const link = st?.link ?? null;
+  const p = st?.pending ?? null;
+  const stateWords: Record<string, string> = {
+    starting: "connecting…",
+    ok: "reading",
+    unauthorized: "the key was revoked on spacesheep; disconnect and connect again",
+    offline: "spacesheep can't be reached right now",
+    gap: "reading (an older gap the relay no longer holds)",
+  };
+  return (
+    <G
+      label="A spacesheep account"
+      note={
+        link
+          ? `Connected as ${link.email} since ${new Date(link.connectedAt).toLocaleDateString()}. ${link.events} events so far · ${stateWords[link.state] ?? link.state}${link.lastError && link.state !== "ok" ? ` · ${link.lastError}` : ""}${link.machines.length ? ` · machines there: ${link.machines.join(", ")}` : ""}. The key is under Settings → API keys on spacesheep; revoking it there disconnects this app.`
+          : "An option, not the default: read the sessions and machines paired on a spacesheep account through spacesheep, with nothing to host here. spacesheep then holds what those machines send, at the tier they send, under its privacy policy; a self-hosted board keeps everything on this disk. You can run both."
+      }
+    >
+      <R
+        label="Use a spacesheep account"
+        hint={
+          link
+            ? link.origin
+            : p && p.state === "pending"
+              ? `Confirm on spacesheep: the page shows ${p.digits.slice(0, 2)} ${p.digits.slice(2)}`
+              : p && p.state !== "pending"
+                ? `Not connected (${p.state}). Try again.`
+                : "Off"
+        }
+      >
+        {link ? (
+          <button type="button" className="btn" disabled={busy} onClick={() => void disconnect()}>
+            Disconnect
+          </button>
+        ) : p && p.state === "pending" ? (
+          <a className="btn btn--primary" href={p.url} target="_blank" rel="noreferrer">
+            Open the confirm page
+          </a>
+        ) : (
+          <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void connect()}>
+            Connect…
+          </button>
+        )}
+      </R>
+      {err && <p className="settings-group-note settings-err">{err}</p>}
+    </G>
+  );
+}
 
 function Data() {
   const store = useStore();
