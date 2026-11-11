@@ -5,15 +5,25 @@
 // (a background agent works on after that turn's Stop); an agent the session asked
 // (`delegation.started` / `.ended`, sessionpipe ask or a handoff) is one row in the turn
 // the ask began in, and the answer a handoff brought back is told apart from a prompt the
-// person typed by the daemon's frame. Pure, so all of it is unit-tested.
+// person typed by the daemon's frame. A message handed to a session at a turn's Stop has
+// no `turn.started`: its transcript, marked `injected`, is an exchange of its own after
+// that turn. Pure, so all of it is unit-tested.
 import type { AgentRun, StoredEvent } from "@shared/api";
 import { harnessMark } from "./format";
 import { dur } from "./time";
 
 export interface Turn {
+  /** Its place among the loaded turns: 0 for what came before the first `turn.started`,
+   *  then 1, 2, … as the turns began. An exchange a Stop handed over (`continues`) sits
+   *  between its turn and the next (`n` + a thousandth each), so a started turn keeps its
+   *  number whatever the tier lens leaves out. */
   n: number;
   start?: StoredEvent;
   items: Item[];
+  /** The exchange a message began when it was handed to the session at a turn's Stop
+   *  (sessionpipe 0.13.4: a `turn.transcript` marked `injected`, and no `turn.started`):
+   *  the `n` of the turn whose Stop took it. The harness counts both as one turn. */
+  continues?: number;
 }
 export type Item =
   | { kind: "tool"; key: string; started?: StoredEvent; ended?: StoredEvent }
@@ -55,31 +65,53 @@ const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v 
  *  sender stamps the exchange with its prompt's time (the sim with its end), and the hook
  *  with when it ran: the two differ by moments, while turns sit seconds apart. */
 const TRANSCRIPT_SLACK_MS = 10_000;
+/** How long before its `turn.started` a prompt may be stamped: the harness writes it down,
+ *  then runs the hook. */
+const PROMPT_LEAD_MS = 1000;
 
 const ms = (iso: unknown): number => (typeof iso === "string" ? Date.parse(iso) : Number.NaN);
-const endedAt = (t: Turn): number => {
-  const end = t.items.find((i) => i.kind === "event" && i.e.type === "turn.ended") as EventItem | undefined;
-  return end ? ms(end.e.time) : Number.NaN;
+const isEnd = (i: Item): i is EventItem => i.kind === "event" && i.e.type === "turn.ended";
+const isTranscript = (i: Item): i is EventItem => i.kind === "event" && i.e.type === "turn.transcript";
+/** When a turn was last heard to end: a Stop that handed a message over is followed by
+ *  another, in the turn's own rows or in the exchange that message began. */
+const endedAt = (t: Turn, handed: readonly Turn[] = []): number => {
+  let end = Number.NaN;
+  for (const x of [t, ...handed]) for (const i of x.items) if (isEnd(i) && !(ms(i.e.time) <= end)) end = ms(i.e.time);
+  return end;
 };
 
-/** The turn a `turn.transcript` describes, by time: its `at` falls inside the turn's span
- *  (start to end, or to the next turn's start). Its `turn` number can't say: the sender
+/** The turn a `turn.transcript` describes, by time. Its `turn` number can't say: the sender
  *  counts the exchanges it read from the transcript file (from 0, and from wherever it
  *  first read), never the hook turns, and the loaded window starts mid-session. A late
  *  read hands the last two exchanges over at once, so counting from the newest turn put a
- *  turn's words on the one before it ("the second prompt showed as 'hi'"). `undefined`
+ *  turn's words on the one before it ("the second prompt showed as 'hi'").
+ *
+ *  The sender stamps an exchange with its prompt's time, and the prompt's hook runs a
+ *  moment later (on 1,247 prompts of real sessions: under two tenths of a second on all
+ *  but three, never more than a second, never before). So a transcript stamped within a
+ *  second before a turn's `turn.started` is that turn's, whatever the turn before it
+ *  looks like: one that was stopped has no end of its own (or an `interrupt` stamped by
+ *  the very hook that began the next), and its span runs up to the next turn's start, so
+ *  it took the next turn's words. Otherwise `at` falls inside the turn's span
+ *  (start to end, or to the next turn's start), or within the slack of it. `undefined`
  *  when no loaded turn is close: an exchange from before the window, or the history a
  *  fork copied. `null` when the time can't be read. */
-function transcriptHome(turns: Turn[], at: number): Turn | null | undefined {
+function transcriptHome(turns: Turn[], at: number, handed: ReadonlyMap<Turn, Turn[]>): Turn | null | undefined {
   if (!Number.isFinite(at)) return null;
+  let lead: Turn | undefined;
+  let leadD = PROMPT_LEAD_MS;
   let best: Turn | undefined;
   let bestD = Number.POSITIVE_INFINITY;
   for (let i = 0; i < turns.length; i++) {
     const t = turns[i]!;
     const start = ms(t.start?.time);
     if (!Number.isFinite(start)) continue;
+    if (start >= at && start - at <= leadD) {
+      lead = t;
+      leadD = start - at;
+    }
     const next = turns[i + 1];
-    const end = endedAt(t);
+    const end = endedAt(t, handed.get(t));
     const until = Number.isFinite(end) ? end : next ? ms(next.start?.time) : Number.POSITIVE_INFINITY;
     const d = at < start ? start - at : at > until ? at - until : 0;
     if (d < bestD) {
@@ -87,7 +119,7 @@ function transcriptHome(turns: Turn[], at: number): Turn | null | undefined {
       bestD = d;
     }
   }
-  return bestD <= TRANSCRIPT_SLACK_MS ? best : undefined;
+  return lead ?? (bestD <= TRANSCRIPT_SLACK_MS ? best : undefined);
 }
 
 /** Pairs a tool.ended with its tool.started among `open` (by call id, else by name), or
@@ -124,6 +156,29 @@ export function groupTurns(events: StoredEvent[], agents: readonly AgentRun[] = 
   const byCall = new Map(agents.filter((a) => a.callId).map((a) => [a.callId!, a.id]));
   const groups = new Map<string, { item: AgentItem; open: Map<string, ToolItem> }>();
   const asks = new Map<string, DelegationItem>();
+  /** The exchanges each turn's Stops handed over, oldest first, and the turn each is of. */
+  const handed = new Map<Turn, Turn[]>();
+  const turnOf = new Map<Turn, Turn>();
+  /** A new exchange for a message handed over at one of `home`'s Stops, at `at`. What the
+   *  session did after that Stop is the exchange's: the rows the turn (or the exchange
+   *  before this one) gained after it, the transcript that describes those apart. */
+  const handover = (home: Turn, at: number): Turn => {
+    const list = handed.get(home) ?? [];
+    const from = list[list.length - 1] ?? home;
+    const x: Turn = { n: home.n + (list.length + 1) / 1000, items: [], continues: home.n };
+    // The Stop that took it: the last one before it (the harness writes the message down
+    // once that Stop's hook has answered; a hook that is not ours can have held the turn
+    // at an earlier Stop), else the first.
+    let stop = from.items.findIndex(isEnd);
+    from.items.forEach((it, i) => {
+      if (isEnd(it) && ms(it.e.time) <= at) stop = i;
+    });
+    if (stop >= 0) for (const it of from.items.splice(stop + 1)) (isTranscript(it) ? from : x).items.push(it);
+    handed.set(home, [...list, x]);
+    turnOf.set(x, home);
+    if (cur === from) cur = x;
+    return x;
+  };
   /** An agent's group, made in its spawning turn (the turn its events name, else the one
    *  the summary names, else the current one) the first time it is heard of. */
   const group = (id: string, e: StoredEvent, at?: Turn) => {
@@ -200,18 +255,54 @@ export function groupTurns(events: StoredEvent[], agents: readonly AgentRun[] = 
       if (made) cur.items.push(made);
       continue;
     }
-    if (e.type === "turn.transcript" && turns.length > 1) {
+    if (e.type === "turn.transcript") {
       // Attach to the turn it describes; one that is none of the loaded turns is left out.
-      const home = transcriptHome(turns, ms(e.data.at));
+      const at = ms(e.data.at);
+      const home = turns.length > 1 ? transcriptHome(turns, at, handed) : null;
       if (home === undefined) continue;
-      (home ?? cur).items.push({ kind: "event", key: e.id, e });
+      // A message handed over at the turn's Stop: the turn has its own exchange already,
+      // and this one, the message and its answer, is drawn after it, never instead of it.
+      const of = home ?? turnOf.get(cur) ?? cur;
+      const to = e.data.injected === true && of.items.some(isTranscript) ? handover(of, at) : (home ?? cur);
+      to.items.push({ kind: "event", key: e.id, e });
       continue;
     }
     // A status line's usage report is the account's, not a step of the turn (Usage shows it).
     if (e.type === "limits.observed") continue;
     cur.items.push({ kind: "event", key: e.id, e });
   }
-  return turns.filter((t) => t.start || t.items.length > 0);
+  return turns.flatMap((t) => [t, ...(handed.get(t) ?? [])]).filter((t) => t.start || t.items.length > 0);
+}
+
+/** The transcript of an exchange a Stop handed over: the event that made it one. */
+const handedBy = (t: Turn): StoredEvent | undefined =>
+  t.continues === undefined ? undefined : [...t.items].reverse().find(isTranscript)?.e;
+
+/** When a turn began, on its machine's clock: its `turn.started`, or, for an exchange a
+ *  Stop handed over, the moment the message was handed over (its transcript's `at`). */
+export function turnBegan(t: Turn): string | undefined {
+  if (t.start) return t.start.time;
+  const e = handedBy(t);
+  return e ? (str(e.data.at) ?? e.time) : undefined;
+}
+
+const itemSeq = (i: Item): number | undefined =>
+  (i.kind === "event"
+    ? i.e
+    : i.kind === "tool"
+      ? (i.started ?? i.ended)
+      : i.kind === "agent"
+        ? (i.launch?.started ?? i.launch?.ended ?? i.started ?? i.ended)
+        : (i.started ?? i.ended)
+  )?.session.seq;
+
+/** The seq a turn's rows begin at: its `turn.started`, or the first row of an exchange a
+ *  Stop handed over. Undefined for what came before the first turn. */
+export function turnSeq(t: Turn): number | undefined {
+  if (t.start) return t.start.session.seq;
+  if (t.continues === undefined) return undefined;
+  const seqs = t.items.map(itemSeq).filter((n): n is number => n !== undefined);
+  return seqs.length ? Math.min(...seqs) : undefined;
 }
 
 /** The person's words of a turn: its transcript's, else the running turn's reading. */
@@ -228,22 +319,45 @@ export function turnPrompt(turn: Turn): string | undefined {
 }
 
 /** A message sent from here, as far as matching it to a turn goes: its id, when the
- *  receiver queued it, and its words (without an attachments block). `takenAt`: when the
- *  machine took it (its turn can't start much before). `start`: the `start` that made the
- *  session, whose turn is the session's first. */
+ *  receiver queued it (the receiver's clock, like an event's `arrivedAt`), and its words
+ *  (without an attachments block). `takenAt`: when the machine took it (its turn can't
+ *  start much before). `start`: the `start` that made the session, whose turn is the
+ *  session's first. `outcome`, `code`, `ackedAt`: where the machine's acks have brought it
+ *  (`ControlActivity`), and when the final one was written. */
 export interface SentMessage {
   id: string;
   at: string;
   text: string;
   takenAt?: string;
   start?: boolean;
+  outcome?: string;
+  code?: string;
+  ackedAt?: string;
 }
 
-/** The receiver's clock and the machine's need not agree; a turn can't start before its
- *  message was queued by more than this. */
+/** The receiver's clock and the machine's need not agree: a turn begins no more than this
+ *  before the machine took its message, or after the machine's last word on it. */
 const SENT_SKEW_MS = 60_000;
+/** A turn dated this long before its message was queued is not its turn, whatever the two
+ *  clocks say: it arrived late (a machine sending what it had held). A machine more than
+ *  five minutes behind the signing device refuses the command as signed in its future
+ *  (CONTROL.md §5), and the receiver's early check holds its own clock within ten of that
+ *  device's, so a turn the message did begin is never dated this far back. */
+const SENT_STALE_MS = 30 * 60_000;
 /** Shorter than this, the words must match exactly ("hi" is in "this"). */
 const SENT_PREFIX_MIN = 24;
+
+/** The final outcomes (CONTROL.md §10), and the ones that end a message before the session
+ *  had it: refused, expired, no way in; or failed on the way there (a file that did not
+ *  arrive, a session that did not take what was put in its inbox, a start stopped before
+ *  its process began). Any other failure happened in the turn the message began. */
+const FINAL = new Set(["delivered", "expired", "unsupported", "failed", "refused"]);
+const UNREACHED = new Set(["refused", "expired", "unsupported"]);
+const FAILED_BEFORE = new Set(["file", "held", "cancelled"]);
+/** Whether a message can be a turn's prompt: one the session never had is nobody's,
+ *  whatever was typed there later in the same words. */
+const reached = (m: SentMessage): boolean =>
+  !(UNREACHED.has(m.outcome ?? "") || (m.outcome === "failed" && FAILED_BEFORE.has(m.code ?? "")));
 
 // The machine frames what it hands a session (sessionpipe's control/route.ts): a source
 // line before a message to a running session, a source note after a new session's first.
@@ -285,12 +399,38 @@ export function handoffAnswer(
   return { harness: m[1]!, shortId: m[2]!, ...(via ? { via } : {}), reply: prompt.slice(m[0].length) };
 }
 
-/** Whether a turn's prompt is this message's words, once the machine's framing is off. */
+/** What sessionpipe's privacy filter leaves where it took something out of a prompt: a
+ *  secret, an email address, a phone number. */
+const SCRUBBED = /\[(?:redacted|email|phone)\]/;
+
+/** Whether a prompt the machine scrubbed is this message: what is left of it runs through
+ *  the message in order, from its first word to its last. Other words between the marks
+ *  are another prompt. */
+function scrubbed(prompt: string, sent: string): boolean {
+  const parts = prompt.split(SCRUBBED);
+  if (parts.length < 2) return false;
+  let at = 0;
+  let kept = 0;
+  for (const [i, part] of parts.entries()) {
+    const p = part.trim();
+    if (!p) continue;
+    const hit = sent.indexOf(p, at);
+    if (hit < 0 || (i === 0 && hit !== 0)) return false;
+    at = hit + p.length;
+    kept += p.length;
+  }
+  const last = parts[parts.length - 1]!.trim();
+  return kept >= 8 && (!last || at === sent.length);
+}
+
+/** Whether a turn's prompt is this message's words, once the machine's framing is off:
+ *  the same words, the words with what the machine scrubbed taken out, or the head of a
+ *  prompt the transcript cut short. */
 function sameWords(sent: string, prompt: string): boolean {
   const b = norm(sent);
   if (!b) return false;
   const u = norm(prompt.replace(FRAME_HEAD, "").replace(FRAME_TAIL, ""));
-  if (u === b) return true;
+  if (u === b || scrubbed(u, b)) return true;
   return b.length >= SENT_PREFIX_MIN && u.startsWith(b.slice(0, 200));
 }
 
@@ -307,13 +447,22 @@ function hiddenFits(m: SentMessage, t: Turn): boolean {
 }
 
 /** Which turn each sent message became: oldest message first, each takes the first turn
- *  not yet taken that started after it was queued and whose prompt is its words. Two
- *  messages in a row each find their own turn, even with the same words. A turn whose
- *  prompt arrived as a length only (tier 2) is the first such message's when it started
- *  after the machine took it and the length fits; a `start` takes the session's first
- *  turn when `fromStart` (the loaded window begins at the session's beginning). `bodyOf`
- *  takes a prompt's attachments block off, the way the message's own text had it taken
- *  off. Returns message id → the turn's `n`. */
+ *  not yet taken that began after it was queued and whose prompt is its words. Two
+ *  messages in a row each find their own turn, even with the same words. The turn is one
+ *  that began with a `turn.started`, or the exchange a Stop handed the message over to.
+ *
+ *  "After it was queued" is read on one clock: the receiver stamps both the message and
+ *  the turn's first event as it arrives, so a machine whose clock is minutes behind loses
+ *  nothing. The machine's own times only rule a turn out: one dated long before the
+ *  message (it arrived late), or after the machine's last word on the message (a message
+ *  whose own turn is not loaded never takes a later one that says the same). A message
+ *  the session never had (`reached`) takes none.
+ *
+ *  A turn whose prompt arrived as a length only (tier 2) is the first such message's when
+ *  it started after the machine took it and the length fits; a `start` takes the session's
+ *  first turn when `fromStart` (the loaded window begins at the session's beginning).
+ *  `bodyOf` takes a prompt's attachments block off, the way the message's own text had it
+ *  taken off. Returns message id → the turn's `n`. */
 export function sentTurns(
   messages: readonly SentMessage[],
   turns: readonly Turn[],
@@ -325,6 +474,7 @@ export function sentTurns(
   const sorted = [...messages].sort((a, b) => ms(a.at) - ms(b.at) || (a.id < b.id ? -1 : 1));
   const first = turns.find((t) => t.start);
   for (const m of sorted) {
+    if (!reached(m)) continue;
     if (m.start) {
       if (!o.fromStart || !first || taken.has(first.n)) continue;
       const prompt = turnPrompt(first);
@@ -333,12 +483,14 @@ export function sentTurns(
       taken.add(first.n);
       continue;
     }
-    const since = ms(m.at) - SENT_SKEW_MS;
+    const queued = ms(m.at);
     const took = ms(m.takenAt) - SENT_SKEW_MS;
+    const done = FINAL.has(m.outcome ?? "") ? ms(m.ackedAt) + SENT_SKEW_MS : Number.NaN;
     for (const t of turns) {
-      if (!t.start || taken.has(t.n)) continue;
-      const at = ms(t.start.time);
-      if (Number.isFinite(since) && at < since) continue;
+      if ((!t.start && t.continues === undefined) || taken.has(t.n)) continue;
+      if (ms((t.start ?? handedBy(t))?.arrivedAt) < queued) continue;
+      const at = ms(turnBegan(t));
+      if (at < queued - SENT_STALE_MS || at > done) continue;
       const prompt = turnPrompt(t);
       if (prompt === undefined) {
         // Its words are hidden: only a turn the machine could have run for this message.
