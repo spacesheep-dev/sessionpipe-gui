@@ -1,0 +1,48 @@
+{
+  "name": "protocol",
+  "spec": "VERSIONING.md",
+  "steps": [
+    {
+      "send": {
+        "headers": {
+          "sessionpipe-protocol": "99"
+        },
+        "events": [
+          {
+            "protocol": 99,
+            "id": "*",
+            "type": "session.started",
+            "time": "*",
+            "tier": 0,
+            "harness": {
+              "name": "conformance",
+              "event": "test"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 0
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "source": "startup"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": 400,
+        "body": {
+          "reason": "unsupported_protocol",
+          "supported": [
+            1
+          ]
+        }
+      }
+    }
+  ]
+}

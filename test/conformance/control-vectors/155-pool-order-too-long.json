@@ -1,0 +1,31 @@
+{
+  "name": "pool-order-too-long",
+  "description": "An order of 21 accounts: the pool holds at most 20.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"pool\",\"session\":\"sessionpipe:pool\",\"nonce\":\"_cahIeSahqb3UCb_L7Paxw\",\"iat\":1790800000000,\"pool_action\":\"order\",\"pool_order\":[\"acc_0\",\"acc_1\",\"acc_2\",\"acc_3\",\"acc_4\",\"acc_5\",\"acc_6\",\"acc_7\",\"acc_8\",\"acc_9\",\"acc_10\",\"acc_11\",\"acc_12\",\"acc_13\",\"acc_14\",\"acc_15\",\"acc_16\",\"acc_17\",\"acc_18\",\"acc_19\",\"acc_20\"]}",
+      "csig": "ut9ZzyFYed5lBTMVHtfzgmvuBy46ocPy08sr2jOGPb_cBecAVrTM8yom_JJn5W52e03kiSr89tKmRqIvNwKJNw",
+      "grant": {
+        "cred": "6FP630vse6D271_LP5YxQhiH7Ro9Ew0a",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiaGVBUjh4c21ScjM0MmJ5QXM2RUdtMjFWcU5xX2ctSWgycl9ReHR1VExnWSIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEYCIQDYFOaIOzbgkvYq1JT9YDyTy6WNzUp3twI9vXrXZzt3VAIhALpfOkLBSkVAa63RTLYj10X7hsICO4FMuBlteGfmIrqv",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE3LRphQ8Tu3hwfO3l10QT-ymYuFMqIXM4NZ3qYUa8uuQcQGT1R-m4le19ttipt0maUgg6UC-j6TRO821MsozEBA\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "6FP630vse6D271_LP5YxQhiH7Ro9Ew0a",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2U3x1j5ZGN8EVblGBeu875Wx5uTrMdyAsI4SehypmilhtnYsCBuPwkDLH7UH1L0U6C11cpV-G2dJkzNuIp29XQ"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}

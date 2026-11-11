@@ -1,0 +1,79 @@
+{
+  "name": "forget",
+  "spec": "HTTP.md §5",
+  "capability": "forget",
+  "steps": [
+    {
+      "send": {
+        "events": [
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "session.started",
+            "time": "*",
+            "tier": 0,
+            "harness": {
+              "name": "conformance",
+              "event": "test"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 0
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "source": "startup"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": 202
+      }
+    },
+    {
+      "send": {
+        "events": [
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "session.forgotten",
+            "time": "*",
+            "tier": 0,
+            "harness": {
+              "name": "conformance",
+              "event": "test"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 1
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {}
+          }
+        ]
+      },
+      "expect": {
+        "status": 202
+      }
+    },
+    {
+      "read": {
+        "session": "conformance:conf-{run}"
+      },
+      "expect": {
+        "status": 404
+      }
+    }
+  ]
+}

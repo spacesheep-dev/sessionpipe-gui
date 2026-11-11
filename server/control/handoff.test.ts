@@ -10,11 +10,11 @@ import type { ControlCommand } from "sessionpipe-core/control";
 import { afterAll, describe, expect, it } from "vitest";
 import { ROUTES } from "../../shared/api.js";
 import { Router } from "../http/router.js";
-import { type Control, createControl } from "./index.js";
+import { type Control, type ControlDeps, createControl } from "./index.js";
 import { parseHello } from "./parse.js";
 import { ControlState, toActivity } from "./state.js";
 import { commandStr, signCommand, TestDayKey, TestPasskey } from "./testkeys.js";
-import { coreTakesReplyTo, replyToProblem } from "./ui.js";
+import { replyToProblem } from "./ui.js";
 
 const SINK = "spg_test_sink_token_0123456789";
 const CONTROL = ROUTES.control;
@@ -28,7 +28,9 @@ afterAll(() => {
   for (const d of tmpDirs) rmSync(d, { recursive: true, force: true });
 });
 
-async function boot(): Promise<{ url: string; control: Control; close(): Promise<void> }> {
+async function boot(
+  o: Pick<ControlDeps, "remoteSend"> = {},
+): Promise<{ url: string; control: Control; close(): Promise<void> }> {
   const stateDir = mkdtempSync(path.join(os.tmpdir(), "spgui-handoff-"));
   tmpDirs.push(stateDir);
   const control = createControl({
@@ -37,6 +39,7 @@ async function boot(): Promise<{ url: string; control: Control; close(): Promise
     rpId: "localhost",
     testDoor: true,
     uiAuth: (ctx) => ctx.remote.loopback,
+    ...o,
   });
   const router = new Router();
   control.register(router);
@@ -133,6 +136,16 @@ describe("reply_to", () => {
     });
     expect(replyToProblem({ ...prompt, reply_to: 7 }, { handoff: true })).toMatchObject({ code: "bad_fields" });
     expect(replyToProblem({ ...prompt, reply_to: SESSION }, { handoff: true })).toMatchObject({ code: "bad_fields" });
+    // The machine's own key store and pool are no session an answer could go into, whatever
+    // the hello says; a harness that only starts with the word is one like any other.
+    for (const own of ["sessionpipe:keys", "sessionpipe:pool", "sessionpipe:anything-else"]) {
+      expect(replyToProblem({ ...prompt, reply_to: own }, { handoff: true }), own).toMatchObject({
+        code: "bad_fields",
+        why: "reply_to is a coding session, not the machine's own keys or pool",
+      });
+      expect(replyToProblem({ ...prompt, reply_to: own }, {}), own).toMatchObject({ code: "bad_fields" });
+    }
+    expect(replyToProblem({ ...prompt, reply_to: "sessionpipe-x:abc" }, { handoff: true })).toBeNull();
     expect(replyToProblem(prompt, {})).toMatchObject({ code: "handoff" });
     expect(replyToProblem(prompt, { handoff: false })).toMatchObject({ code: "handoff" });
   });
@@ -183,7 +196,7 @@ describe("reply_to", () => {
     }
   });
 
-  it("/send with reply_to: carried to a machine that said handoff once this core takes the field", async () => {
+  it("/send with reply_to: refused until the hello says handoff, then carried byte for byte", async () => {
     const b = await boot();
     try {
       const pk = await TestPasskey.create();
@@ -193,24 +206,79 @@ describe("reply_to", () => {
       const token = r.body.token as string;
       const cmd = commandStr(machine, { iat: Date.now(), text: "Second opinion?", reply_to: OTHER });
       const signed = await signCommand(pk, day, cmd);
-      // Before the hello says handoff: refused, by the second look or by an older core first.
+      // Before the hello says handoff: the verifier takes the field, the second look does not.
       const early = await call(b.url, "POST", `${UI}/send`, { body: { machineId: machine, ...signed } });
       expect(early.status).toBe(422);
+      expect(early.body.code).toBe("handoff");
+      expect(b.control.activity()).toHaveLength(0);
       await call(b.url, "POST", `${CONTROL}/hello`, { bearer: token, body: { ...facts, ask: true, handoff: true } });
       const sent = await call(b.url, "POST", `${UI}/send`, { body: { machineId: machine, ...signed, from: SESSION } });
-      if (coreTakesReplyTo()) {
-        expect(early.body.code).toBe("handoff");
-        expect(sent.status).toBe(201);
-        expect(sent.body).toMatchObject({ replyTo: OTHER, from: SESSION });
-        // Carried byte for byte: the field is inside what was signed.
-        const polled = await call(b.url, "GET", `${CONTROL}?machine=${machine}&wait=0`, { bearer: token });
-        expect((polled.body.messages as { cmd: string }[])[0]!.cmd).toBe(cmd);
-      } else {
-        // sessionpipe-core 0.10.0: its verifier's closed field list refuses it before our look.
-        expect(early.body.code).toBe("bad_fields");
-        expect(sent.status).toBe(422);
-        expect(sent.body.code).toBe("bad_fields");
-      }
+      expect(sent.status, JSON.stringify(sent.body)).toBe(201);
+      expect(sent.body).toMatchObject({ replyTo: OTHER, from: SESSION });
+      // Carried byte for byte: the field is inside what was signed.
+      const polled = await call(b.url, "GET", `${CONTROL}?machine=${machine}&wait=0`, { bearer: token });
+      expect((polled.body.messages as { cmd: string }[])[0]!.cmd).toBe(cmd);
+      // The verifier's own refusals of the field come first, with its code (vectors 167 to 169).
+      const own = commandStr(machine, { iat: Date.now(), reply_to: SESSION });
+      const refused = await call(b.url, "POST", `${UI}/send`, {
+        body: { machineId: machine, ...(await signCommand(pk, day, own)) },
+      });
+      expect(refused).toMatchObject({ status: 422, body: { code: "bad_fields" } });
+      // The verifier takes any well-formed ref, the machine's own key store and pool
+      // included; the second look does not, on a prompt or a start, and nothing is queued.
+      const before = b.control.activity().length;
+      for (const pseudo of ["sessionpipe:keys", "sessionpipe:pool"])
+        for (const fields of [{}, { kind: "start", session: OTHER, cwd: "/Users/demo/acme/web" }]) {
+          const c = commandStr(machine, { iat: Date.now(), ...fields, reply_to: pseudo });
+          const r2 = await call(b.url, "POST", `${UI}/send`, {
+            body: { machineId: machine, ...(await signCommand(pk, day, c)) },
+          });
+          expect(r2.status, `${pseudo} ${JSON.stringify(r2.body)}`).toBe(422);
+          expect(r2.body).toEqual({
+            reason: "reply_to is a coding session, not the machine's own keys or pool",
+            code: "bad_fields",
+          });
+        }
+      expect(b.control.activity()).toHaveLength(before);
+    } finally {
+      await b.close();
+    }
+  });
+
+  it("a remote machine's handoff the relay refuses comes back as any refusal does: 422, the relay's code and words", async () => {
+    // A machine paired on spacesheep: the command is carried there unverified, and what the
+    // relay answers is mapped to the shape the page reads (forwardSend). A `bad_fields` from
+    // there reaches the Handoff sheet exactly as one from this receiver's own verifier does.
+    const why = "a reply_to can't name the command's own session";
+    const asked: Record<string, unknown>[] = [];
+    const b = await boot({
+      remoteSend: async (_m, body) => {
+        asked.push(body);
+        return { status: 400, json: { code: "bad", refusal: "bad_fields", error: why } };
+      },
+    });
+    try {
+      const machine = "m_handoffremote0000001";
+      b.control.remote.upsert(
+        [
+          {
+            id: machine,
+            name: "lab-mac",
+            online: true,
+            agents: ["claude-code", "codex"],
+            passkey_ids: ["k1"],
+            ask: true,
+            handoff: true,
+          },
+        ],
+        { via: "spacesheep", origin: "https://spacesheep.dev", rpId: "spacesheep.dev" },
+      );
+      expect(b.control.machines().get("lab-mac")).toMatchObject({ handoff: true, remote: { via: "spacesheep" } });
+      const cmd = commandStr(machine, { iat: Date.now(), reply_to: OTHER });
+      const sent = await call(b.url, "POST", `${UI}/send`, { body: { machineId: machine, cmd, csig: "c2ln" } });
+      expect(sent).toEqual({ status: 422, body: { reason: why, code: "bad_fields" } });
+      expect(asked).toEqual([{ cmd, csig: "c2ln", grant: null, confirm: null }]);
+      expect(b.control.activity()).toHaveLength(0);
     } finally {
       await b.close();
     }
