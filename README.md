@@ -325,7 +325,7 @@ device.
 
 | Platform | Download |
 |---|---|
-| macOS 11 or newer, Apple silicon and Intel | [sessionpipe_0.7.2_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.5/sessionpipe_0.7.5_universal.dmg), signed and notarized |
+| macOS 11 or newer, Apple silicon and Intel | [sessionpipe_0.7.5_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.5/sessionpipe_0.7.5_universal.dmg), signed and notarized |
 | Linux, x86-64 | [.deb](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.5/sessionpipe_0.7.5_amd64.deb) · [AppImage](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.5/sessionpipe_0.7.5_amd64.AppImage), for any distribution |
 
 The same UI in a small [Tauri 2](https://tauri.app) app that uses the system's own web view
