@@ -82,7 +82,7 @@ views (themes: pages kept outside the GUI, loaded by the board at runtime):
   sessionpipe-gui view list                  installed views
   sessionpipe-gui view add <source>          install: a folder, a .tgz/.zip (path or URL),
                                              an npm package name or a git URL
-  sessionpipe-gui view link <folder>         symlink a folder, for development
+  sessionpipe-gui view link <folder>         link a folder in place, for development
   sessionpipe-gui view remove <id>           uninstall
   sessionpipe-gui view disable|enable <id>   hide a view (Canvas and Office ship bundled and
                                              cannot be removed) or show it again

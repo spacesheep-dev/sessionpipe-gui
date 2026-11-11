@@ -73,7 +73,7 @@ Install it, then Reload on the Views page (or restart):
 
 ```sh
 sessionpipe-gui plugin add ./needs-you-log      # copies the folder
-sessionpipe-gui plugin link ./needs-you-log     # or: symlink it while you work on it
+sessionpipe-gui plugin link ./needs-you-log     # or: link it while you work on it
 ```
 
 ## The manifest
@@ -183,7 +183,7 @@ sessionpipe-gui plugin add ./my-plugin                 # a folder: copied
 sessionpipe-gui plugin add my-plugin-0.1.0.tgz         # an archive: extracted
 sessionpipe-gui plugin add @you/sessionpipe-plugin-x   # an npm package name
 sessionpipe-gui plugin add https://github.com/you/x.git
-sessionpipe-gui plugin link ./my-plugin                # a symlink, for development
+sessionpipe-gui plugin link ./my-plugin                # a link (a symlink, or a junction on Windows), for development
 sessionpipe-gui plugin list
 sessionpipe-gui plugin remove my-plugin
 ```
