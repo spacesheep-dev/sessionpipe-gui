@@ -36,7 +36,6 @@ pub struct Model {
     pub paused: bool,
 }
 
-/// One row's text: title, the machine when there are several receivers, then what it needs.
 /// The tray's name for the receiver on this machine.
 const THIS_MACHINE: &str = if cfg!(target_os = "macos") {
     "This Mac"
@@ -44,6 +43,7 @@ const THIS_MACHINE: &str = if cfg!(target_os = "macos") {
     "This computer"
 };
 
+/// One row's text: title, the machine when there are several receivers, then what it needs.
 fn row_label(i: &NeedsYouItem, multi: bool, receivers: &[(ReceiverRef, bool)]) -> String {
     let title = crate::tools::one_line(&i.display_title(), 42);
     let what = crate::tools::item_short(i);
