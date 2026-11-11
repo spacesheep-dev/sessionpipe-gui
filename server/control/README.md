@@ -33,7 +33,8 @@ interface Pairing {
   startedAt: string; expiresAt: string;
   machine: { id: string; name: string; harnesses: string[]; modes: string[]; version: string;
              folders?: string[]; mode?: "safe" | "auto" | "inherit";
-             accounts?: { harness: string; id: string; email?: string; name?: string }[];
+             accounts?: { harness: string; id: string; email?: string; name?: string;
+                          signedIn?: boolean }[];
              firstPairing: boolean;    // no token yet: approving hands the machine its token
              keys: number };           // passkeys already trusted for it
   rpId: string;
@@ -115,8 +116,14 @@ age window, no nonce store) and only then queues it.
 (`shared/api.ts`) is the receiver's reading of a carried message — never the signature:
 `outcome` moves through `taken` / `progress` (with `reply` and `replySeq`, the highest
 kept) to a final `delivered` / `expired` / `unsupported` / `failed` / `refused` (with
-`code`), `mode` says how it was delivered. The same objects arrive on the SSE stream as
-`{ kind: "control", message }` whenever one is queued, acked or expires.
+`code`), `mode` says how it was delivered (`shared/api.ts` `DELIVERY_MODES`: `sdk`,
+`waiter`, `turn`, `inbox`, `api`, `resume`, `fork`; an ack's mode that is none of these is
+dropped, the ack kept). `ackSession` is the session the final ack named when it is not the
+command's, and `copyOf` the ack's `copy_of` (sessionpipe 0.13): a copy of the session
+answered, `ackSession` is that copy and `copyOf` the session that was asked, with the
+machine's reason in `detail`; a `copy_of` that is not a session ref is dropped. The same
+objects arrive on the SSE stream as `{ kind: "control", message }` whenever one is queued,
+acked or expires.
 
 For a `permission.answer`, `text` is `"<decision>"` or `"<decision>: <note>"`; for a
 `key.add`, `"trust <name>"`. A `start`'s activity also carries what was signed (`cwd`,
@@ -155,8 +162,11 @@ ask each other) and `handoff` (`true`: it takes `reply_to`; the Handoff sheet of
 the answer back" only then), both absent from a hello that predates them, and `start` (per harness `{ permissions, permission, models?, any_model? }`;
 an entry for a harness the hello does not list, a default outside its levels (or
 `inherit`), unknown levels and malformed models are dropped; on an `inherit` machine, or
-for a default of `inherit`, the levels are capped at read and safe). `accounts` keep one
-named by `email`, else by `name` (an API home, `api.z.ai`). No home folder: sessionpipe
+for a default of `inherit`, the levels are capped at read and safe). `modes` are the
+delivery modes it has, among `DELIVERY_MODES` (`inbox` from sessionpipe 0.13). `accounts`
+keep one named by `email`, else by `name` (an API home, `api.z.ai`), and its `signed_in`
+(sessionpipe 0.13.3) as `signedIn` when it is a boolean: `false` is a command line that
+would fail a resume until `claude auth login` is run there, absent is unknown. No home folder: sessionpipe
 0.10's hello has none. `MachineControl.tilde` says a start may name a `~/…` folder, which
 the machine expands: set when this receiver's sessionpipe-core takes one and the hello has
 `start` (CONTROL.md §3.1: "a machine that sends `start` also takes a `~` folder"; `tilde.ts`). Each hello says them again: one without them takes them

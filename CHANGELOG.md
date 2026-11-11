@@ -6,6 +6,14 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The receiver keeps three things a sessionpipe 0.13 machine says, for the pages that will
+  show them (nothing draws them yet): `inbox` among a machine's delivery modes and as the
+  mode of an ack, which it used to drop as a word it did not know; the session a copy
+  answered for (an ack's `copy_of`, `ControlActivity.copyOf`); and whether the command
+  line is signed in to each account (a hello's `signed_in`, `HarnessAccount.signedIn`).
+
 ### Changed
 
 - **sessionpipe 0.13.6.** The receiver verifies commands with sessionpipe-core 0.13.6 (it

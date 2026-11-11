@@ -18,6 +18,9 @@ import {
 } from "sessionpipe-core/control";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  type ControlActivity,
+  DELIVERY_MODES,
+  type MachineControl,
   POOL_CONFIRM_ACTIONS,
   type PoolAction,
   ROUTES,
@@ -1226,6 +1229,203 @@ describe("parseAcks: applied", () => {
   it("keeps inherit: the start ran with no permission flag", () => {
     const [a] = parseAcks({ acks: [{ id, outcome: "taken", applied: { permission: "inherit" } }] }, now)!;
     expect(a!.applied).toEqual({ permission: "inherit" });
+  });
+});
+
+// --- what a 0.13 daemon says that a 0.10 one did not (CONTROL.md §2, §6, §10) ---------
+
+describe("a 0.13 daemon's hello and acks: the inbox mode, copy_of, signed_in", () => {
+  const now = () => "2026-11-10T10:00:00.000Z";
+  const id = "01K8ZQ6X4N3T5V7W9Y1A2B3C4D";
+  const SESSION = "claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e";
+  const COPY = "claude-code:0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b";
+
+  it("parseHello keeps inbox among the delivery modes, and drops a word that is not one", () => {
+    const h = parseHello({
+      ...facts,
+      modes: ["sdk", "waiter", "turn", "inbox", "api", "resume", "fork", "teleport", 7],
+    });
+    expect(h?.modes).toEqual(["sdk", "waiter", "turn", "inbox", "api", "resume", "fork"]);
+    expect([...DELIVERY_MODES]).toEqual(h?.modes);
+    // What a 0.12 daemon lists reads as before.
+    expect(parseHello({ ...facts, modes: ["waiter", "turn", "resume"] })?.modes).toEqual(["waiter", "turn", "resume"]);
+  });
+
+  it("parseAccounts keeps signed_in as a boolean, and leaves anything else unsaid", () => {
+    expect(
+      parseAccounts([
+        { harness: "claude-code", id: "a1", email: "dev@example.com", signed_in: false },
+        { harness: "claude-code", id: "a2", email: "work@example.com", signed_in: true },
+        { harness: "claude-code", id: "a3", email: "old@example.com" },
+        { harness: "claude-code", id: "api-3f9c1e0b7d2a4c68", name: "api.z.ai", signed_in: "no" },
+        { harness: "codex", id: "c1", email: "codex@example.com", signed_in: null },
+      ]),
+    ).toEqual([
+      { harness: "claude-code", id: "a1", email: "dev@example.com", signedIn: false },
+      { harness: "claude-code", id: "a2", email: "work@example.com", signedIn: true },
+      { harness: "claude-code", id: "a3", email: "old@example.com" },
+      { harness: "claude-code", id: "api-3f9c1e0b7d2a4c68", name: "api.z.ai" },
+      { harness: "codex", id: "c1", email: "codex@example.com" },
+    ]);
+  });
+
+  it("parseAcks keeps the inbox mode and a copy_of that is a session, and drops one that is not", () => {
+    const [inbox] = parseAcks({ acks: [{ id, outcome: "delivered", at: now(), mode: "inbox", reply: "Yes." }] }, now)!;
+    expect(inbox).toEqual({ id, outcome: "delivered", at: now(), mode: "inbox", reply: "Yes." });
+    const [copy] = parseAcks(
+      { acks: [{ id, outcome: "delivered", at: now(), mode: "fork", session: COPY, copy_of: SESSION }] },
+      now,
+    )!;
+    expect(copy).toEqual({ id, outcome: "delivered", at: now(), mode: "fork", session: COPY, copyOf: SESSION });
+    for (const bad of ["8c132906", "Claude-Code:x", 7, null, { harness: "claude-code" }, ""]) {
+      const [a] = parseAcks({ acks: [{ id, outcome: "delivered", at: now(), mode: "fork", copy_of: bad }] }, now)!;
+      // The field goes; the ack stands.
+      expect(a, JSON.stringify(bad)).toEqual({ id, outcome: "delivered", at: now(), mode: "fork" });
+    }
+    const [unknown] = parseAcks({ acks: [{ id, outcome: "delivered", at: now(), mode: "teleport" }] }, now)!;
+    expect(unknown).toEqual({ id, outcome: "delivered", at: now() });
+  });
+
+  it("a hello's modes and each account's signed_in reach the machine, the API and a restart", async () => {
+    const b = await boot();
+    tmpDirs.push(b.stateDir);
+    const pk = await TestPasskey.create();
+    const m = await enrolled(b, pk, "m_daemon0130000000001");
+    const say = (accounts: unknown[]) =>
+      call(b.url, "POST", `${CONTROL}/hello`, {
+        bearer: m.token,
+        body: {
+          ...facts,
+          name: "studio-mac",
+          version: "0.13.6",
+          modes: ["sdk", "waiter", "turn", "inbox", "resume", "fork"],
+          accounts,
+        },
+      });
+    const accounts = [
+      { harness: "claude-code", id: "a1", email: "dev@example.com", signed_in: false },
+      { harness: "claude-code", id: "a2", email: "work@example.com", signed_in: true },
+      { harness: "codex", id: "c1", email: "codex@example.com" },
+    ];
+    const read = [
+      { harness: "claude-code", id: "a1", email: "dev@example.com", signedIn: false },
+      { harness: "claude-code", id: "a2", email: "work@example.com", signedIn: true },
+      { harness: "codex", id: "c1", email: "codex@example.com" },
+    ];
+    try {
+      expect((await say(accounts)).status).toBe(204);
+      const c = b.control.machines().get("studio-mac")!;
+      expect(c.modes).toEqual(["sdk", "waiter", "turn", "inbox", "resume", "fork"]);
+      expect(c.accounts).toEqual(read);
+      const listed = (await call(b.url, "GET", `${UI}/machines`)).body.machines as MachineControl[];
+      expect(listed.find((x) => x.machineId === m.machine)).toMatchObject({ modes: c.modes, accounts: read });
+      // Said again in every hello: signed in now, and a daemon that can no longer tell says nothing.
+      expect(
+        (
+          await say([
+            { ...accounts[0], signed_in: true },
+            { harness: "claude-code", id: "a2", name: "Work" },
+          ])
+        ).status,
+      ).toBe(204);
+      expect(b.control.machines().get("studio-mac")!.accounts).toEqual([
+        { harness: "claude-code", id: "a1", email: "dev@example.com", signedIn: true },
+        { harness: "claude-code", id: "a2", name: "Work" },
+      ]);
+      expect((await say(accounts)).status).toBe(204);
+    } finally {
+      await b.close();
+    }
+    const b2 = await boot({ stateDir: b.stateDir });
+    try {
+      expect(b2.control.machines().get("studio-mac")).toMatchObject({
+        modes: ["sdk", "waiter", "turn", "inbox", "resume", "fork"],
+        accounts: read,
+      });
+    } finally {
+      await b2.close();
+    }
+  });
+
+  it("an ack's inbox mode and copy_of reach the activity, the API, the stream and a restart", async () => {
+    const b = await boot();
+    tmpDirs.push(b.stateDir);
+    const pk = await TestPasskey.create();
+    const day = await TestDayKey.create();
+    const m = await enrolled(b, pk, "m_daemon0130000000002");
+    const seen: ControlActivity[] = [];
+    const off = b.control.subscribe((msg) => {
+      if (msg.kind === "control") seen.push(msg.message);
+    });
+    const sendPrompt = async () => {
+      const r = await call(b.url, "POST", `${UI}/send`, {
+        body: { machineId: m.machine, ...(await signedPrompt(pk, day, m.machine, { session: SESSION })) },
+      });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      return r.body.id as string;
+    };
+    const ack = (a: Record<string, unknown>) =>
+      call(b.url, "POST", `${CONTROL}/ack`, {
+        bearer: m.token,
+        body: { acks: [{ at: new Date().toISOString(), ...a }] },
+      });
+    const why =
+      "ran in a copy, because the session was open in Claude Code on this computer (a terminal window or the Claude app)";
+    let inbox = "";
+    let copied = "";
+    let plain = "";
+    try {
+      // The session's own inbox took it: its own answer, no copy.
+      inbox = await sendPrompt();
+      expect((await ack({ id: inbox, outcome: "taken" })).status).toBe(202);
+      expect((await ack({ id: inbox, outcome: "delivered", mode: "inbox", reply: "Yes, all three." })).status).toBe(
+        202,
+      );
+      const a = b.control.activityById(inbox)!;
+      expect(a).toMatchObject({ outcome: "delivered", mode: "inbox", reply: "Yes, all three." });
+      expect(a).not.toHaveProperty("copyOf");
+      // A copy answered: the ack names the copy in `session` and the session asked in `copy_of`.
+      copied = await sendPrompt();
+      expect(
+        (await ack({ id: copied, outcome: "delivered", mode: "fork", session: COPY, copy_of: SESSION, detail: why }))
+          .status,
+      ).toBe(202);
+      const want = {
+        outcome: "delivered",
+        mode: "fork",
+        session: SESSION,
+        ackSession: COPY,
+        copyOf: SESSION,
+        detail: why,
+      };
+      expect(b.control.activityById(copied)).toMatchObject(want);
+      // A copy_of that names no session is dropped, and the ack is still applied.
+      plain = await sendPrompt();
+      expect(
+        (await ack({ id: plain, outcome: "delivered", mode: "fork", session: COPY, copy_of: "the original" })).body,
+      ).toEqual({
+        applied: 1,
+        unknown: 0,
+      });
+      expect(b.control.activityById(plain)).toMatchObject({ outcome: "delivered", ackSession: COPY });
+      expect(b.control.activityById(plain)).not.toHaveProperty("copyOf");
+
+      const listed = (await call(b.url, "GET", `${UI}/activity`)).body.activity as ControlActivity[];
+      expect(listed.find((x) => x.id === copied)).toMatchObject(want);
+      expect(listed.find((x) => x.id === inbox)).toMatchObject({ mode: "inbox" });
+      expect(seen.filter((x) => x.id === copied).at(-1)).toMatchObject(want);
+      expect(seen.filter((x) => x.id === inbox).at(-1)).toMatchObject({ outcome: "delivered", mode: "inbox" });
+    } finally {
+      off();
+      await b.close();
+    }
+    const b2 = await boot({ stateDir: b.stateDir });
+    try {
+      expect(b2.control.activityById(copied)).toMatchObject({ mode: "fork", ackSession: COPY, copyOf: SESSION });
+      expect(b2.control.activityById(inbox)).toMatchObject({ mode: "inbox" });
+    } finally {
+      await b2.close();
+    }
   });
 });
 

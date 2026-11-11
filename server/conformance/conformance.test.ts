@@ -7,6 +7,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { type ControlActivity, type MachineControl, ROUTES } from "../../shared/api.js";
 import { fixtures } from "../../test/conformance.js";
 import { type App, type AppOptions, createApp } from "../app.js";
 import { type RunReport, runDelivery } from "./runner.js";
@@ -55,5 +56,21 @@ describe("conformance/delivery against createApp", () => {
 
   it("runs every fixture", () => {
     expect(report.results.map((r) => r.file)).toEqual(files);
+  });
+
+  // A scenario holds the receiver to accepting what the machine said; "what the receiver
+  // stored is its own to check" (delivery/24). So, of what sessionpipe 0.13 added: the
+  // hello's `signed_in` (24), the `inbox` mode of an ack (25) and a copy's `copy_of` (27)
+  // are still there when the UI reads them, where they used to be dropped on the way in.
+  it("keeps what the 0.13 scenarios said: signed_in, the inbox mode, copy_of", async () => {
+    const ui = async <T>(route: string): Promise<T> => (await fetch(`${app.url}${ROUTES.ui.control}${route}`)).json();
+    const { machines } = await ui<{ machines: MachineControl[] }>("/machines");
+    expect(machines.flatMap((m) => m.accounts ?? []).some((a) => a.signedIn === true)).toBe(true);
+    const { activity } = await ui<{ activity: ControlActivity[] }>("/activity?limit=1000");
+    expect(activity.some((a) => a.outcome === "delivered" && a.mode === "inbox")).toBe(true);
+    const copy = activity.find((a) => a.copyOf);
+    expect(copy).toMatchObject({ outcome: "delivered", mode: "fork", copyOf: copy?.session });
+    expect(copy?.ackSession).not.toBe(copy?.session);
+    expect(copy?.detail).toMatch(/^ran in a copy, because /);
   });
 });
