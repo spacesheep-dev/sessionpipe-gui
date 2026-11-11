@@ -29,6 +29,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   gives `certutil -user -addstore Root ca.crt` and the Install Certificate… steps (also on the
   trust page and from `sessionpipe-gui tls trust`), and the button says "Pair this machine"
   off a Mac.
+- A self-assigned 169.254 address (no DHCP answered on that link) no longer comes first among
+  the receiver's LAN addresses, so the Machines page's pair command, Connect and the phone
+  link name an address the other device can reach.
 
 ## [0.7.5] - 2026-11-06
 
