@@ -791,6 +791,9 @@ pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // The fake CLIs below are shell scripts made executable with Unix mode bits; the
+    // tests that run one are Unix-only, the rest run everywhere.
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     struct Temp(PathBuf);
@@ -807,6 +810,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
+    #[cfg(unix)]
     fn exe(p: &Path, body: &str) {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, body).unwrap();
@@ -827,6 +831,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn finds_tools_under_a_temp_home() {
         let h = Temp::new("home");
         // Only nvm (two versions) and Volta: the newest nvm wins for node, Volta's npx is used.
@@ -928,6 +933,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn runs_a_fake_cli_and_reports_its_refusal() {
         let d = Temp::new("cli");
         let ok = d.0.join("ok");
@@ -964,6 +970,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn streams_the_installer_s_lines_as_they_come() {
         let d = Temp::new("stream");
         let slow = d.0.join("slow");
@@ -1040,6 +1047,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_cli_that_hangs_times_out_and_is_killed() {
         let d = Temp::new("hang");
         let hang = d.0.join("hang");

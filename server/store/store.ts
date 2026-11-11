@@ -790,7 +790,7 @@ function minimalProblem(ev: ProtocolEvent): string | null {
   if (typeof ev.type !== "string" || !ev.type) return "bad_type";
   if (!ev.harness || typeof ev.harness.name !== "string" || !ev.harness.name) return "bad_harness";
   if (!ev.session || typeof ev.session.id !== "string" || !ev.session.id) return "bad_session";
-  if (!Number.isInteger(ev.session.seq) || ev.session.seq < 0) return "bad_seq";
+  if (!Number.isSafeInteger(ev.session.seq) || ev.session.seq < 0) return "bad_seq";
   if (!ev.data || typeof ev.data !== "object") return "bad_data";
   return null;
 }

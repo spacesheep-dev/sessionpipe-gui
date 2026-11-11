@@ -69,7 +69,13 @@ describe("validate", () => {
     expect(validate({ ...good(), session: { id: "has space", seq: 0 } })).toContain(
       "session.id: not [A-Za-z0-9._:-]{1,128}",
     );
-    expect(validate({ ...good(), session: { id: "a", seq: -1 } })).toContain("session.seq: not an integer >= 0");
+    expect(validate({ ...good(), session: { id: "a", seq: -1 } })).toContain(
+      "session.seq: not an integer from 0 to 2^53 - 1",
+    );
+    expect(validate({ ...good(), session: { id: "a", seq: 2 ** 53 } })).toContain(
+      "session.seq: not an integer from 0 to 2^53 - 1",
+    );
+    expect(validate({ ...good(), session: { id: "a", seq: Number.MAX_SAFE_INTEGER } })).toEqual([]);
     expect(validate({ ...good(), session: { id: "a", seq: 0, title_source: "guess" } })).toContain(
       "session.title_source: not custom|harness|first-ask",
     );

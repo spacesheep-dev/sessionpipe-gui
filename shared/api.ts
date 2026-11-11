@@ -376,6 +376,7 @@ export interface MachineControl {
   mode?: MachineMode;
   folders?: string[];
   harnesses?: string[];
+  /** Hello `modes`: the delivery modes the machine has, among `DELIVERY_MODES`. */
   modes?: string[];
   version?: string;
   accounts?: HarnessAccount[];
@@ -416,6 +417,14 @@ export interface MachineControl {
   handoff?: boolean;
 }
 
+/** How a machine hands a message to a session, the first that fits (sessionpipe CONTROL.md
+ *  §6): a hello's `modes` lists the ones it has, an ack's `mode` names the one it used.
+ *  `inbox` (sessionpipe 0.13) is a message written into a live, idle Claude Code session's
+ *  own local inbox, answered by that session in its own turn: its reply is the session's
+ *  own, where a `fork`'s is a copy's. */
+export const DELIVERY_MODES = ["sdk", "waiter", "turn", "inbox", "api", "resume", "fork"] as const;
+export type DeliveryMode = (typeof DELIVERY_MODES)[number];
+
 /** A machine's mode, the person's choice at its own terminal (CONTROL.md §2): `safe`,
  *  nothing that needs approval runs unattended; `auto`, the harness's auto mode; `inherit`
  *  (sessionpipe 0.10), no permission flag, so a session runs as the person's own do there,
@@ -425,12 +434,18 @@ export type MachineMode = "safe" | "auto" | "inherit";
 /** A harness account signed in on a machine, from its pairing and hello (CONTROL.md §2): a
  *  label for `session.account_id`, never checked against anything. `email` when it signs in
  *  with one; `name` instead for one with no email (sessionpipe 0.10: a Claude Code home on
- *  another API, named by its endpoint's host, `api.z.ai`). At least one of the two is set. */
+ *  another API, named by its endpoint's host, `api.z.ai`). At least one of the two is set.
+ *  `signedIn` (hello `signed_in`, sessionpipe 0.13.3): whether the harness's command line
+ *  is signed in to the account as the daemon sees it, which is what a resume runs with.
+ *  `false` means a message to a session of that account would fail until someone runs
+ *  `claude auth login` on the machine; absent is unknown (an older daemon, or one that
+ *  could not tell), never signed out. */
 export interface HarnessAccount {
   harness: string;
   id: string;
   email?: string;
   name?: string;
+  signedIn?: boolean;
 }
 
 /** What an account is called: its email, else its name, else nothing. */
@@ -1533,6 +1548,7 @@ export interface ControlActivity {
   at: string;
   expiresAt: string;
   outcome?: ControlOutcome;
+  /** The delivery mode the machine acked, one of `DELIVERY_MODES`. */
   mode?: string;
   code?: string;
   detail?: string;
@@ -1540,6 +1556,11 @@ export interface ControlActivity {
   replySeq?: number;
   /** The session the final ack named (a fork, or the session a start created), when it differs. */
   ackSession?: string;
+  /** The final ack's `copy_of` (sessionpipe 0.13, CONTROL.md §6 `prompt`, §10): the answer
+   *  came from a copy of the session the command named, not from it. This is that session,
+   *  as the machine names it; `ackSession` is then the copy, and `detail` says why one was
+   *  made. Absent: the session itself answered, or the daemon predates the field. */
+  copyOf?: SessionKey;
   takenAt?: string;
   ackedAt?: string;
   /** A start's folder, as signed: the starting page shows it and "Edit and start again" puts it back. */

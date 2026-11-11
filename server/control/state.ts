@@ -227,6 +227,8 @@ export interface MessageRow {
   ackedAt?: string;
   /** A fork or a started session the final ack named. */
   ackSession?: string;
+  /** The final ack's `copy_of`: the session the command named, when a copy of it answered. */
+  copyOf?: string;
   /** A start's signed folder, options and files, for the starting page and a retry. */
   cwd?: string;
   permission?: StartPermission;
@@ -292,6 +294,7 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.reply !== undefined) a.reply = m.reply;
   if (m.replySeq !== undefined) a.replySeq = m.replySeq;
   if (m.ackSession) a.ackSession = m.ackSession;
+  if (m.copyOf) a.copyOf = m.copyOf;
   if (m.takenAt) a.takenAt = m.takenAt;
   if (m.ackedAt) a.ackedAt = m.ackedAt;
   if (m.cwd) a.cwd = m.cwd;
@@ -898,6 +901,7 @@ export class ControlState {
         if (a.detail) row.detail = a.detail;
         if (a.reply !== undefined) row.reply = a.reply;
         if (a.session) row.ackSession = a.session;
+        if (a.copyOf) row.copyOf = a.copyOf;
         if (a.applied && row.kind === "start") row.applied = a.applied;
         if (row.kind === "key.add") this.keyAddSettled(m, row);
       }

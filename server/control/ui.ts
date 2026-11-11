@@ -6,7 +6,6 @@
 // trusts signs a `key.add` for it, CONTROL.md §2). Every route needs the UI's own auth (loopback, or the UI key cookie).
 // Documented route by route in README.md beside this file.
 import { randomBytes } from "node:crypto";
-import * as core from "sessionpipe-core/control";
 import {
   type Assertion,
   b64url,
@@ -93,11 +92,17 @@ const keyShape = (device: boolean) => (device ? "key: {id, alg, spki[, type, sto
 const proofShape = (device: boolean) =>
   device ? "proof: {cred, ad, cd, sig} or {cred, sig}" : "proof: {cred, ad, cd, sig}";
 
+/** The harness name of the machine's own pseudo-sessions: `sessionpipe:keys`, which a
+ *  `key.add` names, and `sessionpipe:pool` (POOL_SESSION). Neither is a coding session. */
+const OWN_HARNESS = "sessionpipe:";
+
 /** The second look at a handoff (CONTROL.md §3.1 `reply_to`, DESIGN §2.3), before
  *  precheck.ts sees the command: `reply_to` rides only on a `prompt` or a `start`, names a
- *  `<harness>:<id>` on the same machine, and goes only to a machine whose hello said
- *  `handoff` (a daemon that predates it would refuse the whole command `bad_fields`, or
- *  worse, ignore the relay). Null when there is nothing to refuse. */
+ *  `<harness>:<id>` on the same machine, a coding session and never the machine's own key
+ *  store or pool (an answer is a message for a model; the verifier takes any well-formed
+ *  ref there), and goes only to a machine whose hello said `handoff` (a daemon that
+ *  predates it would refuse the whole command `bad_fields`, or worse, ignore the relay).
+ *  Null when there is nothing to refuse. */
 export function replyToProblem(cmd: Record<string, unknown>, facts: { handoff?: boolean }): Refusal | null {
   if (!Object.hasOwn(cmd, "reply_to")) return null;
   if (cmd.kind !== "prompt" && cmd.kind !== "start")
@@ -105,33 +110,11 @@ export function replyToProblem(cmd: Record<string, unknown>, facts: { handoff?: 
   if (typeof cmd.reply_to !== "string" || !SESSION_REF.test(cmd.reply_to))
     return { code: "bad_fields", why: "reply_to is a session, <harness>:<id>" };
   if (cmd.reply_to === cmd.session) return { code: "bad_fields", why: "reply_to is another session, not this one" };
+  if (cmd.reply_to.startsWith(OWN_HARNESS))
+    return { code: "bad_fields", why: "reply_to is a coding session, not the machine's own keys or pool" };
   if (!facts.handoff)
     return { code: "handoff", why: "this machine did not say it takes handoffs; the answer would not come back" };
   return null;
-}
-
-/** Does this receiver's own sessionpipe-core take `reply_to` on a prompt? Its verifier runs
- *  on every command before the second look, and a core from before `ask` (0.10.0) refuses
- *  the field `bad_fields` there, so until the core is bumped no handoff is queued through
- *  this receiver, whatever the machine's hello says. Feature detection, as tilde.ts does:
- *  the core's own parser is asked. */
-export function coreTakesReplyTo(c: Pick<typeof core, "parseCommand" | "COMMAND_TYPE"> = core): boolean {
-  const cmd = {
-    v: 1,
-    t: c.COMMAND_TYPE,
-    machine: `m_${"a".repeat(22)}`,
-    kind: "prompt",
-    session: "claude-code:00000000-0000-4000-8000-000000000000",
-    text: "x",
-    reply_to: "codex:00000000-0000-4000-8000-000000000001",
-    nonce: "A".repeat(22),
-    iat: 1_700_000_000,
-  };
-  try {
-    return c.parseCommand(JSON.stringify(cmd)).ok === true;
-  } catch {
-    return false;
-  }
 }
 
 /** The command without `reply_to`, for the closed field lists that predate it. */
@@ -267,9 +250,8 @@ export async function verifySend(d: Pick<UiRouteDeps, "state" | "rpId">, raw: un
   if (body.grant && typeof body.grant === "object") signed.grant = body.grant as SignedCommand["grant"];
   if (body.confirm && typeof body.confirm === "object") signed.confirm = body.confirm as SignedCommand["confirm"];
   const opts = { machine: m.id, rpId: d.rpId(), trusted: m.keys, now: Date.now(), maxAgeMs: RECEIVER_MAX_AGE_MS };
-  // A `pool` command (DESIGN §2.3) is verified by pool.ts: the same checks on the core's
-  // own primitives, since this core's parseCommand closes the kind set before it looks
-  // at a signature. Everything else is the core's word.
+  // A `pool` command (CONTROL.md §6 `pool`) goes through pool.ts: the core's verdict, held
+  // to the fresh confirm some of its actions take. Everything else is the core's word alone.
   const verdict = looksLikePool(signed.cmd) ? await verifyPoolCommand(signed, opts) : await verifyCommand(signed, opts);
   if (!verdict.ok) throw new HttpError(422, { reason: verdict.why, code: verdict.code });
   // The second look: what this machine's hello advertised (precheck.ts). The same
