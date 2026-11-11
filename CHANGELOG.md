@@ -93,6 +93,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   for `@vitejs/plugin-react/package.json` through the package's exports, which leave it out,
   so on every platform the tools were installed a second time; on Windows that install ran
   the build script again, and again, until the PATH outgrew cmd.exe.
+- **The desktop app on Windows tells a stale receiver from a live one.** It decides whether
+  the receiver that wrote `run.json` still runs by its process id, and on Windows that check
+  always said yes. It now asks Windows, so a file left by a receiver that has stopped is no
+  longer taken for the one that dropped. The hand-run Desktop workflow also passes on
+  `windows-latest`: its `npm ci` skips the prepare build, as desktop-release does, two tests
+  no longer assume macOS, and the four that run a shell script are compiled on Unix only.
 
 ## [0.7.5] - 2026-11-06
 
