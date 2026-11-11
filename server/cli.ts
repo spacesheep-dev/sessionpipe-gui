@@ -366,7 +366,8 @@ async function banner(app: App): Promise<string> {
     const qr = await QRCode.toString(phoneUrl, { type: "terminal", small: true });
     for (const l of qr.split("\n")) lines.push(`  ${l}`);
   }
-  lines.push("  from another machine:");
+  // No LAN URL (a loopback --host, or no network): the sink command reaches this machine only.
+  lines.push(info.urls.lan.length ? "  from another machine:" : "  from this machine:");
   lines.push(`    ${info.sinkCommand}`);
   if (info.remote) {
     lines.push("  from a machine anywhere (through the proxy):");
@@ -592,6 +593,13 @@ function tlsCommand(parsed: Args): void {
           if (e instanceof TlsError) fail(e.message);
           throw e;
         }
+      }
+      if (process.platform === "win32") {
+        out(`On Windows add the CA by hand: ${m.caCertPath}`);
+        out(`  certutil -user -addstore Root "${m.caCertPath}"   (Windows asks once; Edge and Chrome read this store)`);
+        out("  or open ca.crt → Install Certificate… → Current User → Trusted Root Certification Authorities.");
+        out("  Firefox keeps its own store: Settings → Privacy & Security → Certificates → Authorities → Import.");
+        return;
       }
       if (process.platform !== "darwin") {
         out(`On this platform add the CA by hand: ${m.caCertPath}`);

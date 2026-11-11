@@ -1,0 +1,37 @@
+{
+  "name": "device-sig-der",
+  "description": "The device key's grant signature in DER instead of raw r‖s.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"prompt\",\"session\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\",\"text\":\"Add the Oct 8 row\",\"nonce\":\"GbY2hcZNv9TFYY_sBDX-HA\",\"iat\":1790800000000}",
+      "csig": "Lm1ct0gLWQxYA4L_SQX8-U1NyRaz-kVcVJZvI0ot_-rO5I0h7QW9CJ66WfaOSpjzvZPzfdCSugrJImIGT2XK_w",
+      "grant": {
+        "cred": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+        "sig": "MEYCIQDE_a8y0ZbAZrOvab6nmcDr5eo55QdYJG8qX9DWXd-0GwIhAIzr--4mJxJ6ANv28mX4rfgdKj7HgOVArLseQFUKkUee",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4lrecDEerGRu-OqPHkl4nxvfdteUDFSjP7O4JlW4gPKMxK3F2BLw8OACnCy7wxa-F2Z8J81xTm-JasGu3_JIrw\",\"iat\":1790799940000,\"exp\":1790803600000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "-XI3B3JNIS6D9Ft-nSQ9nzDMQdIQzjCB",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEnBYOZ9CSzoMtBlJ-WUR6uE2Hwtrt6r_7d9YkrKFQvDLp6uHGzGrVGRG0gP7UrdEkfnK4VYXJD3MizA7AOsabLg"
+      },
+      {
+        "id": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENgDnTWZNrbM16SqfjnsZdCU_qNtzB0bdkXDpBZfAja2bd9ozG1YsA6gOkaqWBSt0MaHSLKJKB3ZILVnuBHzkcA",
+        "type": "device",
+        "store": "hardware",
+        "uv": "each-use"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_assertion"
+  }
+}

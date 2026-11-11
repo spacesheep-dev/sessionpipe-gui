@@ -1,0 +1,32 @@
+{
+  "name": "valid-start-with-everything",
+  "description": "A new Codex session read-only, on a model, with a file.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"start\",\"session\":\"codex:0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c\",\"text\":\"What's wrong here?\",\"nonce\":\"VoHZpOOianOVmcjlW0JImg\",\"iat\":1790800000000,\"cwd\":\"/Users/misha/spacesheep\",\"files\":[{\"name\":\"screenshot.png\",\"type\":\"image/png\",\"size\":183402,\"sha256\":\"0BNhTcFKN-4g_pIAVzerfTQn5-k1gK1W74pCIF5_ek4\"}],\"permission\":\"read\",\"model\":\"gpt-5.6-sol\"}",
+      "csig": "Tx6nPR_jorn2-yaB1y0wdMCx77eh2sTPDvjhwuF0pQlFeoOp7KcMddJJtAKN3kgY0I6k-gVqfT4lnvPO3AxPdw",
+      "grant": {
+        "cred": "Z06m_POo6nuq-svh-BgXNta2sx1nz0To",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiV3VNUUpFYTZPMFIxRjg3MzFHLWhheVlNa3RpUTRXcWRUMjh2eHpxeTBlOCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEYCIQCl7IA6UFnHZ3oup0xOF3BbEDKFvVAlKPDOtyf5rsgCQwIhAO7DcNGIUbSd7AztpNHBCM3GkqCzcjDbDGY_pHr0B5S2",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEp5HQwvAkp-apR6WkrQdF7RplNelBCtZ6_wCaAZJs7wrxsAIT_vlyLqZYbvXj1qMDM7iJPtE3fZMwiO-eUzo1Xw\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "Z06m_POo6nuq-svh-BgXNta2sx1nz0To",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4887MC68Vfbb2iYIKfVZ3p-757sPNy-3vpRc-Xu6dKn6CfbemFsJ9IXCiSYcyd9rqfkFC4G-ADShR-8dbNYjqA"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": true,
+    "via": "grant",
+    "kind": "start"
+  }
+}
