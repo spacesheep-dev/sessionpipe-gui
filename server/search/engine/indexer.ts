@@ -743,12 +743,15 @@ export class Indexer {
 
   private async maybeCommit(): Promise<void> {
     const now = Date.now();
+    // Consume this request before yielding: a new request belongs to the next pass.
+    const wantCommit = this.wantCommit;
+    this.wantCommit = false;
     for (const w of this.writers.values()) {
       if (!w.dirty) continue;
       const b = w.builder;
       const since = Math.min(b.since || now, w.since || now);
       if (
-        this.wantCommit ||
+        wantCommit ||
         b.textChars >= COMMIT_CHARS ||
         now - since >= COMMIT_AGE_MS ||
         // tombstones (a forget, a deleted file) show soon
@@ -758,7 +761,6 @@ export class Indexer {
       )
         await this.commit(w, true);
     }
-    this.wantCommit = false;
   }
 
   private async commitAll(force: boolean): Promise<void> {

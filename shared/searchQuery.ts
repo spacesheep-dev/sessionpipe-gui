@@ -138,6 +138,12 @@ const cpLen = (s: string): number => {
   return k;
 };
 
+/** A drive letter before `\` or `/` (`C:\Users\…`, `D:/repo`), or a scheme before `//`
+ *  (`https://…`, `file:///…`), is a pasted path or URL, not a mistyped filter: it is still
+ *  searched as text, only not reported. `cwd:/x` still is. */
+const PATH_RE = /^-?(?:[A-Za-z]:[\\/]|[A-Za-z][A-Za-z-]*:\/\/)/;
+const looksLikePath = (q: string, t: SearchToken): boolean => PATH_RE.test(q.slice(t.start, t.end));
+
 /** Reads a query. `live`: the person is typing, so a last bare word with no space after it
  *  is a prefix (it has at least 2 characters; a 1-character last word waits). */
 export function parseSearch(q: string, opts: { live?: boolean } = {}): ParsedSearch {
@@ -158,7 +164,7 @@ export function parseSearch(q: string, opts: { live?: boolean } = {}): ParsedSea
       into[t.key!] = list;
       return;
     }
-    if (t.unknownKey && !unknown.includes(t.unknownKey)) unknown.push(t.unknownKey);
+    if (t.unknownKey && !looksLikePath(q, t) && !unknown.includes(t.unknownKey)) unknown.push(t.unknownKey);
     if (t.kind === "prefix") {
       if (cpLen(t.value) >= 2) clauses.push({ kind: "prefix", text: t.value, not: t.not });
       else if (t.value) clauses.push({ kind: "word", text: t.value, not: t.not });

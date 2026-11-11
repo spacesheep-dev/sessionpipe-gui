@@ -5,6 +5,7 @@
 import {
   type Applied,
   type ControlOutcome,
+  DELIVERY_MODES,
   type HarnessAccount,
   type HarnessStartOptions,
   INHERIT_LEVELS,
@@ -31,7 +32,10 @@ export const POLL_KEY_RE = /^[A-Za-z0-9_-]{22,128}$/;
 export const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 export const SESSION_REF = /^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/;
 export const HARNESS_RE = /^[a-z][a-z0-9-]{0,39}$/;
-const MODES = new Set(["sdk", "waiter", "turn", "api", "resume", "fork"]);
+/** The delivery modes a hello may list and an ack may name (CONTROL.md §6; `inbox` from
+ *  sessionpipe 0.13). Another word is dropped, never kept as a mode nobody can read. */
+const MODES: ReadonlySet<string> = new Set(DELIVERY_MODES);
+const MODE_RE = new RegExp(`^(?:${DELIVERY_MODES.join("|")})$`);
 const OUTCOMES = new Set<string>(["progress", "taken", "delivered", "expired", "unsupported", "failed", "refused"]);
 const ACCOUNT_EMAIL = /^[^@\s]{1,64}@[^@\s]{1,189}$/;
 /** The most harnesses a hello lists that this receiver keeps: the three built in, and every
@@ -92,7 +96,7 @@ export function parseHello(body: unknown): Hello | null {
   return {
     name: stripControl(b.name).trim().slice(0, 80),
     harnesses,
-    modes: strs(b.modes, /^(sdk|waiter|turn|api|resume|fork)$/, 6),
+    modes: strs(b.modes, MODE_RE, DELIVERY_MODES.length),
     keys: strs(b.keys, /^[A-Za-z0-9_-]{16,1400}$/, 50),
     version: b.version.slice(0, 40),
     waiting: strs(b.waiting, SESSION_REF, 500),
@@ -196,7 +200,9 @@ export function parseStart(
 /** `accounts`: a label the board shows for an account id, never checked against anything.
  *  Each is named by its email, or, for one with no email (sessionpipe 0.10: a Claude Code
  *  home on another API), by its `name` (`api.z.ai`), shown as printed text: control
- *  characters dropped, at most 200 characters. One with neither is dropped. */
+ *  characters dropped, at most 200 characters. One with neither is dropped. `signed_in`
+ *  (sessionpipe 0.13.3) is kept when it is a boolean; anything else is as if not sent,
+ *  which reads unknown, never signed out. */
 export function parseAccounts(v: unknown): HarnessAccount[] {
   if (!Array.isArray(v)) return [];
   const out: HarnessAccount[] = [];
@@ -208,7 +214,12 @@ export function parseAccounts(v: unknown): HarnessAccount[] {
     const label = ACCOUNT_EMAIL.test(email) ? { email } : name ? { name } : null;
     if (!label) continue;
     if (!out.some((x) => x.harness === a.harness && x.id === a.id))
-      out.push({ harness: a.harness, id: a.id, ...label });
+      out.push({
+        harness: a.harness,
+        id: a.id,
+        ...label,
+        ...(typeof a.signed_in === "boolean" ? { signedIn: a.signed_in } : {}),
+      });
   }
   return out;
 }
@@ -219,6 +230,8 @@ export interface AckIn {
   at: string;
   mode?: string;
   session?: string;
+  /** `copy_of` (sessionpipe 0.13): the session the command named, when a copy of it answered. */
+  copyOf?: string;
   code?: string;
   detail?: string;
   reply?: string;
@@ -239,6 +252,7 @@ export function parseAcks(body: unknown, now: () => string): AckIn[] | null {
     const ack: AckIn = { id: a.id, outcome: a.outcome as ControlOutcome, at };
     if (typeof a.mode === "string" && MODES.has(a.mode)) ack.mode = a.mode;
     if (typeof a.session === "string" && SESSION_REF.test(a.session)) ack.session = a.session;
+    if (typeof a.copy_of === "string" && SESSION_REF.test(a.copy_of)) ack.copyOf = a.copy_of;
     if (typeof a.code === "string" && /^[a-z_]{1,40}$/.test(a.code)) ack.code = a.code;
     if (typeof a.detail === "string") ack.detail = a.detail.slice(0, 500);
     if (typeof a.reply === "string") ack.reply = a.reply.slice(0, 20_000);

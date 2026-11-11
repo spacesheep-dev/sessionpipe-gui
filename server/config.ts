@@ -3,7 +3,7 @@
 // makes on first run: the sink token (what senders present) and the UI key (what a
 // phone presents). Both live in <stateDir>/config.json, mode 0600.
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -65,17 +65,57 @@ export function defaultStateDir(): string {
 export const newSinkToken = (): string => `spg_${randomBytes(24).toString("base64url")}`;
 export const newUiKey = (): string => randomBytes(12).toString("base64url");
 
-/** Read the config, making it (or any missing secret) on first run. */
+/** config.json holds something readGuiConfig cannot read, and was left as it is. */
+export class ConfigError extends Error {
+  readonly name = "ConfigError";
+}
+
+/** `text` without a leading UTF-8 byte-order mark. PowerShell 5's `UTF8` encoding and
+ *  older Windows editors write one, and JSON.parse refuses it. */
+export const withoutBom = (text: string): string => (text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+
+const WHAT_IT_HOLDS =
+  "it holds the sink token every sender presents and the UI key every phone and browser holds. " +
+  "Fix it, or move it aside to start fresh (senders and phones then pair again), then run this again.";
+
+/** What config.json holds: undefined when it is missing (the first run). A file that
+ *  cannot be read (a folder of that name, no permission), is empty (a write that died
+ *  before its first byte: the GUI never writes one) or does not parse throws a
+ *  ConfigError, saying where but never quoting the text, which can be part of the sink
+ *  token: writing fresh secrets over a cut-short, mistyped or unreadable file would lock
+ *  out every sender and phone paired with the old ones. */
+export function readConfigFile(f: string): Partial<GuiConfig> | undefined {
+  let text: string;
+  try {
+    text = withoutBom(readFileSync(f, "utf8"));
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return undefined;
+    throw new ConfigError(`${f} could not be read (${code}), so it was not written over: ${WHAT_IT_HOLDS}`);
+  }
+  if (!text.trim()) throw new ConfigError(`${f} is empty, so it was not written over: ${WHAT_IT_HOLDS}`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    const m = (e as Error).message;
+    const at = (/line \d+ column \d+/.exec(m) ?? /position \d+/.exec(m))?.[0];
+    throw new ConfigError(
+      `${f} is not valid JSON${at ? ` at ${at}` : ""}, so it was not written over: ${WHAT_IT_HOLDS}`,
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new ConfigError(`${f} is not a JSON object, so it was not written over: ${WHAT_IT_HOLDS}`);
+  return parsed as Partial<GuiConfig>;
+}
+
+/** Read the config, making it (or any missing secret) on first run. A file that cannot be
+ *  read or does not parse throws a ConfigError and is left byte for byte as it was; one
+ *  with a byte-order mark is read past it (and written back without one, the GUI's own
+ *  format). */
 export function readGuiConfig(dir: string): GuiConfig {
   const f = path.join(dir, "config.json");
-  let cfg: Partial<GuiConfig> = {};
-  if (existsSync(f)) {
-    try {
-      cfg = JSON.parse(readFileSync(f, "utf8")) as Partial<GuiConfig>;
-    } catch {
-      cfg = {};
-    }
-  }
+  const cfg = readConfigFile(f) ?? {};
   const complete = typeof cfg.sinkToken === "string" && cfg.sinkToken && typeof cfg.uiKey === "string" && cfg.uiKey;
   const full: GuiConfig = {
     sinkToken: typeof cfg.sinkToken === "string" && cfg.sinkToken ? cfg.sinkToken : newSinkToken(),

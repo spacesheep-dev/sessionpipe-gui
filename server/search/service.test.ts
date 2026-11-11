@@ -623,6 +623,20 @@ describe("reveal", () => {
   });
 });
 
+const childLogLines = (text: string): Record<string, unknown>[] =>
+  text
+    .split("\n")
+    .slice(0, -1)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+it("waits for complete child log records without hiding malformed records", () => {
+  expect(childLogLines("")).toEqual([]);
+  expect(childLogLines('{"got":')).toEqual([]);
+  expect(childLogLines('{"got":1}\n{"got":')).toEqual([{ got: 1 }]);
+  expect(childLogLines('{"got":1}\n{"got":2}\n')).toEqual([{ got: 1 }, { got: 2 }]);
+  expect(() => childLogLines("invalid\n")).toThrow();
+});
+
 describe("the indexer child (fork, nice, IPC)", () => {
   /** A stand-in for `dist/cli.js index --ipc`: logs its argv, priority and every message. */
   const CHILD = `
@@ -641,12 +655,7 @@ process.on("message", (m) => {
 `;
   let logFile: string;
   const lines = (): Record<string, unknown>[] =>
-    existsSync(logFile)
-      ? readFileSync(logFile, "utf8")
-          .trim()
-          .split("\n")
-          .map((l) => JSON.parse(l) as Record<string, unknown>)
-      : [];
+    existsSync(logFile) ? childLogLines(readFileSync(logFile, "utf8")) : [];
   const until = async (f: () => boolean, ms = 3000) => {
     const t0 = Date.now();
     while (!f() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 20));
