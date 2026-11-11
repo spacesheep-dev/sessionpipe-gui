@@ -199,6 +199,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   background service on Windows is not here yet…". With a receiver started in a terminal,
   the app, opened again, finds it on this computer (it looked for it only under HOME,
   which Windows doesn't set, and showed the welcome instead).
+- **The Windows app's updater reads update archives with `zip` 9.5.1** (it was 4.6.1), which
+  has the fixes for an archive whose two headers disagree writing files outside the update
+  folder (GHSA-m665-v7pm-7grj, CVE-2026-115905), a symlink target that aborts extraction or
+  exhausts memory (GHSA-q7v9-x93c-xqv3, CVE-2026-115909), and an AES entry passing its HMAC
+  check when the file ends early (GHSA-8hxf-qr8p-62x4, CVE-2026-115906). It comes with
+  `tauri-plugin-updater` 2.14.1, whose own code is unchanged. The macOS and Linux apps never
+  read update archives with `zip`.
 
 ## [0.7.5] - 2026-11-06
 
