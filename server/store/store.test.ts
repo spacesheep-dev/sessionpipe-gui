@@ -13,6 +13,8 @@ import {
   sessionKey,
 } from "../../shared/api.js";
 import { Session, SID, tempDir } from "../../test/events.js";
+import { EventFiles } from "./files.js";
+import { applyEvent, newRecord } from "./readings.js";
 import { Store } from "./store.js";
 
 const KEY = sessionKey("claude-code", SID);
@@ -584,6 +586,37 @@ describe("reboot", () => {
     const detail = store.sessionDetail(KEY)!;
     expect(detail.events.map((e) => e.session.seq)).toEqual([0, 1, 2, 3]);
     expect(detail.events[0]!.arrivedAt).toBeDefined();
+  });
+});
+
+describe("seq bound", () => {
+  it("rejects a seq above 2^53 - 1 from every source, as the receiver does", () => {
+    const a = new Session("seq-top").ev("session.started", { source: "startup" }, { seq: Number.MAX_SAFE_INTEGER });
+    const s = new Session();
+    const b = s.ev("turn.started", { turn_id: "t1" }, { seq: 2 ** 53 + 2 });
+    expect(store.ingest([a, b], "outbox")).toMatchObject({ accepted: 1, rejected: [{ id: b.id, reason: "bad_seq" }] });
+    expect(store.ingest([{ ...b, id: s.ev("turn.started").id }], "demo").rejected[0]?.reason).toBe("bad_seq");
+  });
+
+  it("leaves the seq span alone for a stored seq past 2^53 - 1, which boot replays unchecked", () => {
+    const ev = new Session().ev("session.started", { source: "startup" }, { seq: 2 ** 53 + 2 });
+    const rec = newRecord("claude-code", SID, ev.time, "http");
+    applyEvent(rec, ev, ev.time, "http");
+    expect(rec.summary.counts.events).toBe(1);
+    expect([rec.track.seqLo, rec.track.seqHi, rec.track.missing.size]).toEqual([-1, -1, 0]);
+  });
+
+  it("boots a store whose files hold seqs past 2^53 - 1 from an older release", async () => {
+    const s = new Session();
+    const arrivedAt = new Date().toISOString();
+    const lines = [
+      s.ev("session.started", { source: "startup" }, { seq: Number.MAX_SAFE_INTEGER }),
+      s.ev("turn.started", { turn_id: "t1" }, { seq: 2 ** 53 + 2 }),
+    ].map((ev) => ({ ...ev, arrivedAt, source: "http" as const }));
+    await store.close();
+    new EventFiles(tmp.dir).append("claude-code", SID, lines, 0);
+    store = new Store(tmp.dir, { tickMs: 1_000, statsMs: 1_000 });
+    expect(store.session(KEY)?.counts.events).toBe(2);
   });
 });
 
