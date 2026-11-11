@@ -6,7 +6,7 @@
 // under the pointer, the search that finds nothing, the keyboard (e with Hidden open
 // too), and the Hidden header's own menu.
 import { expect, test } from "@playwright/test";
-import { holdBoard, openBoard } from "./helpers.js";
+import { EVENTS, holdBoard, INFO, openBoard, sessionUrl, tier1Batch } from "./helpers.js";
 
 test.describe("board", () => {
   test("groups demo sessions by state and collapses done with a count", async ({ page }) => {
@@ -184,6 +184,35 @@ test.describe("board", () => {
     // Leaving lets the list take its real order again.
     await page.mouse.move(5, 5);
     await expect(page.locator(".page.board")).not.toHaveAttribute("data-held", "", { timeout: 5_000 });
+  });
+
+  test("a filter applies at once while the pointer rests on the list", async ({ page }) => {
+    // A row of the test's own, so the filter has one row to keep.
+    const { sinkToken } = (await (await page.request.get(INFO)).json()) as { sinkToken: string };
+    const b = tier1Batch({ title: "E2E held filter" });
+    const res = await page.request.post(EVENTS, {
+      headers: { authorization: `Bearer ${sinkToken}` },
+      data: { events: b.events },
+    });
+    expect(res.status()).toBe(202);
+    try {
+      await openBoard(page);
+      const card = page.locator(`article.card:has(a.card-link[href^="${sessionUrl(b.harness, b.sessionId)}"])`);
+      await expect(card).toBeVisible();
+      expect(await page.locator("article.card").count()).toBeGreaterThan(1);
+      // The pointer rests on the row: the list holds.
+      await card.hover();
+      await expect(page.locator(".page.board")).toHaveAttribute("data-held", "");
+      // fill() types without moving the pointer, so the list is still held when the filter
+      // changes: the rows it took away leave now, not when the pointer does. The session's
+      // id is the one thing no other row has.
+      await page.getByRole("searchbox", { name: "Search sessions" }).fill(b.sessionId);
+      await expect(page.locator("article.card")).toHaveCount(1);
+      await expect(card).toBeVisible();
+    } finally {
+      // The specs share one receiver: the row goes, so the board other specs read is no longer.
+      await page.request.post(`/api/ui/sessions/${b.harness}/${b.sessionId}/forget`);
+    }
   });
 
   test("a search that finds nothing says so, with Clear search", async ({ page }) => {

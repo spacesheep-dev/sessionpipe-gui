@@ -106,6 +106,33 @@ All notable changes to `sessionpipe-gui`. The format follows
 - Search no longer says "“c:” isn't a filter" over a pasted Windows path (`C:\Users\…`,
   `D:/repo`) or a URL (`https://…`). They were, and still are, searched as text; the notice
   now stays for something that looks like a filter, such as `foo:bar` or `cwd:/x`.
+- **The tier lens shows prompts, turn ends and attentions as a lower-tier receiver gets
+  them:** under a lens below tier 3, who submitted a prompt (`submitted_by`, `injected`)
+  and the background work still running when a turn ends (`background`) now stay, and an
+  attention's `turn_id` and `call_id`, which the client never sends, go, as does its
+  `agent_id` at tier 0.
+- Board filters apply immediately even while focus or the pointer holds the row order.
+- **Search shows a message just indexed at once when the indexer runs inside the server.**
+  Where the indexer cannot be forked it runs in the server's own process, and there a
+  request to commit that arrived while an earlier commit was being published was dropped:
+  the new messages then waited for the timed commit, up to a minute. The forked indexer
+  never dropped one.
+- **Turning history search off works on Windows.** With Node 20, Settings › Data answered
+  "internal", left the history index on disk and stopped the indexer until the GUI was
+  restarted: the server still had that index open while it deleted it, which Windows
+  refused. It now lets go of it first. If another program still holds a file of it, the
+  setting is saved anyway, indexing goes on, and the status is an error naming the index
+  left on disk until a later try (the indexer's next start, or Rebuild) deletes it.
+- **A Windows file is listed once.** A full path from Claude Code on Windows
+  (`C:\Users\…\acme\src\index.ts`, with either slash or the drive in another case) is shown
+  relative to the session's folder, as `src/index.ts`, as on a Mac, so the Files drawer, the
+  Review page and the changed-files count no longer give one file a row for each
+  spelling of its full path.
+- **`view`, `skin` and `plugin add` and `link` work on Windows.** A .zip is unpacked with
+  the tar.exe Windows ships instead of failing with "unzip is not installed"; an npm
+  package or a git URL runs npm's own script under the GUI's node instead of failing with
+  "npm is not installed" while npm is on PATH; and `link` makes a junction where Windows
+  refuses a symlink, so it no longer fails with EPERM when Developer Mode is off.
 - **A finished session stays finished.** A sender records a hook when it gets to it, so a
   tool call that fired just before a turn's Stop can be recorded after it; the receiver
   read that late event as a new turn, and the session went back to "working" (then
