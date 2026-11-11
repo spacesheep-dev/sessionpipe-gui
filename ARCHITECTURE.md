@@ -67,6 +67,7 @@ client against a receiver you can see into.
 | `server/skins/*` | platform | the skin kind (`<stateDir>/skins/<id>/skin.json`): `SkinRegistry` (built-ins + packages + `<stateDir>/color-themes/*.json` as one list), `/api/ui/skins`, `/api/ui/skins/reload` (loopback), `/skins/:id/*` static (fonts immutable, json/css no-cache), `skin add/link/remove/list` |
 | `web/src/lib/skins.ts`, `theme.ts` | platform | applies a skin to `<html>` (tokens per scheme, `--font-ui`/`--font-mono`, `--radius`, `--hairline`, `data-density`, `@font-face`, the stylesheet); the per-device choice under `sessionpipe-gui.skin` (migrated once from `sessionpipe-gui.colorTheme`) |
 | `web/src/themes/host/*` | platform | loads a theme at `/t/:id` and builds its `ThemeApi` (`shared/theme-api.ts`): the snapshot with `labels`, `labels.set/rename/edit`, `menu.open/session/confirm` (the host's own menu and confirm), `storage.update` (If-Match, retried) and `storage.subscribe` (another device's write, from `viewState` frames) |
+| `web/src/data/store.ts`, `resume.ts`, `sessionFeed.ts`, `prefetch.ts` | web | the page's state never goes back. `Store`: the snapshot, then deltas; the page is `live` at a snapshot, never at an open stream; `AppState.resyncs` counts the snapshots after the first (a drop, Retry now, a pull, the page come back), and what a page read on its own is read again when it moves: `AppState.control` (the stream's `control` frames over GET `/control/activity`, `loadControl`; of two copies of a message the one further along stays, `furthest`), a session view's events (`sessionFeed.ts`: one listener from the open to the close, `tapSession`; `rereadQuery` / `mergeBySeq` add what the drop kept from it, keeping every row and the scroll), the Files drawer's index. `resume.ts` (`watchResume`) asks for a fresh stream (`Store.resync`, silent unless the snapshot takes over RESYNC_QUIET_MS) when a tab is shown after HIDDEN_LONG_MS hidden, on `pageshow` from the back/forward cache, when the page's clock jumped (sleep) and on `online`. While the stream is down `useStreamMark` sets `data-stream="down"` on `<html>` and a session view holds its clocks (`lib/time.ts` `ClockHold`) |
 | `web/src/lib/pull.ts`, `components/PullRefresh.tsx`, `styles/pull.css` | web | pull to refresh on the phone's list pages (`PULL_PAGES`, mounted by `Shell`): the pure gesture (`travel`, the band; `begin` / `move` / `release`, arming at `ARM_PX` with one haptic; `landed`, `holdFor` (`MIN_SPIN_MS`), `overdue` (`TIMEOUT_MS`), `outcome`), one window touch handler that defers to sheets, fields, sideways rows and the tab bar, `Store.reconnect()` as the refresh (the retry while the stream is down), `--pull-y` / `--pull` / `data-pull` on `<html>` for the CSS, a `role=status` ring that says "Release to refresh" and "Up to date" |
 | `web/src/lib/labels.ts`, `components/LabelDot.tsx` | web | a label's name, `setLabel` / `renameLabel` (through `Store.patchLabels`: shown at once, put back on a refusal), the `Label` submenu every session menu carries (`labelMenu`, in `sessionItems`), the `label:` search value (`labelFromQuery`), the "Edit labels" request; `LabelDot` / `LabelSwatch` draw the one dot (`.label-dot`, `--label-*` tokens) |
 | `web/src/lib/marks.ts`, `components/NotifyOff.tsx` | web | `isUnread(s, marks)` (only idle and done rows, never an unattended run; a manual unread wins; no `since`, nothing), `setUnread` (through `Store.patchMarks`), the seen queue (at most one PATCH every 2 s, keys merged); `effectiveNotify` (a session's own Notify me, capped by the quietest level set on an ancestor), `toastAllowed`, `showsNever` (whether a row draws `NotifyOff`, the Inbox bell with a slash: a child row only when its parent doesn't), the `Notify me` submenu (`notifyMenu`, in `sessionItems`); `useUnread`, `useSeen` (the session page and the panel's active tab: read after 1 s on screen in a visible, focused window) and `useUnreadKeys` (`u`) in `data/hooks.ts` |
@@ -90,6 +91,39 @@ function names above.
 - COALESCE the session block (spec §3): a later empty field never blanks a full one;
   `title` keeps the better `title_source` (`custom` > `harness` > `first-ask`).
 - `turn.progress` is kept only until its `turn.transcript` or the turn's end.
+- **Nothing goes back, and no clock takes a session down.** An event stands in its
+  session's own order by `seq`, the order its sender recorded it in (PROTOCOL.md §3), and
+  the sender's `time` corrects that only within `LATE_MS` (2 s), where a hook that fired
+  first can have been recorded second (§4): an event recorded after an end and timed
+  within 2 s before it is from before it (`before` in `readings.ts`). Timed further back
+  than that, it is a clock that stepped back and is read where it was recorded. The 2 s is
+  measured, not guessed: in one machine's sessionpipe outbox (529 sessions, 43,213 events)
+  615 events are timed before one recorded ahead of them, 99 % by under 0.41 s and the
+  furthest by 1.29 s; the sender gives a hook 6 s for its session's lock before it
+  re-queues it. An event from before the last `turn.ended` or `session.ended` is filed and
+  counted and changes neither `currentTurn`, `currentTool`, `progress` nor the state,
+  unless it names the open turn (that turn's, whatever its clock says) or a prompt or a
+  resume has been read since that end and it is not from before that too. A
+  `session.started`, and a `turn.started` whose id was not named before, are the session
+  saying it is alive: let through however they are timed, and refused only when recorded
+  before the end (or the open turn's start) and timed before it (`stale`: an old event
+  delivered late). A `turn.started` that names a turn named before is that turn said
+  again, placed like any event. A `turn.ended` that names the open turn ends it however it
+  is timed; the end of a turn before the open one leaves it running (it names another
+  turn, or is the one end owed for a turn the open one took over, or is known older). A
+  run ends once: with the last run's end read, a `session.ended` is this run's; where a
+  resume was read first, the one end from before it is the old run's. An event that only
+  implies a turn (a tool, progress, a heartbeat, a subagent's start) opens one when it is
+  not late and not in the end's own millisecond, and a turn only implied stands at the
+  newest such event and is the turn it names. A `time` ahead of this receiver's clock
+  stands at its arrival, as `clampTime` has it, and two such times are compared as the
+  sender wrote them (one clock running ahead, a batch of it arriving at one instant). An
+  agent's start or call from before its `subagent.ended` leaves it ended; a `tool.started`
+  whose `tool.ended` was read is not the current tool. What is kept to place events is
+  bounded (64 agents' ends, 32 calls, 16 turn ids). `readings.test.ts` reads generated
+  sessions in those proportions with hooks recorded late, under a clock that steps back
+  2 s to 1 h or runs ahead, and in any order of delivery, against the same session in the
+  order it happened under a true clock.
 - An attention is open from `attention.needed` until `attention.cleared` **or the
   session's next hook event** (CONTROL.md §7).
 - `currentTool` is the orchestrator's last `tool.started` without its `tool.ended` (by `call_id`,

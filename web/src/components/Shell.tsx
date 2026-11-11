@@ -15,7 +15,7 @@ import type { InstalledTheme } from "@shared/theme-api";
 import { type CSSProperties, Fragment, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
 import { newSessionOpen, openNewSession } from "../control/newSessionState";
-import { useAnswerableCount, useAppState, useStore } from "../data/hooks";
+import { useAnswerableCount, useAppState, useStore, useStreamMark } from "../data/hooks";
 import { useGlobalKeys } from "../lib/keys";
 import { lazyModule, whenIdle } from "../lib/lazy";
 import { linkItems } from "../lib/menus";
@@ -529,6 +529,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   const phone = useMedia(PHONE_QUERY);
   useResize();
   useThemeColor();
+  useStreamMark();
   // Boot: the last visit's tabs when the URL carries none.
   useEffect(() => {
     restoreSplit();

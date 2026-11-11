@@ -2,7 +2,9 @@
 // The in-page state: a snapshot from the stream, then deltas applied to immutable maps so
 // useSyncExternalStore sees one new object per change. Sessions and machines are keyed;
 // recent events are a ring (newest first) the Feed page reads; control activity is kept
-// for the control engineer's strip.
+// for the control engineer's strip. Nothing here goes back: a snapshot after the first is
+// the stream come back and counts as one (`resyncs`), so a page reads again what it read
+// on its own, and of two copies of a control message the one further along stays.
 import {
   type ControlActivity,
   EMPTY_LABELS,
@@ -36,8 +38,15 @@ export interface AppState {
   stats: Stats | null;
   /** Newest first, capped at RING. */
   recent: readonly StoredEvent[];
-  /** Newest first, capped at 200. */
+  /** The receiver's control activity as this page knows it, the last one heard of first,
+   *  at most CONTROL_KEEP: the stream's `control` frames, over what GET /activity said once
+   *  a page asked (`loadControl`), read again after every snapshot that follows the first.
+   *  Of two copies of one message the one further along stays (`furthest`). */
   control: readonly ControlActivity[];
+  /** The snapshots since the first. Each is the stream come back (a drop, Retry now, a
+   *  pull to refresh, the page shown again after a long time away): what a page read on
+   *  its own, a session's events, is read again when this moves. */
+  resyncs: number;
   /** Browsers on the stream right now, this one marked `current`. */
   viewers: readonly Viewer[];
   /** Plugins' suggested answers to open permissions (shared/plugin-api.ts); one per
@@ -58,6 +67,49 @@ export interface AppState {
 }
 
 export const RING = 1500;
+/** Control messages kept: the history a page asks for (CONTROL_HISTORY) and the stream's. */
+export const CONTROL_KEEP = 500;
+export const CONTROL_HISTORY = 300;
+/** How many times one read of the history is asked for, and the wait before the second
+ *  (the third waits twice as long). */
+export const CONTROL_TRIES = 3;
+export const CONTROL_RETRY_MS = 1500;
+/** How long a stream opened again without a word (`resync`) may take to bring its
+ *  snapshot before the page says it is reconnecting. */
+export const RESYNC_QUIET_MS = 1500;
+
+const FINAL = new Set<ControlActivity["outcome"]>(["delivered", "expired", "unsupported", "failed", "refused"]);
+
+/** Of two copies of one control message, the one further along its way (server/control/
+ *  README.md: queued, then `taken` and the reply so far by `replySeq`, then one final
+ *  outcome); `b`, the later read, when neither is. A message only moves forward on the
+ *  receiver, so the copy that is behind is the older one, however late it lands: the
+ *  answer to a GET that a frame overtook, or a frame an answer overtook. */
+export function furthest(a: ControlActivity, b: ControlActivity): ControlActivity {
+  const fa = FINAL.has(a.outcome);
+  if (fa !== FINAL.has(b.outcome)) return fa ? a : b;
+  if (fa) return b;
+  const seq = (a.replySeq ?? -1) - (b.replySeq ?? -1);
+  if (seq !== 0) return seq > 0 ? a : b;
+  return (a.takenAt ?? "") > (b.takenAt ?? "") ? a : b;
+}
+
+/** The page's activity with an answer of GET /activity folded in: each message it holds
+ *  stays where it is, as the copy further along (the very object it held when the answer
+ *  says nothing new, so nothing redraws); the ones it had not heard of go after, newest
+ *  first. */
+export function mergeControl(have: readonly ControlActivity[], read: readonly ControlActivity[]): ControlActivity[] {
+  const byId = new Map(read.map((a) => [a.id, a]));
+  const out = have.map((a) => {
+    const b = byId.get(a.id);
+    if (!b) return a;
+    byId.delete(a.id);
+    const next = furthest(a, b);
+    return next === b && JSON.stringify(a) === JSON.stringify(b) ? a : next;
+  });
+  const rest = [...byId.values()].sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  return [...out, ...rest].slice(0, CONTROL_KEEP);
+}
 
 const initial: AppState = {
   connection: "connecting",
@@ -74,6 +126,7 @@ const initial: AppState = {
   marks: EMPTY_MARKS,
   limits: [],
   viewStates: new Map(),
+  resyncs: 0,
   version: 0,
 };
 
@@ -86,6 +139,9 @@ export class Store {
   private frameListeners = new Set<(m: StreamMessage) => void>();
   private stop: (() => void) | null = null;
   private seen = new Set<string>();
+  /** The `resyncs` the control activity was last asked for at; null until a page asks. */
+  private controlAt: number | null = null;
+  private quiet: ReturnType<typeof setTimeout> | null = null;
 
   constructor(public readonly transport: Transport) {}
 
@@ -122,8 +178,12 @@ export class Store {
         this.apply(m);
         for (const l of this.frameListeners) l(m);
       },
-      onOpen: () => this.set({ connection: this.state.snapshotAt ? "live" : "connecting", retryAt: null }),
+      // An open stream has said nothing yet. Only its snapshot makes the page live: until
+      // it lands the rows are the ones from before, and a page that dropped stays dropped.
+      onOpen: () =>
+        this.set({ connection: this.state.snapshotAt ? this.state.connection : "connecting", retryAt: null }),
       onError: (retryIn) => {
+        this.hush();
         const offline = typeof navigator !== "undefined" && navigator.onLine === false;
         this.set({ connection: offline ? "offline" : "reconnecting", retryAt: Date.now() + retryIn });
       },
@@ -131,17 +191,71 @@ export class Store {
   }
 
   close() {
+    this.hush();
     this.stop?.();
     this.stop = null;
   }
 
+  private hush() {
+    if (this.quiet) clearTimeout(this.quiet);
+    this.quiet = null;
+  }
+
+  private down(): boolean {
+    return this.state.connection === "reconnecting" || this.state.connection === "offline";
+  }
+
   /** "Retry now": drop the backoff and open the stream again at once. The rows stay as
-   *  they were until the fresh snapshot lands. */
+   *  they were until the fresh snapshot lands, and a page that knows it dropped goes on
+   *  saying so until then. */
   reconnect() {
     this.close();
-    this.set({ connection: "connecting", retryAt: null });
+    this.set({ connection: this.state.snapshotAt && this.down() ? "reconnecting" : "connecting", retryAt: null });
     this.start();
   }
+
+  /** The page came back (data/resume.ts: shown again after a long time hidden, out of the
+   *  back/forward cache, awake, online): the stream it holds may be open in name only, so
+   *  it is opened again for a fresh snapshot, without a word unless that takes longer than
+   *  RESYNC_QUIET_MS. Before the first snapshot it only cuts a backoff short. */
+  resync() {
+    if (!this.stop || this.quiet) return;
+    if (!this.state.snapshotAt) {
+      if (this.down()) this.reconnect();
+      return;
+    }
+    this.close();
+    if (this.down()) this.set({ retryAt: null });
+    this.start();
+    this.quiet = setTimeout(() => {
+      this.quiet = null;
+      if (this.state.connection === "live") this.set({ connection: "reconnecting", retryAt: null });
+    }, RESYNC_QUIET_MS);
+  }
+
+  /** Read the receiver's control activity under the stream's frames: when a page first
+   *  asks, and from then on by the store itself after each snapshot that follows the
+   *  first, once. An answer that does not come is asked for again, CONTROL_TRIES times
+   *  in all, and after that by the next page that asks. */
+  loadControl = (): void => {
+    const at = this.state.resyncs;
+    if (this.controlAt === at) return;
+    this.controlAt = at;
+    const ask = (tries: number): void => {
+      const read = this.transport.controlActivity?.(CONTROL_HISTORY);
+      if (!read) return;
+      read.then(
+        (list) => this.set({ control: mergeControl(this.state.control, list) }),
+        () => {
+          // A newer snapshot has asked since: that answer is the one that counts.
+          if (this.controlAt !== at) return;
+          if (tries >= CONTROL_TRIES) this.controlAt = -1;
+          else setTimeout(() => this.controlAt === at && ask(tries + 1), CONTROL_RETRY_MS * tries);
+        },
+      );
+    };
+    ask(1);
+  };
 
   private set(patch: Partial<AppState>) {
     this.state = { ...this.state, ...patch, version: this.state.version + 1 };
@@ -152,10 +266,13 @@ export class Store {
     switch (m.kind) {
       case "snapshot": {
         const s = m.snapshot;
+        const again = this.state.snapshotAt !== null;
+        this.hush();
         this.seen.clear();
         this.set({
           connection: "live",
           retryAt: null,
+          resyncs: this.state.resyncs + (again ? 1 : 0),
           snapshotAt: s.at,
           sessions: new Map(s.sessions.map((x) => [x.key, x])),
           machines: new Map(s.machines.map((x) => (noteMachineControl(x.control), [x.name, x]))),
@@ -166,6 +283,8 @@ export class Store {
           marks: s.marks ?? this.state.marks,
           limits: s.limits ?? [],
         });
+        // The frames of the drop are gone for good: what they said of the messages is asked for.
+        if (again && this.controlAt !== null) this.loadControl();
         return;
       }
       case "event": {
@@ -211,7 +330,11 @@ export class Store {
         this.set({ stats: m.stats });
         return;
       case "control": {
-        const control = [m.message, ...this.state.control.filter((c) => c.id !== m.message.id)].slice(0, 200);
+        const had = this.state.control.find((c) => c.id === m.message.id);
+        const control = [
+          had ? furthest(had, m.message) : m.message,
+          ...this.state.control.filter((c) => c.id !== m.message.id),
+        ].slice(0, CONTROL_KEEP);
         this.set({ control });
         return;
       }

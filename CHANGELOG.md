@@ -133,6 +133,32 @@ All notable changes to `sessionpipe-gui`. The format follows
   package or a git URL runs npm's own script under the GUI's node instead of failing with
   "npm is not installed" while npm is on PATH; and `link` makes a junction where Windows
   refuses a symlink, so it no longer fails with EPERM when Developer Mode is off.
+- **A finished session stays finished.** A sender records a hook when it gets to it, so a
+  tool call that fired just before a turn's Stop can be recorded after it; the receiver
+  read that late event as a new turn, and the session went back to "working" (then
+  "stale") until its next prompt. An event from before the last end of the turn, or of the
+  session, now takes nothing back: it is filed and counted, and the session stays idle or
+  done. The same for an agent whose start is recorded after its end, and for the end of a
+  run recorded after the session started again. Only an event timed within two seconds
+  before that end is read so (the furthest a hook was found recorded behind, on a real
+  machine, is 1.3 s). Further back than that it is the sender's clock that moved: a clock
+  that stepped back, a session resumed where the clock is behind, or a batch from a clock
+  ahead of the receiver's is read in the order it was recorded, so a running session never
+  reads idle or done because of its clock.
+- **A page that was away shows what is true now.** After the live stream dropped and came
+  back, an open session page kept the events it had: a turn still drawn as running, a
+  message still "handing it over", a reply missing, until a reload. The page now reads
+  what it missed, once, when the stream is back, with nothing redrawn, the scroll where it
+  was and the draft in the composer kept. A tab shown again after a long time hidden, a
+  page restored by Back, a laptop awake again and a network that returned all ask for a
+  fresh stream instead of trusting the old one, and coming back online no longer waits
+  out a retry timer.
+- While the stream is down a session page stops its spinners and its clocks where they
+  were, as the board's rows do, and the page counts as live again when the fresh state
+  has arrived, not when the connection opens: nothing reads as running, or can be sent
+  or stopped, on what the page knew before.
+- An event that arrived in the instant a session page finished loading no longer goes
+  missing from its timeline.
 
 ## [0.7.5] - 2026-11-06
 

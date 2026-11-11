@@ -5,6 +5,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app";
 import { StoreContext } from "./data/hooks";
+import { watchResume } from "./data/resume";
 import { Store } from "./data/store";
 import { createHttpTransport } from "./data/transport";
 import { applySettings } from "./lib/theme";
@@ -54,6 +55,7 @@ async function boot() {
   if (isMockMode()) (await import("./mock/banner")).showDemoBanner();
   const store = new Store(transport);
   store.start();
+  watchResume(store);
   native?.markFirstSnapshot(store);
   // Install-only service worker (public/sw.js): it caches nothing. Secure contexts only,
   // which is where "Add to Home Screen" and the app badge exist anyway.

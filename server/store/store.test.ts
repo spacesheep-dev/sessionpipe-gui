@@ -1093,6 +1093,422 @@ describe("sessionpipe 0.10 readings", () => {
   });
 });
 
+describe("late events", () => {
+  // A sessionpipe sender stamps `time` as the harness fires a hook and `seq` when its worker
+  // gets to recording it, so a hook that fired before a Stop can be recorded after it
+  // (PROTOCOL.md §4, CONTROL.md §7). These replay Claude Code's hooks in those orders.
+  const T0 = Date.now() - 60_000;
+  const fired = (ms: number) => new Date(T0 + ms).toISOString();
+  const hook = (
+    s: Session,
+    name: string,
+    type: string,
+    ms: number,
+    data: Record<string, unknown> = {},
+    seq?: number,
+  ) => ({
+    ...s.ev(type, data, { time: fired(ms), ...(seq === undefined ? {} : { seq }) }),
+    harness: { name: s.harness, version: "2.1.296", event: name },
+  });
+  /** One turn with one tool call, ended at 9 s. */
+  const turn = (s: Session) => [
+    hook(s, "SessionStart", "session.started", 0, { source: "startup" }),
+    hook(s, "UserPromptSubmit", "turn.started", 1000, { turn_id: "p1", prompt_chars: 24, submitted_by: "user" }),
+    hook(s, "PreToolUse", "tool.started", 2000, { tool: "Bash", call_id: "toolu_01", turn_id: "p1" }),
+    hook(s, "PostToolUse", "tool.ended", 3000, { tool: "Bash", call_id: "toolu_01", turn_id: "p1", ok: true, ms: 950 }),
+    hook(s, "Stop", "turn.ended", 9000, { turn_id: "p1", reason: "stop", background: 0 }),
+  ];
+  const IMPLY: [string, string, Record<string, unknown>][] = [
+    ["PostToolUse", "tool.ended", { tool: "Read", call_id: "toolu_02", turn_id: "p1", ok: true, ms: 12 }],
+    ["PreToolUse", "tool.started", { tool: "Read", call_id: "toolu_02", turn_id: "p1" }],
+    [
+      "PostToolUse",
+      "turn.progress",
+      { turn: 0, user: "Fix the date picker", assistant: "Reading it", at: fired(8990) },
+    ],
+    ["PostToolUse", "session.heartbeat", {}],
+  ];
+  const rested = (key = KEY) => {
+    const sum = store.session(key)!;
+    return { state: sum.state, turn: sum.currentTurn, tool: sum.currentTool, progress: sum.progress };
+  };
+  const REST = { state: "idle", turn: undefined, tool: undefined, progress: undefined };
+
+  for (const [name, type, data] of IMPLY)
+    it(`a ${type} that fired before the Stop and was recorded after it leaves the session idle`, () => {
+      const s = new Session();
+      store.ingest(turn(s), "http");
+      expect(rested()).toEqual(REST);
+      const since = store.session(KEY)!.stateSince;
+      // 10 ms before the Stop, then in the Stop's own millisecond: the ended turn's either way.
+      store.ingest([hook(s, name, type, 8990, data)], "http");
+      expect(rested()).toEqual(REST);
+      store.ingest([hook(s, name, type, 9000, data)], "http");
+      expect(rested()).toEqual(REST);
+      expect(store.session(KEY)!.stateSince).toBe(since);
+      expect(store.session(KEY)!.counts.events).toBe(7);
+      // What is timed after the end is the next turn's, announced or not.
+      store.ingest([hook(s, "PreToolUse", "tool.started", 20_000, { tool: "Edit", call_id: "toolu_03" })], "http");
+      expect(rested()).toMatchObject({ state: "working", tool: { tool: "Edit" } });
+    });
+
+  it("a prompt absorbed by the turn that was ending, recorded after its Stop, opens no turn", () => {
+    const s = new Session();
+    store.ingest(turn(s), "http");
+    store.ingest([hook(s, "UserPromptSubmit", "turn.started", 8990, { turn_id: "p1", prompt_chars: 9 })], "http");
+    expect(rested()).toEqual(REST);
+    expect(store.session(KEY)!.counts.turns).toBe(2);
+    // The next prompt, in the Stop's millisecond or later, is a turn.
+    store.ingest([hook(s, "UserPromptSubmit", "turn.started", 9000, { turn_id: "p2" })], "http");
+    expect(rested()).toMatchObject({ state: "working", turn: { turnId: "p2" } });
+  });
+
+  it("a subagent's start recorded after the Stop is its agent's, never a turn: idle once the agent ends", () => {
+    const s = new Session();
+    store.ingest(turn(s), "http");
+    store.ingest(
+      [hook(s, "SubagentStart", "subagent.started", 8990, { agent_id: "ag1", agent_type: "Explore" })],
+      "http",
+    );
+    expect(store.session(KEY)!).toMatchObject({ state: "working", counts: { agentsRunning: 1 } });
+    expect(store.session(KEY)!.currentTurn).toBeUndefined();
+    store.ingest([hook(s, "SubagentStop", "subagent.ended", 15_000, { agent_id: "ag1" })], "http");
+    expect(rested()).toEqual(REST);
+  });
+
+  it("an interrupted turn's end carries the next prompt's time: that prompt is the turn, in either order", () => {
+    // Claude Code fires no hook on an interrupt; the sender ends the turn at the next
+    // prompt, in that hook's job, so all four events share its `time` and differ by `seq`.
+    const job = (s: Session) => [
+      hook(s, "UserPromptSubmit", "turn.ended", 5000, { turn_id: "p1", reason: "interrupt" }),
+      hook(s, "UserPromptSubmit", "turn.transcript", 5000, { turn: 0, user: "Fix it", assistant: "", at: fired(1000) }),
+      hook(s, "UserPromptSubmit", "turn.started", 5000, { turn_id: "p2" }),
+      hook(s, "UserPromptSubmit", "turn.progress", 5000, {
+        turn: 1,
+        user: "No, the other one",
+        assistant: "",
+        at: fired(5000),
+      }),
+    ];
+    const s = new Session();
+    store.ingest([hook(s, "UserPromptSubmit", "turn.started", 1000, { turn_id: "p1" }), ...job(s)], "http");
+    expect(rested()).toMatchObject({ state: "working", turn: { turnId: "p2" }, progress: { turn: 1 } });
+
+    const r = new Session("0b6f7d0c-1c1e-4f0a-9a57-2f6f1f4f8a11");
+    const key = sessionKey("claude-code", r.id);
+    store.ingest([hook(r, "UserPromptSubmit", "turn.started", 1000, { turn_id: "p1" })], "http");
+    const [end, said, start, progress] = job(r);
+    store.ingest([start!, progress!], "http");
+    expect(store.ingest([end!, said!], "http").accepted).toBe(2);
+    expect(rested(key)).toMatchObject({ state: "working", turn: { turnId: "p2" }, progress: { turn: 1 } });
+  });
+
+  it("the end of the turn before, delivered after the next one began, leaves that one running", () => {
+    const s = new Session();
+    const [started, prompt, pre, post, stop] = turn(s);
+    store.ingest([started!, prompt!, pre!, post!], "http");
+    store.ingest(
+      [
+        hook(s, "UserPromptSubmit", "turn.started", 12_000, { turn_id: "p2" }, 7),
+        hook(s, "PreToolUse", "tool.started", 13_000, { tool: "Edit", call_id: "toolu_09", turn_id: "p2" }, 8),
+      ],
+      "http",
+    );
+    store.ingest([stop!], "http");
+    const sum = store.session(KEY)!;
+    expect(sum).toMatchObject({ state: "working", currentTurn: { turnId: "p2" }, currentTool: { tool: "Edit" } });
+    expect(sum.turnStats.count).toBe(1);
+    // A prompt from before it, delivered later still (it carries the seq it was recorded
+    // with, before the open turn's), does not take the turn back either.
+    store.ingest([hook(s, "UserPromptSubmit", "turn.started", 10_000, { turn_id: "p0" }, 5)], "http");
+    expect(store.session(KEY)!.currentTurn?.turnId).toBe("p2");
+    store.ingest([hook(s, "Stop", "turn.ended", 14_000, { turn_id: "p2", reason: "stop" })], "http");
+    expect(rested()).toEqual(REST);
+  });
+
+  it("a run's end recorded after the next run's start leaves the session running; a start after its end leaves it done", () => {
+    // A script's next `claude -p --resume` starts within a second of the last one's exit.
+    const s = new Session();
+    const [started, ...first] = turn(s);
+    store.ingest(first, "http");
+    store.ingest(
+      [
+        hook(s, "SessionStart", "session.started", 9500, { source: "resume" }),
+        hook(s, "UserPromptSubmit", "turn.started", 9600, { turn_id: "p2" }),
+      ],
+      "http",
+    );
+    store.ingest([hook(s, "SessionEnd", "session.ended", 9400, { reason: "exit" })], "http");
+    expect(store.session(KEY)!).toMatchObject({ state: "working", currentTurn: { turnId: "p2" } });
+    expect(store.session(KEY)!.endedAt).toBeUndefined();
+    store.ingest(
+      [
+        hook(s, "Stop", "turn.ended", 12_000, { turn_id: "p2", reason: "stop" }),
+        hook(s, "SessionEnd", "session.ended", 12_100, { reason: "exit" }),
+      ],
+      "http",
+    );
+    expect(store.session(KEY)!).toMatchObject({ state: "done", endedAt: fired(12_100) });
+    // The first run's start, delivered after the end (recorded before it, and timed
+    // before it): still done.
+    store.ingest([started!], "http");
+    expect(store.session(KEY)!).toMatchObject({ state: "done", endedAt: fired(12_100) });
+    // A start timed after the end is the session come back.
+    store.ingest([hook(s, "SessionStart", "session.started", 30_000, { source: "resume" })], "http");
+    expect(store.session(KEY)!.state).toBe("idle");
+  });
+
+  it("an agent that ended is not started again by its own start or calls recorded after its end", () => {
+    // In the order they fired; an agent runs for 12 s at the least, so its own start reaches
+    // a receiver after its end only where it is delivered after it, with the seq it was
+    // recorded with. A call of its can be recorded after the end by the hook's own wait.
+    const s = new Session();
+    const [started, prompt] = turn(s);
+    const begun = hook(s, "SubagentStart", "subagent.started", 2000, { agent_id: "ag1", agent_type: "Explore" });
+    const call = hook(s, "PreToolUse", "tool.started", 3000, { tool: "Grep", call_id: "toolu_a1", agent_id: "ag1" });
+    const called = hook(s, "PostToolUse", "tool.ended", 3100, {
+      tool: "Grep",
+      call_id: "toolu_a1",
+      agent_id: "ag1",
+      ok: true,
+    });
+    store.ingest([started!, prompt!], "http");
+    store.ingest(
+      [
+        hook(s, "SubagentStop", "subagent.ended", 15_000, { agent_id: "ag1", agent_type: "Explore" }),
+        hook(s, "Stop", "turn.ended", 19_000, { turn_id: "p1", reason: "stop", background: 0 }),
+      ],
+      "http",
+    );
+    expect(store.session(KEY)!.state).toBe("idle");
+    store.ingest([begun, call, called], "http");
+    const sum = store.session(KEY)!;
+    expect(rested()).toEqual(REST);
+    expect(sum.counts).toMatchObject({ agentsRunning: 0, subagents: 1, tools: 1 });
+    expect(sum.agents).toHaveLength(1);
+    expect(sum.agents[0]).toMatchObject({ id: "ag1", state: "done", startedAt: fired(2000), endedAt: fired(15_000) });
+    expect(sum.agents[0]!.currentTool).toBeUndefined();
+    // Its last call, fired 10 ms before its end and recorded after it.
+    store.ingest(
+      [hook(s, "PostToolUse", "tool.ended", 14_990, { tool: "Read", call_id: "toolu_a2", agent_id: "ag1", ok: true })],
+      "http",
+    );
+    expect(rested()).toEqual(REST);
+    expect(store.session(KEY)!.counts).toMatchObject({ agentsRunning: 0, tools: 2 });
+    // The same agent started again after that end is running.
+    store.ingest([hook(s, "SubagentStart", "subagent.started", 30_000, { agent_id: "ag1" })], "http");
+    expect(store.session(KEY)!).toMatchObject({ state: "working", counts: { agentsRunning: 1 } });
+  });
+
+  it("reads the same after a rebuild in seq order and after a reboot", async () => {
+    const s = new Session();
+    const events = turn(s).map((e) => ({ ...e, tier: 1 as const }));
+    const late = hook(s, "PostToolUse", "tool.ended", 8990, { tool: "Read", call_id: "toolu_02", ok: true });
+    store.ingest([...events, { ...late, tier: 1 as const }], "http");
+    expect(rested()).toEqual(REST);
+    // The same seq again at a higher tier replaces it and rebuilds the readings, by seq.
+    expect(store.ingest([{ ...late, data: { ...late.data, input: { file_path: "a.ts" } } }], "outbox").duplicates).toBe(
+      1,
+    );
+    expect(store.session(KEY)!.maxTier).toBe(3);
+    expect(rested()).toEqual(REST);
+    const before = store.session(KEY)!;
+    await store.close();
+    store = new Store(tmp.dir, { tickMs: 1_000, statsMs: 1_000 });
+    expect(store.session(KEY)!).toEqual(before);
+  });
+
+  // The sender's clock is not this receiver's, and it moves. Further back than a hook waits
+  // to be recorded (LATE_MS), an event's time says a clock stepped back, and it is read
+  // where it was recorded: a session never reads idle or done for that.
+  const BACK: [string, number][] = [
+    ["30 s", 30_000],
+    ["5 min", 300_000],
+    ["1 h", 3_600_000],
+  ];
+  it.each(BACK)(
+    "a clock that stepped back %s after a turn ended: the next turn reads working, then ends",
+    (_, back) => {
+      const s = new Session();
+      store.ingest(turn(s), "http");
+      expect(rested()).toEqual(REST);
+      // Ten seconds on by a true clock.
+      store.ingest(
+        [hook(s, "UserPromptSubmit", "turn.started", 19_000 - back, { turn_id: "p2", prompt_chars: 9 })],
+        "http",
+      );
+      expect(rested()).toMatchObject({ state: "working", turn: { turnId: "p2" } });
+      store.ingest(
+        [hook(s, "PreToolUse", "tool.started", 20_000 - back, { tool: "Edit", call_id: "toolu_05", turn_id: "p2" })],
+        "http",
+      );
+      expect(rested()).toMatchObject({ state: "working", turn: { turnId: "p2" }, tool: { tool: "Edit" } });
+      store.ingest(
+        [
+          hook(s, "PostToolUse", "tool.ended", 25_000 - back, {
+            tool: "Edit",
+            call_id: "toolu_05",
+            turn_id: "p2",
+            ok: true,
+          }),
+          hook(s, "Stop", "turn.ended", 40_000 - back, { turn_id: "p2", reason: "stop", background: 0 }),
+        ],
+        "http",
+      );
+      expect(rested()).toEqual(REST);
+      expect(store.session(KEY)!.counts.turns).toBe(2);
+    },
+  );
+
+  it("a run resumed on a clock 5 min behind its last end is running, and its next turn too", () => {
+    const s = new Session();
+    store.ingest([...turn(s), hook(s, "SessionEnd", "session.ended", 9100, { reason: "exit" })], "http");
+    expect(store.session(KEY)!).toMatchObject({ state: "done", endedAt: fired(9100) });
+    const back = 300_000;
+    store.ingest(
+      [
+        hook(s, "SessionStart", "session.started", 29_000 - back, { source: "resume" }),
+        hook(s, "UserPromptSubmit", "turn.started", 30_000 - back, { turn_id: "p2" }),
+        hook(s, "PreToolUse", "tool.started", 31_000 - back, { tool: "Bash", call_id: "toolu_06", turn_id: "p2" }),
+      ],
+      "http",
+    );
+    expect(rested()).toMatchObject({ state: "working", turn: { turnId: "p2" }, tool: { tool: "Bash" } });
+    expect(store.session(KEY)!.endedAt).toBeUndefined();
+    store.ingest(
+      [
+        hook(s, "Stop", "turn.ended", 45_000 - back, { turn_id: "p2", reason: "stop" }),
+        hook(s, "UserPromptSubmit", "turn.started", 50_000 - back, { turn_id: "p3" }),
+      ],
+      "http",
+    );
+    expect(rested()).toMatchObject({ state: "working", turn: { turnId: "p3" } });
+  });
+
+  it("the end of the run before, recorded after a resume that is the first event read, leaves the resumed run running, and after a reboot", async () => {
+    // The run before ended 132 ms before the resume; its SessionEnd was recorded after it.
+    const lateEnd = (s: Session, seq: number) => [
+      hook(s, "SessionStart", "session.started", 4380, { source: "resume" }, seq),
+      hook(s, "SessionEnd", "session.ended", 4248, { reason: "exit" }, seq + 1),
+    ];
+    const next = (s: Session, seq: number) => [
+      hook(s, "UserPromptSubmit", "turn.started", 6000, { turn_id: "p2" }, seq),
+      hook(s, "PreToolUse", "tool.started", 7000, { tool: "Bash", call_id: "toolu_c2", turn_id: "p2" }, seq + 1),
+    ];
+    const running = { state: "working", turn: { turnId: "p2" }, tool: { tool: "Bash" } };
+    // The batch that holds the resume and that end is delivered ahead of the one before it.
+    const s = new Session();
+    store.ingest(lateEnd(s, 2), "http");
+    store.ingest(
+      [
+        hook(s, "SessionStart", "session.started", 0, { source: "startup" }, 0),
+        hook(s, "Stop", "turn.ended", 4137, { turn_id: "p1", reason: "stop" }, 1),
+      ],
+      "http",
+    );
+    store.ingest(next(s, 4), "http");
+    expect(rested()).toMatchObject(running);
+    expect(store.session(KEY)!.endedAt).toBeUndefined();
+    // The receiver's first event of the session is the resume.
+    const r = new Session("5b0c7e19-8d42-4a6f-9c31-e7f2a4d6b803");
+    const key = sessionKey("claude-code", r.id);
+    store.ingest(lateEnd(r, 7), "http");
+    store.ingest(next(r, 9), "http");
+    expect(rested(key)).toMatchObject(running);
+    expect(store.session(key)!.endedAt).toBeUndefined();
+    // A reboot reads the files in the order the events arrived.
+    await store.close();
+    store = new Store(tmp.dir, { tickMs: 1_000, statsMs: 1_000 });
+    expect(rested()).toMatchObject(running);
+    expect(rested(key)).toMatchObject(running);
+    // The resumed run's own end ends it.
+    store.ingest(
+      [
+        hook(r, "Stop", "turn.ended", 9000, { turn_id: "p2", reason: "stop" }, 11),
+        hook(r, "SessionEnd", "session.ended", 9010, { reason: "exit" }, 12),
+      ],
+      "http",
+    );
+    expect(store.session(key)!).toMatchObject({ state: "done", endedAt: fired(9010) });
+  });
+
+  it("a clock that stepped back 5 min in the middle of a turn: its Stop, timed before its own prompt, ends it", () => {
+    for (const ids of [true, false]) {
+      const s = new Session(ids ? SID : "3d7a4f0e-52b1-4c7e-9a43-6f2d1b9e8c55");
+      const key = sessionKey("claude-code", s.id);
+      const id = (turnId: string) => (ids ? { turn_id: turnId } : {});
+      store.ingest(
+        [
+          hook(s, "SessionStart", "session.started", 0, { source: "startup" }),
+          hook(s, "UserPromptSubmit", "turn.started", 1000, id("p1")),
+          hook(s, "PreToolUse", "tool.started", 2000, { tool: "Bash", call_id: "toolu_07", ...id("p1") }),
+        ],
+        "http",
+      );
+      expect(rested(key).state).toBe("working");
+      const back = 300_000;
+      store.ingest(
+        [
+          hook(s, "PostToolUse", "tool.ended", 10_000 - back, {
+            tool: "Bash",
+            call_id: "toolu_07",
+            ...id("p1"),
+            ok: true,
+          }),
+          hook(s, "Stop", "turn.ended", 30_000 - back, { ...id("p1"), reason: "stop" }),
+        ],
+        "http",
+      );
+      expect(rested(key), `ids ${ids}`).toEqual(REST);
+      // And a whole next turn, still timed before the old prompt.
+      store.ingest([hook(s, "UserPromptSubmit", "turn.started", 40_000 - back, id("p2"))], "http");
+      expect(rested(key).state, `ids ${ids}`).toBe("working");
+      store.ingest([hook(s, "Stop", "turn.ended", 50_000 - back, { ...id("p2"), reason: "stop" })], "http");
+      expect(rested(key), `ids ${ids}`).toEqual(REST);
+    }
+  });
+
+  it("one batch from a clock ahead of this receiver's: the turn after an end in it, and its tool, are read", () => {
+    // Every time in the batch is ahead of its arrival, so all of them stand at that one instant.
+    const ahead = 65_000;
+    const s = new Session();
+    store.ingest(
+      [
+        hook(s, "SessionStart", "session.started", 0, { source: "startup" }),
+        hook(s, "UserPromptSubmit", "turn.started", 1000, { turn_id: "p1" }),
+      ],
+      "http",
+    );
+    store.ingest(
+      [
+        hook(s, "Stop", "turn.ended", ahead, { turn_id: "p1", reason: "stop" }),
+        hook(s, "UserPromptSubmit", "turn.started", ahead + 1000, { turn_id: "p2" }),
+        hook(s, "PreToolUse", "tool.started", ahead + 1500, { tool: "Bash", call_id: "toolu_08", turn_id: "p2" }),
+      ],
+      "http",
+    );
+    expect(rested()).toMatchObject({ state: "working", turn: { turnId: "p2" }, tool: { tool: "Bash" } });
+    // The same on a harness with no prompt hook: the tool after the end is a turn.
+    const r = new Session("7e1c9b52-0a64-4d3f-b8e7-5c2f4a6d9013", "antigravity");
+    const key = sessionKey("antigravity", r.id);
+    store.ingest(
+      [
+        hook(r, "PreInvocation", "session.started", 0, { source: "unknown" }),
+        hook(r, "PreToolUse", "tool.started", 1000, { tool: "run_command" }),
+      ],
+      "http",
+    );
+    store.ingest(
+      [
+        hook(r, "Stop", "turn.ended", ahead, { reason: "stop" }),
+        hook(r, "PreToolUse", "tool.started", ahead + 1500, { tool: "view_file" }),
+      ],
+      "http",
+    );
+    expect(rested(key)).toMatchObject({ state: "working", tool: { tool: "view_file" } });
+  });
+});
+
 describe("newsAt", () => {
   const arrive = (t: string, events: Parameters<Store["ingest"]>[0]) => {
     vi.setSystemTime(Date.parse(t));
