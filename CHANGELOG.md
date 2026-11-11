@@ -86,6 +86,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   while it runs is no longer undone by the receiver's next write of config.json (a token
   rotation, a toggle in Settings, a spacesheep connect), which put back the lists it held
   in memory.
+- **`npx github:spacesheep-dev/sessionpipe-gui` works on Windows.** Its one-time build
+  spawned a bare `npm`, which is `npm.cmd` there and can't start without a shell, so the
+  command exited 1 with no message. The build now runs npm through npm's own entry under the
+  same node, and says why if npm can't be started. Its check for the build tools also looked
+  for `@vitejs/plugin-react/package.json` through the package's exports, which leave it out,
+  so on every platform the tools were installed a second time; on Windows that install ran
+  the build script again, and again, until the PATH outgrew cmd.exe.
 
 ## [0.7.5] - 2026-11-06
 
