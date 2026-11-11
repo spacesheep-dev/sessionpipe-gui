@@ -1,0 +1,31 @@
+{
+  "name": "reply-to-malformed",
+  "description": "A reply_to that is not a session ref by the adapter's rule (a Claude Code id that isn't a UUID).",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"prompt\",\"session\":\"codex:0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c\",\"text\":\"Add the Oct 8 row\",\"nonce\":\"9E72CmNXUM46sxvSzSKKzw\",\"iat\":1790800000000,\"reply_to\":\"claude-code:not-a-uuid\"}",
+      "csig": "ghmQqld440v-4DwnP0btcSwu_LOKL5AgP6yHgtkMHKE4Ae3Wzj9h7RlSAn85MTFtCGHp8UU2GUD1yxv7mqQYmA",
+      "grant": {
+        "cred": "po4y-Btkuhpyz6Es9FRVUHHKX4ZdqX58",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiRmFHNHRsOXk4ZmluUDVyQlNsSGJfZzBHUjJYOUtPTy10UTJBb0NSM0N4NCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIQDWVIffjmxFxU-OFXVE70OrzUCBX6d69bOa0YyhPNSN6wIgJUGOmJHWN6n7Nav58L1Wf0FRObyDkpXqYKqssh-q9Vs",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEvX1Kna2HyRqE2U8t5iaH0ihW4wiDJaevvKiYAxACvYL5D_8HVAdIFzTvDay4dX83u2qnnRIa8SoJronVMg0MoQ\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "po4y-Btkuhpyz6Es9FRVUHHKX4ZdqX58",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbH-EFAvuL42tRfx5lZlbUBfxQk6DrXHkREYNKfJkkWRWuFSaFihU9flFhRJpPzJy3dLQ05pPoI80oaeq2Gw2wg"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}

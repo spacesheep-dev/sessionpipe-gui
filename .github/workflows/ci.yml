@@ -33,6 +33,9 @@ jobs:
 
       - run: npm run typecheck
       - run: npm run lint
+      # With sessionpipe's own conformance fixtures (every control vector, every delivery
+      # scenario) from test/conformance/, the copy at the pinned sessionpipe-core's version:
+      # nothing here needs a second checkout, and none of it is skipped.
       - run: npm test
 
       # The bundled-views step looks for ../sessionpipe-gui-themes and skips with a note

@@ -14,6 +14,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   than bringing answers back", because this receiver's own verifier refused `reply_to`
   before the machine saw it. A pool command is verified by the core itself, and still
   refused here on a day grant alone where the machine wants a fresh confirm.
+- sessionpipe's conformance fixtures for 0.13.6 (169 control vectors, 33 delivery scenarios)
+  are in the repo under `test/conformance/` and run with `npm test`, in CI too. They were
+  read from a sessionpipe checkout beside the clone and skipped without one, so CI never
+  ran them, and with one the pool vectors failed (#71).
 
 ## [0.7.5] - 2026-11-06
 

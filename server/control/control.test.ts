@@ -4,11 +4,10 @@
 // redelivery, the `taken` pause, acks, expiry, off, the early verification against
 // every control vector, the approval proof, persistence and the stream.
 
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   type Assertion,
   RECEIVER_MAX_AGE_MS,
@@ -25,6 +24,7 @@ import {
   type StreamMessage,
   type TrustedKey,
 } from "../../shared/api.js";
+import { fixtures } from "../../test/conformance.js";
 import { Router } from "../http/router.js";
 import { coreTakesDevice, receiverKeyTypes } from "./devicekeys.js";
 import { fileHash } from "./files.js";
@@ -1453,17 +1453,10 @@ describe("a start's options, files and applied, through POST send", () => {
 // --- every control vector (CONTROL.md §11) ------------------------------------------
 // "The reference verifier and every receiver that pre-checks MUST agree with all of them."
 // Twice over: the verdict the verifier this receiver runs reaches on each vector, as it is
-// written; and what the receiver then does with the command through POST send.
+// written; and what the receiver then does with the command through POST send. The vectors
+// are the pinned sessionpipe's, in this repo (test/conformance.ts): never skipped.
 
-const repo =
-  process.env.SESSIONPIPE_REPO ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../sessionpipe");
-const vectorsDir = path.join(repo, "conformance/control-vectors");
-let vectorFiles: string[] = [];
-try {
-  vectorFiles = readdirSync(vectorsDir)
-    .filter((f) => f.endsWith(".json"))
-    .sort();
-} catch {}
+const { dir: vectorsDir, files: vectorFiles } = fixtures("control-vectors");
 
 interface Vector {
   name: string;
@@ -1497,7 +1490,7 @@ const VECTOR_POOL = {
  *  generator hashes these words. Uploaded, so the receiver holds what the commands name. */
 const VECTOR_FILE_BYTES = ["png bytes", "pdf bytes"];
 
-describe.skipIf(!vectorFiles.length)("control vectors: the verdict of the verifier this receiver runs", () => {
+describe("control vectors: the verdict of the verifier this receiver runs", () => {
   for (const f of vectorFiles) {
     const v = readVector(f);
     it(f, async () => {
@@ -1538,8 +1531,7 @@ describe.skipIf(!vectorFiles.length)("control vectors: the verdict of the verifi
   }
 });
 
-describe.skipIf(!vectorFiles.length)("control vectors: carried or refused through POST send", () => {
-  if (!vectorFiles.length) console.log(`control vectors not found at ${vectorsDir}; set SESSIONPIPE_REPO`);
+describe("control vectors: carried or refused through POST send", () => {
   for (const f of vectorFiles) {
     const v = readVector(f);
     if (!v.input.signed) continue; // an enrollment proof names a pairing code only its machine made

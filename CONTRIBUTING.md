@@ -35,6 +35,13 @@ npm run build
 npm run test:e2e        # playwright: a built server in demo mode on :7311 / :7312, desktop and phone
 ```
 
+`npm test` holds the receiver to sessionpipe's own conformance fixtures (its control
+vectors and delivery scenarios), from the copy in `test/conformance/` at the version of
+`sessionpipe-core` the lockfile pins. A PR that moves `sessionpipe-core` runs
+`npm run conformance:sync` (a sessionpipe checkout beside this repo, or `-- --from <path>`)
+and commits what it wrote; nothing there is edited by hand, and a test fails when the copy
+and the pin disagree.
+
 The e2e suite never touches :7373, so it runs beside a GUI you have open. The control
 e2e (`npx playwright test -c web/e2e/playwright.config.ts`) boots its own server on a
 free port. `SHOTS=1 npx playwright test screenshots` writes the README screenshots from
