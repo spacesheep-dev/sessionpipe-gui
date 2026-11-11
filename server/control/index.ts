@@ -22,9 +22,17 @@ import type { Ctx, Router } from "../http/router.js";
 import { coreTakesDevice, receiverKeyTypes } from "./devicekeys.js";
 import type { Hello } from "./parse.js";
 import { registerMachineRoutes } from "./routes.js";
-import { ControlState, type DemoStart, type DeviceRequestRow, toActivity, WAIT_MAX_S } from "./state.js";
+import {
+  ControlState,
+  type DemoStart,
+  type DeviceRequestRow,
+  type RemoteMachine,
+  toActivity,
+  WAIT_MAX_S,
+} from "./state.js";
 import { registerTestDoor } from "./testdoor.js";
 import { coreTakesTilde } from "./tilde.js";
+import type { UiRouteDeps } from "./ui.js";
 import { queueSend, registerUiRoutes, type VerifiedSend, verifySend } from "./ui.js";
 
 export interface ControlDeps {
@@ -48,6 +56,8 @@ export interface ControlDeps {
   origins?: () => string[];
   /** The UI key (routes.ts pairUrlFor): the pairing link carries it. */
   uiKey?: () => string;
+  /** A send for a machine paired on spacesheep (ui.ts forwardSend, docs/rfcs/08). */
+  remoteSend?: UiRouteDeps["remoteSend"];
 }
 
 export interface Control {
@@ -56,6 +66,14 @@ export interface Control {
   register(router: Router): void;
   /** Paired machines, keyed by the daemon's `name` (the same name events carry in session.machine). */
   machines(): Map<string, MachineControl>;
+  remote: {
+    upsert: (list: RemoteMachine[], remote: { via: "spacesheep"; origin: string; rpId: string }) => void;
+    drop: (via: "spacesheep") => void;
+    pendingFrom: () => number | null;
+    applyJobs: (
+      jobs: Array<{ id: number; status: string; note: string | null; done_at: number | null; created_at: number }>,
+    ) => number;
+  };
   activity(limit?: number): ControlActivity[];
   /** One command by its id, from whichever queue holds it (a workflow step's ack, found
    *  without a walk through the newest N). */
@@ -153,8 +171,22 @@ export function createControl(deps: ControlDeps): Control {
         ...(deps.uiKey ? { uiKey: deps.uiKey } : {}),
         ...(deps.origins ? { origins: deps.origins } : {}),
       });
-      registerUiRoutes(router, { state, rpId, uiAuth: deps.uiAuth, base: ROUTES.ui.control, device });
+      registerUiRoutes(router, {
+        state,
+        rpId,
+        uiAuth: deps.uiAuth,
+        base: ROUTES.ui.control,
+        device,
+        ...(deps.remoteSend ? { remoteSend: deps.remoteSend } : {}),
+      });
       if (deps.testDoor) registerTestDoor(router, { state, rpId, base: ROUTES.control, device });
+    },
+    /** The relay's machines (docs/rfcs/08): rows in memory, their sends settled by job status. */
+    remote: {
+      upsert: (list, remote) => state.upsertRemoteMachines(list, remote),
+      drop: (via) => state.dropRemoteMachines(via),
+      pendingFrom: () => state.pendingRemoteJobsFrom(),
+      applyJobs: (jobs) => state.applyRemoteJobs(jobs),
     },
     machines() {
       const out = new Map<string, MachineControl>();

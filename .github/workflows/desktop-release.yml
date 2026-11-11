@@ -291,7 +291,8 @@ jobs:
             auth=(--apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID")
           fi
           xcrun notarytool submit "$dmg" "${auth[@]}" --wait --timeout 30m
-          xcrun stapler staple "$dmg"
+          # stapler fetches the ticket from Apple's CloudKit, which drops connections now and then.
+          for n in 1 2 3 4 5; do xcrun stapler staple "$dmg" && break; [ "$n" = 5 ] && exit 68; sleep $((n*20)); done
           gh release upload "$TAG" "$dmg" --repo "$GITHUB_REPOSITORY" --clobber
 
       - name: Check the signature (macOS)
@@ -314,7 +315,7 @@ jobs:
             for v in "$app_verdict" "$dmg_verdict"; do
               grep -q 'source=Notarized Developer ID' <<<"$v" || { echo "::error::spctl does not say Notarized Developer ID"; exit 1; }
             done
-            xcrun stapler validate "$dmg"
+            for n in 1 2 3 4 5; do xcrun stapler validate "$dmg" && break; [ "$n" = 5 ] && exit 68; sleep $((n*20)); done
             echo "macOS: signed, notarized and stapled (spctl: Notarized Developer ID)." >> "$GITHUB_STEP_SUMMARY"
           else
             grep -q 'source=Unnotarized Developer ID' <<<"$app_verdict" || { echo "::error::the app is not signed with Developer ID"; exit 1; }

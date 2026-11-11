@@ -216,7 +216,7 @@ test("New session on lab-mac: each agent says what its account has left there", 
 });
 
 test("New session on a one-account machine: none left, in the attention colour", async ({ page }) => {
-  await page.goto("/?mock=1&new=1&machine=misha-air&harness=claude-code");
+  await page.goto("/?mock=1&new=1&machine=demo-laptop&harness=claude-code");
   const sheet = page.locator("[data-new-session]");
   await expect(sheet.locator("[data-ns-left]")).toHaveText("None left");
   await expect(sheet.locator("[data-ns-left]")).toHaveClass(/ns-aside--out/);
