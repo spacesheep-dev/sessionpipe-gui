@@ -7,9 +7,10 @@
 // (the strip's Allow / Deny as menu items) stays here, in the app's own chunk.
 import { type SessionSummary, sessionKey } from "@shared/api";
 import { lazy, type RefObject, Suspense } from "react";
-import { useSeen } from "../data/hooks";
+import { useSeen, useStreamDown } from "../data/hooks";
 import { isPlanReview, toolLabel } from "../lib/format";
 import { back } from "../lib/router";
+import { ClockHold } from "../lib/time";
 import type { MenuList } from "./ContextMenu";
 import { BackButton, PageBar } from "./PageBar";
 
@@ -41,10 +42,15 @@ if (typeof window !== "undefined") {
 export function SessionView(props: SessionViewProps) {
   // On the page it is what the person is looking at; the panel marks its active tab.
   useSeen(props.mode === "page" ? sessionKey(props.harness, props.id) : null);
+  // While the stream is down nothing says how long a turn or a tool has run: the view's
+  // clocks stand at the instant it dropped (its rings stop too: styles/session.css).
+  const downAt = useStreamDown();
   return (
-    <Suspense fallback={<SessionLoading mode={props.mode} />}>
-      <Body {...props} />
-    </Suspense>
+    <ClockHold.Provider value={downAt}>
+      <Suspense fallback={<SessionLoading mode={props.mode} />}>
+        <Body {...props} />
+      </Suspense>
+    </ClockHold.Provider>
   );
 }
 

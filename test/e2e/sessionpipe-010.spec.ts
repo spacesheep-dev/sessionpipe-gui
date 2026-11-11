@@ -93,6 +93,13 @@ test("a scheduled turn says so under its prompt", async ({ page }) => {
   const s = (await snap(page)).sessions.find((x) => x.title?.startsWith("Every 30 minutes") && x.counts.turns >= 2)!;
   await openPage(page, `/s/${s.harness}/${s.id}`);
   await expect(page.locator(".prompt-via", { hasText: "Scheduled" })).toBeVisible();
+  // Who submitted a prompt is tier 0 (PROTOCOL.md §4): the tier lens keeps it. Lens 2 from
+  // the "⋯" menu still draws the prompt (the transcript is tier 2), and still says Scheduled.
+  await page.locator(".sess-bar").getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Tier lens" }).click();
+  await page.getByRole("menuitemradio", { name: /^2 · / }).click();
+  await expect(page.locator(".lens-hint")).toBeVisible();
+  await expect(page.locator(".prompt-via", { hasText: "Scheduled" })).toBeVisible();
 });
 
 test("goose's run over ACP: the reply from the ack, delivered over api", async ({ page }) => {
