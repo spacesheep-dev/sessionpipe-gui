@@ -624,7 +624,7 @@ describe("a plugin or view the CLI turns on or off while the server runs", () =>
     expect(file().enabled).toBeUndefined();
   });
 
-  it("the server's secrets stay its own, and a bad file, or one the CLI rebuilt from it, changes nothing", async () => {
+  it("the server's secrets stay its own, and a bad file, or one with other secrets, changes nothing", async () => {
     cli("view:canvas", false);
     const { sinkToken, uiKey } = app.config();
     const f = path.join(tmp.dir, "config.json");
@@ -634,11 +634,10 @@ describe("a plugin or view the CLI turns on or off while the server runs", () =>
     expect(readFileSync(f, "utf8")).toBe("{ not json");
     expect(app.config()).toMatchObject({ sinkToken, uiKey, disabled });
     expect(app.config().enabled).toEqual(enabled);
-    // The CLI on a file it cannot parse rebuilds it with new secrets and only its own key:
-    // those lists are not an edit of ours, so none is taken from it.
-    cli("plugin:shipped", true);
-    expect(file().sinkToken).not.toBe(sinkToken);
-    expect(file().disabled).toBeUndefined();
+    // A file with other secrets than the server's (another install's, or the old token a
+    // CLI command wrote back across a rotation): its lists are not an edit of ours, so
+    // none is taken from it.
+    writeFileSync(f, JSON.stringify({ sinkToken: "spg_test_other", uiKey: "uik_other", enabled: ["plugin:shipped"] }));
     await fetch(url(PLUGIN_ROUTES.reload), { method: "POST" });
     expect(await status("shipped")).toBe("inactive");
     expect(app.config()).toMatchObject({ sinkToken, uiKey, disabled });
