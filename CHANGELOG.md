@@ -106,6 +106,11 @@ All notable changes to `sessionpipe-gui`. The format follows
 - Search no longer says "“c:” isn't a filter" over a pasted Windows path (`C:\Users\…`,
   `D:/repo`) or a URL (`https://…`). They were, and still are, searched as text; the notice
   now stays for something that looks like a filter, such as `foo:bar` or `cwd:/x`.
+- **The tier lens shows prompts, turn ends and attentions as a lower-tier receiver gets
+  them:** under a lens below tier 3, who submitted a prompt (`submitted_by`, `injected`)
+  and the background work still running when a turn ends (`background`) now stay, and an
+  attention's `turn_id` and `call_id`, which the client never sends, go, as does its
+  `agent_id` at tier 0.
 
 ## [0.7.5] - 2026-11-06
 
