@@ -21,7 +21,7 @@ import {
   type SessionSearchPage,
 } from "../../shared/api.js";
 import { isEmptySearch, parseSearch } from "../../shared/searchQuery.js";
-import { readConfigFile } from "../config.js";
+import { ConfigError, readConfigFile } from "../config.js";
 import { HARNESS_LABELS } from "./facets.js";
 import { homePath } from "./resume.js";
 import {
@@ -160,14 +160,24 @@ export function parseSearchArgs(argv: string[]): SearchArgs | "help" {
 }
 
 /** The GUI's own settings, read without creating anything (the CLI never writes config).
- *  No config.json yet means history on, the default; one the GUI itself refuses to read
- *  (unreadable, empty, does not parse) means off, so a setting that turned history off is
- *  not undone by a damaged file. */
+ *  No config.json yet means history on, the default. One the GUI itself refuses to read
+ *  (unreadable, empty, does not parse) throws its ConfigError, which `refused` turns into
+ *  the message and exit 2, as every other command stops: read as "on" it would undo a
+ *  setting that turned history off, and read as "off" the indexer would delete the
+ *  history index. */
 function readHistorySetting(stateDir: string): boolean {
+  return readConfigFile(path.join(stateDir, "config.json"))?.searchHistory !== false;
+}
+
+/** Exit 2, with the reason said, when config.json is one the GUI refuses to read. */
+function refused(io: CliIo): number | undefined {
   try {
-    return readConfigFile(path.join(stateDir, "config.json"))?.searchHistory !== false;
-  } catch {
-    return false;
+    readHistorySetting(io.stateDir);
+    return undefined;
+  } catch (e) {
+    if (!(e instanceof ConfigError)) throw e;
+    io.stderr.write(`sessionpipe-gui: ${e.message}\n`);
+    return 2;
   }
 }
 
@@ -320,6 +330,8 @@ export async function runSearchCli(argv: string[], io: CliIo): Promise<number> {
     io.stdout.write(SEARCH_USAGE);
     return 0;
   }
+  const stop = refused(io);
+  if (stop !== undefined) return stop;
   let opened: Opened;
   try {
     opened = await openForCli(io);
@@ -501,6 +513,8 @@ export async function runIndexCli(argv: string[], io: CliIo): Promise<number> {
         return 2;
     }
   }
+  const stop = refused(io);
+  if (stop !== undefined) return stop;
   const server = runningServer(io.stateDir);
   const http = io.fetch ?? fetch;
   const base = server ? `http://127.0.0.1:${server.port}` : undefined;

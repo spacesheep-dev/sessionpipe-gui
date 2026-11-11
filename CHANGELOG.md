@@ -16,8 +16,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   byte for byte as it was; one it cannot read (a folder of that name, no permission) stops
   it the same way instead of with a stack trace. A `config.json` with a UTF-8 byte-order
   mark (PowerShell 5's `UTF8` encoding, older Windows editors) is read past it, instead of
-  being replaced the same way. `sessionpipe-gui search` reads its history setting past a
-  byte-order mark too, and treats a `config.json` the GUI refuses as history off, not on.
+  being replaced the same way. `sessionpipe-gui search` and `index` read the history setting
+  past a byte-order mark too, and stop the same way on a `config.json` the GUI refuses,
+  instead of reading it as history on.
 
 ## [0.7.5] - 2026-11-06
 

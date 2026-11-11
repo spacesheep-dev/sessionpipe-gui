@@ -2,7 +2,7 @@
 // Owned by: search-service. `sessionpipe-gui search` / `index` over a fake backend (the
 // oracle as the reader): flags into tokens, the printed page, --json, exit codes, and
 // `index` asking a running server instead of fighting it for the LOCK.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -175,16 +175,30 @@ describe("sessionpipe-gui search", () => {
     expect((JSON.parse(r.out) as SessionSearchPage).index.history).toBe(false);
   });
 
-  it("treats a config.json the GUI refuses to read as history off, not on", async () => {
+  it("stops on a config.json the GUI refuses to read, rather than read it as history on or off", async () => {
     // A cut-short write: the GUI itself stops on this file rather than write over it.
-    writeFileSync(path.join(tmp.dir, "config.json"), '{"searchHistory": false, "sinkToken": "spg_');
+    const cut = '{"searchHistory": false, "sinkToken": "spg_';
+    writeFileSync(path.join(tmp.dir, "config.json"), cut);
+    built = false;
     const r = await run(runSearchCli, ["webhook", "--json"]);
-    expect(r.code).toBe(1);
-    expect((JSON.parse(r.out) as SessionSearchPage).index.history).toBe(false);
+    expect(r.code).toBe(2);
+    expect(r.err).toMatch(/config\.json is not valid JSON/);
+    expect(r.err).not.toContain("spg_");
+    expect(r.out).toBe("");
+    expect(ran).toHaveLength(0);
+    expect(readFileSync(path.join(tmp.dir, "config.json"), "utf8")).toBe(cut);
   });
 });
 
 describe("sessionpipe-gui index", () => {
+  it("stops on a config.json the GUI refuses to read: no indexer runs, so no history index is deleted", async () => {
+    writeFileSync(path.join(tmp.dir, "config.json"), '{"sinkToken": "spg_');
+    const r = await run(runIndexCli, ["--rebuild"]);
+    expect(r.code).toBe(2);
+    expect(r.err).toMatch(/config\.json is not valid JSON/);
+    expect(ran).toHaveLength(0);
+  });
+
   it("indexes in the foreground when no GUI is running", async () => {
     const r = await run(runIndexCli, ["--rebuild"]);
     expect(r.code).toBe(0);
