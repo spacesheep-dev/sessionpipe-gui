@@ -16,6 +16,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   draws them yet: the session a copy answered for (an ack's `copy_of`,
   `ControlActivity.copyOf`), and whether the command line is signed in to each account (a
   hello's `signed_in`, `HarnessAccount.signedIn`).
+- **`sessionpipe-gui service install` on Windows.** The receiver runs in the background as a
+  scheduled task that starts at your logon (`\sessionpipe\dev.spacesheep.sessionpipe-gui`
+  in Task Scheduler), with no console window and no administrator rights; `uninstall`,
+  `status`, `--dry-run` and the in-place upgrade work as on macOS and Linux, and the output
+  goes to `<state>/service.log`. Until now it said "a background service on Windows is not
+  here yet".
 
 ### Changed
 
