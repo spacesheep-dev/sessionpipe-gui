@@ -32,7 +32,7 @@ import { isThisMachine } from "../control/Attachments";
 import { lastInfo, rpId } from "../control/api";
 import { nonce } from "../control/bytes";
 import { useSessionSend } from "../control/useSend";
-import { useStore } from "../data/hooks";
+import { useResyncs, useStore } from "../data/hooks";
 import { toolLabel } from "../lib/format";
 import { fuzzy } from "../lib/fuzzy";
 import { copyText } from "../lib/menus";
@@ -107,13 +107,16 @@ function useHostname(): string | undefined {
 }
 
 /** The receiver's index of the session's files, read when the drawer opens (and again
- *  on a retry); null while it is on its way or failed, with the error apart. */
+ *  on a retry, and when the stream comes back: the tools of a drop are in it, not in the
+ *  events the page held); null while it is on its way or failed, with the error apart. */
 function useIndex(session: SessionSummary): { index: SessionFiles | null; error: string | null; retry: () => void } {
   const store = useStore();
   const [index, setIndex] = useState<SessionFiles | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const resyncs = useResyncs();
   useEffect(() => {
+    void resyncs;
     let on = true;
     setError(null);
     store.transport
@@ -123,7 +126,7 @@ function useIndex(session: SessionSummary): { index: SessionFiles | null; error:
     return () => {
       on = false;
     };
-  }, [store, session.harness, session.id, attempt]);
+  }, [store, session.harness, session.id, attempt, resyncs]);
   return { index, error, retry: () => setAttempt((n) => n + 1) };
 }
 

@@ -40,9 +40,18 @@ the wire and in logs). Rotate the sink token from the Connect page or
 `POST /api/ui/token/rotate` (loopback only); a new UI key is made by deleting `uiKey`
 from `config.json` and restarting.
 
-**Network exposure.** The GUI is meant for a trusted LAN. It makes no outbound request
-of its own, the web bundle calls only its own origin, and there is no telemetry. Putting
-the port on the public internet is not a supported configuration.
+**Network exposure.** The GUI is meant for a trusted LAN. The web bundle calls only its
+own origin, and there is no telemetry. The server makes outbound requests only for what
+you turn on: a plugin, which runs in the server process once installed or enabled
+(ping-a-human calls Telegram's API); and a spacesheep account you connect (Settings →
+Data). Connecting sends this machine's name and the GUI's version to the spacesheep
+account's origin (spacesheep.dev) to get the four-digit code. Once connected, every
+request there carries the account's key: the server polls the relay, lists its machines
+and jobs, forwards the messages you send and, when you approve the app on spacesheep
+(Machines), sends the app's public device key with this machine's name. Installing an
+extension from a URL, npm or git is the `view add` CLI command's request, in the CLI
+process, not the running server. Putting the port on the public internet is not a
+supported configuration.
 
 ## In scope
 

@@ -12,7 +12,7 @@ import { Toggle } from "../components/bits";
 import { navigate } from "../lib/router";
 import { type AppSettings, loadSettings, patchSettings, requestNotify, setHotkey, settings, useCell } from "./appState";
 import { invoke } from "./bridge";
-import { DEFAULT_HOTKEY, FIRST_RUN_KEY, firstRunDue, hotkeyLabel, notifyToggle, settingsApp } from "./logic";
+import { DEFAULT_HOTKEY, FIRST_RUN_KEY, firstRunDue, hotkeyLabel, notifyToggle, settingsApp, trayPlace } from "./logic";
 import { type Phone, WORDS } from "./onboarding";
 import { features, platform, shellInfo } from "./shell";
 import "./native.css";
@@ -145,7 +145,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         }}
       >
         <h2 className="confirm-title" id="first-run-title">
-          {f.has("tray") ? "sessionpipe is in your menu bar" : "sessionpipe is ready"}
+          {f.has("tray") ? `sessionpipe is in your ${trayPlace(platform())}` : "sessionpipe is ready"}
         </h2>
         <p className="confirm-body" id="first-run-body">
           {f.has("tray")
@@ -170,7 +170,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
           {f.has("hotkey") && (
             <li className="first-run-row">
               <span className="first-run-label">
-                New session shortcut <kbd className="first-run-key">{hotkeyLabel(s?.hotkey ?? DEFAULT_HOTKEY)}</kbd>
+                New session shortcut{" "}
+                <kbd className="first-run-key">{hotkeyLabel(s?.hotkey ?? DEFAULT_HOTKEY, platform())}</kbd>
               </span>
               <Toggle
                 label="New session shortcut"

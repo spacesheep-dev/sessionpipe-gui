@@ -20,13 +20,15 @@ interface FakeOptions {
    *  way through the channel, as a busy Mac's is; "silent" opens and sends nothing;
    *  "down" fails every attempt. */
   stream?: "real" | "big" | "silent" | "down";
+  /** The shell's platform; "macos" unless a test plays another computer. */
+  platform?: string;
 }
 
 /** The fake shell, as an init script (runs before any page script, as the shell's does). */
-type FakeArgs = [boolean, boolean, string[] | undefined, FakeOptions["discover"], FakeOptions["stream"]];
+type FakeArgs = [boolean, boolean, string[] | undefined, FakeOptions["discover"], FakeOptions["stream"], string];
 
 function fakeShell() {
-  return ([hasReceiver, firstRunDone, features, discover, stream = "real"]: FakeArgs) => {
+  return ([hasReceiver, firstRunDone, features, discover, stream = "real", platform]: FakeArgs) => {
     const KINDS = [
       "snapshot",
       "event",
@@ -45,14 +47,14 @@ function fakeShell() {
     const receiver = hasReceiver || sessionStorage.getItem("fake.selected") === "1";
     w.sessionpipeShell = {
       v: 1,
-      platform: "macos",
+      platform,
       appVersion: "0.3.0",
       features: features ?? ["tray", "notifications", "hotkey", "autostart", "deeplink", "updater"],
       receiver: receiver ? { id: "e2erx00001", name: "This Mac", origin: location.origin, local: true } : null,
       rxBase: receiver ? "" : null,
     };
     // Before the document exists there is no <html> yet (shell.ts sets the attribute too).
-    if (document.documentElement) document.documentElement.dataset.shell = "macos";
+    if (document.documentElement) document.documentElement.dataset.shell = platform;
     const callbacks = new Map<number, (raw: unknown) => void>();
     const listeners = new Map<string, number[]>();
     const streams = new Map<number, EventSource>();
@@ -168,7 +170,14 @@ function fakeShell() {
 }
 
 async function openInShell(page: Page, path: string, opts: FakeOptions = {}) {
-  const arg: FakeArgs = [opts.receiver ?? true, opts.firstRunDone ?? true, opts.features, opts.discover, opts.stream];
+  const arg: FakeArgs = [
+    opts.receiver ?? true,
+    opts.firstRunDone ?? true,
+    opts.features,
+    opts.discover,
+    opts.stream,
+    opts.platform ?? "macos",
+  ];
   await page.addInitScript(fakeShell(), arg);
   await page.goto(path);
 }
@@ -269,6 +278,24 @@ test.describe("inside the native shell", () => {
     expect(await calls(page)).toContain("app_first_run_done");
   });
 
+  test("on Windows the first-run sheet says system tray and Ctrl+Alt+N, not menu bar and ⌃⌥N", async ({ page }) => {
+    await openInShell(page, "/", { firstRunDone: false, platform: "windows" });
+    const sheet = page.getByRole("dialog", { name: "sessionpipe is in your system tray" });
+    await expect(sheet).toBeVisible({ timeout: 15_000 });
+    await expect(sheet.locator("kbd")).toHaveText("Ctrl+Alt+N");
+  });
+
+  test("on Windows the shortcut recorder writes Ctrl+Alt+N", async ({ page }) => {
+    await openInShell(page, "/settings?section=app", { platform: "windows" });
+    const pane = page.getByRole("tabpanel", { name: "App" });
+    await expect(pane).toBeVisible({ timeout: 15_000 });
+    await pane.getByRole("button", { name: "Record shortcut" }).click();
+    await page.keyboard.press("Control+Alt+KeyN");
+    await expect(
+      pane.getByRole("button", { name: "New session shortcut: Ctrl+Alt+N. Click to record another" }),
+    ).toBeVisible();
+  });
+
   test("Settings › App renders", async ({ page }) => {
     await openInShell(page, "/settings?section=app");
     const pane = page.getByRole("tabpanel", { name: "App" });
@@ -357,12 +384,25 @@ test.describe("inside the native shell", () => {
     await expect(page.getByRole("heading", { name: "Welcome to sessionpipe" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Start sessionpipe" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Connect…" })).toBeVisible();
+    // A Mac's welcome names the Mac.
+    await expect(page.getByText("This Mac", { exact: true })).toBeVisible();
+    await expect(page.getByText("so this Mac's sessions show up here")).toBeVisible();
+    await expect(page.getByText("Nothing leaves this Mac.")).toBeVisible();
     expect(hits).toEqual([]);
     // Offline from here on: the demo needs no receiver.
     await page.route(/\/(api|\.well-known|themes|skins|attachments)\//, (r) => r.abort());
     await page.getByRole("button", { name: "Try the demo" }).click();
     await expect(page).toHaveURL(/\?mock=1/);
     await expect(page.locator("section.group").first()).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("on Windows the welcome says this computer, not this Mac", async ({ page }) => {
+    await openInShell(page, "/", { receiver: false, platform: "windows" });
+    await expect(page.getByRole("heading", { name: "Welcome to sessionpipe" })).toBeVisible();
+    await expect(page.getByText("This computer", { exact: true })).toBeVisible();
+    await expect(page.getByText("so this computer's sessions show up here")).toBeVisible();
+    await expect(page.getByText("Nothing leaves this computer.")).toBeVisible();
+    await expect(page.locator("main")).not.toContainText("Mac");
   });
 });
 

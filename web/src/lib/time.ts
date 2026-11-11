@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // One shared one-second clock for every ticking relative time on the page, and the
 // humane formatters that read from it.
-import { useSyncExternalStore } from "react";
+import { createContext, useContext, useSyncExternalStore } from "react";
 
 let now = Date.now();
 const fine = new Set<() => void>();
@@ -45,14 +45,22 @@ const getNow = () => now;
  *  it renders moves. */
 export type Tick = "fine" | "coarse" | "off";
 
+/** The instant the clock stands still at for everything under it, or null while it runs.
+ *  A session view holds its clocks at the moment the stream went down: how long a turn
+ *  or a tool has run since is not known there (components/SessionView.tsx). */
+export const ClockHold = createContext<number | null>(null);
+
 /** Re-renders the caller as its `tick` asks; "fine" (the default) every second. With
- *  "off" the value is the clock as of the last render that needed it. */
+ *  "off" the value is the clock as of the last render that needed it. Under a ClockHold
+ *  the value is the held instant, and nothing ticks. */
 export function useNow(tick: Tick = "fine"): number {
-  return useSyncExternalStore(
-    tick === "fine" ? subscribeFine : tick === "coarse" ? subscribeCoarse : subscribeOff,
+  const held = useContext(ClockHold);
+  const live = useSyncExternalStore(
+    held !== null || tick === "off" ? subscribeOff : tick === "fine" ? subscribeFine : subscribeCoarse,
     getNow,
     getNow,
   );
+  return held ?? live;
 }
 
 /** The tick a relative time of `ageMs` needs: seconds show below `secondsUntil`. */

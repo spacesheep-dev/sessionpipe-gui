@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The tier lens: what a receiver at tier N would have got, applied client-side to events
-// that arrived at a higher tier (spec PROTOCOL.md §4 per-type tiers and §5 table). Removal
-// is by allowlist per type, like the client's own filter.
+// that arrived at a higher tier (spec PROTOCOL.md §4 per-type tiers and §5 table). Data keys
+// are removed by allowlist for the types in ALLOW, like the client's own filter; other types
+// keep their data whole, and values are not redacted or capped.
 import type { StoredEvent, Tier } from "@shared/api";
 
 /** Lowest tier that carries each type (PROTOCOL.md §4). Unknown types are kept at every tier. */
@@ -27,15 +28,14 @@ export const TYPE_TIER: Record<string, Tier> = {
   native: 3,
 };
 
-const ALWAYS = ["turn_id", "call_id", "agent_id", "attention_id", "agent_type"];
-
-/** Keys of `data` allowed per type at tiers 0..3, cumulative. */
+/** Keys of `data` allowed per type at tiers 0..3, cumulative: these types' rows of the
+ *  client's own table (sessionpipe-core's `DATA_ALLOW`, PROTOCOL.md §4). */
 const ALLOW: Record<string, Partial<Record<Tier, string[]>>> = {
-  "turn.started": { 0: ["turn_id"], 1: ["prompt_chars"] },
-  "turn.ended": { 0: ["turn_id", "reason", "ms"], 1: ["error"] },
+  "turn.started": { 0: ["turn_id", "submitted_by", "injected"], 1: ["prompt_chars"] },
+  "turn.ended": { 0: ["turn_id", "reason", "ms", "background"], 1: ["error"] },
   "tool.started": { 1: ["tool", "call_id", "turn_id", "agent_id"], 3: ["input"] },
   "tool.ended": { 1: ["tool", "call_id", "turn_id", "agent_id", "ms", "ok", "error"], 3: ["input", "output"] },
-  "attention.needed": { 0: ["attention_id", "kind"], 1: ["tool", "message"] },
+  "attention.needed": { 0: ["attention_id", "kind"], 1: ["tool", "message", "agent_id"] },
 };
 
 /** The event as a tier-`lens` receiver would hold it, or null when it would not get it at all. */
@@ -45,7 +45,7 @@ export function atTier(e: StoredEvent, lens: Tier): StoredEvent | null {
   if (min !== undefined && min > lens) return null;
   const allow = ALLOW[e.type];
   if (!allow) return { ...e, tier: lens };
-  const keep = new Set<string>(ALWAYS);
+  const keep = new Set<string>();
   for (let t = 0 as Tier; t <= lens; t = (t + 1) as Tier) for (const k of allow[t] ?? []) keep.add(k);
   const data: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(e.data)) if (keep.has(k)) data[k] = v;
