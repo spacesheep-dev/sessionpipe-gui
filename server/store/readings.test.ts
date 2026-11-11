@@ -87,6 +87,37 @@ describe("events out of order: the cases", () => {
     expect(read([start, resumed, prompt, end, stop, exit])).toMatchObject({ state: "done", ended: true });
   });
 
+  it("the same where the resume is the first event read: its batch delivered first, or a receiver that joined at it", () => {
+    // In the order they were recorded; the run before ended 132 ms before the resume, and
+    // its end was recorded after it.
+    const ev = recorder();
+    const startup = ev("session.started", 0, { source: "startup" });
+    const stop1 = ev("turn.ended", 4137, { turn_id: "p1" });
+    const resumed = ev("session.started", 4380, { source: "resume" });
+    const end = ev("session.ended", 4248, { reason: "exit" });
+    const prompt = ev("turn.started", 6000, { turn_id: "p2" });
+    const tool = ev("tool.started", 7000, { tool: "Bash", call_id: "c2", turn_id: "p2" });
+    const running = { state: "working", ended: false, turn: "p2", tool: "c2" };
+    // The batch that holds the resume and that end arrives ahead of the one before it.
+    expect(read([resumed, end, startup, stop1, prompt, tool])).toMatchObject(running);
+    // The receiver's first event is the resume.
+    expect(read([resumed, end, prompt, tool])).toMatchObject(running);
+    // As recorded.
+    expect(read([startup, stop1, resumed, end, prompt, tool])).toMatchObject(running);
+    // And the resumed run's own end ends it.
+    const stop2 = ev("turn.ended", 9000, { turn_id: "p2", reason: "stop" });
+    const exit = ev("session.ended", 9010, { reason: "exit" });
+    expect(read([resumed, end, prompt, tool, stop2, exit])).toMatchObject({ state: "done", ended: true });
+    // A session whose first event is its startup owes no end: that run's end is its own.
+    const fresh = recorder();
+    expect(
+      read([fresh("session.started", 100, { source: "startup" }), fresh("session.ended", 50, { reason: "exit" })]),
+    ).toMatchObject({
+      state: "done",
+      ended: true,
+    });
+  });
+
   it("a turn only implied stands at its newest event: the end of the turn before leaves it running, and it is the turn that event names", () => {
     // In the order they were recorded; the two prompts reach the receiver last (a sink
     // that joined mid-turn, a batch delivered late): tools of p1, then of p2, then p1's end.

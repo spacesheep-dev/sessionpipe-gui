@@ -1385,6 +1385,53 @@ describe("late events", () => {
     expect(rested()).toMatchObject({ state: "working", turn: { turnId: "p3" } });
   });
 
+  it("the end of the run before, recorded after a resume that is the first event read, leaves the resumed run running, and after a reboot", async () => {
+    // The run before ended 132 ms before the resume; its SessionEnd was recorded after it.
+    const lateEnd = (s: Session, seq: number) => [
+      hook(s, "SessionStart", "session.started", 4380, { source: "resume" }, seq),
+      hook(s, "SessionEnd", "session.ended", 4248, { reason: "exit" }, seq + 1),
+    ];
+    const next = (s: Session, seq: number) => [
+      hook(s, "UserPromptSubmit", "turn.started", 6000, { turn_id: "p2" }, seq),
+      hook(s, "PreToolUse", "tool.started", 7000, { tool: "Bash", call_id: "toolu_c2", turn_id: "p2" }, seq + 1),
+    ];
+    const running = { state: "working", turn: { turnId: "p2" }, tool: { tool: "Bash" } };
+    // The batch that holds the resume and that end is delivered ahead of the one before it.
+    const s = new Session();
+    store.ingest(lateEnd(s, 2), "http");
+    store.ingest(
+      [
+        hook(s, "SessionStart", "session.started", 0, { source: "startup" }, 0),
+        hook(s, "Stop", "turn.ended", 4137, { turn_id: "p1", reason: "stop" }, 1),
+      ],
+      "http",
+    );
+    store.ingest(next(s, 4), "http");
+    expect(rested()).toMatchObject(running);
+    expect(store.session(KEY)!.endedAt).toBeUndefined();
+    // The receiver's first event of the session is the resume.
+    const r = new Session("5b0c7e19-8d42-4a6f-9c31-e7f2a4d6b803");
+    const key = sessionKey("claude-code", r.id);
+    store.ingest(lateEnd(r, 7), "http");
+    store.ingest(next(r, 9), "http");
+    expect(rested(key)).toMatchObject(running);
+    expect(store.session(key)!.endedAt).toBeUndefined();
+    // A reboot reads the files in the order the events arrived.
+    await store.close();
+    store = new Store(tmp.dir, { tickMs: 1_000, statsMs: 1_000 });
+    expect(rested()).toMatchObject(running);
+    expect(rested(key)).toMatchObject(running);
+    // The resumed run's own end ends it.
+    store.ingest(
+      [
+        hook(r, "Stop", "turn.ended", 9000, { turn_id: "p2", reason: "stop" }, 11),
+        hook(r, "SessionEnd", "session.ended", 9010, { reason: "exit" }, 12),
+      ],
+      "http",
+    );
+    expect(store.session(key)!).toMatchObject({ state: "done", endedAt: fired(9010) });
+  });
+
   it("a clock that stepped back 5 min in the middle of a turn: its Stop, timed before its own prompt, ends it", () => {
     for (const ids of [true, false]) {
       const s = new Session(ids ? SID : "3d7a4f0e-52b1-4c7e-9a43-6f2d1b9e8c55");

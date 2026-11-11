@@ -681,8 +681,10 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       // before it, which is an old event delivered late.
       if (stale(m, t.sessionEnd) || stale(m, t.sessionStart)) break;
       // The run before this one has not been seen to end: its end may be on its way (a
-      // compaction starts no run).
-      t.owed = !rec.ended && !first && d.source !== "compact";
+      // compaction starts no run). A resume says there was a run before it even where it
+      // is the first event read: its batch delivered ahead of that run's, or a receiver
+      // that joined at the resume.
+      t.owed = !rec.ended && (!first || d.source === "resume") && d.source !== "compact";
       t.sessionStart = m;
       if (!stale(m, t.closed)) t.opened = m;
       // A session that ended and came back (Claude Code's resume, a compaction restart,
