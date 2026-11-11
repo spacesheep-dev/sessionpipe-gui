@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: server-core (composition root). Every module plugs in here and nowhere
 // else. Module boundaries and who owns what: ARCHITECTURE.md.
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import type net from "node:net";
@@ -184,6 +185,36 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   const startedAt = new Date().toISOString();
   const stateDir = opts.stateDir ?? defaultStateDir();
   let config = readGuiConfig(stateDir);
+  // `plugin|skin|view enable|disable` (server/cli.ts) write config.json while this runs.
+  // The two lists they change are taken from the file each time they are read and before
+  // every write here, so Reload plugins sees the CLI's change and no write of ours drops it.
+  // The rest, the secrets above all, stays this process's own. A file that is gone, does
+  // not parse, or holds other secrets than ours changes nothing here: the CLI rebuilds a
+  // file it cannot parse with new secrets and only its own key, and those cut-down lists
+  // are not an edit of ours (the re-read never writes; the next write of ours replaces
+  // it). The CLI takes no lock, so two writes at the same instant are still last-writer-wins.
+  const live = (): GuiConfig => {
+    let disk: unknown;
+    try {
+      disk = JSON.parse(readFileSync(path.join(stateDir, "config.json"), "utf8").replace(/^\uFEFF/, ""));
+    } catch {
+      return config;
+    }
+    if (!disk || typeof disk !== "object" || Array.isArray(disk)) return config;
+    const list = (v: unknown): string[] | undefined =>
+      Array.isArray(v) ? v.filter((d): d is string => typeof d === "string") : undefined;
+    const { disabled, enabled, sinkToken, uiKey } = disk as Record<string, unknown>;
+    if (sinkToken !== config.sinkToken || uiKey !== config.uiKey) return config;
+    const next: GuiConfig = { ...config };
+    const off = list(disabled);
+    const on = list(enabled);
+    if (off) next.disabled = off;
+    else delete next.disabled;
+    if (on) next.enabled = on;
+    else delete next.enabled;
+    config = next;
+    return config;
+  };
   const store = new Store(stateDir, { tickMs: opts.tickMs, keepDays: opts.keepDays });
   // Each account's usage limits follow the store from its first event (the outbox's
   // first read, the demo's) on.
@@ -196,7 +227,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     : null;
   // --public-url: given → remembered; null → forgotten; undefined → the remembered one.
   if (opts.publicUrl !== undefined)
-    config = setPublicUrl(stateDir, config, opts.publicUrl === null ? undefined : normalizePublicUrl(opts.publicUrl));
+    config = setPublicUrl(stateDir, live(), opts.publicUrl === null ? undefined : normalizePublicUrl(opts.publicUrl));
   let publicUrl: string | undefined = config.publicUrl ? normalizePublicUrl(config.publicUrl) : undefined;
   const publicHost = (): string | undefined => (publicUrl ? new URL(publicUrl).hostname : undefined);
   const chooseRpId = (): string => opts.rpId ?? publicHost() ?? tls?.hostname ?? "localhost";
@@ -376,12 +407,11 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
 
   const viewers = new ViewerRegistry();
   const bundled = bundledDirs(opts.bundledDir);
-  const disabled = (): readonly string[] => config.disabled ?? [];
+  const disabled = (): readonly string[] => live().disabled ?? [];
   const plugins = new PluginHost({
     registry: new PluginRegistry(opts.pluginsDir ?? path.join(stateDir, "plugins"), {
       bundledDir: bundled.plugin,
-      disabled,
-      enabled: () => config.enabled ?? [],
+      lists: live,
     }),
     settings: new PluginSettings(path.join(stateDir, "plugins-settings")),
     storageDir: path.join(stateDir, "plugins-storage"),
@@ -389,7 +419,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     control,
     info,
     setEnabled: (id, on) => {
-      config = setEnabled(stateDir, config, `plugin:${id}`, on);
+      config = setEnabled(stateDir, live(), `plugin:${id}`, on);
     },
   });
   // The person's labels follow the store: a forgotten session loses its label.
@@ -412,7 +442,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     viewers,
     plugins,
     rotateSinkToken: () => {
-      config = rotateSinkToken(stateDir, config);
+      config = rotateSinkToken(stateDir, live());
       return config.sinkToken;
     },
     demo: { on: () => demo !== null, set: setDemo },
@@ -428,7 +458,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     home: opts.searchHome ?? path.join(stateDir, "search", "no-home"),
     history: () => config.searchHistory !== false,
     setHistory: (on) => {
-      config = setSearchHistory(stateDir, config, on);
+      config = setSearchHistory(stateDir, live(), on);
     },
     broadcast: (m) => broadcast.emit(m),
     port: () => port,
@@ -450,14 +480,14 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       link: () => config.spacesheep,
       status: () => spacesheep?.status() ?? null,
       connect: (link) => {
-        config = setSpacesheep(stateDir, config, link);
+        config = setSpacesheep(stateDir, live(), link);
         startSpacesheep(link);
         broadcast.emit({ kind: "info" } as never);
       },
       disconnect: () => {
         spacesheep?.stop();
         spacesheep = null;
-        config = setSpacesheep(stateDir, config, undefined);
+        config = setSpacesheep(stateDir, live(), undefined);
         control.remote.drop("spacesheep");
       },
       deviceName: () => `${os.hostname().replace(/\.(local|lan|home)$/i, "")}`,
@@ -475,7 +505,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     stateDir: path.join(stateDir, "themes-state"),
     onState: (id, etag) => broadcast.emit({ kind: "viewState", id, etag }),
     setDisabled: (id, off) => {
-      config = setDisabled(stateDir, config, `view:${id}`, off);
+      config = setDisabled(stateDir, live(), `view:${id}`, off);
     },
   });
   registerPlugins(router, { host: plugins, uiAuth, demo: opts.demo === true });
@@ -519,7 +549,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     listener.setHttps(httpsServer);
     tls = m;
     rpId = chooseRpId();
-    config = setTlsPreference(stateDir, config, true);
+    config = setTlsPreference(stateDir, live(), true);
     return m;
   };
   /** The setup page's "Use https://…" and "Stop using it": at runtime, remembered. */
@@ -527,7 +557,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     const next = url ? normalizePublicUrl(url) : undefined;
     publicUrl = next;
     rpId = chooseRpId();
-    config = setPublicUrl(stateDir, config, next);
+    config = setPublicUrl(stateDir, live(), next);
   };
 
   const tailscale = createTailscaleProbe(execDefault, {
@@ -607,7 +637,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       return lanUrls();
     },
     stateDir,
-    config: () => config,
+    config: () => live(),
     info,
     outbox,
     themes,
