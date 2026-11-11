@@ -159,7 +159,7 @@ ping-a-human Telegram plugin (off until you turn it on). The board runs on port 
 1. **Run `sessionpipe-gui`.** It prints where to open it, and a QR code for your phone:
 
    ```
-   sessionpipe-gui 0.7.5 · ~/.local/state/sessionpipe-gui
+   sessionpipe-gui 0.8.0 · ~/.local/state/sessionpipe-gui
 
      setup   http://localhost:7373/setup   (first run: your sessions, https, pairing, your phone)
      local   http://localhost:7373

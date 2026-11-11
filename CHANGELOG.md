@@ -6,6 +6,8 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-11
+
 ### Added
 
 - The receiver keeps three things a sessionpipe 0.13 machine says. `inbox` among a
@@ -918,7 +920,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.5...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.5...v0.8.0
 [0.7.5]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.2...v0.7.3
