@@ -13,7 +13,19 @@
 // anything else stops it before a byte is written.
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -280,4 +292,143 @@ describe("the sync (scripts/sync-conformance.mjs): run against a tree", () => {
     expect(ranged.status).toBe(1);
     expect(ranged.stderr).toContain("one exact version");
   }, 60_000);
+
+  // The sync removes its folders whole and writes files by path, and both go wherever a
+  // path resolves. A checkout can hold a symbolic link where a folder or a file should be
+  // (git stores them), so each place is looked at before anything is removed or written.
+  it("touches nothing when test, test/conformance, a fixture folder or a file it writes is a symbolic link", () => {
+    const one = '{"name":"one","expect":{"ok":true}}\n';
+    const two = '{"name":"two","steps":[]}\n';
+    tagged("v0.0.4", [["blob", blob(one), "01-one.json"]], [["blob", blob(two), "01-two.json"]]);
+    pin("0.0.4");
+    const test = path.join(copy, "test");
+    const out = path.join(test, "conformance");
+
+    // Somebody else's folder, laid out so that whatever the sync would remove or write
+    // through a link has something of theirs to hit.
+    const elsewhere = path.join(tmp, "elsewhere");
+    const theirs = () => {
+      rmSync(elsewhere, { recursive: true, force: true });
+      for (const under of ["", "conformance"]) {
+        for (const f of FOLDERS) {
+          mkdirSync(path.join(elsewhere, under, f), { recursive: true });
+          writeFileSync(path.join(elsewhere, under, f, "01-one.json"), "theirs");
+          writeFileSync(path.join(elsewhere, under, f, "kept.txt"), "theirs");
+        }
+        writeFileSync(path.join(elsewhere, under, "manifest.json"), "theirs");
+      }
+      writeFileSync(path.join(elsewhere, "victim.json"), "theirs");
+    };
+    /** Every file under a folder with its bytes, and every link with where it points (never followed). */
+    const snapshot = (dir: string, at = ""): Record<string, string> => {
+      const found: Record<string, string> = {};
+      for (const name of readdirSync(dir).sort()) {
+        const full = path.join(dir, name);
+        const rel = at ? `${at}/${name}` : name;
+        const st = lstatSync(full);
+        if (st.isSymbolicLink()) found[rel] = `link to ${readlinkSync(full)}`;
+        else if (st.isDirectory()) Object.assign(found, { [`${rel}/`]: "folder" }, snapshot(full, rel));
+        else found[rel] = readFileSync(full, "base64");
+      }
+      return found;
+    };
+    /** A symbolic link (a junction for a folder on Windows, which needs no privilege). False
+     *  where the platform will not make one: a file link on Windows without the privilege. */
+    const link = (target: string, at: string, kind: "dir" | "file"): boolean => {
+      try {
+        symlinkSync(target, at, kind === "dir" && process.platform === "win32" ? "junction" : kind);
+        return true;
+      } catch (e) {
+        if (process.platform === "win32" && (e as NodeJS.ErrnoException).code === "EPERM") return false;
+        throw e;
+      }
+    };
+    /** The sync and the check both stop, name the link, and leave their folder and the copy as they were. */
+    const refused = (what: string) => {
+      const before = { theirs: snapshot(elsewhere), copy: snapshot(copy) };
+      for (const args of [[], ["--check"]]) {
+        const r = sync(...args);
+        const said = `${what} ${args.join(" ")}: ${r.stdout}${r.stderr}`;
+        expect(r.status, said).toBe(1);
+        expect(r.stderr, said).toContain(`${what} is a symbolic link`);
+        expect(r.stderr, said).toContain(args.length ? "nothing was read" : "nothing was removed or written");
+        expect(snapshot(elsewhere), said).toEqual(before.theirs);
+        expect(snapshot(copy), said).toEqual(before.copy);
+      }
+    };
+    const fresh = () => {
+      rmSync(test, { recursive: true, force: true });
+      theirs();
+    };
+
+    // test itself is a link: test/conformance/<folder> would be their conformance/<folder>.
+    fresh();
+    expect(link(elsewhere, test, "dir")).toBe(true);
+    refused("test");
+
+    // test/conformance is a link: its folders and its manifest.json would be theirs.
+    fresh();
+    mkdirSync(test);
+    link(elsewhere, out, "dir");
+    refused("test/conformance");
+
+    // One fixture folder is a link.
+    fresh();
+    mkdirSync(path.join(out, "delivery"), { recursive: true });
+    link(path.join(elsewhere, "control-vectors"), path.join(out, "control-vectors"), "dir");
+    refused("test/conformance/control-vectors");
+    // … or holds one, at any depth: a folder that is removed whole is removed through nothing.
+    fresh();
+    mkdirSync(path.join(out, "delivery", "more"), { recursive: true });
+    link(path.join(elsewhere, "delivery"), path.join(out, "delivery", "more", "deeper"), "dir");
+    refused("test/conformance/delivery/more/deeper");
+
+    // A real copy, synced; then a vector, and then the manifest, replaced by a link to a
+    // file of theirs. The manifest is the one a write would have gone through.
+    fresh();
+    expect(sync().status).toBe(0);
+    const vector = path.join(out, "control-vectors", "01-one.json");
+    rmSync(vector);
+    if (link(path.join(elsewhere, "victim.json"), vector, "file")) {
+      refused("test/conformance/control-vectors/01-one.json");
+      fresh();
+      expect(sync().status).toBe(0);
+      rmSync(path.join(out, "manifest.json"));
+      link(path.join(elsewhere, "victim.json"), path.join(out, "manifest.json"), "file");
+      refused("test/conformance/manifest.json");
+    }
+
+    // And with nothing in the way, the ordinary sync: the tag's bytes, exactly, into an
+    // empty checkout and again over a copy that has drifted.
+    fresh();
+    const tagBytes = (rel: string) =>
+      execFileSync("git", ["-C", upstream, "show", `v0.0.4:conformance/${rel}`]).toString("base64");
+    const whole = () => {
+      const r = sync();
+      expect(r.status, r.stderr).toBe(0);
+      const got = snapshot(out);
+      expect(Object.keys(got).sort()).toEqual(
+        [
+          "control-vectors/",
+          "control-vectors/01-one.json",
+          "delivery/",
+          "delivery/01-two.json",
+          "manifest.json",
+        ].sort(),
+      );
+      expect(got["control-vectors/01-one.json"]).toBe(tagBytes("control-vectors/01-one.json"));
+      expect(got["control-vectors/01-one.json"]).toBe(Buffer.from(one).toString("base64"));
+      expect(got["delivery/01-two.json"]).toBe(tagBytes("delivery/01-two.json"));
+      expect(sync("--check").status).toBe(0);
+      return got;
+    };
+    const first = whole();
+    writeFileSync(path.join(out, "control-vectors", "01-one.json"), "{}");
+    writeFileSync(path.join(out, "control-vectors", "99-stale.json"), "{}");
+    mkdirSync(path.join(out, "delivery", "more"));
+    writeFileSync(path.join(out, "delivery", "more", "x.json"), "{}");
+    expect(whole()).toEqual(first);
+    // Their folder was never part of it.
+    expect(snapshot(elsewhere)["victim.json"]).toBe(Buffer.from("theirs").toString("base64"));
+  }, 120_000);
 });
