@@ -191,6 +191,18 @@ describe("claude read", () => {
     );
   });
 
+  it("the fixture's fork is never created before the session it forks, whatever order the folder lists them in", () => {
+    // What the adapter reads to tell the two apart (forkOwners): creation time, then id.
+    // A copy made in the folder's own order had the fork first on some Linux runs.
+    const born = (id: string): number => {
+      const st = statSync(path.join(fx.home, `.claude/projects/${SLUG}/${id}.jsonl`));
+      return st.birthtimeMs > 0 ? st.birthtimeMs : st.ctimeMs;
+    };
+    const session = born(A.slice("claude-code:".length));
+    const fork = born(F.slice("claude-code:".length));
+    expect(session).toBeLessThanOrEqual(fork);
+  });
+
   it("a fork indexes only its own records and names the session it continues", async () => {
     const sink = new Collect();
     await readAll(claudeAdapter(), testEnv(fx.home, fx.state), sink);
