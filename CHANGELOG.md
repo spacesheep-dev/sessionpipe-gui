@@ -111,6 +111,7 @@ All notable changes to `sessionpipe-gui`. The format follows
   and the background work still running when a turn ends (`background`) now stay, and an
   attention's `turn_id` and `call_id`, which the client never sends, go, as does its
   `agent_id` at tier 0.
+- Board filters apply immediately even while focus or the pointer holds the row order.
 
 ## [0.7.5] - 2026-11-06
 
