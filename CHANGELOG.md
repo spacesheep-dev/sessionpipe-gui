@@ -68,6 +68,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   gives `certutil -user -addstore Root ca.crt` and the Install Certificate… steps (also on the
   trust page and from `sessionpipe-gui tls trust`), and the button says "Pair this machine"
   off a Mac.
+- **Turn on (the secure address) finds openssl on Windows.** The receiver looked for
+  `openssl` on the PATH only, and neither Git for Windows (its `usr\bin`; only `Git\cmd` is
+  on the PATH) nor `winget install ShiningLight.OpenSSL.Light` (`Program Files\OpenSSL-Win64`,
+  `-ARM` on arm64) puts it there, so Setup kept saying "Needs the openssl command" with
+  either installed. It now also looks in those folders, so an install shows without a PATH
+  change or a restart, and the note says so.
 - A self-assigned 169.254 address (no DHCP answered on that link) no longer comes first among
   the receiver's LAN addresses, so the Machines page's pair command, Connect and the phone
   link name an address the other device can reach.
