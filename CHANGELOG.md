@@ -8,8 +8,11 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
-- Search keeps a commit request received while publishing an earlier commit, so newly
-  indexed messages do not wait for the next timed flush.
+- **Search shows a message just indexed at once when the indexer runs inside the server.**
+  Where the indexer cannot be forked it runs in the server's own process, and there a
+  request to commit that arrived while an earlier commit was being published was dropped:
+  the new messages then waited for the timed commit, up to a minute. The forked indexer
+  never dropped one.
 
 ## [0.7.5] - 2026-11-06
 
