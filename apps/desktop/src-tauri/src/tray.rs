@@ -571,6 +571,10 @@ mod tests {
         assert!(m.dimmed);
         assert_eq!(m.title, None, "no number when disconnected");
         assert_eq!(m.unreachable, vec![THIS_MACHINE.to_string()]);
+        #[cfg(target_os = "macos")]
+        assert_eq!(THIS_MACHINE, "This Mac");
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(THIS_MACHINE, "This computer");
         let m = model(
             &[],
             &[
