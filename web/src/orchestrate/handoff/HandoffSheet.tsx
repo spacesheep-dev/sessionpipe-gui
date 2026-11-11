@@ -294,7 +294,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
       // Sent: the sheet closes and the asking session's page says the rest (its row).
       closeHandoff();
     } catch (e) {
-      setError(handoffRefusalWords(e, name, back) ?? sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
+      setError(handoffRefusalWords(e, name) ?? sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
       setBusy(false);
     } finally {
       setTap(false);

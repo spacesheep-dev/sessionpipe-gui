@@ -6,6 +6,32 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The receiver keeps three things a sessionpipe 0.13 machine says. `inbox` among a
+  machine's delivery modes and as the mode of an ack, which it used to drop as a word it
+  did not know: the line under a message a live session took through its own inbox now
+  reads "delivered · inbox" ("taken · … · inbox" on the way), where it read "delivered"
+  with no mode. The other two are kept for the pages that will show them, and nothing
+  draws them yet: the session a copy answered for (an ack's `copy_of`,
+  `ControlActivity.copyOf`), and whether the command line is signed in to each account (a
+  hello's `signed_in`, `HarnessAccount.signedIn`).
+
+### Changed
+
+- **sessionpipe 0.13.6.** The receiver verifies commands with sessionpipe-core 0.13.6 (it
+  was 0.10.0), pinned to that one version. "Bring the answer back" in the Ask another agent
+  sheet now sends: a machine whose hello says `handoff` used to get "Not sent: this
+  receiver's sessionpipe is older than bringing answers back", because this receiver's own
+  verifier refused `reply_to` before the machine saw it. That line is gone from the sheet;
+  a command the verifier does refuse with the switch on reads there as it does on any
+  send. A pool command is verified by the core itself, and still refused here on a day
+  grant alone where the machine wants a fresh confirm.
+- sessionpipe's conformance fixtures for 0.13.6 (169 control vectors, 33 delivery scenarios)
+  are in the repo under `test/conformance/` and run with `npm test`, in CI too. They were
+  read from a sessionpipe checkout beside the clone and skipped without one, so CI never
+  ran them, and with one the pool vectors failed (#71).
+
 ### Fixed
 
 - **A `session.seq` above 2^53 − 1 is refused**, the schema's bound: the receiver answers
@@ -23,6 +49,27 @@ All notable changes to `sessionpipe-gui`. The format follows
   cmd.exe, which never handed its output back (the step sat at "Starting the pairing…") and
   split a folder with a space, such as `C:\Users\Ann Lee\code`, into two words. It now runs the
   script the npm shim names under its own node, with no shell, as it does on a Mac.
+- **Setup speaks Windows.** On a Windows receiver the secure-address step pointed at
+  `brew install openssl` and gave Debian and Fedora commands for trusting the certificate; the
+  pair step's button said "Pair this Mac". It now names Git for Windows' openssl (or winget),
+  gives `certutil -user -addstore Root ca.crt` and the Install Certificate… steps (also on the
+  trust page and from `sessionpipe-gui tls trust`), and the button says "Pair this machine"
+  off a Mac.
+- A self-assigned 169.254 address (no DHCP answered on that link) no longer comes first among
+  the receiver's LAN addresses, so the Machines page's pair command, Connect and the phone
+  link name an address the other device can reach.
+- **A virtual adapter no longer comes first.** Windows' "vEthernet (…)" switches (WSL 2,
+  Hyper-V), VirtualBox and VMware host adapters, and Linux's libvirt, LXD, Incus, LXC,
+  Multipass and Podman bridges sort after the real interfaces, whatever their case, so the
+  phone's QR code, Connect and the `sink add` command name an address the other device can
+  reach. No address is dropped: a Hyper-V external switch keeps the host's LAN address on
+  "vEthernet (External…)", after any real-named interface.
+- **`--host 127.0.0.1` (or `::1`, `localhost`) no longer offers LAN URLs nothing listens
+  on.** The banner listed every LAN address as a `network` URL, its phone QR and the sink
+  command pointed at one of them, and a bind to `::1` gave a sink command on `127.0.0.1`;
+  all of them refused connections. A loopback bind now offers no LAN URL, and the sink
+  command names the address it bound, under "from this machine"; a bind to one LAN
+  address lists that address alone as its network URL.
 - **A finished session stays finished.** A sender records a hook when it gets to it, so a
   tool call that fired just before a turn's Stop can be recorded after it; the receiver
   read that late event as a new turn, and the session went back to "working" (then
