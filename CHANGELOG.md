@@ -188,6 +188,17 @@ All notable changes to `sessionpipe-gui`. The format follows
   requested." are never shown as what the agent said, a turn stopped at its terminal no
   longer shows the raw word "interrupt" beside a duration that ran to the next prompt, and
   a tool call the stop cut off no longer spins.
+- **The desktop app's "Start sessionpipe" finds Node on Windows.** It looked through a login
+  shell and for `node` and `npx` in Homebrew, nvm and Volta folders only, so on Windows it
+  always said "sessionpipe needs Node 20 or later". It now reads the app's own PATH, then
+  Program Files, `%APPDATA%\npm`, nvm-windows, Volta and Scoop; runs the scripts behind
+  npm's `.cmd` shims under node; and starts them with no console window. It takes only the
+  absolute folders of PATH, for the search and for the PATH it hands the installer, so a
+  `.` there is never where it finds `node.exe`. Until `sessionpipe-gui service install`
+  works on Windows (#100) the button stops at that command's words: "It didn't start: a
+  background service on Windows is not here yet…". With a receiver started in a terminal,
+  the app, opened again, finds it on this computer (it looked for it only under HOME,
+  which Windows doesn't set, and showed the welcome instead).
 
 ## [0.7.5] - 2026-11-06
 
