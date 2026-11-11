@@ -12,6 +12,25 @@ All notable changes to `sessionpipe-gui`. The format follows
   `bad_seq`, and the outbox reader and the demo drop it. Two such seqs in one session hung
   the GUI server at 100% CPU while it listed the hole between them; a store an older
   release already wrote them into now boots instead of hanging.
+- **One conversation, drawn once.** A message sent from a session's page and the turn it
+  became are one block, in the cases where they were two or the wrong one. A message
+  handed to a terminal session at its turn's Stop (sessionpipe 0.13.4) is its own exchange
+  after that turn, "Turn 4, continued": it used to take the typed turn's place, so the
+  typed prompt and its reply were gone, or, when that turn had begun over a minute
+  before, to be drawn again at the end for two minutes. A prompt the machine scrubbed a
+  secret, an email address or a phone number out of, and any message to a machine whose
+  clock is behind, is its turn (both showed twice while the turn ran). A refused or
+  expired message no longer takes a later turn that says the same words, which drew the
+  refusal on a turn that ran; and a machine whose clock is ahead no longer hides it. The
+  turn after one that was stopped keeps its own words, which were drawn on the stopped turn.
+- **A stopped turn reads as stopped.** After Stop the turn stays where it was, with what
+  it had written and a quiet "Stopped" where a running turn says "Running"; one stopped
+  before it wrote anything says "Stopped before the first word.", and so does a message
+  stopped before its turn began, which read "Delivered. Its turn shows here when it
+  begins." The daemon's "(The turn was cancelled.)" and Claude Code's "No response
+  requested." are never shown as what the agent said, a turn stopped at its terminal no
+  longer shows the raw word "interrupt" beside a duration that ran to the next prompt, and
+  a tool call the stop cut off no longer spins.
 
 ## [0.7.5] - 2026-11-06
 
