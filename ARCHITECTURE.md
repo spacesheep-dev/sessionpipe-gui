@@ -90,6 +90,20 @@ function names above.
 - COALESCE the session block (spec §3): a later empty field never blanks a full one;
   `title` keeps the better `title_source` (`custom` > `harness` > `first-ask`).
 - `turn.progress` is kept only until its `turn.transcript` or the turn's end.
+- **Nothing goes back.** An event stands in its session's own order by its `time` (the
+  sender's clock as the hook fired), then by `seq` (the order the sender recorded them in)
+  within one millisecond: a sender records a hook when it gets to it, so `seq` and arrival
+  can both put an earlier hook after a later one (PROTOCOL.md §3, §4; `Mark`, `markOf`,
+  `older` in `readings.ts`). An event older than the last `turn.ended` or `session.ended`
+  is filed and counted and changes neither `currentTurn`, `currentTool`, `progress` nor
+  the state. A `turn.started` opens a turn when it is newer than that end (and than the
+  start of the turn that is open); an event that only implies a turn (a tool, progress, a
+  heartbeat, a subagent's start) opens one only when timed after the end, not in its
+  millisecond. A `turn.ended` older than the open turn's start leaves it running; a
+  `session.started` older than the session's end, or a `session.ended` older than its
+  newest start, changes nothing; an agent's start or tool call older than its
+  `subagent.ended` leaves it ended. The readings are the same live, at boot (arrival
+  order) and after a rebuild (seq order).
 - An attention is open from `attention.needed` until `attention.cleared` **or the
   session's next hook event** (CONTROL.md §7).
 - `currentTool` is the orchestrator's last `tool.started` without its `tool.ended` (by `call_id`,
