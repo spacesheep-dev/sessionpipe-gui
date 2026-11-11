@@ -21,8 +21,6 @@ import {
   type ControlActivity,
   DELIVERY_MODES,
   type MachineControl,
-  POOL_CONFIRM_ACTIONS,
-  type PoolAction,
   ROUTES,
   type StreamMessage,
   type TrustedKey,
@@ -1759,9 +1757,16 @@ describe("control vectors: carried or refused through POST send", () => {
         // And it asks for what the machine will ask for (§6 `pool`): on, off, remove, order,
         // disable and login.complete take a fresh confirm, so one that verifies on a day
         // grant is refused `confirm_required` here as it is there, and carried once a key
-        // the machine trusts has confirmed the very bytes the vector signed.
+        // the machine trusts has confirmed the very bytes the vector signed. The five the
+        // vectors sign with a grant (137, 138, 140, 141, 142) are named here, in the test's
+        // own words and not by the constant the receiver reads: an action dropped from that
+        // constant would be carried on a grant, and has to fail here. (login.complete, the
+        // sixth, is signed with a confirm in its vector, 146.)
         const fresh =
-          expectOk && cmd.kind === "pool" && POOL_CONFIRM_ACTIONS.includes(cmd.pool_action as PoolAction) && !s.confirm
+          expectOk &&
+          cmd.kind === "pool" &&
+          ["on", "off", "disable", "remove", "order"].includes(String(cmd.pool_action)) &&
+          !s.confirm
             ? await TestPasskey.create({ rpId: v.input.rp_id })
             : null;
 

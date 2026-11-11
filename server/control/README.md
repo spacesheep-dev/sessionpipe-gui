@@ -138,11 +138,13 @@ command's final `delivered` ack the daemon delivers the answer into that session
 how it went in that session's events (`delegation.ended.relayed`); the command's own ack
 is unchanged. The receiver's second look (`replyToProblem`, before the one below) holds it
 to a prompt or a start (`bad_fields` on anything else, or a malformed ref, or the
-command's own session), and to a machine whose last hello said `handoff` (`handoff`: an
-older daemon would refuse the whole command, or ignore the relay). The activity carries it
-as `replyTo`. The verifier (sessionpipe-core 0.13) runs first and takes the field on those
-two kinds only, as a session ref that is not the command's own: anything else is its
-`bad_fields` (vectors 165 to 169).
+command's own session, or the machine's own `sessionpipe:keys` or `sessionpipe:pool`, which
+are no session an answer could go into), and to a machine whose last hello said `handoff`
+(`handoff`: an older daemon would refuse the whole command, or ignore the relay). The
+activity carries it as `replyTo`. The verifier (sessionpipe-core 0.13) runs first and
+takes the field on those two kinds only, as a session ref that is not the command's own:
+anything else is its `bad_fields` (vectors 165 to 169). It takes any well-formed ref,
+the two pseudo-sessions included, which is why the second look names them.
 
 **The second look** (`precheck.ts`). After the verifier, the receiver holds a command to
 what the machine's last hello advertised (CONTROL.md §2), because a daemon that predates

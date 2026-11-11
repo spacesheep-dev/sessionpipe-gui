@@ -92,11 +92,17 @@ const keyShape = (device: boolean) => (device ? "key: {id, alg, spki[, type, sto
 const proofShape = (device: boolean) =>
   device ? "proof: {cred, ad, cd, sig} or {cred, sig}" : "proof: {cred, ad, cd, sig}";
 
+/** The harness name of the machine's own pseudo-sessions: `sessionpipe:keys`, which a
+ *  `key.add` names, and `sessionpipe:pool` (POOL_SESSION). Neither is a coding session. */
+const OWN_HARNESS = "sessionpipe:";
+
 /** The second look at a handoff (CONTROL.md §3.1 `reply_to`, DESIGN §2.3), before
  *  precheck.ts sees the command: `reply_to` rides only on a `prompt` or a `start`, names a
- *  `<harness>:<id>` on the same machine, and goes only to a machine whose hello said
- *  `handoff` (a daemon that predates it would refuse the whole command `bad_fields`, or
- *  worse, ignore the relay). Null when there is nothing to refuse. */
+ *  `<harness>:<id>` on the same machine, a coding session and never the machine's own key
+ *  store or pool (an answer is a message for a model; the verifier takes any well-formed
+ *  ref there), and goes only to a machine whose hello said `handoff` (a daemon that
+ *  predates it would refuse the whole command `bad_fields`, or worse, ignore the relay).
+ *  Null when there is nothing to refuse. */
 export function replyToProblem(cmd: Record<string, unknown>, facts: { handoff?: boolean }): Refusal | null {
   if (!Object.hasOwn(cmd, "reply_to")) return null;
   if (cmd.kind !== "prompt" && cmd.kind !== "start")
@@ -104,6 +110,8 @@ export function replyToProblem(cmd: Record<string, unknown>, facts: { handoff?: 
   if (typeof cmd.reply_to !== "string" || !SESSION_REF.test(cmd.reply_to))
     return { code: "bad_fields", why: "reply_to is a session, <harness>:<id>" };
   if (cmd.reply_to === cmd.session) return { code: "bad_fields", why: "reply_to is another session, not this one" };
+  if (cmd.reply_to.startsWith(OWN_HARNESS))
+    return { code: "bad_fields", why: "reply_to is a coding session, not the machine's own keys or pool" };
   if (!facts.handoff)
     return { code: "handoff", why: "this machine did not say it takes handoffs; the answer would not come back" };
   return null;

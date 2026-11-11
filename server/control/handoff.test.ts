@@ -133,6 +133,16 @@ describe("reply_to", () => {
     });
     expect(replyToProblem({ ...prompt, reply_to: 7 }, { handoff: true })).toMatchObject({ code: "bad_fields" });
     expect(replyToProblem({ ...prompt, reply_to: SESSION }, { handoff: true })).toMatchObject({ code: "bad_fields" });
+    // The machine's own key store and pool are no session an answer could go into, whatever
+    // the hello says; a harness that only starts with the word is one like any other.
+    for (const own of ["sessionpipe:keys", "sessionpipe:pool", "sessionpipe:anything-else"]) {
+      expect(replyToProblem({ ...prompt, reply_to: own }, { handoff: true }), own).toMatchObject({
+        code: "bad_fields",
+        why: "reply_to is a coding session, not the machine's own keys or pool",
+      });
+      expect(replyToProblem({ ...prompt, reply_to: own }, {}), own).toMatchObject({ code: "bad_fields" });
+    }
+    expect(replyToProblem({ ...prompt, reply_to: "sessionpipe-x:abc" }, { handoff: true })).toBeNull();
     expect(replyToProblem(prompt, {})).toMatchObject({ code: "handoff" });
     expect(replyToProblem(prompt, { handoff: false })).toMatchObject({ code: "handoff" });
   });
@@ -211,6 +221,22 @@ describe("reply_to", () => {
         body: { machineId: machine, ...(await signCommand(pk, day, own)) },
       });
       expect(refused).toMatchObject({ status: 422, body: { code: "bad_fields" } });
+      // The verifier takes any well-formed ref, the machine's own key store and pool
+      // included; the second look does not, on a prompt or a start, and nothing is queued.
+      const before = b.control.activity().length;
+      for (const pseudo of ["sessionpipe:keys", "sessionpipe:pool"])
+        for (const fields of [{}, { kind: "start", session: OTHER, cwd: "/Users/demo/acme/web" }]) {
+          const c = commandStr(machine, { iat: Date.now(), ...fields, reply_to: pseudo });
+          const r2 = await call(b.url, "POST", `${UI}/send`, {
+            body: { machineId: machine, ...(await signCommand(pk, day, c)) },
+          });
+          expect(r2.status, `${pseudo} ${JSON.stringify(r2.body)}`).toBe(422);
+          expect(r2.body).toEqual({
+            reason: "reply_to is a coding session, not the machine's own keys or pool",
+            code: "bad_fields",
+          });
+        }
+      expect(b.control.activity()).toHaveLength(before);
     } finally {
       await b.close();
     }
