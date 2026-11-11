@@ -406,11 +406,7 @@ async function extensionCommand(parsed: Args): Promise<void> {
   const out = (s: string) => process.stdout.write(s.endsWith("\n") ? s : `${s}\n`);
   const bundled = bundledDirs(parsed.bundledDir);
   const disabled = () => readGuiConfig(stateDir).disabled ?? [];
-  const pluginOpts = () => ({
-    bundledDir: bundled.plugin,
-    disabled,
-    enabled: () => readGuiConfig(stateDir).enabled ?? [],
-  });
+  const pluginOpts = () => ({ bundledDir: bundled.plugin, lists: () => readGuiConfig(stateDir) });
   const skinOpts = () => ({ bundledDir: bundled.skin, disabled });
   const viewOpts = () => ({ bundledDir: bundled.view, disabled });
   const ops =

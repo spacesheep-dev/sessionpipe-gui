@@ -81,6 +81,28 @@ All notable changes to `sessionpipe-gui`. The format follows
   being replaced the same way. `sessionpipe-gui search` and `index` read the history setting
   past a byte-order mark too, and stop the same way on a `config.json` the GUI refuses,
   instead of reading it as history on.
+- A plugin turned on with `sessionpipe-gui plugin enable` while the receiver runs starts
+  on Reload plugins, as the CLI says. And a plugin or view the CLI turns on or off
+  while it runs is no longer undone by the receiver's next write of config.json (a token
+  rotation, a toggle in Settings, a spacesheep connect), which put back the lists it held
+  in memory.
+- **`npx github:spacesheep-dev/sessionpipe-gui` works on Windows.** Its one-time build
+  spawned a bare `npm`, which is `npm.cmd` there and can't start without a shell, so the
+  command exited 1 with no message. The build now runs npm through npm's own entry under the
+  same node, and says why if npm can't be started. Its check for the build tools also looked
+  for `@vitejs/plugin-react/package.json` through the package's exports, which leave it out,
+  so on every platform the tools were installed a second time; on Windows that install ran
+  the build script again, and again, until the PATH outgrew cmd.exe.
+- **The desktop app on Windows tells a stale receiver from a live one.** It decides whether
+  the receiver that wrote `run.json` still runs by its process id, and on Windows that check
+  always said yes. It now asks Windows, so a file left by a receiver that has stopped is no
+  longer taken for the one that dropped. The hand-run Desktop workflow also passes on
+  `windows-latest`: its `npm ci` skips the prepare build, as desktop-release does, two tests
+  no longer assume macOS, and the four that run a shell script are compiled on Unix only.
+- **The desktop app's first-run sheet speaks Windows and Linux.** The New session shortcut
+  reads Ctrl+Alt+N there (it read ⌃⌥N, the Mac's symbols, everywhere), as does the
+  recorder in Settings › App; the sheet says sessionpipe is in your system tray, not your
+  menu bar; and a refused notification points at Windows' Settings, not System Settings.
 - **A finished session stays finished.** A sender records a hook when it gets to it, so a
   tool call that fired just before a turn's Stop can be recorded after it; the receiver
   read that late event as a new turn, and the session went back to "working" (then
