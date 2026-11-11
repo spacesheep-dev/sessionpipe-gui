@@ -6,6 +6,16 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **One session file the outbox can't read no longer stops the outbox.** A file the GUI
+  may not open (its mode, another user's) or a folder named `*.jsonl` made the first read
+  fail, and no session from the outbox reached the board while that file stayed so,
+  restart or not; one that turned unreadable while running kept every older session from
+  being read and the offsets from being saved, with a line on stderr every 500 ms. That
+  file is now skipped for the tick, said once, and read on from its offset once it can be
+  read again.
+
 ## [0.7.5] - 2026-11-06
 
 ### Added
