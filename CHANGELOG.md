@@ -103,6 +103,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   reads Ctrl+Alt+N there (it read ⌃⌥N, the Mac's symbols, everywhere), as does the
   recorder in Settings › App; the sheet says sessionpipe is in your system tray, not your
   menu bar; and a refused notification points at Windows' Settings, not System Settings.
+- Search no longer says "“c:” isn't a filter" over a pasted Windows path (`C:\Users\…`,
+  `D:/repo`) or a URL (`https://…`). They were, and still are, searched as text; the notice
+  now stays for something that looks like a filter, such as `foo:bar` or `cwd:/x`.
 
 ## [0.7.5] - 2026-11-06
 
