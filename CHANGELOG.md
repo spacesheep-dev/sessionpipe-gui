@@ -76,7 +76,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   "stale") until its next prompt. An event from before the last end of the turn, or of the
   session, now takes nothing back: it is filed and counted, and the session stays idle or
   done. The same for an agent whose start is recorded after its end, and for the end of a
-  run recorded after the session started again.
+  run recorded after the session started again. Only an event timed within two seconds
+  before that end is read so (the furthest a hook was found recorded behind, on a real
+  machine, is 1.3 s). Further back than that it is the sender's clock that moved: a clock
+  that stepped back, a session resumed where the clock is behind, or a batch from a clock
+  ahead of the receiver's is read in the order it was recorded, so a running session never
+  reads idle or done because of its clock.
 - **A page that was away shows what is true now.** After the live stream dropped and came
   back, an open session page kept the events it had: a turn still drawn as running, a
   message still "handing it over", a reply missing, until a reload. The page now reads

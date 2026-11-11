@@ -91,24 +91,39 @@ function names above.
 - COALESCE the session block (spec §3): a later empty field never blanks a full one;
   `title` keeps the better `title_source` (`custom` > `harness` > `first-ask`).
 - `turn.progress` is kept only until its `turn.transcript` or the turn's end.
-- **Nothing goes back.** An event stands in its session's own order by its `time` (the
-  sender's clock as the hook fired), then by `seq` (the order the sender recorded them in)
-  within one millisecond: a sender records a hook when it gets to it, so `seq` and arrival
-  can both put an earlier hook after a later one (PROTOCOL.md §3, §4; `Mark`, `markOf`,
-  `older` in `readings.ts`). A `time` ahead of this receiver's clock counts as its
-  arrival, as `clampTime` has it, so a wrong clock holds nothing back. An event older than the last `turn.ended` or `session.ended`
-  is filed and counted and changes neither `currentTurn`, `currentTool`, `progress` nor
-  the state. A `turn.started` opens a turn when it is newer than that end (and than the
-  start of the turn that is open); an event that only implies a turn (a tool, progress, a
-  heartbeat, a subagent's start) opens one only when timed after the end, not in its
-  millisecond, and a turn only implied stands at the newest such event and is the turn it
-  names. A `turn.ended` or a `session.ended` older than the open turn's start leaves it
-  running; a `session.started` older than the session's end, or a `session.ended` older
-  than its newest start, changes nothing; an agent's start or tool call older than its
-  `subagent.ended` leaves it ended; a `tool.started` whose `tool.ended` was read is not
-  the current tool. The state, the turn and the running agents read the same live, at
-  boot (arrival order), after a rebuild (seq order) and in any order the events are
-  recorded or delivered in (`readings.test.ts`).
+- **Nothing goes back, and no clock takes a session down.** An event stands in its
+  session's own order by `seq`, the order its sender recorded it in (PROTOCOL.md §3), and
+  the sender's `time` corrects that only within `LATE_MS` (2 s), where a hook that fired
+  first can have been recorded second (§4): an event recorded after an end and timed
+  within 2 s before it is from before it (`before` in `readings.ts`). Timed further back
+  than that, it is a clock that stepped back and is read where it was recorded. The 2 s is
+  measured, not guessed: in one machine's sessionpipe outbox (529 sessions, 43,213 events)
+  615 events are timed before one recorded ahead of them, 99 % by under 0.41 s and the
+  furthest by 1.29 s; the sender gives a hook 6 s for its session's lock before it
+  re-queues it. An event from before the last `turn.ended` or `session.ended` is filed and
+  counted and changes neither `currentTurn`, `currentTool`, `progress` nor the state,
+  unless it names the open turn (that turn's, whatever its clock says) or a prompt or a
+  resume has been read since that end and it is not from before that too. A
+  `session.started`, and a `turn.started` whose id was not named before, are the session
+  saying it is alive: let through however they are timed, and refused only when recorded
+  before the end (or the open turn's start) and timed before it (`stale`: an old event
+  delivered late). A `turn.started` that names a turn named before is that turn said
+  again, placed like any event. A `turn.ended` that names the open turn ends it however it
+  is timed; the end of a turn before the open one leaves it running (it names another
+  turn, or is the one end owed for a turn the open one took over, or is known older). A
+  run ends once: with the last run's end read, a `session.ended` is this run's; where a
+  resume was read first, the one end from before it is the old run's. An event that only
+  implies a turn (a tool, progress, a heartbeat, a subagent's start) opens one when it is
+  not late and not in the end's own millisecond, and a turn only implied stands at the
+  newest such event and is the turn it names. A `time` ahead of this receiver's clock
+  stands at its arrival, as `clampTime` has it, and two such times are compared as the
+  sender wrote them (one clock running ahead, a batch of it arriving at one instant). An
+  agent's start or call from before its `subagent.ended` leaves it ended; a `tool.started`
+  whose `tool.ended` was read is not the current tool. What is kept to place events is
+  bounded (64 agents' ends, 32 calls, 16 turn ids). `readings.test.ts` reads generated
+  sessions in those proportions with hooks recorded late, under a clock that steps back
+  2 s to 1 h or runs ahead, and in any order of delivery, against the same session in the
+  order it happened under a true clock.
 - An attention is open from `attention.needed` until `attention.cleared` **or the
   session's next hook event** (CONTROL.md §7).
 - `currentTool` is the orchestrator's last `tool.started` without its `tool.ended` (by `call_id`,
