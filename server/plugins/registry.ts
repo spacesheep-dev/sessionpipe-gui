@@ -154,21 +154,23 @@ export interface PluginRegistryOptions {
   disabled?: () => readonly string[];
   /** The bundled ids turned on (config.json `enabled`, as `plugin:<id>`); read on every scan. */
   enabled?: () => readonly string[];
+  /** Both lists from one read, used instead of `disabled` and `enabled` when given, so a
+   *  scan never mixes two versions of a config.json another process is rewriting. */
+  lists?: () => { disabled?: readonly string[]; enabled?: readonly string[] };
 }
 
 export class PluginRegistry {
   private entries = new Map<string, PluginEntry>();
   readonly bundledDir: string;
-  private readonly disabled: () => readonly string[];
-  private readonly enabled: () => readonly string[];
+  private readonly lists: () => { disabled?: readonly string[]; enabled?: readonly string[] };
 
   constructor(
     readonly pluginsDir: string,
     opts: PluginRegistryOptions = {},
   ) {
     this.bundledDir = opts.bundledDir ?? bundledDir("plugin");
-    this.disabled = opts.disabled ?? (() => []);
-    this.enabled = opts.enabled ?? (() => []);
+    const { disabled, enabled } = opts;
+    this.lists = opts.lists ?? (() => ({ disabled: disabled?.(), enabled: enabled?.() }));
     this.scan();
   }
 
@@ -177,8 +179,9 @@ export class PluginRegistry {
   scan(): PluginEntry[] {
     const next = new Map<string, PluginEntry>();
     const strip = (k: string) => k.replace(/^plugin:/, "");
-    const off = new Set(this.disabled().map(strip));
-    const on = new Set(this.enabled().map(strip));
+    const lists = this.lists();
+    const off = new Set((lists.disabled ?? []).map(strip));
+    const on = new Set((lists.enabled ?? []).map(strip));
     const add = (f: ScannedFolder<PluginManifest>, bundled: boolean) => {
       if (bundled && next.has(f.id)) return;
       const entry: PluginEntry = { id: f.id, dir: f.dir };

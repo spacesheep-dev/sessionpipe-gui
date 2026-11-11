@@ -1,35 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
-// The `pool` control kind (CONTROL.md, the pool; DESIGN §2.3): a machine-level command on `sessionpipe:pool`
-// that turns a machine's account pool on or off, enables, disables, removes, refreshes or
-// reorders its accounts, or signs a new one in. It is verified exactly like a `key.add`
-// (CONTROL.md §5: a grant from a trusted key plus the day key's signature over the exact
-// bytes, or one confirm over sha256(cmd); the receiver's ten-minute age window; no nonce
-// store here), but this receiver's sessionpipe-core (0.10.0) closes its kind set in
-// `parseCommand`, which `verifyCommand` runs first, so a pool command is `unknown_kind`
-// there whatever its signature says. The signature checks themselves are exported one by
-// one (`parseGrant`, `verifyAssertion`, `sha256`, `fromB64url`), so this file reads the
-// fields with its own strict parser, mirroring the core's common rules, and runs the same
-// checks in the same order with the same refusal codes. The one piece the core keeps to
-// itself, the day key's P-256 signature over the command bytes, is ten lines of WebCrypto
-// here. Once a core that lists `pool` in CONTROL_KINDS is installed, `coreTakesPool()` is
-// true and `verifyPoolCommand` hands the whole check to `verifyCommand`: nothing here
-// outlives the core's catching up.
+// The `pool` control kind (CONTROL.md §3.1, §6 `pool`): a machine-level command on
+// `sessionpipe:pool` that turns a machine's account pool on or off, enables, disables,
+// removes, refreshes or reorders its accounts, or signs a new one in. It is verified
+// exactly like a `key.add` (CONTROL.md §5: a grant from a trusted key plus the day key's
+// signature over the exact bytes, or one confirm over sha256(cmd); the receiver's
+// ten-minute age window; no nonce store here), by sessionpipe-core's `verifyCommand`,
+// which has listed the kind since 0.11. Two things here are this receiver's own, and both
+// only ever refuse: a strict reading of the fields before the core sees the command
+// (`parsePoolCommand`), and the contract's last word on a verified one (`needsConfirm`):
+// the actions that take a fresh confirm are refused on a day grant alone, as the machine
+// refuses them.
 import * as core from "sessionpipe-core/control";
 import {
-  type Assertion,
   CMD_MAX,
   COMMAND_TYPE,
-  type DeviceSignature,
-  fromB64url,
   NOTE_MAX,
-  parseGrant,
   RECEIVER_MAX_AGE_MS,
   type RefusalCode,
   type SignedCommand,
-  SKEW_MS,
-  sha256,
   type TrustedKey,
-  verifyAssertion,
 } from "sessionpipe-core/control";
 import {
   POOL_ACCOUNT_ACTIONS,
@@ -59,9 +48,9 @@ export interface PoolCommand {
   iat: number;
 }
 
-/** The core's codes, `unknown_kind` (a core that does not list the kind), and the daemon's
- *  `confirm_required`: a confirm-only action signed with the day grant alone. */
-export type PoolRefusal = RefusalCode | "unknown_kind" | "confirm_required";
+/** The core's codes, and the daemon's `confirm_required`: a confirm-only action signed
+ *  with the day grant alone. */
+export type PoolRefusal = RefusalCode | "confirm_required";
 export type PoolParsed = { ok: true; cmd: PoolCommand } | { ok: false; code: PoolRefusal; why: string };
 export type PoolVerdict =
   | { ok: true; cmd: PoolCommand; via: "grant" | "confirm"; key: string }
@@ -86,16 +75,6 @@ const bad = (code: PoolRefusal, why: string): { ok: false; code: PoolRefusal; wh
   code,
   why,
 });
-
-/** Does this receiver's core know the `pool` kind itself? Asked of the core, never assumed
- *  from a version (tilde.ts, devicekeys.ts do the same). */
-export function coreTakesPool(c: Pick<typeof core, "CONTROL_KINDS"> = core): boolean {
-  try {
-    return (c.CONTROL_KINDS as readonly string[]).includes("pool");
-  } catch {
-    return false;
-  }
-}
 
 /** Is this string a `pool` command at all (by its `kind`), before anything is verified?
  *  The send route asks this to pick the verifier; a string that is not JSON is nobody's. */
@@ -166,88 +145,22 @@ export function parsePoolCommand(str: unknown): PoolParsed {
   return { ok: true, cmd: c as unknown as PoolCommand };
 }
 
-const enc = new TextEncoder();
-type Bytes = Uint8Array<ArrayBuffer>;
-
-/** The day key's ECDSA P-256 signature over the command's exact bytes (CONTROL.md §3.2),
- *  as the core checks it: a 64-byte raw r‖s, the key from the grant's SPKI. */
-export async function verifyCsig(cmd: string, csig: unknown, pub: string): Promise<boolean> {
-  const sig = fromB64url(csig);
-  const spki = fromB64url(pub);
-  if (sig?.length !== 64 || !spki) return false;
-  try {
-    const key = await crypto.subtle.importKey("spki", spki as Bytes, { name: "ECDSA", namedCurve: "P-256" }, false, [
-      "verify",
-    ]);
-    return await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, sig as Bytes, enc.encode(cmd) as Bytes);
-  } catch {
-    return false;
-  }
-}
-
-/** Is this a `pool` command the machine may be asked to run? The core's checks in the
- *  core's order (CONTROL.md §5), by the core's own primitives where it exports them: the
- *  exact bytes parse; the command is for this machine; it is signed (a grant from a
- *  trusted key and the day key's signature, or a confirm over sha256(cmd)); it was signed
- *  within the window. With a core that knows the kind, the core's `verifyCommand` decides. */
+/** Is this a `pool` command the machine may be asked to run? The fields are read here
+ *  first, then the core's `verifyCommand` decides (CONTROL.md §5: the exact bytes parse;
+ *  the command is for this machine; it is signed, by a grant from a trusted key and the day
+ *  key's signature or by a confirm over sha256(cmd); it was signed within the window), and
+ *  a verified command is held to the confirm rule below. `c` is the core, for a test. */
 export async function verifyPoolCommand(
   s: SignedCommand | null | undefined,
   o: PoolVerifyOptions,
-  c: Pick<typeof core, "CONTROL_KINDS" | "verifyCommand"> = core,
+  c: Pick<typeof core, "verifyCommand"> = core,
 ): Promise<PoolVerdict> {
   if (!s || typeof s !== "object") return bad("malformed", "nothing to verify");
   const p = parsePoolCommand(s.cmd);
   if (!p.ok) return p;
-  const cmd = p.cmd;
-  if (coreTakesPool(c)) {
-    const v = await c.verifyCommand(s, { ...o, maxAgeMs: o.maxAgeMs ?? RECEIVER_MAX_AGE_MS });
-    return v.ok ? (needsConfirm(cmd, v.via) ?? { ok: true, cmd, via: v.via, key: v.key }) : bad(v.code, v.why);
-  }
-  if (cmd.machine !== o.machine) return bad("wrong_machine", "the command is for another machine");
-  let via: "grant" | "confirm" | null = null;
-  let keyId = "";
-  let refusal: { code: PoolRefusal; why: string } | null = null;
-  if (s.grant && s.csig) {
-    const bundle = s.grant;
-    const g = parseGrant(bundle.str, o.rpId);
-    if (!g.ok) refusal = { code: "bad_grant", why: g.why };
-    else {
-      const key = o.trusted.find((k) => k && k.id === bundle.cred);
-      if (!key) refusal = { code: "untrusted_key", why: "the grant was signed with a key this machine doesn't trust" };
-      else {
-        const a = await verifyAssertion(await sha256(bundle.str), bundle, key, o.rpId, "grant");
-        if (!a.ok) refusal = { code: "bad_assertion", why: a.why };
-        else if (!(await verifyCsig(s.cmd, s.csig, g.grant.pub)))
-          refusal = {
-            code: "bad_csig",
-            why: "the command's signature doesn't verify — it was changed after it was signed",
-          };
-        else if (cmd.iat < g.grant.iat - SKEW_MS || cmd.iat > g.grant.exp)
-          refusal = { code: "outside_grant", why: "the command was signed outside its grant's window" };
-        else {
-          via = "grant";
-          keyId = key.id;
-        }
-      }
-    }
-  }
-  if (!via && s.confirm) {
-    const confirm = s.confirm as Assertion | DeviceSignature;
-    const key = o.trusted.find((k) => k && k.id === confirm.cred);
-    if (!key) refusal = { code: "untrusted_key", why: "confirmed with a key this machine doesn't trust" };
-    else {
-      const a = await verifyAssertion(await sha256(s.cmd), confirm, key, o.rpId, "confirm");
-      if (a.ok) {
-        via = "confirm";
-        keyId = key.id;
-      } else refusal = { code: "bad_assertion", why: a.why };
-    }
-  }
-  if (!via) return refusal ? bad(refusal.code, refusal.why) : bad("unsigned", "the command isn't signed");
-  if (cmd.iat > o.now + SKEW_MS) return bad("future", "the command is dated in the future (is this clock right?)");
-  if (o.now - cmd.iat > (o.maxAgeMs ?? RECEIVER_MAX_AGE_MS))
-    return bad("too_old", "the command was signed too long ago");
-  return needsConfirm(cmd, via) ?? { ok: true, cmd, via, key: keyId };
+  const v = await c.verifyCommand(s, { ...o, maxAgeMs: o.maxAgeMs ?? RECEIVER_MAX_AGE_MS });
+  if (!v.ok) return bad(v.code, v.why);
+  return needsConfirm(p.cmd, v.via) ?? { ok: true, cmd: p.cmd, via: v.via, key: v.key };
 }
 
 /** The contract's last word on a verified pool command (CONTROL.md §6, POOL_CONFIRM_ACTIONS):

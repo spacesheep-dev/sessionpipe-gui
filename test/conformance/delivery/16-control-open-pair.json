@@ -1,0 +1,81 @@
+{
+  "name": "control-open-pair",
+  "spec": "CONTROL.md \u00a72 open pairing",
+  "capability": "control",
+  "note": "Only for a receiver that declares control.open_pairing. The runner signs in as a test person to approve.",
+  "steps": [
+    {
+      "pair_start": {
+        "auth": "none",
+        "body": {
+          "name": "conformance",
+          "harnesses": [
+            "claude-code"
+          ],
+          "modes": [
+            "waiter"
+          ],
+          "version": "0.0.0",
+          "poll_key": "{poll_key}"
+        }
+      },
+      "expect": {
+        "status": 201
+      }
+    },
+    {
+      "pair_status": {
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401
+      }
+    },
+    {
+      "pair_status": {
+        "auth": "wrong_poll_key"
+      },
+      "expect": {
+        "status": 401
+      }
+    },
+    {
+      "pair_status": {
+        "auth": "poll_key"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "status": "pending"
+        }
+      }
+    },
+    {
+      "approve": {
+        "as": "test-person"
+      }
+    },
+    {
+      "pair_status": {
+        "auth": "poll_key"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "status": "paired",
+          "token": "*",
+          "key": "*",
+          "proof": "*"
+        }
+      }
+    },
+    {
+      "pair_status": {
+        "auth": "poll_key"
+      },
+      "expect": {
+        "status": 404
+      }
+    }
+  ]
+}

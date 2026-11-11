@@ -7,3 +7,8 @@ by Michael Makarov and contributors (https://sessionpipe.org, spec CC BY 4.0);
 
 Geist and Geist Mono (web/public/fonts/) are Copyright 2024 The Geist Project Authors,
 licensed under the SIL Open Font License 1.1 (web/public/fonts/OFL.txt).
+
+The conformance fixtures under test/conformance/ (control-vectors, delivery) are copied
+from sessionpipe (https://github.com/spacesheep-dev/sessionpipe, conformance/), Copyright
+2026 Michael Makarov and the sessionpipe contributors, licensed under the Apache License,
+Version 2.0; manifest.json beside them names the version and the commit.
