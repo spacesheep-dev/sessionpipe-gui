@@ -60,6 +60,8 @@ const STREAK_MIN = 3;
 const GAP_MAX_HOLE = 100;
 /** Turn durations kept for the median. */
 const TURN_SAMPLES = 64;
+/** Ended calls remembered (Tracking.callsEnded): a start is recorded within a few of its end. */
+const CALLS_ENDED = 32;
 
 /** What the flags and turnStats are read from; rebuilt with the summary. */
 export interface Tracking {
@@ -96,6 +98,9 @@ export interface Tracking {
   /** Each agent's `subagent.ended`, by agent id: its start, or a call of its, from before
    *  that end does not start it again, listed still or not. One entry per agent that ended. */
   agentEnds: Map<string, Mark>;
+  /** The orchestrator's last CALLS_ENDED calls that ended, by `call_id`: the start of one,
+   *  recorded after its end, is not the tool that runs now. */
+  callsEnded: string[];
 }
 
 /** Where an event stands in its session's own order: `time`, the sender's clock as the
@@ -201,6 +206,7 @@ export function newRecord(harness: string, id: string, at: string, source: Event
       missing: new Set(),
       launches: [],
       agentEnds: new Map(),
+      callsEnded: [],
     },
   };
 }
@@ -513,10 +519,14 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
   // end's millisecond it is the ended turn's, whichever hook the sender got to first.
   const after = !closed || m.t > closed.t;
   /** Open the turn such an event implies when none is open: a sink that joined mid-turn,
-   *  a harness with no prompt hook. */
+   *  a harness with no prompt hook. A turn only implied stands where the newest event
+   *  that implies it does (so the end of the turn before it does not end it), and is the
+   *  turn that event names when it names another. */
   const imply = (turn: NonNullable<SessionSummary["currentTurn"]>): void => {
-    if (s.currentTurn || !after) return;
-    s.currentTurn = turn;
+    if (!after) return;
+    const cur = s.currentTurn;
+    if (cur && (t.turnStart?.seq !== IMPLIED || t.turnStart.t >= m.t)) return;
+    if (!cur || (turn.turnId && cur.turnId && turn.turnId !== cur.turnId)) s.currentTurn = turn;
     t.turnStart = { t: m.t, seq: IMPLIED };
   };
   const first = s.counts.events === 0;
@@ -593,9 +603,11 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
     case "session.ended":
       // The end of a run the session has started again from (a script's next `claude -p`
       // can be recorded before the last one's end), or an end older than the one read:
-      // the session is where the newer event left it.
+      // the session is where the newer event left it. So it is when a turn has begun
+      // since this end, its run's own start still on its way.
       if (older(m, t.sessionStart) || older(m, t.sessionEnd)) break;
       t.sessionEnd = m;
+      if (s.currentTurn && older(m, t.turnStart)) break;
       // The end of a session nothing happened in (a program started the harness and
       // stopped it) tells nobody anything.
       if (!nothingHappened(s)) noteNews(s, arrivedAt);
@@ -617,8 +629,9 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       s.counts.turns++;
       // A prompt from before the last end, or from before the one the open turn began
       // with, is a turn that is over: counted, and it opens nothing. A turn only implied
-      // takes its start whenever that is timed.
-      if (late || (s.currentTurn && t.turnStart?.seq !== IMPLIED && older(m, t.turnStart))) break;
+      // takes its own start whenever that is timed (one that names another turn is not it).
+      const own = t.turnStart?.seq === IMPLIED && !(turnId && s.currentTurn?.turnId);
+      if (late || (s.currentTurn && !own && older(m, t.turnStart))) break;
       t.turnStart = m;
       const promptChars = num(d.prompt_chars);
       const by = typeof d.submitted_by === "string" && SUBMITTED_BY.test(d.submitted_by) ? d.submitted_by : undefined;
@@ -709,9 +722,12 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
         break;
       }
       if (tool) {
-        // A call from before the last end is not what runs now.
-        if (after) s.currentTool = { tool, callId: str(d.call_id), since: at };
-        noteStart(t, tool, at, ev);
+        // A call from before the last end is not what runs now. Nor is one whose end was
+        // read already (its start recorded after it): that end stood in for the start.
+        const callId = str(d.call_id);
+        const over = !!callId && t.callsEnded.includes(callId);
+        if (after && !over) s.currentTool = { tool, callId, since: at };
+        if (!over) noteStart(t, tool, at, ev);
         if (LAUNCH_TOOLS.has(tool)) {
           const input = (d.input && typeof d.input === "object" ? d.input : {}) as Record<string, unknown>;
           t.launches.push({
@@ -773,6 +789,11 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       const ms = num(d.ms);
       s.recentTools.push({ tool, ok, ...(ms !== undefined ? { ms } : {}) });
       if (s.recentTools.length > 8) s.recentTools.splice(0, s.recentTools.length - 8);
+      const ended = str(d.call_id);
+      if (ended) {
+        t.callsEnded.push(ended);
+        if (t.callsEnded.length > CALLS_ENDED) t.callsEnded.shift();
+      }
       const cur = s.currentTool;
       let matched = false;
       if (cur) {

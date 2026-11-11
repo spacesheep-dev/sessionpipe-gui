@@ -100,11 +100,14 @@ function names above.
   the state. A `turn.started` opens a turn when it is newer than that end (and than the
   start of the turn that is open); an event that only implies a turn (a tool, progress, a
   heartbeat, a subagent's start) opens one only when timed after the end, not in its
-  millisecond. A `turn.ended` older than the open turn's start leaves it running; a
-  `session.started` older than the session's end, or a `session.ended` older than its
-  newest start, changes nothing; an agent's start or tool call older than its
-  `subagent.ended` leaves it ended. The readings are the same live, at boot (arrival
-  order) and after a rebuild (seq order).
+  millisecond, and a turn only implied stands at the newest such event and is the turn it
+  names. A `turn.ended` or a `session.ended` older than the open turn's start leaves it
+  running; a `session.started` older than the session's end, or a `session.ended` older
+  than its newest start, changes nothing; an agent's start or tool call older than its
+  `subagent.ended` leaves it ended; a `tool.started` whose `tool.ended` was read is not
+  the current tool. The state, the turn and the running agents read the same live, at
+  boot (arrival order), after a rebuild (seq order) and in any order the events are
+  recorded or delivered in (`readings.test.ts`).
 - An attention is open from `attention.needed` until `attention.cleared` **or the
   session's next hook event** (CONTROL.md §7).
 - `currentTool` is the orchestrator's last `tool.started` without its `tool.ended` (by `call_id`,
