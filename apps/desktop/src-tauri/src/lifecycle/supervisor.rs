@@ -193,9 +193,11 @@ pub fn search_windows(dirs: &[PathBuf]) -> Tools {
 
 /// Where Node lives on Windows when PATH doesn't say: Node's installer (Program Files), npm's
 /// global folder (%APPDATA%\npm), nvm-windows' active version (%NVM_SYMLINK%), Volta's shims
-/// and Scoop's current version.
+/// and Scoop's current version. A variable counts only when its value is an absolute folder
+/// (`windows_absolute`), read as it is: a `nvm`, a `.` or an unexpanded `%X%\y` there is
+/// left out as on PATH, and ProgramFiles then has its usual place, as when it is unset.
 pub fn windows_prefixes(env: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
-    let var = |k: &str| env(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let var = |k: &str| env(k).filter(|v| windows_absolute(v)).map(PathBuf::from);
     let mut v = vec![var("ProgramFiles")
         .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"))
         .join("nodejs")];
@@ -1144,6 +1146,114 @@ mod tests {
                 PathBuf::from(r"C:\b")
             ]
         );
+    }
+
+    #[test]
+    fn takes_a_windows_prefix_only_from_an_absolute_variable() {
+        let abs = |k: &str| {
+            match k {
+                "ProgramFiles" => Some(r"D:\Programs"),
+                "APPDATA" => Some(r"C:\Users\c\AppData\Roaming"),
+                "NVM_SYMLINK" => Some(r"C:\nvm4w\nodejs"),
+                "LOCALAPPDATA" => Some(r"C:\Users\c\AppData\Local"),
+                "USERPROFILE" => Some(r"C:\Users\c"),
+                _ => None,
+            }
+            .map(String::from)
+        };
+        let scoop = PathBuf::from(r"C:\Users\c")
+            .join("scoop")
+            .join("apps")
+            .join("nodejs")
+            .join("current");
+        // Every variable absolute: each one's folder, in this order.
+        let all = windows_prefixes(&abs);
+        assert_eq!(
+            all,
+            [
+                PathBuf::from(r"D:\Programs").join("nodejs"),
+                PathBuf::from(r"C:\Users\c\AppData\Roaming").join("npm"),
+                PathBuf::from(r"C:\nvm4w\nodejs"),
+                PathBuf::from(r"C:\Users\c\AppData\Local")
+                    .join("Volta")
+                    .join("bin"),
+                scoop.join("bin"),
+                scoop,
+            ]
+        );
+        // What ProgramFiles gives when it is unset: the only folder left with no variable.
+        let default = PathBuf::from(r"C:\Program Files").join("nodejs");
+        // The folders each variable gives, by their place in `all`.
+        let from = [
+            ("ProgramFiles", 0..1),
+            ("APPDATA", 1..2),
+            ("NVM_SYMLINK", 2..3),
+            ("LOCALAPPDATA", 3..4),
+            ("USERPROFILE", 4..6),
+        ];
+        // A value that depends on where the app was started, or names no folder at all. A
+        // variable holds one folder, not a list: quotes and a space before it are part of
+        // the value, as they are for everything else that reads it.
+        for rel in [
+            ".",
+            "nvm",
+            "C:rel",
+            r"\rooted",
+            "",
+            r"%X%\y",
+            r".\nodejs",
+            r#""C:\nvm4w\nodejs""#,
+            r" C:\nvm4w\nodejs",
+        ] {
+            // In every variable: nothing from any of them.
+            assert_eq!(
+                windows_prefixes(&|_| Some(rel.to_string())),
+                std::slice::from_ref(&default),
+                "{rel:?} everywhere"
+            );
+            // In one, the others absolute: the others' folders, as they were.
+            for (bad, gone) in &from {
+                let dirs = windows_prefixes(&|k| {
+                    if k == *bad {
+                        Some(rel.to_string())
+                    } else {
+                        abs(k)
+                    }
+                });
+                let mut want = all.clone();
+                want.drain(gone.clone());
+                if *bad == "ProgramFiles" {
+                    want.insert(0, default.clone());
+                }
+                assert_eq!(dirs, want, "{bad}={rel:?}");
+            }
+        }
+        // A mix, and the other ways a value is absolute: a share, a forward slash, a
+        // separator at the end. Each is taken as it is written.
+        let mix = windows_prefixes(&|k| {
+            match k {
+                "ProgramFiles" => Some("Program Files"),
+                "APPDATA" => Some(r"\\server\profiles\c\AppData\Roaming"),
+                "NVM_SYMLINK" => Some("d:/nvm4w/nodejs/"),
+                "LOCALAPPDATA" => Some("%LOCALAPPDATA%"),
+                "USERPROFILE" => Some(r"C:Users\c"),
+                _ => None,
+            }
+            .map(String::from)
+        });
+        assert_eq!(
+            mix,
+            [
+                default,
+                PathBuf::from(r"\\server\profiles\c\AppData\Roaming").join("npm"),
+                PathBuf::from("d:/nvm4w/nodejs/"),
+            ]
+        );
+        // Windows' own answer is the same one: nothing here hangs on the working directory.
+        #[cfg(windows)]
+        for d in all.iter().chain(&mix) {
+            assert!(d.is_absolute(), "{d:?} (std)");
+        }
     }
 
     #[test]
