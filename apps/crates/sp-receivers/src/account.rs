@@ -857,7 +857,8 @@ mod tests {
     #[test]
     fn everything_else_is_not_a_door() {
         let m = "m_0123456789abcdefABCD";
-        for (method, path) in [
+        #[rustfmt::skip]
+        let table = [
             // Other paths.
             ("GET", "/"),
             ("GET", "/api/ui/info"),
@@ -915,7 +916,8 @@ mod tests {
             ("GET", "/@evil.example/api/sessionpipe/v1/relay"),
             ("GET", "@evil.example/api/sessionpipe/v1/relay"),
             ("GET", ""),
-        ] {
+        ];
+        for (method, path) in table {
             assert_eq!(
                 door(method, path),
                 Err(Refused::NotADoor),
@@ -928,23 +930,15 @@ mod tests {
     #[test]
     fn a_door_takes_only_its_own_parameters() {
         let id = "A".repeat(43);
-        for (method, path) in [
+        #[rustfmt::skip]
+        let table = [
             ("GET", "/api/sessionpipe/v1/relay?since=-1".to_string()),
             ("GET", "/api/sessionpipe/v1/relay?since=1e3".to_string()),
             ("GET", "/api/sessionpipe/v1/relay?since=".to_string()),
             ("GET", "/api/sessionpipe/v1/relay?since".to_string()),
-            (
-                "GET",
-                "/api/sessionpipe/v1/relay?since=1&since=2".to_string(),
-            ),
-            (
-                "GET",
-                "/api/sessionpipe/v1/relay?since=9007199254740992".to_string(),
-            ),
-            (
-                "GET",
-                "/api/sessionpipe/v1/relay?since=99999999999999999".to_string(),
-            ),
+            ("GET", "/api/sessionpipe/v1/relay?since=1&since=2".to_string()),
+            ("GET", "/api/sessionpipe/v1/relay?since=9007199254740992".to_string()),
+            ("GET", "/api/sessionpipe/v1/relay?since=99999999999999999".to_string()),
             ("GET", "/api/sessionpipe/v1/relay?limit=0".to_string()),
             ("GET", "/api/sessionpipe/v1/relay?limit=501".to_string()),
             ("GET", "/api/sessionpipe/v1/relay?wait=26".to_string()),
@@ -954,10 +948,7 @@ mod tests {
             ("GET", "/api/sessionpipe/v1/relay?&since=1".to_string()),
             ("GET", "/api/sessionpipe/v1/relay?since=%31".to_string()),
             ("GET", "/api/sessionpipe/v1/relay?s%69nce=1".to_string()),
-            (
-                "GET",
-                "/api/sessionpipe/v1/relay?since=1?wait=2".to_string(),
-            ),
+            ("GET", "/api/sessionpipe/v1/relay?since=1?wait=2".to_string()),
             ("GET", "/api/sessionpipe/v1/relay/machines?x=1".to_string()),
             ("GET", "/api/sessionpipe/v1/relay/jobs?limit=5".to_string()),
             ("GET", "/api/sessionpipe/v1/relay/jobs?since=a".to_string()),
@@ -967,11 +958,9 @@ mod tests {
             ("GET", format!("/api/gui/device?id={id}A")),
             ("GET", format!("/api/gui/device?id={}%2F", "A".repeat(40))),
             ("POST", "/api/gui/device?id=1".to_string()),
-            (
-                "POST",
-                "/api/machines/m_0123456789abcdefABCD/jobs?check_stub=ok".to_string(),
-            ),
-        ] {
+            ("POST", "/api/machines/m_0123456789abcdefABCD/jobs?check_stub=ok".to_string()),
+        ];
+        for (method, path) in table {
             assert_eq!(
                 door(method, &path),
                 Err(Refused::BadQuery),
