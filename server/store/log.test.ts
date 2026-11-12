@@ -86,17 +86,13 @@ test("utf8Bytes counts as Buffer does", () => {
 /** Everything a page reads from a store, as one value: the board, every session's page
  *  (forward, tail, before, by agent), the feed (filtered four ways, and a second page),
  *  search, files changed, the digest. `ms` (how long a search took) is left out. */
-function readings(store: StoreCore, o: { cursors?: boolean } = {}) {
+function readings(store: StoreCore) {
   const snap = store.snapshot();
   const sessions = [...snap.sessions].sort((a, b) => (a.key < b.key ? -1 : 1));
   const busiest = [...sessions].sort((x, y) => y.counts.events - x.counts.events)[0]!;
   const withAgent = sessions.find((s) => s.agents.some((a) => !a.session));
   const agent = withAgent?.agents.find((a) => !a.session)?.id;
-  const feed = (q: Parameters<StoreCore["feed"]>[0]) => {
-    const page = store.feed(q);
-    return o.cursors === false ? page.events.map((e) => e.id) : page;
-  };
-  const first = store.feed({ limit: 150 });
+  const feed = store.feed({ limit: 150 });
   const { ms: _ms, ...search } = store.search({ q: "the", limit: 50 });
   return {
     sessions,
@@ -107,18 +103,32 @@ function readings(store: StoreCore, o: { cursors?: boolean } = {}) {
     before: store.sessionDetail(busiest.key, undefined, 20, { before: Math.floor(busiest.counts.events / 2) }),
     slim: store.sessionDetail(busiest.key, -1, 1000, { slim: true }),
     agent: agent ? store.sessionDetail(withAgent!.key, -1, 1000, { agent }) : "no agent in the sample",
-    feed: feed({ limit: 150 }),
-    next:
-      o.cursors === false
-        ? "after a boot the arrival numbers are the boot's own"
-        : store.feed({ limit: 150, before: first.cursor }),
-    byHarness: feed({ limit: 100, harness: busiest.harness }),
-    byMachine: feed({ limit: 100, machine: busiest.machine }),
-    bySession: feed({ limit: 100, session: busiest.key }),
-    byText: feed({ limit: 100, q: "test" }),
-    search: o.cursors === false ? search.hits : search,
+    feed,
+    next: store.feed({ limit: 150, before: feed.cursor }),
+    byHarness: store.feed({ limit: 100, harness: busiest.harness }),
+    byMachine: store.feed({ limit: 100, machine: busiest.machine }),
+    bySession: store.feed({ limit: 100, session: busiest.key }),
+    byText: store.feed({ limit: 100, q: "test" }),
+    search,
     files: store.filesChanged({}),
     digest: store.digest({}),
+  };
+}
+
+/** The readings of a store booted again, beside a live one's: the feed's cursors carry
+ *  arrival numbers, which a boot gives out again, so the feed pages are compared by the
+ *  events they hold, and search by its hits. */
+function withoutCursors(r: ReturnType<typeof readings>) {
+  const ids = (p: { events: { id: string }[] }) => p.events.map((e) => e.id);
+  return {
+    ...r,
+    feed: ids(r.feed),
+    next: ids(r.next),
+    byHarness: ids(r.byHarness),
+    byMachine: ids(r.byMachine),
+    bySession: ids(r.bySession),
+    byText: ids(r.byText),
+    search: r.search.hits,
   };
 }
 
@@ -176,17 +186,10 @@ test("every reading agrees over the files and the memory log, live and booted ag
   // the events they page through.)
   const diskAgain = new Store(tmp.dir);
   const memoryAgain = new StoreCore("memory", {}, memory);
-  const booted = readings(diskAgain, { cursors: false });
-  expect(readings(memoryAgain, { cursors: false })).toEqual(booted);
-  const { feed: _f, next: _n, byHarness: _h, byMachine: _m, bySession: _s, byText: _t, search: _q, ...liveRest } = live;
-  const { feed: f, next: _n2, byHarness: h, byMachine: m, bySession: s2, byText: t, search: q, ...bootRest } = booted;
-  expect(bootRest).toEqual(liveRest);
-  expect(f).toEqual(live.feed.events.map((e) => e.id));
-  expect(h).toEqual(live.byHarness.events.map((e) => e.id));
-  expect(m).toEqual(live.byMachine.events.map((e) => e.id));
-  expect(s2).toEqual(live.bySession.events.map((e) => e.id));
-  expect(t).toEqual(live.byText.events.map((e) => e.id));
-  expect(q).toEqual(live.search.hits);
+  const booted = withoutCursors(readings(diskAgain));
+  expect(withoutCursors(readings(memoryAgain))).toEqual(booted);
+  // What a page sees after a boot is what it saw live, each feed page by its own cursor.
+  expect(booted).toEqual(withoutCursors(live));
   await diskAgain.close();
   await memoryAgain.close();
 });
@@ -200,8 +203,8 @@ test("past keepDays, a boot keeps the short preview over either log alike", asyn
   // Two days on: everything ingested is past keepDays.
   vi.advanceTimersByTime(2 * 86_400_000);
   const again = [new Store(tmp.dir, { keepDays: 1 }), new StoreCore("memory", { keepDays: 1 }, memory)];
-  const a = readings(again[0]!, { cursors: false });
-  expect(readings(again[1]!, { cursors: false })).toEqual(a);
+  const a = withoutCursors(readings(again[0]!));
+  expect(withoutCursors(readings(again[1]!))).toEqual(a);
   // Some preview was cut to the old length, so the trimming ran and both did it.
   expect(JSON.stringify(a.slim).includes('"preview"')).toBe(true);
   for (const s of again) s.tick();
