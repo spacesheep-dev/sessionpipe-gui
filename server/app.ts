@@ -298,6 +298,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
         pendingJobs: () => control.remote.pending(),
         jobsCadence: () => control.remote.cadence(),
         onEvents: (keys) => control.remote.eventsSeen(keys),
+        onUnauthorized: () => control.remote.revoked(true),
         onJobs: (jobs, through, serverNow) => control.remote.applyJobs(jobs, through, serverNow),
       });
     } catch (e) {

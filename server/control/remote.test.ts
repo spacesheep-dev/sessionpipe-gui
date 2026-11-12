@@ -181,14 +181,14 @@ describe("remote machines in the control state", () => {
     state.onMessage = (r) => seen.push(r.unfollowed ? "unfollowed" : r.outcome);
     state.dropRemoteMachines("spacesheep");
     state.setRemoteAccount(null);
-    expect(state.activityById(row.id)).toMatchObject({ unfollowed: true });
+    expect(state.activityById(row.id)).toMatchObject({ unfollowed: "disconnected" });
     expect(state.activityById(row.id)?.outcome).toBeUndefined();
     expect(state.pendingRemoteJobsFrom()).toBeNull();
     // A restart while disconnected keeps it so.
     state.close();
     const again = new ControlState(path.join(dir, "control"));
     again.setRemoteAccount(null);
-    expect(again.activityById(row.id)).toMatchObject({ unfollowed: true });
+    expect(again.activityById(row.id)).toMatchObject({ unfollowed: "disconnected" });
     again.onMessage = (r) => seen.push(r.unfollowed ? "unfollowed" : (r.outcome ?? "followed"));
     again.setRemoteAccount(account);
     expect(again.activityById(row.id)?.unfollowed).toBeUndefined();
@@ -431,5 +431,22 @@ describe("remote machines in the control state", () => {
     vi.setSystemTime(born + EXPIRES_MAX_MS + REMOTE_GRACE_MS + 1);
     expect(state.applyRemoteJobs([queued], Number.POSITIVE_INFINITY)).toBe(1);
     expect(state.activityById(row.id)?.outcome).toBe("expired");
+  });
+
+  it("while spacesheep refuses the key, a waiting send says it is not followed; a new connect follows it again", () => {
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed({ online: false })], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 60);
+    expect(state.activityById(row.id)?.unfollowed).toBeUndefined();
+    state.setRemoteRevoked(true);
+    expect(state.activityById(row.id)?.unfollowed).toBe("revoked");
+    // Disconnect, then: disconnected says more than revoked.
+    state.setRemoteAccount(null);
+    expect(state.activityById(row.id)?.unfollowed).toBe("disconnected");
+    state.setRemoteAccount(account);
+    expect(state.activityById(row.id)?.unfollowed).toBeUndefined();
+    expect(state.pendingRemoteJobs()).toEqual([60]);
   });
 });

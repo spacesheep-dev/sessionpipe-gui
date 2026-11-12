@@ -77,6 +77,8 @@ export interface Control {
     cadence: () => "fast" | "slow" | "none";
     /** The relay brought events for these sessions (`harness:id`). */
     eventsSeen: (keys: Iterable<string>) => void;
+    /** spacesheep refused the key (true), or not any more. */
+    revoked: (on: boolean) => void;
     /** Who reads the jobs at once when one is worth reading now. */
     onKick: (f: () => void) => void;
     applyJobs: (
@@ -207,6 +209,7 @@ export function createControl(deps: ControlDeps): Control {
       pending: () => state.pendingRemoteJobs(),
       cadence: () => state.remoteJobsCadence(),
       eventsSeen: (keys) => state.remoteEventsSeen(keys),
+      revoked: (on) => state.setRemoteRevoked(on),
       onKick: (f) => {
         state.onRemoteKick = f;
       },

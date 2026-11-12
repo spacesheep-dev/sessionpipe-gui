@@ -16,7 +16,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   account) is settled as one this app can no longer follow, and offers no "Edit and start
   again", since it may still run there. Disconnecting, or starting without an account,
   leaves the rows waiting and marked as not followed; the same account connecting again
-  picks them up.
+  picks them up. While spacesheep refuses this app's key the waiting rows are marked so
+  too, rather than reading "Waiting for …" with nothing being read.
 - **A start waiting for a computer through spacesheep is no longer given up after an hour.**
   The app called it expired on its own clock ("didn't come online in time", with "Edit and
   start again") while spacesheep kept it for a day and still handed it out, so starting it

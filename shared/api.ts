@@ -1562,7 +1562,7 @@ export interface ControlActivity {
   outcome?: ControlOutcome;
   /** A send carried by spacesheep, waiting while this app follows no account that can say
    *  how it went (disconnected): it is picked up again when that account connects. */
-  unfollowed?: boolean;
+  unfollowed?: "disconnected" | "revoked";
   /** The delivery mode the machine acked, one of `DELIVERY_MODES`. */
   mode?: string;
   code?: string;

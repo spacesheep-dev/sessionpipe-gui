@@ -71,7 +71,7 @@ describe("startFailureWords", () => {
     expect(startFailureWords(u, "rc-mac", "Claude Code")).toBe(
       "No word from rc-mac since it took this. Check spacesheep.dev to see how it went.",
     );
-    const w = start({ unfollowed: true });
+    const w = start({ unfollowed: "disconnected" });
     expect(sentLine(w, { machine: "rc-mac", online: false, command: "claude" })?.text).toBe(
       "Not being followed while spacesheep is disconnected.",
     );

@@ -86,6 +86,8 @@ export const REMOTE_JUST_SENT_MS = 60_000;
 export const UNTRACKED_CODE = "untracked";
 /** A code as spacesheep's jobs door may carry it: a word, as a computer's ack codes are. */
 const REMOTE_CODE_RE = /^[a-z][a-z0-9_]{0,39}$/;
+/** Why a waiting spacesheep-carried row is not being followed right now. */
+export type Unfollowed = "disconnected" | "revoked";
 /** The one name of a spacesheep account here: its origin and the email it is signed in as. */
 export const remoteAccountKey = (a: { origin: string; email: string }): string => `${a.origin} ${a.email}`;
 /** A device request (a phone's own passkey waiting for a trusted device's `key.add`) lives
@@ -228,7 +230,7 @@ export interface MessageRow {
   remoteAccount?: string;
   /** Waiting, and not followed right now: no spacesheep account is connected (or the row's
    *  account is not yet known to be the connected one). Cleared when it is followed again. */
-  unfollowed?: boolean;
+  unfollowed?: Unfollowed | true;
   cmd: string;
   csig?: string | null;
   grant?: SignedCommand["grant"];
@@ -331,7 +333,7 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.poolAccount) a.poolAccount = m.poolAccount;
   if (m.replyTo) a.replyTo = m.replyTo;
   if (m.from) a.from = m.from;
-  if (m.unfollowed && !isFinal(m.outcome)) a.unfollowed = true;
+  if (m.unfollowed && !isFinal(m.outcome)) a.unfollowed = m.unfollowed === "revoked" ? "revoked" : "disconnected";
   return a;
 }
 
@@ -400,6 +402,8 @@ export class ControlState {
   private onlineSig = "";
   /** The spacesheep account read through now (remoteAccountKey), or null when none is. */
   private remoteAccount: string | null = null;
+  /** The connected account's key was refused (SpacesheepSource unauthorized). */
+  private remoteRevoked = false;
 
   constructor(readonly dir: string) {
     this.files = new FileStore(path.join(dir, "files"));
@@ -589,17 +593,39 @@ export class ControlState {
    *  waits for that account's machine list (upsertRemoteMachines). */
   setRemoteAccount(account: { origin: string; email: string } | null): void {
     this.remoteAccount = account ? remoteAccountKey(account) : null;
+    // A connect is a new key: whatever the last one was refused for is over.
+    this.remoteRevoked = false;
     if (this.remoteAccount) this.onRemoteKick();
     this.eachRemoteRow((row) => {
       if (this.remoteAccount && row.remoteAccount !== undefined && row.remoteAccount !== this.remoteAccount)
         return this.untracked(row);
-      const unfollowed = !this.remoteAccount || row.remoteAccount === undefined;
-      if (!!row.unfollowed === unfollowed) return false;
-      if (unfollowed) row.unfollowed = true;
-      else delete row.unfollowed;
-      this.onMessage(row);
-      return true;
+      return this.markFollowing(row);
     });
+  }
+
+  /** spacesheep refused this app's key (the relay's 401, a send's): nothing is read until
+   *  the account connects again, so the waiting rows say they are not followed. */
+  setRemoteRevoked(on: boolean): void {
+    if (this.remoteRevoked === on) return;
+    this.remoteRevoked = on;
+    this.eachRemoteRow((row) => this.markFollowing(row));
+  }
+
+  /** A waiting row's `unfollowed` mark as things stand: no account (or not yet known to be
+   *  the connected one's) is `disconnected`; the connected account's key refused, `revoked`. */
+  private markFollowing(row: MessageRow): boolean {
+    const want: Unfollowed | undefined =
+      !this.remoteAccount || row.remoteAccount === undefined
+        ? "disconnected"
+        : this.remoteRevoked
+          ? "revoked"
+          : undefined;
+    const had = row.unfollowed === true ? "disconnected" : row.unfollowed;
+    if (had === want) return false;
+    if (want) row.unfollowed = want;
+    else delete row.unfollowed;
+    this.onMessage(row);
+    return true;
   }
 
   /** Each unsettled row spacesheep carried; `f` says whether it changed the row. */

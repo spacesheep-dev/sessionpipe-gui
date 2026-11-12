@@ -39,6 +39,8 @@ export interface SpacesheepSourceOptions {
    *  every JOBS_SLOW_MS (every send waits for a computer shown offline), `none` (nothing to
    *  read). Absent: fast. kickJobs reads at once whatever it says. */
   jobsCadence?: () => "fast" | "slow" | "none";
+  /** spacesheep refused the key (its own poll's 401, or unauthorized() for a send's). */
+  onUnauthorized?: () => void;
   /** The sessions (`harness:id`) a relay page brought events for. */
   onEvents?: (keys: string[]) => void;
 }
@@ -223,6 +225,7 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
     if (machinesTimer) clearTimeout(machinesTimer);
     wake?.();
     abort?.abort();
+    opts.onUnauthorized?.();
   };
 
   const poll = async (waitS: number): Promise<number> => {
