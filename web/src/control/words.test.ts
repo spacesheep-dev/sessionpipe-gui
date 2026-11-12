@@ -3,7 +3,7 @@
 // own detail ends the sentence it is quoted in, once, whatever punctuation it came with.
 import type { ControlActivity } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { harnessCommand, sentLine, startFailureWords } from "./words";
+import { harnessCommand, outcomeWords, sentLine, startFailureWords } from "./words";
 
 const start = (over: Partial<ControlActivity>): ControlActivity => ({
   id: "c1",
@@ -34,6 +34,25 @@ describe("startFailureWords", () => {
   it("says it plainly when the machine gave no detail", () => {
     const a = start({ outcome: "refused", code: "folder" });
     expect(startFailureWords(a, "build-box", "Claude Code")).toBe("build-box doesn't allow that folder.");
+  });
+
+  it("says a refusal with no code once, with its note (a spacesheep without `code`)", () => {
+    const a = start({ outcome: "refused", detail: "called off by its owner before the machine took it" });
+    expect(startFailureWords(a, "rc-mac", "Claude Code")).toBe(
+      "rc-mac refused it: called off by its owner before the machine took it.",
+    );
+    expect(startFailureWords(start({ outcome: "refused" }), "rc-mac", "Claude Code")).toBe("rc-mac refused it.");
+    expect(outcomeWords(a)).toBe("refused · called off by its owner before the machine took it");
+  });
+
+  it("says a start called off before it began as that, not as the computer's refusal", () => {
+    for (const outcome of ["refused", "failed"] as const)
+      expect(
+        startFailureWords(start({ outcome, code: "cancelled", detail: "called off" }), "rc-mac", "Claude Code"),
+      ).toBe("This start was called off before it began on rc-mac.");
+    expect(outcomeWords(start({ outcome: "refused", code: "cancelled" }))).toBe(
+      "refused · called off before the machine took it",
+    );
   });
 
   it("has nothing to say while the start is on its way or after it started", () => {

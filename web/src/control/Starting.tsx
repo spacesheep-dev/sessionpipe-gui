@@ -201,8 +201,12 @@ export function sentRow(
 /** A prompt that did not reach its session, in the words the timeline shows under it. */
 export function promptFailureWords(a: ControlActivity, machine: string): string | null {
   const detail = a.detail?.trim();
+  if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
+    return `This message was called off with its session's start, before ${machine} took it.`;
   switch (a.outcome) {
     case "refused":
+      // No code (spacesheep before its `code`): its note, not "refused: refused".
+      if (!a.code) return `${machine} refused it${detail ? `: ${detail.replace(/[.!?…]?$/, ".")}` : "."}`;
       return `${machine} refused it: ${refusalWords(a.code)}.`;
     case "failed":
       return `It didn't reach the session${detail ? `: ${detail.replace(/[.!?…]?$/, ".")}` : "."}`;

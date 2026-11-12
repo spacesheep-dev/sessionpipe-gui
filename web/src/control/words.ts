@@ -52,6 +52,9 @@ export const REFUSAL_WORDS: Record<string, string> = {
   pool_order: "the order must name every account in the pool, each once",
   pool_off: "the pool is off on that machine; turn it on first",
   confirm_required: "this one takes a fresh passkey tap (Touch ID in the app), not the day grant; try again",
+  // spacesheep's word on a start withdrawn before a computer took it (its jobs door), and a
+  // computer's own on a start a `cancel` stopped before its process began (CONTROL.md §10).
+  cancelled: "called off before the machine took it",
   login: "Claude did not take the code; start over",
   pool: "the machine could not reach Claude; try again",
 };
@@ -102,6 +105,8 @@ export function outcomeWords(a: ControlActivity, o: { machine?: string; online?:
     case "failed":
       return `failed · ${a.detail ?? "the path errored"}`;
     case "refused":
+      // No code (spacesheep before its `code`): the detail alone, not "refused · refused: …".
+      if (!a.code) return `refused${a.detail ? ` · ${a.detail}` : ""}`;
       return `refused · ${refusalWords(a.code)}${a.detail && !REFUSAL_WORDS[a.code ?? ""] ? `: ${a.detail}` : ""}`;
     default:
       return String(a.outcome);
@@ -140,6 +145,9 @@ const ended = (s: string): string => (/[.!?…]$/.test(s) ? s : `${s}.`);
 export function startFailureWords(a: ControlActivity, machine: string, agent: string): string | null {
   const detail = a.detail?.trim();
   const level = a.permission ? PERMISSION_LABEL[a.permission] : null;
+  // Called off before it began: by its owner on spacesheep, or by a cancel on the computer.
+  if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
+    return `This start was called off before it began on ${machine}.`;
   if (a.outcome === "refused")
     switch (a.code) {
       case "folder":
@@ -153,6 +161,9 @@ export function startFailureWords(a: ControlActivity, machine: string, agent: st
         return `${machine}'s ${agent} won't run ${a.model ?? "that model"}${detail ? `: ${ended(detail)}` : "."}`;
       case "start_limit":
         return `${machine} is already running as many new sessions as it allows. Try again in a few minutes.`;
+      case undefined:
+        // No code (spacesheep before its `code`): its note alone, never "refused: …" again.
+        return `${machine} refused it${detail ? `: ${ended(detail)}` : "."}`;
       default:
         return `${machine} refused it: ${refusalWords(a.code)}${detail && !REFUSAL_WORDS[a.code ?? ""] ? `: ${ended(detail)}` : "."}`;
     }

@@ -43,6 +43,11 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **When spacesheep asks this app to slow down (HTTP 429), the app waits as long as it
   says** (its Retry-After, at most 15 minutes) and its state is `limited`, no longer
   `offline`, which Settings → Data read as "can't be reached".
+- **Words: a refusal is said once.** With no code (a spacesheep from before `code`) a start
+  read "rc-mac refused it: refused: …"; it now reads "rc-mac refused it: …". A start called
+  off before it began says so: "This start was called off before it began on rc-mac.", and
+  a message sent to it "This message was called off with its session's start, before
+  rc-mac took it."
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH
