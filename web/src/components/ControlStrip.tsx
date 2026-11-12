@@ -42,9 +42,11 @@ import "../control/control.css";
 // The plan reads as Markdown, whose renderer stays out of the first paint (PlanText.tsx).
 const PlanText = lazy(() => import("./PlanText").then((m) => ({ default: m.PlanText })));
 
+/** `composer`: what it signs was typed in the composer (a message, Keep planning's note),
+ *  so a hold of it depends on the composer and goes when the composer changes. */
 export type ControlAction =
-  | { kind: "prompt"; text: string }
-  | { kind: "permission.answer"; attentionId: string; allow: boolean; note?: string }
+  | { kind: "prompt"; text: string; composer?: boolean }
+  | { kind: "permission.answer"; attentionId: string; allow: boolean; note?: string; composer?: boolean }
   | { kind: "cancel"; note?: string };
 
 /** The event that clears a session's composer once a message it held went another way. */
@@ -270,7 +272,7 @@ const NOTED = "Send the note with Keep planning, or clear it";
  *  it. The note reaches the model beside the decision, so the plan comes back revised. */
 export function keepPlanning(attentionId: string, text: string): ControlAction {
   const note = text.trim();
-  return { kind: "permission.answer", attentionId, allow: false, ...(note ? { note } : {}) };
+  return { kind: "permission.answer", attentionId, allow: false, ...(note ? { note } : {}), composer: true };
 }
 
 /** The textarea grows with its text up to 40 % of the view, then scrolls (CSS caps it). */
@@ -341,9 +343,14 @@ export function ControlStrip({
   // A held message confirmed from its notice (control/HeldNotice.tsx) went: the composer
   // is clear, as after Send. Until then its words stayed here.
   const clearAtt = att.clear;
+  // Only while it still holds what was held: words typed while the confirm was going stay.
+  const draft = JSON.stringify([text, att.items.map((i) => i.key)]);
+  const draftNow = useRef(draft);
+  draftNow.current = draft;
   useEffect(() => {
     const on = (e: Event) => {
-      if ((e as CustomEvent<{ key: string }>).detail?.key !== session.key) return;
+      const d = (e as CustomEvent<{ key: string; draft: string }>).detail;
+      if (d?.key !== session.key || d.draft !== draftNow.current) return;
       setText("");
       writeDraft(session.key, "");
       clearAtt();
@@ -351,7 +358,6 @@ export function ControlStrip({
     window.addEventListener(COMPOSER_SENT, on);
     return () => window.removeEventListener(COMPOSER_SENT, on);
   }, [session.key, clearAtt]);
-  const draft = JSON.stringify([text, att.items.map((i) => i.key)]);
   const onDraftNow = useRef(onDraft);
   onDraftNow.current = onDraft;
   useEffect(() => onDraftNow.current?.(draft), [draft]);
@@ -528,7 +534,7 @@ export function ControlStrip({
     // The signed text: the message, then the attachments block (or null while an upload runs).
     const composed = att.compose(t);
     if (!composed) return;
-    run("prompt", { kind: "prompt", text: composed.text }, () => {
+    run("prompt", { kind: "prompt", text: composed.text, composer: true }, () => {
       setText("");
       writeDraft(session.key, "");
       att.clear();

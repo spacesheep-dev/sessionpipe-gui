@@ -50,6 +50,7 @@ import { type CommandFields, sendCommand } from "./command";
 import { folderChoices, machineHome, tildify, typedFolder } from "./folders";
 import { HeldNotice, useHeld } from "./HeldNotice";
 import type { HeldMeta } from "./held";
+import { HELD_WORDS } from "./heldWords";
 import { useGrant, useRpId } from "./hooks";
 import {
   agentLeft,
@@ -499,7 +500,9 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       await sendCommand(rp, c.machineId, fields, { onTap: () => setTap(true) });
       started(fields, sent);
     } catch (e) {
-      if (!held.catchHeld(e, sent, keyAtSend)) setError(sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
+      const caught = held.catchHeld(e, sent, keyAtSend);
+      if (caught === "changed") setError(HELD_WORDS.changed);
+      else if (!caught) setError(sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
       setBusy(false);
     } finally {
       // Started, Start keeps saying "Starting…" while the sheet dissolves: it never flips

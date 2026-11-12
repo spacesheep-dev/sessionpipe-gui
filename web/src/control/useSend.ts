@@ -9,6 +9,8 @@ import { type ControlAction, preHello } from "../components/ControlStrip";
 import { ControlError } from "./api";
 import { type CommandFields, sendCommand } from "./command";
 import { type Held, useHeld } from "./HeldNotice";
+import type { HeldMeta } from "./held";
+import { HELD_WORDS } from "./heldWords";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
 import { canSign, machineTakes, signerLabel, signHint, updateWords } from "./signer";
 import { sendErrorWords } from "./words";
@@ -48,6 +50,12 @@ export function answerState(
   return { reason, off, status, tag };
 }
 
+/** What a strip send kept beside a hold: the composer as it was when it was pressed, when
+ *  what it signs was typed there. */
+export interface StripSent extends HeldMeta {
+  draft?: string;
+}
+
 export interface SessionSend {
   /** The receiver's rp id; null until known. */
   rp: string | null;
@@ -67,7 +75,7 @@ export interface SessionSend {
   onSend: (action: ControlAction) => Promise<void>;
   /** A send the receiver held for a confirm, for a surface that shows its notice
    *  (`notice`); elsewhere a hold is a refusal in `error` that says where to confirm it. */
-  held: Held<ControlActivity>;
+  held: Held<ControlActivity, StripSent>;
 }
 
 export function useSessionSend(
@@ -77,8 +85,9 @@ export function useSessionSend(
   o: {
     /** This surface shows the held notice (the session page's strip). */
     notice?: boolean;
-    /** After a held send was confirmed and went, with the fields it carried. */
-    confirmed?: (fields: CommandFields) => void;
+    /** After a held send was confirmed and went, with the fields it carried and, when it
+     *  was typed in the composer, the composer as it was when it was pressed. */
+    confirmed?: (fields: CommandFields, draft: string | undefined) => void;
     /** The composer as it is now (its words and attachments): a held message depends on
      *  it, and goes the moment it changes. */
     draft?: string;
@@ -105,10 +114,10 @@ export function useSessionSend(
   }, []);
   const draftNow = useRef(o.draft);
   draftNow.current = o.draft;
-  const held = useHeld<ControlActivity>(
-    (carried, h) => {
+  const held = useHeld<ControlActivity, StripSent>(
+    (carried, h, meta) => {
       went(h.fields, carried);
-      o.confirmed?.(h.fields);
+      o.confirmed?.(h.fields, meta.draft);
       grant.refresh();
     },
     (e) => setError(sendErrorWords(e)),
@@ -164,7 +173,7 @@ export function useSessionSend(
       const att = action.kind === "permission.answer" ? action.attentionId : null;
       if (att && answers[att]) return;
       // A message depends on the composer it was typed in; an answer or a Stop on nothing.
-      const keyAtSend = action.kind === "prompt" ? draftNow.current : undefined;
+      const keyAtSend = action.kind !== "cancel" && action.composer ? draftNow.current : undefined;
       try {
         const carried = await sendCommand(rp, control.machineId, fields, { onTap: () => setTap(true) });
         went(fields, carried);
@@ -173,7 +182,9 @@ export function useSessionSend(
         if (att && e instanceof ControlError && e.code === "no_attention")
           setAnswers((prev) => ({ ...prev, [att]: "closed" }));
         // Held for a confirm: the notice says so where it is shown, the refusal elsewhere.
-        if (!(notice && catchHeld(e, {}, keyAtSend))) setError(sendErrorWords(e));
+        const caught = notice ? catchHeld(e, { draft: keyAtSend }, keyAtSend) : false;
+        if (caught === "changed") setError(HELD_WORDS.changed);
+        else if (!caught) setError(sendErrorWords(e));
         throw e;
       } finally {
         setTap(false);

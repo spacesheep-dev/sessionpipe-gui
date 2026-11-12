@@ -29,6 +29,7 @@ import { sendCommand } from "../../control/command";
 import { folderChoices, machineHome, tildify, typedFolder } from "../../control/folders";
 import { HeldNotice, useHeld } from "../../control/HeldNotice";
 import type { HeldMeta } from "../../control/held";
+import { HELD_WORDS } from "../../control/heldWords";
 import { useGrant, useRpId } from "../../control/hooks";
 import { fixedPermission, permissionChoices, permissionToSend } from "../../control/newSessionState";
 import { sentence } from "../../control/PendingDevices";
@@ -331,7 +332,9 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
       await sendCommand(rp, c.machineId, fields, { onTap: () => setTap(true), from: session.key });
       asked(sent);
     } catch (e) {
-      if (!held.catchHeld(e, sent, keyAtSend))
+      const caught = held.catchHeld(e, sent, keyAtSend);
+      if (caught === "changed") setError(HELD_WORDS.changed);
+      else if (!caught)
         setError(handoffRefusalWords(e, name) ?? sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
       setBusy(false);
     } finally {

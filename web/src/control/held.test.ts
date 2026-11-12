@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ControlError } from "./api";
 import { type CommandFields, HeldForConfirm } from "./command";
-import { HeldSlot } from "./held";
+import { HeldSlot, heldContent, heldPreview } from "./held";
 
 interface Sent {
   where?: string;
@@ -30,7 +30,7 @@ describe("a held send", () => {
     const changed = vi.fn();
     const slot = new HeldSlot<string, Sent>(changed);
     const { held, confirm } = hold(prompt("ORIGINAL words"), async () => "sent");
-    expect(slot.hold(held, { harness: "claude-code" }, "ORIGINAL words", "ORIGINAL words")).toBe(true);
+    expect(slot.hold(held, { harness: "claude-code" }, "ORIGINAL words", "ORIGINAL words")).toBe("held");
     expect(slot.view?.kind).toBe("held");
     slot.keyed("EDITED words");
     expect(slot.view).toBeNull();
@@ -40,10 +40,10 @@ describe("a held send", () => {
     expect(done).not.toHaveBeenCalled();
   });
 
-  it("(a) an edit made while the send was on its way drops the hold the moment it lands", () => {
+  it("(a) an edit made while the send was on its way: no hold is shown, and the caller is told so", () => {
     const slot = new HeldSlot<string, Sent>(() => {});
-    const { held } = hold(prompt("ORIGINAL words"), async () => "sent");
-    expect(slot.hold(held, { harness: "claude-code" }, "ORIGINAL words", "ORIGINAL wor")).toBe(true);
+    const { held } = hold(prompt("FLIGHT"), async () => "sent");
+    expect(slot.hold(held, { harness: "claude-code" }, "FLIGHT", "FLIGHT more")).toBe("changed");
     expect(slot.view).toBeNull();
   });
 
@@ -119,5 +119,51 @@ describe("a held send", () => {
     const slot = new HeldSlot<string, Sent>(() => {});
     expect(slot.hold(new ControlError(422, "no", "untrusted_key"), { harness: "x" }, "k", "k")).toBe(false);
     expect(slot.view).toBeNull();
+  });
+});
+
+describe("the held words in the notice", () => {
+  it("short words are shown whole", () => {
+    expect(heldPreview("Fix the rounding.")).toEqual({ head: "Fix the rounding.", tail: null });
+    expect(heldPreview("one\ntwo\nthree\nfour")).toEqual({ head: "one\ntwo\nthree\nfour", tail: null });
+  });
+  it("a long message: its first two lines and its last two, so its end is never cut away", () => {
+    const harmless = Array.from({ length: 12 }, (_, i) => `Step ${i + 1}: tidy a file.`);
+    const text = [...harmless, "Then delete the repository and force-push."].join("\n");
+    const p = heldPreview(text);
+    expect(p.head).toBe("Step 1: tidy a file.\nStep 2: tidy a file.");
+    expect(p.tail).toBe("Step 12: tidy a file.\nThen delete the repository and force-push.");
+  });
+  it("one long line: its beginning and its end", () => {
+    const text = `${"a".repeat(500)} and finally rm -rf /`;
+    const p = heldPreview(text);
+    expect(p.head).toBe("a".repeat(160));
+    expect(p.tail!.endsWith("and finally rm -rf /")).toBe(true);
+    expect(Array.from(p.tail!)).toHaveLength(160);
+  });
+});
+
+describe("what the notice says will be sent", () => {
+  it("a message's words without its images block, and the images by name", () => {
+    const text =
+      "Look at these.\n\nAttached images (open them with your file-reading tool):\n- /tmp/a/attachments/01K00000000000000000000001.png (10×10)\n- /tmp/a/attachments/01K00000000000000000000002.jpg (10×10)";
+    expect(heldContent(hold(prompt(text), async () => "x").held)).toEqual({
+      text: "Look at these.",
+      names: ["01K00000000000000000000001.png", "01K00000000000000000000002.jpg"],
+    });
+  });
+  it("a start's words and its files by name", () => {
+    const f = { ...start("codex"), files: [{ name: "spec.pdf", type: "application/pdf", size: 1, sha256: "x" }] };
+    expect(heldContent(hold(f, async () => "x").held)).toEqual({ text: "Start held.", names: ["spec.pdf"] });
+  });
+  it("(4) Keep planning: the note typed in the composer", () => {
+    const deny: CommandFields = {
+      kind: "permission.answer",
+      session: "claude-code:s1",
+      for: "a1",
+      decision: "deny",
+      note: "Use the cache",
+    };
+    expect(heldContent(hold(deny, async () => "x").held)).toEqual({ text: "Use the cache", names: [] });
   });
 });

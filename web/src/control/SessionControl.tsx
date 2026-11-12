@@ -75,9 +75,9 @@ export function SessionControl({
     // A message the receiver held is confirmed from the notice under the composer; once
     // it went, the composer that still held its words is cleared.
     notice: true,
-    confirmed: (fields) => {
-      if (fields.kind === "prompt")
-        window.dispatchEvent(new CustomEvent(COMPOSER_SENT, { detail: { key: session.key } }));
+    confirmed: (_fields, typed) => {
+      if (typed !== undefined)
+        window.dispatchEvent(new CustomEvent(COMPOSER_SENT, { detail: { key: session.key, draft: typed } }));
     },
   });
   const device = signerKind() === "device";

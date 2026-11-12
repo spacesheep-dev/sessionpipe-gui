@@ -27,6 +27,27 @@ describe("cleanReason", () => {
     expect(cleanReason("x".repeat(30), 10)).toBe(`${"x".repeat(9)}…`);
     expect(cleanReason("x".repeat(200))).toBe("x".repeat(200));
   });
+  it("every code point: what survives is letters, marks (two in a row at most), numbers, punctuation, symbols and plain spaces", () => {
+    const allowed = /^[\p{L}\p{M}\p{N}\p{P}\p{S} ]*$/u;
+    const bad: string[] = [];
+    for (let cp = 0; cp <= 0x10ffff; cp++) {
+      const out = cleanReason(`a${c(cp)}b`);
+      if (!allowed.test(out)) bad.push(cp.toString(16));
+    }
+    expect(bad).toEqual([]);
+  });
+  it("named ones that used to get through are gone", () => {
+    const named = [
+      0xe0001, 0xe0041, 0xe007f, 0x206a, 0x206f, 0xad, 0xfff9, 0xfffa, 0xfffb, 0x115f, 0x1160, 0x3164, 0xffa0, 0x2800,
+      0x180b, 0x180f, 0xfe00, 0xfe0f, 0xe0100, 0xe01ef, 0x34f, 0x17b4, 0x17b5, 0x1d173, 0x1d17a, 0xe000, 0xf8ff,
+      0xf0000, 0x10fffd,
+    ];
+    for (const cp of named) expect(cleanReason(`a${c(cp)}b`), cp.toString(16)).toBe("ab");
+  });
+  it("keeps two combining marks in a row, not a flood", () => {
+    expect(cleanReason(`x${c(0x301).repeat(150)}y`)).toBe(`x${c(0x301, 0x301)}y`);
+    expect(cleanReason(`e${c(0x301)}`)).toBe(`e${c(0x301)}`);
+  });
   it("is empty for anything that is not a string", () => {
     expect(cleanReason(undefined)).toBe("");
     expect(cleanReason(42)).toBe("");

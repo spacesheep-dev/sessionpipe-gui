@@ -23,6 +23,7 @@ import {
   seenSetupHere,
   sinkToken,
 } from "./control-helpers.js";
+import { ulid } from "./helpers.js";
 
 test.describe.configure({ mode: "serial" });
 test.skip(({ isMobile }) => isMobile, "desktop project; the widths are set per test");
@@ -44,11 +45,17 @@ interface Posted {
 
 /** spacesheep's second look, as the GUI server passes it on: what the day grant signed is
  *  held; what a confirm alone signed goes on to the receiver (or is `refuseConfirm`d). */
-async function secondLook(page: Page, o: { refuseConfirm?: boolean; holdConfirm?: boolean } = {}): Promise<Posted[]> {
+async function secondLook(
+  page: Page,
+  o: { refuseConfirm?: boolean; holdConfirm?: boolean; holdAfterMs?: number; confirmAfterMs?: number } = {},
+): Promise<Posted[]> {
   const posted: Posted[] = [];
   await page.route("**/api/ui/control/send", async (route: Route) => {
     const b = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
     posted.push({ grant: !!b.grant, confirm: !!b.confirm, csig: !!b.csig, cmd: JSON.parse(String(b.cmd)) });
+    const wait = (ms?: number) => (ms ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
+    if (b.grant || b.csig) await wait(o.holdAfterMs);
+    else await wait(o.confirmAfterMs);
     if (b.grant || b.csig)
       return route.fulfill({
         status: 422,
@@ -349,4 +356,135 @@ test("a confirm held again: still held, with the reason; the focus goes to its o
   await expect(notice(page)).toHaveCount(0);
   await expect(box).toBeFocused();
   await expect(box).toHaveValue("Wipe the staging database.");
+});
+
+test("a hold that lands after the words were changed: no notice, and the line says it did not go", async ({
+  context,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const m = await machine(context, page, `held-flight-${tag()}`);
+  const s = await postSession(sink, { machine: m.name, cwd: CWD, title: "Changed in flight" });
+  const posted = await secondLook(page, { holdAfterMs: 1500 });
+  await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+  const box = composer(page);
+  await box.fill("FLIGHT");
+  await box.press("Enter");
+  await expect.poll(() => posted.length).toBe(1);
+  await box.press("End");
+  await box.type(" more");
+  await expect(page.locator(".ctl-note--err").first()).toBeVisible({ timeout: 10_000 });
+  await expect(notice(page)).toHaveCount(0);
+  await expect(box).toHaveValue("FLIGHT more");
+  expect(m.seen).toHaveLength(0);
+  await shots(page, "7-changed-in-flight");
+});
+
+test("a long message: the notice shows its beginning and its end, and Show all shows the rest in place", async ({
+  context,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const m = await machine(context, page, `held-long-${tag()}`);
+  const s = await postSession(sink, { machine: m.name, cwd: CWD, title: "A long message" });
+  await secondLook(page);
+  await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+  const lines = Array.from({ length: 12 }, (_, i) => `Step ${i + 1}: tidy the file it names.`);
+  const text = [...lines, "Then delete the repository and force-push."].join("\n");
+  const box = composer(page);
+  await box.fill(text);
+  await box.press("Enter");
+  const what = notice(page).locator("[data-held-what]");
+  await expect(what).toHaveAttribute("data-held-cut", "");
+  await expect(what).toContainText("Step 1: tidy the file it names.");
+  await expect(what).toContainText("Then delete the repository and force-push.");
+  await expect(what).not.toContainText("Step 6:");
+  await shots(page, "6-long-message-collapsed", () => notice(page));
+  await what.locator("[data-held-more]").click();
+  await expect(what.locator("[data-held-all]")).toHaveText(text);
+  await shots(page, "6-long-message-expanded", () => notice(page));
+});
+
+test("words typed while the confirm is going stay in the composer", async ({ context, page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const m = await machine(context, page, `held-typing-${tag()}`);
+  const s = await postSession(sink, { machine: m.name, cwd: CWD, title: "Typing while it goes" });
+  await secondLook(page, { confirmAfterMs: 1500 });
+  await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+  const box = composer(page);
+  await box.fill("First message.");
+  await box.press("Enter");
+  await notice(page).locator("[data-held-confirm]").click();
+  await expect(notice(page).locator("[data-held-confirm]")).toBeDisabled();
+  await box.click();
+  await box.press("End");
+  await box.type(" And the next one");
+  await expect(notice(page)).toHaveCount(0, { timeout: 10_000 });
+  await expect.poll(() => m.seen.length, { timeout: 15_000 }).toBe(1);
+  expect(m.seen[0]).toMatchObject({ text: "First message." });
+  await expect(box).toHaveValue("First message. And the next one");
+});
+
+test("Keep planning's note is what is held: shown in the notice, and an edit to it drops the hold", async ({
+  context,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const m = await machine(context, page, `held-plan-${tag()}`);
+  const id = randomUUID();
+  const turn = randomUUID();
+  let seq = 0;
+  let clock = Date.now() - 20_000;
+  const ev = (type: string, data: Record<string, unknown>, hook: string) => {
+    clock += 300;
+    return {
+      protocol: 1,
+      id: ulid(clock),
+      type,
+      time: new Date(clock).toISOString(),
+      tier: 3,
+      harness: { name: "claude-code", version: "2.1.296", event: hook },
+      session: { id, seq: seq++, machine: m.name, cwd: CWD, title: "A plan", title_source: "custom" },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    };
+  };
+  await fetch(`${CONTROL_BASE}/api/sessionpipe/v1/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${sink}`, "sessionpipe-protocol": "1" },
+    body: JSON.stringify({
+      events: [
+        ev("session.started", { source: "startup" }, "SessionStart"),
+        ev("turn.started", { turn_id: turn, prompt_chars: 20 }, "UserPromptSubmit"),
+        ev(
+          "tool.started",
+          { tool: "ExitPlanMode", call_id: "toolu_plan", turn_id: turn, input: { plan: "1. Do it." } },
+          "PreToolUse",
+        ),
+        ev(
+          "attention.needed",
+          { attention_id: "perm-plan1", kind: "permission", tool: "ExitPlanMode", message: "ExitPlanMode" },
+          "PermissionRequest",
+        ),
+      ],
+    }),
+  });
+  const posted = await secondLook(page);
+  await page.goto(`${CONTROL_BASE}/s/claude-code/${id}`);
+  const box = composer(page);
+  await box.fill("Use the existing cache.");
+  await box.press("Enter");
+  await expect(notice(page).locator("[data-held-what]")).toHaveText("Use the existing cache.");
+  expect(posted[0]!.cmd).toMatchObject({
+    kind: "permission.answer",
+    decision: "deny",
+    note: "Use the existing cache.",
+  });
+  await box.fill("Use the new cache.");
+  await expect(notice(page)).toHaveCount(0);
+  await box.press("Enter");
+  await expect(notice(page).locator("[data-held-what]")).toHaveText("Use the new cache.");
+  await notice(page).locator("[data-held-confirm]").click();
+  await expect.poll(() => m.seen.length, { timeout: 15_000 }).toBe(1);
+  expect(m.seen[0]).toMatchObject({ kind: "permission.answer", decision: "deny", note: "Use the new cache." });
 });

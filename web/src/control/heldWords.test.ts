@@ -18,16 +18,11 @@ describe("held words", () => {
     expect(HELD_WORDS.confirm("Touch ID")).toBe("Confirm with Touch ID");
   });
 
-  it("the reason is said to be the receiver's, and a confirm held again says so", () => {
-    expect(HELD_WORDS.says(heldFrom("spacesheep.dev"), heldReason("it reads like a wipe"))).toBe(
-      "spacesheep.dev says: “It reads like a wipe.”",
-    );
-    expect(HELD_WORDS.says(heldFrom(null), heldReason("are you sure?"))).toBe(
-      "This computer's sessionpipe says: “Are you sure?”",
-    );
-    expect(HELD_WORDS.still(heldFrom("spacesheep.dev"))).toBe(
-      "Still held. spacesheep.dev didn't take the confirmation.",
-    );
+  it("who held it: the spacesheep's host, or this receiver; a confirm held again says so", () => {
+    expect(heldFrom("spacesheep.dev")).toBe("spacesheep.dev");
+    expect(heldFrom(null)).toBe(HELD_WORDS.local);
+    expect(HELD_WORDS.says("spacesheep.dev")).toContain("spacesheep.dev");
+    expect(HELD_WORDS.still(heldFrom("spacesheep.dev"))).toContain("spacesheep.dev");
   });
 
   it("a hold where no notice can confirm it says where one can", () => {

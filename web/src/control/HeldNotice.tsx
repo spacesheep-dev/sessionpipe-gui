@@ -5,10 +5,11 @@
 // be theirs), and one button that confirms that one send. The press on the button is the
 // fresh gesture the confirm's prompt needs; nothing confirms without it. The hold's state is
 // held.ts; this is the hook over it and its drawing.
+
 import { cleanReason } from "@shared/reason";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HeldForConfirm } from "./command";
-import { type HeldMeta, HeldSlot, type HeldView } from "./held";
+import { type HeldMeta, HeldSlot, type HeldView, heldContent, heldPreview } from "./held";
 import { HELD_WORDS, heldFrom, heldReason } from "./heldWords";
 import { signerLabel } from "./signer";
 import "./control.css";
@@ -16,9 +17,11 @@ import "./control.css";
 export interface Held<T, M extends HeldMeta = HeldMeta> {
   /** The hold (or a confirm held again), while it is shown. */
   view: HeldView<T, M> | null;
-  /** After a refusal: true when `e` is a hold, now shown; the caller says nothing else.
-   *  `meta` is what its "done" needs; `key` what the hold depends on when it pressed. */
-  catchHeld(e: unknown, meta: M, key?: string): boolean;
+  /** After a refusal: "held" when `e` is a hold, now shown (the caller says nothing else);
+   *  "changed" when it was one but the caller's fields changed while it was on its way (the
+   *  caller says it did not go: HELD_WORDS.changed); false for any other refusal. `meta`
+   *  is what its "done" needs; `key` what the hold depends on when it pressed. */
+  catchHeld(e: unknown, meta: M, key?: string): false | "held" | "changed";
   /** From the notice's button: the one confirm. */
   confirm(): void;
   /** Let it go. */
@@ -43,7 +46,7 @@ export function useHeld<T, M extends HeldMeta = HeldMeta>(
   const after = useRef({ done, failed });
   after.current = { done, failed };
   const catchHeld = useCallback(
-    (e: unknown, meta: M, keyAtSend?: string) => !!slot.current?.hold(e, meta, keyAtSend, keyNow.current),
+    (e: unknown, meta: M, keyAtSend?: string) => slot.current?.hold(e, meta, keyAtSend, keyNow.current) ?? false,
     [],
   );
   const confirm = useCallback(() => {
@@ -56,11 +59,37 @@ export function useHeld<T, M extends HeldMeta = HeldMeta>(
   return { view: slot.current.view, catchHeld, confirm, drop };
 }
 
-/** The words a send carries, for the notice: a message's or a start's text. */
-const heldText = (h: HeldForConfirm<unknown>): string | null => {
-  const f = h.fields;
-  return f.kind === "prompt" || f.kind === "start" ? f.text : null;
-};
+/** The held words: the beginning and the end, and Show all for the rest in place. */
+function HeldWords({ text }: { text: string }) {
+  const [all, setAll] = useState(false);
+  const p = heldPreview(text);
+  if (!p.tail)
+    return (
+      <span className="held-what" data-held-what>
+        {p.head}
+      </span>
+    );
+  return (
+    <span className="held-what" data-held-what data-held-cut={all ? undefined : ""}>
+      {all ? (
+        <span className="held-all" data-held-all>
+          {text}
+        </span>
+      ) : (
+        <>
+          <span className="held-end">{p.head}</span>
+          <span className="held-gap" aria-hidden="true">
+            …
+          </span>
+          <span className="held-end">{p.tail}</span>
+        </>
+      )}
+      <button type="button" className="held-more" onClick={() => setAll(!all)} data-held-more>
+        {all ? HELD_WORDS.showLess : HELD_WORDS.showAll}
+      </button>
+    </span>
+  );
+}
 
 /** The notice, in a live region that is there before it is: a screen reader hears it
  *  come. When it goes (confirmed, let go, or dropped by an edit) and the focus went with
@@ -89,19 +118,19 @@ export function HeldNotice<T, M extends HeldMeta>({
     else if (!kind && was && el) focusBack?.(el)?.focus();
   }, [kind, focusBack]);
   const busy = v?.kind === "held" && v.busy;
-  const text = v ? heldText(v.held) : null;
+  const content = v ? heldContent(v.held) : { text: null, names: [] };
   const who = v ? heldFrom(v.held.from) : "";
   const raw = v ? (v.kind === "still" ? v.why : v.held.why) : "";
-  // The receiver's words are said to be theirs; with none, the line is ours and says so.
-  const whyLine = cleanReason(raw) ? HELD_WORDS.says(who, heldReason(raw)) : HELD_WORDS.noReason;
+  const reason = cleanReason(raw) ? heldReason(raw) : null;
   return (
     <div className="held-live" aria-live="polite" ref={live}>
       {v && (
         <div className="held" data-held={v.kind}>
           <b className="held-title">{v.kind === "still" ? HELD_WORDS.still(who) : HELD_WORDS.title}</b>
-          {text && (
-            <span className="held-what" data-held-what>
-              {text.length > 400 ? `${text.slice(0, 399)}…` : text}
+          {content.text && <HeldWords key={content.text} text={content.text} />}
+          {content.names.length > 0 && (
+            <span className="held-names" data-held-names>
+              {content.names.join(" · ")}
             </span>
           )}
           {v.meta.where && (
@@ -109,9 +138,18 @@ export function HeldNotice<T, M extends HeldMeta>({
               {v.meta.where}
             </span>
           )}
-          <span className="held-why" data-held-why>
-            {whyLine}
-          </span>
+          {reason ? (
+            // The receiver's own words, set apart: who says it, then what, in its own box,
+            // so nothing it writes can sit beside the app's words as if it were theirs.
+            <span className="held-said" data-held-why>
+              <span className="held-who">{HELD_WORDS.says(who)}</span>
+              <span className="held-quote">{reason}</span>
+            </span>
+          ) : (
+            <span className="held-why" data-held-why>
+              {HELD_WORDS.noReason}
+            </span>
+          )}
           <span className="held-acts">
             {v.kind === "held" && (
               <button
