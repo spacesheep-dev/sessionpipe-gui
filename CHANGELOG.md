@@ -40,6 +40,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   mistaken for the page's own key.** spacesheep's 401 was passed on as it was, which a page
   reads as "this page lost its key". It now comes back with its own code, and Settings →
   Data says the key was revoked at the same moment, not at the relay's next poll.
+- **When spacesheep asks this app to slow down (HTTP 429), the app waits as long as it
+  says** (its Retry-After, at most 15 minutes) and its state is `limited`, no longer
+  `offline`, which Settings → Data read as "can't be reached".
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH

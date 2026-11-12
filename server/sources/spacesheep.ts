@@ -119,6 +119,25 @@ export function cursorAfter(kept: number, page: RelayPage): { cursor: number; ga
   return { cursor: page.next, gap };
 }
 
+/** The longest pause a Retry-After is followed for. */
+export const RETRY_AFTER_MAX_MS = 15 * 60_000;
+
+/** A Retry-After header (seconds, or an HTTP date) in milliseconds from `now`, or null. */
+export function retryAfterMs(v: string | null, now = Date.now()): number | null {
+  if (!v) return null;
+  const t = v.trim();
+  if (/^\d+$/.test(t)) return Number(t) * 1000;
+  const at = Date.parse(t);
+  return Number.isFinite(at) ? Math.max(0, at - now) : null;
+}
+
+/** spacesheep asked to wait (429): the loop pauses as long as it said. */
+class Limited extends Error {
+  constructor(readonly pauseMs: number) {
+    super("HTTP 429");
+  }
+}
+
 export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOptions): SpacesheepSource {
   const f = opts.fetch ?? fetch;
   const cursorFile = path.join(store.dir, "spacesheep-cursor.json");
@@ -157,6 +176,11 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
     if (res.status === 401 || res.status === 403) {
       revoked();
       return 0;
+    }
+    if (res.status === 429) {
+      // Not unreachable: spacesheep's limit for this key. Its Retry-After, within bounds.
+      const asked = retryAfterMs(res.headers.get("retry-after")) ?? 60_000;
+      throw new Limited(Math.min(RETRY_AFTER_MAX_MS, Math.max(opts.retryMs ?? 2000, asked)));
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const page = parseRelayPage(await res.json());
@@ -240,8 +264,13 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
       } catch (e) {
         inFlight = null;
         if (stopped) break;
-        state = "offline";
         lastError = (e as Error).message;
+        if (e instanceof Limited) {
+          state = "limited";
+          await new Promise((r) => setTimeout(r, e.pauseMs));
+          continue;
+        }
+        state = "offline";
         await new Promise((r) => setTimeout(r, pause));
         pause = Math.min(pause * 2, 60_000);
       }
@@ -250,14 +279,17 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
 
   // The first page is history: the board shouldn't ring for it.
   store.setLoading(true);
+  let firstPause = 0;
   const first = poll(0)
     .catch((e) => {
-      state = "offline";
+      state = e instanceof Limited ? "limited" : "offline";
+      if (e instanceof Limited) firstPause = e.pauseMs;
       lastError = (e as Error).message;
       return 0;
     })
     .finally(() => store.setLoading(false));
-  void first.then(() => {
+  void first.then(async () => {
+    if (firstPause) await new Promise((r) => setTimeout(r, firstPause));
     if (!stopped) void loop();
   });
 

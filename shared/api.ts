@@ -1254,8 +1254,9 @@ export interface SpacesheepSourceStatus {
   /** The relay cursor: the last seq read. */
   cursor: number;
   /** `ok` after a good poll; `unauthorized` when the key was revoked; `offline` when the
-   *  origin can't be reached; `gap` when the relay no longer holds the cursor's past. */
-  state: "starting" | "ok" | "unauthorized" | "offline" | "gap";
+   *  origin can't be reached; `limited` when it asked this app to wait (429, its
+   *  Retry-After followed); `gap` when the relay no longer holds the cursor's past. */
+  state: "starting" | "ok" | "unauthorized" | "offline" | "limited" | "gap";
   lastAt?: string;
   lastError?: string;
   /** The machines paired on spacesheep, as its hellos last said (names only here). */

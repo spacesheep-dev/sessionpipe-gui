@@ -10,6 +10,7 @@ import {
   parseRelayPage,
   type RelayJob,
   readJobs,
+  retryAfterMs,
   type SpacesheepSource,
   startSpacesheepSource,
 } from "./spacesheep.js";
@@ -86,6 +87,15 @@ describe("the spacesheep relay source (docs/rfcs/08)", () => {
   });
 });
 
+describe("Retry-After", () => {
+  it("reads seconds and dates, and nothing else", () => {
+    expect(retryAfterMs("120")).toBe(120_000);
+    expect(retryAfterMs(new Date(10_000 + 30_000).toUTCString(), 10_000)).toBe(30_000);
+    expect(retryAfterMs("soon")).toBeNull();
+    expect(retryAfterMs(null)).toBeNull();
+  });
+});
+
 describe("the spacesheep source's status", () => {
   const ORIGIN = "https://ss.test";
   let dir: string;
@@ -154,5 +164,19 @@ describe("the spacesheep source's status", () => {
     await settle();
     expect(polls - after).toBeLessThanOrEqual(1);
     expect(s.status().state).toBe("unauthorized");
+  });
+
+  it("a 429 is spacesheep asking to wait, not spacesheep unreachable: limited, for as long as it said", async () => {
+    let polls = 0;
+    const s = start((u) => {
+      if (u.includes("/machines")) return json({ machines: [] });
+      polls++;
+      return json({ error: "rate_limited" }, 429, { "retry-after": "120" });
+    });
+    await settle();
+    expect(s.status()).toMatchObject({ state: "limited", lastError: "HTTP 429" });
+    // It waits the two minutes it was told (not the 5 ms retry), so it asked once.
+    await settle();
+    expect(polls).toBe(1);
   });
 });
