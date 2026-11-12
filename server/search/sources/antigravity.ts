@@ -90,11 +90,12 @@ interface Brain {
 }
 /** `…/brain/<id>/<rest>` → the brain. */
 function brainOf(p: string): Brain | undefined {
-  const parts = p.split(path.sep);
+  const parts = p.split(/[/\\]/);
   const i = parts.lastIndexOf("brain");
   const id = parts[i + 1];
   if (i < 0 || !id || !ID.test(id)) return undefined;
-  return { id: id.toLowerCase(), dir: parts.slice(0, i + 2).join(path.sep) };
+  const sep = p.includes("\\") && !p.includes("/") ? "\\" : p.includes("/") && !p.includes("\\") ? "/" : path.sep;
+  return { id: id.toLowerCase(), dir: parts.slice(0, i + 2).join(sep) };
 }
 
 const transcriptOf = (brainDir: string): string | undefined => {

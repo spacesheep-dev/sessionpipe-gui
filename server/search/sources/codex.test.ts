@@ -25,7 +25,9 @@ const hasCli = zstdWay(testEnv("/", "/", { SPGUI_SEARCH_ZSTD: "cli" })).kind ===
 describe("codex discover", () => {
   it("finds .jsonl and .jsonl.zst rollouts, the plain copy winning over a .zst of the same id", async () => {
     const files = await codexAdapter().discover(testEnv(fx.home, fx.state));
-    const rel = files.map((f) => [path.relative(path.join(fx.home, ".codex/sessions"), f.path), f.kind]).sort();
+    const rel = files
+      .map((f) => [path.relative(path.join(fx.home, ".codex/sessions"), f.path).replace(/\\/g, "/"), f.kind])
+      .sort();
     expect(rel).toEqual([
       ["../session_index.jsonl", "append"],
       ["2026/10/03/rollout-2026-10-03T07-00-00-c0000000-0000-4000-8000-000000000011.jsonl", "append"],

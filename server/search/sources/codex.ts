@@ -510,9 +510,11 @@ function readIndex(file: SourceFile, from: ReadCursor, sink: DocSink, opts: Read
 /** The env a read runs in when it came before any discover (a resumed engine): the
  *  Codex home is the folder above `sessions/`. */
 function envFromPath(file: SourceFile): SourceEnv {
-  const i = file.path.lastIndexOf(`${path.sep}sessions${path.sep}`);
-  const j = file.path.lastIndexOf(`${path.sep}archived_sessions${path.sep}`);
-  const home = file.path.slice(0, Math.max(i, j));
+  const norm = file.path.replace(/\\/g, "/");
+  const i = norm.lastIndexOf("/sessions/");
+  const j = norm.lastIndexOf("/archived_sessions/");
+  const at = Math.max(i, j);
+  const home = at >= 0 ? file.path.slice(0, at) : path.dirname(file.path);
   return {
     home: path.dirname(home),
     stateDir: "",

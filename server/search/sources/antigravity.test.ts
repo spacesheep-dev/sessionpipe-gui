@@ -22,7 +22,9 @@ afterEach(() => fx.done());
 describe("antigravity", () => {
   it("discovers both layouts and never a .pb, a .resolved snapshot or a step's output", async () => {
     const files = await antigravityAdapter().discover(testEnv(fx.home, fx.state));
-    const rel = files.map((f) => [path.relative(path.join(fx.home, ".gemini"), f.path), f.kind, f.key]).sort();
+    const rel = files
+      .map((f) => [path.relative(path.join(fx.home, ".gemini"), f.path).replace(/\\/g, "/"), f.kind, f.key])
+      .sort();
     expect(rel).toEqual([
       [`antigravity-cli/brain/${G2.slice(12)}/.system_generated/logs/transcript.jsonl`, "append", G2],
       [`antigravity/brain/${G1.slice(12)}/.system_generated/messages/m1.json`, "whole", G1],

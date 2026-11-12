@@ -8,6 +8,10 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **Cross-platform path parsing in search history adapters.** `parseClaudePath`, Antigravity
+  `brainOf` and Codex `envFromPath` split and resolve paths across both `/` and `\` separators,
+  preventing sessions from being missed during search indexing when paths contain forward slashes
+  on Windows or backslashes on POSIX.
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH

@@ -21,7 +21,7 @@ afterEach(() => fx.done());
 describe("claude discover", () => {
   it("finds every home's sessions and subagents, largest copy wins, never memory or tool results", async () => {
     const files = await claudeAdapter().discover(testEnv(fx.home, fx.state));
-    const rel = files.map((f) => path.relative(fx.home, f.path)).sort();
+    const rel = files.map((f) => path.relative(fx.home, f.path).replace(/\\/g, "/")).sort();
     expect(rel).toEqual([
       `.claude-work/projects/-Users-dev-acme-web/b0000000-0000-4000-8000-000000000003.jsonl`,
       `.claude/projects/${SLUG}/a0000000-0000-4000-8000-000000000001.jsonl`,
@@ -51,6 +51,11 @@ describe("claude discover", () => {
     expect(parseClaudePath("/h/.claude/projects/s/x/subagents/workflows/w/agent-ab.jsonl")).toMatchObject({
       id: "x",
       agentId: "ab",
+    });
+    expect(parseClaudePath("C:\\Users\\dev\\.claude\\projects\\s\\x.jsonl")).toMatchObject({
+      id: "x",
+      home: "C:\\Users\\dev\\.claude",
+      slugDir: "C:\\Users\\dev\\.claude\\projects\\s",
     });
     expect(parseClaudePath("/h/.claude/projects/s/x/tool-results/a.jsonl")).toBeUndefined();
   });
