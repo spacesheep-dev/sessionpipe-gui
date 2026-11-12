@@ -1,0 +1,230 @@
+// SPDX-License-Identifier: Apache-2.0
+// Owned by: web. What a page on a spacesheep account keeps of the relay between launches
+// (docs/rfcs/08, "The documents": the events are the page's to cache, and losing the cache
+// costs one read of the relay). One IndexedDB database per receiver id, so another
+// person's account on the same phone is another database: the relay's pages as they were
+// ingested, one record a page under the cursor after it, and the reader's two small values
+// (`cursor`, `reads`). A page and the cursor after it are one write, so the two can never
+// disagree. It is bounded (CACHE_EVENTS_MAX), read once at the start, and deleted when the
+// account is disconnected. Where IndexedDB cannot be opened, the same thing in memory:
+// nothing survives the launch, and the backend says so.
+import type { StoredEvent } from "@shared/api";
+import type { RelayKept } from "../../../server/sources/relay";
+
+/** The relay itself holds 50 000 events at most; the cache keeps as many, newest last. */
+export const CACHE_EVENTS_MAX = 50_000;
+/** Past this many events over the bound the oldest pages go, in one write. */
+export const CACHE_SLACK = 2_000;
+/** A live page is often one event: past this many records they are rewritten as full ones. */
+export const CACHE_COMPACT_PAGES = 400;
+export const CACHE_PAGE = 500;
+
+export const cacheName = (receiverId: string): string => `sessionpipe.account.${receiverId}`;
+
+export interface CacheLoad {
+  /** Every kept event, in the order the relay gave them. */
+  events: StoredEvent[];
+  /** The reader's values as they were kept (undefined with none). */
+  kept: Partial<Record<RelayKept, unknown>>;
+  pages: number;
+  ms: number;
+}
+
+export interface EventCache {
+  /** `indexeddb`: kept between launches. `memory`: gone with the page. */
+  readonly kind: "indexeddb" | "memory";
+  load(): Promise<CacheLoad>;
+  /** One relay page and the cursor after it, as one write. `events` may be empty (the
+   *  cursor moved over events the store already had). */
+  page(cursor: number, events: StoredEvent[], cursorDoc: unknown): void;
+  /** One of the reader's small values. */
+  put(name: RelayKept, value: unknown): void;
+  /** Everything kept for this account goes (a disconnect). */
+  destroy(): Promise<void>;
+  /** Resolves when everything handed over so far is written. */
+  flushed(): Promise<void>;
+  /** Bytes the browser says this origin's storage holds, when it says. */
+  bytes(): Promise<number | null>;
+}
+
+/** Which records go so that at most `max` events stay: the oldest whole pages. */
+export function pagesToDrop(pages: readonly { key: number; n: number }[], max: number): number[] {
+  let total = 0;
+  for (const p of pages) total += p.n;
+  const out: number[] = [];
+  for (const p of pages) {
+    if (total <= max) break;
+    out.push(p.key);
+    total -= p.n;
+  }
+  return out;
+}
+
+/** Many small pages as full ones, each under the cursor of its last. */
+export function compacted(
+  pages: readonly { key: number; events: StoredEvent[] }[],
+  size = CACHE_PAGE,
+): { key: number; events: StoredEvent[] }[] {
+  const out: { key: number; events: StoredEvent[] }[] = [];
+  let cur: StoredEvent[] = [];
+  let key = 0;
+  for (const p of pages) {
+    key = p.key;
+    for (const e of p.events) cur.push(e);
+    if (cur.length >= size) {
+      out.push({ key, events: cur });
+      cur = [];
+    }
+  }
+  if (cur.length || (pages.length && !out.length)) out.push({ key, events: cur });
+  else if (out.length) out[out.length - 1]!.key = key;
+  return out;
+}
+
+export function memoryCache(): EventCache {
+  return {
+    kind: "memory",
+    load: async () => ({ events: [], kept: {}, pages: 0, ms: 0 }),
+    page: () => {},
+    put: () => {},
+    destroy: async () => {},
+    flushed: async () => {},
+    bytes: async () => null,
+  };
+}
+
+const req = <T>(r: IDBRequest<T>): Promise<T> =>
+  new Promise((res, rej) => {
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+const done = (tx: IDBTransaction): Promise<void> =>
+  new Promise((res, rej) => {
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+    tx.onabort = () => rej(tx.error);
+  });
+
+/** The cache for `receiverId`: IndexedDB where it opens, else memory. */
+export async function openCache(
+  receiverId: string,
+  idb: IDBFactory | undefined = globalThis.indexedDB,
+): Promise<EventCache> {
+  if (!idb) return memoryCache();
+  const name = cacheName(receiverId);
+  let db: IDBDatabase;
+  try {
+    db = await new Promise<IDBDatabase>((res, rej) => {
+      const o = idb.open(name, 1);
+      o.onupgradeneeded = () => {
+        o.result.createObjectStore("pages");
+        o.result.createObjectStore("meta");
+      };
+      o.onsuccess = () => res(o.result);
+      o.onerror = () => rej(o.error);
+      o.onblocked = () => rej(new Error("blocked"));
+    });
+  } catch {
+    return memoryCache();
+  }
+  // Another window of the app asks to delete or upgrade it: let go.
+  db.onversionchange = () => db.close();
+  /** Each record's key and how many events it holds, oldest first. */
+  let index: { key: number; n: number }[] = [];
+  let total = 0;
+  let last: Promise<void> = Promise.resolve();
+  let dead = false;
+  const write = (f: (tx: IDBTransaction) => void): void => {
+    if (dead) return;
+    try {
+      const tx = db.transaction(["pages", "meta"], "readwrite");
+      f(tx);
+      const p = done(tx).catch((e) => console.warn("[account] cache write:", e));
+      last = last.then(() => p);
+    } catch (e) {
+      console.warn("[account] cache write:", e);
+    }
+  };
+  return {
+    kind: "indexeddb",
+    async load() {
+      const t0 = performance.now();
+      const tx = db.transaction(["pages", "meta"], "readonly");
+      const os = tx.objectStore("pages");
+      const [keys, values, cursor, reads] = await Promise.all([
+        req(os.getAllKeys()),
+        req(os.getAll()),
+        req(tx.objectStore("meta").get("cursor")),
+        req(tx.objectStore("meta").get("reads")),
+      ]);
+      let pages = keys.map((k, i) => ({ key: Number(k), events: (values[i] ?? []) as StoredEvent[] }));
+      const drop = new Set(
+        pagesToDrop(
+          pages.map((p) => ({ key: p.key, n: p.events.length })),
+          CACHE_EVENTS_MAX,
+        ),
+      );
+      const small = pages.length > CACHE_COMPACT_PAGES;
+      if (drop.size || small) {
+        const kept = pages.filter((p) => !drop.has(p.key));
+        const next = small ? compacted(kept) : kept;
+        write((w) => {
+          const s = w.objectStore("pages");
+          if (small) {
+            s.clear();
+            for (const p of next) s.put(p.events, p.key);
+          } else for (const k of drop) s.delete(k);
+        });
+        pages = next;
+      }
+      index = pages.map((p) => ({ key: p.key, n: p.events.length }));
+      total = index.reduce((n, p) => n + p.n, 0);
+      const events: StoredEvent[] = [];
+      for (const p of pages) for (const e of p.events) events.push(e);
+      return {
+        events,
+        kept: { ...(cursor !== undefined ? { cursor } : {}), ...(reads !== undefined ? { reads } : {}) },
+        pages: pages.length,
+        ms: performance.now() - t0,
+      };
+    },
+    page(cursor, events, cursorDoc) {
+      index.push({ key: cursor, n: events.length });
+      total += events.length;
+      let drop: number[] = [];
+      if (total > CACHE_EVENTS_MAX + CACHE_SLACK) {
+        drop = pagesToDrop(index, CACHE_EVENTS_MAX);
+        const gone = new Set(drop);
+        index = index.filter((p) => !gone.has(p.key));
+        total = index.reduce((n, p) => n + p.n, 0);
+      }
+      write((tx) => {
+        const s = tx.objectStore("pages");
+        if (events.length) s.put(events, cursor);
+        for (const k of drop) s.delete(k);
+        tx.objectStore("meta").put(cursorDoc, "cursor");
+      });
+    },
+    put: (n, value) => write((tx) => void tx.objectStore("meta").put(value, n)),
+    async destroy() {
+      await last;
+      dead = true;
+      db.close();
+      await new Promise<void>((res) => {
+        const d = idb.deleteDatabase(name);
+        d.onsuccess = () => res();
+        d.onerror = () => res();
+        d.onblocked = () => res();
+      });
+    },
+    flushed: () => last,
+    async bytes() {
+      try {
+        const e = await navigator.storage?.estimate?.();
+        return typeof e?.usage === "number" ? e.usage : null;
+      } catch {
+        return null;
+      }
+    },
+  };
+}

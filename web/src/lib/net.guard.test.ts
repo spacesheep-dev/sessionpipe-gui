@@ -32,9 +32,12 @@ function found(file: string, text: string, re: RegExp): string[] {
 /** Fetches that are not of the page's backend, each with why. */
 const ALLOWED: Record<string, string> = {
   // The receiver's address over https, probed from the setup page: another origin on purpose.
-  "pages/SetupPage.tsx": "/api/ui/info`, { mode: \"no-cors\"",
+  "pages/SetupPage.tsx": '/api/ui/info`, { mode: "no-cors"',
   // A sound the person picked: a blob: or data: URL of their own file.
   "lib/sounds.ts": "fetch(customUrl)",
+  // The five doors of a spacesheep account, through the native hub: the only requests a
+  // page on an account makes, and what apiFetch never does.
+  "account/doors.ts": "fetch(url, init))",
 };
 
 test("no file but lib/net.ts fetches a receiver path", () => {
