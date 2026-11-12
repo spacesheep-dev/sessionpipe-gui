@@ -38,6 +38,8 @@ const ALLOWED: Record<string, string> = {
   // The five doors of a spacesheep account, through the native hub: the only requests a
   // page on an account makes, and what apiFetch never does.
   "account/doors.ts": "fetch(url, init))",
+  // A path that is not a receiver's at all (another origin, a data: URL) goes as it would.
+  "account/routes.ts": "return fetch(path, init);",
 };
 
 test("no file but lib/net.ts fetches a receiver path", () => {
