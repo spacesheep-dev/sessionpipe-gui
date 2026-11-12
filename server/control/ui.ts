@@ -269,6 +269,9 @@ export async function verifySend(d: Pick<UiRouteDeps, "state" | "rpId">, raw: un
   };
 }
 
+/** The code of a send spacesheep refused because it no longer takes this app's key. */
+export const SPACESHEEP_UNAUTHORIZED = "spacesheep_unauthorized";
+
 /** A send for a machine paired on spacesheep: not verified here (its keys are ids only,
  *  its rp id is spacesheep's), carried to spacesheep's jobs route, which verifies it
  *  against the machine's keys and queues it; the row here follows the job's status.
@@ -314,6 +317,9 @@ async function forwardSend(
   // The second look there wants a fresh tap: the same word the page knows from a machine.
   if (r.status === 409 && code === "confirm") throw new HttpError(422, { reason: error, code: "confirm_required" });
   if (r.status === 401 && code === "unlock") throw new HttpError(422, { reason: error, code: "bad_grant" });
+  // Any other 401 is spacesheep refusing this app's key (revoked there), not the page's own
+  // key: its own code, never the 401 a page reads as "this page lost its key".
+  if (r.status === 401) throw new HttpError(502, { reason: error, code: SPACESHEEP_UNAUTHORIZED });
   if (r.status === 400 && (code === "bad" || code === "unlock"))
     throw new HttpError(422, { reason: error, code: String(r.json.refusal ?? "untrusted_key") });
   throw new HttpError(r.status >= 500 ? 502 : r.status, { reason: error, code: code || "refused" });

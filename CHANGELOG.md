@@ -36,6 +36,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   holds, so an app that was off longer than spacesheep keeps events (7 days, 50 000 events)
   lost the middle and said "reading". It now says "gap" whenever the first event back is
   not the one after the cursor, and keeps saying it while it runs.
+- **A send that spacesheep refuses because this app's key was revoked there is no longer
+  mistaken for the page's own key.** spacesheep's 401 was passed on as it was, which a page
+  reads as "this page lost its key". It now comes back with its own code, and Settings →
+  Data says the key was revoked at the same moment, not at the relay's next poll.
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH

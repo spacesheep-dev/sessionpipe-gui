@@ -270,6 +270,8 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
         body: JSON.stringify(body),
       });
       const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      // The key revoked there: the source says so now, not at its next poll (ui.ts forwardSend).
+      if (res.status === 401 && json.code !== "unlock") spacesheep?.unauthorized();
       return { status: res.status, json };
     },
   });

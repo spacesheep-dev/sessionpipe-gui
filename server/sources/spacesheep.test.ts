@@ -138,4 +138,21 @@ describe("the spacesheep source's status", () => {
     await s.tick();
     expect(s.status().state).toBe("gap");
   });
+
+  it("goes unauthorized the moment a send finds the key revoked, and polls no more", async () => {
+    let polls = 0;
+    const s = start((u) => {
+      if (u.includes("/machines")) return json({ machines: [] });
+      polls++;
+      return json({ events: [], next: 0, oldest: null, protocol: 1 });
+    });
+    await settle();
+    expect(s.status().state).toBe("ok");
+    s.unauthorized();
+    expect(s.status()).toMatchObject({ state: "unauthorized" });
+    const after = polls;
+    await settle();
+    expect(polls - after).toBeLessThanOrEqual(1);
+    expect(s.status().state).toBe("unauthorized");
+  });
 });

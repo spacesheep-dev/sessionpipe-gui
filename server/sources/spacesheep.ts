@@ -45,6 +45,9 @@ export interface SpacesheepSource {
   pollJobs(): Promise<void>;
   /** One read of the machines door now (tests). */
   pollMachines(): Promise<void>;
+  /** spacesheep refused the key elsewhere (a send's 401): the source stops as its own poll
+   *  would on one, so the status says so at the same moment. */
+  unauthorized(): void;
 }
 
 /** One job as the relay's jobs door lists it (spacesheep's `relay/jobs`). */
@@ -133,6 +136,14 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
   let inFlight: Promise<number> | null = null;
   let abort: AbortController | null = null;
 
+  const revoked = (): void => {
+    state = "unauthorized";
+    lastError = "the key no longer opens the relay (revoked on spacesheep?)";
+    stopped = true;
+    if (jobsTimer) clearTimeout(jobsTimer);
+    abort?.abort();
+  };
+
   const poll = async (waitS: number): Promise<number> => {
     abort = new AbortController();
     const url = `${opts.origin}${RELAY_PATH}?since=${cursor}&limit=${RELAY_PAGE}&wait=${waitS}`;
@@ -140,10 +151,11 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
       headers: { authorization: `Bearer ${opts.key}`, accept: "application/json" },
       signal: abort.signal,
     });
+    // Stopped while this poll was out (a send found the key revoked, a disconnect): its
+    // answer changes nothing.
+    if (stopped) return 0;
     if (res.status === 401 || res.status === 403) {
-      state = "unauthorized";
-      lastError = "the key no longer opens the relay (revoked on spacesheep?)";
-      stopped = true;
+      revoked();
       return 0;
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -269,6 +281,7 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
     tick: () => inFlight ?? poll(0),
     pollJobs: jobsPoll,
     pollMachines: machinesPoll,
+    unauthorized: revoked,
   };
 }
 

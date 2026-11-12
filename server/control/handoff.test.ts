@@ -283,4 +283,31 @@ describe("reply_to", () => {
       await b.close();
     }
   });
+
+  it("a remote machine's send that spacesheep refuses for the app's key is not the page's own 401", async () => {
+    let answer = {
+      status: 401,
+      json: { code: "unauthorized", error: "Unknown or revoked API key." } as Record<string, unknown>,
+    };
+    const b = await boot({ remoteSend: async () => answer });
+    try {
+      const machine = "m_handoffremote0000002";
+      b.control.remote.upsert(
+        [{ id: machine, name: "lab-mac", online: true, agents: ["claude-code"], passkey_ids: ["k1"] }],
+        { via: "spacesheep", origin: "https://spacesheep.dev", rpId: "spacesheep.dev" },
+      );
+      const cmd = commandStr(machine, { iat: Date.now() });
+      const send = () => call(b.url, "POST", `${UI}/send`, { body: { machineId: machine, cmd, csig: "c2ln" } });
+      expect(await send()).toEqual({
+        status: 502,
+        body: { reason: "Unknown or revoked API key.", code: "spacesheep_unauthorized" },
+      });
+      // A 401 for the passkey's unlock is the grant's, as before.
+      answer = { status: 401, json: { code: "unlock", error: "Unlock with your passkey." } };
+      expect(await send()).toEqual({ status: 422, body: { reason: "Unlock with your passkey.", code: "bad_grant" } });
+      expect(b.control.activity()).toHaveLength(0);
+    } finally {
+      await b.close();
+    }
+  });
 });
