@@ -16,6 +16,9 @@ url = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# gzip for an account's answers (hub/acct.rs). Already in both lock files through Tauri;
+# inflated by hand so the size limit is on what comes out, not on what went over the wire.
+flate2 = "1"
 log = "0.4"
 
 # The keychain (keychain.rs): the login keychain on a Mac, the data protection keychain on

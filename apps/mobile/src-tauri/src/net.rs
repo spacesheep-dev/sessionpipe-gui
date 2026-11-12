@@ -12,20 +12,21 @@ use sp_receivers::{
 use std::path::PathBuf;
 use tauri::{ipc::Channel, AppHandle, Manager, Runtime, State, Webview};
 
-/// Where a spacesheep account's API key is kept (docs/rfcs/08). On an iPhone, the
-/// keychain: this device only, readable after the first unlock, under a service of its
-/// own (`<bundle id>.account`). On Android, for now, the file receiver keys are in
-/// (`keys.json` in the app's private storage, owner-only): that is weaker (a rooted phone
-/// or a full-device backup reads it, and nothing ties it to the hardware), and the
-/// follow-up is the Android Keystore; the account mode is off there until then anyway
-/// (`Os::account`). A dev run with `SP_SHELL_HOME` keeps it in that folder's file, so
-/// nothing is left in a keychain.
+/// Where a spacesheep account's API key is kept (docs/rfcs/08): always a store of its
+/// own, never the file receiver keys are in (a receiver is sent its key as a cookie, to
+/// an origin the list names). On an iPhone, the keychain: this device only, readable
+/// after the first unlock, under its own service (`<bundle id>.account`). On Android,
+/// for now, a file of its own in the app's private storage (`account-keys.json`,
+/// owner-only): that is weaker (a rooted phone or a full-device backup reads it, and
+/// nothing ties it to the hardware), and the follow-up is the Android Keystore; the
+/// account mode is off there until then anyway (`Os::account`). A dev run with
+/// `SP_SHELL_HOME` uses that folder's file, so nothing is left in a keychain.
 fn account_keys(os: Os, dev_home: bool, home: &std::path::Path, identifier: &str) -> KeyStore {
     match os {
         Os::Ios if !dev_home => KeyStore::Keychain {
             service: format!("{identifier}.account"),
         },
-        _ => KeyStore::File(home.join("keys.json")),
+        _ => KeyStore::File(home.join("account-keys.json")),
     }
 }
 
@@ -39,11 +40,14 @@ pub fn config(home: PathBuf, version: &str, identifier: &str) -> HubConfig {
     HubConfig {
         account: AccountConfig {
             enabled: os.account(),
-            keys: Some(account_keys(os, dev_home, &home, identifier)),
+            keys: account_keys(os, dev_home, &home, identifier),
             // A local spacesheep over plain http: a debug build only.
             allow_local_http: cfg!(debug_assertions),
             device: os.device_name().into(),
             version: version.into(),
+            // The shell puts its native alerts here once there is an app to show them
+            // (`acct::Alerts`, lib.rs); with none, every question is answered no.
+            confirm: None,
         },
         keys: KeyStore::File(home.join("keys.json")),
         home,
@@ -396,10 +400,19 @@ mod tests {
         }
         for (os, dev) in [(Os::Android, false), (Os::Android, true), (Os::Ios, true)] {
             match account_keys(os, dev, home, id) {
-                KeyStore::File(p) => assert_eq!(p, home.join("keys.json")),
+                KeyStore::File(p) => assert_eq!(p, home.join("account-keys.json")),
                 _ => panic!("a file here"),
             }
         }
+        // Never the receivers' own key file, on any platform: the Hub would turn the
+        // account mode off if it were.
+        let cfg = config(home.to_path_buf(), "0.8.0", id);
+        assert!(!cfg.account.keys.same_place(&cfg.keys));
+        assert!(!account_keys(Os::Android, false, home, id).same_place(&cfg.keys));
+        assert!(
+            cfg.account.confirm.is_none(),
+            "set by the app, which can show an alert"
+        );
         // Off on Android until its https verifier is set up; on for the iPhone.
         assert!(Os::Ios.account() && !Os::Android.account());
     }

@@ -227,6 +227,14 @@ impl Hub {
     pub fn new(cfg: HubConfig) -> Hub {
         crate::ensure_crypto();
         let registry = Registry::load(&cfg.home);
+        // The first start in this home (accounts on): keys an earlier install left
+        // behind go, and the list is written so the next start is not a first one.
+        if cfg.account.enabled && !registry.existed() {
+            Hub::account_first_start(&cfg);
+            if let Err(e) = registry.save() {
+                log::warn!("receivers.json: {e}");
+            }
+        }
         let default_client = reqwest::Client::builder()
             .user_agent(cfg.user_agent.clone())
             .connect_timeout(Duration::from_secs(5))
@@ -330,7 +338,9 @@ impl Hub {
     /// `/api/ui/*` goes through here.
     fn find_receiver(&self, id: &str) -> Result<Receiver, String> {
         let r = self.find(id).ok_or("unknown receiver")?;
-        if r.kind != Kind::Receiver {
+        // Its kind, and the shape of its id: a receiver's key is looked up by its id, and
+        // only an id `receiver_id` could have written is ever looked up.
+        if r.kind != Kind::Receiver || !crate::id::is_receiver_id(&r.id) {
             return Err("not a receiver".into());
         }
         Ok(r)
@@ -457,21 +467,17 @@ impl Hub {
         Ok(self.to_ref(&r))
     }
 
+    /// Removes a receiver. An account is not removed this way: it is disconnected
+    /// (`account_disconnect`), which asks the person when documents go with it.
     pub fn remove(&self, id: &str) -> Result<bool, String> {
-        // What the list itself holds under this id says whose key and documents go.
-        let was_account = self
-            .0
-            .registry
-            .lock()
-            .unwrap()
-            .list()
-            .iter()
-            .any(|r| r.id == id && r.kind != Kind::Receiver);
-        // An account's key goes first: if the list then can't be saved, what is left is
-        // an entry without a key, never a key without an entry.
-        if was_account {
-            self.account_forget(id);
+        if self.account_entry(id).is_some() {
+            return Err("an account is disconnected, not removed".into());
         }
+        self.remove_entry(id)
+    }
+
+    /// Takes an entry out of the list and out of everything kept by its id.
+    fn remove_entry(&self, id: &str) -> Result<bool, String> {
         let removed = self
             .0
             .registry
@@ -479,8 +485,8 @@ impl Hub {
             .unwrap()
             .remove(id)
             .map_err(|e| e.to_string())?;
-        if !was_account {
-            self.0.transient.lock().unwrap().retain(|r| r.id != id);
+        self.0.transient.lock().unwrap().retain(|r| r.id != id);
+        if crate::id::is_receiver_id(id) {
             let _ = self.0.cfg.keys.delete(id);
         }
         if let Some(ctl) = self.0.trays.lock().unwrap().remove(id) {
@@ -495,16 +501,13 @@ impl Hub {
             items: vec![],
         });
         self.emit(HubEvent::Receivers);
-        if was_account {
-            self.emit(HubEvent::Account);
-        }
         Ok(removed)
     }
 
     /// A receiver's UI key. An account has none: its API key has another name in the
     /// store (`account_key_name`) and is read only where a door is forwarded.
     fn key_for(&self, r: &Receiver) -> Option<String> {
-        if r.local || r.kind != Kind::Receiver {
+        if r.local || r.kind != Kind::Receiver || !crate::id::is_receiver_id(&r.id) {
             return None;
         }
         if let Some(k) = self.0.transient_keys.lock().unwrap().get(&r.id) {
@@ -700,10 +703,8 @@ impl Hub {
         let rx = match self.find(&id) {
             Some(rx) if rx.kind == Kind::Receiver => rx,
             // An account: only its doors, and nothing below (no cookie, no page header).
-            Some(rx) if rx.kind == Kind::Spacesheep => {
-                return self.account_proxy(rx, req, &path, origin).await
-            }
-            _ => {
+            Some(rx) => return self.account_proxy(rx, req, &path, origin).await,
+            None => {
                 self.proxy_failed(
                     &id,
                     req.method().as_str(),
@@ -1337,14 +1338,14 @@ mod tests {
         let mut reg = Registry::load(t.path());
         let (mut r, _) = Receiver::from_url(&format!("http://127.0.0.1:{port}")).unwrap();
         r.local = false;
-        r.id = "remote1234".into();
+        r.id = "remote2345".into();
         reg.upsert(r).unwrap();
         let h2 = hub(t.path(), None);
-        h2.0.cfg.keys.set("remote1234", "uikey").unwrap();
+        h2.0.cfg.keys.set("remote2345", "uikey").unwrap();
         let res = proxied(
             &h2,
             "GET",
-            "rx://localhost/remote1234/api/ui/info",
+            "rx://localhost/remote2345/api/ui/info",
             Some("https://evil.com"),
             vec![],
         )
@@ -1368,7 +1369,7 @@ mod tests {
             404
         );
         assert_eq!(
-            proxied(&h2, "GET", "rx://localhost/remote1234/../x", None, vec![])
+            proxied(&h2, "GET", "rx://localhost/remote2345/../x", None, vec![])
                 .await
                 .status(),
             400
@@ -1377,7 +1378,7 @@ mod tests {
             proxied(
                 &h2,
                 "GET",
-                "rx://localhost/remote1234/http://evil.com/x",
+                "rx://localhost/remote2345/http://evil.com/x",
                 None,
                 vec![]
             )
@@ -1387,7 +1388,7 @@ mod tests {
         );
         let big = vec![0u8; proxy::MAX_BODY + 1];
         assert_eq!(
-            proxied(&h2, "POST", "rx://localhost/remote1234/x", None, big)
+            proxied(&h2, "POST", "rx://localhost/remote2345/x", None, big)
                 .await
                 .status(),
             413
@@ -1395,7 +1396,7 @@ mod tests {
         let pre = proxied(
             &h2,
             "OPTIONS",
-            "rx://localhost/remote1234/x",
+            "rx://localhost/remote2345/x",
             Some("tauri://localhost"),
             vec![],
         )

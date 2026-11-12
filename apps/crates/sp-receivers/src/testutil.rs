@@ -55,12 +55,14 @@ impl Seen {
     }
 }
 
-/// A reply with headers of its own, optionally late.
+/// A reply with headers of its own, optionally late, optionally without saying its length.
 pub struct Reply {
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
     pub delay: Option<std::time::Duration>,
+    /// No `Content-Length`: the body ends when the connection does.
+    pub unsized_body: bool,
 }
 
 impl Reply {
@@ -70,7 +72,22 @@ impl Reply {
             headers: vec![("content-type".into(), "application/json".into())],
             body: body.into(),
             delay: None,
+            unsized_body: false,
         }
+    }
+    /// A status and nothing else (a 204).
+    pub fn empty(status: u16) -> Reply {
+        Reply {
+            status,
+            headers: vec![],
+            body: vec![],
+            delay: None,
+            unsized_body: false,
+        }
+    }
+    pub fn no_length(mut self) -> Reply {
+        self.unsized_body = true;
+        self
     }
     pub fn header(mut self, name: &str, value: &str) -> Reply {
         self.headers.push((name.into(), value.into()));
@@ -104,11 +121,10 @@ where
                 if let Some(d) = r.delay {
                     tokio::time::sleep(d).await;
                 }
-                let mut head = format!(
-                    "HTTP/1.1 {} X\r\ncontent-length: {}\r\nconnection: close\r\n",
-                    r.status,
-                    r.body.len()
-                );
+                let mut head = format!("HTTP/1.1 {} X\r\nconnection: close\r\n", r.status);
+                if !r.unsized_body {
+                    head.push_str(&format!("content-length: {}\r\n", r.body.len()));
+                }
                 for (k, v) in &r.headers {
                     head.push_str(&format!("{k}: {v}\r\n"));
                 }

@@ -7,13 +7,17 @@
 //! nothing that speaks to a receiver speaks to it: its key has its own name in the key
 //! store, and the Hub forwards only its doors.
 
-use crate::id::{account_id, canonical_origin, is_loopback_origin, receiver_id};
+use crate::id::{
+    account_id, canonical_origin, is_account_id, is_loopback_origin, is_receiver_id, receiver_id,
+};
 use crate::keychain;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// What an entry of the list is. A file written before kinds existed has none: a receiver.
+/// A kind this version does not know is not here at all: such an entry is kept as the
+/// JSON it was (`Registry`), never read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -22,10 +26,6 @@ pub enum Kind {
     Receiver,
     /// A spacesheep account: the Hub holds its key and forwards its doors.
     Spacesheep,
-    /// A kind a newer version wrote. Kept as it is in the file and never spoken to, so an
-    /// older build neither loses the list nor treats the entry as a receiver.
-    #[serde(other)]
-    Unknown,
 }
 
 impl Kind {
@@ -47,6 +47,10 @@ pub struct Account {
     /// The rp id spacesheep signs for, as its machines door last said.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rp_id: Option<String>,
+    /// The id of this device's own key, once the Hub asked spacesheep to trust it: the
+    /// only key the device door is ever asked about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_key_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,6 +117,7 @@ impl Receiver {
                 connected_at: connected_at.to_string(),
                 unauthorized: false,
                 rp_id: None,
+                device_key_id: None,
             }),
         })
     }
@@ -120,89 +125,201 @@ impl Receiver {
     pub fn is_account(&self) -> bool {
         self.kind == Kind::Spacesheep && self.account.is_some()
     }
+
+    /// An entry this version reads: a receiver with a receiver's id and nothing of an
+    /// account, or an account with an account's id and its record. Anything else in the
+    /// file (a newer kind, a field of another shape, an id of neither shape) is not an
+    /// entry to this version.
+    fn read(entry: &serde_json::Value) -> Option<Receiver> {
+        let r: Receiver = serde_json::from_value(entry.clone()).ok()?;
+        let ok = match r.kind {
+            Kind::Receiver => r.account.is_none() && is_receiver_id(&r.id),
+            Kind::Spacesheep => r.account.is_some() && is_account_id(&r.id),
+        };
+        ok.then_some(r)
+    }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct ReceiversFile {
-    #[serde(default)]
-    receivers: Vec<Receiver>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    active: Option<String>,
-}
-
+/// `<home>/receivers.json`: `{ receivers: [...], active? }`.
+///
+/// What this version does not read is kept as it is. An entry of a kind a newer version
+/// wrote stays in the file byte for byte in meaning (the JSON value it was), through every
+/// save; it is never listed, never selectable, never spoken to. A top-level field this
+/// version does not know is written back too. A file that is not a list at all is never
+/// saved over blind: a copy is kept beside it (`receivers.json.bad`) and the list starts
+/// empty in memory.
 pub struct Registry {
     path: PathBuf,
-    file: ReceiversFile,
+    receivers: Vec<Receiver>,
+    /// Entries kept and not read, in the order they were in.
+    raw: Vec<serde_json::Value>,
+    active: Option<String>,
+    /// Top-level fields this version does not know.
+    rest: serde_json::Map<String, serde_json::Value>,
+    existed: bool,
 }
 
 impl Registry {
     pub fn load(home: &Path) -> Registry {
         let path = home.join("receivers.json");
-        let file = std::fs::read(&path)
-            .ok()
-            .and_then(|b| serde_json::from_slice::<ReceiversFile>(&b).ok())
-            .unwrap_or_default();
-        Registry { path, file }
+        let mut reg = Registry {
+            path,
+            receivers: Vec::new(),
+            raw: Vec::new(),
+            active: None,
+            rest: serde_json::Map::new(),
+            existed: false,
+        };
+        let Ok(bytes) = std::fs::read(&reg.path) else {
+            return reg;
+        };
+        reg.existed = true;
+        let top = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+            Ok(serde_json::Value::Object(top))
+                if top.get("receivers").is_none_or(|r| r.is_array()) =>
+            {
+                top
+            }
+            _ => {
+                let bad = reg.path.with_extension("json.bad");
+                match std::fs::copy(&reg.path, &bad) {
+                    Ok(_) => log::warn!(
+                        "receivers.json is not a list this version reads; a copy is kept as {}",
+                        bad.display()
+                    ),
+                    Err(e) => log::warn!("receivers.json is unreadable, and no copy was kept: {e}"),
+                }
+                return reg;
+            }
+        };
+        for (k, v) in top {
+            match (k.as_str(), v) {
+                ("receivers", serde_json::Value::Array(entries)) => {
+                    for e in entries {
+                        match Receiver::read(&e) {
+                            Some(r) if !reg.receivers.iter().any(|x| x.id == r.id) => {
+                                reg.receivers.push(r)
+                            }
+                            _ => reg.raw.push(e),
+                        }
+                    }
+                }
+                ("active", serde_json::Value::String(id)) => reg.active = Some(id),
+                ("receivers" | "active", _) => {}
+                (_, v) => {
+                    reg.rest.insert(k, v);
+                }
+            }
+        }
+        reg
     }
 
+    /// Was there a list on disk when this one was loaded (readable or not)? False on the
+    /// app's first start in this home.
+    pub fn existed(&self) -> bool {
+        self.existed
+    }
+
+    /// The entries this version reads.
     pub fn list(&self) -> &[Receiver] {
-        &self.file.receivers
+        &self.receivers
+    }
+
+    /// How many entries are kept and not read.
+    pub fn kept_unread(&self) -> usize {
+        self.raw.len()
     }
 
     pub fn active(&self) -> Option<&str> {
-        self.file.active.as_deref()
+        self.active.as_deref()
     }
 
     pub fn set_active(&mut self, id: Option<&str>) -> std::io::Result<()> {
-        self.file.active = id.map(str::to_string);
-        self.save()
+        let before = self.snapshot();
+        self.active = id.map(str::to_string);
+        self.commit(before)
     }
 
-    /// Adds or replaces (same id) a receiver and saves. An entry never changes kind: an
-    /// id is 50 bits of a hash, and a link can choose its origin, so a receiver whose id
-    /// met an account's must not take its place (and with it, its name in the key store).
+    fn snapshot(&self) -> (Vec<Receiver>, Option<String>) {
+        (self.receivers.clone(), self.active.clone())
+    }
+
+    /// Saves, or puts the list back as it was: what is in memory is what is on disk,
+    /// also when the disk said no.
+    fn commit(&mut self, before: (Vec<Receiver>, Option<String>)) -> std::io::Result<()> {
+        self.save()
+            .inspect_err(|_| (self.receivers, self.active) = before)
+    }
+
+    /// Is `id` the id of an entry kept and not read? (It is not free to take.)
+    pub fn kept_under(&self, id: &str) -> bool {
+        self.raw
+            .iter()
+            .any(|e| e.get("id").and_then(|v| v.as_str()) == Some(id))
+    }
+
+    /// Adds or replaces (same id) a receiver and saves. An entry never changes kind, and
+    /// never takes the id of one this version keeps without reading.
     pub fn upsert(&mut self, r: Receiver) -> std::io::Result<()> {
-        match self.file.receivers.iter_mut().find(|x| x.id == r.id) {
+        if self.kept_under(&r.id) {
+            return Err(std::io::Error::other(
+                "that id belongs to an entry this version does not read",
+            ));
+        }
+        let before = self.snapshot();
+        match self.receivers.iter_mut().find(|x| x.id == r.id) {
             Some(x) if x.kind != r.kind => {
                 return Err(std::io::Error::other(
                     "that id belongs to an entry of another kind",
                 ))
             }
             Some(x) => *x = r,
-            None => self.file.receivers.push(r),
+            None => self.receivers.push(r),
         }
-        self.save()
+        self.commit(before)
     }
 
     /// Changes one entry in place and saves; false when there is none.
     pub fn update(&mut self, id: &str, f: impl FnOnce(&mut Receiver)) -> std::io::Result<bool> {
-        let Some(x) = self.file.receivers.iter_mut().find(|x| x.id == id) else {
+        let before = self.snapshot();
+        let Some(x) = self.receivers.iter_mut().find(|x| x.id == id) else {
             return Ok(false);
         };
-        let before = x.clone();
         f(x);
-        if *x == before {
+        if self.receivers == before.0 {
             return Ok(true);
         }
-        self.save()?;
+        self.commit(before)?;
         Ok(true)
     }
 
     pub fn remove(&mut self, id: &str) -> std::io::Result<bool> {
-        let n = self.file.receivers.len();
-        self.file.receivers.retain(|r| r.id != id);
-        if self.file.active.as_deref() == Some(id) {
-            self.file.active = None;
+        let before = self.snapshot();
+        self.receivers.retain(|r| r.id != id);
+        if self.active.as_deref() == Some(id) {
+            self.active = None;
         }
-        let removed = n != self.file.receivers.len();
-        self.save()?;
+        let removed = before.0.len() != self.receivers.len();
+        self.commit(before)?;
         Ok(removed)
     }
 
-    fn save(&self) -> std::io::Result<()> {
+    /// Writes the list: what this version reads, then what it only keeps.
+    pub fn save(&self) -> std::io::Result<()> {
+        let mut top = self.rest.clone();
+        let mut entries: Vec<serde_json::Value> = self
+            .receivers
+            .iter()
+            .map(|r| serde_json::to_value(r).expect("json"))
+            .collect();
+        entries.extend(self.raw.iter().cloned());
+        top.insert("receivers".into(), serde_json::Value::Array(entries));
+        if let Some(a) = &self.active {
+            top.insert("active".into(), serde_json::Value::String(a.clone()));
+        }
         write_atomic(
             &self.path,
-            &serde_json::to_vec_pretty(&self.file).expect("json"),
+            &serde_json::to_vec_pretty(&serde_json::Value::Object(top)).expect("json"),
         )
     }
 }
@@ -312,6 +429,33 @@ impl KeyStore {
             KeyStore::Keychain { service } => keychain::delete(service, id),
         }
     }
+
+    /// Empties the store (`keychain::delete_all` says when and why). Only ever called on
+    /// a store that holds nothing but account keys.
+    pub fn clear_all(&self) -> std::io::Result<()> {
+        match self {
+            KeyStore::File(p) => match std::fs::remove_file(p) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            },
+            KeyStore::Memory(m) => {
+                m.lock().unwrap().clear();
+                Ok(())
+            }
+            KeyStore::Keychain { service } => keychain::delete_all(service),
+        }
+    }
+
+    /// Do two stores keep their keys in the same place? (An account's keys must not be
+    /// where a receiver's are: `Hub::new` checks.)
+    pub fn same_place(&self, other: &KeyStore) -> bool {
+        match (self, other) {
+            (KeyStore::File(a), KeyStore::File(b)) => a == b,
+            (KeyStore::Keychain { service: a }, KeyStore::Keychain { service: b }) => a == b,
+            (KeyStore::Memory(a), KeyStore::Memory(b)) => std::ptr::eq(a, b),
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -378,15 +522,19 @@ mod tests {
         );
     }
 
+    fn list_on_disk(t: &TempDir) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(t.path().join("receivers.json")).unwrap()).unwrap()
+    }
+
     /// A list written before kinds existed reads as receivers and is written back as it
-    /// was; an account's entry says its kind; a kind from a newer version neither breaks
-    /// the list nor becomes a receiver.
+    /// was; an account's entry says its kind; an entry never changes kind.
     #[test]
     fn kinds_in_the_list() {
         let t = TempDir::new("registry-kinds");
         let old = r#"{ "receivers": [ { "id": "abcdefghij", "name": "studio", "origin": "http://192.168.1.9:7373", "local": false } ], "active": "abcdefghij" }"#;
         std::fs::write(t.path().join("receivers.json"), old).unwrap();
         let mut reg = Registry::load(t.path());
+        assert!(reg.existed());
         assert_eq!(reg.list()[0].kind, Kind::Receiver);
         assert!(!reg.list()[0].is_account());
         let a = Receiver::account(
@@ -399,18 +547,17 @@ mod tests {
             a.id,
             account_id("https://spacesheep.dev", "misha@example.com")
         );
-        assert_ne!(a.id, receiver_id("https://spacesheep.dev"));
+        assert_eq!(a.id.len(), 52);
         assert!(a.is_account() && !a.local);
         assert_eq!(a.name, "spacesheep.dev");
         reg.upsert(a.clone()).unwrap();
-        let v: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(t.path().join("receivers.json")).unwrap())
-                .unwrap();
+        let v = list_on_disk(&t);
         assert_eq!(
             v["receivers"][0],
             serde_json::json!({ "id": "abcdefghij", "name": "studio", "origin": "http://192.168.1.9:7373", "local": false }),
             "a receiver's entry gains nothing"
         );
+        assert_eq!(v["active"], "abcdefghij");
         assert_eq!(v["receivers"][1]["kind"], "spacesheep");
         assert_eq!(v["receivers"][1]["account"]["email"], "Misha@Example.com");
         assert!(v["receivers"][1]["account"].get("unauthorized").is_none());
@@ -435,15 +582,130 @@ mod tests {
                 .unwrap()
                 .unauthorized
         );
-        // A newer version's kind.
-        let newer = std::fs::read_to_string(t.path().join("receivers.json"))
-            .unwrap()
-            .replace("\"spacesheep\"", "\"teleport\"");
-        std::fs::write(t.path().join("receivers.json"), newer).unwrap();
+    }
+
+    /// What this version does not read is kept as the JSON it was, through every save: a
+    /// newer kind with fields of its own, an account whose record has another shape, an
+    /// entry whose id is of neither shape, a top-level field. None of them is an entry
+    /// here: not listed, not replaceable by one of the same id.
+    #[test]
+    fn what_is_not_read_is_kept_as_it_is() {
+        let t = TempDir::new("registry-raw");
+        let acct = "a".repeat(52);
+        let newer = serde_json::json!({
+            "id": "teleport2345", "name": "beam", "origin": "https://beam.example", "local": false,
+            "kind": "teleport", "beam": { "power": 9, "targets": ["a", "b"] }
+        });
+        let reshaped = serde_json::json!({
+            "id": acct, "name": "spacesheep.dev", "origin": "https://spacesheep.dev", "local": false,
+            "kind": "spacesheep", "account": ["of", "another", "shape"]
+        });
+        let odd_id = serde_json::json!({
+            "id": "acct:abcdefghij", "name": "x", "origin": "https://evil.example", "local": false
+        });
+        let no_record = serde_json::json!({
+            "id": acct.replace('a', "b"), "name": "x", "origin": "https://spacesheep.dev",
+            "local": false, "kind": "spacesheep"
+        });
+        let plain = serde_json::json!({
+            "id": "abcdefghij", "name": "studio", "origin": "http://192.168.1.9:7373", "local": false
+        });
+        let file = serde_json::json!({
+            "receivers": [newer, plain, reshaped, odd_id, no_record],
+            "active": "abcdefghij",
+            "schema": { "v": 2 }
+        });
+        std::fs::write(t.path().join("receivers.json"), file.to_string()).unwrap();
+        let mut reg = Registry::load(t.path());
+        assert_eq!(reg.list().len(), 1, "one entry this version reads");
+        assert_eq!(reg.list()[0].id, "abcdefghij");
+        assert_eq!(reg.kept_unread(), 4);
+        // Saves of every sort leave them as they were.
+        let (r, _) = Receiver::from_url("http://192.168.1.10:7373").unwrap();
+        reg.upsert(r.clone()).unwrap();
+        reg.set_active(Some(&r.id)).unwrap();
+        reg.remove("abcdefghij").unwrap();
+        let v = list_on_disk(&t);
+        let on_disk = v["receivers"].as_array().unwrap();
+        assert_eq!(on_disk.len(), 5);
+        for kept in [&newer, &reshaped, &odd_id, &no_record] {
+            assert!(on_disk.contains(kept), "{kept}");
+        }
+        assert_eq!(v["schema"], serde_json::json!({ "v": 2 }));
+        assert_eq!(v["active"], r.id.as_str());
+        // An id that is kept is not one to take.
+        let mut thief = Receiver::account("https://spacesheep.dev", "a@b.example", "now").unwrap();
+        thief.id = acct.clone();
+        assert!(reg.upsert(thief).is_err());
+        assert_eq!(Registry::load(t.path()).kept_unread(), 4);
+        // The same id twice: the first is the entry, the second is only kept.
+        let twice = serde_json::json!({ "receivers": [plain, plain] });
+        std::fs::write(t.path().join("receivers.json"), twice.to_string()).unwrap();
         let reg = Registry::load(t.path());
-        assert_eq!(reg.list().len(), 2, "the list still loads");
-        assert_eq!(reg.list()[1].kind, Kind::Unknown);
-        assert!(!reg.list()[1].is_account());
+        assert_eq!((reg.list().len(), reg.kept_unread()), (1, 1));
+    }
+
+    /// A file that is no list is never saved over blind: a copy stays beside it.
+    #[test]
+    fn an_unreadable_list_is_copied_before_anything_is_saved() {
+        for (i, bad) in [
+            "{ \"receivers\": [ { \"id\": ",
+            "[]",
+            "{ \"receivers\": { \"not\": \"a list\" } }",
+            "",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let t = TempDir::new("registry-bad");
+            let path = t.path().join("receivers.json");
+            std::fs::write(&path, bad).unwrap();
+            let mut reg = Registry::load(t.path());
+            assert!(reg.existed(), "{i}: there was a list, however broken");
+            assert!(reg.list().is_empty());
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                *bad,
+                "{i}: untouched by a load"
+            );
+            let copy = t.path().join("receivers.json.bad");
+            assert_eq!(std::fs::read_to_string(&copy).unwrap(), *bad, "{i}");
+            let (r, _) = Receiver::from_url("http://192.168.1.10:7373").unwrap();
+            reg.upsert(r).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(&copy).unwrap(),
+                *bad,
+                "{i}: the copy stays"
+            );
+            assert_eq!(Registry::load(t.path()).list().len(), 1);
+        }
+        // No file at all is a first start, and leaves nothing behind.
+        let t = TempDir::new("registry-none");
+        assert!(!Registry::load(t.path()).existed());
+        assert_eq!(std::fs::read_dir(t.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_store_can_be_emptied_and_knows_its_place() {
+        let t = TempDir::new("keys-clear");
+        let a = KeyStore::File(t.path().join("a.json"));
+        let b = KeyStore::File(t.path().join("b.json"));
+        a.set("x", "1").unwrap();
+        a.clear_all().unwrap();
+        assert_eq!(a.get("x"), None);
+        assert!(!t.path().join("a.json").exists());
+        a.clear_all().unwrap();
+        assert!(a.same_place(&KeyStore::File(t.path().join("a.json"))));
+        assert!(!a.same_place(&b));
+        let m = KeyStore::memory();
+        assert!(m.same_place(&m) && !m.same_place(&KeyStore::memory()));
+        m.set("x", "1").unwrap();
+        m.clear_all().unwrap();
+        assert_eq!(m.get("x"), None);
+        let k = |s: &str| KeyStore::Keychain { service: s.into() };
+        assert!(
+            k("a").same_place(&k("a")) && !k("a").same_place(&k("b")) && !k("a").same_place(&a)
+        );
     }
 
     #[test]

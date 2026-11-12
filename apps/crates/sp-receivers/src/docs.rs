@@ -32,9 +32,10 @@ pub fn is_doc_name(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
 }
 
-/// An account id as a folder's name: what `id::account_id` writes and nothing else.
+/// An account id as a folder's name: lowercase letters and digits, as `id::account_id`
+/// writes (the Hub checks that it is an account's before it gets here).
 fn is_id(id: &str) -> bool {
-    (1..=32).contains(&id.len())
+    (1..=64).contains(&id.len())
         && id
             .bytes()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())

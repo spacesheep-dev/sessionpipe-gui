@@ -28,8 +28,8 @@ pub mod status;
 pub(crate) mod testutil;
 
 pub use account::{
-    AccountConfig, AccountRef, AccountState, AccountStatus, AccountView, ConnectState, ConnectView,
-    Disconnected, Problem,
+    AccountConfig, AccountRef, AccountState, AccountStatus, AccountView, Answered, Confirm,
+    ConnectState, ConnectView, DeviceAsked, Disconnected, Problem, Question,
 };
 pub use hub::{
     normalise_sha256, Backoff, Hub, HubConfig, HubEvent, ReceiverRef, StreamFrame,

@@ -280,7 +280,9 @@ pub fn alert(
         let ok: *mut AnyObject = msg_send![class!(UIAlertAction), actionWithTitle: nsstring(a.ok), style: 0isize, handler: &*yes];
         let _: () = msg_send![ac, addAction: cancel];
         let _: () = msg_send![ac, addAction: ok];
-        let _: () = msg_send![ac, setPreferredAction: ok];
+        // The preferred action is the bold one, and what a keyboard's return key gives.
+        let preferred = if a.prefer_cancel { cancel } else { ok };
+        let _: () = msg_send![ac, setPreferredAction: preferred];
         let none: Option<&block2::Block<dyn Fn()>> = None;
         let _: () = msg_send![vc, presentViewController: ac, animated: true, completion: none];
     }

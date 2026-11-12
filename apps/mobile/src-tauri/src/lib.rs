@@ -32,7 +32,7 @@ fn app_open_external<R: Runtime>(app: AppHandle<R>, url: String) -> Result<(), S
     Ok(())
 }
 
-fn open_external<R: Runtime>(app: &AppHandle<R>, url: &str) {
+pub(crate) fn open_external<R: Runtime>(app: &AppHandle<R>, url: &str) {
     #[cfg(target_os = "ios")]
     let _ = (app, uikit::open_external(url));
     #[cfg(target_os = "android")]
@@ -433,8 +433,10 @@ pub fn run() {
             net::rx_stream_close,
             acct::acct_status,
             acct::acct_connect_start,
+            acct::acct_connect_open,
             acct::acct_connect_cancel,
             acct::acct_disconnect,
+            acct::acct_device_ask,
             acct::acct_doc_get,
             acct::acct_doc_set,
             acct::acct_doc_delete,
@@ -451,7 +453,10 @@ pub fn run() {
             };
             std::fs::create_dir_all(&home)?;
             app.manage(settings::Settings::new(&home));
-            let hub = Hub::new(net::config(home, &version, &app.config().identifier));
+            let mut cfg = net::config(home, &version, &app.config().identifier);
+            // What the Hub asks the person about an account, it asks in a native alert.
+            cfg.account.confirm = Some(std::sync::Arc::new(acct::Alerts(app.handle().clone())));
+            let hub = Hub::new(cfg);
             hub.start(tauri::async_runtime::handle().inner().clone());
             app.manage(hub.clone());
             acct::watch(app.handle(), hub.clone());

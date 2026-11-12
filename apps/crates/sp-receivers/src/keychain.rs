@@ -69,6 +69,31 @@ pub fn delete(service: &str, account: &str) -> std::io::Result<()> {
     }
 }
 
+/// Deletes every item under `service`. An iPhone keeps keychain items when the app is
+/// deleted, while the list that named them goes with the app's container: on the first
+/// start with no list, whatever is under the account service belongs to an install that
+/// is gone, and nothing here could ever find it again to delete it.
+#[cfg(target_os = "ios")]
+pub fn delete_all(service: &str) -> std::io::Result<()> {
+    use security_framework::item::{ItemClass, ItemSearchOptions};
+    let done = ItemSearchOptions::new()
+        .class(ItemClass::generic_password())
+        .service(service)
+        .delete();
+    match done {
+        Ok(()) => Ok(()),
+        Err(e) if e.code() == NOT_FOUND => Ok(()),
+        Err(e) => Err(std::io::Error::other(e)),
+    }
+}
+
+/// Not on a Mac: the login keychain is the person's, an app does not sweep it, and the
+/// Hub keeps no account there (the desktop's account mode is off).
+#[cfg(not(target_os = "ios"))]
+pub fn delete_all(_: &str) -> std::io::Result<()> {
+    Ok(())
+}
+
 // Windows, Linux and Android credential stores come with their own builds; until then
 // there is none, and a caller that asked for one is told so.
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
