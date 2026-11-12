@@ -140,17 +140,24 @@ half is not. Until a page uses it, nothing a person sees changes.
 Everything above needs a GUI server. A phone has none: the app is the bundled page and a
 Rust hub. In this mode the page carries its own board, fed by the account's relay, and
 the hub is the only thing between the page and spacesheep. It holds the account's API key
-and does three things with it: connects, forwards six doors, and keeps a few documents.
-This section is the contract between the two halves.
+and does four things with it: connects, forwards five doors, asks spacesheep to trust
+this phone's own device key, and keeps a few documents. This section is the contract
+between the two halves.
+
+The page is not trusted by the hub. It is the app's own bundle, and it also draws what
+machines and sessions say; whatever it asks is checked as if anyone had asked, and what
+would add, replace or empty an account is the person's to confirm in a native alert the
+page cannot draw or click.
 
 ### An account in the receiver list
 
 A spacesheep account is an entry of the hub's receiver list with `kind: "spacesheep"`. It
 sits beside receivers, can be the active one (`rx_select`), survives restarts, and is
-removed by `acct_disconnect` or `rx_remove`. Its id is ten characters like a receiver's,
-of another preimage: the origin and the lowercase email. Another person's account at the
-same origin is another id, so whatever the page keeps by receiver id is never shown to
-the wrong person. There is one account per origin.
+removed by `acct_disconnect` (not by `rx_remove`, which refuses an account). Its id is
+the whole SHA-256 of its origin and lowercase email, in base32: 52 characters, where a
+receiver's is ten. Another person's account at the same origin is another id, so whatever
+the page keeps by receiver id is never shown to the wrong person. There is one account
+per origin.
 
 A receiver's row and a receiver's shell contract are what they were, field for field. An
 account's add three, flat:
@@ -164,23 +171,34 @@ account's add three, flat:
 `rxBase` is made the same way (`rx://localhost/<id>`). `state` is `"ok"`,
 `"unauthorized"` (spacesheep answered 401 to the key and nothing has succeeded since) or
 `"no_key"` (the entry is here and its key is not: a backup restored on another phone).
+`email` is printable ASCII, as spacesheep gave it; an address with anything else in it is
+not connected at all.
 
 Nothing that speaks to a receiver speaks to an account: no `/api/ui/*` request, no
 stream (`rx_stream` answers `Err("account_no_stream")`), no `spgui` cookie, no view
 window. The signer (`plugin:identity|*` with the account's id as `receiver`) works: the
 hub answers its two questions, the rp id and the machines' names, from the machines door.
 
+The list keeps what it does not read. An entry of a kind a newer version wrote, or one
+whose fields have another shape, stays in `receivers.json` as the JSON it was through
+every save; it is never listed to the page, never selectable, never spoken to. A file
+that is no list at all is copied to `receivers.json.bad` before anything is saved, and
+the list starts empty in memory.
+
 ### Commands
 
 Tauri commands, for the bundled page in the main window only. An error is
-`{ code, message, retryAfterS? }`. None takes or returns the key.
+`{ code, message, retryAfterS?, upstream? }`. None takes or returns the key, the connect's
+link, or a device key.
 
 | command | answer |
 |---|---|
-| `acct_status()` | `{ enabled, accounts: [{ id, origin, email, state, connectedAt, active }], connect }` |
-| `acct_connect_start({ origin? })` | a connect: `{ origin, digits, url, expiresAt, state: "pending" }` |
+| `acct_status()` | `{ enabled, accounts: [{ id, origin, email, state, connectedAt, active, deviceKeyId? }], connect }` |
+| `acct_connect_start({ origin? })` | a connect: `{ origin, digits, expiresAt, state: "pending" }` |
+| `acct_connect_open()` | nothing: the hub's link for the pending connect is opened in the system browser |
 | `acct_connect_cancel()` | `true` when a pending connect was stopped; `false` when it only cleared an outcome |
 | `acct_disconnect({ id })` | `{ id, origin, email, forgotten: true, revoked: false, revokeUrl, note }` |
+| `acct_device_ask({ id })` | `{ code, keyId, trustedOn, devicesUrl? }` |
 | `acct_doc_get({ id, name })` | the document, or `null` |
 | `acct_doc_set({ id, name, value })` | its size in bytes |
 | `acct_doc_delete({ id, name })` | `true` when there was one |
@@ -189,63 +207,114 @@ The event `account` carries `acct_status`'s value whenever it changes.
 
 **Connecting.** `origin` is https and nothing but an origin; absent, it is
 `https://spacesheep.dev`. (`http://localhost` and `http://127.0.0.1` are origins in a
-debug build only.) spacesheep.dev confirms a connect on its own page; for any other
-origin the app first asks the person in a native alert, as `rx_add` does, so nothing the
-page asks for adds an entry to the list on its own. The hub asks `POST <origin>/api/gui/connect` as
+debug build only.) The hub asks `POST <origin>/api/gui/connect` as
 `{ device: "iPhone", version }` (the page does not choose the name) and hands back the
-digits to show, the link to open and when it expires. The link is on the account's own
-origin or the connect fails. The page opens it with `app_open_external`. The poll token
-never leaves the hub.
+digits to show and when they expire. The link stays in the hub: it holds the code, and
+whoever has the code can have any account approve it. The page calls `acct_connect_open`
+and the hub hands the link to the system browser itself; the link is on the account's own
+origin, in its own scheme, or the connect fails. The poll token never leaves the hub
+either.
 
 The hub polls by itself: 0.8 s after the start, then every 2 s, backing off to a minute
 when spacesheep cannot be reached or asks to wait, until approved, denied or expired, and
 never past the code's end plus the two minutes spacesheep keeps an approved key for
 collection. The pending connect is kept beside the keys, so it goes on when the app was
 closed while the person confirmed in the browser; coming back to the front polls at once.
-`connect.state` goes `pending` → `approved` (with `receiver`, the account's id, and
-`email`), `denied`, `expired` or `failed` (with `error`: `bad_answer`, `keystore`, `io`).
-On `approved` the page calls `rx_select(receiver)`, as after `rx_add`. A second start
-while one is pending for the same origin returns the same connect.
 
-Start's errors: `unsupported` (no account mode in this build), `bad_origin`, `cancelled`
-(the person said no to another origin),
-`already_connected` (an account at that origin is `ok`: disconnect first; one that is
-`unauthorized` or `no_key` may connect again, and the same person keeps their id and
-documents), `unreachable`, `rate_limited` (with `retryAfterS`), `refused` (not a 201),
-`bad_answer`.
+When spacesheep says the code was approved, nothing is kept yet. The hub first checks that
+this connect is still the one, and that the account's id is free or is this same
+account's (otherwise `failed` with `conflict`). Then it asks the person, natively, whose
+account this phone is about to show (below). On yes: the key is kept, then the entry;
+and only then does another account at the same origin go, with its key and documents.
+On no: `declined`, and nothing was written or removed. `connect.state` goes `pending` →
+`approved` (with `receiver`, the account's id, and `email`), `denied` (on spacesheep),
+`declined` (here), `expired` or `failed` (with `error`: `bad_answer`, `conflict`,
+`keystore`, `io`, `busy`). On `approved` the page calls `rx_select(receiver)`, as after
+`rx_add`. A second start while one is live for the same origin returns the same connect.
 
-**Disconnecting** forgets the key, the documents and the entry on this phone. It does not
-revoke the key: `revoked` is always `false`, `revokeUrl` is spacesheep's Settings → API
-keys, and the page says so. What the page itself cached for that id (IndexedDB) is the
-page's to clear.
+Start's errors: `unsupported` (no account mode in this build), `bad_origin`, `busy` (a
+start is already under way, or another question is open), `already_connected` (an
+account at that origin is `ok`: disconnect first; one that is `unauthorized` or `no_key`
+may connect again, and the same person keeps their id, documents and device key id),
+`too_many_starts` (five in ten minutes from this app, with `retryAfterS`), `cancelled`
+(the person said no to another origin), `unreachable`, `rate_limited` (with
+`retryAfterS`), `refused` (not a 201), `bad_answer`.
+
+**Disconnecting** forgets the key, the documents and the entry on this phone; when
+documents are kept for the account, the person is asked first (`cancelled` on no). It
+does not revoke the key: `revoked` is always `false`, `revokeUrl` is spacesheep's
+Settings → API keys, and the page says so. What the page itself cached for that id
+(IndexedDB) is the page's to clear.
+
+**This phone's device key.** `acct_device_ask` asks spacesheep to trust the key that is
+in this phone's Secure Enclave for the account's rp id. The shell reads the key from the
+signer natively and the hub writes the whole request (`POST /api/gui/device` with
+`{ key, name }`: the signer's key as it is, the hub's own name for the device). The page
+supplies nothing, so no key but this phone's own can be enrolled through the app. The
+answer has the number spacesheep's Devices page shows beside the request (`code`), the
+key's id, the machines that trust it already, and the Devices link when it is on the
+account's origin. The hub remembers the key's id (`deviceKeyId`), and the status door
+below is about that key only. Errors: `unknown_account`, `unsupported` (no signer:
+Android), `signer` (with the signer's own code in `upstream`), `bad_key`,
+`unauthorized`, `rate_limited`, `refused` (with spacesheep's words in `message` and its
+code in `upstream`, e.g. `pro_required`, `talk_off`), `bad_answer`, and the hub's own
+codes below.
+
+### What the person is asked
+
+Native alerts, one at a time; a second question while one is open is refused (`busy`),
+never queued. Cancel is the preferred action of each. With nobody to ask, the answer is
+no. On Android "This iPhone" reads "This phone".
+
+| when | title | message | buttons |
+|---|---|---|---|
+| before a connect to any origin but `https://spacesheep.dev` | Use an account on this server? | This iPhone will ask {host} for an account and show its sessions. It is not spacesheep.dev: continue only if you know this server. | Cancel / Continue |
+| before an approved account is kept | Use this spacesheep account? | {email} on {host}. This iPhone will show its sessions. | Cancel / Use it |
+| before an account with documents is disconnected | Disconnect {email}? | Labels and read marks kept on this iPhone for it are removed. | Cancel / Disconnect |
 
 ### The doors
 
 The page asks `${rxBase}<path>`; the hub adds `Authorization: Bearer <key>` and forwards
-these and nothing else:
+these five and nothing else:
 
 | method | path | query | body | answer up to |
 |---|---|---|---|---|
-| GET | `/api/sessionpipe/v1/relay` | `since` 0…2^53−1, `limit` 1…500, `wait` 0…25, each optional | none | 32 MB |
-| GET | `/api/sessionpipe/v1/relay/machines` | none | none | 1 MB |
-| GET | `/api/sessionpipe/v1/relay/jobs` | `since`, optional | none | 1 MB |
-| POST | `/api/machines/<id>/jobs`, id `m_` + 16…40 of `A-Za-z0-9_-` | none | a JSON object, 256 KB | 1 MB |
-| POST | `/api/gui/device` | none | a JSON object, 16 KB | 1 MB |
-| GET | `/api/gui/device` | `id`, 43 of `A-Za-z0-9_-`, required | none | 1 MB |
+| GET | `/api/sessionpipe/v1/relay` | `since` 0…2^53−1, `limit` 1…500, `wait` 0…25, each optional | none | 8 MiB |
+| GET | `/api/sessionpipe/v1/relay/machines` | none | none | 1 MiB |
+| GET | `/api/sessionpipe/v1/relay/jobs` | `since`, optional | none | 1 MiB |
+| POST | `/api/machines/<id>/jobs`, id `m_` + 16…40 of `A-Za-z0-9_-`, never `m_box…` | none | a signed command, 256 KB | 1 MiB |
+| GET | `/api/gui/device` | none: the hub adds `id=<this phone's key>` | none | 1 MiB |
 
 A path is a door only when it is written exactly so: no `..`, no `//`, no encoded
-character, no trailing slash. A parameter is plain digits (or the id), given once; the
-hub rebuilds the query from the values it read. The request must come from the bundled
-origin. The hub's time limit is the relay's `wait` plus 20 s, and 15 s for the rest.
-At most eight requests are in flight at once.
+character, no trailing slash. A parameter is plain digits, given once; the hub rebuilds
+the query from the values it read. The request must come from the bundled origin.
+
+A send is a signed command as the signer writes one, and nothing else:
+`{ cmd, csig, grant }` or `{ cmd, confirm }`, where `cmd` is the JSON text that was
+signed, `csig` a string, `grant` and `confirm` objects (the unused ones may be `null`).
+A body with any other field, or with nothing signing the command, is `not_signed`. A
+cloud box (`m_box…`) is not a door at all: spacesheep runs a message for one with no
+signature, so the account's key alone would be enough to make it work.
+
+`POST /api/gui/device` is not a door for the page (`not_a_door`); `acct_device_ask` is
+how a key is enrolled.
+
+The hub's time limit is the relay's `wait` plus 20 s, and 15 s for the rest. Each
+account has its own room: six of the page's requests in flight, of which two relay reads;
+the hub's own requests (the signer's questions, the device key) are counted apart and
+wait their turn.
 
 Upstream gets the hub's headers only (`Authorization`, `Accept: application/json`,
-`Content-Type: application/json` on a POST, the hub's `User-Agent`): nothing the page
-sends as a header, `Authorization`, `Host` and `Cookie` included, reaches spacesheep. The
-page gets spacesheep's status and body as they are, and of its headers `Content-Type`
-and `Retry-After` (both readable across origins); `Cache-Control: no-store` is the hub's.
-No cookie is sent, kept or set. A redirect is neither followed nor passed on. No
-compression is asked for.
+`Accept-Encoding: gzip`, `Content-Type: application/json` on a POST, the hub's
+`User-Agent`): nothing the page sends as a header, `Authorization`, `Host` and `Cookie`
+included, reaches spacesheep. The page gets spacesheep's status and its body unpacked,
+and of its headers `Content-Type` and `Retry-After` (both readable across origins);
+`Cache-Control: no-store` is the hub's. An answer's limit is on its size unpacked: a
+relay page is at most 500 events of at most 262,144 bytes each on the wire, a kilobyte
+or so in practice, so 8 MiB holds a full page of events averaging 16 KB; a page over it
+is `answer_too_large`, the reader asks for a smaller `limit`, and at `limit=1` the
+largest event there can be fits thirty times over. No cookie is sent, kept or set. A
+redirect is neither followed nor passed on.
 
 A 401 from spacesheep marks the account `unauthorized` (on the jobs door only its
 `code: "unauthorized"` does: a 401 `unlock` there is the signer's grant). The key is kept;
@@ -257,22 +326,25 @@ on by name, so an answer with the header is the hub's and one without is spacesh
 
 | status | code | when |
 |---|---|---|
-| 403 | `not_a_door` | another path or method, or a path not written as a door is |
+| 403 | `not_a_door` | another path or method, a path not written as a door is, a cloud box, the device door's POST |
 | 400 | `bad_query` | a parameter the door does not take, out of range, or twice |
 | 400 | `bad_body` | a body on a GET, or one that is not a JSON object |
+| 400 | `not_signed` | a send that is not a signed command |
 | 413 | `too_large` | a body over the door's limit |
 | 403 | `forbidden_origin` | not the bundled page asking |
 | 403 | `account_off` | no account mode in this build |
 | 403 | `bad_account` | the entry's id is not its origin's and email's |
-| 401 | `not_connected` | no key here for the account |
-| 429 | `busy` | eight requests already in flight (`Retry-After: 1`) |
+| 401 | `not_connected` | no key here for this account at this origin |
+| 409 | `no_device_key` | the device door, before `acct_device_ask` ever succeeded |
+| 429 | `busy` | the account's room is full (`Retry-After: 1`) |
 | 502 | `unreachable` | spacesheep could not be reached, or its answer stopped |
 | 504 | `timeout` | no answer in the hub's time |
 | 502 | `redirected` | spacesheep answered 3xx |
-| 502 | `answer_too_large` | the answer is over the door's limit (ask for a smaller `limit`) |
+| 502 | `answer_too_large` | the answer, unpacked, is over the door's limit |
+| 502 | `bad_encoding` | the answer is packed some other way than gzip, or is not what it says |
 | 502 | `withheld` | the answer held the key |
 
-Every refusal in the upper nine rows comes before any network.
+Every refusal in the upper eleven rows comes before any network.
 
 ### The documents
 
@@ -287,19 +359,25 @@ of the relay.
 
 ### Where the key is
 
-- **iPhone:** the keychain, service `<bundle id>.account`, this device only, readable
-  after the first unlock. Never in a backup, never in iCloud Keychain.
-- **Android:** the account mode is off (below). When it is on, the key is in `keys.json`
-  in the app's private storage, owner-only, like receiver keys there today. That is
-  weaker: a rooted phone or a full-device backup reads it, and nothing ties it to the
-  hardware. The follow-up is the Android Keystore.
-- **Desktop:** the hub's account mode is off; the server connects an account there
-  (above). Were it on, the key would be where `KeyStore` puts receiver keys.
+Always in a store of its own, never the one receiver keys are in: a receiver is sent its
+key as a cookie, to an origin the list names, and an API key must not be findable that
+way. Given the same place for both, the hub turns the account mode off. A receiver's key
+is looked up only by an id a receiver can have (ten base32 characters).
 
-The key is under its own name (`acct:<id>`), never under the bare id a receiver's key is
-looked up by, and the id is its origin's and email's hash: an entry rewritten to point at
-another origin finds no key to send there. It is in no log line, error, URL, status file
-or returned value, and an answer that echoes it is withheld.
+- **iPhone:** the keychain, service `<bundle id>.account`, this device only, readable
+  after the first unlock. Never in a backup, never in iCloud Keychain. An iPhone keeps
+  keychain items when an app is deleted, so on the first start with no receiver list the
+  hub empties that service: what is there belongs to an install that is gone.
+- **Android:** the account mode is off (below). When it is on, the key is in
+  `account-keys.json` in the app's private storage, owner-only. That is weaker: a rooted
+  phone or a full-device backup reads it, and nothing ties it to the hardware. The
+  follow-up is the Android Keystore.
+- **Desktop:** the hub's account mode is off; the server connects an account there
+  (above).
+
+The key is kept with the origin it is for, and is given to a request for no other
+origin, whatever the list says and whatever id the entry has. It is in no log line,
+error, URL, status file or returned value, and an answer that echoes it is withheld.
 
 ### What does not work yet
 
@@ -308,7 +386,7 @@ or returned value, and an answer that echoes it is withheld.
   at start (with its Kotlin half in the build). Nothing does that today, so the first
   https request there would end the app; this is true of an https receiver on Android
   too. The hub refuses to connect an account there and the contract does not list
-  `"account"`.
+  `"account"`. Android also has no signer, so `acct_device_ask` is `unsupported` there.
 - **Notifications and needs-you.** The hub reads needs-you from a receiver's stream; an
   account has none, so no notification is posted for an account's session, and the status
   file's `needsYou` counts receivers only. Its `receivers[]` row for an account says
