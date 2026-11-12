@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The server's store reads its full events through a log it is handed (the session files on
+  disk, as before, or events held in memory), and nothing it imports needs Node, so the same
+  store can later run in the phone app's page. Nothing changes in what the GUI shows or keeps.
+- Checking an incoming event's id and tier no longer loads sessionpipe-core's Node code for two
+  rules: the receiver keeps a copy of them, and a test holds the copy to sessionpipe-core
+  0.13.6, so it runs in a page too. Events are accepted and refused exactly as before.
+
 ### Fixed
 
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
@@ -45,6 +54,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   goes only when you press that button; change the message first and the hold is dropped.
   It used to say "try again", and every try was held the same way, so such a message could
   not be sent from the GUI at all.
+- **Child sessions stay under their parent when the GUI restarts.** A session started by
+  another one (a subagent) was counted as its parent's child while the GUI ran, and every
+  restart forgot it: the parent showed no children and the agent row for that child no
+  longer opened the child's page, until the child sent something new.
 
 ## [0.8.0] - 2026-11-11
 
