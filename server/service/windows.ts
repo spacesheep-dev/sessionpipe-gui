@@ -128,7 +128,8 @@ export function taskArgv(text: string): string[] {
 // and in the system's language (the status column says "Running" only in English). The
 // scripts print a number at most; text goes to a file as UTF-8 (`Out-File`), so no code page
 // touches it. Cmdlets only, no .NET method calls: those are refused where PowerShell is
-// held to its constrained language mode.
+// held to its constrained language mode. (taskFolderRemoveScript is the one exception, and
+// is best-effort for that reason.)
 
 const psQuote = (s: string): string => `'${s.replace(/'/g, "''")}'`;
 
@@ -146,6 +147,25 @@ export function taskQueryScript(label: string, file: string): string {
     "if(-not $t){'none';exit 0}",
     `$t|Export-ScheduledTask|Out-File -Encoding utf8 -LiteralPath ${psQuote(file)}`,
     "[int]$t.State",
+  ].join(";");
+}
+
+/** `powershell -Command <this>` takes the \sessionpipe\ folder out of Task Scheduler when no
+ *  task is left in it and prints "removed"; with a task in it (another label's) it prints
+ *  "kept" and leaves it. schtasks can't delete a folder and no cmdlet does, so this goes
+ *  through the Schedule.Service COM object: method calls, which constrained language mode
+ *  refuses. The caller takes it as best-effort: where the script fails, the empty folder
+ *  stays. DeleteFolder refuses a folder that isn't empty too; the folder is listed first so
+ *  that isn't the only thing between this and another label's task. */
+export function taskFolderRemoveScript(): string {
+  return [
+    "$ErrorActionPreference='Stop'",
+    "try{$t=Get-ScheduledTask -TaskPath '\\sessionpipe\\'}catch{if($_.FullyQualifiedErrorId -notlike 'CmdletizationQuery_NotFound*'){throw};$t=$null}",
+    "if($t){'kept';exit 0}",
+    "$s=New-Object -ComObject Schedule.Service",
+    "$s.Connect()",
+    "$s.GetFolder('\\').DeleteFolder('sessionpipe',0)",
+    "'removed'",
   ].join(";");
 }
 

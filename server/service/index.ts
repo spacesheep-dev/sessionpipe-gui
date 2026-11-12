@@ -41,6 +41,7 @@ import {
   system32,
   TASK_RUNNING,
   taskArgv,
+  taskFolderRemoveScript,
   taskName,
   taskQueryScript,
   taskXml,
@@ -222,13 +223,15 @@ function serviceFile(env: ServiceEnv): string {
   return unitPath(env.home, env.label);
 }
 
+const POWERSHELL_FLAGS = ["-NoProfile", "-NonInteractive", "-Command"];
+
 /** Windows: runs a script that may write text to the file it is given (see windows.ts);
  *  `text` is what it wrote, without Out-File's byte-order mark and last line end. */
 function powershell(env: ServiceEnv, script: (file: string) => string): ExecResult & { text: string } {
   const tmp = mkdtempSync(path.join(os.tmpdir(), "sessionpipe-gui-"));
   const file = path.join(tmp, "answer.txt");
   try {
-    const r = env.exec(env.powershell, ["-NoProfile", "-NonInteractive", "-Command", script(file)]);
+    const r = env.exec(env.powershell, [...POWERSHELL_FLAGS, script(file)]);
     let text = "";
     try {
       text = readFileSync(file, "utf8")
@@ -239,6 +242,20 @@ function powershell(env: ServiceEnv, script: (file: string) => string): ExecResu
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+/** Windows: what takes Task Scheduler's \sessionpipe\ folder away once no task is left in
+ *  it (another label's can be: SP_SERVICE_LABEL). */
+const taskFolderCommand = (env: ServiceEnv): string[] => [
+  env.powershell,
+  ...POWERSHELL_FLAGS,
+  taskFolderRemoveScript(),
+];
+/** Runs it, after our task is deleted. Best-effort (windows.ts): where the folder can't be
+ *  removed it stays, empty, as it did; that fails nothing and nothing is said. */
+function removeTaskFolder(env: ServiceEnv): void {
+  const c = taskFolderCommand(env);
+  env.exec(c[0]!, c.slice(1));
 }
 
 /** Task Scheduler didn't answer: nothing is known about the task, so nothing is done to it. */
@@ -556,6 +573,7 @@ async function install(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     if (r.code !== 0) {
       if (env.platform === "win32") {
         if (c[1] !== "/Create") env.exec(env.schtasks, ["/Delete", "/TN", file, "/F"]);
+        removeTaskFolder(env);
         rmSync(xmlFile, { force: true });
       } else rmSync(file, { force: true });
       if (env.platform === "linux") env.exec(env.systemctl, ["--user", "daemon-reload"]);
@@ -702,6 +720,7 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     for (const c of commands) env.out(`$ ${c.join(" ")}`);
     if (has && env.platform !== "win32") env.out(`$ rm ${file}`);
     if (env.platform === "linux") env.out(`$ ${env.systemctl} --user daemon-reload`);
+    if (env.platform === "win32") env.out(`$ ${taskFolderCommand(env).join(" ")}`);
     if (stop?.left) env.out(leftRunning(stop.left, wasState, env.home));
     env.out("dry run: nothing stopped or removed");
     return 0;
@@ -725,6 +744,7 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     );
     return 1;
   }
+  if (env.platform === "win32") removeTaskFolder(env);
   if (stop?.left) {
     env.out(`removed ${env.label}: it won't start at login`);
     env.err(leftRunning(stop.left, wasState, env.home));

@@ -27,6 +27,7 @@ import {
   TASK_RUNNING,
   taskArguments,
   taskArgv,
+  taskFolderRemoveScript,
   taskName,
   taskQueryScript,
   taskXml,
@@ -72,7 +73,12 @@ exit 0
  *  powershell that answers windows.ts's two scripts: the task's state, and its definition
  *  written as Out-File does (UTF-8 with a byte-order mark) from what the fake schtasks
  *  keeps; and a process's command line from the file proc.<pid> (no file: no such process).
- *  $FAKE_FAIL=powershell makes it fail, $FAKE_FAIL=process only the process question. */
+ *  $FAKE_FAIL=powershell makes it fail, $FAKE_FAIL=process only the process question.
+ *  The \\sessionpipe\\ folder is the file task.folder, there from the first /Create. The
+ *  fake powershell answers the folder script as Task Scheduler would: "kept" while a task is
+ *  in the folder (ours, or the file task.other: another label's); else the folder goes, logged
+ *  as "powershell DeleteFolder sessionpipe"; no folder is an error, and $FAKE_FAIL=folder
+ *  refuses the COM object as constrained language mode does. */
 function fakeSchtasks(): string {
   const p = path.join(dir, "schtasks");
   writeFileSync(
@@ -82,7 +88,7 @@ echo "schtasks $*" >> "${log}"
 [ -n "$FAKE_FAIL" ] && [ "$1" = "$FAKE_FAIL" ] && { echo "ERROR: Access is denied." >&2; exit 1; }
 t="${dir}/task.xml"; st="${dir}/task.status"
 case "$1" in
-  /Create) iconv -f UTF-16 -t UTF-8 "$5" > "$t"; echo Ready > "$st";;
+  /Create) iconv -f UTF-16 -t UTF-8 "$5" > "$t"; echo Ready > "$st"; touch "${dir}/task.folder";;
   /Query) [ -f "$t" ] || { echo "ERROR: The system cannot find the file specified." >&2; exit 1; }
     if [ "$4" = "/XML" ]; then LC_ALL=C sed 's/[^ -~]/?/g' "$t"; else printf '"HOST","%s","N/A","%s"\\r\\n' "$3" "$([ "$(cat "$st")" = Running ] && echo Wird_ausgefuehrt || echo Bereit)"; fi;;
   /Run) echo Running > "$st";;
@@ -111,6 +117,10 @@ function fakePowershell(): string {
 t="${dir}/task.xml"; st="${dir}/task.status"
 file=$(printf '%s' "$4" | sed -n "s/.*-LiteralPath '\\([^']*\\)'.*/\\1/p")
 case "$4" in
+  *Schedule.Service*) [ "$FAKE_FAIL" = folder ] && { echo "New-Object : Cannot create type. Only core types are supported in this language mode." >&2; exit 1; }
+    if [ -f "$t" ] || [ -f "${dir}/task.other" ]; then echo kept; exit 0; fi
+    [ -f "${dir}/task.folder" ] || { echo "Exception calling DeleteFolder: The system cannot find the file specified." >&2; exit 1; }
+    rm -f "${dir}/task.folder"; echo "powershell DeleteFolder sessionpipe" >> "${log}"; echo removed;;
   *Get-ScheduledTask*) [ -f "$t" ] || { echo none; exit 0; }
     { printf '\\357\\273\\277'; cat "$t"; printf '\\r\\n'; } > "$file"
     if [ "$(cat "$st" 2>/dev/null)" = Running ]; then echo 4; else echo 3; fi;;
@@ -776,6 +786,21 @@ describe("the Windows scheduled task", () => {
     for (const text of [script, process]) expect(text).not.toMatch(/\]::/);
   });
 
+  it("removes the \\sessionpipe\\ folder only after listing it and finding no task in it", () => {
+    const script = taskFolderRemoveScript();
+    const listed = script.indexOf("$t=Get-ScheduledTask -TaskPath '\\sessionpipe\\'}catch{");
+    const kept = script.indexOf("if($t){'kept';exit 0}");
+    const removed = script.indexOf("$s.GetFolder('\\').DeleteFolder('sessionpipe',0)");
+    expect(listed).toBeGreaterThan(0);
+    expect(kept).toBeGreaterThan(listed);
+    expect(removed).toBeGreaterThan(kept);
+    // "No such folder" is the only error read as empty; any other fails the script before the delete.
+    expect(script).toContain("-notlike 'CmdletizationQuery_NotFound*'){throw}");
+    expect(script.startsWith("$ErrorActionPreference='Stop';")).toBe(true);
+    // One argument to powershell -Command: no double quote for node to escape.
+    expect(script).not.toContain('"');
+  });
+
   it("knows the receiver by its command line: the task's cli on the task's state dir", () => {
     const [node, cli, , , , state] = spec.argv as [string, string, string, string, string, string];
     const line = `"${node}" "${cli}" --port 7828 --state "${state}" --quiet`;
@@ -858,13 +883,80 @@ describe("service on Windows", () => {
       `schtasks /End /TN ${name}`,
       `taskkill /PID ${process.pid} /T /F`,
       `schtasks /Delete /TN ${name} /F`,
+      "powershell DeleteFolder sessionpipe",
     ]);
     expect(out.at(-1)).toContain("won't start at login");
     // The killed receiver never removed its run.json; uninstall did.
     expect(existsSync(path.join(state, "run.json"))).toBe(false);
     expect(await runService({ verb: "status" }, e)).toBe(3);
+    writeFileSync(log, "");
     expect(await runService({ verb: "uninstall" }, e)).toBe(0);
     expect(out.at(-1)).toContain("nothing to do");
+    expect(readFileSync(log, "utf8")).toBe("");
+  });
+
+  it("uninstall takes the \\sessionpipe\\ folder out of Task Scheduler with its last task, and only then", async () => {
+    const e = win();
+    const state = path.join(dir, "s");
+    const folder = path.join(dir, "task.folder");
+    const removals = () => calls().filter((c) => c.startsWith("powershell"));
+    const done = `removed ${SERVICE_LABEL}: stopped, and it won't start at login`;
+    // Another label's task is in the folder (SP_SERVICE_LABEL): the folder stays.
+    await runService({ verb: "install", port: 7829, state }, e);
+    writeFileSync(path.join(dir, "task.other"), "");
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(existsSync(path.join(dir, "task.xml"))).toBe(false);
+    expect(existsSync(folder)).toBe(true);
+    expect(removals()).toEqual([]);
+    expect(out.at(-1)).toBe(done);
+    rmSync(path.join(dir, "task.other"));
+    // The folder can't be removed (constrained language mode refuses the COM object): the task
+    // is gone, uninstall has not failed, and nothing is said about it.
+    await runService({ verb: "install", port: 7829, state }, e);
+    failVerb = "folder";
+    out = [];
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(existsSync(path.join(dir, "task.xml"))).toBe(false);
+    expect(existsSync(folder)).toBe(true);
+    expect(out).toEqual([done]);
+    expect(errs).toEqual([]);
+    failVerb = "";
+    // --dry-run shows the script it would run, and runs nothing.
+    await runService({ verb: "install", port: 7829, state }, e);
+    out = [];
+    expect(await runService({ verb: "uninstall", dryRun: true }, e)).toBe(0);
+    expect(out).toEqual([
+      `$ ${e.schtasks} /End /TN ${name}`,
+      `$ ${e.schtasks} /Delete /TN ${name} /F`,
+      `$ ${e.powershell} -NoProfile -NonInteractive -Command ${taskFolderRemoveScript()}`,
+      "dry run: nothing stopped or removed",
+    ]);
+    expect(existsSync(folder)).toBe(true);
+    expect(removals()).toEqual([]);
+    // Ours was the last task: the folder goes after it, once.
+    writeFileSync(log, "");
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(calls().filter((c) => !c.includes("/Query"))).toEqual([
+      `schtasks /End /TN ${name}`,
+      `schtasks /Delete /TN ${name} /F`,
+      "powershell DeleteFolder sessionpipe",
+    ]);
+    expect(existsSync(folder)).toBe(false);
+    expect(errs).toEqual([]);
+    // A task under our name that runs something else is removed by uninstall as before, and
+    // the folder with it.
+    writeFileSync(path.join(dir, "task.xml"), "<Exec><Command>C:\\x\\backup.exe</Command></Exec>");
+    writeFileSync(path.join(dir, "task.status"), "Ready");
+    writeFileSync(folder, "");
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(existsSync(folder)).toBe(false);
+    // Still loaded (the delete failed): the folder is not asked about.
+    await runService({ verb: "install", port: 7829, state }, e);
+    writeFileSync(log, "");
+    failVerb = "/Delete";
+    expect(await runService({ verb: "uninstall" }, e)).toBe(1);
+    expect(removals()).toEqual([]);
+    expect(existsSync(folder)).toBe(true);
   });
 
   it("deletes the task again when it won't run, and says nothing is installed", async () => {
@@ -872,6 +964,9 @@ describe("service on Windows", () => {
     expect(await runService({ verb: "install", state: path.join(dir, "s") }, win())).toBe(1);
     expect(calls()).toContain(`schtasks /Delete /TN ${name} /F`);
     expect(existsSync(path.join(dir, "task.xml"))).toBe(false);
+    // The folder the task was created in goes with it.
+    expect(calls().at(-1)).toBe("powershell DeleteFolder sessionpipe");
+    expect(existsSync(path.join(dir, "task.folder"))).toBe(false);
     expect(errs[0]).toContain("Access is denied.");
     expect(errs[0]).toContain("(nothing installed)");
   });

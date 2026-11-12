@@ -20,6 +20,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   not at all. A task that 0.8.0 installed gets the new line the next time `service install`
   rewrites it (a new Node or package path, a changed option, or a receiver that is not
   running), or at once with `service uninstall` then `service install`.
+  And `service uninstall` takes the `\sessionpipe\` folder out of Task Scheduler with its
+  last task, where it used to leave it there empty. The folder stays while another task is
+  in it, and where PowerShell is held to constrained language mode, which cannot remove it.
 
 ## [0.8.0] - 2026-11-11
 
