@@ -541,6 +541,24 @@
   color: var(--fg);
   font-weight: 600;
 }
+/* What will be sent: the held words, two lines at most. */
+.held-what {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+/* A start's machine and folder, under its words. */
+.held-where {
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+/* The receiver's reason, said to be theirs. */
 .held-why {
   color: var(--fg-2);
   overflow-wrap: anywhere;
@@ -552,11 +570,13 @@
   margin-top: 2px;
 }
 /* In a sheet (New session, Ask another agent): inside its padding, above its foot. */
-.ns-sheet > .held {
+.ns-sheet > .held-live > .held {
   margin: 0 20px 12px;
 }
 /* The phone's sheet: the width of its foot, above the status line. */
-.ns-group-foot > .held {
+.ns-group-foot > .held-live {
   align-self: stretch;
+}
+.ns-group-foot > .held-live > .held {
   margin: 0 0 4px;
 }
