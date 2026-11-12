@@ -236,8 +236,7 @@ export function setEnabled(dir: string, cfg: GuiConfig, key: string, on: boolean
   return next;
 }
 
-/** This package's version, from package.json beside dist/ (or the repo root from source). */
-export function packageVersion(): string {
+function readPackageVersion(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   for (const c of [path.join(here, "..", "package.json"), path.join(here, "..", "..", "package.json")]) {
     try {
@@ -246,4 +245,15 @@ export function packageVersion(): string {
     } catch {}
   }
   return "0.0.0";
+}
+
+/** Read once, when the code is loaded: the version this process runs. Read again on every
+ *  call (as it was up to 0.8.0), a receiver whose package `npm i -g` replaced under it
+ *  answered /api/ui/info with the new version while it still ran the old code. */
+const VERSION = readPackageVersion();
+
+/** This package's version, from package.json beside dist/ (or the repo root from source),
+ *  as it was when this process loaded it. */
+export function packageVersion(): string {
+  return VERSION;
 }

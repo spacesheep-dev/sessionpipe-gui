@@ -17,6 +17,70 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **`service install` restarts a receiver that is still running an older copy of itself.**
+  After `npm i -g` put a new sessionpipe-gui over the old one at the same place, the
+  service's file already named the new files, so `service install` said "already running
+  0.7.2" and left the old process running the old code; the page, newer, then called
+  routes that server did not have ("HTTP 404" under Settings › Data › spacesheep). It now
+  restarts it and waits for this version to answer ("updating … 0.7.2 → 0.8.0"), on macOS,
+  Linux and Windows. A receiver on the port that isn't the service's own (one started by
+  hand while the service is down: its `run.json` names a pid that isn't the service
+  manager's, or on Windows a command line that isn't the task's) is left alone, with a line
+  that says so; a receiver that couldn't write its `run.json` counts as the service's when
+  the manager says the service runs. When the new
+  version doesn't come up after the old one was stopped, it says so on stderr and exits 4.
+  An older sessionpipe-gui no longer quietly replaces a newer service that runs from
+  somewhere else (the version read from the `package.json` beside the service's CLI): it
+  says so and leaves it, unless `--downgrade`; nor a service that runs a developer's
+  checkout (a folder with `server/cli.ts` or `.git` beside `dist/`). A re-install with other
+  `--port`, `--state` or `--host` by the same CLI or a newer version works as before. One
+  `service install` or `uninstall` runs at a time (the lock is
+  `service-<label>.lock` in the default state folder, `~/.local/state/sessionpipe-gui`;
+  a crashed run's is taken over), and a `bootout` that finds the job already gone counts as
+  stopped. `--if-installed` acts on a service that is there, installs none, never moves one
+  to an older version, and exits 5 where it did nothing.
+- **A receiver reports the version it is running**, read once when it starts. It read
+  `package.json` on every request, so one whose package was replaced under it answered
+  `/api/ui/info` with the new version while it ran the old code, and nothing could tell it
+  was stale. `service install` takes the version from `run.json` (written once, at start),
+  so it also restarts a receiver of 0.8.0 or earlier that answers with the wrong one.
+- **The desktop app brings an older receiver on this computer up to its own version,**
+  downloading nothing without a click. An app that updated itself kept talking to the
+  receiver it had, which still ran the version that installed it. Once per launch, when
+  this computer's receiver (the one its `run.json` names) first connects and runs an older
+  version than the app: where a `sessionpipe-gui` on PATH is at the app's version or newer,
+  the app runs its `service install --if-installed` in the background (the service upgraded
+  in place, with its port and state folder; none installed where there was none). Where only
+  the app's own release through `npx` would do, that is a download, and nothing runs: the
+  app's log says so and Settings › Data offers it as a click. A failure before the old
+  receiver was stopped leaves it running; one after it (exit 4) is logged as that, and an
+  `--if-installed` that did nothing (exit 5) is logged as nothing done. "Start sessionpipe"
+  and the click prefer the app's release through `npx` over an older CLI on PATH. The click
+  runs a `sessionpipe-gui` on PATH only when its version is known and at least the app's;
+  when `npx` can't download it (offline, GitHub blocked), or there is nothing that could,
+  it changes nothing and says so. "Start sessionpipe" uses the CLI on PATH instead only
+  where that can't make the service older (no service installed, or a CLI at least the
+  version it runs). The app runs one install at a time. An install still downloading when
+  the app stops waiting (180 s) is stopped: on macOS and Linux with what `npx` started, on
+  Windows `npx` alone. One whose `sessionpipe-gui` has begun is never killed: the app stops
+  waiting and says it is still finishing, keeps reading what it prints until it ends, and
+  logs how it ended.
+- **In the app, an option the receiver is too old for says so** instead of the receiver's
+  "HTTP 404". Settings › Data › "Use a spacesheep account" against a receiver older than
+  0.7.5: "sessionpipe on this computer is 0.7.2, which is older than this option." with
+  Connect… off, an **Update sessionpipe** button (the app's release through `npx`, with its
+  progress line), and the command to copy. When the update stopped the old receiver and the
+  new one didn't come up: "The update didn't finish, and sessionpipe isn't running right
+  now. Press Update again." with the log's path under it; any other failure: "Couldn't
+  update it. Press Update again, or run the command below." with the installer's line under
+  it. An update already running when Settings opens shows as working. "This computer" is
+  the receiver the app's launch check found to be this computer's, not any loopback
+  address; any other is "… Update it there." The version is read again after the update,
+  when the connection comes back and when the window comes forward; a notice that a 404
+  brought stays until another receiver process answers. Only the receiver's own 404 counts (not the app proxy's for a receiver it doesn't
+  know), and a version that isn't below the option's is left out of the sentence. A page
+  the receiver serves itself never says it. On a phone a sentence over a command (this one,
+  and About's update command) stays in one column.
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH

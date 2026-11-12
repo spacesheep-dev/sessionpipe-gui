@@ -13,6 +13,8 @@
     "allow-rx-select",
     "allow-rx-discover",
     "allow-rx-start-local",
+    "allow-rx-local-update",
+    "allow-rx-update-local",
     "allow-rx-stream",
     "allow-rx-stream-close",
     "allow-app-settings-get",
