@@ -2,8 +2,9 @@
 // Envelope validation by hand (PROTOCOL.md §2–3). sessionpipe-core/schema would do it
 // with zod, which is not a dependency here. One event at a time: a bad event is
 // rejected with a reason, the batch goes on (HTTP.md §2).
-import { isUlid, TYPE_TIER } from "sessionpipe-core";
+
 import type { ProtocolEvent, Tier } from "../../shared/api.js";
+import { isUlid, TYPE_TIER } from "./core-copy.js";
 
 export const MAX_TIER: Tier = 3;
 

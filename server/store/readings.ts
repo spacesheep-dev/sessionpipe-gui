@@ -25,7 +25,7 @@ import {
   type Tier,
   type TurnStats,
 } from "../../shared/api.js";
-import { SESSION_REF } from "../control/parse.js";
+import { SESSION_REF } from "../control/refs.js";
 import { changedPaths } from "./paths.js";
 import { detach, PREVIEW_CHARS } from "./slim.js";
 
