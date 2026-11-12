@@ -16,6 +16,7 @@ import {
   SERVICE_LABEL,
   type ServiceEnv,
   servicePath,
+  serviceTools,
 } from "./index.js";
 import { launchAgentPath, launchAgentPlist, parseLaunchctlPrint, plistArgv } from "./launchd.js";
 import { parseSystemctlShow, systemdUnit, unitArgv, unitPath } from "./systemd.js";
@@ -314,16 +315,20 @@ describe("service install (macOS)", () => {
     expect(errs.join("\n")).toMatch(/bootstrap gui\/501 failed: boom: bootstrap \(nothing installed\)/);
   });
 
-  it("uses the label from SP_SERVICE_LABEL and the tools from SP_LAUNCHCTL / SP_SYSTEMCTL", () => {
+  it("uses the label from SP_SERVICE_LABEL and the tools from SP_LAUNCHCTL / SP_SYSTEMCTL / SP_SCHTASKS / SP_TASKKILL / SP_POWERSHELL", () => {
     const saved = { ...process.env };
     try {
       process.env.SP_SERVICE_LABEL = "dev.spacesheep.sessionpipe-gui.test-7829";
       process.env.SP_LAUNCHCTL = "/fake/launchctl";
       process.env.SP_SYSTEMCTL = "/fake/systemctl";
+      process.env.SP_SCHTASKS = "/fake/schtasks";
+      process.env.SP_TASKKILL = "/fake/taskkill";
+      process.env.SP_POWERSHELL = "/fake/powershell";
       const e = processEnv("/d");
       expect(e.label).toBe("dev.spacesheep.sessionpipe-gui.test-7829");
       expect(e.launchctl).toBe("/fake/launchctl");
       expect(e.systemctl).toBe("/fake/systemctl");
+      expect([e.schtasks, e.taskkill, e.powershell]).toEqual(["/fake/schtasks", "/fake/taskkill", "/fake/powershell"]);
       expect(e.node).toBe(process.execPath);
     } finally {
       process.env = saved;
@@ -681,6 +686,55 @@ describe("the Windows scheduled task", () => {
     expect(isOurs(taskArgv(other))).toBe(false);
   });
 
+  it("names schtasks, taskkill and PowerShell in full under %SystemRoot%\\System32, never by a bare name", () => {
+    const under = (root: string) => ({
+      schtasks: `${root}\\System32\\schtasks.exe`,
+      taskkill: `${root}\\System32\\taskkill.exe`,
+      powershell: `${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`,
+    });
+    expect(serviceTools({ SystemRoot: "D:\\WINNT", windir: "E:\\other" }, "win32")).toMatchObject(under("D:\\WINNT"));
+    // A backslash at the end, and forward slashes.
+    expect(serviceTools({ SystemRoot: "C:\\Windows\\" }, "win32")).toMatchObject(under("C:\\Windows"));
+    expect(serviceTools({ SystemRoot: "c:/windows" }, "win32")).toMatchObject(under("c:\\windows"));
+    // No %SystemRoot%: %windir%, and with neither C:\Windows.
+    expect(serviceTools({ windir: "D:\\WINNT" }, "win32")).toMatchObject(under("D:\\WINNT"));
+    expect(serviceTools({}, "win32")).toMatchObject(under("C:\\Windows"));
+    // Only a full path on a drive counts: anything else would be looked for from the working
+    // directory, which is what naming them in full is there to stop.
+    for (const root of [
+      "",
+      "Windows",
+      ".\\Windows",
+      "C:Windows",
+      "\\Windows",
+      "\\\\server\\share\\Windows",
+      "%SystemRoot%",
+    ]) {
+      expect(serviceTools({ SystemRoot: root }, "win32")).toMatchObject(under("C:\\Windows"));
+      expect(serviceTools({ SystemRoot: root, windir: "D:\\WINNT" }, "win32")).toMatchObject(under("D:\\WINNT"));
+    }
+    // A stand-in named by SP_* is still the one run; off Windows nothing changes.
+    const standIns = {
+      SP_SCHTASKS: "/fake/schtasks",
+      SP_TASKKILL: "/fake/taskkill",
+      SP_POWERSHELL: "/fake/powershell",
+    };
+    expect(serviceTools({ SystemRoot: "D:\\WINNT", ...standIns }, "win32")).toMatchObject({
+      schtasks: "/fake/schtasks",
+      taskkill: "/fake/taskkill",
+      powershell: "/fake/powershell",
+    });
+    for (const platform of ["darwin", "linux"] as const) {
+      expect(serviceTools({ SystemRoot: "D:\\WINNT" }, platform)).toEqual({
+        launchctl: "launchctl",
+        systemctl: "systemctl",
+        schtasks: "schtasks",
+        taskkill: "taskkill",
+        powershell: "powershell.exe",
+      });
+    }
+  });
+
   it("names a word conhost and cmd can't carry as it is", () => {
     expect(unsafeWord(spec.argv)).toBeUndefined();
     for (const w of ['a"b', "a&b", "a|b", "a<b", "a>b", "a^b", "%TEMP%", ""]) expect(unsafeWord(["x", w])).toBe(w);
@@ -945,5 +999,53 @@ describe("service on Windows", () => {
     expect(out.join("\n")).toContain("<Command>conhost.exe</Command>");
     expect(out).toContain(`$ ${path.join(dir, "schtasks")} /Run /TN ${name}`);
     expect(calls().filter((c) => !c.includes("/Query"))).toEqual([]);
+  });
+
+  it("runs the tools by their full paths and shows those in --dry-run; a message names them by file name", async () => {
+    // Windows as it is: the three tools under System32 (the fakes stand in, by file name).
+    const sys = "C:\\Windows\\System32";
+    const fakes = win();
+    const ran = new Set<string>();
+    const e: ServiceEnv = {
+      ...fakes,
+      schtasks: `${sys}\\schtasks.exe`,
+      taskkill: `${sys}\\taskkill.exe`,
+      powershell: `${sys}\\WindowsPowerShell\\v1.0\\powershell.exe`,
+      exec: (cmd, args) => {
+        ran.add(cmd);
+        return fakes.exec(path.join(dir, path.win32.basename(cmd, ".exe")), args);
+      },
+    };
+    const state = path.join(dir, "s");
+    failVerb = "/Create";
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(1);
+    expect(errs).toEqual(["schtasks.exe /Create /TN failed: ERROR: Access is denied. (nothing installed)"]);
+    failVerb = "";
+    expect(await runService({ verb: "install", port: 7829, state, dryRun: true }, e)).toBe(0);
+    expect(out).toContain(`$ ${sys}\\schtasks.exe /Create /TN ${name} /XML ${path.join(state, "service-task.xml")} /F`);
+    expect(out).toContain(`$ ${sys}\\schtasks.exe /Run /TN ${name}`);
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    writeRunFile(state, { port: 7829, pid: 4242, version: "0.6.0", url: "http://127.0.0.1:7829", startedAt: "now" });
+    proc(4242, receiverLine(e, state));
+    out = [];
+    expect(await runService({ verb: "uninstall", dryRun: true }, e)).toBe(0);
+    expect(out.slice(0, 3)).toEqual([
+      `$ ${sys}\\schtasks.exe /End /TN ${name}`,
+      `$ ${sys}\\taskkill.exe /PID 4242 /T /F`,
+      `$ ${sys}\\schtasks.exe /Delete /TN ${name} /F`,
+    ]);
+    failVerb = "/Delete";
+    errs = [];
+    expect(await runService({ verb: "uninstall" }, e)).toBe(1);
+    expect(errs).toEqual([
+      `${SERVICE_LABEL} is still loaded (schtasks.exe /Delete /TN: ERROR: Access is denied.); try again, or \`schtasks.exe /Delete /TN ${name} /F\``,
+    ]);
+    failVerb = "powershell";
+    errs = [];
+    expect(await runService({ verb: "status" }, e)).toBe(1);
+    expect(errs).toEqual([
+      "can't read Task Scheduler through powershell.exe: powershell: this system has scripts turned off.",
+    ]);
+    expect([...ran].sort()).toEqual([e.powershell, e.schtasks, e.taskkill].sort());
   });
 });

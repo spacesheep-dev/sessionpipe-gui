@@ -13,8 +13,8 @@
 //
 // Everything outside the process (the platform, HOME, the uid, launchctl / systemctl, the
 // port probe) comes in through `ServiceEnv`, so tests run against a temp HOME and a fake
-// launchctl (`SP_LAUNCHCTL`, `SP_SYSTEMCTL`, `SP_SCHTASKS`, `SP_TASKKILL`) and never touch
-// the real session.
+// launchctl (`SP_LAUNCHCTL`, `SP_SYSTEMCTL`, `SP_SCHTASKS`, `SP_TASKKILL`, `SP_POWERSHELL`)
+// and never touch the real session.
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -38,6 +38,7 @@ import {
   isReceiverCommandLine,
   parseTaskQuery,
   processQueryScript,
+  system32,
   TASK_RUNNING,
   taskArgv,
   taskName,
@@ -103,6 +104,24 @@ export interface ServiceEnv {
   err(line: string): void;
 }
 
+/** The programs `service` runs. On Windows schtasks, taskkill and PowerShell are named in
+ *  full, under %SystemRoot%\System32 (windows.ts), never by a bare name; an `SP_*` variable
+ *  names a stand-in, as the tests do. */
+export function serviceTools(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): Pick<ServiceEnv, "launchctl" | "systemctl" | "schtasks" | "taskkill" | "powershell"> {
+  const win = platform === "win32";
+  return {
+    launchctl: env.SP_LAUNCHCTL || "launchctl",
+    systemctl: env.SP_SYSTEMCTL || "systemctl",
+    schtasks: env.SP_SCHTASKS || (win ? system32(env, "schtasks.exe") : "schtasks"),
+    taskkill: env.SP_TASKKILL || (win ? system32(env, "taskkill.exe") : "taskkill"),
+    powershell:
+      env.SP_POWERSHELL || (win ? system32(env, "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe"),
+  };
+}
+
 /** The real environment, with the test overrides read from `process.env`. */
 export function processEnv(defaultState: string): ServiceEnv {
   const env = process.env;
@@ -115,11 +134,7 @@ export function processEnv(defaultState: string): ServiceEnv {
     home: env.HOME ?? os.homedir(),
     uid: process.getuid?.() ?? 0,
     label: env.SP_SERVICE_LABEL || SERVICE_LABEL,
-    launchctl: env.SP_LAUNCHCTL || "launchctl",
-    systemctl: env.SP_SYSTEMCTL || "systemctl",
-    schtasks: env.SP_SCHTASKS || "schtasks",
-    taskkill: env.SP_TASKKILL || "taskkill",
-    powershell: env.SP_POWERSHELL || "powershell.exe",
+    ...serviceTools(env, process.platform),
     user: env.USERDOMAIN && env.USERNAME ? `${env.USERDOMAIN}\\${env.USERNAME}` : os.userInfo().username,
     node: process.execPath,
     cli,
@@ -175,6 +190,11 @@ const tilde = (p: string, home: string) =>
 /** The last part of a path written with either separator (a Windows argv read on any OS). */
 const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** How a message names a program. On Windows by its file name (`schtasks.exe`), not the full
+ *  path it is run by: `--dry-run` shows that one. */
+const named = (env: ServiceEnv, cmd: string) => (env.platform === "win32" ? path.win32.basename(cmd) : cmd);
+/** The first words of a command, as a message names it. */
+const head = (env: ServiceEnv, c: string[]) => [named(env, c[0] ?? ""), ...c.slice(1, 3)].join(" ");
 
 /** The PATH the service runs with: launchd and systemd start programs with a bare one, and
  *  the receiver runs `sessionpipe` (pairing) and `npm` (view add) found on it. */
@@ -237,7 +257,9 @@ function queryTask(env: ServiceEnv): { state: number; xml: string } | null {
     if (!r.text) throw new Error("it wrote no task definition");
     return { state, xml: r.text };
   } catch (e) {
-    throw new TaskQueryError(`can't read Task Scheduler through ${env.powershell}: ${(e as Error).message}`);
+    throw new TaskQueryError(
+      `can't read Task Scheduler through ${named(env, env.powershell)}: ${(e as Error).message}`,
+    );
   }
 }
 
@@ -347,8 +369,8 @@ export async function runService(o: ServiceOptions, env: ServiceEnv): Promise<nu
   }
 }
 
-const failedCommand = (c: string[], r: ExecResult) =>
-  `${c.slice(0, 3).join(" ")} failed: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
+const failedCommand = (env: ServiceEnv, c: string[], r: ExecResult) =>
+  `${head(env, c)} failed: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
 
 /** The file the service runs from. */
 function serviceText(env: ServiceEnv, argv: string[], state: string): string {
@@ -537,7 +559,7 @@ async function install(o: ServiceOptions, env: ServiceEnv): Promise<number> {
         rmSync(xmlFile, { force: true });
       } else rmSync(file, { force: true });
       if (env.platform === "linux") env.exec(env.systemctl, ["--user", "daemon-reload"]);
-      env.err(`${failedCommand(c, r)} (nothing installed)`);
+      env.err(`${failedCommand(env, c, r)} (nothing installed)`);
       return 1;
     }
   }
@@ -633,7 +655,7 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
     if (r.code !== 0 && !isStop(env, c)) {
       if (env.platform === "win32") rmSync(xmlFile, { force: true });
       env.err(
-        `${failedCommand(c, r)} (${where(env, inst.file)} is rewritten; \`service uninstall\` then \`service install\` starts over)`,
+        `${failedCommand(env, c, r)} (${where(env, inst.file)} is rewritten; \`service uninstall\` then \`service install\` starts over)`,
       );
       return 1;
     }
@@ -689,7 +711,7 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     const r = env.exec(c[0]!, c.slice(1));
     afterStop(env, c, r, wasState);
     if (r.code !== 0 && !isStop(env, c))
-      failed = `${c.slice(0, 3).join(" ")}: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
+      failed = `${head(env, c)}: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
   }
   if (env.platform !== "win32") rmSync(file, { force: true });
   if (env.platform === "linux") env.exec(env.systemctl, ["--user", "daemon-reload"]);
@@ -697,7 +719,7 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     env.err(
       `${env.label} is still loaded${failed ? ` (${failed})` : ""}; try again, or ${
         env.platform === "win32"
-          ? `\`${env.schtasks} /Delete /TN ${file} /F\``
+          ? `\`${named(env, env.schtasks)} /Delete /TN ${file} /F\``
           : `\`${env.launchctl} bootout gui/${env.uid}/${env.label}\``
       }`,
     );

@@ -10,6 +10,10 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
+- **`sessionpipe-gui service` on Windows is more careful.**
+  It starts `schtasks`, `taskkill` and PowerShell from `%SystemRoot%\System32` by their full
+  paths. They were started by bare name, which is looked for first in the folder the command
+  is run from, so a `schtasks.exe` lying there would have been run in their place.
 
 ## [0.8.0] - 2026-11-11
 

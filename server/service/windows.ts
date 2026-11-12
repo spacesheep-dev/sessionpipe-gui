@@ -12,6 +12,7 @@
 // quoting each one that holds a space and escaping any quote inside one as \" (which cmd
 // doesn't read). So the line is plain words, each path quoted on its own, and it starts with
 // the redirect: cmd /c drops the first and last quote of a line that starts with one.
+import path from "node:path";
 
 export interface TaskSpec {
   description: string;
@@ -23,6 +24,15 @@ export interface TaskSpec {
 }
 
 export const taskName = (label: string): string => `\\sessionpipe\\${label}`;
+
+/** A program Windows ships, by its full path: `%SystemRoot%\System32\<parts>`. Node looks
+ *  for a bare name in the working directory before PATH, so a `schtasks.exe` in the folder
+ *  the command is run from would be the one started. %SystemRoot% (else %windir%) counts
+ *  only when it is a full path on a drive; anything else is read as C:\Windows. */
+export function system32(env: NodeJS.ProcessEnv, ...parts: string[]): string {
+  const root = [env.SystemRoot, env.windir].find((v) => v !== undefined && /^[A-Za-z]:[\\/]/.test(v));
+  return path.win32.join(root ?? "C:\\Windows", "System32", ...parts);
+}
 
 const xml = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
