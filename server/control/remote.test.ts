@@ -154,7 +154,7 @@ describe("remote machines in the control state", () => {
     expect(state.activityById(row.id)).toMatchObject({ outcome: "refused", detail: "the machine was removed" });
   });
 
-  it("another account's sends, or none connected, can't be followed: settled as untracked", () => {
+  it("another account's sends can't be followed: settled as untracked when that other account connects", () => {
     state.setRemoteAccount(account);
     state.upsertRemoteMachines([listed()], remote);
     const m = state.machine("m_0123456789abcdefghij")!;
@@ -164,19 +164,39 @@ describe("remote machines in the control state", () => {
     const other = new ControlState(path.join(dir, "control"));
     other.setRemoteAccount({ origin: "https://spacesheep.dev", email: "someone@example.com" });
     expect(other.activityById(row.id)).toMatchObject({ outcome: "failed", code: "untracked" });
+    expect(other.activityById(row.id)?.unfollowed).toBeUndefined();
     expect(other.pendingRemoteJobsFrom()).toBeNull();
     // Job 9 on that account is another job: it changes nothing here.
     expect(other.applyRemoteJobs([{ id: 9, status: "done", note: null, done_at: Date.now(), created_at: 1 }])).toBe(0);
     other.close();
-    const none = new ControlState(path.join(dir, "control"));
-    const cmd2 = startCmd(m.id, "claude-code:def");
-    none.setRemoteAccount(account);
-    none.upsertRemoteMachines([listed()], remote);
-    const row2 = none.enqueueRemote(none.machine(m.id)!, { cmd: JSON.stringify(cmd2) }, cmd2, { via: "ui" }, 10);
-    none.dropRemoteMachines("spacesheep");
-    none.setRemoteAccount(null);
-    expect(none.activityById(row2.id)).toMatchObject({ outcome: "failed", code: "untracked" });
-    none.close();
+  });
+
+  it("disconnected, a waiting send stays waiting, not followed; the same account reconnecting settles it", () => {
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 10);
+    const seen: Array<string | undefined> = [];
+    state.onMessage = (r) => seen.push(r.unfollowed ? "unfollowed" : r.outcome);
+    state.dropRemoteMachines("spacesheep");
+    state.setRemoteAccount(null);
+    expect(state.activityById(row.id)).toMatchObject({ unfollowed: true });
+    expect(state.activityById(row.id)?.outcome).toBeUndefined();
+    expect(state.pendingRemoteJobsFrom()).toBeNull();
+    // A restart while disconnected keeps it so.
+    state.close();
+    const again = new ControlState(path.join(dir, "control"));
+    again.setRemoteAccount(null);
+    expect(again.activityById(row.id)).toMatchObject({ unfollowed: true });
+    again.onMessage = (r) => seen.push(r.unfollowed ? "unfollowed" : (r.outcome ?? "followed"));
+    again.setRemoteAccount(account);
+    expect(again.activityById(row.id)?.unfollowed).toBeUndefined();
+    expect(again.pendingRemoteJobsFrom()).toBe(10);
+    again.applyRemoteJobs([{ id: 10, status: "running", note: null, done_at: null, created_at: 1 }]);
+    expect(again.activityById(row.id)?.outcome).toBe("taken");
+    expect(seen).toEqual(["unfollowed", "followed", "taken"]);
+    again.close();
   });
 
   it("a row from before rows named their account is matched by its machine on the first list", () => {

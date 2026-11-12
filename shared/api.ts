@@ -1549,6 +1549,9 @@ export interface ControlActivity {
   at: string;
   expiresAt: string;
   outcome?: ControlOutcome;
+  /** A send carried by spacesheep, waiting while this app follows no account that can say
+   *  how it went (disconnected): it is picked up again when that account connects. */
+  unfollowed?: boolean;
   /** The delivery mode the machine acked, one of `DELIVERY_MODES`. */
   mode?: string;
   code?: string;

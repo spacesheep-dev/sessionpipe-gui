@@ -13,7 +13,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   waiting for an offline computer then read "No such session here", and ran anyway when the
   computer came back. The row is kept, followed again once the account is read, and settled
   by spacesheep's word on the job. A row the connected account can't speak for (another
-  account, or none connected) is settled as one this app can no longer follow.
+  account) is settled as one this app can no longer follow, and offers no "Edit and start
+  again", since it may still run there. Disconnecting, or starting without an account,
+  leaves the rows waiting and marked as not followed; the same account connecting again
+  picks them up.
 - **A start waiting for a computer through spacesheep is no longer given up after an hour.**
   The app called it expired on its own clock ("didn't come online in time", with "Edit and
   start again") while spacesheep kept it for a day and still handed it out, so starting it

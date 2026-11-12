@@ -224,6 +224,9 @@ export interface MessageRow {
    *  means something only on its own account; a row from before this field is matched by
    *  its machine on the first read of the relay's machine list. */
   remoteAccount?: string;
+  /** Waiting, and not followed right now: no spacesheep account is connected (or the row's
+   *  account is not yet known to be the connected one). Cleared when it is followed again. */
+  unfollowed?: boolean;
   cmd: string;
   csig?: string | null;
   grant?: SignedCommand["grant"];
@@ -326,6 +329,7 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.poolAccount) a.poolAccount = m.poolAccount;
   if (m.replyTo) a.replyTo = m.replyTo;
   if (m.from) a.from = m.from;
+  if (m.unfollowed && !isFinal(m.outcome)) a.unfollowed = true;
   return a;
 }
 
@@ -517,6 +521,8 @@ export class ControlState {
         if (row.remoteAccount !== undefined) return false;
         if (seen.has(row.machineId)) {
           row.remoteAccount = this.remoteAccount!;
+          delete row.unfollowed;
+          this.onMessage(row);
           return true;
         }
         return this.untracked(row);
@@ -532,15 +538,22 @@ export class ControlState {
   }
 
   /** The spacesheep account this receiver reads through from now (connected, started with
-   *  a link), or null (disconnected, started without one). The sends another account
-   *  carried can't be followed from here: their rows settle as untracked now, rather than
-   *  waiting for ever. A row from before the account was named waits for the machine list. */
+   *  a link), or null (disconnected, started without one). With none, every waiting row
+   *  stays as it is, marked not followed (`unfollowed`): the same account connecting again
+   *  picks it up and spacesheep's list settles it. Only another account connecting settles
+   *  the rows it can't speak for, as untracked. A row from before the account was named
+   *  waits for that account's machine list (upsertRemoteMachines). */
   setRemoteAccount(account: { origin: string; email: string } | null): void {
     this.remoteAccount = account ? remoteAccountKey(account) : null;
     this.eachRemoteRow((row) => {
-      if (row.remoteAccount === undefined && this.remoteAccount) return false;
-      if (row.remoteAccount === this.remoteAccount) return false;
-      return this.untracked(row);
+      if (this.remoteAccount && row.remoteAccount !== undefined && row.remoteAccount !== this.remoteAccount)
+        return this.untracked(row);
+      const unfollowed = !this.remoteAccount || row.remoteAccount === undefined;
+      if (!!row.unfollowed === unfollowed) return false;
+      if (unfollowed) row.unfollowed = true;
+      else delete row.unfollowed;
+      this.onMessage(row);
+      return true;
     });
   }
 
@@ -556,6 +569,7 @@ export class ControlState {
   /** A spacesheep-carried row nothing here can follow: settled, saying so by its code, so
    *  the page stops waiting for it. Whether it ran is spacesheep's to tell, not ours. */
   private untracked(row: MessageRow): true {
+    delete row.unfollowed;
     row.outcome = "failed";
     row.code = UNTRACKED_CODE;
     row.ackedAt = nowIso();
