@@ -25,12 +25,13 @@ import {
 // The same reader the limits store uses for a limits.observed, so a hello's windows and an
 // event's are one shape (server-core owns it; control only reads with it).
 import { readWindows } from "../ui/limits.js";
+import { SESSION_REF } from "./refs.js";
 
 export const MACHINE_RE = /^m_[A-Za-z0-9_-]{16,40}$/;
 export const CODE_RE = /^[A-Za-z0-9_-]{6,32}$/;
 export const POLL_KEY_RE = /^[A-Za-z0-9_-]{22,128}$/;
 export const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
-export const SESSION_REF = /^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/;
+export { SESSION_REF };
 export const HARNESS_RE = /^[a-z][a-z0-9-]{0,39}$/;
 /** The delivery modes a hello may list and an ack may name (CONTROL.md §6; `inbox` from
  *  sessionpipe 0.13). Another word is dropped, never kept as a mode nobody can read. */
