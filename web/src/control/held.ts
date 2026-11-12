@@ -5,7 +5,7 @@
 // composer's words and attachments; every row of a sheet): a different key drops the hold,
 // so a confirm can only ever send what is on screen. A confirm the receiver holds again is
 // "still held", with its reason, and nothing more is offered.
-import { splitAttachments } from "@shared/attachments";
+import { ATTACHMENT_REF_RE, LOCAL_HEADING, REMOTE_HEADING } from "@shared/attachments";
 import type { HeldForConfirm } from "./command";
 import { heldWhy } from "./command";
 
@@ -14,6 +14,9 @@ import { heldWhy } from "./command";
  *  the held words (a start's machine and folder). */
 export interface HeldMeta {
   where?: string;
+  /** The attachment lines this page wrote into a message (Attachments compose): only these,
+   *  under their heading, are shown as names instead of as text. */
+  attached?: readonly string[];
 }
 
 export type HeldView<T, M extends HeldMeta> =
@@ -124,15 +127,51 @@ function endsOf(s: string, side: "head" | "tail"): string {
 }
 
 /** What a send carries, for the notice: the words (a message's or a start's text, or the
- *  note of an answer typed in the composer) without a message's attachments block, and
- *  the names of its images or a start's files, which are listed whole. */
-export function heldContent(h: HeldForConfirm<unknown>): { text: string | null; names: string[] } {
+ *  note of an answer typed in the composer) without the attachments block this page wrote
+ *  (`attached`), and the names of its images or a start's files, which are listed whole. */
+export function heldContent(
+  h: HeldForConfirm<unknown>,
+  attached: readonly string[] = [],
+): { text: string | null; names: string[] } {
   const f = h.fields;
-  if (f.kind === "prompt") {
-    const { body, items } = splitAttachments(f.text);
-    return { text: body || null, names: items.map((i) => `${i.id}.${i.ext}`) };
-  }
+  if (f.kind === "prompt") return heldWordsAndImages(f.text, attached);
   if (f.kind === "start") return { text: f.text, names: (f.files ?? []).map((x) => x.name) };
   if (f.kind === "permission.answer") return { text: f.note ?? null, names: [] };
   return { text: null, names: [] };
+}
+
+/** A message's text for the notice. Only an attachments block this page wrote is taken
+ *  out: a heading followed, up to a blank line or the end, by nothing but lines in
+ *  `attached`; those lines become names. Every other line stays as text, however much it
+ *  looks like a block, so nothing that is signed is hidden. */
+export function heldWordsAndImages(
+  text: string,
+  attached: readonly string[],
+): { text: string | null; names: string[] } {
+  const ours = new Set(attached);
+  const lines = text.split("\n");
+  const keep: string[] = [];
+  const names: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line === LOCAL_HEADING || line === REMOTE_HEADING) {
+      let end = i + 1;
+      while (end < lines.length && lines[end] !== "") end++;
+      const block = lines.slice(i + 1, end);
+      if (block.length > 0 && block.every((l) => ours.has(l))) {
+        names.push(...block.map(nameOf));
+        i = end - 1;
+        continue;
+      }
+    }
+    keep.push(line);
+  }
+  const shown = keep.join("\n").replace(/\s+$/, "");
+  return { text: shown || null, names };
+}
+
+/** An attachment line's name: `<id>.<ext>`. */
+function nameOf(line: string): string {
+  const m = new RegExp(ATTACHMENT_REF_RE.source).exec(line);
+  return m ? `${m[1]}.${m[2]}` : line.replace(/^- /, "");
 }

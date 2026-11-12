@@ -182,7 +182,10 @@ export function useSessionSend(
         if (att && e instanceof ControlError && e.code === "no_attention")
           setAnswers((prev) => ({ ...prev, [att]: "closed" }));
         // Held for a confirm: the notice says so where it is shown, the refusal elsewhere.
-        const caught = notice ? catchHeld(e, { draft: keyAtSend }, keyAtSend) : false;
+        const attached = action.kind === "prompt" ? action.attached : undefined;
+        const caught = notice
+          ? catchHeld(e, { draft: keyAtSend, ...(attached ? { attached } : {}) }, keyAtSend)
+          : false;
         if (caught === "changed") setError(HELD_WORDS.changed);
         else if (!caught) setError(sendErrorWords(e));
         throw e;

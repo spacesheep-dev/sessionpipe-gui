@@ -118,7 +118,7 @@ export function HeldNotice<T, M extends HeldMeta>({
     else if (!kind && was && el) focusBack?.(el)?.focus();
   }, [kind, focusBack]);
   const busy = v?.kind === "held" && v.busy;
-  const content = v ? heldContent(v.held) : { text: null, names: [] };
+  const content = v ? heldContent(v.held, v.meta.attached) : { text: null, names: [] };
   const who = v ? heldFrom(v.held.from) : "";
   const raw = v ? (v.kind === "still" ? v.why : v.held.why) : "";
   const reason = cleanReason(raw) ? heldReason(raw) : null;

@@ -45,7 +45,8 @@ const PlanText = lazy(() => import("./PlanText").then((m) => ({ default: m.PlanT
 /** `composer`: what it signs was typed in the composer (a message, Keep planning's note),
  *  so a hold of it depends on the composer and goes when the composer changes. */
 export type ControlAction =
-  | { kind: "prompt"; text: string; composer?: boolean }
+  /** `attached`: the attachment lines this page wrote into `text` (Attachments compose). */
+  | { kind: "prompt"; text: string; composer?: boolean; attached?: string[] }
   | { kind: "permission.answer"; attentionId: string; allow: boolean; note?: string; composer?: boolean }
   | { kind: "cancel"; note?: string };
 
@@ -534,7 +535,7 @@ export function ControlStrip({
     // The signed text: the message, then the attachments block (or null while an upload runs).
     const composed = att.compose(t);
     if (!composed) return;
-    run("prompt", { kind: "prompt", text: composed.text, composer: true }, () => {
+    run("prompt", { kind: "prompt", text: composed.text, composer: true, attached: composed.lines }, () => {
       setText("");
       writeDraft(session.key, "");
       att.clear();
