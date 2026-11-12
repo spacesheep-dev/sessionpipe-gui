@@ -67,11 +67,12 @@ interface ClaudePath {
 
 /** `<home>/projects/<slug>/<id>.jsonl` or `<home>/projects/<slug>/<id>/subagents/[workflows/<wf>/]agent-<a>.jsonl`. */
 export function parseClaudePath(p: string): ClaudePath | undefined {
-  const parts = p.split(path.sep);
+  const parts = p.split(/[/\\]/);
   const i = parts.lastIndexOf("projects");
   if (i < 1 || parts.length < i + 3) return undefined;
-  const home = parts.slice(0, i).join(path.sep);
-  const slugDir = parts.slice(0, i + 2).join(path.sep);
+  const sep = p.includes("\\") && !p.includes("/") ? "\\" : p.includes("/") && !p.includes("\\") ? "/" : path.sep;
+  const home = parts.slice(0, i).join(sep);
+  const slugDir = parts.slice(0, i + 2).join(sep);
   const rest = parts.slice(i + 2);
   if (rest.length === 1 && rest[0]?.endsWith(".jsonl")) return { home, slugDir, id: rest[0].slice(0, -6) };
   const name = rest[rest.length - 1] ?? "";
