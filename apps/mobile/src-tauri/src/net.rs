@@ -209,11 +209,13 @@ pub async fn rx_add<R: Runtime>(
 ) -> Result<ReceiverRef, String> {
     main_only(&webview)?;
     let link = ConnectLink::parse(&url)?;
+    // An alert that could not be shown is not a yes.
     if !crate::confirm::ask(
         &app,
         &crate::confirm::add_receiver(Os::current(), &link.origin, ca.is_some()),
     )
     .await
+    .unwrap_or(false)
     {
         return Err("cancelled".into());
     }

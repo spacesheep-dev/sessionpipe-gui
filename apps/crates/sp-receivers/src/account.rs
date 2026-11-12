@@ -67,9 +67,23 @@ pub const RELAY_ANSWER_MAX: usize = 8 * 1024 * 1024;
 /// Every other answer.
 pub const SMALL_ANSWER_MAX: usize = 1024 * 1024;
 /// Connects started from this app in `START_WINDOW_S`: spacesheep counts them per
-/// address, and a page must not be able to spend that for everyone behind it.
-pub const START_LIMIT: usize = 5;
-pub const START_WINDOW_S: u64 = 600;
+/// address (ten an hour, thirty a day), and a page must not be able to spend that for
+/// everyone behind it. Three an hour, counted across restarts.
+pub const START_LIMIT: usize = 3;
+pub const START_WINDOW_S: u64 = 3600;
+/// Requests to trust this device's key in `DEVICE_ASK_WINDOW_S`: spacesheep counts them
+/// for the whole account (twenty an hour, with pairing), and each one made anew changes
+/// the number the person is matching.
+pub const DEVICE_ASK_LIMIT: usize = 5;
+pub const DEVICE_ASK_WINDOW_S: u64 = 3600;
+/// While an ask is this fresh, asking again returns it as it was: no request, the same
+/// number.
+pub const DEVICE_ASK_FRESH_S: u64 = 600;
+/// A key that was collected and waits for the person's answer here is held this long.
+pub const HELD_MAX_MS: u64 = 15 * 60_000;
+/// What a connect says when a key was made on spacesheep and is not kept here: the Hub
+/// cannot revoke it, so the person is told where to.
+pub const UNUSED_KEY_NOTE: &str = "A key was made for this app on spacesheep and is not kept here. Revoke it there: Settings → API keys.";
 
 /// A question only the person answers, in UI the page cannot draw or click. The shell
 /// writes the words (`apps/mobile` `confirm.rs`); Cancel is the default answer of each.
@@ -85,16 +99,20 @@ pub enum Question {
         origin: String,
         host: String,
     },
-    /// Before an account with documents is disconnected: they go with it.
+    /// Before an account is disconnected. `documents`: labels and read marks are kept
+    /// for it here, and go with it.
     Disconnect {
         email: String,
         origin: String,
         host: String,
+        documents: bool,
     },
 }
 
-/// The person's answer, once they gave it. False when the question could not be shown.
-pub type Answered = Pin<Box<dyn Future<Output = bool> + Send>>;
+/// The person's answer, once they gave it: yes or no. None when the question could not
+/// be shown (another alert is up, there is no window): that is not an answer, and
+/// nothing is decided by it.
+pub type Answered = Pin<Box<dyn Future<Output = Option<bool>> + Send>>;
 
 /// How the Hub asks. The phone shows a native alert; a test answers from a script.
 pub trait Confirm: Send + Sync + 'static {
@@ -431,12 +449,17 @@ pub fn is_machine_id(s: &str) -> bool {
     s.strip_prefix("m_").is_some_and(|r| is_b64url(r, 16, 40))
 }
 
-/// A cloud box's id (spacesheep's `isBoxId` is `m_box` and sixteen hex digits; anything
-/// that starts so is taken for one). A box is spacesheep's own machine: its jobs route
-/// runs a message for it with no signature at all, so the account's key alone would be
-/// enough to make it work. The Hub sends nothing to one.
+/// A cloud box's id, as spacesheep's `isBoxId` has it: `m_box` and exactly sixteen
+/// lowercase hex digits. (Not a prefix: an ordinary machine's id is random, and one in a
+/// quarter of a million begins `m_box`.) A box is spacesheep's own machine: its jobs
+/// route runs a message for it with no signature at all, so the account's key alone
+/// would be enough to make it work. The Hub sends nothing to one.
 pub fn is_box_id(s: &str) -> bool {
-    s.starts_with("m_box")
+    s.strip_prefix("m_box").is_some_and(|r| {
+        r.len() == 16
+            && r.bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+    })
 }
 
 /// A device key's id: the SHA-256 of its spki, base64url.
@@ -555,18 +578,19 @@ pub fn open_door(method: &str, path_and_query: &str) -> Result<Opened, Refused> 
     }
 }
 
+/// Every field a send may have. A closed set: any other name is not a send.
+pub const SIGNED_FIELDS: [&str; 5] = ["cmd", "csig", "grant", "confirm", "match"];
+
 /// Is this a signed command as the signer writes one (`sp-identity` `Signer::sign`)?
 /// `{ cmd, csig, grant }` under the day's grant, or `{ cmd, confirm }` with a fresh
-/// confirmation; `cmd` is the command, as the JSON text that was signed. Nothing else is
+/// confirmation (and then, for a `key.add`, the `match` number the person compared);
+/// `cmd` is the command, as the JSON text that was signed. Nothing else is
 /// a send: not spacesheep's own unsigned form for its cloud boxes
 /// (`{ action, session, text }`), not a command with nothing signing it, not either of
 /// them with a field more.
 fn is_signed_command(o: &serde_json::Map<String, serde_json::Value>) -> bool {
     use serde_json::Value;
-    if !o
-        .keys()
-        .all(|k| matches!(k.as_str(), "cmd" | "csig" | "grant" | "confirm"))
-    {
+    if !o.keys().all(|k| SIGNED_FIELDS.contains(&k.as_str())) {
         return false;
     }
     let cmd = o
@@ -578,7 +602,23 @@ fn is_signed_command(o: &serde_json::Map<String, serde_json::Value>) -> bool {
     let object = |k: &str| given(k).is_none_or(Value::is_object);
     let by_grant = given("csig").is_some() && given("grant").is_some();
     let by_confirm = given("confirm").is_some();
-    cmd && text("csig") && object("grant") && object("confirm") && (by_grant || by_confirm)
+    // The number the person matched, beside a confirmed `key.add` (spacesheep reads it
+    // there and nowhere else): one to eight digits, as text or as a number.
+    let matched = given("match").is_none_or(|v| {
+        by_confirm
+            && match v {
+                Value::String(s) => {
+                    (1..=8).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_digit())
+                }
+                Value::Number(n) => n.as_u64().is_some_and(|n| n < 100_000_000),
+                _ => false,
+            }
+    });
+    cmd && text("csig")
+        && object("grant")
+        && object("confirm")
+        && matched
+        && (by_grant || by_confirm)
 }
 
 /// The body a door takes: none for a GET; for a send, a signed command within the limit.
@@ -644,13 +684,30 @@ pub fn is_token(s: &str) -> bool {
 
 /// An email as the origin gave it, when it is one the person can be shown and an id can
 /// be made of: printable ASCII and nothing else (no space, no control, no character that
-/// reorders or hides its neighbours when drawn), an `@` inside it, 254 characters at
-/// most. An address outside that is refused whole, never trimmed into another one.
+/// reorders or hides its neighbours when drawn), exactly one `@`, at most 64 characters
+/// before it and 190 after. (Several `@` let a sentence pose as an address:
+/// `misha@example.com.on.spacesheep.dev.Tap.Use.it@evil.example`.) An address outside
+/// that is refused whole, never trimmed into another one.
 pub fn clean_email(s: &str) -> Option<String> {
-    let ok = (3..=254).contains(&s.len())
-        && s.bytes().all(|c| (0x21..=0x7e).contains(&c))
-        && s.find('@').is_some_and(|i| i > 0 && i < s.len() - 1);
+    let (local, domain) = s.split_once('@')?;
+    let ok = s.bytes().all(|c| (0x21..=0x7e).contains(&c))
+        && !domain.contains('@')
+        && (1..=64).contains(&local.len())
+        && (1..=190).contains(&domain.len());
     ok.then(|| s.to_string())
+}
+
+/// An email as an alert shows it: whole up to sixty characters, else its first 29 and
+/// last 30 around an ellipsis, so its beginning and its domain's end are both read and
+/// the line it is on stays one line.
+pub fn shown_email(email: &str) -> String {
+    let n = email.chars().count();
+    if n <= 60 {
+        return email.to_string();
+    }
+    let head: String = email.chars().take(29).collect();
+    let tail: String = email.chars().skip(n - 30).collect();
+    format!("{head}…{tail}")
 }
 
 /// What the key store keeps for an account: the key, and the origin it is for. An entry
@@ -868,6 +925,9 @@ pub enum ConnectState {
     /// The person said no on spacesheep.
     Denied,
     Expired,
+    /// Approved on spacesheep, and the key is held here until the person answers whose
+    /// account this is (the question is asked again whenever the app comes to the front).
+    Asking,
     /// The person said no here, when asked whether to use the account that was approved.
     Declined,
     /// With `ConnectView::error`. (A connect the page cancelled is simply gone.)
@@ -895,6 +955,14 @@ pub struct ConnectView {
     /// Why it failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<Problem>,
+    /// Set, with `note`, when spacesheep made a key for this connect and it is not kept
+    /// here (declined, a conflict, never answered, not saved): where the person revokes
+    /// it, Settings → API keys on the account's own origin.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoke_url: Option<String>,
+    /// `UNUSED_KEY_NOTE`, with `revoke_url`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1104,9 +1172,7 @@ mod tests {
             ("POST", "/api/gui/device?id=1".to_string()),
             ("PUT", "/api/gui/device".to_string()),
             ("POST", "/api/machines/m_box0123456789abcdef/jobs".to_string()),
-            ("POST", "/api/machines/m_box0123456789ABCDEF/jobs".to_string()),
-            ("POST", "/api/machines/m_boxanything-that-starts-so/jobs".to_string()),
-            ("POST", "/api/machines/m_box0123456789abcdef0/jobs".to_string()),
+            ("POST", "/api/machines/m_boxffffffffffffffff/jobs".to_string()),
         ];
         for (method, path) in table {
             assert_eq!(
@@ -1124,8 +1190,22 @@ mod tests {
             );
         }
         assert!(is_box_id("m_box0123456789abcdef") && !is_box_id("m_0123456789abcdefABCD"));
-        // A machine whose id only resembles a box's is a machine.
-        assert!(door("POST", "/api/machines/m_bo0123456789abcdefAB/jobs").is_ok());
+        // A box's id is `m_box` and sixteen lowercase hex digits, exactly. A machine's id
+        // is random, and one that happens to begin `m_box` is a machine like any other.
+        for machine in [
+            "m_bo0123456789abcdefAB",
+            "m_box0123456789ABCDEF",
+            "m_box0123456789abcde",
+            "m_box0123456789abcdef0",
+            "m_box0123456789abcdeg",
+            "m_boxQ7x-_kPz0123456789ab",
+        ] {
+            assert!(!is_box_id(machine), "{machine}");
+            assert!(
+                door("POST", &format!("/api/machines/{machine}/jobs")).is_ok(),
+                "{machine}"
+            );
+        }
     }
 
     #[test]
@@ -1252,10 +1332,113 @@ mod tests {
         let with_nulls = format!(
             r#"{{"cmd":"{cmd}","csig":null,"grant":null,"confirm":{{"cred":"k","sig":"s"}}}}"#
         );
-        for ok in [&by_grant, &by_confirm, &with_nulls] {
+        // Beside a confirmed `key.add`: the number the person matched, as spacesheep reads it.
+        let signed = r#""confirm":{"cred":"k","sig":"s"}"#;
+        let matched = |m: &str| format!(r#"{{"cmd":"{cmd}",{signed},"match":{m}}}"#);
+        for ok in [
+            by_grant.clone(),
+            by_confirm.clone(),
+            with_nulls,
+            matched("\"71\""),
+            matched("71"),
+            matched("\"0\""),
+            matched("\"12345678\""),
+            matched("null"),
+        ] {
             assert_eq!(check_body(Door::MachineJobs, ok.as_bytes()), Ok(()), "{ok}");
         }
-        let signed = r#""confirm":{"cred":"k","sig":"s"}"#;
+        for bad in [
+            matched("\"\""),
+            matched("\"123456789\""),
+            matched("\"7a\""),
+            matched("\" 71\""),
+            matched("-1"),
+            matched("7.5"),
+            matched("100000000"),
+            matched("[71]"),
+            matched("true"),
+            // With the day's grant there is nothing to match.
+            format!(r#"{{"cmd":"{cmd}","csig":"c2ln","grant":{{"cred":"k"}},"match":"71"}}"#),
+            format!(r#"{{"cmd":"{cmd}","match":"71"}}"#),
+        ] {
+            assert_eq!(
+                check_body(Door::MachineJobs, bad.as_bytes()),
+                Err(Refused::NotSigned),
+                "{bad}"
+            );
+        }
+        // The fields are a closed set. Every other name beside a signed command is
+        // refused: every one a daemon, spacesheep or a page has for anything, every
+        // single letter and digit pair, and each allowed name spelt almost right.
+        assert_eq!(SIGNED_FIELDS, ["cmd", "csig", "grant", "confirm", "match"]);
+        let mut names: Vec<String> = [
+            "action",
+            "session",
+            "text",
+            "check_stub",
+            "from",
+            "machine",
+            "machineId",
+            "kind",
+            "source",
+            "cwd",
+            "files",
+            "nonce",
+            "iat",
+            "v",
+            "t",
+            "for",
+            "decision",
+            "reply_to",
+            "expires_in_s",
+            "key",
+            "name",
+            "proof",
+            "by",
+            "id",
+            "code",
+            "token",
+            "origin",
+            "__proto__",
+            "constructor",
+            "",
+            " ",
+            "cmd ",
+            " cmd",
+            "Cmd",
+            "CMD",
+            "cmd\u{0}",
+            "c\u{6d}d2",
+        ]
+        .iter()
+        .map(|n| n.to_string())
+        .collect();
+        for allowed in SIGNED_FIELDS {
+            names.push(allowed.to_uppercase());
+            names.push(format!("{allowed}_"));
+            names.push(format!("_{allowed}"));
+            names.push(format!("{allowed}s"));
+            names.push(allowed[..allowed.len() - 1].to_string());
+        }
+        for a in b'a'..=b'z' {
+            names.push((a as char).to_string());
+            for b in *b"amz0_" {
+                names.push(format!("{}{}", a as char, b as char));
+            }
+        }
+        names.retain(|n| !SIGNED_FIELDS.contains(&n.as_str()));
+        assert!(names.len() > 200);
+        for name in &names {
+            for form in [&by_grant, &by_confirm] {
+                let mut v: serde_json::Value = serde_json::from_str(form).unwrap();
+                v[name.as_str()] = serde_json::json!("x");
+                assert_eq!(
+                    check_body(Door::MachineJobs, v.to_string().as_bytes()),
+                    Err(Refused::NotSigned),
+                    "{name:?}"
+                );
+            }
+        }
         #[rustfmt::skip]
         let unsigned = [
             // spacesheep's own unsigned form for a cloud box, alone and beside a command.
@@ -1543,9 +1726,25 @@ mod tests {
             "a@",
             "ab",
             "",
+            // One `@`, or a sentence can pose as an address.
+            "misha@example.com.on.spacesheep.dev.Tap.Use.it@evil.example",
+            "a@b@c.example",
+            "a@@b.example",
         ] {
             assert_eq!(clean_email(bad), None, "{bad:?}");
         }
+        // Sixty-four before the `@`, a hundred and ninety after.
+        let long = |l: usize, d: usize| format!("{}@{}", "a".repeat(l), "d".repeat(d));
+        assert!(clean_email(&long(64, 190)).is_some());
+        assert_eq!(clean_email(&long(65, 10)), None);
+        assert_eq!(clean_email(&long(10, 191)), None);
+        // As an alert shows one: whole when short, its two ends when long, one line.
+        assert_eq!(shown_email("misha@example.com"), "misha@example.com");
+        let shown = shown_email(&long(64, 190));
+        assert_eq!(shown.chars().count(), 60);
+        assert!(shown.starts_with(&"a".repeat(29)) && shown.ends_with(&"d".repeat(30)));
+        assert!(shown.contains('…') && !shown.contains('\n'));
+        assert_eq!(shown_email(&long(30, 29)).chars().count(), 60);
         assert_eq!(clean_email(&format!("{}@b.example", "a".repeat(250))), None);
         assert_eq!(
             plain_words("  Too many tries.\u{202e}\n ", 40),
@@ -1572,6 +1771,8 @@ mod tests {
             receiver: None,
             email: None,
             error: None,
+            revoke_url: None,
+            note: None,
         })
         .unwrap();
         assert_eq!(
@@ -1589,5 +1790,10 @@ mod tests {
             serde_json::to_value(ConnectState::Declined).unwrap(),
             serde_json::json!("declined")
         );
+        assert_eq!(
+            serde_json::to_value(ConnectState::Asking).unwrap(),
+            serde_json::json!("asking")
+        );
+        assert!(UNUSED_KEY_NOTE.contains("Revoke it there: Settings → API keys."));
     }
 }

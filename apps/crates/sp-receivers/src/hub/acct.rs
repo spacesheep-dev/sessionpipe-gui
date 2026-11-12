@@ -25,7 +25,7 @@ use http::HeaderValue;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::{Notify, Semaphore};
 
 /// Between two polls of a connect the person has not answered yet.
@@ -53,12 +53,39 @@ const SECOND: Duration = if cfg!(test) {
 } else {
     Duration::from_secs(1)
 };
-/// The window `account::START_LIMIT` counts in.
-const START_WINDOW: Duration = if cfg!(test) {
-    Duration::from_millis(700)
+/// The window `account::START_LIMIT` counts in, in milliseconds.
+const START_WINDOW_MS: u64 = if cfg!(test) {
+    700
 } else {
-    Duration::from_secs(account::START_WINDOW_S)
+    account::START_WINDOW_S * 1000
 };
+/// The window `account::DEVICE_ASK_LIMIT` counts in.
+const DEVICE_ASK_WINDOW_MS: u64 = if cfg!(test) {
+    700
+} else {
+    account::DEVICE_ASK_WINDOW_S * 1000
+};
+/// How long an ask is returned as it was instead of being made again.
+const DEVICE_ASK_FRESH_MS: u64 = if cfg!(test) {
+    300
+} else {
+    account::DEVICE_ASK_FRESH_S * 1000
+};
+/// When the question about a held approval could not be shown, it is asked again when
+/// the app comes to the front, and in any case after this long.
+const ASK_AGAIN: Duration = if cfg!(test) {
+    Duration::from_millis(30)
+} else {
+    Duration::from_secs(15)
+};
+/// How long a held approval waits for its answer (`account::HELD_MAX_MS`).
+const HELD_MAX_MS: u64 = if cfg!(test) {
+    1500
+} else {
+    account::HELD_MAX_MS
+};
+/// What the Hub counts across restarts (`Counts`), in its home.
+const COUNTS_FILE: &str = "account-limits.json";
 /// A connect answer, a poll answer: a few hundred bytes.
 const SMALL_ANSWER: usize = 16 * 1024;
 /// An answer up to this size that came unpacked is looked through where it is; a larger
@@ -81,6 +108,39 @@ struct Limits {
     own: Arc<Semaphore>,
 }
 
+/// When connects were started and this device's key was asked about (epoch
+/// milliseconds), so that the limits on both hold across a restart of the app.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct Counts {
+    #[serde(default)]
+    starts: Vec<u64>,
+    #[serde(default)]
+    device_asks: Vec<u64>,
+}
+
+#[derive(Clone, Copy)]
+enum Counted {
+    Start,
+    DeviceAsk,
+}
+
+/// What the person said, or that they were not asked.
+enum Asked {
+    Yes,
+    No,
+    /// The question was not on the screen (another one is open, or it could not be
+    /// shown): not an answer, and why.
+    Not(Problem),
+}
+
+/// An approval collected from spacesheep, waiting for the person's answer here.
+#[derive(Clone)]
+struct Held {
+    key: String,
+    email: String,
+    until_ms: u64,
+}
+
 pub(super) struct Accounts {
     /// On, and with a key store of its own (`AccountConfig::keys`).
     enabled: bool,
@@ -92,9 +152,13 @@ pub(super) struct Accounts {
     start_gate: tokio::sync::Mutex<()>,
     next_gen: AtomicU64,
     limits: Mutex<HashMap<String, Arc<Limits>>>,
-    /// When the last connects were started (`account::START_LIMIT`).
-    starts: Mutex<Vec<Instant>>,
+    /// `Counts`, as in `counts_path`.
+    counts: Mutex<Counts>,
+    counts_path: std::path::PathBuf,
     start_limit: AtomicUsize,
+    device_ask_limit: AtomicUsize,
+    /// The last ask per account and when (`DEVICE_ASK_FRESH_MS`).
+    asked: Mutex<HashMap<String, (u64, DeviceAsked)>>,
     /// A question is on the screen: a second one is refused, never queued behind it.
     asking: AtomicBool,
     docs: Docs,
@@ -123,8 +187,16 @@ impl Accounts {
             start_gate: tokio::sync::Mutex::new(()),
             next_gen: AtomicU64::new(1),
             limits: Mutex::new(HashMap::new()),
-            starts: Mutex::new(Vec::new()),
+            counts: Mutex::new(
+                std::fs::read(cfg.home.join(COUNTS_FILE))
+                    .ok()
+                    .and_then(|b| serde_json::from_slice(&b).ok())
+                    .unwrap_or_default(),
+            ),
+            counts_path: cfg.home.join(COUNTS_FILE),
             start_limit: AtomicUsize::new(account::START_LIMIT),
+            device_ask_limit: AtomicUsize::new(account::DEVICE_ASK_LIMIT),
+            asked: Mutex::new(HashMap::new()),
             asking: AtomicBool::new(false),
             docs: Docs::new(&cfg.home),
             docs_lock: Mutex::new(()),
@@ -147,6 +219,10 @@ struct Pending {
     receiver: Option<String>,
     email: Option<String>,
     error: Option<Problem>,
+    /// The approval, once collected, until the person answers (`ConnectState::Asking`).
+    held: Option<Held>,
+    /// spacesheep made a key for this connect and it is not kept here.
+    unused_key: bool,
     task: Option<tokio::task::AbortHandle>,
     kick: Arc<Notify>,
 }
@@ -161,21 +237,36 @@ impl Pending {
             receiver: self.receiver.clone(),
             email: self.email.clone(),
             error: self.error.clone(),
+            revoke_url: self
+                .unused_key
+                .then(|| format!("{}/settings/api-keys", self.origin)),
+            note: self.unused_key.then_some(account::UNUSED_KEY_NOTE),
         }
     }
 
-    /// Still waiting for the person, with a code that is still good.
+    /// Under way: waiting for the person on spacesheep with a code that is still good,
+    /// or holding their approval until they answer here.
     fn live(&self) -> bool {
-        self.state == ConnectState::Pending && now_ms() < self.expires_at_ms
+        (self.state == ConnectState::Pending && now_ms() < self.expires_at_ms)
+            || self.state == ConnectState::Asking
     }
 
-    /// As it is kept while pending: spacesheep's own answer and the origin it came from,
-    /// so `account_resume` believes it only as far as it would a fresh one.
+    /// As it is kept while under way, in the account key store: spacesheep's own answer
+    /// and the origin it came from, so `account_resume` believes it only as far as it
+    /// would a fresh one; or, once the approval was collected, the key and whose it is,
+    /// so the question is asked again after the app was closed.
     fn kept(&self) -> String {
-        serde_json::json!({
-            "origin": self.origin, "code": self.code, "poll_token": self.poll_token,
-            "digits": self.digits, "url": self.url, "expires_at": iso_ms(self.expires_at_ms),
-        })
+        match &self.held {
+            Some(h) => serde_json::json!({
+                "origin": self.origin, "digits": self.digits,
+                "expires_at": iso_ms(self.expires_at_ms),
+                "held": { "key": h.key, "email": h.email, "until": iso_ms(h.until_ms) },
+            }),
+            None => serde_json::json!({
+                "origin": self.origin, "code": self.code, "poll_token": self.poll_token,
+                "digits": self.digits, "url": self.url, "expires_at": iso_ms(self.expires_at_ms),
+            }),
+        }
         .to_string()
     }
 }
@@ -263,15 +354,18 @@ fn is_gzip(h: &http::HeaderMap) -> Result<bool, Refused> {
     }
 }
 
-/// Unpacks gzip, and stops one byte past `max` however much more there is: a few
-/// kilobytes can unpack to gigabytes, and none of that is ever held.
+/// Unpacks gzip: one member, and nothing after it (a second member, or bytes that are
+/// no gzip at all, are not part of an answer the Hub asked for). Stops one byte past
+/// `max` however much more there is: a few kilobytes can unpack to gigabytes, and none
+/// of that is ever held.
 fn unpack(wire: &[u8], max: usize) -> Result<Vec<u8>, Refused> {
     use std::io::Read;
     let mut out = Vec::new();
-    flate2::read::GzDecoder::new(wire)
-        .take(max as u64 + 1)
-        .read_to_end(&mut out)
-        .map_err(|_| Refused::BadEncoding)?;
+    let mut d = flate2::bufread::GzDecoder::new(wire).take(max as u64 + 1);
+    d.read_to_end(&mut out).map_err(|_| Refused::BadEncoding)?;
+    if out.len() <= max && !d.into_inner().into_inner().is_empty() {
+        return Err(Refused::BadEncoding);
+    }
     Ok(out)
 }
 
@@ -413,21 +507,32 @@ impl Hub {
             .clone()
     }
 
-    /// Asks the person, when nothing else is being asked. `Err` when a question is
-    /// already open (this one is not queued behind it); `Ok(false)` when they said no,
-    /// or when this build has nobody to ask.
-    async fn account_ask(&self, question: Question) -> Result<bool, Problem> {
+    /// Asks the person, when nothing else is being asked. `Asked::Not` when a question
+    /// is already open (this one is not queued behind it), when this build has nobody
+    /// to ask, and when the question could not be put on the screen: none of those is
+    /// an answer.
+    async fn account_ask(&self, question: Question) -> Asked {
         let Some(confirm) = self.account_cfg().confirm.clone() else {
-            return Ok(false);
+            return Asked::Not(Problem::new(
+                "not_asked",
+                "This device can't ask that question.",
+            ));
         };
         if self.0.acct.asking.swap(true, Ordering::SeqCst) {
-            return Err(Problem::new(
+            return Asked::Not(Problem::new(
                 "busy",
                 "Another question is open on this device. Answer it first.",
             ));
         }
         let _open = Asking(&self.0.acct.asking);
-        Ok(confirm.ask(question).await)
+        match confirm.ask(question).await {
+            Some(true) => Asked::Yes,
+            Some(false) => Asked::No,
+            None => Asked::Not(Problem::new(
+                "not_asked",
+                "The question could not be shown. Try again.",
+            )),
+        }
     }
 
     // ---- status ----
@@ -466,10 +571,11 @@ impl Hub {
     }
 
     /// spacesheep refused the key (true) or took it (false): kept in the list, so the app
-    /// knows at its next start without asking.
+    /// knows at its next start without asking. Said (the log line, the events) only once
+    /// it is saved: a mark that could not be written was not made.
     fn account_mark(&self, id: &str, unauthorized: bool) {
         let mut changed = false;
-        let _ = self.0.registry.lock().unwrap().update(id, |r| {
+        let saved = self.0.registry.lock().unwrap().update(id, |r| {
             if let Some(a) = r
                 .account
                 .as_mut()
@@ -479,7 +585,7 @@ impl Hub {
                 changed = true;
             }
         });
-        if changed {
+        if changed && saved.is_ok() {
             if unauthorized {
                 log::warn!("acct {id}: spacesheep refused the key (revoked there?)");
             } else {
@@ -504,7 +610,7 @@ impl Hub {
 
     fn account_rp(&self, id: &str, rp: String) {
         let mut changed = false;
-        let _ = self.0.registry.lock().unwrap().update(id, |r| {
+        let saved = self.0.registry.lock().unwrap().update(id, |r| {
             if let Some(a) = r
                 .account
                 .as_mut()
@@ -514,17 +620,22 @@ impl Hub {
                 changed = true;
             }
         });
-        if changed {
+        if changed && saved.is_ok() {
             self.emit(HubEvent::Receivers);
         }
     }
 
-    /// Removes an account whole: its key and documents first, then its entry. If the list
-    /// then can't be saved, what is left is an entry without a key, never a key without
-    /// an entry.
-    fn account_remove(&self, id: &str) -> Result<bool, String> {
+    /// Removes an account whole: its key first, then its documents, then its entry. If
+    /// the key can't be deleted nothing else is touched; if the list then can't be
+    /// saved, what is left is an entry without a key, never a key without an entry. The
+    /// error says which, as it is.
+    fn account_remove(&self, id: &str) -> Result<bool, Problem> {
         if let Err(e) = self.account_keys().delete(&account_key_name(id)) {
             log::warn!("acct {id}: the key could not be deleted: {e}");
+            return Err(Problem::new(
+                "io",
+                "The key could not be removed from this device. Nothing was changed.",
+            ));
         }
         {
             let _g = self.0.acct.docs_lock.lock().unwrap();
@@ -533,7 +644,13 @@ impl Hub {
             }
         }
         self.0.acct.limits.lock().unwrap().remove(id);
-        let removed = self.remove_entry(id)?;
+        self.0.acct.asked.lock().unwrap().remove(id);
+        let removed = self.remove_entry(id).map_err(|e| {
+            Problem::new(
+                "io",
+                format!("The key is removed from this device, but the entry could not be ({e}). It now shows as having no key."),
+            )
+        })?;
         self.emit(HubEvent::Account);
         Ok(removed)
     }
@@ -816,6 +933,16 @@ impl Hub {
             ));
         }
         let key_id = key["id"].as_str().unwrap_or_default().to_string();
+        // Asked a moment ago for this same key: the answer it got then, and no request.
+        // (Each request made anew changes the number the person is matching, and they
+        // are counted for the whole account on spacesheep.)
+        let now = now_ms();
+        if let Some((at, asked)) = self.0.acct.asked.lock().unwrap().get(id) {
+            if asked.key_id == key_id && now.saturating_sub(*at) < DEVICE_ASK_FRESH_MS {
+                return Ok(asked.clone());
+            }
+        }
+        self.account_count(Counted::DeviceAsk)?;
         let body = serde_json::json!({ "key": key, "name": self.account_cfg().device })
             .to_string()
             .into_bytes();
@@ -864,13 +991,15 @@ impl Hub {
                 "spacesheep's answer can't be used by this version.",
             ));
         }
-        let _ = self.0.registry.lock().unwrap().update(id, |r| {
+        let saved = self.0.registry.lock().unwrap().update(id, |r| {
             if let Some(a) = r.account.as_mut() {
                 a.device_key_id = Some(key_id.clone());
             }
         });
-        self.emit(HubEvent::Account);
-        Ok(DeviceAsked {
+        if saved.is_ok() {
+            self.emit(HubEvent::Account);
+        }
+        let asked = DeviceAsked {
             code,
             key_id,
             trusted_on: v["trusted_on"]
@@ -884,26 +1013,57 @@ impl Hub {
                 })
                 .unwrap_or_default(),
             devices_url: account::link_on_origin(said("devices_url"), &rx.origin),
-        })
+        };
+        self.0
+            .acct
+            .asked
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), (now, asked.clone()));
+        Ok(asked)
     }
 
     // ---- connecting ----
 
-    /// May another connect start now? Counted before anything is asked or sent.
-    fn connect_start_allowed(&self) -> Result<(), Problem> {
-        let mut starts = self.0.acct.starts.lock().unwrap();
-        let now = Instant::now();
-        starts.retain(|t| now.duration_since(*t) < START_WINDOW);
-        if starts.len() >= self.0.acct.start_limit.load(Ordering::Relaxed) {
-            let wait = START_WINDOW.saturating_sub(now.duration_since(starts[0]));
+    /// May another connect start, or this device's key be asked about again, now? Counted
+    /// here before anything is asked or sent, by the wall clock, and written down so a
+    /// restart of the app does not start the count again.
+    fn account_count(&self, what: Counted) -> Result<(), Problem> {
+        let acct = &self.0.acct;
+        let mut counts = acct.counts.lock().unwrap();
+        let now = now_ms();
+        let (times, limit, window, code, message) = match what {
+            Counted::Start => (
+                &mut counts.starts,
+                acct.start_limit.load(Ordering::Relaxed),
+                START_WINDOW_MS,
+                "too_many_starts",
+                "Too many tries. Wait a while, then connect again.",
+            ),
+            Counted::DeviceAsk => (
+                &mut counts.device_asks,
+                acct.device_ask_limit.load(Ordering::Relaxed),
+                DEVICE_ASK_WINDOW_MS,
+                "too_many_asks",
+                "Too many tries. Wait a while, then ask again.",
+            ),
+        };
+        // A clock set back does not lock anyone out: times from the future are dropped.
+        times.retain(|t| *t <= now && now - *t < window);
+        if times.len() >= limit {
+            let wait_ms = window - (now - times[0]);
             return Err(Problem {
-                code: "too_many_starts",
-                message: "Too many tries. Wait a few minutes, then connect again.".into(),
-                retry_after_s: Some(wait.as_secs().max(1)),
+                code,
+                message: message.into(),
+                retry_after_s: Some(wait_ms.div_ceil(1000).max(1)),
                 upstream: None,
             });
         }
-        starts.push(now);
+        times.push(now);
+        let bytes = serde_json::to_vec(&*counts).expect("json");
+        if let Err(e) = crate::registry::write_atomic(&acct.counts_path, &bytes) {
+            log::warn!("acct: the limits could not be written: {e}");
+        }
         Ok(())
     }
 
@@ -947,8 +1107,16 @@ impl Hub {
                 p.kick.notify_one();
                 return Ok(p.view());
             }
+            // An approval is held for another origin: a new connect would throw its key
+            // away unanswered.
+            if g.as_ref().is_some_and(|p| p.state == ConnectState::Asking) {
+                return Err(Problem::new(
+                    "busy",
+                    "An account was approved and waits for your answer on this device.",
+                ));
+            }
         }
-        self.connect_start_allowed()?;
+        self.account_count(Counted::Start)?;
         let host = account::host_of(&origin);
         // spacesheep.dev confirms a connect on its own page. Another origin's confirm page
         // is that server's, which could say yes to itself: the person says so here first.
@@ -957,8 +1125,10 @@ impl Hub {
                 origin: origin.clone(),
                 host: host.clone(),
             };
-            if !self.account_ask(q).await? {
-                return Err(Problem::new("cancelled", "Cancelled."));
+            match self.account_ask(q).await {
+                Asked::Yes => {}
+                Asked::No => return Err(Problem::new("cancelled", "Cancelled.")),
+                Asked::Not(why) => return Err(why),
             }
         }
         let res = self
@@ -1015,6 +1185,8 @@ impl Hub {
             receiver: None,
             email: None,
             error: None,
+            held: None,
+            unused_key: false,
             task: None,
             kick: Arc::new(Notify::new()),
         };
@@ -1040,13 +1212,22 @@ impl Hub {
     /// Makes `pending` the connect and starts its poll; an older one ends.
     fn connect_install(&self, pending: Pending) -> Result<(), Problem> {
         let gen = pending.gen;
+        let pending_is_held = pending.held.is_some();
         if let Some(old) = self.0.acct.connect.lock().unwrap().replace(pending) {
             if let Some(t) = old.task {
                 t.abort();
             }
         }
         let hub = self.clone();
-        let Some(task) = self.spawn(async move { hub.connect_poll(gen).await }) else {
+        let held = pending_is_held;
+        let run = async move {
+            if held {
+                hub.connect_hold(gen).await
+            } else {
+                hub.connect_poll(gen).await
+            }
+        };
+        let Some(task) = self.spawn(run) else {
             *self.0.acct.connect.lock().unwrap() = None;
             let _ = self.account_keys().delete(PENDING_NAME);
             return Err(Problem::new("failed", "The app is not ready yet."));
@@ -1066,7 +1247,9 @@ impl Hub {
         Ok(())
     }
 
-    /// A connect that was pending when the app was last closed goes on, if it still can.
+    /// A connect that was under way when the app was last closed goes on, if it still
+    /// can: the poll for the person's answer on spacesheep, or, when their approval was
+    /// already collected, the question here (the key was kept for exactly this).
     pub(super) fn account_resume(&self) {
         let cfg = self.account_cfg();
         if !self.account_on() || self.0.acct.connect.lock().unwrap().is_some() {
@@ -1076,37 +1259,73 @@ impl Hub {
             return;
         };
         let v: serde_json::Value = serde_json::from_str(&kept).unwrap_or_default();
-        let origin = v["origin"].as_str().unwrap_or("").to_string();
+        let text = |v: &serde_json::Value, k: &str| v[k].as_str().unwrap_or("").to_string();
+        let origin = text(&v, "origin");
         let now = now_ms();
-        let in_time = crate::status::parse_iso_ms(v["expires_at"].as_str().unwrap_or(""))
-            .is_some_and(|t| t.saturating_add(account::CONNECT_COLLECT_MS) > now);
         let same = !origin.is_empty()
             && account::clean_origin(Some(&origin), cfg.allow_local_http).as_deref()
                 == Some(origin.as_str());
-        let answer = (in_time && same)
-            .then(|| account::parse_connect_answer(kept.as_bytes(), &origin, now).ok())
-            .flatten();
-        let Some(a) = answer else {
-            let _ = self.account_keys().delete(PENDING_NAME);
-            return;
-        };
-        let pending = Pending {
+        let mut pending = Pending {
             gen: self.0.acct.next_gen.fetch_add(1, Ordering::Relaxed),
-            origin,
-            code: a.code,
-            poll_token: a.poll_token,
-            digits: a.digits,
-            url: a.url,
-            expires_at_ms: a.expires_at_ms,
+            origin: origin.clone(),
+            code: String::new(),
+            poll_token: String::new(),
+            digits: text(&v, "digits"),
+            url: String::new(),
+            expires_at_ms: crate::status::parse_iso_ms(&text(&v, "expires_at")).unwrap_or(0),
             state: ConnectState::Pending,
             receiver: None,
             email: None,
             error: None,
+            held: None,
+            unused_key: false,
             task: None,
             kick: Arc::new(Notify::new()),
         };
+        // Believed only as far as a fresh answer would be: its own origin, its own shapes.
+        let whole = if v["held"].is_object() {
+            let h = &v["held"];
+            let held = Held {
+                key: text(h, "key"),
+                email: text(h, "email"),
+                // Never longer than a fresh one would be held.
+                until_ms: crate::status::parse_iso_ms(&text(h, "until"))
+                    .unwrap_or(0)
+                    .min(now + HELD_MAX_MS),
+            };
+            let ok = same
+                && account::is_token(&held.key)
+                && account::clean_email(&held.email).is_some()
+                && pending.digits.bytes().all(|c| c.is_ascii_digit());
+            pending.state = ConnectState::Asking;
+            pending.held = Some(held);
+            ok
+        } else {
+            let in_time = pending
+                .expires_at_ms
+                .saturating_add(account::CONNECT_COLLECT_MS)
+                > now;
+            match (in_time && same)
+                .then(|| account::parse_connect_answer(kept.as_bytes(), &origin, now).ok())
+                .flatten()
+            {
+                Some(a) => {
+                    pending.code = a.code;
+                    pending.poll_token = a.poll_token;
+                    pending.digits = a.digits;
+                    pending.url = a.url;
+                    pending.expires_at_ms = a.expires_at_ms;
+                    true
+                }
+                None => false,
+            }
+        };
+        if !whole {
+            let _ = self.account_keys().delete(PENDING_NAME);
+            return;
+        }
         if self.connect_install(pending).is_ok() {
-            log::info!("acct: a connect that was pending goes on");
+            log::info!("acct: a connect that was under way goes on");
         }
     }
 
@@ -1144,7 +1363,7 @@ impl Hub {
             }
             // By the wall clock: a phone asleep does not stop the code from expiring.
             if now_ms() > live.deadline_ms {
-                self.connect_finish(gen, ConnectState::Expired, None, None, None);
+                self.connect_finish(gen, ConnectState::Expired, None, None, None, false);
                 return;
             }
             let Some(auth) = bearer(&live.poll_token) else {
@@ -1184,15 +1403,15 @@ impl Hub {
                     delay = Duration::from_millis(ms).clamp(POLL_EVERY, POLL_SLOWEST);
                 }
                 PollAnswer::Approved { key, email } => {
-                    self.connect_approved(gen, &live.origin, &key, &email).await;
+                    self.connect_collected(gen, &live.origin, key, email).await;
                     return;
                 }
                 PollAnswer::Denied => {
-                    self.connect_finish(gen, ConnectState::Denied, None, None, None);
+                    self.connect_finish(gen, ConnectState::Denied, None, None, None, false);
                     return;
                 }
                 PollAnswer::Expired => {
-                    self.connect_finish(gen, ConnectState::Expired, None, None, None);
+                    self.connect_finish(gen, ConnectState::Expired, None, None, None, false);
                     return;
                 }
                 PollAnswer::Unreadable => {
@@ -1200,32 +1419,27 @@ impl Hub {
                         "bad_answer",
                         "spacesheep's answer can't be used by this version.",
                     );
-                    self.connect_finish(gen, ConnectState::Failed, None, None, Some(p));
+                    self.connect_finish(gen, ConnectState::Failed, None, None, Some(p), false);
                     return;
                 }
             }
         }
     }
 
-    /// spacesheep says someone approved the code. Whose account it is, is for the person
-    /// to see and accept here before anything is kept: until they do, nothing is written
-    /// and nothing of an account already here is touched. In order: the connect must
-    /// still be the one; the id must be free or this same account's; the person says
-    /// yes; then the key, then the entry; and only then does an older account at the
-    /// same origin go.
-    async fn connect_approved(&self, gen: u64, origin: &str, key: &str, email: &str) {
-        let fail = |code: &'static str, message: &str| {
-            let p = Problem::new(code, message);
-            self.connect_finish(gen, ConnectState::Failed, None, None, Some(p));
-        };
-        const UNUSABLE: &str = "spacesheep's answer can't be used by this version.";
-        const REVOKE: &str =
-            "Connect again, and revoke the unused key on spacesheep (Settings → API keys).";
+    /// spacesheep says someone approved the code, and handed the key over: once, and its
+    /// record of it is gone. So from here the key is held (in the account key store, with
+    /// the connect, never anywhere the page reads) until the person has answered whose
+    /// account this is, however long the app is away meanwhile. Checked first, before
+    /// anything is held: the connect must still be the one, and the account's id must
+    /// be free or this same account's.
+    async fn connect_collected(&self, gen: u64, origin: &str, key: String, email: String) {
         if self.connect_live(gen).is_none() {
             return;
         }
-        let Some(mut rx) = Receiver::account(origin, email, &iso_now()) else {
-            return fail("bad_answer", UNUSABLE);
+        const UNUSABLE: &str = "spacesheep's answer can't be used by this version.";
+        let Some(rx) = Receiver::account(origin, &email, &iso_now()) else {
+            let p = Problem::new("bad_answer", UNUSABLE);
+            return self.connect_finish(gen, ConnectState::Failed, None, None, Some(p), true);
         };
         // An id is a whole digest, so this never happens by chance; if it happens at
         // all, the account that was here first stays as it is.
@@ -1237,38 +1451,129 @@ impl Hub {
                 .is_some_and(|r| !r.is_account() || r.origin != origin)
         {
             log::warn!("acct: an approved account's id is another entry's; not kept");
+            let p = Problem::new(
+                "conflict",
+                "That account can't be kept beside the ones already here.",
+            );
+            return self.connect_finish(gen, ConnectState::Failed, None, None, Some(p), true);
+        }
+        {
+            let mut g = self.0.acct.connect.lock().unwrap();
+            let Some(p) = g.as_mut().filter(|p| p.gen == gen) else {
+                return;
+            };
+            p.state = ConnectState::Asking;
+            p.held = Some(Held {
+                key,
+                email,
+                until_ms: now_ms() + HELD_MAX_MS,
+            });
+            // The code did its work; the link and the poll token have no further use.
+            p.code.clear();
+            p.poll_token.clear();
+            p.url.clear();
+            if let Err(e) = self.account_keys().set(PENDING_NAME, &p.kept()) {
+                // Held in memory then: the question still comes, while the app stays open.
+                log::warn!("acct: the approval could not be kept for a restart: {e}");
+            }
+        }
+        self.emit(HubEvent::Account);
+        self.connect_hold(gen).await
+    }
+
+    /// The approval `gen` holds, while it is the one and still unanswered.
+    fn connect_held(&self, gen: u64) -> Option<(String, Held, Arc<Notify>)> {
+        let g = self.0.acct.connect.lock().unwrap();
+        let p = g
+            .as_ref()
+            .filter(|p| p.gen == gen && p.state == ConnectState::Asking)?;
+        Some((p.origin.clone(), p.held.clone()?, p.kick.clone()))
+    }
+
+    /// Asks whose account this phone is about to show, until there is an answer. A
+    /// question that could not be shown (another alert is up, another question of the
+    /// Hub's is open, there is no window) is not an answer: it is asked again when the
+    /// app comes to the front and now and then, and after a restart. Only a real no
+    /// discards the key, or the end of the time it is held for; either way the person
+    /// is told a key was made that is theirs to revoke.
+    async fn connect_hold(&self, gen: u64) {
+        loop {
+            let Some((origin, held, kick)) = self.connect_held(gen) else {
+                return;
+            };
+            if now_ms() > held.until_ms {
+                log::info!("acct: an approved account was never answered for; its key is dropped");
+                return self.connect_finish(gen, ConnectState::Expired, None, None, None, true);
+            }
+            let question = Question::Attach {
+                email: held.email.clone(),
+                origin: origin.clone(),
+                host: account::host_of(&origin),
+            };
+            match self.account_ask(question).await {
+                Asked::Yes => return self.connect_keep(gen, &origin, &held).await,
+                Asked::No => {
+                    log::info!("acct: the person declined the approved account");
+                    return self.connect_finish(
+                        gen,
+                        ConnectState::Declined,
+                        None,
+                        None,
+                        None,
+                        true,
+                    );
+                }
+                Asked::Not(_) => {
+                    tokio::select! {
+                        _ = kick.notified() => {}
+                        _ = tokio::time::sleep(ASK_AGAIN) => {}
+                    }
+                }
+            }
+        }
+    }
+
+    /// The person said yes. In order: the connect must still be the one; then the key,
+    /// then the entry; and only then does an older account at the same origin go.
+    async fn connect_keep(&self, gen: u64, origin: &str, held: &Held) {
+        let fail = |code: &'static str, message: &str| {
+            let p = Problem::new(code, message);
+            self.connect_finish(gen, ConnectState::Failed, None, None, Some(p), true);
+        };
+        const REVOKE: &str =
+            "Connect again, and revoke the unused key on spacesheep (Settings → API keys).";
+        // Cancelled, or replaced by another connect, while the question was open.
+        if self.connect_held(gen).is_none() {
+            return;
+        }
+        let Some(mut rx) = Receiver::account(origin, &held.email, &iso_now()) else {
+            return fail(
+                "bad_answer",
+                "spacesheep's answer can't be used by this version.",
+            );
+        };
+        let taken = self.find(&rx.id);
+        if self.0.registry.lock().unwrap().kept_under(&rx.id)
+            || taken
+                .as_ref()
+                .is_some_and(|r| !r.is_account() || r.origin != origin)
+        {
             return fail(
                 "conflict",
                 "That account can't be kept beside the ones already here.",
             );
         }
-        let question = Question::Attach {
-            email: email.to_string(),
-            origin: origin.to_string(),
-            host: account::host_of(origin),
-        };
-        match self.account_ask(question).await {
-            Ok(true) => {}
-            Ok(false) => {
-                log::info!("acct: the person declined the approved account");
-                return self.connect_finish(gen, ConnectState::Declined, None, None, None);
-            }
-            Err(p) => return self.connect_finish(gen, ConnectState::Failed, None, None, Some(p)),
-        }
-        // Cancelled, or replaced by another connect, while the question was open.
-        if self.connect_live(gen).is_none() {
-            return;
-        }
         // The same person connecting again keeps what the Hub had learnt about them.
         if let (Some(old), Some(new)) = (taken.and_then(|r| r.account), rx.account.as_mut()) {
             new.rp_id = old.rp_id;
             new.device_key_id = old.device_key_id;
+            new.extra = old.extra;
         }
         let name = account_key_name(&rx.id);
         let before = self.account_keys().get(&name);
         if let Err(e) = self
             .account_keys()
-            .set(&name, &account::kept_key(origin, key))
+            .set(&name, &account::kept_key(origin, &held.key))
         {
             log::warn!("acct: the key could not be kept: {e}");
             return fail(
@@ -1308,8 +1613,9 @@ impl Hub {
             gen,
             ConnectState::Approved,
             Some(rx.id.clone()),
-            Some(email.to_string()),
+            Some(held.email.clone()),
             None,
+            false,
         );
         self.emit(HubEvent::Receivers);
         // The rp id the signer needs, learnt now rather than at the first send. A failure
@@ -1319,8 +1625,10 @@ impl Hub {
             .await;
     }
 
-    /// Ends the connect `gen` (when it is still the one): the code, the link and the poll
-    /// token are dropped, the outcome stays for the page to read.
+    /// Ends the connect `gen` (when it is still the one): the code, the link, the poll
+    /// token and a held key are dropped, the outcome stays for the page to read.
+    /// `unused_key`: spacesheep made a key for it that is not kept here, and the outcome
+    /// says so, with where to revoke it.
     fn connect_finish(
         &self,
         gen: u64,
@@ -1328,6 +1636,7 @@ impl Hub {
         receiver: Option<String>,
         email: Option<String>,
         error: Option<Problem>,
+        unused_key: bool,
     ) {
         {
             let mut g = self.0.acct.connect.lock().unwrap();
@@ -1338,6 +1647,8 @@ impl Hub {
             p.code.clear();
             p.poll_token.clear();
             p.url.clear();
+            p.held = None;
+            p.unused_key = unused_key;
             p.receiver = receiver;
             p.email = email;
             p.error = error;
@@ -1350,20 +1661,31 @@ impl Hub {
         self.emit(HubEvent::Account);
     }
 
-    /// Stops a pending connect (true), or clears a finished one's outcome (false). The
-    /// code stays good on spacesheep until it expires: a person who confirms it after
-    /// this makes a key nobody collects, which is theirs to revoke there.
+    /// Stops a connect that is under way (true), or clears a finished one's outcome
+    /// (false). The code stays good on spacesheep until it expires: a person who confirms
+    /// it after this makes a key nobody collects, which is theirs to revoke there. A
+    /// connect whose approval was already collected ends as `declined`, and its outcome
+    /// stays to say that a key was made.
     pub fn account_connect_cancel(&self) -> bool {
-        let old = self.0.acct.connect.lock().unwrap().take();
+        let mut g = self.0.acct.connect.lock().unwrap();
         let _ = self.account_keys().delete(PENDING_NAME);
-        let Some(old) = old else {
-            return false;
-        };
-        if let Some(t) = &old.task {
+        let was = g.as_ref().map(|p| p.state);
+        if let Some(t) = g.as_mut().and_then(|p| p.task.take()) {
             t.abort();
         }
-        self.emit(HubEvent::Account);
-        old.state == ConnectState::Pending
+        match (was, g.as_mut()) {
+            (Some(ConnectState::Asking), Some(p)) => {
+                p.state = ConnectState::Declined;
+                p.held = None;
+                p.unused_key = true;
+            }
+            _ => *g = None,
+        }
+        drop(g);
+        if was.is_some() {
+            self.emit(HubEvent::Account);
+        }
+        matches!(was, Some(ConnectState::Pending | ConnectState::Asking))
     }
 
     /// Polls a pending connect now (the app came back to the front).
@@ -1373,9 +1695,10 @@ impl Hub {
         }
     }
 
-    /// Forgets the account here: its key, its documents, its entry. When documents are
-    /// kept for it, the person is asked first (they are theirs, and gone for good). The
-    /// key itself keeps working until it is revoked on spacesheep, and the answer says so.
+    /// Forgets the account here: its key, its documents, its entry. The person is always
+    /// asked first (and told when labels and read marks go with it): a page cannot empty
+    /// an account by itself, in one step or in several. The key itself keeps working
+    /// until it is revoked on spacesheep, and the answer says so.
     pub async fn account_disconnect(&self, id: &str) -> Result<Disconnected, Problem> {
         let rx = self
             .account_entry(id)
@@ -1385,32 +1708,28 @@ impl Hub {
             .as_ref()
             .map(|a| a.email.clone())
             .unwrap_or_default();
-        let has_documents = {
+        let documents = {
             let _g = self.0.acct.docs_lock.lock().unwrap();
             !self.0.acct.docs.names(id).is_empty()
         };
-        if has_documents {
-            let q = Question::Disconnect {
-                email: email.clone(),
-                origin: rx.origin.clone(),
-                host: account::host_of(&rx.origin),
-            };
-            if !self.account_ask(q).await? {
-                return Err(Problem::new("cancelled", "Cancelled."));
-            }
+        let q = Question::Disconnect {
+            email: email.clone(),
+            origin: rx.origin.clone(),
+            host: account::host_of(&rx.origin),
+            documents,
+        };
+        match self.account_ask(q).await {
+            Asked::Yes => {}
+            Asked::No => return Err(Problem::new("cancelled", "Cancelled.")),
+            Asked::Not(why) => return Err(why),
         }
-        self.account_remove(id).map_err(|e| {
-            Problem::new(
-                "io",
-                format!("The key is forgotten, but the entry could not be removed: {e}"),
-            )
-        })?;
+        self.account_remove(id)?;
         {
             // A finished connect that named it is no longer news.
             let mut g = self.0.acct.connect.lock().unwrap();
-            if g.as_ref().is_some_and(|p| {
-                p.state != ConnectState::Pending && p.receiver.as_deref() == Some(id)
-            }) {
+            if g.as_ref()
+                .is_some_and(|p| !p.live() && p.receiver.as_deref() == Some(id))
+            {
                 *g = None;
             }
         }

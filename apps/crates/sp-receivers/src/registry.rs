@@ -51,6 +51,9 @@ pub struct Account {
     /// only key the device door is ever asked about.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_key_id: Option<String>,
+    /// Fields a newer version wrote here, kept and written back as they were.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +72,10 @@ pub struct Receiver {
     /// Set exactly when `kind` is `Spacesheep`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<Account>,
+    /// Fields a newer version wrote on an entry this version does read: kept, and
+    /// written back as they were at every save.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Receiver {
@@ -95,6 +102,7 @@ impl Receiver {
                 ca_sha256: None,
                 kind: Kind::Receiver,
                 account: None,
+                extra: Default::default(),
             },
             key,
         ))
@@ -118,7 +126,9 @@ impl Receiver {
                 unauthorized: false,
                 rp_id: None,
                 device_key_id: None,
+                extra: Default::default(),
             }),
+            extra: Default::default(),
         })
     }
 
@@ -643,6 +653,71 @@ mod tests {
         std::fs::write(t.path().join("receivers.json"), twice.to_string()).unwrap();
         let reg = Registry::load(t.path());
         assert_eq!((reg.list().len(), reg.kept_unread()), (1, 1));
+    }
+
+    /// A field a newer version wrote on an entry this version does read (a receiver's,
+    /// an account's record's) is kept through every save, beside what this version
+    /// changes.
+    #[test]
+    fn a_newer_field_on_an_entry_that_is_read_survives() {
+        let t = TempDir::new("registry-extra");
+        let acct = account_id("https://spacesheep.dev", "misha@example.com");
+        let file = serde_json::json!({
+            "receivers": [
+                { "id": "abcdefghij", "name": "studio", "origin": "http://192.168.1.9:7373",
+                  "local": false, "pinned": true, "tags": ["work", { "n": 1 }] },
+                { "id": acct, "name": "spacesheep.dev", "origin": "https://spacesheep.dev",
+                  "local": false, "kind": "spacesheep", "colour": "green",
+                  "account": { "email": "misha@example.com", "connectedAt": "then",
+                               "plan": { "name": "pro" }, "seats": 3 } }
+            ]
+        });
+        std::fs::write(t.path().join("receivers.json"), file.to_string()).unwrap();
+        let mut reg = Registry::load(t.path());
+        assert_eq!(
+            (reg.list().len(), reg.kept_unread()),
+            (2, 0),
+            "both are read"
+        );
+        assert_eq!(reg.list()[0].extra["pinned"], true);
+        // Changes of this version's own, and saves of every sort.
+        reg.update(&acct, |r| {
+            let a = r.account.as_mut().unwrap();
+            a.unauthorized = true;
+            a.rp_id = Some("spacesheep.dev".into());
+        })
+        .unwrap();
+        reg.update("abcdefghij", |r| r.name = "studio-mac".into())
+            .unwrap();
+        reg.set_active(Some("abcdefghij")).unwrap();
+        let again = reg.list()[1].clone();
+        reg.upsert(again).unwrap();
+        let v = list_on_disk(&t);
+        assert_eq!(v["receivers"][0]["pinned"], true);
+        assert_eq!(
+            v["receivers"][0]["tags"],
+            serde_json::json!(["work", { "n": 1 }])
+        );
+        assert_eq!(v["receivers"][0]["name"], "studio-mac");
+        assert_eq!(v["receivers"][1]["colour"], "green");
+        assert_eq!(
+            v["receivers"][1]["account"]["plan"],
+            serde_json::json!({ "name": "pro" })
+        );
+        assert_eq!(v["receivers"][1]["account"]["seats"], 3);
+        assert_eq!(v["receivers"][1]["account"]["unauthorized"], true);
+        assert_eq!(v["receivers"][1]["account"]["rpId"], "spacesheep.dev");
+        // And nothing is added to an entry that had none.
+        let (plain, _) = Receiver::from_url("http://192.168.1.10:7373").unwrap();
+        assert!(plain.extra.is_empty());
+        assert_eq!(
+            serde_json::to_value(&plain)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .len(),
+            4
+        );
     }
 
     /// A file that is no list is never saved over blind: a copy stays beside it.

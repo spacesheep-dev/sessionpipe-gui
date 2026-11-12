@@ -40,7 +40,8 @@ fn gate<R: Runtime>(w: &Webview<R>) -> Result<(), Problem> {
 }
 
 /// The Hub's questions, as native alerts over the app (`confirm.rs` has the words). An
-/// alert that cannot be shown is a no.
+/// alert that cannot be shown is no answer at all (`None`): the Hub holds an approval
+/// and asks again rather than take that for a no.
 pub struct Alerts<R: Runtime>(pub AppHandle<R>);
 
 impl<R: Runtime> Confirm for Alerts<R> {
@@ -107,8 +108,8 @@ pub fn acct_connect_cancel<R: Runtime>(
     Ok(hub.account_connect_cancel())
 }
 
-/// Forgets the account on this phone: its key, its documents, its entry. When documents
-/// are kept for it the Hub asks the person first. The answer says what this does not do
+/// Forgets the account on this phone: its key, its documents, its entry. The Hub always
+/// asks the person first. The answer says what this does not do
 /// (the key works until it is revoked on spacesheep) and where to do it. When it was the
 /// one the window shows, the page calls `rx_select` for another receiver or reloads to
 /// the welcome.

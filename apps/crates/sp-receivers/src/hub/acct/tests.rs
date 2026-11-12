@@ -10,6 +10,7 @@ use crate::testutil::{logged, serve_replies, Reply, Seen, TempDir};
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::path::Path;
+use std::time::Instant;
 
 /// The bundled page's origin on an iPhone.
 const APP: &str = "tauri://localhost";
@@ -224,8 +225,9 @@ fn route(w: &World, origin: &str, s: &Seen) -> Reply {
 /// The person, scripted: what they were asked, and what they say.
 struct Script {
     asked: Mutex<Vec<Question>>,
-    next: Mutex<VecDeque<bool>>,
-    otherwise: bool,
+    /// The next answers: yes, no, or None for a question that could not be shown.
+    next: Mutex<VecDeque<Option<bool>>>,
+    otherwise: Option<bool>,
     /// While set, a question stays open until `release`: the one about keeping an
     /// approved account, or (`hold_every`) any.
     hold: Mutex<Option<Arc<Notify>>>,
@@ -234,6 +236,13 @@ struct Script {
 
 impl Script {
     fn saying(otherwise: bool) -> Arc<Script> {
+        Script::answering(Some(otherwise))
+    }
+    /// A device on which no question can be shown (until told otherwise with `then`).
+    fn unshown() -> Arc<Script> {
+        Script::answering(None)
+    }
+    fn answering(otherwise: Option<bool>) -> Arc<Script> {
         Arc::new(Script {
             asked: Mutex::new(Vec::new()),
             next: Mutex::new(VecDeque::new()),
@@ -243,7 +252,20 @@ impl Script {
         })
     }
     fn then(&self, answers: &[bool]) {
-        self.next.lock().unwrap().extend(answers);
+        self.next
+            .lock()
+            .unwrap()
+            .extend(answers.iter().map(|a| Some(*a)));
+    }
+    /// The next `n` questions cannot be shown.
+    fn then_unshown(&self, n: usize) {
+        self.next.lock().unwrap().extend((0..n).map(|_| None));
+    }
+    fn attach_questions(&self) -> usize {
+        self.asked()
+            .iter()
+            .filter(|q| matches!(q, Question::Attach { .. }))
+            .count()
     }
     fn asked(&self) -> Vec<Question> {
         self.asked.lock().unwrap().clone()
@@ -307,6 +329,7 @@ fn hub_asking(home: &Path, enabled: bool, local: bool, person: Option<Arc<Script
     });
     // Tests start connects by the dozen; the one about the limit sets its own.
     h.0.acct.start_limit.store(10_000, Ordering::Relaxed);
+    h.0.acct.device_ask_limit.store(10_000, Ordering::Relaxed);
     h
 }
 
@@ -433,6 +456,13 @@ fn kept(home: &Path, id: &str) -> Option<(String, String)> {
     let all = key_store(home);
     let v: Value = serde_json::from_str(all.get(format!("acct:{id}"))?.as_str()?).ok()?;
     Some((v["origin"].as_str()?.into(), v["key"].as_str()?.into()))
+}
+
+fn gz_best(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    e.write_all(bytes).unwrap();
+    e.finish().unwrap()
 }
 
 fn gz(bytes: &[u8]) -> Vec<u8> {
@@ -894,7 +924,11 @@ async fn connects_started_from_here_are_few() {
     let fake = Fake::start("start-limit").await;
     let person = Script::saying(true);
     let h = hub_asking(t.path(), true, true, Some(person.clone()));
-    assert_eq!(account::START_LIMIT, 5, "five in ten minutes");
+    assert_eq!(
+        (account::START_LIMIT, account::START_WINDOW_S),
+        (3, 3600),
+        "three an hour: under what spacesheep allows one address"
+    );
     h.0.acct.start_limit.store(2, Ordering::Relaxed);
     // Each start is counted, also one spacesheep refuses and one the person turns down.
     fake.hook(|s| (s.target() == "/api/gui/connect").then(|| Reply::json(404, "{}")));
@@ -927,7 +961,16 @@ async fn connects_started_from_here_are_few() {
     );
     // The window passes (it is short in tests) and a start is a start again.
     fake.set(|w| w.hook = None);
-    tokio::time::sleep(START_WINDOW + Duration::from_millis(100)).await;
+    // Counted in the Hub's home, so closing and opening the app does not start it again.
+    let again = hub_asking(t.path(), true, true, Some(person.clone()));
+    again.0.acct.start_limit.store(2, Ordering::Relaxed);
+    let e = again
+        .account_connect_start(Some(&fake.origin()))
+        .await
+        .unwrap_err();
+    assert_eq!(e.code, "too_many_starts");
+    assert_eq!(fake.starts(), starts);
+    tokio::time::sleep(Duration::from_millis(START_WINDOW_MS + 100)).await;
     let v = h.account_connect_start(Some(&fake.origin())).await.unwrap();
     assert_eq!(v.state, ConnectState::Pending);
     // Asking again for the connect that is under way is not a start.
@@ -954,6 +997,15 @@ async fn the_person_is_asked_before_an_account_is_kept_and_no_means_nothing_chan
     .await;
     let c = h.account_status().connect.unwrap();
     assert_eq!((c.receiver, c.email, c.error), (None, None, None));
+    // A key was made on spacesheep and is not kept here: the page is told, with where
+    // the person revokes it.
+    assert_eq!(
+        (c.revoke_url, c.note),
+        (
+            Some(format!("{}/settings/api-keys", fake.origin())),
+            Some(account::UNUSED_KEY_NOTE)
+        )
+    );
     assert!(h.account_status().accounts.is_empty() && h.receivers().is_empty());
     assert_eq!(key_store(t.path()), json!({}));
     assert!(!t.path().join("accounts").exists());
@@ -1008,9 +1060,10 @@ async fn the_person_is_asked_before_an_account_is_kept_and_no_means_nothing_chan
     whole(&h);
     assert_eq!(
         connect_state(&h),
-        Some(ConnectState::Pending),
+        Some(ConnectState::Asking),
         "not approved until the person says so"
     );
+    fake.absent_from_page(&visible(&h), "what the page sees while the key is held");
     person.release();
     until("declined", || {
         connect_state(&h) == Some(ConnectState::Declined)
@@ -1099,6 +1152,11 @@ async fn the_person_is_asked_before_an_account_is_kept_and_no_means_nothing_chan
     assert_eq!(h.account_status().accounts[0].id, other);
     assert_eq!(kept(t.path(), &fake.id()), None);
     assert_eq!(key_store(t.path()).as_object().unwrap().len(), 1);
+    // Its approval had been collected, so the outcome stays to say a key was made.
+    let c = h.account_status().connect.unwrap();
+    assert_eq!(c.state, ConnectState::Declined);
+    assert!(c.revoke_url.is_some() && c.note.is_some());
+    assert!(!h.account_connect_cancel(), "an outcome is cleared");
 }
 
 #[tokio::test]
@@ -1158,7 +1216,8 @@ async fn one_question_at_a_time_and_none_without_someone_to_ask() {
         Some(&Question::Disconnect {
             email: fake.email(),
             origin: fake.origin(),
-            host: fake.host()
+            host: fake.host(),
+            documents: true
         })
     );
     assert!(account(&h, &id).is_some() && kept(t.path(), &id).is_some());
@@ -1166,11 +1225,32 @@ async fn one_question_at_a_time_and_none_without_someone_to_ask() {
     // `rx_remove` is not a way round it: an account is disconnected, not removed.
     assert!(h.remove(&id).is_err());
     assert!(account(&h, &id).is_some() && kept(t.path(), &id).is_some());
-    // With nothing of theirs to lose, nobody is asked.
+    // Deleting the documents one by one first is no way round it either: the person is
+    // asked all the same, and told there is nothing kept to lose.
     h.account_doc_delete(&id, "labels").unwrap();
-    let asked = person.asked().len();
+    person.then(&[false]);
+    assert_eq!(
+        h.account_disconnect(&id).await.unwrap_err().code,
+        "cancelled"
+    );
+    assert_eq!(
+        person.asked().last(),
+        Some(&Question::Disconnect {
+            email: fake.email(),
+            origin: fake.origin(),
+            host: fake.host(),
+            documents: false
+        })
+    );
+    assert!(account(&h, &id).is_some() && kept(t.path(), &id).is_some());
+    // A question that cannot be shown is not a yes.
+    person.then_unshown(1);
+    assert_eq!(
+        h.account_disconnect(&id).await.unwrap_err().code,
+        "not_asked"
+    );
+    assert!(account(&h, &id).is_some() && kept(t.path(), &id).is_some());
     h.account_disconnect(&id).await.unwrap();
-    assert_eq!(person.asked().len(), asked);
     assert!(h.account_status().accounts.is_empty());
 
     // An origin that merely begins like spacesheep.dev is not spacesheep.dev: asked.
@@ -1197,7 +1277,7 @@ async fn one_question_at_a_time_and_none_without_someone_to_ask() {
         .account_connect_start(Some(&fake.origin()))
         .await
         .unwrap_err();
-    assert_eq!(e.code, "cancelled");
+    assert_eq!(e.code, "not_asked");
     assert_eq!(fake.starts(), 1, "and nothing was sent");
 }
 
@@ -1503,6 +1583,49 @@ async fn this_devices_key_is_asked_about_by_the_hub_and_no_other_key_ever() {
         Some("K".repeat(43))
     );
 
+    // Asked again while the ask is fresh: the same answer and no request (each new one
+    // would change the number the person is matching).
+    let rest = fake.count();
+    let fresh = h.account_device_ask(&id, &key).await.unwrap();
+    for _ in 0..30 {
+        assert_eq!(h.account_device_ask(&id, &key).await.unwrap(), fresh);
+    }
+    assert!(
+        fake.count() <= rest + 1,
+        "thirty asks, at most the one request"
+    );
+    // And the requests themselves are few, counted across restarts.
+    let forget = |h: &Hub| h.0.acct.asked.lock().unwrap().clear();
+    tokio::time::sleep(Duration::from_millis(DEVICE_ASK_WINDOW_MS + 100)).await;
+    h.0.acct.device_ask_limit.store(2, Ordering::Relaxed);
+    let rest = fake.count();
+    for _ in 0..2 {
+        forget(&h);
+        h.account_device_ask(&id, &key).await.unwrap();
+    }
+    forget(&h);
+    let e = h.account_device_ask(&id, &key).await.unwrap_err();
+    assert_eq!(e.code, "too_many_asks");
+    assert!(e.retry_after_s.is_some_and(|s| s >= 1));
+    let reopened = hub_in(t.path());
+    reopened.0.acct.device_ask_limit.store(2, Ordering::Relaxed);
+    assert_eq!(
+        reopened
+            .account_device_ask(&id, &key)
+            .await
+            .unwrap_err()
+            .code,
+        "too_many_asks"
+    );
+    assert_eq!(
+        fake.count(),
+        rest + 2,
+        "two requests, and none that was refused"
+    );
+    tokio::time::sleep(Duration::from_millis(DEVICE_ASK_WINDOW_MS + 100)).await;
+    h.0.acct.device_ask_limit.store(10_000, Ordering::Relaxed);
+    forget(&h);
+
     // What is not a device key as the signer makes one is not sent.
     let rest = fake.count();
     let mut passkey = device_key('P');
@@ -1529,6 +1652,7 @@ async fn this_devices_key_is_asked_about_by_the_hub_and_no_other_key_ever() {
             )
         })
     });
+    forget(&h);
     let e = h.account_device_ask(&id, &key).await.unwrap_err();
     assert_eq!(
         (e.code, e.upstream.as_deref()),
@@ -1544,10 +1668,12 @@ async fn this_devices_key_is_asked_about_by_the_hub_and_no_other_key_ever() {
             )
         })
     });
+    forget(&h);
     assert_eq!(
         h.account_device_ask(&id, &key).await.unwrap_err().code,
         "bad_answer"
     );
+    forget(&h);
     let k = "K".repeat(43);
     fake.hook(move |s| {
         (s.target() == "/api/gui/device").then(|| {
@@ -1805,6 +1931,21 @@ async fn an_answer_is_unpacked_within_its_limit_and_never_holds_the_key() {
             "{door}: stopped at {max}, never unpacked whole"
         );
     }
+    // One member and nothing after it: a second one, or bytes that are no gzip, are not
+    // part of an answer the Hub asked for.
+    let two = [gz(b"{\"a\":1}"), gz(b"{\"b\":2}")].concat();
+    let trailed = [gz(b"{\"a\":1}"), b"junk".to_vec()].concat();
+    assert!(matches!(unpack(&two, small), Err(Refused::BadEncoding)));
+    assert!(matches!(unpack(&trailed, small), Err(Refused::BadEncoding)));
+    for body in [two, trailed] {
+        fake.hook(move |s| {
+            s.target()
+                .starts_with(RELAY)
+                .then(|| Reply::json(200, body.clone()).header("content-encoding", "gzip"))
+        });
+        let res = ask(&h, "GET", &id, RELAY, b"").await;
+        assert_eq!(said(&res), (502, Some("bad_encoding")));
+    }
     // Packed some other way, or not what it says it is.
     for (encoding, body) in [
         ("br", packed.clone()),
@@ -1828,8 +1969,19 @@ async fn an_answer_is_unpacked_within_its_limit_and_never_holds_the_key() {
             let echo = json!({ "you_sent": auth }).to_string();
             Some(match place {
                 "body" => Reply::json(200, echo),
+                // Packed for real: among enough other text that the key's bytes are not
+                // in what goes over the wire, only in what comes out.
                 "packed" => {
-                    Reply::json(200, gz(echo.as_bytes())).header("content-encoding", "gzip")
+                    let filler: String = (0..400)
+                        .map(|i| format!("{{\"seq\":{i},\"text\":\"turn {i} of the session\"}},"))
+                        .collect();
+                    let packed = gz_best(format!("[{filler}{echo},{echo}]").as_bytes());
+                    let key = auth.trim_start_matches("Bearer ");
+                    assert!(
+                        !account::holds(&packed, key.as_bytes()),
+                        "the key must not be readable in the packed bytes"
+                    );
+                    Reply::json(200, packed).header("content-encoding", "gzip")
                 }
                 "large" => Reply::json(200, format!("{}{echo}", " ".repeat(300_000))),
                 "content-type" => Reply {
@@ -2574,7 +2726,8 @@ async fn an_approval_never_takes_an_id_that_is_someone_elses() {
     })
     .await;
     let c = h.account_status().connect.unwrap();
-    assert_eq!(c.error.unwrap().code, "conflict");
+    assert_eq!(c.error.clone().unwrap().code, "conflict");
+    assert!(c.revoke_url.is_some() && c.note.is_some(), "a key was made");
     assert!(
         !person
             .asked()
@@ -2876,4 +3029,297 @@ async fn an_account_that_cannot_be_saved_replaces_nothing() {
         .get(&format!("acct:{first}"))
         .unwrap()
         .contains("newcomer"));
+}
+
+/// The approval is collected from spacesheep once, and its record there is gone. So a
+/// question that could not be shown is not an answer: the key is held, never where the
+/// page reads, and the person is asked again, until they answer.
+#[tokio::test]
+async fn an_approval_is_held_until_the_person_has_really_answered() {
+    let t = TempDir::new("acct-held");
+    let fake = Fake::start("held").await;
+    // Nothing can be shown on this device for now (another alert is up, there is no
+    // window, the app is in the background).
+    let person = Script::unshown();
+    person.then(&[true]);
+    let h = hub_asking(t.path(), true, true, Some(person.clone()));
+    fake.set(|w| w.verdict = Verdict::Approved);
+    h.account_connect_start(Some(&fake.origin())).await.unwrap();
+    until("the approval, held", || {
+        connect_state(&h) == Some(ConnectState::Asking)
+    })
+    .await;
+    until("asked more than once", || person.attach_questions() >= 3).await;
+    // Held: not an account yet, nothing the page reads has the key, and it is beside the
+    // pending connect in the key store, for a restart.
+    let c = h.account_status().connect.unwrap();
+    assert_eq!(
+        (c.state, c.receiver, c.error),
+        (ConnectState::Asking, None, None)
+    );
+    assert!(h.account_status().accounts.is_empty());
+    assert!(kept(t.path(), &fake.id()).is_none());
+    assert!(key_store(t.path())[PENDING_NAME]
+        .as_str()
+        .unwrap()
+        .contains(&fake.key()));
+    fake.absent_from_page(&visible(&h), "what the page sees while the key is held");
+    fake.absent(&files(t.path()), "a file beside the key store");
+    assert_eq!(
+        h.account_connect_link(),
+        None,
+        "the link ended with the code"
+    );
+    // The key was handed over once; nothing more is asked of spacesheep meanwhile.
+    let polls = fake.asked("/api/gui/connect/poll").len();
+    // Pressing Connect again is the same connect, still asking; another origin waits.
+    let again = h.account_connect_start(Some(&fake.origin())).await.unwrap();
+    assert_eq!(again.state, ConnectState::Asking);
+    let e = h
+        .account_connect_start(Some("https://stagesheep.dev"))
+        .await
+        .unwrap_err();
+    assert_eq!(e.code, "busy");
+    assert_eq!(
+        connect_state(&h),
+        Some(ConnectState::Asking),
+        "and the key is still held"
+    );
+
+    // The app is closed while it waits. Opened again, it asks from what it kept: no new
+    // connect, no new poll, and this time the question can be shown.
+    let taken = h.0.acct.connect.lock().unwrap().take().unwrap();
+    taken.task.as_ref().unwrap().abort();
+    let asker = Script::unshown();
+    let h = hub_asking(t.path(), true, true, Some(asker.clone()));
+    assert_eq!(h.account_status().connect, None, "nothing before it starts");
+    h.start(tokio::runtime::Handle::current());
+    until("asking again", || asker.attach_questions() >= 2).await;
+    assert_eq!(connect_state(&h), Some(ConnectState::Asking));
+    assert_eq!(
+        asker.asked()[0],
+        Question::Attach {
+            email: fake.email(),
+            origin: fake.origin(),
+            host: fake.host()
+        }
+    );
+    // The app comes to the front (a nudge) and the alert can be shown: yes.
+    asker.then(&[true]);
+    h.account_nudge();
+    until("approved", || {
+        connect_state(&h) == Some(ConnectState::Approved)
+    })
+    .await;
+    assert_eq!(
+        kept(t.path(), &fake.id()),
+        Some((fake.origin(), fake.key()))
+    );
+    assert_eq!(account(&h, &fake.id()).unwrap().state, AccountState::Ok);
+    assert!(key_store(t.path()).get(PENDING_NAME).is_none());
+    assert_eq!(
+        (fake.starts(), fake.asked("/api/gui/connect/poll").len()),
+        (1, polls)
+    );
+    let c = h.account_status().connect.unwrap();
+    assert_eq!(
+        (c.revoke_url, c.note),
+        (None, None),
+        "the key is kept: nothing to revoke"
+    );
+    fake.absent(&files(t.path()), "a file beside the key store");
+    fake.absent(&logged().join("\n"), "a log line");
+}
+
+/// Another question of the Hub's is open when the approval arrives: that is not a no
+/// either. The approval waits, and is asked about once the other is answered.
+#[tokio::test]
+async fn an_approval_that_meets_an_open_question_waits_for_it() {
+    let t = TempDir::new("acct-held-busy");
+    let fake = Fake::start("held-busy").await;
+    let other = Fake::start("held-busy-other").await;
+    let person = Script::saying(true);
+    let h = hub_asking(t.path(), true, true, Some(person.clone()));
+    let there = connected(&h, &other).await;
+    h.account_connect_start(Some(&fake.origin())).await.unwrap();
+    // The person is looking at "Disconnect …?" for the other account.
+    person.hold_every();
+    let (h2, id2) = (h.clone(), there.clone());
+    let disconnect = tokio::spawn(async move { h2.account_disconnect(&id2).await });
+    until("the open question", || {
+        matches!(person.asked().last(), Some(Question::Disconnect { .. }))
+    })
+    .await;
+    fake.set(|w| w.verdict = Verdict::Approved);
+    until("the approval, held", || {
+        connect_state(&h) == Some(ConnectState::Asking)
+    })
+    .await;
+    tokio::time::sleep(ASK_AGAIN * 3).await;
+    assert_eq!(
+        connect_state(&h),
+        Some(ConnectState::Asking),
+        "not declined, not failed"
+    );
+    assert_eq!(
+        person.attach_questions(),
+        1,
+        "the first connect's, long answered"
+    );
+    // The other question is answered; the approval's turn comes by itself.
+    person.release();
+    assert!(disconnect.await.unwrap().is_ok());
+    until("approved", || {
+        connect_state(&h) == Some(ConnectState::Approved)
+    })
+    .await;
+    assert_eq!(
+        kept(t.path(), &fake.id()),
+        Some((fake.origin(), fake.key()))
+    );
+    assert!(account(&h, &there).is_none());
+}
+
+/// Never answered: the key is held for a time and no longer. Its end, like a no, says
+/// that a key was made on spacesheep, and where the person revokes it.
+#[tokio::test]
+async fn a_held_approval_nobody_answers_ends_and_says_a_key_was_made() {
+    let t = TempDir::new("acct-held-expiry");
+    let fake = Fake::start("held-expiry").await;
+    let person = Script::unshown();
+    person.then(&[true]);
+    let h = hub_asking(t.path(), true, true, Some(person.clone()));
+    fake.set(|w| w.verdict = Verdict::Approved);
+    h.account_connect_start(Some(&fake.origin())).await.unwrap();
+    until("the approval, held", || {
+        connect_state(&h) == Some(ConnectState::Asking)
+    })
+    .await;
+    assert_eq!(account::HELD_MAX_MS, 15 * 60_000, "a quarter of an hour");
+    tokio::time::sleep(Duration::from_millis(HELD_MAX_MS / 3)).await;
+    assert_eq!(connect_state(&h), Some(ConnectState::Asking), "still held");
+    until("its end", || {
+        connect_state(&h) == Some(ConnectState::Expired)
+    })
+    .await;
+    let c = h.account_status().connect.unwrap();
+    assert_eq!(
+        (c.revoke_url, c.note, c.error),
+        (
+            Some(format!("{}/settings/api-keys", fake.origin())),
+            Some(account::UNUSED_KEY_NOTE),
+            None
+        )
+    );
+    assert!(h.account_status().accounts.is_empty());
+    assert_eq!(key_store(t.path()), json!({}), "the key is dropped with it");
+    // What a restart finds of a held approval is believed only as far as a fresh one,
+    // and held no longer than a fresh one would be.
+    for (what, record) in [
+        (
+            "another origin's key",
+            json!({ "origin": "http://evil.example", "digits": "4821",
+            "expires_at": iso_ms(now_ms()), "held": { "key": fake.key(), "email": fake.email(), "until": iso_ms(now_ms() + 60_000) } }),
+        ),
+        (
+            "no key",
+            json!({ "origin": fake.origin(), "digits": "4821",
+            "expires_at": iso_ms(now_ms()), "held": { "key": "", "email": fake.email(), "until": iso_ms(now_ms() + 60_000) } }),
+        ),
+        (
+            "an address that is none",
+            json!({ "origin": fake.origin(), "digits": "4821",
+            "expires_at": iso_ms(now_ms()), "held": { "key": fake.key(), "email": "a@b@c", "until": iso_ms(now_ms() + 60_000) } }),
+        ),
+    ] {
+        let t2 = TempDir::new("acct-held-bad");
+        std::fs::write(t2.path().join("receivers.json"), r#"{"receivers":[]}"#).unwrap();
+        std::fs::write(
+            t2.path().join("account-keys.json"),
+            json!({ PENDING_NAME: record.to_string() }).to_string(),
+        )
+        .unwrap();
+        let h2 = hub_in(t2.path());
+        h2.start(tokio::runtime::Handle::current());
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        assert_eq!(h2.account_status().connect, None, "{what}");
+        assert!(h2.account_status().accounts.is_empty(), "{what}");
+        assert_eq!(key_store(t2.path()), json!({}), "{what}: dropped");
+    }
+    let t3 = TempDir::new("acct-held-forever");
+    std::fs::write(t3.path().join("receivers.json"), r#"{"receivers":[]}"#).unwrap();
+    let forever = json!({ "origin": fake.origin(), "digits": "4821", "expires_at": iso_ms(now_ms()),
+        "held": { "key": fake.key(), "email": fake.email(), "until": "2099-01-01T00:00:00.000Z" } });
+    std::fs::write(
+        t3.path().join("account-keys.json"),
+        json!({ PENDING_NAME: forever.to_string() }).to_string(),
+    )
+    .unwrap();
+    let h3 = hub_asking(t3.path(), true, true, Some(Script::unshown()));
+    h3.start(tokio::runtime::Handle::current());
+    until("asking", || {
+        connect_state(&h3) == Some(ConnectState::Asking)
+    })
+    .await;
+    until("its end, in the Hub's own time", || {
+        connect_state(&h3) == Some(ConnectState::Expired)
+    })
+    .await;
+    fake.absent(&logged().join("\n"), "a log line");
+}
+
+/// What could not be written is not said to have happened: no mark, no event, no log
+/// line; and a disconnect whose key could not be deleted says so, and changed nothing.
+#[cfg(unix)]
+#[tokio::test]
+async fn what_was_not_saved_is_not_announced() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = TempDir::new("acct-unsaved-mark");
+    let fake = Fake::start("unsaved-mark").await;
+    let h = hub_in(t.path());
+    let id = connected(&h, &fake).await;
+    h.account_doc_set(&id, "labels", &json!(1)).unwrap();
+    let writable = |on: bool| {
+        let mode = if on { 0o755 } else { 0o555 };
+        std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    writable(false);
+    if std::fs::write(t.path().join("probe"), b"x").is_ok() {
+        writable(true);
+        return;
+    }
+    // spacesheep refuses the key while the list cannot be written.
+    fake.set(|w| w.revoked = true);
+    let mut events = h.subscribe();
+    let res = ask(&h, "GET", &id, RELAY, b"").await;
+    assert_eq!(res.status(), 401, "the page still gets spacesheep's answer");
+    assert_eq!(
+        account(&h, &id).unwrap().state,
+        AccountState::Ok,
+        "not marked"
+    );
+    let mut told = false;
+    while let Ok(e) = events.try_recv() {
+        told |= e == HubEvent::Account;
+    }
+    assert!(!told, "no event for a mark that was not made");
+    assert!(!logged()
+        .iter()
+        .any(|l| l.contains(&format!("acct {id}: spacesheep refused the key"))));
+    // A disconnect whose key cannot be deleted says exactly that, and changed nothing.
+    let e = h.account_disconnect(&id).await.unwrap_err();
+    assert_eq!(e.code, "io");
+    assert_eq!(
+        e.message,
+        "The key could not be removed from this device. Nothing was changed."
+    );
+    writable(true);
+    assert!(account(&h, &id).is_some() && kept(t.path(), &id).is_some());
+    assert_eq!(h.account_doc_get(&id, "labels").unwrap(), Some(json!(1)));
+    // Once it can be written, the next refusal is marked and said.
+    assert_eq!(ask(&h, "GET", &id, RELAY, b"").await.status(), 401);
+    assert_eq!(account(&h, &id).unwrap().state, AccountState::Unauthorized);
+    assert!(logged()
+        .iter()
+        .any(|l| l.contains(&format!("acct {id}: spacesheep refused the key"))));
 }
