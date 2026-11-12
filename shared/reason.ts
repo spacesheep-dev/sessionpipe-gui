@@ -16,9 +16,11 @@ const BREAKS = /[\p{Cc}\p{Zl}\p{Zp}]/gu;
  *  zero-width, tags, the soft hyphen, interlinear annotation), private use, unassigned
  *  code points, surrogates, everything Unicode calls default-ignorable (variation
  *  selectors, the Hangul fillers, U+034F, U+17B4/5, U+1D173-1D17A), and the blank-looking
- *  characters that are none of those (the braille blank, the Hangul fillers again). */
+ *  characters that are none of those (the braille blank, the Hangul fillers again, the
+ *  Khitan filler U+16FE4, the null notehead U+1D159, SignWriting's fill and rotation
+ *  modifiers U+1DA9B-1DA9F and U+1DAA1-1DAAF). */
 const INVISIBLE =
-  /[\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Default_Ignorable_Code_Point}\u{115F}\u{1160}\u{3164}\u{FFA0}\u{2800}]/gu;
+  /[\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Default_Ignorable_Code_Point}\u{115F}\u{1160}\u{3164}\u{FFA0}\u{2800}\u{16FE4}\u{1D159}\u{1DA9B}-\u{1DA9F}\u{1DAA1}-\u{1DAAF}]/gu;
 /** A run of combining marks past two: the rest would draw over the lines around it. */
 const MARK_FLOOD = /(\p{M}{2})\p{M}+/gu;
 
@@ -27,9 +29,18 @@ const MARK_FLOOD = /(\p{M}{2})\p{M}+/gu;
  *  (an ellipsis where it was cut). */
 export function cleanReason(s: unknown, max = 200): string {
   if (typeof s !== "string") return "";
-  const t = s.replace(BREAKS, " ").replace(INVISIBLE, "").replace(MARK_FLOOD, "$1").replace(/\s+/g, " ").trim();
+  // Cut first: a reason of megabytes is cleaned no further than it could be shown. At most
+  // `max * 8` UTF-16 units, so even every character dropped or doubled leaves enough, and
+  // never half a surrogate pair. A cut reason ends in an ellipsis however short it cleans.
+  const room = max * 8;
+  let head = s.length > room ? s.slice(0, room) : s;
+  const last = head.charCodeAt(head.length - 1);
+  if (head.length < s.length && last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1);
+  const cut = head.length < s.length;
+  const t = head.replace(BREAKS, " ").replace(INVISIBLE, "").replace(MARK_FLOOD, "$1").replace(/\s+/g, " ").trim();
   const chars = Array.from(t);
-  if (chars.length <= max) return t;
+  if (chars.length <= max && !cut) return t;
+  if (chars.length < max) return `${t}…`;
   return `${chars
     .slice(0, max - 1)
     .join("")
