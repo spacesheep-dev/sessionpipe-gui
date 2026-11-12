@@ -628,7 +628,13 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
     env.err(`${o.dryRun ? "would refuse: " : ""}port ${port} is in use by another program (try --port)`);
     return 1;
   }
-  const running = who === "gui" ? await env.running(port) : undefined;
+  const answered = who === "gui" ? await env.running(port) : undefined;
+  // What the receiver that answers runs: its run.json says the version it started with.
+  // Its /api/ui/info is no witness on its own: up to 0.8.0 it read package.json on every
+  // request, so a receiver whose package was replaced under it answers with the new version
+  // while it runs the old code.
+  const run = answered !== undefined ? readRunFileRaw(path.resolve(was.state ?? env.defaultState)) : null;
+  const running = run && run.port === port && pidAlive(run.pid) ? run.version : answered;
   // The same file answering with this version: nothing to do. The same file answering
   // with another version: the files at that cli path are this very CLI, so the process is
   // a stale one (the package was replaced under it), and it is restarted below.

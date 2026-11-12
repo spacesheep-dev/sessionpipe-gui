@@ -18,6 +18,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   that runs from somewhere else: it says so and leaves it, unless `--downgrade`. A
   re-install with other `--port`, `--state` or `--host` by the same or a newer version
   works as before. `--if-installed` upgrades a service that is there and installs none.
+- **A receiver reports the version it is running**, read once when it starts. It read
+  `package.json` on every request, so one whose package was replaced under it answered
+  `/api/ui/info` with the new version while it ran the old code, and nothing could tell it
+  was stale. `service install` takes the version from `run.json` (written once, at start),
+  so it also restarts a receiver of 0.8.0 or earlier that answers with the wrong one.
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH

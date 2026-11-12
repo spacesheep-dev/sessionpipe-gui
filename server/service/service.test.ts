@@ -500,6 +500,29 @@ describe("service install upgrades a service of ours in place", () => {
     expect(calls().filter((l) => l.startsWith("bootstrap"))).toEqual([`bootstrap gui/501 ${file}`]);
   });
 
+  it("takes the running version from run.json, which a receiver writes once when it starts: up to 0.8.0 its info read package.json anew", async () => {
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, env())).toBe(0);
+    const run = { port: 7829, pid: process.pid, version: "0.5.0", url: "http://127.0.0.1:7829", startedAt: "x" };
+    writeRunFile(state, run);
+    writeFileSync(log, "");
+    out = [];
+    // Its info says 0.6.0 (the files under it are 0.6.0 now); it started as 0.5.0.
+    expect(await runService({ verb: "install", port: 7829, state }, env({}, "gui", "0.6.0"))).toBe(0);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
+    expect(calls().filter((l) => l.startsWith("bootout") || l.startsWith("bootstrap")).length).toBe(2);
+    // A run.json of another port, or of a pid that is gone, says nothing about who answers.
+    for (const other of [
+      { ...run, port: 7830 },
+      { ...run, pid: 999_999 },
+    ]) {
+      writeRunFile(state, other);
+      out = [];
+      expect(await runService({ verb: "install", port: 7829, state }, env({}, "gui", "0.6.0"))).toBe(0);
+      expect(out).toEqual(["already running 0.6.0 on http://127.0.0.1:7829"]);
+    }
+  });
+
   it("--dry-run says it would restart a stale one, and touches nothing", async () => {
     const state = path.join(dir, "s");
     await runService({ verb: "install", port: 7829, state }, env());
