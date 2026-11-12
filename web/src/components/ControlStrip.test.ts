@@ -11,11 +11,13 @@ describe("keepPlanning", () => {
       attentionId: "perm-1",
       allow: false,
       note: "Use the existing cache",
+      // Its note is the composer's: a hold of it goes when the composer changes.
+      composer: true,
     });
   });
   it("carries no note when the composer is empty", () => {
     const a = keepPlanning("perm-1", " \n ");
-    expect(a).toEqual({ kind: "permission.answer", attentionId: "perm-1", allow: false });
+    expect(a).toEqual({ kind: "permission.answer", attentionId: "perm-1", allow: false, composer: true });
     expect("note" in a).toBe(false);
   });
 });
