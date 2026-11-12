@@ -104,6 +104,7 @@ async function bundle() {
         'export { LabelsCore, LabelsError } from "../ui/labelsCore.js";',
         'export { MarksCore } from "../ui/marksCore.js";',
         'export { LimitsCore } from "../ui/limitsCore.js";',
+        'export { snapshotWithControl } from "../ui/snapshot.js";',
         // Every export of the three files a page runs, not only the ones named above: the
         // bundler drops what the entry does not reach, and a word of Node's in a dropped
         // export would pass. As namespaces: a plain `export *` from several modules drops,
@@ -165,7 +166,7 @@ test("the core bundles for the browser from the repo's own files alone, naming n
   // What the core may read: its own folder, the shared types and readings, the validator.
   // The reader and the slice: their own files and the same.
   const allowed =
-    /^(server\/store|shared|server\/receiver|server\/sources\/relay\.ts$|server\/control\/(refs|rows|remote)\.ts$|server\/ui\/(labelsCore|marksCore|limitsCore|docKeep)\.ts$)/;
+    /^(server\/store|shared|server\/receiver|server\/sources\/relay\.ts$|server\/control\/(refs|rows|remote)\.ts$|server\/ui\/(labelsCore|marksCore|limitsCore|docKeep|snapshot)\.ts$)/;
   expect(files.filter((f) => !allowed.test(f))).toEqual([]);
   expect(files).toContain("server/store/core.ts");
   expect(files).toContain("server/sources/relay.ts");
