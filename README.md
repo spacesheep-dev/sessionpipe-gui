@@ -338,6 +338,18 @@ keeps a menu bar item and a Dock badge that count what needs you, notifies you, 
 login if you like, and updates itself. Every release is
 on the [releases page](https://github.com/spacesheep-dev/sessionpipe-gui/releases).
 
+When the app has updated itself, the receiver on this computer can still be the older
+version that installed it. Each time the app opens it asks that receiver its version (only
+the one this computer's state folder names, never a receiver on another machine). If it is
+older than the app and a `sessionpipe-gui` command at the app's version or newer is
+installed here, the app runs that command's `service install` in the background, which
+restarts the service on its own port and state folder; nothing is downloaded and the app's
+log says what happened. If bringing it up to date would mean downloading the app's release
+(through `npx`), the app does nothing on its own: Settings › Data then shows
+**Update sessionpipe**, and only that press, or "Start sessionpipe" on the welcome, downloads
+and runs it. The service then runs from npx's cache; a `sessionpipe-gui` you installed with
+`npm i -g` stays the version you installed.
+
 On a Mac the app also sends: prompts, new sessions and permission answers, from the window
 or from a notification. It signs with a key in the Mac's Secure Enclave, unlocked with Touch
 ID once a day. Set it up once with **Sign with Touch ID** (on Machines, or Settings › App):

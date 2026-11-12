@@ -20,6 +20,10 @@
 //! Debug builds never install anything and never touch :7373: they run the install with
 //! `--dry-run`, then start a demo receiver as a child on SP_DEV_RECEIVER_PORT (7828),
 //! which dies with the app.
+//!
+//! A CLI on PATH older than the app is set aside for npx (release builds), so the app's
+//! version is the one installed; and once per launch a local receiver older than the app
+//! is brought up to it ("keeping it current" below).
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -47,6 +51,15 @@ pub enum StartError {
     Failed(String),
     /// Installed, but nothing answered in time.
     Timeout(u16),
+    /// `service install` stopped the old receiver and the new one isn't running (exit 4);
+    /// its line, which names the log.
+    NotRunning(String),
+    /// npx couldn't fetch the app's release (npm's last line); nothing was changed.
+    Download(String),
+    /// Our CLI is still at work past the app's wait: it is left to finish, never killed.
+    StillRunning,
+    /// Another install or update is already running from this app.
+    Busy,
 }
 
 impl std::fmt::Display for StartError {
@@ -60,6 +73,16 @@ impl std::fmt::Display for StartError {
                     "sessionpipe started but isn't answering on port {p} yet; a big board takes a while to load"
                 )
             }
+            StartError::NotRunning(m) => write!(f, "{m}"),
+            StartError::Download(m) => write!(
+                f,
+                "couldn't download sessionpipe ({m}); nothing was changed"
+            ),
+            StartError::StillRunning => write!(
+                f,
+                "the update is still finishing; it carries on in the background"
+            ),
+            StartError::Busy => write!(f, "an install or update is already running"),
         }
     }
 }
@@ -345,6 +368,11 @@ fn is_script(p: &Path) -> bool {
 
 /// `sessionpipe-gui service install …`, or the npx form, or NoNode.
 pub fn install_invocation(t: &Tools, o: &InstallOpts) -> Result<Invocation, StartError> {
+    cli_invocation(t, &o.version, install_args(o))
+}
+
+/// `service install --port N [--state D] [--dry-run]`.
+pub fn install_args(o: &InstallOpts) -> Vec<String> {
     let mut rest = vec![
         "service".to_string(),
         "install".to_string(),
@@ -357,6 +385,16 @@ pub fn install_invocation(t: &Tools, o: &InstallOpts) -> Result<Invocation, Star
     if o.dry_run {
         rest.push("--dry-run".into());
     }
+    rest
+}
+
+/// `sessionpipe-gui <rest…>` run by node, or by the CLI itself, or through npx with the
+/// release tarball of `version`; NoNode when none of them is there.
+pub fn cli_invocation(
+    t: &Tools,
+    version: &str,
+    rest: Vec<String>,
+) -> Result<Invocation, StartError> {
     let path = child_path(t);
     match (&t.cli, &t.node, &t.npx) {
         // node + the CLI: node runs it, so a missing `env node` on PATH doesn't matter.
@@ -379,7 +417,7 @@ pub fn install_invocation(t: &Tools, o: &InstallOpts) -> Result<Invocation, Star
             // The release that shipped this app carries the same version as a tarball.
             let mut args = vec![
                 "-y".to_string(),
-                format!("--package={}", release_tarball(&o.version)),
+                format!("--package={}", release_tarball(version)),
                 "--".to_string(),
                 "sessionpipe-gui".to_string(),
             ];
@@ -421,12 +459,12 @@ fn wait_output(
     let stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
     let (tx, rx) = std::sync::mpsc::channel::<String>();
+    // Reads stdout to its end whatever becomes of the receiver: a pipe closed under a child
+    // that still prints would kill it at its next write (Node doesn't handle EPIPE).
     let out_t = std::thread::spawn(move || {
         if let Some(o) = stdout {
             for line in BufReader::new(o).lines().map_while(Result::ok) {
-                if tx.send(line).is_err() {
-                    break;
-                }
+                let _ = tx.send(line);
             }
         }
     });
@@ -455,8 +493,48 @@ fn wait_output(
                 return Ok((st.code().unwrap_or(-1), out, err));
             }
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
+            // Our CLI has spoken (a line on stdout; npx prints none there while it downloads):
+            // it may be between stopping the old receiver and starting the new one, so it is
+            // never killed. The app stops waiting, says it is still finishing, and reaps it
+            // when it ends (busy() stays true until then).
+            Ok(None) if !out.is_empty() => {
+                ORPHANS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut out = out;
+                std::thread::spawn(move || {
+                    // Both pipes are read until the child closes them (the readers never stop),
+                    // then its verdict is logged and kept.
+                    let status = child.wait();
+                    let _ = out_t.join();
+                    while let Ok(line) = rx.try_recv() {
+                        out.push_str(&line);
+                        out.push('\n');
+                    }
+                    let err = err_t.join().unwrap_or_default();
+                    let code = status.ok().and_then(|s| s.code()).unwrap_or(-1);
+                    let ran = Ran { code, out, err };
+                    let said = if code == 0 {
+                        ran.out
+                            .lines()
+                            .rfind(|l| !l.trim().is_empty())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string()
+                    } else {
+                        failure_line(code, &ran.out, &ran.err)
+                    };
+                    log::info!(target: "sessionpipe::lifecycle", "install: the installer the app stopped waiting for ended: exit {code}: {said}");
+                    let mut ends = ORPHAN_ENDS.lock().unwrap();
+                    ends.push(ran);
+                    let extra = ends.len().saturating_sub(8);
+                    ends.drain(..extra);
+                    drop(ends);
+                    ORPHANS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                });
+                return Err(StartError::StillRunning);
+            }
+            // Nothing from our CLI yet (npx still downloading, or a program that hangs): it goes.
             Ok(None) => {
-                let _ = child.kill();
+                kill_tree(&mut child);
                 let _ = child.wait();
                 return Err(StartError::Failed(format!(
                     "it didn't finish in {} s",
@@ -468,14 +546,89 @@ fn wait_output(
     }
 }
 
-/// Runs an invocation; Ok(stdout) on exit 0, else the last line it printed. `on_line`
-/// sees each stdout line as the program prints it.
-pub fn run(
+/// Installers left to finish past the app's wait (wait_output): while any runs, busy().
+static ORPHANS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// How the last few of them ended (their exit code and full output), as the log says it.
+static ORPHAN_ENDS: Mutex<Vec<Ran>> = Mutex::new(Vec::new());
+
+/// A child started in a group of its own (Unix): npx runs the CLI as its child, and a
+/// timeout must stop both, not npx alone.
+fn own_group(c: &mut Command) -> &mut Command {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        c.process_group(0);
+    }
+    c
+}
+
+/// Stops a child and what it started: its process group on Unix (own_group). On Windows
+/// only the child: `taskkill /T` finds a tree by parent pid, and a process whose parent
+/// died long ago with the same pid would be taken for one of ours; there is no cheap sure
+/// way to tell. It is enough: a kill only ever comes before our CLI has spoken (npx still
+/// downloading), and a CLI npx had just started then runs its install to the end on its own.
+fn kill_tree(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        extern "C" {
+            fn kill(pid: i32, sig: i32) -> i32;
+        }
+        const SIGKILL: i32 = 9;
+        if let Ok(pid) = i32::try_from(child.id()) {
+            // SAFETY: kill(-pgid, SIGKILL) only sends a signal to that process group.
+            unsafe {
+                kill(-pid, SIGKILL);
+            }
+        }
+    }
+    let _ = child.kill();
+}
+
+/// `service install`: it stopped the old receiver and the new one isn't running.
+pub const EXIT_NOT_RUNNING: i32 = 4;
+/// `service install --if-installed`: it did nothing (no service, current, or newer).
+pub const EXIT_NOTHING_DONE: i32 = 5;
+
+/// What a finished child said.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ran {
+    pub code: i32,
+    pub out: String,
+    pub err: String,
+}
+
+impl Ran {
+    /// Did sessionpipe-gui itself speak (a line on stdout, or one of its own on stderr), as
+    /// against npx failing before it ran (offline, GitHub blocked: npm's lines only)?
+    pub fn ours_spoke(&self) -> bool {
+        self.out.lines().any(|l| !l.trim().is_empty())
+            || self
+                .err
+                .lines()
+                .any(|l| l.trim_start().starts_with("sessionpipe-gui: "))
+    }
+
+    fn into_result(self) -> Result<String, StartError> {
+        if self.code == 0 {
+            return Ok(self.out);
+        }
+        let line = failure_line(self.code, &self.out, &self.err);
+        Err(if self.code == EXIT_NOT_RUNNING {
+            StartError::NotRunning(line)
+        } else {
+            StartError::Failed(line)
+        })
+    }
+}
+
+/// Runs an invocation to its end (or the timeout); `on_line` sees each stdout line as the
+/// program prints it.
+pub fn run_capture(
     inv: &Invocation,
     timeout: Duration,
     on_line: impl FnMut(&str),
-) -> Result<String, StartError> {
-    let child = no_window(&mut Command::new(&inv.program))
+) -> Result<Ran, StartError> {
+    let child = own_group(no_window(&mut Command::new(&inv.program)))
         .args(&inv.args)
         .env("PATH", &inv.path)
         .stdin(Stdio::null())
@@ -484,25 +637,81 @@ pub fn run(
         .spawn()
         .map_err(|e| StartError::Failed(format!("couldn't run {}: {e}", inv.program.display())))?;
     let (code, out, err) = wait_output(child, timeout, on_line)?;
-    if code == 0 {
-        return Ok(out);
-    }
-    let why = err
-        .lines()
-        .chain(out.lines())
-        .map(str::trim)
-        .rfind(|l| !l.is_empty())
-        .unwrap_or("")
-        .to_string();
+    Ok(Ran { code, out, err })
+}
+
+/// Runs an invocation; Ok(stdout) on exit 0, else the last line it printed. `on_line`
+/// sees each stdout line as the program prints it.
+pub fn run(
+    inv: &Invocation,
+    timeout: Duration,
+    on_line: impl FnMut(&str),
+) -> Result<String, StartError> {
+    run_capture(inv, timeout, on_line)?.into_result()
+}
+
+/// The last line a failed program printed, without our "sessionpipe-gui: " prefix.
+/// stderr's last line first (where sessionpipe-gui and npm say what went wrong), else
+/// stdout's: a failure after progress lines ("updating …", "starting on …") is its error.
+fn failure_line(code: i32, out: &str, err: &str) -> String {
+    let last = |t: &str| {
+        t.lines()
+            .map(str::trim)
+            .rfind(|l| !l.is_empty())
+            .map(String::from)
+    };
+    let why = last(err).or_else(|| last(out)).unwrap_or_default();
     let why = why
         .strip_prefix("sessionpipe-gui: ")
         .unwrap_or(&why)
         .to_string();
-    Err(StartError::Failed(if why.is_empty() {
+    if why.is_empty() {
         format!("service install exited with {code}")
     } else {
         why
-    }))
+    }
+}
+
+/// The click path ("Start sessionpipe", and the page's "Update sessionpipe"): `rest` run by
+/// the app's own version through npx when the CLI on PATH is older than the app (or there
+/// is none). When npx fails before sessionpipe-gui said anything (offline, GitHub blocked)
+/// the CLI on PATH runs it instead only where `may_fall_back()` says that can't make the
+/// service older (asked then, not before); otherwise it is StartError::Download and
+/// nothing was changed.
+pub fn run_installer(
+    tools: &Tools,
+    cli_version: Option<&str>,
+    app: &str,
+    rest: Vec<String>,
+    timeout: Duration,
+    may_fall_back: impl FnOnce() -> bool,
+    mut on_line: impl FnMut(&str),
+) -> Result<String, StartError> {
+    let cli_older = cli_version.is_some_and(|v| version_cmp(v, app).is_lt());
+    if tools.npx.is_some() && (tools.cli.is_none() || cli_older) {
+        let npx_only = Tools {
+            cli: None,
+            ..tools.clone()
+        };
+        let inv = cli_invocation(&npx_only, app, rest.clone())?;
+        log::info!(target: "sessionpipe::lifecycle", "install: {} {}", inv.program.display(), inv.args.join(" "));
+        let ran = run_capture(&inv, timeout, &mut on_line);
+        let why = match ran {
+            Ok(r) if r.code == 0 || r.ours_spoke() => return r.into_result(),
+            Ok(r) => failure_line(r.code, &r.out, &r.err),
+            // npx couldn't be started at all; a timeout may have half-run it, so it stands.
+            Err(StartError::Failed(m)) if m.starts_with("couldn't run") => m,
+            Err(e) => return Err(e),
+        };
+        if tools.cli.is_none() || !may_fall_back() {
+            log::warn!(target: "sessionpipe::lifecycle", "install: npx failed before sessionpipe-gui ran ({why}); nothing changed");
+            return Err(StartError::Download(why));
+        }
+        log::warn!(target: "sessionpipe::lifecycle", "install: npx failed before sessionpipe-gui ran ({why}); the one on PATH runs it");
+    }
+    let inv = cli_invocation(tools, app, rest)?;
+    log::info!(target: "sessionpipe::lifecycle", "install: {} {}", inv.program.display(), inv.args.join(" "));
+    run(&inv, timeout, on_line)
 }
 
 /// The welcome's words for a line `service install` printed, when it is one worth showing:
@@ -658,6 +867,7 @@ pub async fn start_local_receiver(
     version: &str,
     progress: impl Fn(&str, &str),
 ) -> Result<ReceiverRef, StartError> {
+    let _busy = begin_install()?;
     progress("find", "Looking for Node…");
     let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
     let tools =
@@ -667,21 +877,31 @@ pub async fn start_local_receiver(
     log::info!(target: "sessionpipe::lifecycle", "start: cli {:?} node {:?} npx {:?}", tools.cli, tools.node, tools.npx);
 
     let debug = cfg!(debug_assertions);
+    // An older CLI on PATH would install its own, older version: a release build prefers
+    // the app's version through npx, and falls back to that CLI when npx can't run it
+    // (run_installer). Debug builds keep the CLI: the dev child runs it.
+    let cli_v = if debug {
+        None
+    } else {
+        let t = tools.clone();
+        tauri::async_runtime::spawn_blocking(move || cli_version(&t))
+            .await
+            .map_err(|e| StartError::Failed(e.to_string()))?
+    };
     let port = if debug {
         env_port("SP_DEV_RECEIVER_PORT", DEV_PORT)
     } else {
         SERVICE_PORT
     };
     let state = debug.then(dev_state);
-    let inv = install_invocation(
-        &tools,
-        &InstallOpts {
-            port,
-            state: state.clone(),
-            dry_run: debug,
-            version: version.into(),
-        },
-    )?;
+    let rest = install_args(&InstallOpts {
+        port,
+        state: state.clone(),
+        dry_run: debug,
+        version: version.into(),
+    });
+    // NoNode now rather than after the progress line.
+    cli_invocation(&tools, version, rest.clone())?;
     progress(
         "install",
         if debug {
@@ -692,12 +912,31 @@ pub async fn start_local_receiver(
     );
     // The installer's lines, as it prints them: an upgrade in place and a slow start both
     // say what they are doing, and the welcome shows it.
-    let inv2 = inv.clone();
+    let (t2, v2) = (tools.clone(), version.to_string());
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let install = tauri::async_runtime::spawn_blocking(move || {
-        run(&inv2, INSTALL_TIMEOUT, |line| {
-            let _ = tx.send(line.to_string());
-        })
+        // npx failing before our CLI ran falls back to the CLI on PATH only where that
+        // can't make the service older (may_fall_back); a debug build's dry run never needs it.
+        let t3 = t2.clone();
+        let cv = cli_v.clone();
+        let fall_back = move || {
+            !debug
+                && may_fall_back(
+                    cv.as_deref(),
+                    &installed_service(&t3, local_state_dir().as_deref()),
+                )
+        };
+        run_installer(
+            &t2,
+            cli_v.as_deref(),
+            &v2,
+            rest,
+            INSTALL_TIMEOUT,
+            fall_back,
+            |line| {
+                let _ = tx.send(line.to_string());
+            },
+        )
     });
     while let Some(line) = rx.recv().await {
         log::info!(target: "sessionpipe::lifecycle", "service install: {line}");
@@ -915,6 +1154,703 @@ async fn follow<R: Runtime>(app: AppHandle<R>, hub: Hub, state: PathBuf, r: Rece
     FOLLOWING.store(false, std::sync::atomic::Ordering::SeqCst);
 }
 
+// ---- keeping it current ----
+//
+// An app that updated itself (updater.rs) finds the receiver it attaches to still on the
+// version it had: the service runs the CLI that installed it, and "Start sessionpipe"
+// (the only place that runs `service install` unasked) is the welcome's, on a first run.
+// The page then calls routes that server doesn't have. So once per launch, when this
+// computer's receiver first connects, the app asks it its version, and when that is older
+// than the app's own:
+// - a `sessionpipe-gui` on PATH at the app's version or newer is there: it runs `service
+//   install --if-installed` in the background (the service upgraded in place, with its
+//   port and state dir; none installed where there was none). Nothing is downloaded.
+// - otherwise bringing it current needs the app's release through npx, a download, which
+//   needs a click: nothing runs, the log says so, and the page (rx_local_update) offers
+//   "Update sessionpipe", which runs the click path (update_local_click).
+// It is logged either way. A failure before the old receiver was stopped leaves it running;
+// one after (`service install` exits 4: the new one never came up) is logged as such, and
+// the page offers the click. Debug builds never do any of it (they keep away from :7373
+// and ~/.local/state).
+
+/// Orders two versions as `x.y.z[-pre][+build]`, as shared/version.ts's compareVersions
+/// does (both are tested against shared/version-cases.json): build metadata dropped, a
+/// part by its leading digits (none: 0), a missing part 0, a prerelease before its release.
+pub fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let parse = |v: &str| {
+        let v = v.trim().trim_start_matches('v');
+        let v = v.split('+').next().unwrap_or("");
+        let (core, pre) = match v.split_once('-') {
+            Some((c, _)) => (c, true),
+            None => (v, false),
+        };
+        let nums: Vec<u64> = core
+            .split('.')
+            .map(|n| {
+                let digits: String = n.chars().take_while(char::is_ascii_digit).collect();
+                digits.parse().unwrap_or(0)
+            })
+            .collect();
+        (nums, pre)
+    };
+    let (x, xp) = parse(a);
+    let (y, yp) = parse(b);
+    for i in 0..x.len().max(y.len()) {
+        let o = x.get(i).unwrap_or(&0).cmp(y.get(i).unwrap_or(&0));
+        if o.is_ne() {
+            return o;
+        }
+    }
+    yp.cmp(&xp)
+}
+
+/// What the receiver at `origin` said of itself in /api/ui/info.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InfoSays {
+    pub version: Option<String>,
+    pub started_at: Option<String>,
+}
+
+/// The version this computer's receiver at `origin` runs, or None when nothing says it is
+/// this computer's: its run.json (in this computer's state dir) must name the origin with
+/// a live pid (a tunnel to another machine, a receiver on another state dir: None).
+///
+/// The info's version is used unless run.json describes the very process that answers:
+/// its startedAt (written at listen) no earlier than the info's (taken when the process
+/// built its app). Then run.json's version is the one: up to 0.8.0 the info read
+/// package.json on every request and could name the new version while the old code ran.
+/// A run.json left by an earlier process, whose pid was reused, is older than the info
+/// and is not believed. The info only ever over-reports, so an info version already older
+/// than the app is enough on its own.
+pub fn running_version(
+    origin: &str,
+    info: &InfoSays,
+    run: Option<&discovery::RunFile>,
+    alive: impl Fn(u32) -> bool,
+) -> Option<String> {
+    let run = run.filter(|r| {
+        sp_receivers::id::canonical_origin(&r.url).as_deref() == Some(origin) && alive(r.pid)
+    })?;
+    let said = info
+        .version
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let same_process = match info.started_at.as_deref() {
+        Some(at) => !run.started_at.is_empty() && run.started_at.as_str() >= at,
+        None => false,
+    };
+    let started_as = Some(run.version.trim()).filter(|v| !v.is_empty());
+    match (said, started_as) {
+        (Some(s), Some(r)) if same_process && version_cmp(r, s).is_lt() => Some(r.to_string()),
+        (Some(s), _) => Some(s.to_string()),
+        (None, r) => r.map(String::from),
+    }
+}
+
+/// `sessionpipe-gui --version` of the CLI found, when it answers with one.
+fn cli_version(t: &Tools) -> Option<String> {
+    t.cli.as_ref()?;
+    let inv = cli_invocation(t, "", vec!["--version".into()]).ok()?;
+    let out = run(&inv, Duration::from_secs(15), |_| {}).ok()?;
+    let v = out.lines().next()?.trim();
+    v.starts_with(|c: char| c.is_ascii_digit())
+        .then(|| v.to_string())
+}
+
+/// What to do about this computer's receiver.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Plan {
+    /// Nothing says it is this computer's receiver: never touched.
+    NotThisComputers,
+    /// It runs this version, not older than the app's.
+    Current(String),
+    /// Older (this version), and a CLI on PATH at the app's version or newer runs the update.
+    Auto(String),
+    /// Older (this version), and only the app's release through npx would bring it current:
+    /// a download, so it waits for a click.
+    Click(String),
+}
+
+/// The decision, from what is known: the receiver's version (running_version), the app's,
+/// and the version of the CLI on PATH (None: there is none, or it says none). Never a
+/// download: only a CLI already here is ever run unasked.
+pub fn plan(running: Option<&str>, app: &str, cli_version: Option<&str>) -> Plan {
+    let Some(v) = running else {
+        return Plan::NotThisComputers;
+    };
+    if !version_cmp(v, app).is_lt() {
+        return Plan::Current(v.into());
+    }
+    match cli_version {
+        Some(c) if !version_cmp(c, app).is_lt() => Plan::Auto(v.into()),
+        _ => Plan::Click(v.into()),
+    }
+}
+
+/// The receiver the check is about: the first local one that is connected.
+pub fn first_local(
+    receivers: &[ReceiverRef],
+    connected: impl Fn(&str) -> bool,
+) -> Option<ReceiverRef> {
+    receivers
+        .iter()
+        .find(|r| r.local && connected(&r.id))
+        .cloned()
+}
+
+/// True the first time only: the check runs once per launch.
+pub fn first_time(flag: &std::sync::atomic::AtomicBool) -> bool {
+    !flag.swap(true, std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Where the check left this computer's receiver, for the page (rx_local_update).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalUpdate {
+    /// The receiver checked.
+    pub origin: String,
+    /// The version it ran when checked.
+    pub running: String,
+    pub app: String,
+    pub state: UpdateState,
+    /// Why the last update didn't happen (Failed), or what the CLI said it left (Unchanged).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+    /// An install or update is running now (from this app), and its last progress line.
+    pub busy: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateState {
+    /// Not older than the app.
+    Current,
+    /// Updated in the background by the CLI on PATH.
+    Updated,
+    /// Older, and the update needs a click (a download).
+    Click,
+    /// An update ran and failed; a click may try again.
+    Failed,
+    /// The background update ran and did nothing (`--if-installed` exit 5: no service of
+    /// ours, or one already current or newer); `why` is its line.
+    Unchanged,
+}
+
+/// What the background update did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Updated {
+    Done,
+    /// `--if-installed` did nothing (exit 5): its line.
+    Nothing(String),
+}
+
+// ---- one install at a time ----
+
+static INSTALLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static PROGRESS: Mutex<Option<String>> = Mutex::new(None);
+
+/// Held while "Start sessionpipe", "Update sessionpipe" or the background update runs.
+pub struct InstallGuard;
+impl Drop for InstallGuard {
+    fn drop(&mut self) {
+        *PROGRESS.lock().unwrap() = None;
+        INSTALLING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// The app's one install at a time: Busy while another runs, or while an installer left to
+/// finish past the app's wait still runs (wait_output).
+pub fn begin_install() -> Result<InstallGuard, StartError> {
+    if ORPHANS.load(std::sync::atomic::Ordering::SeqCst) > 0
+        || INSTALLING.swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        return Err(StartError::Busy);
+    }
+    Ok(InstallGuard)
+}
+
+/// Is an install or update running from this app now?
+pub fn busy() -> bool {
+    INSTALLING.load(std::sync::atomic::Ordering::SeqCst)
+        || ORPHANS.load(std::sync::atomic::Ordering::SeqCst) > 0
+}
+
+fn note_progress(line: &str) {
+    *PROGRESS.lock().unwrap() = Some(line.to_string());
+}
+
+// ---- the Start fallback ----
+
+/// What this computer's service is known to run, for "Start sessionpipe"'s fallback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstalledService {
+    /// No service of ours is installed (a first run).
+    None,
+    /// One is, and the newest version it is known to run is this.
+    Runs(String),
+    /// One may be, and nothing says what it runs.
+    Unknown,
+}
+
+/// May the CLI on PATH run the install when npx couldn't? Only where it can't make the
+/// service older: no service installed (a first run, as main did), or a CLI at least the
+/// version the service runs. Unknown: no.
+pub fn may_fall_back(cli_version: Option<&str>, installed: &InstalledService) -> bool {
+    match installed {
+        InstalledService::None => true,
+        InstalledService::Runs(v) => cli_version.is_some_and(|c| !version_cmp(c, v).is_lt()),
+        InstalledService::Unknown => false,
+    }
+}
+
+/// The CLIs a service file names: plist `<string>`s, or the unit's ExecStart words, that
+/// end in `cli.js` or are the `sessionpipe-gui` bin.
+pub fn clis_in_service_file(text: &str) -> Vec<PathBuf> {
+    let unescape = |w: &str| {
+        w.replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&amp;", "&")
+    };
+    let mut words: Vec<String> = text
+        .split("<string>")
+        .skip(1)
+        .filter_map(|r| r.split_once("</string>").map(|(w, _)| unescape(w)))
+        .collect();
+    if let Some(line) = text
+        .lines()
+        .find(|l| l.trim_start().starts_with("ExecStart="))
+    {
+        let rest = line.trim_start().trim_start_matches("ExecStart=");
+        words.extend(rest.split('"').enumerate().flat_map(|(i, part)| {
+            if i % 2 == 1 {
+                vec![part.replace("\\\"", "\"").replace("\\\\", "\\")]
+            } else {
+                part.split_whitespace().map(String::from).collect()
+            }
+        }));
+    }
+    words
+        .into_iter()
+        .filter(|w| {
+            w.ends_with("cli.js")
+                || w.ends_with("/sessionpipe-gui")
+                || w.ends_with("\\sessionpipe-gui")
+        })
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// The version in the package.json of the package a CLI belongs to (a bin is followed).
+fn package_version_at(cli: &Path) -> Option<String> {
+    let real = std::fs::canonicalize(cli).ok()?;
+    let dir = real.parent()?.parent()?;
+    let v: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("package.json")).ok()?).ok()?;
+    (v.get("name")?.as_str()? == "sessionpipe-gui")
+        .then(|| v.get("version")?.as_str().map(String::from))?
+}
+
+/// What the CLI on PATH's `service status` says, with the service file it names and this
+/// computer's run.json: whether a service is installed and the newest version it is known
+/// to run. Pure; installed_service() gathers its inputs.
+pub fn installed_from(
+    status: Option<&str>,
+    file_text: Option<&str>,
+    version_at: impl Fn(&Path) -> Option<String>,
+    last_run: Option<&str>,
+) -> InstalledService {
+    let Some(status) = status else {
+        return InstalledService::Unknown;
+    };
+    if status
+        .lines()
+        .next()
+        .is_some_and(|l| l.contains("· not installed"))
+    {
+        return InstalledService::None;
+    }
+    let mut known: Vec<String> = file_text
+        .map(clis_in_service_file)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|c| version_at(c))
+        .collect();
+    known.extend(
+        status
+            .lines()
+            .filter_map(|l| l.strip_prefix("run.json"))
+            .filter_map(|l| l.split(" · ").nth(1))
+            .map(|v| v.trim().to_string()),
+    );
+    known.extend(last_run.map(String::from));
+    known.retain(|v| v.starts_with(|c: char| c.is_ascii_digit()));
+    known.sort_by(|a, b| version_cmp(a, b));
+    known
+        .pop()
+        .map(InstalledService::Runs)
+        .unwrap_or(InstalledService::Unknown)
+}
+
+/// Gathers installed_from()'s inputs: `<CLI on PATH> service status`, the file it names (on
+/// macOS and Linux), and `<state>/run.json`'s version.
+fn installed_service(t: &Tools, state: Option<&Path>) -> InstalledService {
+    let status = t.cli.as_ref().and_then(|_| {
+        let inv = cli_invocation(t, "", vec!["service".into(), "status".into()]).ok()?;
+        // exit 3 is "not running" (or not installed): its words are what count.
+        run_capture(&inv, Duration::from_secs(15), |_| {})
+            .ok()
+            .map(|r| r.out)
+    });
+    let file_text = status.as_deref().and_then(|s| {
+        let file = s.lines().find_map(|l| l.strip_prefix("file"))?.trim();
+        let home = std::env::var("HOME").unwrap_or_default();
+        let path = file
+            .strip_prefix('~')
+            .map(|r| format!("{home}{r}"))
+            .unwrap_or(file.into());
+        std::fs::read_to_string(path).ok()
+    });
+    let last = state.and_then(discovery::read_run_file).map(|r| r.version);
+    installed_from(
+        status.as_deref(),
+        file_text.as_deref(),
+        package_version_at,
+        last.as_deref(),
+    )
+}
+
+static CHECKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static LOCAL: Mutex<Option<(ReceiverRef, LocalUpdate)>> = Mutex::new(None);
+
+/// What the check last found, for the page, with whether an install runs now.
+pub fn local_update() -> Option<LocalUpdate> {
+    LOCAL.lock().unwrap().as_ref().map(|(_, u)| LocalUpdate {
+        busy: busy(),
+        progress: PROGRESS.lock().unwrap().clone(),
+        ..u.clone()
+    })
+}
+
+/// The CLI on PATH and the version it says: what the background update may run.
+fn tools_here() -> (Tools, Option<String>) {
+    let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let t = discover_tools(&home, login_shell_lookup());
+    let v = cli_version(&t);
+    (t, v)
+}
+
+/// The background update: `service install --if-installed` by the CLI on PATH, never npx
+/// (plan() only says Auto when that CLI is at the app's version or newer).
+fn update_with_cli(t: &Tools, app: &str) -> Result<Updated, StartError> {
+    let cli_only = Tools {
+        npx: None,
+        ..t.clone()
+    };
+    let inv = cli_invocation(
+        &cli_only,
+        app,
+        ["service", "install", "--if-installed"]
+            .map(String::from)
+            .to_vec(),
+    )?;
+    log::info!(target: "sessionpipe::lifecycle", "update: {} {}", inv.program.display(), inv.args.join(" "));
+    let ran = run_capture(
+        &inv,
+        INSTALL_TIMEOUT,
+        |line| log::info!(target: "sessionpipe::lifecycle", "service install: {line}"),
+    )?;
+    if ran.code == EXIT_NOTHING_DONE {
+        let line = ran
+            .out
+            .lines()
+            .rfind(|l| !l.trim().is_empty())
+            .unwrap_or("")
+            .trim();
+        return Ok(Updated::Nothing(line.to_string()));
+    }
+    ran.into_result().map(|_| Updated::Done)
+}
+
+/// Once per launch: the first local receiver that connects is checked (see above).
+/// Called once from setup.
+pub fn keep_current(hub: Hub, app_version: String) {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    let Some(state) = local_state_dir() else {
+        return;
+    };
+    let mut rx = hub.subscribe();
+    tauri::async_runtime::spawn(async move {
+        let r = loop {
+            // One that connected before this listened counts too.
+            if let Some(r) = first_local(&hub.receivers(), |id| hub.is_connected(id)) {
+                break r;
+            }
+            match rx.recv().await {
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => return,
+            }
+        };
+        if !first_time(&CHECKED) {
+            return;
+        }
+        if let Some(u) =
+            check_local(&hub, &r, &state, &app_version, tools_here, update_with_cli).await
+        {
+            *LOCAL.lock().unwrap() = Some((r, u));
+        }
+    });
+}
+
+/// The receiver's own word on its version and start.
+async fn info_of(hub: &Hub, r: &ReceiverRef) -> InfoSays {
+    let v: Option<serde_json::Value> = hub
+        .get(&r.id, "/api/ui/info")
+        .await
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok());
+    let field = |k: &str| {
+        v.as_ref()
+            .and_then(|v| v.get(k))
+            .and_then(|x| x.as_str())
+            .map(String::from)
+    };
+    InfoSays {
+        version: field("version"),
+        started_at: field("startedAt"),
+    }
+}
+
+/// Checks the local receiver `r` and acts on plan(): `tools` finds the CLI on PATH and its
+/// version (only asked when the receiver is older), `update` runs the background update
+/// (off the async runtime). Logged; nothing fails. None: not this computer's receiver.
+pub async fn check_local(
+    hub: &Hub,
+    r: &ReceiverRef,
+    state: &Path,
+    app: &str,
+    tools: fn() -> (Tools, Option<String>),
+    update: fn(&Tools, &str) -> Result<Updated, StartError>,
+) -> Option<LocalUpdate> {
+    let info = info_of(hub, r).await;
+    let run_file = discovery::read_run_file(state);
+    let running = running_version(&r.origin, &info, run_file.as_ref(), discovery::pid_alive);
+    let older = running
+        .as_deref()
+        .is_some_and(|v| version_cmp(v, app).is_lt());
+    let (found, cli_v) = if older {
+        tauri::async_runtime::spawn_blocking(tools)
+            .await
+            .unwrap_or_default()
+    } else {
+        (Tools::default(), None)
+    };
+    let done = |running: &str, state: UpdateState, why: Option<String>| LocalUpdate {
+        origin: r.origin.clone(),
+        running: running.into(),
+        app: app.into(),
+        state,
+        why,
+        busy: false,
+        progress: None,
+    };
+    match plan(running.as_deref(), app, cli_v.as_deref()) {
+        Plan::NotThisComputers => {
+            log::info!(target: "sessionpipe::lifecycle", "update: {} isn't known to be this computer's receiver; left as it is", r.origin);
+            None
+        }
+        Plan::Current(v) => {
+            log::info!(target: "sessionpipe::lifecycle", "update: the local receiver runs {v} ({}); nothing to do", r.origin);
+            Some(done(&v, UpdateState::Current, None))
+        }
+        Plan::Click(v) => {
+            log::info!(target: "sessionpipe::lifecycle", "update: the local receiver runs {v}, older than this app ({app}); bringing it to {app} needs the app's release through npx (a download), so it waits for \"Update sessionpipe\" in Settings › Data (the CLI on PATH: {})", cli_v.as_deref().unwrap_or("none"));
+            Some(done(&v, UpdateState::Click, None))
+        }
+        Plan::Auto(v) => {
+            log::info!(target: "sessionpipe::lifecycle", "update: the local receiver runs {v}, older than this app ({app}); the sessionpipe-gui on PATH ({}) updates it", cli_v.as_deref().unwrap_or(""));
+            let Ok(_busy) = begin_install() else {
+                log::info!(target: "sessionpipe::lifecycle", "update: another install runs; left to it");
+                return Some(done(&v, UpdateState::Click, None));
+            };
+            let a = app.to_string();
+            let res = tauri::async_runtime::spawn_blocking(move || update(&found, &a)).await;
+            let why = match res {
+                Ok(Ok(Updated::Done)) => {
+                    log::info!(target: "sessionpipe::lifecycle", "update: done");
+                    return Some(done(&v, UpdateState::Updated, None));
+                }
+                Ok(Ok(Updated::Nothing(line))) => {
+                    log::info!(target: "sessionpipe::lifecycle", "update: nothing done: {line}");
+                    return Some(done(&v, UpdateState::Unchanged, Some(line)));
+                }
+                Ok(Err(e)) => e.to_string(),
+                Err(e) => e.to_string(),
+            };
+            log::warn!(target: "sessionpipe::lifecycle", "update: not done: {why}");
+            Some(done(&v, UpdateState::Failed, Some(why)))
+        }
+    }
+}
+
+/// The page's "Update sessionpipe" (Settings › Data): the app's release through npx, with
+/// its progress lines. Never the CLI on PATH instead: when npx can't download it, nothing is
+/// changed and it says so (StartError::Download), since an older CLI there (one without
+/// this version's gates) would put its own version in place of the service's. Then the
+/// receiver's version is read again, waiting (up to 30 s) for the new one's run.json.
+pub async fn update_local_click(
+    hub: &Hub,
+    app: &str,
+    progress: impl Fn(&str, &str),
+) -> Result<Option<LocalUpdate>, StartError> {
+    if cfg!(debug_assertions) {
+        return Err(StartError::Failed(
+            "a debug build doesn't update this computer's receiver".into(),
+        ));
+    }
+    let r = LOCAL
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|(r, _)| r.clone())
+        .ok_or_else(|| StartError::Failed("this computer's receiver wasn't checked yet".into()))?;
+    let state =
+        local_state_dir().ok_or_else(|| StartError::Failed("no state folder here".into()))?;
+    let _busy = begin_install()?;
+    let say = |step: &str, line: &str| {
+        note_progress(line);
+        progress(step, line);
+    };
+    say("find", "Looking for Node…");
+    let (found, cli_v) = tauri::async_runtime::spawn_blocking(tools_here)
+        .await
+        .map_err(|e| StartError::Failed(e.to_string()))?;
+    let found = update_tools(found, cli_v.as_deref(), app)?;
+    say("install", "Updating the background service…");
+    let a = app.to_string();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let job = tauri::async_runtime::spawn_blocking(move || {
+        run_installer(
+            &found,
+            cli_v.as_deref(),
+            &a,
+            ["service", "install"].map(String::from).to_vec(),
+            INSTALL_TIMEOUT,
+            || false,
+            |line| {
+                let _ = tx.send(line.to_string());
+            },
+        )
+    });
+    while let Some(line) = rx.recv().await {
+        log::info!(target: "sessionpipe::lifecycle", "service install: {line}");
+        if let Some(words) = progress_for(&line) {
+            say("install", &words);
+        }
+    }
+    let res = job.await.map_err(|e| StartError::Failed(e.to_string()))?;
+    // The new receiver writes run.json when it listens: wait for it, a while, before saying
+    // what runs (a big board takes a moment); the installer's own result decides otherwise.
+    let mut now = None;
+    if res.is_ok() {
+        let until = Instant::now() + Duration::from_secs(30);
+        loop {
+            let info = info_of(hub, &r).await;
+            now = running_version(
+                &r.origin,
+                &info,
+                discovery::read_run_file(&state).as_ref(),
+                discovery::pid_alive,
+            );
+            if now.is_some() || Instant::now() >= until {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }
+    let state_now = match (&res, now.as_deref()) {
+        (Err(_), _) => UpdateState::Failed,
+        (Ok(_), Some(v)) if version_cmp(v, app).is_lt() => UpdateState::Click,
+        (Ok(_), Some(_)) => UpdateState::Current,
+        (Ok(_), None) => UpdateState::Updated,
+    };
+    let u = LocalUpdate {
+        origin: r.origin.clone(),
+        running: now.unwrap_or_default(),
+        app: app.into(),
+        state: state_now,
+        why: res.as_ref().err().map(|e| e.to_string()),
+        busy: false,
+        progress: None,
+    };
+    *LOCAL.lock().unwrap() = Some((r, u.clone()));
+    res?;
+    say("done", "sessionpipe is up to date");
+    Ok(Some(u))
+}
+
+/// What "Update sessionpipe" may run: the CLI on PATH only when its version is known and at
+/// least the app's (one from before this version has no downgrade gate, and a CLI whose
+/// `--version` said nothing usable could be one), else the app's release through npx. With
+/// neither, nothing can do it: said, and nothing is changed.
+pub fn update_tools(
+    found: Tools,
+    cli_version: Option<&str>,
+    app: &str,
+) -> Result<Tools, StartError> {
+    let cli_current = cli_version.is_some_and(|v| !version_cmp(v, app).is_lt());
+    let t = if found.cli.is_some() && cli_current {
+        found
+    } else {
+        Tools { cli: None, ..found }
+    };
+    if t.cli.is_none() && t.npx.is_none() {
+        return Err(StartError::Failed(format!(
+            "there is no sessionpipe-gui {app} or newer here, and no npx to download it; nothing was changed"
+        )));
+    }
+    Ok(t)
+}
+
+/// What the page is told when "Update sessionpipe" didn't work.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateFailure {
+    /// "notRunning" (the old receiver was stopped and the new one isn't running),
+    /// "download" (npx couldn't fetch it; nothing changed), "stillRunning" (still at work in
+    /// the background), "busy", or "failed".
+    pub kind: &'static str,
+    /// The installer's last line, or the app's.
+    pub line: String,
+    /// The service log a "notRunning" line names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log: Option<String>,
+}
+
+impl From<&StartError> for UpdateFailure {
+    fn from(e: &StartError) -> Self {
+        let kind = match e {
+            StartError::NotRunning(_) => "notRunning",
+            StartError::Download(_) => "download",
+            StartError::StillRunning => "stillRunning",
+            StartError::Busy => "busy",
+            _ => "failed",
+        };
+        let line = e.to_string();
+        let log = match e {
+            StartError::NotRunning(m) => m.rsplit_once("see ").map(|(_, l)| l.trim().to_string()),
+            _ => None,
+        };
+        UpdateFailure { kind, line, log }
+    }
+}
+
 /// Kills the dev child when the app exits, and starts the app again when a relaunch was
 /// asked for (relaunch.rs).
 pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
@@ -935,6 +1871,20 @@ mod tests {
     // tests that run one are Unix-only, the rest run everywhere.
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+
+    /// The app's one-install guard (INSTALLING, ORPHANS) is the process's, and cargo runs
+    /// tests side by side: the tests that take it, or leave an installer running past its
+    /// wait, hold this while they run, and start only once nothing of an earlier one is
+    /// still counted.
+    static GUARD_TESTS: Mutex<()> = Mutex::new(());
+    fn alone_with_the_guard() -> std::sync::MutexGuard<'static, ()> {
+        let held = GUARD_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let until = Instant::now() + Duration::from_secs(10);
+        while busy() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        held
+    }
 
     struct Temp(PathBuf);
     impl Temp {
@@ -1531,6 +2481,760 @@ mod tests {
             .port();
         write(std::process::id(), free); // alive but not answering
         assert_eq!(moved_to(&d.0, "http://127.0.0.1:7829"), None);
+    }
+
+    #[test]
+    fn orders_versions_as_the_page_and_the_cli_do() {
+        // The one table shared/version.test.ts checks compareVersions against.
+        let table: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../../shared/version-cases.json")).unwrap();
+        let cases = table["cases"].as_array().unwrap();
+        assert!(cases.len() > 10);
+        for c in cases {
+            let (a, b, sign) = (
+                c[0].as_str().unwrap(),
+                c[1].as_str().unwrap(),
+                c[2].as_i64().unwrap(),
+            );
+            let got = match version_cmp(a, b) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            };
+            assert_eq!(got, sign, "{a:?} vs {b:?}");
+        }
+    }
+
+    fn run_file(port: u16, pid: u32, version: &str, started_at: &str) -> discovery::RunFile {
+        discovery::RunFile {
+            port,
+            pid,
+            version: version.into(),
+            url: format!("http://127.0.0.1:{port}"),
+            started_at: started_at.into(),
+        }
+    }
+
+    #[test]
+    fn the_running_version_believes_run_json_only_for_the_process_that_answers() {
+        let alive = |pid: u32| pid == 42;
+        let o = "http://127.0.0.1:7380";
+        let info = |v: &str, at: &str| InfoSays {
+            version: Some(v.into()),
+            started_at: Some(at.into()),
+        };
+        let t0 = "2026-11-12T10:00:00.000Z";
+        let t1 = "2026-11-12T10:00:03.000Z";
+        // run.json written by the process that answers (at listen, after its info's start):
+        // the version it started as, though its info names the files' newer one.
+        assert_eq!(
+            running_version(
+                o,
+                &info("0.8.0", t0),
+                Some(&run_file(7380, 42, "0.7.2", t1)),
+                alive
+            )
+            .as_deref(),
+            Some("0.7.2")
+        );
+        // A run.json from an earlier process whose pid lives on as another: older than the
+        // info's start, not believed; the current receiver's info stands (no restart each launch).
+        assert_eq!(
+            running_version(
+                o,
+                &info("0.8.0", t1),
+                Some(&run_file(7380, 42, "0.7.2", t0)),
+                alive
+            )
+            .as_deref(),
+            Some("0.8.0")
+        );
+        // The info older already: enough on its own (it only ever over-reports).
+        assert_eq!(
+            running_version(
+                o,
+                &info("0.7.2", t1),
+                Some(&run_file(7380, 42, "0.9.0", t0)),
+                alive
+            )
+            .as_deref(),
+            Some("0.7.2")
+        );
+        // No info version: what run.json says.
+        assert_eq!(
+            running_version(
+                o,
+                &InfoSays::default(),
+                Some(&run_file(7380, 42, "0.7.2", t0)),
+                alive
+            )
+            .as_deref(),
+            Some("0.7.2")
+        );
+        // Not this computer's: no run.json, another port, a dead pid; the default port alone
+        // (a tunnel to another machine can sit there) is not enough.
+        for run in [
+            None,
+            Some(run_file(7381, 42, "0.7.2", t1)),
+            Some(run_file(7380, 7, "0.7.2", t1)),
+        ] {
+            assert_eq!(
+                running_version(o, &info("0.7.2", t0), run.as_ref(), alive),
+                None
+            );
+        }
+        assert_eq!(
+            running_version("http://127.0.0.1:7373", &info("0.7.2", t0), None, alive),
+            None
+        );
+    }
+
+    #[test]
+    fn plans_never_a_download_unasked_and_never_for_another_machine() {
+        assert_eq!(plan(None, "0.8.1", Some("0.8.1")), Plan::NotThisComputers);
+        assert_eq!(
+            plan(Some("0.8.1"), "0.8.1", None),
+            Plan::Current("0.8.1".into())
+        );
+        assert_eq!(
+            plan(Some("0.9.0"), "0.8.1", None),
+            Plan::Current("0.9.0".into())
+        );
+        // A CLI here at the app's version or newer: it runs the update, nothing downloaded.
+        assert_eq!(
+            plan(Some("0.7.2"), "0.8.1", Some("0.8.1")),
+            Plan::Auto("0.7.2".into())
+        );
+        assert_eq!(
+            plan(Some("0.7.2"), "0.8.1", Some("0.9.0")),
+            Plan::Auto("0.7.2".into())
+        );
+        // An older CLI, none, or one that says no version: only npx would do; that waits for a click.
+        for cli in [Some("0.8.0"), None] {
+            assert_eq!(
+                plan(Some("0.7.2"), "0.8.1", cli),
+                Plan::Click("0.7.2".into())
+            );
+        }
+    }
+
+    #[test]
+    fn checks_the_first_connected_local_receiver_once() {
+        let r = |id: &str, local: bool| ReceiverRef {
+            id: id.into(),
+            name: id.into(),
+            origin: format!("http://{id}:7373"),
+            local,
+            rp_id: None,
+        };
+        let list = [r("remote", false), r("a", true), r("b", true)];
+        assert_eq!(
+            first_local(&list, |id| id != "a").map(|r| r.id),
+            Some("b".into())
+        );
+        assert_eq!(first_local(&list, |id| id == "remote"), None);
+        assert_eq!(first_local(&[], |_| true), None);
+        let flag = std::sync::atomic::AtomicBool::new(false);
+        assert!(first_time(&flag));
+        assert!(!first_time(&flag));
+        assert!(!first_time(&flag));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_click_path_prefers_npx_and_falls_back_to_the_cli_when_npx_cannot_run_it() {
+        let d = Temp::new("click");
+        let cli = d.0.join("sessionpipe-gui");
+        exe(&cli, "#!/bin/sh\necho \"cli $*\"\n");
+        let offline = d.0.join("npx-offline");
+        exe(
+            &offline,
+            "#!/bin/sh\necho 'npm error code ENOTFOUND' >&2\necho 'npm error network request failed' >&2\nexit 1\n",
+        );
+        let refuses = d.0.join("npx-ours");
+        exe(
+            &refuses,
+            "#!/bin/sh\necho 'sessionpipe-gui: port 7373 is in use by another program (try --port)' >&2\nexit 1\n",
+        );
+        let works = d.0.join("npx-ok");
+        exe(&works, "#!/bin/sh\necho \"npx $*\"\n");
+        let rest = || ["service", "install"].map(String::from).to_vec();
+        let tools = |npx: &Path| Tools {
+            cli: Some(cli.clone()),
+            node: None,
+            npx: Some(npx.to_path_buf()),
+        };
+        let go_with = |t: &Tools, v: Option<&str>, fall_back: bool| {
+            run_installer(
+                t,
+                v,
+                "0.8.1",
+                rest(),
+                Duration::from_secs(5),
+                move || fall_back,
+                |_| {},
+            )
+        };
+        let go = |t: &Tools, v: Option<&str>| go_with(t, v, true);
+        // Older CLI: npx with the app's release.
+        let out = go(&tools(&works), Some("0.7.2")).unwrap();
+        assert!(out.starts_with("npx -y --package=https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.8.1/"), "{out}");
+        // npx offline before ours ran, where falling back can't make the service older
+        // ("Start sessionpipe" on a first run): the CLI on PATH runs it.
+        assert_eq!(
+            go(&tools(&offline), Some("0.7.2")).unwrap().trim(),
+            "cli service install"
+        );
+        // Where it could ("Update sessionpipe", always; "Start" over a newer service): nothing
+        // runs, and it says it couldn't download.
+        match go_with(&tools(&offline), Some("0.7.2"), false) {
+            Err(e @ StartError::Download(_)) => assert_eq!(
+                e.to_string(),
+                "couldn't download sessionpipe (npm error network request failed); nothing was changed"
+            ),
+            other => panic!("{other:?}"),
+        }
+        // Ours ran under npx and refused: that stands, no second try.
+        match go(&tools(&refuses), Some("0.7.2")) {
+            Err(StartError::Failed(m)) => {
+                assert_eq!(m, "port 7373 is in use by another program (try --port)")
+            }
+            other => panic!("{other:?}"),
+        }
+        // No CLI and npx offline: npx's own line.
+        let no_cli = Tools {
+            cli: None,
+            ..tools(&offline)
+        };
+        assert!(
+            matches!(go(&no_cli, None), Err(StartError::Download(m)) if m.contains("network request failed"))
+        );
+        // A CLI at the app's version (or one that says none): it, not npx.
+        for v in [Some("0.8.1"), None] {
+            assert_eq!(go(&tools(&works), v).unwrap().trim(), "cli service install");
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_background_update_runs_the_cli_and_never_npx() {
+        let d = Temp::new("bg");
+        let cli = d.0.join("sessionpipe-gui");
+        exe(&cli, "#!/bin/sh\necho \"cli $*\"\n");
+        let npx = d.0.join("npx");
+        exe(&npx, "#!/bin/sh\necho npx\n");
+        let t = Tools {
+            cli: Some(cli),
+            node: None,
+            npx: Some(npx.clone()),
+        };
+        assert_eq!(update_with_cli(&t, "0.8.1").unwrap(), Updated::Done);
+        // Exit 5: it did nothing, and says what it left.
+        let nothing = d.0.join("sessionpipe-gui-nothing");
+        exe(
+            &nothing,
+            "#!/bin/sh\necho 'no service dev.spacesheep.sessionpipe-gui installed: nothing to do'\nexit 5\n",
+        );
+        let t5 = Tools {
+            cli: Some(nothing),
+            ..t.clone()
+        };
+        assert_eq!(
+            update_with_cli(&t5, "0.8.1").unwrap(),
+            Updated::Nothing(
+                "no service dev.spacesheep.sessionpipe-gui installed: nothing to do".into()
+            )
+        );
+        // Exit 4: the old receiver stopped, the new one not running.
+        let four = d.0.join("sessionpipe-gui-four");
+        exe(
+            &four,
+            "#!/bin/sh\necho 'updating x: 0.7.2 → 0.8.1'\necho \"sessionpipe-gui: 0.8.1 isn't running on :7373 after 90 s, and the old receiver was stopped for the update: see ~/s/service.log\" >&2\nexit 4\n",
+        );
+        let t4 = Tools {
+            cli: Some(four),
+            ..t.clone()
+        };
+        let e = update_with_cli(&t4, "0.8.1").unwrap_err();
+        assert!(matches!(e, StartError::NotRunning(_)));
+        let f = UpdateFailure::from(&e);
+        assert_eq!(
+            (f.kind, f.log.as_deref()),
+            ("notRunning", Some("~/s/service.log"))
+        );
+        let npx_only = Tools {
+            cli: None,
+            node: None,
+            npx: Some(npx),
+        };
+        assert!(matches!(
+            update_with_cli(&npx_only, "0.8.1"),
+            Err(StartError::NoNode)
+        ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_timeout_stops_what_the_child_started_too() {
+        let d = Temp::new("tree");
+        let pidfile = d.0.join("grandchild.pid");
+        let npx = d.0.join("npx");
+        exe(
+            &npx,
+            &format!(
+                "#!/bin/sh\nsleep 30 &\necho $! > {}\nwait\n",
+                pidfile.display()
+            ),
+        );
+        let inv = Invocation {
+            program: npx,
+            args: vec![],
+            path: "/usr/bin:/bin".into(),
+        };
+        assert!(
+            matches!(run(&inv, Duration::from_millis(600), |_| {}), Err(StartError::Failed(m)) if m.contains("didn't finish"))
+        );
+        let pid: u32 = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !discovery::pid_alive(pid),
+            "the grandchild {pid} outlived the timeout"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn once_our_cli_has_spoken_a_timeout_stops_waiting_and_never_kills_it() {
+        let _alone = alone_with_the_guard();
+        let d = Temp::new("spoke");
+        let done = d.0.join("finished");
+        let cli = d.0.join("cli");
+        exe(
+            &cli,
+            &format!(
+                "#!/bin/sh\necho 'updating x: 0.7.2 → 0.8.1'\nsleep 1.2\ntouch {}\n",
+                done.display()
+            ),
+        );
+        let inv = Invocation {
+            program: cli,
+            args: vec![],
+            path: "/usr/bin:/bin".into(),
+        };
+        assert!(matches!(
+            run(&inv, Duration::from_millis(400), |_| {}),
+            Err(StartError::StillRunning)
+        ));
+        // Busy while it finishes; nothing else may start meanwhile.
+        assert!(busy());
+        assert!(matches!(begin_install(), Err(StartError::Busy)));
+        std::thread::sleep(Duration::from_millis(1600));
+        assert!(done.exists(), "the installer was killed");
+        assert!(!busy());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_installer_the_app_stopped_waiting_for_keeps_printing_and_ends_with_its_verdict() {
+        let _alone = alone_with_the_guard();
+        let d = Temp::new("orphan-out");
+        let done = d.0.join("ended");
+        let cli = d.0.join("cli");
+        // It speaks, outlives the wait, then prints on (a write to a closed pipe would kill
+        // it), and ends normally with its last line.
+        exe(
+            &cli,
+            &format!(
+                "#!/bin/sh\necho 'updating x: 0.7.2 → 0.8.1'\nsleep 0.8\ni=0; while [ $i -lt 200 ]; do echo \"starting on :7373… line $i\"; i=$((i+1)); done\necho 'running 0.8.1 on http://127.0.0.1:7999 · orphan-test'\ntouch {}\nexit 0\n",
+                done.display()
+            ),
+        );
+        let inv = Invocation {
+            program: cli,
+            args: vec![],
+            path: "/usr/bin:/bin".into(),
+        };
+        assert!(matches!(
+            run(&inv, Duration::from_millis(300), |_| {}),
+            Err(StartError::StillRunning)
+        ));
+        let until = Instant::now() + Duration::from_secs(5);
+        while !done.exists() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            done.exists(),
+            "the installer died after the app stopped waiting"
+        );
+        // Its verdict: exit 0, every line, the last one intact.
+        let until = Instant::now() + Duration::from_secs(5);
+        let ended = loop {
+            let found = ORPHAN_ENDS
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|r| r.out.contains("orphan-test"))
+                .cloned();
+            if let Some(r) = found {
+                break r;
+            }
+            assert!(Instant::now() < until, "no verdict kept");
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert_eq!(ended.code, 0);
+        assert_eq!(ended.out.lines().count(), 202);
+        assert_eq!(
+            ended.out.lines().last(),
+            Some("running 0.8.1 on http://127.0.0.1:7999 · orphan-test")
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn update_never_runs_a_cli_whose_version_is_unknown_or_older_and_says_so_with_nothing_to_run() {
+        let d = Temp::new("update-tools");
+        let ran = d.0.join("old-cli-ran");
+        let cli = d.0.join("sessionpipe-gui");
+        // A CLI from before this branch: no gates; if it runs, the service could move back.
+        exe(
+            &cli,
+            &format!("#!/bin/sh\ntouch {}\necho \"cli $*\"\n", ran.display()),
+        );
+        let npx = d.0.join("npx");
+        exe(&npx, "#!/bin/sh\necho \"npx $*\"\n");
+        let with = |npx_here: bool| Tools {
+            cli: Some(cli.clone()),
+            node: None,
+            npx: npx_here.then(|| npx.clone()),
+        };
+        let update = |t: &Tools, v: Option<&str>| -> Result<String, StartError> {
+            let t = update_tools(t.clone(), v, "0.8.1")?;
+            run_installer(
+                &t,
+                v,
+                "0.8.1",
+                ["service", "install"].map(String::from).to_vec(),
+                Duration::from_secs(5),
+                || false,
+                |_| {},
+            )
+        };
+        // Unknown version (its --version timed out or said nothing), or an older one, with
+        // npx: npx, never the CLI.
+        for v in [None, Some("0.7.2")] {
+            let out = update(&with(true), v).unwrap();
+            assert!(out.starts_with("npx -y --package="), "{v:?}: {out}");
+        }
+        // The same with no npx: nothing to run, said plainly, nothing changed.
+        for v in [None, Some("0.7.2")] {
+            match update(&with(false), v) {
+                Err(e) => assert_eq!(
+                    e.to_string(),
+                    "there is no sessionpipe-gui 0.8.1 or newer here, and no npx to download it; nothing was changed"
+                ),
+                other => panic!("{v:?}: {other:?}"),
+            }
+        }
+        assert!(!ran.exists(), "the old CLI ran");
+        // A CLI known to be at the app's version: it may run it.
+        assert_eq!(
+            update(&with(false), Some("0.8.1")).unwrap().trim(),
+            "cli service install"
+        );
+    }
+
+    #[test]
+    fn one_install_at_a_time_in_the_app() {
+        let _alone = alone_with_the_guard();
+        // (ORPHANS from another test may still be counted: wait for them.)
+        let until = Instant::now() + Duration::from_secs(5);
+        while busy() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let g = begin_install().unwrap();
+        assert!(busy());
+        assert!(matches!(begin_install(), Err(StartError::Busy)));
+        note_progress("Updating sessionpipe 0.7.2 → 0.8.1…");
+        drop(g);
+        assert!(!busy());
+        assert!(PROGRESS.lock().unwrap().is_none());
+        drop(begin_install().unwrap());
+    }
+
+    #[test]
+    fn start_falls_back_to_the_cli_on_path_only_where_that_cannot_make_the_service_older() {
+        use InstalledService::{Runs, Unknown};
+        let no_service = InstalledService::None;
+        assert!(may_fall_back(Some("0.7.2"), &no_service));
+        assert!(may_fall_back(None, &no_service));
+        assert!(may_fall_back(Some("0.8.0"), &Runs("0.8.0".into())));
+        assert!(!may_fall_back(Some("0.7.2"), &Runs("0.8.0".into())));
+        assert!(!may_fall_back(None, &Runs("0.8.0".into())));
+        assert!(!may_fall_back(Some("0.9.0"), &Unknown));
+        // What `service status` says, the file it names and run.json.
+        let not = "service   dev.spacesheep.sessionpipe-gui (launchd) · not installed\n          `sessionpipe-gui service install` runs the receiver at login\n";
+        assert_eq!(
+            installed_from(Some(not), None, |_| None, Some("0.9.0")),
+            no_service
+        );
+        let installed = "service   dev.spacesheep.sessionpipe-gui (launchd) · stopped\nfile      ~/Library/LaunchAgents/x.plist\nport      7373\nrun.json  none (~/x/run.json)\n";
+        let plist = "<array>\n\t<string>/usr/local/bin/node</string>\n\t<string>/Users/m/.npm/_npx/ab/node_modules/sessionpipe-gui/dist/cli.js</string>\n\t<string>--port</string>\n</array>";
+        let at = |p: &Path| {
+            p.to_string_lossy()
+                .contains("_npx/ab")
+                .then(|| "0.8.0".to_string())
+        };
+        assert_eq!(
+            installed_from(Some(installed), Some(plist), at, Some("0.7.9")),
+            Runs("0.8.0".into())
+        );
+        assert_eq!(
+            installed_from(Some(installed), Some(plist), at, Some("0.8.2")),
+            Runs("0.8.2".into())
+        );
+        let running = "service   x (launchd) · running · pid 7 · 0.8.1\nrun.json  pid 7 · 0.8.1 · since now\n";
+        assert_eq!(
+            installed_from(Some(running), None, |_| None, None),
+            Runs("0.8.1".into())
+        );
+        assert_eq!(
+            installed_from(Some(installed), None, |_| None, None),
+            Unknown
+        );
+        assert_eq!(installed_from(None, None, |_| None, Some("0.8.0")), Unknown);
+        // A systemd unit's ExecStart, quoted words and all.
+        let unit = "[Service]\nExecStart=\"/usr/bin/node\" \"/home/m/.local/lib/node_modules/sessionpipe-gui/dist/cli.js\" \"--port\" \"7373\"\n";
+        assert_eq!(
+            clis_in_service_file(unit),
+            [PathBuf::from(
+                "/home/m/.local/lib/node_modules/sessionpipe-gui/dist/cli.js"
+            )]
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn reads_the_cli_s_version() {
+        let d = Temp::new("ver");
+        let node = d.0.join("node");
+        // node <cli> --version
+        exe(
+            &node,
+            "#!/bin/sh\n[ \"$2\" = --version ] && echo 0.7.2 || exit 9\n",
+        );
+        let t = Tools {
+            cli: Some(d.0.join("cli.js")),
+            node: Some(node.clone()),
+            npx: None,
+        };
+        assert_eq!(cli_version(&t).as_deref(), Some("0.7.2"));
+        exe(&node, "#!/bin/sh\necho 'unknown option'\n");
+        assert_eq!(cli_version(&t), None);
+        assert_eq!(cli_version(&Tools { cli: None, ..t }), None);
+    }
+
+    /// A hub that knows one receiver, at `url`, as SP_RECEIVER_URL would give it.
+    fn hub_for(url: &str, home: &Path) -> Hub {
+        Hub::new(sp_receivers::HubConfig {
+            home: home.to_path_buf(),
+            keys: sp_receivers::KeyStore::memory(),
+            env_receiver_url: Some(url.into()),
+            allowed_origins: sp_receivers::proxy::default_allowed_origins(None),
+            status: sp_receivers::StatusFile::new(None, "test"),
+            user_agent: "sp-supervisor-test".into(),
+        })
+    }
+
+    fn receiver_answering(version: &'static str, started_at: &'static str) -> u16 {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for mut s in l.incoming().flatten() {
+                let mut buf = [0u8; 1024];
+                let _ = s.read(&mut buf);
+                let body = format!(
+                    r#"{{"name":"sessionpipe-gui","version":"{version}","startedAt":"{started_at}"}}"#
+                );
+                let _ = write!(
+                    s,
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn checks_this_computer_s_receiver_and_acts_only_on_an_older_one() {
+        let _alone = alone_with_the_guard();
+        let d = Temp::new("check");
+        // Its info says 0.8.0 (its package was replaced under it); it started as 0.7.2.
+        let port = receiver_answering("0.8.0", "2026-11-12T10:00:00.000Z");
+        let origin = format!("http://127.0.0.1:{port}");
+        let hub = hub_for(&origin, &d.0);
+        let r = hub.active().unwrap();
+        let state = d.0.join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        let run_json = |version: &str| {
+            std::fs::write(
+                state.join("run.json"),
+                format!(
+                    r#"{{"port":{port},"pid":{},"version":"{version}","url":"{origin}","startedAt":"2026-11-12T10:00:02.000Z"}}"#,
+                    std::process::id()
+                ),
+            )
+            .unwrap()
+        };
+        type Up = fn(&Tools, &str) -> Result<Updated, StartError>;
+        type Find = fn() -> (Tools, Option<String>);
+        let check = |tools: Find, update: Up| {
+            tauri::async_runtime::block_on(check_local(&hub, &r, &state, "0.8.1", tools, update))
+        };
+        fn current_cli() -> (Tools, Option<String>) {
+            (
+                Tools {
+                    cli: Some("/c/sessionpipe-gui".into()),
+                    ..Tools::default()
+                },
+                Some("0.8.1".into()),
+            )
+        }
+        fn older_cli() -> (Tools, Option<String>) {
+            (
+                Tools {
+                    cli: Some("/c/sessionpipe-gui".into()),
+                    npx: Some("/n/npx".into()),
+                    ..Tools::default()
+                },
+                Some("0.7.2".into()),
+            )
+        }
+        fn unasked() -> (Tools, Option<String>) {
+            panic!("the CLI looked for although the receiver isn't older")
+        }
+        fn ok(t: &Tools, app: &str) -> Result<Updated, StartError> {
+            assert_eq!(app, "0.8.1");
+            assert!(t.cli.is_some());
+            Ok(Updated::Done)
+        }
+        fn nothing(_: &Tools, _: &str) -> Result<Updated, StartError> {
+            Ok(Updated::Nothing(
+                "no service x installed: nothing to do".into(),
+            ))
+        }
+        fn exit4(_: &Tools, _: &str) -> Result<Updated, StartError> {
+            Err(StartError::NotRunning("0.8.1 isn't running on :7373 after 90 s, and the old receiver was stopped for the update: see ~/x".into()))
+        }
+        fn never(_: &Tools, _: &str) -> Result<Updated, StartError> {
+            panic!("the background update ran where it mustn't")
+        }
+        // No run.json naming it: not this computer's, never touched.
+        assert_eq!(check(unasked, never), None);
+        run_json("0.7.2");
+        // The CLI ran and did nothing (exit 5): said as that, not as an update.
+        let u = check(current_cli, nothing).unwrap();
+        assert_eq!(
+            (u.state, u.why.as_deref()),
+            (
+                UpdateState::Unchanged,
+                Some("no service x installed: nothing to do")
+            )
+        );
+        run_json("0.7.2");
+        let u = check(current_cli, ok).unwrap();
+        assert_eq!(
+            (u.running.as_str(), u.state),
+            ("0.7.2", UpdateState::Updated)
+        );
+        // A failure after the old receiver was stopped is a failure, with its line.
+        let u = check(current_cli, exit4).unwrap();
+        assert_eq!(u.state, UpdateState::Failed);
+        assert!(u.why.unwrap().contains("the old receiver was stopped"));
+        // Only npx would bring it current: nothing runs; the page is told a click is needed.
+        let u = check(older_cli, never).unwrap();
+        assert_eq!(
+            (u.running.as_str(), u.state, u.app.as_str()),
+            ("0.7.2", UpdateState::Click, "0.8.1")
+        );
+        assert_eq!(u.origin, origin);
+        run_json("0.8.1");
+        // run.json says 0.8.1 but the info 0.8.0: the info older is enough.
+        assert_eq!(check(older_cli, never).unwrap().state, UpdateState::Click);
+        run_json("0.9.1");
+        let port2 = receiver_answering("0.9.1", "2026-11-12T10:00:00.000Z");
+        let hub2 = hub_for(&format!("http://127.0.0.1:{port2}"), &d.0);
+        let r2 = hub2.active().unwrap();
+        std::fs::write(
+            state.join("run.json"),
+            format!(
+                r#"{{"port":{port2},"pid":{},"version":"0.9.1","url":"http://127.0.0.1:{port2}","startedAt":"2026-11-12T10:00:02.000Z"}}"#,
+                std::process::id()
+            ),
+        )
+        .unwrap();
+        let u = tauri::async_runtime::block_on(check_local(
+            &hub2, &r2, &state, "0.8.1", unasked, never,
+        ))
+        .unwrap();
+        assert_eq!(u.state, UpdateState::Current);
+    }
+
+    /// The real thing against a service on a scratch label (stale-server e2e bed): a
+    /// receiver started as an older version from `SP_STALE_CLI`'s path, whose package was
+    /// then replaced there with `SP_STALE_APP`. Run with SP_SERVICE_LABEL, SP_LAUNCHCTL
+    /// (a stand-in), HOME and the SP_STALE_* variables set:
+    /// `cargo test -p sessionpipe-desktop live_brings -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn live_brings_an_older_service_up_to_the_app() {
+        let _alone = alone_with_the_guard();
+        let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k} unset"));
+        assert_ne!(var("SP_SERVICE_LABEL"), "dev.spacesheep.sessionpipe-gui");
+        assert!(!var("SP_LAUNCHCTL").is_empty());
+        let d = Temp::new("live-update");
+        let hub = hub_for(&var("SP_STALE_URL"), &d.0);
+        let r = hub.active().unwrap();
+        let state = PathBuf::from(var("SP_STALE_STATE"));
+        fn here() -> (Tools, Option<String>) {
+            let t = Tools {
+                cli: std::env::var_os("SP_STALE_CLI").map(PathBuf::from),
+                node: std::env::var_os("SP_STALE_NODE").map(PathBuf::from),
+                npx: None,
+            };
+            let v = cli_version(&t);
+            eprintln!("the CLI here says {v:?}");
+            (t, v)
+        }
+        fn update(t: &Tools, app: &str) -> Result<Updated, StartError> {
+            let out = update_with_cli(t, app);
+            eprintln!("{out:?}");
+            out
+        }
+        let app = var("SP_STALE_APP");
+        let got = tauri::async_runtime::block_on(check_local(&hub, &r, &state, &app, here, update));
+        eprintln!("checked: {got:?}");
+        let want = std::env::var("SP_STALE_WANT").unwrap_or_else(|_| "updated".into());
+        let got = got.expect("this computer's receiver");
+        assert_eq!(
+            serde_json::to_value(got.state).unwrap(),
+            serde_json::json!(want),
+            "{got:?}"
+        );
+        if want == "updated" {
+            let run = discovery::read_run_file(&state).unwrap();
+            eprintln!("run.json now: pid {} started as {}", run.pid, run.version);
+            assert_eq!(run.version, app);
+            // Once current, the next check leaves it.
+            let again =
+                tauri::async_runtime::block_on(check_local(&hub, &r, &state, &app, here, update))
+                    .unwrap();
+            assert_eq!(again.state, UpdateState::Current);
+        }
     }
 
     fn fake_receiver() -> u16 {
