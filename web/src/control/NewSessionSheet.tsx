@@ -504,7 +504,11 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       return { text: `${m.name} can't take files on a new session. Update sessionpipe there.` };
     if (model && !modelOk)
       return { text: `${model} isn't a model ${m.name} offers for ${harnessMark(harness).label}.` };
-    if (c && !c.online) return { text: `${m.name} is offline. It starts when the machine is back, within an hour.` };
+    // spacesheep holds a start a day (server/control/state.ts), this receiver an hour.
+    if (c && !c.online)
+      return {
+        text: `${m.name} is offline. It starts when the machine is back, within ${relayed ? "a day" : "an hour"}.`,
+      };
     return { text: `${m.name} is listening.` };
   })();
   // The passkey is a note on Start (its tooltip, and what a screen reader hears with it),
