@@ -82,9 +82,10 @@ export interface Tracking {
   /** The span of seqs seen (-1 before the first) and the holes in it. */
   seqLo: number;
   seqHi: number;
-  missing: Set<number>;
-  /** Arrival time of the event that opened the first open hole. */
-  missingSince?: string;
+  /** Each missing seq, with the arrival time of the event that opened its hole, in
+   *  the order the holes opened as events were applied: the first entry is the oldest
+   *  hole still open. */
+  missing: Map<number, string>;
   /** Agent / Task tool calls (the tools that launch a subagent), newest last, at most
    *  AGENTS_MAX: what an AgentRun's description and launch call are read from. */
   launches: Launch[];
@@ -275,7 +276,7 @@ export function newRecord(harness: string, id: string, at: string, source: Event
       turnMs: [],
       seqLo: -1,
       seqHi: -1,
-      missing: new Set(),
+      missing: new Map(),
       launches: [],
       turnIds: [],
       era: 0,
@@ -322,10 +323,7 @@ function noteSeq(t: Tracking, seq: number, arrivedAt: string): void {
     t.seqHi = seq;
     return;
   }
-  if (t.missing.delete(seq)) {
-    if (!t.missing.size) t.missingSince = undefined;
-    return;
-  }
+  if (t.missing.delete(seq)) return;
   let from = 0;
   let to = -1;
   if (seq > t.seqHi) {
@@ -339,8 +337,7 @@ function noteSeq(t: Tracking, seq: number, arrivedAt: string): void {
   } else return;
   if (to < from || to - from + 1 > GAP_MAX_HOLE) return;
   // Count, don't step from `from`: past 2^53 - 1, i++ would stop moving.
-  for (let n = 0; n <= to - from; n++) t.missing.add(from + n);
-  t.missingSince ??= arrivedAt;
+  for (let n = 0; n <= to - from; n++) t.missing.set(from + n, arrivedAt);
 }
 
 function turnStats(t: Tracking, tools: number): TurnStats {
@@ -1189,13 +1186,15 @@ export function evaluateFlags(rec: SessionRecord, now: number): SessionFlag[] {
       detail: `compacted ${n === 2 ? "twice" : `${n}×`} in ${span(last - first)}`,
     });
   }
-  if (t.missing.size && t.missingSince && now - Date.parse(t.missingSince) > GAP_AFTER_MS) {
-    const seqs = [...t.missing].sort((a, b) => a - b);
+  // A hole counts from when it opened, not from an older one that has since filled.
+  const since = t.missing.values().next().value;
+  if (since && now - Date.parse(since) > GAP_AFTER_MS) {
+    const seqs = [...t.missing.keys()].sort((a, b) => a - b);
     const n = seqs.length;
     const range = n === 1 ? `seq ${seqs[0]}` : `seq ${seqs[0]}–${seqs[n - 1]}`;
     flags.push({
       kind: "gap",
-      since: t.missingSince,
+      since,
       detail: `waiting for ${n} event${n === 1 ? "" : "s"} (${range})`,
     });
   }

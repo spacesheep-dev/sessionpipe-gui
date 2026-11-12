@@ -39,6 +39,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   the sink token and the UI key. The GUI now takes the group and other bits off before every
   write, as it already sets its TLS keys to 0600 when it writes them, and also when it
   starts; where that fails it says so and starts anyway.
+- A session's "missing events" flag waits 30 s from when each hole opened. When an older
+  hole filled while a newer one was still open, the newer one kept the older one's time,
+  so it was flagged at once, with a "since" from before it opened.
 
 ## [0.8.0] - 2026-11-11
 
