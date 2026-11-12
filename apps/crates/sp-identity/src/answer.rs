@@ -68,6 +68,32 @@ pub async fn target(
     Ok(Target { rp: known, host })
 }
 
+/// This device's own key for the rp id `receiver` signs for (made on first use, with no
+/// prompt), read natively. The shell hands it to the Hub when a spacesheep account is
+/// asked to trust this device: the key that is enrolled there is the one in this
+/// device's hardware, never one a page named.
+pub async fn device_key(
+    lookup: &dyn ReceiverLookup,
+    receiver: &str,
+) -> Result<crate::device::DeviceKey, Error> {
+    let signer = SIGNER
+        .get()
+        .cloned()
+        .ok_or_else(|| Error::new("unavailable", "the signer is not ready"))?;
+    device_key_of(signer, lookup, receiver).await
+}
+
+/// `device_key` for a given signer: the rp id is the receiver's own, checked against its
+/// URL as for any signature, so no key is handed out for an rp the receiver cannot claim.
+async fn device_key_of(
+    signer: Arc<Signer>,
+    lookup: &dyn ReceiverLookup,
+    receiver: &str,
+) -> Result<crate::device::DeviceKey, Error> {
+    let t = target(lookup, receiver, None).await?;
+    blocking(move || signer.key(&t.rp)).await
+}
+
 /// A machine's name as the receiver lists it, for a prompt; its id's start when unknown.
 pub async fn machine_name(lookup: &dyn ReceiverLookup, receiver: &str, machine: &str) -> String {
     let fallback = || format!("machine {}", machine.get(..10).unwrap_or(machine));
@@ -435,6 +461,35 @@ mod tests {
                 .host,
             "app.spacesheep.dev"
         );
+    }
+
+    #[test]
+    fn this_devices_key_is_for_the_receivers_own_rp_and_no_other() {
+        let (s, _, _) = signer();
+        let s = Arc::new(s);
+        let account = rx("https://spacesheep.dev", Some("spacesheep.dev"), false);
+        let k = run(device_key_of(s.clone(), &account, "rx1")).unwrap();
+        assert_eq!(k, s.key("spacesheep.dev").unwrap());
+        assert_eq!((k.kind.as_str(), k.alg, k.id.len()), ("device", -7, 43));
+        // A receiver that claims an rp id its URL cannot have gets no key at all.
+        let liar = rx("https://evil.example", Some("spacesheep.dev"), false);
+        assert_eq!(
+            run(device_key_of(s.clone(), &liar, "rx1"))
+                .unwrap_err()
+                .code,
+            "rp_mismatch"
+        );
+        assert_eq!(
+            run(device_key_of(s, &account, "nobody")).unwrap_err().code,
+            "unknown_receiver"
+        );
+        // Before the plugin made a signer there is none to ask.
+        if SIGNER.get().is_none() {
+            assert_eq!(
+                run(device_key(&account, "rx1")).unwrap_err().code,
+                "unavailable"
+            );
+        }
     }
 
     #[test]
