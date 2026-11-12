@@ -1,29 +1,69 @@
 // SPDX-License-Identifier: Apache-2.0
-// Owned by: server-core. A spacesheep account as a source (docs/rfcs/08): the relay at
-// `${origin}/api/sessionpipe/v1/relay` hands this GUI the account's accepted wire events
-// after a cursor, long-polling when there are none, and this feeds them through the same
-// store ingest the receiver route uses. The cursor lives beside the outbox offsets; the
-// store's dedup resolves any overlap with a machine that also posts here directly.
+// Owned by: server-core. The reader of a spacesheep account's relay (docs/rfcs/08): the
+// relay at `/api/sessionpipe/v1/relay` hands over the account's accepted wire events after
+// a cursor, long-polling when there are none, and this feeds them to a store's ingest. The
+// store's dedup resolves any overlap with a machine that also posts to the same store.
 //
 // One loop, never two: a poll that waits up to 25 s on the server, then the next at
 // once; on an error, a pause that grows to a minute. A 401 means the key was revoked on
 // spacesheep (Settings → API keys there): the loop stops and the status says so.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
+//
+// One definition, two openers. The receiver (sources/spacesheep.ts) holds the account's
+// key and keeps the cursor in files beside the outbox offsets; a page that carries its own
+// board (the phone on an account) asks through the native hub, which holds the key, and
+// keeps the cursor in its own storage. What differs is handed in: the doors (`fetch` with
+// whatever reaches spacesheep), where the cursor and the read times are kept, the clock and
+// its timers, and the sink the events go to. Nothing here is Node's (store/browser.test.ts
+// holds it to what a page has).
 import type { ProtocolEvent, SpacesheepSourceStatus } from "../../shared/api.js";
 import { eventProblem } from "../receiver/validate.js";
-import type { Store } from "../store/store.js";
 
 export const RELAY_PATH = "/api/sessionpipe/v1/relay";
 export const RELAY_WAIT_S = 25;
 export const RELAY_PAGE = 500;
 
-export interface SpacesheepSourceOptions {
+/** A request to one of the account's doors, by path and query: the opener adds the origin
+ *  and the key (the receiver), or hands it to the hub that does (a page never has the key). */
+export type Doors = (path: string, init?: { signal?: AbortSignal }) => Promise<Response>;
+
+/** The two small values the reader keeps between runs, each whole JSON: `cursor`
+ *  (`{ origin, email, cursor }`) and `reads` (`{ origin, email, reads }`). Read once at the
+ *  start; `read` answers undefined for one that is not there or cannot be read. */
+export type RelayKept = "cursor" | "reads";
+export interface RelayKeep {
+  read(name: RelayKept): unknown;
+  write(name: RelayKept, value: unknown): void;
+}
+
+/** The clock and its timers. A handle is whatever `setTimeout` gave: Node's Timeout (the
+ *  reader unrefs the ones that must not keep a process alive) or a page's number. */
+export interface RelayClock {
+  now(): number;
+  setTimeout(f: () => void, ms: number): unknown;
+  clearTimeout(timer: unknown): void;
+}
+
+/** Where the events go. */
+export interface RelaySink {
+  /** Valid events, in the relay's order: how many were new. */
+  ingest(events: ProtocolEvent[]): number;
+  /** True around the first read: it is history, not live traffic. */
+  setLoading(on: boolean): void;
+}
+
+/** The header the native hub puts on an answer of its own (docs/rfcs/08, "The doors"):
+ *  with it the answer is the hub's, without it spacesheep's. */
+export const HUB_HEADER = "x-sessionpipe-hub";
+
+export interface RelayReaderOptions {
+  /** The account read: its cursor and its read times are kept under these two. */
   origin: string;
-  key: string;
   email: string;
-  connectedAt: string;
-  fetch?: typeof fetch;
+  doors: Doors;
+  keep: RelayKeep;
+  sink: RelaySink;
+  /** Absent: the real clock. */
+  clock?: RelayClock;
   /** The pause after an error, before it grows (tests). */
   retryMs?: number;
   /** The relay's machine list, each time it is read (every minute): the control state
@@ -43,6 +83,27 @@ export interface SpacesheepSourceOptions {
   onUnauthorized?: () => void;
   /** The sessions (`harness:id`) a relay page brought events for. */
   onEvents?: (keys: string[]) => void;
+
+  // What follows is for an opener behind the native hub with no board of its own until
+  // the relay is read (a page). The receiver sets none of it.
+
+  /** The doors go through the native hub: an answer with HUB_HEADER is the hub's own, read
+   *  by its code and never as spacesheep's (a `busy` 429 is not spacesheep's limit and is
+   *  asked again; `answer_too_large` asks again for fewer events; a hub 401 is not a
+   *  revoked key). Off, the header is never looked at. */
+  hub?: boolean;
+  /** History is read first: while a page comes back full (more is waiting) the next is
+   *  read at once and with no wait, as long as BACKLOG_RESERVE reads of the budget stay
+   *  unspent (backlogPaceMs). Off, every read is paced alike (relayPaceMs) and waits. */
+  backlog?: boolean;
+  /** The key was made just now, so no reader before this one spent any of its budget:
+   *  with no read times kept, none are taken as spent (readsFrom's seed). */
+  fresh?: boolean;
+  /** Each relay page as it was taken: how many events it held, how many were new, the
+   *  cursor after it, and whether it came back full (more is waiting). */
+  onPage?: (page: { events: number; taken: number; cursor: number; more: boolean }) => void;
+  /** The state, each time it changes. */
+  onState?: (state: RelayStatus["state"]) => void;
 }
 
 /** The jobs door's pace: while a send was just made, is taken, or its computer is online. */
@@ -50,16 +111,19 @@ export const JOBS_FAST_MS = 3000;
 /** ...and while every send waits for a computer the machine list shows offline. */
 export const JOBS_SLOW_MS = 45_000;
 
-export interface SpacesheepSource {
+/** What the reader says of itself; the receiver's source adds the account to it. */
+export type RelayStatus = Omit<SpacesheepSourceStatus, "origin" | "email" | "connectedAt">;
+
+export interface RelayReader {
   stop(): void;
-  status(): SpacesheepSourceStatus;
+  status(): RelayStatus;
   /** One poll now, with no wait (tests): how many events were taken. */
   tick(): Promise<number>;
   /** One read of the jobs door now (tests). */
   pollJobs(): Promise<void>;
   /** One read of the machines door now (tests). */
   pollMachines(): Promise<void>;
-  /** spacesheep refused the key elsewhere (a send's 401): the source stops as its own poll
+  /** spacesheep refused the key elsewhere (a send's 401): the reader stops as its own poll
    *  would on one, so the status says so at the same moment. */
   unauthorized(): void;
   /** Read the jobs door now (a send just made, its computer back, events for its session). */
@@ -165,6 +229,21 @@ export function relayPaceMs(reads: readonly number[], now: number): number {
   return Math.max(0, Math.ceil(Math.max(ramp, spread)));
 }
 
+/** The reads of the budget history leaves alone: while a full page says more is waiting
+ *  and fewer than RELAY_BUDGET less this are spent, the next page is read at once
+ *  (RelayReaderOptions.backlog). The relay holds 50 000 events at most, 100 full pages, so a
+ *  reader that starts with nothing spent reads all of it at once and has more than half the
+ *  budget left for what comes after; one that starts from a third spent (readsFrom's seed)
+ *  reads all of it too and is then paced by what is left. */
+export const BACKLOG_RESERVE = 50;
+
+/** relayPaceMs for a reader that is still reading history: no wait while the reserve holds. */
+export function backlogPaceMs(reads: readonly number[], now: number): number {
+  let n = 0;
+  for (const t of reads) if (now - t < RELAY_WINDOW_MS) n++;
+  return n < RELAY_BUDGET - BACKLOG_RESERVE ? 0 : relayPaceMs(reads, now);
+}
+
 /** The longest pause a Retry-After is followed for. */
 export const RETRY_AFTER_MAX_MS = 15 * 60_000;
 
@@ -184,13 +263,51 @@ class Limited extends Error {
   }
 }
 
-export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOptions): SpacesheepSource {
-  const f = opts.fetch ?? fetch;
-  const cursorFile = path.join(store.dir, "spacesheep-cursor.json");
-  let cursor = readCursor(cursorFile, opts.origin, opts.email);
+/** The hub's room for this account was full (its own 429 `busy`): the read never reached
+ *  spacesheep, so it is not counted, the state stays, and it is asked again after `pauseMs`. */
+class HubBusy extends Error {
+  constructor(readonly pauseMs: number) {
+    super("hub: busy");
+  }
+}
+
+/** The hub would not pass a relay page that large (`answer_too_large`): the next read asks
+ *  for fewer events. */
+class TooLarge extends Error {
+  constructor() {
+    super("hub: answer_too_large");
+  }
+}
+
+/** How long a hub `busy` is waited out, whatever its Retry-After says. */
+export const HUB_BUSY_MIN_MS = 250;
+export const HUB_BUSY_MAX_MS = 5000;
+
+/** A timer that does not keep a Node process alive; a page's timer is a number, with no unref. */
+const unref = <T>(timer: T): T => {
+  (timer as { unref?: () => void }).unref?.();
+  return timer;
+};
+
+const realClock: RelayClock = {
+  now: () => Date.now(),
+  setTimeout: (f, ms) => setTimeout(f, ms),
+  clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+};
+
+export function startRelayReader(opts: RelayReaderOptions): RelayReader {
+  const f = opts.doors;
+  const clock = opts.clock ?? realClock;
+  const { sink, keep } = opts;
+  let cursor = cursorFrom(keep.read("cursor"), opts.origin, opts.email);
   let events = 0;
   let machines: string[] = [];
-  let state: SpacesheepSourceStatus["state"] = "starting";
+  let state: RelayStatus["state"] = "starting";
+  const say = (next: RelayStatus["state"]): void => {
+    if (state === next) return;
+    state = next;
+    opts.onState?.(next);
+  };
   /** The first event the relay still held when a gap was found: the state says "gap" from
    *  then on, while this source runs, not only for the one poll that saw it. */
   let gapBefore: number | null = null;
@@ -200,71 +317,97 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
   let pause = opts.retryMs ?? 2000;
   let inFlight: Promise<number> | null = null;
   let abort: AbortController | null = null;
+  /** How many events a read asks for: RELAY_PAGE, fewer after the hub found a page too
+   *  large, and no more again until the cursor is past the events that page would have held. */
+  let limit = RELAY_PAGE;
+  let smallUntil = 0;
+  /** The last page came back full: more is waiting (RelayReaderOptions.backlog). */
+  let more = false;
   /** When each relay read in the last window was made (relayPaceMs). */
   // Kept beside the cursor (READS_SAVE_MS and at stop), so a restart mid-stream goes on
   // from the same budget rather than an empty one. One reader per key: each Connect mints
   // its own key, so two apps never share this count (two readers on one key are not paced).
-  const readsFile = path.join(store.dir, "spacesheep-reads.json");
-  let reads: number[] = loadReads(readsFile, opts.origin, opts.email, Date.now());
+  let reads: number[] = readsFrom(keep.read("reads"), opts.origin, opts.email, clock.now(), !opts.fresh);
   let readsDirty = false;
   const saveReads = (): void => {
     if (!readsDirty) return;
-    const now = Date.now();
+    const now = clock.now();
     reads = reads.filter((t) => now - t < RELAY_WINDOW_MS);
-    writeReads(readsFile, { origin: opts.origin, email: opts.email, reads });
+    keep.write("reads", { origin: opts.origin, email: opts.email, reads });
     readsDirty = false;
   };
-  const readsTimer = setInterval(saveReads, READS_SAVE_MS);
-  readsTimer.unref();
+  let readsTimer: unknown;
+  const scheduleReads = (): void => {
+    readsTimer = unref(
+      clock.setTimeout(() => {
+        saveReads();
+        scheduleReads();
+      }, READS_SAVE_MS),
+    );
+  };
+  scheduleReads();
   /** A pause the loop is in (the pace, an error's, a 429's), cut short by stop(). */
   let wake: (() => void) | null = null;
   const sleep = (ms: number) =>
     new Promise<void>((resolve) => {
-      const t = setTimeout(() => {
+      const t = clock.setTimeout(() => {
         wake = null;
         resolve();
       }, ms);
       wake = () => {
-        clearTimeout(t);
+        clock.clearTimeout(t);
         wake = null;
         resolve();
       };
     });
 
   const revoked = (): void => {
-    state = "unauthorized";
+    say("unauthorized");
     lastError = "the key no longer opens the relay (revoked on spacesheep?)";
     stopped = true;
-    if (jobsTimer) clearTimeout(jobsTimer);
-    if (machinesTimer) clearTimeout(machinesTimer);
+    if (jobsTimer) clock.clearTimeout(jobsTimer);
+    if (machinesTimer) clock.clearTimeout(machinesTimer);
     wake?.();
     abort?.abort();
-    clearInterval(readsTimer);
+    clock.clearTimeout(readsTimer);
     saveReads();
     opts.onUnauthorized?.();
   };
 
   const poll = async (waitS: number): Promise<number> => {
     abort = new AbortController();
-    const at = Date.now();
+    const at = clock.now();
     reads = reads.filter((t) => at - t < RELAY_WINDOW_MS);
     reads.push(at);
     readsDirty = true;
-    const url = `${opts.origin}${RELAY_PATH}?since=${cursor}&limit=${RELAY_PAGE}&wait=${waitS}`;
-    const res = await f(url, {
-      headers: { authorization: `Bearer ${opts.key}`, accept: "application/json" },
-      signal: abort.signal,
-    });
+    const size = limit;
+    const res = await f(`${RELAY_PATH}?since=${cursor}&limit=${size}&wait=${waitS}`, { signal: abort.signal });
     // Stopped while this poll was out (a send found the key revoked, a disconnect): its
     // answer changes nothing.
     if (stopped) return 0;
+    const hub = opts.hub ? res.headers.get(HUB_HEADER) : null;
+    if (hub === "busy") {
+      // It never left the hub: not a read spacesheep counted.
+      const i = reads.lastIndexOf(at);
+      if (i >= 0) reads.splice(i, 1);
+      const asked = retryAfterMs(res.headers.get("retry-after"), clock.now()) ?? 1000;
+      throw new HubBusy(Math.min(HUB_BUSY_MAX_MS, Math.max(HUB_BUSY_MIN_MS, asked)));
+    }
+    if (hub === "answer_too_large" && size > 1) {
+      limit = Math.max(1, Math.floor(size / 2));
+      smallUntil = cursor + size;
+      throw new TooLarge();
+    }
+    // Any other answer of the hub's own (its 401 `not_connected` among them) is the hub
+    // speaking, not spacesheep: an error to wait out, never a revoked key.
+    if (hub) throw new Error(`hub: ${hub}`);
     if (res.status === 401 || res.status === 403) {
       revoked();
       return 0;
     }
     if (res.status === 429) {
       // Not unreachable: spacesheep's limit for this key. Its Retry-After, within bounds.
-      const asked = retryAfterMs(res.headers.get("retry-after")) ?? 60_000;
+      const asked = retryAfterMs(res.headers.get("retry-after"), clock.now()) ?? 60_000;
       throw new Limited(Math.min(RETRY_AFTER_MAX_MS, Math.max(opts.retryMs ?? 2000, asked)));
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -273,31 +416,33 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
     const valid: ProtocolEvent[] = [];
     for (const e of page.events) if (!eventProblem(e)) valid.push(e as ProtocolEvent);
     let taken = 0;
-    if (valid.length) taken = store.ingest(valid, "spacesheep").accepted;
+    if (valid.length) taken = sink.ingest(valid);
     if (valid.length && opts.onEvents)
       opts.onEvents([...new Set(valid.map((e) => `${e.harness.name}:${e.session.id}`))]);
     events += taken;
     const c = cursorAfter(cursor, page);
     if (c.gap) gapBefore = page.oldest;
     if (gapBefore !== null) {
-      state = "gap";
+      say("gap");
       lastError = `the relay no longer holds events before ${gapBefore}; the board shows what it still has`;
-    } else state = "ok";
+    } else say("ok");
     if (c.cursor !== cursor) {
       cursor = c.cursor;
-      writeCursor(cursorFile, { origin: opts.origin, email: opts.email, cursor });
+      keep.write("cursor", { origin: opts.origin, email: opts.email, cursor });
     }
-    lastAt = new Date().toISOString();
+    lastAt = new Date(clock.now()).toISOString();
     if (state === "ok") lastError = undefined;
     pause = opts.retryMs ?? 2000;
+    more = page.events.length >= size;
+    // Past what was too large: the next may ask for more again.
+    if (limit < RELAY_PAGE && cursor >= smallUntil) limit = Math.min(RELAY_PAGE, limit * 2);
+    opts.onPage?.({ events: page.events.length, taken, cursor, more });
     return taken;
   };
 
   const machinesPoll = async (): Promise<void> => {
     try {
-      const res = await f(`${opts.origin}${RELAY_PATH}/machines`, {
-        headers: { authorization: `Bearer ${opts.key}`, accept: "application/json" },
-      });
+      const res = await f(`${RELAY_PATH}/machines`);
       if (!res.ok) return;
       const j = (await res.json()) as { machines?: Array<{ name?: unknown }>; rp_id?: unknown };
       machines = (j.machines ?? []).map((m) => String(m.name ?? "")).filter(Boolean);
@@ -308,16 +453,14 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
   };
 
   // How the sends spacesheep carried are going: read while any is unsettled here.
-  let jobsTimer: NodeJS.Timeout | undefined;
+  let jobsTimer: unknown;
   const jobsPoll = async (): Promise<void> => {
     const pending = opts.pendingJobs?.() ?? [];
     if (!pending.length) return;
     try {
       let serverNow: number | undefined;
       const r = await readJobs(pending, async (since) => {
-        const res = await f(`${opts.origin}${RELAY_PATH}/jobs?since=${since}`, {
-          headers: { authorization: `Bearer ${opts.key}`, accept: "application/json" },
-        });
+        const res = await f(`${RELAY_PATH}/jobs?since=${since}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         // spacesheep's clock, for how old its jobs are (state.applyRemoteJobs), not ours: the
         // answer's `now` (spacesheep ≥ the field), else its Date header.
@@ -354,49 +497,56 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
   };
   const scheduleJobs = (): void => {
     if (stopped) return;
-    if (jobsTimer) clearTimeout(jobsTimer);
+    if (jobsTimer) clock.clearTimeout(jobsTimer);
     const pace = opts.jobsCadence?.() ?? "fast";
-    jobsTimer = setTimeout(() => void runJobs(), pace === "slow" ? JOBS_SLOW_MS : JOBS_FAST_MS);
-    jobsTimer.unref();
+    jobsTimer = unref(clock.setTimeout(() => void runJobs(), pace === "slow" ? JOBS_SLOW_MS : JOBS_FAST_MS));
   };
   const kickJobs = (): void => {
     if (stopped) return;
-    if (jobsTimer) clearTimeout(jobsTimer);
+    if (jobsTimer) clock.clearTimeout(jobsTimer);
     void runJobs();
   };
   scheduleJobs();
 
   // The machine list, once a minute on its own clock: not metered, so it stays fresh while
   // the relay waits out a pace or a 429.
-  let machinesTimer: NodeJS.Timeout | undefined;
+  let machinesTimer: unknown;
   const scheduleMachines = (): void => {
     if (stopped) return;
-    machinesTimer = setTimeout(async () => {
-      await machinesPoll();
-      scheduleMachines();
-    }, 60_000);
-    machinesTimer.unref();
+    machinesTimer = unref(
+      clock.setTimeout(async () => {
+        await machinesPoll();
+        scheduleMachines();
+      }, 60_000),
+    );
   };
 
   const loop = async (): Promise<void> => {
     while (!stopped) {
       try {
-        const pace = relayPaceMs(reads, Date.now());
+        const pace = opts.backlog && more ? backlogPaceMs(reads, clock.now()) : relayPaceMs(reads, clock.now());
         if (pace > 0) await sleep(pace);
         if (stopped) break;
-        inFlight = poll(RELAY_WAIT_S);
+        // History is not waited for: after a full page the next is asked for with no wait, so
+        // the page that ends it comes back at once.
+        inFlight = poll(opts.backlog && more ? 0 : RELAY_WAIT_S);
         await inFlight;
         inFlight = null;
       } catch (e) {
         inFlight = null;
         if (stopped) break;
-        lastError = (e as Error).message;
-        if (e instanceof Limited) {
-          state = "limited";
+        if (e instanceof TooLarge) continue;
+        if (e instanceof HubBusy) {
           await sleep(e.pauseMs);
           continue;
         }
-        state = "offline";
+        lastError = (e as Error).message;
+        if (e instanceof Limited) {
+          say("limited");
+          await sleep(e.pauseMs);
+          continue;
+        }
+        say("offline");
         await sleep(pause);
         pause = Math.min(pause * 2, 60_000);
       }
@@ -406,16 +556,21 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
   void machinesPoll();
   scheduleMachines();
   // The first page is history: the board shouldn't ring for it.
-  store.setLoading(true);
+  sink.setLoading(true);
   let firstPause = 0;
   const first = poll(0)
     .catch((e) => {
-      state = e instanceof Limited ? "limited" : "offline";
+      if (e instanceof TooLarge) return 0;
+      if (e instanceof HubBusy) {
+        firstPause = e.pauseMs;
+        return 0;
+      }
+      say(e instanceof Limited ? "limited" : "offline");
       if (e instanceof Limited) firstPause = e.pauseMs;
       lastError = (e as Error).message;
       return 0;
     })
-    .finally(() => store.setLoading(false));
+    .finally(() => sink.setLoading(false));
   void first.then(async () => {
     if (firstPause) await sleep(firstPause);
     if (!stopped) void loop();
@@ -423,18 +578,15 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
 
   return {
     stop() {
-      clearInterval(readsTimer);
+      clock.clearTimeout(readsTimer);
       saveReads();
       stopped = true;
-      if (jobsTimer) clearTimeout(jobsTimer);
-      if (machinesTimer) clearTimeout(machinesTimer);
+      if (jobsTimer) clock.clearTimeout(jobsTimer);
+      if (machinesTimer) clock.clearTimeout(machinesTimer);
       wake?.();
       abort?.abort();
     },
     status: () => ({
-      origin: opts.origin,
-      email: opts.email,
-      connectedAt: opts.connectedAt,
       events,
       cursor,
       state,
@@ -455,47 +607,23 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
  *  between RELAY_BUDGET and RELAY_LIMIT. */
 export const READS_SAVE_MS = 15_000;
 
-/** The reads of the last window as a stopped source wrote them down, for this account;
- *  with nothing usable on file (none, another account, unreadable), a third of the budget
- *  taken as spent just now, since a reader before this one may have been busy. */
-export function loadReads(file: string, origin: string, email: string, now: number): number[] {
-  const seed = () => Array.from({ length: Math.floor(RELAY_BUDGET / 3) }, () => now);
-  try {
-    if (!existsSync(file)) return seed();
-    const v = JSON.parse(readFileSync(file, "utf8")) as { origin?: unknown; email?: unknown; reads?: unknown };
-    if (v.origin !== origin || v.email !== email || !Array.isArray(v.reads)) return seed();
-    return v.reads.filter((t): t is number => typeof t === "number" && t <= now && now - t < RELAY_WINDOW_MS);
-  } catch {
-    return seed();
-  }
+/** The reads of the last window as a stopped reader wrote them down (`kept`: the value of
+ *  `reads`), for this account; with nothing usable kept (none, another account, not that
+ *  shape), a third of the budget taken as spent just now, since a reader before this one
+ *  may have been busy. `seed` false: none taken as spent (a key made just now). */
+export function readsFrom(kept: unknown, origin: string, email: string, now: number, seed = true): number[] {
+  const none = () => (seed ? Array.from({ length: Math.floor(RELAY_BUDGET / 3) }, () => now) : []);
+  if (!kept || typeof kept !== "object") return none();
+  const v = kept as { origin?: unknown; email?: unknown; reads?: unknown };
+  if (v.origin !== origin || v.email !== email || !Array.isArray(v.reads)) return none();
+  return v.reads.filter((t): t is number => typeof t === "number" && t <= now && now - t < RELAY_WINDOW_MS);
 }
 
-function writeReads(file: string, v: { origin: string; email: string; reads: number[] }): void {
-  try {
-    mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    writeFileSync(file, `${JSON.stringify(v)}\n`, { mode: 0o600 });
-  } catch (e) {
-    process.stderr.write(`[spacesheep] reads: ${(e as Error).message}\n`);
-  }
-}
-
-function readCursor(file: string, origin: string, email: string): number {
-  if (!existsSync(file)) return 0;
-  try {
-    const v = JSON.parse(readFileSync(file, "utf8")) as { origin?: unknown; email?: unknown; cursor?: unknown };
-    // Another account or origin: its cursor means nothing here.
-    if (v.origin !== origin || v.email !== email) return 0;
-    return typeof v.cursor === "number" && v.cursor >= 0 ? v.cursor : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function writeCursor(file: string, v: { origin: string; email: string; cursor: number }): void {
-  try {
-    mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    writeFileSync(file, `${JSON.stringify(v)}\n`, { mode: 0o600 });
-  } catch (e) {
-    process.stderr.write(`[spacesheep] cursor: ${(e as Error).message}\n`);
-  }
+/** The cursor as it was kept (the value of `cursor`), for this account; 0 with none. */
+export function cursorFrom(kept: unknown, origin: string, email: string): number {
+  if (!kept || typeof kept !== "object") return 0;
+  const v = kept as { origin?: unknown; email?: unknown; cursor?: unknown };
+  // Another account or origin: its cursor means nothing here.
+  if (v.origin !== origin || v.email !== email) return 0;
+  return typeof v.cursor === "number" && v.cursor >= 0 ? v.cursor : 0;
 }
