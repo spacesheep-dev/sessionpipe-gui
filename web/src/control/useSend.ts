@@ -3,11 +3,12 @@
 // page's strip (SessionControl) and the inbox's Allow / Deny: builds the command for a
 // strip action, signs it with the day grant (one passkey tap a day), and remembers which
 // attentions have an answer out or were closed by the machine, so no second answer goes.
-import type { Attention, MachineControl, SessionSummary } from "@shared/api";
+import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type ControlAction, preHello } from "../components/ControlStrip";
 import { ControlError } from "./api";
 import { type CommandFields, sendCommand } from "./command";
+import { type Held, useHeld } from "./HeldNotice";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
 import { canSign, machineTakes, signerLabel, signHint, updateWords } from "./signer";
 import { sendErrorWords } from "./words";
@@ -64,14 +65,24 @@ export interface SessionSend {
   activity: ReturnType<typeof useControlActivity>;
   /** Signs and sends one strip action; throws the refusal after recording it in `error`. */
   onSend: (action: ControlAction) => Promise<void>;
+  /** A send the receiver held for a confirm, for a surface that shows its notice
+   *  (`notice`); elsewhere a hold is a refusal in `error` that says where to confirm it. */
+  held: Held<ControlActivity>;
 }
 
 export function useSessionSend(
   session: SessionSummary,
   control: MachineControl | undefined,
   attentions: readonly Attention[],
+  o: {
+    /** This surface shows the held notice (the session page's strip). */
+    notice?: boolean;
+    /** After a held send was confirmed and went. */
+    confirmed?: (fields: CommandFields) => void;
+  } = {},
 ): SessionSend {
   const rp = useRpId();
+  const notice = !!o.notice;
   const secure = canSign(rp);
   const grant = useGrant(rp);
   const [tap, setTap] = useState(false);
@@ -83,6 +94,21 @@ export function useSessionSend(
   const [answers, setAnswers] = useState<Record<string, AnswerStatus>>({});
   /** Message id → the attention its answer named. */
   const sent = useRef(new Map<string, string>());
+  /** An answer that went is "sent" until the machine says what became of it. */
+  const went = useCallback((fields: CommandFields, carried: ControlActivity) => {
+    if (fields.kind !== "permission.answer") return;
+    sent.current.set(carried.id, fields.for);
+    setAnswers((prev) => ({ ...prev, [fields.for]: "sent" }));
+  }, []);
+  const held = useHeld<ControlActivity>(
+    (carried, h) => {
+      went(h.fields, carried);
+      o.confirmed?.(h.fields);
+      grant.refresh();
+    },
+    (e) => setError(sendErrorWords(e)),
+  );
+  const { catchHeld, drop: dropHeld } = held;
   useEffect(() => {
     const closed: string[] = [];
     for (const a of activity) {
@@ -133,22 +159,21 @@ export function useSessionSend(
       if (att && answers[att]) return;
       try {
         const carried = await sendCommand(rp, control.machineId, fields, { onTap: () => setTap(true) });
-        if (att) {
-          sent.current.set(carried.id, att);
-          setAnswers((prev) => ({ ...prev, [att]: "sent" }));
-        }
+        went(fields, carried);
+        dropHeld();
       } catch (e) {
         if (att && e instanceof ControlError && e.code === "no_attention")
           setAnswers((prev) => ({ ...prev, [att]: "closed" }));
-        setError(sendErrorWords(e));
+        // Held for a confirm: the notice says so where it is shown, the refusal elsewhere.
+        if (!(notice && catchHeld(e))) setError(sendErrorWords(e));
         throw e;
       } finally {
         setTap(false);
         grant.refresh();
       }
     },
-    [control, rp, key, grant.refresh, answers],
+    [control, rp, key, grant.refresh, answers, notice, catchHeld, dropHeld, went],
   );
 
-  return { rp, secure, grant, tap, error, answers, activity, onSend };
+  return { rp, secure, grant, tap, error, answers, activity, onSend, held };
 }

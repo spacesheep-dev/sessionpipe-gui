@@ -47,6 +47,9 @@ export type ControlAction =
   | { kind: "permission.answer"; attentionId: string; allow: boolean; note?: string }
   | { kind: "cancel"; note?: string };
 
+/** The event that clears a session's composer once a message it held went another way. */
+export const COMPOSER_SENT = "sp:composer-sent";
+
 export interface ControlStripProps {
   session: SessionSummary;
   /** The session machine's control status, when it paired. */
@@ -331,6 +334,19 @@ export function ControlStrip({
   const enabled = paired && !!onSend && !blocked && !stream;
   // Images beside the message (control/Attachments.tsx): paperclip, paste, drop, the phone's picker.
   const att = useAttachments({ machine: session.machine, enabled });
+  // A held message confirmed from its notice (control/HeldNotice.tsx) went: the composer
+  // is clear, as after Send. Until then its words stayed here.
+  const clearAtt = att.clear;
+  useEffect(() => {
+    const on = (e: Event) => {
+      if ((e as CustomEvent<{ key: string }>).detail?.key !== session.key) return;
+      setText("");
+      writeDraft(session.key, "");
+      clearAtt();
+    };
+    window.addEventListener(COMPOSER_SENT, on);
+    return () => window.removeEventListener(COMPOSER_SENT, on);
+  }, [session.key, clearAtt]);
   const name = session.machine ?? "the machine";
   const permissions = (attentions ?? (attention ? [attention] : [])).filter((a) => a.kind === "permission");
   // The answerable prompt(s) only; a notification twin adds nothing. With no answerable one,

@@ -19,6 +19,7 @@ import { wrongOriginHere } from "../../control/api";
 import { uuid } from "../../control/bytes";
 import { sendCommand } from "../../control/command";
 import { folderChoices, machineHome, tildify, typedFolder } from "../../control/folders";
+import { HeldNotice, useHeld } from "../../control/HeldNotice";
 import { useGrant, useRpId } from "../../control/hooks";
 import { fixedPermission, permissionChoices, permissionToSend } from "../../control/newSessionState";
 import { sentence } from "../../control/PendingDevices";
@@ -269,10 +270,26 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
     modelOk &&
     !busy;
 
+  // Sent: the sheet closes and the asking session's page says the rest (its row).
+  const asked = (t: NonNullable<typeof target>, machineId: string) => {
+    if (t.kind === "new") rememberHandoffAgent(machineId, t.harness);
+    saveHandoffDraft(session.key, null);
+    closeHandoff();
+  };
+  // An ask the receiver held for a confirm: the notice above the foot, and its button.
+  const held = useHeld<unknown>(
+    () => {
+      if (target && c) asked(target, c.machineId);
+      grant.refresh();
+    },
+    (e) => setError(handoffRefusalWords(e, name) ?? sendErrorWords(e).replace(/^not sent · /, "Not sent: ")),
+  );
+
   const ask = async () => {
     if (!canAsk || !c || !rp || !target) return;
     setBusy(true);
     setError(null);
+    held.drop();
     const back = offersBack && bringBack;
     const fields = handoffFields({
       target,
@@ -289,12 +306,10 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
     });
     try {
       await sendCommand(rp, c.machineId, fields, { onTap: () => setTap(true), from: session.key });
-      if (target.kind === "new") rememberHandoffAgent(c.machineId, target.harness);
-      saveHandoffDraft(session.key, null);
-      // Sent: the sheet closes and the asking session's page says the rest (its row).
-      closeHandoff();
+      asked(target, c.machineId);
     } catch (e) {
-      setError(handoffRefusalWords(e, name) ?? sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
+      if (!held.catchHeld(e))
+        setError(handoffRefusalWords(e, name) ?? sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
       setBusy(false);
     } finally {
       setTap(false);
@@ -586,6 +601,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
             </div>
           )}
           <div className="ns-group-foot">
+            <HeldNotice h={held} />
             {statusLine}
             {passkeyNote && (
               <p className="ns-passkey" id="hs-passkey">
@@ -659,6 +675,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
             )}
           </div>
         )}
+        <HeldNotice h={held} />
         <footer className="ns-foot">
           {statusLine}
           <span className="ns-actions">

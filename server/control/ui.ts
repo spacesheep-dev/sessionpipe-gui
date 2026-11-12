@@ -311,13 +311,19 @@ async function forwardSend(
   }
   const code = String(r.json.code ?? "");
   const error = String(r.json.error ?? "spacesheep did not take it");
-  // The second look there wants a fresh tap: the same word the page knows from a machine.
-  if (r.status === 409 && code === "confirm") throw new HttpError(422, { reason: error, code: "confirm_required" });
+  // The second look there wants a fresh tap: the same word the page knows from a machine,
+  // and spacesheep's reason (`why`) as the detail the page's held notice shows.
+  if (r.status === 409 && code === "confirm")
+    throw new HttpError(422, { reason: error, code: "confirm_required", ...whyOf(r.json) });
   if (r.status === 401 && code === "unlock") throw new HttpError(422, { reason: error, code: "bad_grant" });
   if (r.status === 400 && (code === "bad" || code === "unlock"))
     throw new HttpError(422, { reason: error, code: String(r.json.refusal ?? "untrusted_key") });
   throw new HttpError(r.status >= 500 ? 502 : r.status, { reason: error, code: code || "refused" });
 }
+
+/** spacesheep's reason for a hold, as text, when it gave one. */
+const whyOf = (j: Record<string, unknown>): { detail?: string } =>
+  typeof j.why === "string" && j.why.trim() ? { detail: j.why.trim().slice(0, 500) } : {};
 
 /** Queue a verified command for its machine (synchronous): the activity row as the page reads it. */
 export function queueSend(state: ControlState, v: VerifiedSend): ControlActivity {

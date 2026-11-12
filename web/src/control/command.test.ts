@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // The command string a page signs (command.ts): fields in the spec's order, no field a kind
 // does not own, the pool's on its own pseudo-session. And a send a receiver holds for a
-// confirm: one fresh tap over the same bytes, sent alone, with either signer and carrier.
+// confirm: never confirmed on its own; its caller gets the hold and the receiver's reason,
+// and a confirm from a press is a new command, signed once with a confirm and sent alone.
 import "../native/test-env";
 import { type MachineControl, POOL_SESSION } from "@shared/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SendBody } from "./api";
+import { ControlError, type SendBody } from "./api";
 import { b64url, sha256 } from "./bytes";
-import { commandString, sendCommand, signAndDeliver } from "./command";
+import { commandString, HeldForConfirm, sendCommand, signAndDeliver } from "./command";
 import { noteMachineControl } from "./remoteRp";
 
 const M = "m_testmachine0000000001";
@@ -60,14 +61,15 @@ describe("a send a receiver holds for a confirm (CONTROL.md §3.2: a receiver's 
   const g = globalThis as Record<string, unknown>;
   const LOCAL = "m_localmachine000000001";
   const REMOTE = "m_spacesheepmachine0001";
+  const WHY = "it reads like an instruction to delete files";
   /** What reached POST /api/ui/control/send, in order. */
   let posted: SendBody[] = [];
-  /** The device key's prompts in the app: every sign the shell was asked for, by mode. */
+  /** The device key's prompts in the app: every sign the shell was asked for. */
   let native: { rp: string; cmd: string; mode: string }[] = [];
-  /** The receiver: a command signed with the day grant is held for a confirm, as spacesheep
-   *  answers one its second look holds (ui.ts forwardSend turns its 409 into this 422) and
-   *  as a local receiver answers a pool action that takes one (pool.ts); one that carries a
-   *  confirm alone is taken. `holdConfirms` holds that one too. */
+  /** The receiver holds what is signed with the day grant, the way the GUI server answers
+   *  spacesheep's 409 (ui.ts forwardSend: its error as `reason`, its `why` as `detail`) and
+   *  a local receiver a confirm-only pool action (pool.ts: its words as `reason`); it takes a
+   *  confirm alone. `holdConfirms` holds that one too. */
   let holdConfirms = false;
 
   beforeEach(() => {
@@ -81,7 +83,12 @@ describe("a send a receiver holds for a confirm (CONTROL.md §3.2: a receiver's 
       posted.push(body);
       const alone = !!body.confirm && !body.grant && !body.csig;
       if (!alone || holdConfirms)
-        return Response.json({ reason: "this one needs a fresh confirm", code: "confirm_required" }, { status: 422 });
+        return Response.json(
+          body.machineId === REMOTE
+            ? { reason: `Confirm with your passkey to send this: ${WHY}.`, code: "confirm_required", detail: WHY }
+            : { reason: "pool order needs a fresh confirm, not a day grant", code: "confirm_required" },
+          { status: 422 },
+        );
       return Response.json(
         { id: `01K${posted.length}`, machineId: body.machineId, kind: "prompt", at: new Date().toISOString() },
         { status: 201 },
@@ -97,15 +104,20 @@ describe("a send a receiver holds for a confirm (CONTROL.md §3.2: a receiver's 
     delete g.sessionpipeShell;
     delete g.__TAURI_INTERNALS__;
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
-  /** The native app: the shell's flag and a Tauri runtime whose identity plugin signs. */
+  /** The native app on this Mac's receiver (rp id localhost): its identity plugin signs
+   *  only for that receiver's rp id, as Rust's answer::target does, and refuses another
+   *  with `rp_mismatch` (sp-identity answer.rs). */
   function inApp() {
     g.sessionpipeShell = { v: 1, platform: "macos", features: ["signer"], receiver: { id: "rx0123abcd", local: true } };
     g.__TAURI_INTERNALS__ = {
       invoke: async (cmd: string, args: Record<string, unknown> = {}) => {
         if (cmd === "plugin:identity|status") return { available: true, grantExp: Date.now() + 3_600_000 };
         if (cmd !== "plugin:identity|sign") return null;
+        if (args.rp !== "localhost")
+          throw { code: "rp_mismatch", message: `http://127.0.0.1:7819 signs for localhost, not ${String(args.rp)}` };
         native.push({ rp: String(args.rp), cmd: String(args.cmd), mode: String(args.mode) });
         return args.mode === "confirm"
           ? { cmd: args.cmd, confirm: { cred: "dev1", sig: "dsig" } }
@@ -115,97 +127,148 @@ describe("a send a receiver holds for a confirm (CONTROL.md §3.2: a receiver's 
     };
   }
 
+  /** One press, held: the hold, nothing confirmed, nothing asked. */
+  async function pressHeld(machine: string, o: Parameters<typeof sendCommand>[3] = {}) {
+    const press = sendCommand("localhost", machine, { kind: "prompt", session: "claude-code:s1", text: "ship it" }, o);
+    const e = (await press.catch((x: unknown) => x)) as HeldForConfirm<unknown>;
+    expect(e).toBeInstanceOf(HeldForConfirm);
+    expect(e).toBeInstanceOf(ControlError);
+    expect(e).toMatchObject({ status: 422, code: "confirm_required" });
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.grant).toBeDefined();
+    expect(passkey.asked).toHaveLength(0);
+    expect(native.filter((n) => n.mode === "confirm")).toHaveLength(0);
+    return e;
+  }
+
   const cases = [
-    { signer: "passkey", carrier: "a local receiver", machine: LOCAL, rp: "localhost" },
-    { signer: "passkey", carrier: "spacesheep", machine: REMOTE, rp: "spacesheep.dev" },
-    { signer: "device key", carrier: "a local receiver", machine: LOCAL, rp: "localhost" },
-    { signer: "device key", carrier: "spacesheep", machine: REMOTE, rp: "spacesheep.dev" },
+    { signer: "passkey", carrier: "spacesheep", machine: REMOTE, rp: "spacesheep.dev", why: WHY },
+    {
+      signer: "passkey",
+      carrier: "a local receiver",
+      machine: LOCAL,
+      rp: "localhost",
+      why: "pool order needs a fresh confirm, not a day grant",
+    },
+    {
+      signer: "device key",
+      carrier: "a local receiver",
+      machine: LOCAL,
+      rp: "localhost",
+      why: "pool order needs a fresh confirm, not a day grant",
+    },
   ] as const;
 
   for (const c of cases) {
-    it(`one press with the ${c.signer}, through ${c.carrier}: one fresh tap over the same bytes, sent alone`, async () => {
+    it(`with the ${c.signer}, through ${c.carrier}: the press is held with the receiver's reason; the confirm is a new command, signed once, sent alone`, async () => {
       if (c.signer === "device key") inApp();
+      vi.useFakeTimers({ now: Date.parse("2026-11-12T12:00:00Z"), toFake: ["Date"] });
+      const held = await pressHeld(c.machine, { from: "claude-code:s0" });
+      expect(held.why).toBe(c.why);
+      expect(held.fields).toEqual({ kind: "prompt", session: "claude-code:s1", text: "ship it" });
+      // The person reads it, then presses Confirm: later, so the command is signed now.
+      vi.setSystemTime(Date.parse("2026-11-12T12:03:00Z"));
       let taps = 0;
-      const carried = await sendCommand(
-        "localhost",
-        c.machine,
-        { kind: "prompt", session: "claude-code:s1", text: "ship it" },
-        { onTap: () => taps++, from: "claude-code:s0" },
-      );
+      const carried = (await held.confirm({ onTap: () => taps++ })) as { machineId: string };
       expect(carried.machineId).toBe(c.machine);
       expect(posted).toHaveLength(2);
-      const [held, confirmed] = posted as [SendBody, SendBody];
-      expect(held.grant).toBeDefined();
-      expect(held.confirm).toBeUndefined();
-      // The same command, signed by one confirm and nothing else (§3.2), the page's note kept.
-      expect(confirmed.cmd).toBe(held.cmd);
-      expect(Object.keys(confirmed).sort()).toEqual(["cmd", "confirm", "from", "machineId"]);
-      expect(confirmed.from).toBe("claude-code:s0");
+      const [first, second] = posted as [SendBody, SendBody];
+      const a = JSON.parse(first.cmd);
+      const b = JSON.parse(second.cmd);
+      // The same send, built again: a new nonce, the time of the confirm.
+      expect({ ...b, nonce: 0, iat: 0 }).toEqual({ ...a, nonce: 0, iat: 0 });
+      expect(b.nonce).not.toBe(a.nonce);
+      expect(b.iat).toBe(Date.parse("2026-11-12T12:03:00Z"));
+      // Signed by one confirm and nothing else (§3.2), the page's own note kept.
+      expect(Object.keys(second).sort()).toEqual(["cmd", "confirm", "from", "machineId"]);
       expect(taps).toBe(1);
       if (c.signer === "passkey") {
         expect(passkey.asked).toHaveLength(1);
         expect(passkey.asked[0]!.rp).toBe(c.rp);
-        expect(b64url(passkey.asked[0]!.challenge)).toBe(b64url(await sha256(held.cmd)));
+        expect(b64url(passkey.asked[0]!.challenge)).toBe(b64url(await sha256(second.cmd)));
       } else {
-        expect(native.map((n) => n.mode)).toEqual(["grant", "confirm"]);
-        expect(native.every((n) => n.rp === c.rp && n.cmd === held.cmd)).toBe(true);
+        expect(native.map((n) => [n.mode, n.rp])).toEqual([
+          ["grant", c.rp],
+          ["confirm", c.rp],
+        ]);
+        expect(native[1]!.cmd).toBe(second.cmd);
       }
     });
   }
 
-  it("a refused grant, then a hold: the new grant, then the confirm, in one press", async () => {
-    const answers = ["bad_grant", "confirm_required"];
-    const deliver = vi.fn(async (body: SendBody) => {
-      posted.push(body);
-      const code = answers.shift();
-      if (code) throw Object.assign(new Error(code), { status: 422, code });
-      return "taken";
-    });
-    await expect(
-      signAndDeliver("localhost", REMOTE, { kind: "prompt", session: "claude-code:s1", text: "x" }, deliver),
-    ).resolves.toBe("taken");
-    expect(posted.map((b) => (b.confirm ? "confirm" : "grant"))).toEqual(["grant", "grant", "confirm"]);
-    expect(passkey.asked).toHaveLength(1);
+  it("the app's device key, to a machine paired on spacesheep through this Mac's receiver: the signer refuses it, nothing is sent, no hold", async () => {
+    inApp();
+    const e = await sendCommand("localhost", REMOTE, { kind: "prompt", session: "claude-code:s1", text: "x" }).catch(
+      (x: unknown) => x,
+    );
+    expect(e).toMatchObject({ code: "rp_mismatch" });
+    expect(e).not.toBeInstanceOf(HeldForConfirm);
+    expect(posted).toHaveLength(0);
   });
 
   it("a send's expiry goes with its confirm", async () => {
-    await sendCommand(
-      "localhost",
-      LOCAL,
-      { kind: "prompt", session: "claude-code:s1", text: "later" },
-      { expiresInS: 600 },
-    );
+    const held = await pressHeld(LOCAL, { expiresInS: 600 });
+    await held.confirm();
     expect(posted.map((b) => b.expires_in_s)).toEqual([600, 600]);
   });
 
-  it("a confirm that is held too is said, not asked for again", async () => {
+  it("a confirm that is held too is a refusal, not another hold", async () => {
+    const held = await pressHeld(REMOTE);
     holdConfirms = true;
-    await expect(
-      sendCommand("localhost", REMOTE, { kind: "prompt", session: "claude-code:s1", text: "x" }),
-    ).rejects.toMatchObject({ status: 422, code: "confirm_required" });
+    const e = await held.confirm().catch((x: unknown) => x);
+    expect(e).toMatchObject({ status: 422, code: "confirm_required" });
+    expect(e).not.toBeInstanceOf(HeldForConfirm);
     expect(posted).toHaveLength(2);
     expect(passkey.asked).toHaveLength(1);
   });
 
-  it("a caller that may not prompt (the workflows runner) is told, and nothing asks", async () => {
+  it("a refused grant, then a hold: the new grant once, then the hold", async () => {
+    const answers = ["bad_grant", "confirm_required"];
     const deliver = vi.fn(async (body: SendBody) => {
       posted.push(body);
-      throw Object.assign(new Error("held"), { status: 422, code: "confirm_required" });
+      const code = answers.shift();
+      if (code) throw Object.assign(new Error(code), { status: 422, code, reason: code });
+      return "taken";
+    });
+    const e = await signAndDeliver(
+      "localhost",
+      REMOTE,
+      { kind: "prompt", session: "claude-code:s1", text: "x" },
+      deliver,
+    ).catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(HeldForConfirm);
+    expect(posted.map((b) => (b.confirm ? "confirm" : "grant"))).toEqual(["grant", "grant"]);
+    expect(passkey.asked).toHaveLength(0);
+    await expect((e as HeldForConfirm<string>).confirm()).resolves.toBe("taken");
+    expect(posted.map((b) => (b.confirm ? "confirm" : "grant"))).toEqual(["grant", "grant", "confirm"]);
+  });
+
+  it("a caller that may not prompt (the workflows runner) gets the refusal itself, and nothing asks", async () => {
+    const refusal = Object.assign(new Error("held"), { status: 422, code: "confirm_required" });
+    const deliver = vi.fn(async (body: SendBody) => {
+      posted.push(body);
+      throw refusal;
     });
     await expect(
       signAndDeliver("localhost", REMOTE, { kind: "prompt", session: "claude-code:s1", text: "x" }, deliver, {
         noPrompt: true,
       }),
-    ).rejects.toMatchObject({ code: "confirm_required" });
+    ).rejects.toBe(refusal);
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(passkey.asked).toHaveLength(0);
   });
 
-  it("a send that asked for a confirm itself is not asked for one again", async () => {
+  it("a theme's send (no onTap, no noPrompt) is held like any other: no prompt nobody pressed for", async () => {
+    await pressHeld(REMOTE);
+  });
+
+  it("a send that was a confirm already is refused, not held", async () => {
     holdConfirms = true;
-    await expect(
-      sendCommand("localhost", LOCAL, { kind: "pool", action: "on" }, { confirm: true }),
-    ).rejects.toMatchObject({ code: "confirm_required" });
+    const e = await sendCommand("localhost", LOCAL, { kind: "pool", action: "on" }, { confirm: true }).catch(
+      (x: unknown) => x,
+    );
+    expect(e).toMatchObject({ code: "confirm_required" });
+    expect(e).not.toBeInstanceOf(HeldForConfirm);
     expect(posted).toHaveLength(1);
     expect(passkey.asked).toHaveLength(1);
   });

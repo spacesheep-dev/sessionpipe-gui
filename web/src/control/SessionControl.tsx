@@ -10,12 +10,13 @@
 // it opens over whichever surface holds this session.
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
 import { useState } from "react";
-import { ControlStrip } from "../components/ControlStrip";
+import { COMPOSER_SENT, ControlStrip } from "../components/ControlStrip";
 import { useAppState, useListedSessions, useStore } from "../data/hooks";
 import { HandoffHost } from "../orchestrate/handoff/HandoffHost";
 import { canAskFrom } from "../orchestrate/handoff/handoff";
 import { openHandoff } from "../orchestrate/handoff/handoffState";
 import { ActivityList, forkOf } from "./Activity";
+import { HeldNotice } from "./HeldNotice";
 import {
   deviceWords,
   machineTakes,
@@ -62,7 +63,16 @@ export function SessionControl({
     answers,
     activity,
     onSend,
-  } = useSessionSend(session, control, attentions);
+    held,
+  } = useSessionSend(session, control, attentions, {
+    // A message the receiver held is confirmed from the notice under the composer; once
+    // it went, the composer that still held its words is cleared.
+    notice: true,
+    confirmed: (fields) => {
+      if (fields.kind === "prompt")
+        window.dispatchEvent(new CustomEvent(COMPOSER_SENT, { detail: { key: session.key } }));
+    },
+  });
   const device = signerKind() === "device";
   // The app signs only for a machine whose daemon takes device keys (CONTROL.md §2).
   const old = device && control && !machineTakes(control) ? updateWords(session.machine) : null;
@@ -122,6 +132,7 @@ export function SessionControl({
         unlock={control && secure && grant.exp === null ? () => void unlockNow() : undefined}
         ask={askable ? () => openHandoff({ session: session.key }) : undefined}
       />
+      <HeldNotice h={held} />
       <ActivityList items={activity.filter(underStrip)} machine={session.machine} online={control?.online} limit={2} />
       <HandoffHost session={session.key} />
     </>

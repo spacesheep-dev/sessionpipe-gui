@@ -13,8 +13,15 @@
 // can be pulled down by its top to dismiss. With no machine paired it is an empty state
 // with the one way on, not a disabled form. Loaded once the page is idle (NewSession.tsx
 // mounts it).
-import type { MachineSummary, RunLevel, StartFile } from "@shared/api";
-import { START_FILE_MAX_BYTES, START_FILES_MAX, START_FILES_TOTAL_BYTES, sessionKey, validModel } from "@shared/api";
+import type { ControlActivity, MachineSummary, RunLevel, StartFile } from "@shared/api";
+import {
+  START_FILE_MAX_BYTES,
+  START_FILES_MAX,
+  START_FILES_TOTAL_BYTES,
+  sessionKey,
+  splitKey,
+  validModel,
+} from "@shared/api";
 import {
   type ClipboardEvent,
   type DragEvent,
@@ -41,6 +48,7 @@ import { controlApi, wrongOriginHere } from "./api";
 import { uuid } from "./bytes";
 import { sendCommand } from "./command";
 import { folderChoices, machineHome, tildify, typedFolder } from "./folders";
+import { HeldNotice, useHeld } from "./HeldNotice";
 import { useGrant, useRpId } from "./hooks";
 import {
   agentLeft,
@@ -414,12 +422,41 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     modelOk &&
     !busy;
 
+  // Started: remember the choices, and go to the new session where it was typed.
+  const started = (sid: string) => {
+    if (!m || !c || !harness || !folderCheck.ok) return;
+    rememberStart(m.name, c.machineId, {
+      harness,
+      cwd: folderCheck.path,
+      ...(showPermission && permission ? { permission } : {}),
+      ...(showModel && model ? { model } : {}),
+    });
+    saveDraft(null);
+    // The started moment: the sheet dissolves where it is (no lift) and the message
+    // carries on from where it was typed into the new session's first turn.
+    const typed = ref.current?.querySelector<HTMLElement>("[data-ns-text]");
+    const from = typed ? textOrigin(typed) : null;
+    ref.current?.setAttribute("data-started", "");
+    closeNewSession();
+    navigate(sessionPath(harness, sid));
+    if (from) landStart(from);
+  };
+  // A start the receiver held for a confirm: the notice above the foot, and its button.
+  const held = useHeld<ControlActivity>(
+    (_r, h) => {
+      if (h.fields.kind === "start") started(splitKey(h.fields.session).id);
+      grant.refresh();
+    },
+    (e) => setError(sendErrorWords(e).replace(/^not sent · /, "Not sent: ")),
+  );
+
   const start = async () => {
     if (!canStart || !m || !c || !rp || !harness || !folderCheck.ok) return;
     setBusy(true);
     setError(null);
+    held.drop();
     const sid = uuid();
-    const held = files.flatMap((f) => (f.entry ? [f.entry] : []));
+    const kept = files.flatMap((f) => (f.entry ? [f.entry] : []));
     try {
       await sendCommand(
         rp,
@@ -431,7 +468,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
           cwd: folderCheck.path,
           // Only what this machine's hello advertised (CONTROL.md §2): an older daemon
           // ignores a field it does not know and would run at its own mode.
-          ...(takesFiles && held.length ? { files: held } : {}),
+          ...(takesFiles && kept.length ? { files: kept } : {}),
           // On an inherit machine its default is chosen by naming no level at all.
           ...(showPermission && permissionToSend(opts, permission)
             ? { permission: permissionToSend(opts, permission) }
@@ -440,23 +477,9 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
         },
         { onTap: () => setTap(true) },
       );
-      rememberStart(m.name, c.machineId, {
-        harness,
-        cwd: folderCheck.path,
-        ...(showPermission && permission ? { permission } : {}),
-        ...(showModel && model ? { model } : {}),
-      });
-      saveDraft(null);
-      // The started moment: the sheet dissolves where it is (no lift) and the message
-      // carries on from where it was typed into the new session's first turn.
-      const typed = ref.current?.querySelector<HTMLElement>("[data-ns-text]");
-      const from = typed ? textOrigin(typed) : null;
-      ref.current?.setAttribute("data-started", "");
-      closeNewSession();
-      navigate(sessionPath(harness, sid));
-      if (from) landStart(from);
+      started(sid);
     } catch (e) {
-      setError(sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
+      if (!held.catchHeld(e)) setError(sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
       setBusy(false);
     } finally {
       // Started, Start keeps saying "Starting…" while the sheet dissolves: it never flips
@@ -873,6 +896,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
                 </div>
               )}
               <div className="ns-group-foot">
+                <HeldNotice h={held} />
                 {statusLine}
                 {passkeyNote && (
                   <p className="ns-passkey" id="ns-passkey">
@@ -948,6 +972,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
                 </span>
               )}
             </div>
+            <HeldNotice h={held} />
             <footer className="ns-foot">
               {statusLine}
               <span className="ns-actions">
