@@ -40,10 +40,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   write, as it already sets its TLS keys to 0600 when it writes them, and also when it
   starts; where that fails it says so and starts anyway.
 - **A message that is held for you to confirm can be sent.** When spacesheep's safety check
-  holds a message to a machine paired there, the page now says so where you sent it, with
-  spacesheep's reason and a "Confirm with your passkey" button. It goes only when you press
-  that button. It used to say "try again", and every try was held the same way, so such a
-  message could not be sent from the GUI at all.
+  holds a message to a machine paired there, the page now says so where you sent it: the
+  message, spacesheep's reason in its own words, and a "Confirm with your passkey" button. It
+  goes only when you press that button; change the message first and the hold is dropped.
+  It used to say "try again", and every try was held the same way, so such a message could
+  not be sent from the GUI at all.
 
 ## [0.8.0] - 2026-11-11
 

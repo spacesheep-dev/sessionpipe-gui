@@ -16,11 +16,11 @@ export const HELD_WORDS = {
   /** The button that lets the held send go; the words stay where they were typed. */
   drop: "Never mind",
   /** The title when the confirm was held too; `who` is heldFrom(). */
-  still: (who: string) => `still held (${who})`,
+  still: (who: string) => `Still held. ${who} didn't take the confirmation.`,
   /** The receiver's reason, said to be theirs: `who` is heldFrom(), `why` heldReason(). */
-  says: (who: string, why: string) => `${who}: ${why}`,
+  says: (who: string, why: string) => `${who} says: “${why}”`,
   /** Who held it when it is this receiver itself (not a spacesheep a machine is reached through). */
-  local: "local receiver",
+  local: "This computer's sessionpipe",
 };
 
 /** Who held it, by name: the spacesheep's host, or this receiver. */
