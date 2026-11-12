@@ -57,7 +57,7 @@ describe("startFailureWords", () => {
         startFailureWords(start({ outcome, code: "cancelled", detail: "called off" }), "rc-mac", "Claude Code"),
       ).toBe("Cancelled before rc-mac started it.");
     expect(outcomeWords(start({ outcome: "refused", code: "cancelled" }))).toBe(
-      "refused · cancelled before the machine started it",
+      "cancelled · before the machine started it",
     );
   });
 
@@ -75,6 +75,9 @@ describe("startFailureWords", () => {
     expect(sentLine(w, { machine: "rc-mac", online: false, command: "claude" })?.text).toBe(
       "Not being followed while spacesheep is disconnected.",
     );
+    expect(
+      sentLine(start({ unfollowed: "revoked" }), { machine: "rc-mac", online: false, command: "claude" })?.text,
+    ).toBe("Not being followed: spacesheep no longer takes this app's key.");
   });
 
   it("has nothing to say while the start is on its way or after it started", () => {
@@ -112,7 +115,7 @@ describe("sentLine", () => {
 describe("sendErrorWords", () => {
   it("tells spacesheep's refusal of this app's key from the page's own key", () => {
     expect(sendErrorWords(new ControlError(502, "Unknown or revoked API key.", "spacesheep_unauthorized"))).toBe(
-      "Not sent. spacesheep is disconnected: connect again in Settings → Data.",
+      "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.",
     );
     expect(
       sendErrorWords(new ControlError(422, "Files can't be sent to rc-mac through spacesheep yet.", "relay_files")),

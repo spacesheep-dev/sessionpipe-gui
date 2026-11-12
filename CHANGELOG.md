@@ -79,13 +79,15 @@ All notable changes to `sessionpipe-gui`. The format follows
   receiver's reason when there is one, never "refused: refused"; a file for a computer
   reached through spacesheep "Files can't be sent to rc-mac through spacesheep yet." (plus
   "Remove them to start." for a start edited again that carried files, and "Not sent." in
-  front when a send carried one); a revoked key "Not sent. spacesheep is disconnected:
+  front when a send carried one); a revoked key "Not sent. spacesheep no longer takes this app's key: disconnect and
   connect again in Settings → Data."; a send this app can no longer follow "Sent through a
   spacesheep account that's no longer connected here. Check spacesheep.dev to see if it
   started."; a send the computer took and said nothing more of "No word from rc-mac since
   it took this. Check spacesheep.dev to see how it went."; a send waiting while spacesheep
-  is disconnected "Not being followed while spacesheep is disconnected."; Settings → Data,
-  limited, "spacesheep is busy; this catches up by itself"; an offline computer through
+  is disconnected "Not being followed while spacesheep is disconnected." (while its key is
+  refused, "Not being followed: spacesheep no longer takes this app's key."); Settings → Data,
+  limited, "this app is reading too often for spacesheep; it catches up by itself"; the
+  activity line of a cancelled start, "cancelled · before the machine started it"; an offline computer through
   spacesheep is waited for "within a day".
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.

@@ -52,9 +52,6 @@ export const REFUSAL_WORDS: Record<string, string> = {
   pool_order: "the order must name every account in the pool, each once",
   pool_off: "the pool is off on that machine; turn it on first",
   confirm_required: "this one takes a fresh passkey tap (Touch ID in the app), not the day grant; try again",
-  // spacesheep's word on a start withdrawn before a computer took it (its jobs door), and a
-  // computer's own on a start a `cancel` stopped before its process began (CONTROL.md §10).
-  cancelled: "cancelled before the machine started it",
   login: "Claude did not take the code; start over",
   pool: "the machine could not reach Claude; try again",
 };
@@ -87,7 +84,11 @@ export function outcomeWords(a: ControlActivity, o: { machine?: string; online?:
   const who = o.machine ?? "the machine";
   const mode = a.mode ? ` · ${a.mode}` : "";
   const state = shownState(a);
-  if (a.unfollowed && (state === "queued" || state === "taken")) return `waiting · ${UNFOLLOWED_WORDS}`;
+  if (a.unfollowed && (state === "queued" || state === "taken")) return `waiting · ${unfollowedWords(a)}`;
+  // A person's own cancel (spacesheep's withdrawn start, a computer's stopped start) is not
+  // a refusal.
+  if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
+    return "cancelled · before the machine started it";
   switch (state === "queued" ? undefined : state) {
     case undefined:
       return o.online === false
@@ -136,7 +137,7 @@ export function sendErrorWords(e: unknown): string {
     if (e.status === 422 && e.code) return `not sent · ${refusalWords(e.code)}`;
     // spacesheep refused this app's key (server/control/ui.ts forwardSend), not the page's.
     if (e.code === "spacesheep_unauthorized")
-      return "Not sent. spacesheep is disconnected: connect again in Settings → Data.";
+      return "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.";
     if (e.status === 404) return "not sent · this machine is no longer paired here";
     if (e.status === 401) return "not sent · this page lost its key; reload it from the terminal's link";
     return `not sent · ${e.detail ?? e.reason}`;
@@ -162,7 +163,11 @@ export const UNTRACKED_WORDS =
   "Sent through a spacesheep account that's no longer connected here. Check spacesheep.dev to see if it started.";
 export const unconfirmedWords = (machine: string): string =>
   `No word from ${machine} since it took this. Check spacesheep.dev to see how it went.`;
-export const UNFOLLOWED_WORDS = "Not being followed while spacesheep is disconnected.";
+/** A waiting row nothing reads right now: disconnected, or the key refused. */
+export const unfollowedWords = (a: Pick<ControlActivity, "unfollowed">): string =>
+  a.unfollowed === "revoked"
+    ? "Not being followed: spacesheep no longer takes this app's key."
+    : "Not being followed while spacesheep is disconnected.";
 
 /** A machine's detail ends the sentence it is quoted in; most arrive without a full stop. */
 const ended = (s: string): string => (/[.!?…]$/.test(s) ? s : `${s}.`);
@@ -241,7 +246,7 @@ export function sentLine(
   o: { machine: string; online: boolean; command: string },
 ): { text: string; running: boolean } | null {
   const state = shownState(a);
-  if (a.unfollowed && (state === "queued" || state === "taken")) return { text: UNFOLLOWED_WORDS, running: false };
+  if (a.unfollowed && (state === "queued" || state === "taken")) return { text: unfollowedWords(a), running: false };
   switch (state) {
     case "queued":
       return {
