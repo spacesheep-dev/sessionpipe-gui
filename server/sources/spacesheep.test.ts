@@ -295,4 +295,35 @@ describe("the spacesheep source's status", () => {
     expect(jobs).toBeGreaterThanOrEqual(2);
     expect(jobs).toBeLessThanOrEqual(3);
   });
+
+  it("hands on spacesheep's time from the jobs answer: its `now`, else its Date header", async () => {
+    const got: Array<number | undefined> = [];
+    let body: Record<string, unknown> = { jobs: [], now: 1_700_000_000_000 };
+    let headers: Record<string, string> = { date: new Date(1_600_000_000_000).toUTCString() };
+    dir = mkdtempSync(path.join(tmpdir(), "spgui-ss-"));
+    const store = { dir, ingest: () => ({ accepted: 0 }), setLoading: () => {} } as unknown as Store;
+    const fetch = (async (u: string | URL) => {
+      await new Promise((r) => setTimeout(r, 2));
+      if (String(u).includes("/jobs")) return json(body, 200, headers);
+      if (String(u).includes("/machines")) return json({ machines: [] });
+      await new Promise((r) => setTimeout(r, 50));
+      return json({ events: [], next: 0, oldest: null, protocol: 1 });
+    }) as typeof globalThis.fetch;
+    src = startSpacesheepSource(store, {
+      origin: ORIGIN,
+      key: "ss_x",
+      email: "me@x",
+      connectedAt: "",
+      fetch,
+      pendingJobs: () => [1],
+      jobsCadence: () => "slow",
+      onJobs: (_j, _t, now) => got.push(now),
+    });
+    await src.pollJobs();
+    body = { jobs: [] };
+    await src.pollJobs();
+    headers = {};
+    await src.pollJobs();
+    expect(got).toEqual([1_700_000_000_000, 1_600_000_000_000, undefined]);
+  });
 });

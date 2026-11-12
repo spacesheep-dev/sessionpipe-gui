@@ -299,10 +299,12 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
           headers: { authorization: `Bearer ${opts.key}`, accept: "application/json" },
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        // spacesheep's clock, for how old its jobs are (state.applyRemoteJobs), not ours.
+        // spacesheep's clock, for how old its jobs are (state.applyRemoteJobs), not ours: the
+        // answer's `now` (spacesheep ≥ the field), else its Date header.
         const date = Date.parse(res.headers.get("date") ?? "");
         if (Number.isFinite(date)) serverNow = date;
-        const j = (await res.json()) as { jobs?: unknown };
+        const j = (await res.json()) as { jobs?: unknown; now?: unknown };
+        if (typeof j.now === "number" && Number.isFinite(j.now) && j.now > 0) serverNow = j.now;
         if (!Array.isArray(j.jobs)) throw new Error("not a jobs page");
         return j.jobs as RelayJob[];
       });
