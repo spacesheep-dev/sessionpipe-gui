@@ -18,7 +18,9 @@ serde_json = "1"
 sha2 = "0.10"
 log = "0.4"
 
-[target.'cfg(target_os = "macos")'.dependencies]
+# The keychain (keychain.rs): the login keychain on a Mac, the data protection keychain on
+# an iPhone. The same crate and version for both, so neither lock file moves.
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 security-framework = "3"
 
 [dev-dependencies]

@@ -25,6 +25,17 @@ pub fn receiver_id(origin: &str) -> String {
     s
 }
 
+/// A spacesheep account's id: the same ten characters, of another preimage (no origin
+/// starts with these words), so it differs per account and per origin. It names the
+/// account's key, its documents and whatever the page keeps for it; another person's
+/// account on the same phone starts from nothing.
+pub fn account_id(origin: &str, email: &str) -> String {
+    receiver_id(&format!(
+        "spacesheep-account\n{origin}\n{}",
+        email.trim().to_lowercase()
+    ))
+}
+
 /// RFC 4648 base32, lowercase, no padding.
 pub fn base32_lower(bytes: &[u8]) -> String {
     const A: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";

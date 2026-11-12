@@ -482,6 +482,7 @@ mod tests {
             origin: format!("http://{name}:7373"),
             local,
             rp_id: None,
+            account: None,
         }
     }
     fn item(rx: &str, n: usize, tool: &str) -> NeedsYouItem {

@@ -275,6 +275,7 @@ mod tests {
             allowed_origins: vec![],
             status: StatusFile::new(None, "test"),
             user_agent: "sp-test".into(),
+            account: Default::default(),
         })
     }
 

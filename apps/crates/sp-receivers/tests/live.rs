@@ -25,6 +25,7 @@ fn hub(tag: &str, status: Option<std::path::PathBuf>) -> (Hub, std::path::PathBu
         allowed_origins: proxy::default_allowed_origins(None),
         status: StatusFile::new(status, "live"),
         user_agent: "sp-live-test".into(),
+        account: Default::default(),
     });
     (h, home)
 }

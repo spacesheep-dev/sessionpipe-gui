@@ -1,11 +1,53 @@
 //! The receivers the person added (NATIVE-SPEC.md §1.3), kept in `<home>/receivers.json`,
 //! and their UI keys: the Keychain (service `<bundle id>.receivers`, account `<id>`), or
 //! `<home>/keys.json` when SP_SHELL_HOME is set (dev: nothing is left in the keychain).
+//!
+//! A receiver has a kind. An ordinary one is a sessionpipe-gui server; a spacesheep account
+//! (docs/rfcs/08, `account.rs`) sits in the same list and can be the active one, but
+//! nothing that speaks to a receiver speaks to it: its key has its own name in the key
+//! store, and the Hub forwards only its doors.
 
-use crate::id::{canonical_origin, is_loopback_origin, receiver_id};
+use crate::id::{account_id, canonical_origin, is_loopback_origin, receiver_id};
+use crate::keychain;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+/// What an entry of the list is. A file written before kinds existed has none: a receiver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    /// A sessionpipe-gui server.
+    #[default]
+    Receiver,
+    /// A spacesheep account: the Hub holds its key and forwards its doors.
+    Spacesheep,
+    /// A kind a newer version wrote. Kept as it is in the file and never spoken to, so an
+    /// older build neither loses the list nor treats the entry as a receiver.
+    #[serde(other)]
+    Unknown,
+}
+
+impl Kind {
+    fn is_receiver(&self) -> bool {
+        *self == Kind::Receiver
+    }
+}
+
+/// What the list keeps about a spacesheep account. Never the key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Account {
+    /// Whose account, for display.
+    pub email: String,
+    pub connected_at: String,
+    /// spacesheep answered 401 to the key and nothing has succeeded since.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unauthorized: bool,
+    /// The rp id spacesheep signs for, as its machines door last said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rp_id: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,6 +60,11 @@ pub struct Receiver {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ca_sha256: Option<String>,
     pub local: bool,
+    #[serde(default, skip_serializing_if = "Kind::is_receiver")]
+    pub kind: Kind,
+    /// Set exactly when `kind` is `Spacesheep`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<Account>,
 }
 
 impl Receiver {
@@ -42,9 +89,36 @@ impl Receiver {
                 origin,
                 lan_origins: vec![],
                 ca_sha256: None,
+                kind: Kind::Receiver,
+                account: None,
             },
             key,
         ))
+    }
+
+    /// A spacesheep account at `origin` (already cleaned, `account::clean_origin`). It is
+    /// never `local`: nothing about it is trusted for being on loopback.
+    pub fn account(origin: &str, email: &str, connected_at: &str) -> Option<Receiver> {
+        let host = url::Url::parse(origin).ok()?.host_str()?.to_string();
+        Some(Receiver {
+            id: account_id(origin, email),
+            name: host,
+            origin: origin.to_string(),
+            lan_origins: vec![],
+            ca_sha256: None,
+            local: false,
+            kind: Kind::Spacesheep,
+            account: Some(Account {
+                email: email.to_string(),
+                connected_at: connected_at.to_string(),
+                unauthorized: false,
+                rp_id: None,
+            }),
+        })
+    }
+
+    pub fn is_account(&self) -> bool {
+        self.kind == Kind::Spacesheep && self.account.is_some()
     }
 }
 
@@ -84,13 +158,34 @@ impl Registry {
         self.save()
     }
 
-    /// Adds or replaces (same id) a receiver and saves.
+    /// Adds or replaces (same id) a receiver and saves. An entry never changes kind: an
+    /// id is 50 bits of a hash, and a link can choose its origin, so a receiver whose id
+    /// met an account's must not take its place (and with it, its name in the key store).
     pub fn upsert(&mut self, r: Receiver) -> std::io::Result<()> {
         match self.file.receivers.iter_mut().find(|x| x.id == r.id) {
+            Some(x) if x.kind != r.kind => {
+                return Err(std::io::Error::other(
+                    "that id belongs to an entry of another kind",
+                ))
+            }
             Some(x) => *x = r,
             None => self.file.receivers.push(r),
         }
         self.save()
+    }
+
+    /// Changes one entry in place and saves; false when there is none.
+    pub fn update(&mut self, id: &str, f: impl FnOnce(&mut Receiver)) -> std::io::Result<bool> {
+        let Some(x) = self.file.receivers.iter_mut().find(|x| x.id == id) else {
+            return Ok(false);
+        };
+        let before = x.clone();
+        f(x);
+        if *x == before {
+            return Ok(true);
+        }
+        self.save()?;
+        Ok(true)
     }
 
     pub fn remove(&mut self, id: &str) -> std::io::Result<bool> {
@@ -121,11 +216,20 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
-/// Where UI keys live.
+/// The name an account's key has in a key store. A receiver's key is under its bare id
+/// (ten characters of base32); nothing that looks a key up by id can reach this one.
+pub fn account_key_name(id: &str) -> String {
+    format!("acct:{id}")
+}
+
+/// Where keys live: a receiver's UI key, a spacesheep account's API key.
 pub enum KeyStore {
-    /// `<dir>/keys.json` (dev, SP_SHELL_HOME set).
+    /// `<dir>/keys.json`, readable by its owner alone (dev with SP_SHELL_HOME set; the
+    /// phones' receiver keys; an account's key on Android, where it is the app's private
+    /// storage and nothing stronger).
     File(PathBuf),
-    /// The login keychain, service `<bundle id>.receivers`, account = receiver id.
+    /// The system keychain (`keychain.rs`): service `<bundle id>.receivers` for receiver
+    /// keys on a Mac, `<bundle id>.account` for an account's key on an iPhone.
     Keychain { service: String },
     /// Tests.
     Memory(std::sync::Mutex<BTreeMap<String, String>>),
@@ -187,47 +291,6 @@ impl KeyStore {
             }
             KeyStore::Keychain { service } => keychain::delete(service, id),
         }
-    }
-}
-
-#[cfg(target_os = "macos")]
-mod keychain {
-    use security_framework::passwords::{
-        delete_generic_password, get_generic_password, set_generic_password,
-    };
-
-    pub fn get(service: &str, account: &str) -> Option<String> {
-        get_generic_password(service, account)
-            .ok()
-            .and_then(|b| String::from_utf8(b).ok())
-    }
-    pub fn set(service: &str, account: &str, key: &str) -> std::io::Result<()> {
-        set_generic_password(service, account, key.as_bytes()).map_err(std::io::Error::other)
-    }
-    pub fn delete(service: &str, account: &str) -> std::io::Result<()> {
-        match delete_generic_password(service, account) {
-            Ok(()) => Ok(()),
-            // errSecItemNotFound: nothing to delete.
-            Err(e) if e.code() == -25300 => Ok(()),
-            Err(e) => Err(std::io::Error::other(e)),
-        }
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-mod keychain {
-    // Windows / Linux credential stores come with their CI builds; until then keys stay
-    // in memory for the session.
-    pub fn get(_: &str, _: &str) -> Option<String> {
-        None
-    }
-    pub fn set(_: &str, _: &str, _: &str) -> std::io::Result<()> {
-        Err(std::io::Error::other(
-            "no credential store on this platform yet",
-        ))
-    }
-    pub fn delete(_: &str, _: &str) -> std::io::Result<()> {
-        Ok(())
     }
 }
 

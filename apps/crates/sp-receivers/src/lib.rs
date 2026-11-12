@@ -8,12 +8,17 @@
 //! - the SSE client: page streams over an IPC channel, and one long-lived menu-bar stream
 //!   per receiver (`x-sessionpipe-client: shell`) feeding needs-you
 //! - the status file for packaging's reliability tests
+//! - a spacesheep account as a kind of receiver (docs/rfcs/08): connecting, its key, the
+//!   doors the Hub forwards for it and nothing else, and the few documents its page keeps
 //!
 //! No Tauri types here: the shell and the iOS app wire it to their own runtime.
 
+pub mod account;
 pub mod discovery;
+pub mod docs;
 mod hub;
 pub mod id;
+mod keychain;
 pub mod needs;
 pub mod proxy;
 pub mod registry;
@@ -22,12 +27,16 @@ pub mod status;
 #[cfg(test)]
 pub(crate) mod testutil;
 
+pub use account::{
+    AccountConfig, AccountRef, AccountState, AccountStatus, AccountView, ConnectState, ConnectView,
+    Disconnected, Problem,
+};
 pub use hub::{
     normalise_sha256, Backoff, Hub, HubConfig, HubEvent, ReceiverRef, StreamFrame,
     SHELL_CLIENT_HEADER,
 };
 pub use needs::{AttentionInfo, NeedsYouItem};
-pub use registry::{KeyStore, Receiver};
+pub use registry::{KeyStore, Kind, Receiver};
 pub use status::StatusFile;
 
 /// reqwest runs on rustls without a built-in provider (ring, the one the updater already

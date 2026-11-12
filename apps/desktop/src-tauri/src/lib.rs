@@ -127,6 +127,9 @@ pub fn run() {
                 allowed_origins: sp_receivers::proxy::default_allowed_origins(dev_url.as_deref()),
                 status: StatusFile::from_env(&version),
                 user_agent: format!("sessionpipe-desktop/{version}"),
+                // A spacesheep account is the server's to connect on a desktop
+                // (server/ui/spacesheep.ts); the Hub's own account mode is the phones'.
+                account: Default::default(),
             });
             let s = settings::load(&home);
             app.manage(Shell {

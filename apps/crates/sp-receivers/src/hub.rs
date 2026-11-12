@@ -1,9 +1,17 @@
 //! The Hub: every receiver the app knows, their clients, the page's `rx:` requests and
 //! streams, and one long-lived menu-bar stream per receiver feeding needs-you.
+//!
+//! A spacesheep account is in the same list (`registry::Kind`), and everything here that
+//! speaks to a receiver first asks which kind it has: an account gets no stream, no
+//! `/api/ui/*` request, no `spgui` cookie and no key in a URL. What it does get is in
+//! `hub/acct.rs`.
 
+mod acct;
+
+use crate::account::{AccountConfig, AccountRef};
 use crate::needs::{NeedsYou, NeedsYouItem};
 use crate::proxy::{self, Refusal};
-use crate::registry::{KeyStore, Receiver, Registry};
+use crate::registry::{KeyStore, Kind, Receiver, Registry};
 use crate::sse::{SseItem, SseParser};
 use crate::status::StatusFile;
 use futures_util::StreamExt;
@@ -65,9 +73,14 @@ pub struct ReceiverRef {
     pub name: String,
     pub origin: String,
     pub local: bool,
-    /// `Info.control.rpId`, once the receiver answered `/api/ui/info`.
+    /// `Info.control.rpId`, once the receiver answered `/api/ui/info`. For an account,
+    /// the rp id its machines door gave.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rp_id: Option<String>,
+    /// Set for a spacesheep account, and then the row also says `kind: "spacesheep"`,
+    /// `email` and `state`. A receiver's row has none of the three.
+    #[serde(flatten)]
+    pub account: Option<AccountRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +103,9 @@ pub enum HubEvent {
     },
     /// The receiver list changed (added, removed, renamed from its info).
     Receivers,
+    /// Something `Hub::account_status` says changed: a connect moved on, an account was
+    /// added or removed, spacesheep refused its key or took it again.
+    Account,
 }
 
 /// A page-stream frame for the IPC channel: `{ event, data?, retryInMs? }`.
@@ -113,6 +129,8 @@ pub struct HubConfig {
     pub allowed_origins: Vec<String>,
     pub status: StatusFile,
     pub user_agent: String,
+    /// spacesheep accounts (`AccountConfig::default()` is off).
+    pub account: AccountConfig,
 }
 
 /// 0.5 s doubling to 30 s, ±20 % jitter.
@@ -199,6 +217,7 @@ struct Inner {
     next_stream: AtomicU64,
     proxy_logged: Mutex<HashMap<String, std::time::Instant>>,
     rt: Mutex<Option<tokio::runtime::Handle>>,
+    acct: acct::Accounts,
 }
 
 #[derive(Clone)]
@@ -231,7 +250,9 @@ impl Hub {
             }
         }
         let (tx, _) = broadcast::channel(64);
+        let acct = acct::Accounts::new(&cfg);
         Hub(Arc::new(Inner {
+            acct,
             cfg,
             registry: Mutex::new(registry),
             transient: Mutex::new(transient),
@@ -256,6 +277,7 @@ impl Hub {
         for r in self.all() {
             self.ensure_tray(&r.id);
         }
+        self.account_resume();
     }
 
     pub fn status(&self) -> &StatusFile {
@@ -303,6 +325,17 @@ impl Hub {
         self.all().into_iter().find(|r| r.id == id)
     }
 
+    /// A sessionpipe-gui receiver by id: never an account, never a kind this version
+    /// does not know. Everything that sends a receiver its cookie or asks its
+    /// `/api/ui/*` goes through here.
+    fn find_receiver(&self, id: &str) -> Result<Receiver, String> {
+        let r = self.find(id).ok_or("unknown receiver")?;
+        if r.kind != Kind::Receiver {
+            return Err("not a receiver".into());
+        }
+        Ok(r)
+    }
+
     fn to_ref(&self, r: &Receiver) -> ReceiverRef {
         let info = self
             .0
@@ -317,7 +350,11 @@ impl Hub {
             name: info.hostname.unwrap_or_else(|| r.name.clone()),
             origin: r.origin.clone(),
             local: r.local,
-            rp_id: info.rp_id,
+            rp_id: match &r.account {
+                Some(a) if r.is_account() => a.rp_id.clone(),
+                _ => info.rp_id,
+            },
+            account: self.account_ref(r),
         }
     }
 
@@ -421,6 +458,20 @@ impl Hub {
     }
 
     pub fn remove(&self, id: &str) -> Result<bool, String> {
+        // What the list itself holds under this id says whose key and documents go.
+        let was_account = self
+            .0
+            .registry
+            .lock()
+            .unwrap()
+            .list()
+            .iter()
+            .any(|r| r.id == id && r.kind != Kind::Receiver);
+        // An account's key goes first: if the list then can't be saved, what is left is
+        // an entry without a key, never a key without an entry.
+        if was_account {
+            self.account_forget(id);
+        }
         let removed = self
             .0
             .registry
@@ -428,8 +479,10 @@ impl Hub {
             .unwrap()
             .remove(id)
             .map_err(|e| e.to_string())?;
-        self.0.transient.lock().unwrap().retain(|r| r.id != id);
-        let _ = self.0.cfg.keys.delete(id);
+        if !was_account {
+            self.0.transient.lock().unwrap().retain(|r| r.id != id);
+            let _ = self.0.cfg.keys.delete(id);
+        }
         if let Some(ctl) = self.0.trays.lock().unwrap().remove(id) {
             ctl.stop.store(true, Ordering::SeqCst);
             ctl.kick.notify_one();
@@ -442,11 +495,16 @@ impl Hub {
             items: vec![],
         });
         self.emit(HubEvent::Receivers);
+        if was_account {
+            self.emit(HubEvent::Account);
+        }
         Ok(removed)
     }
 
+    /// A receiver's UI key. An account has none: its API key has another name in the
+    /// store (`account_key_name`) and is read only where a door is forwarded.
     fn key_for(&self, r: &Receiver) -> Option<String> {
-        if r.local {
+        if r.local || r.kind != Kind::Receiver {
             return None;
         }
         if let Some(k) = self.0.transient_keys.lock().unwrap().get(&r.id) {
@@ -457,7 +515,7 @@ impl Hub {
 
     /// A URL for a view window on the receiver's own origin, with `?k=` for a remote one.
     pub fn view_url(&self, id: &str, path: &str) -> Result<url::Url, String> {
-        let r = self.find(id).ok_or("unknown receiver")?;
+        let r = self.find_receiver(id)?;
         proxy::check_path(path).map_err(|_| "bad path")?;
         let mut u = proxy::upstream_url(&r.origin, path).map_err(|_| "bad path")?;
         if let Some(k) = self.key_for(&r) {
@@ -597,7 +655,10 @@ impl Hub {
         path: &str,
         body: Option<Vec<u8>>,
     ) -> Result<(u16, Vec<u8>), String> {
-        let r = self.find(id).ok_or("unknown receiver")?;
+        if self.find(id).is_some_and(|r| r.kind == Kind::Spacesheep) {
+            return self.account_asked_as_receiver(id, &method, path).await;
+        }
+        let r = self.find_receiver(id)?;
         proxy::check_path(path).map_err(|_| "bad path")?;
         let url = proxy::upstream_url(&r.origin, path).map_err(|_| "bad path")?;
         let client = self.client_for(&r).await?;
@@ -632,14 +693,29 @@ impl Hub {
             return proxy::preflight(origin, allowed);
         }
         let refuse = |r: Refusal, msg: &str| proxy::refusal(r.status(), msg, origin, allowed);
-        let (id, path) = match proxy::parse_rx_uri(&req.uri().to_string()) {
+        let (id, path) = match proxy::split_rx_uri(&req.uri().to_string()) {
             Ok(x) => x,
             Err(r) => return refuse(r, "refused"),
         };
-        let Some(rx) = self.find(&id) else {
-            self.proxy_failed(&id, req.method().as_str(), &path, "unknown receiver");
-            return refuse(Refusal::UnknownReceiver, "unknown receiver");
+        let rx = match self.find(&id) {
+            Some(rx) if rx.kind == Kind::Receiver => rx,
+            // An account: only its doors, and nothing below (no cookie, no page header).
+            Some(rx) if rx.kind == Kind::Spacesheep => {
+                return self.account_proxy(rx, req, &path, origin).await
+            }
+            _ => {
+                self.proxy_failed(
+                    &id,
+                    req.method().as_str(),
+                    log_path(&path),
+                    "unknown receiver",
+                );
+                return refuse(Refusal::UnknownReceiver, "unknown receiver");
+            }
         };
+        if let Err(r) = proxy::check_path(&path) {
+            return refuse(r, "refused");
+        }
         if req.body().len() > proxy::MAX_BODY {
             return refuse(Refusal::TooLarge, "too large");
         }
@@ -754,7 +830,14 @@ impl Hub {
     where
         S: Fn(StreamFrame) -> bool + Send + Sync + 'static,
     {
-        let r = self.find(receiver).ok_or("unknown receiver")?;
+        // An account has no stream: its page reads the relay through the relay door.
+        if self
+            .find(receiver)
+            .is_some_and(|r| r.kind == Kind::Spacesheep)
+        {
+            return Err("account_no_stream".into());
+        }
+        let r = self.find_receiver(receiver)?;
         proxy::check_path(path).map_err(|_| "bad path")?;
         let url = proxy::upstream_url(&r.origin, path).map_err(|_| "bad path")?;
         let id = self.0.next_stream.fetch_add(1, Ordering::Relaxed);
@@ -930,6 +1013,11 @@ impl Hub {
         if self.0.rt.lock().unwrap().is_none() {
             return;
         }
+        // Only a receiver has `/api/ui/stream`. An account's needs-you is its page's to
+        // work out from the relay; nothing here reads it yet.
+        if self.find_receiver(id).is_err() {
+            return;
+        }
         let ctl = {
             let mut t = self.0.trays.lock().unwrap();
             if t.contains_key(id) {
@@ -963,7 +1051,9 @@ impl Hub {
                 ctl.kick.notified().await;
                 continue;
             }
-            let Some(r) = self.find(&id) else { return };
+            let Ok(r) = self.find_receiver(&id) else {
+                return;
+            };
             let kicked = tokio::select! {
                 _ = self.tray_once(&r, &mut needs, &mut backoff) => false,
                 _ = ctl.kick.notified() => true,
@@ -1126,6 +1216,7 @@ mod tests {
             allowed_origins: proxy::default_allowed_origins(None),
             status: StatusFile::new(None, "test"),
             user_agent: "sp-test".into(),
+            account: AccountConfig::default(),
         })
     }
 
