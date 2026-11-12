@@ -53,7 +53,7 @@ import { AppIcon } from "./AppIcon";
 import { ActionButton, CommandWell, CopyIconButton, Segmented, Toggle } from "./bits";
 import { LensPicker } from "./LensChip";
 import { NotificationsSettings } from "./NotificationsSettings";
-import { OlderReceiverNotice } from "./OlderReceiverNotice";
+import { type LocalUpdateState, OlderReceiverNotice } from "./OlderReceiverNotice";
 import { APPEARANCE, noContextMenu, SKIN_ADD_LINE, TextSizeSlider, useListedSkins } from "./QuickSettings";
 import { Select } from "./Select";
 import { Keys } from "./ShortcutHelp";
@@ -838,20 +838,24 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
   const { connection } = useConnection();
   const [version, setVersion] = useState<string | undefined>(undefined);
   const [notFound, setNotFound] = useState(false);
-  const [localOrigin, setLocalOrigin] = useState<string | null>(null);
+  // The process that 404'd, by its info's startedAt: the notice stays until another answers.
+  const notFoundAt = useRef<string | null>(null);
+  const startedAt = useRef<string | null>(null);
+  const [local, setLocal] = useState<LocalUpdateState | null>(null);
   const refresh = useCallback(() => {
     store.transport
       .info()
       .then((i) => {
         setVersion(i.version);
-        // A receiver now new enough: an earlier 404 was the old one's.
-        if (!olderReceiver("spacesheep", i.version, { shell: {} })) setNotFound(false);
+        startedAt.current = i.startedAt;
+        // A 404 was that process's; a receiver started since may have the route.
+        if (notFoundAt.current !== null && i.startedAt !== notFoundAt.current) {
+          notFoundAt.current = null;
+          setNotFound(false);
+        }
       })
       .catch(() => {});
-    if (inShell)
-      void import("../native/receiverUpdate")
-        .then((m) => m.localUpdate())
-        .then((u) => setLocalOrigin(u?.origin ?? null));
+    if (inShell) void import("../native/receiverUpdate").then((m) => m.localUpdate()).then(setLocal);
   }, [store]);
   useEffect(() => {
     refresh();
@@ -864,6 +868,7 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
   }, [refresh]);
+  const localOrigin = local?.origin ?? null;
   const older = olderReceiver("spacesheep", version, { notFound, localOrigin });
   const read = async () => {
     try {
@@ -896,6 +901,10 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
       // The receiver's own 404 (no such route) says it is older; the app's proxy's (no such
       // receiver) does not.
       if (isRouteNotFound(res.status, j) && olderReceiver("spacesheep", version, { notFound: true, localOrigin })) {
+        notFoundAt.current = await store.transport
+          .info()
+          .then((i) => i.startedAt)
+          .catch(() => startedAt.current ?? "");
         setNotFound(true);
         return;
       }
@@ -962,7 +971,7 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
         )}
       </R>
       {older ? (
-        <OlderReceiverNotice older={older} onUpdated={refresh} />
+        <OlderReceiverNotice older={older} local={local} onUpdated={refresh} />
       ) : (
         err && <p className="settings-group-note settings-err">{err}</p>
       )}

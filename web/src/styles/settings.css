@@ -976,3 +976,15 @@ a.settings-row:focus-visible {
     display: none;
   }
 }
+
+/* The older-receiver notice's failure (components/OlderReceiverNotice.tsx): the sentence,
+   and the installer's line or the log's path small under it. */
+.older-failure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.older-detail {
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}

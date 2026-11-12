@@ -56,12 +56,16 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **In the app, an option the receiver is too old for says so** instead of the receiver's
   "HTTP 404". Settings › Data › "Use a spacesheep account" against a receiver older than
   0.7.5: "sessionpipe on this computer is 0.7.2, which is older than this option." with
-  Connect… off, an **Update sessionpipe** button (what "Start sessionpipe" runs, with its
-  progress line; "Couldn't update it: …" with the last line when it fails), and the command
-  to copy. "This computer" is the receiver the app's launch check found to be this
-  computer's, not any loopback address; any other is "… Update it there." The version is
-  read again after the update, when the connection comes back and when the window comes
-  forward. Only the receiver's own 404 counts (not the app proxy's for a receiver it doesn't
+  Connect… off, an **Update sessionpipe** button (the app's release through `npx`, with its
+  progress line), and the command to copy. When the update stopped the old receiver and the
+  new one didn't come up: "The update didn't finish, and sessionpipe isn't running right
+  now. Press Update again." with the log's path under it; any other failure: "Couldn't
+  update it. Press Update again, or run the command below." with the installer's line under
+  it. An update already running when Settings opens shows as working. "This computer" is
+  the receiver the app's launch check found to be this computer's, not any loopback
+  address; any other is "… Update it there." The version is read again after the update,
+  when the connection comes back and when the window comes forward; a notice that a 404
+  brought stays until another receiver process answers. Only the receiver's own 404 counts (not the app proxy's for a receiver it doesn't
   know), and a version that isn't below the option's is left out of the sentence. A page
   the receiver serves itself never says it. On a phone a sentence over a command (this one,
   and About's update command) stays in one column.
