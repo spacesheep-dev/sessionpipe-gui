@@ -39,6 +39,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   the sink token and the UI key. The GUI now takes the group and other bits off before every
   write, as it already sets its TLS keys to 0600 when it writes them, and also when it
   starts; where that fails it says so and starts anyway.
+- **A send that is held for a fresh confirm goes with one more tap.** When spacesheep's safety
+  check holds a message to a machine paired there until you confirm it, the page now asks for
+  that one passkey tap (Touch ID or Face ID in the app) at once and sends the same message
+  with it. It used to say "try again", and every try was held the same way, so such a
+  message could not be sent from the GUI at all.
 
 ## [0.8.0] - 2026-11-11
 

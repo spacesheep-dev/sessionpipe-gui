@@ -284,3 +284,44 @@ describe("reply_to", () => {
     }
   });
 });
+
+describe("a machine paired on spacesheep: a send its second look holds for a confirm", () => {
+  it("comes back as confirm_required, and the same command with a confirm alone is carried and queued", async () => {
+    // spacesheep answers 409 `confirm` to a send its safety check holds (signed with the day
+    // grant) and takes the same bytes with a confirm (CONTROL.md §3.2): the page's one retry.
+    const asked: Record<string, unknown>[] = [];
+    const b = await boot({
+      remoteSend: async (_m, body) => {
+        asked.push(body);
+        return body.confirm
+          ? { status: 202, json: { job: 41 } }
+          : { status: 409, json: { code: "confirm", error: "spacesheep wants a fresh confirm for this one" } };
+      },
+    });
+    try {
+      const machine = "m_heldremote000000000001";
+      b.control.remote.upsert(
+        [{ id: machine, name: "lab-mac", online: true, agents: ["claude-code"], passkey_ids: ["k1"] }],
+        { via: "spacesheep", origin: "https://spacesheep.dev", rpId: "spacesheep.dev" },
+      );
+      const cmd = commandStr(machine, { iat: Date.now() });
+      const grant = { str: "{}", cred: "k1", ad: "YQ", cd: "Yw", sig: "cw" };
+      const held = await call(b.url, "POST", `${UI}/send`, { body: { machineId: machine, cmd, csig: "c2ln", grant } });
+      expect(held).toEqual({
+        status: 422,
+        body: { reason: "spacesheep wants a fresh confirm for this one", code: "confirm_required" },
+      });
+      expect(b.control.activity()).toHaveLength(0);
+      const confirm = { cred: "k1", ad: "YQ", cd: "Yw", sig: "Y29uZmlybQ" };
+      const sent = await call(b.url, "POST", `${UI}/send`, { body: { machineId: machine, cmd, confirm } });
+      expect(sent.status).toBe(201);
+      expect(asked).toEqual([
+        { cmd, csig: "c2ln", grant, confirm: null },
+        { cmd, csig: null, grant: null, confirm },
+      ]);
+      expect(b.control.activity()).toHaveLength(1);
+    } finally {
+      await b.close();
+    }
+  });
+});

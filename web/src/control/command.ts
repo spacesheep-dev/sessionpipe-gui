@@ -128,8 +128,9 @@ const faultCode = (e: unknown): string | undefined =>
 /** Sign one command for `machineId` and hand the signed body to `deliver`: /send for the
  *  page's own commands (sendCommand), the run's PATCH for a workflow step (useRunner.ts),
  *  which queues it only once the server has seen the step is still this tab's. A refusal
- *  of the cached grant drops it and tries once more with a new one; any other refusal is
- *  thrown as `deliver` threw it. */
+ *  of the cached grant drops it and tries once more with a new one; a command the
+ *  receiver holds for a confirm goes once more with one; any other refusal is thrown as
+ *  `deliver` threw it. */
 export async function signAndDeliver<T>(
   rp: string,
   machineId: string,
@@ -140,16 +141,23 @@ export async function signAndDeliver<T>(
   const cmd = commandString(machineId, fields);
   // A machine paired on spacesheep (remoteRp.ts) takes a signature for that rp id.
   const rpUse = remoteRpFor(machineId) ?? rp;
-  const attempt = async (fresh = false): Promise<T> => {
-    const signed = await signCommand(rpUse, cmd, { ...o, fresh });
+  const attempt = async (how: { fresh?: boolean; confirm?: boolean } = {}): Promise<T> => {
+    const signed = await signCommand(rpUse, cmd, { ...o, ...how });
     const body: SendBody = { machineId, ...signed };
     if (o.expiresInS) body.expires_in_s = o.expiresInS;
     if (o.from) body.from = o.from;
     return deliver(body);
   };
+  // The receiver's second look held this one for a confirm of its own (CONTROL.md §3.2):
+  // spacesheep's, on a send to a machine paired there (server/control/ui.ts forwardSend),
+  // or a local receiver's, on a pool action that takes one (server/control/pool.ts). The
+  // press that sent it is the person's say-so for one fresh tap over the same bytes, sent
+  // alone; a new press would be signed with the grant again and held the same way.
+  const heldForConfirm = (e: unknown): boolean => !o.confirm && !o.noPrompt && faultCode(e) === "confirm_required";
   try {
     return await attempt();
   } catch (e) {
+    if (heldForConfirm(e)) return attempt({ confirm: true });
     const code = faultCode(e);
     if (!o.confirm && code && GRANT_FAULTS.has(code)) {
       await dropGrant(rpUse);
@@ -157,7 +165,12 @@ export async function signAndDeliver<T>(
       // gone, every useGrant on the page reads so, and the page the person is on asks.
       if (o.noPrompt) throw e;
       // The app's signer gets one fresh grant after a refusal (it rate-limits the rest).
-      return attempt(signerKind() === "device");
+      try {
+        return await attempt({ fresh: signerKind() === "device" });
+      } catch (again) {
+        if (heldForConfirm(again)) return attempt({ confirm: true });
+        throw again;
+      }
     }
     throw e;
   }
