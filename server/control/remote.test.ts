@@ -415,4 +415,21 @@ describe("remote machines in the control state", () => {
     ]);
     expect(state.remoteJobsCadence()).toBe("none");
   });
+
+  it("with no time from spacesheep, ages a job by the row's own time on this clock, not spacesheep's created_at", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed({ online: false })], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 50);
+    const born = Date.parse(row.at);
+    // spacesheep's clock runs 26 h behind this one: its created_at is "old" by this clock.
+    const queued = { id: 50, status: "queued", note: null, done_at: null, created_at: born - 26 * 3600_000 };
+    expect(state.applyRemoteJobs([queued], Number.POSITIVE_INFINITY)).toBe(0);
+    expect(state.activityById(row.id)?.outcome).toBeUndefined();
+    vi.setSystemTime(born + EXPIRES_MAX_MS + REMOTE_GRACE_MS + 1);
+    expect(state.applyRemoteJobs([queued], Number.POSITIVE_INFINITY)).toBe(1);
+    expect(state.activityById(row.id)?.outcome).toBe("expired");
+  });
 });

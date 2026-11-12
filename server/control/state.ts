@@ -689,13 +689,17 @@ export class ControlState {
   ): number {
     let n = 0;
     const byJob = new Map(jobs.map((j) => [j.id, j]));
-    const now = Number.isFinite(serverNow) ? serverNow! : Date.now();
+    // spacesheep's time when it said one; else this clock, and then the row's own time on
+    // this clock too (never spacesheep's created_at against this clock: two clocks).
+    const known = Number.isFinite(serverNow);
+    const now = known ? serverNow! : Date.now();
     for (const [id, rows] of this.queues) {
       let changed = false;
       for (const row of rows) {
         if (!this.followed(row)) continue;
         const j = byJob.get(row.remoteJob!);
-        const born = j && Number.isFinite(j.created_at) && j.created_at > 0 ? j.created_at : Date.parse(row.at);
+        const born =
+          known && j && Number.isFinite(j.created_at) && j.created_at > 0 ? j.created_at : Date.parse(row.at);
         const over = row.remoteJob! <= through && now - born >= EXPIRES_MAX_MS + REMOTE_GRACE_MS;
         const taken = j ? j.status === "taken" || j.status === "running" : row.outcome === "taken";
         if (over && (taken || !j || j.status === "queued")) {
