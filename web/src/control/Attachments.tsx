@@ -14,7 +14,13 @@ import {
   type Info,
   ROUTES,
 } from "@shared/api";
-import { type AttachmentRef, composePrompt, PROMPT_MAX_CHARS, splitAttachments } from "@shared/attachments";
+import {
+  type AttachmentRef,
+  attachmentLines,
+  composePrompt,
+  PROMPT_MAX_CHARS,
+  splitAttachments,
+} from "@shared/attachments";
 import {
   type ChangeEvent,
   type ClipboardEvent,
@@ -140,6 +146,8 @@ export interface PendingItem {
 
 export interface ComposeResult {
   text: string;
+  /** The block's lines as written into `text` (attachmentLines): what this page attached. */
+  lines: string[];
   /** Which form the block took, for a note. */
   local: boolean;
 }
@@ -273,7 +281,14 @@ export function useAttachments(o: { machine?: string; enabled?: boolean }): Atta
       }
       if (!text) return null;
       setError(null);
-      return { text, local: isLocal };
+      return {
+        text,
+        local: isLocal,
+        lines: attachmentLines(
+          cur.map((it) => it.attachment!),
+          isLocal,
+        ),
+      };
     },
     [local],
   );

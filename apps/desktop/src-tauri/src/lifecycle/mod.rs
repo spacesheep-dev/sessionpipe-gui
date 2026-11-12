@@ -23,7 +23,8 @@ pub fn plugins<R: Runtime>(b: tauri::Builder<R>) -> tauri::Builder<R> {
         .plugin(supervisor::plugin())
 }
 
-/// The shell's log file, sleep/wake, and the run.json watch. Called once from setup.
+/// The shell's log file, sleep/wake, the run.json watch, and the check that brings an
+/// older local receiver up to the app's version. Called once from setup.
 pub fn setup<R: Runtime>(app: &tauri::App<R>, hub: sp_receivers::Hub) -> tauri::Result<()> {
     if let Some(dir) = logging::log_dir(app.path().app_log_dir().ok()) {
         if let Some(file) = logging::set_dir(&dir) {
@@ -32,7 +33,9 @@ pub fn setup<R: Runtime>(app: &tauri::App<R>, hub: sp_receivers::Hub) -> tauri::
     }
     let _ = HUB.set((hub.clone(), app.package_info().version.to_string()));
     power::observe(app.handle().clone());
-    supervisor::watch(app.handle().clone(), hub);
+    supervisor::watch(app.handle().clone(), hub.clone());
+    // A receiver older than the app (an app that updated itself): brought up to it, once.
+    supervisor::keep_current(hub, app.package_info().version.to_string());
     Ok(())
 }
 
@@ -46,4 +49,21 @@ pub async fn start_local_receiver(
         .cloned()
         .ok_or_else(|| StartError::Failed("the app is still starting".into()))?;
     supervisor::start_local_receiver(&hub, &version, progress).await
+}
+
+/// What the launch check found about this computer's receiver (None: not checked, or
+/// not this computer's), for the page's notice in Settings › Data.
+pub fn local_update() -> Option<supervisor::LocalUpdate> {
+    supervisor::local_update()
+}
+
+/// The page's "Update sessionpipe": the click path, then the version read again.
+pub async fn update_local_receiver(
+    progress: impl Fn(&str, &str),
+) -> Result<Option<supervisor::LocalUpdate>, StartError> {
+    let (hub, version) = HUB
+        .get()
+        .cloned()
+        .ok_or_else(|| StartError::Failed("the app is still starting".into()))?;
+    supervisor::update_local_click(&hub, &version, progress).await
 }

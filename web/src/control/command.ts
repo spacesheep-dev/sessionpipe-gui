@@ -12,10 +12,11 @@ import {
   type StartFile,
   type StartPermission,
 } from "@shared/api";
+import { cleanReason } from "@shared/reason";
 import { noteOwnSend } from "../lib/toasts";
-import { controlApi, type SendBody, type TrustedKey } from "./api";
+import { ControlError, controlApi, type SendBody, type TrustedKey } from "./api";
 import { nonce } from "./bytes";
-import { remoteRpFor } from "./remoteRp";
+import { remoteHostFor, remoteRpFor } from "./remoteRp";
 import { dropGrant, sign, signerKind } from "./signer";
 
 export const COMMAND_TYPE = "sessionpipe.control";
@@ -125,11 +126,53 @@ const GRANT_FAULTS = new Set(["bad_grant", "outside_grant", "bad_csig", "bad_ass
 const faultCode = (e: unknown): string | undefined =>
   e && typeof e === "object" && (e as { status?: unknown }).status === 422 ? (e as { code?: string }).code : undefined;
 
+/** A send the receiver's second look held for a fresh confirm (CONTROL.md §3.2: "a
+ *  receiver's second look may ask for one"). spacesheep holds a message to a machine paired
+ *  there when its safety check is unsure it is its owner's (server/control/ui.ts
+ *  forwardSend), and a confirm skips that check: so nothing here confirms on its own. The
+ *  page shows `why` (the receiver's own words) where the person pressed, and `confirm` runs
+ *  only from a press on that notice: it builds the command again (same fields, a new nonce
+ *  and `iat`), signs it once with a confirm and sends that alone. A caller that may not
+ *  prompt never gets one of these: it gets the refusal as `deliver` threw it. */
+export class HeldForConfirm<T> extends ControlError {
+  constructor(
+    held: unknown,
+    /** What the receiver said about why, as text. */
+    readonly why: string,
+    /** What was held: the fields as they were signed, the only ones a confirm sends. */
+    readonly fields: CommandFields,
+    /** The machine it was for. */
+    readonly machineId: string,
+    /** Who held it: the host of the spacesheep a machine paired there is reached through
+     *  (remoteRp.ts), or null for this receiver itself. */
+    readonly from: string | null,
+    /** Sign the same send again with one confirm and deliver it; call from a press only. */
+    readonly confirm: (o?: Pick<SendOptions, "onTap">) => Promise<T>,
+  ) {
+    const e = held as { status?: number; reason?: unknown; code?: string; detail?: unknown };
+    super(
+      e.status ?? 422,
+      typeof e.reason === "string" ? e.reason : "confirm_required",
+      e.code ?? "confirm_required",
+      typeof e.detail === "string" ? e.detail : undefined,
+    );
+    this.name = "HeldForConfirm";
+  }
+}
+
+/** The receiver's reason for a hold, cleaned (shared/reason.ts): its detail (spacesheep's
+ *  `why`, carried by forwardSend), else its reason. Also for a confirm held again. */
+export const heldWhy = (e: unknown): string => {
+  const x = (e ?? {}) as { detail?: unknown; reason?: unknown };
+  return cleanReason(x.detail) || cleanReason(x.reason);
+};
+
 /** Sign one command for `machineId` and hand the signed body to `deliver`: /send for the
  *  page's own commands (sendCommand), the run's PATCH for a workflow step (useRunner.ts),
  *  which queues it only once the server has seen the step is still this tab's. A refusal
- *  of the cached grant drops it and tries once more with a new one; any other refusal is
- *  thrown as `deliver` threw it. */
+ *  of the cached grant drops it and tries once more with a new one; a send the receiver
+ *  holds for a confirm is thrown as HeldForConfirm (never confirmed here); any other
+ *  refusal is thrown as `deliver` threw it. */
 export async function signAndDeliver<T>(
   rp: string,
   machineId: string,
@@ -147,6 +190,14 @@ export async function signAndDeliver<T>(
     if (o.from) body.from = o.from;
     return deliver(body);
   };
+  // Held for a confirm: the caller says so and offers one; a send that was a confirm
+  // already, or a caller that may not prompt, gets the refusal itself.
+  const held = (e: unknown): unknown =>
+    !o.confirm && !o.noPrompt && faultCode(e) === "confirm_required"
+      ? new HeldForConfirm<T>(e, heldWhy(e), fields, machineId, remoteHostFor(machineId) ?? null, (c = {}) =>
+          signAndDeliver(rp, machineId, fields, deliver, { ...o, onTap: c.onTap, confirm: true }),
+        )
+      : e;
   try {
     return await attempt();
   } catch (e) {
@@ -157,14 +208,19 @@ export async function signAndDeliver<T>(
       // gone, every useGrant on the page reads so, and the page the person is on asks.
       if (o.noPrompt) throw e;
       // The app's signer gets one fresh grant after a refusal (it rate-limits the rest).
-      return attempt(signerKind() === "device");
+      try {
+        return await attempt(signerKind() === "device");
+      } catch (again) {
+        throw held(again);
+      }
     }
-    throw e;
+    throw held(e);
   }
 }
 
 /** Build, sign and send one command to `machineId`. A refusal of the cached grant drops
- *  it and tries once more with a new one; any other refusal is thrown as ControlError. */
+ *  it and tries once more with a new one; a hold is thrown as HeldForConfirm; any other
+ *  refusal is thrown as ControlError. */
 export function sendCommand(
   rp: string,
   machineId: string,

@@ -11,7 +11,15 @@
 // the ask as a row at once. Loaded once the page is idle (HandoffHost.tsx mounts it).
 import type { RunLevel } from "@shared/api";
 import { validModel } from "@shared/api";
-import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ActionButton, HarnessGlyph, Toggle } from "../../components/bits";
 import { MoreButton } from "../../components/ContextMenu";
 import { Select, type SelectOption } from "../../components/Select";
@@ -19,6 +27,9 @@ import { wrongOriginHere } from "../../control/api";
 import { uuid } from "../../control/bytes";
 import { sendCommand } from "../../control/command";
 import { folderChoices, machineHome, tildify, typedFolder } from "../../control/folders";
+import { HeldNotice, useHeld } from "../../control/HeldNotice";
+import type { HeldMeta } from "../../control/held";
+import { HELD_WORDS } from "../../control/heldWords";
 import { useGrant, useRpId } from "../../control/hooks";
 import { fixedPermission, permissionChoices, permissionToSend } from "../../control/newSessionState";
 import { sentence } from "../../control/PendingDevices";
@@ -83,6 +94,12 @@ function blocker(
       ? setupWords(name)
       : `${name} trusts no passkey from this browser. Add this device from one it trusts.`;
   return null;
+}
+
+/** What an ask was when it was pressed: all its "asked" needs after a confirm. */
+interface AskSent extends HeldMeta {
+  target: Target;
+  machineId: string;
 }
 
 export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean }) {
@@ -269,10 +286,34 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
     modelOk &&
     !busy;
 
+  // Sent: the sheet closes and the asking session's page says the rest (its row). What it
+  // remembers is what was asked when it was pressed, never the sheet as it is now.
+  const asked = (s: AskSent) => {
+    if (s.target.kind === "new") rememberHandoffAgent(s.machineId, s.target.harness);
+    saveHandoffDraft(session.key, null);
+    closeHandoff();
+  };
+  // Everything an ask is made of, as one string: a held ask goes the moment any of it
+  // changes (who is asked, the switch, folder, permission, model, text).
+  const sheetKey = JSON.stringify([target, bringBack, folder, permission, model, text]);
+  // An ask the receiver held for a confirm: the notice above the foot, and its button.
+  const held = useHeld<unknown, AskSent>(
+    (_r, _h, s) => {
+      asked(s);
+      grant.refresh();
+    },
+    (e) => setError(handoffRefusalWords(e, name) ?? sendErrorWords(e).replace(/^not sent · /, "Not sent: ")),
+    sheetKey,
+  );
+  const askButton = useCallback(() => ref.current?.querySelector<HTMLElement>(".ns-start") ?? null, []);
+
   const ask = async () => {
     if (!canAsk || !c || !rp || !target) return;
+    // A held ask's confirm is on its way: a second press would ask twice.
+    if (held.confirming()) return;
     setBusy(true);
     setError(null);
+    held.drop();
     const back = offersBack && bringBack;
     const fields = handoffFields({
       target,
@@ -287,14 +328,16 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
         : {}),
       ...(showModel && model ? { model } : {}),
     });
+    const sent: AskSent = { target, machineId: c.machineId };
+    const keyAtSend = sheetKey;
     try {
       await sendCommand(rp, c.machineId, fields, { onTap: () => setTap(true), from: session.key });
-      if (target.kind === "new") rememberHandoffAgent(c.machineId, target.harness);
-      saveHandoffDraft(session.key, null);
-      // Sent: the sheet closes and the asking session's page says the rest (its row).
-      closeHandoff();
+      asked(sent);
     } catch (e) {
-      setError(handoffRefusalWords(e, name) ?? sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
+      const caught = held.catchHeld(e, sent, keyAtSend);
+      if (caught === "changed") setError(HELD_WORDS.changed);
+      else if (!caught)
+        setError(handoffRefusalWords(e, name) ?? sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
       setBusy(false);
     } finally {
       setTap(false);
@@ -586,6 +629,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
             </div>
           )}
           <div className="ns-group-foot">
+            <HeldNotice h={held} focusBack={askButton} />
             {statusLine}
             {passkeyNote && (
               <p className="ns-passkey" id="hs-passkey">
@@ -659,6 +703,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
             )}
           </div>
         )}
+        <HeldNotice h={held} focusBack={askButton} />
         <footer className="ns-foot">
           {statusLine}
           <span className="ns-actions">
