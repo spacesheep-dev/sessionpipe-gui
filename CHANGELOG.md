@@ -8,6 +8,16 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **`service install` restarts a receiver that is still running an older copy of itself.**
+  After `npm i -g` put a new sessionpipe-gui over the old one at the same place, the
+  service's file already named the new files, so `service install` said "already running
+  0.7.2" and left the old process running the old code; the page, newer, then called
+  routes that server did not have ("HTTP 404" under Settings › Data › spacesheep). It now
+  restarts it and waits for this version to answer ("updating … 0.7.2 → 0.8.0"), on macOS,
+  Linux and Windows. An older sessionpipe-gui no longer quietly replaces a newer service
+  that runs from somewhere else: it says so and leaves it, unless `--downgrade`. A
+  re-install with other `--port`, `--state` or `--host` by the same or a newer version
+  works as before. `--if-installed` upgrades a service that is there and installs none.
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH

@@ -8,8 +8,13 @@
 // `install` finds a service of ours already there (every app upgrade does: the plist
 // names the cli of the version that installed it) and upgrades it in place: the same port,
 // state dir and options unless flags say otherwise, the new node and cli, a restart, and a
-// wait until the receiver answers with the new version. A plist under our label that runs
-// something else is left alone.
+// wait until the receiver answers with the new version. A service whose file is already
+// this one but whose receiver answers with another version is restarted too: the package
+// was replaced under it (`npm i -g` over the same prefix) and the process still runs the
+// old code. An older sessionpipe-gui does not put itself in place of a newer one that runs
+// from elsewhere unless `--downgrade` says so. A plist under our label that runs
+// something else is left alone. `--if-installed` (the desktop app's own check on launch)
+// only ever upgrades: with no service of ours there it does nothing.
 //
 // Everything outside the process (the platform, HOME, the uid, launchctl / systemctl, the
 // port probe) comes in through `ServiceEnv`, so tests run against a temp HOME and a fake
@@ -30,6 +35,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { DEFAULT_PORT } from "../../shared/api.js";
+import { compareVersions } from "../../shared/version.js";
 import { packageVersion } from "../config.js";
 import { pidAlive, readRunFile, readRunFileRaw, removeRunFile, runFilePath } from "../runfile.js";
 import { launchAgentPath, launchAgentPlist, parseLaunchctlPrint, plistArgv } from "./launchd.js";
@@ -62,6 +68,10 @@ export interface ServiceOptions {
   /** Receiver options after `--`, passed on to the service as they are. */
   extra?: string[];
   dryRun?: boolean;
+  /** Let an older sessionpipe-gui replace a newer service that runs from elsewhere. */
+  downgrade?: boolean;
+  /** Upgrade a service of ours when there is one; never install one. */
+  ifInstalled?: boolean;
 }
 
 export interface ExecResult {
@@ -510,7 +520,12 @@ async function install(o: ServiceOptions, env: ServiceEnv): Promise<number> {
 
   // A service under our label already: ours is upgraded in place; anything else is refused.
   const inst = readInstalled(env);
-  if (inst || managerState(env).loaded) {
+  const loaded = inst !== null || managerState(env).loaded;
+  if (!loaded && o.ifInstalled) {
+    env.out(`no service ${env.label} installed: nothing to do`);
+    return 0;
+  }
+  if (loaded) {
     if (inst && isOurs(inst.argv, env.cli)) return upgrade(o, env, inst);
     env.err(
       inst
@@ -614,12 +629,15 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
     return 1;
   }
   const running = who === "gui" ? await env.running(port) : undefined;
-  if (same && running !== undefined) {
+  // The same file answering with this version: nothing to do. The same file answering
+  // with another version: the files at that cli path are this very CLI, so the process is
+  // a stale one (the package was replaced under it), and it is restarted below.
+  if (same && running === env.version) {
     env.out(`already running ${running} on ${url}`);
     return 0;
   }
   // The same service, up but not answering yet (a big board loading): leave it to it.
-  if (same && managerState(env).running && !o.dryRun) {
+  if (same && running === undefined && managerState(env).running && !o.dryRun) {
     env.out(`already installed ${env.label}; it is starting`);
     if (env.waitMs > 0) {
       const verdict = await waitForReceiver(env, { port, state, version: env.version });
@@ -630,6 +648,14 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
   }
   const from = running ?? readRunFileRaw(state)?.version;
   const change = `${env.label}: ${from && from !== env.version ? `${from} → ` : ""}${env.version}`;
+  // Another cli in the file, at a newer version than this one: putting this one there is a
+  // downgrade, done only when asked for.
+  if (!same && from && compareVersions(from, env.version) > 0 && !o.downgrade) {
+    env.err(
+      `${o.dryRun ? "would refuse: " : ""}${env.label} runs ${from}, newer than this sessionpipe-gui (${env.version}): left as it is. \`service install\` from ${from} or later keeps it; --downgrade puts ${env.version} in its place`,
+    );
+    return 1;
+  }
 
   if (!taskCarries(env, argv, state, o.dryRun)) return 1;
   const text = serviceText(env, argv, state);

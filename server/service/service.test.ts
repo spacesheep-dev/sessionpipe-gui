@@ -471,6 +471,118 @@ describe("service install upgrades a service of ours in place", () => {
     expect(calls().filter((l) => l.startsWith("bootout"))).toEqual([]);
   });
 
+  it("restarts the same service when it answers with another version (the package was replaced under it), and waits for this one", async () => {
+    // Installed by this cli at this path; then `npm i -g` put 0.6.0 over 0.5.0 there, and
+    // the old process still runs: the same file, another version answering.
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, env())).toBe(0);
+    const file = launchAgentPath(home, SERVICE_LABEL);
+    const before = readFileSync(file, "utf8");
+    writeFileSync(log, "");
+    out = [];
+    const e = env({ waitMs: 3000 }, "gui", ["0.5.0", "0.5.0", undefined, "0.6.0"]);
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([
+      `bootout gui/501/${SERVICE_LABEL}`,
+      `bootstrap gui/501 ${file}`,
+    ]);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
+    expect(out).toContain(`updated ${SERVICE_LABEL}: 0.5.0 → 0.6.0 (~/Library/LaunchAgents/${SERVICE_LABEL}.plist)`);
+    expect(out.at(-1)).toBe(`running 0.6.0 on http://127.0.0.1:7829 · state ${state}`);
+    expect(errs).toEqual([]);
+    // A newer version answering from the same file is as stale: the files there are this
+    // CLI (an older one put back over it), so it is restarted too, with no version order.
+    writeFileSync(log, "");
+    out = [];
+    expect(await runService({ verb: "install", port: 7829, state }, env({}, "gui", "0.9.0"))).toBe(0);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.9.0 → 0.6.0`);
+    expect(calls().filter((l) => l.startsWith("bootstrap"))).toEqual([`bootstrap gui/501 ${file}`]);
+  });
+
+  it("--dry-run says it would restart a stale one, and touches nothing", async () => {
+    const state = path.join(dir, "s");
+    await runService({ verb: "install", port: 7829, state }, env());
+    writeFileSync(log, "");
+    out = [];
+    expect(await runService({ verb: "install", port: 7829, state, dryRun: true }, env({}, "gui", "0.5.0"))).toBe(0);
+    expect(out.at(-1)).toBe(
+      `dry run: nothing written or restarted; it would update ${SERVICE_LABEL}: 0.5.0 → 0.6.0 on http://127.0.0.1:7829`,
+    );
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([]);
+  });
+
+  it("an older CLI leaves a newer service that runs from elsewhere alone, unless --downgrade", async () => {
+    const state = path.join(dir, "state");
+    const file = oldPlist(["--port", "7373", "--state", state, "--quiet"], state);
+    const before = readFileSync(file, "utf8");
+    // The service runs 0.9.0 from another path; this CLI is 0.6.0.
+    expect(await runService({ verb: "install" }, env({}, "gui", "0.9.0"))).toBe(1);
+    expect(errs).toEqual([
+      `${SERVICE_LABEL} runs 0.9.0, newer than this sessionpipe-gui (0.6.0): left as it is. \`service install\` from 0.9.0 or later keeps it; --downgrade puts 0.6.0 in its place`,
+    ]);
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([]);
+    // The same with a port change, a dry run, and a service that isn't answering (run.json says).
+    errs = [];
+    expect(await runService({ verb: "install", port: 7374, dryRun: true }, env({}, "gui", "0.9.0"))).toBe(1);
+    expect(errs[0]).toMatch(/^would refuse: .* runs 0\.9\.0, newer than this sessionpipe-gui \(0\.6\.0\)/);
+    writeRunFile(state, { port: 7373, pid: 999_999, version: "0.10.1", url: "http://127.0.0.1:7373", startedAt: "x" });
+    errs = [];
+    expect(await runService({ verb: "install" }, env({}, null))).toBe(1);
+    expect(errs[0]).toContain("runs 0.10.1, newer than this sessionpipe-gui (0.6.0)");
+    expect(readFileSync(file, "utf8")).toBe(before);
+    // Asked for: it is replaced, and the line says which way it went.
+    out = [];
+    errs = [];
+    const e = env({ waitMs: 2000 }, "gui", ["0.9.0", "0.6.0"]);
+    expect(await runService({ verb: "install", downgrade: true }, e)).toBe(0);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.9.0 → 0.6.0`);
+    expect(plistArgv(readFileSync(file, "utf8")).slice(0, 2)).toEqual([e.node, e.cli]);
+    expect(errs).toEqual([]);
+  });
+
+  it("a re-install with other --port/--state/--host by the same version, or a newer one, is not a downgrade", async () => {
+    const state = path.join(dir, "state");
+    const file = oldPlist(["--port", "7373", "--state", state, "--quiet"], state);
+    // Another cli at the same version (an npx cache and a global install of one release).
+    expect(await runService({ verb: "install", port: 7374, host: "0.0.0.0" }, env({}, "gui", "0.6.0"))).toBe(0);
+    expect(plistArgv(readFileSync(file, "utf8"))).toContain("7374");
+    // And a newer CLI over it, with a state change.
+    const other = path.join(dir, "other");
+    expect(
+      await runService({ verb: "install", state: other }, env({ version: "0.7.0", cli: OLD_CLI }, "gui", "0.6.0")),
+    ).toBe(0);
+    expect(plistArgv(readFileSync(file, "utf8"))).toContain(other);
+    expect(errs).toEqual([]);
+  });
+
+  it("--if-installed upgrades a service of ours and installs none", async () => {
+    // Nothing installed: nothing written, nothing run, exit 0, whatever answers on the port.
+    expect(await runService({ verb: "install", ifInstalled: true }, env({}, "gui", "0.5.0"))).toBe(0);
+    expect(out).toEqual([`no service ${SERVICE_LABEL} installed: nothing to do`]);
+    expect(existsSync(launchAgentPath(home, SERVICE_LABEL))).toBe(false);
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([]);
+    // Ours there, older: upgraded as by a plain install, on the port and state it had.
+    const state = path.join(dir, "state");
+    const file = oldPlist(["--port", "7380", "--state", state, "--quiet"], state);
+    out = [];
+    expect(await runService({ verb: "install", ifInstalled: true }, env({}, "gui", "0.5.0"))).toBe(0);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
+    expect(installedOptions(plistArgv(readFileSync(file, "utf8")))).toMatchObject({ port: 7380, state });
+    // Someone else's plist under our label: still refused.
+    const theirs = launchAgentPlist({
+      label: SERVICE_LABEL,
+      argv: ["/usr/bin/python3", "/Users/m/own/server.py"],
+      env: {},
+      logPath: "/tmp/x.log",
+      workingDirectory: "/tmp",
+    });
+    writeFileSync(file, theirs);
+    expect(await runService({ verb: "install", ifInstalled: true }, env())).toBe(1);
+    expect(readFileSync(file, "utf8")).toBe(theirs);
+  });
+
   it("leaves the same service alone while it is still starting, and waits for it", async () => {
     const e = env({ waitMs: 2000 }, null, [undefined, undefined, "0.6.0"]);
     const state = path.join(dir, "s");
@@ -567,6 +679,21 @@ describe("service install upgrades a service of ours in place", () => {
     expect(out).toContain(
       "updated dev.spacesheep.sessionpipe-gui: 0.4.1 → 0.6.0 (~/.config/systemd/user/dev.spacesheep.sessionpipe-gui.service)",
     );
+  });
+
+  it("on Linux: the same unit answering with another version is restarted", async () => {
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, env({ platform: "linux" }))).toBe(0);
+    writeFileSync(log, "");
+    out = [];
+    const e = env({ platform: "linux", waitMs: 2000 }, "gui", ["0.5.0", "0.6.0"]);
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    expect(calls().filter((c) => !c.startsWith("--user show"))).toEqual([
+      "--user daemon-reload",
+      `--user restart ${SERVICE_LABEL}.service`,
+    ]);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
+    expect(out.at(-1)).toBe(`running 0.6.0 on http://127.0.0.1:7829 · state ${state}`);
   });
 });
 
@@ -1010,8 +1137,28 @@ describe("service on Windows", () => {
     expect(taskArgv(readFileSync(path.join(dir, "task.xml"), "utf8"))[1]).toContain("AppData");
   });
 
+  it("restarts the same task when its receiver answers with another version: the old receiver stopped, the task run again", async () => {
+    const e = win();
+    const state = path.join(dir, "s");
+    await runService({ verb: "install", port: 7829, state }, e);
+    writeRunFile(state, { port: 7829, pid: 778, version: "0.5.0", url: "http://127.0.0.1:7829", startedAt: "now" });
+    proc(778, receiverLine(e, state));
+    writeFileSync(log, "");
+    out = [];
+    expect(await runService({ verb: "install" }, win({ waitMs: 2000 }, "gui", ["0.5.0", "0.6.0"]))).toBe(0);
+    expect(calls().filter((c) => !c.includes("/Query"))).toEqual([
+      `schtasks /Create /TN ${name} /XML ${path.join(state, "service-task.xml")} /F`,
+      `schtasks /End /TN ${name}`,
+      "taskkill /PID 778 /T /F",
+      `schtasks /Run /TN ${name}`,
+    ]);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
+    expect(out.at(-1)).toBe(`running 0.6.0 on http://127.0.0.1:7829 · state ${state}`);
+    expect(existsSync(path.join(state, "run.json"))).toBe(false);
+  });
+
   it("knows the task 0.8.0 installed (no /v:off) as ours: left alone while it answers with the same options, rewritten with /v:off when install next changes it", async () => {
-    const e = win({}, "gui", "0.8.0");
+    const e = win({ version: "0.8.0" }, "gui", "0.8.0");
     const state = path.join(dir, "s");
     const argv = [e.node, e.cli, "--port", "7829", "--state", state, "--quiet"];
     const v080 = taskXml({
@@ -1034,7 +1181,7 @@ describe("service on Windows", () => {
     out = [];
     expect(await runService({ verb: "status" }, e)).toBe(0);
     expect(out).toContain("port      7829");
-    expect(await runService({ verb: "install", port: 7830 }, win({}, null))).toBe(0);
+    expect(await runService({ verb: "install", port: 7830 }, win({ version: "0.8.0" }, null))).toBe(0);
     const now = readFileSync(path.join(dir, "task.xml"), "utf8");
     expect(now).toContain("<Arguments>--headless cmd.exe /d /v:off /c &gt;&gt; ");
     expect(taskArgv(now)).toEqual([e.node, e.cli, "--port", "7830", "--state", state, "--quiet"]);
