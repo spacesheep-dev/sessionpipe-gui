@@ -73,6 +73,12 @@ export interface Control {
     account: (account: { origin: string; email: string } | null) => void;
     /** The unsettled job ids of the connected account, lowest first. */
     pending: () => number[];
+    /** How soon the jobs are worth reading again (state.remoteJobsCadence). */
+    cadence: () => "fast" | "slow" | "none";
+    /** The relay brought events for these sessions (`harness:id`). */
+    eventsSeen: (keys: Iterable<string>) => void;
+    /** Who reads the jobs at once when one is worth reading now. */
+    onKick: (f: () => void) => void;
     applyJobs: (
       jobs: Array<{
         id: number;
@@ -199,6 +205,11 @@ export function createControl(deps: ControlDeps): Control {
       drop: (via) => state.dropRemoteMachines(via),
       account: (account) => state.setRemoteAccount(account),
       pending: () => state.pendingRemoteJobs(),
+      cadence: () => state.remoteJobsCadence(),
+      eventsSeen: (keys) => state.remoteEventsSeen(keys),
+      onKick: (f) => {
+        state.onRemoteKick = f;
+      },
       applyJobs: (jobs, through, serverNow) => state.applyRemoteJobs(jobs, through, serverNow),
     },
     machines() {

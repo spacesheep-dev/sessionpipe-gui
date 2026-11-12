@@ -179,4 +179,44 @@ describe("the spacesheep source's status", () => {
     await settle();
     expect(polls).toBe(1);
   });
+
+  it("reads the jobs door at the pace it is told, and at once on a kick", async () => {
+    let jobs = 0;
+    let pace: "fast" | "slow" | "none" = "slow";
+    dir = mkdtempSync(path.join(tmpdir(), "spgui-ss-"));
+    const store = { dir, ingest: () => ({ accepted: 0 }), setLoading: () => {} } as unknown as Store;
+    const fetch = (async (u: string | URL) => {
+      await new Promise((r) => setTimeout(r, 2));
+      if (String(u).includes("/jobs")) {
+        jobs++;
+        return json({ jobs: [] });
+      }
+      if (String(u).includes("/machines")) return json({ machines: [] });
+      await new Promise((r) => setTimeout(r, 50));
+      return json({ events: [], next: 0, oldest: null, protocol: 1 });
+    }) as typeof globalThis.fetch;
+    src = startSpacesheepSource(store, {
+      origin: ORIGIN,
+      key: "ss_x",
+      email: "me@x",
+      connectedAt: "",
+      fetch,
+      pendingJobs: () => [1],
+      jobsCadence: () => pace,
+      onJobs: () => {},
+    });
+    // Slow: nothing within the first few seconds' worth of a fast pace.
+    await settle();
+    expect(jobs).toBe(0);
+    src.kickJobs();
+    await settle();
+    expect(jobs).toBe(1);
+    pace = "fast";
+    src.kickJobs();
+    src.kickJobs();
+    await settle();
+    // Two kicks while one read is out: that one and one more, not three.
+    expect(jobs).toBeGreaterThanOrEqual(2);
+    expect(jobs).toBeLessThanOrEqual(3);
+  });
 });

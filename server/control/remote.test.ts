@@ -376,4 +376,43 @@ describe("remote machines in the control state", () => {
     );
     expect(state.activityById(row.id)?.outcome).toBe("expired");
   });
+
+  it("says how soon the jobs are worth reading, and asks for a read at once when one is", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let kicks = 0;
+    state.onRemoteKick = () => kicks++;
+    expect(state.remoteJobsCadence()).toBe("none");
+    state.setRemoteAccount(account);
+    expect(kicks).toBe(1);
+    state.upsertRemoteMachines([listed({ online: false })], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 40);
+    // Right after a send: read now, and fast for a minute.
+    expect(kicks).toBe(2);
+    expect(state.remoteJobsCadence()).toBe("fast");
+    // Then, waiting for a computer shown offline: slow.
+    vi.setSystemTime(Date.parse(row.at) + 61_000);
+    expect(state.remoteJobsCadence()).toBe("slow");
+    // Events for another session change nothing; for its session, read now.
+    state.remoteEventsSeen(["claude-code:someone-else"]);
+    expect(kicks).toBe(2);
+    state.remoteEventsSeen(["claude-code:abc"]);
+    expect(kicks).toBe(3);
+    // Its computer comes online: read now, and fast while it is.
+    state.upsertRemoteMachines([listed({ online: false })], remote);
+    expect(kicks).toBe(3);
+    state.upsertRemoteMachines([listed({ online: true })], remote);
+    expect(kicks).toBe(4);
+    expect(state.remoteJobsCadence()).toBe("fast");
+    state.upsertRemoteMachines([listed({ online: false })], remote);
+    expect(state.remoteJobsCadence()).toBe("slow");
+    // Taken: fast. Settled: nothing to read.
+    state.applyRemoteJobs([{ id: 40, status: "running", note: null, done_at: null, created_at: Date.parse(row.at) }]);
+    expect(state.remoteJobsCadence()).toBe("fast");
+    state.applyRemoteJobs([
+      { id: 40, status: "done", note: null, done_at: Date.now(), created_at: Date.parse(row.at) },
+    ]);
+    expect(state.remoteJobsCadence()).toBe("none");
+  });
 });

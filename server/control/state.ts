@@ -78,6 +78,8 @@ const PAIRING_TTL_MS = 3600_000;
  *  is still "queued" (or there is none) this long after the day is it called expired here
  *  (applyRemoteJobs): clocks, a computer's late poll. */
 export const REMOTE_GRACE_MS = 3600_000;
+/** A send this young is read for at the fast pace, whatever its computer shows. */
+export const REMOTE_JUST_SENT_MS = 60_000;
 /** The code of a spacesheep-carried row this receiver can no longer follow: the account
  *  that carried it is not the one connected (disconnected, or another account), or its
  *  machine was not on the account's list when it was read again after a restart. */
@@ -392,6 +394,9 @@ export class ControlState {
   /** Called when any machine row changed (pairing, hello, poll, removal) or a machine's
    *  online reading flipped, so the UI can refresh its machine list without an event. */
   onMachines: () => void = () => {};
+  /** A spacesheep job is worth reading now (a send just made, its computer back, events for
+   *  its session, the account connected): the source reads the jobs door at once. */
+  onRemoteKick: () => void = () => {};
   private onlineSig = "";
   /** The spacesheep account read through now (remoteAccountKey), or null when none is. */
   private remoteAccount: string | null = null;
@@ -455,6 +460,7 @@ export class ControlState {
   upsertRemoteMachines(list: RemoteMachine[], remote: { via: "spacesheep"; origin: string; rpId: string }): void {
     const seen = new Set<string>();
     let changed = false;
+    let kick = false;
     for (const r of list) {
       if (!MACHINE_RE.test(r.id)) continue;
       seen.add(r.id);
@@ -494,6 +500,8 @@ export class ControlState {
       }
       this.applyFacts(m, facts);
       m.pairedAt = m.pairedAt ?? nowIso();
+      // A computer with a send waiting for it came online: read the jobs now.
+      if (r.online && m.remote?.online === false && this.followedFor(m.id)) kick = true;
       m.remote = {
         ...remote,
         online: !!r.online,
@@ -529,6 +537,42 @@ export class ControlState {
       });
     if (changed) this.checkOnline();
     this.onMachines();
+    if (kick) this.onRemoteKick();
+  }
+
+  /** Whether any send this account follows waits on machine `id`. */
+  private followedFor(id: string): boolean {
+    return (this.queues.get(id) ?? []).some((row) => this.followed(row));
+  }
+
+  /** How soon spacesheep's jobs door is worth reading again (sources/spacesheep.ts):
+   *  `fast` while a followed send was just made, was taken, or waits for a computer the
+   *  machine list shows online; `slow` while every one waits for a computer shown offline
+   *  (nothing can move until it comes back, and its coming back is a kick); `none` when
+   *  nothing is followed. */
+  remoteJobsCadence(now = Date.now()): "fast" | "slow" | "none" {
+    let any = false;
+    for (const [id, rows] of this.queues)
+      for (const row of rows) {
+        if (!this.followed(row)) continue;
+        any = true;
+        if (row.outcome === "taken" || now - Date.parse(row.at) < REMOTE_JUST_SENT_MS) return "fast";
+        if (this.machinesById.get(id)?.remote?.online !== false) return "fast";
+      }
+    return any ? "slow" : "none";
+  }
+
+  /** The relay brought events (`harness:id` keys): one for a session a followed send names
+   *  means it moved there, so the jobs are read now. */
+  remoteEventsSeen(keys: Iterable<string>): void {
+    const set = new Set(keys);
+    if (!set.size) return;
+    for (const [, rows] of this.queues)
+      for (const row of rows)
+        if (this.followed(row) && set.has(row.session)) {
+          this.onRemoteKick();
+          return;
+        }
   }
 
   /** Disconnected: the rows paired there leave the board. */
@@ -545,6 +589,7 @@ export class ControlState {
    *  waits for that account's machine list (upsertRemoteMachines). */
   setRemoteAccount(account: { origin: string; email: string } | null): void {
     this.remoteAccount = account ? remoteAccountKey(account) : null;
+    if (this.remoteAccount) this.onRemoteKick();
     this.eachRemoteRow((row) => {
       if (this.remoteAccount && row.remoteAccount !== undefined && row.remoteAccount !== this.remoteAccount)
         return this.untracked(row);
@@ -595,6 +640,7 @@ export class ControlState {
     row.remoteJob = remoteJob;
     if (this.remoteAccount) row.remoteAccount = this.remoteAccount;
     this.saveQueue(m.id);
+    this.onRemoteKick();
     return row;
   }
 

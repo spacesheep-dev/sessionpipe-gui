@@ -35,7 +35,18 @@ export interface SpacesheepSourceOptions {
    *  spacesheep's own time from the answer's Date (undefined without one). */
   pendingJobs?: () => number[];
   onJobs?: (jobs: RelayJob[], through: number, serverNow?: number) => void;
+  /** How soon the jobs door is worth reading again: `fast` every JOBS_FAST_MS, `slow`
+   *  every JOBS_SLOW_MS (every send waits for a computer shown offline), `none` (nothing to
+   *  read). Absent: fast. kickJobs reads at once whatever it says. */
+  jobsCadence?: () => "fast" | "slow" | "none";
+  /** The sessions (`harness:id`) a relay page brought events for. */
+  onEvents?: (keys: string[]) => void;
 }
+
+/** The jobs door's pace: while a send was just made, is taken, or its computer is online. */
+export const JOBS_FAST_MS = 3000;
+/** ...and while every send waits for a computer the machine list shows offline. */
+export const JOBS_SLOW_MS = 45_000;
 
 export interface SpacesheepSource {
   stop(): void;
@@ -49,6 +60,8 @@ export interface SpacesheepSource {
   /** spacesheep refused the key elsewhere (a send's 401): the source stops as its own poll
    *  would on one, so the status says so at the same moment. */
   unauthorized(): void;
+  /** Read the jobs door now (a send just made, its computer back, events for its session). */
+  kickJobs(): void;
 }
 
 /** One job as the relay's jobs door lists it (spacesheep's `relay/jobs`). */
@@ -190,6 +203,8 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
     for (const e of page.events) if (!eventProblem(e)) valid.push(e as ProtocolEvent);
     let taken = 0;
     if (valid.length) taken = store.ingest(valid, "spacesheep").accepted;
+    if (valid.length && opts.onEvents)
+      opts.onEvents([...new Set(valid.map((e) => `${e.harness.name}:${e.session.id}`))]);
     events += taken;
     const c = cursorAfter(cursor, page);
     if (c.gap) gapBefore = page.oldest;
@@ -245,13 +260,36 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
       /* next tick */
     }
   };
+  // One read at a time; a kick while one is out reads again right after it.
+  let jobsBusy = false;
+  let jobsAgain = false;
+  const runJobs = async (): Promise<void> => {
+    if (jobsBusy) {
+      jobsAgain = true;
+      return;
+    }
+    jobsBusy = true;
+    try {
+      do {
+        jobsAgain = false;
+        await jobsPoll();
+      } while (jobsAgain && !stopped);
+    } finally {
+      jobsBusy = false;
+    }
+    scheduleJobs();
+  };
   const scheduleJobs = (): void => {
     if (stopped) return;
-    jobsTimer = setTimeout(async () => {
-      await jobsPoll();
-      scheduleJobs();
-    }, 3000);
+    if (jobsTimer) clearTimeout(jobsTimer);
+    const pace = opts.jobsCadence?.() ?? "fast";
+    jobsTimer = setTimeout(() => void runJobs(), pace === "slow" ? JOBS_SLOW_MS : JOBS_FAST_MS);
     jobsTimer.unref();
+  };
+  const kickJobs = (): void => {
+    if (stopped) return;
+    if (jobsTimer) clearTimeout(jobsTimer);
+    void runJobs();
   };
   scheduleJobs();
 
@@ -319,6 +357,7 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
     pollJobs: jobsPoll,
     pollMachines: machinesPoll,
     unauthorized: revoked,
+    kickJobs,
   };
 }
 

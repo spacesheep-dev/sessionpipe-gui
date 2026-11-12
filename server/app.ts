@@ -296,12 +296,15 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
         // by the relay's word on spacesheep's jobs.
         onMachines: (list, origin, rpId) => control.remote.upsert(list as never, { via: "spacesheep", origin, rpId }),
         pendingJobs: () => control.remote.pending(),
+        jobsCadence: () => control.remote.cadence(),
+        onEvents: (keys) => control.remote.eventsSeen(keys),
         onJobs: (jobs, through, serverNow) => control.remote.applyJobs(jobs, through, serverNow),
       });
     } catch (e) {
       if (!opts.quiet) process.stderr.write(`[sessionpipe-gui] spacesheep: ${(e as Error).message}\n`);
     }
   };
+  control.remote.onKick(() => spacesheep?.kickJobs());
   if (config.spacesheep) startSpacesheep(config.spacesheep);
   // No link: what spacesheep carried before can't be followed (kept from before a restart).
   else control.remote.account(null);

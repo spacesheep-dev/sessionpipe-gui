@@ -28,6 +28,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   day as `unconfirmed` and is no longer read, rather than "Starting…" for ever. A job's
   age is spacesheep's: its own `created_at` against the time spacesheep's answer carries,
   so a clock here that jumps ends nothing early.
+- **Waiting sends through spacesheep are read for at a slower pace.** The job list was read
+  every 3 seconds whatever the send waited for (about 200 reads in 10 minutes, now for up
+  to a day). While every waiting send is queued for a computer the machine list shows
+  offline it is read every 45 seconds (about 13 in 10 minutes), and at once after a send,
+  when that computer shows online and when events for that session arrive; every 3
+  seconds only while a send is taken, just made, or its computer is online.
 - **A refusal through spacesheep keeps its reason.** Where spacesheep's job list says why a
   job ended (`code`: the computer's own refusal code, `cancelled`, `expired`), the row takes
   it, so the words for a folder, a permission level, a start limit or a model are the ones
