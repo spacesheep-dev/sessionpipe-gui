@@ -5,7 +5,7 @@
 // workflow arrives whole on PUT and is read here (readWorkflow): what breaks the contract
 // is refused with the route's status, never patched up. A broken file is set aside, never
 // lost, and read as empty.
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   START_PERMISSIONS,
@@ -234,9 +234,21 @@ export class OrchestrateStore {
       }
     }
     const rf = readJson(this.runsFile) as Partial<RunsFile> | null;
+    let leftOut = rf !== null && !Array.isArray(rf?.runs);
     for (const raw of Array.isArray(rf?.runs) ? rf.runs : []) {
       const run = readRun(raw);
       if (run && !this.runList.some((r) => r.id === run.id)) this.runList.push(run);
+      else leftOut = true;
+    }
+    // A run left out would be gone at the next write: the file as it was is set aside
+    // first (never lost, as readJson does), then rewritten with the runs that read.
+    if (leftOut) {
+      try {
+        copyFileSync(this.runsFile, `${this.runsFile}.bad-${Date.now()}`);
+        this.commitRuns();
+      } catch {
+        // not set aside: the file is left as it is
+      }
     }
   }
 

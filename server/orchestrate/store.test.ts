@@ -235,6 +235,13 @@ describe("OrchestrateStore", () => {
     writeFileSync(file, JSON.stringify({ v: 1, runs: [bad, good] }));
     const store = new OrchestrateStore(tmp.dir);
     expect(store.runs().map((r) => r.id)).toEqual([GOOD]);
+    // The file as it was is set aside, so the run left out is not lost.
+    const aside = readdirSync(tmp.dir).filter((f) => f.startsWith("workflow-runs.json.bad-"));
+    expect(aside).toHaveLength(1);
+    expect(JSON.parse(readFileSync(path.join(tmp.dir, aside[0]!), "utf8")).runs).toEqual([bad, good]);
+    // A second start finds nothing to set aside.
+    expect(new OrchestrateStore(tmp.dir).runs().map((r) => r.id)).toEqual([GOOD]);
+    expect(readdirSync(tmp.dir).filter((f) => f.startsWith("workflow-runs.json.bad-"))).toHaveLength(1);
     // The next write keeps the good run whole; the one left out is not written back.
     store.putRun(run("01K8RUN000000000000000AAAA", "done", NOW));
     expect(new OrchestrateStore(tmp.dir).run(GOOD)).toEqual(good);
@@ -242,6 +249,18 @@ describe("OrchestrateStore", () => {
       GOOD,
       "01K8RUN000000000000000AAAA",
     ]);
+  });
+
+  it("sets aside a runs file whose runs are not a list, and keeps one where every run reads as it is", () => {
+    const file = path.join(tmp.dir, "workflow-runs.json");
+    writeFileSync(file, JSON.stringify({ v: 1, runs: { not: "a list" } }));
+    expect(new OrchestrateStore(tmp.dir).runs()).toEqual([]);
+    expect(readdirSync(tmp.dir).filter((f) => f.startsWith("workflow-runs.json.bad-"))).toHaveLength(1);
+    const whole = `${JSON.stringify({ v: 1, runs: [good] })}\n`;
+    writeFileSync(file, whole);
+    new OrchestrateStore(tmp.dir);
+    expect(readFileSync(file, "utf8")).toBe(whole);
+    expect(readdirSync(tmp.dir).filter((f) => f.startsWith("workflow-runs.json.bad-"))).toHaveLength(1);
   });
 
   it("keeps at most RUNS_MAX runs, dropping the oldest ended ones first", () => {

@@ -14,7 +14,7 @@ All notable changes to `sessionpipe-gui`. The format follows
   tick, and the server exited about a second after every start. Such a run, and one whose
   plan names a step it does not have or after one that is not before it, is now left out
   when the file is read, as a workflow that no longer reads already is; the other runs are
-  kept.
+  kept, and the file as it was is set aside as `workflow-runs.json.bad-<time>`.
 - **A send to a computer reached through spacesheep outlives a restart.** Its row was
   deleted when the app started, because such a computer is never saved here: a start
   waiting for an offline computer then read "No such session here", and ran anyway when the
