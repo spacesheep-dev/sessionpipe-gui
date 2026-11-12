@@ -24,12 +24,24 @@ export type Feature =
   | "signer"
   | "vibrancy"
   | "haptics"
-  | "scanner";
+  | "scanner"
+  /** The `acct_*` commands are here, and a spacesheep account can be the receiver. */
+  | "account"
+  /** The shell takes the page's needs-you list for an account (`acct_needs`). */
+  | "account-needs";
 export interface ShellReceiver {
   id: string;
   name: string;
   origin: string;
   local: boolean;
+  /** A spacesheep account (docs/rfcs/08, "The phone on an account"): no receiver is behind
+   *  `rxBase`, only the account's doors, and the page carries its own board. Absent for a
+   *  receiver. */
+  kind?: "spacesheep";
+  /** Whose account, for display. */
+  email?: string;
+  /** `ok`, `unauthorized` or `no_key`, as the window opened. */
+  state?: string;
 }
 export interface ShellInfo {
   v: 1;
@@ -53,6 +65,8 @@ const FEATURES: readonly string[] = [
   "vibrancy",
   "haptics",
   "scanner",
+  "account",
+  "account-needs",
 ];
 const str = (v: unknown): v is string => typeof v === "string";
 
@@ -63,9 +77,21 @@ export function parseShell(raw: unknown): ShellInfo | null {
   const r = raw as Record<string, unknown>;
   if (r.v !== 1 || !str(r.platform) || !PLATFORMS.includes(r.platform)) return null;
   const x = r.receiver as Record<string, unknown> | null | undefined;
-  const receiver =
+  const receiver: ShellReceiver | null =
     x && typeof x === "object" && str(x.id) && x.id && str(x.origin)
-      ? { id: x.id, name: str(x.name) && x.name ? x.name : x.id, origin: x.origin, local: x.local === true }
+      ? {
+          id: x.id,
+          name: str(x.name) && x.name ? x.name : x.id,
+          origin: x.origin,
+          local: x.local === true,
+          ...(x.kind === "spacesheep"
+            ? {
+                kind: "spacesheep" as const,
+                ...(str(x.email) ? { email: x.email } : {}),
+                ...(str(x.state) ? { state: x.state } : {}),
+              }
+            : {}),
+        }
       : null;
   return {
     v: 1,

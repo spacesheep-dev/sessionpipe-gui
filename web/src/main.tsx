@@ -7,7 +7,8 @@ import { App } from "./app";
 import { StoreContext } from "./data/hooks";
 import { watchResume } from "./data/resume";
 import { Store } from "./data/store";
-import { createHttpTransport } from "./data/transport";
+import { createHttpTransport, type Transport } from "./data/transport";
+import { accountMode } from "./lib/net";
 import { applySettings } from "./lib/theme";
 // The stylesheets, one per surface, in cascade order. They land after every component's
 // own CSS (select, menu, palette, control…), which is why they come after ./app: keep
@@ -51,8 +52,17 @@ async function boot() {
   // Inside the native app: its adapter first (it may put up the welcome instead).
   const native = "sessionpipeShell" in window ? await import("./native/shell") : null;
   if (native && (await native.start())) return;
-  const transport = isMockMode() ? (await import("./mock/index")).createMockTransport() : createHttpTransport();
-  if (isMockMode()) (await import("./mock/banner")).showDemoBanner();
+  // The receiver this window shows is a spacesheep account (the shell's contract says so,
+  // and only it): there is no receiver to ask, and the page carries its own board
+  // (account/). Its code is loaded here and nowhere else.
+  const account = accountMode() ? await (await import("./account/start")).startAccount() : null;
+  const mock = !account && isMockMode();
+  const transport: Transport = account
+    ? account.transport
+    : mock
+      ? (await import("./mock/index")).createMockTransport()
+      : createHttpTransport();
+  if (mock) (await import("./mock/banner")).showDemoBanner();
   const store = new Store(transport);
   store.start();
   watchResume(store);
