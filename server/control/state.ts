@@ -82,6 +82,8 @@ export const REMOTE_GRACE_MS = 3600_000;
  *  that carried it is not the one connected (disconnected, or another account), or its
  *  machine was not on the account's list when it was read again after a restart. */
 export const UNTRACKED_CODE = "untracked";
+/** A code as spacesheep's jobs door may carry it: a word, as a computer's ack codes are. */
+const REMOTE_CODE_RE = /^[a-z][a-z0-9_]{0,39}$/;
 /** The one name of a spacesheep account here: its origin and the email it is signed in as. */
 export const remoteAccountKey = (a: { origin: string; email: string }): string => `${a.origin} ${a.email}`;
 /** A device request (a phone's own passkey waiting for a trusted device's `key.add`) lives
@@ -607,7 +609,14 @@ export class ControlState {
    *  not listed at all, past spacesheep's day and REMOTE_GRACE_MS is expired here, since
    *  spacesheep can no longer hand it out. */
   applyRemoteJobs(
-    jobs: Array<{ id: number; status: string; note: string | null; done_at: number | null; created_at: number }>,
+    jobs: Array<{
+      id: number;
+      status: string;
+      note: string | null;
+      code?: string | null;
+      done_at: number | null;
+      created_at: number;
+    }>,
     through = 0,
   ): number {
     let n = 0;
@@ -633,8 +642,20 @@ export class ControlState {
           row.outcome = "taken";
           row.takenAt = nowIso();
         } else {
-          row.outcome = j.status === "done" ? "delivered" : j.status === "refused" ? "refused" : "failed";
+          // spacesheep ≥ the `code` field: the computer's refusal code as it acked it,
+          // `cancelled` for a start called off before it was taken, `expired` for one that ran
+          // out. Without it (an older spacesheep) the status alone, and no code is guessed.
+          const code = typeof j.code === "string" && REMOTE_CODE_RE.test(j.code) ? j.code : undefined;
+          row.outcome =
+            j.status === "done"
+              ? "delivered"
+              : code === "expired"
+                ? "expired"
+                : j.status === "refused"
+                  ? "refused"
+                  : "failed";
           row.ackedAt = j.done_at ? new Date(j.done_at).toISOString() : nowIso();
+          if (code && row.outcome !== "delivered" && row.outcome !== "expired") row.code = code;
           if (j.note) row.detail = j.note;
         }
         changed = true;

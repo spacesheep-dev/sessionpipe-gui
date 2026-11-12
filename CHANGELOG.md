@@ -21,6 +21,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   lists as waiting, or no longer lists, is called expired here only an hour past
   spacesheep's day, when spacesheep can no longer hand it out. The job list is read past a
   job that waits for days, so a newer send's word is never out of reach.
+- **A refusal through spacesheep keeps its reason.** Where spacesheep's job list says why a
+  job ended (`code`: the computer's own refusal code, `cancelled`, `expired`), the row takes
+  it, so the words for a folder, a permission level, a start limit or a model are the ones
+  a computer reached directly gets, and a start that ran out reads as one that expired.
+  Against a spacesheep without the field nothing is guessed from its note.
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH

@@ -269,4 +269,34 @@ describe("remote machines in the control state", () => {
     expect(state.applyRemoteJobs([], Number.POSITIVE_INFINITY)).toBe(1);
     expect(state.activityById(row.id)?.outcome).toBe("expired");
   });
+
+  it("copies spacesheep's code onto the row, and guesses none where it sends none", () => {
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const send = (job: number) => {
+      const cmd = startCmd(m.id, `claude-code:s${job}`);
+      return state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, job);
+    };
+    const rows = [20, 21, 22, 23, 24, 25].map(send);
+    const note = (s: string) => ({ note: s, done_at: Date.now(), created_at: 1 });
+    state.applyRemoteJobs([
+      { id: 20, status: "refused", code: "folder", ...note("That session's folder isn't allowed.") },
+      { id: 21, status: "refused", code: "cancelled", ...note("called off by its owner before the machine took it") },
+      { id: 22, status: "failed", code: "expired", ...note("expired before the machine took it") },
+      { id: 23, status: "failed", code: "model", ...note("no such model") },
+      // An older spacesheep: no code, and none is read off the note.
+      { id: 24, status: "refused", ...note("called off by its owner before the machine took it") },
+      { id: 25, status: "refused", code: "Not A Code!", ...note("x") },
+    ]);
+    const a = rows.map((r) => state.activityById(r.id)!);
+    expect(a[0]).toMatchObject({ outcome: "refused", code: "folder" });
+    expect(a[1]).toMatchObject({ outcome: "refused", code: "cancelled" });
+    expect(a[2]).toMatchObject({ outcome: "expired", detail: "expired before the machine took it" });
+    expect(a[2]!.code).toBeUndefined();
+    expect(a[3]).toMatchObject({ outcome: "failed", code: "model", detail: "no such model" });
+    expect(a[4]).toMatchObject({ outcome: "refused", detail: "called off by its owner before the machine took it" });
+    expect(a[4]!.code).toBeUndefined();
+    expect(a[5]!.code).toBeUndefined();
+  });
 });

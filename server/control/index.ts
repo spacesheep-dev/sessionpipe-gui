@@ -74,7 +74,14 @@ export interface Control {
     /** The unsettled job ids of the connected account, lowest first. */
     pending: () => number[];
     applyJobs: (
-      jobs: Array<{ id: number; status: string; note: string | null; done_at: number | null; created_at: number }>,
+      jobs: Array<{
+        id: number;
+        status: string;
+        note: string | null;
+        code?: string | null;
+        done_at: number | null;
+        created_at: number;
+      }>,
       through?: number,
     ) => number;
   };

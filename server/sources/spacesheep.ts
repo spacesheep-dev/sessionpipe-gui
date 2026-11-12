@@ -52,6 +52,9 @@ export interface RelayJob {
   id: number;
   status: string;
   note: string | null;
+  /** Why it ended as it did, when spacesheep says (a computer's refusal code, `cancelled`,
+   *  `expired`); absent on a spacesheep from before the field. */
+  code?: string | null;
   done_at: number | null;
   created_at: number;
 }
