@@ -292,6 +292,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const showPermission = levels.length >= 2;
   const showModel = !!opts && (!!opts.anyModel || !!opts.models?.length);
   const takesFiles = c?.files === true;
+  // Reached through spacesheep: no file can be carried there yet (server/control/state.ts).
+  const relayed = !!c?.remote;
   const listsFolders = !!c?.folders?.length;
   const folderCheck = machine
     ? typedFolder(folder, { folders: c?.folders, home: machineHome(c), machine })
@@ -349,6 +351,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   // ----- files: 📎, paste, drop; uploaded here, named by hash in the signed command -----
   const addFiles = (list: File[]) => {
     if (!list.length) return;
+    if (relayed) return;
     if (!takesFiles) {
       setNote(`${machine ?? "This machine"} can't take files on a new session. Update sessionpipe there.`);
       return;

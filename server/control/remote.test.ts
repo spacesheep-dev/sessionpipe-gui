@@ -32,6 +32,7 @@ describe("remote machines in the control state", () => {
     modes: ["waiter"],
     passkey_ids: ["k1", "k2"],
     files: true,
+    prompt_files: true,
     key_types: ["passkey", "device"],
     ask: true,
     handoff: true,
@@ -54,6 +55,9 @@ describe("remote machines in the control state", () => {
     const c = state.machineControl(m);
     expect(c.online).toBe(true);
     expect(c.remote).toEqual({ via: "spacesheep", origin: "https://spacesheep.dev", rpId: "spacesheep.dev" });
+    // The computer takes files, but no file can be carried through spacesheep: none is offered.
+    expect(c.files).toBeUndefined();
+    expect(c.promptFiles).toBeUndefined();
     // Offline there, offline here; gone there, gone here. Never written to machines.json.
     state.upsertRemoteMachines([listed({ online: false, passkey_ids: ["k1"] })], remote);
     expect(state.machineControl(state.machine("m_0123456789abcdefghij")!).online).toBe(false);

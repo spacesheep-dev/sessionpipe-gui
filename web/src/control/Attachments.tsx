@@ -154,6 +154,8 @@ export interface AttachmentsHandle {
   dragging: boolean;
   /** The session runs on this machine (null until Info arrived). */
   local: boolean | null;
+  /** Images may be attached here at all (`localOnly` and not this machine: no). */
+  offered: boolean;
   add(files: Iterable<Blob>): void;
   remove(key: string): void;
   clear(): void;
@@ -169,13 +171,18 @@ export interface AttachmentsHandle {
   };
 }
 
-export function useAttachments(o: { machine?: string; enabled?: boolean }): AttachmentsHandle {
+/** `localOnly`: the images are offered only when the session runs on this machine, where
+ *  the block names files on this disk; a computer reached through spacesheep could be
+ *  sent no URL it can open (control/ControlStrip). */
+export function useAttachments(o: { machine?: string; enabled?: boolean; localOnly?: boolean }): AttachmentsHandle {
   const [items, setItems] = useState<PendingItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [hostname, setHostname] = useState<string | undefined | null>(null);
   const seq = useRef(0);
-  const enabled = o.enabled !== false;
+  const local = hostname === null ? null : isThisMachine(o.machine, hostname);
+  const offered = !o.localOnly || local === true;
+  const enabled = o.enabled !== false && offered;
   const itemsRef = useRef(items);
   itemsRef.current = items;
 
@@ -246,7 +253,6 @@ export function useAttachments(o: { machine?: string; enabled?: boolean }): Atta
   }, []);
 
   const uploading = items.some((it) => !it.attachment && !it.error);
-  const local = hostname === null ? null : isThisMachine(o.machine, hostname);
 
   const compose = useCallback(
     (message: string): ComposeResult | null => {
@@ -308,7 +314,7 @@ export function useAttachments(o: { machine?: string; enabled?: boolean }): Atta
     [add, enabled],
   );
 
-  return { items, uploading, error, dragging, local, add, remove, clear, compose, handlers };
+  return { items, uploading, error, dragging, local, offered, add, remove, clear, compose, handlers };
 }
 
 // ---------- the pieces a composer places ----------

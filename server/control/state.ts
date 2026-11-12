@@ -462,8 +462,11 @@ export class ControlState {
         folders: r.folders ?? undefined,
         mode: r.mode === "auto" || r.mode === "inherit" || r.mode === "safe" ? r.mode : undefined,
         accounts: [],
-        files: !!r.files,
-        promptFiles: !!r.prompt_files,
+        // A file a send names lives on this disk (control/files), and spacesheep checks its
+        // own store for it: through spacesheep there is no way to carry one yet, whatever
+        // the computer takes, so none is offered (the page reads these).
+        files: false,
+        promptFiles: false,
         keyTypes: r.key_types?.includes("device") ? ["passkey", "device"] : ["passkey"],
         ask: r.ask,
         handoff: !!r.handoff,

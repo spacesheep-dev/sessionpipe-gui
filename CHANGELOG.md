@@ -26,6 +26,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   it, so the words for a folder, a permission level, a start limit or a model are the ones
   a computer reached directly gets, and a start that ran out reads as one that expired.
   Against a spacesheep without the field nothing is guessed from its note.
+- **No attachment is offered for a computer reached through spacesheep.** A start's file
+  stayed on this app's disk, spacesheep looked for it in its own store and refused the
+  start, and the person was told to add the file again. The new session sheet no longer
+  offers files there, and a session's message box offers images only when that computer is
+  this one (the block names files on this disk), until there is a way to carry one.
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH
