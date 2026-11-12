@@ -18,13 +18,13 @@ import {
   verifyEnrollment,
 } from "sessionpipe-core/control";
 import { type ControlActivity, START_FILE_MAX_BYTES, type StartFile, type TrustedKey } from "../../shared/api.js";
-import { cleanReason } from "../../shared/reason.js";
 import type { Ctx, Handler, Reply, Router } from "../http/router.js";
 import { HttpError } from "../http/router.js";
 import { MEDIA_TYPE_RE } from "./files.js";
 import { CODE_RE, MACHINE_RE, SESSION_REF } from "./parse.js";
 import { looksLikePool, verifyPoolCommand } from "./pool.js";
 import { filesProblem, precheck, type Refusal } from "./precheck.js";
+import { forwardRemoteSend, RELAY_FILES, type RemoteSend, SendRefused, SPACESHEEP_UNAUTHORIZED } from "./remote.js";
 import { requestOrigin } from "./routes.js";
 import {
   type ControlState,
@@ -46,10 +46,7 @@ export interface UiRouteDeps {
   device: boolean;
   /** A send for a machine paired on spacesheep (docs/rfcs/08): the signed body goes to
    *  spacesheep's jobs route as this account; the answer is its job id, or why not. */
-  remoteSend?: (
-    m: MachineRow,
-    body: Record<string, unknown>,
-  ) => Promise<{ status: number; json: Record<string, unknown> }>;
+  remoteSend?: RemoteSend;
 }
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
@@ -270,78 +267,23 @@ export async function verifySend(d: Pick<UiRouteDeps, "state" | "rpId">, raw: un
   };
 }
 
-/** The code of a send spacesheep refused because it no longer takes this app's key. */
-export const SPACESHEEP_UNAUTHORIZED = "spacesheep_unauthorized";
-/** The code of a send for a spacesheep computer that names files: none can be carried there. */
-export const RELAY_FILES = "relay_files";
+export { RELAY_FILES, SPACESHEEP_UNAUTHORIZED };
 
-/** A send for a machine paired on spacesheep: not verified here (its keys are ids only,
- *  its rp id is spacesheep's), carried to spacesheep's jobs route, which verifies it
- *  against the machine's keys and queues it; the row here follows the job's status.
- *  spacesheep's refusals come back in the shape the page already reads (422 + code). */
+/** A send for a machine paired on spacesheep (remote.ts forwardRemoteSend): its row as the
+ *  page reads one, or spacesheep's refusal in the shape the page already reads (422 + code). */
 async function forwardSend(
   state: ControlState,
   m: MachineRow,
   body: Record<string, unknown>,
   remoteSend: UiRouteDeps["remoteSend"],
 ): Promise<Reply> {
-  if (!remoteSend) throw new HttpError(503, { reason: "no_relay", error: "Not connected to spacesheep any more." });
-  if (typeof body.cmd !== "string")
-    throw new HttpError(400, { reason: "bad_request", error: "cmd is the signed command string." });
-  let cmd: ControlCommand;
   try {
-    cmd = JSON.parse(body.cmd) as ControlCommand;
-  } catch {
-    throw new HttpError(400, { reason: "bad_request", error: "cmd is not JSON." });
+    return { status: 201, json: toActivity(await forwardRemoteSend(state, m, body, remoteSend)) };
+  } catch (e) {
+    if (e instanceof SendRefused) throw new HttpError(e.status, e.body);
+    throw e;
   }
-  // A file a send names is held on this disk, and spacesheep looks for it in its own store:
-  // none can be carried there yet (the pages offer none), so a page that sends one is told
-  // here, before spacesheep answers that it "didn't finish uploading".
-  const files = (cmd as ControlCommand & { files?: unknown }).files;
-  if (Array.isArray(files) && files.length)
-    throw new HttpError(422, { reason: `Files can't be sent to ${m.name} through spacesheep yet.`, code: RELAY_FILES });
-  const signed: SignedCommand = { cmd: body.cmd };
-  if (typeof body.csig === "string") signed.csig = body.csig;
-  if (body.grant && typeof body.grant === "object") signed.grant = body.grant as SignedCommand["grant"];
-  if (body.confirm && typeof body.confirm === "object") signed.confirm = body.confirm as SignedCommand["confirm"];
-  const r = await remoteSend(m, {
-    cmd: signed.cmd,
-    csig: signed.csig ?? null,
-    grant: signed.grant ?? null,
-    confirm: signed.confirm ?? null,
-  });
-  if (r.status === 202) {
-    const job = Number(r.json.job);
-    const row = state.enqueueRemote(
-      m,
-      signed,
-      cmd,
-      { via: "ui", ...(typeof body.from === "string" ? { from: body.from } : {}) },
-      job,
-    );
-    return { status: 201, json: toActivity(row) };
-  }
-  const code = String(r.json.code ?? "");
-  // spacesheep's words, passed on as text the page can show (shared/reason.ts).
-  const error = cleanReason(r.json.error) || "spacesheep did not take it";
-  // The second look there wants a fresh tap: the same word the page knows from a machine,
-  // and spacesheep's reason (`why`) as the detail the page's held notice shows.
-  if (r.status === 409 && code === "confirm")
-    throw new HttpError(422, { reason: error, code: "confirm_required", ...whyOf(r.json) });
-  if (r.status === 401 && code === "unlock") throw new HttpError(422, { reason: error, code: "bad_grant" });
-  // Any other 401 is spacesheep refusing this app's key (revoked there), not the page's own
-  // key: its own code, never the 401 a page reads as "this page lost its key".
-  if (r.status === 401) throw new HttpError(502, { reason: error, code: SPACESHEEP_UNAUTHORIZED });
-  if (r.status === 400 && (code === "bad" || code === "unlock"))
-    throw new HttpError(422, { reason: error, code: String(r.json.refusal ?? "untrusted_key") });
-  throw new HttpError(r.status >= 500 ? 502 : r.status, { reason: error, code: code || "refused" });
 }
-
-/** spacesheep's reason for a hold, cleaned, when it gave one. */
-const whyOf = (j: Record<string, unknown>): { detail?: string } => {
-  const why = cleanReason(j.why);
-  return why ? { detail: why } : {};
-};
 
 /** Queue a verified command for its machine (synchronous): the activity row as the page reads it. */
 export function queueSend(state: ControlState, v: VerifiedSend): ControlActivity {

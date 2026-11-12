@@ -14,6 +14,7 @@ import type {
   HarnessAccount,
   HarnessStartOptions,
   KeyType,
+  MachineControl,
   MachineMode,
   MachinePool,
   POOL_SESSION,
@@ -338,4 +339,155 @@ export function describePool(cmd: PoolCommand, names: (id: string) => string = (
     case "login.complete":
       return "Finish signing in";
   }
+}
+
+/** The pairing request's or hello's facts about the machine (name, harnesses, folders, mode, accounts). */
+export function applyFacts(m: MachineRow, h: Hello): void {
+  if (h.name) m.name = h.name;
+  if (h.harnesses.length) m.harnesses = h.harnesses;
+  if (h.modes.length) m.modes = h.modes;
+  if (h.version) m.version = h.version;
+  if (h.folders) m.folders = h.folders;
+  if (h.mode) m.mode = h.mode;
+  if (h.accounts.length) m.accounts = h.accounts;
+  // Said again in every hello (CONTROL.md §2): absent now means absent.
+  if (h.files) m.files = true;
+  else delete m.files;
+  if (h.promptFiles) m.promptFiles = true;
+  else delete m.promptFiles;
+  if (h.start) m.start = h.start;
+  else delete m.start;
+  if (h.keyTypes) m.keyTypes = h.keyTypes;
+  else delete m.keyTypes;
+  if (h.pool) m.pool = h.pool;
+  else delete m.pool;
+  if (h.ask !== undefined) m.ask = h.ask;
+  else delete m.ask;
+  if (h.handoff) m.handoff = true;
+  else delete m.handoff;
+}
+
+/** A machine as the UI reads it. `queued`: how many of its messages are not finally acked;
+ *  `tilde`: whoever verifies its commands takes a start's `~/…` folder, and so does it
+ *  (control/tilde.ts). */
+export function machineControl(m: MachineRow, o: { queued: number; tilde: boolean }): MachineControl {
+  const c: MachineControl = {
+    machineId: m.id,
+    online: m.remote ? m.remote.online : !!m.lastPollAt && Date.now() - Date.parse(m.lastPollAt) < ONLINE_WINDOW_MS,
+    ...(m.remote ? { remote: { via: m.remote.via, origin: m.remote.origin, rpId: m.remote.rpId } } : {}),
+    keys: m.keys.map((k) => ({
+      id: k.id,
+      alg: k.alg,
+      ...(k.type === "device" ? { type: k.type } : {}),
+      ...(k.name ? { name: k.name } : {}),
+      addedAt: k.addedAt,
+    })),
+    queued: o.queued,
+  };
+  if (m.lastPollAt) c.lastPollAt = m.lastPollAt;
+  if (m.lastHelloAt) c.lastHelloAt = m.lastHelloAt;
+  if (m.mode) c.mode = m.mode;
+  if (m.folders) c.folders = m.folders;
+  if (m.harnesses.length) c.harnesses = m.harnesses;
+  if (m.modes.length) c.modes = m.modes;
+  if (m.version) c.version = m.version;
+  if (m.accounts) c.accounts = m.accounts;
+  if (m.files) c.files = true;
+  if (m.promptFiles) c.promptFiles = true;
+  if (o.tilde) c.tilde = true;
+  if (m.start) c.start = m.start;
+  if (m.keyTypes) c.keyTypes = m.keyTypes;
+  if (m.pool) c.pool = m.pool;
+  if (m.ask !== undefined) c.ask = m.ask;
+  if (m.handoff) c.handoff = true;
+  return c;
+}
+
+/** The row of a carried command: what the receiver keeps of it and the UI reads (never
+ *  more of the signature than it came with). `id` is the row's own (a ULID at `now`). */
+export function messageRow(
+  m: MachineRow,
+  signed: SignedCommand,
+  cmd: ControlCommand,
+  o: { expiresInMs?: number; via: string; from?: string; id: string; now: number },
+): MessageRow {
+  const now = o.now;
+  const ttl = Math.min(EXPIRES_MAX_MS, Math.max(1000, o.expiresInMs ?? EXPIRES_DEFAULT_MS));
+  const row: MessageRow = {
+    id: o.id,
+    machineId: m.id,
+    cmd: signed.cmd,
+    at: new Date(now).toISOString(),
+    expiresAt: new Date(now + ttl).toISOString(),
+    kind: cmd.kind,
+    session: cmd.session,
+    via: o.via,
+  };
+  if (signed.csig) row.csig = signed.csig;
+  if (signed.grant) row.grant = signed.grant;
+  if (signed.confirm) row.confirm = signed.confirm;
+  const text =
+    (cmd.kind as string) === "pool"
+      ? describePool(cmd as unknown as PoolCommand, (id) => accountName(m, id))
+      : describe(cmd);
+  if (text !== undefined) row.text = text;
+  if ((cmd.kind as string) === "pool") {
+    const c = cmd as unknown as PoolCommand;
+    row.poolAction = c.pool_action;
+    if (c.pool_account) row.poolAccount = c.pool_account;
+  }
+  if (o.from) row.from = o.from;
+  // A handoff (CONTROL.md §3.1): the session the daemon relays the answer into. Inside the
+  // signed bytes; the caller's second look (ui.ts) held it to the machine's hello.
+  const replyTo = (cmd as ControlCommand & { reply_to?: unknown }).reply_to;
+  if ((cmd.kind === "prompt" || cmd.kind === "start") && typeof replyTo === "string") row.replyTo = replyTo;
+  if (cmd.kind === "start") {
+    // The fields a start may carry beyond core 0.7's type (CONTROL.md §3.1); the caller's
+    // pre-check (ui.ts) already held them to the machine's hello.
+    const c = cmd as ControlCommand & { files?: StartFile[]; permission?: StartPermission; model?: string };
+    if (typeof c.cwd === "string") row.cwd = c.cwd;
+    if (c.permission) row.permission = c.permission;
+    if (c.model) row.model = c.model;
+    if (Array.isArray(c.files) && c.files.length) {
+      row.files = c.files.map((f) => ({ name: f.name, type: f.type, size: f.size, sha256: f.sha256 }));
+    }
+  }
+  return row;
+}
+
+/** What the person calls a pooled account on this machine: its pool label, else its
+ *  email (from the pool or the hello's accounts), else the id as it is. */
+export function accountName(m: MachineRow, id: string): string {
+  const pooled = m.pool?.accounts.find((a) => a.id === id);
+  if (pooled?.label) return pooled.label;
+  if (pooled?.email) return pooled.email;
+  const named = m.accounts?.find((a) => a.id === id);
+  return named?.email ?? named?.name ?? id;
+}
+
+/** What a queue keeps: every message not finally acked, and those that are for a week,
+ *  KEEP_SETTLED at most, in id order. */
+export function keptQueue(q: MessageRow[], now: number): MessageRow[] {
+  const live = q.filter((m) => !isFinal(m.outcome));
+  const settled = q
+    .filter((m) => isFinal(m.outcome) && now - Date.parse(m.ackedAt ?? m.at) < SETTLED_TTL_MS)
+    .slice(-KEEP_SETTLED);
+  return [...live, ...settled].sort((a, b) => (a.id < b.id ? -1 : 1));
+}
+
+/** The carried commands of every queue as the UI reads them, newest first. */
+export function activity(queues: Map<string, MessageRow[]>, limit = 100): ControlActivity[] {
+  const all: MessageRow[] = [];
+  for (const q of queues.values()) all.push(...q);
+  all.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  return all.slice(0, Math.max(0, limit)).map(toActivity);
+}
+
+/** One carried command by its id, whichever machine's queue holds it. */
+export function activityById(queues: Map<string, MessageRow[]>, id: string): ControlActivity | undefined {
+  for (const q of queues.values()) {
+    const row = q.find((m) => m.id === id);
+    if (row) return toActivity(row);
+  }
+  return undefined;
 }

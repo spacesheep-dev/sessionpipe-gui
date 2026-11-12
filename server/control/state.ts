@@ -18,42 +18,28 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, w
 import path from "node:path";
 import { ulid } from "sessionpipe-core";
 import type { ControlCommand, SignedCommand } from "sessionpipe-core/control";
-import type {
-  Applied,
-  ControlActivity,
-  ControlOutcome,
-  MachineControl,
-  StartFile,
-  StartPermission,
-  TrustedKey,
-} from "../../shared/api.js";
+import type { Applied, ControlActivity, ControlOutcome, MachineControl, TrustedKey } from "../../shared/api.js";
 import { FileStore } from "./files.js";
 import { type AckIn, type Hello, isFinal, MACHINE_RE } from "./parse.js";
-import type { PoolCommand } from "./pool.js";
+import { type RemoteJobWord, RemoteSlice } from "./remote.js";
 import {
-  describe,
-  describePool,
+  activity,
+  activityById,
+  applyFacts,
   EXPIRES_DEFAULT_MS,
-  EXPIRES_MAX_MS,
   isRemoteRow,
-  KEEP_SETTLED,
   type KeyRow,
+  keptQueue,
   keyOf,
   type MachineRow,
   type MessageRow,
+  machineControl,
+  messageRow,
   nowIso,
   ONLINE_WINDOW_MS,
   type PairingRow,
   type Proof,
-  REMOTE_CODE_RE,
-  REMOTE_GRACE_MS,
-  REMOTE_JUST_SENT_MS,
   type RemoteMachine,
-  remoteAccountKey,
-  SETTLED_TTL_MS,
-  toActivity,
-  UNTRACKED_CODE,
-  type Unfollowed,
 } from "./rows.js";
 import { machineTakesTilde } from "./tilde.js";
 
@@ -168,12 +154,17 @@ export class ControlState {
    *  its session, the account connected): the source reads the jobs door at once. */
   onRemoteKick: () => void = () => {};
   private onlineSig = "";
-  /** The spacesheep account read through now (remoteAccountKey), or null when none is. */
-  private remoteAccount: string | null = null;
-  /** The connected account's key was refused (SpacesheepSource unauthorized). */
-  private remoteRevoked = false;
-  /** Closed rows' job ids to read once more (recheckRemote). */
-  private recheck = new Set<number>();
+  /** The machines and sends of a spacesheep account (remote.ts), over this state's rows. */
+  private readonly remote: RemoteSlice = new RemoteSlice({
+    machines: this.machinesById,
+    queues: this.queues,
+    enqueue: (m, signed, cmd, o) => this.enqueue(m, signed, cmd, o),
+    saveQueue: (id) => this.saveQueue(id),
+    onMessage: (row) => this.onMessage(row),
+    onMachines: () => this.onMachines(),
+    checkOnline: () => this.checkOnline(),
+    onRemoteKick: () => this.onRemoteKick(),
+  });
 
   constructor(readonly dir: string) {
     this.files = new FileStore(path.join(dir, "files"));
@@ -227,222 +218,27 @@ export class ControlState {
   }
 
   // --- machines paired elsewhere (docs/rfcs/08: a spacesheep account as the backend) ---
+  // Their rows are in this state's maps and its queue files; what is done with them is
+  // the slice's (remote.ts), the same one a page with no receiver under it runs.
 
-  /** The relay's machine list, as rows: created or refreshed in memory, with the facts
-   *  spacesheep's hellos kept and the keys it trusts (ids only; the signature is the
-   *  receiver's check). Rows the list no longer has go. */
   upsertRemoteMachines(list: RemoteMachine[], remote: { via: "spacesheep"; origin: string; rpId: string }): void {
-    const seen = new Set<string>();
-    let changed = false;
-    let kick = false;
-    for (const r of list) {
-      if (!MACHINE_RE.test(r.id)) continue;
-      seen.add(r.id);
-      const facts: Hello = {
-        name: r.name,
-        harnesses: r.agents ?? [],
-        modes: r.modes ?? [],
-        version: r.cli_version ?? "",
-        folders: r.folders ?? undefined,
-        mode: r.mode === "auto" || r.mode === "inherit" || r.mode === "safe" ? r.mode : undefined,
-        accounts: [],
-        // A file a send names lives on this disk (control/files), and spacesheep checks its
-        // own store for it: through spacesheep there is no way to carry one yet, whatever
-        // the computer takes, so none is offered (the page reads these).
-        files: false,
-        promptFiles: false,
-        keyTypes: r.key_types?.includes("device") ? ["passkey", "device"] : ["passkey"],
-        ask: r.ask,
-        handoff: !!r.handoff,
-        start: r.start,
-        pool: r.pool ?? undefined,
-      } as unknown as Hello;
-      let m = this.machinesById.get(r.id);
-      if (!m) {
-        m = {
-          id: r.id,
-          name: r.name,
-          createdAt: nowIso(),
-          keys: [],
-          harnesses: facts.harnesses,
-          modes: facts.modes,
-          version: facts.version,
-          pairings: [],
-        };
-        this.machinesById.set(r.id, m);
-        changed = true;
-      }
-      this.applyFacts(m, facts);
-      m.pairedAt = m.pairedAt ?? nowIso();
-      // A computer with a send waiting for it came online: read the jobs now.
-      if (r.online && m.remote?.online === false && this.followedFor(m.id)) kick = true;
-      m.remote = {
-        ...remote,
-        online: !!r.online,
-        lastSeen: r.last_seen ? new Date(r.last_seen).toISOString() : undefined,
-      };
-      m.lastHelloAt = m.remote.lastSeen;
-      const keys = (r.passkey_ids ?? []).map((id) => ({ id, alg: -7, spki: "", addedAt: nowIso() }));
-      if (keys.map((k) => k.id).join() !== m.keys.map((k) => k.id).join()) {
-        m.keys = keys;
-        changed = true;
-      }
-    }
-    for (const m of [...this.machinesById.values()]) {
-      if (m.remote?.via === remote.via && !seen.has(m.id)) {
-        this.machinesById.delete(m.id);
-        changed = true;
-      }
-    }
-    // The rows kept from before a restart that predate their account's name: those whose
-    // machine is on this list are this account's, the rest can't be followed any more.
-    // A row of this account whose machine left the list stays: spacesheep settles its job
-    // (a removed computer's waiting jobs are refused there).
-    if (this.remoteAccount)
-      this.eachRemoteRow((row) => {
-        if (row.remoteAccount !== undefined) return false;
-        if (seen.has(row.machineId)) {
-          row.remoteAccount = this.remoteAccount!;
-          delete row.unfollowed;
-          this.onMessage(row);
-          return true;
-        }
-        return this.untracked(row);
-      });
-    if (changed) this.checkOnline();
-    this.onMachines();
-    if (kick) this.onRemoteKick();
+    this.remote.upsertRemoteMachines(list, remote);
   }
-
-  /** Whether any send this account follows waits on machine `id`. */
-  private followedFor(id: string): boolean {
-    return (this.queues.get(id) ?? []).some((row) => this.followed(row));
-  }
-
-  /** How soon spacesheep's jobs door is worth reading again (sources/spacesheep.ts):
-   *  `fast` while a followed send was just made, was taken, or waits for a computer the
-   *  machine list shows online; `slow` while every one waits for a computer shown offline
-   *  (nothing can move until it comes back, and its coming back is a kick); `none` when
-   *  nothing is followed. */
   remoteJobsCadence(now = Date.now()): "fast" | "slow" | "none" {
-    let any = false;
-    for (const [id, rows] of this.queues)
-      for (const row of rows) {
-        if (!this.followed(row)) continue;
-        any = true;
-        if (row.outcome === "taken" || now - Date.parse(row.at) < REMOTE_JUST_SENT_MS) return "fast";
-        if (this.machinesById.get(id)?.remote?.online !== false) return "fast";
-      }
-    return any ? "slow" : "none";
+    return this.remote.remoteJobsCadence(now);
   }
-
-  /** The relay brought events (`harness:id` keys): one for a session a followed send names
-   *  means it moved there, so the jobs are read now. */
   remoteEventsSeen(keys: Iterable<string>): void {
-    const set = new Set(keys);
-    if (!set.size) return;
-    const closed: MessageRow[] = [];
-    let kick = false;
-    for (const [, rows] of this.queues)
-      for (const row of rows) {
-        if (!set.has(row.session)) continue;
-        if (this.followed(row)) kick = true;
-        else if (this.reopenable(row)) closed.push(row);
-      }
-    if (closed.length) this.recheckRemote(closed);
-    else if (kick) this.onRemoteKick();
+    this.remote.remoteEventsSeen(keys);
   }
-
-  /** Disconnected: the rows paired there leave the board. */
   dropRemoteMachines(via: "spacesheep"): void {
-    for (const m of [...this.machinesById.values()]) if (m.remote?.via === via) this.machinesById.delete(m.id);
-    this.onMachines();
+    this.remote.dropRemoteMachines(via);
   }
-
-  /** The spacesheep account this receiver reads through from now (connected, started with
-   *  a link), or null (disconnected, started without one). With none, every waiting row
-   *  stays as it is, marked not followed (`unfollowed`): the same account connecting again
-   *  picks it up and spacesheep's list settles it. Only another account connecting settles
-   *  the rows it can't speak for, as untracked. A row from before the account was named
-   *  waits for that account's machine list (upsertRemoteMachines). */
   setRemoteAccount(account: { origin: string; email: string } | null): void {
-    this.remoteAccount = account ? remoteAccountKey(account) : null;
-    // A connect is a new key: whatever the last one was refused for is over.
-    this.remoteRevoked = false;
-    if (this.remoteAccount) this.onRemoteKick();
-    // Its own rows that were closed for want of an account: an untracked one waits again
-    // (spacesheep's list settles it), an unconfirmed one is read once more.
-    const again: MessageRow[] = [];
-    if (this.remoteAccount)
-      for (const [id, rows] of this.queues) {
-        let changed = false;
-        for (const row of rows) {
-          if (!isRemoteRow(row) || row.remoteAccount !== this.remoteAccount) continue;
-          if (row.outcome === "failed" && row.code === UNTRACKED_CODE) {
-            delete row.outcome;
-            delete row.code;
-            delete row.ackedAt;
-            changed = true;
-            this.onMessage(row);
-          } else if (row.outcome === "unconfirmed") again.push(row);
-        }
-        if (changed) this.saveQueue(id);
-      }
-    this.recheckRemote(again);
-    this.eachRemoteRow((row) => {
-      if (this.remoteAccount && row.remoteAccount !== undefined && row.remoteAccount !== this.remoteAccount)
-        return this.untracked(row);
-      return this.markFollowing(row);
-    });
+    this.remote.setRemoteAccount(account);
   }
-
-  /** spacesheep refused this app's key (the relay's 401, a send's): nothing is read until
-   *  the account connects again, so the waiting rows say they are not followed. */
   setRemoteRevoked(on: boolean): void {
-    if (this.remoteRevoked === on) return;
-    this.remoteRevoked = on;
-    this.eachRemoteRow((row) => this.markFollowing(row));
+    this.remote.setRemoteRevoked(on);
   }
-
-  /** A waiting row's `unfollowed` mark as things stand: no account (or not yet known to be
-   *  the connected one's) is `disconnected`; the connected account's key refused, `revoked`. */
-  private markFollowing(row: MessageRow): boolean {
-    const want: Unfollowed | undefined =
-      !this.remoteAccount || row.remoteAccount === undefined
-        ? "disconnected"
-        : this.remoteRevoked
-          ? "revoked"
-          : undefined;
-    const had = row.unfollowed === true ? "disconnected" : row.unfollowed;
-    if (had === want) return false;
-    if (want) row.unfollowed = want;
-    else delete row.unfollowed;
-    this.onMessage(row);
-    return true;
-  }
-
-  /** Each unsettled row spacesheep carried; `f` says whether it changed the row. */
-  private eachRemoteRow(f: (row: MessageRow) => boolean): void {
-    for (const [id, rows] of this.queues) {
-      let changed = false;
-      for (const row of rows) if (isRemoteRow(row) && !isFinal(row.outcome) && f(row)) changed = true;
-      if (changed) this.saveQueue(id);
-    }
-  }
-
-  /** A spacesheep-carried row nothing here can follow: settled, saying so by its code, so
-   *  the page stops waiting for it. Whether it ran is spacesheep's to tell, not ours. */
-  private untracked(row: MessageRow): true {
-    delete row.unfollowed;
-    row.outcome = "failed";
-    row.code = UNTRACKED_CODE;
-    row.ackedAt = nowIso();
-    this.onMessage(row);
-    return true;
-  }
-
-  /** A send spacesheep carried for a remote machine: its row here, settled by the relay's
-   *  job status (applyRemoteJobs), never by a poll of this receiver. */
   enqueueRemote(
     m: MachineRow,
     signed: SignedCommand,
@@ -450,145 +246,16 @@ export class ControlState {
     o: { via: string; from?: string },
     remoteJob: number,
   ): MessageRow {
-    // spacesheep's day, not the receiver's default hour: the row says when spacesheep drops it.
-    const row = this.enqueue(m, signed, cmd, {
-      via: o.via,
-      expiresInMs: EXPIRES_MAX_MS,
-      ...(o.from ? { from: o.from } : {}),
-    });
-    row.remoteJob = remoteJob;
-    if (this.remoteAccount) row.remoteAccount = this.remoteAccount;
-    this.saveQueue(m.id);
-    this.onRemoteKick();
-    return row;
+    return this.remote.enqueueRemote(m, signed, cmd, o, remoteJob);
   }
-
-  /** The spacesheep job ids still unsettled here, lowest first, for the relay's `since`:
-   *  only the connected account's (a job id means nothing on another). */
   pendingRemoteJobs(): number[] {
-    const ids: number[] = [...this.recheck];
-    for (const [, rows] of this.queues) for (const row of rows) if (this.followed(row)) ids.push(row.remoteJob!);
-    return [...new Set(ids)].sort((a, b) => a - b);
+    return this.remote.pendingRemoteJobs();
   }
-
-  /** The lowest of them, or null. */
   pendingRemoteJobsFrom(): number | null {
-    return this.pendingRemoteJobs()[0] ?? null;
+    return this.remote.pendingRemoteJobsFrom();
   }
-
-  /** An unsettled row the connected account's jobs speak for. */
-  private followed(row: MessageRow): boolean {
-    return (
-      isRemoteRow(row) && !isFinal(row.outcome) && !!this.remoteAccount && row.remoteAccount === this.remoteAccount
-    );
-  }
-
-  /** The relay's word on the jobs spacesheep carried (its status column, worded there):
-   *  queued keeps waiting, taken/running is taken, done is delivered, refused and failed
-   *  are themselves, with the note as the detail. Only spacesheep's word settles such a
-   *  row, with one exception: `through` is the highest job id the read covered (Infinity
-   *  when it reached the end of the list), and a row in that span still queued there, or
-   *  not listed at all, past spacesheep's day and REMOTE_GRACE_MS is expired here, since
-   *  spacesheep can no longer hand it out; one the computer took (taken/running there,
-   *  which spacesheep never ends by itself) is `unconfirmed`: nothing was heard since.
-   *  The age is spacesheep's: the job's own `created_at` against `serverNow` (the answer's
-   *  Date), so a clock here that jumps ends nothing early; the row's own time and this
-   *  clock only where spacesheep gave none. */
-  applyRemoteJobs(
-    jobs: Array<{
-      id: number;
-      status: string;
-      note: string | null;
-      code?: string | null;
-      done_at: number | null;
-      created_at: number;
-    }>,
-    through = 0,
-    serverNow?: number,
-  ): number {
-    let n = 0;
-    const byJob = new Map(jobs.map((j) => [j.id, j]));
-    // spacesheep's time when it said one; else this clock, and then the row's own time on
-    // this clock too (never spacesheep's created_at against this clock: two clocks).
-    const known = Number.isFinite(serverNow);
-    const now = known ? serverNow! : Date.now();
-    for (const [id, rows] of this.queues) {
-      let changed = false;
-      for (const row of rows) {
-        const j = byJob.get(row.remoteJob!);
-        if (!this.followed(row)) {
-          // Closed here as `unconfirmed` (or reopened untracked, now waiting again): a later
-          // read that lists its job as settled there says how it really went.
-          if (!this.reopenable(row) || !j || !(j.status === "done" || j.status === "refused" || j.status === "failed"))
-            continue;
-          delete row.code;
-          delete row.detail;
-        }
-        const born =
-          known && j && Number.isFinite(j.created_at) && j.created_at > 0 ? j.created_at : Date.parse(row.at);
-        const over = row.remoteJob! <= through && now - born >= EXPIRES_MAX_MS + REMOTE_GRACE_MS;
-        const taken = j ? j.status === "taken" || j.status === "running" : row.outcome === "taken";
-        if (over && (taken || !j || j.status === "queued")) {
-          // Past spacesheep's day: waiting there, it can't be handed out any more; taken,
-          // nothing will be heard of it. Either way the row stops being read.
-          row.outcome = taken ? "unconfirmed" : "expired";
-          row.ackedAt = new Date().toISOString();
-          if (!taken) row.detail = "expired before the machine took it";
-          changed = true;
-          n++;
-          this.onMessage(row);
-          continue;
-        }
-        if (!j || j.status === "queued") continue;
-        if (taken) {
-          if (row.outcome === "taken") continue;
-          row.outcome = "taken";
-          row.takenAt = nowIso();
-        } else {
-          // spacesheep ≥ the `code` field: the computer's refusal code as it acked it,
-          // `cancelled` for a start called off before it was taken, `expired` for one that ran
-          // out. Without it (an older spacesheep) the status alone, and no code is guessed.
-          const code = typeof j.code === "string" && REMOTE_CODE_RE.test(j.code) ? j.code : undefined;
-          row.outcome =
-            j.status === "done"
-              ? "delivered"
-              : code === "expired"
-                ? "expired"
-                : j.status === "refused"
-                  ? "refused"
-                  : "failed";
-          row.ackedAt = j.done_at ? new Date(j.done_at).toISOString() : nowIso();
-          if (code && row.outcome !== "delivered" && row.outcome !== "expired") row.code = code;
-          if (j.note) row.detail = j.note;
-        }
-        changed = true;
-        n++;
-        this.onMessage(row);
-      }
-      if (changed) this.saveQueue(id);
-    }
-    // The once-over reads asked for (recheckRemote) are done where this read reached.
-    for (const job of [...this.recheck]) if (byJob.has(job) || job <= through) this.recheck.delete(job);
-    return n;
-  }
-
-  /** A row this app closed for want of word, not by spacesheep's (`unconfirmed`): of the
-   *  connected account, so a read of its job may still settle it. */
-  private reopenable(row: MessageRow): boolean {
-    return (
-      isRemoteRow(row) &&
-      row.outcome === "unconfirmed" &&
-      !!this.remoteAccount &&
-      row.remoteAccount === this.remoteAccount
-    );
-  }
-
-  /** Read these closed rows' jobs once more, now (their account connected, events for their
-   *  session): job ids added to the next read's pending list, and a kick. */
-  private recheckRemote(rows: MessageRow[]): void {
-    if (!rows.length) return;
-    for (const row of rows) this.recheck.add(row.remoteJob!);
-    this.onRemoteKick();
+  applyRemoteJobs(jobs: RemoteJobWord[], through = 0, serverNow?: number): number {
+    return this.remote.applyRemoteJobs(jobs, through, serverNow);
   }
   private saveQueue(id: string): void {
     const q = this.queues.get(id);
@@ -596,12 +263,7 @@ export class ControlState {
       rmSync(this.queueFile(id), { force: true });
       return;
     }
-    const now = Date.now();
-    const live = q.filter((m) => !isFinal(m.outcome));
-    const settled = q
-      .filter((m) => isFinal(m.outcome) && now - Date.parse(m.ackedAt ?? m.at) < SETTLED_TTL_MS)
-      .slice(-KEEP_SETTLED);
-    const kept = [...live, ...settled].sort((a, b) => (a.id < b.id ? -1 : 1));
+    const kept = keptQueue(q, Date.now());
     this.queues.set(id, kept);
     writeAtomic(this.queueFile(id), { v: 1, messages: kept } satisfies QueueFile);
   }
@@ -660,30 +322,9 @@ export class ControlState {
     return m;
   }
 
-  /** The pairing request's or hello's facts about the machine (name, harnesses, folders, mode, accounts). */
+  /** The pairing request's or hello's facts about the machine (rows.ts applyFacts). */
   applyFacts(m: MachineRow, h: Hello): void {
-    if (h.name) m.name = h.name;
-    if (h.harnesses.length) m.harnesses = h.harnesses;
-    if (h.modes.length) m.modes = h.modes;
-    if (h.version) m.version = h.version;
-    if (h.folders) m.folders = h.folders;
-    if (h.mode) m.mode = h.mode;
-    if (h.accounts.length) m.accounts = h.accounts;
-    // Said again in every hello (CONTROL.md §2): absent now means absent.
-    if (h.files) m.files = true;
-    else delete m.files;
-    if (h.promptFiles) m.promptFiles = true;
-    else delete m.promptFiles;
-    if (h.start) m.start = h.start;
-    else delete m.start;
-    if (h.keyTypes) m.keyTypes = h.keyTypes;
-    else delete m.keyTypes;
-    if (h.pool) m.pool = h.pool;
-    else delete m.pool;
-    if (h.ask !== undefined) m.ask = h.ask;
-    else delete m.ask;
-    if (h.handoff) m.handoff = true;
-    else delete m.handoff;
+    applyFacts(m, h);
   }
 
   /** Mint the machine's own bearer token (once, at its first pairing). Returned in clear
@@ -727,36 +368,10 @@ export class ControlState {
   }
 
   machineControl(m: MachineRow): MachineControl {
-    const c: MachineControl = {
-      machineId: m.id,
-      online: m.remote ? m.remote.online : !!m.lastPollAt && Date.now() - Date.parse(m.lastPollAt) < ONLINE_WINDOW_MS,
-      ...(m.remote ? { remote: { via: m.remote.via, origin: m.remote.origin, rpId: m.remote.rpId } } : {}),
-      keys: m.keys.map((k) => ({
-        id: k.id,
-        alg: k.alg,
-        ...(k.type === "device" ? { type: k.type } : {}),
-        ...(k.name ? { name: k.name } : {}),
-        addedAt: k.addedAt,
-      })),
+    return machineControl(m, {
       queued: this.queued(m.id).length,
-    };
-    if (m.lastPollAt) c.lastPollAt = m.lastPollAt;
-    if (m.lastHelloAt) c.lastHelloAt = m.lastHelloAt;
-    if (m.mode) c.mode = m.mode;
-    if (m.folders) c.folders = m.folders;
-    if (m.harnesses.length) c.harnesses = m.harnesses;
-    if (m.modes.length) c.modes = m.modes;
-    if (m.version) c.version = m.version;
-    if (m.accounts) c.accounts = m.accounts;
-    if (m.files) c.files = true;
-    if (m.promptFiles) c.promptFiles = true;
-    if (this.takesTilde && machineTakesTilde(m)) c.tilde = true;
-    if (m.start) c.start = m.start;
-    if (m.keyTypes) c.keyTypes = m.keyTypes;
-    if (m.pool) c.pool = m.pool;
-    if (m.ask !== undefined) c.ask = m.ask;
-    if (m.handoff) c.handoff = true;
-    return c;
+      tilde: this.takesTilde && machineTakesTilde(m),
+    });
   }
 
   // --- pairings -------------------------------------------------------------------
@@ -858,63 +473,15 @@ export class ControlState {
     o: { expiresInMs?: number; via: string; from?: string },
   ): MessageRow {
     const now = Date.now();
-    const ttl = Math.min(EXPIRES_MAX_MS, Math.max(1000, o.expiresInMs ?? EXPIRES_DEFAULT_MS));
-    const row: MessageRow = {
-      id: ulid(now),
-      machineId: m.id,
-      cmd: signed.cmd,
-      at: new Date(now).toISOString(),
-      expiresAt: new Date(now + ttl).toISOString(),
-      kind: cmd.kind,
-      session: cmd.session,
-      via: o.via,
-    };
-    if (signed.csig) row.csig = signed.csig;
-    if (signed.grant) row.grant = signed.grant;
-    if (signed.confirm) row.confirm = signed.confirm;
-    const text =
-      (cmd.kind as string) === "pool"
-        ? describePool(cmd as unknown as PoolCommand, (id) => this.accountName(m, id))
-        : describe(cmd);
-    if (text !== undefined) row.text = text;
-    if ((cmd.kind as string) === "pool") {
-      const c = cmd as unknown as PoolCommand;
-      row.poolAction = c.pool_action;
-      if (c.pool_account) row.poolAccount = c.pool_account;
-    }
-    if (o.from) row.from = o.from;
-    // A handoff (CONTROL.md §3.1): the session the daemon relays the answer into. Inside the
-    // signed bytes; the caller's second look (ui.ts) held it to the machine's hello.
-    const replyTo = (cmd as ControlCommand & { reply_to?: unknown }).reply_to;
-    if ((cmd.kind === "prompt" || cmd.kind === "start") && typeof replyTo === "string") row.replyTo = replyTo;
-    if (cmd.kind === "start") {
-      // The fields a start may carry beyond core 0.7's type (CONTROL.md §3.1); the caller's
-      // pre-check (ui.ts) already held them to the machine's hello.
-      const c = cmd as ControlCommand & { files?: StartFile[]; permission?: StartPermission; model?: string };
-      if (typeof c.cwd === "string") row.cwd = c.cwd;
-      if (c.permission) row.permission = c.permission;
-      if (c.model) row.model = c.model;
-      if (Array.isArray(c.files) && c.files.length) {
-        row.files = c.files.map((f) => ({ name: f.name, type: f.type, size: f.size, sha256: f.sha256 }));
-        for (const f of row.files) this.files.keepUntil(f.sha256, row.expiresAt);
-      }
-    }
+    const row = messageRow(m, signed, cmd, { ...o, id: ulid(now), now });
+    // A start's files are held here until the row is over (files.ts).
+    for (const f of row.files ?? []) this.files.keepUntil(f.sha256, row.expiresAt);
     this.queue(m.id).push(row);
     this.saveQueue(m.id);
     if (cmd.kind === "key.add" && cmd.key) this.deviceSent(cmd.key.id, m.id, row.id);
     this.onMessage(row);
     this.wake(m.id);
     return row;
-  }
-
-  /** What the person calls a pooled account on this machine: its pool label, else its
-   *  email (from the pool or the hello's accounts), else the id as it is. */
-  private accountName(m: MachineRow, id: string): string {
-    const pooled = m.pool?.accounts.find((a) => a.id === id);
-    if (pooled?.label) return pooled.label;
-    if (pooled?.email) return pooled.email;
-    const named = m.accounts?.find((a) => a.id === id);
-    return named?.email ?? named?.name ?? id;
   }
 
   message(machineId: string, id: string): MessageRow | undefined {
@@ -1202,19 +769,12 @@ export class ControlState {
   }
 
   activity(limit = 100): ControlActivity[] {
-    const all: MessageRow[] = [];
-    for (const q of this.queues.values()) all.push(...q);
-    all.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
-    return all.slice(0, Math.max(0, limit)).map(toActivity);
+    return activity(this.queues, limit);
   }
 
   /** One carried command by its id, whichever machine's queue holds it; undefined once
    *  its queue is gone (the machine removed) or it was never here. */
   activityById(id: string): ControlActivity | undefined {
-    for (const q of this.queues.values()) {
-      const row = q.find((m) => m.id === id);
-      if (row) return toActivity(row);
-    }
-    return undefined;
+    return activityById(this.queues, id);
   }
 }
