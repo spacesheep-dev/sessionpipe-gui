@@ -17,27 +17,48 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { ulid } from "sessionpipe-core";
-import type { Assertion, ControlCommand, SignedCommand } from "sessionpipe-core/control";
+import type { ControlCommand, SignedCommand } from "sessionpipe-core/control";
 import type {
   Applied,
   ControlActivity,
-  ControlKind,
   ControlOutcome,
-  HarnessStartOptions,
-  KeyType,
   MachineControl,
-  MachineMode,
-  MachinePool,
-  PoolAction,
   StartFile,
   StartPermission,
   TrustedKey,
 } from "../../shared/api.js";
-import type { DeviceSignature } from "./devicekeys.js";
 import { FileStore } from "./files.js";
-import { type AckIn, type HarnessAccount, type Hello, isFinal, MACHINE_RE } from "./parse.js";
+import { type AckIn, type Hello, isFinal, MACHINE_RE } from "./parse.js";
 import type { PoolCommand } from "./pool.js";
+import {
+  describe,
+  describePool,
+  EXPIRES_DEFAULT_MS,
+  EXPIRES_MAX_MS,
+  isRemoteRow,
+  KEEP_SETTLED,
+  type KeyRow,
+  keyOf,
+  type MachineRow,
+  type MessageRow,
+  nowIso,
+  ONLINE_WINDOW_MS,
+  type PairingRow,
+  type Proof,
+  REMOTE_CODE_RE,
+  REMOTE_GRACE_MS,
+  REMOTE_JUST_SENT_MS,
+  type RemoteMachine,
+  remoteAccountKey,
+  SETTLED_TTL_MS,
+  toActivity,
+  UNTRACKED_CODE,
+  type Unfollowed,
+} from "./rows.js";
 import { machineTakesTilde } from "./tilde.js";
+
+// The rows, their constants and what reads them for the UI moved to rows.ts as they were.
+export * from "./rows.js";
 
 /** Demo mode's machines have ids under this prefix (MACHINE_RE: `m_` and 16–40 more). */
 export const DEMO_MACHINE = "m_demo-";
@@ -56,142 +77,17 @@ export interface DemoStart {
   from?: string;
 }
 
-/** The longest long-poll we hold (HTTP.md §1 control.wait_max_s). */
-export const WAIT_MAX_S = 25;
-/** A machine that polled within this is online (HTTP.md §3: 2 × wait_max_s). */
-export const ONLINE_WINDOW_MS = 2 * WAIT_MAX_S * 1000;
 /** A pairing code lives this long unapproved (CONTROL.md §2 step 3). */
 export const PAIR_TTL_MS = 10 * 60_000;
 /** A `taken` ack pauses redelivery for this long (CONTROL.md §10). */
 export const TAKEN_PAUSE_MS = 35 * 60_000;
-/** A carried message lives at most a day (§3.3); an hour when the sender says nothing. */
-export const EXPIRES_MAX_MS = 24 * 3600_000;
-export const EXPIRES_DEFAULT_MS = 3600_000;
-/** Settled messages kept per machine for the activity view. */
-const KEEP_SETTLED = 300;
-const SETTLED_TTL_MS = 7 * 86_400_000;
 /** A pairing row is forgotten this long after it expired or was handed over. */
 const PAIRING_TTL_MS = 3600_000;
-/** A send spacesheep carries is good for spacesheep's day (its CONTROL_EXPIRES_MS, the
- *  protocol's longest, §3.3), and spacesheep never hands one out older than that. Its row
- *  here takes no expiry of its own: it waits for spacesheep's word, and only when that word
- *  is still "queued" (or there is none) this long after the day is it called expired here
- *  (applyRemoteJobs): clocks, a computer's late poll. */
-export const REMOTE_GRACE_MS = 3600_000;
-/** A send this young is read for at the fast pace, whatever its computer shows. */
-export const REMOTE_JUST_SENT_MS = 60_000;
-/** The code of a spacesheep-carried row this receiver can no longer follow: the account
- *  that carried it is not the one connected (disconnected, or another account), or its
- *  machine was not on the account's list when it was read again after a restart. */
-export const UNTRACKED_CODE = "untracked";
-/** A code as spacesheep's jobs door may carry it: a word, as a computer's ack codes are. */
-const REMOTE_CODE_RE = /^[a-z][a-z0-9_]{0,39}$/;
-/** Why a waiting spacesheep-carried row is not being followed right now. */
-export type Unfollowed = "disconnected" | "revoked";
-/** The one name of a spacesheep account here: its origin and the email it is signed in as. */
-export const remoteAccountKey = (a: { origin: string; email: string }): string => `${a.origin} ${a.email}`;
 /** A device request (a phone's own passkey waiting for a trusted device's `key.add`) lives
  *  this long unapproved (CONTROL.md §2), and is remembered an hour past that so the phone's
  *  poll reads `expired` rather than 404. Never persisted: a restart forgets it. */
 export const DEVICE_TTL_MS = 10 * 60_000;
 const DEVICE_KEEP_MS = 3600_000;
-
-/** A key a machine trusts, mirrored here whole: a device key keeps its `type`, `store`
- *  and `uv` (CONTROL.md §2), so the early check verifies it the way the machine does. */
-export interface KeyRow {
-  id: string;
-  alg: number;
-  spki: string;
-  type?: "device";
-  store?: "hardware";
-  uv?: "each-use";
-  name?: string;
-  addedAt: string;
-}
-
-/** The key's own fields (TrustedKey), without this receiver's bookkeeping. */
-export function keyOf(k: TrustedKey): TrustedKey {
-  return {
-    id: k.id,
-    alg: k.alg,
-    spki: k.spki,
-    ...(k.type === "device" ? { type: k.type, store: k.store, uv: k.uv } : {}),
-  };
-}
-
-/** A proof or a signature as the receiver carries it: a passkey's assertion, or a device
- *  key's `{cred, sig}` (CONTROL.md §3.2). */
-export type Proof = Assertion | DeviceSignature;
-
-export interface PairingRow {
-  code: string;
-  check: string;
-  startedAt: string;
-  expiresAt: string;
-  fromIp: string;
-  /** Started with no sink token (open pairing): the poll_key's hash gates its status. */
-  open: boolean;
-  pollHash?: string;
-  approved?: { key: KeyRow; proof: Proof; by: string; at: string };
-  /** The paired answer (and the token) went out once; the code answers 404 from then on. */
-  deliveredAt?: string;
-}
-
-/** A machine as spacesheep's relay lists it (its publicMachine shape, the fields read here). */
-export interface RemoteMachine {
-  id: string;
-  name: string;
-  online?: boolean;
-  last_seen?: number | null;
-  folders?: string[];
-  mode?: string;
-  agents?: string[];
-  cli_version?: string | null;
-  modes?: string[];
-  passkey_ids?: string[];
-  files?: boolean;
-  prompt_files?: boolean;
-  key_types?: string[];
-  ask?: boolean;
-  handoff?: boolean;
-  start?: Record<string, HarnessStartOptions>;
-  pool?: MachinePool | null;
-}
-
-export interface MachineRow {
-  id: string;
-  name: string;
-  createdAt: string;
-  pairedAt?: string;
-  tokenHash?: string;
-  keys: KeyRow[];
-  harnesses: string[];
-  modes: string[];
-  version: string;
-  folders?: string[];
-  mode?: MachineMode;
-  accounts?: HarnessAccount[];
-  /** The last hello's word on files and start options: each hello says them again, so a
-   *  daemon that stopped advertising one (a downgrade) loses it here at once. */
-  files?: boolean;
-  promptFiles?: boolean;
-  start?: Record<string, HarnessStartOptions>;
-  /** Pairing or hello `key_types`; absent means passkeys only (an older daemon). */
-  keyTypes?: KeyType[];
-  /** The last hello's `pool` (sessionpipe 0.11); said again each time, so absent is absent. */
-  pool?: MachinePool;
-  /** The last hello's word on agents asking agents (CONTROL.md §13): `ask` on or off there,
-   *  `handoff` when it takes `reply_to`. Absent when the hello said nothing (a 0.10 daemon). */
-  ask?: boolean;
-  handoff?: boolean;
-  waiting?: string[];
-  lastHelloAt?: string;
-  lastPollAt?: string;
-  /** A machine paired on a spacesheep account (docs/rfcs/08): held in memory from the
-   *  relay's list, never saved, never polled here; its keys are ids only. */
-  remote?: { via: "spacesheep"; origin: string; rpId: string; online: boolean; lastSeen?: string };
-  pairings: PairingRow[];
-}
 
 /** A device that wants to be trusted: its passkey, made on that device, and the six
  *  digits the person compares on a device the machine already trusts. Nothing here hands
@@ -218,58 +114,6 @@ export interface DeviceRequestRow {
   doneAt?: string;
 }
 
-export interface MessageRow {
-  id: string;
-  machineId: string;
-  /** A send carried by spacesheep (a remote machine): its job id there, whose status the
-   *  relay reports (state.applyRemoteJobs). */
-  remoteJob?: number;
-  /** The spacesheep account that carried it (remoteAccountKey: origin and email). A job id
-   *  means something only on its own account; a row from before this field is matched by
-   *  its machine on the first read of the relay's machine list. */
-  remoteAccount?: string;
-  /** Waiting, and not followed right now: no spacesheep account is connected (or the row's
-   *  account is not yet known to be the connected one). Cleared when it is followed again. */
-  unfollowed?: Unfollowed | true;
-  cmd: string;
-  csig?: string | null;
-  grant?: SignedCommand["grant"];
-  confirm?: SignedCommand["confirm"];
-  at: string;
-  expiresAt: string;
-  kind: ControlKind;
-  session: string;
-  text?: string;
-  /** Who queued it: "ui" for the browser, "test-door" for the conformance door. */
-  via: string;
-  outcome?: ControlOutcome;
-  mode?: string;
-  code?: string;
-  detail?: string;
-  reply?: string;
-  replySeq?: number;
-  takenAt?: string;
-  ackedAt?: string;
-  /** A fork or a started session the final ack named. */
-  ackSession?: string;
-  /** The final ack's `copy_of`: the session the command named, when a copy of it answered. */
-  copyOf?: string;
-  /** A start's signed folder, options and files, for the starting page and a retry. */
-  cwd?: string;
-  permission?: StartPermission;
-  model?: string;
-  files?: StartFile[];
-  /** What the machine ran the start with (`taken`, `delivered`). */
-  applied?: Applied;
-  /** A pool command's action and account, as signed (pool.ts read them). */
-  poolAction?: PoolAction;
-  poolAccount?: string;
-  /** A handoff: `reply_to` as signed on a prompt or a start (CONTROL.md §3.1). */
-  replyTo?: string;
-  /** The UI's unsigned note of which session's page sent it (SendBody.from). */
-  from?: string;
-}
-
 interface MachinesFile {
   v: 1;
   machines: MachineRow[];
@@ -279,9 +123,6 @@ interface QueueFile {
   messages: MessageRow[];
 }
 
-const nowIso = () => new Date().toISOString();
-/** A send spacesheep carried (enqueueRemote), whichever account. */
-const isRemoteRow = (m: MessageRow): boolean => typeof m.remoteJob === "number";
 const b64 = (n: number) => randomBytes(n).toString("base64url");
 export const hashToken = (t: string): string => createHash("sha256").update(`sessionpipe-gui.token:${t}`).digest("hex");
 export const hashPollKey = (k: string): string => createHash("sha256").update(`sessionpipe.poll:${k}`).digest("hex");
@@ -300,79 +141,6 @@ function readJson<T>(file: string): T | null {
     return existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as T) : null;
   } catch {
     return null;
-  }
-}
-
-/** The receiver's reading of one carried message, for the UI (never the signature). */
-export function toActivity(m: MessageRow): ControlActivity {
-  const a: ControlActivity = {
-    id: m.id,
-    machineId: m.machineId,
-    kind: m.kind,
-    session: m.session,
-    at: m.at,
-    expiresAt: m.expiresAt,
-  };
-  if (m.text !== undefined) a.text = m.text;
-  if (m.outcome) a.outcome = m.outcome;
-  if (m.mode) a.mode = m.mode;
-  if (m.code) a.code = m.code;
-  if (m.detail) a.detail = m.detail;
-  if (m.reply !== undefined) a.reply = m.reply;
-  if (m.replySeq !== undefined) a.replySeq = m.replySeq;
-  if (m.ackSession) a.ackSession = m.ackSession;
-  if (m.copyOf) a.copyOf = m.copyOf;
-  if (m.takenAt) a.takenAt = m.takenAt;
-  if (m.ackedAt) a.ackedAt = m.ackedAt;
-  if (m.cwd) a.cwd = m.cwd;
-  if (m.permission) a.permission = m.permission;
-  if (m.model) a.model = m.model;
-  if (m.files) a.files = m.files;
-  if (m.applied) a.applied = m.applied;
-  if (m.poolAction) a.poolAction = m.poolAction;
-  if (m.poolAccount) a.poolAccount = m.poolAccount;
-  if (m.replyTo) a.replyTo = m.replyTo;
-  if (m.from) a.from = m.from;
-  if (m.unfollowed && !isFinal(m.outcome)) a.unfollowed = m.unfollowed === "revoked" ? "revoked" : "disconnected";
-  return a;
-}
-
-/** What the UI shows of a command: its text, or a permission answer's decision and note. */
-function describe(cmd: ControlCommand): string | undefined {
-  if (typeof cmd.text === "string") return cmd.text;
-  if (cmd.kind === "permission.answer") return cmd.note ? `${cmd.decision}: ${cmd.note}` : cmd.decision;
-  if (cmd.kind === "key.add") return cmd.name ? `trust ${cmd.name}` : "trust a new device";
-  if ((cmd.kind as string) === "pool") return describePool(cmd as unknown as PoolCommand);
-  return cmd.note;
-}
-
-/** A pool command in words, as the activity shows it: "Turn the pool on", "Move Fiction
- *  first", "Refresh dev@example.com". `names` turns an account id into what the person
- *  calls it (its label, else its email, else the id itself); the activity keeps the id. */
-export function describePool(cmd: PoolCommand, names: (id: string) => string = (id) => id): string {
-  const who = cmd.pool_account ? names(cmd.pool_account) : "an account";
-  if (cmd.pool_action === "refresh" && !cmd.pool_account) return "Refresh usage";
-  switch (cmd.pool_action) {
-    case "on":
-      return "Turn the pool on";
-    case "off":
-      return "Turn the pool off";
-    case "enable":
-      return `Turn ${who} on`;
-    case "disable":
-      return `Turn ${who} off`;
-    case "remove":
-      return `Remove ${who}`;
-    case "refresh":
-      return `Refresh ${who}`;
-    case "order": {
-      const first = cmd.pool_order?.[0];
-      return first ? `Move ${names(first)} first` : "Reorder the accounts";
-    }
-    case "login.begin":
-      return "Sign in to Claude";
-    case "login.complete":
-      return "Finish signing in";
   }
 }
 

@@ -28,25 +28,11 @@ import {
   POOL_CODE_MAX,
   POOL_CONFIRM_ACTIONS,
   POOL_SESSION,
-  type PoolAction,
 } from "../../shared/api.js";
 import { MACHINE_RE, poolIdOk } from "./parse.js";
+import type { PoolCommand } from "./rows.js";
 
-/** A `pool` command's fields, read from the exact string. */
-export interface PoolCommand {
-  v: 1;
-  t: typeof COMMAND_TYPE;
-  machine: string;
-  kind: "pool";
-  session: typeof POOL_SESSION;
-  pool_action: PoolAction;
-  pool_account?: string;
-  pool_order?: string[];
-  pool_code?: string;
-  note?: string;
-  nonce: string;
-  iat: number;
-}
+export type { PoolCommand };
 
 /** The core's codes, and the daemon's `confirm_required`: a confirm-only action signed
  *  with the day grant alone. */

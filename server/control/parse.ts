@@ -26,8 +26,9 @@ import {
 // event's are one shape (server-core owns it; control only reads with it).
 import { readWindows } from "../ui/limits.js";
 import { SESSION_REF } from "./refs.js";
+import { FINAL_OUTCOMES, type Hello, isFinal, MACHINE_RE } from "./rows.js";
 
-export const MACHINE_RE = /^m_[A-Za-z0-9_-]{16,40}$/;
+export { FINAL_OUTCOMES, type Hello, isFinal, MACHINE_RE };
 export const CODE_RE = /^[A-Za-z0-9_-]{6,32}$/;
 export const POLL_KEY_RE = /^[A-Za-z0-9_-]{22,128}$/;
 export const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -45,34 +46,6 @@ export const HARNESSES_MAX = 64;
 const MACHINE_MODES = new Set<string>(["safe", "auto", "inherit"]);
 
 export type { HarnessAccount };
-
-export interface Hello {
-  name: string;
-  harnesses: string[];
-  modes: string[];
-  keys: string[];
-  version: string;
-  waiting: string[];
-  folders: string[] | null;
-  /** `inherit` (sessionpipe 0.10): no permission flag; null when not sent or unknown. */
-  mode: MachineMode | null;
-  accounts: HarnessAccount[];
-  /** `files: true`: the machine takes `files` on a `start`. */
-  files: boolean;
-  /** `prompt_files: true`: and on a `prompt` (sessionpipe 0.10). */
-  promptFiles: boolean;
-  /** What a `start` may ask for, per harness (sessionpipe 0.10); null when not sent. */
-  start: Record<string, HarnessStartOptions> | null;
-  /** `key_types` (CONTROL.md §2): the kinds of key it takes; null when not sent (passkeys only). */
-  keyTypes: KeyType[] | null;
-  /** `pool` (sessionpipe 0.11): the accounts its daemon pools; null when not sent or malformed. */
-  pool: MachinePool | null;
-  /** `ask`: whether `sessionpipe ask` is on there (CONTROL.md §13); absent when not sent (a
-   *  0.10 daemon says nothing about it). */
-  ask?: boolean;
-  /** `handoff: true`: it takes `reply_to` on a prompt or a start; absent when not sent. */
-  handoff?: boolean;
-}
 
 /** `key_types`: known kinds only, each once; null when absent or empty. */
 export function parseKeyTypes(v: unknown): KeyType[] | null {
@@ -275,13 +248,3 @@ export function parseApplied(v: unknown): Applied | undefined {
   if (validModel(a.model)) out.model = a.model;
   return out.permission || out.model ? out : undefined;
 }
-
-export const FINAL_OUTCOMES = new Set<ControlOutcome>([
-  "delivered",
-  "expired",
-  "unsupported",
-  "failed",
-  "refused",
-  "unconfirmed",
-]);
-export const isFinal = (o: ControlOutcome | undefined): boolean => !!o && FINAL_OUTCOMES.has(o);
