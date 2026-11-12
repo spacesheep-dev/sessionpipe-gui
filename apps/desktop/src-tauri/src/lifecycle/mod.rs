@@ -50,3 +50,20 @@ pub async fn start_local_receiver(
         .ok_or_else(|| StartError::Failed("the app is still starting".into()))?;
     supervisor::start_local_receiver(&hub, &version, progress).await
 }
+
+/// What the launch check found about this computer's receiver (None: not checked, or
+/// not this computer's), for the page's notice in Settings › Data.
+pub fn local_update() -> Option<supervisor::LocalUpdate> {
+    supervisor::local_update()
+}
+
+/// The page's "Update sessionpipe": the click path, then the version read again.
+pub async fn update_local_receiver(
+    progress: impl Fn(&str, &str),
+) -> Result<Option<supervisor::LocalUpdate>, StartError> {
+    let (hub, version) = HUB
+        .get()
+        .cloned()
+        .ok_or_else(|| StartError::Failed("the app is still starting".into()))?;
+    supervisor::update_local_click(&hub, &version, progress).await
+}

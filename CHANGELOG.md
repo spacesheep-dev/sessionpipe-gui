@@ -32,15 +32,19 @@ All notable changes to `sessionpipe-gui`. The format follows
   `/api/ui/info` with the new version while it ran the old code, and nothing could tell it
   was stale. `service install` takes the version from `run.json` (written once, at start),
   so it also restarts a receiver of 0.8.0 or earlier that answers with the wrong one.
-- **The desktop app brings an older receiver on this computer up to its own version.** An
-  app that updated itself kept talking to the receiver it had, which still ran the version
-  that installed it. Once per launch, when the local receiver first connects and runs an
-  older version than the app, the app runs `service install --if-installed` in the
-  background: the service is upgraded in place, with its port and state folder, and none is
-  installed where there was none. It is written to the app's log; when it fails the old
-  receiver keeps running. A `sessionpipe-gui` on PATH older than the app is passed over
-  for `npx` and the app's own release, here and in "Start sessionpipe", so the service then
-  runs from npx's cache, not from that global install, which stays as it was.
+- **The desktop app brings an older receiver on this computer up to its own version,**
+  downloading nothing without a click. An app that updated itself kept talking to the
+  receiver it had, which still ran the version that installed it. Once per launch, when
+  this computer's receiver (the one its `run.json` names) first connects and runs an older
+  version than the app: where a `sessionpipe-gui` on PATH is at the app's version or newer,
+  the app runs its `service install --if-installed` in the background (the service upgraded
+  in place, with its port and state folder; none installed where there was none). Where only
+  the app's own release through `npx` would do, that is a download, and nothing runs: the
+  app's log says so and Settings › Data offers it as a click. A failure before the old
+  receiver was stopped leaves it running; one after it (exit 4) is logged as that. "Start
+  sessionpipe" and the click prefer the app's release through `npx` over an older CLI on
+  PATH, and use that CLI when `npx` can't run (offline, GitHub blocked). A timed-out
+  install now stops `npx` and what it started, not `npx` alone.
 - **In the app, an option the receiver is too old for says so** instead of the receiver's
   "HTTP 404". Settings › Data › "Use a spacesheep account" against a receiver older than
   0.7.5: "sessionpipe on this computer is 0.7.2, which is older than this option. Update it
