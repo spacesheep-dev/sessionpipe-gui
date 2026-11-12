@@ -541,24 +541,67 @@
   color: var(--fg);
   font-weight: 600;
 }
-/* What will be sent: the held words, two lines at most. */
+/* What will be sent: the held words, whole when short; a long message as its beginning
+   and its end with an ellipsis between, and Show all opens the rest in place, scrolling
+   inside past a third of the screen. */
 .held-what {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   color: var(--fg);
   overflow-wrap: anywhere;
-  white-space: pre-line;
+  white-space: pre-wrap;
 }
-/* A start's machine and folder, under its words. */
-.held-where {
+.held-gap {
+  color: var(--fg-3);
+}
+.held-all {
+  max-height: 33vh;
+  overflow-y: auto;
+  align-self: stretch;
+}
+.held-more {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.held-more:hover {
+  color: var(--fg);
+}
+/* A start's machine and folder, and the images or files a send carries, by name. */
+.held-where,
+.held-names {
   color: var(--fg-3);
   font-size: var(--text-xs);
   overflow-wrap: anywhere;
 }
-/* The receiver's reason, said to be theirs. */
+/* The receiver's own words, set apart from the app's: who says it on a small line, then
+   what it said in its own box, a quiet surface with a rule at its left. */
+.held-said {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.held-who {
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.held-quote {
+  padding: 6px 10px;
+  border-left: 2px solid var(--line-2);
+  border-radius: 0 var(--radius-inner) var(--radius-inner) 0;
+  background: var(--bg);
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+/* With no reason from the receiver: our own line. */
 .held-why {
   color: var(--fg-2);
   overflow-wrap: anywhere;
