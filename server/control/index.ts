@@ -83,6 +83,7 @@ export interface Control {
         created_at: number;
       }>,
       through?: number,
+      serverNow?: number,
     ) => number;
   };
   activity(limit?: number): ControlActivity[];
@@ -198,7 +199,7 @@ export function createControl(deps: ControlDeps): Control {
       drop: (via) => state.dropRemoteMachines(via),
       account: (account) => state.setRemoteAccount(account),
       pending: () => state.pendingRemoteJobs(),
-      applyJobs: (jobs, through) => state.applyRemoteJobs(jobs, through),
+      applyJobs: (jobs, through, serverNow) => state.applyRemoteJobs(jobs, through, serverNow),
     },
     machines() {
       const out = new Map<string, MachineControl>();

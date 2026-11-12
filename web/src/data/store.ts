@@ -78,7 +78,14 @@ export const CONTROL_RETRY_MS = 1500;
  *  snapshot before the page says it is reconnecting. */
 export const RESYNC_QUIET_MS = 1500;
 
-const FINAL = new Set<ControlActivity["outcome"]>(["delivered", "expired", "unsupported", "failed", "refused"]);
+const FINAL = new Set<ControlActivity["outcome"]>([
+  "delivered",
+  "expired",
+  "unsupported",
+  "failed",
+  "refused",
+  "unconfirmed",
+]);
 
 /** Of two copies of one control message, the one further along its way (server/control/
  *  README.md: queued, then `taken` and the reply so far by `replySeq`, then one final

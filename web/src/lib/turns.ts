@@ -351,7 +351,7 @@ const SENT_PREFIX_MIN = 24;
  *  had it: refused, expired, no way in; or failed on the way there (a file that did not
  *  arrive, a session that did not take what was put in its inbox, a start stopped before
  *  its process began). Any other failure happened in the turn the message began. */
-const FINAL = new Set(["delivered", "expired", "unsupported", "failed", "refused"]);
+const FINAL = new Set(["delivered", "expired", "unsupported", "failed", "refused", "unconfirmed"]);
 const UNREACHED = new Set(["refused", "expired", "unsupported"]);
 const FAILED_BEFORE = new Set(["file", "held", "cancelled"]);
 /** Whether a message can be a turn's prompt: one the session never had is nobody's,

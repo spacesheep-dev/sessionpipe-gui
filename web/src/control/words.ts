@@ -121,7 +121,8 @@ export const isFinal = (a: ControlActivity): boolean =>
   a.outcome === "expired" ||
   a.outcome === "unsupported" ||
   a.outcome === "failed" ||
-  a.outcome === "refused";
+  a.outcome === "refused" ||
+  a.outcome === "unconfirmed";
 
 /** What went wrong before anything was queued, in words. */
 export function sendErrorWords(e: unknown): string {

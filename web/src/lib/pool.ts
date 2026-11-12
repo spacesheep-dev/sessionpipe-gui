@@ -461,6 +461,8 @@ export function commandNote(
       return { text: `It didn't reach ${machine}${detail ? `: ${ended(detail)}` : "."}`, err: true };
     case "expired":
       return { text: `${machine} didn't take it in time.`, err: true };
+    case "unconfirmed":
+      return null;
   }
 }
 

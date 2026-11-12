@@ -23,7 +23,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   again meant two runs. Only spacesheep's word on the job settles it now; a job it still
   lists as waiting, or no longer lists, is called expired here only an hour past
   spacesheep's day, when spacesheep can no longer hand it out. The job list is read past a
-  job that waits for days, so a newer send's word is never out of reach.
+  job that waits for days, so a newer send's word is never out of reach. A send the
+  computer took and said nothing more of (spacesheep keeps it "running") ends past that
+  day as `unconfirmed` and is no longer read, rather than "Starting…" for ever. A job's
+  age is spacesheep's: its own `created_at` against the time spacesheep's answer carries,
+  so a clock here that jumps ends nothing early.
 - **A refusal through spacesheep keeps its reason.** Where spacesheep's job list says why a
   job ended (`code`: the computer's own refusal code, `cancelled`, `expired`), the row takes
   it, so the words for a folder, a permission level, a start limit or a model are the ones

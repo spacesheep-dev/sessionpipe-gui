@@ -1537,7 +1537,18 @@ export interface Applied {
  *  `key.add` (server/control/pool.ts); its fields are `pool_action`, `pool_account`,
  *  `pool_order` and `pool_code`. */
 export type ControlKind = "prompt" | "permission.answer" | "cancel" | "start" | "key.add" | "pool";
-export type ControlOutcome = "progress" | "taken" | "delivered" | "expired" | "unsupported" | "failed" | "refused";
+/** `unconfirmed` is this receiver's own, never a machine's ack: a send spacesheep carried
+ *  that the computer took and said nothing more of within spacesheep's day (state.ts
+ *  applyRemoteJobs). Final; whether it ran is spacesheep's to say. */
+export type ControlOutcome =
+  | "progress"
+  | "taken"
+  | "delivered"
+  | "expired"
+  | "unsupported"
+  | "failed"
+  | "refused"
+  | "unconfirmed";
 
 /** A control message the receiver carries, as the UI sees it (never the raw signature). */
 export interface ControlActivity {

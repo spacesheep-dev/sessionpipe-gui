@@ -250,7 +250,7 @@ export function SentFailure({
   const name = machines.find((m) => m.control?.machineId === a.machineId)?.name;
   // Whether it ran is spacesheep's to say (an account no longer connected here): starting
   // it again could make a second run, so no way on is offered here; the words point there.
-  const unknown = a.code === "untracked";
+  const unknown = a.code === "untracked" || a.outcome === "unconfirmed";
   return (
     <div className="starting-failed" role="alert">
       <p className="sent-failed-text">

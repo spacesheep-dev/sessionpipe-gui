@@ -31,9 +31,10 @@ export interface SpacesheepSourceOptions {
   onMachines?: (machines: unknown[], origin: string, rpId: string) => void;
   /** The spacesheep job ids still unsettled here, lowest first: while there is one, the
    *  jobs door is read every few seconds and its word handed to `onJobs`, with the highest
-   *  job id the read covered (Infinity when it reached the end of the list). */
+   *  job id the read covered (Infinity when it reached the end of the list) and
+   *  spacesheep's own time from the answer's Date (undefined without one). */
   pendingJobs?: () => number[];
-  onJobs?: (jobs: RelayJob[], through: number) => void;
+  onJobs?: (jobs: RelayJob[], through: number, serverNow?: number) => void;
 }
 
 export interface SpacesheepSource {
@@ -226,16 +227,20 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
     const pending = opts.pendingJobs?.() ?? [];
     if (!pending.length) return;
     try {
+      let serverNow: number | undefined;
       const r = await readJobs(pending, async (since) => {
         const res = await f(`${opts.origin}${RELAY_PATH}/jobs?since=${since}`, {
           headers: { authorization: `Bearer ${opts.key}`, accept: "application/json" },
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        // spacesheep's clock, for how old its jobs are (state.applyRemoteJobs), not ours.
+        const date = Date.parse(res.headers.get("date") ?? "");
+        if (Number.isFinite(date)) serverNow = date;
         const j = (await res.json()) as { jobs?: unknown };
         if (!Array.isArray(j.jobs)) throw new Error("not a jobs page");
         return j.jobs as RelayJob[];
       });
-      opts.onJobs?.(r.jobs, r.through);
+      opts.onJobs?.(r.jobs, r.through, serverNow);
     } catch {
       /* next tick */
     }

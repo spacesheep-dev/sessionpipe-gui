@@ -624,7 +624,11 @@ export class ControlState {
    *  row, with one exception: `through` is the highest job id the read covered (Infinity
    *  when it reached the end of the list), and a row in that span still queued there, or
    *  not listed at all, past spacesheep's day and REMOTE_GRACE_MS is expired here, since
-   *  spacesheep can no longer hand it out. */
+   *  spacesheep can no longer hand it out; one the computer took (taken/running there,
+   *  which spacesheep never ends by itself) is `unconfirmed`: nothing was heard since.
+   *  The age is spacesheep's: the job's own `created_at` against `serverNow` (the answer's
+   *  Date), so a clock here that jumps ends nothing early; the row's own time and this
+   *  clock only where spacesheep gave none. */
   applyRemoteJobs(
     jobs: Array<{
       id: number;
@@ -635,26 +639,32 @@ export class ControlState {
       created_at: number;
     }>,
     through = 0,
+    serverNow?: number,
   ): number {
     let n = 0;
     const byJob = new Map(jobs.map((j) => [j.id, j]));
-    const now = Date.now();
+    const now = Number.isFinite(serverNow) ? serverNow! : Date.now();
     for (const [id, rows] of this.queues) {
       let changed = false;
       for (const row of rows) {
         if (!this.followed(row)) continue;
         const j = byJob.get(row.remoteJob!);
-        if (!j || j.status === "queued") {
-          if (row.remoteJob! > through || now - Date.parse(row.at) < EXPIRES_MAX_MS + REMOTE_GRACE_MS) continue;
-          row.outcome = "expired";
-          row.ackedAt = new Date(now).toISOString();
-          row.detail = "expired before the machine took it";
+        const born = j && Number.isFinite(j.created_at) && j.created_at > 0 ? j.created_at : Date.parse(row.at);
+        const over = row.remoteJob! <= through && now - born >= EXPIRES_MAX_MS + REMOTE_GRACE_MS;
+        const taken = j ? j.status === "taken" || j.status === "running" : row.outcome === "taken";
+        if (over && (taken || !j || j.status === "queued")) {
+          // Past spacesheep's day: waiting there, it can't be handed out any more; taken,
+          // nothing will be heard of it. Either way the row stops being read.
+          row.outcome = taken ? "unconfirmed" : "expired";
+          row.ackedAt = new Date().toISOString();
+          if (!taken) row.detail = "expired before the machine took it";
           changed = true;
           n++;
           this.onMessage(row);
           continue;
         }
-        if (j.status === "taken" || j.status === "running") {
+        if (!j || j.status === "queued") continue;
+        if (taken) {
           if (row.outcome === "taken") continue;
           row.outcome = "taken";
           row.takenAt = nowIso();

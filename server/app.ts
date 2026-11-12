@@ -296,7 +296,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
         // by the relay's word on spacesheep's jobs.
         onMachines: (list, origin, rpId) => control.remote.upsert(list as never, { via: "spacesheep", origin, rpId }),
         pendingJobs: () => control.remote.pending(),
-        onJobs: (jobs, through) => control.remote.applyJobs(jobs, through),
+        onJobs: (jobs, through, serverNow) => control.remote.applyJobs(jobs, through, serverNow),
       });
     } catch (e) {
       if (!opts.quiet) process.stderr.write(`[sessionpipe-gui] spacesheep: ${(e as Error).message}\n`);

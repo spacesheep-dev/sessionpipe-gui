@@ -247,7 +247,12 @@ describe("remote machines in the control state", () => {
     // Past its day, with spacesheep still saying queued: still spacesheep's to say...
     vi.setSystemTime(Date.parse(row.at) + EXPIRES_MAX_MS + 60_000);
     state.sweep();
-    expect(state.applyRemoteJobs([{ id: 11, status: "queued", note: null, done_at: null, created_at: 1 }], 11)).toBe(0);
+    expect(
+      state.applyRemoteJobs(
+        [{ id: 11, status: "queued", note: null, done_at: null, created_at: Date.parse(row.at) }],
+        11,
+      ),
+    ).toBe(0);
     expect(state.activityById(row.id)?.outcome).toBeUndefined();
     // ...and it said so after a GUI that was off: done while away is done.
     const later = state.enqueueRemote(
@@ -261,8 +266,14 @@ describe("remote machines in the control state", () => {
     expect(
       state.applyRemoteJobs(
         [
-          { id: 11, status: "queued", note: null, done_at: null, created_at: 1 },
-          { id: 12, status: "done", note: null, done_at: Date.parse(later.at) + 60_000, created_at: 1 },
+          { id: 11, status: "queued", note: null, done_at: null, created_at: Date.parse(row.at) },
+          {
+            id: 12,
+            status: "done",
+            note: null,
+            done_at: Date.parse(later.at) + 60_000,
+            created_at: Date.parse(later.at),
+          },
         ],
         Number.POSITIVE_INFINITY,
       ),
@@ -322,5 +333,47 @@ describe("remote machines in the control state", () => {
     expect(a[4]).toMatchObject({ outcome: "refused", detail: "called off by its owner before the machine took it" });
     expect(a[4]!.code).toBeUndefined();
     expect(a[5]!.code).toBeUndefined();
+  });
+
+  it("a start the computer took and never finished ends past spacesheep's day as unconfirmed, and is read no more", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 30);
+    const born = Date.parse(row.at);
+    const running = { id: 30, status: "running", note: null, done_at: null, created_at: born };
+    state.applyRemoteJobs([running], Number.POSITIVE_INFINITY, born + 60_000);
+    expect(state.activityById(row.id)?.outcome).toBe("taken");
+    // Within the day: still taken.
+    state.applyRemoteJobs([running], Number.POSITIVE_INFINITY, born + EXPIRES_MAX_MS);
+    expect(state.activityById(row.id)?.outcome).toBe("taken");
+    // Past it, by spacesheep's clock: unconfirmed, final, no longer pending.
+    state.applyRemoteJobs([running], Number.POSITIVE_INFINITY, born + EXPIRES_MAX_MS + REMOTE_GRACE_MS + 1);
+    const a = state.activityById(row.id)!;
+    expect(a.outcome).toBe("unconfirmed");
+    expect(a.detail).toBeUndefined();
+    expect(state.pendingRemoteJobs()).toEqual([]);
+  });
+
+  it("ages a job by spacesheep's clock and its created_at: a clock here that jumps a day ends nothing", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed({ online: false })], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 31);
+    const born = Date.parse(row.at);
+    const queued = { id: 31, status: "queued", note: null, done_at: null, created_at: born };
+    // This machine's clock jumps 26 h; spacesheep says it is an hour later.
+    vi.setSystemTime(born + 26 * 3600_000);
+    expect(state.applyRemoteJobs([queued], Number.POSITIVE_INFINITY, born + 3600_000)).toBe(0);
+    expect(state.activityById(row.id)?.outcome).toBeUndefined();
+    // spacesheep's clock past the day: expired.
+    expect(state.applyRemoteJobs([queued], Number.POSITIVE_INFINITY, born + EXPIRES_MAX_MS + REMOTE_GRACE_MS + 1)).toBe(
+      1,
+    );
+    expect(state.activityById(row.id)?.outcome).toBe("expired");
   });
 });

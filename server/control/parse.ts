@@ -275,5 +275,12 @@ export function parseApplied(v: unknown): Applied | undefined {
   return out.permission || out.model ? out : undefined;
 }
 
-export const FINAL_OUTCOMES = new Set<ControlOutcome>(["delivered", "expired", "unsupported", "failed", "refused"]);
+export const FINAL_OUTCOMES = new Set<ControlOutcome>([
+  "delivered",
+  "expired",
+  "unsupported",
+  "failed",
+  "refused",
+  "unconfirmed",
+]);
 export const isFinal = (o: ControlOutcome | undefined): boolean => !!o && FINAL_OUTCOMES.has(o);
