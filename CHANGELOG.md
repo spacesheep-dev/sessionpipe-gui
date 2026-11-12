@@ -14,10 +14,19 @@ All notable changes to `sessionpipe-gui`. The format follows
   0.7.2" and left the old process running the old code; the page, newer, then called
   routes that server did not have ("HTTP 404" under Settings › Data › spacesheep). It now
   restarts it and waits for this version to answer ("updating … 0.7.2 → 0.8.0"), on macOS,
-  Linux and Windows. An older sessionpipe-gui no longer quietly replaces a newer service
-  that runs from somewhere else: it says so and leaves it, unless `--downgrade`. A
-  re-install with other `--port`, `--state` or `--host` by the same or a newer version
-  works as before. `--if-installed` upgrades a service that is there and installs none.
+  Linux and Windows. A receiver on the port that isn't the service's own (one started by
+  hand while the service is down; told by its pid against the service manager's, or on
+  Windows by its command line) is left alone, with a line that says so. When the new
+  version doesn't come up after the old one was stopped, it says so on stderr and exits 4.
+  An older sessionpipe-gui no longer quietly replaces a newer service that runs from
+  somewhere else (the version read from the `package.json` beside the service's CLI): it
+  says so and leaves it, unless `--downgrade`; nor a service that runs a developer's
+  checkout (a folder with `server/cli.ts` or `.git` beside `dist/`). A re-install with other
+  `--port`, `--state` or `--host` by the same CLI or a newer version works as before. One
+  `service install` runs at a time (a lock file beside the state folder, taken over when
+  its holder is gone), and a `bootout` that finds the job already gone counts as stopped.
+  `--if-installed` acts on a service that is there, installs none, and never moves one to
+  an older version.
 - **A receiver reports the version it is running**, read once when it starts. It read
   `package.json` on every request, so one whose package was replaced under it answered
   `/api/ui/info` with the new version while it ran the old code, and nothing could tell it

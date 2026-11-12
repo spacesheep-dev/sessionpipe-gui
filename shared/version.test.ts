@@ -1,21 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { compareVersions } from "./version.js";
 
-describe("compareVersions", () => {
-  it("orders x.y.z by number, not by text", () => {
-    expect(compareVersions("0.7.2", "0.8.0")).toBeLessThan(0);
-    expect(compareVersions("0.10.0", "0.9.9")).toBeGreaterThan(0);
-    expect(compareVersions("1.0.0", "0.99.99")).toBeGreaterThan(0);
-    expect(compareVersions("0.8.0", "0.8.0")).toBe(0);
-    expect(compareVersions("v0.8.0", "0.8")).toBe(0);
-  });
+const table = JSON.parse(readFileSync(new URL("./version-cases.json", import.meta.url), "utf8")) as {
+  cases: [string, string, number][];
+};
 
-  it("puts a prerelease before its release, and reads what isn't a number as 0", () => {
-    expect(compareVersions("0.9.0-rc.1", "0.9.0")).toBeLessThan(0);
-    expect(compareVersions("0.9.0", "0.9.0-rc.1")).toBeGreaterThan(0);
-    expect(compareVersions("0.9.0-rc.1", "0.8.5")).toBeGreaterThan(0);
-    expect(compareVersions("", "0.0.0")).toBe(0);
-    expect(compareVersions("x.y", "0.1")).toBeLessThan(0);
+describe("compareVersions", () => {
+  it("orders the shared table as the desktop app's version_cmp does", () => {
+    for (const [a, b, sign] of table.cases) expect([a, b, Math.sign(compareVersions(a, b))]).toEqual([a, b, sign]);
+    expect(table.cases.length).toBeGreaterThan(10);
   });
 });
