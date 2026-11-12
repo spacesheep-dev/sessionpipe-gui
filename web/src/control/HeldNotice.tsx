@@ -5,6 +5,7 @@
 // be theirs), and one button that confirms that one send. The press on the button is the
 // fresh gesture the confirm's prompt needs; nothing confirms without it. The hold's state is
 // held.ts; this is the hook over it and its drawing.
+import { cleanReason } from "@shared/reason";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HeldForConfirm } from "./command";
 import { type HeldMeta, HeldSlot, type HeldView } from "./held";
@@ -90,7 +91,9 @@ export function HeldNotice<T, M extends HeldMeta>({
   const busy = v?.kind === "held" && v.busy;
   const text = v ? heldText(v.held) : null;
   const who = v ? heldFrom(v.held.from) : "";
-  const why = v ? heldReason(v.kind === "still" ? v.why : v.held.why) : "";
+  const raw = v ? (v.kind === "still" ? v.why : v.held.why) : "";
+  // The receiver's words are said to be theirs; with none, the line is ours and says so.
+  const whyLine = cleanReason(raw) ? HELD_WORDS.says(who, heldReason(raw)) : HELD_WORDS.noReason;
   return (
     <div className="held-live" aria-live="polite" ref={live}>
       {v && (
@@ -107,7 +110,7 @@ export function HeldNotice<T, M extends HeldMeta>({
             </span>
           )}
           <span className="held-why" data-held-why>
-            {HELD_WORDS.says(who, why)}
+            {whyLine}
           </span>
           <span className="held-acts">
             {v.kind === "held" && (
