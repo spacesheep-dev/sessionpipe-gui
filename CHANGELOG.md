@@ -28,7 +28,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   computer took and said nothing more of (spacesheep keeps it "running") ends past that
   day as `unconfirmed` and is no longer read, rather than "Starting…" for ever. A job's
   age is spacesheep's: its own `created_at` against the time spacesheep's answer carries,
-  so a clock here that jumps ends nothing early.
+  so a clock here that jumps ends nothing early; with no time from spacesheep, the send's
+  own time on this clock. A send closed for want of word (`unconfirmed`, or `untracked`
+  while another account was connected) is settled after all when spacesheep later lists
+  its job as finished: an untracked one waits again when its account connects, an
+  unconfirmed one is read once more then and when events arrive for its session.
 - **Waiting sends through spacesheep are read for at a slower pace.** The job list was read
   every 3 seconds whatever the send waited for (about 200 reads in 10 minutes, now for up
   to a day). While every waiting send is queued for a computer the machine list shows

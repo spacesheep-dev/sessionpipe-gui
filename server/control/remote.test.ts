@@ -449,4 +449,53 @@ describe("remote machines in the control state", () => {
     expect(state.activityById(row.id)?.unfollowed).toBeUndefined();
     expect(state.pendingRemoteJobs()).toEqual([60]);
   });
+
+  it("a row untracked by another account waits again when its own account connects, and settles by its list", () => {
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 70);
+    state.setRemoteAccount({ origin: "https://spacesheep.dev", email: "someone@example.com" });
+    expect(state.activityById(row.id)).toMatchObject({ outcome: "failed", code: "untracked" });
+    state.setRemoteAccount(account);
+    const back = state.activityById(row.id)!;
+    expect(back.outcome).toBeUndefined();
+    expect(back.code).toBeUndefined();
+    expect(state.pendingRemoteJobs()).toEqual([70]);
+    state.applyRemoteJobs([{ id: 70, status: "done", note: null, done_at: Date.now(), created_at: Date.now() }]);
+    expect(state.activityById(row.id)?.outcome).toBe("delivered");
+  });
+
+  it("an unconfirmed row is read once more on events for its session or its account connecting, and a settled job settles it", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let kicks = 0;
+    state.onRemoteKick = () => kicks++;
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 71);
+    const born = Date.parse(row.at);
+    const running = { id: 71, status: "running", note: null, done_at: null, created_at: born };
+    state.applyRemoteJobs([running], Number.POSITIVE_INFINITY, born + EXPIRES_MAX_MS + REMOTE_GRACE_MS + 1);
+    expect(state.activityById(row.id)?.outcome).toBe("unconfirmed");
+    expect(state.pendingRemoteJobs()).toEqual([]);
+    // Still running there: a read changes nothing, and it is not read again.
+    const before = kicks;
+    state.remoteEventsSeen(["claude-code:abc"]);
+    expect(kicks).toBe(before + 1);
+    expect(state.pendingRemoteJobs()).toEqual([71]);
+    state.applyRemoteJobs([running], Number.POSITIVE_INFINITY);
+    expect(state.activityById(row.id)?.outcome).toBe("unconfirmed");
+    expect(state.pendingRemoteJobs()).toEqual([]);
+    // The account connects again: read once more; this time it is done there.
+    state.setRemoteAccount(account);
+    expect(state.pendingRemoteJobs()).toEqual([71]);
+    state.applyRemoteJobs([{ id: 71, status: "done", note: null, done_at: born + 60_000, created_at: born }]);
+    expect(state.activityById(row.id)?.outcome).toBe("delivered");
+    // Only these two: a delivered row is never reopened.
+    state.applyRemoteJobs([{ id: 71, status: "failed", note: "x", done_at: born, created_at: born }]);
+    expect(state.activityById(row.id)?.outcome).toBe("delivered");
+  });
 });

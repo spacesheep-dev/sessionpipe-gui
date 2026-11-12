@@ -404,6 +404,8 @@ export class ControlState {
   private remoteAccount: string | null = null;
   /** The connected account's key was refused (SpacesheepSource unauthorized). */
   private remoteRevoked = false;
+  /** Closed rows' job ids to read once more (recheckRemote). */
+  private recheck = new Set<number>();
 
   constructor(readonly dir: string) {
     this.files = new FileStore(path.join(dir, "files"));
@@ -571,12 +573,16 @@ export class ControlState {
   remoteEventsSeen(keys: Iterable<string>): void {
     const set = new Set(keys);
     if (!set.size) return;
+    const closed: MessageRow[] = [];
+    let kick = false;
     for (const [, rows] of this.queues)
-      for (const row of rows)
-        if (this.followed(row) && set.has(row.session)) {
-          this.onRemoteKick();
-          return;
-        }
+      for (const row of rows) {
+        if (!set.has(row.session)) continue;
+        if (this.followed(row)) kick = true;
+        else if (this.reopenable(row)) closed.push(row);
+      }
+    if (closed.length) this.recheckRemote(closed);
+    else if (kick) this.onRemoteKick();
   }
 
   /** Disconnected: the rows paired there leave the board. */
@@ -596,6 +602,25 @@ export class ControlState {
     // A connect is a new key: whatever the last one was refused for is over.
     this.remoteRevoked = false;
     if (this.remoteAccount) this.onRemoteKick();
+    // Its own rows that were closed for want of an account: an untracked one waits again
+    // (spacesheep's list settles it), an unconfirmed one is read once more.
+    const again: MessageRow[] = [];
+    if (this.remoteAccount)
+      for (const [id, rows] of this.queues) {
+        let changed = false;
+        for (const row of rows) {
+          if (!isRemoteRow(row) || row.remoteAccount !== this.remoteAccount) continue;
+          if (row.outcome === "failed" && row.code === UNTRACKED_CODE) {
+            delete row.outcome;
+            delete row.code;
+            delete row.ackedAt;
+            changed = true;
+            this.onMessage(row);
+          } else if (row.outcome === "unconfirmed") again.push(row);
+        }
+        if (changed) this.saveQueue(id);
+      }
+    this.recheckRemote(again);
     this.eachRemoteRow((row) => {
       if (this.remoteAccount && row.remoteAccount !== undefined && row.remoteAccount !== this.remoteAccount)
         return this.untracked(row);
@@ -673,7 +698,7 @@ export class ControlState {
   /** The spacesheep job ids still unsettled here, lowest first, for the relay's `since`:
    *  only the connected account's (a job id means nothing on another). */
   pendingRemoteJobs(): number[] {
-    const ids: number[] = [];
+    const ids: number[] = [...this.recheck];
     for (const [, rows] of this.queues) for (const row of rows) if (this.followed(row)) ids.push(row.remoteJob!);
     return [...new Set(ids)].sort((a, b) => a - b);
   }
@@ -722,8 +747,15 @@ export class ControlState {
     for (const [id, rows] of this.queues) {
       let changed = false;
       for (const row of rows) {
-        if (!this.followed(row)) continue;
         const j = byJob.get(row.remoteJob!);
+        if (!this.followed(row)) {
+          // Closed here as `unconfirmed` (or reopened untracked, now waiting again): a later
+          // read that lists its job as settled there says how it really went.
+          if (!this.reopenable(row) || !j || !(j.status === "done" || j.status === "refused" || j.status === "failed"))
+            continue;
+          delete row.code;
+          delete row.detail;
+        }
         const born =
           known && j && Number.isFinite(j.created_at) && j.created_at > 0 ? j.created_at : Date.parse(row.at);
         const over = row.remoteJob! <= through && now - born >= EXPIRES_MAX_MS + REMOTE_GRACE_MS;
@@ -767,7 +799,28 @@ export class ControlState {
       }
       if (changed) this.saveQueue(id);
     }
+    // The once-over reads asked for (recheckRemote) are done where this read reached.
+    for (const job of [...this.recheck]) if (byJob.has(job) || job <= through) this.recheck.delete(job);
     return n;
+  }
+
+  /** A row this app closed for want of word, not by spacesheep's (`unconfirmed`): of the
+   *  connected account, so a read of its job may still settle it. */
+  private reopenable(row: MessageRow): boolean {
+    return (
+      isRemoteRow(row) &&
+      row.outcome === "unconfirmed" &&
+      !!this.remoteAccount &&
+      row.remoteAccount === this.remoteAccount
+    );
+  }
+
+  /** Read these closed rows' jobs once more, now (their account connected, events for their
+   *  session): job ids added to the next read's pending list, and a kick. */
+  private recheckRemote(rows: MessageRow[]): void {
+    if (!rows.length) return;
+    for (const row of rows) this.recheck.add(row.remoteJob!);
+    this.onRemoteKick();
   }
   private saveQueue(id: string): void {
     const q = this.queues.get(id);
