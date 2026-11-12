@@ -13,8 +13,8 @@
 //
 // Everything outside the process (the platform, HOME, the uid, launchctl / systemctl, the
 // port probe) comes in through `ServiceEnv`, so tests run against a temp HOME and a fake
-// launchctl (`SP_LAUNCHCTL`, `SP_SYSTEMCTL`, `SP_SCHTASKS`, `SP_TASKKILL`) and never touch
-// the real session.
+// launchctl (`SP_LAUNCHCTL`, `SP_SYSTEMCTL`, `SP_SCHTASKS`, `SP_TASKKILL`, `SP_POWERSHELL`)
+// and never touch the real session.
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -38,8 +38,10 @@ import {
   isReceiverCommandLine,
   parseTaskQuery,
   processQueryScript,
+  system32,
   TASK_RUNNING,
   taskArgv,
+  taskFolderRemoveScript,
   taskName,
   taskQueryScript,
   taskXml,
@@ -103,6 +105,24 @@ export interface ServiceEnv {
   err(line: string): void;
 }
 
+/** The programs `service` runs. On Windows schtasks, taskkill and PowerShell are named in
+ *  full, under %SystemRoot%\System32 (windows.ts), never by a bare name; an `SP_*` variable
+ *  names a stand-in, as the tests do. */
+export function serviceTools(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): Pick<ServiceEnv, "launchctl" | "systemctl" | "schtasks" | "taskkill" | "powershell"> {
+  const win = platform === "win32";
+  return {
+    launchctl: env.SP_LAUNCHCTL || "launchctl",
+    systemctl: env.SP_SYSTEMCTL || "systemctl",
+    schtasks: env.SP_SCHTASKS || (win ? system32(env, "schtasks.exe") : "schtasks"),
+    taskkill: env.SP_TASKKILL || (win ? system32(env, "taskkill.exe") : "taskkill"),
+    powershell:
+      env.SP_POWERSHELL || (win ? system32(env, "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe"),
+  };
+}
+
 /** The real environment, with the test overrides read from `process.env`. */
 export function processEnv(defaultState: string): ServiceEnv {
   const env = process.env;
@@ -115,11 +135,7 @@ export function processEnv(defaultState: string): ServiceEnv {
     home: env.HOME ?? os.homedir(),
     uid: process.getuid?.() ?? 0,
     label: env.SP_SERVICE_LABEL || SERVICE_LABEL,
-    launchctl: env.SP_LAUNCHCTL || "launchctl",
-    systemctl: env.SP_SYSTEMCTL || "systemctl",
-    schtasks: env.SP_SCHTASKS || "schtasks",
-    taskkill: env.SP_TASKKILL || "taskkill",
-    powershell: env.SP_POWERSHELL || "powershell.exe",
+    ...serviceTools(env, process.platform),
     user: env.USERDOMAIN && env.USERNAME ? `${env.USERDOMAIN}\\${env.USERNAME}` : os.userInfo().username,
     node: process.execPath,
     cli,
@@ -175,6 +191,11 @@ const tilde = (p: string, home: string) =>
 /** The last part of a path written with either separator (a Windows argv read on any OS). */
 const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** How a message names a program. On Windows by its file name (`schtasks.exe`), not the full
+ *  path it is run by: `--dry-run` shows that one. */
+const named = (env: ServiceEnv, cmd: string) => (env.platform === "win32" ? path.win32.basename(cmd) : cmd);
+/** The first words of a command, as a message names it. */
+const head = (env: ServiceEnv, c: string[]) => [named(env, c[0] ?? ""), ...c.slice(1, 3)].join(" ");
 
 /** The PATH the service runs with: launchd and systemd start programs with a bare one, and
  *  the receiver runs `sessionpipe` (pairing) and `npm` (view add) found on it. */
@@ -202,13 +223,15 @@ function serviceFile(env: ServiceEnv): string {
   return unitPath(env.home, env.label);
 }
 
+const POWERSHELL_FLAGS = ["-NoProfile", "-NonInteractive", "-Command"];
+
 /** Windows: runs a script that may write text to the file it is given (see windows.ts);
  *  `text` is what it wrote, without Out-File's byte-order mark and last line end. */
 function powershell(env: ServiceEnv, script: (file: string) => string): ExecResult & { text: string } {
   const tmp = mkdtempSync(path.join(os.tmpdir(), "sessionpipe-gui-"));
   const file = path.join(tmp, "answer.txt");
   try {
-    const r = env.exec(env.powershell, ["-NoProfile", "-NonInteractive", "-Command", script(file)]);
+    const r = env.exec(env.powershell, [...POWERSHELL_FLAGS, script(file)]);
     let text = "";
     try {
       text = readFileSync(file, "utf8")
@@ -219,6 +242,20 @@ function powershell(env: ServiceEnv, script: (file: string) => string): ExecResu
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+/** Windows: what takes Task Scheduler's \sessionpipe\ folder away once no task is left in
+ *  it (another label's can be: SP_SERVICE_LABEL). */
+const taskFolderCommand = (env: ServiceEnv): string[] => [
+  env.powershell,
+  ...POWERSHELL_FLAGS,
+  taskFolderRemoveScript(),
+];
+/** Runs it, after our task is deleted. Best-effort (windows.ts): where the folder can't be
+ *  removed it stays, empty, as it did; that fails nothing and nothing is said. */
+function removeTaskFolder(env: ServiceEnv): void {
+  const c = taskFolderCommand(env);
+  env.exec(c[0]!, c.slice(1));
 }
 
 /** Task Scheduler didn't answer: nothing is known about the task, so nothing is done to it. */
@@ -237,7 +274,9 @@ function queryTask(env: ServiceEnv): { state: number; xml: string } | null {
     if (!r.text) throw new Error("it wrote no task definition");
     return { state, xml: r.text };
   } catch (e) {
-    throw new TaskQueryError(`can't read Task Scheduler through ${env.powershell}: ${(e as Error).message}`);
+    throw new TaskQueryError(
+      `can't read Task Scheduler through ${named(env, env.powershell)}: ${(e as Error).message}`,
+    );
   }
 }
 
@@ -347,8 +386,8 @@ export async function runService(o: ServiceOptions, env: ServiceEnv): Promise<nu
   }
 }
 
-const failedCommand = (c: string[], r: ExecResult) =>
-  `${c.slice(0, 3).join(" ")} failed: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
+const failedCommand = (env: ServiceEnv, c: string[], r: ExecResult) =>
+  `${head(env, c)} failed: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
 
 /** The file the service runs from. */
 function serviceText(env: ServiceEnv, argv: string[], state: string): string {
@@ -446,8 +485,9 @@ function stopTask(env: ServiceEnv, argv: string[], state: string): { commands: s
     left: pid && !ours && pidAlive(pid) ? pid : undefined,
   };
 }
-const leftRunning = (pid: number, state: string, home: string): string =>
-  `pid ${pid} (${tilde(runFilePath(state), home)}) is running, and its command line doesn't show it to be this service's receiver: left alone. If it is one, stop it yourself (taskkill /PID ${pid} /T /F)`;
+/** The command to type names taskkill in full, as the ones `service` runs itself do. */
+const leftRunning = (env: ServiceEnv, pid: number, state: string): string =>
+  `pid ${pid} (${tilde(runFilePath(state), env.home)}) is running, and its command line doesn't show it to be this service's receiver: left alone. If it is one, stop it yourself (${env.taskkill} /PID ${pid} /T /F)`;
 /** The receiver we killed never got to remove its run.json: remove it, if it is still that one. */
 function afterStop(env: ServiceEnv, c: string[], r: ExecResult, state: string): void {
   if (c[0] === env.taskkill && r.code === 0) removeRunFile(state, Number(c[2]));
@@ -534,10 +574,11 @@ async function install(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     if (r.code !== 0) {
       if (env.platform === "win32") {
         if (c[1] !== "/Create") env.exec(env.schtasks, ["/Delete", "/TN", file, "/F"]);
+        removeTaskFolder(env);
         rmSync(xmlFile, { force: true });
       } else rmSync(file, { force: true });
       if (env.platform === "linux") env.exec(env.systemctl, ["--user", "daemon-reload"]);
-      env.err(`${failedCommand(c, r)} (nothing installed)`);
+      env.err(`${failedCommand(env, c, r)} (nothing installed)`);
       return 1;
     }
   }
@@ -617,7 +658,7 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
     env.out("");
     for (const c of commands) env.out(`$ ${c.join(" ")}`);
     env.out("");
-    if (stop?.left) env.out(leftRunning(stop.left, was.state ?? env.defaultState, env.home));
+    if (stop?.left) env.out(leftRunning(env, stop.left, was.state ?? env.defaultState));
     env.out(`dry run: nothing written or restarted; it would update ${change} on ${url}`);
     return 0;
   }
@@ -633,7 +674,7 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
     if (r.code !== 0 && !isStop(env, c)) {
       if (env.platform === "win32") rmSync(xmlFile, { force: true });
       env.err(
-        `${failedCommand(c, r)} (${where(env, inst.file)} is rewritten; \`service uninstall\` then \`service install\` starts over)`,
+        `${failedCommand(env, c, r)} (${where(env, inst.file)} is rewritten; \`service uninstall\` then \`service install\` starts over)`,
       );
       return 1;
     }
@@ -645,7 +686,7 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
   }
   if (env.platform === "win32") rmSync(xmlFile, { force: true });
   env.out(`updated ${change} (${where(env, inst.file)})`);
-  if (stop?.left) env.err(leftRunning(stop.left, was.state ?? env.defaultState, env.home));
+  if (stop?.left) env.err(leftRunning(env, stop.left, was.state ?? env.defaultState));
 
   if (env.waitMs > 0) {
     const verdict = await waitForReceiver(env, { port, state, version: env.version });
@@ -664,6 +705,8 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
   const has = env.platform === "win32" ? st.loaded : existsSync(file);
   const wasState = (inst && installedOptions(inst.argv).state) || env.defaultState;
   if (!has && !st.loaded) {
+    // An uninstall by 0.8.0 left the task folder behind, empty: it goes now.
+    if (env.platform === "win32" && !o.dryRun) removeTaskFolder(env);
     env.out(`no service ${env.label} installed: nothing to do`);
     return 0;
   }
@@ -680,7 +723,8 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     for (const c of commands) env.out(`$ ${c.join(" ")}`);
     if (has && env.platform !== "win32") env.out(`$ rm ${file}`);
     if (env.platform === "linux") env.out(`$ ${env.systemctl} --user daemon-reload`);
-    if (stop?.left) env.out(leftRunning(stop.left, wasState, env.home));
+    if (env.platform === "win32") env.out(`$ ${taskFolderCommand(env).join(" ")}`);
+    if (stop?.left) env.out(leftRunning(env, stop.left, wasState));
     env.out("dry run: nothing stopped or removed");
     return 0;
   }
@@ -689,7 +733,7 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     const r = env.exec(c[0]!, c.slice(1));
     afterStop(env, c, r, wasState);
     if (r.code !== 0 && !isStop(env, c))
-      failed = `${c.slice(0, 3).join(" ")}: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
+      failed = `${head(env, c)}: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
   }
   if (env.platform !== "win32") rmSync(file, { force: true });
   if (env.platform === "linux") env.exec(env.systemctl, ["--user", "daemon-reload"]);
@@ -703,9 +747,10 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     );
     return 1;
   }
+  if (env.platform === "win32") removeTaskFolder(env);
   if (stop?.left) {
     env.out(`removed ${env.label}: it won't start at login`);
-    env.err(leftRunning(stop.left, wasState, env.home));
+    env.err(leftRunning(env, stop.left, wasState));
     return 0;
   }
   env.out(`removed ${env.label}: stopped, and it won't start at login`);
