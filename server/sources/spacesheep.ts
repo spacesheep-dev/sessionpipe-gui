@@ -105,12 +105,15 @@ export function parseRelayPage(body: unknown): RelayPage | null {
   };
 }
 
-/** The cursor to ask from: the one kept, unless the relay no longer holds its past
- *  (`oldest` is above it), in which case the gap is noted and the oldest kept is next. */
+/** The cursor to ask from next, and whether events were lost: the relay answers every
+ *  event after the cursor it still holds, so when the oldest it holds (`oldest`, the first
+ *  of the page) is not the one after the cursor, the ones between are gone (past its 7 days
+ *  or 50 000 events). A full page then still comes back, and is a gap all the same. From 0
+ *  there is no gap: everything held is everything there is to read. */
 export function cursorAfter(kept: number, page: RelayPage): { cursor: number; gap: boolean } {
-  if (page.oldest != null && page.oldest > kept + 1 && kept > 0 && !page.events.length)
-    return { cursor: page.oldest - 1, gap: true };
-  return { cursor: page.next, gap: false };
+  const gap = kept > 0 && page.oldest != null && page.oldest > kept + 1;
+  if (gap && !page.events.length) return { cursor: page.oldest! - 1, gap };
+  return { cursor: page.next, gap };
 }
 
 export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOptions): SpacesheepSource {
@@ -120,6 +123,9 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
   let events = 0;
   let machines: string[] = [];
   let state: SpacesheepSourceStatus["state"] = "starting";
+  /** The first event the relay still held when a gap was found: the state says "gap" from
+   *  then on, while this source runs, not only for the one poll that saw it. */
+  let gapBefore: number | null = null;
   let lastAt: string | undefined;
   let lastError: string | undefined;
   let stopped = false;
@@ -149,9 +155,10 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
     if (valid.length) taken = store.ingest(valid, "spacesheep").accepted;
     events += taken;
     const c = cursorAfter(cursor, page);
-    if (c.gap) {
+    if (c.gap) gapBefore = page.oldest;
+    if (gapBefore !== null) {
       state = "gap";
-      lastError = `the relay no longer holds events before ${page.oldest}; the board shows what it still has`;
+      lastError = `the relay no longer holds events before ${gapBefore}; the board shows what it still has`;
     } else state = "ok";
     if (c.cursor !== cursor) {
       cursor = c.cursor;

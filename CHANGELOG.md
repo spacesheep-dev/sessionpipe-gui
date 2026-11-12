@@ -31,6 +31,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   start, and the person was told to add the file again. The new session sheet no longer
   offers files there, and a session's message box offers images only when that computer is
   this one (the block names files on this disk), until there is a way to carry one.
+- **Events spacesheep no longer holds are reported as a gap.** The gap was noted only when
+  a page came back empty, but spacesheep answers everything after the cursor that it still
+  holds, so an app that was off longer than spacesheep keeps events (7 days, 50 000 events)
+  lost the middle and said "reading". It now says "gap" whenever the first event back is
+  not the one after the cursor, and keeps saying it while it runs.
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH
