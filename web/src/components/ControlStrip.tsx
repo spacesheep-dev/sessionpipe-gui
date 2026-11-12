@@ -340,7 +340,8 @@ export function ControlStrip({
   const httpsHref = blocked ? (wrong ? wrongOriginHref() : httpsHere()) : null;
   const enabled = paired && !!onSend && !blocked && !stream;
   // Images beside the message (control/Attachments.tsx): paperclip, paste, drop, the phone's picker.
-  const att = useAttachments({ machine: session.machine, enabled });
+  // Not offered for a computer reached through spacesheep, unless it is this one (paths).
+  const att = useAttachments({ machine: session.machine, enabled, localOnly: !!control?.remote });
   // A held message confirmed from its notice (control/HeldNotice.tsx) went: the composer
   // is clear, as after Send. Until then its words stayed here.
   const clearAtt = att.clear;
@@ -658,7 +659,7 @@ export function ControlStrip({
         <div className="ctl-field">
           <AttachmentTray att={att} />
           <div className="ctl-ask">
-            <AttachButton att={att} disabled={!enabled || !!busy || !!review} />
+            {att.offered && <AttachButton att={att} disabled={!enabled || !!busy || !!review} />}
             <textarea
               ref={field}
               value={text}

@@ -270,6 +270,8 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
         body: JSON.stringify(body),
       });
       const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      // The key revoked there: the source says so now, not at its next poll (ui.ts forwardSend).
+      if (res.status === 401 && json.code !== "unlock") spacesheep?.unauthorized();
       return { status: res.status, json };
     },
   });
@@ -285,20 +287,28 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   let spacesheep: SpacesheepSource | null = null;
   const startSpacesheep = (link: SpacesheepLink): void => {
     spacesheep?.stop();
+    // The sends this account carried are followed from now; another account's can't be.
+    control.remote.account({ origin: link.origin, email: link.email });
     try {
       spacesheep = startSpacesheepSource(store, {
         ...link,
         // The machines paired there become rows here (control.remote), their sends settled
         // by the relay's word on spacesheep's jobs.
         onMachines: (list, origin, rpId) => control.remote.upsert(list as never, { via: "spacesheep", origin, rpId }),
-        pendingJobsFrom: () => control.remote.pendingFrom(),
-        onJobs: (jobs) => control.remote.applyJobs(jobs),
+        pendingJobs: () => control.remote.pending(),
+        jobsCadence: () => control.remote.cadence(),
+        onEvents: (keys) => control.remote.eventsSeen(keys),
+        onUnauthorized: () => control.remote.revoked(true),
+        onJobs: (jobs, through, serverNow) => control.remote.applyJobs(jobs, through, serverNow),
       });
     } catch (e) {
       if (!opts.quiet) process.stderr.write(`[sessionpipe-gui] spacesheep: ${(e as Error).message}\n`);
     }
   };
+  control.remote.onKick(() => spacesheep?.kickJobs());
   if (config.spacesheep) startSpacesheep(config.spacesheep);
+  // No link: what spacesheep carried before can't be followed (kept from before a restart).
+  else control.remote.account(null);
 
   let outbox: OutboxSource | null = null;
   if (opts.outbox !== false) {
@@ -489,6 +499,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
         spacesheep = null;
         config = setSpacesheep(stateDir, live(), undefined);
         control.remote.drop("spacesheep");
+        control.remote.account(null);
       },
       deviceName: () => `${os.hostname().replace(/\.(local|lan|home)$/i, "")}`,
       version: () => packageVersion(),

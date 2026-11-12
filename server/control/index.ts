@@ -69,9 +69,29 @@ export interface Control {
   remote: {
     upsert: (list: RemoteMachine[], remote: { via: "spacesheep"; origin: string; rpId: string }) => void;
     drop: (via: "spacesheep") => void;
-    pendingFrom: () => number | null;
+    /** The account read through from now, or null: other accounts' sends settle as untracked. */
+    account: (account: { origin: string; email: string } | null) => void;
+    /** The unsettled job ids of the connected account, lowest first. */
+    pending: () => number[];
+    /** How soon the jobs are worth reading again (state.remoteJobsCadence). */
+    cadence: () => "fast" | "slow" | "none";
+    /** The relay brought events for these sessions (`harness:id`). */
+    eventsSeen: (keys: Iterable<string>) => void;
+    /** spacesheep refused the key (true), or not any more. */
+    revoked: (on: boolean) => void;
+    /** Who reads the jobs at once when one is worth reading now. */
+    onKick: (f: () => void) => void;
     applyJobs: (
-      jobs: Array<{ id: number; status: string; note: string | null; done_at: number | null; created_at: number }>,
+      jobs: Array<{
+        id: number;
+        status: string;
+        note: string | null;
+        code?: string | null;
+        done_at: number | null;
+        created_at: number;
+      }>,
+      through?: number,
+      serverNow?: number,
     ) => number;
   };
   activity(limit?: number): ControlActivity[];
@@ -185,8 +205,15 @@ export function createControl(deps: ControlDeps): Control {
     remote: {
       upsert: (list, remote) => state.upsertRemoteMachines(list, remote),
       drop: (via) => state.dropRemoteMachines(via),
-      pendingFrom: () => state.pendingRemoteJobsFrom(),
-      applyJobs: (jobs) => state.applyRemoteJobs(jobs),
+      account: (account) => state.setRemoteAccount(account),
+      pending: () => state.pendingRemoteJobs(),
+      cadence: () => state.remoteJobsCadence(),
+      eventsSeen: (keys) => state.remoteEventsSeen(keys),
+      revoked: (on) => state.setRemoteRevoked(on),
+      onKick: (f) => {
+        state.onRemoteKick = f;
+      },
+      applyJobs: (jobs, through, serverNow) => state.applyRemoteJobs(jobs, through, serverNow),
     },
     machines() {
       const out = new Map<string, MachineControl>();

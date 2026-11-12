@@ -389,7 +389,10 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
       return {
         text: `${name} needs a newer sessionpipe to bring answers back. The answer stays in the asked session.`,
       };
-    if (!c.online) return { text: `${name} is offline. It asks when the machine is back, within an hour.` };
+    if (!c.online)
+      return {
+        text: `${name} is offline. It asks when the machine is back, within ${c.remote ? "a day" : "an hour"}.`,
+      };
     return { text: `${name} is listening.` };
   })();
   const passkeyNote =

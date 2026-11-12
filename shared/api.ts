@@ -1254,8 +1254,9 @@ export interface SpacesheepSourceStatus {
   /** The relay cursor: the last seq read. */
   cursor: number;
   /** `ok` after a good poll; `unauthorized` when the key was revoked; `offline` when the
-   *  origin can't be reached; `gap` when the relay no longer holds the cursor's past. */
-  state: "starting" | "ok" | "unauthorized" | "offline" | "gap";
+   *  origin can't be reached; `limited` when it asked this app to wait (429, its
+   *  Retry-After followed); `gap` when the relay no longer holds the cursor's past. */
+  state: "starting" | "ok" | "unauthorized" | "offline" | "limited" | "gap";
   lastAt?: string;
   lastError?: string;
   /** The machines paired on spacesheep, as its hellos last said (names only here). */
@@ -1536,7 +1537,18 @@ export interface Applied {
  *  `key.add` (server/control/pool.ts); its fields are `pool_action`, `pool_account`,
  *  `pool_order` and `pool_code`. */
 export type ControlKind = "prompt" | "permission.answer" | "cancel" | "start" | "key.add" | "pool";
-export type ControlOutcome = "progress" | "taken" | "delivered" | "expired" | "unsupported" | "failed" | "refused";
+/** `unconfirmed` is this receiver's own, never a machine's ack: a send spacesheep carried
+ *  that the computer took and said nothing more of within spacesheep's day (state.ts
+ *  applyRemoteJobs). Final; whether it ran is spacesheep's to say. */
+export type ControlOutcome =
+  | "progress"
+  | "taken"
+  | "delivered"
+  | "expired"
+  | "unsupported"
+  | "failed"
+  | "refused"
+  | "unconfirmed";
 
 /** A control message the receiver carries, as the UI sees it (never the raw signature). */
 export interface ControlActivity {
@@ -1548,6 +1560,9 @@ export interface ControlActivity {
   at: string;
   expiresAt: string;
   outcome?: ControlOutcome;
+  /** A send carried by spacesheep, waiting while this app follows no account that can say
+   *  how it went (disconnected): it is picked up again when that account connects. */
+  unfollowed?: "disconnected" | "revoked";
   /** The delivery mode the machine acked, one of `DELIVERY_MODES`. */
   mode?: string;
   code?: string;

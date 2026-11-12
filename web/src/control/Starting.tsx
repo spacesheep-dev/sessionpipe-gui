@@ -24,11 +24,14 @@ import {
   isFinal,
   outcomeWords,
   PERMISSION_LABEL,
+  reasonOf,
   refusalWords,
   sendErrorWords,
   sentLine,
   shownState,
   startFailureWords,
+  UNTRACKED_WORDS,
+  unconfirmedWords,
 } from "./words";
 
 /** The start this device (or another) sent that names `key`, newest first. */
@@ -201,9 +204,18 @@ export function sentRow(
 /** A prompt that did not reach its session, in the words the timeline shows under it. */
 export function promptFailureWords(a: ControlActivity, machine: string): string | null {
   const detail = a.detail?.trim();
+  if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
+    return `Cancelled with its session, before ${machine} got it.`;
+  if (a.outcome === "failed" && a.code === "untracked") return UNTRACKED_WORDS;
+  if (a.outcome === "unconfirmed") return unconfirmedWords(machine);
   switch (a.outcome) {
-    case "refused":
+    case "refused": {
+      // No code (spacesheep before its `code`): the reason when there is one, never twice.
+      const reason = reasonOf(a);
+      if (!a.code)
+        return `${machine} refused it.${reason ? ` ${(reason.charAt(0).toUpperCase() + reason.slice(1)).replace(/[.!?…]?$/, ".")}` : ""}`;
       return `${machine} refused it: ${refusalWords(a.code)}.`;
+    }
     case "failed":
       return `It didn't reach the session${detail ? `: ${detail.replace(/[.!?…]?$/, ".")}` : "."}`;
     case "expired":
@@ -242,6 +254,9 @@ export function SentFailure({
   const command = commandIn(words);
   const safe = control && safeOffered(a, control);
   const name = machines.find((m) => m.control?.machineId === a.machineId)?.name;
+  // Whether it ran is spacesheep's to say (an account no longer connected here): starting
+  // it again could make a second run, so no way on is offered here; the words point there.
+  const unknown = a.code === "untracked" || a.outcome === "unconfirmed";
   return (
     <div className="starting-failed" role="alert">
       <p className="sent-failed-text">
@@ -265,7 +280,7 @@ export function SentFailure({
             Start in Safe instead
           </ActionButton>
         )}
-        {a.kind === "start" ? (
+        {unknown ? null : a.kind === "start" ? (
           <button type="button" className="btn btn--sm" onClick={() => editAgain(a, name)} data-edit-again>
             Edit and start again
           </button>

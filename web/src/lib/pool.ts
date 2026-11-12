@@ -454,13 +454,22 @@ export function commandNote(
     case "delivered":
       return null;
     case "refused":
-      return { text: `${machine} refused it: ${ended(a.code ? refusal(a.code) : (detail ?? "refused"))}`, err: true };
+      // No code and no reason worth quoting (an older spacesheep notes the bare outcome):
+      // "refused it.", never "refused it: refused."
+      if (!a.code && (!detail || detail.toLowerCase() === "refused"))
+        return { text: `${machine} refused it.`, err: true };
+      return { text: `${machine} refused it: ${ended(a.code ? refusal(a.code) : detail!)}`, err: true };
     case "unsupported":
       return { text: olderDaemon(machine), err: true, sticky: true };
     case "failed":
       return { text: `It didn't reach ${machine}${detail ? `: ${ended(detail)}` : "."}`, err: true };
     case "expired":
       return { text: `${machine} didn't take it in time.`, err: true };
+    case "unconfirmed":
+      return {
+        text: `No word from ${machine} since it took this. Check spacesheep.dev to see how it went.`,
+        err: true,
+      };
   }
 }
 

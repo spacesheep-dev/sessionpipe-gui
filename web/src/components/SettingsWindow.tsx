@@ -933,6 +933,7 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
     ok: "reading",
     unauthorized: "the key was revoked on spacesheep; disconnect and connect again",
     offline: "spacesheep can't be reached right now",
+    limited: "this app is reading too often for spacesheep; it catches up by itself",
     gap: "reading (an older gap the relay no longer holds)",
   };
   return (
