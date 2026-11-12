@@ -312,6 +312,22 @@ describe("attachments API", () => {
     expect(existsSync(kept.path)).toBe(true);
     expect(existsSync(gone.path)).toBe(false);
     expect(existsSync(young.path)).toBe(true);
+
+    // Also verify Windows backslash paths in events (e.g. C:\path\attachments\<id>.png) keep the file
+    const keptWin = store.save(png(7, 7), info);
+    utimesSync(keptWin.path, old, old);
+    const sWin = new Session("with-win-image");
+    const winPrompt = `Attached images:\n- C:\\Users\\dev\\.local\\state\\sessionpipe-gui\\attachments\\${keptWin.id}.png (100×100)`;
+    app.store.ingest(
+      [
+        sWin.ev("session.started", { source: "startup" }),
+        sWin.ev("turn.transcript", { turn: 1, user: winPrompt, assistant: "ok" }),
+      ],
+      "http",
+    );
+    const removedWin = store.prune(path.join(tmp.dir, "events"));
+    expect(removedWin).toEqual([]);
+    expect(existsSync(keptWin.path)).toBe(true);
   });
 });
 
@@ -351,6 +367,13 @@ describe("the text block", () => {
     expect(remote.items).toEqual([{ id: A, ext: "png", src: `/attachments/${A}.png`, width: 1, height: 2 }]);
     const plain = splitAttachments("Nothing attached here");
     expect(plain).toEqual({ body: "Nothing attached here", items: [] });
+    const winAttachment: Attachment = {
+      ...a(A, 800, 600),
+      path: `C:\\Users\\dev name\\.local\\state\\sessionpipe-gui\\attachments\\${A}.png`,
+    };
+    const win = splitAttachments(composePrompt("Windows path", [winAttachment], true));
+    expect(win.body).toBe("Windows path");
+    expect(win.items).toEqual([{ id: A, ext: "png", src: `/attachments/${A}.png`, width: 800, height: 600 }]);
   });
 });
 
