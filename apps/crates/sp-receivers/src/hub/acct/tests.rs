@@ -468,6 +468,64 @@ async fn a_connect_denied_or_expired_ends_with_nothing_kept() {
 }
 
 #[tokio::test]
+async fn the_poll_rides_out_trouble_and_ends_with_the_code() {
+    let t = TempDir::new("acct-poll");
+    let fake = Fake::start("poll-trouble").await;
+    let h = hub_in(t.path());
+    // spacesheep is down, then asks to wait, then is itself again: the connect goes on.
+    let n = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let n2 = n.clone();
+    fake.hook(move |s| {
+        if !s.target().starts_with("/api/gui/connect/poll") {
+            return None;
+        }
+        match n2.fetch_add(1, Ordering::SeqCst) {
+            0 | 1 => Some(Reply::json(503, "down")),
+            2 => Some(Reply::json(429, "{}").header("retry-after", "0")),
+            _ => None,
+        }
+    });
+    h.account_connect_start(Some(&fake.origin())).await.unwrap();
+    until("past the trouble", || n.load(Ordering::SeqCst) >= 5).await;
+    assert_eq!(connect_state(&h), Some(ConnectState::Pending));
+    // The code's own end, by the clock, with spacesheep still saying "pending": the Hub
+    // stops by itself (here the end is moved into the past rather than waited for).
+    let polls = fake.asked("/api/gui/connect/poll").len();
+    h.0.acct
+        .connect
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .expires_at_ms = now_ms() - account::CONNECT_COLLECT_MS - 1;
+    until("expired", || {
+        connect_state(&h) == Some(ConnectState::Expired)
+    })
+    .await;
+    assert!(fake.asked("/api/gui/connect/poll").len() <= polls + 1);
+    assert_eq!(key_store(t.path()), json!({}));
+    // An answer this version cannot read ends it too, saying so.
+    fake.hook(|s| {
+        s.target()
+            .starts_with("/api/gui/connect/poll")
+            .then(|| Reply::json(200, r#"{"state":"approved","email":"a@b.example"}"#))
+    });
+    h.account_connect_start(Some(&fake.origin())).await.unwrap();
+    until("failed", || connect_state(&h) == Some(ConnectState::Failed)).await;
+    let c = h.account_status().connect.unwrap();
+    assert_eq!(c.error.as_ref().map(|e| e.code), Some("bad_answer"));
+    assert!(
+        h.account_status().accounts.is_empty(),
+        "half an approval is none"
+    );
+    assert!(
+        !h.account_connect_cancel(),
+        "an outcome is cleared, not cancelled"
+    );
+    assert_eq!(h.account_status().connect, None);
+}
+
+#[tokio::test]
 async fn a_connect_cancelled_stops_asking_and_keeps_nothing() {
     let t = TempDir::new("acct-cancel");
     let fake = Fake::start("cancelled").await;
