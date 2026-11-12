@@ -285,6 +285,8 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   let spacesheep: SpacesheepSource | null = null;
   const startSpacesheep = (link: SpacesheepLink): void => {
     spacesheep?.stop();
+    // The sends this account carried are followed from now; another account's can't be.
+    control.remote.account({ origin: link.origin, email: link.email });
     try {
       spacesheep = startSpacesheepSource(store, {
         ...link,
@@ -299,6 +301,8 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     }
   };
   if (config.spacesheep) startSpacesheep(config.spacesheep);
+  // No link: what spacesheep carried before can't be followed (kept from before a restart).
+  else control.remote.account(null);
 
   let outbox: OutboxSource | null = null;
   if (opts.outbox !== false) {
@@ -489,6 +493,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
         spacesheep = null;
         config = setSpacesheep(stateDir, live(), undefined);
         control.remote.drop("spacesheep");
+        control.remote.account(null);
       },
       deviceName: () => `${os.hostname().replace(/\.(local|lan|home)$/i, "")}`,
       version: () => packageVersion(),

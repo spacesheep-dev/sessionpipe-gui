@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -61,7 +61,21 @@ describe("remote machines in the control state", () => {
     expect(state.machine("m_0123456789abcdefghij")).toBeUndefined();
   });
 
+  const account = { origin: "https://spacesheep.dev", email: "me@example.com" };
+  const startCmd = (machine: string, session = "claude-code:abc") => ({
+    v: 1 as const,
+    t: "sessionpipe.control" as const,
+    machine,
+    kind: "start" as const,
+    session,
+    text: "hi",
+    cwd: "/home/me",
+    nonce: `n-${session}`,
+    iat: Date.now(),
+  });
+
   it("a send carried there settles by the relay's job status", () => {
+    state.setRemoteAccount(account);
     state.upsertRemoteMachines([listed()], remote);
     const m = state.machine("m_0123456789abcdefghij")!;
     const cmd = {
@@ -95,5 +109,99 @@ describe("remote machines in the control state", () => {
     const row2 = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 42);
     expect(state.applyRemoteJobs([{ id: 42, status: "done", note: null, done_at: Date.now(), created_at: 1 }])).toBe(1);
     expect(state.activityById(row2.id)?.outcome).toBe("delivered");
+  });
+
+  it("a send waiting there outlives a restart: kept on disk, matched again by the account", () => {
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 7);
+    expect(row.remoteAccount).toBe("https://spacesheep.dev me@example.com");
+    state.close();
+    // The machine is never saved, its queue is: the start is on the page before the list is read.
+    const again = new ControlState(path.join(dir, "control"));
+    expect(again.machine(m.id)).toBeUndefined();
+    expect(again.activityById(row.id)?.kind).toBe("start");
+    again.setRemoteAccount(account);
+    expect(again.pendingRemoteJobsFrom()).toBe(7);
+    again.upsertRemoteMachines([listed({ online: false })], remote);
+    expect(again.machine(m.id)).toBeDefined();
+    expect(again.applyRemoteJobs([{ id: 7, status: "done", note: null, done_at: Date.now(), created_at: 1 }])).toBe(1);
+    expect(again.activityById(row.id)?.outcome).toBe("delivered");
+    again.close();
+  });
+
+  it("a row of this account whose machine left the list waits for spacesheep's word", () => {
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 8);
+    state.upsertRemoteMachines([], remote);
+    expect(state.activityById(row.id)?.outcome).toBeUndefined();
+    expect(state.pendingRemoteJobsFrom()).toBe(8);
+    state.applyRemoteJobs([
+      { id: 8, status: "refused", note: "the machine was removed", done_at: Date.now(), created_at: 1 },
+    ]);
+    expect(state.activityById(row.id)).toMatchObject({ outcome: "refused", detail: "the machine was removed" });
+  });
+
+  it("another account's sends, or none connected, can't be followed: settled as untracked", () => {
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 9);
+    state.close();
+    const other = new ControlState(path.join(dir, "control"));
+    other.setRemoteAccount({ origin: "https://spacesheep.dev", email: "someone@example.com" });
+    expect(other.activityById(row.id)).toMatchObject({ outcome: "failed", code: "untracked" });
+    expect(other.pendingRemoteJobsFrom()).toBeNull();
+    // Job 9 on that account is another job: it changes nothing here.
+    expect(other.applyRemoteJobs([{ id: 9, status: "done", note: null, done_at: Date.now(), created_at: 1 }])).toBe(0);
+    other.close();
+    const none = new ControlState(path.join(dir, "control"));
+    const cmd2 = startCmd(m.id, "claude-code:def");
+    none.setRemoteAccount(account);
+    none.upsertRemoteMachines([listed()], remote);
+    const row2 = none.enqueueRemote(none.machine(m.id)!, { cmd: JSON.stringify(cmd2) }, cmd2, { via: "ui" }, 10);
+    none.dropRemoteMachines("spacesheep");
+    none.setRemoteAccount(null);
+    expect(none.activityById(row2.id)).toMatchObject({ outcome: "failed", code: "untracked" });
+    none.close();
+  });
+
+  it("a row from before rows named their account is matched by its machine on the first list", () => {
+    const m = "m_0123456789abcdefghij";
+    const gone = "m_abcdefghij0123456789";
+    const row = (id: string, machineId: string, job: number) => ({
+      id,
+      machineId,
+      remoteJob: job,
+      cmd: "{}",
+      at: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      kind: "start",
+      session: "claude-code:abc",
+      via: "ui",
+    });
+    mkdirSync(path.join(dir, "control", "queue"), { recursive: true });
+    writeFileSync(
+      path.join(dir, "control", "queue", `${m}.json`),
+      JSON.stringify({ v: 1, messages: [row("01A", m, 3)] }),
+    );
+    writeFileSync(
+      path.join(dir, "control", "queue", `${gone}.json`),
+      JSON.stringify({ v: 1, messages: [row("01B", gone, 4)] }),
+    );
+    const s = new ControlState(path.join(dir, "control"));
+    s.setRemoteAccount(account);
+    expect(s.activityById("01A")?.outcome).toBeUndefined();
+    expect(s.activityById("01B")?.outcome).toBeUndefined();
+    s.upsertRemoteMachines([listed()], remote);
+    expect(s.pendingRemoteJobsFrom()).toBe(3);
+    expect(s.activityById("01B")).toMatchObject({ outcome: "failed", code: "untracked" });
+    s.close();
   });
 });

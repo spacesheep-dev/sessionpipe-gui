@@ -8,6 +8,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **A send to a computer reached through spacesheep outlives a restart.** Its row was
+  deleted when the app started, because such a computer is never saved here: a start
+  waiting for an offline computer then read "No such session here", and ran anyway when the
+  computer came back. The row is kept, followed again once the account is read, and settled
+  by spacesheep's word on the job. A row the connected account can't speak for (another
+  account, or none connected) is settled as one this app can no longer follow.
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH

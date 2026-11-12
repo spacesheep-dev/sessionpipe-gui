@@ -69,6 +69,8 @@ export interface Control {
   remote: {
     upsert: (list: RemoteMachine[], remote: { via: "spacesheep"; origin: string; rpId: string }) => void;
     drop: (via: "spacesheep") => void;
+    /** The account read through from now, or null: other accounts' sends settle as untracked. */
+    account: (account: { origin: string; email: string } | null) => void;
     pendingFrom: () => number | null;
     applyJobs: (
       jobs: Array<{ id: number; status: string; note: string | null; done_at: number | null; created_at: number }>,
@@ -185,6 +187,7 @@ export function createControl(deps: ControlDeps): Control {
     remote: {
       upsert: (list, remote) => state.upsertRemoteMachines(list, remote),
       drop: (via) => state.dropRemoteMachines(via),
+      account: (account) => state.setRemoteAccount(account),
       pendingFrom: () => state.pendingRemoteJobsFrom(),
       applyJobs: (jobs) => state.applyRemoteJobs(jobs),
     },

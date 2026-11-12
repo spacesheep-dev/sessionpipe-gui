@@ -72,6 +72,12 @@ const KEEP_SETTLED = 300;
 const SETTLED_TTL_MS = 7 * 86_400_000;
 /** A pairing row is forgotten this long after it expired or was handed over. */
 const PAIRING_TTL_MS = 3600_000;
+/** The code of a spacesheep-carried row this receiver can no longer follow: the account
+ *  that carried it is not the one connected (disconnected, or another account), or its
+ *  machine was not on the account's list when it was read again after a restart. */
+export const UNTRACKED_CODE = "untracked";
+/** The one name of a spacesheep account here: its origin and the email it is signed in as. */
+export const remoteAccountKey = (a: { origin: string; email: string }): string => `${a.origin} ${a.email}`;
 /** A device request (a phone's own passkey waiting for a trusted device's `key.add`) lives
  *  this long unapproved (CONTROL.md §2), and is remembered an hour past that so the phone's
  *  poll reads `expired` rather than 404. Never persisted: a restart forgets it. */
@@ -206,6 +212,10 @@ export interface MessageRow {
   /** A send carried by spacesheep (a remote machine): its job id there, whose status the
    *  relay reports (state.applyRemoteJobs). */
   remoteJob?: number;
+  /** The spacesheep account that carried it (remoteAccountKey: origin and email). A job id
+   *  means something only on its own account; a row from before this field is matched by
+   *  its machine on the first read of the relay's machine list. */
+  remoteAccount?: string;
   cmd: string;
   csig?: string | null;
   grant?: SignedCommand["grant"];
@@ -255,6 +265,8 @@ interface QueueFile {
 }
 
 const nowIso = () => new Date().toISOString();
+/** A send spacesheep carried (enqueueRemote), whichever account. */
+const isRemoteRow = (m: MessageRow): boolean => typeof m.remoteJob === "number";
 const b64 = (n: number) => randomBytes(n).toString("base64url");
 export const hashToken = (t: string): string => createHash("sha256").update(`sessionpipe-gui.token:${t}`).digest("hex");
 export const hashPollKey = (k: string): string => createHash("sha256").update(`sessionpipe.poll:${k}`).digest("hex");
@@ -369,6 +381,8 @@ export class ControlState {
    *  online reading flipped, so the UI can refresh its machine list without an event. */
   onMachines: () => void = () => {};
   private onlineSig = "";
+  /** The spacesheep account read through now (remoteAccountKey), or null when none is. */
+  private remoteAccount: string | null = null;
 
   constructor(readonly dir: string) {
     this.files = new FileStore(path.join(dir, "files"));
@@ -380,9 +394,22 @@ export class ControlState {
         if (!f.endsWith(".json")) continue;
         const id = f.slice(0, -5);
         const q = readJson<QueueFile>(path.join(qdir, f));
-        if (q?.messages && this.machinesById.has(id)) this.queues.set(id, q.messages);
+        // A machine paired on spacesheep is never in machines.json (it comes back with the
+        // relay's list), so its queue is kept for the rows spacesheep carried: they settle by
+        // spacesheep's word, or as untracked (setRemoteAccount, upsertRemoteMachines).
+        if (q?.messages && (this.machinesById.has(id) || (MACHINE_RE.test(id) && q.messages.some(isRemoteRow))))
+          this.queues.set(id, q.messages);
         else rmSync(path.join(qdir, f), { force: true });
       }
+    // Such a queue keeps what is unsettled and a week of history, like any other.
+    for (const id of [...this.queues.keys()]) {
+      if (this.machinesById.has(id)) continue;
+      this.saveQueue(id);
+      if (!this.queues.get(id)?.length) {
+        this.queues.delete(id);
+        this.saveQueue(id);
+      }
+    }
     this.sweeper = setInterval(() => this.sweep(), 5000);
     this.sweeper.unref();
   }
@@ -470,6 +497,19 @@ export class ControlState {
         changed = true;
       }
     }
+    // The rows kept from before a restart that predate their account's name: those whose
+    // machine is on this list are this account's, the rest can't be followed any more.
+    // A row of this account whose machine left the list stays: spacesheep settles its job
+    // (a removed computer's waiting jobs are refused there).
+    if (this.remoteAccount)
+      this.eachRemoteRow((row) => {
+        if (row.remoteAccount !== undefined) return false;
+        if (seen.has(row.machineId)) {
+          row.remoteAccount = this.remoteAccount!;
+          return true;
+        }
+        return this.untracked(row);
+      });
     if (changed) this.checkOnline();
     this.onMachines();
   }
@@ -478,6 +518,38 @@ export class ControlState {
   dropRemoteMachines(via: "spacesheep"): void {
     for (const m of [...this.machinesById.values()]) if (m.remote?.via === via) this.machinesById.delete(m.id);
     this.onMachines();
+  }
+
+  /** The spacesheep account this receiver reads through from now (connected, started with
+   *  a link), or null (disconnected, started without one). The sends another account
+   *  carried can't be followed from here: their rows settle as untracked now, rather than
+   *  waiting for ever. A row from before the account was named waits for the machine list. */
+  setRemoteAccount(account: { origin: string; email: string } | null): void {
+    this.remoteAccount = account ? remoteAccountKey(account) : null;
+    this.eachRemoteRow((row) => {
+      if (row.remoteAccount === undefined && this.remoteAccount) return false;
+      if (row.remoteAccount === this.remoteAccount) return false;
+      return this.untracked(row);
+    });
+  }
+
+  /** Each unsettled row spacesheep carried; `f` says whether it changed the row. */
+  private eachRemoteRow(f: (row: MessageRow) => boolean): void {
+    for (const [id, rows] of this.queues) {
+      let changed = false;
+      for (const row of rows) if (isRemoteRow(row) && !isFinal(row.outcome) && f(row)) changed = true;
+      if (changed) this.saveQueue(id);
+    }
+  }
+
+  /** A spacesheep-carried row nothing here can follow: settled, saying so by its code, so
+   *  the page stops waiting for it. Whether it ran is spacesheep's to tell, not ours. */
+  private untracked(row: MessageRow): true {
+    row.outcome = "failed";
+    row.code = UNTRACKED_CODE;
+    row.ackedAt = nowIso();
+    this.onMessage(row);
+    return true;
   }
 
   /** A send spacesheep carried for a remote machine: its row here, settled by the relay's
@@ -491,19 +563,28 @@ export class ControlState {
   ): MessageRow {
     const row = this.enqueue(m, signed, cmd, { via: o.via, ...(o.from ? { from: o.from } : {}) });
     row.remoteJob = remoteJob;
+    if (this.remoteAccount) row.remoteAccount = this.remoteAccount;
     this.saveQueue(m.id);
     return row;
   }
 
-  /** The lowest spacesheep job id still unsettled here, for the relay's `since`. */
+  /** The lowest spacesheep job id still unsettled here, for the relay's `since`: only the
+   *  connected account's (a job id means nothing on another). */
   pendingRemoteJobsFrom(): number | null {
     let min: number | null = null;
     for (const [, rows] of this.queues)
       for (const row of rows) {
-        if (row.remoteJob === undefined || isFinal(row.outcome)) continue;
-        if (min === null || row.remoteJob < min) min = row.remoteJob;
+        if (!this.followed(row)) continue;
+        if (min === null || row.remoteJob! < min) min = row.remoteJob!;
       }
     return min;
+  }
+
+  /** An unsettled row the connected account's jobs speak for. */
+  private followed(row: MessageRow): boolean {
+    return (
+      isRemoteRow(row) && !isFinal(row.outcome) && !!this.remoteAccount && row.remoteAccount === this.remoteAccount
+    );
   }
 
   /** The relay's word on the jobs spacesheep carried (its status column, worded there):
@@ -517,8 +598,8 @@ export class ControlState {
     for (const [id, rows] of this.queues) {
       let changed = false;
       for (const row of rows) {
-        if (row.remoteJob === undefined || isFinal(row.outcome)) continue;
-        const j = byJob.get(row.remoteJob);
+        if (!this.followed(row)) continue;
+        const j = byJob.get(row.remoteJob!);
         if (!j || j.status === "queued") continue;
         if (j.status === "taken" || j.status === "running") {
           if (row.outcome === "taken") continue;
