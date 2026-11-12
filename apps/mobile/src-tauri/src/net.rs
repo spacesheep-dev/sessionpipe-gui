@@ -6,16 +6,45 @@
 
 use crate::contract::{Os, ShellInfo, ShellReceiver};
 use serde::Serialize;
-use sp_receivers::{proxy, Hub, HubConfig, KeyStore, ReceiverRef, StatusFile, StreamFrame};
+use sp_receivers::{
+    proxy, AccountConfig, Hub, HubConfig, KeyStore, ReceiverRef, StatusFile, StreamFrame,
+};
 use std::path::PathBuf;
 use tauri::{ipc::Channel, AppHandle, Manager, Runtime, State, Webview};
 
-/// The Hub's settings for the phone. Keys live in the app's own container (`keys.json`,
-/// 0600) until sp-receivers' keychain covers the phones; `SP_RECEIVER_URL` (a dev launch's
-/// `SIMCTL_CHILD_SP_RECEIVER_URL`) adds one receiver for the run. A phone has no local
-/// receiver to discover.
-pub fn config(home: PathBuf, version: &str) -> HubConfig {
+/// Where a spacesheep account's API key is kept (docs/rfcs/08). On an iPhone, the
+/// keychain: this device only, readable after the first unlock, under a service of its
+/// own (`<bundle id>.account`). On Android, for now, the file receiver keys are in
+/// (`keys.json` in the app's private storage, owner-only): that is weaker (a rooted phone
+/// or a full-device backup reads it, and nothing ties it to the hardware), and the
+/// follow-up is the Android Keystore; the account mode is off there until then anyway
+/// (`Os::account`). A dev run with `SP_SHELL_HOME` keeps it in that folder's file, so
+/// nothing is left in a keychain.
+fn account_keys(os: Os, dev_home: bool, home: &std::path::Path, identifier: &str) -> KeyStore {
+    match os {
+        Os::Ios if !dev_home => KeyStore::Keychain {
+            service: format!("{identifier}.account"),
+        },
+        _ => KeyStore::File(home.join("keys.json")),
+    }
+}
+
+/// The Hub's settings for the phone. Receiver keys live in the app's own container
+/// (`keys.json`, 0600) until sp-receivers' keychain covers them too; `SP_RECEIVER_URL` (a
+/// dev launch's `SIMCTL_CHILD_SP_RECEIVER_URL`) adds one receiver for the run. A phone has
+/// no local receiver to discover. `identifier` is the app's bundle id.
+pub fn config(home: PathBuf, version: &str, identifier: &str) -> HubConfig {
+    let os = Os::current();
+    let dev_home = std::env::var_os("SP_SHELL_HOME").is_some_and(|h| !h.is_empty());
     HubConfig {
+        account: AccountConfig {
+            enabled: os.account(),
+            keys: Some(account_keys(os, dev_home, &home, identifier)),
+            // A local spacesheep over plain http: a debug build only.
+            allow_local_http: cfg!(debug_assertions),
+            device: os.device_name().into(),
+            version: version.into(),
+        },
         keys: KeyStore::File(home.join("keys.json")),
         home,
         env_receiver_url: std::env::var("SP_RECEIVER_URL")
@@ -34,6 +63,9 @@ pub fn shell_receiver(r: &ReceiverRef) -> ShellReceiver {
         name: r.name.clone(),
         origin: r.origin.clone(),
         local: r.local,
+        kind: r.account.as_ref().map(|a| a.kind),
+        email: r.account.as_ref().map(|a| a.email.clone()),
+        state: r.account.as_ref().map(|a| a.state.as_str()),
     }
 }
 
@@ -209,7 +241,8 @@ pub fn rx_remove<R: Runtime>(
 }
 
 /// Opens the receiver's SSE stream for the page; frames arrive on `on_frame` exactly as
-/// received, plus `open` and a final `error { retryInMs }`.
+/// received, plus `open` and a final `error { retryInMs }`. An account has no stream
+/// (its page reads the relay door): this answers `Err("account_no_stream")` for one.
 #[tauri::command]
 pub fn rx_stream<R: Runtime>(
     webview: Webview<R>,
@@ -241,7 +274,11 @@ mod tests {
     fn hub(dir: &std::path::Path) -> Hub {
         Hub::new(HubConfig {
             env_receiver_url: Some("http://127.0.0.1:7823/?k=abc".into()),
-            ..config(dir.to_path_buf(), "0.2.0")
+            ..config(
+                dir.to_path_buf(),
+                "0.2.0",
+                "dev.spacesheep.sessionpipe.test",
+            )
         })
     }
 
@@ -318,7 +355,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sp-ios-net-none-{}", std::process::id()));
         let h = Hub::new(HubConfig {
             env_receiver_url: None,
-            ..config(dir.clone(), "0.2.0")
+            ..config(dir.clone(), "0.2.0", "dev.spacesheep.sessionpipe.test")
         });
         assert!(shell_info(&h, "0.2.0").receiver.is_none());
         let _ = std::fs::remove_dir_all(dir);
@@ -343,6 +380,64 @@ mod tests {
         assert_eq!(ask(None, "/contract").status(), 404);
         assert_eq!(ask(Some("http://evil.example"), "/contract").status(), 404);
         assert_eq!(ask(Some(app), "/other").status(), 404);
+    }
+
+    /// An account's key: the iPhone's keychain under the app's own service; the app's
+    /// private file on Android and in a dev run with its own home.
+    #[test]
+    fn an_account_key_is_kept_in_the_keychain_on_an_iphone() {
+        let home = std::path::Path::new("/tmp/sp-home");
+        let id = "dev.spacesheep.sessionpipe";
+        match account_keys(Os::Ios, false, home, id) {
+            KeyStore::Keychain { service } => {
+                assert_eq!(service, "dev.spacesheep.sessionpipe.account")
+            }
+            _ => panic!("an iPhone keeps it in the keychain"),
+        }
+        for (os, dev) in [(Os::Android, false), (Os::Android, true), (Os::Ios, true)] {
+            match account_keys(os, dev, home, id) {
+                KeyStore::File(p) => assert_eq!(p, home.join("keys.json")),
+                _ => panic!("a file here"),
+            }
+        }
+        // Off on Android until its https verifier is set up; on for the iPhone.
+        assert!(Os::Ios.account() && !Os::Android.account());
+    }
+
+    /// The window on an account: the contract says which kind, whose, and how it stands,
+    /// and never the key (there is none in a `ReceiverRef` to say).
+    #[test]
+    fn an_account_becomes_the_window_receiver_with_its_kind() {
+        let r = ReceiverRef {
+            id: "klmnopqrst".into(),
+            name: "spacesheep.dev".into(),
+            origin: "https://spacesheep.dev".into(),
+            local: false,
+            rp_id: Some("spacesheep.dev".into()),
+            account: Some(sp_receivers::AccountRef {
+                kind: "spacesheep",
+                email: "misha@example.com".into(),
+                state: sp_receivers::AccountState::Unauthorized,
+            }),
+        };
+        let s = shell_receiver(&r);
+        assert_eq!(s.kind, Some("spacesheep"));
+        assert_eq!(s.email.as_deref(), Some("misha@example.com"));
+        assert_eq!(s.state, Some("unauthorized"));
+        // And a row of `rx_list`: the receiver's fields, the account's three, `connected`.
+        let row = serde_json::to_value(ListedReceiver {
+            receiver: r,
+            connected: true,
+        })
+        .unwrap();
+        assert_eq!(
+            row,
+            serde_json::json!({
+                "id": "klmnopqrst", "name": "spacesheep.dev", "origin": "https://spacesheep.dev",
+                "local": false, "rpId": "spacesheep.dev", "kind": "spacesheep",
+                "email": "misha@example.com", "state": "unauthorized", "connected": true
+            })
+        );
     }
 
     #[test]

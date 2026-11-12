@@ -4,6 +4,7 @@
 //! reached through Rust (shell's `sp-receivers`: the `rx:` scheme and the stream channel),
 //! never by loading their pages.
 
+mod acct;
 mod confirm;
 pub mod contract;
 #[cfg(not(target_os = "ios"))]
@@ -350,8 +351,11 @@ mod notifications {
             let _ = app.run_on_main_thread(move || {
                 crate::uikit::watch_background(move |on| {
                     bg.store(on, Ordering::SeqCst);
-                    // Back in front: the window's own streams resync (§11.1 `wake`).
+                    // Back in front: the window's own streams resync (§11.1 `wake`), and
+                    // a connect the person may just have confirmed in the browser is
+                    // asked about now rather than at its next turn.
                     if !on {
+                        h.state::<Hub>().account_nudge();
                         let _ = h.emit_to("main", "wake", ());
                     }
                 })
@@ -427,6 +431,13 @@ pub fn run() {
             net::rx_remove,
             net::rx_stream,
             net::rx_stream_close,
+            acct::acct_status,
+            acct::acct_connect_start,
+            acct::acct_connect_cancel,
+            acct::acct_disconnect,
+            acct::acct_doc_get,
+            acct::acct_doc_set,
+            acct::acct_doc_delete,
             settings::app_settings_get,
             settings::app_settings_set,
             settings::app_first_run_done,
@@ -440,9 +451,10 @@ pub fn run() {
             };
             std::fs::create_dir_all(&home)?;
             app.manage(settings::Settings::new(&home));
-            let hub = Hub::new(net::config(home, &version));
+            let hub = Hub::new(net::config(home, &version, &app.config().identifier));
             hub.start(tauri::async_runtime::handle().inner().clone());
             app.manage(hub.clone());
+            acct::watch(app.handle(), hub.clone());
             #[cfg(target_os = "ios")]
             identity_glue::init(app, hub.clone())?;
             #[cfg(mobile)]
