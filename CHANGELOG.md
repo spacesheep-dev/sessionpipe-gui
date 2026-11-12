@@ -10,6 +10,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
+- **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH
+  it tries folders under `ProgramFiles`, `APPDATA`, `LOCALAPPDATA` and `USERPROFILE`, and
+  `NVM_SYMLINK` itself. A value there that is not a full path (`nvm`, `.`, an unexpanded
+  `%NVM_HOME%\nodejs`) was looked up from the folder the app was started in, so a
+  `node.exe` under that folder could be the one it ran. Such a value is now left out, as a
+  `.` on PATH already is (#101); `ProgramFiles` then reads as `C:\Program Files`.
 - **`sessionpipe-gui service` on Windows starts `schtasks`, `taskkill` and PowerShell by their
   full paths** under `%SystemRoot%\System32`. They were started by bare name, which is looked
   for first in the folder the command is run from, so a `schtasks.exe` lying there would
