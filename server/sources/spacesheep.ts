@@ -29,12 +29,11 @@ export interface SpacesheepSourceOptions {
   /** The relay's machine list, each time it is read (every minute): the control state
    *  keeps them as rows paired there (state.upsertRemoteMachines). */
   onMachines?: (machines: unknown[], origin: string, rpId: string) => void;
-  /** The lowest spacesheep job id still unsettled here, or null: while there is one, the
-   *  jobs door is read every few seconds and its word handed to `onJobs`. */
-  pendingJobsFrom?: () => number | null;
-  onJobs?: (
-    jobs: Array<{ id: number; status: string; note: string | null; done_at: number | null; created_at: number }>,
-  ) => void;
+  /** The spacesheep job ids still unsettled here, lowest first: while there is one, the
+   *  jobs door is read every few seconds and its word handed to `onJobs`, with the highest
+   *  job id the read covered (Infinity when it reached the end of the list). */
+  pendingJobs?: () => number[];
+  onJobs?: (jobs: RelayJob[], through: number) => void;
 }
 
 export interface SpacesheepSource {
@@ -46,6 +45,42 @@ export interface SpacesheepSource {
   pollJobs(): Promise<void>;
   /** One read of the machines door now (tests). */
   pollMachines(): Promise<void>;
+}
+
+/** One job as the relay's jobs door lists it (spacesheep's `relay/jobs`). */
+export interface RelayJob {
+  id: number;
+  status: string;
+  note: string | null;
+  done_at: number | null;
+  created_at: number;
+}
+
+/** The jobs door answers at most this many jobs after `since`, oldest first. */
+export const JOBS_PAGE = 100;
+/** Pages read in one look at the jobs door, at most. */
+export const JOBS_PAGES_MAX = 10;
+
+/** One look at the jobs door: a page from below the lowest pending id, then, while a
+ *  pending id lies past the page's last job, a page from just below that one, so a job
+ *  that waits (a computer off for days) never keeps a newer send's word out of reach.
+ *  `through` is the highest id the pages covered; Infinity once a page came back short. */
+export async function readJobs(
+  pending: number[],
+  page: (since: number) => Promise<RelayJob[]>,
+): Promise<{ jobs: RelayJob[]; through: number }> {
+  const jobs: RelayJob[] = [];
+  let since = Math.max(0, (pending[0] ?? 1) - 1);
+  for (let i = 0; i < JOBS_PAGES_MAX; i++) {
+    const got = await page(since);
+    jobs.push(...got);
+    const last = got.length ? got[got.length - 1]!.id : since;
+    if (got.length < JOBS_PAGE) return { jobs, through: Number.POSITIVE_INFINITY };
+    const next = pending.find((id) => id > last);
+    if (next === undefined) return { jobs, through: last };
+    since = next - 1;
+  }
+  return { jobs, through: jobs.length ? jobs[jobs.length - 1]!.id : since };
 }
 
 /** The relay's page, as the server sends it; `events` are wire events, checked here. */
@@ -142,17 +177,19 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
   // How the sends spacesheep carried are going: read while any is unsettled here.
   let jobsTimer: NodeJS.Timeout | undefined;
   const jobsPoll = async (): Promise<void> => {
-    const from = opts.pendingJobsFrom?.();
-    if (from === null || from === undefined) return;
+    const pending = opts.pendingJobs?.() ?? [];
+    if (!pending.length) return;
     try {
-      const res = await f(`${opts.origin}${RELAY_PATH}/jobs?since=${Math.max(0, from - 1)}`, {
-        headers: { authorization: `Bearer ${opts.key}`, accept: "application/json" },
+      const r = await readJobs(pending, async (since) => {
+        const res = await f(`${opts.origin}${RELAY_PATH}/jobs?since=${since}`, {
+          headers: { authorization: `Bearer ${opts.key}`, accept: "application/json" },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const j = (await res.json()) as { jobs?: unknown };
+        if (!Array.isArray(j.jobs)) throw new Error("not a jobs page");
+        return j.jobs as RelayJob[];
       });
-      if (!res.ok) return;
-      const j = (await res.json()) as {
-        jobs?: Array<{ id: number; status: string; note: string | null; done_at: number | null; created_at: number }>;
-      };
-      if (j.jobs?.length) opts.onJobs?.(j.jobs);
+      opts.onJobs?.(r.jobs, r.through);
     } catch {
       /* next tick */
     }

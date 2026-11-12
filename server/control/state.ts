@@ -72,6 +72,12 @@ const KEEP_SETTLED = 300;
 const SETTLED_TTL_MS = 7 * 86_400_000;
 /** A pairing row is forgotten this long after it expired or was handed over. */
 const PAIRING_TTL_MS = 3600_000;
+/** A send spacesheep carries is good for spacesheep's day (its CONTROL_EXPIRES_MS, the
+ *  protocol's longest, §3.3), and spacesheep never hands one out older than that. Its row
+ *  here takes no expiry of its own: it waits for spacesheep's word, and only when that word
+ *  is still "queued" (or there is none) this long after the day is it called expired here
+ *  (applyRemoteJobs): clocks, a computer's late poll. */
+export const REMOTE_GRACE_MS = 3600_000;
 /** The code of a spacesheep-carried row this receiver can no longer follow: the account
  *  that carried it is not the one connected (disconnected, or another account), or its
  *  machine was not on the account's list when it was read again after a restart. */
@@ -561,23 +567,29 @@ export class ControlState {
     o: { via: string; from?: string },
     remoteJob: number,
   ): MessageRow {
-    const row = this.enqueue(m, signed, cmd, { via: o.via, ...(o.from ? { from: o.from } : {}) });
+    // spacesheep's day, not the receiver's default hour: the row says when spacesheep drops it.
+    const row = this.enqueue(m, signed, cmd, {
+      via: o.via,
+      expiresInMs: EXPIRES_MAX_MS,
+      ...(o.from ? { from: o.from } : {}),
+    });
     row.remoteJob = remoteJob;
     if (this.remoteAccount) row.remoteAccount = this.remoteAccount;
     this.saveQueue(m.id);
     return row;
   }
 
-  /** The lowest spacesheep job id still unsettled here, for the relay's `since`: only the
-   *  connected account's (a job id means nothing on another). */
+  /** The spacesheep job ids still unsettled here, lowest first, for the relay's `since`:
+   *  only the connected account's (a job id means nothing on another). */
+  pendingRemoteJobs(): number[] {
+    const ids: number[] = [];
+    for (const [, rows] of this.queues) for (const row of rows) if (this.followed(row)) ids.push(row.remoteJob!);
+    return [...new Set(ids)].sort((a, b) => a - b);
+  }
+
+  /** The lowest of them, or null. */
   pendingRemoteJobsFrom(): number | null {
-    let min: number | null = null;
-    for (const [, rows] of this.queues)
-      for (const row of rows) {
-        if (!this.followed(row)) continue;
-        if (min === null || row.remoteJob! < min) min = row.remoteJob!;
-      }
-    return min;
+    return this.pendingRemoteJobs()[0] ?? null;
   }
 
   /** An unsettled row the connected account's jobs speak for. */
@@ -589,18 +601,33 @@ export class ControlState {
 
   /** The relay's word on the jobs spacesheep carried (its status column, worded there):
    *  queued keeps waiting, taken/running is taken, done is delivered, refused and failed
-   *  are themselves, with the note as the detail. */
+   *  are themselves, with the note as the detail. Only spacesheep's word settles such a
+   *  row, with one exception: `through` is the highest job id the read covered (Infinity
+   *  when it reached the end of the list), and a row in that span still queued there, or
+   *  not listed at all, past spacesheep's day and REMOTE_GRACE_MS is expired here, since
+   *  spacesheep can no longer hand it out. */
   applyRemoteJobs(
     jobs: Array<{ id: number; status: string; note: string | null; done_at: number | null; created_at: number }>,
+    through = 0,
   ): number {
     let n = 0;
     const byJob = new Map(jobs.map((j) => [j.id, j]));
+    const now = Date.now();
     for (const [id, rows] of this.queues) {
       let changed = false;
       for (const row of rows) {
         if (!this.followed(row)) continue;
         const j = byJob.get(row.remoteJob!);
-        if (!j || j.status === "queued") continue;
+        if (!j || j.status === "queued") {
+          if (row.remoteJob! > through || now - Date.parse(row.at) < EXPIRES_MAX_MS + REMOTE_GRACE_MS) continue;
+          row.outcome = "expired";
+          row.ackedAt = new Date(now).toISOString();
+          row.detail = "expired before the machine took it";
+          changed = true;
+          n++;
+          this.onMessage(row);
+          continue;
+        }
         if (j.status === "taken" || j.status === "running") {
           if (row.outcome === "taken") continue;
           row.outcome = "taken";
@@ -1024,6 +1051,9 @@ export class ControlState {
     let changed = false;
     for (const row of this.queues.get(id) ?? []) {
       if (isFinal(row.outcome) || Date.parse(row.expiresAt) > now) continue;
+      // spacesheep's to settle (applyRemoteJobs): its day is its own, and it may still
+      // hand the job out after this receiver's clock said the row was over.
+      if (isRemoteRow(row)) continue;
       row.outcome = "expired";
       row.ackedAt = new Date(now).toISOString();
       row.detail = "expired before the machine took it";

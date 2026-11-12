@@ -2,8 +2,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ControlState } from "./state.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ControlState, EXPIRES_MAX_MS, REMOTE_GRACE_MS } from "./state.js";
 
 // Machines paired on a spacesheep account (docs/rfcs/08): rows from the relay's list,
 // sends carried there settled by the relay's job status.
@@ -14,7 +14,10 @@ describe("remote machines in the control state", () => {
     dir = mkdtempSync(path.join(tmpdir(), "spgui-remote-"));
     state = new ControlState(path.join(dir, "control"));
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => {
+    vi.useRealTimers();
+    rmSync(dir, { recursive: true, force: true });
+  });
 
   const remote = { via: "spacesheep" as const, origin: "https://spacesheep.dev", rpId: "spacesheep.dev" };
   const listed = (over: Record<string, unknown> = {}) => ({
@@ -203,5 +206,67 @@ describe("remote machines in the control state", () => {
     expect(s.pendingRemoteJobsFrom()).toBe(3);
     expect(s.activityById("01B")).toMatchObject({ outcome: "failed", code: "untracked" });
     s.close();
+  });
+
+  it("only spacesheep's word settles its send: no expiry of this receiver's own", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed({ online: false })], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 11);
+    // spacesheep's day, not the receiver's hour.
+    expect(Date.parse(row.expiresAt) - Date.parse(row.at)).toBe(EXPIRES_MAX_MS);
+    vi.setSystemTime(Date.now() + 2 * 3600_000);
+    state.sweep();
+    expect(state.activityById(row.id)?.outcome).toBeUndefined();
+    // Past its day, with spacesheep still saying queued: still spacesheep's to say...
+    vi.setSystemTime(Date.parse(row.at) + EXPIRES_MAX_MS + 60_000);
+    state.sweep();
+    expect(state.applyRemoteJobs([{ id: 11, status: "queued", note: null, done_at: null, created_at: 1 }], 11)).toBe(0);
+    expect(state.activityById(row.id)?.outcome).toBeUndefined();
+    // ...and it said so after a GUI that was off: done while away is done.
+    const later = state.enqueueRemote(
+      m,
+      { cmd: JSON.stringify(startCmd(m.id, "claude-code:x")) },
+      startCmd(m.id, "claude-code:x"),
+      { via: "ui" },
+      12,
+    );
+    vi.setSystemTime(Date.parse(later.at) + EXPIRES_MAX_MS + REMOTE_GRACE_MS + 60_000);
+    expect(
+      state.applyRemoteJobs(
+        [
+          { id: 11, status: "queued", note: null, done_at: null, created_at: 1 },
+          { id: 12, status: "done", note: null, done_at: Date.parse(later.at) + 60_000, created_at: 1 },
+        ],
+        Number.POSITIVE_INFINITY,
+      ),
+    ).toBe(2);
+    expect(state.activityById(later.id)).toMatchObject({
+      outcome: "delivered",
+      ackedAt: new Date(Date.parse(later.at) + 60_000).toISOString(),
+    });
+    // Once spacesheep can no longer hand it out (its day and the grace), queued there is expired here.
+    expect(state.activityById(row.id)).toMatchObject({
+      outcome: "expired",
+      detail: "expired before the machine took it",
+    });
+  });
+
+  it("a send spacesheep no longer lists is expired only past its day, and only where the read reached", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed({ online: false })], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 500);
+    expect(state.applyRemoteJobs([], Number.POSITIVE_INFINITY)).toBe(0);
+    vi.setSystemTime(Date.parse(row.at) + EXPIRES_MAX_MS + REMOTE_GRACE_MS + 1000);
+    // The read stopped short of job 500 (its pages ended at 400): nothing is known of it.
+    expect(state.applyRemoteJobs([], 400)).toBe(0);
+    expect(state.activityById(row.id)?.outcome).toBeUndefined();
+    expect(state.applyRemoteJobs([], Number.POSITIVE_INFINITY)).toBe(1);
+    expect(state.activityById(row.id)?.outcome).toBe("expired");
   });
 });

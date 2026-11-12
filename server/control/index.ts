@@ -71,9 +71,11 @@ export interface Control {
     drop: (via: "spacesheep") => void;
     /** The account read through from now, or null: other accounts' sends settle as untracked. */
     account: (account: { origin: string; email: string } | null) => void;
-    pendingFrom: () => number | null;
+    /** The unsettled job ids of the connected account, lowest first. */
+    pending: () => number[];
     applyJobs: (
       jobs: Array<{ id: number; status: string; note: string | null; done_at: number | null; created_at: number }>,
+      through?: number,
     ) => number;
   };
   activity(limit?: number): ControlActivity[];
@@ -188,8 +190,8 @@ export function createControl(deps: ControlDeps): Control {
       upsert: (list, remote) => state.upsertRemoteMachines(list, remote),
       drop: (via) => state.dropRemoteMachines(via),
       account: (account) => state.setRemoteAccount(account),
-      pendingFrom: () => state.pendingRemoteJobsFrom(),
-      applyJobs: (jobs) => state.applyRemoteJobs(jobs),
+      pending: () => state.pendingRemoteJobs(),
+      applyJobs: (jobs, through) => state.applyRemoteJobs(jobs, through),
     },
     machines() {
       const out = new Map<string, MachineControl>();

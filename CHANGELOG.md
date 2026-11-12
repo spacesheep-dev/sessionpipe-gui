@@ -14,6 +14,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   computer came back. The row is kept, followed again once the account is read, and settled
   by spacesheep's word on the job. A row the connected account can't speak for (another
   account, or none connected) is settled as one this app can no longer follow.
+- **A start waiting for a computer through spacesheep is no longer given up after an hour.**
+  The app called it expired on its own clock ("didn't come online in time", with "Edit and
+  start again") while spacesheep kept it for a day and still handed it out, so starting it
+  again meant two runs. Only spacesheep's word on the job settles it now; a job it still
+  lists as waiting, or no longer lists, is called expired here only an hour past
+  spacesheep's day, when spacesheep can no longer hand it out. The job list is read past a
+  job that waits for days, so a newer send's word is never out of reach.
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH

@@ -293,8 +293,8 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
         // The machines paired there become rows here (control.remote), their sends settled
         // by the relay's word on spacesheep's jobs.
         onMachines: (list, origin, rpId) => control.remote.upsert(list as never, { via: "spacesheep", origin, rpId }),
-        pendingJobsFrom: () => control.remote.pendingFrom(),
-        onJobs: (jobs) => control.remote.applyJobs(jobs),
+        pendingJobs: () => control.remote.pending(),
+        onJobs: (jobs, through) => control.remote.applyJobs(jobs, through),
       });
     } catch (e) {
       if (!opts.quiet) process.stderr.write(`[sessionpipe-gui] spacesheep: ${(e as Error).message}\n`);
