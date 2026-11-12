@@ -17,6 +17,7 @@ import type {
   MachineControl,
   MachineMode,
   MachinePool,
+  MachineSummary,
   POOL_SESSION,
   PoolAction,
   StartFile,
@@ -490,4 +491,29 @@ export function activityById(queues: Map<string, MessageRow[]>, id: string): Con
     if (row) return toActivity(row);
   }
   return undefined;
+}
+
+/** A machine the UI lists: it paired (it holds a token here, or a key is trusted for it). */
+export const isPaired = (m: MachineRow): boolean => !!m.tokenHash || m.keys.length > 0;
+
+/** A paired machine as GET /machines lists it. */
+export function pairedMachine(
+  m: MachineRow,
+  control: MachineControl,
+): MachineControl & { name: string; createdAt: string; pairedAt?: string } {
+  return { name: m.name, createdAt: m.createdAt, ...(m.pairedAt ? { pairedAt: m.pairedAt } : {}), ...control };
+}
+
+/** A machine's stream frame from its control reading alone: the board merges its own
+ *  counts in (web/src/data/store.ts). */
+export function machineFrame(name: string, control: MachineControl): MachineSummary {
+  return {
+    name,
+    lastAt: control.lastPollAt ?? control.lastHelloAt ?? new Date().toISOString(),
+    harnesses: Object.fromEntries((control.harnesses ?? []).map((h) => [h, undefined])),
+    sessions: 0,
+    working: 0,
+    needsYou: 0,
+    control,
+  };
 }

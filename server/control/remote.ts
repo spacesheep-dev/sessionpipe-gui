@@ -7,16 +7,23 @@
 // own board (MemoryControl below), which has no receiver to keep them. Nothing here is
 // Node's (store/browser.test.ts holds it to what a page has).
 import type { ControlCommand, SignedCommand } from "sessionpipe-core/control";
+import type { ControlActivity, MachineControl } from "../../shared/api.js";
 import { cleanReason } from "../../shared/reason.js";
 import {
+  activity,
+  activityById,
   applyFacts,
   EXPIRES_MAX_MS,
   type Hello,
   isFinal,
+  isPaired,
   isRemoteRow,
+  keptQueue,
   MACHINE_RE,
   type MachineRow,
   type MessageRow,
+  machineControl,
+  messageRow,
   nowIso,
   REMOTE_CODE_RE,
   REMOTE_GRACE_MS,
@@ -563,3 +570,133 @@ const whyOf = (j: Record<string, unknown>): { detail?: string } => {
   const why = cleanReason(j.why);
   return why ? { detail: why } : {};
 };
+
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/** A ULID at `now`: 48 bits of time, 80 of chance, as sessionpipe-core's `ulid` writes one
+ *  (the receiver uses the core's; a page has no core). Ids made in a later millisecond sort
+ *  later, which is the order the activity is read in. */
+export function newUlid(now: number = Date.now()): string {
+  let time = "";
+  let t = Math.max(0, Math.floor(now));
+  for (let i = 0; i < 10; i++) {
+    time = CROCKFORD[t % 32] + time;
+    t = Math.floor(t / 32);
+  }
+  let chance = "";
+  for (const b of crypto.getRandomValues(new Uint8Array(16))) chance += CROCKFORD[b & 31];
+  return time + chance;
+}
+
+/** What MemoryControl hands its opener to keep: every queue it holds, by machine id. */
+export type KeptQueues = Record<string, MessageRow[]>;
+
+export interface MemoryControlOptions {
+  /** The queues kept from an earlier run (the last value `onSave` was given), if any. */
+  kept?: KeptQueues | null;
+  /** Every queue as it stands, after each change to one. */
+  onSave?: (queues: KeptQueues) => void;
+  /** A new row's id; absent, a ULID at `now` (newUlid). */
+  newId?: (now: number) => string;
+  /** Whoever verifies a start takes a `~/…` folder (rows.ts machineControl `tilde`), so a
+   *  machine that says `start` is offered one. Absent: yes, as a receiver with a current
+   *  core says of a machine paired on spacesheep. */
+  tilde?: boolean;
+}
+
+/** The control state of an opener with no receiver under it (a page on a spacesheep
+ *  account): the slice over rows held in memory. The only machines here are the account's,
+ *  the only messages the ones spacesheep carried. Nothing is verified here, handed to a
+ *  poll or signed, so a row keeps none of what signed it: `cmd`, `csig`, `grant` and
+ *  `confirm` went to spacesheep and are not kept. */
+export class MemoryControl {
+  private readonly machinesById = new Map<string, MachineRow>();
+  private readonly queues = new Map<string, MessageRow[]>();
+  /** Called with every message whose state changed. */
+  onMessage: (m: MessageRow) => void = () => {};
+  /** Called when a machine row changed. */
+  onMachines: () => void = () => {};
+  /** A spacesheep job is worth reading now: whoever reads the jobs door does. */
+  onRemoteKick: () => void = () => {};
+  readonly remote: RemoteSlice;
+
+  constructor(private readonly o: MemoryControlOptions = {}) {
+    // As the receiver reads its queue files at start: a queue is kept for the rows
+    // spacesheep carried, with what is unsettled and a week of history.
+    const now = Date.now();
+    for (const [id, rows] of Object.entries(o.kept ?? {})) {
+      if (!MACHINE_RE.test(id) || !Array.isArray(rows)) continue;
+      const mine = rows.filter((r) => r && typeof r.id === "string" && r.machineId === id);
+      if (!mine.some(isRemoteRow)) continue;
+      const kept = keptQueue(mine, now);
+      if (kept.length) this.queues.set(id, kept);
+    }
+    this.remote = new RemoteSlice({
+      machines: this.machinesById,
+      queues: this.queues,
+      enqueue: (m, signed, cmd, opts) => this.enqueue(m, signed, cmd, opts),
+      saveQueue: (id) => this.saveQueue(id),
+      onMessage: (row) => this.onMessage(row),
+      onMachines: () => this.onMachines(),
+      // Online is the relay's word on each row, never a poll's age: nothing to look at.
+      checkOnline: () => {},
+      onRemoteKick: () => this.onRemoteKick(),
+    });
+  }
+
+  private enqueue(
+    m: MachineRow,
+    _signed: SignedCommand,
+    cmd: ControlCommand,
+    o: { expiresInMs?: number; via: string; from?: string },
+  ): MessageRow {
+    const now = Date.now();
+    // The row of the command as it was read, with nothing of what signed it.
+    const row = messageRow(m, { cmd: "" }, cmd, { ...o, id: (this.o.newId ?? newUlid)(now), now });
+    let q = this.queues.get(m.id);
+    if (!q) {
+      q = [];
+      this.queues.set(m.id, q);
+    }
+    q.push(row);
+    this.saveQueue(m.id);
+    this.onMessage(row);
+    return row;
+  }
+
+  private saveQueue(id: string): void {
+    const q = this.queues.get(id);
+    if (q) this.queues.set(id, keptQueue(q, Date.now()));
+    this.o.onSave?.(Object.fromEntries(this.queues));
+  }
+
+  machine(id: string): MachineRow | undefined {
+    return this.machinesById.get(id);
+  }
+  allMachines(): MachineRow[] {
+    return [...this.machinesById.values()];
+  }
+  /** Queued and not finally settled. */
+  queued(id: string): MessageRow[] {
+    return (this.queues.get(id) ?? []).filter((m) => !isFinal(m.outcome));
+  }
+  machineControl(m: MachineRow): MachineControl {
+    return machineControl(m, { queued: this.queued(m.id).length, tilde: (this.o.tilde ?? true) && !!m.start });
+  }
+  /** The paired machines, keyed by name (the name events carry in session.machine). */
+  machines(): Map<string, MachineControl> {
+    const out = new Map<string, MachineControl>();
+    for (const m of this.machinesById.values()) if (isPaired(m)) out.set(m.name, this.machineControl(m));
+    return out;
+  }
+  activity(limit = 100): ControlActivity[] {
+    return activity(this.queues, limit);
+  }
+  activityById(id: string): ControlActivity | undefined {
+    return activityById(this.queues, id);
+  }
+  /** A send for one of the account's machines (forwardRemoteSend): its row, or SendRefused. */
+  send(m: MachineRow, body: Record<string, unknown>, remoteSend: RemoteSend | undefined): Promise<MessageRow> {
+    return forwardRemoteSend(this.remote, m, body, remoteSend);
+  }
+}

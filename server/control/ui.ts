@@ -29,9 +29,11 @@ import { requestOrigin } from "./routes.js";
 import {
   type ControlState,
   type DeviceRequestRow,
+  isPaired,
   type MachineRow,
   type PairingRow,
   type Proof,
+  pairedMachine,
   toActivity,
 } from "./state.js";
 
@@ -512,13 +514,8 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
         json: {
           machines: state
             .allMachines()
-            .filter((m) => m.tokenHash || m.keys.length)
-            .map((m) => ({
-              name: m.name,
-              createdAt: m.createdAt,
-              ...(m.pairedAt ? { pairedAt: m.pairedAt } : {}),
-              ...state.machineControl(m),
-            })),
+            .filter(isPaired)
+            .map((m) => pairedMachine(m, state.machineControl(m))),
         },
       }),
     ),
