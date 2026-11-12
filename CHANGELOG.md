@@ -53,6 +53,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   started on rc-mac." (a message: "… whether rc-mac got it.").
 - **Words: an offline computer reached through spacesheep is waited for "within a day"**, not
   "within an hour", in the new session sheet and the handoff sheet.
+- **Words: a file dropped on the new session sheet for a computer reached through spacesheep**
+  reads "Files can't reach rc-mac through spacesheep yet.", not "Update sessionpipe there".
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH

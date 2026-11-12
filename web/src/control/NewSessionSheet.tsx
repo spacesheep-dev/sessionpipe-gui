@@ -351,7 +351,10 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   // ----- files: 📎, paste, drop; uploaded here, named by hash in the signed command -----
   const addFiles = (list: File[]) => {
     if (!list.length) return;
-    if (relayed) return;
+    if (relayed) {
+      setNote(`Files can't reach ${machine ?? "this machine"} through spacesheep yet.`);
+      return;
+    }
     if (!takesFiles) {
       setNote(`${machine ?? "This machine"} can't take files on a new session. Update sessionpipe there.`);
       return;
@@ -500,6 +503,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     if (!harness) return { text: harnesses.length ? "Choose an agent" : `${m.name} hasn't said which agents it runs.` };
     if (!folderCheck.ok) return { text: folderCheck.reason };
     if (note) return { text: note };
+    if (files.length && relayed)
+      return { text: `Files can't reach ${m.name} through spacesheep yet. Remove them to start.` };
     if (files.length && !takesFiles)
       return { text: `${m.name} can't take files on a new session. Update sessionpipe there.` };
     if (model && !modelOk)
