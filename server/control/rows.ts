@@ -27,6 +27,8 @@ import type {
 import { cleanNote } from "../../shared/reason.js";
 
 export const MACHINE_RE = /^m_[A-Za-z0-9_-]{16,40}$/;
+/** Demo mode's machines have ids under this prefix (MACHINE_RE: `m_` and 16–40 more). */
+export const DEMO_MACHINE = "m_demo-";
 
 export interface Hello {
   name: string;

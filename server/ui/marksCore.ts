@@ -1,30 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: server-core. What the person has seen (shared/api.ts Marks): one small
-// document at <stateDir>/marks.json, the same on every device. A session is read up to the
+// document, the same on every device. A session is read up to the
 // `newsAt` it had when it was on screen, and may be marked unread by hand; `since` is when
 // the file was made, so news from before this receiver kept marks is read. Like labels it
 // is the person's, not a reading, so it lives beside the store: GET reads it, PATCH merges
 // into it, and every change goes to every page as one `marks` stream frame. Forgetting a
 // session forgets its marks. It also keeps each session's own "Notify me" when it is not
-// the default (`notify`), so a muted session is muted on every device.
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import path from "node:path";
+// the default (`notify`), so a muted session is muted on every device. Where the document
+// is kept is its opener's (docKeep.ts): the receiver's is <stateDir>/marks.json (marks.ts
+// MarkStore). Nothing here is Node's.
 import {
   MARKS_MAX,
   type Marks,
   type MarksPatch,
   type NotifyLevel,
-  ROUTES,
   type SessionKey,
   type StreamMessage,
 } from "../../shared/api.js";
-import type { Handler, Reply, Router } from "../http/router.js";
-import type { Store } from "../store/store.js";
+import { utf8Bytes } from "../store/log.js";
+import type { DocKeep } from "./docKeep.js";
 
 /** The file's ceiling, like labels.json. */
 export const MARKS_FILE_MAX = 256 * 1024;
-/** "Mark all as read" on a full board is one patch: as large as the file may be. */
-const PATCH_MAX = MARKS_FILE_MAX;
 /** What `Date.toISOString` writes, the only time the store writes. */
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const isIso = (v: unknown): v is string => typeof v === "string" && ISO.test(v) && !Number.isNaN(Date.parse(v));
@@ -45,28 +42,26 @@ export class MarksError extends Error {
   }
 }
 
-export class MarkStore {
+export class MarksCore {
   private doc: Doc;
-  private readonly file: string;
   private readonly listeners = new Set<(m: StreamMessage) => void>();
 
-  /** `stateDir`: the GUI's state dir. `known`: whether the store has a session (a key it
-   *  does not know is skipped, so no orphan keys). `now` for tests. */
+  /** `keep`: where the document is kept. `known`: whether the store has a session (a key
+   *  it does not know is skipped, so no orphan keys). `now` for tests. */
   constructor(
-    stateDir: string,
+    private readonly keep: DocKeep,
     private readonly known: (key: SessionKey) => boolean,
     now: () => number = Date.now,
   ) {
-    this.file = path.join(stateDir, "marks.json");
     const had = this.load();
-    // The first run makes the file, so `since` is set once, when this receiver began to
+    // The first run makes the document, so `since` is set once, when its keeper began to
     // keep marks, and never moves.
     this.doc = had ?? { rev: 0, since: new Date(now()).toISOString(), read: {}, unread: {}, notify: {} };
     if (!had) {
       try {
         this.write(this.doc);
       } catch (e) {
-        process.stderr.write(`[marks] ${(e as Error).message}\n`);
+        console.error("[marks] %s", (e as Error).message);
       }
     }
   }
@@ -147,7 +142,7 @@ export class MarkStore {
   }
 
   /** Follow the store: a `forgotten` message drops that session's marks. */
-  follow(store: Store): () => void {
+  follow(store: { subscribe(l: (m: StreamMessage) => void): () => void }): () => void {
     return store.subscribe((m) => {
       if (m.kind === "forgotten") this.forget(m.key);
     });
@@ -168,29 +163,21 @@ export class MarkStore {
       try {
         l({ kind: "marks", marks: kept });
       } catch (e) {
-        process.stderr.write(`[marks] listener: ${(e as Error).message}\n`);
+        console.error("[marks] listener: %s", (e as Error).message);
       }
     }
   }
 
   private write(doc: Marks): void {
-    mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
-    const tmp = `${this.file}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ v: 1, ...doc }), { mode: 0o600 });
-    renameSync(tmp, this.file);
+    this.keep.save({ v: 1, ...doc });
   }
 
-  /** The file as it is, or null when there is none; a broken one is set aside (never
+  /** What was kept, as it is, or null with nothing kept; a broken one is set aside (never
    *  lost) and the marks start again. Entries that do not validate are dropped. */
   private load(): Doc | null {
-    let text: string;
     try {
-      text = readFileSync(this.file, "utf8");
-    } catch {
-      return null;
-    }
-    try {
-      const raw = JSON.parse(text) as Partial<Marks>;
+      const raw = this.keep.load() as Partial<Marks> | undefined;
+      if (raw === undefined) return null;
       if (!isIso(raw.since)) throw new Error("no since");
       const read: Marks["read"] = {};
       const unread: Marks["unread"] = {};
@@ -201,11 +188,7 @@ export class MarkStore {
       const rev = typeof raw.rev === "number" && Number.isInteger(raw.rev) && raw.rev >= 0 ? raw.rev : 0;
       return fit({ rev, since: raw.since, read, unread, notify });
     } catch {
-      try {
-        renameSync(this.file, `${this.file}.bad-${Date.now()}`);
-      } catch {
-        // nothing to set aside
-      }
+      this.keep.setAside?.();
       return null;
     }
   }
@@ -215,7 +198,7 @@ export class MarkStore {
  *  values going first (`since` moves up to the newest dropped, so they stay read), then the earliest unread; past
  *  MARKS_MAX, the earliest notify levels go back to the default. */
 function fit<T extends Marks>(doc: T): T {
-  const size = (d: Marks) => Buffer.byteLength(JSON.stringify({ v: 1, ...d }));
+  const size = (d: Marks) => utf8Bytes(JSON.stringify({ v: 1, ...d }));
   if (
     Object.keys(doc.read).length <= MARKS_MAX &&
     Object.keys(doc.unread).length <= MARKS_MAX &&
@@ -249,35 +232,4 @@ function fit<T extends Marks>(doc: T): T {
   for (const [k, at] of Object.entries(doc.read)) if (!kept.has(k) && (!dropped || at > dropped)) dropped = at;
   if (dropped && doc.since !== undefined && dropped > doc.since) next.since = dropped;
   return next;
-}
-
-/** GET and PATCH ROUTES.ui.marks, behind the UI guard. PATCH takes JSON only, as labels
- *  does: the content type forces a CORS preflight this server never answers. */
-export function registerMarks(router: Router, marks: MarkStore, guard: (h: Handler) => Handler): void {
-  router.get(
-    ROUTES.ui.marks,
-    guard(() => ({ status: 200, json: marks.get(), headers: { "cache-control": "no-store" } })),
-  );
-  router.add(
-    "PATCH",
-    ROUTES.ui.marks,
-    guard(async (ctx): Promise<Reply> => {
-      const type = String(ctx.req.headers["content-type"] ?? "");
-      if (!/^application\/json\b/i.test(type)) return { status: 415, json: { reason: "json_only" } };
-      const announced = Number(ctx.req.headers["content-length"]);
-      if (Number.isFinite(announced) && announced > PATCH_MAX) return { status: 413, json: { reason: "too_large" } };
-      let body: MarksPatch;
-      try {
-        body = await ctx.json<MarksPatch>(PATCH_MAX);
-      } catch {
-        return { status: 400, json: { reason: "malformed" } };
-      }
-      try {
-        return { status: 200, json: marks.patch(body) };
-      } catch (e) {
-        if (e instanceof MarksError) return { status: e.status, json: { reason: e.reason } };
-        throw e;
-      }
-    }),
-  );
 }

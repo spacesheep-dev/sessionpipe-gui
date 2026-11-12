@@ -2,8 +2,9 @@
 // Owned by: server-core. Each account's usage limits (shared/api.ts LimitsEntry): the
 // newest limits.observed per (harness, session.account_id), or per machine when the events
 // carry no account id (Codex). The numbers belong to the account, not to a session, so
-// they live beside the store in <stateDir>/limits.json rather than on a SessionSummary:
-// forgetting a session keeps them. It follows the store's `event` messages, so it sees
+// they live beside the store rather than on a SessionSummary: forgetting a session keeps
+// them. Where they are kept is their opener's (docKeep.ts): the receiver's is
+// <stateDir>/limits.json (limits.ts LimitsStore); nothing here is Node's. It follows the store's `event` messages, so it sees
 // only what the store accepted (the receiver's and the outbox's alike), and every change
 // goes to every page as one `limits` frame with the whole list. Demo numbers stay in
 // memory and go when demo mode does, so a real receiver keeps no pretend accounts.
@@ -11,8 +12,6 @@
 // one, the account that served the request, else by the session's own; and a hello's
 // `pool.accounts[].windows`, the daemon's freshest numbers for an idle account, feed the
 // same entries, dated by the hello (followControl).
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import path from "node:path";
 import {
   LIMIT_WINDOWS_MAX,
   LIMITS_MACHINES_MAX,
@@ -20,13 +19,11 @@ import {
   type LimitsEntry,
   type LimitWindow,
   type MachineSummary,
-  ROUTES,
   type StoredEvent,
   type StreamMessage,
 } from "../../shared/api.js";
-import { DEMO_MACHINE } from "../control/state.js";
-import type { Handler, Reply, Router } from "../http/router.js";
-import type { Store } from "../store/store.js";
+import { DEMO_MACHINE } from "../control/rows.js";
+import type { DocKeep } from "./docKeep.js";
 
 const WINDOW_ID = /^[a-z0-9_]{1,64}$/;
 const HARNESS = /^[a-z][a-z0-9-]{0,39}$/;
@@ -36,9 +33,8 @@ const CONTROL = /[\u0000-\u001f\u007f]/;
 /** used_percent's ceiling: a spend limit passed a hundredfold is still a number. */
 const USED_MAX = 10_000;
 const PLAN_MAX = 64;
-const FORGET_MAX = 4096;
 
-const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
+export const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
 const isTime = (v: unknown): v is string => typeof v === "string" && RFC3339.test(v) && Number.isFinite(Date.parse(v));
 
 /** One window as the event or the file has it (`used_percent` or `usedPercent`), or null
@@ -89,16 +85,14 @@ function clamp(time: string, arrivedAt: string | undefined): string {
   return new Date(Math.min(t, a)).toISOString();
 }
 
-export class LimitsStore {
-  /** What limits.json holds: every entry a real sender reported. */
+export class LimitsCore {
+  /** What is kept: every entry a real sender reported. */
   private real: Map<string, LimitsEntry>;
   /** The demo's, over the real ones, in memory only. */
   private readonly demo = new Map<string, LimitsEntry>();
-  private readonly file: string;
   private readonly listeners = new Set<(m: StreamMessage) => void>();
 
-  constructor(stateDir: string) {
-    this.file = path.join(stateDir, "limits.json");
+  constructor(private readonly keep: DocKeep) {
     this.real = this.load();
   }
 
@@ -218,7 +212,7 @@ export class LimitsStore {
   }
 
   /** Follow the store: each accepted event, read for its limits. */
-  follow(store: Store): () => void {
+  follow(store: { subscribe(l: (m: StreamMessage) => void): () => void }): () => void {
     return store.subscribe((m) => {
       if (m.kind === "event" && m.event.type === "limits.observed") this.observe(m.event, m.session.machine);
     });
@@ -245,36 +239,28 @@ export class LimitsStore {
       try {
         l({ kind: "limits", limits });
       } catch (e) {
-        process.stderr.write(`[limits] listener: ${(e as Error).message}\n`);
+        console.error("[limits] listener: %s", (e as Error).message);
       }
     }
   }
 
-  /** Written whole and atomically (a temp file, then rename), like labels.json. A failed
-   *  write keeps the numbers in memory and says so; the next report writes again. */
+  /** Kept whole, like the labels. A failed write keeps the numbers in memory and says so;
+   *  the next report writes again. */
   private save(): void {
     try {
-      mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
-      const tmp = `${this.file}.${process.pid}.tmp`;
-      writeFileSync(tmp, JSON.stringify({ version: 1, entries: [...this.real.values()] }), { mode: 0o600 });
-      renameSync(tmp, this.file);
+      this.keep.save({ version: 1, entries: [...this.real.values()] });
     } catch (e) {
-      process.stderr.write(`[limits] write: ${(e as Error).message}\n`);
+      console.error("[limits] write: %s", (e as Error).message);
     }
   }
 
-  /** The file as it is; a missing one is empty, a broken one is set aside (never lost)
-   *  and read as empty. Entries that do not validate are dropped. */
+  /** What was kept, as it is; with nothing kept it is empty, a broken one is set aside
+   *  (never lost) and read as empty. Entries that do not validate are dropped. */
   private load(): Map<string, LimitsEntry> {
     const out = new Map<string, LimitsEntry>();
-    let text: string;
     try {
-      text = readFileSync(this.file, "utf8");
-    } catch {
-      return out;
-    }
-    try {
-      const raw = JSON.parse(text) as { entries?: unknown };
+      const raw = this.keep.load() as { entries?: unknown } | undefined;
+      if (raw === undefined) return out;
       for (const e of Array.isArray(raw.entries) ? raw.entries : []) {
         const entry = readEntry(e);
         if (entry) out.set(entry.key, entry);
@@ -282,11 +268,7 @@ export class LimitsStore {
       cap(out);
       return out;
     } catch {
-      try {
-        renameSync(this.file, `${this.file}.bad-${Date.now()}`);
-      } catch {
-        // nothing to set aside
-      }
+      this.keep.setAside?.();
       return new Map();
     }
   }
@@ -323,32 +305,4 @@ function cap(map: Map<string, LimitsEntry>): void {
     if (!oldest) return;
     map.delete(oldest.key);
   }
-}
-
-/** GET ROUTES.ui.limits and POST ROUTES.ui.limitsForget, behind the UI guard. The POST
- *  takes JSON only, like the labels PATCH: the content type forces a CORS preflight this
- *  server never answers, so a page on another origin cannot forget numbers through the
- *  loopback-is-trusted rule. */
-export function registerLimits(router: Router, limits: LimitsStore, guard: (h: Handler) => Handler): void {
-  router.get(
-    ROUTES.ui.limits,
-    guard(() => ({ status: 200, json: { limits: limits.list() }, headers: { "cache-control": "no-store" } })),
-  );
-  router.post(
-    ROUTES.ui.limitsForget,
-    guard(async (ctx): Promise<Reply> => {
-      const type = String(ctx.req.headers["content-type"] ?? "");
-      if (!/^application\/json\b/i.test(type)) return { status: 415, json: { reason: "json_only" } };
-      let body: { key?: unknown };
-      try {
-        body = await ctx.json<{ key?: unknown }>(FORGET_MAX);
-      } catch {
-        return { status: 400, json: { reason: "malformed" } };
-      }
-      const key = body && typeof body === "object" ? str(body.key) : undefined;
-      if (!key) return { status: 400, json: { reason: "malformed" } };
-      if (!limits.forget(key)) return { status: 404, json: { reason: "not_found" } };
-      return { status: 204, text: "" };
-    }),
-  );
 }

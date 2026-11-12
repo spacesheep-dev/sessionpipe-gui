@@ -26,6 +26,7 @@ import {
   activity,
   activityById,
   applyFacts,
+  DEMO_MACHINE,
   EXPIRES_DEFAULT_MS,
   isRemoteRow,
   type KeyRow,
@@ -45,9 +46,6 @@ import { machineTakesTilde } from "./tilde.js";
 
 // The rows, their constants and what reads them for the UI moved to rows.ts as they were.
 export * from "./rows.js";
-
-/** Demo mode's machines have ids under this prefix (MACHINE_RE: `m_` and 16–40 more). */
-export const DEMO_MACHINE = "m_demo-";
 
 /** What demo mode says a demo machine ran (ControlState.demoStart). */
 export interface DemoStart {

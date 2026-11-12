@@ -5,8 +5,9 @@
 // it runs in a context that has what a page on the oldest Safari we hold to has, and none
 // of Node's. Envelope validation (receiver/validate.ts) is held to the same, for a page
 // that reads events from a relay; so are the relay's reader (sources/relay.ts) and the
-// machines and sends of a spacesheep account (control/remote.ts, control/rows.ts), which
-// that page runs as the receiver does.
+// machines and sends of a spacesheep account (control/remote.ts, control/rows.ts), and the
+// three small documents beside the store (ui/labelsCore.ts, ui/marksCore.ts,
+// ui/limitsCore.ts), which that page runs as the receiver does.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { format } from "node:util";
@@ -100,6 +101,9 @@ async function bundle() {
         'export { startRelayReader, relayPaceMs, backlogPaceMs } from "../sources/relay.js";',
         'export { MemoryControl, RemoteSlice, forwardRemoteSend, SendRefused, newUlid } from "../control/remote.js";',
         'export { toActivity, isFinal } from "../control/rows.js";',
+        'export { LabelsCore, LabelsError } from "../ui/labelsCore.js";',
+        'export { MarksCore } from "../ui/marksCore.js";',
+        'export { LimitsCore } from "../ui/limitsCore.js";',
         // Every export of the three files a page runs, not only the ones named above: the
         // bundler drops what the entry does not reach, and a word of Node's in a dropped
         // export would pass. As namespaces: a plain `export *` from several modules drops,
@@ -161,12 +165,13 @@ test("the core bundles for the browser from the repo's own files alone, naming n
   // What the core may read: its own folder, the shared types and readings, the validator.
   // The reader and the slice: their own files and the same.
   const allowed =
-    /^(server\/store|shared|server\/receiver|server\/sources\/relay\.ts$|server\/control\/(refs|rows|remote)\.ts$)/;
+    /^(server\/store|shared|server\/receiver|server\/sources\/relay\.ts$|server\/control\/(refs|rows|remote)\.ts$|server\/ui\/(labelsCore|marksCore|limitsCore|docKeep)\.ts$)/;
   expect(files.filter((f) => !allowed.test(f))).toEqual([]);
   expect(files).toContain("server/store/core.ts");
   expect(files).toContain("server/sources/relay.ts");
   expect(files).toContain("server/control/remote.ts");
   expect(files).toContain("server/control/rows.ts");
+  for (const f of ["labelsCore", "marksCore", "limitsCore"]) expect(files).toContain(`server/ui/${f}.ts`);
   // Node's globals by name anywhere, through globalThis or a string too; Buffer only where
   // slim.ts asks whether there is one.
   expect(code.match(/\b(?:process|require|module|__dirname|__filename|setImmediate|global)\b/g) ?? []).toEqual([]);
@@ -418,4 +423,53 @@ test("the relay's reader and the remote slice run at the floor: a page of events
   expect(errors).toEqual([]);
   reader.stop();
   await store.close();
+});
+
+test("the labels, the marks and the limits run at the floor over a keep in memory", async () => {
+  const { code } = await bundle();
+  const errors: string[] = [];
+  const page = pageContext(errors);
+  vm.runInContext(`${code}\nglobalThis.core = core;`, page);
+  const lib = page.core as typeof import("../ui/labelsCore.js") &
+    typeof import("../ui/marksCore.js") &
+    typeof import("../ui/limitsCore.js");
+  const kept = new Map<string, unknown>();
+  const keep = (name: string) => ({
+    load: () => kept.get(name),
+    save: (value: unknown) => void kept.set(name, JSON.parse(JSON.stringify(value))),
+  });
+  const known = (key: string) => key === `claude-code:${SID}`;
+
+  const labels = new lib.LabelsCore(keep("labels"), known);
+  const frames: string[] = [];
+  labels.subscribe((m) => frames.push(m.kind));
+  expect(labels.patch({ sessions: { [`claude-code:${SID}`]: "red" }, names: { red: "Urgent" } })).toMatchObject({
+    rev: 1,
+    names: { red: "Urgent" },
+  });
+  expect(() => labels.patch({ sessions: { "claude-code:unknown": "red" } })).toThrow(lib.LabelsError);
+  expect(frames).toEqual(["labels"]);
+  // Opened again from what was kept: the same document.
+  expect(new lib.LabelsCore(keep("labels"), known).get()).toEqual(labels.get());
+
+  const marks = new lib.MarksCore(keep("marks"), known, () => 1_800_000_000_000);
+  expect(marks.get().since).toBe(new Date(1_800_000_000_000).toISOString());
+  const at = new Date(1_800_000_060_000).toISOString();
+  expect(marks.patch({ read: { [`claude-code:${SID}`]: at, "claude-code:unknown": at } }).read).toEqual({
+    [`claude-code:${SID}`]: at,
+  });
+  expect(new lib.MarksCore(keep("marks"), known).get()).toEqual(marks.get());
+
+  const limits = new lib.LimitsCore(keep("limits"));
+  const s = new Session();
+  const seen = limits.observe({
+    ...s.ev("limits.observed", { windows: [{ id: "five_hour", used_percent: 41 }], plan: "max" }, { tier: 1 }),
+    arrivedAt: new Date().toISOString(),
+    source: "spacesheep",
+  });
+  expect(seen).toBe(true);
+  expect(limits.list()).toMatchObject([{ harness: "claude-code", machine: "misha-air", plan: "max" }]);
+  expect(new lib.LimitsCore(keep("limits")).list()).toEqual(limits.list());
+  expect(limits.forget(limits.list()[0]!.key)).toBe(true);
+  expect(errors).toEqual([]);
 });
