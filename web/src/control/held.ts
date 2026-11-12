@@ -66,7 +66,7 @@ export class HeldSlot<T, M extends HeldMeta> {
     failed: (e: unknown, meta: M) => void,
   ): Promise<void> {
     const v = this.view;
-    if (!v || v.kind !== "held" || v.busy) return;
+    if (v?.kind !== "held" || v.busy) return;
     this.view = { ...v, busy: true };
     this.changed();
     try {
