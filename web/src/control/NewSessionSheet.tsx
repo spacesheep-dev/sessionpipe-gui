@@ -352,7 +352,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const addFiles = (list: File[]) => {
     if (!list.length) return;
     if (relayed) {
-      setNote(`Files can't reach ${machine ?? "this machine"} through spacesheep yet.`);
+      setNote(`Files can't be sent to ${machine ?? "this machine"} through spacesheep yet.`);
       return;
     }
     if (!takesFiles) {
@@ -504,7 +504,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     if (!folderCheck.ok) return { text: folderCheck.reason };
     if (note) return { text: note };
     if (files.length && relayed)
-      return { text: `Files can't reach ${m.name} through spacesheep yet. Remove them to start.` };
+      return { text: `Files can't be sent to ${m.name} through spacesheep yet. Remove them to start.` };
     if (files.length && !takesFiles)
       return { text: `${m.name} can't take files on a new session. Update sessionpipe there.` };
     if (model && !modelOk)

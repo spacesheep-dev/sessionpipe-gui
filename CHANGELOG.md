@@ -66,22 +66,20 @@ All notable changes to `sessionpipe-gui`. The format follows
   so a stream is read in batches about 3 seconds apart (at most about 4 seconds behind)
   and never meets the limit. The machine list is read every minute on its own, so it
   stays fresh while the reader waits.
-- **Words: a refusal is said once.** With no code (a spacesheep from before `code`) a start
-  read "rc-mac refused it: refused: …"; it now reads "rc-mac refused it: …". A start called
-  off before it began says so: "This start was called off before it began on rc-mac.", and
-  a message sent to it "This message was called off with its session's start, before
-  rc-mac took it."
-- **Words: a send through spacesheep this app can no longer follow says so**: "This app no
-  longer reads the spacesheep account that carried this, so it can't tell whether it
-  started on rc-mac." (a message: "… whether rc-mac got it.").
-- **Words: an offline computer reached through spacesheep is waited for "within a day"**, not
-  "within an hour", in the new session sheet and the handoff sheet.
-- **Words: a file dropped on the new session sheet for a computer reached through spacesheep**
-  reads "Files can't reach rc-mac through spacesheep yet.", not "Update sessionpipe there".
-- **Words: a send refused for a revoked spacesheep key** reads "not sent · spacesheep no
-  longer takes this app's key. Connect spacesheep again in Settings → Data."
-- **Words: Settings → Data says "spacesheep asked this app to wait a little; it reads again
-  by itself"** when spacesheep limits the app, not "spacesheep can't be reached right now".
+- **Words, plain** (for approval): a start called off before it began reads "Cancelled
+  before rc-mac started it." and a message sent to it "Cancelled with its session, before
+  rc-mac got it."; a refusal with no specific reason "rc-mac refused it." plus the
+  receiver's reason when there is one, never "refused: refused"; a file for a computer
+  reached through spacesheep "Files can't be sent to rc-mac through spacesheep yet." (plus
+  "Remove them to start." for a start edited again that carried files, and "Not sent." in
+  front when a send carried one); a revoked key "Not sent. spacesheep is disconnected:
+  connect again in Settings → Data."; a send this app can no longer follow "Sent through a
+  spacesheep account that's no longer connected here. Check spacesheep.dev to see if it
+  started."; a send the computer took and said nothing more of "No word from rc-mac since
+  it took this. Check spacesheep.dev to see how it went."; a send waiting while spacesheep
+  is disconnected "Not being followed while spacesheep is disconnected."; Settings → Data,
+  limited, "spacesheep is busy; this catches up by itself"; an offline computer through
+  spacesheep is waited for "within a day".
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH

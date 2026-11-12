@@ -877,7 +877,7 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
     ok: "reading",
     unauthorized: "the key was revoked on spacesheep; disconnect and connect again",
     offline: "spacesheep can't be reached right now",
-    limited: "spacesheep asked this app to wait a little; it reads again by itself",
+    limited: "spacesheep is busy; this catches up by itself",
     gap: "reading (an older gap the relay no longer holds)",
   };
   return (

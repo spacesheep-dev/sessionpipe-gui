@@ -40,9 +40,14 @@ describe("startFailureWords", () => {
   it("says a refusal with no code once, with its note (a spacesheep without `code`)", () => {
     const a = start({ outcome: "refused", detail: "called off by its owner before the machine took it" });
     expect(startFailureWords(a, "rc-mac", "Claude Code")).toBe(
-      "rc-mac refused it: called off by its owner before the machine took it.",
+      "rc-mac refused it. Called off by its owner before the machine took it.",
     );
     expect(startFailureWords(start({ outcome: "refused" }), "rc-mac", "Claude Code")).toBe("rc-mac refused it.");
+    // An older spacesheep's bare outcome as the note: said once.
+    expect(startFailureWords(start({ outcome: "refused", detail: "refused" }), "rc-mac", "Claude Code")).toBe(
+      "rc-mac refused it.",
+    );
+    expect(outcomeWords(start({ outcome: "refused", detail: "refused" }))).toBe("refused");
     expect(outcomeWords(a)).toBe("refused · called off by its owner before the machine took it");
   });
 
@@ -50,18 +55,26 @@ describe("startFailureWords", () => {
     for (const outcome of ["refused", "failed"] as const)
       expect(
         startFailureWords(start({ outcome, code: "cancelled", detail: "called off" }), "rc-mac", "Claude Code"),
-      ).toBe("This start was called off before it began on rc-mac.");
+      ).toBe("Cancelled before rc-mac started it.");
     expect(outcomeWords(start({ outcome: "refused", code: "cancelled" }))).toBe(
-      "refused · called off before the machine took it",
+      "refused · cancelled before the machine started it",
     );
   });
 
   it("says a send it can no longer follow through spacesheep as that, not as a failure there", () => {
     const a = start({ outcome: "failed", code: "untracked" });
     expect(startFailureWords(a, "rc-mac", "Claude Code")).toBe(
-      "This app no longer reads the spacesheep account that carried this, so it can't tell whether it started on rc-mac.",
+      "Sent through a spacesheep account that's no longer connected here. Check spacesheep.dev to see if it started.",
     );
-    expect(outcomeWords(a)).toBe("not followed · this app no longer reads the spacesheep account that carried it");
+    expect(outcomeWords(a)).toBe("not followed · sent through an account that's no longer connected");
+    const u = start({ outcome: "unconfirmed" });
+    expect(startFailureWords(u, "rc-mac", "Claude Code")).toBe(
+      "No word from rc-mac since it took this. Check spacesheep.dev to see how it went.",
+    );
+    const w = start({ unfollowed: true });
+    expect(sentLine(w, { machine: "rc-mac", online: false, command: "claude" })?.text).toBe(
+      "Not being followed while spacesheep is disconnected.",
+    );
   });
 
   it("has nothing to say while the start is on its way or after it started", () => {
@@ -99,8 +112,11 @@ describe("sentLine", () => {
 describe("sendErrorWords", () => {
   it("tells spacesheep's refusal of this app's key from the page's own key", () => {
     expect(sendErrorWords(new ControlError(502, "Unknown or revoked API key.", "spacesheep_unauthorized"))).toBe(
-      "not sent · spacesheep no longer takes this app's key. Connect spacesheep again in Settings → Data.",
+      "Not sent. spacesheep is disconnected: connect again in Settings → Data.",
     );
+    expect(
+      sendErrorWords(new ControlError(422, "Files can't be sent to rc-mac through spacesheep yet.", "relay_files")),
+    ).toBe("Not sent. Files can't be sent to rc-mac through spacesheep yet.");
     expect(sendErrorWords(new ControlError(401, "unauthorized"))).toBe(
       "not sent · this page lost its key; reload it from the terminal's link",
     );

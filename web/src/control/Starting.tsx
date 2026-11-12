@@ -24,11 +24,14 @@ import {
   isFinal,
   outcomeWords,
   PERMISSION_LABEL,
+  reasonOf,
   refusalWords,
   sendErrorWords,
   sentLine,
   shownState,
   startFailureWords,
+  UNTRACKED_WORDS,
+  unconfirmedWords,
 } from "./words";
 
 /** The start this device (or another) sent that names `key`, newest first. */
@@ -202,14 +205,17 @@ export function sentRow(
 export function promptFailureWords(a: ControlActivity, machine: string): string | null {
   const detail = a.detail?.trim();
   if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
-    return `This message was called off with its session's start, before ${machine} took it.`;
-  if (a.outcome === "failed" && a.code === "untracked")
-    return `This app no longer reads the spacesheep account that carried this, so it can't tell whether ${machine} got it.`;
+    return `Cancelled with its session, before ${machine} got it.`;
+  if (a.outcome === "failed" && a.code === "untracked") return UNTRACKED_WORDS;
+  if (a.outcome === "unconfirmed") return unconfirmedWords(machine);
   switch (a.outcome) {
-    case "refused":
-      // No code (spacesheep before its `code`): its note, not "refused: refused".
-      if (!a.code) return `${machine} refused it${detail ? `: ${detail.replace(/[.!?…]?$/, ".")}` : "."}`;
+    case "refused": {
+      // No code (spacesheep before its `code`): the reason when there is one, never twice.
+      const reason = reasonOf(a);
+      if (!a.code)
+        return `${machine} refused it.${reason ? ` ${(reason.charAt(0).toUpperCase() + reason.slice(1)).replace(/[.!?…]?$/, ".")}` : ""}`;
       return `${machine} refused it: ${refusalWords(a.code)}.`;
+    }
     case "failed":
       return `It didn't reach the session${detail ? `: ${detail.replace(/[.!?…]?$/, ".")}` : "."}`;
     case "expired":

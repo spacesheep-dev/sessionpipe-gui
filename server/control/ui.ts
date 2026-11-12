@@ -297,7 +297,8 @@ async function forwardSend(
   // none can be carried there yet (the pages offer none), so a page that sends one is told
   // here, before spacesheep answers that it "didn't finish uploading".
   const files = (cmd as ControlCommand & { files?: unknown }).files;
-  if (Array.isArray(files) && files.length) throw new HttpError(422, { reason: RELAY_FILES, code: RELAY_FILES });
+  if (Array.isArray(files) && files.length)
+    throw new HttpError(422, { reason: `Files can't be sent to ${m.name} through spacesheep yet.`, code: RELAY_FILES });
   const signed: SignedCommand = { cmd: body.cmd };
   if (typeof body.csig === "string") signed.csig = body.csig;
   if (body.grant && typeof body.grant === "object") signed.grant = body.grant as SignedCommand["grant"];

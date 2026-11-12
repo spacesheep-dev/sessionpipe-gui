@@ -332,7 +332,10 @@ describe("reply_to", () => {
       ]) {
         const cmd = commandStr(machine, { iat: Date.now(), ...fields });
         const sent = await call(b.url, "POST", `${UI}/send`, { body: { machineId: machine, cmd, csig: "c2ln" } });
-        expect(sent).toEqual({ status: 422, body: { reason: "relay_files", code: "relay_files" } });
+        expect(sent).toEqual({
+          status: 422,
+          body: { reason: "Files can't be sent to lab-mac through spacesheep yet.", code: "relay_files" },
+        });
       }
       expect(asked).toEqual([]);
       expect(b.control.activity()).toHaveLength(0);
