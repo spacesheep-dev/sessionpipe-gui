@@ -639,8 +639,8 @@ pub enum ConnectState {
     Approved,
     Denied,
     Expired,
+    /// With `ConnectView::error`. (A connect the page cancelled is simply gone.)
     Failed,
-    Cancelled,
 }
 
 /// A connect as the page sees it. The code is in the link (it is what the person's
