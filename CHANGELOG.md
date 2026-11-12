@@ -48,6 +48,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   off before it began says so: "This start was called off before it began on rc-mac.", and
   a message sent to it "This message was called off with its session's start, before
   rc-mac took it."
+- **Words: a send through spacesheep this app can no longer follow says so**: "This app no
+  longer reads the spacesheep account that carried this, so it can't tell whether it
+  started on rc-mac." (a message: "… whether rc-mac got it.").
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH

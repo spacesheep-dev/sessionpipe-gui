@@ -55,6 +55,14 @@ describe("startFailureWords", () => {
     );
   });
 
+  it("says a send it can no longer follow through spacesheep as that, not as a failure there", () => {
+    const a = start({ outcome: "failed", code: "untracked" });
+    expect(startFailureWords(a, "rc-mac", "Claude Code")).toBe(
+      "This app no longer reads the spacesheep account that carried this, so it can't tell whether it started on rc-mac.",
+    );
+    expect(outcomeWords(a)).toBe("not followed · this app no longer reads the spacesheep account that carried it");
+  });
+
   it("has nothing to say while the start is on its way or after it started", () => {
     expect(startFailureWords(start({}), "studio-mac", "Claude Code")).toBeNull();
     expect(startFailureWords(start({ outcome: "delivered" }), "studio-mac", "Claude Code")).toBeNull();

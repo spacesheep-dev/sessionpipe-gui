@@ -103,6 +103,9 @@ export function outcomeWords(a: ControlActivity, o: { machine?: string; online?:
     case "unsupported":
       return `unsupported · ${who} has no way to ${KIND_LABEL[a.kind]} on this harness${a.detail ? `: ${a.detail}` : ""}`;
     case "failed":
+      // A send through spacesheep this app can no longer follow (server/control/state.ts).
+      if (a.code === "untracked")
+        return "not followed · this app no longer reads the spacesheep account that carried it";
       return `failed · ${a.detail ?? "the path errored"}`;
     case "refused":
       // No code (spacesheep before its `code`): the detail alone, not "refused · refused: …".
@@ -148,6 +151,8 @@ export function startFailureWords(a: ControlActivity, machine: string, agent: st
   // Called off before it began: by its owner on spacesheep, or by a cancel on the computer.
   if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
     return `This start was called off before it began on ${machine}.`;
+  if (a.outcome === "failed" && a.code === "untracked")
+    return `This app no longer reads the spacesheep account that carried this, so it can't tell whether it started on ${machine}.`;
   if (a.outcome === "refused")
     switch (a.code) {
       case "folder":

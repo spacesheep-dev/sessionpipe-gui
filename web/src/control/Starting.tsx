@@ -203,6 +203,8 @@ export function promptFailureWords(a: ControlActivity, machine: string): string 
   const detail = a.detail?.trim();
   if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
     return `This message was called off with its session's start, before ${machine} took it.`;
+  if (a.outcome === "failed" && a.code === "untracked")
+    return `This app no longer reads the spacesheep account that carried this, so it can't tell whether ${machine} got it.`;
   switch (a.outcome) {
     case "refused":
       // No code (spacesheep before its `code`): its note, not "refused: refused".
