@@ -157,7 +157,11 @@ removed by `acct_disconnect` (not by `rx_remove`, which refuses an account). Its
 the whole SHA-256 of its origin and lowercase email, in base32: 52 characters, where a
 receiver's is ten. Another person's account at the same origin is another id, so whatever
 the page keeps by receiver id is never shown to the wrong person. There is one account
-per origin.
+per origin. An account is never `local`, wherever it lives (a local spacesheep on
+loopback in a debug build included): nothing that looks after "this computer's receiver"
+takes one for it. The desktop's launch check, which brings an older local receiver up to
+the app's version, skips an account outright: it is not asked `/api/ui/info`, and
+`service install` is never run on its account.
 
 A receiver's row and a receiver's shell contract are what they were, field for field. An
 account's add three, flat:

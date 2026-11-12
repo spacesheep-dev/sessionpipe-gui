@@ -265,17 +265,12 @@ pub fn confirm_connect<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sp_receivers::{Hub, HubConfig, KeyStore, StatusFile};
+    use sp_receivers::{Hub, HubConfig, KeyStore};
 
     fn hub(home: &std::path::Path) -> Hub {
         Hub::new(HubConfig {
-            home: home.to_path_buf(),
-            keys: KeyStore::memory(),
-            env_receiver_url: None,
             allowed_origins: vec![],
-            status: StatusFile::new(None, "test"),
-            user_agent: "sp-test".into(),
-            account: Default::default(),
+            ..HubConfig::new(home.to_path_buf(), KeyStore::memory())
         })
     }
 

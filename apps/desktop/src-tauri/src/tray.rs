@@ -481,8 +481,7 @@ mod tests {
             name: name.into(),
             origin: format!("http://{name}:7373"),
             local,
-            rp_id: None,
-            account: None,
+            ..Default::default()
         }
     }
     fn item(rx: &str, n: usize, tool: &str) -> NeedsYouItem {

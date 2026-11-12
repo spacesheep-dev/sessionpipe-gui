@@ -137,14 +137,16 @@ impl Receiver {
     }
 
     /// An entry this version reads: a receiver with a receiver's id and nothing of an
-    /// account, or an account with an account's id and its record. Anything else in the
+    /// account, or an account with an account's id and its record, which is never
+    /// `local` (this version writes no such entry: one that says so was rewritten, to
+    /// have the account taken for this computer's own receiver). Anything else in the
     /// file (a newer kind, a field of another shape, an id of neither shape) is not an
     /// entry to this version.
     fn read(entry: &serde_json::Value) -> Option<Receiver> {
         let r: Receiver = serde_json::from_value(entry.clone()).ok()?;
         let ok = match r.kind {
             Kind::Receiver => r.account.is_none() && is_receiver_id(&r.id),
-            Kind::Spacesheep => r.account.is_some() && is_account_id(&r.id),
+            Kind::Spacesheep => r.account.is_some() && is_account_id(&r.id) && !r.local,
         };
         ok.then_some(r)
     }
@@ -617,11 +619,17 @@ mod tests {
             "id": acct.replace('a', "b"), "name": "x", "origin": "https://spacesheep.dev",
             "local": false, "kind": "spacesheep"
         });
+        // An account that says it is this computer's own receiver: no account is.
+        let local_account = serde_json::json!({
+            "id": acct.replace('a', "c"), "name": "localhost", "origin": "http://127.0.0.1:7373",
+            "local": true, "kind": "spacesheep",
+            "account": { "email": "a@b.example", "connectedAt": "then" }
+        });
         let plain = serde_json::json!({
             "id": "abcdefghij", "name": "studio", "origin": "http://192.168.1.9:7373", "local": false
         });
         let file = serde_json::json!({
-            "receivers": [newer, plain, reshaped, odd_id, no_record],
+            "receivers": [newer, plain, reshaped, odd_id, no_record, local_account],
             "active": "abcdefghij",
             "schema": { "v": 2 }
         });
@@ -629,7 +637,7 @@ mod tests {
         let mut reg = Registry::load(t.path());
         assert_eq!(reg.list().len(), 1, "one entry this version reads");
         assert_eq!(reg.list()[0].id, "abcdefghij");
-        assert_eq!(reg.kept_unread(), 4);
+        assert_eq!(reg.kept_unread(), 5);
         // Saves of every sort leave them as they were.
         let (r, _) = Receiver::from_url("http://192.168.1.10:7373").unwrap();
         reg.upsert(r.clone()).unwrap();
@@ -637,8 +645,8 @@ mod tests {
         reg.remove("abcdefghij").unwrap();
         let v = list_on_disk(&t);
         let on_disk = v["receivers"].as_array().unwrap();
-        assert_eq!(on_disk.len(), 5);
-        for kept in [&newer, &reshaped, &odd_id, &no_record] {
+        assert_eq!(on_disk.len(), 6);
+        for kept in [&newer, &reshaped, &odd_id, &no_record, &local_account] {
             assert!(on_disk.contains(kept), "{kept}");
         }
         assert_eq!(v["schema"], serde_json::json!({ "v": 2 }));
@@ -647,7 +655,7 @@ mod tests {
         let mut thief = Receiver::account("https://spacesheep.dev", "a@b.example", "now").unwrap();
         thief.id = acct.clone();
         assert!(reg.upsert(thief).is_err());
-        assert_eq!(Registry::load(t.path()).kept_unread(), 4);
+        assert_eq!(Registry::load(t.path()).kept_unread(), 5);
         // The same id twice: the first is the entry, the second is only kept.
         let twice = serde_json::json!({ "receivers": [plain, plain] });
         std::fs::write(t.path().join("receivers.json"), twice.to_string()).unwrap();

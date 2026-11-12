@@ -1288,14 +1288,16 @@ pub fn plan(running: Option<&str>, app: &str, cli_version: Option<&str>) -> Plan
     }
 }
 
-/// The receiver the check is about: the first local one that is connected.
+/// The receiver the check is about: the first local one that is connected. Never a
+/// spacesheep account: that is no receiver of this computer's, wherever it lives (the
+/// Hub never calls one local; this does not rely on it).
 pub fn first_local(
     receivers: &[ReceiverRef],
     connected: impl Fn(&str) -> bool,
 ) -> Option<ReceiverRef> {
     receivers
         .iter()
-        .find(|r| r.local && connected(&r.id))
+        .find(|r| r.local && r.account.is_none() && connected(&r.id))
         .cloned()
 }
 
@@ -1638,6 +1640,13 @@ pub async fn check_local(
     tools: fn() -> (Tools, Option<String>),
     update: fn(&Tools, &str) -> Result<Updated, StartError>,
 ) -> Option<LocalUpdate> {
+    // A spacesheep account is not this computer's receiver, whatever run.json says of
+    // its address: it is not asked what a receiver is asked, and nothing is installed
+    // or updated on its account.
+    if r.account.is_some() {
+        log::info!(target: "sessionpipe::lifecycle", "update: {} is a spacesheep account, not a receiver; left as it is", r.origin);
+        return None;
+    }
     let info = info_of(hub, r).await;
     let run_file = discovery::read_run_file(state);
     let running = running_version(&r.origin, &info, run_file.as_ref(), discovery::pid_alive);
@@ -2625,7 +2634,7 @@ mod tests {
             name: id.into(),
             origin: format!("http://{id}:7373"),
             local,
-            rp_id: None,
+            ..Default::default()
         };
         let list = [r("remote", false), r("a", true), r("b", true)];
         assert_eq!(
@@ -3040,12 +3049,9 @@ mod tests {
     /// A hub that knows one receiver, at `url`, as SP_RECEIVER_URL would give it.
     fn hub_for(url: &str, home: &Path) -> Hub {
         Hub::new(sp_receivers::HubConfig {
-            home: home.to_path_buf(),
-            keys: sp_receivers::KeyStore::memory(),
             env_receiver_url: Some(url.into()),
-            allowed_origins: sp_receivers::proxy::default_allowed_origins(None),
-            status: sp_receivers::StatusFile::new(None, "test"),
             user_agent: "sp-supervisor-test".into(),
+            ..sp_receivers::HubConfig::new(home.to_path_buf(), sp_receivers::KeyStore::memory())
         })
     }
 
@@ -3182,6 +3188,187 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(u.state, UpdateState::Current);
+    }
+
+    /// A server on loopback that answers as an OLDER receiver would (`/api/ui/info`) and
+    /// as a spacesheep would (its machines door), and keeps every request line it was
+    /// sent.
+    fn answering_as_both() -> (u16, std::sync::Arc<Mutex<Vec<String>>>) {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for mut s in l.incoming().flatten() {
+                let mut buf = [0u8; 2048];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]).to_string();
+                let line = head.lines().next().unwrap_or("").to_string();
+                let body = if line.contains("/api/ui/info") {
+                    r#"{"name":"sessionpipe-gui","version":"0.7.2","startedAt":"2026-11-12T10:00:00.000Z"}"#
+                } else {
+                    r#"{"machines":[],"rp_id":"localhost"}"#
+                };
+                log.lock().unwrap().push(line);
+                let _ = write!(
+                    s,
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        (port, seen)
+    }
+
+    /// A spacesheep account in the Hub's list is never this computer's receiver: not
+    /// picked by the launch check, not asked `/api/ui/info`, and nothing is installed or
+    /// updated for it. Here everything else says "local and old": the account lives on
+    /// loopback, run.json names its very address with a live pid and an older version,
+    /// the server there would answer a receiver's info with that older version, and the
+    /// account is connected with its key. A plain receiver at the same address, with the
+    /// same run.json, IS checked: it is the account that makes the difference.
+    #[test]
+    fn a_spacesheep_account_is_never_this_computer_s_receiver() {
+        let d = Temp::new("account");
+        let (port, seen) = answering_as_both();
+        let origin = format!("http://127.0.0.1:{port}");
+        let id = sp_receivers::id::account_id(&origin, "misha@example.com");
+        let entry = |local: bool| {
+            serde_json::json!({
+                "id": id, "name": "127.0.0.1", "origin": origin, "local": local,
+                "kind": "spacesheep",
+                "account": { "email": "misha@example.com", "connectedAt": "2026-11-12T08:00:00.000Z" }
+            })
+        };
+        let home = |tag: &str, local: bool| {
+            let home = d.0.join(tag);
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(
+                home.join("receivers.json"),
+                serde_json::json!({ "receivers": [entry(local)], "active": id }).to_string(),
+            )
+            .unwrap();
+            std::fs::write(
+                home.join("account-keys.json"),
+                serde_json::json!({
+                    sp_receivers::registry::account_key_name(&id):
+                        sp_receivers::account::kept_key(&origin, "ss_test-key-0123456789abcdef")
+                })
+                .to_string(),
+            )
+            .unwrap();
+            home
+        };
+        // A Hub with the account mode ON (the phones' today), so that nothing here rests
+        // on the desktop having it off.
+        let hub_at = |home: &Path| {
+            Hub::new(sp_receivers::HubConfig {
+                account: sp_receivers::AccountConfig {
+                    enabled: true,
+                    keys: sp_receivers::KeyStore::File(home.join("account-keys.json")),
+                    allow_local_http: true,
+                    ..Default::default()
+                },
+                ..sp_receivers::HubConfig::new(home.to_path_buf(), sp_receivers::KeyStore::memory())
+            })
+        };
+        let hub = hub_at(&home("hub", false));
+        let r = hub.active().expect("the account is the active entry");
+        assert!(
+            r.account.is_some() && !r.local,
+            "an account, and never local"
+        );
+        assert_eq!(r.origin, origin);
+
+        // It is connected: the signer's question reaches it, through its machines door.
+        // (That is the one thing a Hub ever asks an account when asked for "info".)
+        let info = tauri::async_runtime::block_on(hub.get(&r.id, "/api/ui/info")).unwrap();
+        assert!(String::from_utf8_lossy(&info).contains(r#""rpId":"localhost""#));
+        assert!(hub.is_connected(&r.id));
+        let asked = || seen.lock().unwrap().clone();
+        assert_eq!(asked().len(), 1);
+        assert!(asked()[0].starts_with("GET /api/sessionpipe/v1/relay/machines "));
+
+        // run.json names its address, alive, as an older version than the app.
+        let state = d.0.join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(
+            state.join("run.json"),
+            format!(
+                r#"{{"port":{port},"pid":{},"version":"0.7.2","url":"{origin}","startedAt":"2026-11-12T10:00:02.000Z"}}"#,
+                std::process::id()
+            ),
+        )
+        .unwrap();
+        fn unasked() -> (Tools, Option<String>) {
+            panic!("the CLI was looked for on a spacesheep account's behalf")
+        }
+        fn never(_: &Tools, _: &str) -> Result<Updated, StartError> {
+            panic!("service install ran for a spacesheep account")
+        }
+        fn older_cli() -> (Tools, Option<String>) {
+            (
+                Tools {
+                    cli: Some("/c/sessionpipe-gui".into()),
+                    npx: Some("/n/npx".into()),
+                    ..Tools::default()
+                },
+                Some("0.7.2".into()),
+            )
+        }
+
+        // Not picked as the local receiver: as the Hub lists it, connected or not…
+        assert_eq!(
+            first_local(&hub.receivers(), |id| hub.is_connected(id)),
+            None
+        );
+        assert_eq!(first_local(&hub.receivers(), |_| true), None);
+        // …and not even were a row to say `local` of it (the Hub never does).
+        let claims_local = ReceiverRef {
+            local: true,
+            ..r.clone()
+        };
+        assert_eq!(
+            first_local(std::slice::from_ref(&claims_local), |_| true),
+            None
+        );
+        // Not checked, either way: no CLI looked for, no install, and nothing asked of it.
+        for row in [&r, &claims_local] {
+            let checked = tauri::async_runtime::block_on(check_local(
+                &hub, row, &state, "0.8.1", unasked, never,
+            ));
+            assert_eq!(checked, None);
+        }
+        assert_eq!(
+            asked().len(),
+            1,
+            "nothing was asked of the account: {:?}",
+            asked()
+        );
+        assert!(!asked().iter().any(|l| l.contains("/api/ui/")));
+        assert!(local_update().is_none_or(|u| u.origin != origin));
+
+        // An entry rewritten to say the account is local is not an entry at all: the
+        // Hub lists nothing, so there is nothing to pick.
+        let tampered = hub_at(&home("tampered", true));
+        assert!(tampered.receivers().is_empty() && tampered.active().is_none());
+        assert_eq!(first_local(&tampered.receivers(), |_| true), None);
+
+        // The same address as a plain receiver, with the same run.json, is this
+        // computer's receiver: asked its info, found older, and waiting for a click.
+        let plain_hub = hub_for(&origin, &d.0.join("plain"));
+        let plain = plain_hub.active().unwrap();
+        assert!(plain.local && plain.account.is_none());
+        assert_eq!(
+            first_local(&plain_hub.receivers(), |_| true).map(|p| p.id),
+            Some(plain.id.clone())
+        );
+        let u = tauri::async_runtime::block_on(check_local(
+            &plain_hub, &plain, &state, "0.8.1", older_cli, never,
+        ))
+        .expect("a receiver here is checked");
+        assert_eq!((u.running.as_str(), u.state), ("0.7.2", UpdateState::Click));
+        assert!(asked().iter().any(|l| l.starts_with("GET /api/ui/info ")));
     }
 
     /// The real thing against a service on a scratch label (stale-server e2e bed): a

@@ -2547,6 +2547,22 @@ async fn nothing_that_speaks_to_a_receiver_speaks_to_an_account() {
     assert_eq!(h.open_streams(), 0);
     assert!(h.needs_you().is_empty());
 
+    // Nor is it ever this computer's own receiver, whatever its entry came to say: what
+    // looks after "the local receiver" (its updates, its restarts) never takes it for one.
+    h.0.registry
+        .lock()
+        .unwrap()
+        .update(&id, |r| r.local = true)
+        .unwrap();
+    assert!(!h.receiver(&id).unwrap().local);
+    assert!(h.receivers().iter().all(|r| !r.local));
+    assert!(!h.active().unwrap().local);
+    h.0.registry
+        .lock()
+        .unwrap()
+        .update(&id, |r| r.local = false)
+        .unwrap();
+
     // What the signer asks of a receiver, answered from the machines door: the rp id it
     // signs for, the machines' names for a prompt.
     let info: Value = serde_json::from_slice(&h.get(&id, "/api/ui/info").await.unwrap()).unwrap();

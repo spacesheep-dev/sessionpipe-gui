@@ -6,9 +6,7 @@
 
 use crate::contract::{Os, ShellInfo, ShellReceiver};
 use serde::Serialize;
-use sp_receivers::{
-    proxy, AccountConfig, Hub, HubConfig, KeyStore, ReceiverRef, StatusFile, StreamFrame,
-};
+use sp_receivers::{AccountConfig, Hub, HubConfig, KeyStore, ReceiverRef, StatusFile, StreamFrame};
 use std::path::PathBuf;
 use tauri::{ipc::Channel, AppHandle, Manager, Runtime, State, Webview};
 
@@ -46,17 +44,17 @@ pub fn config(home: PathBuf, version: &str, identifier: &str) -> HubConfig {
             device: os.device_name().into(),
             version: version.into(),
             // The shell puts its native alerts here once there is an app to show them
-            // (`acct::Alerts`, lib.rs); with none, every question is answered no.
+            // (`acct::Alerts`, lib.rs); with none, no question can be asked, and nothing
+            // that needs the person's answer happens.
             confirm: None,
         },
-        keys: KeyStore::File(home.join("keys.json")),
-        home,
         env_receiver_url: std::env::var("SP_RECEIVER_URL")
             .ok()
             .filter(|u| !u.trim().is_empty()),
-        allowed_origins: proxy::default_allowed_origins(None),
         status: StatusFile::new(None, version),
         user_agent: format!("sessionpipe-{}/{version}", Os::current().name()),
+        // The bundled origins and whatever else a Hub has unasked.
+        ..HubConfig::new(home.clone(), KeyStore::File(home.join("keys.json")))
     }
 }
 
@@ -427,13 +425,13 @@ mod tests {
             id: "klmnopqrst".into(),
             name: "spacesheep.dev".into(),
             origin: "https://spacesheep.dev".into(),
-            local: false,
             rp_id: Some("spacesheep.dev".into()),
             account: Some(sp_receivers::AccountRef {
                 kind: "spacesheep",
                 email: "misha@example.com".into(),
                 state: sp_receivers::AccountState::Unauthorized,
             }),
+            ..Default::default()
         };
         let s = shell_receiver(&r);
         assert_eq!(s.kind, Some("spacesheep"));
@@ -457,7 +455,10 @@ mod tests {
 
     #[test]
     fn the_rx_scheme_only_serves_the_bundled_origin() {
-        let o = proxy::default_allowed_origins(None);
+        let o = sp_receivers::proxy::default_allowed_origins(None);
+        // And they are what the phone's Hub is given.
+        let cfg = config("/tmp/sp-home".into(), "0.8.0", "dev.spacesheep.sessionpipe");
+        assert_eq!(cfg.allowed_origins, o);
         assert!(o.iter().any(|x| x == Os::Ios.app_origin()));
         assert!(o.iter().any(|x| x == Os::Android.app_origin()));
         assert!(!o.iter().any(|x| x.starts_with("http://127.0.0.1")));

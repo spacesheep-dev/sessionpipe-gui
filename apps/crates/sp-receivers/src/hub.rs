@@ -66,12 +66,19 @@ fn log_path(path: &str) -> &str {
 }
 
 /// What the shell, identity and packaging need to know about a receiver.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+///
+/// Built by hand (a test's row), write the fields that matter and
+/// `..Default::default()` for the rest: the default is a plain receiver that is not
+/// local, has no rp id and is no account, and a field added here later breaks nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceiverRef {
     pub id: String,
     pub name: String,
     pub origin: String,
+    /// This computer's own receiver, on loopback. Never true of an account, whatever
+    /// its origin: nothing about an account is trusted for being on loopback, and
+    /// nothing that looks after "this computer's receiver" may take one for it.
     pub local: bool,
     /// `Info.control.rpId`, once the receiver answered `/api/ui/info`. For an account,
     /// the rp id its machines door gave.
@@ -131,6 +138,26 @@ pub struct HubConfig {
     pub user_agent: String,
     /// spacesheep accounts (`AccountConfig::default()` is off).
     pub account: AccountConfig,
+}
+
+impl HubConfig {
+    /// A Hub's settings from the two things that have no default, its home and where
+    /// receiver keys live. The rest is the "none" of each: no SP_RECEIVER_URL, the
+    /// bundled origins and no dev server's, no status file, a plain user agent, and no
+    /// spacesheep accounts. A shell (or a test) names what it wants otherwise and takes
+    /// the rest from here, `HubConfig { status, ..HubConfig::new(home, keys) }`, so a
+    /// setting added later is one line here and not one in every place a Hub is made.
+    pub fn new(home: PathBuf, keys: KeyStore) -> HubConfig {
+        HubConfig {
+            home,
+            keys,
+            env_receiver_url: None,
+            allowed_origins: proxy::default_allowed_origins(None),
+            status: StatusFile::new(None, ""),
+            user_agent: "sessionpipe".into(),
+            account: AccountConfig::default(),
+        }
+    }
 }
 
 /// 0.5 s doubling to 30 s, ±20 % jitter.
@@ -359,7 +386,8 @@ impl Hub {
             id: r.id.clone(),
             name: info.hostname.unwrap_or_else(|| r.name.clone()),
             origin: r.origin.clone(),
-            local: r.local,
+            // Only a receiver is ever this computer's own.
+            local: r.local && r.kind == Kind::Receiver,
             rp_id: match &r.account {
                 Some(a) if r.is_account() => a.rp_id.clone(),
                 _ => info.rp_id,
@@ -1211,14 +1239,33 @@ mod tests {
 
     fn hub(home: &std::path::Path, env: Option<String>) -> Hub {
         Hub::new(HubConfig {
-            home: home.to_path_buf(),
-            keys: KeyStore::memory(),
             env_receiver_url: env,
-            allowed_origins: proxy::default_allowed_origins(None),
-            status: StatusFile::new(None, "test"),
             user_agent: "sp-test".into(),
-            account: AccountConfig::default(),
+            ..HubConfig::new(home.to_path_buf(), KeyStore::memory())
         })
+    }
+
+    /// What a Hub is when nothing but its home and its keys is said: no receiver from
+    /// the environment, the bundled origins, and no spacesheep accounts.
+    #[test]
+    fn a_hub_config_from_its_home_and_keys_has_the_none_of_everything_else() {
+        let c = HubConfig::new("/tmp/sp-home".into(), KeyStore::memory());
+        assert_eq!(c.home, std::path::Path::new("/tmp/sp-home"));
+        assert_eq!(c.env_receiver_url, None);
+        assert_eq!(c.allowed_origins, proxy::default_allowed_origins(None));
+        assert_eq!(c.user_agent, "sessionpipe");
+        assert!(!c.account.enabled && !c.account.allow_local_http);
+        assert!(c.account.confirm.is_none());
+        assert!(
+            !c.account.keys.same_place(&c.keys),
+            "and account keys, were the mode ever turned on, are not the receivers'"
+        );
+        // A row built by hand: a plain receiver unless it says otherwise.
+        let r = ReceiverRef {
+            id: "abcdefghij".into(),
+            ..Default::default()
+        };
+        assert_eq!((r.local, r.rp_id, r.account), (false, None, None));
     }
 
     #[test]
