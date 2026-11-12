@@ -373,7 +373,10 @@ test("a hold that lands after the words were changed: no notice, and the line sa
   await expect.poll(() => posted.length).toBe(1);
   await box.press("End");
   await box.type(" more");
-  await expect(page.locator(".ctl-note--err").first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".ctl-note--err").first()).toHaveText(
+    "Not sent. It was held for a second look, and you changed it. Send it again.",
+    { timeout: 10_000 },
+  );
   await expect(notice(page)).toHaveCount(0);
   await expect(box).toHaveValue("FLIGHT more");
   expect(m.seen).toHaveLength(0);

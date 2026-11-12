@@ -19,14 +19,14 @@ export const HELD_WORDS = {
   still: (who: string) => `Still held. ${who} didn't take the confirmation.`,
   /** The label over the receiver's reason, which sits in its own box under it; `who` is
    *  heldFrom(). */
-  says: (who: string) => `${who}:`,
+  says: (who: string) => `${who} says`,
   /** Who held it when it is this receiver itself (not a spacesheep a machine is reached through). */
-  local: "This computer's sessionpipe",
+  local: "sessionpipe",
   /** Where send errors show, when a hold arrived after the words it held were changed. */
-  changed: "changed in flight",
+  changed: "Not sent. It was held for a second look, and you changed it. Send it again.",
   /** Show the held words whole, and back. */
-  showAll: "all",
-  showLess: "less",
+  showAll: "Show all",
+  showLess: "Show less",
 };
 
 /** Who held it, by name: the spacesheep's host, or this receiver. */

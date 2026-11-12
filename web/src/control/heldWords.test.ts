@@ -20,9 +20,13 @@ describe("held words", () => {
 
   it("who held it: the spacesheep's host, or this receiver; a confirm held again says so", () => {
     expect(heldFrom("spacesheep.dev")).toBe("spacesheep.dev");
-    expect(heldFrom(null)).toBe(HELD_WORDS.local);
-    expect(HELD_WORDS.says("spacesheep.dev")).toContain("spacesheep.dev");
-    expect(HELD_WORDS.still(heldFrom("spacesheep.dev"))).toContain("spacesheep.dev");
+    expect(HELD_WORDS.says(heldFrom("spacesheep.dev"))).toBe("spacesheep.dev says");
+    expect(HELD_WORDS.says(heldFrom(null))).toBe("sessionpipe says");
+    expect(HELD_WORDS.still(heldFrom("spacesheep.dev"))).toBe(
+      "Still held. spacesheep.dev didn't take the confirmation.",
+    );
+    expect(HELD_WORDS.still(heldFrom(null))).toBe("Still held. sessionpipe didn't take the confirmation.");
+    expect(HELD_WORDS.changed).toBe("Not sent. It was held for a second look, and you changed it. Send it again.");
   });
 
   it("a hold where no notice can confirm it says where one can", () => {
