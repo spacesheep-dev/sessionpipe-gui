@@ -548,6 +548,24 @@ describe("service install upgrades a service of ours in place", () => {
     expect(errs).toEqual([]);
   });
 
+  it("a receiver that crashes at boot under KeepAlive is not 'still starting': its pid moves between looks (exit 4)", async () => {
+    const state = path.join(dir, "state");
+    oldPlist(["--port", "7373", "--state", state, "--quiet"], state);
+    answer("0.4.1", { state, port: 7373 });
+    const e = liveEnv({ waitMs: 300 });
+    const exec = e.exec;
+    let pid = 5000;
+    // After the restart, every look finds it running under a new pid (restarted again).
+    e.exec = (cmd, args) => {
+      const r = exec(cmd, args);
+      if (args[0] === "print" && calls().some((c) => c.startsWith("bootstrap")))
+        return { ...r, stdout: `\tstate = running\n\tpid = ${pid++}\n` };
+      return r;
+    };
+    expect(await runService({ verb: "install" }, e)).toBe(EXIT_NOT_RUNNING);
+    expect(errs.at(-1)).toContain("isn't running on :7373 after 0 s, and the old receiver was stopped");
+  });
+
   it("an upgrade whose new receiver never answers says so and exits 4: the old one was stopped", async () => {
     const state = path.join(dir, "state");
     oldPlist(["--port", "7373", "--state", state, "--quiet"], state);

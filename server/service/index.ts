@@ -293,7 +293,10 @@ function queryTask(env: ServiceEnv): { state: number; xml: string } | null {
 
 /** managerState where the work is already done and only a last look is wanted: an
  *  unreadable Task Scheduler there is not a failure of the verb. */
-function managerStateOr(env: ServiceEnv, otherwise: { loaded: boolean; running: boolean }) {
+function managerStateOr(
+  env: ServiceEnv,
+  otherwise: { loaded: boolean; running: boolean },
+): { loaded: boolean; running: boolean; pid?: number } {
   try {
     return managerState(env);
   } catch (e) {
@@ -515,7 +518,13 @@ async function waitForReceiver(
     }
     await sleep(200);
   }
-  return managerStateOr(env, { loaded: true, running: false }).running ? "running" : "silent";
+  // "Running" only when the manager says so twice, a second apart, with the same pid: a
+  // receiver that crashes at boot under KeepAlive is running for a moment of each restart.
+  const first = managerStateOr(env, { loaded: true, running: false });
+  if (!first.running) return "silent";
+  await sleep(1000);
+  const again = managerStateOr(env, { loaded: true, running: false });
+  return again.running && again.pid === first.pid ? "running" : "silent";
 }
 
 function afterWait(env: ServiceEnv, verdict: "running" | "silent", port: number, state: string): number {
