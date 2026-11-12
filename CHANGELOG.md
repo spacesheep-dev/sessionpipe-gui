@@ -8,6 +8,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **A saved workflow run whose plan does not read no longer stops the server.** A run in
+  `workflow-runs.json` with a plan step that is not an object, has no text or no entry in
+  `steps`, or has an `after` that is not a list of step ids threw from the orchestrator's
+  tick, and the server exited about a second after every start. Such a run, and one whose
+  plan names a step it does not have or after one that is not before it, is now left out
+  when the file is read, as a workflow that no longer reads already is; the other runs are
+  kept.
 - **A send to a computer reached through spacesheep outlives a restart.** Its row was
   deleted when the app started, because such a computer is never saved here: a start
   waiting for an offline computer then read "No such session here", and ran anyway when the

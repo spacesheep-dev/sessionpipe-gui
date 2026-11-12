@@ -140,7 +140,11 @@ export function readWorkflow(v: unknown, o: { id: string; now: string; existing?
   return w;
 }
 
-/** A run as the file has it: the shape only (the state machine wrote it); null when broken. */
+/** A run as the file has it: the shape only (the state machine wrote it); null when broken.
+ *  That includes what the state machine leans on, so a hand-edited or damaged run is left
+ *  out rather than throwing on every tick: each plan step is an object with its own id and
+ *  its text, an `after` names only steps before it, and every plan step has its entry in
+ *  `steps`. */
 function readRun(v: unknown): WorkflowRun | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
   const r = v as Record<string, unknown>;
@@ -149,8 +153,20 @@ function readRun(v: unknown): WorkflowRun | null {
   if (typeof r.rev !== "number" || !Number.isInteger(r.rev) || r.rev < 0) return null;
   if (typeof r.status !== "string" || !["running", "waiting", ...RUN_FINAL].includes(r.status as never)) return null;
   if (typeof r.startedAt !== "string" || !Array.isArray(r.plan) || !r.steps || typeof r.steps !== "object") return null;
-  for (const s of Object.values(r.steps as Record<string, unknown>)) {
+  const steps = r.steps as Record<string, unknown>;
+  for (const s of Object.values(steps)) {
     if (!s || typeof s !== "object" || !STEP_STATUS.has(String((s as StepRun).status))) return null;
+  }
+  const ids: string[] = [];
+  for (const raw of r.plan as unknown[]) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const p = raw as Record<string, unknown>;
+    if (typeof p.id !== "string" || !ID_RE.test(p.id) || ids.includes(p.id) || typeof p.text !== "string") return null;
+    if (!Object.hasOwn(steps, p.id)) return null;
+    if (p.after !== undefined && p.after !== null) {
+      if (!Array.isArray(p.after) || !p.after.every((a) => typeof a === "string" && ids.includes(a))) return null;
+    }
+    ids.push(p.id);
   }
   return r as unknown as WorkflowRun;
 }

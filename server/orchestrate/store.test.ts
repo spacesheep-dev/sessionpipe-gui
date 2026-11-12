@@ -175,6 +175,75 @@ describe("OrchestrateStore", () => {
     expect(existsSync(path.join(tmp.dir, "workflows.json"))).toBe(false);
   });
 
+  // A run whose plan the state machine cannot walk threw from every tick (advance:
+  // `steps[step.id]!.status`, `afterOf(...).map((id) => steps[id]!)`), and the server
+  // exited a second after each start. Such a run is left out; the good one beside it stays.
+  const planned = (id: string, plan: unknown[], steps: Record<string, unknown>): unknown => ({
+    ...run(id, "running", NOW),
+    plan,
+    steps,
+  });
+  const GOOD = "01K8RUN000000000000000GOOD";
+  const good = planned(
+    GOOD,
+    [
+      { ...base.steps[0], id: "ask" },
+      { ...base.steps[1], id: "compare", after: ["ask"] },
+    ],
+    { ask: { status: "done", reply: "r" }, compare: { status: "pending" } },
+  ) as WorkflowRun;
+  const step = (id: string, extra: Record<string, unknown> = {}) => ({ ...base.steps[0], id, ...extra });
+  const broken: [string, unknown][] = [
+    ["a plan step that is not an object", planned("01K8RUN00000000000000BAD1", [null], {})],
+    ["a plan step with no entry in steps", planned("01K8RUN00000000000000BAD2", [step("a")], {})],
+    [
+      "an after that is not a step id",
+      planned("01K8RUN00000000000000BAD3", [step("a"), step("b", { after: [5] })], {
+        a: { status: "done" },
+        b: { status: "pending" },
+      }),
+    ],
+    [
+      "an after naming a step that is not before it",
+      planned("01K8RUN00000000000000BAD4", [step("a", { after: ["b"] }), step("b")], {
+        a: { status: "pending" },
+        b: { status: "pending" },
+      }),
+    ],
+    [
+      "an after that is not a list",
+      planned("01K8RUN00000000000000BAD5", [step("a"), step("b", { after: "a" })], {
+        a: { status: "done" },
+        b: { status: "pending" },
+      }),
+    ],
+    [
+      "a plan step id that is not an id",
+      planned("01K8RUN00000000000000BAD6", [step("../x")], { "../x": { status: "pending" } }),
+    ],
+    [
+      "a plan step id used twice",
+      planned("01K8RUN00000000000000BAD7", [step("a"), step("a")], { a: { status: "pending" } }),
+    ],
+    [
+      "a plan step with no text",
+      planned("01K8RUN00000000000000BAD8", [step("a", { text: undefined })], { a: { status: "pending" } }),
+    ],
+  ];
+  it.each(broken)("leaves out a run with %s and keeps the good one whole", (_, bad) => {
+    const file = path.join(tmp.dir, "workflow-runs.json");
+    writeFileSync(file, JSON.stringify({ v: 1, runs: [bad, good] }));
+    const store = new OrchestrateStore(tmp.dir);
+    expect(store.runs().map((r) => r.id)).toEqual([GOOD]);
+    // The next write keeps the good run whole; the one left out is not written back.
+    store.putRun(run("01K8RUN000000000000000AAAA", "done", NOW));
+    expect(new OrchestrateStore(tmp.dir).run(GOOD)).toEqual(good);
+    expect(JSON.parse(readFileSync(file, "utf8")).runs.map((r: WorkflowRun) => r.id)).toEqual([
+      GOOD,
+      "01K8RUN000000000000000AAAA",
+    ]);
+  });
+
   it("keeps at most RUNS_MAX runs, dropping the oldest ended ones first", () => {
     const store = new OrchestrateStore(tmp.dir);
     const at = (i: number) => new Date(Date.parse(NOW) + i * 1000).toISOString();
