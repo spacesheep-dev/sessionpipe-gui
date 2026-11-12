@@ -7,6 +7,7 @@ import { useCallback, useRef, useState } from "react";
 import type { HeldForConfirm } from "./command";
 import { HELD_WORDS, heldReason } from "./heldWords";
 import { signerLabel } from "./signer";
+import "./control.css";
 
 export interface Held<T> {
   /** The hold, while it is shown. */

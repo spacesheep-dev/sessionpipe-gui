@@ -522,3 +522,41 @@
   color: var(--fg-3);
   font-size: var(--text-xs);
 }
+
+/* A send the receiver held for a confirm (HeldNotice.tsx): one panel in the well tier,
+   where the send was pressed. The reason, then the one button that confirms it. */
+.held {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+}
+.held-title {
+  color: var(--fg);
+  font-weight: 600;
+}
+.held-why {
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+.held-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+/* In a sheet (New session, Ask another agent): inside its padding, above its foot. */
+.ns-sheet > .held {
+  margin: 0 20px 12px;
+}
+/* The phone's sheet: the width of its foot, above the status line. */
+.ns-group-foot > .held {
+  align-self: stretch;
+  margin: 0 0 4px;
+}
