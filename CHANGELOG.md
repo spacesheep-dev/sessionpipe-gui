@@ -16,6 +16,22 @@ All notable changes to `sessionpipe-gui`. The format follows
   `%NVM_HOME%\nodejs`) was looked up from the folder the app was started in, so a
   `node.exe` under that folder could be the one it ran. Such a value is now left out, as a
   `.` on PATH already is (#101); `ProgramFiles` then reads as `C:\Program Files`.
+- **`sessionpipe-gui service` on Windows starts `schtasks`, `taskkill` and PowerShell by their
+  full paths** under `%SystemRoot%\System32`. They were started by bare name, which is looked
+  for first in the folder the command is run from, so a `schtasks.exe` lying there would
+  have been run in their place. The commands it tells you to type name them in full too.
+- **A `!NAME!` in the state folder's path is kept** where the registry turns cmd's delayed
+  expansion on: the Windows task now runs the receiver through `cmd /v:off`. Without it cmd
+  puts a variable's value there when NAME is one that is set (`C:\data\!OS!\state` became
+  `C:\data\Windows_NT\state`), and the receiver was started on another folder. A task that
+  0.8.0 installed gets the new line the next time `service install` rewrites it (a new Node
+  or package path, a changed option, or a receiver that is not running), or at once with
+  `service uninstall` then `service install`. A 0.8.0 `sessionpipe-gui` does not know a
+  task with the new line as its own: remove it with this version.
+- **`service uninstall` on Windows takes the `\sessionpipe\` folder out of Task Scheduler**
+  with its last task, where it left it there empty; one that 0.8.0 left goes on the next
+  `service uninstall`. The folder stays while another task is in it, and where PowerShell
+  is held to constrained language mode, which cannot remove it.
 
 ## [0.8.0] - 2026-11-11
 
