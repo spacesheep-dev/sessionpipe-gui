@@ -127,6 +127,9 @@ export const isFinal = (a: ControlActivity): boolean =>
 export function sendErrorWords(e: unknown): string {
   if (e instanceof ControlError) {
     if (e.status === 422 && e.code) return `not sent · ${refusalWords(e.code)}`;
+    // spacesheep refused this app's key (server/control/ui.ts forwardSend), not the page's.
+    if (e.code === "spacesheep_unauthorized")
+      return "not sent · spacesheep no longer takes this app's key. Connect spacesheep again in Settings → Data.";
     if (e.status === 404) return "not sent · this machine is no longer paired here";
     if (e.status === 401) return "not sent · this page lost its key; reload it from the terminal's link";
     return `not sent · ${e.detail ?? e.reason}`;

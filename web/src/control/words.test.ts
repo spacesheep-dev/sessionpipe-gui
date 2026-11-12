@@ -3,7 +3,8 @@
 // own detail ends the sentence it is quoted in, once, whatever punctuation it came with.
 import type { ControlActivity } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { harnessCommand, outcomeWords, sentLine, startFailureWords } from "./words";
+import { ControlError } from "./api";
+import { harnessCommand, outcomeWords, sendErrorWords, sentLine, startFailureWords } from "./words";
 
 const start = (over: Partial<ControlActivity>): ControlActivity => ({
   id: "c1",
@@ -92,5 +93,16 @@ describe("sentLine", () => {
   it("names the command a harness runs as, and keeps the label of one without", () => {
     expect(harnessCommand("claude-code", "Claude Code")).toBe("claude");
     expect(harnessCommand("antigravity", "Antigravity")).toBe("Antigravity");
+  });
+});
+
+describe("sendErrorWords", () => {
+  it("tells spacesheep's refusal of this app's key from the page's own key", () => {
+    expect(sendErrorWords(new ControlError(502, "Unknown or revoked API key.", "spacesheep_unauthorized"))).toBe(
+      "not sent · spacesheep no longer takes this app's key. Connect spacesheep again in Settings → Data.",
+    );
+    expect(sendErrorWords(new ControlError(401, "unauthorized"))).toBe(
+      "not sent · this page lost its key; reload it from the terminal's link",
+    );
   });
 });
