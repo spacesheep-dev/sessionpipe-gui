@@ -11,12 +11,14 @@ export const PREVIEW_CHARS = 2048;
 const NodeBuffer = (globalThis as { Buffer?: { from(s: string, enc: "utf8"): { toString(enc: "utf8"): string } } })
   .Buffer;
 const encoder = /* @__PURE__ */ new TextEncoder();
-const decoder = /* @__PURE__ */ new TextDecoder();
+// ignoreBOM: a decoder drops a leading U+FEFF by default, and Buffer keeps it.
+const decoder = /* @__PURE__ */ new TextDecoder("utf-8", { ignoreBOM: true });
 
 /** A flat copy of a string. V8 keeps a `slice` as a view on its parent, so a 2 KB
  *  preview would pin the 64 KB it was cut from; copying through bytes does not. Through
- *  a Buffer on the server, as it always was; through TextEncoder where there is no Buffer
- *  (the same string back: both turn a lone surrogate into U+FFFD). */
+ *  a Buffer on the server, as it always was; through TextEncoder and TextDecoder where
+ *  there is no Buffer, which give the same string back as Buffer does: a lone surrogate
+ *  becomes U+FFFD in both, and a leading U+FEFF stays (store/browser.test.ts). */
 export const detach: (s: string) => string = NodeBuffer
   ? (s) => NodeBuffer.from(s, "utf8").toString("utf8")
   : (s) => decoder.decode(encoder.encode(s));
