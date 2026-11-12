@@ -14,9 +14,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   server exited about a second after every start. Such a run, and one whose plan step has
   text that is not a string, an id that is not an id or is used twice, or an `after` naming
   a step that is not before it, is now left out when the file is read, as a workflow that
-  no longer reads already is; the other runs are kept, and the file as it was is set aside
-  as `workflow-runs.json.bad-<time>`. A step called `__proto__` now keeps its entry in the
-  run's `steps`, so such a run is read back like any other.
+  no longer reads already is; so is a run whose input or a step's reply is not text, and
+  one with an entry in `steps` that no plan step names (it kept the run from ever ending).
+  The other runs are kept, and the file as it was is set aside as
+  `workflow-runs.json.bad-<time>`; until it can be, the runs left out are written back with
+  the others. A step called `__proto__` now keeps its entry in the run's `steps`, so such a
+  run is read back like any other.
 - **A send to a computer reached through spacesheep outlives a restart.** Its row was
   deleted when the app started, because such a computer is never saved here: a start
   waiting for an offline computer then read "No such session here", and ran anyway when the

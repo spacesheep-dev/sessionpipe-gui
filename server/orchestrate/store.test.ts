@@ -2,7 +2,7 @@
 // What a saved workflow must be, and the two files: private, written whole, read back the same.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WORKFLOW_STEPS_MAX, WORKFLOW_TEXT_MAX, type WorkflowRun } from "../../shared/api.js";
 import { tempDir } from "../../test/events.js";
 import { cancel, newRun } from "./runs.js";
@@ -134,7 +134,7 @@ describe("OrchestrateStore", () => {
     rev: 1,
     status,
     startedAt,
-    plan: [],
+    plan: [{ ...base.steps[0]!, id: "a" }],
     steps: { a: { status: status === "running" ? "ready" : "done" } },
   });
 
@@ -230,6 +230,26 @@ describe("OrchestrateStore", () => {
       "a plan step with no text",
       planned("01K8RUN00000000000000BAD8", [step("a", { text: undefined })], { a: { status: "pending" } }),
     ],
+    // fitFills reads `.length` and `.slice` of every fill: an object with a length threw.
+    [
+      "an input that is not text",
+      {
+        ...(planned("01K8RUN00000000000000BAD9", [step("a")], { a: { status: "pending" } }) as object),
+        input: { length: 5 },
+      },
+    ],
+    [
+      "a reply that is not text",
+      planned("01K8RUN0000000000000BAD10", [step("a"), step("b", { text: "{{prev}}", after: ["a"] })], {
+        a: { status: "done", reply: { length: 99999 } },
+        b: { status: "pending" },
+      }),
+    ],
+    // The run's status is read from every entry: a pending one no step names never ends.
+    [
+      "an entry in steps that no plan step names",
+      planned("01K8RUN0000000000000BAD11", [step("a")], { a: { status: "done" }, zz: { status: "pending" } }),
+    ],
   ];
   it.each(broken)("leaves out a run with %s and keeps the good one whole", (_, bad) => {
     const file = path.join(tmp.dir, "workflow-runs.json");
@@ -276,6 +296,33 @@ describe("OrchestrateStore", () => {
     rmSync(blocker, { recursive: true });
     new OrchestrateStore(tmp.dir);
     expect(readdirSync(tmp.dir).filter((f) => f.includes(".bad-"))).toHaveLength(1);
+  });
+
+  it("keeps a run it left out in the file until the file can be set aside", () => {
+    const file = path.join(tmp.dir, "workflow-runs.json");
+    const bad = broken[1]![1];
+    writeFileSync(file, JSON.stringify({ v: 1, runs: [bad, good] }));
+    // No copy can be made: a folder already has the name of the copy.
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+    const blocker = `${file}.bad-1700000000000`;
+    mkdirSync(blocker);
+    const store = new OrchestrateStore(tmp.dir);
+    expect(store.runs().map((r) => r.id)).toEqual([GOOD]);
+    // A write meanwhile keeps the run left out in the file, beside the runs that read.
+    store.putRun(run("01K8RUN000000000000000AAAA", "done", NOW));
+    expect(JSON.parse(readFileSync(file, "utf8")).runs).toContainEqual(bad);
+    rmSync(blocker, { recursive: true });
+    now.mockRestore();
+    // Once a copy can be made, the file is set aside with that run, then written without it.
+    store.putRun(run("01K8RUN000000000000000BBBB", "done", NOW));
+    const aside = readdirSync(tmp.dir).filter((f) => f.startsWith("workflow-runs.json.bad-"));
+    expect(aside).toHaveLength(1);
+    expect(JSON.parse(readFileSync(path.join(tmp.dir, aside[0]!), "utf8")).runs).toContainEqual(bad);
+    expect(
+      JSON.parse(readFileSync(file, "utf8"))
+        .runs.map((r: WorkflowRun) => r.id)
+        .sort(),
+    ).toEqual(["01K8RUN000000000000000AAAA", "01K8RUN000000000000000BBBB", GOOD].sort());
   });
 
   it("reads back every run the server writes, also one with a step called __proto__", () => {

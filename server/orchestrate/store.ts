@@ -32,6 +32,7 @@ const TEMPLATE_MAX = 40;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what it refuses
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const STEP_STATUS = new Set<string>(["pending", "ready", "sending", "sent", "done", "failed", "skipped"]);
+const STEP_TEXT = ["text", "commandId", "reply", "error", "readyAt", "claimedAt", "sentAt", "endedAt"] as const;
 
 /** Why a workflow was refused, as the route answers it (`reason`, and `error` saying what to fix). */
 export class WorkflowError extends Error {
@@ -143,8 +144,9 @@ export function readWorkflow(v: unknown, o: { id: string; now: string; existing?
 /** A run as the file has it: the shape only (the state machine wrote it); null when broken.
  *  That includes what the state machine leans on, so a hand-edited or damaged run is left
  *  out rather than throwing on every tick: each plan step is an object with its own id and
- *  its text, an `after` names only steps before it, and every plan step has its entry in
- *  `steps`. */
+ *  its text, an `after` names only steps before it, every plan step has its entry in
+ *  `steps` and every entry its plan step, and the input and each step's text fields are
+ *  strings. */
 function readRun(v: unknown): WorkflowRun | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
   const r = v as Record<string, unknown>;
@@ -153,9 +155,15 @@ function readRun(v: unknown): WorkflowRun | null {
   if (typeof r.rev !== "number" || !Number.isInteger(r.rev) || r.rev < 0) return null;
   if (typeof r.status !== "string" || !["running", "waiting", ...RUN_FINAL].includes(r.status as never)) return null;
   if (typeof r.startedAt !== "string" || !Array.isArray(r.plan) || !r.steps || typeof r.steps !== "object") return null;
+  if (r.input !== undefined && typeof r.input !== "string") return null;
   const steps = r.steps as Record<string, unknown>;
   for (const s of Object.values(steps)) {
     if (!s || typeof s !== "object" || !STEP_STATUS.has(String((s as StepRun).status))) return null;
+    // What the state machine reads as text (a reply fills a later step's placeholders).
+    for (const k of STEP_TEXT) {
+      const t = (s as Record<string, unknown>)[k];
+      if (t !== undefined && typeof t !== "string") return null;
+    }
   }
   const ids: string[] = [];
   for (const raw of r.plan as unknown[]) {
@@ -168,6 +176,9 @@ function readRun(v: unknown): WorkflowRun | null {
     }
     ids.push(p.id);
   }
+  // An entry no plan step names would keep the run from ever ending (its status is read
+  // from every entry).
+  if (Object.keys(steps).some((k) => !ids.includes(k))) return null;
   return r as unknown as WorkflowRun;
 }
 
@@ -213,6 +224,9 @@ export class OrchestrateStore {
   private readonly runsFile: string;
   private workflowList: Workflow[] = [];
   private runList: WorkflowRun[] = [];
+  /** The runs file's entries left out on read while no copy of the file is set aside:
+   *  written back with every commit, so they are not lost, until a copy is. */
+  private keptOut: unknown[] | null = null;
 
   constructor(stateDir: string) {
     this.workflowsFile = path.join(stateDir, "workflows.json");
@@ -234,26 +248,21 @@ export class OrchestrateStore {
       }
     }
     const rf = readJson(this.runsFile) as Partial<RunsFile> | null;
-    let leftOut = rf !== null && !Array.isArray(rf?.runs);
+    const leftOut: unknown[] = [];
+    const notList = rf !== null && !Array.isArray(rf?.runs);
     for (const raw of Array.isArray(rf?.runs) ? rf.runs : []) {
       const run = readRun(raw);
       if (run && !this.runList.some((r) => r.id === run.id)) this.runList.push(run);
-      else leftOut = true;
+      else leftOut.push(raw);
     }
     // A run left out would be gone at the next write: the file as it was is set aside
     // first (never lost, as readJson does), then rewritten with the runs that read.
-    if (leftOut) {
-      const aside = `${this.runsFile}.bad-${Date.now()}`;
+    if (notList || leftOut.length) {
+      this.keptOut = leftOut;
       try {
-        copyFileSync(this.runsFile, aside);
-        try {
-          this.commitRuns();
-        } catch {
-          // not rewritten: the file is left as it is, and so is not set aside again
-          rmSync(aside, { force: true });
-        }
+        this.setRunsAside();
       } catch {
-        // not set aside: the file is left as it is
+        // not rewritten: the file is left as it is, and the copy removed
       }
     }
   }
@@ -323,6 +332,26 @@ export class OrchestrateStore {
     writeAtomic(this.workflowsFile, { v: 1, workflows: this.workflowList } satisfies WorkflowsFile);
   }
   private commitRuns(): void {
-    writeAtomic(this.runsFile, { v: 1, runs: this.runList } satisfies RunsFile);
+    if (this.keptOut && this.setRunsAside()) return;
+    writeAtomic(this.runsFile, { v: 1, runs: [...this.runList, ...(this.keptOut ?? [])] });
+  }
+  /** The runs file copied to `.bad-<ms>`, then rewritten with the runs that read. False when
+   *  no copy could be made (nothing written); throws when the rewrite fails, with the copy
+   *  removed so the file is not set aside twice. */
+  private setRunsAside(): boolean {
+    const aside = `${this.runsFile}.bad-${Date.now()}`;
+    try {
+      copyFileSync(this.runsFile, aside);
+    } catch {
+      return false;
+    }
+    try {
+      writeAtomic(this.runsFile, { v: 1, runs: this.runList } satisfies RunsFile);
+    } catch (e) {
+      rmSync(aside, { force: true });
+      throw e;
+    }
+    this.keptOut = null;
+    return true;
   }
 }
