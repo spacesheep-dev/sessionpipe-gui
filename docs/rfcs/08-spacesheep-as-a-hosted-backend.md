@@ -181,7 +181,8 @@ hub answers its two questions, the rp id and the machines' names, from the machi
 
 The list keeps what it does not read. An entry of a kind a newer version wrote, or one
 whose fields have another shape, stays in `receivers.json` as the JSON it was through
-every save; it is never listed to the page, never selectable, never spoken to. A file
+every save; it is never listed to the page, never selectable, never spoken to. A field
+a newer version added to an entry this version does read is kept and written back too. A file
 that is no list at all is copied to `receivers.json.bad` before anything is saved, and
 the list starts empty in memory.
 
@@ -194,7 +195,7 @@ link, or a device key.
 | command | answer |
 |---|---|
 | `acct_status()` | `{ enabled, accounts: [{ id, origin, email, state, connectedAt, active, deviceKeyId? }], connect }` |
-| `acct_connect_start({ origin? })` | a connect: `{ origin, digits, expiresAt, state: "pending" }` |
+| `acct_connect_start({ origin? })` | a connect: `{ origin, digits, expiresAt, state, revokeUrl?, note? }` |
 | `acct_connect_open()` | nothing: the hub's link for the pending connect is opened in the system browser |
 | `acct_connect_cancel()` | `true` when a pending connect was stopped; `false` when it only cleared an outcome |
 | `acct_disconnect({ id })` | `{ id, origin, email, forgotten: true, revoked: false, revokeUrl, note }` |
@@ -221,28 +222,48 @@ never past the code's end plus the two minutes spacesheep keeps an approved key 
 collection. The pending connect is kept beside the keys, so it goes on when the app was
 closed while the person confirmed in the browser; coming back to the front polls at once.
 
-When spacesheep says the code was approved, nothing is kept yet. The hub first checks that
-this connect is still the one, and that the account's id is free or is this same
-account's (otherwise `failed` with `conflict`). Then it asks the person, natively, whose
-account this phone is about to show (below). On yes: the key is kept, then the entry;
-and only then does another account at the same origin go, with its key and documents.
-On no: `declined`, and nothing was written or removed. `connect.state` goes `pending` →
-`approved` (with `receiver`, the account's id, and `email`), `denied` (on spacesheep),
-`declined` (here), `expired` or `failed` (with `error`: `bad_answer`, `conflict`,
-`keystore`, `io`, `busy`). On `approved` the page calls `rx_select(receiver)`, as after
-`rx_add`. A second start while one is live for the same origin returns the same connect.
+When spacesheep says the code was approved it hands the key over, once, and its own
+record of the connect is gone. Nothing is an account yet. The hub checks that this
+connect is still the one, and that the account's id is free or is this same account's
+(otherwise `failed` with `conflict`). Then it **holds** the key, beside the pending
+connect in its key store and nowhere the page reads, and the connect's state is
+`asking`: the person is asked, natively, whose account this phone is about to show
+(below).
+
+Only an answer ends that. A question that could not be shown is not an answer: another
+alert is up, another of the hub's questions is open, there is no window, the app is in
+the background. The key stays held and the question is asked again when the app comes to
+the front, every fifteen seconds meanwhile, and after the app was closed and opened
+(from what was kept), for a quarter of an hour at most from the approval. On yes: the
+key is kept, then the entry; and only then does another account at the same origin go,
+with its key and documents. On no: `declined`, and nothing was written or removed.
+
+`connect.state` goes `pending` → `asking` → `approved` (with `receiver`, the account's
+id, and `email`), or ends as `denied` (on spacesheep), `declined` (here, or cancelled
+while `asking`), `expired` (the code ran out, or a held approval was never answered) or
+`failed` (with `error`: `bad_answer`, `conflict`, `keystore`, `io`). Whenever a key was
+made on spacesheep and is not kept here (`declined`, an `expired` that was `asking`, and
+a `failed` after the approval), the connect also says `revokeUrl` (Settings → API keys
+on the account's origin) and `note` ("A key was made for this app on spacesheep and is
+not kept here. Revoke it there: Settings → API keys."): the hub cannot revoke a key,
+so the page tells the person. On `approved` the page calls `rx_select(receiver)`, as
+after `rx_add`. A second start while one is under way for the same origin returns the
+same connect; while an approval is held, a start for another origin is `busy`.
 
 Start's errors: `unsupported` (no account mode in this build), `bad_origin`, `busy` (a
-start is already under way, or another question is open), `already_connected` (an
-account at that origin is `ok`: disconnect first; one that is `unauthorized` or `no_key`
-may connect again, and the same person keeps their id, documents and device key id),
-`too_many_starts` (five in ten minutes from this app, with `retryAfterS`), `cancelled`
-(the person said no to another origin), `unreachable`, `rate_limited` (with
-`retryAfterS`), `refused` (not a 201), `bad_answer`.
+start is already under way, another question is open, or an approval is held),
+`already_connected` (an account at that origin is `ok`: disconnect first; one that is
+`unauthorized` or `no_key` may connect again, and the same person keeps their id,
+documents and device key id), `too_many_starts` (three an hour from this app, counted
+across restarts, with `retryAfterS`), `cancelled` (the person said no to another
+origin), `not_asked` (that question could not be shown), `unreachable`, `rate_limited`
+(with `retryAfterS`), `refused` (not a 201), `bad_answer`.
 
-**Disconnecting** forgets the key, the documents and the entry on this phone; when
-documents are kept for the account, the person is asked first (`cancelled` on no). It
-does not revoke the key: `revoked` is always `false`, `revokeUrl` is spacesheep's
+**Disconnecting** forgets the key, the documents and the entry on this phone. The person
+is always asked first (`cancelled` on no; `not_asked` or `busy` when the question could
+not be shown), and told when labels and read marks go with it. An `io` error says what
+is true: either the key could not be removed and nothing was changed, or the key is
+removed and the entry is left, showing `no_key`. It does not revoke the key: `revoked` is always `false`, `revokeUrl` is spacesheep's
 Settings → API keys, and the page says so. What the page itself cached for that id
 (IndexedDB) is the page's to clear.
 
@@ -254,23 +275,34 @@ supplies nothing, so no key but this phone's own can be enrolled through the app
 answer has the number spacesheep's Devices page shows beside the request (`code`), the
 key's id, the machines that trust it already, and the Devices link when it is on the
 account's origin. The hub remembers the key's id (`deviceKeyId`), and the status door
-below is about that key only. Errors: `unknown_account`, `unsupported` (no signer:
-Android), `signer` (with the signer's own code in `upstream`), `bad_key`,
+below is about that key only. Asked again within ten minutes for the same key, the
+command returns the answer it got then and makes no request (each request made anew
+changes the number the person is matching); requests are five an hour at most, counted
+across restarts (`too_many_asks`, with `retryAfterS`). Errors: `unknown_account`,
+`unsupported` (no signer: Android), `signer` (with the signer's own code in
+`upstream`), `bad_key`, `too_many_asks`,
 `unauthorized`, `rate_limited`, `refused` (with spacesheep's words in `message` and its
 code in `upstream`, e.g. `pro_required`, `talk_off`), `bad_answer`, and the hub's own
 codes below.
 
 ### What the person is asked
 
-Native alerts, one at a time; a second question while one is open is refused (`busy`),
-never queued. Cancel is the preferred action of each. With nobody to ask, the answer is
-no. On Android "This iPhone" reads "This phone".
+Native alerts, one at a time; a second question while one is open is not shown and
+never queued. Cancel is the preferred action of each. A question that could not be shown
+is not an answer: a start or a disconnect is refused (`busy`, `not_asked`), an approval
+is held and asked about again. On Android "This iPhone" reads "This phone". An email is
+shown whole up to sixty characters, else its first 29 and last 30 around an ellipsis;
+it has exactly one `@`, at most 64 characters before it and 190 after.
 
 | when | title | message | buttons |
 |---|---|---|---|
 | before a connect to any origin but `https://spacesheep.dev` | Use an account on this server? | This iPhone will ask {host} for an account and show its sessions. It is not spacesheep.dev: continue only if you know this server. | Cancel / Continue |
-| before an approved account is kept | Use this spacesheep account? | {email} on {host}. This iPhone will show its sessions. | Cancel / Use it |
-| before an account with documents is disconnected | Disconnect {email}? | Labels and read marks kept on this iPhone for it are removed. | Cancel / Disconnect |
+| before an approved account is kept, on spacesheep.dev | Use this spacesheep account? | {host}⏎{email}⏎This iPhone will show its sessions. | Cancel / Use it |
+| the same, on any other origin | Use this account? | {host}⏎{email}⏎This iPhone will show its sessions. | Cancel / Use it |
+| before an account is disconnected, with documents kept for it | Disconnect {email}? | Labels and read marks kept on this iPhone for it are removed. | Cancel / Disconnect |
+| the same, with none | Disconnect {email}? | This iPhone stops showing its sessions. | Cancel / Disconnect |
+
+(⏎ is a line break: the host has a line of its own, first.)
 
 ### The doors
 
@@ -282,7 +314,7 @@ these five and nothing else:
 | GET | `/api/sessionpipe/v1/relay` | `since` 0…2^53−1, `limit` 1…500, `wait` 0…25, each optional | none | 8 MiB |
 | GET | `/api/sessionpipe/v1/relay/machines` | none | none | 1 MiB |
 | GET | `/api/sessionpipe/v1/relay/jobs` | `since`, optional | none | 1 MiB |
-| POST | `/api/machines/<id>/jobs`, id `m_` + 16…40 of `A-Za-z0-9_-`, never `m_box…` | none | a signed command, 256 KB | 1 MiB |
+| POST | `/api/machines/<id>/jobs`, id `m_` + 16…40 of `A-Za-z0-9_-`, never a cloud box's (`m_box` + 16 hex) | none | a signed command, 256 KB | 1 MiB |
 | GET | `/api/gui/device` | none: the hub adds `id=<this phone's key>` | none | 1 MiB |
 
 A path is a door only when it is written exactly so: no `..`, no `//`, no encoded
@@ -292,8 +324,10 @@ the query from the values it read. The request must come from the bundled origin
 A send is a signed command as the signer writes one, and nothing else:
 `{ cmd, csig, grant }` or `{ cmd, confirm }`, where `cmd` is the JSON text that was
 signed, `csig` a string, `grant` and `confirm` objects (the unused ones may be `null`).
-A body with any other field, or with nothing signing the command, is `not_signed`. A
-cloud box (`m_box…`) is not a door at all: spacesheep runs a message for one with no
+With `confirm`, and only then, it may carry `match`: the number the person compared for
+a `key.add`, one to eight digits as text or as a number. The five names are a closed
+set: a body with any other field, or with nothing signing the command, is `not_signed`.
+A cloud box (`m_box` and exactly sixteen lowercase hex digits) is not a door at all: spacesheep runs a message for one with no
 signature, so the account's key alone would be enough to make it work.
 
 `POST /api/gui/device` is not a door for the page (`not_a_door`); `acct_device_ask` is
@@ -341,7 +375,7 @@ on by name, so an answer with the header is the hub's and one without is spacesh
 | 504 | `timeout` | no answer in the hub's time |
 | 502 | `redirected` | spacesheep answered 3xx |
 | 502 | `answer_too_large` | the answer, unpacked, is over the door's limit |
-| 502 | `bad_encoding` | the answer is packed some other way than gzip, or is not what it says |
+| 502 | `bad_encoding` | the answer is packed some other way than gzip, is not what it says, or has anything after its one gzip member |
 | 502 | `withheld` | the answer held the key |
 
 Every refusal in the upper eleven rows comes before any network.
