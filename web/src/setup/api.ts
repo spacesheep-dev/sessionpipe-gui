@@ -5,7 +5,7 @@
 import type { RemoteInfo, SetupStatus } from "@shared/api";
 import { ROUTES } from "@shared/api";
 import { useEffect, useSyncExternalStore } from "react";
-import { apiUrl } from "../lib/net";
+import { apiFetch } from "../lib/net";
 
 const BASE = ROUTES.ui.setup;
 const FAST_MS = 2000;
@@ -41,7 +41,7 @@ export class SetupError extends Error {
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(apiUrl(`${BASE}${path}`), {
+  const res = await apiFetch(`${BASE}${path}`, {
     method: "POST",
     headers: { accept: "application/json", ...(body !== undefined ? { "content-type": "application/json" } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -105,7 +105,7 @@ const set = (patch: Partial<SetupState>) => {
 
 async function read(): Promise<void> {
   try {
-    const res = await fetch(apiUrl(`${BASE}/status`), { headers: { accept: "application/json" }, cache: "no-store" });
+    const res = await apiFetch(`${BASE}/status`, { headers: { accept: "application/json" }, cache: "no-store" });
     if (res.status === 403) {
       set({ local: false, error: null });
       return;

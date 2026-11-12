@@ -22,7 +22,7 @@ import { PendingDevices, sentence } from "../control/PendingDevices";
 import { PendingPairings } from "../control/PendingPairings";
 import { canSign, deviceKey, machineTakes, setupLabel, signerKind, signHint, useOwnKeys } from "../control/signer";
 import { useMachines, useStore } from "../data/hooks";
-import { apiUrl } from "../lib/net";
+import { apiFetch } from "../lib/net";
 import "../lib/acp";
 import { harnessMark } from "../lib/format";
 import { copyText } from "../lib/menus";
@@ -350,7 +350,7 @@ function RemoteAppSetup({ rpId, origin }: { rpId: string; origin: string }) {
     setErr(null);
     try {
       const key = await deviceKey(rpId);
-      const res = await fetch(apiUrl(`${ROUTES.ui.spacesheep}/device`), {
+      const res = await apiFetch(`${ROUTES.ui.spacesheep}/device`, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify({ key }),

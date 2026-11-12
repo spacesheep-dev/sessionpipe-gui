@@ -15,7 +15,7 @@ import {
 } from "@shared/skin-api";
 import { BUILTIN_SKINS, DEFAULT_SKIN_ID, PLAIN_SKIN_ID } from "@shared/skins-builtin";
 import { useSyncExternalStore } from "react";
-import { apiUrl } from "./net";
+import { apiFetch, apiUrl } from "./net";
 
 export type { InstalledSkin, SkinScheme } from "@shared/skin-api";
 export { BUILTIN_SKINS, DEFAULT_SKIN_ID, PLAIN_SKIN_ID } from "@shared/skins-builtin";
@@ -122,7 +122,7 @@ function set(next: SkinsState) {
 }
 
 async function request(method: "GET" | "POST", url: string): Promise<InstalledSkin[]> {
-  const res = await fetch(apiUrl(url), { method, headers: { accept: "application/json" } });
+  const res = await apiFetch(url, { method, headers: { accept: "application/json" } });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   const body = (await res.json()) as { skins?: InstalledSkin[] };
   return body.skins ?? [];

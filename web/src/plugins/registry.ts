@@ -6,7 +6,7 @@
 import type { InstalledPlugin } from "@shared/plugin-api";
 import { PLUGIN_ROUTES } from "@shared/plugin-api";
 import { useSyncExternalStore } from "react";
-import { apiUrl } from "../lib/net";
+import { apiFetch } from "../lib/net";
 
 export interface PluginsState {
   plugins: readonly InstalledPlugin[];
@@ -34,7 +34,7 @@ const subscribe = (l: () => void) => {
 };
 
 async function request<T>(url: string, method: "GET" | "POST" | "PUT", body?: unknown): Promise<T> {
-  const res = await fetch(apiUrl(url), {
+  const res = await apiFetch(url, {
     method,
     headers: { accept: "application/json", ...(body !== undefined ? { "content-type": "application/json" } : {}) },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),

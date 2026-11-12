@@ -31,7 +31,7 @@ import { useAppState, useConnection, useStore } from "../data/hooks";
 import { tablistKey } from "../lib/focus";
 import { bytes } from "../lib/format";
 import { reducedMotion, tokenMs } from "../lib/motion";
-import { apiUrl } from "../lib/net";
+import { apiFetch } from "../lib/net";
 import { back, hasInAppHistory, Link, navigate, useSearchParam } from "../lib/router";
 import { isRouteNotFound, olderReceiver } from "../lib/serverAge";
 import {
@@ -872,7 +872,7 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
   const older = olderReceiver("spacesheep", version, { notFound, localOrigin });
   const read = async () => {
     try {
-      const res = await fetch(apiUrl(ROUTES.ui.spacesheep), { headers: { accept: "application/json" } });
+      const res = await apiFetch(ROUTES.ui.spacesheep, { headers: { accept: "application/json" } });
       if (res.ok) setSt((await res.json()) as Status);
     } catch {}
   };
@@ -888,7 +888,7 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
     setBusy(true);
     setErr(null);
     try {
-      const res = await fetch(apiUrl(ROUTES.ui.spacesheep), {
+      const res = await apiFetch(ROUTES.ui.spacesheep, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
         body: "{}",
@@ -920,7 +920,7 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
   const disconnect = async () => {
     setBusy(true);
     try {
-      await fetch(apiUrl(ROUTES.ui.spacesheep), { method: "DELETE" });
+      await apiFetch(ROUTES.ui.spacesheep, { method: "DELETE" });
       await read();
     } finally {
       setBusy(false);
@@ -1022,7 +1022,7 @@ function Data() {
     setBusy("export");
     setNote(null);
     try {
-      const res = await fetch(apiUrl(ROUTES.ui.snapshot), { headers: { accept: "application/json" } });
+      const res = await apiFetch(ROUTES.ui.snapshot, { headers: { accept: "application/json" } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
       const a = document.createElement("a");
@@ -1146,7 +1146,7 @@ function About() {
       .info()
       .then(setInfo)
       .catch(() => {});
-    fetch(apiUrl(UPDATE), { headers: { accept: "application/json" } })
+    apiFetch(UPDATE, { headers: { accept: "application/json" } })
       .then((r) => (r.ok ? (r.json() as Promise<UpdateStatus>) : null))
       .then(setUpdate)
       .catch(() => setUpdate(null));
@@ -1155,7 +1155,7 @@ function About() {
   const check = async () => {
     setErr(null);
     try {
-      const r = await fetch(apiUrl(`${UPDATE}/check`), { method: "POST", headers: { accept: "application/json" } });
+      const r = await apiFetch(`${UPDATE}/check`, { method: "POST", headers: { accept: "application/json" } });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setUpdate((await r.json()) as UpdateStatus);
     } catch (e) {

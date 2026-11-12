@@ -18,7 +18,7 @@ import type {
   TrustedKey,
 } from "@shared/api";
 import { ROUTES } from "@shared/api";
-import { apiUrl } from "../lib/net";
+import { apiFetch } from "../lib/net";
 import { sendingOriginOf, wrongOrigin } from "./origin";
 
 export type { TrustedKey };
@@ -117,7 +117,7 @@ export class ControlError extends Error {
 }
 
 async function call<T>(method: "GET" | "POST", url: string, body?: unknown): Promise<T> {
-  const res = await fetch(apiUrl(url), {
+  const res = await apiFetch(url, {
     method,
     headers: { accept: "application/json", ...(body !== undefined ? { "content-type": "application/json" } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -157,7 +157,7 @@ export const controlApi = {
   machines: () => call<{ machines: PairedMachine[] }>("GET", `${BASE}/machines`).then((r) => r.machines),
   /** One file a start will carry: held here under its hash, named in the signed `files`. */
   uploadFile: async (file: File): Promise<StartFile> => {
-    const res = await fetch(apiUrl(`${BASE}/files?name=${encodeURIComponent(file.name)}`), {
+    const res = await apiFetch(`${BASE}/files?name=${encodeURIComponent(file.name)}`, {
       method: "POST",
       headers: { "content-type": file.type || "application/octet-stream", accept: "application/json" },
       body: file,
@@ -189,7 +189,7 @@ export const lastInfo = (): Info | undefined => infoCache;
  *  same read remembers Info.tls for `tlsInfo()`. */
 export function rpId(): Promise<string> {
   if (!rpIdPromise) {
-    rpIdPromise = fetch(apiUrl(ROUTES.ui.info), { headers: { accept: "application/json" } })
+    rpIdPromise = apiFetch(ROUTES.ui.info, { headers: { accept: "application/json" } })
       .then((r) => r.json() as Promise<Info>)
       .then((i) => {
         infoCache = i;
