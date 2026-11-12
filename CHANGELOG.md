@@ -57,6 +57,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   reads "Files can't reach rc-mac through spacesheep yet.", not "Update sessionpipe there".
 - **Words: a send refused for a revoked spacesheep key** reads "not sent · spacesheep no
   longer takes this app's key. Connect spacesheep again in Settings → Data."
+- **Words: Settings → Data says "spacesheep asked this app to wait a little; it reads again
+  by itself"** when spacesheep limits the app, not "spacesheep can't be reached right now".
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH
