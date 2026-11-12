@@ -148,7 +148,9 @@ service (the receiver in the background: started at login; on macOS and Linux al
                                              unless --downgrade); --if-installed never
                                              installs one and never moves one back. Exit 4:
                                              it stopped the old receiver and the new one
-                                             isn't running
+                                             isn't running; exit 5 (--if-installed): it
+                                             did nothing. One install or uninstall at a
+                                             time (a lock in the default state folder)
   sessionpipe-gui service uninstall          stop it and remove it
   sessionpipe-gui service status             the label, pid, running version, port and url
                                              (exit 3: not running)

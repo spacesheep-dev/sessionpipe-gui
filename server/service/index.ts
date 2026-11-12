@@ -531,6 +531,9 @@ function afterWait(env: ServiceEnv, verdict: "running" | "silent", port: number,
 
 /** Exit code of an upgrade that stopped the old receiver and whose new one isn't running. */
 export const EXIT_NOT_RUNNING = 4;
+/** Exit code of `install --if-installed` where it did nothing (no service of ours, already
+ *  running this version, or one newer than this CLI): not a failure, and not an update. */
+export const EXIT_NOTHING_DONE = 5;
 
 /** After an upgrade's restart: still loading is fine (exit 0); not running at all is a
  *  failure, and says the old receiver is gone (EXIT_NOT_RUNNING). */
@@ -544,39 +547,87 @@ function afterUpgradeWait(env: ServiceEnv, verdict: "running" | "silent", port: 
   return EXIT_NOT_RUNNING;
 }
 
-/** One `service install` at a time per label: `<default state>/service-<label>.lock`, made
- *  exclusively. A lock whose pid is gone, or older than STALE_LOCK_MS, is a crashed run's and
- *  is taken over. Returns the release, or the line that says who holds it. */
+/** One `service install` or `uninstall` at a time per label: the file
+ *  `<default state folder>/service-<label>.lock` (in it, not beside it), made with O_EXCL. A
+ *  lock whose pid is gone, or older than STALE_LOCK_MS, is a crashed run's and is taken
+ *  over, under a second lock (`….lock.takeover`, also O_EXCL) so that two installs that both
+ *  find it stale can't both end up holding it: only the one holding the takeover lock
+ *  removes the stale file, and only after reading it again under that lock. A takeover lock
+ *  left by a crash (older than STALE_TAKEOVER_MS) is removed. Returns the release, or the
+ *  line that says who holds it. `onStale` is the tests' seam: it runs after a stale lock
+ *  was seen ("seen") and again once the takeover lock is held ("takingOver"). */
 const STALE_LOCK_MS = 15 * 60_000;
+const STALE_TAKEOVER_MS = 10_000;
 export const lockPath = (env: ServiceEnv): string => path.join(env.defaultState, `service-${env.label}.lock`);
-function takeLock(env: ServiceEnv): (() => void) | string {
+const busyLine = (env: ServiceEnv, pid?: number) =>
+  `another \`service install\` or \`uninstall\` for ${env.label} is running${pid ? ` (pid ${pid})` : ""}; try again when it is done`;
+export function takeLock(env: ServiceEnv, onStale?: (stage: "seen" | "takingOver") => void): (() => void) | string {
   const file = lockPath(env);
+  const takeover = `${file}.takeover`;
   mkdirSync(path.dirname(file), { recursive: true });
-  const mine = `${process.pid} ${new Date().toISOString()}\n`;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const mine = `${process.pid} ${new Date().toISOString()} ${Math.random().toString(36).slice(2)}\n`;
+  const exclusive = (f: string, text: string): boolean => {
     try {
-      writeFileSync(file, mine, { flag: "wx", mode: 0o644 });
-      return () => {
-        try {
-          if (readFileSync(file, "utf8") === mine) rmSync(file, { force: true });
-        } catch {}
-      };
+      writeFileSync(f, text, { flag: "wx", mode: 0o644 });
+      return true;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      return false;
     }
-    let pid = 0;
-    let age = 0;
+  };
+  /** The lock as it is now: its text, holder and whether that holder still counts. */
+  const look = (): { text: string; pid: number; live: boolean } | null => {
     try {
-      pid = Number.parseInt(readFileSync(file, "utf8"), 10) || 0;
-      age = Date.now() - statSync(file).mtimeMs;
+      const text = readFileSync(file, "utf8");
+      const pid = Number.parseInt(text, 10) || 0;
+      const age = Date.now() - statSync(file).mtimeMs;
+      return { text, pid, live: pid > 0 && pidAlive(pid) && age < STALE_LOCK_MS };
     } catch {
-      continue; // it went while we looked: try again
+      return null; // it went while we looked
     }
-    if (pid && pidAlive(pid) && age < STALE_LOCK_MS)
-      return `another \`service install\` for ${env.label} is running (pid ${pid}); try again when it is done`;
-    rmSync(file, { force: true });
+  };
+  const release = () => {
+    try {
+      if (readFileSync(file, "utf8") === mine) rmSync(file, { force: true });
+    } catch {}
+  };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (exclusive(file, mine)) return release;
+    const seen = look();
+    if (!seen) continue;
+    if (seen.live) return busyLine(env, seen.pid);
+    onStale?.("seen");
+    // Take over under the takeover lock; a takeover lock a crash left behind goes first.
+    try {
+      if (Date.now() - statSync(takeover).mtimeMs > STALE_TAKEOVER_MS) rmSync(takeover, { force: true });
+    } catch {}
+    if (!exclusive(takeover, mine)) return busyLine(env);
+    try {
+      onStale?.("takingOver");
+      const again = look();
+      // Still the stale one we saw: it goes. Anything else (gone, or another's fresh lock) is
+      // decided on the next turn by O_EXCL.
+      if (again && again.text === seen.text && !again.live) rmSync(file, { force: true });
+    } finally {
+      rmSync(takeover, { force: true });
+    }
   }
   return `can't take ${tilde(file, env.home)}; try again`;
+}
+
+/** Runs `verb` under the label's lock (a dry run changes nothing and takes none). */
+async function locked(env: ServiceEnv, dryRun: boolean | undefined, verb: () => Promise<number>): Promise<number> {
+  if (dryRun) return verb();
+  const release = takeLock(env);
+  if (typeof release === "string") {
+    env.err(release);
+    return 1;
+  }
+  try {
+    return await verb();
+  } finally {
+    release();
+  }
 }
 
 /** `schtasks /Create /XML` reads UTF-16 with a byte-order mark. */
@@ -620,20 +671,9 @@ function taskCarries(env: ServiceEnv, argv: string[], state: string, dryRun?: bo
 }
 const isStop = (env: ServiceEnv, c: string[]) => c[0] === env.taskkill || (c[0] === env.schtasks && c[1] === "/End");
 
-/** `install` under the label's lock (a dry run changes nothing and takes none). */
-async function install(o: ServiceOptions, env: ServiceEnv): Promise<number> {
-  if (o.dryRun) return installUnlocked(o, env);
-  const release = takeLock(env);
-  if (typeof release === "string") {
-    env.err(release);
-    return 1;
-  }
-  try {
-    return await installUnlocked(o, env);
-  } finally {
-    release();
-  }
-}
+/** `install` under the label's lock. */
+const install = (o: ServiceOptions, env: ServiceEnv): Promise<number> =>
+  locked(env, o.dryRun, () => installUnlocked(o, env));
 
 async function installUnlocked(o: ServiceOptions, env: ServiceEnv): Promise<number> {
   const file = serviceFile(env);
@@ -644,7 +684,7 @@ async function installUnlocked(o: ServiceOptions, env: ServiceEnv): Promise<numb
   const loaded = inst !== null || managerState(env).loaded;
   if (!loaded && o.ifInstalled) {
     env.out(`no service ${env.label} installed: nothing to do`);
-    return 0;
+    return EXIT_NOTHING_DONE;
   }
   if (loaded) {
     if (inst && isOurs(inst.argv, env.cli)) return upgrade(o, env, inst);
@@ -761,21 +801,33 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
     );
     return 1;
   }
-  const mgr = managerState(env);
+  let mgr = managerState(env);
   const answered = who === "gui" ? await env.running(port) : undefined;
   // Is the receiver that answers this service's own? Its run.json (written once, when it
   // starts) names its pid: the manager's pid on macOS and Linux, the task's cli on the
   // task's state dir on Windows. Only then does run.json say what it runs: up to 0.8.0
   // /api/ui/info read package.json on every request, so a receiver whose package was
-  // replaced under it answered with the new version while it ran the old code.
+  // replaced under it answered with the new version while it ran the old code. With no
+  // live run.json for the port (a receiver that couldn't write it), the manager saying the
+  // service runs is taken as the answer being its. Only a live run.json naming a pid that
+  // isn't the service's says another receiver answers; the manager is asked once more
+  // before that is believed (a KeepAlive restart between the two looks moves the pid).
   const run = answered !== undefined ? readRunFileRaw(wasState) : null;
   const live = run && run.port === port && pidAlive(run.pid) ? run : null;
-  const owned = live !== null && ownsPid(env, mgr, live.pid, instCli ?? "", wasState);
-  const running = owned ? live.version : answered;
+  const ownsLive = () => live !== null && ownsPid(env, mgr, live.pid, instCli ?? "", wasState);
+  let owned = answered !== undefined && (live ? ownsLive() : mgr.running);
+  if (answered !== undefined && !owned) {
+    mgr = managerState(env);
+    owned = live ? ownsLive() : mgr.running;
+  }
+  const running = owned && live ? live.version : answered;
+  /** What --if-installed (the app's check) returns where it did nothing: the app tells it
+   *  from an update. A plain install says 0 there, as before. */
+  const nothing = o.ifInstalled ? EXIT_NOTHING_DONE : 0;
   // The same file answering with this version: nothing to do.
   if (same && running === env.version) {
     env.out(`already running ${running} on ${url}`);
-    return 0;
+    return nothing;
   }
   // Something answers that isn't this service's receiver (one started by hand, a stale
   // run.json): a restart of the service can't reach it, and would only fight it for the port.
@@ -814,7 +866,7 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
     .at(-1);
   if (o.ifInstalled && newest && compareVersions(newest, env.version) > 0) {
     env.out(`${env.label} runs ${newest}, newer than this sessionpipe-gui (${env.version}): left as it is`);
-    return 0;
+    return nothing;
   }
   // Another CLI in the file, at a newer version than this one: putting this one there is
   // a downgrade, done only when asked for.
@@ -895,7 +947,11 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
   return 0;
 }
 
-async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
+/** `uninstall` under the label's lock, as `install`. */
+const uninstall = (o: ServiceOptions, env: ServiceEnv): Promise<number> =>
+  locked(env, o.dryRun, () => uninstallUnlocked(o, env));
+
+async function uninstallUnlocked(o: ServiceOptions, env: ServiceEnv): Promise<number> {
   const file = serviceFile(env);
   const st = managerState(env);
   const inst = env.platform === "win32" ? readInstalled(env) : null;

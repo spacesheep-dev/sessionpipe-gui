@@ -10,6 +10,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -18,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { writeRunFile } from "../runfile.js";
 import {
   EXIT_NOT_RUNNING,
+  EXIT_NOTHING_DONE,
   installedOptions,
   isCheckout,
   isOurs,
@@ -29,6 +31,7 @@ import {
   type ServiceEnv,
   servicePath,
   serviceTools,
+  takeLock,
 } from "./index.js";
 import { launchAgentPath, launchAgentPlist, parseLaunchctlPrint, plistArgv } from "./launchd.js";
 import { parseSystemctlShow, systemdUnit, unitArgv, unitPath } from "./systemd.js";
@@ -733,7 +736,7 @@ describe("service install upgrades a service of ours in place", () => {
     expect(errs[0]).toContain(`${SERVICE_LABEL} runs 0.9.2, newer than this sessionpipe-gui (0.6.0): left as it is.`);
     // And --if-installed (the app) never moves it back: said, exit 0.
     errs = [];
-    expect(await runService({ verb: "install", ifInstalled: true }, env())).toBe(0);
+    expect(await runService({ verb: "install", ifInstalled: true }, env())).toBe(EXIT_NOTHING_DONE);
     expect(out.at(-1)).toBe(`${SERVICE_LABEL} runs 0.9.2, newer than this sessionpipe-gui (0.6.0): left as it is`);
     expect(errs).toEqual([]);
   });
@@ -795,7 +798,7 @@ describe("service install upgrades a service of ours in place", () => {
 
   it("--if-installed upgrades a service of ours, installs none, and never moves one back", async () => {
     // Nothing installed: nothing written, nothing run, exit 0, whatever answers on the port.
-    expect(await runService({ verb: "install", ifInstalled: true }, env({}, "gui", "0.5.0"))).toBe(0);
+    expect(await runService({ verb: "install", ifInstalled: true }, env({}, "gui", "0.5.0"))).toBe(EXIT_NOTHING_DONE);
     expect(out).toEqual([`no service ${SERVICE_LABEL} installed: nothing to do`]);
     expect(existsSync(launchAgentPath(home, SERVICE_LABEL))).toBe(false);
     expect(calls().filter((l) => !l.startsWith("print"))).toEqual([]);
@@ -813,7 +816,7 @@ describe("service install upgrades a service of ours in place", () => {
     answer("0.9.0", { state, port: 7380 });
     writeFileSync(log, "");
     out = [];
-    expect(await runService({ verb: "install", ifInstalled: true }, liveEnv())).toBe(0);
+    expect(await runService({ verb: "install", ifInstalled: true }, liveEnv())).toBe(EXIT_NOTHING_DONE);
     expect(out).toEqual([`${SERVICE_LABEL} runs 0.9.0, newer than this sessionpipe-gui (0.6.0): left as it is`]);
     expect(calls().filter((l) => !l.startsWith("print"))).toEqual([]);
     // Someone else's plist under our label: still refused.
@@ -837,7 +840,7 @@ describe("service install upgrades a service of ours in place", () => {
     writeFileSync(lock, `${FOREIGN_PID} 2026-11-12T00:00:00.000Z\n`);
     expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(1);
     expect(errs).toEqual([
-      `another \`service install\` for ${SERVICE_LABEL} is running (pid ${FOREIGN_PID}); try again when it is done`,
+      `another \`service install\` or \`uninstall\` for ${SERVICE_LABEL} is running (pid ${FOREIGN_PID}); try again when it is done`,
     ]);
     expect(existsSync(launchAgentPath(home, SERVICE_LABEL))).toBe(false);
     // A dry run takes no lock and changes nothing.
@@ -859,6 +862,98 @@ describe("service install upgrades a service of ours in place", () => {
     ]);
     expect([a, b].sort()).toEqual([0, 1]);
     expect(errs.some((l) => l.startsWith("another `service install`"))).toBe(true);
+  });
+
+  it("two installs that both find a stale lock: exactly one takes it over", async () => {
+    const e = env();
+    const lock = lockPath(e);
+    mkdirSync(path.dirname(lock), { recursive: true });
+    writeFileSync(lock, "999999 2026-11-12T00:00:00.000Z\n");
+    const stale = () => writeFileSync(lock, "999999 2026-11-12T00:00:00.000Z\n");
+    const race = (stage: "seen" | "takingOver") => {
+      stale();
+      let b: (() => void) | string = "";
+      const a = takeLock(e, (at) => {
+        if (at === stage && !b) b = takeLock(e);
+      });
+      const held = [a, b].filter((x): x is () => void => typeof x === "function");
+      const refused = [a, b].filter((x): x is string => typeof x === "string");
+      expect(held).toHaveLength(1);
+      expect(refused).toHaveLength(1);
+      expect(refused[0]).toMatch(
+        /^another `service install` or `uninstall` for .* is running( \(pid \d+\))?; try again when it is done$/,
+      );
+      expect(readFileSync(lock, "utf8")).toMatch(new RegExp(`^${process.pid} `));
+      expect(existsSync(`${lock}.takeover`)).toBe(false);
+      held[0]!();
+      expect(existsSync(lock)).toBe(false);
+      return typeof a === "function" ? "A" : "B";
+    };
+    // B runs all the way while A holds the takeover lock: B is refused, A holds.
+    expect(race("takingOver")).toBe("A");
+    // B runs all the way after A saw the stale lock, before A's takeover: B holds, and A,
+    // re-reading under the takeover lock, leaves B's fresh lock and is refused.
+    expect(race("seen")).toBe("B");
+    // A takeover lock a crash left behind is cleared after 10 s, not honoured for ever.
+    writeFileSync(lock, "999999 2026-11-12T00:00:00.000Z\n");
+    writeFileSync(`${lock}.takeover`, "999999");
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(`${lock}.takeover`, old, old);
+    const c = takeLock(e);
+    expect(typeof c).toBe("function");
+    (c as () => void)();
+  });
+
+  it("uninstall takes the same lock", async () => {
+    const state = path.join(dir, "s");
+    const e = env();
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    writeFileSync(lockPath(e), `${FOREIGN_PID} ${new Date().toISOString()}\n`);
+    expect(await runService({ verb: "uninstall" }, e)).toBe(1);
+    expect(errs.at(-1)).toContain(`for ${SERVICE_LABEL} is running (pid ${FOREIGN_PID})`);
+    expect(existsSync(launchAgentPath(home, SERVICE_LABEL))).toBe(true);
+    rmSync(lockPath(e));
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(existsSync(lockPath(e))).toBe(false);
+  });
+
+  it("a service whose receiver couldn't write run.json is still its own: the manager says it runs", async () => {
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, env())).toBe(0);
+    answer("0.5.0", { state, port: 7829 });
+    rmSync(path.join(state, "run.json"));
+    world.starts = "0.6.0";
+    out = [];
+    expect(await runService({ verb: "install", port: 7829, state }, liveEnv({ waitMs: 2000 }))).toBe(0);
+    expect(errs).toEqual([]);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
+    // And with the manager saying it isn't running, an answer with no run.json isn't the service's.
+    answer("0.5.0", { state, port: 7829 });
+    rmSync(path.join(state, "run.json"));
+    writeFileSync(path.join(dir, "print"), "\tstate = waiting\n");
+    expect(await runService({ verb: "install", port: 7829, state }, liveEnv())).toBe(1);
+    expect(errs.at(-1)).toContain("isn't dev.spacesheep.sessionpipe-gui's receiver (the service isn't running)");
+  });
+
+  it("asks the manager once more before calling the receiver another's (a KeepAlive restart between the looks)", async () => {
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, env())).toBe(0);
+    answer("0.5.0", { state, port: 7829 });
+    world.starts = "0.6.0";
+    // The first look sees the previous pid; the second the pid run.json names.
+    writeFileSync(path.join(dir, "print"), "\tstate = running\n\tpid = 4242\n");
+    const e = liveEnv({ waitMs: 2000 });
+    const exec = e.exec;
+    let prints = 0;
+    e.exec = (cmd, args) => {
+      if (args[0] === "print" && ++prints === 2)
+        writeFileSync(path.join(dir, "print"), `\tstate = running\n\tpid = ${process.pid}\n`);
+      return exec(cmd, args);
+    };
+    out = [];
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    expect(errs).toEqual([]);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
   });
 
   it("a bootout launchd answers with 'No such process' counts as stopped when the job is gone", async () => {
