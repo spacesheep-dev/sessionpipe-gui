@@ -42,10 +42,16 @@ import "../control/control.css";
 // The plan reads as Markdown, whose renderer stays out of the first paint (PlanText.tsx).
 const PlanText = lazy(() => import("./PlanText").then((m) => ({ default: m.PlanText })));
 
+/** `composer`: what it signs was typed in the composer (a message, Keep planning's note),
+ *  so a hold of it depends on the composer and goes when the composer changes. */
 export type ControlAction =
-  | { kind: "prompt"; text: string }
-  | { kind: "permission.answer"; attentionId: string; allow: boolean; note?: string }
+  /** `attached`: the attachment lines this page wrote into `text` (Attachments compose). */
+  | { kind: "prompt"; text: string; composer?: boolean; attached?: string[] }
+  | { kind: "permission.answer"; attentionId: string; allow: boolean; note?: string; composer?: boolean }
   | { kind: "cancel"; note?: string };
+
+/** The event that clears a session's composer once a message it held went another way. */
+export const COMPOSER_SENT = "sp:composer-sent";
 
 export interface ControlStripProps {
   session: SessionSummary;
@@ -65,6 +71,9 @@ export interface ControlStripProps {
    *  passkey prompt being up. It wins over every other reason. */
   note?: string;
   noteKind?: "info" | "err";
+  /** The composer's words and attachments, as one string, each time they change: a held
+   *  message (control/HeldNotice.tsx) depends on them. */
+  onDraft?: (draft: string) => void;
   /** This browser holds no passkey the machine trusts (in the app: the machine doesn't
    *  trust this Mac's device key): a send would be refused. */
   untrusted?: boolean;
@@ -264,7 +273,7 @@ const NOTED = "Send the note with Keep planning, or clear it";
  *  it. The note reaches the model beside the decision, so the plan comes back revised. */
 export function keepPlanning(attentionId: string, text: string): ControlAction {
   const note = text.trim();
-  return { kind: "permission.answer", attentionId, allow: false, ...(note ? { note } : {}) };
+  return { kind: "permission.answer", attentionId, allow: false, ...(note ? { note } : {}), composer: true };
 }
 
 /** The textarea grows with its text up to 40 % of the view, then scrolls (CSS caps it). */
@@ -295,6 +304,7 @@ export function ControlStrip({
   stream,
   unlock,
   ask,
+  onDraft,
 }: ControlStripProps) {
   const [text, setText] = useState(() => readDraft(session.key));
   // The same strip shown for another session takes that session's own draft.
@@ -332,6 +342,27 @@ export function ControlStrip({
   // Images beside the message (control/Attachments.tsx): paperclip, paste, drop, the phone's picker.
   // Not offered for a computer reached through spacesheep, unless it is this one (paths).
   const att = useAttachments({ machine: session.machine, enabled, localOnly: !!control?.remote });
+  // A held message confirmed from its notice (control/HeldNotice.tsx) went: the composer
+  // is clear, as after Send. Until then its words stayed here.
+  const clearAtt = att.clear;
+  // Only while it still holds what was held: words typed while the confirm was going stay.
+  const draft = JSON.stringify([text, att.items.map((i) => i.key)]);
+  const draftNow = useRef(draft);
+  draftNow.current = draft;
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ key: string; draft: string }>).detail;
+      if (d?.key !== session.key || d.draft !== draftNow.current) return;
+      setText("");
+      writeDraft(session.key, "");
+      clearAtt();
+    };
+    window.addEventListener(COMPOSER_SENT, on);
+    return () => window.removeEventListener(COMPOSER_SENT, on);
+  }, [session.key, clearAtt]);
+  const onDraftNow = useRef(onDraft);
+  onDraftNow.current = onDraft;
+  useEffect(() => onDraftNow.current?.(draft), [draft]);
   const name = session.machine ?? "the machine";
   const permissions = (attentions ?? (attention ? [attention] : [])).filter((a) => a.kind === "permission");
   // The answerable prompt(s) only; a notification twin adds nothing. With no answerable one,
@@ -505,7 +536,7 @@ export function ControlStrip({
     // The signed text: the message, then the attachments block (or null while an upload runs).
     const composed = att.compose(t);
     if (!composed) return;
-    run("prompt", { kind: "prompt", text: composed.text }, () => {
+    run("prompt", { kind: "prompt", text: composed.text, composer: true, attached: composed.lines }, () => {
       setText("");
       writeDraft(session.key, "");
       att.clear();

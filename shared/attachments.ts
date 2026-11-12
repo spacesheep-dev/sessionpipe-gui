@@ -23,9 +23,14 @@ export const ATTACHMENT_REF_RE =
 export function composePrompt(message: string, items: readonly Attachment[], local: boolean): string {
   const m = message.trim();
   if (items.length === 0) return m;
-  const lines = items.map((a) => `- ${local ? a.path : a.url} (${a.width}×${a.height})`);
+  const lines = attachmentLines(items, local);
   const block = `${local ? LOCAL_HEADING : REMOTE_HEADING}\n${lines.join("\n")}`;
   return m ? `${m}\n\n${block}` : block;
+}
+
+/** The block's lines for `items`, each exactly as composePrompt writes it. */
+export function attachmentLines(items: readonly Attachment[], local: boolean): string[] {
+  return items.map((a) => `- ${local ? a.path : a.url} (${a.width}×${a.height})`);
 }
 
 export interface AttachmentRef {

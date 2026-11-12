@@ -51,7 +51,9 @@ export const REFUSAL_WORDS: Record<string, string> = {
   pool_account: "the machine's pool has no such account, or the sign-in took longer than ten minutes",
   pool_order: "the order must name every account in the pool, each once",
   pool_off: "the pool is off on that machine; turn it on first",
-  confirm_required: "this one takes a fresh passkey tap (Touch ID in the app), not the day grant; try again",
+  // Shown where no notice can confirm it (the runner, a view, the inbox, the palette):
+  // the session's page can (control/HeldNotice.tsx).
+  confirm_required: "held for you to confirm; send it from the session's page to confirm it",
   login: "Claude did not take the code; start over",
   pool: "the machine could not reach Claude; try again",
 };

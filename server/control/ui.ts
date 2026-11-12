@@ -18,6 +18,7 @@ import {
   verifyEnrollment,
 } from "sessionpipe-core/control";
 import { type ControlActivity, START_FILE_MAX_BYTES, type StartFile, type TrustedKey } from "../../shared/api.js";
+import { cleanReason } from "../../shared/reason.js";
 import type { Ctx, Handler, Reply, Router } from "../http/router.js";
 import { HttpError } from "../http/router.js";
 import { MEDIA_TYPE_RE } from "./files.js";
@@ -321,9 +322,12 @@ async function forwardSend(
     return { status: 201, json: toActivity(row) };
   }
   const code = String(r.json.code ?? "");
-  const error = String(r.json.error ?? "spacesheep did not take it");
-  // The second look there wants a fresh tap: the same word the page knows from a machine.
-  if (r.status === 409 && code === "confirm") throw new HttpError(422, { reason: error, code: "confirm_required" });
+  // spacesheep's words, passed on as text the page can show (shared/reason.ts).
+  const error = cleanReason(r.json.error) || "spacesheep did not take it";
+  // The second look there wants a fresh tap: the same word the page knows from a machine,
+  // and spacesheep's reason (`why`) as the detail the page's held notice shows.
+  if (r.status === 409 && code === "confirm")
+    throw new HttpError(422, { reason: error, code: "confirm_required", ...whyOf(r.json) });
   if (r.status === 401 && code === "unlock") throw new HttpError(422, { reason: error, code: "bad_grant" });
   // Any other 401 is spacesheep refusing this app's key (revoked there), not the page's own
   // key: its own code, never the 401 a page reads as "this page lost its key".
@@ -332,6 +336,12 @@ async function forwardSend(
     throw new HttpError(422, { reason: error, code: String(r.json.refusal ?? "untrusted_key") });
   throw new HttpError(r.status >= 500 ? 502 : r.status, { reason: error, code: code || "refused" });
 }
+
+/** spacesheep's reason for a hold, cleaned, when it gave one. */
+const whyOf = (j: Record<string, unknown>): { detail?: string } => {
+  const why = cleanReason(j.why);
+  return why ? { detail: why } : {};
+};
 
 /** Queue a verified command for its machine (synchronous): the activity row as the page reads it. */
 export function queueSend(state: ControlState, v: VerifiedSend): ControlActivity {

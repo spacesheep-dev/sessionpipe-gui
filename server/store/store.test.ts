@@ -587,6 +587,24 @@ describe("reboot", () => {
     expect(detail.events.map((e) => e.session.seq)).toEqual([0, 1, 2, 3]);
     expect(detail.events[0]!.arrivedAt).toBeDefined();
   });
+
+  it("keeps a parent's child sessions, and its agent's session, across a restart", async () => {
+    const parent = new Session();
+    store.ingest([parent.ev("session.started"), parent.ev("turn.started", { turn_id: "t1" })], "http");
+    const child = new Session("child-1");
+    const childKey = sessionKey("claude-code", "child-1");
+    store.ingest(
+      [child.ev("session.started", {}, { session: { parent_id: SID } }), child.ev("tool.started", { tool: "Read" })],
+      "http",
+    );
+    const before = store.session(KEY)!;
+    expect(before.children).toBe(1);
+    expect(before.agents.find((a) => a.id === "child-1")?.session).toBe(childKey);
+    await store.close();
+    store = new Store(tmp.dir);
+    expect(store.session(KEY)).toEqual(before);
+    expect(store.sessionDetail(KEY)!.children.map((c) => c.id)).toEqual(["child-1"]);
+  });
 });
 
 describe("seq bound", () => {

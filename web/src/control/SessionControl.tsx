@@ -10,12 +10,13 @@
 // it opens over whichever surface holds this session.
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
 import { useState } from "react";
-import { ControlStrip } from "../components/ControlStrip";
+import { COMPOSER_SENT, ControlStrip } from "../components/ControlStrip";
 import { useAppState, useListedSessions, useStore } from "../data/hooks";
 import { HandoffHost } from "../orchestrate/handoff/HandoffHost";
 import { canAskFrom } from "../orchestrate/handoff/handoff";
 import { openHandoff } from "../orchestrate/handoff/handoffState";
 import { ActivityList, forkOf } from "./Activity";
+import { HeldNotice } from "./HeldNotice";
 import {
   deviceWords,
   machineTakes,
@@ -39,6 +40,10 @@ const underStrip = (a: ControlActivity) =>
   ((a.kind === "permission.answer" || a.kind === "cancel") && (!isFinal(a) || a.outcome !== "delivered")) ||
   !!forkOf(a);
 
+/** Where the focus goes when the notice under the composer goes: the composer, the form
+ *  just before it. */
+const composerBefore = (live: HTMLElement) => live.previousElementSibling?.querySelector<HTMLElement>("textarea");
+
 export function SessionControl({
   session,
   control,
@@ -53,6 +58,8 @@ export function SessionControl({
   /** Unused: messages are joined to their turns in the timeline now. */
   inChat?: (messages: readonly ControlActivity[]) => ReadonlySet<string>;
 }) {
+  // The composer's words and attachments as they are now (ControlStrip onDraft).
+  const [draft, setDraft] = useState<string | undefined>(undefined);
   const {
     rp,
     secure: canSignHere,
@@ -62,7 +69,17 @@ export function SessionControl({
     answers,
     activity,
     onSend,
-  } = useSessionSend(session, control, attentions);
+    held,
+  } = useSessionSend(session, control, attentions, {
+    draft,
+    // A message the receiver held is confirmed from the notice under the composer; once
+    // it went, the composer that still held its words is cleared.
+    notice: true,
+    confirmed: (_fields, typed) => {
+      if (typed !== undefined)
+        window.dispatchEvent(new CustomEvent(COMPOSER_SENT, { detail: { key: session.key, draft: typed } }));
+    },
+  });
   const device = signerKind() === "device";
   // The app signs only for a machine whose daemon takes device keys (CONTROL.md §2).
   const old = device && control && !machineTakes(control) ? updateWords(session.machine) : null;
@@ -121,7 +138,9 @@ export function SessionControl({
         stream={down ? { state: down, retry: () => store.reconnect() } : undefined}
         unlock={control && secure && grant.exp === null ? () => void unlockNow() : undefined}
         ask={askable ? () => openHandoff({ session: session.key }) : undefined}
+        onDraft={setDraft}
       />
+      <HeldNotice h={held} focusBack={composerBefore} />
       <ActivityList items={activity.filter(underStrip)} machine={session.machine} online={control?.online} limit={2} />
       <HandoffHost session={session.key} />
     </>

@@ -522,3 +522,104 @@
   color: var(--fg-3);
   font-size: var(--text-xs);
 }
+
+/* A send the receiver held for a confirm (HeldNotice.tsx): one panel in the well tier,
+   where the send was pressed. The reason, then the one button that confirms it. */
+.held {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+}
+.held-title {
+  color: var(--fg);
+  font-weight: 600;
+}
+/* What will be sent: the held words, whole when short; a long message as its beginning
+   and its end with an ellipsis between, and Show all opens the rest in place, scrolling
+   inside past a third of the screen. */
+.held-what {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.held-gap {
+  color: var(--fg-3);
+}
+.held-all {
+  max-height: 33vh;
+  overflow-y: auto;
+  align-self: stretch;
+}
+.held-more {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.held-more:hover {
+  color: var(--fg);
+}
+/* A start's machine and folder, and the images or files a send carries, by name. */
+.held-where,
+.held-names {
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+/* The receiver's own words, set apart from the app's: who says it on a small line, then
+   what it said in its own box, a quiet surface with a rule at its left. */
+.held-said {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.held-who {
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.held-quote {
+  padding: 6px 10px;
+  border-left: 2px solid var(--line-2);
+  border-radius: 0 var(--radius-inner) var(--radius-inner) 0;
+  background: var(--bg);
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+/* With no reason from the receiver: our own line. */
+.held-why {
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+.held-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+/* In a sheet (New session, Ask another agent): inside its padding, above its foot. */
+.ns-sheet > .held-live > .held {
+  margin: 0 20px 12px;
+}
+/* The phone's sheet: the width of its foot, above the status line. */
+.ns-group-foot > .held-live {
+  align-self: stretch;
+}
+.ns-group-foot > .held-live > .held {
+  margin: 0 0 4px;
+}
