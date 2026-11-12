@@ -309,6 +309,8 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
 
   const ask = async () => {
     if (!canAsk || !c || !rp || !target) return;
+    // A held ask's confirm is on its way: a second press would ask twice.
+    if (held.confirming()) return;
     setBusy(true);
     setError(null);
     held.drop();

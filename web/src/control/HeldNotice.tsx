@@ -26,6 +26,8 @@ export interface Held<T, M extends HeldMeta = HeldMeta> {
   confirm(): void;
   /** Let it go. */
   drop(): void;
+  /** Its confirm is on its way: the caller sends nothing else until it has answered. */
+  confirming(): boolean;
 }
 
 /** A caller's one hold at a time. `key` is what a hold depends on now (undefined: nothing
@@ -56,7 +58,8 @@ export function useHeld<T, M extends HeldMeta = HeldMeta>(
     );
   }, []);
   const drop = useCallback(() => slot.current?.drop(), []);
-  return { view: slot.current.view, catchHeld, confirm, drop };
+  const confirming = useCallback(() => slot.current?.confirming ?? false, []);
+  return { view: slot.current.view, catchHeld, confirm, drop, confirming };
 }
 
 /** The held words: the beginning and the end, and Show all for the rest in place. */

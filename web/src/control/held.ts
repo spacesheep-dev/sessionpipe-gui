@@ -44,6 +44,9 @@ export class HeldSlot<T, M extends HeldMeta> {
    *  caller's key when it pressed; `keyNow` its key now. */
   hold(e: unknown, meta: M, keyAtSend: string | undefined, keyNow: string | undefined): false | "held" | "changed" {
     if (!isHold(e)) return false;
+    // While a confirm is on its way the slot is that send's: a hold that turns up now (a
+    // caller that sent again all the same) does not take its place.
+    if (this.confirming) return "held";
     this.key = keyAtSend;
     const changedSince = keyAtSend !== undefined && keyNow !== keyAtSend;
     this.view = changedSince ? null : { kind: "held", held: e as HeldForConfirm<T>, meta, busy: false };
@@ -57,6 +60,11 @@ export class HeldSlot<T, M extends HeldMeta> {
     if (!this.view || this.key === undefined || now === this.key) return;
     if (this.view.kind === "held" && this.view.busy) return;
     this.drop();
+  }
+
+  /** A confirm is on its way: the callers send nothing else until it has answered. */
+  get confirming(): boolean {
+    return this.view?.kind === "held" && this.view.busy;
   }
 
   drop(): void {
@@ -73,21 +81,31 @@ export class HeldSlot<T, M extends HeldMeta> {
   ): Promise<void> {
     const v = this.view;
     if (v?.kind !== "held" || v.busy) return;
-    this.view = { ...v, busy: true };
+    const going: HeldView<T, M> = { ...v, busy: true };
+    this.view = going;
     this.changed();
+    // The slot is cleared (or says "still held") only while it still shows this confirm:
+    // whatever else came to stand in it meanwhile is not this confirm's to take away.
+    const mine = () => this.view === going;
     try {
       const r = await v.held.confirm();
-      this.view = null;
-      this.changed();
+      if (mine()) {
+        this.view = null;
+        this.changed();
+      }
       done(r, v.held, v.meta);
     } catch (e) {
       if (heldAgain(e)) {
-        this.view = { kind: "still", held: v.held, why: heldWhy(e), meta: v.meta };
-        this.changed();
+        if (mine()) {
+          this.view = { kind: "still", held: v.held, why: heldWhy(e), meta: v.meta };
+          this.changed();
+        }
         return;
       }
-      this.view = null;
-      this.changed();
+      if (mine()) {
+        this.view = null;
+        this.changed();
+      }
       failed(e, v.meta);
     }
   }

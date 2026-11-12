@@ -469,6 +469,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
 
   const start = async () => {
     if (!canStart || !m || !c || !rp || !harness || !folderCheck.ok) return;
+    // A held start's confirm is on its way: a second press would be a second session.
+    if (held.confirming()) return;
     setBusy(true);
     setError(null);
     held.drop();

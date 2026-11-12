@@ -123,7 +123,7 @@ export function useSessionSend(
     (e) => setError(sendErrorWords(e)),
     o.draft,
   );
-  const { catchHeld, drop: dropHeld } = held;
+  const { catchHeld, drop: dropHeld, confirming: confirmingHeld } = held;
   useEffect(() => {
     const closed: string[] = [];
     for (const a of activity) {
@@ -151,6 +151,8 @@ export function useSessionSend(
   const onSend = useCallback(
     async (action: ControlAction) => {
       if (!control || !rp) return;
+      // A held send's confirm is on its way: nothing else goes until it has answered.
+      if (confirmingHeld()) return;
       setError(null);
       let fields: CommandFields;
       switch (action.kind) {
@@ -194,7 +196,7 @@ export function useSessionSend(
         grant.refresh();
       }
     },
-    [control, rp, key, grant.refresh, answers, notice, catchHeld, dropHeld, went],
+    [control, rp, key, grant.refresh, answers, notice, catchHeld, dropHeld, confirmingHeld, went],
   );
 
   return { rp, secure, grant, tap, error, answers, activity, onSend, held };

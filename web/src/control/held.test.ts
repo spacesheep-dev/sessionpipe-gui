@@ -28,6 +28,41 @@ const start = (harness: string): CommandFields => ({
 });
 
 describe("a held send", () => {
+  it("a confirm on its way keeps the slot: a hold that turns up meanwhile does not take its place", async () => {
+    const slot = new HeldSlot<string, Sent>(vi.fn());
+    let answer: (v: string) => void = () => {};
+    const first = hold(start("claude-code"), () => new Promise<string>((res) => (answer = res)));
+    slot.hold(first.held, { harness: "claude-code" }, "k", "k");
+    const done = vi.fn();
+    const going = slot.confirm(done, vi.fn());
+    expect(slot.confirming).toBe(true);
+    // A caller that sent again all the same, and was held again.
+    const second = hold(start("codex"), async () => "second");
+    expect(slot.hold(second.held, { harness: "codex" }, "k", "k")).toBe("held");
+    expect(slot.view?.kind === "held" && slot.view.held).toBe(first.held);
+    answer("first");
+    await going;
+    expect(done).toHaveBeenCalledWith("first", first.held, { harness: "claude-code" });
+    expect(second.confirm).not.toHaveBeenCalled();
+    expect(slot.view).toBeNull();
+    expect(slot.confirming).toBe(false);
+  });
+
+  it("a confirm that ends clears only its own notice", async () => {
+    const slot = new HeldSlot<string, Sent>(vi.fn());
+    let answer: (v: string) => void = () => {};
+    const first = hold(prompt("one"), () => new Promise<string>((res) => (answer = res)));
+    slot.hold(first.held, { harness: "claude-code" }, undefined, undefined);
+    const going = slot.confirm(vi.fn(), vi.fn());
+    // Something else comes to stand in the slot while the confirm is out.
+    const other = hold(prompt("two"), async () => "two");
+    const view = { kind: "held" as const, held: other.held, meta: { harness: "claude-code" }, busy: false };
+    slot.view = view;
+    answer("one");
+    await going;
+    expect(slot.view).toBe(view);
+  });
+
   it("(a) the composer edited after the hold: the hold goes, nothing is confirmed, nothing sent", async () => {
     const changed = vi.fn();
     const slot = new HeldSlot<string, Sent>(changed);
