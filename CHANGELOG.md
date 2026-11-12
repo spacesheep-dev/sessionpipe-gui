@@ -56,6 +56,14 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **When spacesheep asks this app to slow down (HTTP 429), the app waits as long as it
   says** (its Retry-After, at most 15 minutes) and its state is `limited`, no longer
   `offline`, which Settings → Data read as "can't be reached".
+- **A steady stream of events no longer freezes the board for minutes.** The reader asked
+  spacesheep once per event, reached its limit (240 reads a key in 10 minutes) in about
+  four minutes at one event a second, and then waited out the rest of the window. It now
+  keeps count of its reads in the last 10 minutes: under a third of its budget of 230 it
+  reads at once; past that it waits between reads, a little more as the budget is spent,
+  so a stream is read in batches about 3 seconds apart (at most about 4 seconds behind)
+  and never meets the limit. The machine list is read every minute on its own, so it
+  stays fresh while the reader waits.
 - **Words: a refusal is said once.** With no code (a spacesheep from before `code`) a start
   read "rc-mac refused it: refused: …"; it now reads "rc-mac refused it: …". A start called
   off before it began says so: "This start was called off before it began on rc-mac.", and

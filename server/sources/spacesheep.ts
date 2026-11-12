@@ -133,6 +133,36 @@ export function cursorAfter(kept: number, page: RelayPage): { cursor: number; ga
   return { cursor: page.next, gap };
 }
 
+/** spacesheep's limit on relay reads per key (its gui_relay rule: 240 in each 600 s
+ *  window). The reader keeps under RELAY_BUDGET in any 600 s, so never near the 240th. */
+export const RELAY_LIMIT = 240;
+export const RELAY_WINDOW_MS = 600_000;
+export const RELAY_BUDGET = 230;
+
+/** How long to wait before the next relay read, given when the reads in the last window
+ *  were made. Under a third of the budget spent (a quiet board's long polls are some 24 a
+ *  window), none. Past that, the longer of two waits: one that grows with what is spent,
+ *  from 0 to 1.6 steady intervals (1.6 × 600 s / RELAY_BUDGET, about 4.2 s) at the budget,
+ *  and the reads left spread over the time until the oldest leaves the window. A steady
+ *  stream then settles near 186 reads a window, one every ~3.2 s, each reading the batch
+ *  that arrived meanwhile. At the budget, none until the oldest leaves. */
+export function relayPaceMs(reads: readonly number[], now: number): number {
+  let n = 0;
+  let oldest = Number.POSITIVE_INFINITY;
+  for (const t of reads)
+    if (now - t < RELAY_WINDOW_MS) {
+      n++;
+      if (t < oldest) oldest = t;
+    }
+  const end = oldest + RELAY_WINDOW_MS;
+  if (n >= RELAY_BUDGET) return Math.max(0, end - now);
+  const free = RELAY_BUDGET / 3;
+  if (n < free) return 0;
+  const ramp = ((n - free) / (RELAY_BUDGET - free)) * 1.6 * (RELAY_WINDOW_MS / RELAY_BUDGET);
+  const spread = (end - now) / (RELAY_BUDGET - n);
+  return Math.max(0, Math.ceil(Math.max(ramp, spread)));
+}
+
 /** The longest pause a Retry-After is followed for. */
 export const RETRY_AFTER_MAX_MS = 15 * 60_000;
 
@@ -168,17 +198,38 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
   let pause = opts.retryMs ?? 2000;
   let inFlight: Promise<number> | null = null;
   let abort: AbortController | null = null;
+  /** When each relay read in the last window was made (relayPaceMs). */
+  let reads: number[] = [];
+  /** A pause the loop is in (the pace, an error's, a 429's), cut short by stop(). */
+  let wake: (() => void) | null = null;
+  const sleep = (ms: number) =>
+    new Promise<void>((resolve) => {
+      const t = setTimeout(() => {
+        wake = null;
+        resolve();
+      }, ms);
+      wake = () => {
+        clearTimeout(t);
+        wake = null;
+        resolve();
+      };
+    });
 
   const revoked = (): void => {
     state = "unauthorized";
     lastError = "the key no longer opens the relay (revoked on spacesheep?)";
     stopped = true;
     if (jobsTimer) clearTimeout(jobsTimer);
+    if (machinesTimer) clearTimeout(machinesTimer);
+    wake?.();
     abort?.abort();
   };
 
   const poll = async (waitS: number): Promise<number> => {
     abort = new AbortController();
+    const at = Date.now();
+    reads = reads.filter((t) => at - t < RELAY_WINDOW_MS);
+    reads.push(at);
     const url = `${opts.origin}${RELAY_PATH}?since=${cursor}&limit=${RELAY_PAGE}&wait=${waitS}`;
     const res = await f(url, {
       headers: { authorization: `Bearer ${opts.key}`, accept: "application/json" },
@@ -293,14 +344,24 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
   };
   scheduleJobs();
 
+  // The machine list, once a minute on its own clock: not metered, so it stays fresh while
+  // the relay waits out a pace or a 429.
+  let machinesTimer: NodeJS.Timeout | undefined;
+  const scheduleMachines = (): void => {
+    if (stopped) return;
+    machinesTimer = setTimeout(async () => {
+      await machinesPoll();
+      scheduleMachines();
+    }, 60_000);
+    machinesTimer.unref();
+  };
+
   const loop = async (): Promise<void> => {
-    let sinceMachines = 0;
     while (!stopped) {
       try {
-        if (Date.now() - sinceMachines > 60_000) {
-          sinceMachines = Date.now();
-          await machinesPoll();
-        }
+        const pace = relayPaceMs(reads, Date.now());
+        if (pace > 0) await sleep(pace);
+        if (stopped) break;
         inFlight = poll(RELAY_WAIT_S);
         await inFlight;
         inFlight = null;
@@ -310,16 +371,18 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
         lastError = (e as Error).message;
         if (e instanceof Limited) {
           state = "limited";
-          await new Promise((r) => setTimeout(r, e.pauseMs));
+          await sleep(e.pauseMs);
           continue;
         }
         state = "offline";
-        await new Promise((r) => setTimeout(r, pause));
+        await sleep(pause);
         pause = Math.min(pause * 2, 60_000);
       }
     }
   };
 
+  void machinesPoll();
+  scheduleMachines();
   // The first page is history: the board shouldn't ring for it.
   store.setLoading(true);
   let firstPause = 0;
@@ -332,7 +395,7 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
     })
     .finally(() => store.setLoading(false));
   void first.then(async () => {
-    if (firstPause) await new Promise((r) => setTimeout(r, firstPause));
+    if (firstPause) await sleep(firstPause);
     if (!stopped) void loop();
   });
 
@@ -340,6 +403,8 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
     stop() {
       stopped = true;
       if (jobsTimer) clearTimeout(jobsTimer);
+      if (machinesTimer) clearTimeout(machinesTimer);
+      wake?.();
       abort?.abort();
     },
     status: () => ({

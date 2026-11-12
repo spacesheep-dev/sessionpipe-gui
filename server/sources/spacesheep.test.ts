@@ -8,8 +8,12 @@ import {
   cursorAfter,
   JOBS_PAGE,
   parseRelayPage,
+  RELAY_BUDGET,
+  RELAY_LIMIT,
+  RELAY_WINDOW_MS,
   type RelayJob,
   readJobs,
+  relayPaceMs,
   retryAfterMs,
   type SpacesheepSource,
   startSpacesheepSource,
@@ -85,6 +89,72 @@ describe("the spacesheep relay source (docs/rfcs/08)", () => {
     expect(asked).toEqual([4, 899]);
     expect(r.through).toBe(Number.POSITIVE_INFINITY);
   });
+});
+
+/** An hour of a steady stream against the relay, on a fake clock: events every 1/rate s;
+ *  a read answers at once with what is waiting, else on the next event (plus spacesheep's
+ *  linger), else after 25 s; each answer takes 50 ms. The reader waits relayPaceMs before
+ *  each read. Says the most reads in any 600 s (sliding) and in any of spacesheep's fixed
+ *  windows, and the longest an event waited to be read. */
+export function simulateRelay(rate: number, seconds: number, lingerMs: number) {
+  const LAT = 50;
+  const arrivals: number[] = [];
+  for (let t = 0; t < seconds * 1000; t += 1000 / rate) arrivals.push(Math.round(t));
+  const log: number[] = [];
+  const fixed = new Map<number, number>();
+  let t = 0;
+  let next = 0;
+  let maxLag = 0;
+  let maxSliding = 0;
+  while (t < seconds * 1000) {
+    t += relayPaceMs(log, t);
+    log.push(t);
+    const sliding = log.filter((x) => t - x < RELAY_WINDOW_MS).length;
+    maxSliding = Math.max(maxSliding, sliding);
+    const w = Math.floor(t / RELAY_WINDOW_MS);
+    fixed.set(w, (fixed.get(w) ?? 0) + 1);
+    let answerAt: number;
+    let upTo: number;
+    if (next < arrivals.length && arrivals[next]! <= t) {
+      answerAt = t + LAT;
+      upTo = t;
+    } else if (next < arrivals.length && arrivals[next]! - t <= 25_000) {
+      upTo = Math.min(arrivals[next]! + lingerMs, t + 25_000);
+      answerAt = upTo + LAT;
+    } else {
+      t += 25_000 + LAT;
+      continue;
+    }
+    while (next < arrivals.length && arrivals[next]! <= upTo) {
+      maxLag = Math.max(maxLag, answerAt - arrivals[next]!);
+      next++;
+    }
+    t = answerAt;
+  }
+  return { maxLag, maxSliding, maxFixed: Math.max(...fixed.values()), reads: log.length };
+}
+
+describe("pacing the relay under spacesheep's limit", () => {
+  it("never spends the budget, and a quiet board waits for nothing", () => {
+    expect(relayPaceMs([], 0)).toBe(0);
+    const third = Array.from({ length: Math.floor(RELAY_BUDGET / 3) }, (_, i) => i * 1000);
+    expect(relayPaceMs(third, 200_000)).toBe(0);
+    const full = Array.from({ length: RELAY_BUDGET }, (_, i) => i * 1000);
+    expect(relayPaceMs(full, 300_000)).toBe(RELAY_WINDOW_MS - 300_000);
+    const most = Array.from({ length: RELAY_BUDGET - 1 }, (_, i) => i * 1000);
+    // One read left: it waits for the oldest to leave the window, spread over that one.
+    expect(relayPaceMs(most, 300_000)).toBe(RELAY_WINDOW_MS - 300_000);
+  });
+
+  for (const rate of [0.2, 1, 5])
+    for (const linger of [0, 400])
+      it(`an hour at ${rate} events a second (linger ${linger} ms): no 429, a few seconds' lag at most`, () => {
+        const r = simulateRelay(rate, 3600, linger);
+        expect(r.maxSliding).toBeLessThanOrEqual(RELAY_BUDGET);
+        expect(r.maxFixed).toBeLessThan(RELAY_LIMIT);
+        expect(r.maxLag).toBeLessThan(4500);
+        if (process.env.SPGUI_PACE_REPORT) console.log(JSON.stringify({ rate, linger, ...r }));
+      });
 });
 
 describe("Retry-After", () => {
@@ -168,8 +238,12 @@ describe("the spacesheep source's status", () => {
 
   it("a 429 is spacesheep asking to wait, not spacesheep unreachable: limited, for as long as it said", async () => {
     let polls = 0;
+    let machinesRead = 0;
     const s = start((u) => {
-      if (u.includes("/machines")) return json({ machines: [] });
+      if (u.includes("/machines")) {
+        machinesRead++;
+        return json({ machines: [] });
+      }
       polls++;
       return json({ error: "rate_limited" }, 429, { "retry-after": "120" });
     });
@@ -178,6 +252,8 @@ describe("the spacesheep source's status", () => {
     // It waits the two minutes it was told (not the 5 ms retry), so it asked once.
     await settle();
     expect(polls).toBe(1);
+    // The machine list (not metered) is read all the same.
+    expect(machinesRead).toBeGreaterThanOrEqual(1);
   });
 
   it("reads the jobs door at the pace it is told, and at once on a kick", async () => {
