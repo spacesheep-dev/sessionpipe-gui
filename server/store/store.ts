@@ -180,6 +180,10 @@ export class Store {
       applyEvent(entry, ev, ev.arrivedAt, ev.source ?? "http");
       const rec = this.index(entry, ev, offset, bytes, true);
       if (rec.t < keepAfter) rec.ev = trimPreview(ev, OLD_PREVIEW_CHARS);
+      // A child session names its parent on every event: ingest counts it as it arrives,
+      // and a boot must too, or a restart leaves every parent with no children (and the
+      // agent its child is without its session) until the child speaks again.
+      this.noteChild(entry, ev);
     });
     for (const entry of this.sessions.values()) this.refresh(entry, now);
     for (const entry of this.sessions.values()) this.syncChildren(entry);

@@ -39,6 +39,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   the sink token and the UI key. The GUI now takes the group and other bits off before every
   write, as it already sets its TLS keys to 0600 when it writes them, and also when it
   starts; where that fails it says so and starts anyway.
+- **Child sessions stay under their parent when the GUI restarts.** A session started by
+  another one (a subagent, an ask) was counted as its parent's child while the GUI ran, and
+  every restart forgot it: the parent showed no children and the agent row for that child no
+  longer opened the child's page, until the child sent something new.
 
 ## [0.8.0] - 2026-11-11
 
