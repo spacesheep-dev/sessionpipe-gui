@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Owned by: server-core. The store: append-only JSONL per session on disk, an index
-// of slim events and session summaries in memory, the readings of ARCHITECTURE.md,
-// and a subscription stream the SSE route forwards. Contract: ARCHITECTURE.md "Store".
+// Owned by: server-core. The store: an index of slim events and session summaries in
+// memory, the readings of ARCHITECTURE.md, and a subscription stream the SSE route
+// forwards. Contract: ARCHITECTURE.md "Store". The full events live in an EventLog
+// (store/log.ts) its opener hands in: the server's is the JSONL files (store/store.ts).
+// Nothing this file imports is Node's, so the same core can run in a page;
+// store/browser.test.ts bundles it for the browser and runs it without Node's globals.
 import {
   type AgentRun,
   type Digest,
@@ -25,7 +28,8 @@ import {
   sessionKey,
   splitKey,
 } from "../../shared/api.js";
-import { EventFiles } from "./files.js";
+import { decodeCursor, encodeCursor } from "./cursor.js";
+import type { EventLog } from "./log.js";
 import { applyEvent, newRecord, refreshFlags, refreshState, type SessionRecord, settleAgents } from "./readings.js";
 import { digest, filesChanged, type ReviewIndex, search } from "./review.js";
 import { type SlimEvent, slimEvent, trimPreview } from "./slim.js";
@@ -67,11 +71,10 @@ export interface Rec {
   no: number;
 }
 
-/** The feed cursor: event time and arrival number, opaque to the client. */
-const encodeCursor = (r: Rec): string => Buffer.from(`${r.t}.${r.no}`).toString("base64url");
-const decodeCursor = (c: string): { t: number; no: number } | null => {
-  const m = /^(\d+)\.(\d+)$/.exec(Buffer.from(c, "base64url").toString());
-  return m ? { t: Number(m[1]), no: Number(m[2]) } : null;
+/** A timer that does not keep a Node process alive; a page's timer is a number, with no unref. */
+const unref = <T>(timer: T): T => {
+  (timer as { unref?: () => void }).unref?.();
+  return timer;
 };
 const before = (a: { t: number; no: number }, b: { t: number; no: number }): boolean =>
   a.t < b.t || (a.t === b.t && a.no < b.no);
@@ -108,8 +111,8 @@ const LATENCY_WINDOW = 200;
 const MACHINE_LASTAT_MS = 1_000;
 const withoutLastAt = (json: string): string => json.replace(/"lastAt":"[^"]*",?/, "");
 
-export class Store {
-  private readonly files: EventFiles;
+export class StoreCore {
+  private readonly files: EventLog;
   private readonly sessions = new Map<SessionKey, Entry>();
   /** Every event by event time, then arrival (ascending). */
   private byTime: Rec[] = [];
@@ -124,24 +127,24 @@ export class Store {
   private readonly machinesSent = new Map<string, string>();
   /** Machines whose lastAt moved since their last frame; sent together by flushMachines. */
   private readonly machinesDue = new Set<string>();
-  private machineFlush: NodeJS.Timeout | undefined;
+  private machineFlush: ReturnType<typeof setTimeout> | undefined;
   private statsSent = "";
   private readonly startedAt = Date.now();
-  private readonly timers: NodeJS.Timeout[] = [];
+  private readonly timers: ReturnType<typeof setInterval>[] = [];
   private closed = false;
   private readonly keepDays: number;
 
+  /** `log`: where the full events are kept and read back from (store/log.ts). */
   constructor(
     readonly dir: string,
-    opts: StoreOptions = {},
+    opts: StoreOptions,
+    log: EventLog,
   ) {
-    this.files = new EventFiles(dir);
+    this.files = log;
     this.keepDays = opts.keepDays ?? KEEP_DAYS_DEFAULT;
     this.boot();
-    const tick = setInterval(() => this.tick(), opts.tickMs ?? 30_000);
-    const stats = setInterval(() => this.emitStats(), opts.statsMs ?? 5_000);
-    tick.unref();
-    stats.unref();
+    const tick = unref(setInterval(() => this.tick(), opts.tickMs ?? 30_000));
+    const stats = unref(setInterval(() => this.emitStats(), opts.statsMs ?? 5_000));
     this.timers.push(tick, stats);
   }
 
@@ -365,7 +368,7 @@ export class Store {
       try {
         l(msg);
       } catch (e) {
-        process.stderr.write(`[store] listener: ${(e as Error).message}\n`);
+        console.error("[store] listener: %s", (e as Error).message);
       }
     }
   }
@@ -384,7 +387,7 @@ export class Store {
       // anything else about the machine goes out at once.
       if (prev !== undefined && withoutLastAt(prev) === withoutLastAt(json)) {
         this.machinesDue.add(name);
-        this.machineFlush ??= setTimeout(() => this.flushMachines(), MACHINE_LASTAT_MS).unref();
+        this.machineFlush ??= unref(setTimeout(() => this.flushMachines(), MACHINE_LASTAT_MS));
         continue;
       }
       this.machinesSent.set(name, json);

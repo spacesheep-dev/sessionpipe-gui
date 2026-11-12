@@ -6,6 +6,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The server's store reads its full events through a log it is handed (the session files on
+  disk, as before, or events held in memory), and nothing it imports needs Node, so the same
+  store can later run in the phone app's page. Nothing changes in what the GUI shows or keeps.
+
 ### Fixed
 
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
