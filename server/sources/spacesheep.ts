@@ -201,7 +201,21 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
   let inFlight: Promise<number> | null = null;
   let abort: AbortController | null = null;
   /** When each relay read in the last window was made (relayPaceMs). */
-  let reads: number[] = [];
+  // Kept beside the cursor (READS_SAVE_MS and at stop), so a restart mid-stream goes on
+  // from the same budget rather than an empty one. One reader per key: each Connect mints
+  // its own key, so two apps never share this count (two readers on one key are not paced).
+  const readsFile = path.join(store.dir, "spacesheep-reads.json");
+  let reads: number[] = loadReads(readsFile, opts.origin, opts.email, Date.now());
+  let readsDirty = false;
+  const saveReads = (): void => {
+    if (!readsDirty) return;
+    const now = Date.now();
+    reads = reads.filter((t) => now - t < RELAY_WINDOW_MS);
+    writeReads(readsFile, { origin: opts.origin, email: opts.email, reads });
+    readsDirty = false;
+  };
+  const readsTimer = setInterval(saveReads, READS_SAVE_MS);
+  readsTimer.unref();
   /** A pause the loop is in (the pace, an error's, a 429's), cut short by stop(). */
   let wake: (() => void) | null = null;
   const sleep = (ms: number) =>
@@ -225,6 +239,8 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
     if (machinesTimer) clearTimeout(machinesTimer);
     wake?.();
     abort?.abort();
+    clearInterval(readsTimer);
+    saveReads();
     opts.onUnauthorized?.();
   };
 
@@ -233,6 +249,7 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
     const at = Date.now();
     reads = reads.filter((t) => at - t < RELAY_WINDOW_MS);
     reads.push(at);
+    readsDirty = true;
     const url = `${opts.origin}${RELAY_PATH}?since=${cursor}&limit=${RELAY_PAGE}&wait=${waitS}`;
     const res = await f(url, {
       headers: { authorization: `Bearer ${opts.key}`, accept: "application/json" },
@@ -406,6 +423,8 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
 
   return {
     stop() {
+      clearInterval(readsTimer);
+      saveReads();
       stopped = true;
       if (jobsTimer) clearTimeout(jobsTimer);
       if (machinesTimer) clearTimeout(machinesTimer);
@@ -429,6 +448,35 @@ export function startSpacesheepSource(store: Store, opts: SpacesheepSourceOption
     unauthorized: revoked,
     kickJobs,
   };
+}
+
+/** How often the reads of the last window are written down (and at stop). A process that
+ *  dies between two writes loses at most this many seconds of reads: a few, under the 10
+ *  between RELAY_BUDGET and RELAY_LIMIT. */
+export const READS_SAVE_MS = 15_000;
+
+/** The reads of the last window as a stopped source wrote them down, for this account;
+ *  with nothing usable on file (none, another account, unreadable), a third of the budget
+ *  taken as spent just now, since a reader before this one may have been busy. */
+export function loadReads(file: string, origin: string, email: string, now: number): number[] {
+  const seed = () => Array.from({ length: Math.floor(RELAY_BUDGET / 3) }, () => now);
+  try {
+    if (!existsSync(file)) return seed();
+    const v = JSON.parse(readFileSync(file, "utf8")) as { origin?: unknown; email?: unknown; reads?: unknown };
+    if (v.origin !== origin || v.email !== email || !Array.isArray(v.reads)) return seed();
+    return v.reads.filter((t): t is number => typeof t === "number" && t <= now && now - t < RELAY_WINDOW_MS);
+  } catch {
+    return seed();
+  }
+}
+
+function writeReads(file: string, v: { origin: string; email: string; reads: number[] }): void {
+  try {
+    mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    writeFileSync(file, `${JSON.stringify(v)}\n`, { mode: 0o600 });
+  } catch (e) {
+    process.stderr.write(`[spacesheep] reads: ${(e as Error).message}\n`);
+  }
 }
 
 function readCursor(file: string, origin: string, email: string): number {

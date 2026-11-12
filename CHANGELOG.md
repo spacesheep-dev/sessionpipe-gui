@@ -70,7 +70,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   reads at once; past that it waits between reads, a little more as the budget is spent,
   so a stream is read in batches about 3 seconds apart (at most about 4 seconds behind)
   and never meets the limit. The machine list is read every minute on its own, so it
-  stays fresh while the reader waits.
+  stays fresh while the reader waits. The count is kept beside the cursor (every 15
+  seconds and at stop), so a restart in the middle of a stream goes on from it; with none
+  on file a third of the budget is taken as spent.
 - **Words, plain** (for approval): a start called off before it began reads "Cancelled
   before rc-mac started it." and a message sent to it "Cancelled with its session, before
   rc-mac got it."; a refusal with no specific reason "rc-mac refused it." plus the

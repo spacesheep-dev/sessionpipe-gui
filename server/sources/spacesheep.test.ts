@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,7 +7,9 @@ import type { Store } from "../store/store.js";
 import {
   cursorAfter,
   JOBS_PAGE,
+  loadReads,
   parseRelayPage,
+  READS_SAVE_MS,
   RELAY_BUDGET,
   RELAY_LIMIT,
   RELAY_WINDOW_MS,
@@ -96,8 +98,16 @@ describe("the spacesheep relay source (docs/rfcs/08)", () => {
  *  linger), else after 25 s; each answer takes 50 ms. The reader waits relayPaceMs before
  *  each read. Says the most reads in any 600 s (sliding) and in any of spacesheep's fixed
  *  windows, and the longest an event waited to be read. */
-export function simulateRelay(rate: number, seconds: number, lingerMs: number) {
+export function simulateRelay(
+  rate: number,
+  seconds: number,
+  lingerMs: number,
+  restart?: { at: number; withFile: boolean },
+) {
   const LAT = 50;
+  // Every read spacesheep counted, across a restart; `log` is what this process knows.
+  const all: number[] = [];
+  let restarted = false;
   const arrivals: number[] = [];
   for (let t = 0; t < seconds * 1000; t += 1000 / rate) arrivals.push(Math.round(t));
   const log: number[] = [];
@@ -107,11 +117,24 @@ export function simulateRelay(rate: number, seconds: number, lingerMs: number) {
   let maxLag = 0;
   let maxSliding = 0;
   while (t < seconds * 1000) {
+    if (restart && !restarted && t >= restart.at * 1000) {
+      // The process stops between two saves (READS_SAVE_MS): what it read since the last
+      // save is lost to the next one, which starts two seconds later from the file, or
+      // (no file) from a third of the budget.
+      restarted = true;
+      const saved = Math.floor(t / READS_SAVE_MS) * READS_SAVE_MS;
+      t += 2000;
+      const kept = log.filter((x) => x <= saved && t - x < RELAY_WINDOW_MS);
+      log.length = 0;
+      log.push(...(restart.withFile ? kept : Array.from({ length: Math.floor(RELAY_BUDGET / 3) }, () => t)));
+    }
     t += relayPaceMs(log, t);
     log.push(t);
-    const sliding = log.filter((x) => t - x < RELAY_WINDOW_MS).length;
+    all.push(t);
+    const sliding = all.filter((x) => t - x < RELAY_WINDOW_MS).length;
     maxSliding = Math.max(maxSliding, sliding);
     const w = Math.floor(t / RELAY_WINDOW_MS);
+    void w;
     fixed.set(w, (fixed.get(w) ?? 0) + 1);
     let answerAt: number;
     let upTo: number;
@@ -155,6 +178,17 @@ describe("pacing the relay under spacesheep's limit", () => {
         expect(r.maxLag).toBeLessThan(4500);
         if (process.env.SPGUI_PACE_REPORT) console.log(JSON.stringify({ rate, linger, ...r }));
       });
+});
+
+describe("the read budget across a restart", () => {
+  it("a restart mid-stream at 1 event a second, from the saved reads, stays under 240 in any 600 s", () => {
+    for (const at of [200, 300, 450, 700]) {
+      const r = simulateRelay(1, 1800, 400, { at, withFile: true });
+      expect(r.maxSliding).toBeLessThan(RELAY_LIMIT);
+      expect(r.maxLag).toBeLessThan(5000);
+      if (process.env.SPGUI_PACE_REPORT) console.log(JSON.stringify({ restartAt: at, ...r }));
+    }
+  });
 });
 
 describe("Retry-After", () => {
@@ -325,5 +359,34 @@ describe("the spacesheep source's status", () => {
     headers = {};
     await src.pollJobs();
     expect(got).toEqual([1_700_000_000_000, 1_600_000_000_000, undefined]);
+  });
+
+  it("loads the saved reads of this account's last window, and with none usable takes a third as spent", () => {
+    dir = mkdtempSync(path.join(tmpdir(), "spgui-reads-"));
+    const file = path.join(dir, "spacesheep-reads.json");
+    const now = 10_000_000;
+    expect(loadReads(file, ORIGIN, "me@x", now)).toEqual(Array(Math.floor(RELAY_BUDGET / 3)).fill(now));
+    writeFileSync(
+      file,
+      JSON.stringify({ origin: ORIGIN, email: "me@x", reads: [now - 700_000, now - 5000, now - 1000] }),
+    );
+    expect(loadReads(file, ORIGIN, "me@x", now)).toEqual([now - 5000, now - 1000]);
+    expect(loadReads(file, ORIGIN, "other@x", now)).toHaveLength(Math.floor(RELAY_BUDGET / 3));
+    writeFileSync(file, "not json");
+    expect(loadReads(file, ORIGIN, "me@x", now)).toHaveLength(Math.floor(RELAY_BUDGET / 3));
+  });
+
+  it("writes the reads down at stop, and the next source goes on from them", async () => {
+    let polls = 0;
+    start(() => {
+      polls++;
+      return json({ events: [], next: 0, oldest: null, protocol: 1 });
+    });
+    await settle();
+    src!.stop();
+    src = null;
+    const saved = JSON.parse(readFileSync(path.join(dir, "spacesheep-reads.json"), "utf8")) as { reads: number[] };
+    expect(saved.reads.length).toBeGreaterThanOrEqual(Math.floor(RELAY_BUDGET / 3) + 1);
+    expect(polls).toBeGreaterThan(0);
   });
 });
