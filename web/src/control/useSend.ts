@@ -77,8 +77,11 @@ export function useSessionSend(
   o: {
     /** This surface shows the held notice (the session page's strip). */
     notice?: boolean;
-    /** After a held send was confirmed and went. */
+    /** After a held send was confirmed and went, with the fields it carried. */
     confirmed?: (fields: CommandFields) => void;
+    /** The composer as it is now (its words and attachments): a held message depends on
+     *  it, and goes the moment it changes. */
+    draft?: string;
   } = {},
 ): SessionSend {
   const rp = useRpId();
@@ -100,6 +103,8 @@ export function useSessionSend(
     sent.current.set(carried.id, fields.for);
     setAnswers((prev) => ({ ...prev, [fields.for]: "sent" }));
   }, []);
+  const draftNow = useRef(o.draft);
+  draftNow.current = o.draft;
   const held = useHeld<ControlActivity>(
     (carried, h) => {
       went(h.fields, carried);
@@ -107,6 +112,7 @@ export function useSessionSend(
       grant.refresh();
     },
     (e) => setError(sendErrorWords(e)),
+    o.draft,
   );
   const { catchHeld, drop: dropHeld } = held;
   useEffect(() => {
@@ -157,6 +163,8 @@ export function useSessionSend(
       }
       const att = action.kind === "permission.answer" ? action.attentionId : null;
       if (att && answers[att]) return;
+      // A message depends on the composer it was typed in; an answer or a Stop on nothing.
+      const keyAtSend = action.kind === "prompt" ? draftNow.current : undefined;
       try {
         const carried = await sendCommand(rp, control.machineId, fields, { onTap: () => setTap(true) });
         went(fields, carried);
@@ -165,7 +173,7 @@ export function useSessionSend(
         if (att && e instanceof ControlError && e.code === "no_attention")
           setAnswers((prev) => ({ ...prev, [att]: "closed" }));
         // Held for a confirm: the notice says so where it is shown, the refusal elsewhere.
-        if (!(notice && catchHeld(e))) setError(sendErrorWords(e));
+        if (!(notice && catchHeld(e, {}, keyAtSend))) setError(sendErrorWords(e));
         throw e;
       } finally {
         setTap(false);

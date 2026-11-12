@@ -12,10 +12,11 @@ import {
   type StartFile,
   type StartPermission,
 } from "@shared/api";
+import { cleanReason } from "@shared/reason";
 import { noteOwnSend } from "../lib/toasts";
 import { ControlError, controlApi, type SendBody, type TrustedKey } from "./api";
 import { nonce } from "./bytes";
-import { remoteRpFor } from "./remoteRp";
+import { remoteHostFor, remoteRpFor } from "./remoteRp";
 import { dropGrant, sign, signerKind } from "./signer";
 
 export const COMMAND_TYPE = "sessionpipe.control";
@@ -138,8 +139,13 @@ export class HeldForConfirm<T> extends ControlError {
     held: unknown,
     /** What the receiver said about why, as text. */
     readonly why: string,
-    /** What was held. */
+    /** What was held: the fields as they were signed, the only ones a confirm sends. */
     readonly fields: CommandFields,
+    /** The machine it was for. */
+    readonly machineId: string,
+    /** Who held it: the host of the spacesheep a machine paired there is reached through
+     *  (remoteRp.ts), or null for this receiver itself. */
+    readonly from: string | null,
     /** Sign the same send again with one confirm and deliver it; call from a press only. */
     readonly confirm: (o?: Pick<SendOptions, "onTap">) => Promise<T>,
   ) {
@@ -154,12 +160,11 @@ export class HeldForConfirm<T> extends ControlError {
   }
 }
 
-/** The receiver's reason for a hold, as text: its detail (spacesheep's `why`, carried by
- *  forwardSend), else its reason. */
-const heldWhy = (e: unknown): string => {
-  const x = e as { detail?: unknown; reason?: unknown };
-  const t = typeof x.detail === "string" && x.detail.trim() ? x.detail : typeof x.reason === "string" ? x.reason : "";
-  return t.trim();
+/** The receiver's reason for a hold, cleaned (shared/reason.ts): its detail (spacesheep's
+ *  `why`, carried by forwardSend), else its reason. Also for a confirm held again. */
+export const heldWhy = (e: unknown): string => {
+  const x = (e ?? {}) as { detail?: unknown; reason?: unknown };
+  return cleanReason(x.detail) || cleanReason(x.reason);
 };
 
 /** Sign one command for `machineId` and hand the signed body to `deliver`: /send for the
@@ -189,7 +194,7 @@ export async function signAndDeliver<T>(
   // already, or a caller that may not prompt, gets the refusal itself.
   const held = (e: unknown): unknown =>
     !o.confirm && !o.noPrompt && faultCode(e) === "confirm_required"
-      ? new HeldForConfirm<T>(e, heldWhy(e), fields, (c = {}) =>
+      ? new HeldForConfirm<T>(e, heldWhy(e), fields, machineId, remoteHostFor(machineId) ?? null, (c = {}) =>
           signAndDeliver(rp, machineId, fields, deliver, { ...o, onTap: c.onTap, confirm: true }),
         )
       : e;

@@ -40,6 +40,10 @@ const underStrip = (a: ControlActivity) =>
   ((a.kind === "permission.answer" || a.kind === "cancel") && (!isFinal(a) || a.outcome !== "delivered")) ||
   !!forkOf(a);
 
+/** Where the focus goes when the notice under the composer goes: the composer, the form
+ *  just before it. */
+const composerBefore = (live: HTMLElement) => live.previousElementSibling?.querySelector<HTMLElement>("textarea");
+
 export function SessionControl({
   session,
   control,
@@ -54,6 +58,8 @@ export function SessionControl({
   /** Unused: messages are joined to their turns in the timeline now. */
   inChat?: (messages: readonly ControlActivity[]) => ReadonlySet<string>;
 }) {
+  // The composer's words and attachments as they are now (ControlStrip onDraft).
+  const [draft, setDraft] = useState<string | undefined>(undefined);
   const {
     rp,
     secure: canSignHere,
@@ -65,6 +71,7 @@ export function SessionControl({
     onSend,
     held,
   } = useSessionSend(session, control, attentions, {
+    draft,
     // A message the receiver held is confirmed from the notice under the composer; once
     // it went, the composer that still held its words is cleared.
     notice: true,
@@ -131,8 +138,9 @@ export function SessionControl({
         stream={down ? { state: down, retry: () => store.reconnect() } : undefined}
         unlock={control && secure && grant.exp === null ? () => void unlockNow() : undefined}
         ask={askable ? () => openHandoff({ session: session.key }) : undefined}
+        onDraft={setDraft}
       />
-      <HeldNotice h={held} />
+      <HeldNotice h={held} focusBack={composerBefore} />
       <ActivityList items={activity.filter(underStrip)} machine={session.machine} online={control?.online} limit={2} />
       <HandoffHost session={session.key} />
     </>

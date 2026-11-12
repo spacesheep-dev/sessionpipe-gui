@@ -183,4 +183,37 @@ describe("a held send, confirmed as the page confirms it", () => {
       await b.close();
     }
   });
+
+  it("spacesheep's words are passed on cleaned and capped: its reason and its error alike", async () => {
+    const machine = "m_heldremote000000000002";
+    const bidi = String.fromCodePoint(0x202e);
+    const bell = String.fromCodePoint(7);
+    const b = await boot({
+      remoteSend: async () => ({
+        status: 409,
+        json: {
+          code: "confirm",
+          error: `line one\nline two${bidi} ${"long ".repeat(80)}`,
+          why: `two\n\nlines${bidi}${bell} here`,
+        },
+      }),
+    });
+    try {
+      b.control.remote.upsert(
+        [{ id: machine, name: "lab-mac", online: true, agents: ["claude-code"], passkey_ids: ["k1"] }],
+        { via: "spacesheep", origin: "https://spacesheep.dev", rpId: "spacesheep.dev" },
+      );
+      const r = await call(b.url, "POST", `${UI}/send`, {
+        body: { machineId: machine, cmd: commandStr(machine, {}), csig: "c2ln" },
+      });
+      expect(r.status).toBe(422);
+      expect(r.body.detail).toBe("two lines here");
+      const reason = String(r.body.reason);
+      expect(reason.startsWith("line one line two long")).toBe(true);
+      expect(Array.from(reason).length).toBeLessThanOrEqual(200);
+      expect(reason.endsWith("…")).toBe(true);
+    } finally {
+      await b.close();
+    }
+  });
 });

@@ -68,6 +68,9 @@ export interface ControlStripProps {
    *  passkey prompt being up. It wins over every other reason. */
   note?: string;
   noteKind?: "info" | "err";
+  /** The composer's words and attachments, as one string, each time they change: a held
+   *  message (control/HeldNotice.tsx) depends on them. */
+  onDraft?: (draft: string) => void;
   /** This browser holds no passkey the machine trusts (in the app: the machine doesn't
    *  trust this Mac's device key): a send would be refused. */
   untrusted?: boolean;
@@ -298,6 +301,7 @@ export function ControlStrip({
   stream,
   unlock,
   ask,
+  onDraft,
 }: ControlStripProps) {
   const [text, setText] = useState(() => readDraft(session.key));
   // The same strip shown for another session takes that session's own draft.
@@ -347,6 +351,10 @@ export function ControlStrip({
     window.addEventListener(COMPOSER_SENT, on);
     return () => window.removeEventListener(COMPOSER_SENT, on);
   }, [session.key, clearAtt]);
+  const draft = JSON.stringify([text, att.items.map((i) => i.key)]);
+  const onDraftNow = useRef(onDraft);
+  onDraftNow.current = onDraft;
+  useEffect(() => onDraftNow.current?.(draft), [draft]);
   const name = session.machine ?? "the machine";
   const permissions = (attentions ?? (attention ? [attention] : [])).filter((a) => a.kind === "permission");
   // The answerable prompt(s) only; a notification twin adds nothing. With no answerable one,

@@ -46,9 +46,10 @@ import { hintFor, matches, useShortcut } from "../lib/shortcuts";
 import { useNow } from "../lib/time";
 import { controlApi, wrongOriginHere } from "./api";
 import { uuid } from "./bytes";
-import { sendCommand } from "./command";
+import { type CommandFields, sendCommand } from "./command";
 import { folderChoices, machineHome, tildify, typedFolder } from "./folders";
 import { HeldNotice, useHeld } from "./HeldNotice";
+import type { HeldMeta } from "./held";
 import { useGrant, useRpId } from "./hooks";
 import {
   agentLeft,
@@ -109,6 +110,15 @@ function usePhone(): boolean {
 }
 
 /** A file on its way into the start: uploading, held (its entry), or refused in place. */
+/** What a start was made of when it was pressed: all its "started" needs, so nothing after
+ *  a confirm reads the sheet as it is now. */
+interface Sent extends HeldMeta {
+  machine: string;
+  machineId: string;
+  permission?: RunLevel;
+  model?: string;
+}
+
 interface FileItem {
   key: string;
   name: string;
@@ -422,14 +432,15 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     modelOk &&
     !busy;
 
-  // Started: remember the choices, and go to the new session where it was typed.
-  const started = (sid: string) => {
-    if (!m || !c || !harness || !folderCheck.ok) return;
-    rememberStart(m.name, c.machineId, {
-      harness,
-      cwd: folderCheck.path,
-      ...(showPermission && permission ? { permission } : {}),
-      ...(showModel && model ? { model } : {}),
+  // Started: remember the choices it was made with, and go to the session it started.
+  const started = (fields: CommandFields, s: Sent) => {
+    if (fields.kind !== "start") return;
+    const { harness: h, id: sid } = splitKey(fields.session);
+    rememberStart(s.machine, s.machineId, {
+      harness: h,
+      cwd: fields.cwd,
+      ...(s.permission ? { permission: s.permission } : {}),
+      ...(s.model ? { model: s.model } : {}),
     });
     saveDraft(null);
     // The started moment: the sheet dissolves where it is (no lift) and the message
@@ -438,17 +449,22 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     const from = typed ? textOrigin(typed) : null;
     ref.current?.setAttribute("data-started", "");
     closeNewSession();
-    navigate(sessionPath(harness, sid));
+    navigate(sessionPath(h, sid));
     if (from) landStart(from);
   };
+  // Everything a start is made of, as one string: a held start goes the moment any of it
+  // changes (machine, agent, folder, permission, model, text, files).
+  const sheetKey = JSON.stringify([machine, harness, folder, permission, model, text, files.map((f) => f.key)]);
   // A start the receiver held for a confirm: the notice above the foot, and its button.
-  const held = useHeld<ControlActivity>(
-    (_r, h) => {
-      if (h.fields.kind === "start") started(splitKey(h.fields.session).id);
+  const held = useHeld<ControlActivity, Sent>(
+    (_r, h, s) => {
+      started(h.fields, s);
       grant.refresh();
     },
     (e) => setError(sendErrorWords(e).replace(/^not sent · /, "Not sent: ")),
+    sheetKey,
   );
+  const startButton = useCallback(() => ref.current?.querySelector<HTMLElement>("[data-ns-start]") ?? null, []);
 
   const start = async () => {
     if (!canStart || !m || !c || !rp || !harness || !folderCheck.ok) return;
@@ -457,29 +473,33 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     held.drop();
     const sid = uuid();
     const kept = files.flatMap((f) => (f.entry ? [f.entry] : []));
+    const keyAtSend = sheetKey;
+    const sent: Sent = {
+      machine: m.name,
+      machineId: c.machineId,
+      ...(showPermission && permission ? { permission } : {}),
+      ...(showModel && model ? { model } : {}),
+      where: `${m.name} · ${tildify(folderCheck.path, machineHome(c))}`,
+    };
+    const fields: CommandFields = {
+      kind: "start",
+      session: sessionKey(harness, sid),
+      text: text.trim(),
+      cwd: folderCheck.path,
+      // Only what this machine's hello advertised (CONTROL.md §2): an older daemon
+      // ignores a field it does not know and would run at its own mode.
+      ...(takesFiles && kept.length ? { files: kept } : {}),
+      // On an inherit machine its default is chosen by naming no level at all.
+      ...(showPermission && permissionToSend(opts, permission)
+        ? { permission: permissionToSend(opts, permission) }
+        : {}),
+      ...(showModel && model ? { model } : {}),
+    };
     try {
-      await sendCommand(
-        rp,
-        c.machineId,
-        {
-          kind: "start",
-          session: sessionKey(harness, sid),
-          text: text.trim(),
-          cwd: folderCheck.path,
-          // Only what this machine's hello advertised (CONTROL.md §2): an older daemon
-          // ignores a field it does not know and would run at its own mode.
-          ...(takesFiles && kept.length ? { files: kept } : {}),
-          // On an inherit machine its default is chosen by naming no level at all.
-          ...(showPermission && permissionToSend(opts, permission)
-            ? { permission: permissionToSend(opts, permission) }
-            : {}),
-          ...(showModel && model ? { model } : {}),
-        },
-        { onTap: () => setTap(true) },
-      );
-      started(sid);
+      await sendCommand(rp, c.machineId, fields, { onTap: () => setTap(true) });
+      started(fields, sent);
     } catch (e) {
-      if (!held.catchHeld(e)) setError(sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
+      if (!held.catchHeld(e, sent, keyAtSend)) setError(sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
       setBusy(false);
     } finally {
       // Started, Start keeps saying "Starting…" while the sheet dissolves: it never flips
@@ -896,7 +916,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
                 </div>
               )}
               <div className="ns-group-foot">
-                <HeldNotice h={held} />
+                <HeldNotice h={held} focusBack={startButton} />
                 {statusLine}
                 {passkeyNote && (
                   <p className="ns-passkey" id="ns-passkey">
@@ -972,7 +992,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
                 </span>
               )}
             </div>
-            <HeldNotice h={held} />
+            <HeldNotice h={held} focusBack={startButton} />
             <footer className="ns-foot">
               {statusLine}
               <span className="ns-actions">

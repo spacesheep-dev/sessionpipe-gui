@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: control-web. Every sentence of the held-send notice (HeldNotice.tsx), in one
 // place for the owner to read: the words are their own commit.
+import { asSentence, cleanReason } from "@shared/reason";
 
 export const HELD_WORDS = {
   /** The notice's first line. */
@@ -14,10 +15,20 @@ export const HELD_WORDS = {
   confirming: "Confirming…",
   /** The button that lets the held send go; the words stay where they were typed. */
   drop: "Never mind",
+  /** The title when the confirm was held too; `who` is heldFrom(). */
+  still: (who: string) => `still held (${who})`,
+  /** The receiver's reason, said to be theirs: `who` is heldFrom(), `why` heldReason(). */
+  says: (who: string, why: string) => `${who}: ${why}`,
+  /** Who held it when it is this receiver itself (not a spacesheep a machine is reached through). */
+  local: "local receiver",
 };
 
-/** The receiver's reason as one sentence: its first letter up, a full stop at the end. */
+/** Who held it, by name: the spacesheep's host, or this receiver. */
+export const heldFrom = (host: string | null): string => host ?? HELD_WORDS.local;
+
+/** The receiver's reason as one sentence, cleaned (shared/reason.ts): its first letter up,
+ *  a full stop only after a letter or a digit. */
 export function heldReason(why: string): string {
-  const t = why.trim().replace(/[.\s]+$/, "");
-  return t ? `${t.charAt(0).toUpperCase()}${t.slice(1)}.` : HELD_WORDS.noReason;
+  const t = cleanReason(why);
+  return t ? asSentence(`${t.charAt(0).toUpperCase()}${t.slice(1)}`) : HELD_WORDS.noReason;
 }
