@@ -232,6 +232,24 @@ machine's own token and nothing else. A `taken` ack pauses redelivery 35 minutes
 duplicates are tolerated. State lives under `<stateDir>/control/` (`machines.json` with
 hashed tokens and `queue/<machine id>.json`).
 
+## Machines paired on a spacesheep account
+
+With an account connected (docs/rfcs/08), the machines paired there are rows too: made
+from the relay's machine list, held in memory, never in `machines.json`, never polled
+here. `POST /send` for one is not verified here (its keys are ids only): the signed body
+goes to spacesheep's jobs route as the account, and the row that comes back is settled by
+spacesheep's jobs list alone (its status, `code` and clock; a day and an hour with no word
+ends it as `expired`, or `unconfirmed` once the computer took it). A row names the
+account that carried it; with none connected, or its key refused, it waits and says
+`unfollowed`; another account connecting settles it as `untracked`.
+
+All of that is `RemoteSlice` in `remote.ts`, over rows a host hands it, with the row
+shapes and their readers in `rows.ts`. Neither file imports anything of Node's. The
+receiver's host is `ControlState` (its maps, its queue files); a page that carries its own
+board on an account has no receiver and runs `MemoryControl` from the same file.
+`remote.parity.test.ts` drives both wirings through one script and compares them row by
+row; `remote.test.ts` holds each rule on the receiver's.
+
 ## Test door
 
 With `testDoor: true` and only from loopback: `POST {control}/_test/enroll`,
