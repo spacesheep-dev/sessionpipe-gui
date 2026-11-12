@@ -44,10 +44,15 @@ All notable changes to `sessionpipe-gui`. The format follows
   in place, with its port and state folder; none installed where there was none). Where only
   the app's own release through `npx` would do, that is a download, and nothing runs: the
   app's log says so and Settings › Data offers it as a click. A failure before the old
-  receiver was stopped leaves it running; one after it (exit 4) is logged as that. "Start
-  sessionpipe" and the click prefer the app's release through `npx` over an older CLI on
-  PATH, and use that CLI when `npx` can't run (offline, GitHub blocked). A timed-out
-  install now stops `npx` and what it started, not `npx` alone.
+  receiver was stopped leaves it running; one after it (exit 4) is logged as that, and an
+  `--if-installed` that did nothing (exit 5) is logged as nothing done. "Start sessionpipe"
+  and the click prefer the app's release through `npx` over an older CLI on PATH. When `npx`
+  can't download it (offline, GitHub blocked), the click changes nothing and says so;
+  "Start sessionpipe" uses the CLI on PATH instead only where that can't make the service
+  older (no service installed, or a CLI at least the version it runs). The app runs one
+  install at a time. An install that is still downloading when the app stops waiting
+  (180 s) is stopped with what it started; one whose `sessionpipe-gui` has begun is never
+  killed: the app stops waiting, says it is still finishing, and lets it end.
 - **In the app, an option the receiver is too old for says so** instead of the receiver's
   "HTTP 404". Settings › Data › "Use a spacesheep account" against a receiver older than
   0.7.5: "sessionpipe on this computer is 0.7.2, which is older than this option." with

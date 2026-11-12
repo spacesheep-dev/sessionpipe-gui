@@ -184,8 +184,15 @@ fn rx_local_update<R: Runtime>(
 async fn rx_update_local<R: Runtime>(
     window: WebviewWindow<R>,
     on_progress: Channel<Progress>,
-) -> Result<Option<crate::lifecycle::supervisor::LocalUpdate>, String> {
-    main_only(&window)?;
+) -> Result<
+    Option<crate::lifecycle::supervisor::LocalUpdate>,
+    crate::lifecycle::supervisor::UpdateFailure,
+> {
+    main_only(&window).map_err(|line| crate::lifecycle::supervisor::UpdateFailure {
+        kind: "failed",
+        line,
+        log: None,
+    })?;
     crate::lifecycle::update_local_receiver(|step, message| {
         let _ = on_progress.send(Progress {
             step: step.into(),
@@ -193,7 +200,7 @@ async fn rx_update_local<R: Runtime>(
         });
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| (&e).into())
 }
 
 #[tauri::command]
