@@ -6,6 +6,11 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
+  not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
+
 ## [0.8.0] - 2026-11-11
 
 ### Added
