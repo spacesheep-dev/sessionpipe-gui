@@ -1074,3 +1074,6 @@ impl Hub {
         self.0.acct.docs.delete(id, name)
     }
 }
+
+#[cfg(test)]
+mod tests;
