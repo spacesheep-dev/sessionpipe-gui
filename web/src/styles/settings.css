@@ -661,6 +661,14 @@ a.settings-row:focus-visible {
   .settings-row-ctl {
     max-width: 100%;
   }
+  /* A stacked row (a sentence over a command) stays one column: wrapped, the well went
+     into a second column beside the text, and the text's basis became its height. */
+  .settings-row--stack {
+    flex-wrap: nowrap;
+  }
+  .settings-row--stack > .settings-row-text {
+    flex: none;
+  }
   /* A choice is the row itself: the value and a ›, the whole row the tap target; its
      explanation moves to the picker it pushes. */
   .settings-row:has(> .settings-row-ctl > .settings-choice) {

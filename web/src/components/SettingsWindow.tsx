@@ -32,6 +32,7 @@ import { bytes } from "../lib/format";
 import { reducedMotion, tokenMs } from "../lib/motion";
 import { apiUrl } from "../lib/net";
 import { back, hasInAppHistory, Link, navigate, useSearchParam } from "../lib/router";
+import { olderReceiver } from "../lib/serverAge";
 import {
   DEFAULT_PAGES,
   type DefaultPage,
@@ -828,6 +829,17 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
   const [st, setSt] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // In the app the receiver can be older than this page (lib/serverAge.ts): it says so.
+  const store = useStore();
+  const [version, setVersion] = useState<string | undefined>(undefined);
+  const [notFound, setNotFound] = useState(false);
+  useEffect(() => {
+    store.transport
+      .info()
+      .then((i) => setVersion(i.version))
+      .catch(() => {});
+  }, [store]);
+  const older = olderReceiver("spacesheep", version, { notFound });
   const read = async () => {
     try {
       const res = await fetch(apiUrl(ROUTES.ui.spacesheep), { headers: { accept: "application/json" } });
@@ -851,6 +863,11 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
         headers: { "content-type": "application/json", accept: "application/json" },
         body: "{}",
       });
+      // A 404 is the receiver's own fallback: it has no such route, it is older.
+      if (res.status === 404 && olderReceiver("spacesheep", version, { notFound: true })) {
+        setNotFound(true);
+        return;
+      }
       const j = (await res.json()) as { url?: string; error?: string };
       if (!res.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
       if (j.url) window.open(j.url, "_blank", "noopener");
@@ -909,12 +926,25 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
             Open the confirm page
           </a>
         ) : (
-          <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void connect()}>
+          <button type="button" className="btn btn--primary" disabled={busy || !!older} onClick={() => void connect()}>
             Connect…
           </button>
         )}
       </R>
-      {err && <p className="settings-group-note settings-err">{err}</p>}
+      {older ? (
+        <div className="settings-row settings-row--stack">
+          <div className="settings-row-text">
+            <span className="settings-hint">{older.sentence}</span>
+          </div>
+          {older.command ? (
+            <div className="settings-well">
+              <CommandWell command={older.command} label="Copy the update command" />
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        err && <p className="settings-group-note settings-err">{err}</p>
+      )}
     </G>
   );
 }

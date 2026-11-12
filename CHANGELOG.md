@@ -32,6 +32,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   receiver keeps running. A `sessionpipe-gui` on PATH older than the app is passed over
   for `npx` and the app's own release, here and in "Start sessionpipe", so the service then
   runs from npx's cache, not from that global install, which stays as it was.
+- **In the app, an option the receiver is too old for says so** instead of the receiver's
+  "HTTP 404". Settings › Data › "Use a spacesheep account" against a receiver older than
+  0.7.5: "sessionpipe on this computer is 0.7.2, which is older than this option. Update it
+  with this command, or reopen the app:" and the command to copy (Connect… is off); for a
+  receiver on another machine, "… Update it there." A page the receiver serves itself
+  never says it. On a phone a sentence over a command (this one, and About's update
+  command) stays in one column.
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH
