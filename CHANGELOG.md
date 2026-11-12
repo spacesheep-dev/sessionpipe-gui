@@ -6,6 +6,8 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-12
+
 ### Changed
 
 - The server's store reads its full events through a log it is handed (the session files on
@@ -1036,7 +1038,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.5...v0.8.0
 [0.7.5]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.3...v0.7.4
