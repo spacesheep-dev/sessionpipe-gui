@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // What a saved workflow must be, and the two files: private, written whole, read back the same.
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WORKFLOW_STEPS_MAX, WORKFLOW_TEXT_MAX, type WorkflowRun } from "../../shared/api.js";
 import { tempDir } from "../../test/events.js";
+import { cancel, newRun } from "./runs.js";
 import { OrchestrateStore, RUNS_MAX, readWorkflow, WorkflowError } from "./store.js";
 
 const M = "m_machine00000000000001";
@@ -261,6 +262,37 @@ describe("OrchestrateStore", () => {
     new OrchestrateStore(tmp.dir);
     expect(readFileSync(file, "utf8")).toBe(whole);
     expect(readdirSync(tmp.dir).filter((f) => f.startsWith("workflow-runs.json.bad-"))).toHaveLength(1);
+  });
+
+  it("leaves a runs file as it is, and sets nothing aside, when it cannot be rewritten", () => {
+    const file = path.join(tmp.dir, "workflow-runs.json");
+    const text = JSON.stringify({ v: 1, runs: [broken[0]![1], good] });
+    writeFileSync(file, text);
+    const blocker = `${file}.${process.pid}.tmp`;
+    mkdirSync(blocker);
+    expect(new OrchestrateStore(tmp.dir).runs().map((r) => r.id)).toEqual([GOOD]);
+    expect(readFileSync(file, "utf8")).toBe(text);
+    expect(readdirSync(tmp.dir).filter((f) => f.includes(".bad-"))).toEqual([]);
+    rmSync(blocker, { recursive: true });
+    new OrchestrateStore(tmp.dir);
+    expect(readdirSync(tmp.dir).filter((f) => f.includes(".bad-"))).toHaveLength(1);
+  });
+
+  it("reads back every run the server writes, also one with a step called __proto__", () => {
+    const wf = readWorkflow(withStep({ id: "__proto__" }), { id: "wf", now: NOW });
+    const started = newRun(wf, { id: "01K8RUN0000000000000PROTO1", now: Date.parse(NOW), online: () => true });
+    const ended = cancel(
+      newRun(wf, { id: "01K8RUN0000000000000PROTO2", now: Date.parse(NOW), online: () => true }),
+      Date.parse(NOW),
+    );
+    const store = new OrchestrateStore(tmp.dir);
+    store.putRun(started);
+    store.putRun(ended);
+    const again = new OrchestrateStore(tmp.dir);
+    expect(again.run(started.id)).toEqual(JSON.parse(JSON.stringify(started)));
+    expect(again.run(ended.id)).toEqual(JSON.parse(JSON.stringify(ended)));
+    expect(Object.hasOwn(again.run(ended.id)!.steps, "__proto__")).toBe(true);
+    expect(readdirSync(tmp.dir).filter((f) => f.includes(".bad-"))).toEqual([]);
   });
 
   it("keeps at most RUNS_MAX runs, dropping the oldest ended ones first", () => {
