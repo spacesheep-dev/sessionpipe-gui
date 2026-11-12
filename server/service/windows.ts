@@ -14,10 +14,11 @@
 // the redirect: cmd /c drops the first and last quote of a line that starts with one.
 //
 // cmd runs with `/v:off`. `/d` skips AutoRun only: where the registry turns delayed expansion
-// on (DelayedExpansion under Command Processor), cmd reads `!name!` in the line as a
-// variable and drops a lone `!`, in quotes or out, so a state dir with a `!` in its path
-// would not reach the receiver as written. A task 0.8.0 installed has no `/v:off`; taskArgv
-// reads both.
+// on (DelayedExpansion under Command Processor), cmd puts a variable's value where the line
+// says `!NAME!` and NAME is set, in quotes or out (`C:\data\!OS!\state` becomes
+// `C:\data\Windows_NT\state`; a lone `!` and an unset name stay), so such a state dir would
+// not reach the receiver as written. A task 0.8.0 installed has no `/v:off`; taskArgv reads
+// both.
 import path from "node:path";
 
 export interface TaskSpec {
@@ -36,7 +37,11 @@ export const taskName = (label: string): string => `\\sessionpipe\\${label}`;
  *  the command is run from would be the one started. %SystemRoot% (else %windir%) counts
  *  only when it is a full path on a drive; anything else is read as C:\Windows. */
 export function system32(env: NodeJS.ProcessEnv, ...parts: string[]): string {
-  const root = [env.SystemRoot, env.windir].find((v) => v !== undefined && /^[A-Za-z]:[\\/]/.test(v));
+  // Windows reads a variable's name whatever its case, and so does process.env there; a
+  // copy of it, or Git Bash's SYSTEMROOT, is a plain object and does not.
+  const named = (name: string) =>
+    env[name] ?? Object.entries(env).find(([k]) => k.toLowerCase() === name.toLowerCase())?.[1];
+  const root = [named("SystemRoot"), named("windir")].find((v) => v !== undefined && /^[A-Za-z]:[\\/]/.test(v));
   return path.win32.join(root ?? "C:\\Windows", "System32", ...parts);
 }
 

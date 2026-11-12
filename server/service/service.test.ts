@@ -117,7 +117,7 @@ function fakePowershell(): string {
 t="${dir}/task.xml"; st="${dir}/task.status"
 file=$(printf '%s' "$4" | sed -n "s/.*-LiteralPath '\\([^']*\\)'.*/\\1/p")
 case "$4" in
-  *Schedule.Service*) [ "$FAKE_FAIL" = folder ] && { echo "New-Object : Cannot create type. Only core types are supported in this language mode." >&2; exit 1; }
+  *Schedule.Service*) echo asked >> "${dir}/folder.asked"; [ "$FAKE_FAIL" = folder ] && { echo "New-Object : Cannot create type. Only core types are supported in this language mode." >&2; exit 1; }
     if [ -f "$t" ] || [ -f "${dir}/task.other" ]; then echo kept; exit 0; fi
     [ -f "${dir}/task.folder" ] || { echo "Exception calling DeleteFolder: The system cannot find the file specified." >&2; exit 1; }
     rm -f "${dir}/task.folder"; echo "powershell DeleteFolder sessionpipe" >> "${log}"; echo removed;;
@@ -174,6 +174,11 @@ function env(over: Partial<ServiceEnv> = {}, probe: Probe | Probe[] = null, runn
 let failVerb = "";
 let slowBootout = false;
 const calls = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
+/** How many times the fake powershell was asked to remove the task folder, whatever it answered. */
+const folderAsked = () => {
+  const f = path.join(dir, "folder.asked");
+  return existsSync(f) ? readFileSync(f, "utf8").trim().split("\n").length : 0;
+};
 
 beforeEach(() => {
   dir = mkdtempSync(path.join(os.tmpdir(), "spgui-service-"));
@@ -688,14 +693,14 @@ describe("the Windows scheduled task", () => {
     );
   });
 
-  it("carries a ! in a path as it is: cmd runs with /v:off, so it reads no !name! where the registry turns delayed expansion on", () => {
+  it("carries a !NAME! in a path as it is: cmd runs with /v:off, so it puts no variable there where the registry turns delayed expansion on", () => {
     const bang = {
-      argv: ["C:\\n\\node.exe", "C:\\n\\cli.js", "--state", "C:\\Users\\wow!\\s!"],
-      logPath: "C:\\Users\\wow!\\s!\\service.log",
+      argv: ["C:\\n\\node.exe", "C:\\n\\cli.js", "--state", "C:\\Users\\wow!\\!OS!"],
+      logPath: "C:\\Users\\wow!\\!OS!\\service.log",
     };
     expect(unsafeWord([...bang.argv, bang.logPath])).toBeUndefined();
     expect(taskArguments(bang)).toBe(
-      "--headless cmd.exe /d /v:off /c >> C:\\Users\\wow!\\s!\\service.log 2>&1 C:\\n\\node.exe C:\\n\\cli.js --state C:\\Users\\wow!\\s!",
+      "--headless cmd.exe /d /v:off /c >> C:\\Users\\wow!\\!OS!\\service.log 2>&1 C:\\n\\node.exe C:\\n\\cli.js --state C:\\Users\\wow!\\!OS!",
     );
     expect(taskArgv(taskXml({ ...spec, ...bang }))).toEqual(bang.argv);
   });
@@ -726,6 +731,9 @@ describe("the Windows scheduled task", () => {
     expect(serviceTools({ SystemRoot: "c:/windows" }, "win32")).toMatchObject(under("c:\\windows"));
     // No %SystemRoot%: %windir%, and with neither C:\Windows.
     expect(serviceTools({ windir: "D:\\WINNT" }, "win32")).toMatchObject(under("D:\\WINNT"));
+    // A copied environment, or Git Bash's, spells the names in another case.
+    expect(serviceTools({ SYSTEMROOT: "D:\\WINNT" }, "win32")).toMatchObject(under("D:\\WINNT"));
+    expect(serviceTools({ systemroot: "relative", WINDIR: "D:\\WINNT" }, "win32")).toMatchObject(under("D:\\WINNT"));
     expect(serviceTools({}, "win32")).toMatchObject(under("C:\\Windows"));
     // Only a full path on a drive counts: anything else would be looked for from the working
     // directory, which is what naming them in full is there to stop.
@@ -890,9 +898,19 @@ describe("service on Windows", () => {
     expect(existsSync(path.join(state, "run.json"))).toBe(false);
     expect(await runService({ verb: "status" }, e)).toBe(3);
     writeFileSync(log, "");
+    const asked = folderAsked();
     expect(await runService({ verb: "uninstall" }, e)).toBe(0);
     expect(out.at(-1)).toContain("nothing to do");
     expect(readFileSync(log, "utf8")).toBe("");
+    // Nothing of ours to remove, but the folder an 0.8.0 uninstall left is asked about once,
+    // and removed when it is there and empty; a dry run asks nothing.
+    expect(folderAsked()).toBe(asked + 1);
+    writeFileSync(path.join(dir, "task.folder"), "");
+    expect(await runService({ verb: "uninstall", dryRun: true }, e)).toBe(0);
+    expect(folderAsked()).toBe(asked + 1);
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(calls()).toEqual(["powershell DeleteFolder sessionpipe"]);
+    expect(existsSync(path.join(dir, "task.folder"))).toBe(false);
   });
 
   it("uninstall takes the \\sessionpipe\\ folder out of Task Scheduler with its last task, and only then", async () => {
@@ -954,8 +972,10 @@ describe("service on Windows", () => {
     await runService({ verb: "install", port: 7829, state }, e);
     writeFileSync(log, "");
     failVerb = "/Delete";
+    const asked = folderAsked();
     expect(await runService({ verb: "uninstall" }, e)).toBe(1);
     expect(removals()).toEqual([]);
+    expect(folderAsked()).toBe(asked);
     expect(existsSync(folder)).toBe(true);
   });
 
@@ -1181,7 +1201,7 @@ describe("service on Windows", () => {
     errs = [];
     expect(await runService({ verb: "uninstall" }, e)).toBe(1);
     expect(errs).toEqual([
-      `${SERVICE_LABEL} is still loaded (schtasks.exe /Delete /TN: ERROR: Access is denied.); try again, or \`schtasks.exe /Delete /TN ${name} /F\``,
+      `${SERVICE_LABEL} is still loaded (schtasks.exe /Delete /TN: ERROR: Access is denied.); try again, or \`${sys}\\schtasks.exe /Delete /TN ${name} /F\``,
     ]);
     failVerb = "powershell";
     errs = [];

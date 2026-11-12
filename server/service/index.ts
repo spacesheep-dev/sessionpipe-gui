@@ -485,8 +485,9 @@ function stopTask(env: ServiceEnv, argv: string[], state: string): { commands: s
     left: pid && !ours && pidAlive(pid) ? pid : undefined,
   };
 }
-const leftRunning = (pid: number, state: string, home: string): string =>
-  `pid ${pid} (${tilde(runFilePath(state), home)}) is running, and its command line doesn't show it to be this service's receiver: left alone. If it is one, stop it yourself (taskkill /PID ${pid} /T /F)`;
+/** The command to type names taskkill in full, as the ones `service` runs itself do. */
+const leftRunning = (env: ServiceEnv, pid: number, state: string): string =>
+  `pid ${pid} (${tilde(runFilePath(state), env.home)}) is running, and its command line doesn't show it to be this service's receiver: left alone. If it is one, stop it yourself (${env.taskkill} /PID ${pid} /T /F)`;
 /** The receiver we killed never got to remove its run.json: remove it, if it is still that one. */
 function afterStop(env: ServiceEnv, c: string[], r: ExecResult, state: string): void {
   if (c[0] === env.taskkill && r.code === 0) removeRunFile(state, Number(c[2]));
@@ -657,7 +658,7 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
     env.out("");
     for (const c of commands) env.out(`$ ${c.join(" ")}`);
     env.out("");
-    if (stop?.left) env.out(leftRunning(stop.left, was.state ?? env.defaultState, env.home));
+    if (stop?.left) env.out(leftRunning(env, stop.left, was.state ?? env.defaultState));
     env.out(`dry run: nothing written or restarted; it would update ${change} on ${url}`);
     return 0;
   }
@@ -685,7 +686,7 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
   }
   if (env.platform === "win32") rmSync(xmlFile, { force: true });
   env.out(`updated ${change} (${where(env, inst.file)})`);
-  if (stop?.left) env.err(leftRunning(stop.left, was.state ?? env.defaultState, env.home));
+  if (stop?.left) env.err(leftRunning(env, stop.left, was.state ?? env.defaultState));
 
   if (env.waitMs > 0) {
     const verdict = await waitForReceiver(env, { port, state, version: env.version });
@@ -704,6 +705,8 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
   const has = env.platform === "win32" ? st.loaded : existsSync(file);
   const wasState = (inst && installedOptions(inst.argv).state) || env.defaultState;
   if (!has && !st.loaded) {
+    // An uninstall by 0.8.0 left the task folder behind, empty: it goes now.
+    if (env.platform === "win32" && !o.dryRun) removeTaskFolder(env);
     env.out(`no service ${env.label} installed: nothing to do`);
     return 0;
   }
@@ -721,7 +724,7 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     if (has && env.platform !== "win32") env.out(`$ rm ${file}`);
     if (env.platform === "linux") env.out(`$ ${env.systemctl} --user daemon-reload`);
     if (env.platform === "win32") env.out(`$ ${taskFolderCommand(env).join(" ")}`);
-    if (stop?.left) env.out(leftRunning(stop.left, wasState, env.home));
+    if (stop?.left) env.out(leftRunning(env, stop.left, wasState));
     env.out("dry run: nothing stopped or removed");
     return 0;
   }
@@ -738,7 +741,7 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     env.err(
       `${env.label} is still loaded${failed ? ` (${failed})` : ""}; try again, or ${
         env.platform === "win32"
-          ? `\`${named(env, env.schtasks)} /Delete /TN ${file} /F\``
+          ? `\`${env.schtasks} /Delete /TN ${file} /F\``
           : `\`${env.launchctl} bootout gui/${env.uid}/${env.label}\``
       }`,
     );
@@ -747,7 +750,7 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
   if (env.platform === "win32") removeTaskFolder(env);
   if (stop?.left) {
     env.out(`removed ${env.label}: it won't start at login`);
-    env.err(leftRunning(stop.left, wasState, env.home));
+    env.err(leftRunning(env, stop.left, wasState));
     return 0;
   }
   env.out(`removed ${env.label}: stopped, and it won't start at login`);
