@@ -459,12 +459,12 @@ fn wait_output(
     let stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
     let (tx, rx) = std::sync::mpsc::channel::<String>();
+    // Reads stdout to its end whatever becomes of the receiver: a pipe closed under a child
+    // that still prints would kill it at its next write (Node doesn't handle EPIPE).
     let out_t = std::thread::spawn(move || {
         if let Some(o) = stdout {
             for line in BufReader::new(o).lines().map_while(Result::ok) {
-                if tx.send(line).is_err() {
-                    break;
-                }
+                let _ = tx.send(line);
             }
         }
     });
@@ -499,10 +499,35 @@ fn wait_output(
             // when it ends (busy() stays true until then).
             Ok(None) if !out.is_empty() => {
                 ORPHANS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut out = out;
                 std::thread::spawn(move || {
-                    let _ = child.wait();
+                    // Both pipes are read until the child closes them (the readers never stop),
+                    // then its verdict is logged and kept.
+                    let status = child.wait();
                     let _ = out_t.join();
-                    let _ = err_t.join();
+                    while let Ok(line) = rx.try_recv() {
+                        out.push_str(&line);
+                        out.push('\n');
+                    }
+                    let err = err_t.join().unwrap_or_default();
+                    let code = status.ok().and_then(|s| s.code()).unwrap_or(-1);
+                    let ran = Ran { code, out, err };
+                    let said = if code == 0 {
+                        ran.out
+                            .lines()
+                            .rfind(|l| !l.trim().is_empty())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string()
+                    } else {
+                        failure_line(code, &ran.out, &ran.err)
+                    };
+                    log::info!(target: "sessionpipe::lifecycle", "install: the installer the app stopped waiting for ended: exit {code}: {said}");
+                    let mut ends = ORPHAN_ENDS.lock().unwrap();
+                    ends.push(ran);
+                    let extra = ends.len().saturating_sub(8);
+                    ends.drain(..extra);
+                    drop(ends);
                     ORPHANS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 });
                 return Err(StartError::StillRunning);
@@ -523,6 +548,8 @@ fn wait_output(
 
 /// Installers left to finish past the app's wait (wait_output): while any runs, busy().
 static ORPHANS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// How the last few of them ended (their exit code and full output), as the log says it.
+static ORPHAN_ENDS: Mutex<Vec<Ran>> = Mutex::new(Vec::new());
 
 /// A child started in a group of its own (Unix): npx runs the CLI as its child, and a
 /// timeout must stop both, not npx alone.
@@ -1704,6 +1731,7 @@ pub async fn update_local_click(
     let (found, cli_v) = tauri::async_runtime::spawn_blocking(tools_here)
         .await
         .map_err(|e| StartError::Failed(e.to_string()))?;
+    let found = update_tools(found, cli_v.as_deref(), app)?;
     say("install", "Updating the background service…");
     let a = app.to_string();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -1765,6 +1793,29 @@ pub async fn update_local_click(
     res?;
     say("done", "sessionpipe is up to date");
     Ok(Some(u))
+}
+
+/// What "Update sessionpipe" may run: the CLI on PATH only when its version is known and at
+/// least the app's (one from before this version has no downgrade gate, and a CLI whose
+/// `--version` said nothing usable could be one), else the app's release through npx. With
+/// neither, nothing can do it: said, and nothing is changed.
+pub fn update_tools(
+    found: Tools,
+    cli_version: Option<&str>,
+    app: &str,
+) -> Result<Tools, StartError> {
+    let cli_current = cli_version.is_some_and(|v| !version_cmp(v, app).is_lt());
+    let t = if found.cli.is_some() && cli_current {
+        found
+    } else {
+        Tools { cli: None, ..found }
+    };
+    if t.cli.is_none() && t.npx.is_none() {
+        return Err(StartError::Failed(format!(
+            "there is no sessionpipe-gui {app} or newer here, and no npx to download it; nothing was changed"
+        )));
+    }
+    Ok(t)
 }
 
 /// What the page is told when "Update sessionpipe" didn't work.
@@ -2769,6 +2820,115 @@ mod tests {
         std::thread::sleep(Duration::from_millis(1600));
         assert!(done.exists(), "the installer was killed");
         assert!(!busy());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_installer_the_app_stopped_waiting_for_keeps_printing_and_ends_with_its_verdict() {
+        let d = Temp::new("orphan-out");
+        let done = d.0.join("ended");
+        let cli = d.0.join("cli");
+        // It speaks, outlives the wait, then prints on (a write to a closed pipe would kill
+        // it), and ends normally with its last line.
+        exe(
+            &cli,
+            &format!(
+                "#!/bin/sh\necho 'updating x: 0.7.2 → 0.8.1'\nsleep 0.8\ni=0; while [ $i -lt 200 ]; do echo \"starting on :7373… line $i\"; i=$((i+1)); done\necho 'running 0.8.1 on http://127.0.0.1:7999 · orphan-test'\ntouch {}\nexit 0\n",
+                done.display()
+            ),
+        );
+        let inv = Invocation {
+            program: cli,
+            args: vec![],
+            path: "/usr/bin:/bin".into(),
+        };
+        assert!(matches!(
+            run(&inv, Duration::from_millis(300), |_| {}),
+            Err(StartError::StillRunning)
+        ));
+        let until = Instant::now() + Duration::from_secs(5);
+        while !done.exists() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            done.exists(),
+            "the installer died after the app stopped waiting"
+        );
+        // Its verdict: exit 0, every line, the last one intact.
+        let until = Instant::now() + Duration::from_secs(5);
+        let ended = loop {
+            let found = ORPHAN_ENDS
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|r| r.out.contains("orphan-test"))
+                .cloned();
+            if let Some(r) = found {
+                break r;
+            }
+            assert!(Instant::now() < until, "no verdict kept");
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert_eq!(ended.code, 0);
+        assert_eq!(ended.out.lines().count(), 202);
+        assert_eq!(
+            ended.out.lines().last(),
+            Some("running 0.8.1 on http://127.0.0.1:7999 · orphan-test")
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn update_never_runs_a_cli_whose_version_is_unknown_or_older_and_says_so_with_nothing_to_run() {
+        let d = Temp::new("update-tools");
+        let ran = d.0.join("old-cli-ran");
+        let cli = d.0.join("sessionpipe-gui");
+        // A CLI from before this branch: no gates; if it runs, the service could move back.
+        exe(
+            &cli,
+            &format!("#!/bin/sh\ntouch {}\necho \"cli $*\"\n", ran.display()),
+        );
+        let npx = d.0.join("npx");
+        exe(&npx, "#!/bin/sh\necho \"npx $*\"\n");
+        let with = |npx_here: bool| Tools {
+            cli: Some(cli.clone()),
+            node: None,
+            npx: npx_here.then(|| npx.clone()),
+        };
+        let update = |t: &Tools, v: Option<&str>| -> Result<String, StartError> {
+            let t = update_tools(t.clone(), v, "0.8.1")?;
+            run_installer(
+                &t,
+                v,
+                "0.8.1",
+                ["service", "install"].map(String::from).to_vec(),
+                Duration::from_secs(5),
+                || false,
+                |_| {},
+            )
+        };
+        // Unknown version (its --version timed out or said nothing), or an older one, with
+        // npx: npx, never the CLI.
+        for v in [None, Some("0.7.2")] {
+            let out = update(&with(true), v).unwrap();
+            assert!(out.starts_with("npx -y --package="), "{v:?}: {out}");
+        }
+        // The same with no npx: nothing to run, said plainly, nothing changed.
+        for v in [None, Some("0.7.2")] {
+            match update(&with(false), v) {
+                Err(e) => assert_eq!(
+                    e.to_string(),
+                    "there is no sessionpipe-gui 0.8.1 or newer here, and no npx to download it; nothing was changed"
+                ),
+                other => panic!("{v:?}: {other:?}"),
+            }
+        }
+        assert!(!ran.exists(), "the old CLI ran");
+        // A CLI known to be at the app's version: it may run it.
+        assert_eq!(
+            update(&with(false), Some("0.8.1")).unwrap().trim(),
+            "cli service install"
+        );
     }
 
     #[test]

@@ -46,13 +46,16 @@ All notable changes to `sessionpipe-gui`. The format follows
   app's log says so and Settings › Data offers it as a click. A failure before the old
   receiver was stopped leaves it running; one after it (exit 4) is logged as that, and an
   `--if-installed` that did nothing (exit 5) is logged as nothing done. "Start sessionpipe"
-  and the click prefer the app's release through `npx` over an older CLI on PATH. When `npx`
-  can't download it (offline, GitHub blocked), the click changes nothing and says so;
-  "Start sessionpipe" uses the CLI on PATH instead only where that can't make the service
-  older (no service installed, or a CLI at least the version it runs). The app runs one
-  install at a time. An install that is still downloading when the app stops waiting
-  (180 s) is stopped with what it started; one whose `sessionpipe-gui` has begun is never
-  killed: the app stops waiting, says it is still finishing, and lets it end.
+  and the click prefer the app's release through `npx` over an older CLI on PATH. The click
+  runs a `sessionpipe-gui` on PATH only when its version is known and at least the app's;
+  when `npx` can't download it (offline, GitHub blocked), or there is nothing that could,
+  it changes nothing and says so. "Start sessionpipe" uses the CLI on PATH instead only
+  where that can't make the service older (no service installed, or a CLI at least the
+  version it runs). The app runs one install at a time. An install still downloading when
+  the app stops waiting (180 s) is stopped: on macOS and Linux with what `npx` started, on
+  Windows `npx` alone. One whose `sessionpipe-gui` has begun is never killed: the app stops
+  waiting and says it is still finishing, keeps reading what it prints until it ends, and
+  logs how it ended.
 - **In the app, an option the receiver is too old for says so** instead of the receiver's
   "HTTP 404". Settings › Data › "Use a spacesheep account" against a receiver older than
   0.7.5: "sessionpipe on this computer is 0.7.2, which is older than this option." with
