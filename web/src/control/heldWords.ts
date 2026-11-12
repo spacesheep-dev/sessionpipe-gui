@@ -4,15 +4,16 @@
 
 export const HELD_WORDS = {
   /** The notice's first line. */
-  title: "held",
+  title: "Confirm it's you to send this",
   /** When the receiver gave no reason. */
-  noReason: "held",
-  /** The button that confirms the one send; `signer` is signerLabel(). */
-  confirm: (signer: string) => `confirm (${signer})`,
+  noReason: "It needs a second look.",
+  /** The button that confirms the one send; `signer` is signerLabel(): "your passkey",
+   *  "Touch ID", "Face ID" or "your fingerprint". */
+  confirm: (signer: string) => `Confirm with ${signer}`,
   /** The button while the confirm is under way. */
-  confirming: "confirming",
-  /** The button that lets the held send go. */
-  drop: "drop",
+  confirming: "Confirming…",
+  /** The button that lets the held send go; the words stay where they were typed. */
+  drop: "Never mind",
 };
 
 /** The receiver's reason as one sentence: its first letter up, a full stop at the end. */
