@@ -196,11 +196,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   Program Files, `%APPDATA%\npm`, nvm-windows, Volta and Scoop; runs the scripts behind
   npm's `.cmd` shims under node; and starts them with no console window. It takes only the
   absolute folders of PATH, for the search and for the PATH it hands the installer, so a
-  `.` there is never where it finds `node.exe`. Until `sessionpipe-gui service install`
-  works on Windows (#100) the button stops at that command's words: "It didn't start: a
-  background service on Windows is not here yet…". With a receiver started in a terminal,
-  the app, opened again, finds it on this computer (it looked for it only under HOME,
-  which Windows doesn't set, and showed the welcome instead).
+  `.` there is never where it finds `node.exe`. The button then runs `sessionpipe-gui
+  service install` (the scheduled task above) and opens the board. Opened again, the app
+  finds the receiver on this computer (it looked for it only under HOME, which Windows
+  doesn't set, and showed the welcome instead).
 - **The Windows app's updater reads update archives with `zip` 9.5.1** (it was 4.6.1), which
   has the fixes for an archive whose two headers disagree writing files outside the update
   folder (GHSA-m665-v7pm-7grj, CVE-2026-115905), a symlink target that aborts extraction or
