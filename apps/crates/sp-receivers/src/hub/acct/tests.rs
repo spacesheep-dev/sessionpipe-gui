@@ -316,6 +316,11 @@ async fn a_connect_the_person_approves_puts_the_key_in_the_hub_alone() {
     let t = TempDir::new("acct-ok");
     let fake = Fake::start("approved").await;
     let h = hub_in(t.path());
+    assert_eq!(
+        h.account_origin_to_confirm(Some(&fake.origin())),
+        Some(fake.origin()),
+        "another origin than spacesheep.dev is the person's to confirm first"
+    );
     let view = h.account_connect_start(Some(&fake.origin())).await.unwrap();
     assert_eq!(view.digits, "4821");
     assert_eq!(view.state, ConnectState::Pending);
@@ -342,6 +347,24 @@ async fn a_connect_the_person_approves_puts_the_key_in_the_hub_alone() {
     assert_eq!(first.header("authorization"), None);
     assert_eq!(first.header("cookie"), None);
     assert_eq!(first.header("user-agent"), Some("sp-test/0.8.0"));
+
+    // Not spacesheep.dev: the shell asks the person before a connect starts, and not
+    // again for the one that is pending.
+    assert_eq!(h.account_origin_to_confirm(Some(&fake.origin())), None);
+    assert_eq!(
+        h.account_origin_to_confirm(Some("https://Stagesheep.dev/"))
+            .as_deref(),
+        Some("https://stagesheep.dev")
+    );
+    for none in [
+        None,
+        Some(""),
+        Some("https://spacesheep.dev"),
+        Some("https://spacesheep.dev/"),
+        Some("http://evil.example"),
+    ] {
+        assert_eq!(h.account_origin_to_confirm(none), None, "{none:?}");
+    }
 
     // The Hub polls on its own; pressing Connect again is the same connect, not a second.
     until("two polls", || {

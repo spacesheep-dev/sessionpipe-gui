@@ -31,6 +31,25 @@ pub fn add_receiver(os: crate::contract::Os, origin: &str, pinned: bool) -> Ask 
     }
 }
 
+/// The words for connecting an account anywhere but spacesheep.dev (a local or a
+/// self-hosted spacesheep). spacesheep.dev confirms a connect on its own page; another
+/// server's confirm page is that server's, so the person is asked here first.
+pub fn connect_account(os: crate::contract::Os, origin: &str) -> Ask {
+    let host = origin.split("://").nth(1).unwrap_or(origin);
+    let device = match os {
+        crate::contract::Os::Ios => "This iPhone",
+        crate::contract::Os::Android => "This phone",
+    };
+    Ask {
+        title: "Use an account on this server?".into(),
+        message: format!(
+            "{device} will ask {host} for an account and show its sessions. It is not spacesheep.dev: continue only if you know this server."
+        ),
+        ok: "Continue",
+        cancel: "Cancel",
+    }
+}
+
 /// Shows the alert over the app and waits for the answer. False when it can't be shown.
 pub async fn ask<R: Runtime>(app: &AppHandle<R>, a: &Ask) -> bool {
     #[cfg(target_os = "ios")]
@@ -99,5 +118,14 @@ mod tests {
             super::add_receiver(Os::Android, "http://192.168.1.4:7373", false).message,
             "This phone will show the sessions on 192.168.1.4:7373."
         );
+    }
+
+    #[test]
+    fn an_account_elsewhere_is_named_by_its_host() {
+        use crate::contract::Os;
+        let a = super::connect_account(Os::Ios, "https://stagesheep.dev");
+        assert_eq!(a.title, "Use an account on this server?");
+        assert_eq!(a.message, "This iPhone will ask stagesheep.dev for an account and show its sessions. It is not spacesheep.dev: continue only if you know this server.");
+        assert_eq!((a.ok, a.cancel), ("Continue", "Cancel"));
     }
 }

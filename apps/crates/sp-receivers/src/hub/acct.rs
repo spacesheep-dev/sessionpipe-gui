@@ -603,6 +603,32 @@ impl Hub {
 
     // ---- connecting ----
 
+    /// The origin a connect would go to, when the shell must ask the person first, in UI
+    /// the page cannot draw: any origin but spacesheep.dev. There the confirm page is
+    /// spacesheep's own; anywhere else it is that server's, which could say yes to itself
+    /// and so put an entry in the list with nobody asked. None for the default origin, for
+    /// one that is no origin (the start says so itself), and for a connect already
+    /// pending there (the person was asked when it started).
+    pub fn account_origin_to_confirm(&self, origin: Option<&str>) -> Option<String> {
+        let cfg = self.account_cfg();
+        if !cfg.enabled {
+            return None;
+        }
+        let o = account::clean_origin(origin, cfg.allow_local_http)?;
+        if o == account::DEFAULT_ORIGIN {
+            return None;
+        }
+        let pending = self
+            .0
+            .acct
+            .connect
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|p| p.state == ConnectState::Pending && p.origin == o);
+        (!pending).then_some(o)
+    }
+
     /// Asks spacesheep for a connect code and starts polling for the person's answer.
     /// The page gets the digits to show, the link to open in the system browser and when
     /// it expires. A connect already pending for the same origin is returned as it is.

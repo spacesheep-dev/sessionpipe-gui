@@ -189,7 +189,9 @@ The event `account` carries `acct_status`'s value whenever it changes.
 
 **Connecting.** `origin` is https and nothing but an origin; absent, it is
 `https://spacesheep.dev`. (`http://localhost` and `http://127.0.0.1` are origins in a
-debug build only.) The hub asks `POST <origin>/api/gui/connect` as
+debug build only.) spacesheep.dev confirms a connect on its own page; for any other
+origin the app first asks the person in a native alert, as `rx_add` does, so nothing the
+page asks for adds an entry to the list on its own. The hub asks `POST <origin>/api/gui/connect` as
 `{ device: "iPhone", version }` (the page does not choose the name) and hands back the
 digits to show, the link to open and when it expires. The link is on the account's own
 origin or the connect fails. The page opens it with `app_open_external`. The poll token
@@ -205,7 +207,8 @@ closed while the person confirmed in the browser; coming back to the front polls
 On `approved` the page calls `rx_select(receiver)`, as after `rx_add`. A second start
 while one is pending for the same origin returns the same connect.
 
-Start's errors: `unsupported` (no account mode in this build), `bad_origin`,
+Start's errors: `unsupported` (no account mode in this build), `bad_origin`, `cancelled`
+(the person said no to another origin),
 `already_connected` (an account at that origin is `ok`: disconnect first; one that is
 `unauthorized` or `no_key` may connect again, and the same person keeps their id and
 documents), `unreachable`, `rate_limited` (with `retryAfterS`), `refused` (not a 201),

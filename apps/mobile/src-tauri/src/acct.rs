@@ -43,13 +43,24 @@ pub fn acct_status<R: Runtime>(
 /// digits and opens the link with `app_open_external`; the Hub polls until the person
 /// answers there, and says so in the `account` event and `acct_status`. On `approved` the
 /// page calls `rx_select` with the receiver id it was given, as after `rx_add`.
+///
+/// spacesheep.dev confirms a connect on its own page. Any other origin is confirmed here
+/// first, in a native alert: as with `rx_add`, nothing the page asks for puts an entry
+/// in the list without the person saying so where the page cannot draw or click.
 #[tauri::command]
 pub async fn acct_connect_start<R: Runtime>(
+    app: AppHandle<R>,
     webview: Webview<R>,
     hub: State<'_, Hub>,
     origin: Option<String>,
 ) -> Result<ConnectView, Problem> {
     gate(&webview)?;
+    if let Some(o) = hub.account_origin_to_confirm(origin.as_deref()) {
+        let ask = crate::confirm::connect_account(crate::contract::Os::current(), &o);
+        if !crate::confirm::ask(&app, &ask).await {
+            return Err(Problem::new("cancelled", "Cancelled."));
+        }
+    }
     hub.account_connect_start(origin.as_deref()).await
 }
 
