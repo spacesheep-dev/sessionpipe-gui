@@ -674,13 +674,31 @@ describe("the Windows scheduled task", () => {
     expect(text).toContain("<WorkingDirectory>C:\\Users\\Connor B\\sp state</WorkingDirectory>");
     // The redirect first: cmd /c would drop the first and last quote of a line starting with one.
     expect(taskArguments(spec)).toBe(
-      '--headless cmd.exe /d /c >> "C:\\Users\\Connor B\\sp state\\service.log" 2>&1 "C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Connor B\\AppData\\Roaming\\npm\\node_modules\\sessionpipe-gui\\dist\\cli.js" --port 7828 --state "C:\\Users\\Connor B\\sp state" --quiet',
+      '--headless cmd.exe /d /v:off /c >> "C:\\Users\\Connor B\\sp state\\service.log" 2>&1 "C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Connor B\\AppData\\Roaming\\npm\\node_modules\\sessionpipe-gui\\dist\\cli.js" --port 7828 --state "C:\\Users\\Connor B\\sp state" --quiet',
     );
+  });
+
+  it("carries a ! in a path as it is: cmd runs with /v:off, so it reads no !name! where the registry turns delayed expansion on", () => {
+    const bang = {
+      argv: ["C:\\n\\node.exe", "C:\\n\\cli.js", "--state", "C:\\Users\\wow!\\s!"],
+      logPath: "C:\\Users\\wow!\\s!\\service.log",
+    };
+    expect(unsafeWord([...bang.argv, bang.logPath])).toBeUndefined();
+    expect(taskArguments(bang)).toBe(
+      "--headless cmd.exe /d /v:off /c >> C:\\Users\\wow!\\s!\\service.log 2>&1 C:\\n\\node.exe C:\\n\\cli.js --state C:\\Users\\wow!\\s!",
+    );
+    expect(taskArgv(taskXml({ ...spec, ...bang }))).toEqual(bang.argv);
   });
 
   it("reads the receiver's argv back from its own task, and any other task's action as it is", () => {
     expect(taskArgv(taskXml(spec))).toEqual(spec.argv);
     expect(isOurs(taskArgv(taskXml(spec)))).toBe(true);
+    // The task 0.8.0 installed: the same line with no /v:off. It is still ours.
+    const v080 = taskXml(spec).replace("cmd.exe /d /v:off /c", "cmd.exe /d /c");
+    expect(v080).toContain("<Arguments>--headless cmd.exe /d /c &gt;&gt; &quot;C:");
+    expect(taskXml(spec)).toContain("<Arguments>--headless cmd.exe /d /v:off /c &gt;&gt; &quot;C:");
+    expect(taskArgv(v080)).toEqual(spec.argv);
+    expect(isOurs(taskArgv(v080))).toBe(true);
     const other = "<Exec><Command>C:\\x\\backup.exe</Command><Arguments>--all &quot;D:\\a b&quot;</Arguments></Exec>";
     expect(taskArgv(other)).toEqual(["C:\\x\\backup.exe", "--all", "D:\\a b"]);
     expect(isOurs(taskArgv(other))).toBe(false);
@@ -875,6 +893,36 @@ describe("service on Windows", () => {
     ]);
     expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
     expect(taskArgv(readFileSync(path.join(dir, "task.xml"), "utf8"))[1]).toContain("AppData");
+  });
+
+  it("knows the task 0.8.0 installed (no /v:off) as ours: left alone while it answers with the same options, rewritten with /v:off when install next changes it", async () => {
+    const e = win({}, "gui", "0.8.0");
+    const state = path.join(dir, "s");
+    const argv = [e.node, e.cli, "--port", "7829", "--state", state, "--quiet"];
+    const v080 = taskXml({
+      description: "d",
+      user: e.user,
+      argv,
+      logPath: path.join(state, "service.log"),
+      workingDirectory: state,
+    }).replace("cmd.exe /d /v:off /c", "cmd.exe /d /c");
+    expect(v080).toContain("<Arguments>--headless cmd.exe /d /c &gt;&gt; ");
+    writeFileSync(path.join(dir, "task.xml"), v080);
+    writeFileSync(path.join(dir, "task.status"), "Running");
+    // The same node, cli and options, and it answers: nothing to do, the task is not touched.
+    expect(await runService({ verb: "install" }, e)).toBe(0);
+    expect(out).toEqual(["already running 0.8.0 on http://127.0.0.1:7829"]);
+    expect(readFileSync(path.join(dir, "task.xml"), "utf8")).toBe(v080);
+    expect(calls().filter((c) => !c.includes("/Query"))).toEqual([]);
+    // Its options are read (status), and the next change (a port here; a new node or cli path
+    // does the same) rewrites it with /v:off, on the state dir it had.
+    out = [];
+    expect(await runService({ verb: "status" }, e)).toBe(0);
+    expect(out).toContain("port      7829");
+    expect(await runService({ verb: "install", port: 7830 }, win({}, null))).toBe(0);
+    const now = readFileSync(path.join(dir, "task.xml"), "utf8");
+    expect(now).toContain("<Arguments>--headless cmd.exe /d /v:off /c &gt;&gt; ");
+    expect(taskArgv(now)).toEqual([e.node, e.cli, "--port", "7830", "--state", state, "--quiet"]);
   });
 
   it("leaves the pid in run.json alone when it is another program's by now, or nobody's", async () => {

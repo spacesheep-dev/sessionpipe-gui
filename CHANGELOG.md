@@ -14,6 +14,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   It starts `schtasks`, `taskkill` and PowerShell from `%SystemRoot%\System32` by their full
   paths. They were started by bare name, which is looked for first in the folder the command
   is run from, so a `schtasks.exe` lying there would have been run in their place.
+  A `!` in the state folder's path is kept where the registry turns cmd's delayed expansion
+  on: the task now runs the receiver through `cmd /v:off`. Without it cmd reads a `!` there
+  as the start of a variable name, and the receiver would be started on another folder or
+  not at all. A task that 0.8.0 installed gets the new line the next time `service install`
+  rewrites it (a new Node or package path, a changed option, or a receiver that is not
+  running), or at once with `service uninstall` then `service install`.
 
 ## [0.8.0] - 2026-11-11
 

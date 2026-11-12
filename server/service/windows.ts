@@ -12,6 +12,12 @@
 // quoting each one that holds a space and escaping any quote inside one as \" (which cmd
 // doesn't read). So the line is plain words, each path quoted on its own, and it starts with
 // the redirect: cmd /c drops the first and last quote of a line that starts with one.
+//
+// cmd runs with `/v:off`. `/d` skips AutoRun only: where the registry turns delayed expansion
+// on (DelayedExpansion under Command Processor), cmd reads `!name!` in the line as a
+// variable and drops a lone `!`, in quotes or out, so a state dir with a `!` in its path
+// would not reach the receiver as written. A task 0.8.0 installed has no `/v:off`; taskArgv
+// reads both.
 import path from "node:path";
 
 export interface TaskSpec {
@@ -53,9 +59,9 @@ export function unsafeWord(words: string[]): string | undefined {
 
 const word = (s: string): string => (/\s/.test(s) ? `"${s}"` : s);
 
-/** `--headless cmd.exe /d /c >> "<log>" 2>&1 <argv>`: what conhost runs, no window. */
+/** `--headless cmd.exe /d /v:off /c >> "<log>" 2>&1 <argv>`: what conhost runs, no window. */
 export function taskArguments(s: Pick<TaskSpec, "argv" | "logPath">): string {
-  return `--headless cmd.exe /d /c >> ${word(s.logPath)} 2>&1 ${s.argv.map(word).join(" ")}`;
+  return `--headless cmd.exe /d /v:off /c >> ${word(s.logPath)} 2>&1 ${s.argv.map(word).join(" ")}`;
 }
 
 /** The task definition `schtasks /Create /XML` takes (written UTF-16 with a byte-order mark). */
@@ -104,13 +110,16 @@ const words = (line: string): string[] =>
   [...line.matchAll(/"([^"]*)"|(\S+)/g)].map((m) => (m[1] !== undefined ? m[1] : m[2]!));
 
 /** The receiver's argv read back from `schtasks /Query /XML`: ours unwrapped from conhost,
- *  cmd and the log redirect; any other task's action as its program and words. */
+ *  cmd and the log redirect, with `/v:off` or (a task 0.8.0 installed) without it; any other
+ *  task's action as its program and words. */
 export function taskArgv(text: string): string[] {
   const command = unxml(/<Command>([^<]*)<\/Command>/.exec(text)?.[1] ?? "").trim();
   const args = unxml(/<Arguments>([^<]*)<\/Arguments>/.exec(text)?.[1] ?? "").trim();
   const w = words(args);
-  const ours = w[0] === "--headless" && /^cmd(\.exe)?$/i.test(w[1] ?? "") && w[2] === "/d" && w[3] === "/c";
-  if (/(^|[\\/])conhost(\.exe)?$/i.test(command) && ours && w[4] === ">>" && w[6] === "2>&1") return w.slice(7);
+  const c = w[3] === "/v:off" ? 4 : 3;
+  const ours = w[0] === "--headless" && /^cmd(\.exe)?$/i.test(w[1] ?? "") && w[2] === "/d" && w[c] === "/c";
+  if (/(^|[\\/])conhost(\.exe)?$/i.test(command) && ours && w[c + 1] === ">>" && w[c + 3] === "2>&1")
+    return w.slice(c + 4);
   return command ? [command.replace(/^"|"$/g, ""), ...words(args)] : [];
 }
 
