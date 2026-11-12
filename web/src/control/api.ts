@@ -75,6 +75,9 @@ export interface SendBody {
   csig?: string;
   grant?: GrantBundle | (DeviceSignature & { str: string });
   confirm?: Assertion | DeviceSignature;
+  /** Beside a confirm on a `key.add` for a machine paired on spacesheep: the number the
+   *  person compared (one to eight digits). Unsigned: spacesheep's own check. */
+  match?: string;
   expires_in_s?: number;
   /** The session whose page sends it: unsigned, the receiver's own note on the activity. */
   from?: SessionKey;

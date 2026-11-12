@@ -20,6 +20,7 @@ import {
   forwardRemoteSend,
   type KeptQueues,
   MemoryControl,
+  matchOf,
   newUlid,
   type RemoteSend,
   remoteJobOf,
@@ -771,6 +772,42 @@ describe("the control state of a page", () => {
     expect(saves).toBeGreaterThan(before);
     expect(saved[M1]!.map((r) => r.session)).toEqual(["claude-code:s-3", "claude-code:s-4"]);
     expect(control.activity().map((a) => a.session)).toEqual(["claude-code:s-4", "claude-code:s-3"]);
+  });
+
+  it("passes the number a person matched beside a confirm, and nowhere else", async () => {
+    const control = new MemoryControl();
+    control.remote.setRemoteAccount(ME);
+    control.remote.upsertRemoteMachines([listed(M1, "lab-mac")] as never, remote);
+    const m = control.machine(M1)!;
+    const sent: Record<string, unknown>[] = [];
+    const carry: RemoteSend = async (_m, b) => {
+      sent.push(b);
+      return { status: 202, json: { job: sent.length } };
+    };
+    const { cmd } = command(M1, "prompt", "claude-code:s-1");
+    const confirm = { cred: "k1", sig: "s" };
+    await control.send(m, { cmd, confirm, match: "0417" }, carry);
+    await control.send(m, { cmd, confirm, match: 71 }, carry);
+    // Not digits, too long, or no confirm to ride beside: it does not go.
+    await control.send(m, { cmd, confirm, match: "12 34" }, carry);
+    await control.send(m, { cmd, confirm, match: "123456789" }, carry);
+    await control.send(m, { cmd, csig: "s", grant: { str: "g", cred: "k1", sig: "s" }, match: "0417" }, carry);
+    expect(sent.map((b) => b.match)).toEqual(["0417", 71, undefined, undefined, undefined]);
+    expect(sent.map((b) => Object.keys(b).sort().join())).toEqual([
+      "cmd,confirm,csig,grant,match",
+      "cmd,confirm,csig,grant,match",
+      "cmd,confirm,csig,grant",
+      "cmd,confirm,csig,grant",
+      "cmd,confirm,csig,grant",
+    ]);
+    expect([matchOf("1"), matchOf("12345678"), matchOf(""), matchOf(-1), matchOf(1.5), matchOf(null)]).toEqual([
+      "1",
+      "12345678",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
   });
 
   it("reads back only queues of machines with a row spacesheep carried, trimmed as a queue is kept", () => {
