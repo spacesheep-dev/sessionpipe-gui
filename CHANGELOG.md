@@ -43,7 +43,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   stayed on this app's disk, spacesheep looked for it in its own store and refused the
   start, and the person was told to add the file again. The new session sheet no longer
   offers files there, and a session's message box offers images only when that computer is
-  this one (the block names files on this disk), until there is a way to carry one.
+  this one (the block names files on this disk), until there is a way to carry one. A
+  send that names files for such a computer anyway is refused here (code `relay_files`),
+  never carried to spacesheep.
 - **Events spacesheep no longer holds are reported as a gap.** The gap was noted only when
   a page came back empty, but spacesheep answers everything after the cursor that it still
   holds, so an app that was off longer than spacesheep keeps events (7 days, 50 000 events)

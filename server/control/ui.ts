@@ -271,6 +271,8 @@ export async function verifySend(d: Pick<UiRouteDeps, "state" | "rpId">, raw: un
 
 /** The code of a send spacesheep refused because it no longer takes this app's key. */
 export const SPACESHEEP_UNAUTHORIZED = "spacesheep_unauthorized";
+/** The code of a send for a spacesheep computer that names files: none can be carried there. */
+export const RELAY_FILES = "relay_files";
 
 /** A send for a machine paired on spacesheep: not verified here (its keys are ids only,
  *  its rp id is spacesheep's), carried to spacesheep's jobs route, which verifies it
@@ -291,6 +293,11 @@ async function forwardSend(
   } catch {
     throw new HttpError(400, { reason: "bad_request", error: "cmd is not JSON." });
   }
+  // A file a send names is held on this disk, and spacesheep looks for it in its own store:
+  // none can be carried there yet (the pages offer none), so a page that sends one is told
+  // here, before spacesheep answers that it "didn't finish uploading".
+  const files = (cmd as ControlCommand & { files?: unknown }).files;
+  if (Array.isArray(files) && files.length) throw new HttpError(422, { reason: RELAY_FILES, code: RELAY_FILES });
   const signed: SignedCommand = { cmd: body.cmd };
   if (typeof body.csig === "string") signed.csig = body.csig;
   if (body.grant && typeof body.grant === "object") signed.grant = body.grant as SignedCommand["grant"];
