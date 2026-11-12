@@ -1872,6 +1872,20 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
+    /// The app's one-install guard (INSTALLING, ORPHANS) is the process's, and cargo runs
+    /// tests side by side: the tests that take it, or leave an installer running past its
+    /// wait, hold this while they run, and start only once nothing of an earlier one is
+    /// still counted.
+    static GUARD_TESTS: Mutex<()> = Mutex::new(());
+    fn alone_with_the_guard() -> std::sync::MutexGuard<'static, ()> {
+        let held = GUARD_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let until = Instant::now() + Duration::from_secs(10);
+        while busy() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        held
+    }
+
     struct Temp(PathBuf);
     impl Temp {
         fn new(tag: &str) -> Temp {
@@ -2795,6 +2809,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn once_our_cli_has_spoken_a_timeout_stops_waiting_and_never_kills_it() {
+        let _alone = alone_with_the_guard();
         let d = Temp::new("spoke");
         let done = d.0.join("finished");
         let cli = d.0.join("cli");
@@ -2825,6 +2840,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn an_installer_the_app_stopped_waiting_for_keeps_printing_and_ends_with_its_verdict() {
+        let _alone = alone_with_the_guard();
         let d = Temp::new("orphan-out");
         let done = d.0.join("ended");
         let cli = d.0.join("cli");
@@ -2933,6 +2949,7 @@ mod tests {
 
     #[test]
     fn one_install_at_a_time_in_the_app() {
+        let _alone = alone_with_the_guard();
         // (ORPHANS from another test may still be counted: wait for them.)
         let until = Instant::now() + Duration::from_secs(5);
         while busy() && Instant::now() < until {
@@ -3054,6 +3071,7 @@ mod tests {
 
     #[test]
     fn checks_this_computer_s_receiver_and_acts_only_on_an_older_one() {
+        let _alone = alone_with_the_guard();
         let d = Temp::new("check");
         // Its info says 0.8.0 (its package was replaced under it); it started as 0.7.2.
         let port = receiver_answering("0.8.0", "2026-11-12T10:00:00.000Z");
@@ -3174,6 +3192,7 @@ mod tests {
     #[test]
     #[ignore]
     fn live_brings_an_older_service_up_to_the_app() {
+        let _alone = alone_with_the_guard();
         let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k} unset"));
         assert_ne!(var("SP_SERVICE_LABEL"), "dev.spacesheep.sessionpipe-gui");
         assert!(!var("SP_LAUNCHCTL").is_empty());
