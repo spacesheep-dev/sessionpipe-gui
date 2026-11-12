@@ -245,6 +245,10 @@ describe("OrchestrateStore", () => {
         b: { status: "pending" },
       }),
     ],
+    [
+      "a session that is not text",
+      planned("01K8RUN0000000000000BAD12", [step("a")], { a: { status: "done", session: 5 } }),
+    ],
     // The run's status is read from every entry: a pending one no step names never ends.
     [
       "an entry in steps that no plan step names",
@@ -323,6 +327,19 @@ describe("OrchestrateStore", () => {
         .runs.map((r: WorkflowRun) => r.id)
         .sort(),
     ).toEqual(["01K8RUN000000000000000AAAA", "01K8RUN000000000000000BBBB", GOOD].sort());
+  });
+
+  it("does not write back a duplicate of a run that is gone, while the file cannot be set aside", () => {
+    const file = path.join(tmp.dir, "workflow-runs.json");
+    writeFileSync(file, JSON.stringify({ v: 1, runs: [good, { ...good, rev: 2 }, broken[1]![1]] }));
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+    mkdirSync(`${file}.bad-1700000000000`);
+    const store = new OrchestrateStore(tmp.dir);
+    expect(store.deleteRun(GOOD)).toBe(true);
+    now.mockRestore();
+    const runs = JSON.parse(readFileSync(file, "utf8")).runs;
+    expect(runs).toEqual([broken[1]![1]]);
+    expect(new OrchestrateStore(tmp.dir).run(GOOD)).toBeUndefined();
   });
 
   it("reads back every run the server writes, also one with a step called __proto__", () => {
