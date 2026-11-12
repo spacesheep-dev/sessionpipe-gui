@@ -23,6 +23,15 @@ All notable changes to `sessionpipe-gui`. The format follows
   `/api/ui/info` with the new version while it ran the old code, and nothing could tell it
   was stale. `service install` takes the version from `run.json` (written once, at start),
   so it also restarts a receiver of 0.8.0 or earlier that answers with the wrong one.
+- **The desktop app brings an older receiver on this computer up to its own version.** An
+  app that updated itself kept talking to the receiver it had, which still ran the version
+  that installed it. Once per launch, when the local receiver first connects and runs an
+  older version than the app, the app runs `service install --if-installed` in the
+  background: the service is upgraded in place, with its port and state folder, and none is
+  installed where there was none. It is written to the app's log; when it fails the old
+  receiver keeps running. A `sessionpipe-gui` on PATH older than the app is passed over
+  for `npx` and the app's own release, here and in "Start sessionpipe", so the service then
+  runs from npx's cache, not from that global install, which stays as it was.
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH
