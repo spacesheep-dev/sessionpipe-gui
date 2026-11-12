@@ -54,12 +54,14 @@ export function utf8Bytes(s: string): number {
   return n;
 }
 
-/** Full events in memory, per session, in the order they came: a session's `offset` is
- *  the event's place in its list. */
+/** Full events in memory, per session, in the order they came: each kept as its JSON line,
+ *  as the files keep it, and read back by parsing that line. So a reader gets its own
+ *  copy (what it changes is not what the log keeps), an event reads back as it would from
+ *  a file (no `undefined` fields), and a session's `offset` is the line's place in its list. */
 export class MemoryLog implements EventLog {
-  private readonly sessions = new Map<string, StoredEvent[]>();
+  private readonly sessions = new Map<string, string[]>();
 
-  private list(harness: string, id: string): StoredEvent[] {
+  private list(harness: string, id: string): string[] {
     const key = `${harness}\u0000${id}`;
     let list = this.sessions.get(key);
     if (!list) {
@@ -71,28 +73,28 @@ export class MemoryLog implements EventLog {
 
   /** Events kept from an earlier run, in the order they were appended, before the store boots. */
   seed(events: Iterable<StoredEvent>): void {
-    for (const e of events) this.list(e.harness.name, e.session.id).push(e);
+    for (const e of events) this.list(e.harness.name, e.session.id).push(JSON.stringify(e));
   }
 
   scanEach(visit: (file: LogFileInfo, line: LogLine) => void): LogFileInfo[] {
     const out: LogFileInfo[] = [];
     for (const list of this.sessions.values()) {
-      const first = list[0];
-      if (!first) continue;
-      const info: LogFileInfo = {
-        harness: first.harness.name,
-        id: first.session.id,
-        size: 0,
-        lines: 0,
-        firstArrivedAt: first.arrivedAt,
-      };
-      list.forEach((event, offset) => {
-        const bytes = utf8Bytes(JSON.stringify(event));
+      let info: LogFileInfo | undefined;
+      list.forEach((text, offset) => {
+        const event = JSON.parse(text) as StoredEvent;
+        const bytes = utf8Bytes(text);
+        info ??= {
+          harness: event.harness.name,
+          id: event.session.id,
+          size: 0,
+          lines: 0,
+          firstArrivedAt: event.arrivedAt,
+        };
         info.size += bytes + 1;
         info.lines++;
         visit(info, { event, offset, bytes });
       });
-      out.push(info);
+      if (info) out.push(info);
     }
     return out;
   }
@@ -102,9 +104,10 @@ export class MemoryLog implements EventLog {
     const lines: LogLine[] = [];
     let total = size;
     for (const event of events) {
-      const bytes = utf8Bytes(JSON.stringify(event));
+      const text = JSON.stringify(event);
+      const bytes = utf8Bytes(text);
       lines.push({ event, offset: list.length, bytes });
-      list.push(event);
+      list.push(text);
       total += bytes + 1;
     }
     return { lines, size: total };
@@ -112,7 +115,10 @@ export class MemoryLog implements EventLog {
 
   readAt(harness: string, id: string, at: { offset: number; bytes: number }[]): (StoredEvent | undefined)[] {
     const list = this.sessions.get(`${harness}\u0000${id}`);
-    return at.map(({ offset }) => list?.[offset]);
+    return at.map(({ offset }) => {
+      const text = list?.[offset];
+      return text === undefined ? undefined : (JSON.parse(text) as StoredEvent);
+    });
   }
 
   remove(harness: string, id: string): void {
