@@ -77,8 +77,9 @@ pub fn acct_disconnect<R: Runtime>(
     hub.account_disconnect(&id)
 }
 
-/// One of the account's documents, or null.
-#[tauri::command]
+/// One of the account's documents, or null. (The documents' commands read and write a
+/// file of up to a megabyte: off the main thread.)
+#[tauri::command(async)]
 pub fn acct_doc_get<R: Runtime>(
     webview: Webview<R>,
     hub: State<'_, Hub>,
@@ -90,7 +91,7 @@ pub fn acct_doc_get<R: Runtime>(
 }
 
 /// Writes a document whole; its size in bytes.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn acct_doc_set<R: Runtime>(
     webview: Webview<R>,
     hub: State<'_, Hub>,
@@ -103,7 +104,7 @@ pub fn acct_doc_set<R: Runtime>(
 }
 
 /// Removes a document; false when there was none.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn acct_doc_delete<R: Runtime>(
     webview: Webview<R>,
     hub: State<'_, Hub>,

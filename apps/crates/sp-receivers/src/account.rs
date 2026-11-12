@@ -32,8 +32,10 @@ pub const EXPOSE_HEADERS: &str = "content-type, retry-after, x-sessionpipe-hub";
 /// spacesheep holds an empty relay poll at most this long (its `RELAY_WAIT_MAX_S`).
 pub const RELAY_WAIT_MAX_S: u64 = 25;
 pub const RELAY_PAGE_MAX: u64 = 500;
-/// The Hub's own limit for a relay request is the wait it asked for plus this.
-pub const RELAY_GRACE_S: u64 = 10;
+/// The Hub's own limit for a relay request is the wait it asked for plus this: the time
+/// to reach spacesheep and to read a page of events on a slow network (the Hub asks for
+/// no compression, so a full page is a few hundred kilobytes).
+pub const RELAY_GRACE_S: u64 = 20;
 /// Every other door, and connect and its poll.
 pub const REQUEST_TIMEOUT_S: u64 = 15;
 /// JavaScript's largest exact integer: a relay cursor or a job id is at most this.
@@ -848,7 +850,7 @@ mod tests {
             Ok((Door::DeviceStatus, format!("/api/gui/device?id={id}")))
         );
         let o = open_door("GET", "/api/sessionpipe/v1/relay?wait=25").unwrap();
-        assert_eq!((o.wait_s, o.timeout_s()), (25, 35));
+        assert_eq!((o.wait_s, o.timeout_s()), (25, 45));
         assert_eq!(open_door("GET", RELAY_JOBS).unwrap().timeout_s(), 15);
     }
 

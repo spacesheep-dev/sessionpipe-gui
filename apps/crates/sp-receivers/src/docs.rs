@@ -9,7 +9,7 @@
 //! of the relay).
 
 use crate::account::Problem;
-use crate::registry::write_atomic;
+use crate::registry::write_private;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -132,8 +132,7 @@ impl Docs {
         std::fs::create_dir_all(&dir).map_err(io)?;
         owner_only(&self.root, 0o700);
         owner_only(&dir, 0o700);
-        write_atomic(&path, &bytes).map_err(io)?;
-        owner_only(&path, 0o600);
+        write_private(&path, &bytes).map_err(io)?;
         Ok(bytes.len())
     }
 

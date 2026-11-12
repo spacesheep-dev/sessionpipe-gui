@@ -216,6 +216,32 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
+/// `write_atomic` for a file that holds a secret or the person's own notes: it is its
+/// owner's alone from the moment it exists, not from a moment after it was written.
+pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+        // A leftover of the same name would keep the mode it had.
+        let _ = std::fs::remove_file(&tmp);
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        f.write_all(bytes)?;
+        drop(f);
+        std::fs::rename(&tmp, path)
+    }
+    #[cfg(not(unix))]
+    write_atomic(path, bytes)
+}
+
 /// The name an account's key has in a key store. A receiver's key is under its bare id
 /// (ten characters of base32); nothing that looks a key up by id can reach this one.
 pub fn account_key_name(id: &str) -> String {
@@ -260,13 +286,7 @@ impl KeyStore {
             KeyStore::File(p) => {
                 let mut all = Self::read_file(p);
                 all.insert(id.into(), key.into());
-                write_atomic(p, &serde_json::to_vec_pretty(&all).expect("json"))?;
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o600));
-                }
-                Ok(())
+                write_private(p, &serde_json::to_vec_pretty(&all).expect("json"))
             }
             KeyStore::Memory(m) => {
                 m.lock().unwrap().insert(id.into(), key.into());
@@ -281,7 +301,7 @@ impl KeyStore {
             KeyStore::File(p) => {
                 let mut all = Self::read_file(p);
                 if all.remove(id).is_some() {
-                    write_atomic(p, &serde_json::to_vec_pretty(&all).expect("json"))?;
+                    write_private(p, &serde_json::to_vec_pretty(&all).expect("json"))?;
                 }
                 Ok(())
             }
@@ -326,6 +346,104 @@ mod tests {
         let mut again = again;
         assert!(again.remove(&r.id).unwrap());
         assert_eq!(Registry::load(t.path()).active(), None);
+    }
+
+    /// The key file is its owner's alone when it appears and after every change, also
+    /// when a looser one was there before.
+    #[cfg(unix)]
+    #[test]
+    fn file_keys_are_their_owners_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let t = TempDir::new("keys-mode");
+        let p = t.path().join("keys.json");
+        let mode = || std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        std::fs::write(&p, b"{}").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let ks = KeyStore::File(p.clone());
+        ks.set("a", "k1").unwrap();
+        assert_eq!(mode(), 0o600);
+        ks.set(&account_key_name("b"), "k2").unwrap();
+        ks.delete("a").unwrap();
+        assert_eq!(mode(), 0o600);
+        assert_eq!(ks.get("acct:b").as_deref(), Some("k2"));
+        assert_eq!(
+            ks.get("b"),
+            None,
+            "an account's key is not under the bare id"
+        );
+        assert_eq!(
+            std::fs::read_dir(t.path()).unwrap().count(),
+            1,
+            "no temporary file left"
+        );
+    }
+
+    /// A list written before kinds existed reads as receivers and is written back as it
+    /// was; an account's entry says its kind; a kind from a newer version neither breaks
+    /// the list nor becomes a receiver.
+    #[test]
+    fn kinds_in_the_list() {
+        let t = TempDir::new("registry-kinds");
+        let old = r#"{ "receivers": [ { "id": "abcdefghij", "name": "studio", "origin": "http://192.168.1.9:7373", "local": false } ], "active": "abcdefghij" }"#;
+        std::fs::write(t.path().join("receivers.json"), old).unwrap();
+        let mut reg = Registry::load(t.path());
+        assert_eq!(reg.list()[0].kind, Kind::Receiver);
+        assert!(!reg.list()[0].is_account());
+        let a = Receiver::account(
+            "https://spacesheep.dev",
+            "Misha@Example.com",
+            "2026-11-12T08:00:00.000Z",
+        )
+        .unwrap();
+        assert_eq!(
+            a.id,
+            account_id("https://spacesheep.dev", "misha@example.com")
+        );
+        assert_ne!(a.id, receiver_id("https://spacesheep.dev"));
+        assert!(a.is_account() && !a.local);
+        assert_eq!(a.name, "spacesheep.dev");
+        reg.upsert(a.clone()).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(t.path().join("receivers.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            v["receivers"][0],
+            serde_json::json!({ "id": "abcdefghij", "name": "studio", "origin": "http://192.168.1.9:7373", "local": false }),
+            "a receiver's entry gains nothing"
+        );
+        assert_eq!(v["receivers"][1]["kind"], "spacesheep");
+        assert_eq!(v["receivers"][1]["account"]["email"], "Misha@Example.com");
+        assert!(v["receivers"][1]["account"].get("unauthorized").is_none());
+        // An entry never changes kind, either way.
+        let mut as_receiver = a.clone();
+        as_receiver.kind = Kind::Receiver;
+        as_receiver.account = None;
+        assert!(reg.upsert(as_receiver).is_err());
+        let mut as_account = a.clone();
+        as_account.id = "abcdefghij".into();
+        assert!(reg.upsert(as_account).is_err());
+        assert_eq!(Registry::load(t.path()).list().len(), 2);
+        // update: in place, saved only when something changed.
+        assert!(reg
+            .update(&a.id, |r| r.account.as_mut().unwrap().unauthorized = true)
+            .unwrap());
+        assert!(!reg.update("nobody", |_| {}).unwrap());
+        assert!(
+            Registry::load(t.path()).list()[1]
+                .account
+                .as_ref()
+                .unwrap()
+                .unauthorized
+        );
+        // A newer version's kind.
+        let newer = std::fs::read_to_string(t.path().join("receivers.json"))
+            .unwrap()
+            .replace("\"spacesheep\"", "\"teleport\"");
+        std::fs::write(t.path().join("receivers.json"), newer).unwrap();
+        let reg = Registry::load(t.path());
+        assert_eq!(reg.list().len(), 2, "the list still loads");
+        assert_eq!(reg.list()[1].kind, Kind::Unknown);
+        assert!(!reg.list()[1].is_account());
     }
 
     #[test]
