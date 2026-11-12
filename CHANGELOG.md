@@ -32,6 +32,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   with its last task, where it left it there empty; one that 0.8.0 left goes on the next
   `service uninstall`. The folder stays while another task is in it, and where PowerShell
   is held to constrained language mode, which cannot remove it.
+- **`config.json` is kept readable by you alone.** Node applies a write's mode only when it
+  makes the file, so a `config.json` that already existed with looser bits (recreated at the
+  shell's umask after deleting `uiKey` as SECURITY.md says, for example with
+  `jq … > tmp && mv tmp config.json`, or copied back from a backup) kept them while it held
+  the sink token and the UI key. The GUI now takes the group and other bits off before every
+  write, as it already sets its TLS keys to 0600 when it writes them, and also when it
+  starts; where that fails it says so and starts anyway.
 
 ## [0.8.0] - 2026-11-11
 
