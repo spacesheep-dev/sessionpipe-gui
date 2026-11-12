@@ -47,11 +47,16 @@ All notable changes to `sessionpipe-gui`. The format follows
   install now stops `npx` and what it started, not `npx` alone.
 - **In the app, an option the receiver is too old for says so** instead of the receiver's
   "HTTP 404". Settings › Data › "Use a spacesheep account" against a receiver older than
-  0.7.5: "sessionpipe on this computer is 0.7.2, which is older than this option. Update it
-  with this command, or reopen the app:" and the command to copy (Connect… is off); for a
-  receiver on another machine, "… Update it there." A page the receiver serves itself
-  never says it. On a phone a sentence over a command (this one, and About's update
-  command) stays in one column.
+  0.7.5: "sessionpipe on this computer is 0.7.2, which is older than this option." with
+  Connect… off, an **Update sessionpipe** button (what "Start sessionpipe" runs, with its
+  progress line; "Couldn't update it: …" with the last line when it fails), and the command
+  to copy. "This computer" is the receiver the app's launch check found to be this
+  computer's, not any loopback address; any other is "… Update it there." The version is
+  read again after the update, when the connection comes back and when the window comes
+  forward. Only the receiver's own 404 counts (not the app proxy's for a receiver it doesn't
+  know), and a version that isn't below the option's is left out of the sentence. A page
+  the receiver serves itself never says it. On a phone a sentence over a command (this one,
+  and About's update command) stays in one column.
 - The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
   not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
 - **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH

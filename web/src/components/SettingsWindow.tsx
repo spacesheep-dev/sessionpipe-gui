@@ -19,6 +19,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   Suspense,
+  useCallback,
   useContext,
   useEffect,
   useId,
@@ -26,13 +27,13 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { useAppState, useStore } from "../data/hooks";
+import { useAppState, useConnection, useStore } from "../data/hooks";
 import { tablistKey } from "../lib/focus";
 import { bytes } from "../lib/format";
 import { reducedMotion, tokenMs } from "../lib/motion";
 import { apiUrl } from "../lib/net";
 import { back, hasInAppHistory, Link, navigate, useSearchParam } from "../lib/router";
-import { olderReceiver } from "../lib/serverAge";
+import { isRouteNotFound, olderReceiver } from "../lib/serverAge";
 import {
   DEFAULT_PAGES,
   type DefaultPage,
@@ -52,6 +53,7 @@ import { AppIcon } from "./AppIcon";
 import { ActionButton, CommandWell, CopyIconButton, Segmented, Toggle } from "./bits";
 import { LensPicker } from "./LensChip";
 import { NotificationsSettings } from "./NotificationsSettings";
+import { OlderReceiverNotice } from "./OlderReceiverNotice";
 import { APPEARANCE, noContextMenu, SKIN_ADD_LINE, TextSizeSlider, useListedSkins } from "./QuickSettings";
 import { Select } from "./Select";
 import { Keys } from "./ShortcutHelp";
@@ -829,17 +831,40 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
   const [st, setSt] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  // In the app the receiver can be older than this page (lib/serverAge.ts): it says so.
+  // In the app the receiver can be older than this page (lib/serverAge.ts): it says so. Its
+  // version is read again when the stream comes back (a receiver restarted by an update),
+  // when the window comes forward, and after "Update sessionpipe".
   const store = useStore();
+  const { connection } = useConnection();
   const [version, setVersion] = useState<string | undefined>(undefined);
   const [notFound, setNotFound] = useState(false);
-  useEffect(() => {
+  const [localOrigin, setLocalOrigin] = useState<string | null>(null);
+  const refresh = useCallback(() => {
     store.transport
       .info()
-      .then((i) => setVersion(i.version))
+      .then((i) => {
+        setVersion(i.version);
+        // A receiver now new enough: an earlier 404 was the old one's.
+        if (!olderReceiver("spacesheep", i.version, { shell: {} })) setNotFound(false);
+      })
       .catch(() => {});
+    if (inShell)
+      void import("../native/receiverUpdate")
+        .then((m) => m.localUpdate())
+        .then((u) => setLocalOrigin(u?.origin ?? null));
   }, [store]);
-  const older = olderReceiver("spacesheep", version, { notFound });
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+  // Read again when the stream comes back: a receiver an update restarted.
+  useEffect(() => {
+    if (connection === "live") refresh();
+  }, [refresh, connection]);
+  useEffect(() => {
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [refresh]);
+  const older = olderReceiver("spacesheep", version, { notFound, localOrigin });
   const read = async () => {
     try {
       const res = await fetch(apiUrl(ROUTES.ui.spacesheep), { headers: { accept: "application/json" } });
@@ -863,12 +888,17 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
         headers: { "content-type": "application/json", accept: "application/json" },
         body: "{}",
       });
-      // A 404 is the receiver's own fallback: it has no such route, it is older.
-      if (res.status === 404 && olderReceiver("spacesheep", version, { notFound: true })) {
+      const text = await res.text();
+      let j: { url?: string; error?: string; reason?: string } = {};
+      try {
+        j = JSON.parse(text);
+      } catch {}
+      // The receiver's own 404 (no such route) says it is older; the app's proxy's (no such
+      // receiver) does not.
+      if (isRouteNotFound(res.status, j) && olderReceiver("spacesheep", version, { notFound: true, localOrigin })) {
         setNotFound(true);
         return;
       }
-      const j = (await res.json()) as { url?: string; error?: string };
       if (!res.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
       if (j.url) window.open(j.url, "_blank", "noopener");
       await read();
@@ -932,16 +962,7 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
         )}
       </R>
       {older ? (
-        <div className="settings-row settings-row--stack">
-          <div className="settings-row-text">
-            <span className="settings-hint">{older.sentence}</span>
-          </div>
-          {older.command ? (
-            <div className="settings-well">
-              <CommandWell command={older.command} label="Copy the update command" />
-            </div>
-          ) : null}
-        </div>
+        <OlderReceiverNotice older={older} onUpdated={refresh} />
       ) : (
         err && <p className="settings-group-note settings-err">{err}</p>
       )}
