@@ -111,6 +111,11 @@ export function statusWords(s: SearchIndexStatus, withResults = false): string {
     case "off":
       return `${plural(s.sessions, "session")} from sessionpipe · history search is `;
     case "error":
+      if (s.historyLeft)
+        // Only a viewer on this machine has the Rebuild button.
+        return s.local
+          ? "History search is off, but its index could not be deleted. Rebuild, or restarting the app, tries again."
+          : "History search is off, but its index could not be deleted. Restarting the app tries again.";
       return "The index needs rebuilding. Search still covers what sessionpipe received.";
     default:
       return `${plural(s.sessions, "session")} · up to date`;

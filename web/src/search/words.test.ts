@@ -53,5 +53,17 @@ describe("words", () => {
     expect(statusWords({ ...base, state: "first-run", progress: 0.38 }, true)).toBe(
       "History still being read · 38 %, more may turn up",
     );
+    expect(statusWords({ ...base, state: "error", error: "EIO" })).toBe(
+      "The index needs rebuilding. Search still covers what sessionpipe received.",
+    );
+    // history off and its index still on disk: nothing to rebuild, say what it is
+    const left = { ...base, history: false, state: "error", error: "x", historyLeft: true } as const;
+    expect(statusWords({ ...left, local: true })).toBe(
+      "History search is off, but its index could not be deleted. Rebuild, or restarting the app, tries again.",
+    );
+    // a viewer on another device has no Rebuild button
+    expect(statusWords(left)).toBe(
+      "History search is off, but its index could not be deleted. Restarting the app tries again.",
+    );
   });
 });

@@ -513,7 +513,7 @@ describe("status, frames and the history switch", () => {
       const n = fake.indexer.length;
       const s = await svc.setHistory(false);
       expect(history).toBe(false);
-      expect(s).toMatchObject({ state: "error", history: false, sources: [] });
+      expect(s).toMatchObject({ state: "error", history: false, sources: [], historyLeft: true });
       // with the last try's code: ENOTEMPTY or EPERM for a held file on Windows, EACCES here
       expect(s.error).toMatch(
         /^History search is off, but its index is still on disk: it could not be deleted \(E[A-Z]+\)\. It is tried again each time the indexer starts, and on Rebuild\.$/,
@@ -529,6 +529,7 @@ describe("status, frames and the history switch", () => {
     rmSync(path.join(tmp.dir, "search", "history"), { recursive: true, force: true });
     expect(svc.status()).toMatchObject({ state: "off" });
     expect(svc.status().error).toBeUndefined();
+    expect(svc.status().historyLeft).toBeUndefined();
   });
 
   it("after a restart, a history/ the indexer could not delete is still reported", async () => {
@@ -558,9 +559,16 @@ describe("status, frames and the history switch", () => {
       fake.emit({ phase: "idle", firstRun: false });
       expect(svc.status()).toMatchObject({
         state: "error",
+        historyLeft: true,
         error:
           "History search is off, but its index is still on disk: it could not be deleted. It is tried again each time the indexer starts, and on Rebuild.",
       });
+      // an indexer error goes first, and is not the leftover
+      fake.emit({ phase: "error", error: "disk full" });
+      expect(svc.status()).toMatchObject({ state: "error", error: "disk full" });
+      expect(svc.status().historyLeft).toBeUndefined();
+      fake.emit({ phase: "idle", firstRun: false });
+      expect(svc.status()).toMatchObject({ state: "error", historyLeft: true });
     } finally {
       undo();
     }

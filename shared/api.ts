@@ -1044,6 +1044,9 @@ export interface SearchIndexStatus {
   skipped?: { harness: string; files: number; why: "zstd" | "unreadable" }[];
   /** A sentence, when `error`. */
   error?: string;
+  /** With `error`: history search is off, but its index could not be deleted (`error`
+   *  says why). It is tried again each time the indexer starts, and on Rebuild. */
+  historyLeft?: true;
   /** The viewer is on this machine (may toggle history, rebuild, reveal). Only on the
    *  GET /status and POST answers, never in the `searchIndex` stream frame. */
   local?: boolean;

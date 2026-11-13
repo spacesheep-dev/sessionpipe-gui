@@ -8,6 +8,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **Search's status line says when history search is off but its index could not be
+  deleted.** It read "The index needs rebuilding" instead. It now says the history index
+  could not be deleted, and that Rebuild (on this computer) or restarting the app tries
+  again; `sessionpipe-gui index --status` against a running GUI says so too, with the error
+  code when there is one, and points at `index --rebuild`. The status carries a new
+  `historyLeft` field for it.
+
 - **A send to a computer reached through spacesheep outlives a restart.** Its row was
   deleted when the app started, because such a computer is never saved here: a start
   waiting for an offline computer then read "No such session here", and ran anyway when the
