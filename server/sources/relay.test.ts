@@ -14,6 +14,7 @@ import {
   HUB_BUSY_RUN,
   HUB_HEADER,
   HUB_UNPASSABLE_MS,
+  READS_SAVE_MS,
   RELAY_BUDGET,
   RELAY_LIMIT,
   RELAY_PAGE,
@@ -532,6 +533,97 @@ describe("the relay's reader over what its opener hands in", () => {
       } finally {
         errors.mockRestore();
       }
+    });
+
+    it("read times a keep refused are still owed: written at the next turn of the timer, with no read in between", async () => {
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const t = open();
+        const kept = new Map<RelayKept, unknown>();
+        let refuse = true;
+        let refused = 0;
+        // spacesheep's limit is spent: the one read is answered 429, and the next is ten minutes off.
+        t.ss.limit = 0;
+        const r = t.start({
+          fresh: true,
+          keep: {
+            read: (name) => kept.get(name),
+            write: (name, value) => {
+              if (refuse) {
+                refused++;
+                throw new Error("storage is full");
+              }
+              kept.set(name, value);
+            },
+          },
+        });
+        await t.clock.settle();
+        expect(r.status().state).toBe("limited");
+        const reads = () => t.asked.filter((p) => p.includes("since=")).length;
+        expect(reads()).toBe(1);
+        // The timer's first turn is refused...
+        await t.clock.advance(READS_SAVE_MS + 1000);
+        expect(refused).toBe(1);
+        expect(kept.get("reads")).toBeUndefined();
+        // ...and its next one writes what the first could not, though nothing was read since.
+        refuse = false;
+        await t.clock.advance(READS_SAVE_MS);
+        expect(reads()).toBe(1);
+        expect((kept.get("reads") as { reads: number[] }).reads).toHaveLength(1);
+      } finally {
+        errors.mockRestore();
+      }
+    });
+
+    it("a hub busy now and then is never the hub failing: only reads answered busy one after another count", async () => {
+      let busy = 0;
+      const states: string[] = [];
+      const t = open({
+        hub: true,
+        fresh: true,
+        onState: (s) => states.push(s),
+        hubAnswer: (p) => (p.includes("since=") && busy-- > 0 ? hubSays(429, "busy", { "retry-after": "1" }) : null),
+      });
+      const r = t.start();
+      await t.clock.settle();
+      // Twice as many busy answers as would be a failure in a row, each followed by a page.
+      for (let i = 1; i <= HUB_BUSY_RUN * 2; i++) {
+        busy = 1;
+        t.ss.push(events(1, `s-${i}`));
+        await t.clock.advance(30_000);
+        expect(r.status(), `round ${i}`).toMatchObject({ state: "ok", cursor: i });
+      }
+      expect(states).toEqual(["ok"]);
+    });
+
+    it("a first read asked again ends loading when the key turns out revoked, by a send's word or the relay's own", async () => {
+      // A send found the key revoked while the first read waited on the hub's room.
+      const bySend = told({
+        hub: true,
+        fresh: true,
+        hubAnswer: (p) => (p.includes("since=") ? hubSays(429, "busy", { "retry-after": "5" }) : null),
+      });
+      const a = bySend.start();
+      await bySend.clock.settle();
+      expect(bySend.order).toEqual(["loading true"]);
+      a.unauthorized();
+      expect(bySend.order).toEqual(["loading true", "loading false"]);
+      expect(a.status().state).toBe("unauthorized");
+
+      // The hub had the first read asked again, and spacesheep then refused the key itself.
+      let busy = 1;
+      const byRelay = told({
+        hub: true,
+        fresh: true,
+        hubAnswer: (p) => (p.includes("since=") && busy-- > 0 ? hubSays(429, "busy", { "retry-after": "1" }) : null),
+      });
+      byRelay.ss.revoked = true;
+      const b = byRelay.start();
+      await byRelay.clock.settle();
+      expect(byRelay.order).toEqual(["loading true"]);
+      await byRelay.clock.advance(1000);
+      expect(b.status().state).toBe("unauthorized");
+      expect(byRelay.order).toEqual(["loading true", "loading false"]);
     });
 
     it("stopped while an answer is still being read (doors that ignore the signal): nothing of it is taken", async () => {
