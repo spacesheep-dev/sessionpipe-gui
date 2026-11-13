@@ -169,7 +169,7 @@ account's add three, flat:
 | where | an account also says |
 |---|---|
 | `window.sessionpipeShell.receiver` | `kind: "spacesheep"`, `email`, `state` (as the window opened) |
-| a row of `rx_list` | `kind: "spacesheep"`, `email`, `state` (now), `rpId` once known |
+| a row of `rx_list` | `kind: "spacesheep"`, `email`, `state` (now), `rpId` once known (its origin's own host, or absent) |
 | `window.sessionpipeShell.features` | `"account"` when this build has the mode (the iPhone), and with it `"account-needs"` (`acct_needs` below) |
 
 `rxBase` is made the same way (`rx://localhost/<id>`). `state` is `"ok"`,
@@ -182,6 +182,16 @@ Nothing that speaks to a receiver speaks to an account: no `/api/ui/*` request, 
 stream (`rx_stream` answers `Err("account_no_stream")`), no `spgui` cookie, no view
 window. The signer (`plugin:identity|*` with the account's id as `receiver`) works: the
 hub answers its two questions, the rp id and the machines' names, from the machines door.
+
+**An account's rp id is its origin's own host, exactly.** spacesheep's rp id is its
+hostname, and that is the only name the hub takes from the machines door: not a parent
+of the host (`dev` for spacesheep.dev, `co.uk`, any public suffix), not the server one
+label up from a subdomain, not another name. A name that is not the host is not kept,
+is not said to the signer, and is not believed from the saved list either; the account
+then has no rp id and nothing is signed for it. (The signer's own rule, written for
+receivers a person added, takes the host or any parent of it. That rule still applies
+on top, and is unchanged for receivers.) The page's own word for the rp id counts only
+in having to equal the hub's.
 
 The list keeps what it does not read. An entry of a kind a newer version wrote, or one
 whose fields have another shape, stays in `receivers.json` as the JSON it was through
@@ -312,22 +322,37 @@ title?, machine?, cwd?, state, stateSince, openAttentions: [{ attentionId, kind,
 message?, at, answerable }] }` (other fields are not read). The page calls it once
 after its first board, then whenever the list changed, and with an empty list when the
 last one clears; it calls it only where the contract lists `"account-needs"`. The hub
-applies the list as it applies a stream's `snapshot` (the first one only seeds: nothing
-in it counts as having just opened; what is no longer in it closed) and says it with
-the same events and the same count as a receiver's, so a notification is posted for an
-account's session exactly as for a receiver's: when it opens while the app is in the
-background. The page is given no more than that. The id must be an account in the list
+applies the list as it applies a stream's `snapshot` (what is no longer in it closed)
+and says it with the same count as a receiver's, so a notification is posted for an
+account's session as for a receiver's: when it opens while the app is in the
+background.
+
+The first list after a window opens only seeds. It is the board as the page found it,
+none of it news, so nothing is posted for it, whether the app is in front or behind
+(two hundred sessions that were already waiting do not become two hundred
+notifications); the hub says it as its own event and the phone's notifier takes it as
+seen. Every page load in the main window makes the next list a first one again. What a
+later list adds is posted.
+
+The page is given no more than that. The id must be an account in the list
 (`unknown_account`); a list is at most 200 sessions of at most 16 open attentions each,
-200 attentions in all (`bad_request`, and what was held stays); every text is cut to size (a title 200
-characters, a message 300) and loses its control characters before it is kept or shown.
-The list is held in memory only, and goes with the account.
+200 attentions in all (`bad_request`, and what was held stays). Every text in it is
+made one plain line before it is kept or shown: cut to size (a title 200 characters, a
+message 300), with no control character and nothing invisible (the bidi marks,
+overrides and isolates, the zero-width and joining characters, U+2028 and U+2029, the
+tag characters), so a title cannot show reordered, start a second line or hide a
+character. The same is done to every notification's title and body on the phone, a
+receiver's included, and to a machine's name on a Face ID sheet. Calls are not counted:
+a page could hand over list after list (a rate budget is a later change). The list is
+held in memory only, and goes with the account.
 
 ### What the person is asked
 
 Native alerts, one at a time; a second question while one is open is not shown and
 never queued. Cancel is the preferred action of each. A question that could not be shown
-is not an answer: a start or a disconnect is refused (`busy`, `not_asked`), an approval
-is held and asked about again. On Android "This iPhone" reads "This phone", here and in
+(another alert is up, there is no window or nothing in it to show an alert over) is not
+an answer: a start or a disconnect is refused (`busy`, `not_asked`), an approval is held
+and asked about again. On Android "This iPhone" reads "This phone", here and in
 every sentence of the hub's own that names the device (the shell tells the hub what it
 is called; the hub's word for it is "this device"). An email is
 shown whole up to sixty characters, else its first 29 and last 30 around an ellipsis;
@@ -386,7 +411,10 @@ relay page is at most 500 events of at most 262,144 bytes each on the wire, a ki
 or so in practice, so 8 MiB holds a full page of events averaging 16 KB; a page over it
 is `answer_too_large`, the reader asks for a smaller `limit`, and at `limit=1` the
 largest event there can be fits thirty times over. No cookie is sent, kept or set. A
-redirect is neither followed nor passed on.
+redirect is neither followed nor passed on. Nothing is sent twice: the hub's client
+makes one try of each request and never repeats one by itself (an HTTP client's own
+retry after a refused HTTP/2 stream is off), so that what the hub says of a request is
+said of the only try there was.
 
 A 401 from spacesheep marks the account `unauthorized` (on the jobs door only its
 `code: "unauthorized"` does: a 401 `unlock` there is the signer's grant). The key is kept;
@@ -410,19 +438,30 @@ on by name, so an answer with the header is the hub's and one without is spacesh
 | 409 | `no_device_key` | the device door, before `acct_device_ask` ever succeeded |
 | 429 | `busy` | the account's room is full (`Retry-After: 1`) |
 | 502 | `not_sent` | the send door only: no connection to spacesheep could be made, so nothing of the command left this phone |
-| 502 | `unreachable` | spacesheep could not be reached (a read), or an answer stopped on its way (a read or a send) |
+| 502 | `unreachable` | spacesheep could not be reached (a read); an answer stopped on its way (a read or a send); the send door was answered 3xx |
 | 504 | `timeout` | no answer in the hub's time |
-| 502 | `redirected` | spacesheep answered 3xx |
+| 502 | `redirected` | a read door was answered 3xx (never the send door) |
 | 502 | `answer_too_large` | the answer, unpacked, is over the door's limit |
 | 502 | `bad_encoding` | the answer is packed some other way than gzip, is not what it says, or has anything after its one gzip member |
 | 502 | `withheld` | the answer held the key |
 
-Every refusal in the upper eleven rows comes before any network. Of a send, the rest
-divide by what is known. After `not_sent`, nothing of the command left the phone. After
-`unreachable`, `timeout`, `answer_too_large`, `bad_encoding` and `withheld`, nobody
-knows whether spacesheep made a job of it: the request went out and its answer did not
-come back whole. The page asks again with the same signed bytes (spacesheep takes a
-command once, by its nonce), and says "not sent" only where that is known.
+Every refusal in the upper eleven rows comes before any network.
+
+**What an answer of the hub's says of a send.** Each code the send door can give is in
+exactly one of two lists, and the page may say "not sent" after the first only:
+
+- *No job was made: nothing of the command left this phone.* `not_a_door`, `bad_query`,
+  `bad_body`, `not_signed`, `too_large`, `forbidden_origin`, `account_off`,
+  `bad_account`, `not_connected`, `busy` (all before any network), and `not_sent` (no
+  connection could be made for the one try there was).
+- *Unknown: the command went out, and nobody here knows whether a job was made of it.*
+  `unreachable` (the answer stopped on its way, or was a redirect: whoever redirects had
+  the command), `timeout`, `answer_too_large`, `bad_encoding`, `withheld`.
+
+`redirected` and `no_device_key` are never said of a send. After an unknown the page
+asks again with the same signed bytes: spacesheep takes a command once, by its nonce,
+and its answer then says which it was. An answer without the hub's header is
+spacesheep's own, and says for itself what became of the command.
 
 ### The documents
 
@@ -435,6 +474,15 @@ account's (another id reads none of them), they outlive a refused key, and they 
 The events are not kept here: the page caches them, and losing that cache costs one read
 of the relay.
 
+They are ordinary files in the app's container, and so, unlike the key, they ARE in a
+backup of the phone (iCloud or a computer's), with `receivers.json` (which holds the
+account's email) beside them: nothing excludes them today. What that is: labels, read
+marks, and the sends not yet settled, each with the text of its prompt and its signed
+bytes. A signed command restored from a backup makes no job: spacesheep takes a nonce
+once, a command is refused once its signing time is old, and the grant behind it lasts
+a day. Excluding `accounts/` from backup is a later change, to be made with a phone in
+hand to see that it holds.
+
 ### Where the key is
 
 Always in a store of its own, never the one receiver keys are in: a receiver is sent its
@@ -443,7 +491,9 @@ way. Given the same place for both, the hub turns the account mode off. A receiv
 is looked up only by an id a receiver can have (ten base32 characters).
 
 - **iPhone:** the keychain, service `<bundle id>.account`, this device only, readable
-  after the first unlock. Never in a backup, never in iCloud Keychain. An iPhone keeps
+  after the first unlock. Never in a backup another device can restore, never in iCloud
+  Keychain. That is the key's promise alone: the documents and the list are ordinary
+  files, and are backed up ("The documents", above). An iPhone keeps
   keychain items when an app is deleted, so on the first start with no receiver list the
   hub empties that service: what is there belongs to an install that is gone.
 - **Android:** the account mode is off (below). When it is on, the key is in
