@@ -24,14 +24,11 @@ import {
   isFinal,
   outcomeWords,
   PERMISSION_LABEL,
-  reasonOf,
-  refusalWords,
+  promptFailureWords,
   sendErrorWords,
   sentLine,
   shownState,
   startFailureWords,
-  UNTRACKED_WORDS,
-  unconfirmedWords,
 } from "./words";
 
 /** The start this device (or another) sent that names `key`, newest first. */
@@ -199,32 +196,6 @@ export function sentRow(
     tip: outcomeWords(a, o),
     state: shownState(a),
   };
-}
-
-/** A prompt that did not reach its session, in the words the timeline shows under it. */
-export function promptFailureWords(a: ControlActivity, machine: string): string | null {
-  const detail = a.detail?.trim();
-  if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
-    return `Cancelled with its session, before ${machine} got it.`;
-  if (a.outcome === "failed" && a.code === "untracked") return UNTRACKED_WORDS;
-  if (a.outcome === "unconfirmed") return unconfirmedWords(machine);
-  switch (a.outcome) {
-    case "refused": {
-      // No code (spacesheep before its `code`): the reason when there is one, never twice.
-      const reason = reasonOf(a);
-      if (!a.code)
-        return `${machine} refused it.${reason ? ` ${(reason.charAt(0).toUpperCase() + reason.slice(1)).replace(/[.!?…]?$/, ".")}` : ""}`;
-      return `${machine} refused it: ${refusalWords(a.code)}.`;
-    }
-    case "failed":
-      return `It didn't reach the session${detail ? `: ${detail.replace(/[.!?…]?$/, ".")}` : "."}`;
-    case "expired":
-      return `${machine} didn't take it in time.`;
-    case "unsupported":
-      return `${machine} can't hand messages to this session's agent.`;
-    default:
-      return null;
-  }
 }
 
 /** The `backticked` command a machine's words carry, the first one. */
