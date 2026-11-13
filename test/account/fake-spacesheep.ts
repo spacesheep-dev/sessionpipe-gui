@@ -74,6 +74,8 @@ export class FakeSpacesheep {
   /** Count relay reads against spacesheep's limit and answer 429 past it. */
   limit = 240;
   private window = { start: 0, n: 0 };
+  /** Until this time every relay read is answered 429, with the seconds left as Retry-After. */
+  limitedUntil = 0;
   /** What the next sends get instead of a 202, first in first out. */
   sendAnswers: Array<(body: Record<string, unknown>) => FakeAnswer | null> = [];
   /** Every request, in order: "GET /api/…". */
@@ -205,6 +207,10 @@ export class FakeSpacesheep {
     if (now - this.window.start >= WINDOW_MS) this.window = { start: now, n: 0 };
     this.window.n++;
     this.relayReads++;
+    if (now < this.limitedUntil) {
+      const wait = Math.max(1, Math.ceil((this.limitedUntil - now) / 1000));
+      return json({ error: "Too many requests.", code: "rate_limited" }, 429, { "retry-after": String(wait) });
+    }
     if (this.window.n > this.limit) {
       const wait = Math.ceil((this.window.start + WINDOW_MS - now) / 1000);
       return json({ error: "Too many requests.", code: "rate_limited" }, 429, { "retry-after": String(wait) });
