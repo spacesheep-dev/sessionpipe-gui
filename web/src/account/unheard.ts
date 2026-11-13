@@ -33,6 +33,9 @@ export interface UnheardKept {
   why: string;
   /** When the first asking began, on this page's clock. */
   askedAt: number;
+  /** The highest spacesheep job id the page knew of when the send began: its own job, if
+   *  one was made, is after it, and the jobs door is always read from here for it. */
+  floor: number;
   /** The bytes that were signed, while asking them again can still say something; the
    *  command alone once they are too old to make a job (the jobs door is read by it). */
   body?: { cmd: string; csig?: unknown; grant?: unknown; confirm?: unknown };
@@ -71,7 +74,7 @@ export interface Unheard {
     body: Record<string, unknown>,
     cmd: ControlCommand,
     said: Extract<Sent, { kind: "unknown" }>,
-    askedAt: number,
+    at: { askedAt: number; floor: number },
     from?: string,
   ): ControlActivity;
   /** The send that holds `cmd` back: one of the same kind for the same session of the same
@@ -99,15 +102,20 @@ const parse = (cmd: string | undefined): ControlCommand | null => {
 export function readUnheard(raw: unknown): UnheardKept[] {
   const list = (raw as { unheard?: unknown } | null)?.unheard;
   if (!Array.isArray(list)) return [];
-  return list.filter(
-    (u): u is UnheardKept =>
-      !!u &&
-      typeof u === "object" &&
-      !!(u as UnheardKept).row &&
-      typeof (u as UnheardKept).row.id === "string" &&
-      typeof (u as UnheardKept).row.machineId === "string" &&
-      typeof (u as UnheardKept).askedAt === "number" &&
-      ["asking", "unsent", "unknown"].includes((u as UnheardKept).state),
+  return (
+    list
+      .filter(
+        (u): u is UnheardKept =>
+          !!u &&
+          typeof u === "object" &&
+          !!(u as UnheardKept).row &&
+          typeof (u as UnheardKept).row.id === "string" &&
+          typeof (u as UnheardKept).row.machineId === "string" &&
+          typeof (u as UnheardKept).askedAt === "number" &&
+          ["asking", "unsent", "unknown"].includes((u as UnheardKept).state),
+      )
+      // One kept without where its send began is looked for from the start of the list.
+      .map((u) => (typeof u.floor === "number" && u.floor >= 0 ? u : { ...u, floor: 0 }))
   );
 }
 
@@ -191,7 +199,11 @@ export function openUnheard(o: UnheardOptions): Unheard {
     tries.set(u.row.id, (tries.get(u.row.id) ?? 0) + 1);
     try {
       if (!u.dead && u.body && cmd && m) {
-        const said = await o.doors.ask({ id: u.row.machineId }, u.body, { again: true, askedAt: u.askedAt });
+        const said = await o.doors.ask({ id: u.row.machineId }, u.body, {
+          again: true,
+          askedAt: u.askedAt,
+          floor: u.floor,
+        });
         if (stopped || !rows.has(u.row.id)) return;
         if (said.kind === "sent") {
           rows.delete(u.row.id);
@@ -215,11 +227,12 @@ export function openUnheard(o: UnheardOptions): Unheard {
       }
       if (u.dead) {
         if (!u.body) return settle(u, "unknown");
-        const l = await o.doors.look({ id: u.row.machineId }, u.body, u.askedAt);
+        const l = await o.doors.look({ id: u.row.machineId }, u.body, u.askedAt, u.floor);
         if (stopped || !rows.has(u.row.id)) return;
         // The list could not be read to its end: nothing is said of it yet.
         if (!l.read) return;
-        // It lists nothing this send could have become, and nothing more can come: not sent.
+        // Read from where the send began to the list's end, it holds nothing this send could
+        // have become, and nothing more can come: that, and only that, is not sent.
         if (l.told && l.fits.length === 0) {
           u.refusal = { status: 422, reason: u.why, code: "too_old" };
           return settle(u, "unsent");
@@ -241,7 +254,7 @@ export function openUnheard(o: UnheardOptions): Unheard {
   for (const u of rows.values()) if (u.state === "asking") schedule(u);
 
   return {
-    add(m, body, cmd, said, askedAt, from) {
+    add(m, body, cmd, said, { askedAt, floor }, from) {
       const t = now();
       const row = messageRow(m, { cmd: "" }, cmd, {
         via: "ui",
@@ -254,6 +267,7 @@ export function openUnheard(o: UnheardOptions): Unheard {
         state: "asking",
         why: said.why,
         askedAt,
+        floor,
         body: {
           cmd: String(body.cmd),
           csig: body.csig ?? null,

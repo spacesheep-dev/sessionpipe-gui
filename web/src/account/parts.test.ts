@@ -14,8 +14,10 @@ import { CACHE_EVENTS_MAX, compacted, memoryCache, openCache, pagesToDrop, pages
 import { DOC_READ_WAITS_MS, openDocs } from "./docs";
 import {
   AFTER_NONCE,
+  FIRST_ASKING_OVER_MS,
   hubCode,
   LOOK_PAGES,
+  NOT_YET_FINAL,
   openDoors,
   SEND_BUSY_TRIES,
   SEND_UNKNOWN,
@@ -243,14 +245,14 @@ describe("the account's doors", () => {
       expect(await t.doors.send(m, stop)).toEqual({ status: 202, json: {} });
       // The look by itself says what it read.
       t = open([list([old, { ...mine, id: 30, created_at: T + 40_000 }, mine])], { now: () => T + 6000 });
-      expect(await t.doors.look(m, body, T)).toEqual({
+      expect(await t.doors.look(m, body, T, 0)).toEqual({
         read: true,
         told: true,
         fits: [7, 30, 41],
         recent: [41],
       });
       t = open([list([{ ...mine, action: "cancel" }])], { now: () => T + 6000 });
-      expect(await t.doors.look(m, stop, T)).toEqual({ read: true, told: false, fits: [], recent: [] });
+      expect(await t.doors.look(m, stop, T, 0)).toEqual({ read: true, told: false, fits: [], recent: [] });
     });
 
     it("after an asking nobody heard, only an answer that speaks for it too is the end", async () => {
@@ -277,9 +279,11 @@ describe("the account's doors", () => {
         expect((await t.doors.ask(m, body)).kind, name).toBe("unknown");
         expect(posts(t.asked), name).toHaveLength(3);
       }
-      // ...and one that only comes after it is the answer: no job was made.
+      // ...and one that only comes after it, and comes the same to every asking of these
+      // bytes, is the answer: no job was made.
       for (const code of AFTER_NONCE) {
-        t = open([timeout(), answer(code === "confirm" ? 409 : 400, { error: "No.", code })]);
+        if (NOT_YET_FINAL.has(code)) continue;
+        t = open([timeout(), answer(400, { error: "No.", code })]);
         expect(await t.doors.ask(m, body), code).toMatchObject({ kind: "refused", json: { code } });
       }
       // The same bytes asked again later (`again`): one asking, read the same way.
@@ -312,12 +316,75 @@ describe("the account's doors", () => {
       expect(SEND_UNKNOWN_CODE).toBe("hub_unknown");
     });
 
-    it("a refusal on the second asking is the answer: the first never arrived", async () => {
-      const held = answer(409, { error: "Confirm with your passkey.", code: "confirm", why: "it deletes a folder" });
-      const { doors } = open([timeout(), held]);
-      expect(await doors.send(m, body)).toEqual({
-        status: 409,
-        json: { error: "Confirm with your passkey.", code: "confirm", why: "it deletes a folder" },
+    it("`confirm` or `start_limited` on the asking again is not the end while the first asking may still be running", async () => {
+      // The two askings can overlap at spacesheep: its nonce look and the making of the job are
+      // not one step, so the second may be told `confirm` while the first makes the job.
+      const held = () =>
+        answer(409, { error: "Confirm with your passkey.", code: "confirm", why: "it deletes a folder" });
+      const limited = () => answer(429, { error: "That computer is starting enough.", code: "start_limited" });
+      for (const refusal of [held, limited]) {
+        // Two and six seconds after the send began: nobody knows yet, and nothing is offered to confirm.
+        let at = T;
+        const t = open([timeout(), refusal(), refusal()], { now: () => at });
+        expect(await t.doors.send(m, body)).toMatchObject({ status: 504, json: { code: SEND_UNKNOWN_CODE } });
+        expect(posts(t.asked)).toHaveLength(3);
+        // Half a minute after it began the first asking is over. The jobs door is looked in
+        // first, from where the send began: this command's job is there, so it was sent.
+        at = T + FIRST_ASKING_OVER_MS;
+        let late = open([refusal(), list([{ ...mine, id: 41, created_at: T + 60_000 }])], {
+          now: () => at,
+          lastJob: () => 99,
+        });
+        expect(await late.doors.ask(m, body, { again: true, askedAt: T, floor: 39 })).toEqual({
+          kind: "sent",
+          job: 41,
+        });
+        expect(late.asked.at(-1)!.url).toMatch(/jobs\?since=39$/);
+        // No job of it there: the refusal is the answer, and only now is a hold offered.
+        late = open([refusal(), list([{ ...mine, id: 41, session: "other" }])], { now: () => at });
+        expect(await late.doors.ask(m, body, { again: true, askedAt: T, floor: 39 })).toMatchObject({
+          kind: "refused",
+        });
+        // The list cannot be read: still nobody knows.
+        late = open([refusal(), hubSays(502, "unreachable", "spacesheep could not be reached.")], { now: () => at });
+        expect((await late.doors.ask(m, body, { again: true, askedAt: T, floor: 39 })).kind).toBe("unknown");
+      }
+      // Asked for the first time, with nothing unheard before it, a hold is a hold at once.
+      const first = open([held()]);
+      expect(await first.doors.send(m, body)).toMatchObject({ status: 409, json: { code: "confirm" } });
+    });
+
+    it("the look for a send's job starts where that send began, not at the newest job the page has heard of since", async () => {
+      // Another session's send was heard in between (job 60): this send's own job is 41.
+      const t = open([replay(), list([mine, { ...mine, id: 60, session: "other" }])], {
+        now: () => T + 6000,
+        lastJob: () => 60,
+      });
+      expect(await t.doors.ask(m, body, { again: true, askedAt: T, floor: 39 })).toEqual({ kind: "sent", job: 41 });
+      expect(t.asked.at(-1)!.url).toMatch(/jobs\?since=39$/);
+      // With no floor given, a first asking takes the last job known as it begins.
+      const first = open([timeout(), replay(), list([{ ...mine, id: 61 }])], { now: clock(), lastJob: () => 60 });
+      expect(await first.doors.send(m, body)).toEqual({ status: 202, json: { job: 61 } });
+      expect(first.asked.at(-1)!.url).toMatch(/jobs\?since=60$/);
+    });
+
+    it("says spacesheep's sentence for its own error, never its code", async () => {
+      let t = open([
+        answer(500, { error: "internal_error", message: "Something went wrong on our side.\u202E" }),
+        timeout(),
+        timeout(),
+      ]);
+      expect(await t.doors.ask(m, body, { again: true, askedAt: T })).toEqual({
+        kind: "unknown",
+        why: "Something went wrong on our side.",
+        dead: false,
+      });
+      // A code alone is no sentence: the app's own words.
+      t = open([answer(500, { error: "internal_error" })]);
+      expect(await t.doors.ask(m, body, { again: true, askedAt: T })).toEqual({
+        kind: "unknown",
+        why: "spacesheep could not be reached.",
+        dead: false,
       });
     });
   });

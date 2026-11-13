@@ -64,6 +64,14 @@ const JOBS_PAGE = 100;
 /** A job made of a send was made no earlier than the send began: this much is allowed for
  *  the two clocks ticking apart and for the request's way there. */
 export const LOOK_SLACK_MS = 5000;
+/** Two of the refusals in AFTER_NONCE can differ between two askings of the same bytes that
+ *  overlap: spacesheep's second look may say `confirm` to one and let the other through,
+ *  and the first asking may be the start that fills the limit the second is refused for
+ *  (`start_limited`). Its nonce look and the making of the job are not one step, so such an
+ *  answer says nothing of an asking that may still be running. */
+export const NOT_YET_FINAL: ReadonlySet<string> = new Set(["confirm", "start_limited"]);
+/** An asking nobody heard the answer to cannot still be running this long after it began. */
+export const FIRST_ASKING_OVER_MS = 30_000;
 
 /** What became of a send, as far as anyone can say. */
 export type Sent =
@@ -96,9 +104,13 @@ export interface AccountDoors {
   /** The same send, with what became of it said three ways (`Sent`). `again`: these bytes
    *  were asked before and nobody heard the answer, so only an answer that speaks for that
    *  asking too is taken as the end; `askedAt` is when the first asking began. */
-  ask(m: { id: string }, body: Record<string, unknown>, o?: { again?: boolean; askedAt?: number }): Promise<Sent>;
+  ask(
+    m: { id: string },
+    body: Record<string, unknown>,
+    o?: { again?: boolean; askedAt?: number; floor?: number },
+  ): Promise<Sent>;
   /** The jobs a send could have become (`Looked`). */
-  look(m: { id: string }, body: Record<string, unknown>, askedAt: number): Promise<Looked>;
+  look(m: { id: string }, body: Record<string, unknown>, askedAt: number, floor: number): Promise<Looked>;
   /** `GET /api/gui/device`: where this phone's own device key stands. */
   device(): Promise<DoorAnswer>;
 }
@@ -155,10 +167,17 @@ export function openDoors(o: DoorsOptions): AccountDoors {
    *  when it was made no earlier than the send began, told with no clock but spacesheep's:
    *  the newest job listed was made before this read, so a job made since the send began is
    *  no older than the newest one by more than the time that has passed here. */
-  const look = async (m: { id: string }, body: Record<string, unknown>, askedAt: number): Promise<Looked> => {
+  const look = async (
+    m: { id: string },
+    body: Record<string, unknown>,
+    askedAt: number,
+    floor: number,
+  ): Promise<Looked> => {
     const none: Looked = { read: false, told: false, fits: [], recent: [] };
     const as = listedAs(body);
-    let since = Math.max(0, Math.floor(o.lastJob?.() ?? 0));
+    // From the last job the page knew of when the send BEGAN: a job heard of since (another
+    // session's send) is after this send's own, and must not hide it.
+    let since = Math.max(0, Math.floor(floor));
     const fits: { id: number; at: number }[] = [];
     let newest = Number.NEGATIVE_INFINITY;
     let read = false;
@@ -218,6 +237,16 @@ export function openDoors(o: DoorsOptions): AccountDoors {
   };
 
   const UNREACHED = "spacesheep could not be reached.";
+  /** spacesheep's words for what went wrong: its sentence, never its code. Its own error
+   *  answers carry the sentence as `message` and a code as `error`; its refusals carry the
+   *  sentence as `error`. Outside text either way. */
+  const wordsOf = (json: Record<string, unknown>): string => {
+    for (const v of [json.message, json.error]) {
+      const t = cleanReason(v);
+      if (t && !/^[a-z][a-z0-9_]*$/.test(t)) return t;
+    }
+    return "";
+  };
   /** What an answer says of the send. `unheard`: an asking before this one ended with
    *  nobody knowing whether spacesheep took it, so this answer must speak for that one too. */
   const heard = async (
@@ -226,19 +255,16 @@ export function openDoors(o: DoorsOptions): AccountDoors {
     m: { id: string },
     body: Record<string, unknown>,
     askedAt: number,
+    floor: number,
   ): Promise<Sent> => {
-    const unknown = (why: unknown, dead = false): Sent => ({
-      kind: "unknown",
-      why: cleanReason(why) || UNREACHED,
-      dead,
-    });
+    const unknown = (why: string, dead = false): Sent => ({ kind: "unknown", why: why || UNREACHED, dead });
     // The app got no answer for it, or the answer stopped on its way.
     if (a === null) return unknown("");
     if (a.hub !== null) {
-      if (SEND_UNKNOWN.has(a.hub)) return unknown(a.json.error);
+      if (SEND_UNKNOWN.has(a.hub)) return unknown(wordsOf(a.json));
       // The hub's own refusal comes before any network: this asking made no job. Of an
       // asking before it, it says nothing.
-      if (unheard) return unknown(a.json.error);
+      if (unheard) return unknown(wordsOf(a.json));
       return {
         kind: "refused",
         status: a.status === 504 ? 504 : 502,
@@ -250,19 +276,36 @@ export function openDoors(o: DoorsOptions): AccountDoors {
       return { kind: "sent", job: typeof job === "number" && Number.isSafeInteger(job) && job > 0 ? job : null };
     }
     // An error of spacesheep's own is no refusal: the job may have been made before it.
-    if (a.status >= 500) return unknown(a.json.error);
+    if (a.status >= 500) return unknown(wordsOf(a.json));
     const code = typeof a.json.code === "string" ? a.json.code : "";
     if (unheard) {
+      /** The job spacesheep made of these bytes, as the jobs door lists it from where the send began. */
+      const found = async (): Promise<Sent | null> => {
+        const l = await look(m, body, askedAt, floor);
+        // The list could not be read to its end, or cannot tell this send's job apart: no word.
+        if (!l.read || !l.told) return unknown(wordsOf(a.json));
+        if (l.recent.length) return { kind: "sent", job: l.recent.length === 1 ? l.recent[0]! : null };
+        return null;
+      };
       // spacesheep had taken it on an asking before this one: it is sent. Its job is the
       // one fit made since the send began, when the list singles one out.
       if (a.status === 409 && code === "replay") {
-        const l = await look(m, body, askedAt);
+        const l = await look(m, body, askedAt, floor);
         return { kind: "sent", job: l.read && l.told && l.recent.length === 1 ? l.recent[0]! : null };
       }
       // Signed too long ago: these bytes make no job any more, and whether they did is
       // what the jobs door lists.
-      if (code === "too_old" || a.json.refusal === "too_old") return unknown(a.json.error, true);
-      if (!AFTER_NONCE.has(code)) return unknown(a.json.error);
+      if (code === "too_old" || a.json.refusal === "too_old") return unknown(wordsOf(a.json), true);
+      if (!AFTER_NONCE.has(code)) return unknown(wordsOf(a.json));
+      if (NOT_YET_FINAL.has(code)) {
+        // The first asking may still be running, and may yet make the job: not the end.
+        if (now() - askedAt < FIRST_ASKING_OVER_MS) return unknown(wordsOf(a.json));
+        // It is over. Before a hold (and its Confirm, which signs a new command) is ever
+        // offered for a send that had an asking nobody heard, the jobs door is looked in
+        // for this command's job: found, it was sent, and there is nothing to confirm.
+        const sent = await found();
+        if (sent) return sent;
+      }
     }
     // spacesheep's own 401 that is not the grant's: the key is refused there.
     if (a.status === 401 && code !== "unlock") o.onUnauthorized?.();
@@ -271,15 +314,16 @@ export function openDoors(o: DoorsOptions): AccountDoors {
 
   const ask: AccountDoors["ask"] = async (m, body, opts = {}) => {
     const askedAt = opts.askedAt ?? now();
+    const floor = opts.floor ?? o.lastJob?.() ?? 0;
     let unheard = !!opts.again;
-    let said = await heard(await post(m, body), unheard, m, body, askedAt);
+    let said = await heard(await post(m, body), unheard, m, body, askedAt, floor);
     // Asked for the first time and not heard: asked again, the same bytes, a few seconds on.
     if (!opts.again)
       for (const wait of SEND_UNKNOWN_WAITS_MS) {
         if (said.kind !== "unknown" || said.dead) break;
         unheard = true;
         await sleep(wait);
-        said = await heard(await post(m, body), unheard, m, body, askedAt);
+        said = await heard(await post(m, body), unheard, m, body, askedAt, floor);
       }
     return said;
   };

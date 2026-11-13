@@ -789,6 +789,91 @@ describe("a page's own backend on a spacesheep account", () => {
       ]);
     });
 
+    it("`confirm` on the asking again, while the first asking made the job: never a hold, one job, and the row is that job's", async () => {
+      const held = refusal(409, {
+        error: "Confirm with your passkey to send this: it needs a second look.",
+        code: "confirm",
+        why: "it needs a second look",
+      });
+      const b = await ready();
+      const s = listen(b);
+      // The first asking is taken and its answer lost; every asking again is told `confirm`
+      // (two verdicts for two askings that met at spacesheep).
+      r.sendFaults.push("unheard");
+      r.ss.sendAnswers.push(() => null, held, held, held, held, held);
+      const sent = await send(b, signed("claude-code:s-1", "delete the old folder"), 7000);
+      // Not a hold: a row that says it may have been sent.
+      expect(sent.status).toBe(201);
+      expect(sent.body).toMatchObject({ code: "hub_unknown", unheard: { state: "asking" } });
+      expect(r.ss.jobs).toHaveLength(1);
+      // Asked again inside the half minute: still unknown, nothing to confirm.
+      await tick(24_000);
+      expect((await rows(b))[0]).toMatchObject({ id: sent.body.id, unheard: { state: "asking" } });
+      // Past it, the jobs door is looked in before a hold is offered: the job is there.
+      await tick(32_000);
+      const row = (await rows(b))[0]!;
+      expect(row.id).toBe(sent.body.id);
+      expect(row.unheard).toBeUndefined();
+      expect(row.outcome).toBeUndefined();
+      expect(s.frames.some((f) => f.kind === "control" && f.message.code === "confirm_required")).toBe(false);
+      expect(r.ss.jobs).toHaveLength(1);
+      r.ss.settle(r.ss.jobs[0]!.id, "done");
+      await tick(4000);
+      expect((await rows(b))[0]).toMatchObject({ id: sent.body.id, outcome: "delivered" });
+    });
+
+    it("`confirm` on every asking, and spacesheep never had it: said as held only once the first asking is over and the jobs door holds none", async () => {
+      const held = refusal(409, { error: "Confirm with your passkey to send this.", code: "confirm", why: "unusual" });
+      const b = await ready();
+      r.sendFaults.push("lost");
+      r.ss.sendAnswers.push(held, held, held, held, held);
+      const sent = await send(b, signed("claude-code:s-1", "delete the old folder"), 7000);
+      expect(sent.body).toMatchObject({ unheard: { state: "asking" } });
+      await tick(24_000);
+      expect((await rows(b))[0]).toMatchObject({ unheard: { state: "asking" } });
+      await tick(32_000);
+      expect((await rows(b))[0]).toMatchObject({
+        id: sent.body.id,
+        outcome: "failed",
+        code: "confirm_required",
+        unheard: { state: "unsent", status: 422 },
+      });
+      expect(r.ss.jobs).toHaveLength(0);
+    });
+
+    it("another session's send heard in between does not hide the unknown send's own job", async () => {
+      const b = await ready();
+      r.sendFaults.push("unheard", "lost", "lost");
+      const dark = await send(b, signed("claude-code:s-1", "into the dark"), 7000);
+      expect(dark.body).toMatchObject({ unheard: { state: "asking" } });
+      // Job 2, heard: the newest job the page knows is now past the unknown send's own (job 1).
+      const other = await send(b, signed("claude-code:s-2", "meanwhile"), 100);
+      expect(other.body.unheard).toBeUndefined();
+      expect(r.ss.jobs.map((j) => j.id)).toEqual([1, 2]);
+      // Asked again: spacesheep had it. Its job is looked for from where its send began.
+      await tick(9000);
+      const row = (await rows(b)).find((a) => a.id === dark.body.id)!;
+      expect(row.unheard).toBeUndefined();
+      expect(row.outcome).toBeUndefined();
+      r.ss.settle(1, "done");
+      await tick(4000);
+      expect((await rows(b)).find((a) => a.id === dark.body.id)).toMatchObject({ outcome: "delivered" });
+    });
+
+    it("too old after an asking nobody heard, with another send heard in between: never not sent while its job is there", async () => {
+      const old = refusal(400, { error: "That was signed too long ago.", code: "bad", refusal: "too_old" });
+      const b = await ready();
+      r.sendFaults.push("unheard", "lost", "lost");
+      const dark = await send(b, signed("claude-code:s-1", "into the dark"), 7000);
+      await send(b, signed("claude-code:s-2", "meanwhile"), 100);
+      // Every asking from here on says the bytes are too old.
+      r.ss.sendAnswers.push(old);
+      await tick(9000);
+      const row = (await rows(b)).find((a) => a.id === dark.body.id)!;
+      expect(row).toMatchObject({ outcome: "unconfirmed", code: "hub_unknown", unheard: { state: "unknown" } });
+      expect(r.ss.jobs).toHaveLength(2);
+    });
+
     it("while it is unknown, the same send for that session is held with the same words, and nothing is asked for it", async () => {
       const b = await ready();
       r.sendFaults.push("unheard", "lost", "lost");

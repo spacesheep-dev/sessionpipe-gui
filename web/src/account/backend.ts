@@ -434,12 +434,14 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     const held = cmd ? unheard?.holding(m.id, cmd) : undefined;
     if (held) throw new SendRefused(504, { reason: cleanReason(held.why), code: SEND_UNKNOWN_CODE });
     const askedAt = Date.now();
+    // The last job the page knew of as this send begins: its own job is looked for after it.
+    const floor = lastJob;
     let said: Sent | null = null;
     let asked: Record<string, unknown> | null = null;
     try {
       const row = await control.send(m, b, async (mm, body) => {
         asked = body;
-        const s = await doors.ask(mm, body, { askedAt });
+        const s = await doors.ask(mm, body, { askedAt, floor });
         said = s;
         if (s.kind === "sent") return { status: 202, json: s.job === null ? {} : { job: s.job } };
         if (s.kind === "refused") return { status: s.status, json: s.json };
@@ -449,7 +451,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     } catch (e) {
       const s = said as Sent | null;
       if (s?.kind === "unknown" && asked && cmd && unheard && e instanceof SendRefused)
-        return unheard.add(m, asked, cmd, s, askedAt, typeof b.from === "string" ? b.from : undefined);
+        return unheard.add(m, asked, cmd, s, { askedAt, floor }, typeof b.from === "string" ? b.from : undefined);
       throw e;
     }
   };
