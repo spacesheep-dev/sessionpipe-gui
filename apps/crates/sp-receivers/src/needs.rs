@@ -103,10 +103,12 @@ struct SnapshotLite {
 }
 
 /// A list handed over whole (`NeedsYou::apply_sessions`) holds at most this many
-/// sessions, each with at most this many open attentions; a longer one is not a list
-/// the Hub takes.
+/// sessions, each with at most this many open attentions, and no more attentions in all
+/// than sessions (each can become a notification); a longer one is not a list the Hub
+/// takes.
 pub const LIST_MAX_SESSIONS: usize = 200;
 pub const LIST_MAX_ATTENTIONS: usize = 16;
+pub const LIST_MAX_ATTENTIONS_IN_ALL: usize = 200;
 
 /// `s` cut to `max` characters, without what a notification must not carry (control
 /// characters; a line break is a space).
@@ -207,15 +209,16 @@ impl NeedsYou {
     /// arrive: its page works the list out from the relay and hands it over
     /// (`Hub::account_needs`), since an account has no stream for the Hub to read.
     /// None when it is not such a list: not an array of sessions, or one longer than
-    /// `LIST_MAX_SESSIONS`, or a session with more than `LIST_MAX_ATTENTIONS` open.
+    /// `LIST_MAX_SESSIONS`, or a session with more than `LIST_MAX_ATTENTIONS` open, or
+    /// more than `LIST_MAX_ATTENTIONS_IN_ALL` open in the whole of it.
     pub fn apply_sessions(&mut self, sessions: serde_json::Value) -> Option<Change> {
         if sessions.as_array()?.len() > LIST_MAX_SESSIONS {
             return None;
         }
         let sessions: Vec<SessionLite> = serde_json::from_value(sessions).ok()?;
-        if sessions
-            .iter()
-            .any(|s| s.open_attentions.len() > LIST_MAX_ATTENTIONS)
+        let open = |s: &SessionLite| s.open_attentions.len();
+        if sessions.iter().any(|s| open(s) > LIST_MAX_ATTENTIONS)
+            || sessions.iter().map(open).sum::<usize>() > LIST_MAX_ATTENTIONS_IN_ALL
         {
             return None;
         }
@@ -401,6 +404,12 @@ mod tests {
             None,
             "too many attentions"
         );
+        // Within each session's limit, and too many in all.
+        let full: Vec<String> = (0..13)
+            .map(|i| session(&format!("claude:f{i}"), "needs_you", &asks[..16]))
+            .collect();
+        assert!(13 * 16 > LIST_MAX_ATTENTIONS_IN_ALL);
+        assert_eq!(n.apply_sessions(list(&full)), None, "too many in all");
         assert_eq!(n.count(), 1, "what was held is still held");
         // Exactly the most a list may hold is a list.
         assert!(n.apply_sessions(list(&many[1..])).is_some());

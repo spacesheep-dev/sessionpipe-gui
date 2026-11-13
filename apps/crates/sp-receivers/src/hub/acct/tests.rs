@@ -582,6 +582,26 @@ async fn a_connect_the_person_approves_puts_the_key_in_the_hub_alone() {
     let a = st.accounts[0].clone();
     assert_eq!(c.email.as_deref(), Some(fake.email().as_str()));
     assert_eq!(c.receiver.as_deref(), Some(a.id.as_str()));
+    // When it was connected, as the page reads it (`connectedAt`): the moment the person
+    // said yes. The page takes a key made in the last two minutes as fresh, and reads
+    // the whole backlog at once only then.
+    let seen = serde_json::to_value(&st).unwrap();
+    let at = seen["accounts"][0]["connectedAt"]
+        .as_str()
+        .expect("connectedAt");
+    let at = crate::status::parse_iso_ms(at).expect("RFC 3339");
+    assert!(now_ms().abs_diff(at) < 60_000, "just now");
+    // And the row of the list says what kind of entry it is and whose.
+    let row = serde_json::to_value(h.receiver(&a.id).unwrap()).unwrap();
+    assert_eq!(
+        (&row["kind"], &row["email"], &row["state"], &row["local"]),
+        (
+            &json!("spacesheep"),
+            &json!(fake.email()),
+            &json!("ok"),
+            &json!(false)
+        )
+    );
     assert_eq!(
         (a.email.as_str(), a.origin.as_str(), a.state, a.active),
         (

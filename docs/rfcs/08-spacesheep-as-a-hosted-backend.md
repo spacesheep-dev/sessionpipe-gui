@@ -317,8 +317,8 @@ in it counts as having just opened; what is no longer in it closed) and says it 
 the same events and the same count as a receiver's, so a notification is posted for an
 account's session exactly as for a receiver's: when it opens while the app is in the
 background. The page is given no more than that. The id must be an account in the list
-(`unknown_account`); a list is at most 200 sessions of at most 16 open attentions each
-(`bad_request`, and what was held stays); every text is cut to size (a title 200
+(`unknown_account`); a list is at most 200 sessions of at most 16 open attentions each,
+200 attentions in all (`bad_request`, and what was held stays); every text is cut to size (a title 200
 characters, a message 300) and loses its control characters before it is kept or shown.
 The list is held in memory only, and goes with the account.
 
