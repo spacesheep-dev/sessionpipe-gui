@@ -605,7 +605,11 @@ describe("the control state of a page", () => {
     }
     const keptAfter = JSON.stringify(saved);
     for (const secret of ["fresh-tap", '"confirm"', '"cred"']) expect(keptAfter).not.toContain(secret);
-    expect(saved[M1]!.map((r) => r.from)).toEqual([undefined, "claude-code:s-2"]);
+    // (By session: two rows made in one millisecond are in no promised order.)
+    expect(Object.fromEntries(saved[M1]!.map((r) => [r.session, r.from]))).toEqual({
+      "claude-code:s-1": undefined,
+      "claude-code:s-2": "claude-code:s-2",
+    });
   });
 
   it("trims a queue each time it is saved: what is settled goes after a week, what waits stays", async () => {
