@@ -262,6 +262,33 @@ test("a message whose answer never comes back is not said to be not sent: it wen
   await expect(box).toHaveValue("");
 });
 
+test("a message nobody could hear the answer to: it may have been sent, its words and its send are held, and the app settles it", async () => {
+  // spacesheep takes the message; that answer and the answers to both askings after it are lost.
+  hub.unheard = 3;
+  const before = ran.length;
+  const jobs = ss.jobs.length;
+  const box = composer();
+  await box.fill("And the chargeback webhook?");
+  await box.press("Enter");
+  const line = page.getByText(
+    "It may have been sent: spacesheep did not answer in time. Look at the session before you send it again.",
+  );
+  await expect(line).toBeVisible({ timeout: 15_000 });
+  await expect(box).toHaveValue("And the chargeback webhook?");
+  await expect(page.getByText(/not sent/i)).toHaveCount(0);
+  // One more tap makes no second job: the send is held, with the same line.
+  await box.press("Enter");
+  await expect(line).toBeVisible();
+  expect(ss.jobs.length - jobs).toBe(1);
+  // The app asks again by itself and hears that spacesheep had it: the words leave the box and the line goes.
+  await expect(box).toHaveValue("", { timeout: 20_000 });
+  await expect(line).toHaveCount(0);
+  await expect(page.getByText(/not sent/i)).toHaveCount(0);
+  await expect(page.getByText("Done: And the chargeback webhook?").first()).toBeVisible();
+  expect(ran.slice(before).filter((c) => c.text === "And the chargeback webhook?")).toHaveLength(1);
+  expect(ss.jobs.length - jobs).toBe(1);
+});
+
 test("a message spacesheep holds is shown held with its reason, and goes when confirmed", async () => {
   ss.sendAnswers.push(() => ({
     status: 409,

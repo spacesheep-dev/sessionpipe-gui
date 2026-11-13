@@ -14,7 +14,7 @@ import {
 } from "@shared/api";
 import { cleanReason } from "@shared/reason";
 import { noteOwnSend } from "../lib/toasts";
-import { ControlError, controlApi, type SendBody, type TrustedKey } from "./api";
+import { ControlError, controlApi, type SendBody, type TrustedKey, UNHEARD_CODE } from "./api";
 import { nonce } from "./bytes";
 import { remoteHostFor, remoteRpFor } from "./remoteRp";
 import { dropGrant, sign, signerKind } from "./signer";
@@ -233,6 +233,10 @@ export function sendCommand(
     fields,
     async (body) => {
       const carried = await controlApi.send(body);
+      // Nobody heard its answer (a page on a spacesheep account, account/unheard.ts): not
+      // sent as far as this caller may say, and never "not sent". The row is followed.
+      if (carried.unheard?.state === "asking")
+        throw new ControlError(504, carried.detail ?? "", UNHEARD_CODE, carried.detail);
       noteOwnSend(carried.id);
       return carried;
     },

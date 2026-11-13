@@ -5,11 +5,11 @@
 // (server/ui, server/control/ui.ts); a send goes to the jobs door; this phone's own device
 // key goes through the hub. Every other path is answered 404 here, in the page: nothing but
 // the five doors ever reaches the network in this mode.
-import type { Info, LimitsEntry, Snapshot, SpacesheepSourceStatus } from "@shared/api";
+import type { ControlActivity, Info, LimitsEntry, Snapshot, SpacesheepSourceStatus } from "@shared/api";
 import { ROUTES } from "@shared/api";
 import { cleanReason } from "@shared/reason";
 import { type MemoryControl, SendRefused } from "../../../server/control/remote";
-import { isPaired, pairedMachine, toActivity } from "../../../server/control/rows";
+import { isPaired, type MachineRow, pairedMachine } from "../../../server/control/rows";
 import type { ApiBackend } from "../lib/net";
 import type { AccountDoors } from "./doors";
 import { type AccountShell, type DeviceAsked, type Disconnected, hubError } from "./shell";
@@ -22,6 +22,10 @@ export interface RouteDeps {
   info(): Info;
   snapshot(): Snapshot;
   control: MemoryControl;
+  /** A send for one of the account's machines: its row, or SendRefused. */
+  send(m: MachineRow, body: Record<string, unknown>): Promise<ControlActivity>;
+  /** Every row the page is shown, newest first. */
+  activity(limit: number): ControlActivity[];
   limits(): LimitsEntry[];
   doors: AccountDoors;
   /** The account as the receiver's Settings reads a connected one; null once it is gone. */
@@ -57,7 +61,7 @@ export function routes(d: RouteDeps): ApiBackend {
     [`GET ${C}/activity`]: (url) => {
       const asked = Number(url.searchParams.get("limit") ?? 100);
       const limit = Number.isFinite(asked) ? Math.max(1, Math.min(1000, Math.floor(asked))) : 100;
-      return json({ activity: control.activity(limit) });
+      return json({ activity: d.activity(limit) });
     },
     // A machine pairs with the account on spacesheep, and a device is approved there:
     // nothing waits here for either.
@@ -68,7 +72,7 @@ export function routes(d: RouteDeps): ApiBackend {
       const m = typeof b.machineId === "string" ? control.machine(b.machineId) : undefined;
       if (!m) return json({ reason: "not_found", error: "No such machine." }, 404);
       try {
-        return json(toActivity(await control.send(m, b, d.doors.send)), 201);
+        return json(await d.send(m, b), 201);
       } catch (e) {
         if (e instanceof SendRefused) return json(e.body, e.status);
         throw e;

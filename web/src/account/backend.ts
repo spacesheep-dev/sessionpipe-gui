@@ -12,6 +12,7 @@
 // /api/ui/* (lib/net.ts apiFetch; routes.ts). Nothing here reaches the network but the
 // doors.
 import type {
+  ControlActivity,
   Info,
   ProtocolEvent,
   SessionKey,
@@ -22,8 +23,16 @@ import type {
 } from "@shared/api";
 import { sessionKey } from "@shared/api";
 import { indexTouches } from "@shared/files";
-import { type KeptQueues, MemoryControl, type RemoteJobWord } from "../../../server/control/remote";
-import { machineFrame, type RemoteMachine, toActivity } from "../../../server/control/rows";
+import { cleanReason } from "@shared/reason";
+import type { ControlCommand } from "sessionpipe-core/control";
+import {
+  type KeptQueues,
+  MemoryControl,
+  newUlid,
+  type RemoteJobWord,
+  SendRefused,
+} from "../../../server/control/remote";
+import { type MachineRow, machineFrame, type RemoteMachine, toActivity } from "../../../server/control/rows";
 import {
   cursorFrom,
   type RelayClock,
@@ -42,7 +51,7 @@ import { HttpError, type StreamHandlers, type Transport } from "../data/transpor
 import type { ApiBackend } from "../lib/net";
 import { type EventCache, openCache, withoutSessions } from "./cache";
 import { type AccountDocs, type DocName, openDocs } from "./docs";
-import { type AccountDoors, type DoorAnswer, openDoors } from "./doors";
+import { type AccountDoors, type DoorAnswer, openDoors, SEND_UNKNOWN_CODE, type Sent } from "./doors";
 import { claimLocal, readLocal, readsKey, wipeLocal, writeLocal } from "./local";
 import { PageLog } from "./log";
 import { routes } from "./routes";
@@ -57,6 +66,7 @@ import {
   type NeedsSession,
   type ShellCalls,
 } from "./shell";
+import { openUnheard, readUnheard, type Unheard } from "./unheard";
 
 /** Something a person should be told once: the events are not kept between launches
  *  (`cache_memory`), or some of the documents could not be read (`doc_unread`, with their
@@ -191,13 +201,22 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     for (const rows of Object.values(queues ?? {}))
       for (const row of rows) if (typeof row.remoteJob === "number" && row.remoteJob > lastJob) lastJob = row.remoteJob;
   };
-  const keptSends = readSends(sends.load());
+  const keptDoc = sends.load();
+  const keptSends = readSends(keptDoc);
   noteJobs(keptSends);
+  /** The sends nobody heard the answer to (unheard.ts), kept in the same document. */
+  let unheard: Unheard | null = null;
+  let queuesNow: KeptQueues = keptSends ?? {};
+  const saveSends = (): void => sends.save({ ...fitSends(queuesNow), unheard: unheard?.kept() ?? [] });
+  /** The id the next row is made under: a send that was unknown keeps its row's when it turns out sent. */
+  let nextId: string | null = null;
   const control = new MemoryControl({
     kept: keptSends,
+    newId: (now) => nextId ?? newUlid(now),
     onSave: (queues: KeptQueues) => {
       noteJobs(queues);
-      sends.save(fitSends(queues));
+      queuesNow = queues;
+      saveSends();
     },
   });
 
@@ -329,6 +348,86 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     onUnauthorized: () => reader?.unauthorized(),
     lastJob: () => lastJob,
   });
+  let gone = false;
+  unheard = openUnheard({
+    kept: readUnheard(keptDoc),
+    doors,
+    machine: (id) => control.machine(id),
+    newId: (now) => newUlid(now),
+    mayAsk: () => !gone && state === "ok",
+    adopt(u, cmd, job) {
+      const m = control.machine(u.row.machineId);
+      if (!m) return;
+      // The same row, now a send like any other: followed by its job, or closed as one
+      // spacesheep took and nobody can follow.
+      nextId = u.row.id;
+      try {
+        control.remote.enqueueRemote(
+          m,
+          { cmd: "" },
+          cmd,
+          { via: "ui", ...(u.row.from ? { from: u.row.from } : {}) },
+          job ?? 0,
+        );
+      } finally {
+        nextId = null;
+      }
+    },
+    // The refusal as a send answers it (forwardRemoteSend's reading of spacesheep's): its
+    // words, its code when it is written as one, and a hold under the word the page knows.
+    refused(_u, status, json) {
+      const reason = cleanReason(json.error) || "spacesheep did not take it";
+      const code = typeof json.code === "string" ? json.code : undefined;
+      if (status === 409 && code === "confirm") {
+        const why = cleanReason(json.why);
+        return { status: 422, reason, code: "confirm_required", ...(why ? { detail: why } : {}) };
+      }
+      return { status: status >= 500 ? 502 : status, reason, ...(code ? { code } : {}) };
+    },
+    changed(a) {
+      if (a) emit({ kind: "control", message: a });
+      saveSends();
+    },
+  });
+  /** Every row the page is shown, newest first: the sends spacesheep carried, and the ones nobody heard the answer to. */
+  const activity = (limit = 100): ControlActivity[] => {
+    const own = unheard?.activity() ?? [];
+    if (!own.length) return control.activity(limit);
+    return [...control.activity(limit), ...own].sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, limit);
+  };
+  /** A send for one of the account's machines: its row. One nobody heard the answer to is
+   *  a row too, said to be unknown and followed until it is known (unheard.ts); while it
+   *  is, the same send again is held with the same words. */
+  const send = async (m: MachineRow, b: Record<string, unknown>): Promise<ControlActivity> => {
+    let cmd: ControlCommand | null = null;
+    try {
+      const c = JSON.parse(String(b.cmd)) as ControlCommand | null;
+      if (c && typeof c === "object" && !Array.isArray(c)) cmd = c;
+    } catch {
+      // not a command: the forward says so
+    }
+    const held = cmd ? unheard?.holding(m.id, cmd) : undefined;
+    if (held) throw new SendRefused(504, { reason: cleanReason(held.why), code: SEND_UNKNOWN_CODE });
+    const askedAt = Date.now();
+    let said: Sent | null = null;
+    let asked: Record<string, unknown> | null = null;
+    try {
+      const row = await control.send(m, b, async (mm, body) => {
+        asked = body;
+        const s = await doors.ask(mm, body, { askedAt });
+        said = s;
+        if (s.kind === "sent") return { status: 202, json: s.job === null ? {} : { job: s.job } };
+        if (s.kind === "refused") return { status: s.status, json: s.json };
+        return { status: 504, json: { code: SEND_UNKNOWN_CODE, error: s.why } };
+      });
+      return toActivity(row);
+    } catch (e) {
+      const s = said as Sent | null;
+      if (s?.kind === "unknown" && asked && cmd && unheard && e instanceof SendRefused)
+        return unheard.add(m, asked, cmd, s, askedAt, typeof b.from === "string" ? b.from : undefined);
+      throw e;
+    }
+  };
   const kept = new Map<RelayKept, unknown>(Object.entries(loaded.kept) as [RelayKept, unknown][]);
   // The read times are kept in the page's own storage, whatever the events are kept in: it
   // is there when IndexedDB is not, and a write to it is done when it returns, so a page
@@ -461,6 +560,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
           unreachable = false;
           if (s !== "unauthorized") board();
         }
+        // spacesheep answers again: a send nobody heard the answer to is asked for now.
+        if (s === "ok") unheard?.kick();
         changed();
       },
       onMachines(list, _origin, rpId) {
@@ -470,6 +571,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
           origin: shell.origin,
           rpId,
         });
+        // The machines are listed: a send kept from before can be asked for.
+        unheard?.kick();
       },
       pendingJobs: () => control.remote.pendingRemoteJobs(),
       jobsCadence: () => control.remote.remoteJobsCadence(),
@@ -502,7 +605,6 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
   if (docs.unread().length) o.notice?.({ kind: "doc_unread", names: docs.unread() });
 
   // ---------- the hub's word on the account ----------
-  let gone = false;
   /** Everything this page holds of the account goes: the reader stops, the machines and
    *  the board leave the screen, the cached sessions are deleted, and the page's own
    *  storage is emptied of all but the app's settings. Then whoever draws the window is told. */
@@ -511,6 +613,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     gone = true;
     state = "gone";
     reader?.stop();
+    unheard?.stop();
     needs.stop();
     offAccount?.();
     control.remote.dropRemoteMachines("spacesheep");
@@ -592,7 +695,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
         // one is not shown while the first read is still out: `board()` brings it.
         if (boarded) send({ kind: "snapshot", snapshot: snapshot() });
         // The messages carried so far, as a stream would have brought them.
-        for (const message of control.activity(100).reverse()) send({ kind: "control", message });
+        for (const message of activity(100).reverse()) send({ kind: "control", message });
         listeners.add(send);
         streams.add(h);
         if (!unreachable || gone) return;
@@ -653,7 +756,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
       if (!limits.forget(key)) throw new HttpError(404, "not_found");
     },
     sessionSearch: () => import("./search").then((m) => m.accountSearch(store, () => labels.get())),
-    controlActivity: async (limit) => control.activity(limit),
+    controlActivity: async (limit) => activity(limit),
   };
 
   const asked = new Map<string, number>();
@@ -696,6 +799,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     info,
     snapshot,
     control,
+    send,
+    activity,
     limits: () => limits.list(),
     doors,
     // Gone, there is no account to speak of: Settings reads "not connected", not the last state.
@@ -723,6 +828,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     },
     stop() {
       reader?.stop();
+      unheard?.stop();
       needs.stop();
       offAccount?.();
       if (machinesTimer) clearTimeout(machinesTimer);

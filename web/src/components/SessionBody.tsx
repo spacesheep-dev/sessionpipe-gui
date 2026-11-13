@@ -798,7 +798,9 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   // the files and, until the turn has a reply of its own, the reply the machine streamed
   // back. One still on its way has its row at the end, where its turn will be.
   const isMine = useCallback(
-    (a: ControlActivity) => a.session === key && (a.kind === "prompt" || a.kind === "start") && !forkOf(a),
+    // A send nobody heard the answer to is no message of the session yet: the composer says it.
+    (a: ControlActivity) =>
+      a.session === key && (a.kind === "prompt" || a.kind === "start") && !forkOf(a) && !a.unheard,
     [key],
   );
   const sentAll = useControlActivity(isMine);

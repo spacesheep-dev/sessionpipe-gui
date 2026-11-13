@@ -105,6 +105,9 @@ export interface DeviceRequest {
   detail?: string;
 }
 
+/** The code of a send nobody heard the answer to: it may have been sent (account/doors.ts). */
+export const UNHEARD_CODE = "hub_unknown";
+
 /** A refusal from the server: `status` and the body's `reason`; `code` is the verifier's
  *  word on a refused command (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …). */
 export class ControlError extends Error {

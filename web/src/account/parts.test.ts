@@ -243,7 +243,14 @@ describe("the account's doors", () => {
       expect(await t.doors.send(m, stop)).toEqual({ status: 202, json: {} });
       // The look by itself says what it read.
       t = open([list([old, { ...mine, id: 30, created_at: T + 40_000 }, mine])], { now: () => T + 6000 });
-      expect(await t.doors.look(m, body, T)).toEqual({ read: true, fits: [7, 30, 41], recent: [41] });
+      expect(await t.doors.look(m, body, T)).toEqual({
+        read: true,
+        told: true,
+        fits: [7, 30, 41],
+        recent: [41],
+      });
+      t = open([list([{ ...mine, action: "cancel" }])], { now: () => T + 6000 });
+      expect(await t.doors.look(m, stop, T)).toEqual({ read: true, told: false, fits: [], recent: [] });
     });
 
     it("after an asking nobody heard, only an answer that speaks for it too is the end", async () => {

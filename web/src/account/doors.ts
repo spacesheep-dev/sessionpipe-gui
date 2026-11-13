@@ -80,6 +80,8 @@ export type Sent =
 export interface Looked {
   /** The list was read to its end: what follows is all of it. */
   read: boolean;
+  /** The list tells this send's job apart from another's (a prompt, a start). */
+  told: boolean;
   /** Jobs after the last this page knew of, for the send's machine, session and action. */
   fits: number[];
   /** Those among them made no earlier than the send began. */
@@ -154,7 +156,7 @@ export function openDoors(o: DoorsOptions): AccountDoors {
    *  the newest job listed was made before this read, so a job made since the send began is
    *  no older than the newest one by more than the time that has passed here. */
   const look = async (m: { id: string }, body: Record<string, unknown>, askedAt: number): Promise<Looked> => {
-    const none: Looked = { read: false, fits: [], recent: [] };
+    const none: Looked = { read: false, told: false, fits: [], recent: [] };
     const as = listedAs(body);
     let since = Math.max(0, Math.floor(o.lastJob?.() ?? 0));
     const fits: { id: number; at: number }[] = [];
@@ -182,10 +184,13 @@ export function openDoors(o: DoorsOptions): AccountDoors {
       return none;
     }
     if (!read) return none;
-    // A command the list cannot tell apart has no fit to speak of: the look says nothing.
-    if (!as) return none;
     const from = newest - Math.max(0, now() - askedAt) - LOOK_SLACK_MS;
-    return { read, fits: fits.map((x) => x.id), recent: fits.filter((x) => x.at >= from).map((x) => x.id) };
+    return {
+      read,
+      told: !!as,
+      fits: fits.map((x) => x.id),
+      recent: fits.filter((x) => x.at >= from).map((x) => x.id),
+    };
   };
 
   /** One asking, through a full room at the hub: its answer, or null when the request
@@ -252,7 +257,7 @@ export function openDoors(o: DoorsOptions): AccountDoors {
       // one fit made since the send began, when the list singles one out.
       if (a.status === 409 && code === "replay") {
         const l = await look(m, body, askedAt);
-        return { kind: "sent", job: l.read && l.recent.length === 1 ? l.recent[0]! : null };
+        return { kind: "sent", job: l.read && l.told && l.recent.length === 1 ? l.recent[0]! : null };
       }
       // Signed too long ago: these bytes make no job any more, and whether they did is
       // what the jobs door lists.

@@ -12,7 +12,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   release yet: it waits for the app's half (the account's key and its doors) and for the
   screens that connect one. With them, the phone keeps its own board from the account,
   shows it again at the next launch before anything is read, and sends through spacesheep
-  as the desktop app does. A session the account forgets leaves the phone too.
+  as the desktop app does. A message whose answer is lost on the way back is never called
+  not sent: the phone says it may have been sent, holds that session's next send, asks
+  again by itself, and then says which it was. A session the account forgets leaves the
+  phone too.
   Disconnecting removes the account from the phone: its key, its sessions, labels and read
   marks, drafts and recent searches; the key itself keeps working until it is revoked on
   spacesheep. Nothing changes for a browser, the desktop app, or the phone on a receiver.

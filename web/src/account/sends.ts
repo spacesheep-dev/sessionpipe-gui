@@ -17,6 +17,8 @@ export const SETTLED_TEXT_CHARS = 400;
 export interface SendsDoc {
   v: 1;
   queues: KeptQueues;
+  /** The sends nobody heard the answer to (unheard.ts): few, and kept whole. */
+  unheard?: unknown[];
 }
 
 const size = (queues: KeptQueues): number => utf8Bytes(JSON.stringify({ v: 1, queues }));

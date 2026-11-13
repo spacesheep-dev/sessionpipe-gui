@@ -4,16 +4,16 @@
 // strip action, signs it with the day grant (one passkey tap a day), and remembers which
 // attentions have an answer out or were closed by the machine, so no second answer goes.
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ControlAction, preHello } from "../components/ControlStrip";
-import { ControlError } from "./api";
+import { ControlError, UNHEARD_CODE } from "./api";
 import { type CommandFields, sendCommand } from "./command";
 import { type Held, useHeld } from "./HeldNotice";
 import type { HeldMeta } from "./held";
 import { HELD_WORDS } from "./heldWords";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
 import { canSign, machineTakes, signerLabel, signHint, updateWords } from "./signer";
-import { sendErrorWords } from "./words";
+import { sendErrorWords, unheardWords } from "./words";
 
 export type AnswerStatus = "sent" | "closed";
 
@@ -114,6 +114,38 @@ export function useSessionSend(
   }, []);
   const draftNow = useRef(o.draft);
   draftNow.current = o.draft;
+  // A send of this session nobody heard the answer to (account/unheard.ts): its row says it
+  // may have been sent while the app finds out, and holds the same kind of send meanwhile.
+  const asking = useMemo(() => activity.filter((a) => a.unheard?.state === "asking"), [activity]);
+  /** Row id → the composer as it was when that send was pressed. */
+  const unheard = useRef(new Map<string, string | undefined>());
+  /** The composer at the send that is out now: the row of an unheard one takes it. */
+  const pressed = useRef<string | undefined>(undefined);
+  const confirmedNow = useRef(o.confirmed);
+  confirmedNow.current = o.confirmed;
+  useEffect(() => {
+    for (const a of activity) {
+      if (a.unheard?.state === "asking") {
+        if (!unheard.current.has(a.id)) unheard.current.set(a.id, pressed.current);
+        continue;
+      }
+      if (!unheard.current.has(a.id)) continue;
+      const typed = unheard.current.get(a.id);
+      unheard.current.delete(a.id);
+      // Not sent, or nobody can say: the row's words, as a send's own answer would read.
+      if (a.unheard) {
+        setError(unheardWords(a));
+        continue;
+      }
+      // spacesheep holds it: a send like any other. The composer that still holds its words is cleared.
+      setError(null);
+      if (a.kind === "prompt")
+        confirmedNow.current?.(
+          { kind: "prompt", session: key, text: a.text ?? "" },
+          typed ?? JSON.stringify([a.text ?? "", []]),
+        );
+    }
+  }, [activity, key]);
   const held = useHeld<ControlActivity, StripSent>(
     (carried, h, meta) => {
       went(h.fields, carried);
@@ -174,8 +206,16 @@ export function useSessionSend(
       }
       const att = action.kind === "permission.answer" ? action.attentionId : null;
       if (att && answers[att]) return;
+      // The same kind of send is out and nobody knows what became of it: held, in its words.
+      const out = asking.find((a) => a.kind === fields.kind);
+      if (out) {
+        const e = new ControlError(504, out.detail ?? "", UNHEARD_CODE, out.detail);
+        setError(sendErrorWords(e));
+        throw e;
+      }
       // A message depends on the composer it was typed in; an answer or a Stop on nothing.
       const keyAtSend = action.kind !== "cancel" && action.composer ? draftNow.current : undefined;
+      pressed.current = keyAtSend;
       try {
         const carried = await sendCommand(rp, control.machineId, fields, { onTap: () => setTap(true) });
         went(fields, carried);
@@ -192,12 +232,15 @@ export function useSessionSend(
         else if (!caught) setError(sendErrorWords(e));
         throw e;
       } finally {
+        pressed.current = undefined;
         setTap(false);
         grant.refresh();
       }
     },
-    [control, rp, key, grant.refresh, answers, notice, catchHeld, dropHeld, confirmingHeld, went],
+    [control, rp, key, grant.refresh, answers, notice, catchHeld, dropHeld, confirmingHeld, went, asking],
   );
 
-  return { rp, secure, grant, tap, error, answers, activity, onSend, held };
+  // A row still being asked for says so whenever the page is opened, not only after the send.
+  const line = error ?? (asking[0] ? unheardWords(asking[0]) : null);
+  return { rp, secure, grant, tap, error: line, answers, activity, onSend, held };
 }

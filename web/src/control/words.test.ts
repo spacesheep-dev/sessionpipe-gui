@@ -13,6 +13,7 @@ import {
   sendErrorWords,
   sentLine,
   startFailureWords,
+  unheardWords,
 } from "./words";
 
 const start = (over: Partial<ControlActivity>): ControlActivity => ({
@@ -172,6 +173,46 @@ describe("sendErrorWords", () => {
     expect(sendErrorWords(new ControlError(401, "unauthorized"))).toBe(
       "not sent · this page lost its key; reload it from the terminal's link",
     );
+  });
+
+  it("a send nobody heard the answer to says the same of its row: it may have been sent, then what it turned out to be", () => {
+    const row = start({ kind: "prompt", code: "hub_unknown", detail: "spacesheep did not answer in time." });
+    const may =
+      "It may have been sent: spacesheep did not answer in time. Look at the session before you send it again.";
+    // While the app finds out, and when nobody can say any more.
+    const asking = { ...row, unheard: { state: "asking" as const } };
+    const unknown = { ...row, outcome: "unconfirmed" as const, unheard: { state: "unknown" as const } };
+    for (const a of [asking, unknown]) {
+      expect(unheardWords(a)).toBe(may);
+      expect(outcomeWords(a, { machine: "rc-mac" })).toBe(may);
+      expect(sentLine(a, { machine: "rc-mac", online: true, command: "claude" })).toEqual({
+        text: may,
+        running: false,
+      });
+    }
+    // Still being asked for, it is no failure yet; settled as one nobody can say, it reads the same.
+    expect(promptFailureWords(asking, "rc-mac")).toBeNull();
+    expect(startFailureWords({ ...asking, kind: "start" }, "rc-mac", "Claude Code")).toBeNull();
+    expect(promptFailureWords(unknown, "rc-mac")).toBe(may);
+    // No job was made: a send's own words for the refusal, never the computer's.
+    const unsent = (over: Partial<ControlActivity>, u: { status: number; reason: string }) => ({
+      ...row,
+      code: undefined,
+      detail: undefined,
+      outcome: "failed" as const,
+      ...over,
+      unheard: { state: "unsent" as const, ...u },
+    });
+    const old = unsent({ code: "too_old" }, { status: 422, reason: "That was signed too long ago." });
+    expect(unheardWords(old)).toBe("not sent · signed too long ago; send it again");
+    expect(promptFailureWords(old, "rc-mac")).toBe("not sent · signed too long ago; send it again");
+    const folder = unsent(
+      { code: "folder", detail: "rc-mac only lets the agent work in: /srv." },
+      { status: 400, reason: "rc-mac only lets the agent work in: /srv." },
+    );
+    expect(unheardWords(folder)).toBe("not sent · rc-mac only lets the agent work in: /srv.");
+    // Every other row has nothing of this to say.
+    expect(unheardWords(start({ outcome: "delivered" }))).toBeNull();
   });
 
   it("a send nobody heard the answer to is never said to be not sent", () => {

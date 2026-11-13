@@ -336,11 +336,20 @@ describe("a page's own backend on a spacesheep account", () => {
     const unreached = post(b, "/api/ui/control/send", signed("claude-code:s-1"));
     await tick(7000);
     res = await unreached;
-    expect([res.status, await res.json()]).toEqual([
-      502,
-      { reason: "spacesheep could not be reached.", code: "hub_unknown" },
-    ]);
+    const dark = (await res.json()) as ControlActivity;
+    expect(res.status).toBe(201);
+    expect(dark).toMatchObject({
+      code: "hub_unknown",
+      detail: "spacesheep could not be reached.",
+      unheard: { state: "asking" },
+    });
+    expect(dark.outcome).toBeUndefined();
     r.hub.down = false;
+    // Reached again, the same bytes are asked once more and taken: the row is a send like any other.
+    await tick(9000);
+    const lit = (await b.transport.controlActivity!(10)).find((a) => a.id === dark.id)!;
+    expect(lit.unheard).toBeUndefined();
+    expect(lit.code).toBeUndefined();
     // The hub's room is full twice, then it goes.
     r.hub.busy = 2;
     const sent = post(b, "/api/ui/control/send", signed("claude-code:s-1"));
@@ -663,18 +672,150 @@ describe("a page's own backend on a spacesheep account", () => {
       expect((await b.transport.controlActivity!(10))[0]!.outcome).toBeUndefined();
     });
 
-    it("still unheard after every try: it may have been sent, and that is what the page is told", async () => {
+    const refusal = (status: number, body: Record<string, unknown>) => () => ({
+      status,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const rows = async (b: AccountBackend) => b.transport.controlActivity!(20);
+    const keptDoc = () =>
+      JSON.parse([...r.hub.accounts.values()][0]!.docs.get("sends") ?? "{}") as {
+        unheard?: { row: { id: string }; state: string; body?: Record<string, unknown> }[];
+      };
+
+    it("still unheard after every try: a row that says it may have been sent, followed until it is known, and one job", async () => {
+      const b = await ready();
+      const s = listen(b);
+      r.sendFaults.push("unheard", "lost", "lost");
+      const sent = await send(b, signed("claude-code:s-1", "into the dark"), 7000);
+      expect(sent.status).toBe(201);
+      expect(sent.body).toMatchObject({
+        text: "into the dark",
+        session: "claude-code:s-1",
+        code: "hub_unknown",
+        detail: "spacesheep did not answer in time.",
+        unheard: { state: "asking" },
+      });
+      expect(sent.body.outcome).toBeUndefined();
+      expect(sends()).toBe(3);
+      expect(r.ss.jobs).toHaveLength(1);
+      // The page was told of the row, and it is kept with the bytes that were signed.
+      expect(s.last("control")?.message).toMatchObject({ id: sent.body.id, unheard: { state: "asking" } });
+      await b.flushed();
+      expect(keptDoc().unheard).toMatchObject([{ row: { id: sent.body.id }, state: "asking", body: { csig: "sig" } }]);
+      // Asked again a while on: spacesheep had it. The same row is that job's now, and is followed.
+      await tick(9000);
+      expect(sends()).toBe(4);
+      expect(r.ss.jobs).toHaveLength(1);
+      const row = (await rows(b))[0]!;
+      expect(row).toMatchObject({ id: sent.body.id, text: "into the dark" });
+      expect(row.unheard).toBeUndefined();
+      expect(row.outcome).toBeUndefined();
+      expect(await rows(b)).toHaveLength(1);
+      await b.flushed();
+      expect(keptDoc().unheard).toEqual([]);
+      r.ss.settle(r.ss.jobs[0]!.id, "done");
+      await tick(4000);
+      expect((await rows(b))[0]).toMatchObject({ id: sent.body.id, outcome: "delivered" });
+    });
+
+    it("the two askings met at spacesheep (one taken, the other its error): never not sent, one job, followed", async () => {
+      const b = await ready();
+      // The first is taken and its answer lost; the second is answered with spacesheep's own error.
+      r.sendFaults.push("unheard");
+      r.ss.sendAnswers.push(() => null, refusal(500, { error: "Something went wrong.", code: "internal_error" }));
+      const sent = await send(b, signed("claude-code:s-1", "twice at once"));
+      expect(sent.status).toBe(201);
+      expect(r.ss.jobs).toHaveLength(1);
+      // The third asking heard that it was taken, and its job is the row's.
+      expect(sent.body.unheard).toBeUndefined();
+      expect(sent.body.outcome).toBeUndefined();
+      r.ss.settle(r.ss.jobs[0]!.id, "done");
+      await tick(4000);
+      expect((await rows(b))[0]).toMatchObject({ id: sent.body.id, outcome: "delivered" });
+    });
+
+    it("too old by the second asking: not sent only when the jobs door lists nothing it could be", async () => {
+      const old = refusal(400, { error: "That was signed too long ago.", code: "bad", refusal: "too_old" });
+      const b = await ready();
+      // Taken, the answer lost, and the phone put away: nobody can say which job it is.
+      r.sendFaults.push("unheard");
+      r.ss.sendAnswers.push(() => null, old);
+      const taken = await send(b, signed("claude-code:s-1", "before the pocket"));
+      expect(taken.status).toBe(201);
+      expect(r.ss.jobs).toHaveLength(1);
+      await tick(1000);
+      let row = (await rows(b)).find((a) => a.id === taken.body.id)!;
+      expect(row).toMatchObject({ outcome: "unconfirmed", code: "hub_unknown", unheard: { state: "unknown" } });
+      // Never taken: the list holds nothing for it and nothing more can come. Not sent, in a send's own words.
+      r.sendFaults.push("lost");
+      r.ss.sendAnswers.push(old);
+      const never = await send(b, signed("claude-code:s-9", "never left"));
+      expect(never.status).toBe(201);
+      await tick(1000);
+      row = (await rows(b)).find((a) => a.id === never.body.id)!;
+      expect(row).toMatchObject({
+        outcome: "failed",
+        code: "too_old",
+        unheard: { state: "unsent", status: 422, reason: "That was signed too long ago." },
+      });
+      expect(r.ss.jobs).toHaveLength(1);
+      // Neither holds its session's next send any more.
+      expect((await send(b, signed("claude-code:s-9", "again"))).body.unheard).toBeUndefined();
+      await b.flushed();
+      expect(keptDoc().unheard!.map((u) => [u.state, u.body])).toEqual([
+        ["unknown", undefined],
+        ["unsent", undefined],
+      ]);
+    });
+
+    it("while it is unknown, the same send for that session is held with the same words, and nothing is asked for it", async () => {
       const b = await ready();
       r.sendFaults.push("unheard", "lost", "lost");
-      const sent = await send(b, signed("claude-code:s-1", "into the dark"), 20_000);
-      expect(sent).toEqual({
-        status: 502,
+      await send(b, signed("claude-code:s-1", "into the dark"), 7000);
+      const before = sends();
+      const again = await send(b, signed("claude-code:s-1", "into the dark"), 100);
+      expect(again).toEqual({
+        status: 504,
         body: { reason: "spacesheep did not answer in time.", code: "hub_unknown" },
       });
-      expect(sends()).toBe(3);
-      // spacesheep holds the one job; the page keeps no row it could not vouch for.
+      expect(sends()).toBe(before);
       expect(r.ss.jobs).toHaveLength(1);
-      expect(await b.transport.controlActivity!(10)).toEqual([]);
+      // Another session's send is nobody's to hold.
+      const other = await send(b, signed("claude-code:s-2", "elsewhere"), 100);
+      expect(other.status).toBe(201);
+      expect(other.body.unheard).toBeUndefined();
+      // Known again (the next asking hears it was taken): the session sends as ever.
+      await tick(9000);
+      expect((await send(b, signed("claude-code:s-1", "and then"), 100)).body.unheard).toBeUndefined();
+      expect(r.ss.jobs).toHaveLength(3);
+    });
+
+    it("across a launch: the row is still there, still unknown, and is asked for as soon as the machines are listed", async () => {
+      const b = await ready();
+      r.sendFaults.push("unheard", "lost", "lost");
+      const sent = await send(b, signed("claude-code:s-1", "into the dark"), 7000);
+      await b.flushed();
+      r.stop();
+      const before = sends();
+      const again = await r.start();
+      const s = listen(again);
+      await tick(0);
+      // Shown as it was kept, before anything is asked.
+      expect(s.frames.find((f) => f.kind === "control")).toMatchObject({
+        message: { id: sent.body.id, unheard: { state: "asking" } },
+      });
+      await tick(2000);
+      const row = (await rows(again))[0]!;
+      expect(row.id).toBe(sent.body.id);
+      expect(row.unheard).toBeUndefined();
+      // One asking did it, with the bytes that were kept; and it is still the one job.
+      expect(sends() - before).toBe(1);
+      expect(r.ss.jobs).toHaveLength(1);
+      expect(await rows(again)).toHaveLength(1);
+      r.ss.settle(r.ss.jobs[0]!.id, "done");
+      await tick(4000);
+      expect((await rows(again))[0]).toMatchObject({ outcome: "delivered" });
     });
 
     it("taken unheard, and the jobs list does not say which job it was: sent, with no word of how it went", async () => {
