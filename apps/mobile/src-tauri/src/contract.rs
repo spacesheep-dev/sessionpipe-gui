@@ -56,6 +56,15 @@ impl Os {
         matches!(self, Os::Ios)
     }
 
+    /// What the phone is called in the middle of a sentence the person reads, as the
+    /// alerts already call it (`confirm.rs`).
+    pub const fn here(self) -> &'static str {
+        match self {
+            Os::Ios => "this iPhone",
+            Os::Android => "this phone",
+        }
+    }
+
     /// What this install calls itself on spacesheep's confirm page, and in the name of
     /// the key made for it there ("sessionpipe-gui on iPhone (0.8.0)").
     pub const fn device_name(self) -> &'static str {
@@ -374,6 +383,10 @@ mod tests {
             .features
             .contains(&"account"));
         assert_eq!(Os::Ios.device_name(), "iPhone");
+        assert_eq!(
+            (Os::Ios.here(), Os::Android.here()),
+            ("this iPhone", "this phone")
+        );
         // The needs-you hand-over is there exactly where the account is.
         for os in [Os::Ios, Os::Android] {
             let f = ShellInfo::new(os, "0.8.0", None).features;

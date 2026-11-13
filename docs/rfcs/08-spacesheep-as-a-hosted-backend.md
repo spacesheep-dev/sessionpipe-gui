@@ -303,8 +303,7 @@ it has exactly one `@`, at most 64 characters before it and 190 after.
 | before a connect to any origin but `https://spacesheep.dev` | Use an account on this server? | This iPhone will ask {host} for an account and show its sessions. It is not spacesheep.dev: continue only if you know this server. | Cancel / Continue |
 | before an approved account is kept, on spacesheep.dev | Use this spacesheep account? | {host}⏎{email}⏎This iPhone will show its sessions. | Cancel / Use it |
 | the same, on any other origin | Use this account? | {host}⏎{email}⏎This iPhone will show its sessions. | Cancel / Use it |
-| before an account is disconnected, with documents kept for it | Disconnect {email}? | Labels and read marks kept on this iPhone for it are removed. | Cancel / Disconnect |
-| the same, with none | Disconnect {email}? | This iPhone stops showing its sessions. | Cancel / Disconnect |
+| before an account is disconnected | Disconnect {email}? | This iPhone forgets the account: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep. | Cancel / Disconnect |
 
 (⏎ is a line break: the host has a line of its own, first.)
 

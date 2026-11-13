@@ -40,10 +40,7 @@ pub fn add_receiver(os: crate::contract::Os, origin: &str, pinned: bool) -> Ask 
 /// gives; nothing is kept, replaced or removed unless the other button is pressed.
 pub fn for_question(os: crate::contract::Os, q: &sp_receivers::Question) -> Ask {
     use sp_receivers::Question;
-    let (device, this_device) = match os {
-        crate::contract::Os::Ios => ("This iPhone", "this iPhone"),
-        crate::contract::Os::Android => ("This phone", "this phone"),
-    };
+    let device = sp_receivers::account::sentence_start(os.here());
     let (title, message, ok) = match q {
         // spacesheep.dev confirms a connect on its own page; another server's confirm
         // page is that server's, so the person is asked here first.
@@ -72,15 +69,11 @@ pub fn for_question(os: crate::contract::Os, q: &sp_receivers::Question) -> Ask 
             ),
             "Use it",
         ),
-        Question::Disconnect {
-            email, documents, ..
-        } => (
+        // One sentence whether or not labels were kept: the page removes everything it
+        // holds for the account either way, and the key is only forgotten here.
+        Question::Disconnect { email, .. } => (
             format!("Disconnect {}?", sp_receivers::account::shown_email(email)),
-            if *documents {
-                format!("Labels and read marks kept on {this_device} for it are removed.")
-            } else {
-                format!("{device} stops showing its sessions.")
-            },
+            format!("{device} forgets the account: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep."),
             "Disconnect",
         ),
     };
@@ -270,24 +263,21 @@ mod tests {
         assert!(lines[1].contains('…'));
         assert_eq!(lines[2], "This iPhone will show its sessions.");
 
-        let a = super::for_question(Os::Ios, &disconnect(true));
-        assert_eq!(a.title, "Disconnect misha@example.com?");
-        assert_eq!(
-            a.message,
-            "Labels and read marks kept on this iPhone for it are removed."
-        );
-        assert_eq!((a.cancel, a.ok), ("Cancel", "Disconnect"));
-        let a = super::for_question(Os::Ios, &disconnect(false));
-        assert_eq!(a.title, "Disconnect misha@example.com?");
-        assert_eq!(a.message, "This iPhone stops showing its sessions.");
-        assert_eq!(
-            super::for_question(Os::Android, &disconnect(true)).message,
-            "Labels and read marks kept on this phone for it are removed."
-        );
-        assert_eq!(
-            super::for_question(Os::Android, &disconnect(false)).message,
-            "This phone stops showing its sessions."
-        );
+        // A disconnect says all that goes, and what does not: the same whether or not
+        // labels were kept (the page removes what it holds for the account either way).
+        for documents in [true, false] {
+            let a = super::for_question(Os::Ios, &disconnect(documents));
+            assert_eq!(a.title, "Disconnect misha@example.com?");
+            assert_eq!(
+                a.message,
+                "This iPhone forgets the account: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep."
+            );
+            assert_eq!((a.cancel, a.ok), ("Cancel", "Disconnect"));
+            assert_eq!(
+                super::for_question(Os::Android, &disconnect(documents)).message,
+                "This phone forgets the account: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep."
+            );
+        }
         // Cancel is the preferred action of every one of them, on both phones; adding a
         // receiver keeps the button it had.
         for os in [Os::Ios, Os::Android] {

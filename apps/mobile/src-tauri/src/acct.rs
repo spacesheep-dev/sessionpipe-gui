@@ -161,7 +161,7 @@ pub async fn acct_device_ask<R: Runtime>(
                 upstream: Some(e.code.to_string()),
             })?;
         let key = serde_json::to_value(&key)
-            .map_err(|_| Problem::new("signer", "This phone's key could not be read."))?;
+            .map_err(|_| Problem::new("signer", "This iPhone's key could not be read."))?;
         hub.account_device_ask(&id, &key).await
     }
     #[cfg(not(target_os = "ios"))]

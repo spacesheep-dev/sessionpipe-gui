@@ -43,8 +43,7 @@ pub fn config(home: PathBuf, version: &str, identifier: &str) -> HubConfig {
             allow_local_http: cfg!(debug_assertions),
             device: os.device_name().into(),
             version: version.into(),
-            // The Hub's own word for now; the phone's own comes with its words.
-            here: AccountConfig::default().here,
+            here: os.here().into(),
             // The shell puts its native alerts here once there is an app to show them
             // (`acct::Alerts`, lib.rs); with none, no question can be asked, and nothing
             // that needs the person's answer happens.
@@ -414,6 +413,12 @@ mod tests {
         assert!(
             cfg.account.confirm.is_none(),
             "set by the app, which can show an alert"
+        );
+        // The Hub's sentences name the phone as the rest of the app does.
+        assert_eq!(cfg.account.here, Os::current().here());
+        assert_eq!(
+            sp_receivers::account::Refused::NotConnected.words(Os::Ios.here()),
+            "This iPhone holds no key for the account. Connect again."
         );
         // Off on Android until its https verifier is set up; on for the iPhone.
         assert!(Os::Ios.account() && !Os::Android.account());

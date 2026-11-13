@@ -550,7 +550,7 @@ impl Hub {
             return Asked::Not(Problem::new(
                 "not_asked",
                 format!(
-                    "{} can't ask that question.",
+                    "{} can't ask that just now. Try again.",
                     account::sentence_start(self.here())
                 ),
             ));
@@ -690,9 +690,11 @@ impl Hub {
         self.0.acct.asked.lock().unwrap().remove(id);
         self.0.acct.needs.lock().unwrap().remove(id);
         let removed = self.remove_entry(id).map_err(|e| {
+            // The system's own text is for the log, not for a sentence.
+            log::warn!("acct {id}: its entry could not be removed: {e}");
             Problem::new(
                 "io",
-                format!("The key is removed from {}, but the entry could not be ({e}). It now shows as having no key.", self.here()),
+                format!("The key is removed from {}, but its entry could not be. It shows as having no key: connect again or disconnect again.", self.here()),
             )
         })?;
         self.emit(HubEvent::Account);
