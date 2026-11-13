@@ -25,6 +25,7 @@ pub mod se;
 pub mod signer;
 pub mod validate;
 pub mod vault;
+pub mod words;
 
 #[cfg(feature = "plugin")]
 pub mod plugin;
@@ -32,7 +33,7 @@ pub mod plugin;
 use std::future::Future;
 use std::pin::Pin;
 
-pub use answer::{answer, NativeAnswer};
+pub use answer::{answer, device_key, NativeAnswer};
 #[cfg(feature = "plugin")]
 pub use plugin::init;
 pub use signer::Signer;

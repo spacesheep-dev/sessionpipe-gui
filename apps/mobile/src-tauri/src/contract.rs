@@ -45,15 +45,56 @@ impl Os {
             Os::Android => format!("http://rx.localhost/{id}"),
         }
     }
+
+    /// Can this phone use a spacesheep account with no receiver (docs/rfcs/08)? The
+    /// iPhone can. Android cannot yet: an account is reached over https, and the Hub's
+    /// https client verifies certificates through the platform's verifier, which on
+    /// Android has to be handed the app's Java context at start (and its Kotlin half
+    /// built into the app). Until that is done a request there would end the app, so the
+    /// Hub refuses to connect one and the page is not told the feature is there.
+    pub const fn account(self) -> bool {
+        matches!(self, Os::Ios)
+    }
+
+    /// What the phone is called in the middle of a sentence the person reads, as the
+    /// alerts already call it (`confirm.rs`).
+    pub const fn here(self) -> &'static str {
+        match self {
+            Os::Ios => "this iPhone",
+            Os::Android => "this phone",
+        }
+    }
+
+    /// What this install calls itself on spacesheep's confirm page, and in the name of
+    /// the key made for it there ("sessionpipe-gui on iPhone (0.8.0)").
+    pub const fn device_name(self) -> &'static str {
+        match self {
+            Os::Ios => "iPhone",
+            Os::Android => "Android phone",
+        }
+    }
 }
 
-/// The receiver this window shows.
+/// The receiver this window shows. A sessionpipe-gui receiver has the first four fields
+/// and nothing else, as it always had. A spacesheep account (docs/rfcs/08) has all seven:
+/// `kind: "spacesheep"` is how the page knows there is no server behind `rxBase`, only
+/// the account's doors, and that it carries its own board.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ShellReceiver {
     pub id: String,
     pub name: String,
     pub origin: String,
     pub local: bool,
+    /// `"spacesheep"` for an account; absent for a receiver.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<&'static str>,
+    /// Whose account, for display.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    /// `"ok"`, `"unauthorized"` or `"no_key"` as the window opened. It can change while
+    /// the window lives: `acct_status` and the `account` event say how it is now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<&'static str>,
 }
 
 /// What `window.sessionpipeShell` holds. Field names are the page's (camelCase).
@@ -71,18 +112,29 @@ pub struct ShellInfo {
 impl ShellInfo {
     pub fn new(os: Os, app_version: &str, receiver: Option<ShellReceiver>) -> Self {
         let rx_base = receiver.as_ref().map(|r| os.rx_base(&r.id));
+        let mut features = vec!["notifications", "signer", "haptics", "scanner"];
+        // "account": the `acct_*` commands are here and the Hub takes a spacesheep
+        // account as a receiver (`Os::account`).
+        // "account-needs": `acct_needs` is here too: the page hands the Hub the
+        // account's sessions that need the person, and they are notified of as a
+        // receiver's are.
+        if os.account() {
+            features.push("account");
+            features.push("account-needs");
+        }
         ShellInfo {
             v: 1,
             platform: os.name(),
             app_version: app_version.to_owned(),
-            // "signer": the identity plugin answers `status` here, so the page shows the
-            // Signing row and why sending is off ("Sending needs a real phone"). It never
-            // makes a key in this build (identity.rs).
+            // "signer": the identity plugin answers `status` here. On an iPhone it is
+            // the signer itself (sp-identity: the key in the Secure Enclave, Face ID);
+            // in the simulator and on Android `status` says why sending is off
+            // ("Sending needs a real iPhone", identity.rs) and no key is ever made.
             // "haptics": `app_haptic` plays a `Haptic` on the phone's engine (§11.3); on
             // Android the page calls MainActivity's `spHaptic.perform` directly.
             // "scanner": the QR scanner (§11.5, `web/src/native/scanner.ts`):
             // tauri-plugin-barcode-scanner's commands, and `rx_add` takes what it decodes.
-            features: vec!["notifications", "signer", "haptics", "scanner"],
+            features,
             receiver,
             rx_base,
         }
@@ -150,6 +202,27 @@ impl Scheme {
 /// The first line of the contract script: how the shell finds its own script among the
 /// webview's user scripts to swap it when the person switches receivers.
 pub const MARKER: &str = "/* sessionpipe shell contract v1 */";
+
+/// The contract script the window was last given (iOS: the WKUserScript that runs as
+/// each page starts). The Hub's list changes under a page that stays (an account is
+/// disconnected, a key is refused, a receiver says its name); the script is swapped
+/// when what it would say changed, so a page that reloads itself reads the contract as
+/// it is now, and not the one the window was opened with.
+#[derive(Debug, Default)]
+pub struct Injected(std::sync::Mutex<String>);
+
+impl Injected {
+    /// Notes `script` as the one in the window. True when it is not the one that was
+    /// there (and so has to be swapped in).
+    pub fn renew(&self, script: &str) -> bool {
+        let mut last = self.0.lock().unwrap();
+        if *last == script {
+            return false;
+        }
+        *last = script.to_owned();
+        true
+    }
+}
 
 /// The initialization script: runs before any page script, in the main frame only.
 ///
@@ -244,6 +317,21 @@ mod tests {
             name: "studio-mac".into(),
             origin: "http://127.0.0.1:7823".into(),
             local: true,
+            kind: None,
+            email: None,
+            state: None,
+        }
+    }
+
+    fn account() -> ShellReceiver {
+        ShellReceiver {
+            id: "klmnopqrst".into(),
+            name: "spacesheep.dev".into(),
+            origin: "https://spacesheep.dev".into(),
+            local: false,
+            kind: Some("spacesheep"),
+            email: Some("misha@example.com".into()),
+            state: Some("ok"),
         }
     }
 
@@ -253,11 +341,80 @@ mod tests {
         assert_eq!(
             v,
             serde_json::json!({
-                "v": 1, "platform": "ios", "appVersion": "0.2.0", "features": ["notifications", "signer", "haptics", "scanner"],
+                "v": 1, "platform": "ios", "appVersion": "0.2.0", "features": ["notifications", "signer", "haptics", "scanner", "account", "account-needs"],
                 "receiver": { "id": "abcdefghij", "name": "studio-mac", "origin": "http://127.0.0.1:7823", "local": true },
                 "rxBase": "rx://localhost/abcdefghij"
             })
         );
+    }
+
+    /// A receiver's entry is what it always was, field for field; an account's adds
+    /// three, and its `rxBase` is made the same way.
+    #[test]
+    fn an_account_says_so_and_a_receiver_says_nothing_new() {
+        let plain = serde_json::to_value(receiver()).unwrap();
+        let mut keys: Vec<&String> = plain.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(keys, vec!["id", "local", "name", "origin"]);
+        let v = serde_json::to_value(ShellInfo::new(Os::Ios, "0.8.0", Some(account()))).unwrap();
+        assert_eq!(
+            v["receiver"],
+            serde_json::json!({
+                "id": "klmnopqrst", "name": "spacesheep.dev", "origin": "https://spacesheep.dev", "local": false,
+                "kind": "spacesheep", "email": "misha@example.com", "state": "ok"
+            })
+        );
+        assert_eq!(v["rxBase"], "rx://localhost/klmnopqrst");
+        // The page freezes the receiver; every field of an account is on it, none nested.
+        assert!(v["receiver"]
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|x| !x.is_object()));
+    }
+
+    /// The iPhone says it can use an account; Android does not, until it can (`Os::account`).
+    #[test]
+    fn the_account_feature_is_the_iphones_for_now() {
+        assert!(ShellInfo::new(Os::Ios, "0.8.0", None)
+            .features
+            .contains(&"account"));
+        assert!(!ShellInfo::new(Os::Android, "0.8.0", None)
+            .features
+            .contains(&"account"));
+        assert_eq!(Os::Ios.device_name(), "iPhone");
+        assert_eq!(
+            (Os::Ios.here(), Os::Android.here()),
+            ("this iPhone", "this phone")
+        );
+        // The needs-you hand-over is there exactly where the account is.
+        for os in [Os::Ios, Os::Android] {
+            let f = ShellInfo::new(os, "0.8.0", None).features;
+            assert_eq!(f.contains(&"account-needs"), f.contains(&"account"));
+        }
+    }
+
+    /// The window's contract script is swapped when what it says changed, and only then.
+    #[test]
+    fn the_contract_in_the_window_is_renewed_when_it_changed() {
+        let with = init_script(&ShellInfo::new(Os::Ios, "0.8.0", Some(account())));
+        let without = init_script(&ShellInfo::new(Os::Ios, "0.8.0", None));
+        assert_ne!(with, without);
+        let window = Injected::default();
+        assert!(window.renew(&with), "the first one is new");
+        assert!(!window.renew(&with), "the same again is not");
+        // The account was disconnected: the next page must not start on it.
+        assert!(window.renew(&without));
+        assert!(!without.contains("klmnopqrst") && !without.contains("misha@example.com"));
+        assert!(!window.renew(&without));
+        // The account's state is part of what a page reads as it starts.
+        let mut refused = account();
+        refused.state = Some("unauthorized");
+        assert!(window.renew(&init_script(&ShellInfo::new(
+            Os::Ios,
+            "0.8.0",
+            Some(refused)
+        ))));
     }
 
     #[test]

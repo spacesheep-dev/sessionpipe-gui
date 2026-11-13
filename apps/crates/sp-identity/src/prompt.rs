@@ -1,13 +1,32 @@
 //! The Touch ID prompt's words, written by Rust from what is really being signed, never by
 //! the page (arch-identity §6.4). macOS shows them as “"sessionpipe" is trying to <reason>”.
 use crate::validate::Checked;
+use crate::words::Device;
+
+/// A character that draws nothing and can change how the text around it reads: the
+/// bidi marks, embeddings, overrides and isolates, the zero-width and joining
+/// characters and the other invisible operators, the line and paragraph separators,
+/// the interlinear marks and the tag characters. The same set sp-receivers drops from
+/// what a notification shows (`needs::is_invisible`, which turns the two separators
+/// into a space instead); the two lists are kept alike.
+pub fn is_invisible(c: char) -> bool {
+    matches!(c,
+        '\u{00AD}' | '\u{061C}' | '\u{180E}'
+        | '\u{200B}'..='\u{200F}'
+        | '\u{2028}'..='\u{202E}'
+        | '\u{2060}'..='\u{206F}'
+        | '\u{FEFF}'
+        | '\u{FFF9}'..='\u{FFFB}'
+        | '\u{E0000}'..='\u{E007F}')
+}
 
 /// A name from a receiver or a command, safe on a system sheet: no control characters,
-/// no bidi overrides, at most 40 characters.
+/// nothing invisible (`is_invisible`: no bidi override, no second line, no zero-width
+/// character), at most 40 characters.
 pub fn clean(s: &str) -> String {
     let t: String = s
         .chars()
-        .filter(|c| !c.is_control() && !matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}'))
+        .filter(|c| !c.is_control() && !is_invisible(*c))
         .collect();
     let t = t.trim();
     if t.chars().count() > 40 {
@@ -19,14 +38,35 @@ pub fn clean(s: &str) -> String {
 
 /// The day grant: “send to your machines through <host> for the next 24 hours”.
 pub fn grant(host: &str) -> String {
-    format!(
-        "send to your machines through {} for the next 24 hours",
-        clean(host)
-    )
+    grant_on(Device::current(), host)
+}
+
+/// The day grant's words on `device`. An iPhone shows them alone, as a sentence, and
+/// calls what it sends to "your computers", as the rest of the phone's words do.
+pub fn grant_on(device: Device, host: &str) -> String {
+    match device {
+        Device::Mac => format!(
+            "send to your machines through {} for the next 24 hours",
+            clean(host)
+        ),
+        Device::IPhone => format!(
+            "Send to your computers through {} for the next 24 hours.",
+            clean(host)
+        ),
+    }
 }
 
 /// A confirm: what the command does, on which machine.
 pub fn confirm(c: &Checked, machine: &str) -> String {
+    confirm_on(Device::current(), c, machine)
+}
+
+/// A confirm's words on `device`: the Mac's fragment, or the same as a sentence.
+pub fn confirm_on(device: Device, c: &Checked, machine: &str) -> String {
+    device.reason(confirm_fragment(c, machine))
+}
+
+fn confirm_fragment(c: &Checked, machine: &str) -> String {
     let m = clean(machine);
     match c.kind.as_str() {
         "key.add" => format!(
@@ -145,9 +185,120 @@ mod tests {
         );
     }
 
+    /// On an iPhone the sheet shows the reason alone: each is a sentence there. What is
+    /// signed is the same; only the words around it differ.
+    #[test]
+    fn on_an_iphone_each_reason_is_a_sentence() {
+        let i = Device::IPhone;
+        assert_eq!(
+            grant_on(i, "spacesheep.dev"),
+            "Send to your computers through spacesheep.dev for the next 24 hours."
+        );
+        assert_eq!(
+            grant_on(Device::Mac, "spacesheep.dev"),
+            grant("spacesheep.dev"),
+            "the tests run on a Mac"
+        );
+        let on = |c: &Checked| confirm_on(i, c, "studio-mac");
+        assert_eq!(
+            on(&checked("key.add", None, Some("iPhone"))),
+            "Trust “iPhone” on studio-mac."
+        );
+        assert_eq!(
+            on(&checked("permission.answer", Some("allow"), None)),
+            "Allow a permission request on studio-mac."
+        );
+        assert_eq!(
+            on(&checked("permission.answer", Some("deny"), None)),
+            "Deny a permission request on studio-mac."
+        );
+        assert_eq!(
+            on(&checked("start", None, None)),
+            "Start a session on studio-mac."
+        );
+        assert_eq!(
+            on(&checked("cancel", None, None)),
+            "Stop a session on studio-mac."
+        );
+        assert_eq!(
+            on(&checked("prompt", None, None)),
+            "Send a message to a session on studio-mac."
+        );
+        // A name is cleaned the same wherever it is shown.
+        assert_eq!(
+            confirm_on(
+                i,
+                &checked("key.add", None, Some("a\u{0007}b")),
+                "m\u{202E}"
+            ),
+            "Trust “ab” on m."
+        );
+        assert_eq!(
+            confirm_on(Device::Mac, &checked("prompt", None, None), "studio-mac"),
+            confirm(&checked("prompt", None, None), "studio-mac")
+        );
+    }
+
     #[test]
     fn names_are_cleaned() {
         assert_eq!(clean("evil\u{202E}txt.exe\n"), "eviltxt.exe");
+        // A name cannot start a line of its own on the sheet, nor hide a character in
+        // it, nor turn what follows it around.
+        assert_eq!(
+            clean("studio\u{2028}Approve\u{2029}now\u{200B}\u{061C}\u{2066}x\u{2069}\u{FEFF}"),
+            "studioApprovenowx"
+        );
+        for c in [
+            '\u{00AD}',
+            '\u{061C}',
+            '\u{180E}',
+            '\u{200B}',
+            '\u{200C}',
+            '\u{200D}',
+            '\u{200E}',
+            '\u{200F}',
+            '\u{2028}',
+            '\u{2029}',
+            '\u{202A}',
+            '\u{202B}',
+            '\u{202C}',
+            '\u{202D}',
+            '\u{202E}',
+            '\u{2060}',
+            '\u{2061}',
+            '\u{2064}',
+            '\u{2066}',
+            '\u{2067}',
+            '\u{2068}',
+            '\u{2069}',
+            '\u{206A}',
+            '\u{206F}',
+            '\u{FEFF}',
+            '\u{FFF9}',
+            '\u{FFFB}',
+            '\u{E0001}',
+            '\u{E007F}',
+        ] {
+            assert!(is_invisible(c), "{c:?}");
+            assert_eq!(clean(&format!("a{c}b")), "ab", "{c:?}");
+        }
+        for plain in [
+            "studio-mac",
+            "Мой Мак",
+            "田中のMac",
+            "café-box",
+            "מחשב",
+            "build 🚀",
+        ] {
+            assert_eq!(clean(plain), plain);
+        }
+        assert_eq!(
+            confirm(
+                &checked("prompt", None, None),
+                "studio\u{2028}Trust “x” on evil"
+            ),
+            "send a message to a session on studioTrust “x” on evil"
+        );
         assert_eq!(clean(&"x".repeat(80)).chars().count(), 40);
         assert_eq!(
             confirm(&checked("key.add", None, Some("a\u{0007}b")), "m"),

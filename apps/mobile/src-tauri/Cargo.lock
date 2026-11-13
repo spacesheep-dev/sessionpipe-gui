@@ -3527,6 +3527,7 @@ dependencies = [
 name = "sp-receivers"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "futures-util",
  "http",
  "log",
