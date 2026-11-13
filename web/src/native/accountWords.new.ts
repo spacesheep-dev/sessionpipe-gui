@@ -29,7 +29,6 @@ export const NEW_WORDS = {
   revoke: "Open API keys on spacesheep",
   disconnectedTitle: "Disconnected",
   connectedBody: (phone: string) => `Reading works now. To send from ${phone}, approve it once on spacesheep.`,
-  connectedNoSigner: (reason: string) => `Reading works now. ${reason}.`,
   since: (host: string, date: string) => `${host} · since ${date}`,
   stateOk: "Connected",
   stateOffline: "spacesheep can't be reached",
@@ -41,7 +40,6 @@ export const NEW_WORDS = {
   removes: (phone: string) =>
     `Disconnect removes the account from ${phone}: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep: Settings → API keys.`,
   sendRevoked: "Not sent. spacesheep no longer takes this app's key: connect again in Settings → App.",
-  keyRevokedBanner: "spacesheep no longer takes this app's key.",
   approveLead: (phone: string, auth: string) =>
     `Approve ${phone} once on spacesheep, and ${auth} signs what you send from here.`,
   approveAsk: "Ask spacesheep to approve",
