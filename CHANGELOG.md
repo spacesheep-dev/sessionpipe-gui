@@ -6,6 +6,8 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-13
+
 ### Fixed
 
 - **A send to a computer reached through spacesheep outlives a restart.** Its row was
@@ -89,7 +91,7 @@ All notable changes to `sessionpipe-gui`. The format follows
   it, which is not known. A handoff's card no longer says "not sent" of a send whose end is
   not known: it says what is known ("no word · rc-mac took it and said nothing more", or
   that it is not followed).
-- **Words, plain** (for approval): a start called off before it began reads "Cancelled before
+- **Words, plain**: a start called off before it began reads "Cancelled before
   rc-mac started it." and a message sent to it "Cancelled with its session, before rc-mac got
   it."; a refusal with no specific reason "rc-mac refused it." plus the receiver's reason when
   there is one, never "refused: refused"; a file for a computer reached through spacesheep
@@ -1138,7 +1140,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.5...v0.8.0
 [0.7.5]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.4...v0.7.5
