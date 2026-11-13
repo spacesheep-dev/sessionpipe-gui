@@ -183,3 +183,49 @@ export function writeLocal(key: string, value: string, local: Kept | null = stor
     return false;
   }
 }
+
+/** What the hub said when the account this window showed was disconnected, for the screen
+ *  the window opens on next (sessionStorage; written after the account left, read once). */
+export const GONE_KEY = "sessionpipe-gui.account.gone";
+export interface GoneNote {
+  email: string;
+  host: string;
+  note: string;
+  revokeUrl?: string;
+}
+
+const sessionStore = (): Kept | null => {
+  try {
+    return (globalThis as unknown as { sessionStorage?: Kept }).sessionStorage ?? null;
+  } catch {
+    return null;
+  }
+};
+
+/** Leaves the hub's word on a disconnect for the next screen. */
+export function leaveGoneNote(n: GoneNote, session: Kept | null = sessionStore()): void {
+  try {
+    session?.setItem(GONE_KEY, JSON.stringify(n));
+  } catch {
+    // Not left: the welcome opens without it.
+  }
+}
+
+/** The hub's word on a disconnect, once: read and removed. */
+export function takeGoneNote(session: Kept | null = sessionStore()): GoneNote | null {
+  try {
+    const text = session?.getItem(GONE_KEY);
+    if (!text) return null;
+    session?.removeItem(GONE_KEY);
+    const n = JSON.parse(text) as Partial<GoneNote> | null;
+    if (!n || typeof n.note !== "string" || !n.note) return null;
+    return {
+      email: typeof n.email === "string" ? n.email : "",
+      host: typeof n.host === "string" ? n.host : "",
+      note: n.note,
+      ...(typeof n.revokeUrl === "string" && /^https:\/\//.test(n.revokeUrl) ? { revokeUrl: n.revokeUrl } : {}),
+    };
+  } catch {
+    return null;
+  }
+}

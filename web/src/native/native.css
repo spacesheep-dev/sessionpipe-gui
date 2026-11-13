@@ -259,6 +259,52 @@
   border-width: 2px;
   margin: 0 auto 8px;
 }
+/* The other way in, under the ways to a computer: a hairline with "or" in it, so the two
+   read as two groups. */
+.onb-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 2px 0;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.onb-or::before,
+.onb-or::after {
+  content: "";
+  flex: 1 1 0;
+  border-top: var(--hairline) solid var(--line);
+}
+/* The number a connect shows here and on spacesheep's page: the thing to compare, so it is
+   the largest thing on the screen, in a panel of its own. */
+.onb-digits {
+  align-self: center;
+  margin: 4px auto;
+  padding: 12px 28px;
+  border-radius: 16px;
+  background: var(--bg-3);
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 2rem + 3vw, 3.25rem);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  -webkit-user-select: text;
+  user-select: text;
+}
+/* The wait, where the primary action was: a quiet spinner on the button's own line. */
+.onb-waiting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50px;
+}
+.onb-waiting .spinner {
+  width: 20px;
+  height: 20px;
+  border-width: 2px;
+}
 /* "No sessionpipe on your computer yet?": a disclosure, between the ways in and the
    demo, with a small chevron that turns when its card is open. */
 .onb-help {

@@ -6,12 +6,16 @@
 // shell asks in its own sheet) and `rx_select` (the shell reopens the window on the
 // receiver). The Mac's welcome is Welcome.tsx.
 import { useEffect, useReducer, useRef } from "react";
+import { takeGoneNote } from "../account/local";
+import { connectView, tauriConnect } from "../account/shell";
 import { Mark } from "../components/Brand";
 import { haptic } from "../lib/haptics";
+import { NEW_WORDS, REUSED } from "./accountWords";
 import { invoke } from "./bridge";
+import { ConnectAccount, Disconnected } from "./ConnectAccount";
 import { INSTALL_COMMAND } from "./logic";
 import { Primary, Quiet, Screen, Secondary } from "./OnbParts";
-import { INITIAL, isScanning, parsePayload, step, trustBrowser, WORDS } from "./onboarding";
+import { INITIAL, isScanning, parsePayload, type Step, step, trustBrowser, WORDS } from "./onboarding";
 import { cameraPermission, cancelScan, hasScanner, openCameraSettings, requestCamera, scanQr } from "./scanner";
 import type { ShellInfo } from "./shell";
 import "./native.css";
@@ -22,11 +26,45 @@ interface Receiver {
 
 const openOutside = (url: string) => void invoke("app_open_external", { url }).catch(() => {});
 
+/** Where the first run opens: the welcome; or, when the account this window showed was
+ *  disconnected a moment ago, what the hub said of its key, once. */
+function firstStep(): Step {
+  const gone = takeGoneNote();
+  return gone
+    ? { kind: "disconnected", note: gone.note, ...(gone.revokeUrl ? { revokeUrl: gone.revokeUrl } : {}) }
+    : INITIAL;
+}
+
 export function Onboarding({ info }: { info: ShellInfo }) {
-  const browser = trustBrowser(info.platform === "android" ? "android" : "ios");
-  const [s, send] = useReducer(step, INITIAL);
+  const phone = info.platform === "android" ? "android" : "ios";
+  const browser = trustBrowser(phone);
+  const [s, send] = useReducer(step, undefined, firstStep);
   const field = useRef<HTMLInputElement>(null);
   const scanner = hasScanner();
+  // An app that takes a spacesheep account offers it as the other way in.
+  const account = info.features.includes("account");
+
+  // A connect that was under way when the app was closed (the person was in the browser)
+  // goes on where it was: the hub kept it.
+  useEffect(() => {
+    if (!account) return;
+    let on = true;
+    void tauriConnect.status().then(
+      (st) => {
+        const c = connectView(st.connect);
+        const going =
+          c &&
+          (c.state === "pending" ||
+            c.state === "asking" ||
+            (c.state === "approved" && !!c.receiver && st.accounts.some((a) => a.id === c.receiver)));
+        if (on && going) send({ type: "account", resume: true });
+      },
+      () => {},
+    );
+    return () => {
+      on = false;
+    };
+  }, [account]);
 
   // The camera: asked for when Scan is tapped, never before; then one scan.
   useEffect(() => {
@@ -107,6 +145,12 @@ export function Onboarding({ info }: { info: ShellInfo }) {
   }, [s.kind]);
 
   if (isScanning(s)) return <Viewfinder onCancel={cancelScan} />;
+
+  if (s.kind === "account")
+    return <ConnectAccount platform={phone} begin={s.begin} onLeave={() => send({ type: "back" })} />;
+
+  if (s.kind === "disconnected")
+    return <Disconnected note={s.note} revokeUrl={s.revokeUrl} onDone={() => send({ type: "back" })} />;
 
   const back = (
     <button type="button" className="btn btn--ghost onb-back" onClick={() => send({ type: "back" })}>
@@ -237,6 +281,16 @@ export function Onboarding({ info }: { info: ShellInfo }) {
             <Secondary onClick={() => send({ type: "address" })}>{WORDS.address}</Secondary>
           ) : (
             <Primary onClick={() => send({ type: "address" })}>{WORDS.address}</Primary>
+          )}
+          {account && (
+            <>
+              <span className="onb-or" aria-hidden="true">
+                {NEW_WORDS.or}
+              </span>
+              <Secondary onClick={() => send({ type: "account" })} data-account>
+                {REUSED.use}
+              </Secondary>
+            </>
           )}
           <button
             type="button"

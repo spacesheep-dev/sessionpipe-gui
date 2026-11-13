@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Connecting a spacesheep account on the phone (docs/rfcs/08, "The phone on an account"):
-// the steps a person goes through, apart from the React (AccountConnect.tsx) and the shell
+// the steps a person goes through, apart from the React (ConnectAccount.tsx) and the shell
 // (account/shell.ts ConnectCalls). The hub does the connecting: it asks spacesheep for a
 // code, opens the confirm page itself, polls, holds an approval until the person answers
 // its question here, and says where the connect stands (`acct_connect_start`'s answer, the
@@ -27,6 +27,8 @@ export type ConnectStep =
   /** What this is, before anything is asked of spacesheep (a start is one of three an hour). */
   | { kind: "intro" }
   | { kind: "starting" }
+  /** A connect was under way when the app opened: the hub is asked where it stands. */
+  | { kind: "resuming" }
   /** The number to compare; `opened` once the confirm page was handed to the browser. */
   | { kind: "number"; host: string; digits: string; opened: boolean }
   /** Approved on spacesheep; the hub's question is on this phone. */
@@ -115,7 +117,7 @@ export function connectStep(prev: ConnectStep, ev: ConnectEvent, host: string): 
       if (prev.kind === "opening") return prev;
       if (!c) {
         // The connect is gone (cancelled, or its outcome cleared): nothing to wait for.
-        return prev.kind === "number" || prev.kind === "asking" ? { kind: "intro" } : prev;
+        return prev.kind === "number" || prev.kind === "asking" || prev.kind === "resuming" ? { kind: "intro" } : prev;
       }
       const h = hostOf(c.origin);
       if (c.state === "pending")
@@ -128,7 +130,8 @@ export function connectStep(prev: ConnectStep, ev: ConnectEvent, host: string): 
       if (c.state === "asking") return { kind: "asking", host: h };
       if (c.state === "approved") {
         // An approval whose account is no longer here (disconnected since) is old news.
-        if (!c.receiver || (ev.accounts && !ev.accounts.includes(c.receiver))) return prev;
+        if (!c.receiver || (ev.accounts && !ev.accounts.includes(c.receiver)))
+          return prev.kind === "resuming" ? { kind: "intro" } : prev;
         return { kind: "opening", host: h, receiver: c.receiver };
       }
       // An outcome while a new start is on its way is the last try's.

@@ -61,6 +61,27 @@ describe("connecting an account: the steps", () => {
     expect(walk({ kind: "intro" }, { type: "connect", connect: null })).toEqual({ kind: "intro" });
   });
 
+  it("resumes one that was under way when the app opened, wherever it stands by then", () => {
+    const from: ConnectStep = { kind: "resuming" };
+    expect(walk(from, { type: "connect", connect: connect("pending") })).toMatchObject({
+      kind: "number",
+      opened: false,
+    });
+    expect(walk(from, { type: "connect", connect: connect("asking") })).toEqual({ kind: "asking", host: HOST });
+    expect(
+      walk(from, { type: "connect", connect: connect("approved", { receiver: "acct1" }), accounts: ["acct1"] }),
+    ).toMatchObject({ kind: "opening", receiver: "acct1" });
+    // It ended meanwhile: said. It is gone, or its account is: the start.
+    expect(walk(from, { type: "connect", connect: connect("expired") })).toMatchObject({
+      kind: "ended",
+      why: "expired",
+    });
+    expect(walk(from, { type: "connect", connect: null })).toEqual({ kind: "intro" });
+    expect(walk(from, { type: "connect", connect: connect("approved", { receiver: "acct1" }), accounts: [] })).toEqual({
+      kind: "intro",
+    });
+  });
+
   it("an approval whose account is gone is old news", () => {
     const approved = connect("approved", { receiver: "acct1" });
     expect(walk({ kind: "intro" }, { type: "connect", connect: approved, accounts: [] })).toEqual({ kind: "intro" });

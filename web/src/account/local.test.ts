@@ -9,9 +9,12 @@ import {
   accountsKept,
   CONVENIENCES,
   forgetLocal,
+  GONE_KEY,
+  leaveGoneNote,
   readsKey,
   SESSION_KEYED,
   SESSION_LISTS,
+  takeGoneNote,
   wipeAccount,
 } from "./local";
 
@@ -162,6 +165,41 @@ describe("what the page keeps outside an account's cache", () => {
     for (const k of [...SESSION_KEYED, ...SESSION_LISTS, ...CONVENIENCES])
       expect(text.includes(`"${k}`) || text.includes(`\`${k}`), k).toBe(true);
     expect(readsKey("x").startsWith(ACCOUNT_KEYED)).toBe(true);
+  });
+});
+
+describe("what the hub said on a disconnect, for the screen the window opens on next", () => {
+  it("is left and taken once", () => {
+    const session = storage({ other: "x" });
+    leaveGoneNote(
+      {
+        email: "me@example.com",
+        host: "spacesheep.dev",
+        note: "The key is forgotten.",
+        revokeUrl: "https://spacesheep.dev/settings/api-keys",
+      },
+      session,
+    );
+    expect(takeGoneNote(session)).toEqual({
+      email: "me@example.com",
+      host: "spacesheep.dev",
+      note: "The key is forgotten.",
+      revokeUrl: "https://spacesheep.dev/settings/api-keys",
+    });
+    expect(takeGoneNote(session)).toBeNull();
+    expect(session.m.has(GONE_KEY)).toBe(false);
+  });
+
+  it("is nothing when it is not a note, and a link that is not https is not kept", () => {
+    for (const text of ["not json", "null", "{}", JSON.stringify({ note: "" }), JSON.stringify({ note: 7 })]) {
+      const session = storage({ [GONE_KEY]: text });
+      expect(takeGoneNote(session), text).toBeNull();
+    }
+    const session = storage({
+      [GONE_KEY]: JSON.stringify({ note: "Forgotten.", revokeUrl: "javascript:alert(1)", email: 3 }),
+    });
+    expect(takeGoneNote(session)).toEqual({ email: "", host: "", note: "Forgotten." });
+    expect(takeGoneNote(null)).toBeNull();
   });
 });
 

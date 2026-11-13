@@ -16,12 +16,13 @@ function withHost(text: string, host?: string): ReactNode {
   ));
 }
 
-/** One screen: an optional bar (Back), a glyph over the title, one line under it, then
- *  its actions. */
+/** One screen: an optional bar (Back), a glyph over the title, a figure under it where
+ *  there is one (a number to compare), one line, then its actions. */
 export function Screen({
   bar,
   glyph,
   title,
+  figure,
   body,
   host,
   live,
@@ -31,6 +32,7 @@ export function Screen({
   bar?: ReactNode;
   glyph?: ReactNode;
   title?: string;
+  figure?: ReactNode;
   body?: string;
   /** The computer's name, where the title or body says it. */
   host?: string;
@@ -47,6 +49,7 @@ export function Screen({
           <div className="onb-head">
             {glyph}
             <h1 className="onb-title">{withHost(title, host)}</h1>
+            {figure}
             {body && <p className="onb-text">{withHost(body, host)}</p>}
           </div>
         )}

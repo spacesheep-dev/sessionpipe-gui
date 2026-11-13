@@ -18,9 +18,9 @@ import {
   memoFrom,
   remember,
 } from "./approve";
+import { accountBackend } from "./current";
 import type { DoorAnswer } from "./doors";
 import { type DeviceAsked, type HubError, hubError } from "./shell";
-import { accountBackend } from "./start";
 
 /** Between two looks while the Approve page is open and waiting. */
 export const LOOK_FAST_MS = 5000;

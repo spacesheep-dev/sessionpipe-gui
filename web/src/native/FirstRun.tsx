@@ -9,11 +9,13 @@
 import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Toggle } from "../components/bits";
+import { accountMode } from "../lib/net";
 import { navigate } from "../lib/router";
+import { NEW_WORDS } from "./accountWords.new";
 import { type AppSettings, loadSettings, patchSettings, requestNotify, setHotkey, settings, useCell } from "./appState";
 import { invoke } from "./bridge";
 import { DEFAULT_HOTKEY, FIRST_RUN_KEY, firstRunDue, hotkeyLabel, notifyToggle, settingsApp, trayPlace } from "./logic";
-import { type Phone, WORDS } from "./onboarding";
+import { type Phone, phoneNoun, WORDS } from "./onboarding";
 import { features, platform, shellInfo } from "./shell";
 import "./native.css";
 
@@ -83,6 +85,9 @@ export function Connected({ phone, onDone }: { phone: Phone; onDone: () => void 
     navigate("/add-device?ask=1");
   };
   const signer = f.has("signer");
+  // On a spacesheep account nothing is approved on a computer: this phone's key is approved
+  // once on spacesheep, and "Approve this iPhone" (account/ApprovePhone.tsx) is where.
+  const account = accountMode();
   return (
     <>
       <div className="menu-scrim menu-scrim--dialog first-run-scrim" aria-hidden="true" />
@@ -101,16 +106,22 @@ export function Connected({ phone, onDone }: { phone: Phone; onDone: () => void 
           {WORDS.connected.title}
         </h2>
         <p className="confirm-body" id="first-run-body">
-          {signer ? WORDS.connected.body(phone, computer) : WORDS.connected.bodyNoSigner}
+          {account
+            ? signer
+              ? NEW_WORDS.connectedBody(phoneNoun(phone))
+              : WORDS.connected.bodyNoSigner
+            : signer
+              ? WORDS.connected.body(phone, computer)
+              : WORDS.connected.bodyNoSigner}
         </p>
-        {signer && <p className="first-run-where">{WORDS.connected.where(computer)}</p>}
+        {signer && !account && <p className="first-run-where">{WORDS.connected.where(computer)}</p>}
         <div className="confirm-actions">
           <button type="button" className="btn btn--ghost onb-quiet" data-later onClick={onDone}>
             {signer ? WORDS.connected.later : WORDS.connected.done}
           </button>
           {signer && (
             <button type="button" className="btn btn--primary onb-primary" data-ask onClick={ask}>
-              {WORDS.connected.ask(computer)}
+              {account ? NEW_WORDS.machinesApprove(phoneNoun(phone)) : WORDS.connected.ask(computer)}
             </button>
           )}
         </div>
