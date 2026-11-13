@@ -133,8 +133,9 @@ function readJson<T>(file: string): T | null {
 type Waiter = { resolve: (messages: MessageRow[]) => void; timer: NodeJS.Timeout };
 
 export class ControlState {
-  private machinesById = new Map<string, MachineRow>();
-  private queues = new Map<string, MessageRow[]>();
+  // The slice below holds these two maps themselves: they are filled and emptied, never replaced.
+  private readonly machinesById = new Map<string, MachineRow>();
+  private readonly queues = new Map<string, MessageRow[]>();
   private waiters = new Map<string, Set<Waiter>>();
   /** Device requests in flight, in memory only. */
   private devices = new Map<string, DeviceRequestRow>();
