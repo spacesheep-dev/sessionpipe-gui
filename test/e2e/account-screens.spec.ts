@@ -801,6 +801,26 @@ test("the Approve page's blocks are panels that start at one edge, at any width"
         };
       }),
     );
+    // A row's button is one line of label, whole: the words beside it wrap, not it.
+    for (const name of ["Open Devices"]) {
+      const sizes = await b.page
+        .getByRole("button", { name })
+        .evaluateAll((els) =>
+          els.map((el) => ({
+            h: el.getBoundingClientRect().height,
+            lines: el.getClientRects().length,
+            w: el.scrollWidth <= el.clientWidth + 1,
+            lh: Number.parseFloat(getComputedStyle(el).lineHeight),
+          })),
+        );
+      expect(sizes.length).toBeGreaterThanOrEqual(2);
+      for (const z of sizes) {
+        expect(z.w, JSON.stringify(z)).toBe(true);
+        // Tall enough for a finger, and not grown by a label broken over lines.
+        expect(z.h, JSON.stringify(z)).toBeGreaterThanOrEqual(44);
+        expect(z.h, JSON.stringify(z)).toBeLessThan(50);
+      }
+    }
     // One left edge and one right edge for all of them; and on a wide screen, where the
     // page draws no panels of its own, each is one, and what is inside starts equally far in.
     for (const k of W >= 840 ? (["left", "right", "inner"] as const) : (["left", "right"] as const))

@@ -199,12 +199,18 @@
 
 /* A label longer than the screen is wide (text at 200 %, a long host) goes to a second
    line inside its button, not off the edge. */
+.approve-actions .btn {
+  min-width: 0;
+}
 .approve-actions .btn,
 .approve .form-row .btn {
   max-width: 100%;
-  min-width: 0;
-  height: auto;
   white-space: normal;
   text-align: center;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+}
+/* A row's button keeps its label on one line while the row has room for it: the words
+   beside it give way first. */
+.approve .form-row .btn {
+  flex: none;
 }
