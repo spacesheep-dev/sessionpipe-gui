@@ -279,7 +279,11 @@ unsafe fn top_view_controller(wk: *mut AnyObject) -> *mut AnyObject {
     vc
 }
 
-/// A two-button alert; `done` gets true for the confirming button. Main thread.
+/// A two-button alert; `done` gets true for the confirming button, false for Cancel.
+/// When there is nothing to show it over, `done` is dropped unanswered: an alert that
+/// was not shown is not a no, and whoever waits on it hears that it was never asked
+/// (`confirm::ask` answers `None`; a held approval stays held and is asked again).
+/// Main thread.
 pub fn alert(
     wk: *mut AnyObject,
     a: &crate::confirm::Ask,
@@ -299,9 +303,7 @@ pub fn alert(
     unsafe {
         let vc = top_view_controller(wk);
         if vc.is_null() {
-            if let Some(tx) = done.lock().unwrap().take() {
-                let _ = tx.send(false);
-            }
+            drop(done.lock().unwrap().take());
             return;
         }
         // UIAlertControllerStyleAlert = 1; UIAlertActionStyleDefault = 0, Cancel = 1.

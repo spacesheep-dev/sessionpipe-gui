@@ -104,6 +104,14 @@ pub enum HubEvent {
         id: String,
         items: Vec<NeedsYouItem>,
     },
+    /// An account's needs-you as its page first hands it over after a window opened
+    /// (`Hub::account_needs`): the list as it stands, none of it new. What is in it was
+    /// already there when the page came to look, so nobody is to be told of it as of
+    /// something that just happened; what a later `NeedsYou` adds to it is news.
+    NeedsYouSeed {
+        id: String,
+        items: Vec<NeedsYouItem>,
+    },
     AttentionClosed {
         id: String,
         attention_id: String,

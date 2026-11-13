@@ -110,12 +110,36 @@ pub const LIST_MAX_SESSIONS: usize = 200;
 pub const LIST_MAX_ATTENTIONS: usize = 16;
 pub const LIST_MAX_ATTENTIONS_IN_ALL: usize = 200;
 
-/// `s` cut to `max` characters, without what a notification must not carry (control
-/// characters; a line break is a space).
-fn clip(s: &str, max: usize) -> String {
+/// A character that draws nothing and can change how the text around it reads: the
+/// bidi marks, embeddings, overrides and isolates (U+061C, U+200E, U+200F,
+/// U+202A to U+202E, U+2066 to U+2069), the zero-width and joining characters and
+/// the other invisible operators (U+200B to U+200D, U+2060 to U+2065, U+206A to
+/// U+206F, U+FEFF, U+00AD, U+180E), the interlinear marks (U+FFF9 to U+FFFB) and
+/// the tag characters (U+E0000 to U+E007F). sp-identity's `prompt::clean` drops the
+/// same set from a name on a Face ID sheet; the two lists are kept alike.
+pub fn is_invisible(c: char) -> bool {
+    matches!(c,
+        '\u{00AD}' | '\u{061C}' | '\u{180E}'
+        | '\u{200B}'..='\u{200F}'
+        | '\u{202A}'..='\u{202E}'
+        | '\u{2060}'..='\u{206F}'
+        | '\u{FEFF}'
+        | '\u{FFF9}'..='\u{FFFB}'
+        | '\u{E0000}'..='\u{E007F}')
+}
+
+/// Text from outside (a session's title, a tool's message, a machine's name), as it may
+/// be shown in a title or a notification: one line, at most `max` characters, with no
+/// control character and nothing invisible (`is_invisible`), so that what is read is
+/// what is there, in the order it is there. A line break of any kind (a newline, a
+/// tab, U+2028, U+2029) is a space.
+pub fn shown(s: &str, max: usize) -> String {
     s.chars()
-        .map(|c| if c == '\n' || c == '\t' { ' ' } else { c })
-        .filter(|c| !c.is_control())
+        .map(|c| match c {
+            '\n' | '\t' | '\u{2028}' | '\u{2029}' => ' ',
+            c => c,
+        })
+        .filter(|c| !c.is_control() && !is_invisible(*c))
         .take(max)
         .collect()
 }
@@ -125,19 +149,19 @@ impl SessionLite {
     /// use for. A stream's sessions come from a receiver the person added; a list
     /// handed over comes from a page, and is kept and shown by the Hub only so far.
     fn clipped(mut self) -> SessionLite {
-        self.key = clip(&self.key, 300);
-        self.harness = clip(&self.harness, 64);
-        self.id = clip(&self.id, 200);
-        self.title = self.title.map(|t| clip(&t, 200));
-        self.machine = self.machine.map(|m| clip(&m, 100));
-        self.cwd = self.cwd.map(|c| clip(&c, 1024));
-        self.state_since = clip(&self.state_since, 40);
+        self.key = shown(&self.key, 300);
+        self.harness = shown(&self.harness, 64);
+        self.id = shown(&self.id, 200);
+        self.title = self.title.map(|t| shown(&t, 200));
+        self.machine = self.machine.map(|m| shown(&m, 100));
+        self.cwd = self.cwd.map(|c| shown(&c, 1024));
+        self.state_since = shown(&self.state_since, 40);
         for a in &mut self.open_attentions {
-            a.attention_id = clip(&a.attention_id, 200);
-            a.kind = clip(&a.kind, 40);
-            a.tool = a.tool.take().map(|t| clip(&t, 200));
-            a.message = a.message.take().map(|m| clip(&m, 300));
-            a.at = clip(&a.at, 40);
+            a.attention_id = shown(&a.attention_id, 200);
+            a.kind = shown(&a.kind, 40);
+            a.tool = a.tool.take().map(|t| shown(&t, 200));
+            a.message = a.message.take().map(|m| shown(&m, 300));
+            a.at = shown(&a.at, 40);
         }
         self
     }
@@ -172,6 +196,12 @@ impl NeedsYou {
 
     pub fn count(&self) -> usize {
         self.items.len()
+    }
+
+    /// A first snapshot (or list) was applied since this was made or `reset`: the next
+    /// one is compared with it. False: the next one only seeds.
+    pub fn seeded(&self) -> bool {
+        self.seeded
     }
 
     /// Longest waiting first.
@@ -450,6 +480,89 @@ mod tests {
             !format!("{i:?}").contains("\\u{"),
             "no control character is kept"
         );
+    }
+
+    /// What is shown reads as it is written: nothing invisible, nothing that reorders,
+    /// one line.
+    #[test]
+    fn text_from_outside_is_shown_as_one_plain_line() {
+        // A right-to-left override that would show "exe.png" for "gnp.exe", a line
+        // separator that would start a second line, a zero-width space, an isolate.
+        let nasty = "Apple ID\u{202E}gnp.exe\u{2028}Your password is needed\u{200B}\u{2066}x\u{2069}\u{0007}\ttab\nline";
+        assert_eq!(
+            shown(nasty, 200),
+            "Apple IDgnp.exe Your password is neededx tab line"
+        );
+        for c in [
+            '\u{00AD}',
+            '\u{061C}',
+            '\u{180E}',
+            '\u{200B}',
+            '\u{200C}',
+            '\u{200D}',
+            '\u{200E}',
+            '\u{200F}',
+            '\u{202A}',
+            '\u{202B}',
+            '\u{202C}',
+            '\u{202D}',
+            '\u{202E}',
+            '\u{2060}',
+            '\u{2061}',
+            '\u{2064}',
+            '\u{2066}',
+            '\u{2067}',
+            '\u{2068}',
+            '\u{2069}',
+            '\u{206A}',
+            '\u{206F}',
+            '\u{FEFF}',
+            '\u{FFF9}',
+            '\u{FFFB}',
+            '\u{E0001}',
+            '\u{E007F}',
+        ] {
+            assert!(is_invisible(c), "{c:?}");
+            assert_eq!(shown(&format!("a{c}b"), 10), "ab", "{c:?}");
+        }
+        for c in ['\u{2028}', '\u{2029}', '\n', '\t'] {
+            assert_eq!(shown(&format!("a{c}b"), 10), "a b", "{c:?}");
+        }
+        // What people write stays: other scripts, accents, an emoji, punctuation.
+        for plain in [
+            "Outbox: a batch reads 1 MB",
+            "Привет, мир",
+            "日本語のタイトル",
+            "naïve café",
+            "שלום",
+            "ship it 🚀",
+            "a–b … “c”",
+        ] {
+            assert_eq!(shown(plain, 200), plain);
+            assert!(!plain.chars().any(is_invisible));
+        }
+        assert_eq!(shown("abcdef", 3), "abc");
+        // A list handed over is cleaned with it.
+        let mut n = NeedsYou::new("acct");
+        n.apply_sessions(serde_json::json!([{
+            "key": "claude:a", "harness": "claude", "id": "a", "title": nasty, "machine": nasty,
+            "state": "needs_you", "stateSince": "t",
+            "openAttentions": [{
+                "attentionId": "p1", "kind": "permission", "tool": nasty, "message": nasty,
+                "at": "t", "answerable": true
+            }]
+        }]))
+        .unwrap();
+        let i = &n.items()[0];
+        let clean = shown(nasty, 200);
+        assert_eq!(i.title.as_deref(), Some(clean.as_str()));
+        assert_eq!(i.machine.as_deref(), Some(clean.as_str()));
+        assert_eq!(i.attentions[0].tool.as_deref(), Some(clean.as_str()));
+        assert_eq!(i.attentions[0].message.as_deref(), Some(clean.as_str()));
+        // The first list seeds; `reset` makes the next one a first again.
+        assert!(n.seeded());
+        n.reset();
+        assert!(!n.seeded());
     }
 
     #[test]

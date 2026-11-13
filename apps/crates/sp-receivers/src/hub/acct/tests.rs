@@ -2579,7 +2579,9 @@ async fn an_accounts_needs_you_is_its_pages_to_hand_over_and_is_said_as_a_receiv
         while let Ok(e) = events.try_recv() {
             if matches!(
                 e,
-                HubEvent::NeedsYou { .. } | HubEvent::AttentionClosed { .. }
+                HubEvent::NeedsYou { .. }
+                    | HubEvent::NeedsYouSeed { .. }
+                    | HubEvent::AttentionClosed { .. }
             ) {
                 out.push(e);
             }
@@ -2602,10 +2604,11 @@ async fn an_accounts_needs_you_is_its_pages_to_hand_over_and_is_said_as_a_receiv
     let needs_in_file =
         |h: &Hub| serde_json::to_value(h.status().doc()).unwrap()["needsYou"].clone();
 
-    // The first list: said, with the account as its receiver.
+    // The first list: said as a seed (the board as the page found it, none of it news),
+    // with the account as its receiver.
     assert_eq!(h.account_needs(&id, json!([session("a", &["p1"])])), Ok(1));
     let e = said();
-    let [HubEvent::NeedsYou { id: whose, items }] = e.as_slice() else {
+    let [HubEvent::NeedsYouSeed { id: whose, items }] = e.as_slice() else {
         panic!("{e:?}");
     };
     assert_eq!(whose, &id);
@@ -2666,6 +2669,36 @@ async fn an_accounts_needs_you_is_its_pages_to_hand_over_and_is_said_as_a_receiv
     );
     assert!(h.needs_you().is_empty());
     assert_eq!(needs_in_file(&h), json!(0));
+
+    // A window opened again (the page reloaded): its first list is a seed again, even
+    // when it holds what nobody was told of yet; what comes after it is news again.
+    h.account_needs_reseed();
+    assert_eq!(
+        h.account_needs(&id, json!([session("ccc", &["r1"])])),
+        Ok(1)
+    );
+    let e = said();
+    assert!(
+        matches!(e.as_slice(), [HubEvent::NeedsYouSeed { items, .. }] if items.len() == 1),
+        "{e:?}"
+    );
+    let two = json!([session("ccc", &["r1"]), session("dddd", &["s1"])]);
+    assert_eq!(h.account_needs(&id, two.clone()), Ok(2));
+    let e = said();
+    assert!(
+        matches!(e.as_slice(), [HubEvent::NeedsYou { items, .. }] if items.len() == 2),
+        "{e:?}"
+    );
+    // The same board found again by the next window: a seed, though nothing changed.
+    h.account_needs_reseed();
+    assert_eq!(h.account_needs(&id, two), Ok(2));
+    let e = said();
+    assert!(
+        matches!(e.as_slice(), [HubEvent::NeedsYouSeed { items, .. }] if items.len() == 2),
+        "{e:?}"
+    );
+    assert_eq!(h.account_needs(&id, json!([])), Ok(0));
+    said();
     assert_eq!(fake.count(), rest, "nothing of it is spacesheep's to hear");
 
     // It goes with the account: nothing is left to list, and nothing more is taken.

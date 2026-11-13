@@ -1873,7 +1873,8 @@ impl Hub {
     /// It is applied as a stream's `snapshot` is, and said as a receiver's is said (the
     /// same `NeedsYou` and `AttentionClosed` events, the same count in the status file),
     /// so whatever posts a notification for a receiver's session does so for these.
-    /// The first list only seeds: nothing in it counts as having just opened.
+    /// The first list after a window opened only seeds: it is said as `NeedsYouSeed`,
+    /// and nothing in it counts as having just opened (`account_needs_reseed`).
     ///
     /// The page is not trusted with more than that: the account must be one in the list,
     /// the list is at most `needs::LIST_MAX_SESSIONS` long, and every text in it is cut
@@ -1882,15 +1883,16 @@ impl Hub {
         if !self.account_on() || self.account_entry(id).is_none() {
             return Err(Problem::new("unknown_account", "No such account."));
         }
-        let (change, items) = {
+        let (first, change, items) = {
             let mut all = self.0.acct.needs.lock().unwrap();
             let needs = all
                 .entry(id.to_string())
                 .or_insert_with(|| NeedsYou::new(id));
+            let first = !needs.seeded();
             let change = needs
                 .apply_sessions(sessions)
                 .ok_or_else(|| Problem::new("bad_request", "That is not a list of sessions."))?;
-            (change, needs.items())
+            (first, change, needs.items())
         };
         for a in change.closed {
             self.emit(HubEvent::AttentionClosed {
@@ -1906,12 +1908,23 @@ impl Hub {
                 .lock()
                 .unwrap()
                 .insert(id.to_string(), items.clone());
-            self.emit(HubEvent::NeedsYou {
-                id: id.to_string(),
-                items,
+            let id = id.to_string();
+            self.emit(if first {
+                HubEvent::NeedsYouSeed { id, items }
+            } else {
+                HubEvent::NeedsYou { id, items }
             });
         }
         Ok(n)
+    }
+
+    /// A window opened, or its page loaded again: whatever page comes now starts its
+    /// board from nothing, and the first list it hands over for an account is the board
+    /// as it finds it, not news. So that list seeds again, for every account.
+    pub fn account_needs_reseed(&self) {
+        for needs in self.0.acct.needs.lock().unwrap().values_mut() {
+            needs.reset();
+        }
     }
 
     // ---- the account's documents ----

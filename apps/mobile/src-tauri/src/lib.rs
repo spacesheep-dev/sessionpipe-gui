@@ -560,8 +560,14 @@ pub fn run() {
         })
         .on_page_load(move |webview, payload| {
             if payload.event() == PageLoadEvent::Started {
-                // A reload ends the streams the old page opened.
-                webview.app_handle().state::<Hub>().close_streams_of(webview.label());
+                // A reload ends the streams the old page opened. And the page that comes
+                // starts its board from nothing: the first needs-you list it hands over
+                // for an account is what it found, not news (`account_needs_reseed`).
+                let hub = webview.app_handle().state::<Hub>();
+                hub.close_streams_of(webview.label());
+                if webview.label() == "main" {
+                    hub.account_needs_reseed();
+                }
                 return;
             }
             probe(webview);
