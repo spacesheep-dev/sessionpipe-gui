@@ -498,4 +498,73 @@ describe("remote machines in the control state", () => {
     state.applyRemoteJobs([{ id: 71, status: "failed", note: "x", done_at: born, created_at: born }]);
     expect(state.activityById(row.id)?.outcome).toBe("delivered");
   });
+
+  it("tells whoever listens when the relay's machines change, a listener set after the state was built too", () => {
+    let told = 0;
+    state.onMachines = () => told++;
+    state.upsertRemoteMachines([listed()], remote);
+    expect(told).toBeGreaterThan(0);
+    const before = told;
+    // Another listener takes over from the first: the slice calls whichever is there now.
+    let other = 0;
+    state.onMachines = () => other++;
+    state.upsertRemoteMachines([listed({ online: false })], remote);
+    expect(other).toBeGreaterThan(0);
+    expect(told).toBe(before);
+  });
+
+  it("holds a start's files for as long as the start can still be taken", () => {
+    vi.useFakeTimers({ now: 1_800_000_000_000 });
+    const T = Date.now();
+    const HOUR = 3_600_000;
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    // Uploaded now: held for a day by itself.
+    const held = state.files.put(Buffer.from("notes for the agent"), "text/plain");
+    const other = state.files.put(Buffer.from("a file no start names"), "text/plain");
+    // Six hours on, a start that names the first is queued for a day more.
+    vi.setSystemTime(T + 6 * HOUR);
+    const cmd = {
+      ...startCmd(m.id),
+      files: [{ name: "notes.txt", type: "text/plain", size: held.size, sha256: held.sha256 }],
+    };
+    const row = state.enqueue(m, { cmd: JSON.stringify(cmd), csig: "s" }, cmd, {
+      via: "ui",
+      expiresInMs: EXPIRES_MAX_MS,
+    });
+    expect(row.files?.map((f) => f.sha256)).toEqual([held.sha256]);
+    expect(Date.parse(row.expiresAt)).toBe(T + 30 * HOUR);
+    // Past the upload's own day the named file is still there, until the start's end; the
+    // other went with its day.
+    expect(state.files.has(held.sha256, T + 29 * HOUR)).toBe(true);
+    expect(state.files.has(held.sha256, T + 30 * HOUR + 1)).toBe(false);
+    expect(state.files.has(other.sha256, T + 23 * HOUR)).toBe(true);
+    expect(state.files.has(other.sha256, T + 25 * HOUR)).toBe(false);
+  });
+
+  it("a queue is trimmed where it is held, not only where it is written: what settled a week ago is gone from the activity", () => {
+    vi.useFakeTimers({ now: 1_800_000_000_000 });
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const send = (job: number) => {
+      const cmd = startCmd(m.id);
+      return state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, job);
+    };
+    const first = send(81);
+    vi.setSystemTime(Date.now() + 5);
+    const second = send(82);
+    state.applyRemoteJobs([{ id: 81, status: "done", note: null, done_at: Date.now(), created_at: Date.now() }]);
+    expect(state.activity().map((a) => a.id)).toEqual([second.id, first.id]);
+    // Eight days on the queue is saved again (a new send): the settled row is dropped from
+    // the state itself, as from its file; the one that waits stays.
+    vi.setSystemTime(Date.now() + 8 * 86_400_000);
+    const third = send(83);
+    expect(state.activity().map((a) => a.id)).toEqual([third.id, second.id]);
+    expect(state.activityById(first.id)).toBeUndefined();
+    // A state opened on the same folder reads the same.
+    const again = new ControlState(path.join(dir, "control"));
+    expect(again.activity().map((a) => a.id)).toEqual([third.id, second.id]);
+    again.close();
+  });
 });
