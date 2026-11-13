@@ -17,7 +17,9 @@
 .acct-state::before {
   content: "";
   flex: none;
-  align-self: center;
+  /* Beside the first line, where the words run to a second. */
+  align-self: flex-start;
+  margin-top: 0.5em;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -28,6 +30,7 @@
 }
 .acct-state--ok::before {
   content: "\2713";
+  margin-top: 0.25em;
   width: auto;
   height: auto;
   border: 0;
@@ -84,8 +87,13 @@
   margin: 0;
 }
 .approve-line .acct-state {
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: var(--text-md);
   font-weight: 500;
+}
+.approve-line .spinner {
+  flex: none;
 }
 .approve-actions {
   display: flex;

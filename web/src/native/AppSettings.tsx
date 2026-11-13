@@ -250,9 +250,11 @@ function ReceiversGroup({ current }: { current: string | null }) {
       if (!isCancel(e)) setError(e instanceof Error ? e.message : String(e));
     }
   };
+  // The account this window shows has its own group above: it is not listed twice.
+  const shown = (list ?? []).filter((r) => !(r.kind === "spacesheep" && r.id === current));
   return (
     <Group label="Receivers" note={error ?? "The window shows one receiver at a time; switching reloads it."}>
-      {(list ?? []).map((r) => (
+      {shown.map((r) => (
         <Row
           key={r.id}
           // A spacesheep account in the list is named by whose it is.
@@ -281,7 +283,7 @@ function ReceiversGroup({ current }: { current: string | null }) {
           )}
         </Row>
       ))}
-      {list && list.length === 0 && <Row label="No receivers yet" />}
+      {list && shown.length === 0 && <Row label="No receivers yet" />}
       {adding ? (
         <Row label="Address">
           <form

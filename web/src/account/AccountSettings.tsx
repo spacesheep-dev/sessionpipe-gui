@@ -79,10 +79,11 @@ export default function AccountSettings() {
     <div data-account-settings={v.state}>
       <Group label={R.group} note={err ? <span role="alert">{err}</span> : N.removes(thisPhone())}>
         <Row label={v.email} hint={since ? N.since(host, since) : host}>
-          <Mark kind={st.mark}>{st.words}</Mark>
+          {!st.again && <Mark kind={st.mark}>{st.words}</Mark>}
         </Row>
         {st.again && (
-          <Row label={N.connectAgain}>
+          // What is wrong, and the one thing that mends it, on one row.
+          <Row label={<Mark kind={st.mark}>{st.words}</Mark>}>
             <button type="button" className="btn btn--sm btn--primary" onClick={() => setConnecting(true)} data-again>
               {N.connectAgain}
             </button>

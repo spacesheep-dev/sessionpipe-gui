@@ -84,7 +84,13 @@ export default function ApprovePhone() {
       ) : (
         <>
           <section className="form-group approve-panel" aria-live="polite">
-            {!view || phase === "idle" ? (
+            {!view && err ? (
+              // Where the key stands could not be read, and spacesheep (or the app) said why:
+              // that is the line; nothing is offered that would only be refused again.
+              <p className="approve-line">
+                <Mark kind="warn">{err.words}</Mark>
+              </p>
+            ) : !view || phase === "idle" ? (
               <>
                 <p className="approve-lead">{N.approveLead(thisPhone(), deviceWords().auth)}</p>
                 <div className="approve-actions">
@@ -137,7 +143,7 @@ export default function ApprovePhone() {
                 </button>
               </p>
             )}
-            {err && (
+            {err && view && (
               <p className="approve-note approve-err" role="alert">
                 {err.words}
               </p>
