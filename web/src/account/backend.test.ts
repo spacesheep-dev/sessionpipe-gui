@@ -79,6 +79,10 @@ function rig(o: { features?: string[]; cache?: KeptCache } = {}) {
     needs: (id, sessions) => hub.invoke("acct_needs", { id, sessions }),
   };
   const notices: AccountNotice[] = [];
+  /** The page's own storage, as the backend used it: "claim <id>", "wipe". */
+  const local: string[] = [];
+  /** Each time the backend said the account is gone: the hub's answer, or null. */
+  const gone: unknown[] = [];
   let backend: AccountBackend | null = null;
   const start = async (): Promise<AccountBackend> => {
     const shell = accountShell(hub.contract()) as AccountShell;
@@ -88,11 +92,13 @@ function rig(o: { features?: string[]; cache?: KeptCache } = {}) {
       fetch: fetchDoors,
       idb: null,
       ...(o.cache ? { cache: o.cache } : {}),
+      local: { claim: (id) => void local.push(`claim ${id}`), wipe: () => void local.push("wipe") },
+      onGone: (d) => void gone.push(d),
       notice: (n) => notices.push(n),
     });
     return backend;
   };
-  return { ss, hub, asked, notices, calls, failGet, sets, start, stop: () => backend?.stop() };
+  return { ss, hub, asked, notices, calls, failGet, sets, local, gone, start, stop: () => backend?.stop() };
 }
 
 /** The frames a page gets from a stream it opened. */
@@ -576,20 +582,81 @@ describe("a page's own backend on a spacesheep account", () => {
     expect(await res.json()).toMatchObject({ trustedOn: [M1], pending: false });
   });
 
-  it("disconnects only on the person's yes, and then holds nothing of the account", async () => {
+  it("disconnects only on the person's yes, and then holds nothing of the account: not on screen, not on the phone", async () => {
+    const cache = keptCache();
+    r = rig({ cache });
+    const s = new Session("s-1");
+    r.ss.push([s.ev("session.started", {}, { tier: 2, session: { machine: "lab-mac" } })]);
     const b = await r.start();
     const page = listen(b);
     await tick(400);
+    const id = b.view().id;
+    // The window opened on this account: the page's own storage is its from now.
+    expect(r.local).toEqual([`claim ${id}`]);
+    expect(cache.events()).toHaveLength(1);
+    const settings = async () => (await (await b.answer("/api/ui/spacesheep")).json()) as { link: unknown };
+    expect((await settings()).link).toMatchObject({ email: "me@example.com" });
+
+    // No in the app's alert: nothing changes, anywhere.
     r.hub.alert = () => false;
     await expect(b.disconnect()).rejects.toMatchObject({ code: "cancelled" });
+    const refused = await b.answer("/api/ui/spacesheep", { method: "DELETE" });
+    expect([refused.status, ((await refused.json()) as { reason: string }).reason]).toEqual([409, "cancelled"]);
     expect(b.view().state).toBe("ok");
+    expect(r.local).toEqual([`claim ${id}`]);
+    expect(cache.destroyed).toBe(false);
+    expect(r.gone).toEqual([]);
+
+    // Yes: through the route Settings uses, which hands back what the hub says of the key.
     r.hub.alert = () => true;
-    expect(await b.disconnect()).toMatchObject({ forgotten: true, revoked: false, email: "me@example.com" });
-    expect(b.view().state).toBe("gone");
+    const res = await b.answer("/api/ui/spacesheep", { method: "DELETE" });
+    const said = (await res.json()) as { ok: boolean; revoked: boolean; revokeUrl: string; note: string };
+    expect(res.status).toBe(200);
+    expect(said).toMatchObject({ ok: true, revoked: false });
+    expect(said.revokeUrl).toMatch(/^https:\/\/spacesheep\.test\/settings/);
+    expect(said.note).toMatch(/revoke it on spacesheep: Settings → API keys\.$/);
+    expect(r.hub.accounts.size).toBe(0);
+    // Not on the phone: the cached sessions and the page's own storage are gone...
+    expect(cache.destroyed).toBe(true);
+    expect(cache.events()).toEqual([]);
+    expect(r.local).toEqual([`claim ${id}`, "wipe"]);
+    // ...and not on screen: the board is empty, no machine is listed, Settings has no account.
+    expect(b.view()).toMatchObject({ state: "gone", store: { sessions: 0 } });
+    const last = page.last("snapshot")!.snapshot;
+    expect(last.sessions).toEqual([]);
+    expect(last.machines.filter((m) => m.control)).toEqual([]);
+    expect((await settings()).link).toBeNull();
+    expect((await b.transport.info()).sources.spacesheep).toBeNull();
+    // Whoever draws the window was told, once, with the hub's answer.
+    expect(r.gone).toHaveLength(1);
+    expect(r.gone[0]).toMatchObject({ forgotten: true, revoked: false, email: "me@example.com" });
+    // And nothing is asked of spacesheep after.
     const before = r.asked.length;
     await tick(120_000);
     expect(r.asked.length).toBe(before);
-    expect(r.hub.accounts.size).toBe(0);
+    page.off();
+  });
+
+  it("an account the hub no longer lists is left the same way, with no answer to pass on", async () => {
+    const cache = keptCache();
+    r = rig({ cache });
+    const s = new Session("s-1");
+    r.ss.push([s.ev("session.started", {}, { tier: 2 })]);
+    const b = await r.start();
+    const page = listen(b);
+    await tick(400);
+    expect(b.view().store.sessions).toBe(1);
+    // Gone on the hub's side (replaced by another connect, disconnected from another window).
+    r.hub.accounts.clear();
+    r.hub.active = null;
+    r.hub.on(() => {})();
+    await r.hub.invoke("acct_connect_cancel");
+    await tick(50);
+    expect(b.view()).toMatchObject({ state: "gone", store: { sessions: 0 } });
+    expect(cache.destroyed).toBe(true);
+    expect(r.local).toContain("wipe");
+    expect(r.gone).toEqual([null]);
+    expect(page.last("snapshot")!.snapshot.sessions).toEqual([]);
     page.off();
   });
 

@@ -928,15 +928,28 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
   };
   const disconnect = async () => {
     setBusy(true);
+    setErr(null);
     try {
-      await apiFetch(ROUTES.ui.spacesheep, { method: "DELETE" });
+      const res = await apiFetch(ROUTES.ui.spacesheep, { method: "DELETE" });
+      // On an account the app asks first, in its own alert: a no changes nothing and is no
+      // error; what stopped it otherwise (the alert could not be shown, the key could not be
+      // removed) is said in the app's words.
+      if (!res.ok && accountMode()) {
+        const j = (await res.json().catch(() => ({}))) as { reason?: string; error?: string };
+        if (j.reason !== "cancelled") setErr(j.error || `HTTP ${res.status}`);
+      }
       await read();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   };
   const link = st?.link ?? null;
   const p = st?.pending ?? null;
+  // On an account there is nothing to connect from here: once it is gone (or before it is
+  // read) the group is not drawn, and the window is about to show something else.
+  if (accountMode() && !link) return null;
   const stateWords: Record<string, string> = {
     starting: "connecting…",
     ok: "reading",

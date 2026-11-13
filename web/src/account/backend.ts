@@ -40,9 +40,10 @@ import { cutPreview } from "../../../server/ui/preview";
 import { snapshotWithControl } from "../../../server/ui/snapshot";
 import { HttpError, type StreamHandlers, type Transport } from "../data/transport";
 import type { ApiBackend } from "../lib/net";
-import { type EventCache, openCache, sweepCaches, withoutSessions } from "./cache";
+import { type EventCache, openCache, withoutSessions } from "./cache";
 import { type AccountDocs, type DocName, openDocs } from "./docs";
 import { type AccountDoors, type DoorAnswer, openDoors } from "./doors";
+import { claimLocal, wipeLocal } from "./local";
 import { PageLog } from "./log";
 import { routes } from "./routes";
 import { fitSends, readSends } from "./sends";
@@ -73,6 +74,13 @@ export interface AccountBackendOptions {
   idb?: IDBFactory | null;
   /** The cache itself, in place of one opened on `idb` (a test's). */
   cache?: EventCache;
+  /** The page's own storage (local.ts): claimed for this account as the window opens, and
+   *  emptied of all but the app's settings when the account goes. Absent: this page's. */
+  local?: { claim(id: string): void; wipe(): void };
+  /** The account is gone from this phone (disconnected here, or the hub says it is no
+   *  longer listed) and nothing of it is kept by this page any more: whoever draws the
+   *  window leaves it. With the hub's answer when it was this page's own disconnect. */
+  onGone?: (disconnected: Disconnected | null) => void;
   clock?: RelayClock;
   notice?: (n: AccountNotice) => void;
 }
@@ -143,12 +151,10 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     calls.status().catch(() => null),
   ]);
   const loaded = await cache.load();
-  // An account disconnected while no window showed it left its pages behind: they go now.
-  if (first && o.idb !== null)
-    void sweepCaches(
-      first.accounts.map((a) => a.id),
-      o.idb ?? globalThis.indexedDB,
-    );
+  const local = o.local ?? { claim: (id: string) => void claimLocal(id), wipe: () => void wipeLocal() };
+  // What another account's sessions left in this page's own storage goes before this one's
+  // are shown. (What an account left in IndexedDB is swept by every window as it opens: gone.ts.)
+  local.claim(shell.id);
 
   // ---------- the parts, as the receiver puts them together ----------
   // The index keeps its previews whole, so its copy of an event it did not cut is the
@@ -424,19 +430,31 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
 
   // ---------- the hub's word on the account ----------
   let gone = false;
-  const drop = async (): Promise<void> => {
+  /** Everything this page holds of the account goes: the reader stops, the machines and
+   *  the board leave the screen, the cached sessions are deleted, and the page's own
+   *  storage is emptied of all but the app's settings. Then whoever draws the window is told. */
+  const drop = async (disconnected: Disconnected | null = null): Promise<void> => {
     if (gone) return;
     gone = true;
     state = "gone";
     reader?.stop();
     needs.stop();
+    offAccount?.();
     control.remote.dropRemoteMachines("spacesheep");
     control.remote.setRemoteAccount(null);
+    for (const key of store.snapshot().sessions.map((s) => s.key)) store.forget(key);
+    local.wipe();
     await cache.destroy();
+    emit({ kind: "snapshot", snapshot: snapshot() });
     changed();
+    o.onGone?.(disconnected);
   };
+  /** This page's own disconnect is with the hub: its answer says what became of the account. */
+  let disconnecting = false;
   const onAccount = (s: AccountStatus): void => {
     const row = s.accounts.find((a) => a.id === shell.id);
+    // Gone by this page's own asking: the hub's answer is on its way and is handed on with it.
+    if (!row && disconnecting) return;
     if (!row) return void drop();
     if (gone || row.state === state) return;
     const was = state;
@@ -475,7 +493,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     sinkCommand: "",
     sinkToken: "",
     uiKey: "",
-    sources: { http: true, outbox: null, demo: false, spacesheep: relayStatus() },
+    sources: { http: true, outbox: null, demo: false, spacesheep: gone ? null : relayStatus() },
     storage: { dir: "", bytes: store.stats().storageBytes },
     wellKnown: {},
     control: {
@@ -569,8 +587,19 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
   };
   const deviceAsk = (): Promise<DeviceAsked> => calls.deviceAsk(shell.id);
   const disconnect = async (): Promise<Disconnected> => {
-    const d = await calls.disconnect(shell.id);
-    await drop();
+    disconnecting = true;
+    let d: Disconnected;
+    try {
+      d = await calls.disconnect(shell.id);
+    } catch (e) {
+      disconnecting = false;
+      // Refused, or failed part of the way: the hub's list says whether the account is still here.
+      const now = await calls.status().catch(() => null);
+      if (now && !now.accounts.some((a) => a.id === shell.id)) await drop();
+      throw e;
+    }
+    disconnecting = false;
+    await drop(d);
     return d;
   };
 
@@ -581,7 +610,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     control,
     limits: () => limits.list(),
     doors,
-    relay: relayStatus,
+    // Gone, there is no account to speak of: Settings reads "not connected", not the last state.
+    relay: () => (gone ? null : relayStatus()),
     deviceAsk,
     disconnect,
     asked,

@@ -24,7 +24,8 @@ export interface RouteDeps {
   control: MemoryControl;
   limits(): LimitsEntry[];
   doors: AccountDoors;
-  relay(): SpacesheepSourceStatus;
+  /** The account as the receiver's Settings reads a connected one; null once it is gone. */
+  relay(): SpacesheepSourceStatus | null;
   deviceAsk(): Promise<DeviceAsked>;
   disconnect(): Promise<Disconnected>;
   asked: Map<string, number>;
@@ -74,8 +75,9 @@ export function routes(d: RouteDeps): ApiBackend {
     [`GET ${ROUTES.ui.spacesheep}`]: () => json({ link: d.relay(), pending: null }),
     [`DELETE ${ROUTES.ui.spacesheep}`]: async () => {
       try {
-        await d.disconnect();
-        return json({ ok: true });
+        const gone = await d.disconnect();
+        // What the hub says of it: the key is forgotten here and still works there.
+        return json({ ok: true, revoked: gone.revoked, revokeUrl: gone.revokeUrl, note: cleanReason(gone.note, 300) });
       } catch (e) {
         const h = hubError(e);
         return json({ reason: h.code, error: cleanReason(h.message) }, h.code === "cancelled" ? 409 : 502);

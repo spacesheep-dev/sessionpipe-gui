@@ -479,34 +479,78 @@ test("a revoked key is spacesheep's own word: reading stops, and a send says why
   expect([...hub.accounts.values()][0]!.state).toBe("unauthorized");
 });
 
-test("disconnecting leaves nothing of the account on the phone", async () => {
+/** The names of this origin's IndexedDB databases, and what its localStorage holds. */
+const databases = (): Promise<(string | undefined)[]> =>
+  page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name));
+const stored = (): Promise<Record<string, string>> =>
+  page.evaluate(() => Object.fromEntries(Object.entries(localStorage)) as Record<string, string>);
+/** What a person leaves behind while sessions are on screen: a draft, a search, a hidden session. */
+const leaveTraces = (): Promise<void> =>
+  page.evaluate(() => {
+    localStorage.setItem("sessionpipe-gui.draft:claude-code:s-invoice", "half a message about the webhook");
+    localStorage.setItem("sp.search.recent", JSON.stringify(["invoice webhook"]));
+    localStorage.setItem("sessionpipe-gui.hidden", JSON.stringify(["claude-code:s-login"]));
+    localStorage.setItem("sessionpipe-gui.textSize", "large");
+  });
+const TRACES = ["sessionpipe-gui.draft:claude-code:s-invoice", "sp.search.recent", "sessionpipe-gui.hidden"];
+const welcome = () => page.locator(".onb[data-step='welcome']");
+
+test("Disconnect in Settings, once confirmed, leaves nothing of the account on screen or on the phone", async () => {
   const id = [...hub.accounts.keys()][0]!;
   const name = `sessionpipe.account.${id}`;
-  expect(await page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name))).toContain(name);
-  // The person says no in the native alert: nothing changes.
+  expect(await databases()).toContain(name);
+  await leaveTraces();
+  await page.goto(`${server.url}/settings?section=data`);
+  await expect(page.getByText(/Connected as me@example\.com/).first()).toBeVisible();
+  const button = page.getByRole("button", { name: "Disconnect" });
+  // The person says no in the app's own alert: nothing changes.
   hub.alert = () => false;
-  const refused = await page.evaluate(() =>
-    (window as unknown as { __sessionpipeAccount: { disconnect(): Promise<unknown> } }).__sessionpipeAccount
-      .disconnect()
-      .then(
-        () => "done",
-        (e: { code?: string }) => e.code,
-      ),
-  );
-  expect(refused).toBe("cancelled");
+  await button.click();
+  await expect(button).toBeEnabled();
+  await expect(page.getByText(/Connected as me@example\.com/).first()).toBeVisible();
   expect(hub.accounts.size).toBe(1);
+  expect(await databases()).toContain(name);
+  expect(Object.keys(await stored())).toEqual(expect.arrayContaining(TRACES));
+  // Yes: the window leaves the account for what the app shows with none, the welcome.
   hub.alert = () => true;
-  const gone = await page.evaluate(() =>
-    (
-      window as unknown as { __sessionpipeAccount: { disconnect(): Promise<{ forgotten: boolean; revoked: boolean }> } }
-    ).__sessionpipeAccount.disconnect(),
-  );
-  expect(gone).toMatchObject({ forgotten: true, revoked: false });
+  await button.click();
+  await expect(welcome()).toBeVisible();
   expect(hub.accounts.size).toBe(0);
-  await expect
-    .poll(() => page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name)))
-    .not.toContain(name);
-  expect((await view()).state).toBe("gone");
+  await expect(page.getByText("Fix the invoice webhook")).toHaveCount(0);
+  await expect(page.getByText(/Connected as/)).toHaveCount(0);
+  // Nothing of it is kept: not the sessions, not what was written beside them.
+  await expect.poll(databases).not.toContain(name);
+  const left = await stored();
+  for (const key of TRACES) expect(left[key], key).toBeUndefined();
+  expect(Object.keys(left).filter((k) => /draft|recent|hidden|account/.test(k))).toEqual([]);
+  // The app's own settings are the person's, not the account's: they stay.
+  expect(left["sessionpipe-gui.textSize"]).toBe("large");
+  expect(left["sessionpipe-gui.settings"]).toBeTruthy();
+});
+
+test("an account that goes while no window shows it is cleaned up after by the next window that opens", async () => {
+  // Connected again (as a connect leaves it), and shown.
+  ss.revoked = false;
+  const a = hub.add("me@example.com", ss.key);
+  const name = `sessionpipe.account.${a.id}`;
+  ss.push(started("s-notes", "Check the release notes", "Are the release notes up to date?", "They are."));
+  await page.goto(server.url);
+  await expect(page.getByText("Check the release notes").first()).toBeVisible();
+  await page.evaluate(() =>
+    (window as unknown as { __sessionpipeAccount: { flushed(): Promise<void> } }).__sessionpipeAccount.flushed(),
+  );
+  expect(await databases()).toContain(name);
+  await leaveTraces();
+  // The window is elsewhere when the account leaves the phone (replaced by another
+  // connect, removed by the hub): no page of the account runs to clean up.
+  await page.goto("about:blank");
+  hub.accounts.clear();
+  hub.active = null;
+  await page.goto(server.url);
+  await expect(welcome()).toBeVisible();
+  await expect.poll(databases).not.toContain(name);
+  await expect.poll(async () => Object.keys(await stored()).filter((k) => TRACES.includes(k))).toEqual([]);
+  expect((await stored())["sessionpipe-gui.textSize"]).toBe("large");
 });
 
 test("in all of it, nothing was asked of a GUI server, and the hub was asked for its doors only", async () => {

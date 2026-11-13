@@ -157,6 +157,10 @@ export const HANDOFF_MS = 8000;
  *  handed the window to a receiver found running on this machine. */
 export async function start(): Promise<boolean> {
   if (!info) return false;
+  // An app that knows of spacesheep accounts: what an account that is no longer on this
+  // phone left behind is removed as any window opens, whatever this one shows (account/gone.ts).
+  if (info.features.includes("account"))
+    void import("../account/gone").then((m) => m.sweepGone(() => invoke("acct_status"))).catch(() => {});
   const d = document.documentElement;
   d.dataset.shell = info.platform;
   d.toggleAttribute("data-vibrancy", info.features.includes("vibrancy"));

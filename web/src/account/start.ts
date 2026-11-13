@@ -46,13 +46,20 @@ export function noticeWords(n: AccountNotice): { title: string; body: string } |
   return null;
 }
 
+/** The account is gone from this phone and the page holds nothing of it any more: the
+ *  window is opened again on what the shell shows now (another receiver, or none: the
+ *  welcome). */
+const leave = (): void => {
+  location.replace("/");
+};
+
 export async function startAccount(): Promise<AccountBackend | null> {
   const shell = accountShell();
   if (!shell) return null;
   const notice = (n: AccountNotice): void => void notices.push(n);
   let backend: AccountBackend;
   try {
-    backend = await startAccountBackend({ shell, calls: tauriCalls, notice });
+    backend = await startAccountBackend({ shell, calls: tauriCalls, notice, onGone: leave });
   } catch (e) {
     // What was kept could not be read into a board (a cache from a version that wrote it
     // another way, a write cut short): never a blank page. It is deleted and the board is
@@ -64,7 +71,7 @@ export async function startAccount(): Promise<AccountBackend | null> {
     } catch {
       // no IndexedDB to delete from
     }
-    backend = await startAccountBackend({ shell, calls: tauriCalls, idb: null, notice });
+    backend = await startAccountBackend({ shell, calls: tauriCalls, idb: null, notice, onGone: leave });
   }
   setApiBackend(backend.answer);
   (window as unknown as { __sessionpipeAccount?: AccountBackend }).__sessionpipeAccount = backend;
