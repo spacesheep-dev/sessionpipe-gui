@@ -593,6 +593,27 @@ describe("a page's own backend on a spacesheep account", () => {
     off();
   });
 
+  it("whatever the relay says an account or a machine is called, the limits stay a document the hub takes", async () => {
+    const s = new Session("s-1");
+    const at = { tier: 2 as const, session: { machine: "lab-mac" } };
+    const windows = [{ id: "five_hour", used_percent: 10 }];
+    const events = [s.ev("session.started", {}, at)];
+    // Forty reports under account ids of 40 KB each, then one under an ordinary id.
+    for (let i = 0; i < 40; i++)
+      events.push(s.ev("limits.observed", { account_id: `${"a".repeat(40_000)}${i}`, windows }, at));
+    events.push(s.ev("limits.observed", { account_id: "me@example.com", windows }, at));
+    r.ss.push(events);
+    const b = await r.start();
+    await tick(2000);
+    await b.flushed();
+    const list = ((await (await b.answer("/api/ui/limits")).json()) as { limits: { accountId?: string }[] }).limits;
+    expect(list.map((e) => e.accountId)).toEqual(["me@example.com"]);
+    // What the page shows is what is kept: one small document, written, not refused.
+    const kept = [...r.hub.accounts.values()][0]!.docs.get("limits")!;
+    expect(kept.length).toBeLessThan(2000);
+    expect(kept).toContain("me@example.com");
+  });
+
   describe("a send nobody heard the answer to", () => {
     const ready = async (): Promise<AccountBackend> => {
       const s = new Session("s-1");

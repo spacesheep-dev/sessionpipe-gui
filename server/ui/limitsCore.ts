@@ -33,6 +33,15 @@ const CONTROL = /[\u0000-\u001f\u007f]/;
 /** used_percent's ceiling: a spend limit passed a hundredfold is still a number. */
 const USED_MAX = 10_000;
 const PLAN_MAX = 64;
+/** An account id and a machine's name are a line of text, not a document: an email, a
+ *  uuid, a hostname. A longer one (or one with a control character) is not one, and its
+ *  report is not kept: these are a sender's words, they are part of every entry's key and
+ *  of the whole list each frame carries, and a page keeps the list in a document of at
+ *  most a megabyte. */
+export const LIMITS_NAME_MAX = 200;
+/** A name as an entry keeps one, or undefined when it is not usable as one. */
+const name = (v: string | undefined): string | undefined =>
+  v !== undefined && v.length <= LIMITS_NAME_MAX && !CONTROL.test(v) ? v : undefined;
 
 export const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
 const isTime = (v: unknown): v is string => typeof v === "string" && RFC3339.test(v) && Number.isFinite(Date.parse(v));
@@ -111,9 +120,13 @@ export class LimitsCore {
   observe(ev: StoredEvent, machine?: string): boolean {
     if (ev.type !== "limits.observed" || !ev.data || typeof ev.data !== "object") return false;
     const windows = readWindows(ev.data.windows);
-    const where = str(ev.session.machine) ?? machine;
+    const where = name(str(ev.session.machine) ?? machine);
     if (!windows.length || !where) return false;
-    const account = str(ev.data.account_id) ?? str(ev.session.account_id);
+    const said = str(ev.data.account_id) ?? str(ev.session.account_id);
+    const account = name(said);
+    // An account id that is not usable as one is not "no account": the numbers are that
+    // account's, not the machine's, so the report is not kept under either.
+    if (said !== undefined && account === undefined) return false;
     return this.put({
       harness: ev.harness.name,
       account,
@@ -136,8 +149,9 @@ export class LimitsCore {
     const observedAt = clamp(m.control.lastHelloAt, undefined);
     const demo = m.control.machineId.startsWith(DEMO_MACHINE);
     let changed = false;
+    if (name(m.name) === undefined) return false;
     for (const a of pool.accounts) {
-      if (!a.windows?.length) continue;
+      if (!a.windows?.length || name(a.id) === undefined) continue;
       if (
         this.put({
           harness: pool.harness,
