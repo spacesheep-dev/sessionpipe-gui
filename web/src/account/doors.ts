@@ -40,17 +40,63 @@ export const SEND_UNKNOWN: ReadonlySet<string> = new Set([
  *  says which it was: taken now (202), or taken the first time (409 `replay`). These are
  *  the waits before each further try. */
 export const SEND_UNKNOWN_WAITS_MS: readonly number[] = [2000, 4000];
-/** The code a send carries when it is still not known after every try: it may have been sent. */
+/** The code a send carries while nobody knows whether spacesheep took it: it may have been sent. */
 export const SEND_UNKNOWN_CODE = hubCode("unknown");
-/** How many reads of the jobs door look for the job of a send that was taken unheard. */
-const JOBS_PAGES = 10;
+/** The refusals spacesheep gives only after it has looked the command's nonce up, so one of
+ *  them says no job was made of these bytes, on this asking or on any before it
+ *  (spacesheep `POST /api/machines/:id/jobs`, which answers 409 `replay` before any of
+ *  these). A refusal that can come before that look (the signature's age, a 5xx, a limit at
+ *  the gate, `not_found`, `other_machine`) says nothing of an asking nobody heard the
+ *  answer to. */
+export const AFTER_NONCE: ReadonlySet<string> = new Set([
+  "confirm",
+  "never_started",
+  "folder",
+  "files_unsupported",
+  "file_missing",
+  "start_limited",
+  "pool_unsupported",
+]);
+/** How many pages of the jobs door a look reads to reach the list's end; short of it the
+ *  look says nothing. */
+export const LOOK_PAGES = 30;
 const JOBS_PAGE = 100;
+/** A job made of a send was made no earlier than the send began: this much is allowed for
+ *  the two clocks ticking apart and for the request's way there. */
+export const LOOK_SLACK_MS = 5000;
+
+/** What became of a send, as far as anyone can say. */
+export type Sent =
+  /** spacesheep holds it. `job` is its id, or null when spacesheep took it on an asking
+   *  nobody heard the answer to and the list does not single its job out. */
+  | { kind: "sent"; job: number | null }
+  /** No job was made: a refusal from before the request left, or one that proves it. */
+  | { kind: "refused"; status: number; json: Record<string, unknown> }
+  /** Nobody knows. `dead`: these bytes are too old to make a job any more, so what the
+   *  jobs door lists is all there will ever be. */
+  | { kind: "unknown"; why: string; dead: boolean };
+
+/** What the jobs door lists that a send could have become. */
+export interface Looked {
+  /** The list was read to its end: what follows is all of it. */
+  read: boolean;
+  /** Jobs after the last this page knew of, for the send's machine, session and action. */
+  fits: number[];
+  /** Those among them made no earlier than the send began. */
+  recent: number[];
+}
 
 export interface AccountDoors {
   /** The three read doors, for the relay's reader (GET, no body). */
   read: Doors;
   /** `POST /api/machines/<id>/jobs`: a signed command for one of the account's machines. */
   send: RemoteSend;
+  /** The same send, with what became of it said three ways (`Sent`). `again`: these bytes
+   *  were asked before and nobody heard the answer, so only an answer that speaks for that
+   *  asking too is taken as the end; `askedAt` is when the first asking began. */
+  ask(m: { id: string }, body: Record<string, unknown>, o?: { again?: boolean; askedAt?: number }): Promise<Sent>;
+  /** The jobs a send could have become (`Looked`). */
+  look(m: { id: string }, body: Record<string, unknown>, askedAt: number): Promise<Looked>;
   /** `GET /api/gui/device`: where this phone's own device key stands. */
   device(): Promise<DoorAnswer>;
 }
@@ -60,6 +106,8 @@ export interface DoorsOptions {
   fetch?: typeof fetch;
   /** A pause (tests move it). */
   sleep?: (ms: number) => Promise<void>;
+  /** The page's clock (tests move it). */
+  now?: () => number;
   /** spacesheep itself refused the key on a send (its own 401, not the grant's `unlock`). */
   onUnauthorized?: () => void;
   /** The highest spacesheep job id this page knows of: the job of a send that was taken
@@ -67,7 +115,7 @@ export interface DoorsOptions {
   lastJob?: () => number;
 }
 
-async function read(res: Response): Promise<DoorAnswer> {
+async function read1(res: Response): Promise<DoorAnswer> {
   let json: Record<string, unknown> = {};
   try {
     const body = (await res.json()) as unknown;
@@ -81,108 +129,168 @@ async function read(res: Response): Promise<DoorAnswer> {
 export function openDoors(o: DoorsOptions): AccountDoors {
   const f = o.fetch ?? ((url: RequestInfo | URL, init?: RequestInit) => fetch(url, init));
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const now = o.now ?? (() => Date.now());
   const get = (path: string, signal?: AbortSignal): Promise<Response> =>
     f(`${o.rxBase}${path}`, { headers: { accept: "application/json" }, ...(signal ? { signal } : {}) });
-  /** The job spacesheep made of a send it took unheard: the one job after the last this
-   *  page knew of that is for this machine and this session. Null when the list does not
-   *  say (it cannot be read, it names none, or more than one fits: never a guess). */
-  const jobOf = async (machine: string, body: Record<string, unknown>): Promise<number | null> => {
-    let session = "";
+
+  /** What a job of this send would be listed as: the action spacesheep files a prompt or a
+   *  start under, and the session without its harness. Null for a command whose job the
+   *  list does not tell apart from another's (an answer, a stop, the pool, a key). */
+  const listedAs = (body: Record<string, unknown>): { action: string; session: string } | null => {
     try {
-      const cmd = JSON.parse(String(body.cmd)) as { session?: unknown } | null;
-      if (cmd && typeof cmd.session === "string") session = cmd.session;
-    } catch {
-      // not a command this page can read: any job for the machine is a candidate
-    }
-    const fits = (j: Record<string, unknown>): boolean => {
-      if (j.machine !== machine) return false;
-      // The list names the session bare, the command with its harness before it.
-      if (typeof j.session !== "string" || !session) return true;
-      return j.session === session || session.endsWith(`:${j.session}`);
-    };
-    let since = Math.max(0, Math.floor(o.lastJob?.() ?? 0));
-    const found: number[] = [];
-    try {
-      for (let page = 0; page < JOBS_PAGES; page++) {
-        const a = await read(await get(`/api/sessionpipe/v1/relay/jobs?since=${since}`));
-        if (a.hub || a.status !== 200 || !Array.isArray(a.json.jobs)) return null;
-        const jobs = a.json.jobs as Record<string, unknown>[];
-        for (const j of jobs) {
-          if (!j || typeof j.id !== "number") continue;
-          since = Math.max(since, j.id);
-          if (fits(j)) found.push(j.id);
-        }
-        if (jobs.length < JOBS_PAGE) break;
-      }
+      const cmd = JSON.parse(String(body.cmd)) as { kind?: unknown; session?: unknown } | null;
+      if (!cmd || typeof cmd.session !== "string") return null;
+      const action = cmd.kind === "prompt" ? "message" : cmd.kind === "start" ? "start" : null;
+      const i = cmd.session.indexOf(":");
+      return action && i > 0 && i < cmd.session.length - 1 ? { action, session: cmd.session.slice(i + 1) } : null;
     } catch {
       return null;
     }
-    return found.length === 1 ? found[0]! : null;
   };
-  return {
-    read: (path, init) => get(path, init?.signal),
-    async send(m, body) {
-      /** One asking, through a full room at the hub: its answer, or null when the request
-       *  never came back from the app at all. */
-      const ask = async (): Promise<DoorAnswer | null> => {
-        let last: DoorAnswer | null = null;
-        for (let i = 0; i < SEND_BUSY_TRIES; i++) {
-          let res: Response;
-          try {
-            res = await f(`${o.rxBase}/api/machines/${encodeURIComponent(m.id)}/jobs`, {
-              method: "POST",
-              headers: { "content-type": "application/json", accept: "application/json" },
-              body: JSON.stringify(body),
-            });
-          } catch {
-            // The app's protocol failed it: whether it reached spacesheep is not known.
-            return null;
-          }
-          last = await read(res);
-          if (last.hub !== "busy") break;
-          const wait = Number(res.headers.get("retry-after"));
-          if (i < SEND_BUSY_TRIES - 1) await sleep(Number.isFinite(wait) && wait > 0 ? wait * 1000 : SEND_BUSY_WAIT_MS);
+
+  /** The jobs door, read from the last job this page knew of to the end of the list. A
+   *  job fits when it is for this machine, this session and this action. It is `recent`
+   *  when it was made no earlier than the send began, told with no clock but spacesheep's:
+   *  the newest job listed was made before this read, so a job made since the send began is
+   *  no older than the newest one by more than the time that has passed here. */
+  const look = async (m: { id: string }, body: Record<string, unknown>, askedAt: number): Promise<Looked> => {
+    const none: Looked = { read: false, fits: [], recent: [] };
+    const as = listedAs(body);
+    let since = Math.max(0, Math.floor(o.lastJob?.() ?? 0));
+    const fits: { id: number; at: number }[] = [];
+    let newest = Number.NEGATIVE_INFINITY;
+    let read = false;
+    try {
+      for (let page = 0; page < LOOK_PAGES && !read; page++) {
+        const a = await read1(await get(`/api/sessionpipe/v1/relay/jobs?since=${since}`));
+        if (a.hub || a.status !== 200 || !Array.isArray(a.json.jobs)) return none;
+        const jobs = a.json.jobs as (Record<string, unknown> | null)[];
+        let moved = false;
+        for (const j of jobs) {
+          if (!j || typeof j.id !== "number" || !Number.isSafeInteger(j.id) || j.id <= since) continue;
+          since = j.id;
+          moved = true;
+          const at = typeof j.created_at === "number" && Number.isFinite(j.created_at) ? j.created_at : Number.NaN;
+          if (at > newest) newest = at;
+          if (as && j.machine === m.id && j.action === as.action && j.session === as.session)
+            fits.push({ id: j.id, at });
         }
-        return last;
+        // The end: a page that is not full, or one that brought nothing new.
+        if (jobs.length < JOBS_PAGE || !moved) read = true;
+      }
+    } catch {
+      return none;
+    }
+    if (!read) return none;
+    // A command the list cannot tell apart has no fit to speak of: the look says nothing.
+    if (!as) return none;
+    const from = newest - Math.max(0, now() - askedAt) - LOOK_SLACK_MS;
+    return { read, fits: fits.map((x) => x.id), recent: fits.filter((x) => x.at >= from).map((x) => x.id) };
+  };
+
+  /** One asking, through a full room at the hub: its answer, or null when the request
+   *  never came back from the app at all. */
+  const post = async (m: { id: string }, body: Record<string, unknown>): Promise<DoorAnswer | null> => {
+    let last: DoorAnswer | null = null;
+    for (let i = 0; i < SEND_BUSY_TRIES; i++) {
+      let res: Response;
+      try {
+        res = await f(`${o.rxBase}/api/machines/${encodeURIComponent(m.id)}/jobs`, {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify(body),
+        });
+      } catch {
+        // The app's protocol failed it: whether it reached spacesheep is not known.
+        return null;
+      }
+      last = await read1(res);
+      if (last.hub !== "busy") break;
+      const wait = Number(res.headers.get("retry-after"));
+      if (i < SEND_BUSY_TRIES - 1) await sleep(Number.isFinite(wait) && wait > 0 ? wait * 1000 : SEND_BUSY_WAIT_MS);
+    }
+    return last;
+  };
+
+  const UNREACHED = "spacesheep could not be reached.";
+  /** What an answer says of the send. `unheard`: an asking before this one ended with
+   *  nobody knowing whether spacesheep took it, so this answer must speak for that one too. */
+  const heard = async (
+    a: DoorAnswer | null,
+    unheard: boolean,
+    m: { id: string },
+    body: Record<string, unknown>,
+    askedAt: number,
+  ): Promise<Sent> => {
+    const unknown = (why: unknown, dead = false): Sent => ({
+      kind: "unknown",
+      why: cleanReason(why) || UNREACHED,
+      dead,
+    });
+    // The app got no answer for it, or the answer stopped on its way.
+    if (a === null) return unknown("");
+    if (a.hub !== null) {
+      if (SEND_UNKNOWN.has(a.hub)) return unknown(a.json.error);
+      // The hub's own refusal comes before any network: this asking made no job. Of an
+      // asking before it, it says nothing.
+      if (unheard) return unknown(a.json.error);
+      return {
+        kind: "refused",
+        status: a.status === 504 ? 504 : 502,
+        json: { code: hubCode(a.hub), error: cleanReason(a.json.error) || a.hub.replace(/_/g, " ") },
       };
-      const unknown = (a: DoorAnswer | null): boolean => a === null || (a.hub !== null && SEND_UNKNOWN.has(a.hub));
-      let a = await ask();
-      /** An asking before this one ended with nobody knowing whether spacesheep took it. */
-      let unheard = false;
+    }
+    if (a.status === 202) {
+      const job = a.json.job;
+      return { kind: "sent", job: typeof job === "number" && Number.isSafeInteger(job) && job > 0 ? job : null };
+    }
+    // An error of spacesheep's own is no refusal: the job may have been made before it.
+    if (a.status >= 500) return unknown(a.json.error);
+    const code = typeof a.json.code === "string" ? a.json.code : "";
+    if (unheard) {
+      // spacesheep had taken it on an asking before this one: it is sent. Its job is the
+      // one fit made since the send began, when the list singles one out.
+      if (a.status === 409 && code === "replay") {
+        const l = await look(m, body, askedAt);
+        return { kind: "sent", job: l.read && l.recent.length === 1 ? l.recent[0]! : null };
+      }
+      // Signed too long ago: these bytes make no job any more, and whether they did is
+      // what the jobs door lists.
+      if (code === "too_old" || a.json.refusal === "too_old") return unknown(a.json.error, true);
+      if (!AFTER_NONCE.has(code)) return unknown(a.json.error);
+    }
+    // spacesheep's own 401 that is not the grant's: the key is refused there.
+    if (a.status === 401 && code !== "unlock") o.onUnauthorized?.();
+    return { kind: "refused", status: a.status, json: a.json };
+  };
+
+  const ask: AccountDoors["ask"] = async (m, body, opts = {}) => {
+    const askedAt = opts.askedAt ?? now();
+    let unheard = !!opts.again;
+    let said = await heard(await post(m, body), unheard, m, body, askedAt);
+    // Asked for the first time and not heard: asked again, the same bytes, a few seconds on.
+    if (!opts.again)
       for (const wait of SEND_UNKNOWN_WAITS_MS) {
-        if (!unknown(a)) break;
+        if (said.kind !== "unknown" || said.dead) break;
         unheard = true;
         await sleep(wait);
-        a = await ask();
+        said = await heard(await post(m, body), unheard, m, body, askedAt);
       }
-      if (unknown(a))
-        // Still not known: said as that, never as not sent (a person who sends it again,
-        // under a new nonce, would send it twice).
-        return {
-          status: 504,
-          json: {
-            code: SEND_UNKNOWN_CODE,
-            error: cleanReason(a?.json.error) || "spacesheep could not be reached.",
-          },
-        };
-      const said = a!;
-      // spacesheep had taken it the first time and says so now: it is sent. Its job is
-      // looked for, so the row is followed like any other.
-      if (unheard && !said.hub && said.status === 409 && said.json.code === "replay") {
-        const job = await jobOf(m.id, body);
-        return { status: 202, json: job === null ? {} : { job } };
-      }
-      // The hub's own refusal: its words, under a code that is never one of spacesheep's,
-      // and a status that is never read as spacesheep's 401 or 409.
-      if (said.hub)
-        return {
-          status: said.status === 504 ? 504 : 502,
-          json: { code: hubCode(said.hub), error: cleanReason(said.json.error) || said.hub.replace(/_/g, " ") },
-        };
-      // spacesheep's own 401 that is not the grant's: the key is refused there.
-      if (said.status === 401 && said.json.code !== "unlock") o.onUnauthorized?.();
-      return { status: said.status, json: said.json };
+    return said;
+  };
+
+  return {
+    read: (path, init) => get(path, init?.signal),
+    ask,
+    look,
+    async send(m, body) {
+      const said = await ask(m, body);
+      if (said.kind === "sent") return { status: 202, json: said.job === null ? {} : { job: said.job } };
+      if (said.kind === "refused") return { status: said.status, json: said.json };
+      // Still not known: said as that, never as not sent (a person who sends it again,
+      // under a new nonce, would send it twice).
+      return { status: 504, json: { code: SEND_UNKNOWN_CODE, error: said.why } };
     },
-    device: async () => read(await get("/api/gui/device")),
+    device: async () => read1(await get("/api/gui/device")),
   };
 }

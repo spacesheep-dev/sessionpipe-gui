@@ -12,7 +12,16 @@ import { Session } from "../../../test/events";
 import type { AccountBackend, AccountNotice } from "./backend";
 import { CACHE_EVENTS_MAX, compacted, memoryCache, openCache, pagesToDrop, pagesTooOld, sweepCaches } from "./cache";
 import { DOC_READ_WAITS_MS, openDocs } from "./docs";
-import { hubCode, openDoors, SEND_BUSY_TRIES, SEND_UNKNOWN, SEND_UNKNOWN_CODE, SEND_UNKNOWN_WAITS_MS } from "./doors";
+import {
+  AFTER_NONCE,
+  hubCode,
+  LOOK_PAGES,
+  openDoors,
+  SEND_BUSY_TRIES,
+  SEND_UNKNOWN,
+  SEND_UNKNOWN_CODE,
+  SEND_UNKNOWN_WAITS_MS,
+} from "./doors";
 import { PageLog } from "./log";
 import { fitSends, readSends, SETTLED_TEXT_CHARS } from "./sends";
 import { accountShell } from "./shell";
@@ -158,37 +167,130 @@ describe("the account's doors", () => {
       expect(await doors.send(m, body)).toEqual({ status: 202, json: { job: 2 } });
     });
 
-    it("spacesheep says it had it already: sent the first time, and its job is found in the jobs list", async () => {
-      const replay = () => answer(409, { error: "That was already sent.", code: "replay" });
-      const list = (jobs: unknown[]) => answer(200, { jobs });
-      const mine = { id: 41, machine: m.id, action: "message", source: "claude-code", session: "s-1" };
-      // One job after the last this page knew of fits the machine and the session.
+    const replay = () => answer(409, { error: "That was already sent.", code: "replay" });
+    const list = (jobs: unknown[]) => answer(200, { jobs });
+    /** The page's clock in these: the send began at T, and a look is taken six seconds on. */
+    const T = 1_800_000_000_000;
+    const clock = (): (() => number) => {
+      let n = 0;
+      return () => (n++ === 0 ? T : T + 6000);
+    };
+    /** The job spacesheep made of `body`, as its jobs door lists it (its own clock, a minute ahead). */
+    const mine = {
+      id: 41,
+      machine: m.id,
+      action: "message",
+      source: "claude-code",
+      session: "s-1",
+      created_at: T + 61_000,
+    };
+
+    it("spacesheep says it had it already: sent the first time, and its job is the one fit made since the send began", async () => {
+      // One job after the last this page knew of fits the machine, the session and the action.
       let t = open(
         [
           timeout(),
           replay(),
           list([
-            { id: 40, machine: m.id, action: "message", session: "other" },
-            { id: 42, machine: "m_someoneelse0123456", action: "message", session: "s-1" },
+            { ...mine, id: 40, session: "other" },
             mine,
+            { ...mine, id: 42, machine: "m_someoneelse0123456" },
+            { ...mine, id: 43, action: "start" },
           ]),
         ],
-        { lastJob: () => 39 },
+        { lastJob: () => 39, now: clock() },
       );
       expect(await t.doors.send(m, body)).toEqual({ status: 202, json: { job: 41 } });
       expect(t.asked.at(-1)!.url).toBe("rx://localhost/ACCT/api/sessionpipe/v1/relay/jobs?since=39");
-      // None fits, two fit, or the list cannot be read: sent, and no job is guessed.
+      // None fits, two were made since, or the list cannot be read: sent, and no job is guessed.
       for (const jobs of [[], [mine, { ...mine, id: 43 }]]) {
-        t = open([timeout(), replay(), list(jobs)]);
+        t = open([timeout(), replay(), list(jobs)], { now: clock() });
         expect(await t.doors.send(m, body)).toEqual({ status: 202, json: {} });
       }
-      t = open([timeout(), replay(), hubSays(502, "unreachable", "x")]);
+      t = open([timeout(), replay(), hubSays(502, "unreachable", "x")], { now: clock() });
       expect(await t.doors.send(m, body)).toEqual({ status: 202, json: {} });
       // A list a hundred long is read on from its last id.
-      const full = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, machine: m.id, session: "other" }));
-      t = open([timeout(), replay(), list(full), list([{ ...mine, id: 101 }])]);
+      const full = Array.from({ length: 100 }, (_, i) => ({
+        ...mine,
+        id: i + 1,
+        session: "other",
+        created_at: T - 9e9,
+      }));
+      t = open([timeout(), replay(), list(full), list([{ ...mine, id: 101 }])], { now: clock() });
       expect(await t.doors.send(m, body)).toEqual({ status: 202, json: { job: 101 } });
       expect(t.asked.at(-1)!.url).toMatch(/jobs\?since=100$/);
+    });
+
+    it("an old job for the same session is never taken for this send's, however the list is cut", async () => {
+      // A phone that never sent, on an account with a job for this session from months ago.
+      const old = { ...mine, id: 7, created_at: T - 90 * 86_400_000 };
+      // The old one and the new: only the new was made since the send began.
+      let t = open([timeout(), replay(), list([old, mine])], { now: clock() });
+      expect(await t.doors.send(m, body)).toEqual({ status: 202, json: { job: 41 } });
+      // More jobs than a look reads: the list's end is never reached, so nothing is taken from it.
+      const page = (from: number) =>
+        list(
+          Array.from({ length: 100 }, (_, i) => ({ ...old, id: from + i, session: from + i === 7 ? "s-1" : "other" })),
+        );
+      t = open([timeout(), replay(), ...Array.from({ length: LOOK_PAGES }, (_, i) => page(i * 100 + 1))], {
+        now: clock(),
+      });
+      expect(await t.doors.send(m, body)).toEqual({ status: 202, json: {} });
+      expect(t.asked.filter((a) => a.url.includes("/relay/jobs"))).toHaveLength(LOOK_PAGES);
+      // A job of another kind (an answer, a stop) is not told apart by the list: none is taken.
+      const stop = { cmd: JSON.stringify({ kind: "cancel", session: "claude-code:s-1", nonce: "n2" }) };
+      t = open([timeout(), replay(), list([{ ...mine, action: "cancel" }])], { now: clock() });
+      expect(await t.doors.send(m, stop)).toEqual({ status: 202, json: {} });
+      // The look by itself says what it read.
+      t = open([list([old, { ...mine, id: 30, created_at: T + 40_000 }, mine])], { now: () => T + 6000 });
+      expect(await t.doors.look(m, body, T)).toEqual({ read: true, fits: [7, 30, 41], recent: [41] });
+    });
+
+    it("after an asking nobody heard, only an answer that speaks for it too is the end", async () => {
+      // spacesheep's own error is no refusal: the two askings met there, and one made the job.
+      let t = open([timeout(), answer(500, { error: "Something went wrong.", code: "internal_error" }), timeout()]);
+      expect(await t.doors.ask(m, body)).toEqual({
+        kind: "unknown",
+        why: "spacesheep did not answer in time.",
+        dead: false,
+      });
+      // Signed too long ago: nobody knows, and these bytes make no job any more.
+      t = open([timeout(), answer(400, { error: "That was signed too long ago.", code: "bad", refusal: "too_old" })]);
+      expect(await t.doors.ask(m, body)).toEqual({ kind: "unknown", why: "That was signed too long ago.", dead: true });
+      expect(posts(t.asked)).toHaveLength(2);
+      // A refusal that can come before spacesheep looks the command up says nothing of the first asking...
+      const early: [string, () => Response][] = [
+        ["not_found", () => answer(404, { error: "No such session.", code: "not_found" })],
+        ["rate_limited", () => answer(429, { error: "Too many.", code: "rate_limited" })],
+        ["cooling", () => answer(400, { error: "Cooling.", code: "cooling" })],
+        ["the hub's own", () => hubSays(401, "not_connected", "This device holds no key for the account.")],
+      ];
+      for (const [name, make] of early) {
+        t = open([timeout(), make(), make()]);
+        expect((await t.doors.ask(m, body)).kind, name).toBe("unknown");
+        expect(posts(t.asked), name).toHaveLength(3);
+      }
+      // ...and one that only comes after it is the answer: no job was made.
+      for (const code of AFTER_NONCE) {
+        t = open([timeout(), answer(code === "confirm" ? 409 : 400, { error: "No.", code })]);
+        expect(await t.doors.ask(m, body), code).toMatchObject({ kind: "refused", json: { code } });
+      }
+      // The same bytes asked again later (`again`): one asking, read the same way.
+      t = open([answer(202, { job: 8 })]);
+      expect(await t.doors.ask(m, body, { again: true, askedAt: T })).toEqual({ kind: "sent", job: 8 });
+      t = open([answer(404, { error: "No such session.", code: "not_found" })]);
+      expect((await t.doors.ask(m, body, { again: true, askedAt: T })).kind).toBe("unknown");
+      expect(posts(t.asked)).toHaveLength(1);
+    });
+
+    it("asked for the first time, any refusal of spacesheep's is the answer, and its own error is not one", async () => {
+      let t = open([answer(404, { error: "No such session.", code: "not_found" })]);
+      expect(await t.doors.ask(m, body)).toMatchObject({ kind: "refused", status: 404 });
+      t = open([answer(500, { error: "Something went wrong." }), replay(), list([mine])], { now: clock() });
+      expect(await t.doors.ask(m, body)).toEqual({ kind: "sent", job: 41 });
+      // A job that is not a whole number above zero is no job.
+      t = open([answer(202, { job: "41" })]);
+      expect(await t.doors.ask(m, body)).toEqual({ kind: "sent", job: null });
     });
 
     it("still unheard after every try: one code that says nobody knows, with the hub's last words", async () => {
