@@ -9,12 +9,15 @@
 // the key is first seen trusted the machines are read again at once, so the composer
 // agrees. Nothing here draws or holds a sentence.
 import { useSyncExternalStore } from "react";
+import { rpId } from "../control/api";
+import { onSigner, ownKeys } from "../control/signer";
 import {
   type ApproveView,
   approveView,
   type DeviceDoor,
   type DeviceMemo,
   deviceDoor,
+  type KnownMachine,
   memoFrom,
   remember,
 } from "./approve";
@@ -51,6 +54,8 @@ export interface PhoneWatch {
   /** The app is in front again (the page's own listener calls this): the clock is read
    *  again and spacesheep is asked once. */
   front(): void;
+  /** What the page itself knows of the key changed (its machine list, its own keys). */
+  refresh(): void;
 }
 
 export interface PhoneWatchOptions {
@@ -64,6 +69,9 @@ export interface PhoneWatchOptions {
   now?: () => number;
   /** Whether the app is in front (a hidden page asks nothing). */
   visible?: () => boolean;
+  /** The account's computers as the page lists them, each with whether it trusts a key
+   *  this phone holds (approve.ts KnownMachine): read where the hub has no word of the key. */
+  known?: () => KnownMachine[];
 }
 
 export const memoKey = (id: string): string => `sessionpipe-gui.account.device.${id}`;
@@ -105,7 +113,7 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
   };
   /** The view as of now, and a timer for the moment it changes by itself (the hour ends). */
   const show = (memo: DeviceMemo, more: Partial<PhoneState> = {}): void => {
-    const view = looked ? approveView(memo, door, now()) : null;
+    const view = looked ? approveView(memo, door, now(), door ? [] : (o.known?.() ?? [])) : null;
     if (turn) clearTimeout(turn);
     turn = null;
     if (view?.phase.kind === "cooling" && !stopped)
@@ -195,6 +203,16 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
     if (state.asking) return;
     set({ asking: true, error: null });
     try {
+      // What is granted is never asked for again (an ask rings and mails the account). Where
+      // the hub has no word of the key, the machines are read first: a computer that
+      // already trusts a key of this phone means there is nothing to ask.
+      if (!door && o.known) {
+        await o.machinesNow().catch(() => {});
+        if (o.known().some((m) => m.trusts)) {
+          looked = true;
+          return show(state.memo, { asking: false });
+        }
+      }
       const a = await o.deviceAsk();
       // Another key (a new install): nothing remembered of the old one applies.
       const base = state.memo.keyId === a.keyId ? state.memo : {};
@@ -240,6 +258,12 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
     ask,
     look,
     front,
+    refresh() {
+      // The machine list or the phone's own keys changed: the same look, read again.
+      if (!looked || stopped) return;
+      const next = approveView(state.memo, door, now(), door ? [] : (o.known?.() ?? []));
+      if (JSON.stringify(next) !== JSON.stringify(state.view)) show(state.memo);
+    },
     watch(on) {
       watching = on;
       if (on && !looking) void look();
@@ -269,13 +293,32 @@ export function phoneWatch(): PhoneWatch | null {
   if (watch) return watch;
   const b = accountBackend();
   if (!b) return null;
+  /** The rp id the phone's keys are made for, once the page has read it. */
+  let rp: string | null = null;
+  const known = (): KnownMachine[] => {
+    const own = new Set(rp ? ownKeys(rp).map((k) => k.id) : []);
+    return b.machines().map((m) => ({ ...m, trusts: m.keys.some((k) => own.has(k)) }));
+  };
   watch = startPhoneWatch({
     id: b.view().id,
     deviceAsk: b.deviceAsk,
     device: b.device,
     machinesNow: b.machinesNow,
     onCooling: b.onCooling,
+    known,
   });
+  // What the page knows of the key by itself: read again when the machines are listed, when
+  // the signer has said which key this phone holds, and when the rp id is known.
+  const w = watch;
+  b.subscribe(() => w.refresh());
+  onSigner(() => w.refresh());
+  void rpId().then(
+    (r) => {
+      rp = r;
+      w.refresh();
+    },
+    () => {},
+  );
   return watch;
 }
 

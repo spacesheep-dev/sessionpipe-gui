@@ -147,6 +147,9 @@ export interface AccountBackend {
   deviceAsk(): Promise<DeviceAsked>;
   /** Where that key stands (the device door). */
   device(): Promise<DoorAnswer>;
+  /** The account's computers as this page lists them: each one's id and name, the ids of
+   *  the keys it trusts, and whether it takes a phone's own key at all. */
+  machines(): { id: string; name: string; keys: string[]; takesDevice: boolean }[];
   /** Reads the account's machines again now, not at the minute's turn: after this phone's
    *  key was approved, so the rest of the page agrees at once. Not metered by spacesheep. */
   machinesNow(): Promise<void>;
@@ -948,6 +951,13 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     },
     deviceAsk,
     device: () => doors.device(),
+    machines: () =>
+      [...control.machines()].map(([name, c]) => ({
+        id: c.machineId,
+        name,
+        keys: c.keys.map((k) => k.id),
+        takesDevice: !!c.keyTypes?.includes("device"),
+      })),
     machinesNow: async () => {
       await reader?.pollMachines();
     },

@@ -130,6 +130,41 @@ describe("where this phone's key stands", () => {
     expect(approveView(memo, door({ trusted: ["m_studio"] }), T + 1000).phase).toEqual({ kind: "approved" });
   });
 
+  it("where the hub has no word of the key, a computer that already trusts it means approved; none means the ask", () => {
+    const known = [
+      { id: "m_studio", name: "studio-mac", trusts: true, takesDevice: true },
+      { id: "m_old", name: "old-mac", trusts: false, takesDevice: false },
+    ];
+    expect(approveView({}, null, T, known)).toEqual({
+      phase: { kind: "approved" },
+      machines: [
+        { id: "m_studio", name: "studio-mac", state: "can" },
+        { id: "m_old", name: "old-mac", state: "old" },
+      ],
+      rest: null,
+    });
+    // spacesheep's own word for the hour, from a send it refused; never past an hour from now.
+    expect(approveView({ until: T + 1000 }, null, T, known).phase).toEqual({
+      kind: "cooling",
+      until: T + 1000,
+      exact: true,
+    });
+    expect(approveView({ until: T + 9 * NEW_DEVICE_WAIT_MS }, null, T, known).phase).toEqual({
+      kind: "cooling",
+      until: T + NEW_DEVICE_WAIT_MS,
+      exact: false,
+    });
+    // No computer trusts a key of this phone: nothing is known, and the ask is offered.
+    expect(approveView({}, null, T, [{ ...known[0]!, trusts: false }])).toEqual({
+      phase: { kind: "idle" },
+      machines: [],
+      rest: null,
+    });
+    expect(approveView({}, null, T)).toEqual({ phase: { kind: "idle" }, machines: [], rest: null });
+    // Where the hub does know the key, its door has the word and the page's list is not read.
+    expect(approveView(asked, door({ pending: true }), T, known).phase).toEqual({ kind: "waiting", code: "71" });
+  });
+
   it("the wait is an hour and no more: a time past an hour from now is that hour's end, and not said as exact", () => {
     const hour = { kind: "cooling", until: T + NEW_DEVICE_WAIT_MS, exact: false };
     // Remembered five hours ahead (the phone's clock was wrong when it was written).

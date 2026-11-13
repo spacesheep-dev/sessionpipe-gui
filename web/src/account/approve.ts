@@ -110,9 +110,42 @@ export function remember(memo: DeviceMemo, door: DeviceDoor, now: number): Devic
   return next;
 }
 
-/** `door`: null before the hub ever asked for this phone (`no_device_key`). */
-export function approveView(memo: DeviceMemo, door: DeviceDoor | null, now: number): ApproveView {
-  if (!door) return { phase: { kind: "idle" }, machines: [], rest: null };
+/** A computer of the account as the page's own machine list has it, and whether it trusts
+ *  a key this phone holds. What is known of the key where the hub has no word of it: the
+ *  hub knows a phone's key for an account only once that account was asked for it, and an
+ *  account connected again is a new one to the hub, while the key and the computers' trust
+ *  in it are as they were. */
+export interface KnownMachine {
+  id: string;
+  name: string;
+  trusts: boolean;
+  takesDevice: boolean;
+}
+
+/** `door`: null before the hub ever asked for this phone (`no_device_key`). `known`: the
+ *  account's computers as the page lists them, read only then. */
+export function approveView(
+  memo: DeviceMemo,
+  door: DeviceDoor | null,
+  now: number,
+  known: readonly KnownMachine[] = [],
+): ApproveView {
+  if (!door) {
+    // Nothing asked through this account, and no computer trusts a key of this phone: the ask is offered.
+    if (!known.some((m) => m.trusts)) return { phase: { kind: "idle" }, machines: [], rest: null };
+    // A computer already trusts it: what is granted is never asked for again. Whether its
+    // hour is over only spacesheep can say, and says in a send it refuses (`memo.until`).
+    const until = memo.until !== undefined && memo.until > now ? Math.min(memo.until, now + NEW_DEVICE_WAIT_MS) : null;
+    return {
+      phase: until === null ? { kind: "approved" } : { kind: "cooling", until, exact: until === memo.until },
+      machines: known.map((m) => ({
+        id: m.id,
+        name: m.name,
+        state: (m.trusts ? "can" : m.takesDevice ? "not-yet" : "old") as MachineState,
+      })),
+      rest: null,
+    };
+  }
   const machines = door.machines.map((m) => ({
     id: m.id,
     name: m.name,

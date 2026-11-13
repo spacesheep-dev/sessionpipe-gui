@@ -55,6 +55,11 @@ const day = () => import("./daykey");
 let dev: typeof Native | null = null;
 let loading: Promise<typeof Native> | null = null;
 const listeners = new Set<() => void>();
+/** Told when the signer has said something new (which key this device holds). */
+export const onSigner = (l: () => void): (() => void) => {
+  listeners.add(l);
+  return () => void listeners.delete(l);
+};
 export const notifySigner = (): void => {
   for (const l of listeners) l();
 };

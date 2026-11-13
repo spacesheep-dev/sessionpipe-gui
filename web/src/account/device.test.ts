@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NEW_DEVICE_WAIT_MS } from "./approve";
+import { type KnownMachine, NEW_DEVICE_WAIT_MS } from "./approve";
 import { LOOK_FAST_MS, LOOK_IDLE_MS, memoKey, type PhoneWatch, startPhoneWatch } from "./device";
 import type { DoorAnswer } from "./doors";
 import { approveError } from "./screenWords";
@@ -10,7 +10,7 @@ const T = Date.parse("2026-11-12T13:05:00Z");
 const M = { id: "m_studio", name: "studio-mac", takes_device: true };
 
 /** spacesheep's device door and the hub's ask, as a test moves them. */
-function bed(o: { visible?: () => boolean } = {}) {
+function bed(o: { visible?: () => boolean; known?: () => KnownMachine[] } = {}) {
   const kept = new Map<string, string>();
   const s = {
     asked: false,
@@ -32,6 +32,7 @@ function bed(o: { visible?: () => boolean } = {}) {
       removeItem: (k) => void kept.delete(k),
     },
     visible: o.visible,
+    ...(o.known ? { known: o.known } : {}),
     async deviceAsk() {
       s.asks++;
       if (s.refuse) throw s.refuse;
@@ -284,5 +285,59 @@ describe("this phone's key, watched", () => {
     b.s.refuse = null;
     await w.ask();
     expect(w.get()).toMatchObject({ error: null, errorAt: null });
+  });
+  it("connected again with a key a computer already trusts: approved by the page's own list, and nothing is asked", async () => {
+    // The hub has no word of the key under this account (it is a new one to the hub).
+    let list: KnownMachine[] = [];
+    const b = bed({ known: () => list });
+    w = b.w;
+    await w.look();
+    expect(w.get().view?.phase).toEqual({ kind: "idle" });
+    // The machines are listed, and one trusts a key this phone holds.
+    list = [
+      { id: "m_studio", name: "studio-mac", trusts: true, takesDevice: true },
+      { id: "m_lab", name: "lab-mac", trusts: false, takesDevice: true },
+    ];
+    w.refresh();
+    expect(w.get().view).toEqual({
+      phase: { kind: "approved" },
+      machines: [
+        { id: "m_studio", name: "studio-mac", state: "can" },
+        { id: "m_lab", name: "lab-mac", state: "not-yet" },
+      ],
+      rest: null,
+    });
+    // An ask (a button still on screen, the first run's "Approve this iPhone") asks spacesheep nothing.
+    await w.ask();
+    expect(b.s.asks).toBe(0);
+    expect(w.get()).toMatchObject({ asking: false, view: { phase: { kind: "approved" } } });
+    // spacesheep refuses a send as inside the hour: the page says until when.
+    b.s.cooled(T + 600_000);
+    expect(w.get().view?.phase).toEqual({ kind: "cooling", until: T + 600_000, exact: true });
+    // The same list told again changes nothing, and tells nobody.
+    let told = 0;
+    const off = w.subscribe(() => told++);
+    w.refresh();
+    expect(told).toBe(0);
+    off();
+  });
+
+  it("an ask reads the machines first where the hub has no word of the key, and asks only when none trusts it", async () => {
+    let list: KnownMachine[] = [];
+    const b = bed({ known: () => list });
+    w = b.w;
+    await w.look();
+    // The list had not come when the page was drawn; by the time the read returns, it has.
+    const read = b.s.machines;
+    list = [{ id: "m_studio", name: "studio-mac", trusts: true, takesDevice: true }];
+    await w.ask();
+    expect(b.s.machines).toBe(read + 1);
+    expect(b.s.asks).toBe(0);
+    // No computer trusts it: the ask goes.
+    list = [{ id: "m_studio", name: "studio-mac", trusts: false, takesDevice: true }];
+    w.refresh();
+    await w.ask();
+    expect(b.s.asks).toBe(1);
+    expect(w.get().view?.phase).toEqual({ kind: "waiting", code: "71" });
   });
 });
