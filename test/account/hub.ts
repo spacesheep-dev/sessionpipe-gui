@@ -185,6 +185,9 @@ export class HubStandIn {
   startRefusal: HubRefused | null = null;
   /** A start waits for this before it asks spacesheep (a test holds the "connecting" moment). */
   holdStart: Promise<void> | null = null;
+  /** A start takes this long to answer (the hub is asking spacesheep for a number). */
+  startMs = 0;
+  private startWait: ((cancelled: boolean) => void) | null = null;
   /** The hub's `account` events do not reach the page (the app is behind the browser, its
    *  page asleep): what changed is learned only by asking (`acct_status`). */
   mute = false;
@@ -308,8 +311,18 @@ export class HubStandIn {
     switch (cmd) {
       case "acct_status":
         return this.status();
-      case "acct_connect_start":
+      case "acct_connect_start": {
+        if (this.startMs > 0) {
+          // Asking spacesheep for a number takes a while; a cancel meanwhile ends the start.
+          const cancelled = await new Promise<boolean>((r) => {
+            this.startWait = r;
+            this.clock.setTimeout(() => r(false), this.startMs);
+          });
+          this.startWait = null;
+          if (cancelled) throw new HubRefused("cancelled", "Cancelled.");
+        }
         return this.connectStart();
+      }
       case "acct_connect_open": {
         const c = this.connecting;
         if (c?.state !== "pending") throw new HubRefused("no_connect", "No connect is waiting.");
@@ -317,6 +330,7 @@ export class HubStandIn {
         return null;
       }
       case "acct_connect_cancel": {
+        this.startWait?.(true);
         const was = this.connecting;
         if (this.connectTimer) this.clock.clearTimeout(this.connectTimer);
         // Cancelled while the person was being asked here: the key was made and is not kept.

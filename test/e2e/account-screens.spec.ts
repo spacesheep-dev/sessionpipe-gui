@@ -426,15 +426,15 @@ test.describe("each way a connect can end, with what to do next", () => {
     expect((await opens()) - before).toBe(1);
     await button(b.page, "Cancel").click();
     // A start that does not answer: the screen says Connecting, and Cancel leaves it.
-    b.hub.down = true;
-    b.hub.latencyMs = 60_000;
+    await expect(step(b.page, "welcome")).toBeVisible();
+    b.hub.startMs = 60_000;
     await button(b.page, "Use a spacesheep account").click();
     await button(b.page, "Continue").click();
     await expect(step(b.page, "account-starting")).toBeVisible();
     await button(b.page, "Cancel").click();
     await expect(step(b.page, "account-starting")).toHaveCount(0);
-    b.hub.down = false;
-    b.hub.latencyMs = 0;
+    await expect(step(b.page, "welcome")).toBeVisible();
+    b.hub.startMs = 0;
   });
 
   test("nobody confirmed in time", async () => {
@@ -1069,6 +1069,63 @@ test.describe("what else an account shows", () => {
       await page.goto(b.server.url);
       await expect(page.locator("text=Reconnecting… >> visible=true").first()).toBeVisible({ timeout: 60_000 });
       await shot(page, "also-reconnecting");
+    } finally {
+      await b.close();
+    }
+  });
+  test("a permission prompt inside the hour: the hour's line over Deny / Allow, and neither is offered, on the session's page and on the Inbox card", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      // Approved a moment ago, and spacesheep says until when the key waits.
+      const id = [...b.hub.accounts.keys()][0]!;
+      const asked = await page.evaluate(
+        (account) =>
+          (
+            window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }
+          ).__TAURI_INTERNALS__.invoke("acct_device_ask", { id: account }) as Promise<{ keyId: string }>,
+        id,
+      );
+      b.ss.saysCooling = true;
+      b.ss.approveDevice(asked.keyId);
+      // In another session the agent asks to run something.
+      const s = new Session("s-refund");
+      const on = {
+        tier: 2 as const,
+        session: { machine: NAME, cwd: "/Users/me/billing", title: "Refund the double charge" },
+      };
+      b.ss.push([
+        s.ev("session.started", { source: "startup" }, on),
+        s.ev("turn.started", { turn_id: "t1" }, on),
+        s.ev(
+          "attention.needed",
+          { attention_id: "perm-1", kind: "permission", tool: "Bash", message: "Bash npm test" },
+          on,
+        ),
+      ]);
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      const line = /This iPhone can send from \d{1,2}:\d{2}( [AP]M)?/;
+      await expect(page.getByText(line).first()).toBeVisible({ timeout: 15_000 });
+      // Over Deny / Allow: the hour's own line, and no button that would be refused.
+      await expect(page.getByText("this page cannot sign an answer")).toHaveCount(0);
+      const allow = page.getByRole("button", { name: "Allow" }).first();
+      await expect(allow).toBeVisible();
+      await expect(allow).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Deny" }).first()).toBeDisabled();
+      expect(await page.getByText(line).count()).toBeGreaterThanOrEqual(2);
+      await shot(page, "also-prompt-cooling");
+      // The Inbox card: the same reason, and the same two buttons off.
+      await page.goto(`${b.server.url}/inbox`);
+      const row = page.locator(".inbox-row").first();
+      await expect(row).toBeVisible();
+      await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(page.getByText(line).first()).toBeVisible();
+      expect(b.ss.log.filter((l) => l.startsWith("POST /api/machines/"))).toEqual([]);
     } finally {
       await b.close();
     }
