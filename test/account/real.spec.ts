@@ -50,75 +50,74 @@ test("the page on an account against a real local spacesheep", async ({ browser 
   const server = await startAccountServer({ web: WEB, hub });
   const report: Record<string, unknown> = {};
 
-  for (const scheme of ["light", "dark"] as const) {
-    const context = await browser.newContext({
-      viewport: { width: 390, height: 844 },
-      deviceScaleFactor: 3,
-      isMobile: true,
-      hasTouch: true,
-      colorScheme: scheme,
-    });
-    // The device key the computer already trusts, where the software signer keeps its own.
-    await context.addInitScript((k) => localStorage.setItem("account-test.devicekey", k), device);
-    await context.addInitScript(fakeShell, {});
-    const page = await context.newPage();
-    const errors: string[] = [];
-    page.on("pageerror", (e) => errors.push(e.message));
-    const view = () =>
-      page.evaluate(() =>
-        (window as unknown as { __sessionpipeAccount: { view(): unknown } }).__sessionpipeAccount.view(),
-      ) as Promise<{
-        relay: { state: string; cursor: number };
-        catching: boolean;
-        firstBoardMs: number | null;
-        caughtUpMs: number | null;
-        cache: string;
-        restored: unknown;
-        store: { events: number; sessions: number };
-      }>;
-    const shot = async (name: string) => {
+  // One launch, so the relay is read from its start once (a real spacesheep counts the reads).
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 3,
+    isMobile: true,
+    hasTouch: true,
+    colorScheme: "light",
+  });
+  // The device key the computer already trusts, where the software signer keeps its own.
+  await context.addInitScript((k) => localStorage.setItem("account-test.devicekey", k), device);
+  await context.addInitScript(fakeShell, {});
+  const page = await context.newPage();
+  // ACCOUNT_REAL_THROTTLE=4: the page's CPU slowed, as a phone's is next to this machine's.
+  const throttle = Number(process.env.ACCOUNT_REAL_THROTTLE ?? 1);
+  if (throttle > 1)
+    await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: throttle });
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  const view = () =>
+    page.evaluate(() =>
+      (window as unknown as { __sessionpipeAccount: { view(): unknown } }).__sessionpipeAccount.view(),
+    ) as Promise<{ catching: boolean }>;
+  /** The page as it is now, in both schemes. */
+  const shots = async (name: string) => {
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.waitForTimeout(400);
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${name}-${scheme}.png`) });
-    };
+    }
+    await page.emulateMedia({ colorScheme: "light" });
+  };
 
-    // The board, from the relay (the first launch reads all the relay holds) or from what was kept.
-    await page.goto(server.url);
-    await expect(page.getByText("Phone app on a spacesheep account").first()).toBeVisible({ timeout: 120_000 });
-    await expect.poll(async () => (await view()).catching, { timeout: 300_000 }).toBe(false);
-    report[`board-${scheme}`] = await view();
-    await page.waitForTimeout(800);
-    await shot("board");
+  // The board, from the relay: the first launch reads all the relay holds.
+  await page.goto(server.url);
+  await expect(page.getByText("Phone app on a spacesheep account").first()).toBeVisible({ timeout: 120_000 });
+  await expect.poll(async () => (await view()).catching, { timeout: 300_000 }).toBe(false);
+  report.board = await view();
+  await shots("board");
 
-    // A session's page.
-    await page.getByText("Phone app on a spacesheep account").first().click();
-    await expect(page.getByLabel("Message for the next turn")).toBeEnabled();
-    await page.waitForTimeout(800);
-    await shot("session");
+  // A session's page.
+  await page.getByText("Phone app on a spacesheep account").first().click();
+  const box = page.getByLabel("Message for the next turn");
+  await expect(box).toBeEnabled();
+  await page.waitForTimeout(800);
+  await shots("session");
 
-    // A message: spacesheep's own second look holds it (locally it always does), the page
-    // shows it held, and the confirm sends it; the computer takes it and its answer comes back.
-    const text = `ping from the page on an account (${scheme})`;
-    const box = page.getByLabel("Message for the next turn");
-    await box.fill(text);
-    await box.press("Enter");
-    const notice = page.locator("[data-held]");
-    await expect(notice).toBeVisible();
-    await expect(notice.locator("[data-held-what]")).toHaveText(text);
-    await page.waitForTimeout(500);
-    await shot("held");
-    await notice.locator("[data-held-confirm]").click();
-    await expect(notice).toHaveCount(0);
-    await expect(page.getByText(`Got it from the phone: "${text}"`).first()).toBeVisible({ timeout: 60_000 });
-    await page.waitForTimeout(800);
-    await shot("send-result");
-    report[`taps-${scheme}`] = await page.evaluate(() =>
-      (window as unknown as { __taps: { purpose: string }[] }).__taps.map((t) => t.purpose),
-    );
-    report[`errors-${scheme}`] = errors;
-    report[`asked-${scheme}`] = await page.evaluate(() => [
-      ...(window as unknown as { __sessionpipeAccount: { asked: Map<string, number> } }).__sessionpipeAccount.asked,
-    ]);
-    await context.close();
-  }
+  // A message: spacesheep's own second look holds it (locally it always does), the page
+  // shows it held, and the confirm sends it; the computer takes it and its answer comes back.
+  const text = "ping from the page on an account";
+  await box.fill(text);
+  await box.press("Enter");
+  const notice = page.locator("[data-held]");
+  await expect(notice).toBeVisible();
+  await expect(notice.locator("[data-held-what]")).toHaveText(text);
+  await shots("held");
+  await notice.locator("[data-held-confirm]").click();
+  await expect(notice).toHaveCount(0);
+  await expect(page.getByText(`Got it from the phone: "${text}"`).first()).toBeVisible({ timeout: 60_000 });
+  await page.waitForTimeout(800);
+  await shots("send-result");
+  report.taps = await page.evaluate(() =>
+    (window as unknown as { __taps: { purpose: string }[] }).__taps.map((t) => t.purpose),
+  );
+  report.errors = errors;
+  report.asked = await page.evaluate(() => [
+    ...(window as unknown as { __sessionpipeAccount: { asked: Map<string, number> } }).__sessionpipeAccount.asked,
+  ]);
+  await context.close();
   report.doors = [...new Set(hub.log)];
   report.strays = server.strays;
   console.log(`REPORT ${JSON.stringify(report)}`);
