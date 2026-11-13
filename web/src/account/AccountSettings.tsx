@@ -8,6 +8,7 @@ import { ROUTES } from "@shared/api";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Group, Row } from "../components/SettingsWindow";
+import { useFocusTrap } from "../lib/focus";
 import { apiFetch } from "../lib/net";
 import { Link } from "../lib/router";
 import { day, NEW_WORDS as N, REUSED as R, thisPhone } from "../native/accountWords";
@@ -95,7 +96,13 @@ export default function AccountSettings() {
           </Row>
         )}
         <Row label={N.machinesApprove(thisPhone())} hint={key ? <Mark kind={key.mark}>{key.words}</Mark> : undefined}>
-          <Link to="/add-device" className="btn btn--sm" data-approve>
+          <Link
+            to="/add-device"
+            className="btn btn--sm"
+            // Spoken with what it opens: "Open" alone names nothing in a list of links.
+            aria-label={`${N.open}: ${N.machinesApprove(thisPhone())}`}
+            data-approve
+          >
             {N.open}
           </Link>
         </Row>
@@ -111,18 +118,44 @@ export default function AccountSettings() {
           </button>
         </Row>
       </Group>
-      {connecting &&
-        createPortal(
-          <div className="acct-over" role="dialog" aria-modal="true" aria-label={N.connectAgain}>
-            <ConnectAccount
-              origin={v.origin}
-              platform={thisPhone() === "this phone" ? "android" : "ios"}
-              begin="starting"
-              onLeave={() => setConnecting(false)}
-            />
-          </div>,
-          document.body,
-        )}
+      {connecting && <ConnectOver origin={v.origin} onLeave={() => setConnecting(false)} />}
     </div>
+  );
+}
+
+/** Connecting again from Settings: the first run's screens over the app, as a dialog.
+ *  Focus goes in and stays in; Escape is the screen's own way out (Cancel, which stops the
+ *  connect at the hub before it leaves) and closes nothing behind it; and the app behind
+ *  is no part of it while it is up, so there is one main to land on. */
+function ConnectOver({ origin, onLeave }: { origin: string; onLeave: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useFocusTrap(ref, true, { initial: ".onb-back" });
+  useEffect(() => {
+    const root = document.getElementById("root");
+    const was = root?.hasAttribute("inert") ?? false;
+    root?.setAttribute("inert", "");
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== "Escape") return;
+      // Before anything behind hears it (Settings would close itself, and leave the connect going).
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      ref.current?.querySelector<HTMLButtonElement>(".onb-back")?.click();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      if (!was) root?.removeAttribute("inert");
+    };
+  }, []);
+  return createPortal(
+    <div ref={ref} className="acct-over" role="dialog" aria-modal="true" aria-label={N.connectAgain}>
+      <ConnectAccount
+        origin={origin}
+        platform={thisPhone() === "this phone" ? "android" : "ios"}
+        begin="starting"
+        onLeave={onLeave}
+      />
+    </div>,
+    document.body,
   );
 }

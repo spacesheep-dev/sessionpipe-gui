@@ -216,7 +216,7 @@ export function ConnectAccount({
 
   if (s.kind === "intro")
     return (
-      <Screen bar={back()} title={R.use} body={N.introBody} data-step="account-intro">
+      <Screen focusTitle bar={back()} title={R.use} body={N.introBody} data-step="account-intro">
         <Primary onClick={() => send({ type: "go" })}>{R.go}</Primary>
       </Screen>
     );
@@ -224,6 +224,7 @@ export function ConnectAccount({
   if (s.kind === "starting" || s.kind === "opening" || s.kind === "resuming")
     return (
       <Screen
+        focusTitle
         // A start or a resume can be left; once the account is kept the window is being replaced.
         {...(s.kind === "opening" ? {} : { bar: back(R.cancel) })}
         title={R.connecting(s.kind === "opening" ? s.host : host)}
@@ -237,6 +238,7 @@ export function ConnectAccount({
   if (s.kind === "number")
     return (
       <Screen
+        focusTitle
         bar={back(R.cancel)}
         title={N.numberTitle}
         figure={
@@ -252,8 +254,9 @@ export function ConnectAccount({
       >
         {s.opened ? (
           <>
-            <span className="onb-waiting" role="status">
-              <span className="spinner" aria-hidden="true" />
+            {/* The line above says it is waiting; the spinner is for the eye only. */}
+            <span className="onb-waiting" aria-hidden="true">
+              <span className="spinner" />
             </span>
             <Quiet onClick={() => void open()}>{R.again}</Quiet>
           </>
@@ -266,6 +269,7 @@ export function ConnectAccount({
   if (s.kind === "asking")
     return (
       <Screen
+        focusTitle
         bar={back(R.cancel)}
         glyph={spinner}
         title={N.askingTitle}
@@ -278,7 +282,16 @@ export function ConnectAccount({
   // Ended: why, and the next step.
   const w = endedWords(s);
   return (
-    <Screen bar={back()} title={w.title} body={w.body} host={s.host} data-step="account-ended" data-why={s.why} live>
+    <Screen
+      focusTitle
+      bar={back()}
+      title={w.title}
+      body={w.body}
+      host={s.host}
+      data-step="account-ended"
+      data-why={s.why}
+      live
+    >
       {(s.why !== "wait" || due) && <Primary onClick={() => void again()}>{R.retry}</Primary>}
       {s.revokeUrl && <Secondary onClick={() => openOutside(s.revokeUrl!)}>{N.revoke}</Secondary>}
     </Screen>
@@ -288,7 +301,7 @@ export function ConnectAccount({
 /** After a disconnect: what the hub says of the key, and where to revoke it. */
 export function Disconnected({ note, revokeUrl, onDone }: { note: string; revokeUrl?: string; onDone: () => void }) {
   return (
-    <Screen title={N.disconnectedTitle} body={note} data-step="account-disconnected">
+    <Screen focusTitle title={N.disconnectedTitle} body={note} data-step="account-disconnected">
       <Primary onClick={onDone}>{R.done}</Primary>
       {revokeUrl && <Secondary onClick={() => openOutside(revokeUrl)}>{N.revoke}</Secondary>}
     </Screen>

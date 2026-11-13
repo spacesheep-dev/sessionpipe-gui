@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The parts every screen of the phone's first run is made of (PhoneOnboarding.tsx): one
 // screen with its bar, title, line and actions, and the three weights of button.
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { type ButtonHTMLAttributes, type ReactNode, useEffect, useRef } from "react";
 
 /** A line that names the computer: its name never breaks at its hyphen ("studio-" /
  *  "mac"), so the words stay one word. */
@@ -26,6 +26,7 @@ export function Screen({
   body,
   host,
   live,
+  focusTitle,
   children,
   ...rest
 }: {
@@ -37,10 +38,19 @@ export function Screen({
   /** The computer's name, where the title or body says it. */
   host?: string;
   live?: boolean;
+  /** Each new step puts focus on its title, so a screen reader says where the tap led and
+   *  the keyboard starts at the top of it (a flow of several steps: the account's). */
+  focusTitle?: boolean;
   children?: ReactNode;
   "data-step"?: string;
   "data-opened"?: boolean;
 }) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  const stepName = rest["data-step"];
+  // The step's name is among what it depends on: a new name is a new step on screen.
+  useEffect(() => {
+    if (focusTitle) heading.current?.focus({ preventScroll: true });
+  }, [focusTitle, stepName]);
   return (
     <div className="onb" {...rest}>
       <header className="onb-bar">{bar}</header>
@@ -48,7 +58,9 @@ export function Screen({
         {title && (
           <div className="onb-head">
             {glyph}
-            <h1 className="onb-title">{withHost(title, host)}</h1>
+            <h1 className="onb-title" ref={heading} {...(focusTitle ? { tabIndex: -1 } : {})}>
+              {withHost(title, host)}
+            </h1>
             {figure}
             {body && <p className="onb-text">{withHost(body, host)}</p>}
           </div>

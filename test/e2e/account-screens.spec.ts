@@ -277,6 +277,8 @@ test.describe("each way a connect can end, with what to do next", () => {
     await b.page.goto(b.server.url);
     await button(b.page, "Use a spacesheep account").click();
     await expect(step(b.page, "account-intro")).toBeVisible();
+    // The tap led somewhere: focus is on the new screen's title, which is what is read out.
+    await expect(b.page.locator(".onb-title")).toBeFocused();
   };
   /** From there to a started connect (or to how the start was refused). */
   const start = async () => {
@@ -387,6 +389,28 @@ test.describe("each way a connect can end, with what to do next", () => {
     b.hub.alert = () => true;
   });
 
+  test("back from the browser the hub is asked at once: a word of its that never arrived is not waited for", async () => {
+    await start();
+    const number = await digits();
+    // Confirmed on spacesheep while the app was behind the browser, and the hub's word for
+    // it never reached the page.
+    b.hub.alert = () => null;
+    b.hub.mute = true;
+    b.ss.approve(number);
+    await b.hub.pollConnect();
+    b.hub.mute = false;
+    await b.page.waitForTimeout(300);
+    await expect(step(b.page, "account-number")).toBeVisible();
+    // In front again: asked, and the screen is where the connect is.
+    await foreground(b.page);
+    await expect(step(b.page, "account-asking")).toBeVisible();
+    // Each new step starts at its title, for a screen reader and the keyboard alike.
+    expect(await b.page.evaluate(() => document.activeElement?.className)).toBe("onb-title");
+    await expect(b.page.locator(".onb [role='status']")).toHaveCount(0);
+    b.hub.alert = () => true;
+    await button(b.page, "Cancel").click();
+  });
+
   test("two taps on the hand-off to the browser ask the hub once, and Connecting has a way out", async () => {
     await start();
     await digits();
@@ -394,7 +418,7 @@ test.describe("each way a connect can end, with what to do next", () => {
     const before = await opens();
     // Two taps before the first has answered.
     await b.page.evaluate(() => {
-      const open = [...document.querySelectorAll("button")].find((x) => /^Open in /.test(x.textContent ?? ""))!;
+      const open = Array.from(document.querySelectorAll("button")).find((x) => /^Open in /.test(x.textContent ?? ""))!;
       open.click();
       open.click();
     });
@@ -675,9 +699,23 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await group.locator("[data-again]").click();
     await expect(step(page, "account-number")).toBeVisible();
     await shot(page, "connect-again");
-    await button(page, "Cancel").click();
+    // It is a dialog: focus is inside it, the Settings behind are out of reach, and Tab stays in.
+    const inside = () => page.evaluate(() => !!document.activeElement?.closest(".acct-over"));
+    expect(await inside()).toBe(true);
+    expect(await page.evaluate(() => document.getElementById("root")?.hasAttribute("inert"))).toBe(true);
+    for (let i = 0; i < 6; i++) {
+      await page.keyboard.press("Tab");
+      expect(await inside()).toBe(true);
+    }
+    // Escape is its Cancel: the connect is stopped at the hub, and Settings stays as it was.
+    const cancels = async () => (await calls(page)).filter((c) => c === "acct_connect_cancel").length;
+    const before = await cancels();
+    await page.keyboard.press("Escape");
     await expect(step(page, "account-number")).toHaveCount(0);
+    expect((await cancels()) - before).toBe(1);
     await expect(group).toBeVisible();
+    expect(await page.evaluate(() => document.getElementById("root")?.hasAttribute("inert"))).toBe(false);
+    expect(await page.locator("main").count()).toBe(1);
   });
 
   test("Disconnect asks in the app's own alert, and after a yes says what became of the key", async () => {
@@ -801,6 +839,48 @@ test("the Approve page is named as itself, wraps its buttons at twice the text s
     });
     // Its border is half its width on every side: all border, no hole.
     expect(mark).toEqual({ width: "8px", border: "4px" });
+  } finally {
+    await b.close();
+  }
+});
+
+test("connected again with a key the computer still trusts: approved at once, and spacesheep is asked nothing", async ({
+  browser,
+}) => {
+  const b = await bed(browser);
+  b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+  const { page } = b;
+  try {
+    await page.goto(b.server.url);
+    await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+    // Approved long ago: the computer trusts this phone's key.
+    const id = [...b.hub.accounts.keys()][0]!;
+    const asked = await page.evaluate(
+      (account) =>
+        (
+          window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }
+        ).__TAURI_INTERNALS__.invoke("acct_device_ask", { id: account }) as Promise<{ keyId: string }>,
+      id,
+    );
+    (b.ss.machines[0]!.passkey_ids as string[]).push(asked.keyId);
+    b.ss.trusting.set(asked.keyId, [MACHINE]);
+    // Disconnected and connected again: a new account to the hub, which has no word of the
+    // phone's key under it. The key, and the computer's trust in it, are as they were.
+    b.hub.accounts.clear();
+    b.hub.active = null;
+    b.hub.add("me@example.com", b.ss.key);
+    const asks = () => b.ss.log.filter((l) => l.startsWith("POST /api/gui/device")).length;
+    const before = asks();
+    await page.goto(`${b.server.url}/add-device?ask=1`);
+    await expect(page.locator("[data-approve='approved']")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("This iPhone can send.")).toBeVisible();
+    await expect(page.locator("[data-machine='can']")).toHaveText(/Can send$/);
+    await expect(button(page, "Ask spacesheep to approve")).toHaveCount(0);
+    // Settings says the same, and nothing was asked of spacesheep (an ask rings and mails the account).
+    await page.goto(`${b.server.url}/settings?section=app`);
+    await expect(page.locator("[data-account-settings] .acct-state--ok").last()).toHaveText("Can send");
+    await expect(page.locator("[data-account-settings]")).not.toContainText("Not approved yet");
+    expect(asks()).toBe(before);
   } finally {
     await b.close();
   }

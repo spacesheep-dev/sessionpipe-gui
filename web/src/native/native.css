@@ -572,3 +572,9 @@
     display: none;
   }
 }
+
+/* A step's title takes focus when the step is new (OnbParts `focusTitle`): it is where the
+   reading starts, not a control, so it draws no ring. */
+.onb-title[tabindex="-1"]:focus {
+  outline: none;
+}

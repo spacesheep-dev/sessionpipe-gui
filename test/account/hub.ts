@@ -185,6 +185,9 @@ export class HubStandIn {
   startRefusal: HubRefused | null = null;
   /** A start waits for this before it asks spacesheep (a test holds the "connecting" moment). */
   holdStart: Promise<void> | null = null;
+  /** The hub's `account` events do not reach the page (the app is behind the browser, its
+   *  page asleep): what changed is learned only by asking (`acct_status`). */
+  mute = false;
   /** The documents the hub cannot read (`io`), by name: "labels", "marks", "limits", "sends". */
   unreadDocs = new Set<string>();
   /** `acct_disconnect` cannot remove the key (`io`: nothing was changed). */
@@ -289,6 +292,7 @@ export class HubStandIn {
 
   private say(): void {
     const status = this.status();
+    if (this.mute) return;
     for (const l of [...this.listeners]) l("account", status);
   }
 
