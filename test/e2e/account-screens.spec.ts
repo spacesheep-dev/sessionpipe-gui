@@ -84,6 +84,10 @@ async function bed(browser: Browser, o: { platform?: string; shell?: ShellInitOp
   const context = await browser.newContext({
     viewport: { width: W, height: H },
     colorScheme: SCHEME,
+    // A phone: a finger, not a mouse (`(pointer: coarse)` matches, so every small button
+    // is as tall as the app makes it for touch).
+    hasTouch: true,
+    isMobile: true,
     storageState: { cookies: [], origins: [] },
   });
   // Nothing leaves this machine: a link to the account's origin is never followed.
@@ -710,6 +714,36 @@ test.describe("a phone that cannot sign", () => {
     expect(b.ss.deviceRequests.size).toBe(0);
     await shot(page, "approve-cannot");
   });
+});
+
+test("the Approve page's blocks are panels that start at one edge, at any width", async ({ browser }) => {
+  const b = await bed(browser);
+  b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+  try {
+    // Asked, and waiting: where it stands, the computers, and taking the phone off again.
+    await b.page.goto(`${b.server.url}/add-device?ask=1`);
+    await expect(b.page.locator("[data-approve='waiting']")).toBeVisible({ timeout: 15_000 });
+    const groups = b.page.locator(".approve > .form-group");
+    await expect.poll(() => groups.count()).toBeGreaterThanOrEqual(2);
+    const boxes = await groups.evaluateAll((els) =>
+      els.map((el) => {
+        const r = el.getBoundingClientRect();
+        const first = el.firstElementChild?.getBoundingClientRect();
+        return {
+          left: r.left,
+          right: r.right,
+          inner: (first?.left ?? r.left) - r.left,
+          radius: getComputedStyle(el).borderTopLeftRadius,
+        };
+      }),
+    );
+    // One left edge and one right edge for all of them; and on a wide screen, where the
+    // page draws no panels of its own, each is one, and what is inside starts equally far in.
+    for (const k of W >= 840 ? (["left", "right", "inner"] as const) : (["left", "right"] as const))
+      expect(new Set(boxes.map((x) => Math.round(x[k]))).size, `${k}: ${JSON.stringify(boxes)}`).toBe(1);
+  } finally {
+    await b.close();
+  }
 });
 
 test("an email as long as an email may be wraps beside its state in Settings › App, at any width", async ({

@@ -170,3 +170,18 @@
 [data-account-settings] .settings-hint {
   overflow-wrap: anywhere;
 }
+
+/* Wide (a tablet on its side, a desktop window): there is no grouped ground under the page
+   there, so each of the three blocks is a panel by its own line, and all three start at
+   the same edge. Narrow, the grouped page draws them (settings.css). */
+@media (min-width: 840px) {
+  .approve > .form-group {
+    padding: 14px 16px 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pop);
+    background: var(--bg-2);
+  }
+  .approve > .form-group + .form-group {
+    margin-top: 16px;
+  }
+}
