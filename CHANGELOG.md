@@ -73,6 +73,14 @@ All notable changes to `sessionpipe-gui`. The format follows
   stays fresh while the reader waits. The count is kept beside the cursor (every 15
   seconds and at stop), so a restart in the middle of a stream goes on from it; with none
   on file a third of the budget is taken as spent.
+- **What spacesheep says of a send is shown as plain text, and a send it took without saying
+  which job it is does not wait for ever.** The note on a job spacesheep carried (a
+  computer's reason for refusing, say) reached the page as it came: with line breaks,
+  characters that reorder text, any length. It is shown as one plain line now, like every
+  other reason. A code that is not written as one is no longer passed on. A signed command
+  that is not a command is refused as a bad request instead of an error. And when
+  spacesheep takes a send but names no job, its row says it was sent with no word of how
+  it went, rather than waiting on a job that cannot be read.
 - **Words, plain** (for approval): a start called off before it began reads "Cancelled before
   rc-mac started it." and a message sent to it "Cancelled with its session, before rc-mac got
   it."; a refusal with no specific reason "rc-mac refused it." plus the receiver's reason when
