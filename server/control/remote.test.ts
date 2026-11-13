@@ -3,7 +3,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ControlState, EXPIRES_MAX_MS, REMOTE_GRACE_MS } from "./state.js";
+import {
+  ControlState,
+  EXPIRES_MAX_MS,
+  type MessageRow,
+  type PoolCommand,
+  REMOTE_GRACE_MS,
+  toActivity,
+} from "./state.js";
 
 // Machines paired on a spacesheep account (docs/rfcs/08): rows from the relay's list,
 // sends carried there settled by the relay's job status.
@@ -568,28 +575,88 @@ describe("remote machines in the control state", () => {
     again.close();
   });
 
-  it("a job's note is outside text: handed on as one plain line, kept as it came", () => {
+  it("a job's note is outside text: handed on as one plain line, whole up to what a daemon may send, kept as it came", () => {
     state.setRemoteAccount(account);
     state.upsertRemoteMachines([listed()], remote);
     const m = state.machine("m_0123456789abcdefghij")!;
     const cmd = startCmd(m.id);
     const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 91);
-    // A right-to-left override, a line break, markup, and far more than a line of it.
+    // A right-to-left override, a line break, markup, and more than any daemon sends.
     const note = `The folder\u202E isn't allowed.\n<b>second line</b> ${"x".repeat(700)}`;
     state.applyRemoteJobs([{ id: 91, status: "refused", note, done_at: Date.now(), created_at: 1 }]);
     const shown = state.activityById(row.id)!.detail!;
     expect(shown.startsWith("The folder isn't allowed. <b>second line</b> xxx")).toBe(true);
     expect(shown).not.toMatch(/[\u202E\n]/u);
-    expect(Array.from(shown).length).toBeLessThanOrEqual(200);
-    expect(shown.endsWith("…")).toBe(true);
+    // Cut at the daemon's own 500, and nothing put where it was cut.
+    expect(Array.from(shown)).toHaveLength(500);
+    expect(shown.endsWith("xxx")).toBe(true);
     // The same through the list, and the row itself is as spacesheep wrote it.
     expect(state.activity()[0]!.detail).toBe(shown);
     expect(state.message(m.id, row.id)!.detail).toBe(note);
+    // A computer's own reason, as long as its daemon may make it, is shown whole.
+    const long = `${"The folder is not one this computer starts in. ".repeat(10)}Ask its owner.`.padEnd(500, "!");
+    expect(long).toHaveLength(500);
+    const whole = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 93);
+    state.applyRemoteJobs([{ id: 93, status: "refused", note: long, done_at: Date.now(), created_at: 1 }]);
+    expect(state.activityById(whole.id)!.detail).toBe(long);
     // A note that is nothing but what cannot be seen is no detail at all.
     const quiet = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 92);
     state.applyRemoteJobs([{ id: 92, status: "failed", note: "\u200B\u202E", done_at: Date.now(), created_at: 1 }]);
     expect(state.activityById(quiet.id)).toMatchObject({ outcome: "failed" });
     expect(state.activityById(quiet.id)!.detail).toBeUndefined();
+  });
+
+  it("the sign-in link of a pooled account comes through a job's note whole", () => {
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed({ pool: { on: true, harness: "claude-code", accounts: [] } })], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    // The link as the core's sign-in builds it (450 characters), after the pending id: what a
+    // daemon acks a `login.begin` with, and what spacesheep keeps as the job's note.
+    const u = new URL("https://claude.com/cai/oauth/authorize");
+    u.searchParams.append("code", "true");
+    u.searchParams.append("client_id", "00000000-0000-4000-8000-000000000000");
+    u.searchParams.append("response_type", "code");
+    u.searchParams.append("redirect_uri", "https://platform.claude.com/oauth/code/callback");
+    u.searchParams.append(
+      "scope",
+      "user:inference user:profile org:create_api_key user:sessions:claude_code user:mcp_servers user:file_upload",
+    );
+    u.searchParams.append("code_challenge", "c".repeat(43));
+    u.searchParams.append("code_challenge_method", "S256");
+    u.searchParams.append("state", "s".repeat(43));
+    const note = `0a1b2c3d ${u}`;
+    expect(note.length).toBeGreaterThan(450);
+    const cmd: PoolCommand = {
+      v: 1,
+      t: "sessionpipe.control",
+      machine: m.id,
+      kind: "pool",
+      session: "sessionpipe:pool",
+      pool_action: "login.begin",
+      nonce: "n-login",
+      iat: 1,
+    };
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 41);
+    state.applyRemoteJobs([{ id: 41, status: "done", note, done_at: Date.now(), created_at: 1 }]);
+    expect(state.activityById(row.id)).toMatchObject({ outcome: "delivered", detail: note });
+    expect(state.activity()[0]!.detail).toBe(note);
+  });
+
+  it("a row of this receiver's own machine says its detail as the machine acked it, cleaned by no one", () => {
+    // What is cleaned is spacesheep's note alone: a row with no job of spacesheep's is as it was.
+    const detail = `first line\nsecond\u202E line ${"x".repeat(700)}`;
+    const own = {
+      id: "01J0000000000000000000000A",
+      machineId: "m_0123456789abcdefghij",
+      kind: "prompt",
+      session: "claude-code:abc",
+      at: "2026-01-01T00:00:00.000Z",
+      expiresAt: "2026-01-01T00:10:00.000Z",
+      outcome: "failed",
+      detail,
+    } as MessageRow;
+    expect(toActivity(own).detail).toBe(detail);
+    expect(toActivity({ ...own, remoteJob: 7 }).detail).not.toBe(detail);
   });
 
   it("a send spacesheep took without naming its job is said as it is: sent, and no word of how it went", () => {

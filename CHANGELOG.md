@@ -76,8 +76,11 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **What spacesheep says of a send is shown as plain text, and a send it took without saying
   which job it is does not wait for ever.** The note on a job spacesheep carried (a
   computer's reason for refusing, say) reached the page as it came: with line breaks,
-  characters that reorder text, any length. It is shown as one plain line now, like every
-  other reason. A code that is not written as one is no longer passed on. A signed command
+  characters that reorder text, any length. It is shown as one plain line now, with what
+  cannot be seen taken out, and whole: up to the 500 characters a computer may send, with
+  nothing cut short of that and nothing added, so the sign-in link of a pooled account on
+  such a computer arrives as the computer wrote it. A code that is not written as one is
+  no longer passed on. A signed command
   that is not a command is refused as a bad request instead of an error. And when
   spacesheep takes a send but names no job, its row says it was sent with no word of how
   it went, rather than waiting on a job that cannot be read.

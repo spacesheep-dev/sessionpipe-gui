@@ -24,7 +24,7 @@ import type {
   StartPermission,
   TrustedKey,
 } from "../../shared/api.js";
-import { cleanReason } from "../../shared/reason.js";
+import { cleanNote } from "../../shared/reason.js";
 
 export const MACHINE_RE = /^m_[A-Za-z0-9_-]{16,40}$/;
 
@@ -286,8 +286,10 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.code) a.code = m.code;
   // A row spacesheep carried has its job's note as its detail: outside text, kept as it
   // came and handed on as plain visible text (shared/reason.ts), here, where every reader
-  // of a row gets it. A row of this receiver's own machines is as it was.
-  const detail = isRemoteRow(m) ? cleanReason(m.detail) : m.detail;
+  // of a row gets it. Whole, up to what a daemon may send: the page reads the sign-in link
+  // of a pooled account out of it, so nothing is cut short of that and nothing is added.
+  // A row of this receiver's own machines is as it was.
+  const detail = isRemoteRow(m) ? cleanNote(m.detail) : m.detail;
   if (detail) a.detail = detail;
   if (m.reply !== undefined) a.reply = m.reply;
   if (m.replySeq !== undefined) a.replySeq = m.replySeq;
