@@ -5,7 +5,7 @@
 // hub opens in the browser, the wait with a way out, the hub's own question on this phone,
 // and each way it can end with what to do next. The steps are accountConnect.ts's; the
 // hub does the connecting (account/shell.ts ConnectCalls); the words are accountWords.ts's.
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { endedWords } from "../account/screenWords";
 import { type ConnectCalls, connectView, hubError, tauriConnect } from "../account/shell";
 import { alreadyHere, type ConnectStep, connectStep, DEFAULT_ORIGIN, hostOf, spaced } from "./accountConnect";
@@ -16,6 +16,9 @@ import { type Phone, trustBrowser } from "./onboarding";
 
 /** How long the page waits for the shell to show the account before it opens itself again. */
 const SHOWN_WITHIN_MS = 8000;
+
+/** A start that has not answered in this long is one that could not reach spacesheep. */
+export const START_WITHIN_MS = 30_000;
 
 const openOutside = (url: string) => void invoke("app_open_external", { url }).catch(() => {});
 
@@ -48,7 +51,11 @@ export function ConnectAccount({
   const read = useCallback(
     async (resume = false) => {
       const st = await calls.status().catch(() => null);
-      if (!st) return;
+      // The hub cannot say: a resume that waits on it ends as spacesheep out of reach.
+      if (!st)
+        return void (resume
+          ? null
+          : send({ type: "refused", error: { code: "unreachable", message: "" }, now: Date.now() }));
       const c = connectView(st.connect);
       // A finished one that left a key on spacesheep which is not kept here is news to
       // whoever opens the app: its note is shown, whichever way it ended.
@@ -103,10 +110,17 @@ export function ConnectAccount({
     if (!starting) return;
     let on = true;
     void (async () => {
+      // A start that never answers ends as one that could not reach spacesheep.
+      const late = setTimeout(
+        () => on && send({ type: "refused", error: { code: "unreachable", message: "" }, now: Date.now() }),
+        START_WITHIN_MS,
+      );
       try {
         const c = await calls.start(origin);
+        clearTimeout(late);
         if (on) send({ type: "connect", connect: c });
       } catch (e) {
+        clearTimeout(late);
         if (!on) return;
         // An account at that origin is here and fine: it is the one to show.
         if (hubError(e).code === "already_connected") {
@@ -166,11 +180,32 @@ export function ConnectAccount({
     await calls.cancel().catch(() => false);
     send({ type: "go" });
   };
-  const open = () =>
-    calls.open().then(
-      () => send({ type: "opened" }),
-      () => void read(),
-    );
+  /** One hand-off to the browser at a time: a second tap while the first is out asks nothing. */
+  const handing = useRef(false);
+  const open = async () => {
+    if (handing.current) return;
+    handing.current = true;
+    try {
+      await calls.open();
+      send({ type: "opened" });
+    } catch {
+      void read();
+    } finally {
+      handing.current = false;
+    }
+  };
+
+  // A wait that names a time offers the try when that time has come.
+  const waitUntil = s.kind === "ended" && s.why === "wait" ? (s.at ?? null) : null;
+  const [due, setDue] = useState(false);
+  useEffect(() => {
+    setDue(false);
+    if (waitUntil === null) return;
+    const ms = waitUntil - Date.now();
+    if (ms <= 0) return setDue(true);
+    const t = setTimeout(() => setDue(true), Math.min(ms + 500, 2_147_000_000));
+    return () => clearTimeout(t);
+  }, [waitUntil]);
 
   const back = (label: string = R.back) => (
     <button type="button" className="btn btn--ghost onb-back" onClick={() => void leave()}>
@@ -189,6 +224,8 @@ export function ConnectAccount({
   if (s.kind === "starting" || s.kind === "opening" || s.kind === "resuming")
     return (
       <Screen
+        // A start or a resume can be left; once the account is kept the window is being replaced.
+        {...(s.kind === "opening" ? {} : { bar: back(R.cancel) })}
         title={R.connecting(s.kind === "opening" ? s.host : host)}
         host={s.kind === "opening" ? s.host : host}
         glyph={spinner}
@@ -242,7 +279,7 @@ export function ConnectAccount({
   const w = endedWords(s);
   return (
     <Screen bar={back()} title={w.title} body={w.body} host={s.host} data-step="account-ended" data-why={s.why} live>
-      {s.why !== "wait" && <Primary onClick={() => void again()}>{R.retry}</Primary>}
+      {(s.why !== "wait" || due) && <Primary onClick={() => void again()}>{R.retry}</Primary>}
       {s.revokeUrl && <Secondary onClick={() => openOutside(s.revokeUrl!)}>{N.revoke}</Secondary>}
     </Screen>
   );

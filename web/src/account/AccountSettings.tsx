@@ -5,7 +5,7 @@
 // what it removes said before it is pressed. The hub asks before a disconnect in its own
 // alert; the page only says what came of it.
 import { ROUTES } from "@shared/api";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Group, Row } from "../components/SettingsWindow";
 import { apiFetch } from "../lib/net";
@@ -59,7 +59,11 @@ export default function AccountSettings() {
   const host = new URL(v.origin).host;
   const st = accountState(v);
   const key = phoneLine(phone.view);
+  const asking = useRef(false);
   const disconnect = async () => {
+    // One question at a time: a second tap while the app's alert is up asks nothing.
+    if (asking.current) return;
+    asking.current = true;
     setBusy(true);
     setErr(null);
     try {
@@ -72,6 +76,7 @@ export default function AccountSettings() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
+      asking.current = false;
       setBusy(false);
     }
   };

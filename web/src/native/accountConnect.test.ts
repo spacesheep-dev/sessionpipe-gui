@@ -26,7 +26,7 @@ describe("connecting an account: the steps", () => {
     s = walk(s, { type: "connect", connect: connect("pending") });
     expect(s).toMatchObject({ kind: "number", opened: true });
     s = walk(s, { type: "connect", connect: connect("asking") });
-    expect(s).toEqual({ kind: "asking", host: HOST });
+    expect(s).toEqual({ kind: "asking", host: HOST, digits: "4821" });
     s = walk(s, { type: "connect", connect: connect("approved", { receiver: "acct1", email: "me@example.com" }) });
     expect(s).toEqual({ kind: "opening", host: HOST, receiver: "acct1" });
     // Nothing moves it once the shell is asked to show the account.
@@ -67,7 +67,11 @@ describe("connecting an account: the steps", () => {
       kind: "number",
       opened: false,
     });
-    expect(walk(from, { type: "connect", connect: connect("asking") })).toEqual({ kind: "asking", host: HOST });
+    expect(walk(from, { type: "connect", connect: connect("asking") })).toEqual({
+      kind: "asking",
+      host: HOST,
+      digits: "4821",
+    });
     expect(
       walk(from, { type: "connect", connect: connect("approved", { receiver: "acct1" }), accounts: ["acct1"] }),
     ).toMatchObject({ kind: "opening", receiver: "acct1" });
@@ -91,6 +95,33 @@ describe("connecting an account: the steps", () => {
     expect(walk({ kind: "intro" }, { type: "connect", connect: connect("approved") })).toEqual({ kind: "intro" });
   });
 
+  it("an older word of a connect the screen is already past does not bring its number back; a new connect's does", () => {
+    const asking = walk(
+      { kind: "number", host: HOST, digits: "4821", opened: true },
+      { type: "connect", connect: connect("asking") },
+    );
+    expect(asking).toMatchObject({ kind: "asking", digits: "4821" });
+    // The same connect, still "pending", told late (a status read that crossed the hub's own word).
+    expect(walk(asking, { type: "connect", connect: connect("pending") })).toEqual(asking);
+    const ended = walk(asking, { type: "connect", connect: connect("declined", { note: "A key was made." }) });
+    expect(ended).toMatchObject({ kind: "ended", why: "declined", digits: "4821" });
+    expect(walk(ended, { type: "connect", connect: connect("pending") })).toEqual(ended);
+    // Another connect has another number: that one is shown.
+    expect(walk(ended, { type: "connect", connect: { ...connect("pending"), digits: "1375" } })).toMatchObject({
+      kind: "number",
+      digits: "1375",
+    });
+  });
+
+  it("a resume whose read of the hub failed ends as spacesheep out of reach, like a start", () => {
+    const refused = { type: "refused" as const, error: { code: "unreachable", message: "" }, now: 1 };
+    for (const kind of ["starting", "resuming"] as const)
+      expect(walk({ kind }, refused), kind).toMatchObject({ kind: "ended", why: "unreachable" });
+    // A screen that is past starting takes no such word.
+    const number: ConnectStep = { kind: "number", host: HOST, digits: "4821", opened: false };
+    expect(walk(number, refused)).toEqual(number);
+  });
+
   it("says why a connect ended, with the hub's note where a key was made and not kept", () => {
     const note = "A key was made for this app on spacesheep and is not kept here.";
     const revokeUrl = "https://spacesheep.dev/settings/api-keys";
@@ -99,12 +130,14 @@ describe("connecting an account: the steps", () => {
       kind: "ended",
       why: "denied",
       host: HOST,
+      digits: "4821",
     });
     expect(walk(from, { type: "connect", connect: connect("expired") })).toMatchObject({ why: "expired" });
     expect(walk(from, { type: "connect", connect: connect("declined", { note, revokeUrl }) })).toEqual({
       kind: "ended",
       why: "declined",
       host: HOST,
+      digits: "4821",
       note,
       revokeUrl,
     });
@@ -136,7 +169,9 @@ describe("connecting an account: the steps", () => {
     expect(
       walk({ kind: "number", host: HOST, digits: "4821", opened: true }, { type: "connect", connect: null }),
     ).toEqual({ kind: "intro" });
-    expect(walk({ kind: "asking", host: HOST }, { type: "connect", connect: null })).toEqual({ kind: "intro" });
+    expect(walk({ kind: "asking", host: HOST, digits: "4821" }, { type: "connect", connect: null })).toEqual({
+      kind: "intro",
+    });
     expect(walk({ kind: "starting" }, { type: "connect", connect: null })).toEqual({ kind: "starting" });
   });
 

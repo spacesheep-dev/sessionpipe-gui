@@ -33,10 +33,12 @@ export type ConnectStep =
   /** The number to compare; `opened` once the confirm page was handed to the browser. */
   | { kind: "number"; host: string; digits: string; opened: boolean }
   /** Approved on spacesheep; the hub's question is on this phone. */
-  | { kind: "asking"; host: string }
+  | { kind: "asking"; host: string; digits?: string }
   /** The account is kept: the shell is asked to show it. */
   | { kind: "opening"; host: string; receiver: string }
-  | { kind: "ended"; why: Ended; host: string; at?: number; note?: string; revokeUrl?: string };
+  /** `digits`: the number of the connect that ended, so an older word of the same connect
+   *  (still "pending") that arrives late is known for what it is. */
+  | { kind: "ended"; why: Ended; host: string; at?: number; note?: string; revokeUrl?: string; digits?: string };
 
 export type ConnectEvent =
   /** Continue on the intro; Try again where a connect ended. */
@@ -101,8 +103,9 @@ export function connectStep(prev: ConnectStep, ev: ConnectEvent, host: string): 
     case "reset":
       return prev.kind === "opening" ? prev : { kind: "intro" };
     case "refused": {
-      // The shell is replacing the window, or already has.
-      if (prev.kind !== "starting" && prev.kind !== "opening") return prev;
+      // The shell is replacing the window, or already has. (A resume whose read of the hub
+      // failed ends like a start that could not reach it.)
+      if (prev.kind !== "starting" && prev.kind !== "opening" && prev.kind !== "resuming") return prev;
       const why = refusedWhy(ev.error);
       if (!why) return { kind: "intro" };
       const wait = hubError(ev.error).retryAfterS;
@@ -121,6 +124,15 @@ export function connectStep(prev: ConnectStep, ev: ConnectEvent, host: string): 
         return prev.kind === "number" || prev.kind === "asking" || prev.kind === "resuming" ? { kind: "intro" } : prev;
       }
       const h = hostOf(c.origin);
+      // An older word of a connect this screen is already past (the hub's question is up, or
+      // it ended) must not bring its number back. A new connect has a new number.
+      if (
+        c.state === "pending" &&
+        (prev.kind === "asking" || prev.kind === "ended") &&
+        prev.digits &&
+        prev.digits === c.digits
+      )
+        return prev;
       if (c.state === "pending")
         return {
           kind: "number",
@@ -128,7 +140,7 @@ export function connectStep(prev: ConnectStep, ev: ConnectEvent, host: string): 
           digits: c.digits,
           opened: prev.kind === "number" && prev.digits === c.digits ? prev.opened : false,
         };
-      if (c.state === "asking") return { kind: "asking", host: h };
+      if (c.state === "asking") return { kind: "asking", host: h, ...(c.digits ? { digits: c.digits } : {}) };
       if (c.state === "approved") {
         // An approval whose account is no longer here (disconnected since) is old news.
         if (!c.receiver || (ev.accounts && !ev.accounts.includes(c.receiver)))
@@ -141,6 +153,7 @@ export function connectStep(prev: ConnectStep, ev: ConnectEvent, host: string): 
         kind: "ended",
         why: endedWhy(c),
         host: h,
+        ...(c.digits ? { digits: c.digits } : {}),
         ...(c.note ? { note: c.note } : {}),
         // Where to revoke the key, when that is on the origin the connect was for.
         ...(ownUrl(c.revokeUrl, c.origin) ? { revokeUrl: c.revokeUrl } : {}),
