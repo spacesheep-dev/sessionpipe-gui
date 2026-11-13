@@ -48,6 +48,9 @@ export interface PhoneWatch {
   /** The Approve page is open (or closed again). */
   watch(on: boolean): void;
   stop(): void;
+  /** The app is in front again (the page's own listener calls this): the clock is read
+   *  again and spacesheep is asked once. */
+  front(): void;
 }
 
 export interface PhoneWatchOptions {
@@ -114,15 +117,32 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
     const v = state.view;
     return !looked || v?.phase.kind === "waiting" || !!v?.rest;
   };
+  /** How the last look ended: `mend` is a refusal only a person can mend (spacesheep's own
+   *  no, a key that is not there); `unreached` counts the looks in a row that reached nobody. */
+  let mend = false;
+  let unreached = 0;
+  /** When the next look is due while the page is open, or null when none is.
+   *  - A refusal only a person can mend: none. Asking again changes nothing; the state is
+   *    shown with its one way on, and the app coming to the front looks once.
+   *  - spacesheep out of reach: at a growing interval, five seconds up to a minute.
+   *  - Something waited for: every five seconds.
+   *  - Settled: at the slow cadence, so a phone removed on spacesheep is noticed. */
+  const nextLook = (): number | null => {
+    if (mend) return null;
+    if (unreached) return Math.min(LOOK_FAST_MS * 2 ** (unreached - 1), LOOK_IDLE_MS);
+    return waiting() ? LOOK_FAST_MS : LOOK_IDLE_MS;
+  };
   const schedule = (): void => {
     if (timer) clearTimeout(timer);
     timer = null;
-    if (stopped || !watching || !waiting()) return;
+    if (stopped || !watching) return;
+    const wait = nextLook();
+    if (wait === null) return;
     timer = setTimeout(() => {
       timer = null;
       if (visible()) void look();
       else schedule();
-    }, LOOK_FAST_MS);
+    }, wait);
   };
 
   const look = (): Promise<void> => {
@@ -133,13 +153,25 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
         if (a.hub === "no_device_key") {
           door = null;
           looked = true;
+          // No key to ask about until the person asks for one.
+          mend = true;
+          unreached = 0;
           return show(state.memo, { error: null });
         }
         if (a.hub || a.status < 200 || a.status >= 300) {
           const code = a.hub ?? (typeof a.json.code === "string" ? a.json.code : "refused");
           const message = typeof a.json.error === "string" ? a.json.error : "";
+          // Nobody was reached (the hub could not, spacesheep failed or asked to wait): asked
+          // again, less and less often. Anything else is a no that asking again will not change.
+          const nobody = a.hub
+            ? a.hub === "unreachable" || a.hub === "timeout" || a.hub === "busy"
+            : a.status >= 500 || a.status === 429;
+          mend = !nobody;
+          unreached = nobody ? unreached + 1 : 0;
           return set({ error: { code, message, ...(a.hub ? {} : { upstream: code }) } });
         }
+        mend = false;
+        unreached = 0;
         const was = door?.trusted ?? false;
         door = deviceDoor(a.json);
         looked = true;
@@ -148,6 +180,8 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
         show(memo, { error: null });
         if (door.trusted && !was) void o.machinesNow().catch(() => {});
       } catch (e) {
+        mend = false;
+        unreached++;
         set({ error: hubError(e) });
       } finally {
         looking = null;
@@ -185,9 +219,13 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
     keep(memo);
     show(memo);
   });
+  /** The app is in front again: the clock is read again (an hour may have ended while the
+   *  phone slept, and no timer ran), and spacesheep is asked once, whatever the last look
+   *  said and however long ago it was. */
   const front = (): void => {
     if (!visible()) return;
-    if (watching ? waiting() : now() - lookedAt >= LOOK_IDLE_MS) void look();
+    if (looked) show(state.memo);
+    void look();
   };
   if (typeof document !== "undefined") document.addEventListener("visibilitychange", front);
 
@@ -201,6 +239,7 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
     },
     ask,
     look,
+    front,
     watch(on) {
       watching = on;
       if (on && !looking) void look();

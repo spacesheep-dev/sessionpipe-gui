@@ -123,14 +123,85 @@ describe("this phone's key, watched", () => {
     const seen = T + LOOK_FAST_MS * 4;
     expect(w.get().view?.phase).toEqual({ kind: "cooling", until: seen + NEW_DEVICE_WAIT_MS, exact: true });
     expect(b.s.machines).toBe(1);
-    // Nothing more is waited for: no more looks, however long the page stays open.
+    // Nothing more is waited for: it looks on at the slow cadence, once a minute, not every five seconds.
     const after = b.s.looks;
     await vi.advanceTimersByTimeAsync(LOOK_FAST_MS * 10);
     expect(b.s.looks).toBe(after);
+    await vi.advanceTimersByTimeAsync(LOOK_IDLE_MS * 3);
+    expect(b.s.looks).toBe(after + 3);
     expect(b.s.machines).toBe(1);
     // The hour ends by itself.
     await vi.advanceTimersByTimeAsync(NEW_DEVICE_WAIT_MS);
     expect(w.get().view?.phase).toEqual({ kind: "approved" });
+    // Settled and still open: a phone removed on spacesheep is noticed within the minute.
+    b.s.trusted = false;
+    await vi.advanceTimersByTimeAsync(LOOK_IDLE_MS);
+    expect(w.get().view?.phase.kind).not.toBe("approved");
+  });
+
+  it("a refusal only a person can mend stops the asking; nobody reached is asked again less and less often", async () => {
+    const b = bed();
+    w = b.w;
+    await w.ask();
+    w.watch(true);
+    await settle();
+    // spacesheep says no for a reason asking again will not change (a plan, a switch that is off, a revoked key).
+    for (const no of [
+      { status: 403, hub: null, json: { code: "talk_off", error: "Turn it on." } },
+      { status: 401, hub: null, json: { code: "unauthorized", error: "Unknown or revoked API key." } },
+      { status: 401, hub: "not_connected", json: { hub: true, error: "This device holds no key for the account." } },
+    ] as DoorAnswer[]) {
+      b.s.doorError = no;
+      await w.look();
+      const before = b.s.looks;
+      await vi.advanceTimersByTimeAsync(LOOK_IDLE_MS * 10);
+      expect(b.s.looks, JSON.stringify(no.json)).toBe(before);
+      expect(w.get().error?.code).toBeTruthy();
+    }
+    // Nobody reached: asked again at 5, 10, 20, 40 seconds, then every minute.
+    b.s.doorError = { status: 502, hub: "unreachable", json: { hub: true, error: "spacesheep could not be reached." } };
+    await w.look();
+    const start = b.s.looks;
+    const at: number[] = [];
+    for (let t = 0; t < 200; t++) {
+      await vi.advanceTimersByTimeAsync(1000);
+      if (b.s.looks > start + at.length) at.push(t + 1);
+    }
+    expect(at).toEqual([5, 15, 35, 75, 135, 195]);
+    // Reached again: back to every five seconds while something is waited for.
+    b.s.doorError = null;
+    await vi.advanceTimersByTimeAsync(LOOK_IDLE_MS);
+    const ok = b.s.looks;
+    await vi.advanceTimersByTimeAsync(LOOK_FAST_MS * 2);
+    expect(b.s.looks).toBe(ok + 2);
+  });
+
+  it("back in front, it always looks once and reads the clock again, whatever it last knew", async () => {
+    let visible = true;
+    const b = bed({ visible: () => visible });
+    w = b.w;
+    await w.ask();
+    b.s.trusted = true;
+    b.s.pending = false;
+    await w.look();
+    expect(w.get().view?.phase.kind).toBe("cooling");
+    // The phone sleeps through the hour's end: no timer ran, the page still says "from …".
+    visible = false;
+    vi.setSystemTime(Date.now() + NEW_DEVICE_WAIT_MS + 60_000);
+    expect(w.get().view?.phase.kind).toBe("cooling");
+    visible = true;
+    const before = b.s.looks;
+    w.front();
+    expect(w.get().view?.phase).toEqual({ kind: "approved" });
+    await settle();
+    expect(b.s.looks).toBe(before + 1);
+    // Settled, a moment after a look, a refusal on screen: in front again, it still looks.
+    b.s.doorError = { status: 403, hub: null, json: { code: "talk_off", error: "Turn it on." } };
+    w.front();
+    await settle();
+    w.front();
+    await settle();
+    expect(b.s.looks).toBe(before + 3);
   });
 
   it("asks nothing while the app is in the background", async () => {
