@@ -143,6 +143,9 @@ export function sendErrorWords(e: unknown): string {
     // spacesheep refused this app's key (server/control/ui.ts forwardSend), not the page's.
     if (e.code === "spacesheep_unauthorized")
       return "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.";
+    // The app could get no answer for it (account/doors.ts): nobody knows whether spacesheep
+    // took it, so it is never said to be not sent. The app's own words for what happened.
+    if (e.code === "hub_unknown") return e.detail ?? e.reason;
     if (e.status === 404) return "not sent · this machine is no longer paired here";
     if (e.status === 401) return "not sent · this page lost its key; reload it from the terminal's link";
     return `not sent · ${e.detail ?? e.reason}`;

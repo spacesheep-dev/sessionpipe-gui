@@ -40,6 +40,10 @@ export interface FakeJob {
   code?: string | null;
   created_at: number;
   done_at: number | null;
+  /** What the jobs door also lists of it: the kind of job and the session it is for. */
+  action?: string;
+  source?: string;
+  session?: string;
   /** The signed body as it was sent. */
   sent: Record<string, unknown>;
 }
@@ -67,7 +71,10 @@ export class FakeSpacesheep {
   private seq = 0;
   private waiters = new Set<() => void>();
   machines: Record<string, unknown>[] = [];
-  jobs: FakeJob[] = [];
+  jobs: (FakeJob & { nonce?: string })[] = [];
+  /** A signed command sent a second time is refused as a replay, as spacesheep does. Off: a
+   *  test that sends one fixed command again and again is carried each time. */
+  replays = true;
   private jobId = 0;
   /** The key was revoked: every door answers 401 `unauthorized`. */
   revoked = false;
@@ -193,7 +200,7 @@ export class FakeSpacesheep {
       const jobs = this.jobs
         .filter((j) => j.id > since)
         .slice(0, 100)
-        .map(({ sent: _sent, ...j }) => j);
+        .map(({ sent: _sent, nonce: _nonce, ...j }) => j);
       return json({ now: this.clock.now(), jobs });
     }
     const send = /^\/api\/machines\/([^/]+)\/jobs$/.exec(p);
@@ -286,13 +293,28 @@ export class FakeSpacesheep {
       return json({ error: "That computer isn't set up any more.", code: "not_found" }, 404);
     const scripted = this.sendAnswers.shift()?.(body);
     if (scripted) return scripted;
-    const job: FakeJob = {
+    let cmd: { kind?: unknown; session?: unknown; nonce?: unknown } = {};
+    try {
+      cmd = (JSON.parse(body.cmd) ?? {}) as typeof cmd;
+    } catch {
+      /* not a command spacesheep can read: it carries it all the same here */
+    }
+    // A command is taken once (index.ts machineNonceUsed): the same signed bytes again are a replay.
+    const nonce = typeof cmd.nonce === "string" ? cmd.nonce : "";
+    if (nonce && this.replays && this.jobs.some((j) => j.nonce === nonce))
+      return json({ error: "That was already sent.", code: "replay" }, 409);
+    const named = typeof cmd.session === "string" ? cmd.session : "";
+    const at = named.indexOf(":");
+    const job: FakeJob & { nonce?: string } = {
       id: ++this.jobId,
       machine,
       status: "queued",
       note: null,
       created_at: this.clock.now(),
       done_at: null,
+      action: cmd.kind === "start" ? "start" : cmd.kind === "prompt" ? "message" : String(cmd.kind ?? ""),
+      ...(at > 0 ? { source: named.slice(0, at), session: named.slice(at + 1) } : {}),
+      ...(nonce ? { nonce } : {}),
       sent: body,
     };
     this.jobs.push(job);

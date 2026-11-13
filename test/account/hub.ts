@@ -147,6 +147,9 @@ export class HubStandIn {
   busy = 0;
   /** spacesheep cannot be reached (`unreachable`). */
   down = false;
+  /** The next this-many sends reach spacesheep and its answer does not come back in the
+   *  hub's time: the page gets the hub's `timeout`, and spacesheep holds the job. */
+  unheard = 0;
   /** Each door request takes this much longer, as a phone's network would make it. */
   latencyMs = 0;
   /** The most a relay answer may hold, unpacked (8 MiB in the hub; a test lowers it). */
@@ -535,6 +538,10 @@ export class HubStandIn {
     } finally {
       this.inFlight--;
       if (door === "relay") this.relayReads--;
+    }
+    if (door === "send" && this.unheard > 0) {
+      this.unheard--;
+      return refusal("timeout");
     }
     if (res.status >= 300 && res.status < 400) return refusal("redirected");
     if (Buffer.byteLength(res.body) > (door === "relay" ? this.relayMax : MIB)) return refusal("answer_too_large");

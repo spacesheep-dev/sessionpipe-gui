@@ -11,7 +11,7 @@ import { MemoryLog } from "../../../server/store/log";
 import { Session } from "../../../test/events";
 import { CACHE_EVENTS_MAX, compacted, memoryCache, openCache, pagesToDrop, pagesTooOld, sweepCaches } from "./cache";
 import { DOC_READ_WAITS_MS, openDocs } from "./docs";
-import { hubCode, openDoors, SEND_BUSY_TRIES } from "./doors";
+import { hubCode, openDoors, SEND_BUSY_TRIES, SEND_UNKNOWN, SEND_UNKNOWN_CODE, SEND_UNKNOWN_WAITS_MS } from "./doors";
 import { PageLog } from "./log";
 import { accountShell } from "./shell";
 import { noticeWords } from "./start";
@@ -110,8 +110,7 @@ describe("the account's doors", () => {
       [
         hubSays(401, "not_connected", "This device holds no key for the account. Connect again."),
         hubSays(400, "not_signed", "The app forwards only a signed command to a machine."),
-        hubSays(504, "timeout", "spacesheep did not answer in time."),
-        hubSays(502, "unreachable", "spacesheep could not be reached."),
+        hubSays(502, "redirected", "spacesheep answered with a redirect, which the app does not follow."),
       ],
       { onUnauthorized: () => refused++ },
     );
@@ -120,9 +119,96 @@ describe("the account's doors", () => {
       json: { code: hubCode("not_connected"), error: "This device holds no key for the account. Connect again." },
     });
     expect(await doors.send(m, {})).toMatchObject({ status: 502, json: { code: "hub_not_signed" } });
-    expect(await doors.send(m, {})).toMatchObject({ status: 504, json: { code: "hub_timeout" } });
-    expect(await doors.send(m, {})).toMatchObject({ status: 502, json: { code: "hub_unreachable" } });
+    expect(await doors.send(m, {})).toMatchObject({ status: 502, json: { code: "hub_redirected" } });
     expect(refused).toBe(0);
+  });
+
+  describe("a send nobody heard the answer to", () => {
+    const body = { cmd: JSON.stringify({ kind: "prompt", session: "claude-code:s-1", nonce: "n1" }), csig: "s" };
+    const timeout = () => hubSays(504, "timeout", "spacesheep did not answer in time.");
+    const posts = (asked: { init?: RequestInit }[]) => asked.filter((a) => a.init?.method === "POST");
+
+    it("is asked again with the same bytes, after a wait; taken then, it is sent", async () => {
+      const waits: number[] = [];
+      const { doors, asked } = open([timeout(), answer(202, { job: 9 })], {
+        sleep: async (ms) => void waits.push(ms),
+      });
+      expect(await doors.send(m, body)).toEqual({ status: 202, json: { job: 9 } });
+      expect(waits).toEqual([SEND_UNKNOWN_WAITS_MS[0]]);
+      expect(posts(asked).map((a) => a.init!.body)).toEqual([JSON.stringify(body), JSON.stringify(body)]);
+    });
+
+    it("every way of not hearing counts: the hub's time, an answer that stopped or could not be passed on, a request that never came back", async () => {
+      for (const code of [...SEND_UNKNOWN]) {
+        const { doors } = open([hubSays(502, code, "x"), answer(202, { job: 1 })]);
+        expect(await doors.send(m, body), code).toEqual({ status: 202, json: { job: 1 } });
+      }
+      // The app's own protocol failed the first: fetch threw.
+      let n = 0;
+      const doors = openDoors({
+        rxBase: "rx://localhost/ACCT",
+        sleep: async () => {},
+        fetch: (async () => {
+          if (n++ === 0) throw new TypeError("Load failed");
+          return answer(202, { job: 2 });
+        }) as typeof fetch,
+      });
+      expect(await doors.send(m, body)).toEqual({ status: 202, json: { job: 2 } });
+    });
+
+    it("spacesheep says it had it already: sent the first time, and its job is found in the jobs list", async () => {
+      const replay = () => answer(409, { error: "That was already sent.", code: "replay" });
+      const list = (jobs: unknown[]) => answer(200, { jobs });
+      const mine = { id: 41, machine: m.id, action: "message", source: "claude-code", session: "s-1" };
+      // One job after the last this page knew of fits the machine and the session.
+      let t = open(
+        [
+          timeout(),
+          replay(),
+          list([
+            { id: 40, machine: m.id, action: "message", session: "other" },
+            { id: 42, machine: "m_someoneelse0123456", action: "message", session: "s-1" },
+            mine,
+          ]),
+        ],
+        { lastJob: () => 39 },
+      );
+      expect(await t.doors.send(m, body)).toEqual({ status: 202, json: { job: 41 } });
+      expect(t.asked.at(-1)!.url).toBe("rx://localhost/ACCT/api/sessionpipe/v1/relay/jobs?since=39");
+      // None fits, two fit, or the list cannot be read: sent, and no job is guessed.
+      for (const jobs of [[], [mine, { ...mine, id: 43 }]]) {
+        t = open([timeout(), replay(), list(jobs)]);
+        expect(await t.doors.send(m, body)).toEqual({ status: 202, json: {} });
+      }
+      t = open([timeout(), replay(), hubSays(502, "unreachable", "x")]);
+      expect(await t.doors.send(m, body)).toEqual({ status: 202, json: {} });
+      // A list a hundred long is read on from its last id.
+      const full = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, machine: m.id, session: "other" }));
+      t = open([timeout(), replay(), list(full), list([{ ...mine, id: 101 }])]);
+      expect(await t.doors.send(m, body)).toEqual({ status: 202, json: { job: 101 } });
+      expect(t.asked.at(-1)!.url).toMatch(/jobs\?since=100$/);
+    });
+
+    it("still unheard after every try: one code that says nobody knows, with the hub's last words", async () => {
+      const waits: number[] = [];
+      const { doors, asked } = open([timeout(), timeout(), timeout()], { sleep: async (ms) => void waits.push(ms) });
+      expect(await doors.send(m, body)).toEqual({
+        status: 504,
+        json: { code: SEND_UNKNOWN_CODE, error: "spacesheep did not answer in time." },
+      });
+      expect(waits).toEqual([...SEND_UNKNOWN_WAITS_MS]);
+      expect(posts(asked)).toHaveLength(3);
+      expect(SEND_UNKNOWN_CODE).toBe("hub_unknown");
+    });
+
+    it("a refusal on the second asking is the answer: the first never arrived", async () => {
+      const held = answer(409, { error: "Confirm with your passkey.", code: "confirm", why: "it deletes a folder" });
+      const { doors } = open([timeout(), held]);
+      expect(await doors.send(m, body)).toEqual({
+        status: 409,
+        json: { error: "Confirm with your passkey.", code: "confirm", why: "it deletes a folder" },
+      });
+    });
   });
 
   it("a hub `busy` is asked again, a few times, and is never spacesheep's limit", async () => {
@@ -139,12 +225,13 @@ describe("the account's doors", () => {
     expect(always.asked).toHaveLength(SEND_BUSY_TRIES);
   });
 
-  it("a request that never left the app is unreachable, in the hub's words for it", async () => {
-    const { doors } = open([]);
+  it("a request that never comes back from the app, however often it is asked: nobody knows, in plain words", async () => {
+    const { doors, asked } = open([]);
     expect(await doors.send(m, {})).toEqual({
-      status: 502,
-      json: { code: "hub_unreachable", error: "spacesheep could not be reached." },
+      status: 504,
+      json: { code: "hub_unknown", error: "spacesheep could not be reached." },
     });
+    expect(asked).toHaveLength(1 + SEND_UNKNOWN_WAITS_MS.length);
   });
 
   it("the device door says whose answer it is", async () => {

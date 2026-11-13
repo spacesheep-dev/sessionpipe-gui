@@ -41,11 +41,28 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
   hub.rxBase = (id) => `https://rx.test/${id}`;
   hub.add("me@example.com", ss.key);
   const asked: string[] = [];
+  /** What becomes of the next sends between the page and spacesheep, first in first out:
+   *  `lost`: the hub's time ran out and spacesheep never had it; `unheard`: spacesheep took
+   *  it and its answer never came back in the hub's time; `dropped`: the app's own
+   *  protocol failed the request after spacesheep took it. */
+  const sendFaults: ("lost" | "unheard" | "dropped")[] = [];
+  const timedOut = (): Response =>
+    new Response(JSON.stringify({ hub: true, reason: "timeout", error: "spacesheep did not answer in time." }), {
+      status: 504,
+      headers: { "content-type": "application/json", "x-sessionpipe-hub": "timeout" },
+    });
   const fetchDoors = (async (url: string, init?: RequestInit) => {
     const u = new URL(url);
     const id = u.pathname.split("/")[1]!;
     const path = u.pathname.slice(id.length + 1) + u.search;
     asked.push(`${init?.method ?? "GET"} ${path.split("?")[0]}`);
+    const fault = init?.method === "POST" && path.endsWith("/jobs") ? sendFaults.shift() : undefined;
+    if (fault === "lost") return timedOut();
+    if (fault) {
+      await hub.door(id, { method: "POST", path, body: String(init?.body) });
+      if (fault === "dropped") throw new TypeError("Load failed");
+      return timedOut();
+    }
     const a: FakeAnswer = await hub.door(id, {
       method: init?.method ?? "GET",
       path,
@@ -112,7 +129,21 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
     });
     return backend;
   };
-  return { ss, hub, asked, notices, calls, failGet, sets, local, stored, gone, start, stop: () => backend?.stop() };
+  return {
+    ss,
+    hub,
+    asked,
+    notices,
+    calls,
+    failGet,
+    sets,
+    local,
+    stored,
+    gone,
+    sendFaults,
+    start,
+    stop: () => backend?.stop(),
+  };
 }
 
 /** The frames a page gets from a stream it opened. */
@@ -124,6 +155,8 @@ function listen(b: AccountBackend) {
   return { frames, off, last };
 }
 
+let nonces = 0;
+/** A signed send, each with a nonce of its own (spacesheep takes a command once). */
 const signed = (session: string, text = "hello") => ({
   machineId: M1,
   cmd: JSON.stringify({
@@ -133,7 +166,7 @@ const signed = (session: string, text = "hello") => ({
     kind: "prompt",
     session,
     text,
-    nonce: "n",
+    nonce: `n-${++nonces}`,
     iat: Date.now(),
   }),
   csig: "sig",
@@ -295,12 +328,16 @@ describe("a page's own backend on a spacesheep account", () => {
     expect(res.status).toBe(201);
     expect(r.ss.jobs[0]!.sent).toMatchObject({ confirm: { cred: "k1" }, match: "0417", csig: null, grant: null });
 
-    // The hub cannot reach spacesheep: its words, its code, never a 401 or a hold.
+    // The hub cannot reach spacesheep (or its answer stopped: the hub has one word for
+    // both): asked again twice, then its words under the code that says nobody knows, never
+    // a 401 or a hold.
     r.hub.down = true;
-    res = await post(b, "/api/ui/control/send", signed("claude-code:s-1"));
+    const unreached = post(b, "/api/ui/control/send", signed("claude-code:s-1"));
+    await tick(7000);
+    res = await unreached;
     expect([res.status, await res.json()]).toEqual([
       502,
-      { reason: "spacesheep could not be reached.", code: "hub_unreachable" },
+      { reason: "spacesheep could not be reached.", code: "hub_unknown" },
     ]);
     r.hub.down = false;
     // The hub's room is full twice, then it goes.
@@ -554,6 +591,111 @@ describe("a page's own backend on a spacesheep account", () => {
     await tick(50);
     expect(told).toEqual(["open", "snapshot"]);
     off();
+  });
+
+  describe("a send nobody heard the answer to", () => {
+    const ready = async (): Promise<AccountBackend> => {
+      const s = new Session("s-1");
+      r.ss.push([s.ev("session.started", {}, { tier: 2, session: { machine: "lab-mac" } })]);
+      const b = await r.start();
+      await tick(400);
+      return b;
+    };
+    /** A send, with time moved on while it works out what became of it. */
+    const send = async (b: AccountBackend, body: unknown, ms = 10_000) => {
+      const sending = post(b, "/api/ui/control/send", body);
+      await tick(ms);
+      const res = await sending;
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
+    const sends = () => r.asked.filter((a) => a.startsWith("POST ")).length;
+
+    it("spacesheep took it and the answer was lost: it is not said to be not sent, it is one job, and it is followed", async () => {
+      const b = await ready();
+      for (const fault of ["unheard", "dropped"] as const) {
+        const jobs = r.ss.jobs.length;
+        const before = sends();
+        r.sendFaults.push(fault);
+        const sent = await send(b, signed("claude-code:s-1", `once, ${fault}`));
+        // Asked again with the same signed bytes, spacesheep said it had it: sent, once.
+        expect(sent.status, fault).toBe(201);
+        expect(sends() - before).toBe(2);
+        expect(r.ss.jobs.length - jobs).toBe(1);
+        const job = r.ss.jobs.at(-1)!.id;
+        // The row is its job's: spacesheep's word settles it like any other.
+        const row = (await b.transport.controlActivity!(10))[0]!;
+        expect(row).toMatchObject({ text: `once, ${fault}`, session: "claude-code:s-1" });
+        expect(row.outcome).toBeUndefined();
+        r.ss.settle(job, "done");
+        await tick(4000);
+        expect((await b.transport.controlActivity!(10))[0]).toMatchObject({ outcome: "delivered" });
+      }
+    });
+
+    it("spacesheep never had it: the second asking sends it, once", async () => {
+      const b = await ready();
+      r.sendFaults.push("lost");
+      const sent = await send(b, signed("claude-code:s-1", "second time lucky"));
+      expect(sent.status).toBe(201);
+      expect(r.ss.jobs).toHaveLength(1);
+      expect((await b.transport.controlActivity!(10))[0]!.outcome).toBeUndefined();
+    });
+
+    it("still unheard after every try: it may have been sent, and that is what the page is told", async () => {
+      const b = await ready();
+      r.sendFaults.push("unheard", "lost", "lost");
+      const sent = await send(b, signed("claude-code:s-1", "into the dark"), 20_000);
+      expect(sent).toEqual({
+        status: 502,
+        body: { reason: "spacesheep did not answer in time.", code: "hub_unknown" },
+      });
+      expect(sends()).toBe(3);
+      // spacesheep holds the one job; the page keeps no row it could not vouch for.
+      expect(r.ss.jobs).toHaveLength(1);
+      expect(await b.transport.controlActivity!(10)).toEqual([]);
+    });
+
+    it("taken unheard, and the jobs list does not say which job it was: sent, with no word of how it went", async () => {
+      const b = await ready();
+      // Another send to the same session got in from elsewhere just before: two jobs fit.
+      const { cmd, csig, grant } = signed("claude-code:s-1", "from the laptop");
+      await r.hub.door([...r.hub.accounts.keys()][0]!, {
+        method: "POST",
+        path: `/api/machines/${M1}/jobs`,
+        body: JSON.stringify({ cmd, csig, grant }),
+      });
+      r.sendFaults.push("unheard");
+      const sent = await send(b, signed("claude-code:s-1", "from the phone"));
+      expect(sent.status).toBe(201);
+      expect(r.ss.jobs).toHaveLength(2);
+      expect((await b.transport.controlActivity!(10))[0]).toMatchObject({
+        text: "from the phone",
+        outcome: "unconfirmed",
+      });
+    });
+
+    it("a refusal the hub makes before any network is still not sent, and is not asked twice", async () => {
+      const b = await ready();
+      const real = r.hub.door.bind(r.hub);
+      r.hub.door = (async (id: string, req: { method: string; path: string; body?: string }) =>
+        real(id, req.method === "POST" ? { ...req, body: "[]" } : req)) as typeof r.hub.door;
+      const before = sends();
+      const sent = await send(b, signed("claude-code:s-1"), 100);
+      expect(sent).toMatchObject({ status: 502, body: { code: "hub_bad_body" } });
+      expect(sends() - before).toBe(1);
+      expect(r.ss.jobs).toHaveLength(0);
+    });
+
+    it("spacesheep's own 'already sent', with nothing unheard before it, is its refusal as it is", async () => {
+      const b = await ready();
+      const body = signed("claude-code:s-1", "twice by hand");
+      expect((await send(b, body, 100)).status).toBe(201);
+      expect(await send(b, body, 100)).toEqual({
+        status: 409,
+        body: { reason: "That was already sent.", code: "replay" },
+      });
+      expect(r.ss.jobs).toHaveLength(1);
+    });
   });
 
   describe("the reads spent of spacesheep's limit", () => {

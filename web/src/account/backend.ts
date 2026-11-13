@@ -185,9 +185,20 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
   const limits = new LimitsCore(docs.keep("limits"));
   limits.follow(store);
   const sends = docs.keep("sends");
+  /** The highest spacesheep job id among the rows this page keeps (doors.ts `lastJob`). */
+  let lastJob = 0;
+  const noteJobs = (queues: KeptQueues | null | undefined): void => {
+    for (const rows of Object.values(queues ?? {}))
+      for (const row of rows) if (typeof row.remoteJob === "number" && row.remoteJob > lastJob) lastJob = row.remoteJob;
+  };
+  const keptSends = readSends(sends.load());
+  noteJobs(keptSends);
   const control = new MemoryControl({
-    kept: readSends(sends.load()),
-    onSave: (queues: KeptQueues) => sends.save(fitSends(queues)),
+    kept: keptSends,
+    onSave: (queues: KeptQueues) => {
+      noteJobs(queues);
+      sends.save(fitSends(queues));
+    },
   });
 
   // ---------- the bus ----------
@@ -316,6 +327,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     rxBase: shell.rxBase,
     ...(o.fetch ? { fetch: o.fetch } : {}),
     onUnauthorized: () => reader?.unauthorized(),
+    lastJob: () => lastJob,
   });
   const kept = new Map<RelayKept, unknown>(Object.entries(loaded.kept) as [RelayKept, unknown][]);
   // The read times are kept in the page's own storage, whatever the events are kept in: it

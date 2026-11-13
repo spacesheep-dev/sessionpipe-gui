@@ -244,6 +244,22 @@ test("this phone's key is asked to be trusted through the hub; once the computer
   await expect(box).toHaveValue("");
 });
 
+test("a message whose answer never comes back is not said to be not sent: it went once, and its reply arrives", async () => {
+  // spacesheep takes the message and its answer is lost on the way back to the phone.
+  hub.unheard = 1;
+  const before = ran.length;
+  const box = composer();
+  await box.fill("And the payout webhook?");
+  await box.press("Enter");
+  // The page asks again with the same signed bytes; spacesheep says it has it; the computer runs it once.
+  await expect(page.getByText("Done: And the payout webhook?").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/not sent/i)).toHaveCount(0);
+  expect(ran.slice(before).filter((c) => c.text === "And the payout webhook?")).toHaveLength(1);
+  expect(hub.log.filter((l) => l.endsWith("/jobs timeout"))).toHaveLength(1);
+  expect(ss.log.filter((l) => l.startsWith("POST /api/machines/")).length).toBeGreaterThanOrEqual(2);
+  await expect(box).toHaveValue("");
+});
+
 test("a message spacesheep holds is shown held with its reason, and goes when confirmed", async () => {
   ss.sendAnswers.push(() => ({
     status: 409,
