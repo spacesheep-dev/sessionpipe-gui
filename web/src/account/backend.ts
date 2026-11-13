@@ -475,7 +475,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     kept.get("reads") === undefined &&
     Number.isFinite(connectedAt) &&
     Math.abs(Date.now() - connectedAt) < FRESH_MS;
-  /** spacesheep could not be reached at the last read (the reader's `offline`). */
+  /** spacesheep was not read at the last try: out of reach (the reader's `offline`), or it
+   *  asked this app to wait (`limited`). */
   let unreachable = false;
   /** The streams the page holds open: told when spacesheep cannot be reached. */
   const streams = new Set<StreamHandlers>();
@@ -579,10 +580,11 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
         // (Once history is in, the board is on the page already and only its state changes.)
         if ((s === "offline" || s === "limited") && catching) board();
         else if (s === "unauthorized") giveUp();
-        // spacesheep cannot be reached: every open stream says so, as a receiver's dropped
-        // stream does (the page reads "Reconnecting…", not "live"). Reached again, a board
-        // says it is live.
-        if (s === "offline") {
+        // spacesheep is not being read (it cannot be reached, or it asked this app to wait):
+        // every open stream says so, as a receiver's dropped stream does (the page reads
+        // "Reconnecting…", never "live" beside a board nothing is arriving on). Read again, a
+        // board says it is live.
+        if (s === "offline" || s === "limited") {
           unreachable = true;
           for (const h of [...streams]) h.onError(0);
         } else if (unreachable) {

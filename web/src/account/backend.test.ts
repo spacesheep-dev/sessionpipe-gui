@@ -1104,7 +1104,23 @@ describe("a page's own backend on a spacesheep account", () => {
       const page = listen(b);
       await tick(400);
       expect(b.view()).toMatchObject({ relay: { state: "limited" }, catching: true });
+      // Nothing is arriving: an open stream is told so (the page says "Reconnecting…", not
+      // "live"), and one opened meanwhile is told the same without the relay being asked.
+      const told: string[] = [];
+      const reads = () => r.asked.filter((a) => a === "GET /api/sessionpipe/v1/relay").length;
+      const before = reads();
+      const off = b.transport.openStream({
+        onOpen: () => told.push("open"),
+        onMessage: (m) => m.kind === "snapshot" && told.push("snapshot"),
+        onError: () => told.push("down"),
+      });
+      await tick(50);
+      expect(told).toEqual(["open", "snapshot", "down"]);
+      expect(reads()).toBe(before);
       await tick(180_000);
+      // Read again: a board says it is live.
+      expect(told.at(-1)).toBe("snapshot");
+      off();
       expect(b.view()).toMatchObject({ relay: { state: "ok" }, catching: false, store: { sessions: 3 } });
       expect(page.frames.filter((m) => m.kind === "event")).toEqual([]);
       expect(await unread(b)).toEqual([]);

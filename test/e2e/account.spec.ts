@@ -716,6 +716,8 @@ test.describe("an account with nothing on it yet, then a session from a computer
     await expect(page3.getByText("It catches up by itself.")).toBeVisible();
     await expect(page3.getByText("Waiting for your first session")).toHaveCount(0);
     await expect(page3.getByText(/Start an agent on a computer paired/)).toHaveCount(0);
+    // Nothing is arriving: the app does not say "live" beside it.
+    await expect(page3.locator("text=Reconnecting… >> visible=true").first()).toBeVisible({ timeout: 10_000 });
     // The wait is over by the next launch: the account is read, and it is empty.
     ss3.limit = 240;
   });
