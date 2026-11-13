@@ -608,6 +608,105 @@ test("in all of it, nothing was asked of a GUI server, and the hub was asked for
   expect(server.seen.filter((r) => /^\w+ \/(api|themes|skins|attachments)\//.test(r))).toEqual([]);
 });
 
+test.describe("an account with nothing on it yet, then a session from a computer that is not paired", () => {
+  let ss3: FakeSpacesheep;
+  let hub3: HubStandIn;
+  let server3: AccountServer;
+  let context3: BrowserContext;
+  let page3: Page;
+
+  test.beforeAll(async ({ browser }) => {
+    ss3 = new FakeSpacesheep();
+    ss3.machines = [
+      {
+        id: MACHINE,
+        name: NAME,
+        online: true,
+        last_seen: Date.now(),
+        folders: ["/Users/me"],
+        agents: ["claude-code"],
+        modes: ["waiter"],
+        passkey_ids: ["a-passkey-made-on-spacesheep"],
+        key_types: ["passkey", "device"],
+        start: { "claude-code": { permissions: ["default"] } },
+      },
+    ];
+    hub3 = new HubStandIn({ upstream: { origin: "https://spacesheep.test", ask: (req) => ss3.handle(req) } });
+    hub3.add("me@example.com", ss3.key);
+    server3 = await startAccountServer({ web: WEB, hub: hub3 });
+    context3 = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      storageState: { cookies: [], origins: [] },
+      permissions: ["clipboard-read", "clipboard-write"],
+    });
+    await context3.addInitScript(fakeShell, {});
+    page3 = await context3.newPage();
+  });
+  test.afterAll(async () => {
+    await context3?.close();
+    await server3?.close();
+  });
+
+  test("the empty board says nothing of a terminal on this machine, a command to type, or sample sessions", async () => {
+    await page3.goto(server3.url);
+    await expect(page3.getByText("Waiting for your first session")).toBeVisible();
+    // A session can be started on the paired computer: the one way on.
+    await expect(page3.getByRole("button", { name: `Start a session on ${NAME}` })).toBeVisible();
+    for (const false_ of [/in any terminal/, /on this machine/, /^claude$/, /Listening/, /sample sessions/, /npx /])
+      await expect(page3.getByText(false_)).toHaveCount(0);
+    await expect(page3.getByRole("link", { name: /Pair another machine/ })).toHaveCount(0);
+    expect(server3.strays).toEqual([]);
+  });
+
+  test("where a computer is not paired, the way on is the session on spacesheep, not a page this app does not have", async () => {
+    const s = new Session("s-unpaired");
+    const from = {
+      tier: 2 as const,
+      session: { machine: "attic-linux", cwd: "/home/me/notes", title: "Tidy the notes" },
+    };
+    ss3.push([
+      s.ev("session.started", { source: "startup" }, from),
+      s.ev("turn.started", { turn_id: "t1" }, from),
+      s.ev(
+        "turn.transcript",
+        {
+          turn: 1,
+          // An image a receiver was holding when this was sent from its own page.
+          user: "Tidy the notes folder. /attachments/01HZX5M3K9Q2W8RTY4N6P7VBCD.png",
+          assistant: "Tidied.",
+        },
+        from,
+      ),
+      s.ev("turn.ended", { turn_id: "t1" }, from),
+    ]);
+    await expect(page3.getByText("Tidy the notes").first()).toBeVisible();
+    await page3.goto(`${server3.url}/s/claude-code/s-unpaired`);
+    await expect(page3.getByText("Tidied.").first()).toBeVisible();
+    await expect(page3.getByText(/How to pair/)).toHaveCount(0);
+    // The image is the receiver's, not the relay's: no thumbnail, and nothing asked for.
+    await expect(page3.locator("[data-attachment-thumbs]")).toHaveCount(0);
+    await expect(page3.locator("img[src*='/attachments/']")).toHaveCount(0);
+    expect(hub3.log.filter((l) => l.includes("/attachments/"))).toEqual([]);
+    expect(server3.seen.filter((r) => r.includes("/attachments/"))).toEqual([]);
+    const link = page3.locator("[data-elsewhere]").first();
+    await expect(link).toHaveText("Open on spacesheep.test");
+    await expect(link).toHaveAttribute("href", "https://spacesheep.test/sessions?s=s-unpaired");
+    // The link a person copies is the session's page on spacesheep, the one address it has.
+    await page3.getByRole("button", { name: "More actions" }).first().click();
+    await page3.getByRole("menuitem", { name: "Copy" }).click();
+    await page3.getByRole("menuitem", { name: "Link" }).click();
+    await expect
+      .poll(() => page3.evaluate(() => navigator.clipboard.readText()))
+      .toBe("https://spacesheep.test/sessions?s=s-unpaired");
+    // Machines: no command to pair it with a receiver that is not there.
+    await page3.goto(`${server3.url}/machines`);
+    await expect(page3.getByText("attic-linux").first()).toBeVisible();
+    await expect(page3.getByText(/sessionpipe control pair/)).toHaveCount(0);
+    await expect(page3.getByText("Pair it")).toHaveCount(0);
+    expect(server3.strays).toEqual([]);
+  });
+});
+
 test.describe("a phone that cannot sign, with no storage to keep the board in", () => {
   let ss2: FakeSpacesheep;
   let hub2: HubStandIn;

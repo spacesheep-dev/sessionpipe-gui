@@ -35,7 +35,7 @@ import {
 import { Redacted } from "../components/bits";
 import { useContextMenu } from "../components/ContextMenu";
 import { copyItem } from "../lib/menus";
-import { apiFetch, apiUrl } from "../lib/net";
+import { accountMode, apiFetch, apiUrl } from "../lib/net";
 import "./attachments.css";
 
 // ---------- the upload itself (also the theme api's control.attach) ----------
@@ -445,7 +445,9 @@ function TrayItem({ it, onRemove }: { it: PendingItem; onRemove: () => void }) {
 
 /** Thumbnails for the images a prompt text names; each opens the full image in a new tab. */
 export function AttachmentThumbs({ items, small }: { items: readonly AttachmentRef[]; small?: boolean }) {
-  if (items.length === 0) return null;
+  // The images a receiver holds are not on a spacesheep account's relay: nothing to show,
+  // and nothing to ask for that would come back broken.
+  if (items.length === 0 || accountMode()) return null;
   return (
     <span className={`att-thumbs ${small ? "att-thumbs--sm" : ""}`} data-attachment-thumbs={items.length}>
       {items.map((it) => (

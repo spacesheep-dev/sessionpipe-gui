@@ -76,6 +76,7 @@ import { focusSearch, inPanel, useListNav } from "../lib/keys";
 import { type LabelFilter, labelName, labelPasses, labelQuery, requestLabelRename } from "../lib/labels";
 import { isUnread, setUnread } from "../lib/marks";
 import { type Held, useFlip, useHeldOrder, useListHold, usePresence } from "../lib/motion";
+import { accountMode } from "../lib/net";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
@@ -577,7 +578,7 @@ export function Board() {
       ) : null}
       {emptyShown.mounted && (
         <div className="board-empty" data-closing={emptyShown.closing ? "" : undefined}>
-          <FirstRun paired={paired[0]?.name} />
+          {accountMode() ? <AccountFirstRun paired={paired[0]?.name} /> : <FirstRun paired={paired[0]?.name} />}
         </div>
       )}
       {noMatch && (
@@ -827,6 +828,30 @@ function FirstRun({ paired }: { paired?: string }) {
       )}
       <Listening>{(hooked.length ? hooked : names).join(", ")}</Listening>
     </EmptyState>
+  );
+}
+
+/** The first run on a spacesheep account. Nothing on this phone listens for a terminal,
+ *  there are no hooks of its own to install, and it has no sample board to put in its
+ *  place: the wait, and the one way on there is (a session on a paired computer, or the
+ *  machines of the account). */
+function AccountFirstRun({ paired }: { paired?: string }) {
+  return (
+    <EmptyState
+      center
+      title="Waiting for your first session"
+      actions={
+        paired ? (
+          <button type="button" className="btn" onClick={() => openNewSession({ machine: paired })}>
+            Start a session on {paired}
+          </button>
+        ) : (
+          <Link to="/machines" className="btn">
+            Machines
+          </Link>
+        )
+      }
+    />
   );
 }
 

@@ -422,7 +422,13 @@ export function ControlStrip({
             Pair <strong>{name}</strong> to message this session from here.
           </>
         ),
-        action: (
+        // On a spacesheep account a computer is paired on spacesheep, not here: no page of
+        // this app says how, and the session's own page there is the way on.
+        action: elsewhere ? (
+          <a className="ctl-open-https" href={elsewhere.href} target="_blank" rel="noreferrer noopener" data-elsewhere>
+            Open on {elsewhere.host}
+          </a>
+        ) : (
           <Link to="/connect" className="ctl-link">
             How to pair
           </Link>
@@ -501,9 +507,15 @@ export function ControlStrip({
     folded ? (
       <>
         Pair <strong>{name}</strong> to answer and message from here ·{"\u00a0"}
-        <Link to="/connect" className="ctl-link">
-          How to pair
-        </Link>
+        {elsewhere ? (
+          <a className="ctl-link" href={elsewhere.href} target="_blank" rel="noreferrer noopener" data-elsewhere>
+            Open on {elsewhere.host}
+          </a>
+        ) : (
+          <Link to="/connect" className="ctl-link">
+            How to pair
+          </Link>
+        )}
       </>
     ) : (
       `pair ${name} to answer here`

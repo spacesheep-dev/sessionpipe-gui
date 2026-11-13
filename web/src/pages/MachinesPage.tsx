@@ -149,7 +149,8 @@ function MachineBlock({
     },
     c && !accountMode() && { label: "Add a phone…", run: () => navigate("/phone") },
     { sep: true },
-    !c && { label: "Copy pair command", run: () => copyText(pairCmd) },
+    // That command pairs a machine with a receiver; an account's are paired on spacesheep.
+    !c && !accountMode() && { label: "Copy pair command", run: () => copyText(pairCmd) },
     { label: "Copy machine name", run: () => copyText(m.name) },
   ];
   const menu = useContextMenu(items, {
@@ -290,7 +291,7 @@ function MachineBlock({
             </span>
           </li>
         )}
-        {!c && (
+        {!c && !accountMode() && (
           <li className="form-row form-row--stack">
             <span className="form-row-text">
               <span className="form-label">Pair it</span>

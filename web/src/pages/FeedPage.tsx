@@ -22,7 +22,7 @@ import { useAppState, useLabels, useStore } from "../data/hooks";
 import { eventSummary, harnessMark, oneLine, sessionTitle, storedKey, toolLabel } from "../lib/format";
 import { useListNav } from "../lib/keys";
 import { type LabelFilter, labelPasses, labelQuery } from "../lib/labels";
-import { absoluteUrl, copyItem } from "../lib/menus";
+import { absoluteUrl, copyItem, openOutside } from "../lib/menus";
 import { reducedMotion, tokenMs, useListHold } from "../lib/motion";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { useAppSettings, useLens } from "../lib/settings";
@@ -737,7 +737,7 @@ const FeedRow = memo(function FeedRow({
           action: "list.background",
           run: () => openSplit(key, { background: true }),
         },
-        wide && { label: "Open in new window", run: () => void window.open(absoluteUrl(path), "_blank", "noopener") },
+        wide && !!absoluteUrl(path) && { label: "Open in new window", run: () => openOutside(path) },
         { sep: true },
         { label: "Show only this session", run: () => c.setSession(key) },
         e.session.machine && { label: `Show only ${e.session.machine}`, run: () => c.setMachine(e.session.machine!) },

@@ -64,6 +64,12 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
  *  shell the page's origin is the app's). */
 export const receiverOrigin = (): string => shell?.receiver?.origin || location.origin;
 
+/** A session's own page on the spacesheep account this window shows (`/sessions?s=<id>`
+ *  there): the one address of the app's a person on an account can open or hand to
+ *  somebody. The app's own paths (`/s/…`, `/feed`) are not pages spacesheep has. */
+export const accountSessionUrl = (sessionId: string): string =>
+  `${receiverOrigin()}/sessions?s=${encodeURIComponent(sessionId)}`;
+
 /** The shell's stream opener, set by the native adapter. */
 export const shellStreams: { open?: (path: string) => EventSourceLike } = {};
 

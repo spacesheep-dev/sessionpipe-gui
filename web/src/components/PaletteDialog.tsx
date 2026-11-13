@@ -847,6 +847,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
 
     if (want("Go to")) {
       // `words`: what else finds a place ("limits" finds Usage), matched like its name.
+      const account = accountMode();
       const places: { label: string; detail?: string; words?: string; key?: string; run: () => void }[] = [
         { label: "Board", key: "nav.board", run: () => navigate("/") },
         { label: "Feed", key: "nav.feed", run: () => navigate("/feed") },
@@ -858,10 +859,15 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
           key: "nav.usage",
           run: () => navigate("/usage"),
         },
-        { label: "Workflows", key: "nav.workflows", run: () => navigate("/workflows") },
-        { label: "Connect", key: "nav.connect", run: () => navigate("/connect") },
+        // What only a receiver has is not a place on a spacesheep account (app.tsx RECEIVER_ONLY).
+        ...(account
+          ? []
+          : [
+              { label: "Workflows", key: "nav.workflows", run: () => navigate("/workflows") },
+              { label: "Connect", key: "nav.connect", run: () => navigate("/connect") },
+            ]),
       ];
-      for (const p of ["Inbox", "Review", "Setup"]) {
+      for (const p of account ? ["Inbox", "Review"] : ["Inbox", "Review", "Setup"]) {
         const path = `/${p.toLowerCase()}`;
         if (parseRoute(path).name !== "missing")
           places.push({ label: p, key: `nav.${p.toLowerCase()}`, run: () => navigate(path) });
@@ -877,12 +883,13 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
           run: () => navigate(`/t/${encodeURIComponent(t.id)}`),
         });
       }
-      places.push({
-        label: "Views",
-        detail: "install, link, remove",
-        key: "nav.views",
-        run: () => navigate("/themes"),
-      });
+      if (!account)
+        places.push({
+          label: "Views",
+          detail: "install, link, remove",
+          key: "nav.views",
+          run: () => navigate("/themes"),
+        });
       places.push({
         label: "Shortcuts",
         detail: "every key, and change any",
