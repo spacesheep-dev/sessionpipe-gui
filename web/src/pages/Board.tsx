@@ -851,7 +851,9 @@ function AccountFirstRun({ paired }: { paired?: string }) {
           </Link>
         )
       }
-    />
+    >
+      Start an agent on a computer paired with this account and it appears here.
+    </EmptyState>
   );
 }
 

@@ -650,6 +650,9 @@ test.describe("an account with nothing on it yet, then a session from a computer
   test("the empty board says nothing of a terminal on this machine, a command to type, or sample sessions", async () => {
     await page3.goto(server3.url);
     await expect(page3.getByText("Waiting for your first session")).toBeVisible();
+    await expect(
+      page3.getByText("Start an agent on a computer paired with this account and it appears here."),
+    ).toBeVisible();
     // A session can be started on the paired computer: the one way on.
     await expect(page3.getByRole("button", { name: `Start a session on ${NAME}` })).toBeVisible();
     for (const false_ of [/in any terminal/, /on this machine/, /^claude$/, /Listening/, /sample sessions/, /npx /])
