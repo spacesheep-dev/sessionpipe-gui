@@ -91,9 +91,10 @@ export interface RelayReaderOptions {
    *  by its code and never as spacesheep's (a `busy` 429 is not spacesheep's limit and is
    *  asked again, HUB_BUSY_RUN times in a row at most before it is an error like any other
    *  of the hub's; `answer_too_large` asks again for fewer events, and one event the hub
-   *  cannot pass even alone is stepped over; a hub 401 is not a revoked key). The first
-   *  read asked again is still the first: `setLoading(false)` waits for a page or a failure.
-   *  Off, the header is never looked at. */
+   *  cannot pass even alone is an error of the hub's, asked for again every
+   *  HUB_UNPASSABLE_MS with the cursor where it is; a hub 401 is not a revoked key). The
+   *  first read asked again is still the first: `setLoading(false)` waits for a page or a
+   *  failure. Off, the header is never looked at. */
   hub?: boolean;
   /** History is read first: while a page comes back full (more is waiting) the next is
    *  read at once and with no wait, as long as BACKLOG_RESERVE reads of the budget stay
@@ -114,10 +115,8 @@ export const JOBS_FAST_MS = 3000;
 /** ...and while every send waits for a computer the machine list shows offline. */
 export const JOBS_SLOW_MS = 45_000;
 
-/** What the reader says of itself; the receiver's source adds the account to it. `skipped`
- *  (behind the hub only, and only once it happened): how many events the hub could not
- *  pass even one at a time, each stepped over so the ones after it are read. */
-export type RelayStatus = Omit<SpacesheepSourceStatus, "origin" | "email" | "connectedAt"> & { skipped?: number };
+/** What the reader says of itself; the receiver's source adds the account to it. */
+export type RelayStatus = Omit<SpacesheepSourceStatus, "origin" | "email" | "connectedAt">;
 
 export interface RelayReader {
   stop(): void;
@@ -284,6 +283,15 @@ class TooLarge extends Error {
   }
 }
 
+/** The hub would not pass even one event alone: no smaller read can bring it. The reader
+ *  never steps over it (the events after it are not its to judge, and one it stepped over
+ *  would be lost for good): it is the hub failing, said as any failure of the hub's. */
+class Unpassable extends Error {
+  constructor() {
+    super("hub: answer_too_large");
+  }
+}
+
 /** How long a hub `busy` is waited out, whatever its Retry-After says. */
 export const HUB_BUSY_MIN_MS = 250;
 export const HUB_BUSY_MAX_MS = 5000;
@@ -291,8 +299,11 @@ export const HUB_BUSY_MAX_MS = 5000;
  *  One more is the hub failing like any other way: said (`offline`, "hub: busy") and waited
  *  out with a pause that grows, so a hub that is always busy is not asked every second. */
 export const HUB_BUSY_RUN = 5;
-/** How many events in a row may be stepped over as too large for the hub to pass alone. */
-export const TOO_LARGE_RUN = 3;
+/** How long the reader waits before it asks again for an event the hub would not pass even
+ *  alone. Asking sooner brings nothing: the hub's cap is above any event the relay takes
+ *  (docs/rfcs/08), so this is a hub or a relay at fault, and every ask is a read spacesheep
+ *  counts. Three or four in ten minutes. */
+export const HUB_UNPASSABLE_MS = 3 * 60_000;
 
 /** A timer that does not keep a Node process alive; a page's timer is a number, with no unref. */
 const unref = <T>(timer: T): T => {
@@ -334,10 +345,6 @@ export function startRelayReader(opts: RelayReaderOptions): RelayReader {
   let smallUntil = 0;
   /** How many reads in a row the hub answered `busy` (HUB_BUSY_RUN). */
   let busyRun = 0;
-  /** Events the hub could not pass even alone, stepped over. */
-  let skipped = 0;
-  /** How many events in a row were stepped over with no page read between them (TOO_LARGE_RUN). */
-  let skipRun = 0;
   /** The hub had the first read asked again (its room was full, the page too large): it is
    *  still the first, and what it brings is still history. */
   let firstAgain = false;
@@ -441,17 +448,11 @@ export function startRelayReader(opts: RelayReaderOptions): RelayReader {
         smallUntil = cursor + size;
         throw new TooLarge();
       }
-      // One event alone is more than the hub passes: no smaller read can bring it. It is
-      // stepped over (the cursor moves past one seq) so the events after it are read, and
-      // the status says how many were (`skipped`). A hub that passes nothing at all is not
-      // an event too large: after TOO_LARGE_RUN in a row it is the hub failing, and the
-      // cursor stays where it is.
-      if (++skipRun > TOO_LARGE_RUN) throw new Error("hub: answer_too_large");
-      cursor += 1;
-      skipped++;
-      write("cursor", { origin: opts.origin, email: opts.email, cursor });
-      lastError = `an event too large for the app to pass was skipped (before ${cursor + 1})`;
-      throw new TooLarge();
+      // One event alone is more than the hub passes: no smaller read can bring it, and the
+      // cursor stays where it is. Offline, in the hub's own words, and asked for again
+      // slowly. Should the relay let the event go meanwhile, the read that then comes
+      // through finds the cursor behind what the relay holds and says the gap.
+      throw new Unpassable();
     }
     // Any other answer of the hub's own (its 401 `not_connected` among them) is the hub
     // speaking, not spacesheep: an error to wait out, never a revoked key.
@@ -490,7 +491,6 @@ export function startRelayReader(opts: RelayReaderOptions): RelayReader {
       write("cursor", { origin: opts.origin, email: opts.email, cursor });
     }
     loaded();
-    skipRun = 0;
     lastAt = new Date(clock.now()).toISOString();
     if (state === "ok") lastError = undefined;
     pause = opts.retryMs ?? 2000;
@@ -610,6 +610,10 @@ export function startRelayReader(opts: RelayReaderOptions): RelayReader {
           continue;
         }
         say("offline");
+        if (e instanceof Unpassable) {
+          await sleep(HUB_UNPASSABLE_MS);
+          continue;
+        }
         await sleep(pause);
         pause = Math.min(pause * 2, 60_000);
       }
@@ -658,15 +662,7 @@ export function startRelayReader(opts: RelayReaderOptions): RelayReader {
       wake?.();
       abort?.abort();
     },
-    status: () => ({
-      events,
-      cursor,
-      state,
-      lastAt,
-      lastError,
-      machines,
-      ...(skipped ? { skipped } : {}),
-    }),
+    status: () => ({ events, cursor, state, lastAt, lastError, machines }),
     tick: () => inFlight ?? poll(0),
     pollJobs: jobsPoll,
     pollMachines: machinesPoll,

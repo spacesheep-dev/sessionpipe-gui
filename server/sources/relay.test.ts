@@ -13,6 +13,7 @@ import {
   type Doors,
   HUB_BUSY_RUN,
   HUB_HEADER,
+  HUB_UNPASSABLE_MS,
   RELAY_BUDGET,
   RELAY_LIMIT,
   RELAY_PAGE,
@@ -23,7 +24,6 @@ import {
   readsFrom,
   relayPaceMs,
   startRelayReader,
-  TOO_LARGE_RUN,
 } from "./relay.js";
 
 const ORIGIN = "https://ss.test";
@@ -336,15 +336,23 @@ describe("the relay's reader over what its opener hands in", () => {
       expect(t.order).toEqual(["loading true", "loading false"]);
     });
 
-    it("one event the hub cannot pass even alone is stepped over, said, and the rest is read", async () => {
-      const asked: string[] = [];
+    /** The relay reads asked, as "since/limit". */
+    const relayAsks = (asked: string[]): string[] =>
+      asked.flatMap((p) => {
+        const m = /since=(\d+)&limit=(\d+)/.exec(p);
+        return m ? [`${m[1]}/${m[2]}`] : [];
+      });
+
+    it("one event the hub cannot pass even alone is never stepped over: offline in the hub's words, the cursor where it is, asked for again slowly", async () => {
+      let stuck = true;
+      const states: string[] = [];
       const t = open({
         hub: true,
+        onState: (s) => states.push(s),
         // The third event is more than the hub passes, in any answer that would hold it.
         hubAnswer: (p) => {
           const m = /since=(\d+)&limit=(\d+)/.exec(p);
-          if (!m) return null;
-          asked.push(`${m[1]}/${m[2]}`);
+          if (!m || !stuck) return null;
           const [since, limit] = [Number(m[1]), Number(m[2])];
           return since < 3 && since + limit >= 3 ? hubSays(502, "answer_too_large") : null;
         },
@@ -353,28 +361,113 @@ describe("the relay's reader over what its opener hands in", () => {
       t.ss.push(all);
       const r = t.start({ backlog: true, fresh: true });
       await t.clock.advance(100);
-      expect(r.status()).toMatchObject({ state: "ok", cursor: 12, skipped: 1 });
-      expect(t.taken.map((e) => e.id)).toEqual(all.filter((_, i) => i !== 2).map((e) => e.id));
-      // It was asked for alone once, and never again.
-      expect(asked.filter((a) => a === "2/1")).toHaveLength(1);
-      expect(t.kept.get("cursor")).toEqual({ origin: ORIGIN, email: EMAIL, cursor: 12 });
+      // What comes before it is read; it is asked for alone, and there the reader stays.
+      const stays = { state: "offline", lastError: "hub: answer_too_large", cursor: 2, events: 2 };
+      expect(r.status()).toMatchObject(stays);
+      expect(r.status()).not.toHaveProperty("skipped");
+      expect(states).toEqual(["ok", "offline"]);
+      expect(t.taken.map((e) => e.id)).toEqual(all.slice(0, 2).map((e) => e.id));
+      expect(t.kept.get("cursor")).toEqual({ origin: ORIGIN, email: EMAIL, cursor: 2 });
+      expect(relayAsks(t.asked).filter((a) => a === "2/1")).toHaveLength(1);
+      // Ten minutes on: a few more asks for that one event, and nothing has moved.
+      await t.clock.advance(600_000);
+      const again = relayAsks(t.asked).filter((a) => a === "2/1").length - 1;
+      expect(again).toBe(Math.floor(600_000 / HUB_UNPASSABLE_MS));
+      expect(again).toBeLessThanOrEqual(4);
+      expect(relayAsks(t.asked).every((a) => Number(a.split("/")[0]) <= 2)).toBe(true);
+      expect(r.status()).toMatchObject(stays);
+      expect(t.kept.get("cursor")).toEqual({ origin: ORIGIN, email: EMAIL, cursor: 2 });
+      expect(states).toEqual(["ok", "offline"]);
+      // The hub passes it: every event arrives, the one it held back among them, in order.
+      stuck = false;
+      await t.clock.advance(HUB_UNPASSABLE_MS);
+      expect(r.status()).toMatchObject({ state: "ok", cursor: 12, events: 12 });
+      expect(r.status().lastError).toBeUndefined();
+      expect(t.taken.map((e) => e.id)).toEqual(all.map((e) => e.id));
+      expect(states).toEqual(["ok", "offline", "ok"]);
     });
 
-    it("a hub that passes nothing at all is failing, not holding large events: a few are stepped over, no more", async () => {
+    it("a hub that finds every answer too large loses nothing: the cursor stays over three starts, and all of it is read once the hub passes pages", async () => {
+      let failing = true;
+      const t = told({
+        hub: true,
+        hubAnswer: (p) => (failing && p.includes("since=") ? hubSays(502, "answer_too_large") : null),
+      });
+      const all = events(12);
+      t.ss.push(all);
+      for (let launch = 0; launch < 3; launch++) {
+        t.asked.length = 0;
+        t.order.length = 0;
+        const r = t.start({ backlog: true, fresh: true });
+        await t.clock.advance(600_000);
+        expect(r.status(), `launch ${launch}`).toMatchObject({
+          state: "offline",
+          lastError: "hub: answer_too_large",
+          cursor: 0,
+          events: 0,
+        });
+        expect(t.kept.get("cursor"), `launch ${launch}`).toBeUndefined();
+        // Halved from a full page to one event, then a few asks for that one in ten minutes.
+        const asks = relayAsks(t.asked);
+        expect(asks.slice(0, 9)).toEqual(["0/500", "0/250", "0/125", "0/62", "0/31", "0/15", "0/7", "0/3", "0/1"]);
+        expect(asks.slice(9).every((a) => a === "0/1")).toBe(true);
+        expect(asks.length - 9).toBe(Math.floor(600_000 / HUB_UNPASSABLE_MS));
+        // The first read asked again and then failed: loading ended, with nothing taken.
+        expect(t.order).toEqual(["loading true", "loading false"]);
+        r.stop();
+      }
+      failing = false;
+      const r = t.start({ backlog: true });
+      await t.clock.advance(30_000);
+      expect(r.status()).toMatchObject({ state: "ok", cursor: 12, events: 12 });
+      expect(t.taken.map((e) => e.id)).toEqual(all.map((e) => e.id));
+    });
+
+    it("an event the hub never passed and the relay then let go is said as a gap, like any other", async () => {
+      let held = true;
       const t = open({
         hub: true,
-        hubAnswer: (p) => (p.includes("since=") ? hubSays(502, "answer_too_large") : null),
+        hubAnswer: (p) => {
+          const m = /since=(\d+)&limit=(\d+)/.exec(p);
+          if (!m || !held) return null;
+          const [since, limit] = [Number(m[1]), Number(m[2])];
+          return since < 3 && since + limit >= 3 ? hubSays(502, "answer_too_large") : null;
+        },
       });
-      t.ss.push(events(50));
+      const all = events(12);
+      t.ss.push(all);
       const r = t.start({ backlog: true, fresh: true });
       await t.clock.advance(600_000);
-      expect(r.status()).toMatchObject({
-        state: "offline",
-        lastError: "hub: answer_too_large",
-        cursor: TOO_LARGE_RUN,
-        skipped: TOO_LARGE_RUN,
+      expect(r.status()).toMatchObject({ state: "offline", lastError: "hub: answer_too_large", cursor: 2 });
+      // The relay drops it, and two after it. The next ask comes through, behind what the
+      // relay still holds: a gap, said, and the board has what is left.
+      t.ss.drop(5);
+      held = false;
+      await t.clock.advance(HUB_UNPASSABLE_MS);
+      expect(r.status()).toMatchObject({ state: "gap", cursor: 12, events: 9 });
+      expect(r.status().lastError).toContain("the relay no longer holds events before 6");
+      expect(t.taken.map((e) => e.id)).toEqual([...all.slice(0, 2), ...all.slice(5)].map((e) => e.id));
+    });
+
+    it("a start with no cursor whose oldest held event the hub cannot pass waits at nothing, and reads on when the relay lets it go", async () => {
+      let held = true;
+      const t = open({
+        hub: true,
+        hubAnswer: (p) => (held && p.includes("since=") ? hubSays(502, "answer_too_large") : null),
       });
-      expect(t.taken).toHaveLength(0);
+      const all = events(110);
+      t.ss.push(all);
+      // The relay has trimmed: the oldest it holds is seq 101, and that one is too large.
+      t.ss.drop(100);
+      const r = t.start({ backlog: true, fresh: true });
+      await t.clock.advance(600_000);
+      expect(r.status()).toMatchObject({ state: "offline", lastError: "hub: answer_too_large", cursor: 0, events: 0 });
+      expect(t.kept.get("cursor")).toBeUndefined();
+      t.ss.drop(101);
+      held = false;
+      await t.clock.advance(HUB_UNPASSABLE_MS);
+      expect(r.status()).toMatchObject({ state: "ok", cursor: 110, events: 9 });
+      expect(t.taken.map((e) => e.id)).toEqual(all.slice(101).map((e) => e.id));
     });
 
     it("a hub that is always busy is said and waited out: a handful of asks in ten minutes, not one a second", async () => {
