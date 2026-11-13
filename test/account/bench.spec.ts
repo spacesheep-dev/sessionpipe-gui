@@ -31,7 +31,17 @@ interface View {
 
 test("a first connect and a restart with a full relay", async () => {
   test.skip(!EVENTS, "set ACCOUNT_BENCH_EVENTS (see manual.config.ts)");
-  const events = JSON.parse(readFileSync(EVENTS, "utf8")) as unknown[];
+  const events = JSON.parse(readFileSync(EVENTS, "utf8")) as { time: string }[];
+  // As a relay holds them: nothing older than its week. The file's times are moved so
+  // that its newest event is a minute old and its span is at most six days.
+  const times = events.map((e) => Date.parse(e.time));
+  const newest = Math.max(...times);
+  const span = Math.max(1, newest - Math.min(...times));
+  const scale = Math.min(1, (6 * 86_400_000) / span);
+  const end = Date.now() - 60_000;
+  events.forEach((e, i) => {
+    e.time = new Date(end - (newest - times[i]!) * scale).toISOString();
+  });
   const ss = new FakeSpacesheep();
   ss.machines = [
     {

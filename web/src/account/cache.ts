@@ -5,14 +5,18 @@
 // person's account on the same phone is another database: the relay's pages as they were
 // ingested, one record a page under the cursor after it, and the reader's two small values
 // (`cursor`, `reads`). A page and the cursor after it are one write, so the two can never
-// disagree. It is bounded (CACHE_EVENTS_MAX), read once at the start, and deleted when the
-// account is disconnected. Where IndexedDB cannot be opened, the same thing in memory:
-// nothing survives the launch, and the backend says so.
+// disagree. It is bounded as the relay is (CACHE_EVENTS_MAX events, CACHE_KEEP_MS of age),
+// read once at the start, and deleted when the account is disconnected (or found at a later
+// start to belong to an account that is no longer on this phone). Where IndexedDB cannot
+// be opened, the same thing in memory: nothing survives the launch, and the backend says so.
 import type { StoredEvent } from "@shared/api";
 import type { RelayKept } from "../../../server/sources/relay";
 
 /** The relay itself holds 50 000 events at most; the cache keeps as many, newest last. */
 export const CACHE_EVENTS_MAX = 50_000;
+/** The relay drops an event a week after it took it; so does the cache, by the event's own
+ *  time (the relay's is not in what it hands over), a page at a time, at each start. */
+export const CACHE_KEEP_MS = 7 * 86_400_000;
 /** Past this many events over the bound the oldest pages go, in one write. */
 export const CACHE_SLACK = 2_000;
 /** A live page is often one event: past this many records they are rewritten as full ones. */
@@ -58,6 +62,51 @@ export function pagesToDrop(pages: readonly { key: number; n: number }[], max: n
     total -= p.n;
   }
   return out;
+}
+
+/** The pages at the front whose every event is older than `keepMs` at `now`: the ones a
+ *  read of the relay from its start would no longer bring. Stops at the first page that
+ *  holds a newer event; a page with no event at all goes with the old ones before it. */
+export function pagesTooOld(
+  pages: readonly { key: number; events: readonly Pick<StoredEvent, "time">[] }[],
+  now: number,
+  keepMs = CACHE_KEEP_MS,
+): number[] {
+  const out: number[] = [];
+  for (const p of pages) {
+    let newest = Number.NEGATIVE_INFINITY;
+    for (const e of p.events) {
+      const t = Date.parse(e.time);
+      // An event with no readable time is never called old.
+      newest = Math.max(newest, Number.isFinite(t) ? t : Number.POSITIVE_INFINITY);
+    }
+    if (p.events.length && now - newest < keepMs) break;
+    out.push(p.key);
+  }
+  // The last page is the cursor's: it stays, whatever it holds.
+  if (out.length === pages.length) out.pop();
+  return out;
+}
+
+/** The databases of accounts that are no longer on this phone (disconnected while no window
+ *  showed them) are deleted: `keep` is every account id the hub lists now. */
+export async function sweepCaches(
+  keep: readonly string[],
+  idb: IDBFactory | undefined = globalThis.indexedDB,
+): Promise<string[]> {
+  const gone: string[] = [];
+  try {
+    const prefix = cacheName("");
+    const names = new Set(keep.map(cacheName));
+    for (const d of (await idb?.databases?.()) ?? []) {
+      if (!d.name?.startsWith(prefix) || names.has(d.name)) continue;
+      idb!.deleteDatabase(d.name);
+      gone.push(d.name);
+    }
+  } catch {
+    // A browser that will not list them: nothing to sweep by.
+  }
+  return gone;
 }
 
 /** Many small pages as full ones, each under the cursor of its last. */
@@ -158,12 +207,13 @@ export async function openCache(
         req(tx.objectStore("meta").get("reads")),
       ]);
       let pages = keys.map((k, i) => ({ key: Number(k), events: (values[i] ?? []) as StoredEvent[] }));
-      const drop = new Set(
-        pagesToDrop(
-          pages.map((p) => ({ key: p.key, n: p.events.length })),
-          CACHE_EVENTS_MAX,
-        ),
-      );
+      // As the relay trims: what is older than its week, then what is past its count.
+      const drop = new Set(pagesTooOld(pages, Date.now()));
+      for (const key of pagesToDrop(
+        pages.filter((p) => !drop.has(p.key)).map((p) => ({ key: p.key, n: p.events.length })),
+        CACHE_EVENTS_MAX,
+      ))
+        drop.add(key);
       const small = pages.length > CACHE_COMPACT_PAGES;
       if (drop.size || small) {
         const kept = pages.filter((p) => !drop.has(p.key));

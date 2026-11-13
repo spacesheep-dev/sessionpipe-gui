@@ -9,7 +9,7 @@ import { HUB_HEADER } from "../../../server/sources/relay";
 import { StoreCore } from "../../../server/store/core";
 import { MemoryLog } from "../../../server/store/log";
 import { Session } from "../../../test/events";
-import { CACHE_EVENTS_MAX, compacted, memoryCache, openCache, pagesToDrop } from "./cache";
+import { CACHE_EVENTS_MAX, compacted, memoryCache, openCache, pagesToDrop, pagesTooOld, sweepCaches } from "./cache";
 import { openDocs } from "./docs";
 import { hubCode, openDoors, SEND_BUSY_TRIES } from "./doors";
 import { PageLog } from "./log";
@@ -190,6 +190,50 @@ describe("the cache of relay pages", () => {
     ).toEqual([9]);
     expect(compacted([{ key: 4, events: [] }], 3)).toEqual([{ key: 4, events: [] }]);
     expect(compacted([], 3)).toEqual([]);
+  });
+  it("drops the pages a read of the relay would no longer bring: older than its week, oldest first", () => {
+    const now = Date.parse("2026-11-12T12:00:00.000Z");
+    const at = (days: number) => ({ time: new Date(now - days * 86_400_000).toISOString() });
+    const pages = [
+      { key: 10, events: [at(30), at(9)] },
+      { key: 11, events: [] },
+      { key: 20, events: [at(8), at(7.5)] },
+      { key: 30, events: [at(9), at(6)] },
+      { key: 40, events: [at(20)] },
+    ];
+    // The first three hold nothing newer than a week; the fourth does, and everything after it stays.
+    expect(pagesTooOld(pages, now)).toEqual([10, 11, 20]);
+    expect(pagesTooOld(pages, now, 40 * 86_400_000)).toEqual([]);
+    // All of it old: the last page stays, since it carries the cursor.
+    expect(pagesTooOld(pages.slice(0, 3), now)).toEqual([10, 11]);
+    // A time that cannot be read is never called old.
+    expect(
+      pagesTooOld(
+        [
+          { key: 1, events: [{ time: "soon" }] },
+          { key: 2, events: [at(0)] },
+        ],
+        now,
+      ),
+    ).toEqual([]);
+    expect(pagesTooOld([], now)).toEqual([]);
+  });
+  it("deletes the databases of accounts that are no longer on this phone, and no other", async () => {
+    const deleted: string[] = [];
+    const idb = {
+      databases: async () => [
+        { name: "sessionpipe.account.KEPT" },
+        { name: "sessionpipe.account.GONE" },
+        { name: "somebody-elses" },
+        {},
+      ],
+      deleteDatabase: (name: string) => void deleted.push(name),
+    } as unknown as IDBFactory;
+    expect(await sweepCaches(["KEPT"], idb)).toEqual(["sessionpipe.account.GONE"]);
+    expect(deleted).toEqual(["sessionpipe.account.GONE"]);
+    // A browser that cannot list them, or has none: nothing happens.
+    expect(await sweepCaches(["KEPT"], {} as IDBFactory)).toEqual([]);
+    expect(await sweepCaches(["KEPT"], undefined)).toEqual([]);
   });
   it("with no IndexedDB, or one that will not open, is memory: nothing kept, nothing thrown", async () => {
     expect((await openCache("ACCT", undefined)).kind).toBe("memory");

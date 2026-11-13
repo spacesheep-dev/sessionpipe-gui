@@ -32,7 +32,7 @@ import { cutPreview } from "../../../server/ui/preview";
 import { snapshotWithControl } from "../../../server/ui/snapshot";
 import { HttpError, type StreamHandlers, type Transport } from "../data/transport";
 import type { ApiBackend } from "../lib/net";
-import { type EventCache, openCache } from "./cache";
+import { type EventCache, openCache, sweepCaches } from "./cache";
 import { type AccountDocs, openDocs } from "./docs";
 import { type AccountDoors, type DoorAnswer, openDoors } from "./doors";
 import { PageLog } from "./log";
@@ -132,6 +132,12 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     calls.status().catch(() => null),
   ]);
   const loaded = await cache.load();
+  // An account disconnected while no window showed it left its pages behind: they go now.
+  if (first && o.idb !== null)
+    void sweepCaches(
+      first.accounts.map((a) => a.id),
+      o.idb ?? globalThis.indexedDB,
+    );
 
   // ---------- the parts, as the receiver puts them together ----------
   // The index keeps its previews whole, so its copy of an event it did not cut is the
