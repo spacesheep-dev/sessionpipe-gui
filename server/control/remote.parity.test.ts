@@ -510,6 +510,48 @@ describe("the receiver's wiring and a page's, through one script", () => {
   });
 });
 
+describe("the receiver's wiring and a page's: a send confirmed afresh, and one that says which page sent it", () => {
+  let dir: string;
+  let sides: Side[];
+  beforeEach(() => {
+    vi.useFakeTimers({ now: 1_800_000_000_000 });
+    dir = mkdtempSync(path.join(tmpdir(), "spgui-parity-"));
+    sides = [receiverSide(dir), memorySide()];
+  });
+  afterEach(() => {
+    for (const s of sides) s.stop();
+    vi.useRealTimers();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("goes to spacesheep with the confirm alone, and both keep the same row of it", async () => {
+    for (const s of sides) s.ss.machines = [listed(M1, "lab-mac")];
+    for (const s of sides) s.start(ME);
+    await vi.advanceTimersByTimeAsync(50);
+    // A held send's second go (`{ cmd, confirm }`: nothing else signs it), from a session's page.
+    const { cmd } = command(M1, "prompt", "claude-code:s-1");
+    const confirm = { cred: "k1", sig: "confirm-signature" };
+    const body = { cmd, confirm, from: "claude-code:s-1" };
+    const answers = (await Promise.all(sides.map((s) => s.send(M1, body)))) as [Sent, Sent];
+    for (const a of answers)
+      expect("row" in a && a.row).toMatchObject({ kind: "prompt", machineId: M1, from: "claude-code:s-1" });
+    for (const s of sides) expect(s.ss.jobs.map((j) => j.sent)).toEqual([{ cmd, csig: null, grant: null, confirm }]);
+    const [a, b] = sides.map((s) => s.view()) as [View, View];
+    expect(b).toEqual(a);
+    expect(a.activity).toHaveLength(1);
+    expect(a.activity[0]).toMatchObject({ from: "claude-code:s-1", kind: "prompt" });
+    // The same after the job's word and a restart from what each kept.
+    for (const s of sides) s.ss.settle(1, "done");
+    await vi.advanceTimersByTimeAsync(3100);
+    for (const s of sides) s.stop();
+    for (const s of sides) s.start(ME);
+    await vi.advanceTimersByTimeAsync(50);
+    const [c, d] = sides.map((s) => s.view()) as [View, View];
+    expect(d.activity).toEqual(c.activity);
+    expect(c.activity[0]).toMatchObject({ from: "claude-code:s-1", outcome: "delivered" });
+  });
+});
+
 describe("the control state of a page", () => {
   afterEach(() => vi.useRealTimers());
   const remote = { via: "spacesheep" as const, origin: ORIGIN, rpId: "spacesheep.test" };
@@ -540,6 +582,66 @@ describe("the control state of a page", () => {
     expect(kept).toContain('"remoteJob":11');
     for (const secret of ["sig", '"grant"', '"csig"', '"confirm"', "nonce"]) expect(kept).not.toContain(secret);
     expect(saved[M1]![0]!.cmd).toBe("");
+
+    // A send confirmed afresh: spacesheep gets the confirm, the row keeps none of it, and
+    // the page it came from is kept.
+    const again = command(M1, "prompt", "claude-code:s-2");
+    const confirm = { cred: "k1", sig: "fresh-tap" };
+    const second = await control.send(
+      control.machine(M1)!,
+      { cmd: again.cmd, confirm, from: "claude-code:s-2" },
+      async (_m, b) => {
+        sent.push(b);
+        return { status: 202, json: { job: 12 } };
+      },
+    );
+    expect(sent[1]).toEqual({ cmd: again.cmd, csig: null, grant: null, confirm });
+    expect(second).toMatchObject({ remoteJob: 12, from: "claude-code:s-2" });
+    for (const row of [second, ...saved[M1]!]) {
+      expect(row.cmd).toBe("");
+      expect(row.csig).toBeUndefined();
+      expect(row.grant).toBeUndefined();
+      expect(row.confirm).toBeUndefined();
+    }
+    const keptAfter = JSON.stringify(saved);
+    for (const secret of ["fresh-tap", '"confirm"', '"cred"']) expect(keptAfter).not.toContain(secret);
+    expect(saved[M1]!.map((r) => r.from)).toEqual([undefined, "claude-code:s-2"]);
+  });
+
+  it("trims a queue each time it is saved: what is settled goes after a week, what waits stays", async () => {
+    vi.useFakeTimers({ now: 1_800_000_000_000 });
+    let saved: KeptQueues = {};
+    let saves = 0;
+    const control = new MemoryControl({
+      onSave: (q) => {
+        saves++;
+        saved = q;
+      },
+    });
+    control.remote.setRemoteAccount(ME);
+    control.remote.upsertRemoteMachines([listed(M1, "lab-mac")] as never, remote);
+    let job = 0;
+    const go = (session: string) =>
+      control.send(control.machine(M1)!, command(M1, "prompt", session), async () => ({
+        status: 202,
+        json: { job: ++job },
+      }));
+    await go("claude-code:s-1");
+    await vi.advanceTimersByTimeAsync(5);
+    await go("claude-code:s-2");
+    await vi.advanceTimersByTimeAsync(5);
+    await go("claude-code:s-3");
+    // The first two are settled by spacesheep's word; the third still waits.
+    const done = (id: number) => ({ id, status: "done", note: null, done_at: Date.now(), created_at: Date.now() });
+    control.remote.applyRemoteJobs([done(1), done(2)], 2, Date.now());
+    expect(saved[M1]!.map((r) => r.outcome)).toEqual(["delivered", "delivered", undefined]);
+    // Eight days on, the next save (a new send) keeps the one that waits and the new one.
+    await vi.advanceTimersByTimeAsync(8 * 86_400_000);
+    const before = saves;
+    await go("claude-code:s-4");
+    expect(saves).toBeGreaterThan(before);
+    expect(saved[M1]!.map((r) => r.session)).toEqual(["claude-code:s-3", "claude-code:s-4"]);
+    expect(control.activity().map((a) => a.session)).toEqual(["claude-code:s-4", "claude-code:s-3"]);
   });
 
   it("reads back only queues of machines with a row spacesheep carried, trimmed as a queue is kept", () => {
