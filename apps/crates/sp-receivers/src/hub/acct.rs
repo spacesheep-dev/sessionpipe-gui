@@ -150,6 +150,9 @@ pub(super) struct Accounts {
     connect: Mutex<Option<Pending>>,
     /// One connect is started at a time; a second start meanwhile is refused.
     start_gate: tokio::sync::Mutex<()>,
+    /// Counts `account_connect_cancel`: a start that was asking spacesheep meanwhile
+    /// sees it moved and ends `cancelled`, instead of leaving a connect nobody waits for.
+    cancels: AtomicU64,
     next_gen: AtomicU64,
     limits: Mutex<HashMap<String, Arc<Limits>>>,
     /// `Counts`, as in `counts_path`.
@@ -185,6 +188,7 @@ impl Accounts {
             client,
             connect: Mutex::new(None),
             start_gate: tokio::sync::Mutex::new(()),
+            cancels: AtomicU64::new(0),
             next_gen: AtomicU64::new(1),
             limits: Mutex::new(HashMap::new()),
             counts: Mutex::new(
@@ -237,6 +241,7 @@ impl Pending {
             receiver: self.receiver.clone(),
             email: self.email.clone(),
             error: self.error.clone(),
+            error_message: self.error.as_ref().map(|p| p.message.clone()),
             revoke_url: self
                 .unused_key
                 .then(|| format!("{}/settings/api-keys", self.origin)),
@@ -406,6 +411,20 @@ fn refusal(r: Refused, origin: Option<&str>, allowed: &[String]) -> http::Respon
 }
 
 impl Hub {
+    /// An `rx:` request to an id only an account has, with no such account in the list
+    /// (it was disconnected a moment ago, say, and its page has not gone yet). That page
+    /// tells the Hub's answers from spacesheep's by their header, so this one is the
+    /// Hub's own too, in the same shape: never a bare 404 to be taken for spacesheep's.
+    pub(super) fn account_gone(&self, origin: Option<&str>) -> http::Response<Vec<u8>> {
+        let allowed = &self.0.cfg.allowed_origins;
+        let r = if proxy::allow_origin(origin, allowed).is_none() {
+            Refused::ForbiddenOrigin
+        } else {
+            Refused::NotADoor
+        };
+        refusal(r, origin, allowed)
+    }
+
     fn account_cfg(&self) -> &account::AccountConfig {
         &self.0.cfg.account
     }
@@ -781,7 +800,15 @@ impl Hub {
         let res = match b.send().await {
             Ok(r) => r,
             Err(e) => {
-                let r = if e.is_timeout() {
+                // A send for which no connection was made (no network, no name, no
+                // handshake) never left this device: said apart, so the page can say
+                // "not sent" and mean it. Checked before the time limit: a connection
+                // that timed out being made sent nothing either. Any other failure of a
+                // send, and every failure of the time limit as a whole, leaves it unknown
+                // whether spacesheep took the command.
+                let r = if door == Door::MachineJobs && e.is_connect() {
+                    Refused::NotSent
+                } else if e.is_timeout() {
                     Refused::Timeout
                 } else {
                     Refused::Unreachable
@@ -1089,6 +1116,13 @@ impl Hub {
         let Ok(_gate) = self.0.acct.start_gate.try_lock() else {
             return Err(Problem::new("busy", "A connect is already being started."));
         };
+        // Cancelled while this start is on its way (the person left the screen that
+        // waits for the number): it ends here, and no connect is left polling.
+        let cancels = self.0.acct.cancels.load(Ordering::SeqCst);
+        let cancelled = || {
+            (self.0.acct.cancels.load(Ordering::SeqCst) != cancels)
+                .then(|| Problem::new("cancelled", "Cancelled."))
+        };
         if self
             .account_entries()
             .iter()
@@ -1131,6 +1165,9 @@ impl Hub {
                 Asked::Not(why) => return Err(why),
             }
         }
+        if let Some(p) = cancelled() {
+            return Err(p);
+        }
         let res = self
             .0
             .acct
@@ -1172,6 +1209,11 @@ impl Hub {
             .await
             .map_err(|_| unusable("it is too long or was cut off"))?;
         let a = account::parse_connect_answer(&body, &origin, now_ms()).map_err(unusable)?;
+        // The code spacesheep just made is dropped unused: nobody was shown its number
+        // or its link, and it runs out by itself.
+        if let Some(p) = cancelled() {
+            return Err(p);
+        }
         let gen = self.0.acct.next_gen.fetch_add(1, Ordering::Relaxed);
         let pending = Pending {
             gen,
@@ -1196,6 +1238,11 @@ impl Hub {
             log::warn!("acct: the pending connect could not be kept: {e}");
         }
         self.connect_install(pending)?;
+        // A cancel that came between the look above and the connect being there.
+        if let Some(p) = cancelled() {
+            self.account_connect_cancel();
+            return Err(p);
+        }
         log::info!("acct: connect started at {host}");
         Ok(view)
     }
@@ -1667,6 +1714,7 @@ impl Hub {
     /// connect whose approval was already collected ends as `declined`, and its outcome
     /// stays to say that a key was made.
     pub fn account_connect_cancel(&self) -> bool {
+        self.0.acct.cancels.fetch_add(1, Ordering::SeqCst);
         let mut g = self.0.acct.connect.lock().unwrap();
         let _ = self.account_keys().delete(PENDING_NAME);
         let was = g.as_ref().map(|p| p.state);

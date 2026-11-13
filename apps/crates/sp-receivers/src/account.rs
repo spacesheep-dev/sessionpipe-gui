@@ -347,7 +347,11 @@ pub enum Refused {
     NoDeviceKey,
     /// Too many of the page's requests in flight for this account.
     Busy,
-    /// spacesheep could not be reached.
+    /// A send that never left this device: no connection to spacesheep was made, so
+    /// nothing of the command was sent. Said on the send door alone, and apart from
+    /// `Unreachable`, after which nobody knows whether spacesheep took the command.
+    NotSent,
+    /// spacesheep could not be reached, or its answer stopped on the way.
     Unreachable,
     /// It did not answer in the Hub's time.
     Timeout,
@@ -375,6 +379,7 @@ impl Refused {
             Refused::NotConnected => "not_connected",
             Refused::NoDeviceKey => "no_device_key",
             Refused::Busy => "busy",
+            Refused::NotSent => "not_sent",
             Refused::Unreachable => "unreachable",
             Refused::Timeout => "timeout",
             Refused::Redirected => "redirected",
@@ -397,7 +402,8 @@ impl Refused {
             Refused::NoDeviceKey => S::CONFLICT,
             Refused::Busy => S::TOO_MANY_REQUESTS,
             Refused::Timeout => S::GATEWAY_TIMEOUT,
-            Refused::Unreachable
+            Refused::NotSent
+            | Refused::Unreachable
             | Refused::Redirected
             | Refused::AnswerTooLarge
             | Refused::BadEncoding
@@ -418,7 +424,7 @@ impl Refused {
             Refused::NotConnected => "This device holds no key for the account. Connect again.",
             Refused::NoDeviceKey => "This device has not asked to be trusted yet.",
             Refused::Busy => "Too many requests at once.",
-            Refused::Unreachable => "spacesheep could not be reached.",
+            Refused::NotSent | Refused::Unreachable => "spacesheep could not be reached.",
             Refused::Timeout => "spacesheep did not answer in time.",
             Refused::Redirected => {
                 "spacesheep answered with a redirect, which the app does not follow."
@@ -917,6 +923,14 @@ impl std::fmt::Display for Problem {
 
 impl std::error::Error for Problem {}
 
+/// A connect's `error` as the page reads it: the code, as text.
+fn problem_code<S: serde::Serializer>(p: &Option<Problem>, s: S) -> Result<S::Ok, S::Error> {
+    match p {
+        Some(p) => s.serialize_str(p.code),
+        None => s.serialize_none(),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectState {
@@ -952,9 +966,17 @@ pub struct ConnectView {
     pub receiver: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
-    /// Why it failed.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Why it failed. The page gets the code alone, as text (`"bad_answer"`,
+    /// `"conflict"`, `"keystore"`, `"io"`): that is what it reads, and what it chooses
+    /// its own words by.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "problem_code"
+    )]
     pub error: Option<Problem>,
+    /// The Hub's own words for `error`, beside it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
     /// Set, with `note`, when spacesheep made a key for this connect and it is not kept
     /// here (declined, a conflict, never answered, not saved): where the person revokes
     /// it, Settings → API keys on the account's own origin.
@@ -1771,6 +1793,7 @@ mod tests {
             receiver: None,
             email: None,
             error: None,
+            error_message: None,
             revoke_url: None,
             note: None,
         })
@@ -1780,6 +1803,31 @@ mod tests {
             serde_json::json!({
                 "origin": ORIGIN, "digits": "4821",
                 "expiresAt": "2026-11-12T08:10:00.000Z", "state": "pending"
+            })
+        );
+        // A connect that failed after spacesheep made a key: the page reads `error` as
+        // one of four words and chooses its screen by it, so it is the code, as text.
+        let words = "The key could not be kept on this device.";
+        let failed = serde_json::to_value(ConnectView {
+            origin: ORIGIN.into(),
+            digits: "4821".into(),
+            expires_at: "2026-11-12T08:10:00.000Z".into(),
+            state: ConnectState::Failed,
+            receiver: None,
+            email: None,
+            error: Some(Problem::new("keystore", words)),
+            error_message: Some(words.into()),
+            revoke_url: Some(format!("{ORIGIN}/settings/api-keys")),
+            note: Some(UNUSED_KEY_NOTE),
+        })
+        .unwrap();
+        assert_eq!(
+            failed,
+            serde_json::json!({
+                "origin": ORIGIN, "digits": "4821",
+                "expiresAt": "2026-11-12T08:10:00.000Z", "state": "failed",
+                "error": "keystore", "errorMessage": words,
+                "revokeUrl": format!("{ORIGIN}/settings/api-keys"), "note": UNUSED_KEY_NOTE
             })
         );
         assert_eq!(

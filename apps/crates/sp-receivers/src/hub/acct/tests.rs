@@ -790,6 +790,53 @@ async fn a_connect_cancelled_stops_asking_and_keeps_nothing() {
     fake.absent(&logged().join("\n"), "a log line");
 }
 
+/// The page left the screen that waits for a number while the Hub was still asking
+/// spacesheep for one: the start ends `cancelled`, and no connect is left polling for
+/// an answer nobody is waiting for.
+#[tokio::test]
+async fn a_start_cancelled_on_its_way_ends_cancelled_and_leaves_no_connect() {
+    let t = TempDir::new("acct-cancel-start");
+    let fake = Fake::start("cancel-start").await;
+    let h = hub_in(t.path());
+    // spacesheep takes its time to hand out a code.
+    let (origin, code, token) = (fake.origin(), fake.code(), fake.token());
+    fake.hook(move |s| {
+        (s.method() == "POST" && s.target() == "/api/gui/connect").then(|| {
+            Reply::json(
+                201,
+                json!({
+                    "code": code, "digits": "4821", "poll_token": token,
+                    "url": format!("{origin}/connect/gui?code={code}"),
+                    "expires_at": iso_ms(now_ms() + 600_000),
+                })
+                .to_string(),
+            )
+            .after(Duration::from_millis(200))
+        })
+    });
+    let (h2, o) = (h.clone(), fake.origin());
+    let start = tokio::spawn(async move { h2.account_connect_start(Some(&o)).await });
+    until("the start reached spacesheep", || fake.starts() == 1).await;
+    assert_eq!(h.account_status().connect, None, "no number yet");
+    assert!(!h.account_connect_cancel(), "no connect yet to stop");
+    assert_eq!(start.await.unwrap().unwrap_err().code, "cancelled");
+    assert_eq!(h.account_status().connect, None);
+    assert_eq!(h.account_connect_link(), None);
+    assert_eq!(key_store(t.path()), json!({}));
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(
+        fake.asked("/api/gui/connect/poll").is_empty(),
+        "nothing polls for it"
+    );
+    // A cancel is about the start it met, not the next one.
+    fake.set(|w| w.hook = None);
+    let c = h.account_connect_start(Some(&fake.origin())).await.unwrap();
+    assert_eq!(c.state, ConnectState::Pending);
+    until("a poll", || !fake.asked("/api/gui/connect/poll").is_empty()).await;
+    assert!(h.account_connect_cancel(), "this one was pending");
+    fake.absent(&logged().join("\n"), "a log line");
+}
+
 #[tokio::test]
 async fn a_connect_that_cannot_start_says_why_and_asks_nobody() {
     let t = TempDir::new("acct-start");
@@ -2035,6 +2082,71 @@ async fn a_request_that_never_ends_is_cut_off() {
     assert!(res.is_ok(), "the device door answers at once here");
 }
 
+/// The two ways a send can fail to reach an answer are said apart. No connection was
+/// made: nothing of the command left this device (`not_sent`, and the page may say "not
+/// sent"). The connection was made and the answer did not come whole: spacesheep may
+/// hold the command (`unreachable`, and the page asks again with the same bytes).
+#[tokio::test]
+async fn a_send_that_never_left_says_so_and_one_whose_answer_stopped_does_not() {
+    let t = TempDir::new("acct-not-sent");
+    let fake = Fake::start("not-sent").await;
+    let h = hub_in(t.path());
+    let id = connected(&h, &fake).await;
+    let jobs = format!("/api/machines/{MACHINE}/jobs");
+
+    // spacesheep took the command and its answer breaks off half way.
+    fake.hook(|s| {
+        (s.method() == "POST" && s.target().starts_with("/api/machines/")).then(|| {
+            Reply::json(202, r#"{"job":"#)
+                .no_length()
+                .header("content-length", "64")
+        })
+    });
+    let rest = fake.asked("/api/machines/").len();
+    let res = ask(&h, "POST", &id, &jobs, SEND).await;
+    assert_eq!(said(&res), (502, Some("unreachable")), "{}", dump(&res));
+    assert_eq!(
+        fake.asked("/api/machines/").len(),
+        rest + 1,
+        "spacesheep did get it"
+    );
+
+    // An account at an address where nothing listens: the same key, the same doors.
+    let dead = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://127.0.0.1:{}", l.local_addr().unwrap().port())
+    };
+    let rx = Receiver::account(&dead, "nobody@example.com", &iso_now()).unwrap();
+    h.account_keys()
+        .set(
+            &account_key_name(&rx.id),
+            &account::kept_key(&dead, "ss_KEY-not-sent-dead-0123456789abcdef"),
+        )
+        .unwrap();
+    h.0.registry.lock().unwrap().upsert(rx.clone()).unwrap();
+    let res = ask(&h, "POST", &rx.id, &jobs, SEND).await;
+    assert_eq!(said(&res), (502, Some("not_sent")), "{}", dump(&res));
+    let v: Value = serde_json::from_slice(res.body()).unwrap();
+    assert_eq!(
+        v,
+        json!({ "hub": true, "reason": "not_sent", "error": "spacesheep could not be reached." })
+    );
+    // Readable by the bundled page, as every answer of the Hub's is.
+    assert_eq!(res.headers()["access-control-allow-origin"], APP);
+    assert_eq!(
+        res.headers()["access-control-expose-headers"],
+        account::EXPOSE_HEADERS
+    );
+    assert!(!h.is_connected(&rx.id));
+    // Only a send is said so: a read that could not connect is `unreachable`, as before
+    // (nothing is lost by asking a read again).
+    for door in [RELAY, MACHINES, JOBS_DOOR] {
+        let res = ask(&h, "GET", &rx.id, door, b"").await;
+        assert_eq!(said(&res), (502, Some("unreachable")), "{door}");
+    }
+    assert!(!logged().join("\n").contains("ss_KEY-not-sent-dead"));
+}
+
 #[tokio::test]
 async fn a_401_marks_the_account_and_a_429_passes_with_its_wait() {
     let t = TempDir::new("acct-401");
@@ -2338,8 +2450,35 @@ async fn the_documents_are_the_accounts_and_go_with_it() {
     );
     // Nothing is forwarded for an account that is not there, door or not.
     let rest = fake.count();
-    let res = ask(&again, "GET", &id, RELAY, b"").await;
-    assert_eq!(res.status(), 404);
+    // The answer is the Hub's own, said as its answers are: the page that was showing
+    // the account reads whose word an answer is from the header, and a bare 404 would
+    // be taken for spacesheep's.
+    for (method, door, body) in [
+        ("GET", RELAY.to_string(), &b""[..]),
+        ("POST", format!("/api/machines/{MACHINE}/jobs"), SEND),
+    ] {
+        let res = ask(&again, method, &id, &door, body).await;
+        assert_eq!(said(&res), (403, Some("not_a_door")), "{method}");
+        assert_eq!(res.headers()["access-control-allow-origin"], APP);
+        assert_eq!(
+            res.headers()["access-control-expose-headers"],
+            account::EXPOSE_HEADERS
+        );
+        let v: Value = serde_json::from_slice(res.body()).unwrap();
+        assert_eq!(
+            (&v["hub"], &v["reason"]),
+            (&json!(true), &json!("not_a_door"))
+        );
+    }
+    // Asked from anywhere but the bundled page, it is not even that.
+    let req = http::Request::builder()
+        .uri(format!("rx://localhost/{id}{RELAY}"))
+        .header("origin", "https://evil.example")
+        .body(Vec::new())
+        .unwrap();
+    let res = again.proxy(req).await;
+    assert_eq!(said(&res), (403, Some("forbidden_origin")));
+    assert!(res.headers().get("access-control-allow-origin").is_none());
     assert_eq!(fake.count(), rest);
     let list = std::fs::read_to_string(t.path().join("receivers.json")).unwrap();
     assert!(!list.contains(&id) && !list.contains("spacesheep"));
@@ -2654,7 +2793,7 @@ async fn a_key_is_for_its_account_at_its_origin_whatever_the_list_says() {
             let res = ask(&h, method, &id, &door, body).await;
             let code = hub_code(&res).map(str::to_string);
             assert!(
-                matches!(code.as_deref(), Some("bad_account")) || res.status() == 404,
+                matches!(code.as_deref(), Some("bad_account" | "not_a_door")),
                 "{what}: {} {code:?}",
                 res.status()
             );
@@ -2888,7 +3027,13 @@ async fn an_entry_this_version_does_not_read_is_kept_and_never_a_receiver() {
         assert!(h
             .open_stream(id, "/api/ui/stream", "main", |_| true)
             .is_err());
-        assert_eq!(ask(&h, "GET", id, RELAY, b"").await.status(), 404);
+        // An id only an account has is answered as the Hub answers an account's page.
+        let res = ask(&h, "GET", id, RELAY, b"").await;
+        if crate::id::is_account_id(id) {
+            assert_eq!(said(&res), (403, Some("not_a_door")), "{id}");
+        } else {
+            assert_eq!(said(&res), (404, None), "{id}");
+        }
         assert!(h.account_doc_get(id, "labels").is_err());
     }
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -3021,6 +3166,11 @@ async fn an_account_that_cannot_be_saved_replaces_nothing() {
         h.account_status().connect.unwrap().error.unwrap().code,
         "io"
     );
+    // As the page reads it: the code as text, the note and where to revoke beside it.
+    let seen = serde_json::to_value(h.account_status()).unwrap();
+    assert_eq!(seen["connect"]["error"], "io");
+    assert_eq!(seen["connect"]["note"], account::UNUSED_KEY_NOTE);
+    assert!(seen["connect"]["revokeUrl"].is_string());
     assert_eq!(keys.get(&format!("acct:{second}")), None, "taken back out");
     assert_eq!(
         keys.get(&format!("acct:{first}")),

@@ -739,6 +739,9 @@ impl Hub {
                     log_path(&path),
                     "unknown receiver",
                 );
+                if crate::id::is_account_id(&id) {
+                    return self.account_gone(origin);
+                }
                 return refuse(Refusal::UnknownReceiver, "unknown receiver");
             }
         };
