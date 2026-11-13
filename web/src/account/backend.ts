@@ -368,6 +368,14 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
       onJobs: (jobs, through, serverNow) => control.remote.applyRemoteJobs(jobs as RemoteJobWord[], through, serverNow),
     });
   control.onRemoteKick = () => reader?.kickJobs();
+  // A page is closed without a word (the app goes to the background, the window reloads):
+  // the read times are written down when it leaves the screen, so the next launch goes on
+  // from the same budget and not from a third taken as spent.
+  const onHide = (): void => {
+    if (typeof document === "undefined" || document.visibilityState === "hidden") reader?.flush();
+  };
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", onHide);
+  if (typeof addEventListener === "function") addEventListener("pagehide", () => reader?.flush());
   control.remote.setRemoteAccount({ origin: shell.origin, email: shell.email });
   if (shell.state === "unauthorized") control.remote.setRemoteRevoked(true);
   store.setLoading(true);

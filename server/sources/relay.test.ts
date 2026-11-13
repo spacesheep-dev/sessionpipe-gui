@@ -171,6 +171,24 @@ describe("the relay's reader over what its opener hands in", () => {
       expect((t.kept.get("reads") as { reads: number[] }).reads).toHaveLength(2);
     });
 
+    it("a read asked again does not wait its pace out a second time", async () => {
+      // Not a key made just now: a third of the budget is taken as spent, so every read is
+      // paced some four seconds after the last. The hub's room is full twice on the second.
+      let busy = 0;
+      const t = open({
+        hub: true,
+        hubAnswer: (p) => (p.includes("since=") && busy-- > 0 ? hubSays(429, "busy", { "retry-after": "1" }) : null),
+      });
+      const r = t.start();
+      await t.clock.settle();
+      expect(r.status().state).toBe("ok");
+      busy = 2;
+      t.ss.push(events(2));
+      // Its pace, then two seconds of a full room: not three paces.
+      await t.clock.advance(4200 + 2100);
+      expect(r.status()).toMatchObject({ state: "ok", cursor: 2 });
+    });
+
     it("`answer_too_large` asks again for half as many, down to what fits, then for more again", async () => {
       const limits: number[] = [];
       const t = open({
@@ -673,6 +691,41 @@ describe("the relay's reader over what its opener hands in", () => {
       expect(kept.get("cursor")).toBeUndefined();
       expect(r.status().cursor).toBe(0);
     });
+  });
+
+  it("after a failure the reader that shows what it reads asks again without waiting; the receiver's waits", async () => {
+    for (const backlog of [true, false]) {
+      let down = true;
+      const t = open({
+        hub: true,
+        fresh: true,
+        backlog,
+        hubAnswer: (p) => (down && p.includes("since=") ? hubSays(502, "unreachable") : null),
+      });
+      const r = t.start();
+      await t.clock.settle();
+      expect(r.status().state).toBe("offline");
+      down = false;
+      // The first read and the one right after it failed; after the pause, the third:
+      // spacesheep has nothing new to say.
+      await t.clock.advance(1500);
+      const waits = t.asked.filter((p) => p.includes("since=")).map((p) => /wait=(\d+)/.exec(p)![1]);
+      expect(waits.slice(0, 3)).toEqual(backlog ? ["0", "0", "0"] : ["0", "25", "25"]);
+      expect(r.status().state).toBe(backlog ? "ok" : "offline");
+      // The long poll the receiver's reader made answers when its wait is up.
+      await t.clock.advance(25_000);
+      expect(r.status().state).toBe("ok");
+      r.stop();
+    }
+  });
+
+  it("writes its read times down when asked, without stopping", async () => {
+    const t = open({ fresh: true });
+    const r = t.start();
+    await t.clock.settle();
+    expect(t.kept.get("reads")).toBeUndefined();
+    r.flush();
+    expect((t.kept.get("reads") as { reads: number[] }).reads.length).toBeGreaterThan(0);
   });
 
   describe("history first", () => {
