@@ -13,7 +13,7 @@ import { useBackgroundMenu, useStickyTop } from "../components/SessionCard";
 import { useStore } from "../data/hooks";
 import { focusTab, tablistKey } from "../lib/focus";
 import { cleanTitle, repoShort } from "../lib/format";
-import { absoluteUrl, copyItem, openOutside } from "../lib/menus";
+import { copyItem, openOutside } from "../lib/menus";
 import { navigate, sessionPath } from "../lib/router";
 import { useShortcut } from "../lib/shortcuts";
 import { openSplit } from "../lib/split";
