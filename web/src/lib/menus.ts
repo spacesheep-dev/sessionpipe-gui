@@ -18,7 +18,7 @@ import { harnessMark, repoBranch, sessionTitle } from "./format";
 import { canHideUntilNeeded, hiddenNow, hide, hideUntilNeeded, unhide } from "./hidden";
 import { labelMenu } from "./labels";
 import { canMark, isUnread, notifyMenu, setUnread } from "./marks";
-import { receiverOrigin } from "./net";
+import { accountMode, receiverOrigin } from "./net";
 import { hrefFor, navigate, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath } from "./router";
 import { getSettings } from "./settings";
 import { closeTab, openSplit, parseSplit } from "./split";
@@ -191,7 +191,8 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
       ],
     },
     { sep: true },
-    { label: "Forget…", danger: true, run: forget },
+    // A spacesheep account holds the session, and the app's key has no door that forgets one.
+    !accountMode() && { label: "Forget…", danger: true, run: forget },
   ];
   return tidy(items);
 }

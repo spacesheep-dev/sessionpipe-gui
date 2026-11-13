@@ -366,6 +366,47 @@ test("a gap in the relay is said, and the board shows what the relay still holds
   await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
 });
 
+test("what only a receiver has is not offered, and no page asks for it", async () => {
+  // Every page a person can reach: what it asks of its backend is answered, never refused.
+  for (const route of [
+    "/",
+    "/inbox",
+    "/search",
+    "/feed",
+    "/review",
+    "/machines",
+    "/usage",
+    "/settings",
+    "/s/claude-code/s-invoice",
+  ]) {
+    await page.goto(server.url + route);
+    await page.waitForTimeout(400);
+    const asked = await page.evaluate(() => [
+      ...(window as unknown as { __sessionpipeAccount: { asked: Map<string, number> } }).__sessionpipeAccount.asked,
+    ]);
+    expect(
+      asked.filter(([, status]) => status >= 400),
+      route,
+    ).toEqual([]);
+  }
+  // The pages that are a receiver's own doing are not in the app's menu…
+  await page.goto(server.url);
+  await page.locator("[data-nav=more]").first().click();
+  const sheet = page.locator(".more-sheet, [role=dialog]").last();
+  await expect(sheet.locator("[data-nav=machines]")).toBeVisible();
+  await expect(sheet.locator("[data-nav=usage]")).toBeVisible();
+  for (const key of ["workflows", "connect", "setup"]) await expect(page.locator(`[data-nav=${key}]`)).toHaveCount(0);
+  // …and are no pages when an address names them.
+  for (const route of ["/workflows", "/connect", "/setup", "/themes", "/phone", "/pair?code=abcdefgh"]) {
+    await page.goto(server.url + route);
+    await expect(page.locator("[data-missing]"), route).toBeVisible();
+  }
+  // No session offers to be forgotten: the account holds it.
+  await page.goto(`${server.url}/s/claude-code/s-invoice`);
+  await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Forget…" })).toHaveCount(0);
+});
+
 test("a revoked key is spacesheep's own word: reading stops, and a send says why it did not go", async () => {
   await page.goto(`${server.url}/s/claude-code/s-invoice`);
   await expect(composer()).toBeEnabled();
@@ -424,5 +465,5 @@ test("in all of it, nothing was asked of a GUI server, and the hub was asked for
   );
   expect(hub.log.filter((l) => /not_a_door|bad_query|bad_body|not_signed|forbidden/.test(l))).toEqual([]);
   // Every request the server saw is the bundle, the hub's own, or a door.
-  expect(server.seen.filter((r) => /^\w+ \/(api|themes|skins|attachments)\b/.test(r))).toEqual([]);
+  expect(server.seen.filter((r) => /^\w+ \/(api|themes|skins|attachments)\//.test(r))).toEqual([]);
 });

@@ -31,7 +31,7 @@ import { useAppState, useConnection, useStore } from "../data/hooks";
 import { tablistKey } from "../lib/focus";
 import { bytes } from "../lib/format";
 import { reducedMotion, tokenMs } from "../lib/motion";
-import { apiFetch } from "../lib/net";
+import { accountMode, apiFetch } from "../lib/net";
 import { back, hasInAppHistory, Link, navigate, useSearchParam } from "../lib/router";
 import { isRouteNotFound, olderReceiver } from "../lib/serverAge";
 import {
@@ -381,7 +381,8 @@ export function Settings() {
                   {section === "keyboard" && <Keyboard />}
                   {section === "views" && <Views />}
                   {section === "data" && <SpacesheepGroup Group={Group} Row={Row} />}
-                  {section === "data" && <SearchDataGroup Group={Group} Row={Row} />}
+                  {/* No machine's own agent history is on a spacesheep account to switch on. */}
+                  {section === "data" && !accountMode() && <SearchDataGroup Group={Group} Row={Row} />}
                   {section === "data" && <Data />}
                   {section === "about" && <About />}
                 </>
@@ -764,6 +765,14 @@ function Views() {
   const ok = themes.filter((t) => !t.error);
   const good = installed.filter((s) => !s.error);
   const broken = installed.filter((s) => s.error);
+  // Views, outside skins and plugins are installed on a receiver: a spacesheep account has
+  // none, and the two skins that ship with the app are all there is to choose from.
+  if (accountMode())
+    return (
+      <Group label="Skins">
+        <Display only="skin" />
+      </Group>
+    );
   return (
     <>
       <Group label="Views" note="A view is code that runs in this page. Install and remove them on the Views page.">
@@ -1054,46 +1063,48 @@ function Data() {
           {stats && <small> · {stats.events.toLocaleString()} events</small>}
         </span>
       </Row>
-      <Row
-        label="Forget done sessions older than"
-        hint={`${old.length} ${old.length === 1 ? "session matches" : "sessions match"}; the machines keep their own.`}
-      >
-        <span className="settings-inline">
-          <Select<number>
-            className="settings-select"
-            size="sm"
-            align="end"
-            value={days}
-            onChange={setDays}
-            aria-label="Older than"
-            options={AGES.map((a) => ({ value: a.days, label: a.label }))}
-          />
-          {confirm ? (
-            <span className="confirm" role="alertdialog" aria-label="Forget these sessions?">
-              <button type="button" className="btn btn--sm btn--ghost" onClick={() => setConfirm(false)}>
-                Cancel
-              </button>
+      {!accountMode() && (
+        <Row
+          label="Forget done sessions older than"
+          hint={`${old.length} ${old.length === 1 ? "session matches" : "sessions match"}; the machines keep their own.`}
+        >
+          <span className="settings-inline">
+            <Select<number>
+              className="settings-select"
+              size="sm"
+              align="end"
+              value={days}
+              onChange={setDays}
+              aria-label="Older than"
+              options={AGES.map((a) => ({ value: a.days, label: a.label }))}
+            />
+            {confirm ? (
+              <span className="confirm" role="alertdialog" aria-label="Forget these sessions?">
+                <button type="button" className="btn btn--sm btn--ghost" onClick={() => setConfirm(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--sm btn--danger"
+                  onClick={() => void forgetOld()}
+                  disabled={busy === "forget"}
+                >
+                  {busy === "forget" ? "Forgetting…" : `Forget ${old.length}`}
+                </button>
+              </span>
+            ) : (
               <button
                 type="button"
-                className="btn btn--sm btn--danger"
-                onClick={() => void forgetOld()}
-                disabled={busy === "forget"}
+                className="btn btn--sm"
+                onClick={() => setConfirm(true)}
+                disabled={old.length === 0 || !!busy}
               >
-                {busy === "forget" ? "Forgetting…" : `Forget ${old.length}`}
+                Forget…
               </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              className="btn btn--sm"
-              onClick={() => setConfirm(true)}
-              disabled={old.length === 0 || !!busy}
-            >
-              Forget…
-            </button>
-          )}
-        </span>
-      </Row>
+            )}
+          </span>
+        </Row>
+      )}
       <Row label="Export" hint="Every session summary, as JSON.">
         <button type="button" className="btn btn--sm" onClick={() => void exportSnapshot()} disabled={!!busy}>
           {busy === "export" ? "Exporting…" : "Download JSON"}
@@ -1146,6 +1157,8 @@ function About() {
       .info()
       .then(setInfo)
       .catch(() => {});
+    // The app updates as the phone's apps do; there is no receiver with an updater to ask.
+    if (accountMode()) return setUpdate(null);
     apiFetch(UPDATE, { headers: { accept: "application/json" } })
       .then((r) => (r.ok ? (r.json() as Promise<UpdateStatus>) : null))
       .then(setUpdate)

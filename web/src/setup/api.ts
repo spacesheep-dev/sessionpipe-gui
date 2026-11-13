@@ -5,7 +5,7 @@
 import type { RemoteInfo, SetupStatus } from "@shared/api";
 import { ROUTES } from "@shared/api";
 import { useEffect, useSyncExternalStore } from "react";
-import { apiFetch } from "../lib/net";
+import { accountMode, apiFetch } from "../lib/net";
 
 const BASE = ROUTES.ui.setup;
 const FAST_MS = 2000;
@@ -104,6 +104,8 @@ const set = (patch: Partial<SetupState>) => {
 };
 
 async function read(): Promise<void> {
+  // A spacesheep account has no receiver to set up: as from any device but the receiver's own.
+  if (accountMode()) return set({ local: false, error: null });
   try {
     const res = await apiFetch(`${BASE}/status`, { headers: { accept: "application/json" }, cache: "no-store" });
     if (res.status === 403) {

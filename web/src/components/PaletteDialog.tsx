@@ -41,6 +41,7 @@ import {
 } from "../lib/format";
 import { type FieldsMatch, fuzzyFields } from "../lib/fuzzy";
 import { labelName, labelQuery, setLabel } from "../lib/labels";
+import { accountMode } from "../lib/net";
 import { navigate, parseRoute, sessionPath, useRoute } from "../lib/router";
 import { useSimple } from "../lib/settings";
 import { hintFor, IS_MAC, matches, useShortcutMap } from "../lib/shortcuts";
@@ -733,7 +734,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
             },
             hintFor("session.files") || undefined,
           );
-        if (!simple) add("Forget…", () => setMode({ kind: "forget", session: s }));
+        if (!simple && !accountMode()) add("Forget…", () => setMode({ kind: "forget", session: s }));
       }
       // New session: the sheet as it is (c), the machines to start on (›), and when the
       // words name a paired machine or a repo on one, that start first, prefilled.

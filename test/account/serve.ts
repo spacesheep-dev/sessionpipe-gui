@@ -110,7 +110,9 @@ export async function startAccountServer(o: { web: string; hub: HubStandIn; port
         res.writeHead(a.status, a.headers);
         return void res.end(a.status === 204 ? undefined : a.body);
       }
-      if (/^\/(api|themes|skins|attachments|\.well-known)(\/|$)/.test(p)) {
+      // A receiver's own paths (its API, the files of a view or a skin). `/themes` alone is
+      // the app's Views page, a route of the page like any other.
+      if (/^\/(api|themes|skins|attachments|\.well-known)\//.test(p)) {
         strays.push(`${req.method} ${p}`);
         return send(599, { error: "there is no receiver here" });
       }

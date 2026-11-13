@@ -15,7 +15,7 @@ import {
 } from "@shared/skin-api";
 import { BUILTIN_SKINS, DEFAULT_SKIN_ID, PLAIN_SKIN_ID } from "@shared/skins-builtin";
 import { useSyncExternalStore } from "react";
-import { apiFetch, apiUrl } from "./net";
+import { accountMode, apiFetch, apiUrl } from "./net";
 
 export type { InstalledSkin, SkinScheme } from "@shared/skin-api";
 export { BUILTIN_SKINS, DEFAULT_SKIN_ID, PLAIN_SKIN_ID } from "@shared/skins-builtin";
@@ -130,6 +130,11 @@ async function request(method: "GET" | "POST", url: string): Promise<InstalledSk
 
 /** Fetch the list once; concurrent callers share the request. */
 export function fetchSkins(): Promise<void> {
+  // A spacesheep account has no receiver to install a skin on: the built-ins only.
+  if (accountMode()) {
+    if (!state.loaded) set({ ...state, loaded: true, error: null });
+    return Promise.resolve();
+  }
   if (inflight) return inflight;
   inflight = request("GET", SKIN_ROUTES.list)
     .then((skins) => set({ skins: skins.length ? skins : BUILTIN_SKINS, loaded: true, error: null }))

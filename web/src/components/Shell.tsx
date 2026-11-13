@@ -20,6 +20,7 @@ import { useGlobalKeys } from "../lib/keys";
 import { lazyModule, whenIdle } from "../lib/lazy";
 import { linkItems } from "../lib/menus";
 import { reducedMotion, usePresence } from "../lib/motion";
+import { accountMode } from "../lib/net";
 import { Link, navigate, type Route, usePath } from "../lib/router";
 import { getSettings as getAppSettings, setMode, useSimple } from "../lib/settings";
 import { hintFor, useShortcut, useShortcutMap } from "../lib/shortcuts";
@@ -264,13 +265,21 @@ const withUsage = (pages: NavItem[]): NavItem[] => {
 
 /** The pages Simple mode keeps off the rail (still there through ⌘K and /settings). */
 const ADVANCED_ONLY = new Set(["feed", "review"]);
+/** The pages that are a receiver's own doing (its workflows; its address, token and QR):
+ *  not offered where the window shows a spacesheep account, which has no receiver. */
+const RECEIVER_ONLY = new Set(["workflows", "connect"]);
 
 /** Builtins first (Setup among them while this machine is not set up), then installed
  *  themes, the experimental ones of both after a divider. `simple` drops Feed and Review. */
-export function navItems(themes: readonly InstalledTheme[], o: { setup?: boolean; simple?: boolean } = {}): NavItem[] {
+export function navItems(
+  themes: readonly InstalledTheme[],
+  o: { setup?: boolean; simple?: boolean; account?: boolean } = {},
+): NavItem[] {
   const plugins = themes.filter((t) => !t.error && !t.disabled).map(themeNavItem);
-  const builtin = o.simple ? BUILTIN.filter((n) => !ADVANCED_ONLY.has(n.key)) : BUILTIN;
-  const all = [...builtin, ...(o.setup ? [SETUP_ITEM] : []), ...plugins];
+  const builtin = BUILTIN.filter(
+    (n) => !(o.simple && ADVANCED_ONLY.has(n.key)) && !(o.account && RECEIVER_ONLY.has(n.key)),
+  );
+  const all = [...builtin, ...(o.setup && !o.account ? [SETUP_ITEM] : []), ...plugins];
   return [...all.filter((n) => !n.experimental), ...all.filter((n) => n.experimental)];
 }
 
@@ -525,7 +534,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     if (known) writeSetupHint(showSetup);
   }, [known, showSetup]);
   const simple = useSimple();
-  const nav = navItems(useThemes().themes, { setup: showSetup, simple });
+  const account = accountMode();
+  const nav = navItems(useThemes().themes, { setup: showSetup, simple, account });
   const phone = useMedia(PHONE_QUERY);
   useResize();
   useThemeColor();
@@ -643,29 +653,31 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {side && !phone && <UsageGlance here={route.name === "usage"} />}
         <div className="rail-foot">
           <ConnectionPill />
-          <Link
-            to="/themes"
-            className={`theme-btn ${route.name === "themes" ? "nav-link--on" : ""}`}
-            data-tip="Views"
-            data-tip-keys={hintFor("nav.views")}
-            data-tip-side="top"
-            aria-label="Views"
-            aria-current={route.name === "themes" ? "page" : undefined}
-          >
-            <svg
-              viewBox="0 0 20 20"
-              width="16"
-              height="16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+          {!account && (
+            <Link
+              to="/themes"
+              className={`theme-btn ${route.name === "themes" ? "nav-link--on" : ""}`}
+              data-tip="Views"
+              data-tip-keys={hintFor("nav.views")}
+              data-tip-side="top"
+              aria-label="Views"
+              aria-current={route.name === "themes" ? "page" : undefined}
             >
-              {PLUG_ICON}
-            </svg>
-          </Link>
+              <svg
+                viewBox="0 0 20 20"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                {PLUG_ICON}
+              </svg>
+            </Link>
+          )}
           <QuickSettings placement="rail" />
           <Link
             to="/settings"
