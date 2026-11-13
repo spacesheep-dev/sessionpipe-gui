@@ -36,6 +36,7 @@ import { useResyncs, useStore } from "../data/hooks";
 import { toolLabel } from "../lib/format";
 import { fuzzy } from "../lib/fuzzy";
 import { copyText } from "../lib/menus";
+import { accountMode, onSpacesheepDev } from "../lib/net";
 import { clockTime } from "../lib/pool";
 import { hintFor } from "../lib/shortcuts";
 import { ago, useNow } from "../lib/time";
@@ -573,8 +574,15 @@ function FileList({
         <h3 className="state-title">{loading ? "Reading the session's files…" : "No files yet"}</h3>
         {!loading && (
           <p className="state-text">
-            The files this session reads and changes show here as its tools name them. Tier 3 carries the tool inputs;
-            at a lower tier or lens, only a <code>files.changed</code> names one.
+            {accountMode() ? (
+              // What spacesheep.dev takes is its rule, said only of it: another server's is not ours to promise.
+              `The files this session reads and changes show here by name.${onSpacesheepDev() ? " spacesheep is never sent what is in them." : ""}`
+            ) : (
+              <>
+                The files this session reads and changes show here as its tools name them. Tier 3 carries the tool
+                inputs; at a lower tier or lens, only a <code>files.changed</code> names one.
+              </>
+            )}
           </p>
         )}
         {error && (
@@ -1041,7 +1049,11 @@ function FileView({
           <p className="state-text">
             {entry.pending
               ? "A tool is still running on this file."
-              : "The agent named this file, but its events carry none of its text: a lower tier or lens leaves tool inputs and outputs out."}
+              : accountMode()
+                ? onSpacesheepDev()
+                  ? "Only this file's name is here: spacesheep is never sent a file's text."
+                  : "Only this file's name is here."
+                : "The agent named this file, but its events carry none of its text: a lower tier or lens leaves tool inputs and outputs out."}
           </p>
         </div>
       )}

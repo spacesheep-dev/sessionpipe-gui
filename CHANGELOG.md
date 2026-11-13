@@ -6,8 +6,25 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The app's page can show a spacesheep account with no GUI server behind it.** Not in a
+  release yet: it waits for the app's half (the account's key and its doors) and for the
+  screens that connect one. With them, the phone keeps its own board from the account,
+  shows it again at the next launch before anything is read, and sends through spacesheep
+  as the desktop app does. A message whose answer is lost on the way back is never called
+  not sent: the phone says it may have been sent, holds that session's next send, asks
+  again by itself, and then says which it was. A session the account forgets leaves the
+  phone too.
+  Disconnecting removes the account from the phone: its key, its sessions, labels and read
+  marks, drafts and recent searches; the key itself keeps working until it is revoked on
+  spacesheep. Nothing changes for a browser, the desktop app, or the phone on a receiver.
+
 ### Fixed
 
+- **A usage report that names its account or its machine with more than a line of text is
+  not kept.** An account id or a machine name past 200 characters (no sender makes one)
+  went into the limits list, its file and every frame at any length.
 - **A send to a computer reached through spacesheep outlives a restart.** Its row was
   deleted when the app started, because such a computer is never saved here: a start
   waiting for an offline computer then read "No such session here", and ran anyway when the

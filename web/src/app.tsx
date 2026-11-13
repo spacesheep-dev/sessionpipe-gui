@@ -16,6 +16,7 @@ import { PairPage } from "./control/Pair";
 import { useStartTitles } from "./control/Starting";
 import { useAnswerableCount, useAppState } from "./data/hooks";
 import { markRestoring } from "./lib/keys";
+import { accountMode } from "./lib/net";
 import { titlePrefix, useAttentionEffects } from "./lib/notify";
 import { Link, navigate, parseRoute, usePath, useRoute } from "./lib/router";
 import { getSettings } from "./lib/settings";
@@ -90,12 +91,14 @@ export function App() {
   useScrollPlace(pathname);
   // The installed themes: at boot, and again each time the stream (re)connects, since a
   // reconnect may follow a restart with themes added or removed.
+  // A spacesheep account has no receiver to install a view on: nothing to read.
+  const account = accountMode();
   useEffect(() => {
-    if (connection === "live") void fetchThemes();
-  }, [connection]);
+    if (connection === "live" && !account) void fetchThemes();
+  }, [connection, account]);
   useEffect(() => {
-    void fetchThemes();
-  }, []);
+    if (!account) void fetchThemes();
+  }, [account]);
   // First run: a brand-new machine (no event yet, TLS mode off, or its daemon not paired)
   // lands on /setup once per device; "Skip setup" or the first visit remembers it. Until
   // the status says which, a device that has not seen setup shows nothing under the shell
@@ -126,6 +129,15 @@ export function App() {
     }
     setDeciding(false);
   }, [route.name, setup.local, setup.status, setup.error, deciding]);
+  // On an account, the pages that are a receiver's own doing are not pages at all.
+  if (account && RECEIVER_ONLY.has(route.name))
+    return (
+      <Shell route={route}>
+        <NoReceiver />
+        <Palette />
+        <Toasts />
+      </Shell>
+    );
   return (
     <Shell route={route}>
       {route.name === "board" && !deciding && <Board />}
@@ -153,7 +165,8 @@ export function App() {
       )}
       {route.name === "theme" && <ThemeRoute key={route.id} id={route.id} />}
       {route.name === "pair" && <PairPage key={route.code} code={route.code} />}
-      {route.name === "add-device" && <AddDevicePage />}
+      {/* This phone's own key is asked for on Machines there (the hub asks spacesheep). */}
+      {route.name === "add-device" && (account ? <Machines /> : <AddDevicePage />)}
       {route.name === "phone" && <PhonePage />}
       {route.name === "missing" && <Missing path={route.path} />}
       <Palette />
@@ -161,6 +174,20 @@ export function App() {
     </Shell>
   );
 }
+
+/** The routes of pages only a receiver has: its workflows, its views, its address and
+ *  token, its own setup, pairing a machine or a phone with it. */
+const RECEIVER_ONLY: ReadonlySet<string> = new Set([
+  "workflows",
+  "workflow",
+  "workflowRun",
+  "connect",
+  "setup",
+  "themes",
+  "theme",
+  "pair",
+  "phone",
+]);
 
 /** How long a first run waits for the setup status before it shows the board anyway. */
 const FIRST_RUN_WAIT_MS = 3000;
@@ -230,6 +257,25 @@ function useScrollPlace(pathname: string): void {
   useEffect(() => {
     markRestoring(false);
   });
+}
+
+/** A page only a receiver has, named by an address while the window shows a spacesheep
+ *  account: one line that says so, and the way back to the board. */
+function NoReceiver() {
+  return (
+    <div className="page missing">
+      <PageBar title="Not available here" />
+      <div className="state state--center" data-no-receiver>
+        <h2 className="state-title">This needs a sessionpipe-gui server</h2>
+        <p className="state-text">This app is showing a spacesheep account, which has none.</p>
+        <div className="state-actions">
+          <Link to="/" className="btn btn--primary">
+            Go to Board
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** A path the app has no page for: an empty state where the page would be, and the way

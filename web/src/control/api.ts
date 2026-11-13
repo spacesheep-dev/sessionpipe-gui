@@ -18,7 +18,7 @@ import type {
   TrustedKey,
 } from "@shared/api";
 import { ROUTES } from "@shared/api";
-import { apiUrl } from "../lib/net";
+import { apiFetch } from "../lib/net";
 import { sendingOriginOf, wrongOrigin } from "./origin";
 
 export type { TrustedKey };
@@ -75,6 +75,9 @@ export interface SendBody {
   csig?: string;
   grant?: GrantBundle | (DeviceSignature & { str: string });
   confirm?: Assertion | DeviceSignature;
+  /** Beside a confirm on a `key.add` for a machine paired on spacesheep: the number the
+   *  person compared (one to eight digits). Unsigned: spacesheep's own check. */
+  match?: string;
   expires_in_s?: number;
   /** The session whose page sends it: unsigned, the receiver's own note on the activity. */
   from?: SessionKey;
@@ -102,6 +105,9 @@ export interface DeviceRequest {
   detail?: string;
 }
 
+/** The code of a send nobody heard the answer to: it may have been sent (account/doors.ts). */
+export const UNHEARD_CODE = "hub_unknown";
+
 /** A refusal from the server: `status` and the body's `reason`; `code` is the verifier's
  *  word on a refused command (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …). */
 export class ControlError extends Error {
@@ -117,7 +123,7 @@ export class ControlError extends Error {
 }
 
 async function call<T>(method: "GET" | "POST", url: string, body?: unknown): Promise<T> {
-  const res = await fetch(apiUrl(url), {
+  const res = await apiFetch(url, {
     method,
     headers: { accept: "application/json", ...(body !== undefined ? { "content-type": "application/json" } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -157,7 +163,7 @@ export const controlApi = {
   machines: () => call<{ machines: PairedMachine[] }>("GET", `${BASE}/machines`).then((r) => r.machines),
   /** One file a start will carry: held here under its hash, named in the signed `files`. */
   uploadFile: async (file: File): Promise<StartFile> => {
-    const res = await fetch(apiUrl(`${BASE}/files?name=${encodeURIComponent(file.name)}`), {
+    const res = await apiFetch(`${BASE}/files?name=${encodeURIComponent(file.name)}`, {
       method: "POST",
       headers: { "content-type": file.type || "application/octet-stream", accept: "application/json" },
       body: file,
@@ -189,7 +195,7 @@ export const lastInfo = (): Info | undefined => infoCache;
  *  same read remembers Info.tls for `tlsInfo()`. */
 export function rpId(): Promise<string> {
   if (!rpIdPromise) {
-    rpIdPromise = fetch(apiUrl(ROUTES.ui.info), { headers: { accept: "application/json" } })
+    rpIdPromise = apiFetch(ROUTES.ui.info, { headers: { accept: "application/json" } })
       .then((r) => r.json() as Promise<Info>)
       .then((i) => {
         infoCache = i;

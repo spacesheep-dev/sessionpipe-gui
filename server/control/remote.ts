@@ -552,11 +552,15 @@ export async function forwardRemoteSend(
   if (typeof body.csig === "string") signed.csig = body.csig;
   if (body.grant && typeof body.grant === "object") signed.grant = body.grant as SignedCommand["grant"];
   if (body.confirm && typeof body.confirm === "object") signed.confirm = body.confirm as SignedCommand["confirm"];
+  // The number the person compared for a `key.add` rides beside its confirm, outside the
+  // signed bytes: spacesheep's own check, read there and nowhere else.
+  const match = signed.confirm ? matchOf(body.match) : undefined;
   const r = await remoteSend(m, {
     cmd: signed.cmd,
     csig: signed.csig ?? null,
     grant: signed.grant ?? null,
     confirm: signed.confirm ?? null,
+    ...(match !== undefined ? { match } : {}),
   });
   if (r.status === 202) {
     // The job as spacesheep wrote it, or none: never a number made of something else.
@@ -596,6 +600,12 @@ export const remoteJobOf = (v: unknown): number => (typeof v === "number" && Num
 
 /** A code as spacesheep or a machine writes one (`confirm`, `untrusted_key`), or "". */
 const codeOf = (v: unknown): string => (typeof v === "string" && REMOTE_CODE_RE.test(v) ? v : "");
+
+/** A send's `match` as spacesheep takes one: one to eight digits, as text or as a number. */
+export function matchOf(v: unknown): string | number | undefined {
+  if (typeof v === "string") return /^\d{1,8}$/.test(v) ? v : undefined;
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 && v < 100_000_000 ? v : undefined;
+}
 
 /** spacesheep's reason for a hold, cleaned, when it gave one. */
 const whyOf = (j: Record<string, unknown>): { detail?: string } => {

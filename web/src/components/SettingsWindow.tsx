@@ -27,11 +27,12 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { deviceWords } from "../control/signer";
 import { useAppState, useConnection, useStore } from "../data/hooks";
 import { tablistKey } from "../lib/focus";
 import { bytes } from "../lib/format";
 import { reducedMotion, tokenMs } from "../lib/motion";
-import { apiUrl } from "../lib/net";
+import { accountMode, apiFetch } from "../lib/net";
 import { back, hasInAppHistory, Link, navigate, useSearchParam } from "../lib/router";
 import { isRouteNotFound, olderReceiver } from "../lib/serverAge";
 import {
@@ -381,7 +382,8 @@ export function Settings() {
                   {section === "keyboard" && <Keyboard />}
                   {section === "views" && <Views />}
                   {section === "data" && <SpacesheepGroup Group={Group} Row={Row} />}
-                  {section === "data" && <SearchDataGroup Group={Group} Row={Row} />}
+                  {/* No machine's own agent history is on a spacesheep account to switch on. */}
+                  {section === "data" && !accountMode() && <SearchDataGroup Group={Group} Row={Row} />}
                   {section === "data" && <Data />}
                   {section === "about" && <About />}
                 </>
@@ -764,6 +766,14 @@ function Views() {
   const ok = themes.filter((t) => !t.error);
   const good = installed.filter((s) => !s.error);
   const broken = installed.filter((s) => s.error);
+  // Views, outside skins and plugins are installed on a receiver: a spacesheep account has
+  // none, and the two skins that ship with the app are all there is to choose from.
+  if (accountMode())
+    return (
+      <Group label="Skins">
+        <Display only="skin" />
+      </Group>
+    );
   return (
     <>
       <Group label="Views" note="A view is code that runs in this page. Install and remove them on the Views page.">
@@ -872,7 +882,7 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
   const older = olderReceiver("spacesheep", version, { notFound, localOrigin });
   const read = async () => {
     try {
-      const res = await fetch(apiUrl(ROUTES.ui.spacesheep), { headers: { accept: "application/json" } });
+      const res = await apiFetch(ROUTES.ui.spacesheep, { headers: { accept: "application/json" } });
       if (res.ok) setSt((await res.json()) as Status);
     } catch {}
   };
@@ -888,7 +898,7 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
     setBusy(true);
     setErr(null);
     try {
-      const res = await fetch(apiUrl(ROUTES.ui.spacesheep), {
+      const res = await apiFetch(ROUTES.ui.spacesheep, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
         body: "{}",
@@ -919,19 +929,36 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
   };
   const disconnect = async () => {
     setBusy(true);
+    setErr(null);
     try {
-      await fetch(apiUrl(ROUTES.ui.spacesheep), { method: "DELETE" });
+      const res = await apiFetch(ROUTES.ui.spacesheep, { method: "DELETE" });
+      // On an account the app asks first, in its own alert: a no changes nothing and is no
+      // error; what stopped it otherwise (the alert could not be shown, the key could not be
+      // removed) is said in the app's words.
+      if (!res.ok && accountMode()) {
+        const j = (await res.json().catch(() => ({}))) as { reason?: string; error?: string };
+        if (j.reason !== "cancelled") setErr(j.error || `HTTP ${res.status}`);
+      }
       await read();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   };
   const link = st?.link ?? null;
   const p = st?.pending ?? null;
+  // On an account there is nothing to connect from here: once it is gone (or before it is
+  // read) the group is not drawn, and the window is about to show something else.
+  const account = accountMode();
+  if (account && !link) return null;
   const stateWords: Record<string, string> = {
     starting: "connecting…",
     ok: "reading",
-    unauthorized: "the key was revoked on spacesheep; disconnect and connect again",
+    // On an account nothing here connects: the sentence stops at what is so.
+    unauthorized: account
+      ? "the key was revoked on spacesheep"
+      : "the key was revoked on spacesheep; disconnect and connect again",
     offline: "spacesheep can't be reached right now",
     limited: "this app is reading too often for spacesheep; it catches up by itself",
     gap: "reading (an older gap the relay no longer holds)",
@@ -941,7 +968,12 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
       label="A spacesheep account"
       note={
         link
-          ? `Connected as ${link.email} since ${new Date(link.connectedAt).toLocaleDateString()}. ${link.events} events so far · ${stateWords[link.state] ?? link.state}${link.lastError && link.state !== "ok" ? ` · ${link.lastError}` : ""}${link.machines.length ? ` · machines there: ${link.machines.join(", ")}` : ""}. The key is under Settings → API keys on spacesheep; revoking it there disconnects this app.`
+          ? `Connected as ${link.email} since ${new Date(link.connectedAt).toLocaleDateString()}. ${link.events} events so far · ${stateWords[link.state] ?? link.state}${link.lastError && link.state !== "ok" ? ` · ${link.lastError}` : ""}${link.machines.length ? ` · machines there: ${link.machines.join(", ")}` : ""}. ${
+              account
+                ? // What Disconnect removes (account/backend.ts `drop`, account/local.ts), and what it does not.
+                  `Disconnect removes the account from ${deviceWords().this}: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep: Settings → API keys.`
+                : "The key is under Settings → API keys on spacesheep; revoking it there disconnects this app."
+            }`
           : "An option, not the default: read the sessions and machines paired on a spacesheep account through spacesheep, with nothing to host here. spacesheep then holds what those machines send, at the tier they send, under its privacy policy; a self-hosted board keeps everything on this disk. You can run both."
       }
     >
@@ -1022,7 +1054,7 @@ function Data() {
     setBusy("export");
     setNote(null);
     try {
-      const res = await fetch(apiUrl(ROUTES.ui.snapshot), { headers: { accept: "application/json" } });
+      const res = await apiFetch(ROUTES.ui.snapshot, { headers: { accept: "application/json" } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
       const a = document.createElement("a");
@@ -1054,46 +1086,48 @@ function Data() {
           {stats && <small> · {stats.events.toLocaleString()} events</small>}
         </span>
       </Row>
-      <Row
-        label="Forget done sessions older than"
-        hint={`${old.length} ${old.length === 1 ? "session matches" : "sessions match"}; the machines keep their own.`}
-      >
-        <span className="settings-inline">
-          <Select<number>
-            className="settings-select"
-            size="sm"
-            align="end"
-            value={days}
-            onChange={setDays}
-            aria-label="Older than"
-            options={AGES.map((a) => ({ value: a.days, label: a.label }))}
-          />
-          {confirm ? (
-            <span className="confirm" role="alertdialog" aria-label="Forget these sessions?">
-              <button type="button" className="btn btn--sm btn--ghost" onClick={() => setConfirm(false)}>
-                Cancel
-              </button>
+      {!accountMode() && (
+        <Row
+          label="Forget done sessions older than"
+          hint={`${old.length} ${old.length === 1 ? "session matches" : "sessions match"}; the machines keep their own.`}
+        >
+          <span className="settings-inline">
+            <Select<number>
+              className="settings-select"
+              size="sm"
+              align="end"
+              value={days}
+              onChange={setDays}
+              aria-label="Older than"
+              options={AGES.map((a) => ({ value: a.days, label: a.label }))}
+            />
+            {confirm ? (
+              <span className="confirm" role="alertdialog" aria-label="Forget these sessions?">
+                <button type="button" className="btn btn--sm btn--ghost" onClick={() => setConfirm(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--sm btn--danger"
+                  onClick={() => void forgetOld()}
+                  disabled={busy === "forget"}
+                >
+                  {busy === "forget" ? "Forgetting…" : `Forget ${old.length}`}
+                </button>
+              </span>
+            ) : (
               <button
                 type="button"
-                className="btn btn--sm btn--danger"
-                onClick={() => void forgetOld()}
-                disabled={busy === "forget"}
+                className="btn btn--sm"
+                onClick={() => setConfirm(true)}
+                disabled={old.length === 0 || !!busy}
               >
-                {busy === "forget" ? "Forgetting…" : `Forget ${old.length}`}
+                Forget…
               </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              className="btn btn--sm"
-              onClick={() => setConfirm(true)}
-              disabled={old.length === 0 || !!busy}
-            >
-              Forget…
-            </button>
-          )}
-        </span>
-      </Row>
+            )}
+          </span>
+        </Row>
+      )}
       <Row label="Export" hint="Every session summary, as JSON.">
         <button type="button" className="btn btn--sm" onClick={() => void exportSnapshot()} disabled={!!busy}>
           {busy === "export" ? "Exporting…" : "Download JSON"}
@@ -1146,7 +1180,9 @@ function About() {
       .info()
       .then(setInfo)
       .catch(() => {});
-    fetch(apiUrl(UPDATE), { headers: { accept: "application/json" } })
+    // The app updates as the phone's apps do; there is no receiver with an updater to ask.
+    if (accountMode()) return setUpdate(null);
+    apiFetch(UPDATE, { headers: { accept: "application/json" } })
       .then((r) => (r.ok ? (r.json() as Promise<UpdateStatus>) : null))
       .then(setUpdate)
       .catch(() => setUpdate(null));
@@ -1155,7 +1191,7 @@ function About() {
   const check = async () => {
     setErr(null);
     try {
-      const r = await fetch(apiUrl(`${UPDATE}/check`), { method: "POST", headers: { accept: "application/json" } });
+      const r = await apiFetch(`${UPDATE}/check`, { method: "POST", headers: { accept: "application/json" } });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setUpdate((await r.json()) as UpdateStatus);
     } catch (e) {

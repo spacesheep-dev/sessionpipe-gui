@@ -5,7 +5,10 @@
 // when there are none), the machine list, the jobs list (100 after `since`, with `now` and
 // `code`), a send (202 with a job id, or whatever the test queued for it), a revoked key
 // (401 `unauthorized`), and its limit on relay reads (240 in a fixed 600 s window, 429 with
-// Retry-After). Nothing here is Node's: a unit test and a browser test's server both run it.
+// Retry-After). It also plays the two doors an app uses before and beside the relay: the
+// connect (a code and four digits, a poll that hands the key over once approved) and the
+// app's own device key (asked to be trusted, and where it stands). Nothing here is Node's:
+// a unit test and a browser test's server both run it.
 
 export interface FakeClock {
   now(): number;
@@ -37,6 +40,10 @@ export interface FakeJob {
   code?: string | null;
   created_at: number;
   done_at: number | null;
+  /** What the jobs door also lists of it: the kind of job and the session it is for. */
+  action?: string;
+  source?: string;
+  session?: string;
   /** The signed body as it was sent. */
   sent: Record<string, unknown>;
 }
@@ -64,19 +71,32 @@ export class FakeSpacesheep {
   private seq = 0;
   private waiters = new Set<() => void>();
   machines: Record<string, unknown>[] = [];
-  jobs: FakeJob[] = [];
+  jobs: (FakeJob & { nonce?: string })[] = [];
+  /** A signed command sent a second time is refused as a replay, as spacesheep does. Off: a
+   *  test that sends one fixed command again and again is carried each time. */
+  replays = true;
   private jobId = 0;
   /** The key was revoked: every door answers 401 `unauthorized`. */
   revoked = false;
   /** Count relay reads against spacesheep's limit and answer 429 past it. */
   limit = 240;
   private window = { start: 0, n: 0 };
+  /** Until this time every relay read is answered 429, with the seconds left as Retry-After. */
+  limitedUntil = 0;
   /** What the next sends get instead of a 202, first in first out. */
   sendAnswers: Array<(body: Record<string, unknown>) => FakeAnswer | null> = [];
   /** Every request, in order: "GET /api/…". */
   log: string[] = [];
   /** How many relay reads were counted. */
   relayReads = 0;
+  /** Whose account a connect is approved as. */
+  email = "me@example.com";
+  /** Connects under way, by code. */
+  private connects = new Map<string, { digits: string; poll: string; approved: boolean; denied: boolean }>();
+  /** Device keys that asked to be trusted, by key id, and the number each shows. */
+  deviceRequests = new Map<string, { code: string; name: string }>();
+  /** The machines that trust each device key. */
+  trusting = new Map<string, string[]>();
 
   constructor(
     private readonly clock: FakeClock = realClock,
@@ -125,9 +145,50 @@ export class FakeSpacesheep {
     });
   }
 
+  /** The person confirmed (or refused) a connect on spacesheep. */
+  approve(digits: string, yes = true): void {
+    for (const c of this.connects.values())
+      if (c.digits === digits) {
+        if (yes) c.approved = true;
+        else c.denied = true;
+      }
+  }
+
+  /** The connect's two requests: asked with no key at all. */
+  private connect(req: FakeRequest, url: URL): FakeAnswer | null {
+    if (req.method === "POST" && url.pathname === "/api/gui/connect") {
+      const code = `c${String(this.connects.size + 1).padStart(23, "0")}`;
+      const digits = String(4821 + this.connects.size);
+      const poll = `poll_${code}`;
+      this.connects.set(code, { digits, poll, approved: false, denied: false });
+      return json(
+        {
+          code,
+          digits,
+          url: `https://${this.rpId}/connect/gui?code=${code}`,
+          poll_token: poll,
+          expires_at: new Date(this.clock.now() + 600_000).toISOString(),
+        },
+        201,
+      );
+    }
+    if (req.method === "GET" && url.pathname === "/api/gui/connect/poll") {
+      const c = this.connects.get(url.searchParams.get("code") ?? "");
+      if (!c) return json({ state: "expired" }, 410);
+      if (req.authorization !== `Bearer ${c.poll}`) return json({ error: "forbidden" }, 403);
+      if (c.denied) return json({ state: "denied" });
+      if (!c.approved) return { status: 204, headers: {}, body: "" };
+      this.connects.delete(url.searchParams.get("code")!);
+      return json({ state: "approved", key: this.key, email: this.email });
+    }
+    return null;
+  }
+
   async handle(req: FakeRequest): Promise<FakeAnswer> {
     const url = new URL(req.path, "https://spacesheep.test");
     this.log.push(`${req.method} ${url.pathname}${url.search}`);
+    const connecting = this.connect(req, url);
+    if (connecting) return connecting;
     if (req.authorization !== `Bearer ${this.key}` || this.revoked)
       return json({ error: "Unknown or revoked API key.", code: "unauthorized" }, 401);
     const p = url.pathname;
@@ -139,11 +200,12 @@ export class FakeSpacesheep {
       const jobs = this.jobs
         .filter((j) => j.id > since)
         .slice(0, 100)
-        .map(({ sent: _sent, ...j }) => j);
+        .map(({ sent: _sent, nonce: _nonce, ...j }) => j);
       return json({ now: this.clock.now(), jobs });
     }
     const send = /^\/api\/machines\/([^/]+)\/jobs$/.exec(p);
     if (req.method === "POST" && send) return this.send(decodeURIComponent(send[1]!), req.body);
+    if (p === "/api/gui/device") return this.device(req, url);
     return json({ error: "This key doesn't open that.", code: "scope" }, 403);
   }
 
@@ -152,6 +214,10 @@ export class FakeSpacesheep {
     if (now - this.window.start >= WINDOW_MS) this.window = { start: now, n: 0 };
     this.window.n++;
     this.relayReads++;
+    if (now < this.limitedUntil) {
+      const wait = Math.max(1, Math.ceil((this.limitedUntil - now) / 1000));
+      return json({ error: "Too many requests.", code: "rate_limited" }, 429, { "retry-after": String(wait) });
+    }
     if (this.window.n > this.limit) {
       const wait = Math.ceil((this.window.start + WINDOW_MS - now) / 1000);
       return json({ error: "Too many requests.", code: "rate_limited" }, 429, { "retry-after": String(wait) });
@@ -178,6 +244,43 @@ export class FakeSpacesheep {
     };
   }
 
+  /** The app's own device key: asked to be trusted (POST), and where it stands (GET). */
+  private device(req: FakeRequest, url: URL): FakeAnswer {
+    if (req.method === "POST") {
+      let body: { key?: { id?: unknown }; name?: unknown } = {};
+      try {
+        body = JSON.parse(req.body ?? "") as typeof body;
+      } catch {
+        /* empty */
+      }
+      const id = typeof body.key?.id === "string" ? body.key.id : "";
+      if (!/^[A-Za-z0-9_-]{43}$/.test(id)) return json({ error: "Send the device key.", code: "bad_key" }, 400);
+      const code = this.deviceRequests.get(id)?.code ?? String(71 + this.deviceRequests.size);
+      this.deviceRequests.set(id, { code, name: `${String(body.name ?? "sessionpipe-gui")} · app` });
+      return json({
+        id: `d_${id.slice(0, 8)}`,
+        key_id: id,
+        code,
+        trusted_on: this.trusting.get(id) ?? [],
+        devices_url: `https://${this.rpId}/devices`,
+      });
+    }
+    if (req.method !== "GET") return json({ error: "This key doesn't open that.", code: "scope" }, 403);
+    const id = url.searchParams.get("id") ?? "";
+    if (!/^[A-Za-z0-9_-]{43}$/.test(id)) return json({ error: "Which key?", code: "bad_request" }, 400);
+    const trusted = this.trusting.get(id) ?? [];
+    return json({
+      trusted_on: trusted,
+      machines: this.machines.map((m) => ({
+        id: m.id,
+        name: m.name,
+        trusts: trusted.includes(String(m.id)),
+        takes_device: Array.isArray(m.key_types) && m.key_types.includes("device"),
+      })),
+      pending: this.deviceRequests.has(id) && !trusted.length,
+    });
+  }
+
   private send(machine: string, raw: string | undefined): FakeAnswer {
     let body: Record<string, unknown> | null = null;
     try {
@@ -190,13 +293,28 @@ export class FakeSpacesheep {
       return json({ error: "That computer isn't set up any more.", code: "not_found" }, 404);
     const scripted = this.sendAnswers.shift()?.(body);
     if (scripted) return scripted;
-    const job: FakeJob = {
+    let cmd: { kind?: unknown; session?: unknown; nonce?: unknown } = {};
+    try {
+      cmd = (JSON.parse(body.cmd) ?? {}) as typeof cmd;
+    } catch {
+      /* not a command spacesheep can read: it carries it all the same here */
+    }
+    // A command is taken once (index.ts machineNonceUsed): the same signed bytes again are a replay.
+    const nonce = typeof cmd.nonce === "string" ? cmd.nonce : "";
+    if (nonce && this.replays && this.jobs.some((j) => j.nonce === nonce))
+      return json({ error: "That was already sent.", code: "replay" }, 409);
+    const named = typeof cmd.session === "string" ? cmd.session : "";
+    const at = named.indexOf(":");
+    const job: FakeJob & { nonce?: string } = {
       id: ++this.jobId,
       machine,
       status: "queued",
       note: null,
       created_at: this.clock.now(),
       done_at: null,
+      action: cmd.kind === "start" ? "start" : cmd.kind === "prompt" ? "message" : String(cmd.kind ?? ""),
+      ...(at > 0 ? { source: named.slice(0, at), session: named.slice(at + 1) } : {}),
+      ...(nonce ? { nonce } : {}),
       sent: body,
     };
     this.jobs.push(job);

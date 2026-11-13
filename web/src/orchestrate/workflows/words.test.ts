@@ -2,7 +2,7 @@
 // The page's words (words.ts): a run's row and bar, a step's row, the durations and the
 // save-state problems, as UX-SPEC §4 writes them.
 import type { WorkflowRun, WorkflowStep } from "@shared/api";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   afterWords,
   durExact,
@@ -215,6 +215,16 @@ describe("ids", () => {
   it("a workflow id is a slug and a tail, within the server's rule", () => {
     expect(newWorkflowId("Implement, then review", () => "abc123")).toBe("implement-then-review-abc123");
     expect(newWorkflowId("", () => "abc123")).toBe("workflow-abc123");
+    // The tail an id gets by default is the platform's own chance, never Math.random.
+    const insecure = vi.spyOn(Math, "random");
+    try {
+      const ids = new Set(Array.from({ length: 50 }, () => newWorkflowId("Nightly")));
+      expect(insecure).not.toHaveBeenCalled();
+      expect(ids.size).toBe(50);
+      for (const id of ids) expect(id).toMatch(/^nightly-[0-9a-z]{6}$/);
+    } finally {
+      insecure.mockRestore();
+    }
     expect(newWorkflowId("x".repeat(60), () => "abc123")).toMatch(/^[A-Za-z0-9_-]{1,40}$/);
   });
   it("a step id is unique in its plan", () => {

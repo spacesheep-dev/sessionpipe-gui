@@ -11,9 +11,11 @@
 // hands every frame to `onMessage`, and the two kinds this page owns are read from there.
 // Should the stream carry neither for a while, a live run is read again every POLL_MS, so
 // a run still moves on the page.
+
 import type { StreamMessage, Workflow, WorkflowRun } from "@shared/api";
 import { useSyncExternalStore } from "react";
 import type { Store } from "../../data/store";
+import { accountMode } from "../../lib/net";
 import { workflowsApi } from "./api";
 import { runLive } from "./words";
 
@@ -91,6 +93,11 @@ export function applyFrame(m: StreamMessage): void {
 let reading: Promise<void> | null = null;
 /** Read everything again. One read at a time; a second ask while one is out joins it. */
 export function reload(): Promise<void> {
+  // Workflows are a receiver's (its saved runs, its clock): a spacesheep account has none.
+  if (accountMode()) {
+    if (!state.loaded) commit({ ...state, loaded: true, error: null });
+    return Promise.resolve();
+  }
   if (reading) return reading;
   reading = workflowsApi
     .all()

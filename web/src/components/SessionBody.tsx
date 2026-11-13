@@ -90,6 +90,7 @@ import { useKeyboardInset } from "../lib/keyboardInset";
 import { labelMenu } from "../lib/labels";
 import { absoluteUrl, agentItems, askItem, copyItem, sessionItems } from "../lib/menus";
 import { reducedMotion, useFlip } from "../lib/motion";
+import { accountMode } from "../lib/net";
 import { leftOff, type NewLineAt, newLinePlace } from "../lib/newLine";
 import { clockTime, eventWindows, leftBecause, sentenceName, servedBy, swaps, swapWords } from "../lib/pool";
 import { said, stoppedWords, turnWords } from "../lib/replies";
@@ -230,9 +231,10 @@ interface Timeline {
 const TimelineCtx = createContext<Timeline | null>(null);
 const useTimeline = () => useContext(TimelineCtx)!;
 
-/** The link to a row of this session (the view jumps to it on open). */
+/** The link to a row of this session (the view jumps to it on open); none on a spacesheep
+ *  account, whose page of the session has no address for a row. */
 const seqLink = (path: string, seq: number | undefined) =>
-  seq === undefined ? null : `${absoluteUrl(path)}#seq-${seq}`;
+  seq === undefined || accountMode() || !absoluteUrl(path) ? null : `${absoluteUrl(path)}#seq-${seq}`;
 
 /** Whether a message sent from here, with no turn of its own in the view, still gets its
  *  row at the end of the timeline: while it is on its way; once it failed, was stopped or
@@ -796,7 +798,9 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   // the files and, until the turn has a reply of its own, the reply the machine streamed
   // back. One still on its way has its row at the end, where its turn will be.
   const isMine = useCallback(
-    (a: ControlActivity) => a.session === key && (a.kind === "prompt" || a.kind === "start") && !forkOf(a),
+    // A send nobody heard the answer to is no message of the session yet: the composer says it.
+    (a: ControlActivity) =>
+      a.session === key && (a.kind === "prompt" || a.kind === "start") && !forkOf(a) && !a.unheard,
     [key],
   );
   const sentAll = useControlActivity(isMine);

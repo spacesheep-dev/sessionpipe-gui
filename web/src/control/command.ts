@@ -14,7 +14,7 @@ import {
 } from "@shared/api";
 import { cleanReason } from "@shared/reason";
 import { noteOwnSend } from "../lib/toasts";
-import { ControlError, controlApi, type SendBody, type TrustedKey } from "./api";
+import { ControlError, controlApi, type SendBody, type TrustedKey, UNHEARD_CODE } from "./api";
 import { nonce } from "./bytes";
 import { remoteHostFor, remoteRpFor } from "./remoteRp";
 import { dropGrant, sign, signerKind } from "./signer";
@@ -218,6 +218,18 @@ export async function signAndDeliver<T>(
   }
 }
 
+/** A send nobody heard the answer to: thrown where a send's row would be returned, with the
+ *  id of the row that is followed in its place, so the caller can tell what became of it. */
+export class UnheardSend extends ControlError {
+  constructor(
+    readonly id: string,
+    words: string,
+  ) {
+    super(504, words, UNHEARD_CODE, words);
+    this.name = "UnheardSend";
+  }
+}
+
 /** Build, sign and send one command to `machineId`. A refusal of the cached grant drops
  *  it and tries once more with a new one; a hold is thrown as HeldForConfirm; any other
  *  refusal is thrown as ControlError. */
@@ -233,6 +245,9 @@ export function sendCommand(
     fields,
     async (body) => {
       const carried = await controlApi.send(body);
+      // Nobody heard its answer (a page on a spacesheep account, account/unheard.ts): not
+      // sent as far as this caller may say, and never "not sent". The row is followed.
+      if (carried.unheard?.state === "asking") throw new UnheardSend(carried.id, carried.detail ?? "");
       noteOwnSend(carried.id);
       return carried;
     },

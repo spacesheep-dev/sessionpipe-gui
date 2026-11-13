@@ -4,16 +4,17 @@
 // strip action, signs it with the day grant (one passkey tap a day), and remembers which
 // attentions have an answer out or were closed by the machine, so no second answer goes.
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ControlAction, preHello } from "../components/ControlStrip";
-import { ControlError } from "./api";
-import { type CommandFields, sendCommand } from "./command";
+import { ControlError, UNHEARD_CODE } from "./api";
+import { type CommandFields, HeldForConfirm, heldWhy, sendCommand, UnheardSend } from "./command";
 import { type Held, useHeld } from "./HeldNotice";
 import type { HeldMeta } from "./held";
 import { HELD_WORDS } from "./heldWords";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
+import { remoteHostFor } from "./remoteRp";
 import { canSign, machineTakes, signerLabel, signHint, updateWords } from "./signer";
-import { sendErrorWords } from "./words";
+import { sendErrorWords, unheardWords } from "./words";
 
 export type AnswerStatus = "sent" | "closed";
 
@@ -78,6 +79,14 @@ export interface SessionSend {
   held: Held<ControlActivity, StripSent>;
 }
 
+/** What was pressed for a send: the composer as it was (when it was typed there), the
+ *  fields that were signed, and the attachment lines the page wrote into the message. */
+interface Pressed {
+  typed?: string;
+  fields?: CommandFields;
+  attached?: readonly string[];
+}
+
 export function useSessionSend(
   session: SessionSummary,
   control: MachineControl | undefined,
@@ -114,6 +123,16 @@ export function useSessionSend(
   }, []);
   const draftNow = useRef(o.draft);
   draftNow.current = o.draft;
+  // A send of this session nobody heard the answer to (account/unheard.ts): its row says it
+  // may have been sent while the app finds out, and holds the same kind of send meanwhile.
+  const asking = useMemo(() => activity.filter((a) => a.unheard?.state === "asking"), [activity]);
+  /** Row id → what was pressed: the composer as it was, and (where this page made the send)
+   *  the fields it signed, which a hold's Confirm signs again. */
+  const unheard = useRef(new Map<string, Pressed>());
+  /** The send that is out now: the row of an unheard one takes it. */
+  const pressed = useRef<Pressed>({});
+  const confirmedNow = useRef(o.confirmed);
+  confirmedNow.current = o.confirmed;
   const held = useHeld<ControlActivity, StripSent>(
     (carried, h, meta) => {
       went(h.fields, carried);
@@ -124,6 +143,53 @@ export function useSessionSend(
     o.draft,
   );
   const { catchHeld, drop: dropHeld, confirming: confirmingHeld } = held;
+  const machineId = control?.machineId;
+  useEffect(() => {
+    for (const a of activity) {
+      if (a.unheard?.state === "asking") {
+        if (!unheard.current.has(a.id)) unheard.current.set(a.id, pressed.current);
+        continue;
+      }
+      const was = unheard.current.get(a.id);
+      if (!was) continue;
+      unheard.current.delete(a.id);
+      const typed = was.typed;
+      // spacesheep holds it for a confirm, and it is known that no job was made: the hold's
+      // own notice, with its Confirm, as if the send's answer had been heard. One press.
+      // (After a reload the page no longer has what was pressed; a message's fields are its
+      // row's own, so its notice comes all the same. An answer's are not, and it reads as
+      // the refusal.)
+      const again: CommandFields | undefined =
+        was.fields ?? (a.kind === "prompt" && a.text ? { kind: "prompt", session: key, text: a.text } : undefined);
+      if (a.unheard?.state === "unsent" && a.code === "confirm_required" && notice && again && rp && machineId) {
+        const fields = again;
+        const refusal = new ControlError(a.unheard.status ?? 422, a.unheard.reason ?? "", a.code, a.detail);
+        const h = new HeldForConfirm<ControlActivity>(
+          refusal,
+          heldWhy(refusal),
+          fields,
+          machineId,
+          remoteHostFor(machineId) ?? null,
+          (c = {}) => sendCommand(rp, machineId, fields, { onTap: c.onTap, confirm: true }),
+        );
+        const caught = catchHeld(h, { draft: typed, ...(was.attached ? { attached: was.attached } : {}) }, typed);
+        setError(caught === "changed" ? HELD_WORDS.changed : caught ? null : unheardWords(a));
+        continue;
+      }
+      // Not sent, or nobody can say: the row's words, as a send's own answer would read.
+      if (a.unheard) {
+        setError(unheardWords(a));
+        continue;
+      }
+      // spacesheep holds it: a send like any other. The composer that still holds its words is cleared.
+      setError(null);
+      if (a.kind === "prompt")
+        confirmedNow.current?.(
+          { kind: "prompt", session: key, text: a.text ?? "" },
+          typed ?? JSON.stringify([a.text ?? "", []]),
+        );
+    }
+  }, [activity, key, notice, rp, machineId, catchHeld]);
   useEffect(() => {
     const closed: string[] = [];
     for (const a of activity) {
@@ -174,13 +240,24 @@ export function useSessionSend(
       }
       const att = action.kind === "permission.answer" ? action.attentionId : null;
       if (att && answers[att]) return;
+      // The same kind of send is out and nobody knows what became of it: held, in its words.
+      const out = asking.find((a) => a.kind === fields.kind);
+      if (out) {
+        const e = new ControlError(504, out.detail ?? "", UNHEARD_CODE, out.detail);
+        setError(sendErrorWords(e));
+        throw e;
+      }
       // A message depends on the composer it was typed in; an answer or a Stop on nothing.
       const keyAtSend = action.kind !== "cancel" && action.composer ? draftNow.current : undefined;
+      const attachedNow = action.kind === "prompt" ? action.attached : undefined;
+      pressed.current = { typed: keyAtSend, fields, ...(attachedNow ? { attached: attachedNow } : {}) };
       try {
         const carried = await sendCommand(rp, control.machineId, fields, { onTap: () => setTap(true) });
         went(fields, carried);
         dropHeld();
       } catch (e) {
+        // Nobody heard its answer: what was pressed is kept under its row's id.
+        if (e instanceof UnheardSend) unheard.current.set(e.id, pressed.current);
         if (att && e instanceof ControlError && e.code === "no_attention")
           setAnswers((prev) => ({ ...prev, [att]: "closed" }));
         // Held for a confirm: the notice says so where it is shown, the refusal elsewhere.
@@ -192,12 +269,15 @@ export function useSessionSend(
         else if (!caught) setError(sendErrorWords(e));
         throw e;
       } finally {
+        pressed.current = {};
         setTap(false);
         grant.refresh();
       }
     },
-    [control, rp, key, grant.refresh, answers, notice, catchHeld, dropHeld, confirmingHeld, went],
+    [control, rp, key, grant.refresh, answers, notice, catchHeld, dropHeld, confirmingHeld, went, asking],
   );
 
-  return { rp, secure, grant, tap, error, answers, activity, onSend, held };
+  // A row still being asked for says so whenever the page is opened, not only after the send.
+  const line = error ?? (asking[0] ? unheardWords(asking[0]) : null);
+  return { rp, secure, grant, tap, error: line, answers, activity, onSend, held };
 }

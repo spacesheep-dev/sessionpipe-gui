@@ -22,7 +22,7 @@ import { PendingDevices, sentence } from "../control/PendingDevices";
 import { PendingPairings } from "../control/PendingPairings";
 import { canSign, deviceKey, machineTakes, setupLabel, signerKind, signHint, useOwnKeys } from "../control/signer";
 import { useMachines, useStore } from "../data/hooks";
-import { apiUrl } from "../lib/net";
+import { accountMode, apiFetch } from "../lib/net";
 import "../lib/acp";
 import { harnessMark } from "../lib/format";
 import { copyText } from "../lib/menus";
@@ -58,6 +58,7 @@ export function Machines() {
   // machines it applies to, not repeated in each.
   const secure = canSign(rp);
   const paired = machines.some((m) => !!m.control);
+  const account = accountMode();
 
   return (
     <div className="page page--doc page--grouped machines">
@@ -65,37 +66,48 @@ export function Machines() {
         title="Machines"
         meta={machines.length ? `${online} of ${machines.length} online` : undefined}
         actions={
-          <>
-            <Link to="/phone" className="btn">
-              Add a phone…
-            </Link>
-            <Link to="/connect" className="btn">
-              Connect…
-            </Link>
-          </>
+          // A machine or a phone is added to a spacesheep account on spacesheep, not here.
+          account ? undefined : (
+            <>
+              <Link to="/phone" className="btn">
+                Add a phone…
+              </Link>
+              <Link to="/connect" className="btn">
+                Connect…
+              </Link>
+            </>
+          )
         }
       />
-      <PendingPairings />
-      <PendingDevices />
+      {!account && <PendingPairings />}
+      {!account && <PendingDevices />}
       {rp === null ? null : machines.length === 0 ? (
-        <EmptyState
-          center
-          title="This Mac is the only machine"
-          actions={
-            <Link to="/connect" className="btn btn--primary">
-              Pair another…
-            </Link>
-          }
-        >
-          Sessions from another computer show up here once it sends to this receiver.
-        </EmptyState>
+        account ? (
+          <EmptyState center title="No machines yet">
+            Pair a computer with this account on {new URL(receiverOrigin()).host}. Its sessions show up here.
+          </EmptyState>
+        ) : (
+          <EmptyState
+            center
+            title="This Mac is the only machine"
+            actions={
+              account ? undefined : (
+                <Link to="/connect" className="btn btn--primary">
+                  Pair another…
+                </Link>
+              )
+            }
+          >
+            Sessions from another computer show up here once it sends to this receiver.
+          </EmptyState>
+        )
       ) : (
         <>
           {paired && !secure && <p className="machines-note">{sentence(signHint(rp)).replace(/\.?$/, ".")}</p>}
           {machines.map((m) => (
             <MachineBlock key={m.name} m={m} online={isOnline(m, now)} lanUrl={lanUrl} rp={rp} secure={secure} />
           ))}
-          {machines.length === 1 && (
+          {machines.length === 1 && !account && (
             <p className="machines-more">
               {machines[0]!.name} is the only machine.{" "}
               <Link to="/connect" className="link">
@@ -135,9 +147,10 @@ function MachineBlock({
       run: () => openNewSession({ machine: m.name }),
       disabled: secure ? undefined : "Passkeys cannot sign on this address",
     },
-    c && { label: "Add a phone…", run: () => navigate("/phone") },
+    c && !accountMode() && { label: "Add a phone…", run: () => navigate("/phone") },
     { sep: true },
-    !c && { label: "Copy pair command", run: () => copyText(pairCmd) },
+    // That command pairs a machine with a receiver; an account's are paired on spacesheep.
+    !c && !accountMode() && { label: "Copy pair command", run: () => copyText(pairCmd) },
     { label: "Copy machine name", run: () => copyText(m.name) },
   ];
   const menu = useContextMenu(items, {
@@ -278,7 +291,7 @@ function MachineBlock({
             </span>
           </li>
         )}
-        {!c && (
+        {!c && !accountMode() && (
           <li className="form-row form-row--stack">
             <span className="form-row-text">
               <span className="form-label">Pair it</span>
@@ -350,7 +363,7 @@ function RemoteAppSetup({ rpId, origin }: { rpId: string; origin: string }) {
     setErr(null);
     try {
       const key = await deviceKey(rpId);
-      const res = await fetch(apiUrl(`${ROUTES.ui.spacesheep}/device`), {
+      const res = await apiFetch(`${ROUTES.ui.spacesheep}/device`, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify({ key }),
