@@ -54,6 +54,8 @@ export const NEW_WORDS = {
   approveCanSend: "Can send",
   approveNotYet: "Not approved yet",
   approveOld: "Update sessionpipe there to send from the app",
+  approveRowFrom: (time: string) => `Approved · sends from ${time}`,
+  approveRowBy: (time: string) => `Approved · sends by ${time}`,
   approveCoolingAt: (Phone: string, time: string) => `${Phone} can send from ${time}.`,
   approveCoolingBy: (Phone: string, time: string) => `${Phone} can send by ${time} at the latest.`,
   approveCoolingWhy: "New devices wait an hour, so a stolen sign-in can't act at once.",
@@ -69,5 +71,6 @@ export const NEW_WORDS = {
     `On spacesheep: Devices → Remove. It stops carrying anything ${phone} sends, right away.`,
   openDevices: "Open Devices",
   composerCooling: (Phone: string, time: string) => `${Phone} can send from ${time}`,
+  rowCoolingBy: (Phone: string, time: string) => `${Phone} can send by ${time}`,
   machinesApprove: (phone: string) => `Approve ${phone}`,
 } as const;
