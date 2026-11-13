@@ -22,6 +22,7 @@ import {
   MemoryControl,
   newUlid,
   type RemoteSend,
+  remoteJobOf,
   SendRefused,
   SPACESHEEP_UNAUTHORIZED,
 } from "./remote.js";
@@ -650,6 +651,68 @@ describe("the control state of a page", () => {
       status: 409,
       code: "refused",
     });
+  });
+
+  it("a send's job is one only as spacesheep writes it: a whole number above zero, and nothing made into one", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "spgui-job-"));
+    const state = new ControlState(path.join(dir, "control"));
+    const memory = new MemoryControl();
+    try {
+      state.setRemoteAccount(ME);
+      state.upsertRemoteMachines([listed(M1, "lab-mac")] as never, remote);
+      memory.remote.setRemoteAccount(ME);
+      memory.remote.upsertRemoteMachines([listed(M1, "lab-mac")] as never, remote);
+      // What `Number()` would read as a job (1, 5, 16, 7, 7) and what it never did.
+      const none: unknown[] = [true, [5], "0x10", "7", " 7 ", 0, -3, 1.5, "abc", null, undefined, {}, 2 ** 53, false];
+      let n = 0;
+      for (const [name, send] of [
+        [
+          "receiver",
+          (job: unknown) =>
+            forwardRemoteSend(state, state.machine(M1)!, command(M1, "prompt", `claude-code:s-${++n}`), async () => ({
+              status: 202,
+              json: { job },
+            })),
+        ],
+        [
+          "page",
+          (job: unknown) =>
+            memory.send(memory.machine(M1)!, command(M1, "prompt", `claude-code:s-${++n}`), async () => ({
+              status: 202,
+              json: { job },
+            })),
+        ],
+      ] as const) {
+        for (const job of none)
+          expect(await send(job), `${name} ${JSON.stringify(job)}`).toMatchObject({
+            remoteJob: 0,
+            outcome: "unconfirmed",
+          });
+        const real = await send(7);
+        expect(real.remoteJob, name).toBe(7);
+        expect(real.outcome, name).toBeUndefined();
+      }
+      for (const c of [state, memory.remote]) {
+        // Only the real one is followed.
+        expect(c.pendingRemoteJobs()).toEqual([7]);
+        // Jobs 1, 5 and 16 are someone's, and done: their word settles no row here.
+        c.applyRemoteJobs(
+          [1, 5, 16].map((id) => ({ id, status: "done", note: null, done_at: Date.now(), created_at: Date.now() - 5 })),
+          16,
+          Date.now(),
+        );
+      }
+      for (const a of [state.activity(), memory.activity()]) {
+        expect(a.filter((x) => x.outcome === "delivered")).toEqual([]);
+        expect(a.filter((x) => x.outcome === "unconfirmed")).toHaveLength(none.length);
+      }
+      expect(remoteJobOf(7)).toBe(7);
+      expect(remoteJobOf(Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER);
+      expect([Number.NaN, Number.POSITIVE_INFINITY, 7n, "7"].map(remoteJobOf)).toEqual([0, 0, 0, 0]);
+    } finally {
+      state.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("a signed command that is not an object is refused as a bad request, never thrown on", async () => {

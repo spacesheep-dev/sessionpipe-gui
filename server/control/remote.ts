@@ -327,10 +327,10 @@ export class RemoteSlice {
 
   /** A send spacesheep carried for a remote machine: its row here, settled by the relay's
    *  job status (applyRemoteJobs), never by a poll of this receiver. `remoteJob` is
-   *  spacesheep's id for it; an answer that named none (anything but a whole number above
-   *  zero) is a send spacesheep took and nobody can follow: its row is kept under job 0,
-   *  which spacesheep never lists, and closed at once as `unconfirmed`, never left waiting
-   *  for a word that cannot come and never said to be not sent. */
+   *  spacesheep's id for it; an answer that named none (remoteJobOf: anything but a number
+   *  that is whole and above zero) is a send spacesheep took and nobody can follow: its row
+   *  is kept under job 0, which spacesheep never lists, and closed at once as `unconfirmed`,
+   *  never left waiting for a word that cannot come and never said to be not sent. */
   enqueueRemote(
     m: MachineRow,
     signed: SignedCommand,
@@ -344,8 +344,9 @@ export class RemoteSlice {
       expiresInMs: EXPIRES_MAX_MS,
       ...(o.from ? { from: o.from } : {}),
     });
-    const named = Number.isSafeInteger(remoteJob) && remoteJob > 0;
-    row.remoteJob = named ? remoteJob : 0;
+    const job = remoteJobOf(remoteJob);
+    const named = job > 0;
+    row.remoteJob = job;
     if (this.remoteAccount) row.remoteAccount = this.remoteAccount;
     if (!named) {
       row.outcome = "unconfirmed";
@@ -554,13 +555,13 @@ export async function forwardRemoteSend(
     confirm: signed.confirm ?? null,
   });
   if (r.status === 202) {
-    const job = Number(r.json.job);
+    // The job as spacesheep wrote it, or none: never a number made of something else.
     const row = state.enqueueRemote(
       m,
       signed,
       cmd,
       { via: "ui", ...(typeof body.from === "string" ? { from: body.from } : {}) },
-      job,
+      remoteJobOf(r.json.job),
     );
     return row;
   }
@@ -581,6 +582,13 @@ export async function forwardRemoteSend(
     throw new SendRefused(422, { reason: error, code: codeOf(r.json.refusal) || "untrusted_key" });
   throw new SendRefused(r.status >= 500 ? 502 : r.status, { reason: error, code: code || "refused" });
 }
+
+/** A send's job id as spacesheep's jobs route writes one, or 0 for none. spacesheep answers
+ *  a send it took with 202 `{ job, … }`, where `job` is a JSON number: the row id of its job
+ *  table, whole and above zero (spacesheep `POST /api/machines/:id/jobs`). Only that is a
+ *  job. Outside text is never turned into one: `Number()` reads `true` as 1, `[5]` as 5 and
+ *  "0x10" as 16, and each would be followed as someone else's job and settled by its word. */
+export const remoteJobOf = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : 0);
 
 /** A code as spacesheep or a machine writes one (`confirm`, `untrusted_key`), or "". */
 const codeOf = (v: unknown): string => (typeof v === "string" && REMOTE_CODE_RE.test(v) ? v : "");
