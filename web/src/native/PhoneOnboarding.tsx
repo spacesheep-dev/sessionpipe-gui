@@ -5,11 +5,12 @@
 // a step and runs the shell's commands for it: the camera (scanner.ts), `rx_add` (the
 // shell asks in its own sheet) and `rx_select` (the shell reopens the window on the
 // receiver). The Mac's welcome is Welcome.tsx.
-import { type ButtonHTMLAttributes, type ReactNode, useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import { Mark } from "../components/Brand";
 import { haptic } from "../lib/haptics";
 import { invoke } from "./bridge";
 import { INSTALL_COMMAND } from "./logic";
+import { Primary, Quiet, Screen, Secondary } from "./OnbParts";
 import { INITIAL, isScanning, parsePayload, step, trustBrowser, WORDS } from "./onboarding";
 import { cameraPermission, cancelScan, hasScanner, openCameraSettings, requestCamera, scanQr } from "./scanner";
 import type { ShellInfo } from "./shell";
@@ -20,19 +21,6 @@ interface Receiver {
 }
 
 const openOutside = (url: string) => void invoke("app_open_external", { url }).catch(() => {});
-
-/** A line that names the computer: its name never breaks at its hyphen ("studio-" /
- *  "mac"), so the words stay one word. */
-function withHost(text: string, host?: string): ReactNode {
-  if (!host || !text.includes(host)) return text;
-  const parts = text.split(host);
-  return parts.map((part, i) => (
-    <span key={i}>
-      {part}
-      {i < parts.length - 1 && <span className="onb-nowrap">{host}</span>}
-    </span>
-  ));
-}
 
 export function Onboarding({ info }: { info: ShellInfo }) {
   const browser = trustBrowser(info.platform === "android" ? "android" : "ios");
@@ -266,57 +254,6 @@ export function Onboarding({ info }: { info: ShellInfo }) {
       </main>
     </div>
   );
-}
-
-/** One screen: an optional bar (Back), a glyph over the title, one line under it, then
- *  its actions. */
-function Screen({
-  bar,
-  glyph,
-  title,
-  body,
-  host,
-  live,
-  children,
-  ...rest
-}: {
-  bar?: ReactNode;
-  glyph?: ReactNode;
-  title?: string;
-  body?: string;
-  /** The computer's name, where the title or body says it. */
-  host?: string;
-  live?: boolean;
-  children?: ReactNode;
-  "data-step"?: string;
-  "data-opened"?: boolean;
-}) {
-  return (
-    <div className="onb" {...rest}>
-      <header className="onb-bar">{bar}</header>
-      <main className="onb-body onb-body--step" id="main" aria-live={live ? "polite" : undefined}>
-        {title && (
-          <div className="onb-head">
-            {glyph}
-            <h1 className="onb-title">{withHost(title, host)}</h1>
-            {body && <p className="onb-text">{withHost(body, host)}</p>}
-          </div>
-        )}
-        <div className="onb-actions">{children}</div>
-      </main>
-    </div>
-  );
-}
-
-/** The one primary action of a screen: the ink fill, as every primary in the app. */
-function Primary(props: ButtonHTMLAttributes<HTMLButtonElement>) {
-  return <button type="button" {...props} className="btn btn--primary btn--lg onb-primary" />;
-}
-function Secondary(props: ButtonHTMLAttributes<HTMLButtonElement>) {
-  return <button type="button" {...props} className="btn btn--lg onb-secondary" />;
-}
-function Quiet(props: ButtonHTMLAttributes<HTMLButtonElement>) {
-  return <button type="button" {...props} className="btn btn--ghost btn--lg onb-quiet" />;
 }
 
 /** The step card under "No sessionpipe on your computer yet?": three numbered rows in
