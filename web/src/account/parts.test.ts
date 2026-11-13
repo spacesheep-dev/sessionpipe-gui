@@ -24,11 +24,13 @@ import {
   SEND_UNKNOWN,
   SEND_UNKNOWN_CODE,
   SEND_UNKNOWN_WAITS_MS,
+  type Sent,
 } from "./doors";
 import { PageLog } from "./log";
 import { fitSends, readSends, SETTLED_TEXT_CHARS } from "./sends";
 import { accountShell } from "./shell";
 import { hookOf, noticeWords, startOnKept } from "./start";
+import { openUnheard, UNHEARD_MAX_BYTES } from "./unheard";
 
 describe("the shell's contract, read for an account", () => {
   const contract = (receiver: unknown, over: Record<string, unknown> = {}) => ({
@@ -955,5 +957,115 @@ describe("the page's event log", () => {
     expect(log.readAt("claude-code", "s-log", [{ offset: 2, bytes: 0 }])).toEqual([undefined]);
     await first.close();
     await again.close();
+  });
+});
+
+describe("the sends nobody heard the answer to, kept", () => {
+  const machine = { id: "m_0123456789abcdefghij", name: "lab-mac" } as never;
+  const bodyOf = (text: string, n: number) => ({
+    cmd: JSON.stringify({ kind: "prompt", session: `claude-code:s-${n}`, text, nonce: `n-${n}` }),
+    csig: "sig",
+    grant: { str: "g" },
+  });
+  const bed = (o: { adopt?: () => boolean; said?: () => Sent } = {}) => {
+    const adopted: (number | null)[] = [];
+    let asks = 0;
+    let n = 0;
+    const u = openUnheard({
+      doors: {
+        ask: async () => {
+          asks++;
+          return o.said?.() ?? { kind: "sent", job: 41 };
+        },
+        look: async () => ({ read: true, more: false, told: true, fits: [], recent: [] }),
+      },
+      machine: () => machine,
+      adopt: (_u, _cmd, job) => {
+        adopted.push(job);
+        return o.adopt?.() ?? true;
+      },
+      refused: (_u, status, json) => ({ status, reason: String(json.error ?? "") }),
+      changed: () => {},
+      mayAsk: () => true,
+      newId: () => `01J${String(++n).padStart(23, "0")}`,
+      setTimeout: () => 0,
+      clearTimeout: () => {},
+    });
+    const add = (text: string, i: number) => {
+      const body = bodyOf(text, i);
+      return u.add(
+        machine,
+        body,
+        JSON.parse(body.cmd),
+        { kind: "unknown", why: "spacesheep did not answer in time.", dead: false },
+        { askedAt: Date.now(), floor: 0 },
+      );
+    };
+    return { u, add, adopted, asks: () => asks };
+  };
+  const settle = () => new Promise<void>((r) => setTimeout(r, 0));
+
+  it("a send spacesheep says it has is never dropped: it stays until it was taken as a row, and is asked for no more", async () => {
+    let takes = false;
+    const t = bed({ adopt: () => takes });
+    const row = t.add("hello", 1);
+    // Asked again: spacesheep has it (job 41). It could not be taken as a row just now.
+    t.u.kick();
+    await settle();
+    expect(t.adopted).toEqual([41]);
+    expect(t.u.kept()).toMatchObject([{ row: { id: row.id }, state: "asking", sent: { job: 41 } }]);
+    // The next turn takes it, under the same job, with nothing more asked of spacesheep.
+    takes = true;
+    t.u.kick();
+    await settle();
+    expect(t.adopted).toEqual([41, 41]);
+    expect(t.asks()).toBe(1);
+    expect(t.u.kept()).toEqual([]);
+  });
+
+  it("stays within its share of the document: settled rows give way, oldest first; an unknown row is never cut", async () => {
+    const long = "x".repeat(60_000);
+    // Not sent, each of them: settled rows with long words.
+    const t = bed({
+      said: () => ({ kind: "refused", status: 400, json: { error: "No such session.", code: "never_started" } }),
+    });
+    for (let i = 0; i < 12; i++) t.add(long, i);
+    t.u.kick();
+    await settle();
+    expect(t.u.kept().every((x) => x.state === "unsent")).toBe(true);
+    // Then unknown ones with words as long: whole, with the bytes to ask again with.
+    const quiet = bed({ said: () => ({ kind: "unknown", why: "spacesheep did not answer in time.", dead: false }) });
+    for (let i = 0; i < 2; i++) quiet.add(long, i);
+    const bytes = (list: unknown) => new TextEncoder().encode(JSON.stringify(list)).length;
+    expect(bytes(t.u.kept())).toBeLessThanOrEqual(UNHEARD_MAX_BYTES);
+    for (const x of quiet.u.kept()) {
+      expect(x.row.text).toBe(long);
+      expect(JSON.parse(x.body!.cmd).text).toBe(long);
+    }
+    // Settled rows over the bound: their words are cut, then the oldest go; none is unknown.
+    const many = bed({ said: () => ({ kind: "refused", status: 400, json: { error: "No.", code: "never_started" } }) });
+    for (let i = 0; i < 40; i++) many.add("y".repeat(20_000), i);
+    many.u.kick();
+    await settle();
+    const kept = many.u.kept();
+    expect(bytes(kept)).toBeLessThanOrEqual(UNHEARD_MAX_BYTES);
+    expect(kept.length).toBe(40);
+    expect(kept.every((x) => (x.row.text ?? "").length <= SETTLED_TEXT_CHARS + 1)).toBe(true);
+  });
+
+  it("says when one more unknown send could not be written down, so that it is not sent at all", () => {
+    const t = bed({ said: () => ({ kind: "unknown", why: "spacesheep did not answer in time.", dead: false }) });
+    const big = "z".repeat(60_000);
+    expect(t.u.room(bodyOf(big, 0))).toBe(true);
+    // Each unknown send keeps its words twice (the row's, and the bytes to ask again with).
+    let i = 0;
+    while (i < 10 && t.u.room(bodyOf(big, i))) t.add(big, i++);
+    expect(i).toBeGreaterThan(1);
+    expect(i).toBeLessThan(5);
+    const bytes = new TextEncoder().encode(JSON.stringify(t.u.kept())).length;
+    expect(bytes).toBeLessThanOrEqual(UNHEARD_MAX_BYTES);
+    // Every one of them is still whole, and a small send still has room.
+    expect(t.u.kept().every((x) => x.row.text === big && !!x.body)).toBe(true);
+    expect(t.u.room(bodyOf("a short one", 99))).toBe(true);
   });
 });

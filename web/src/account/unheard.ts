@@ -13,12 +13,18 @@ import type { ControlActivity } from "@shared/api";
 import { cleanReason } from "@shared/reason";
 import type { ControlCommand } from "sessionpipe-core/control";
 import { type MachineRow, type MessageRow, messageRow, REMOTE_CODE_RE, toActivity } from "../../../server/control/rows";
+import { utf8Bytes } from "../../../server/store/log";
 import { type AccountDoors, FIRST_ASKING_OVER_MS, SEND_UNKNOWN_CODE, type Sent } from "./doors";
+import { SETTLED_TEXT_CHARS } from "./sends";
 
 /** How long after an asking the next one is made, while nothing else says to ask sooner. */
 export const UNHEARD_WAITS_MS: readonly number[] = [8000, 15_000, 30_000, 60_000];
 /** An asking meant for the moment the first asking is over is made this long after it. */
 export const BOUND_MARGIN_MS = 500;
+/** The most the rows here may take of the `sends` document (the hub takes 1 MiB a document;
+ *  the sends spacesheep carried have half of it, sends.ts). */
+export const UNHEARD_MAX_BYTES = 384 * 1024;
+const bytesOf = (list: readonly UnheardKept[]): number => utf8Bytes(JSON.stringify(list));
 /** A send that was settled as not sent, or as one nobody can say, is kept this long. */
 export const UNHEARD_KEEP_MS = 86_400_000;
 /** At most this many are kept; the oldest settled ones go first. */
@@ -48,6 +54,9 @@ export interface UnheardKept {
   dead?: boolean;
   /** How many looks in the jobs door could not be read (UNHEARD_LOOKS_MAX). */
   looks?: number;
+  /** spacesheep holds it (`job`: its id, or null where the list did not single it out), and
+   *  it has not yet been taken as a row like any other: it is kept here until it is. */
+  sent?: { job: number | null };
   /** Not sent: the refusal as a send answers it (`status`, and the body's reason, code, detail). */
   refusal?: { status: number; reason: string; code?: string; detail?: string };
   /** When it was settled. */
@@ -60,8 +69,9 @@ export interface UnheardOptions {
   /** The machine's row, once the account's list has brought it. */
   machine(id: string): MachineRow | undefined;
   /** spacesheep holds it: the row becomes a send like any other, under the same id (`job`
-   *  null: taken, and its job cannot be named). */
-  adopt(u: UnheardKept, cmd: ControlCommand, job: number | null): void;
+   *  null: taken, and its job cannot be named). True once it is one; false where it could
+   *  not be taken, and then it is kept here. */
+  adopt(u: UnheardKept, cmd: ControlCommand, job: number | null): boolean;
   /** No job was made: the refusal as a send of these bytes answers it now. */
   refused(u: UnheardKept, status: number, json: Record<string, unknown>): UnheardKept["refusal"];
   /** A row was added or changed: the page is told, and the document written. */
@@ -89,8 +99,12 @@ export interface Unheard {
   holding(machineId: string, cmd: ControlCommand): UnheardKept | undefined;
   /** Every row kept, newest first. */
   activity(): ControlActivity[];
-  /** What the document keeps. */
+  /** What the document keeps: within UNHEARD_MAX_BYTES, every unknown row whole. */
   kept(): UnheardKept[];
+  /** Whether one more send could be kept as unknown beside the unknown ones there are, were
+   *  its answer lost too. Where it could not, the send must not leave: an unknown send that
+   *  cannot be written down is one nobody would follow. */
+  room(body: Record<string, unknown>): boolean;
   /** Ask now (spacesheep can be reached again, the machines are listed). */
   kick(): void;
   stop(): void;
@@ -173,6 +187,13 @@ export function openUnheard(o: UnheardOptions): Unheard {
       .filter((u) => u.state !== "asking")
       .sort((a, b) => (a.row.id < b.row.id ? -1 : 1));
     while (rows.size > UNHEARD_MAX && settled.length) rows.delete(settled.shift()!.row.id);
+    // And within UNHEARD_MAX_BYTES of the document: a settled row is history (its long
+    // words are cut first, then the oldest go); one that is still unknown is never touched.
+    if (bytesOf([...rows.values()]) <= UNHEARD_MAX_BYTES) return;
+    for (const u of settled)
+      if (rows.has(u.row.id) && u.row.text !== undefined && u.row.text.length > SETTLED_TEXT_CHARS)
+        u.row.text = `${u.row.text.slice(0, SETTLED_TEXT_CHARS)}…`;
+    while (settled.length && bytesOf([...rows.values()]) > UNHEARD_MAX_BYTES) rows.delete(settled.shift()!.row.id);
   };
   const settle = (u: UnheardKept, state: "unsent" | "unknown"): void => {
     u.state = state;
@@ -182,6 +203,23 @@ export function openUnheard(o: UnheardOptions): Unheard {
     if (t) cancel(t);
     timers.delete(u.row.id);
     o.changed(unheardActivity(u));
+  };
+  /** The send is sent (`u.sent`): it becomes a send like any other. The row leaves here only
+   *  once that took; until then it is kept, and tried again at the next turn. */
+  const took = (u: UnheardKept, cmd: ControlCommand): void => {
+    let ok = false;
+    try {
+      ok = o.adopt(u, cmd, u.sent?.job ?? null);
+    } catch (e) {
+      console.error("[account] a sent send could not be kept as a row: %s", (e as Error)?.message ?? e);
+    }
+    if (ok) {
+      rows.delete(u.row.id);
+      const t = timers.get(u.row.id);
+      if (t) cancel(t);
+      timers.delete(u.row.id);
+    }
+    o.changed(null);
   };
   const schedule = (u: UnheardKept): void => {
     if (stopped || u.state !== "asking" || timers.has(u.row.id)) return;
@@ -210,6 +248,9 @@ export function openUnheard(o: UnheardOptions): Unheard {
     busy.add(u.row.id);
     tries.set(u.row.id, (tries.get(u.row.id) ?? 0) + 1);
     try {
+      // Known sent, and not yet taken as a row: that is all there is left to do, and
+      // spacesheep is asked nothing more for it.
+      if (u.sent && cmd) return took(u, cmd);
       if (!u.dead && u.body && cmd && m) {
         const said = await o.doors.ask({ id: u.row.machineId }, u.body, {
           again: true,
@@ -218,12 +259,10 @@ export function openUnheard(o: UnheardOptions): Unheard {
         });
         if (stopped || !rows.has(u.row.id)) return;
         if (said.kind === "sent") {
-          rows.delete(u.row.id);
-          const t = timers.get(u.row.id);
-          if (t) cancel(t);
-          timers.delete(u.row.id);
-          o.adopt(u, cmd, said.job);
-          return o.changed(null);
+          // spacesheep holds it. That is written on the row before anything else, so a send
+          // that is known to be sent is never dropped on its way to being a row like any other.
+          u.sent = { job: said.job };
+          return took(u, cmd);
         }
         if (said.kind === "refused") {
           u.refusal = o.refused(u, said.status, said.json);
@@ -314,7 +353,21 @@ export function openUnheard(o: UnheardOptions): Unheard {
       return undefined;
     },
     activity: () => [...rows.values()].map(unheardActivity).sort((a, b) => (a.id < b.id ? 1 : -1)),
-    kept: () => [...rows.values()],
+    kept() {
+      trim();
+      return [...rows.values()];
+    },
+    room(body) {
+      const unknown = [...rows.values()].filter((u) => u.state === "asking");
+      // As it would be kept: the command twice (the row's words, and the bytes to ask
+      // again with), what signed it, and the row's own fields.
+      const cmd = typeof body.cmd === "string" ? body.cmd : "";
+      const one =
+        2 * utf8Bytes(cmd) +
+        utf8Bytes(JSON.stringify([body.csig ?? null, body.grant ?? null, body.confirm ?? null])) +
+        1024;
+      return bytesOf(unknown) + one <= UNHEARD_MAX_BYTES;
+    },
     kick() {
       for (const u of rows.values()) {
         if (u.state !== "asking") continue;

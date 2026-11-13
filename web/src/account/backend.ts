@@ -42,6 +42,7 @@ import {
   startRelayReader,
 } from "../../../server/sources/relay";
 import { StoreCore } from "../../../server/store/core";
+import { utf8Bytes } from "../../../server/store/log";
 import { LabelsCore } from "../../../server/ui/labelsCore";
 import { LimitsCore } from "../../../server/ui/limitsCore";
 import { MarksCore } from "../../../server/ui/marksCore";
@@ -66,7 +67,7 @@ import {
 } from "./local";
 import { PageLog } from "./log";
 import { routes } from "./routes";
-import { fitSends, mergeSends, readSends } from "./sends";
+import { fitSends, mergeSends, readSends, SENDS_DOC_MAX_BYTES, SENDS_MAX_BYTES } from "./sends";
 import {
   type AccountShell,
   type AccountState,
@@ -234,7 +235,12 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
   let unheard: Unheard | null = null;
   let queuesNow: KeptQueues = keptSends ?? {};
   const saveSends = (): void => {
-    const doc = { ...fitSends(queuesNow), unheard: unheard?.kept() ?? [] };
+    // The whole document is held under what the hub takes: the unknown sends first (they
+    // are bounded by themselves, unheard.ts, and never cut), and the sends spacesheep
+    // carried in what is left, at most their own half.
+    const waiting = unheard?.kept() ?? [];
+    const left = SENDS_DOC_MAX_BYTES - utf8Bytes(JSON.stringify(waiting));
+    const doc = { ...fitSends(queuesNow, Math.min(SENDS_MAX_BYTES, left)), unheard: waiting };
     sends.save(doc);
     if (sendsUnread) local.write(sendsKey(shell.id), JSON.stringify(doc));
     else if (beside) {
@@ -391,8 +397,19 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     newId: (now) => newUlid(now),
     mayAsk: () => !gone && state === "ok",
     adopt(u, cmd, job) {
-      const m = control.machine(u.row.machineId);
-      if (!m) return;
+      // The computer may have left the account's list while the asking was out: the send is
+      // sent all the same, and its row is kept under the machine's id, as a row of a machine
+      // that left the list is (spacesheep's word on the job settles it).
+      const m: MachineRow = control.machine(u.row.machineId) ?? {
+        id: u.row.machineId,
+        name: u.row.machineId,
+        createdAt: new Date().toISOString(),
+        keys: [],
+        harnesses: [],
+        modes: [],
+        version: "",
+        pairings: [],
+      };
       // The same row, now a send like any other: followed by its job, or closed as one
       // spacesheep took and nobody can follow.
       nextId = u.row.id;
@@ -407,6 +424,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
       } finally {
         nextId = null;
       }
+      return true;
     },
     // The refusal as a send answers it (forwardRemoteSend's reading of spacesheep's): its
     // words, its code when it is written as one, and a hold under the word the page knows.
@@ -443,6 +461,12 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     }
     const held = cmd ? unheard?.holding(m.id, cmd) : undefined;
     if (held) throw new SendRefused(504, { reason: cleanReason(held.why), code: SEND_UNKNOWN_CODE });
+    // So many sends are unknown that one more could not be written down were its answer
+    // lost too: it does not leave the phone (not sent, in the words of why the others wait).
+    if (unheard && !unheard.room(b)) {
+      const why = unheard.kept().find((u) => u.state === "asking")?.why;
+      throw new SendRefused(503, { reason: cleanReason(why) || "spacesheep could not be reached." });
+    }
     const askedAt = Date.now();
     // The last job the page knew of as this send begins: its own job is looked for after it.
     const floor = lastJob;
@@ -674,7 +698,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
    *  storage keeps of the account's sessions and under its id is removed (with what
    *  belongs to no session, when the person disconnected it here). Then whoever draws the
    *  window is told. */
-  const drop = async (disconnected: Disconnected | null = null): Promise<void> => {
+  const drop = async (disconnected: Disconnected | null = null, asked = disconnected !== null): Promise<void> => {
     if (gone) return;
     const sessions = [...new Set([...store.snapshot().sessions.map((s) => s.key), ...seen])];
     gone = true;
@@ -688,7 +712,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     // The board leaves the screen as an empty one (`snapshot`). Its sessions are not
     // forgotten one by one: the labels and the marks follow a forgotten session, and would
     // write themselves empty at the hub, where they are the hub's to keep or to delete.
-    local.wipe(shell.id, sessions, { conveniences: disconnected !== null });
+    // `asked`: the person disconnected it here, however the hub's answer came.
+    local.wipe(shell.id, sessions, { conveniences: asked });
     await cache.destroy();
     emit({ kind: "snapshot", snapshot: snapshot() });
     changed();
@@ -877,7 +902,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
       disconnecting = false;
       // Refused, or failed part of the way: the hub's list says whether the account is still here.
       const now = await calls.status().catch(() => null);
-      if (now && !now.accounts.some((a) => a.id === shell.id)) await drop();
+      // Gone all the same: the person asked for it here, and it removes what Disconnect removes.
+      if (now && !now.accounts.some((a) => a.id === shell.id)) await drop(null, true);
       throw e;
     }
     disconnecting = false;

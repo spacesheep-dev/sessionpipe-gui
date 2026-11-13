@@ -48,6 +48,8 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
    *  it and its answer never came back in the hub's time; `dropped`: the app's own
    *  protocol failed the request after spacesheep took it. */
   const sendFaults: ("lost" | "unheard" | "dropped")[] = [];
+  /** While set, the answer to a send that reached spacesheep is held back until it resolves. */
+  const hold: { until: Promise<void> | null } = { until: null };
   const timedOut = (): Response =>
     new Response(JSON.stringify({ hub: true, reason: "timeout", error: "spacesheep did not answer in time." }), {
       status: 504,
@@ -71,6 +73,8 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
       ...(typeof init?.body === "string" ? { body: init.body } : {}),
       ...(init?.signal ? { signal: init.signal } : {}),
     });
+    // A send's answer is on its way back, and takes its time.
+    if (init?.method === "POST" && hold.until) await hold.until;
     return new Response(a.status === 204 ? null : a.body, { status: a.status, headers: a.headers });
   }) as typeof fetch;
   /** Documents the hub cannot read: each name fails this many times more (an `io` error). */
@@ -143,6 +147,7 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
     stored,
     gone,
     sendFaults,
+    hold,
     start,
     stop: () => backend?.stop(),
   };
@@ -929,6 +934,78 @@ describe("a page's own backend on a spacesheep account", () => {
       expect((await send(b, signed("claude-code:s-1", "and then"), 100)).body.unheard).toBeUndefined();
     });
 
+    it("the computer leaves the account's list while the asking again is out: the send spacesheep has is still a row, followed, and in the document", async () => {
+      const b = await ready();
+      r.sendFaults.push("unheard", "lost", "lost");
+      const sent = await send(b, signed("claude-code:s-1", "into the dark"), 7000);
+      expect(sent.body).toMatchObject({ unheard: { state: "asking" } });
+      // The next asking reaches spacesheep (which says it had it), and its answer is slow.
+      let release = (): void => {};
+      r.hold.until = new Promise<void>((done) => {
+        release = done;
+      });
+      await tick(9000);
+      // Meanwhile the computer is taken off the account, and the list is read again.
+      r.ss.machines = [];
+      await tick(60_000);
+      expect((await (await b.answer("/api/ui/control/machines")).json()) as { machines: unknown[] }).toEqual({
+        machines: [],
+      });
+      r.hold.until = null;
+      release();
+      await tick(1000);
+      // Sent, and not gone: the same row, a send like any other, with its job.
+      const row = (await rows(b)).find((a) => a.id === sent.body.id)!;
+      expect(row).toMatchObject({ text: "into the dark", machineId: M1 });
+      expect(row.unheard).toBeUndefined();
+      await b.flushed();
+      const doc = JSON.parse([...r.hub.accounts.values()][0]!.docs.get("sends")!) as {
+        queues: Record<string, { id: string; remoteJob?: number }[]>;
+        unheard: unknown[];
+      };
+      expect(doc.unheard).toEqual([]);
+      expect(doc.queues[M1]).toMatchObject([{ id: sent.body.id, remoteJob: 1 }]);
+      // spacesheep's word on the job settles it, though the computer is not listed.
+      r.ss.settle(1, "done");
+      await tick(4000);
+      expect((await rows(b)).find((a) => a.id === sent.body.id)).toMatchObject({ outcome: "delivered" });
+    });
+
+    it("the document is measured whole, and a send that could not be written down as unknown does not leave the phone", async () => {
+      const b = await ready();
+      const big = "w".repeat(70_000);
+      // Unknown sends with long words, to other sessions, while no answer comes back, until
+      // one more would not fit.
+      r.hub.down = true;
+      let n = 0;
+      for (;;) {
+        const before = sends();
+        const out = await send(b, signed(`claude-code:big-${n}`, big), 7000);
+        if (out.status !== 201) {
+          // Not sent, in the words of why the others wait; nothing was asked of spacesheep for it.
+          expect(out).toEqual({ status: 503, body: { reason: "spacesheep could not be reached." } });
+          expect(sends() - before).toBeLessThanOrEqual(n);
+          break;
+        }
+        expect(out.body).toMatchObject({ unheard: { state: "asking" } });
+        n++;
+        expect(n).toBeLessThan(10);
+      }
+      expect(n).toBeGreaterThan(1);
+      await b.flushed();
+      const kept = [...r.hub.accounts.values()][0]!.docs.get("sends")!;
+      // Under what the hub takes, with every unknown send whole in it.
+      expect(new TextEncoder().encode(kept).length).toBeLessThan(1024 * 1024);
+      const doc = JSON.parse(kept) as { unheard: { state: string; row: { text: string }; body?: { cmd: string } }[] };
+      expect(doc.unheard).toHaveLength(n);
+      expect(doc.unheard.every((u) => u.state === "asking" && u.row.text === big && !!u.body)).toBe(true);
+      // A short message to another session still goes.
+      r.hub.down = false;
+      const short = await send(b, signed("claude-code:s-2", "a short one"), 100);
+      expect(short.status).toBe(201);
+      expect(short.body.unheard).toBeUndefined();
+    });
+
     it("another session's send heard in between does not hide the unknown send's own job", async () => {
       const b = await ready();
       r.sendFaults.push("unheard", "lost", "lost");
@@ -1449,6 +1526,23 @@ describe("a page's own backend on a spacesheep account", () => {
     await b.disconnect();
     expect(r.local).toEqual([`wipe ${id} [claude-code:s-1,claude-code:long-ago] and the conveniences`]);
     expect([...r.stored.keys()].filter((k) => k.endsWith(`.${id}`))).toEqual([]);
+  });
+
+  it("a Disconnect the person asked for removes what Disconnect removes, also when the hub's answer never came", async () => {
+    const s = new Session("s-1");
+    r.ss.push([s.ev("session.started", {}, { tier: 2 })]);
+    const b = await r.start();
+    await tick(400);
+    const id = b.view().id;
+    // The hub forgets the account and then fails to say so.
+    const real = r.calls.disconnect;
+    r.calls.disconnect = async (account) => {
+      await real(account);
+      throw { code: "failed", message: "The app could not answer." };
+    };
+    await expect(b.disconnect()).rejects.toMatchObject({ code: "failed" });
+    expect(b.view().state).toBe("gone");
+    expect(r.local).toEqual([`wipe ${id} [claude-code:s-1] and the conveniences`]);
   });
 
   it("an account the hub no longer lists is left the same way, with no answer to pass on", async () => {

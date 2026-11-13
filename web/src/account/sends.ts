@@ -11,6 +11,9 @@ import { utf8Bytes } from "../../../server/store/log";
 
 /** The document's ceiling here: half of what the hub takes. */
 export const SENDS_MAX_BYTES = 512 * 1024;
+/** The whole document's ceiling, with the unknown sends beside the queues (unheard.ts): under
+ *  the hub's 1 MiB, with room for the document's own framing. */
+export const SENDS_DOC_MAX_BYTES = 960 * 1024;
 /** Characters of a settled row's text kept once the document is over its ceiling. */
 export const SETTLED_TEXT_CHARS = 400;
 
