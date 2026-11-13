@@ -185,6 +185,8 @@ export class HubStandIn {
   startRefusal: HubRefused | null = null;
   /** A start waits for this before it asks spacesheep (a test holds the "connecting" moment). */
   holdStart: Promise<void> | null = null;
+  /** The documents the hub cannot read (`io`), by name: "labels", "marks", "limits", "sends". */
+  unreadDocs = new Set<string>();
   /** `acct_disconnect` cannot remove the key (`io`: nothing was changed). */
   disconnectFails = false;
   /** When each connect was started and each device ask was made, for the hub's own limits. */
@@ -328,6 +330,7 @@ export class HubStandIn {
         return this.deviceAsk(this.account(args.id));
       case "acct_doc_get": {
         const a = this.account(args.id);
+        if (this.unreadDocs.has(String(args.name))) throw new HubRefused("io", "The document could not be read.");
         const text = a.docs.get(this.docName(args.name));
         return text === undefined ? null : (JSON.parse(text) as unknown);
       }

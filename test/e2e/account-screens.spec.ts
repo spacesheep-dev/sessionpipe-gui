@@ -671,3 +671,165 @@ test.describe("a phone that cannot sign", () => {
     await shot(page, "approve-cannot");
   });
 });
+
+// What follows is not a screen of its own: it is what the page's own backend says on the
+// screens the app already has, each in its place (the pictures page's "What else an
+// account shows").
+test.describe("what else an account shows", () => {
+  const json = { "content-type": "application/json" };
+  /** A phone whose key the computer trusts, as after an approval long ago (asked from the
+   *  page, where the shell holds the key). */
+  const trusted = async (b: Bed): Promise<void> => {
+    const id = [...b.hub.accounts.keys()][0]!;
+    const asked = await b.page.evaluate(
+      (account) =>
+        (
+          window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }
+        ).__TAURI_INTERNALS__.invoke("acct_device_ask", { id: account }) as Promise<{ keyId: string }>,
+      id,
+    );
+    (b.ss.machines[0]!.passkey_ids as string[]).push(asked.keyId);
+    b.ss.trusting.set(asked.keyId, [MACHINE]);
+  };
+  const composer = (page: Page) => page.locator("textarea").first();
+
+  test("a page only a GUI server has, the search, and the files of a session", async ({ browser }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}/setup`);
+      await expect(page.getByText("This needs a sessionpipe-gui server")).toBeVisible();
+      await expect(page.getByText("This app is showing a spacesheep account, which has none.")).toBeVisible();
+      await expect(page.getByRole("link", { name: "Go to Board" }).first()).toBeVisible();
+      await shot(page, "also-not-here");
+      await page.goto(`${b.server.url}/search`);
+      await expect(page.getByText("Prompts, replies and tool calls from every machine on this account.")).toBeVisible();
+      await shot(page, "also-search");
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      await page.getByRole("button", { name: "Files" }).first().click();
+      await expect(
+        page.getByText(
+          "The files this session reads and changes show here by name. spacesheep is never sent what is in them.",
+        ),
+      ).toBeVisible();
+      await shot(page, "also-files");
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("an account with nothing on it: the first board, the same at spacesheep's limit, and no machines", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    // Nothing was sent to this account yet, and no computer is paired with it.
+    b.ss.drop(b.ss.newest);
+    b.ss.machines = [];
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      b.ss.limit = 0;
+      await page.goto(b.server.url);
+      await expect(page.getByText("This app is reading too often for spacesheep")).toBeVisible();
+      await expect(page.getByText("It catches up by itself.")).toBeVisible();
+      await shot(page, "also-first-limited");
+      b.ss.limit = 240;
+      await page.goto(b.server.url);
+      await expect(page.getByText("Waiting for your first session")).toBeVisible({ timeout: 15_000 });
+      await expect(
+        page.getByText("Start an agent on a computer paired with this account and it appears here."),
+      ).toBeVisible();
+      await shot(page, "also-empty-board");
+      await page.goto(`${b.server.url}/machines`);
+      await expect(page.getByText("No machines yet")).toBeVisible();
+      await expect(
+        page.getByText(`Pair a computer with this account on ${HOST}. Its sessions show up here.`),
+      ).toBeVisible();
+      await shot(page, "also-no-machines");
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("what the phone cannot keep, said once: the sessions, and the labels and read marks", async ({ browser }) => {
+    // No storage to keep the sessions in.
+    let b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    try {
+      await b.context.addInitScript(() => {
+        Object.defineProperty(window, "indexedDB", { value: undefined, configurable: true });
+      });
+      await b.page.goto(b.server.url);
+      await expect(b.page.getByText("Sessions are not kept on this phone")).toBeVisible();
+      await expect(
+        b.page.getByText("Its storage could not be opened, so they load again each time the app opens."),
+      ).toBeVisible();
+      await shot(b.page, "also-not-kept");
+    } finally {
+      await b.close();
+    }
+    // The hub cannot read the person's labels and marks.
+    b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    try {
+      b.hub.unreadDocs.add("labels").add("marks");
+      await b.page.goto(b.server.url);
+      await expect(b.page.getByText("Labels and read marks are not being saved")).toBeVisible({ timeout: 15_000 });
+      await expect(
+        b.page.getByText("This phone could not read the ones it keeps, so changes made now are not kept."),
+      ).toBeVisible();
+      await shot(b.page, "also-labels-not-saved");
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("spacesheep out of reach, a send it took without naming its job, and one nobody heard the answer to", async ({
+    browser,
+  }) => {
+    test.setTimeout(120_000);
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      await trusted(b);
+      await page.reload();
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      const box = composer(page);
+      await expect(box).toBeEnabled();
+      // spacesheep takes a send and its answer names no job.
+      b.ss.sendAnswers.push(() => ({ status: 202, headers: json, body: "{}" }));
+      await box.fill("Does the retry stop now?");
+      await box.press("Enter");
+      await expect(
+        page.getByText("Sent, but this app can't follow it. Check spacesheep.dev to see how it went.").first(),
+      ).toBeVisible({ timeout: 15_000 });
+      await shot(page, "also-sent-not-followed");
+      // A send spacesheep takes, with every answer lost on the way back.
+      b.hub.unheard = 99;
+      await box.fill("And the payout webhook?");
+      await box.press("Enter");
+      await expect(
+        page.getByText(
+          "It may have been sent: spacesheep did not answer in time. Look at the session before you send it again.",
+        ),
+      ).toBeVisible({ timeout: 20_000 });
+      await expect(box).toHaveValue("And the payout webhook?");
+      await shot(page, "also-may-have-been-sent");
+      // The app hears of it by itself: the words leave the box.
+      b.hub.unheard = 0;
+      await expect(box).toHaveValue("", { timeout: 60_000 });
+      // spacesheep cannot be reached: the board says so, with the way to ask again.
+      b.hub.down = true;
+      await page.goto(b.server.url);
+      await expect(page.locator("text=Reconnecting… >> visible=true").first()).toBeVisible({ timeout: 60_000 });
+      await shot(page, "also-reconnecting");
+    } finally {
+      await b.close();
+    }
+  });
+});
