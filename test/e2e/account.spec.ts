@@ -184,6 +184,13 @@ test("shows the board and a session from the relay, and what happens next as it 
   await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
   await expect.poll(async () => (await view()).relay.state).toBe("ok");
   expect(await view()).toMatchObject({ state: "ok", cache: "indexeddb", catching: false, store: { sessions: 1 } });
+  // The reads spent of spacesheep's limit are written down as they are spent, in the page's
+  // own storage: a reload or a kill loses none of them.
+  const spent = await page.evaluate(() => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith("sessionpipe-gui.account.reads."));
+    return key ? (JSON.parse(localStorage.getItem(key)!) as { reads: number[] }).reads.length : 0;
+  });
+  expect(spent).toBeGreaterThan(0);
   // A second session starts while the board is on screen.
   ss.push(
     started(
@@ -392,8 +399,9 @@ test("a 429 from spacesheep is waited out and read on from; a full room at the h
   hub.busy = 3;
   ss.push(started("s-busy", "Through a busy hub", "Hello?", "Hello."));
   await expect(page.getByText("Through a busy hub").first()).toBeVisible({ timeout: 15_000 });
+  // (The read that was out when the room filled may bring the session before any is refused.)
+  await expect.poll(() => hub.log.filter((l) => l.endsWith(" busy")).length).toBeGreaterThanOrEqual(3);
   expect((await view()).relay.state).toBe("ok");
-  expect(hub.log.filter((l) => l.endsWith(" busy")).length).toBeGreaterThanOrEqual(3);
 
   // Forty events that do not fit one answer: asked for in smaller pages, all of them read.
   const events = (await view()).store.events;

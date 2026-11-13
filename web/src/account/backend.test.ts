@@ -31,7 +31,7 @@ const machine = (over: Record<string, unknown> = {}) => ({
 });
 
 /** A hub over a spacesheep, an account connected on it, and a page's backend on that. */
-function rig(o: { features?: string[]; cache?: KeptCache } = {}) {
+function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } = {}) {
   const ss = new FakeSpacesheep();
   ss.machines = [machine()];
   const hub = new HubStandIn({
@@ -81,6 +81,8 @@ function rig(o: { features?: string[]; cache?: KeptCache } = {}) {
   const notices: AccountNotice[] = [];
   /** The page's own storage, as the backend used it: "claim <id>", "wipe". */
   const local: string[] = [];
+  /** What it holds, across launches (a wipe empties it). */
+  const stored = new Map<string, string>();
   /** Each time the backend said the account is gone: the hub's answer, or null. */
   const gone: unknown[] = [];
   let backend: AccountBackend | null = null;
@@ -92,13 +94,25 @@ function rig(o: { features?: string[]; cache?: KeptCache } = {}) {
       fetch: fetchDoors,
       idb: null,
       ...(o.cache ? { cache: o.cache } : {}),
-      local: { claim: (id) => void local.push(`claim ${id}`), wipe: () => void local.push("wipe") },
+      local: {
+        claim: (id) => void local.push(`claim ${id}`),
+        wipe: () => {
+          local.push("wipe");
+          stored.clear();
+        },
+        read: (key) => stored.get(key) ?? null,
+        write: (key, value) => {
+          if (o.noStorage) return false;
+          stored.set(key, value);
+          return true;
+        },
+      },
       onGone: (d) => void gone.push(d),
       notice: (n) => notices.push(n),
     });
     return backend;
   };
-  return { ss, hub, asked, notices, calls, failGet, sets, local, gone, start, stop: () => backend?.stop() };
+  return { ss, hub, asked, notices, calls, failGet, sets, local, stored, gone, start, stop: () => backend?.stop() };
 }
 
 /** The frames a page gets from a stream it opened. */
@@ -540,6 +554,77 @@ describe("a page's own backend on a spacesheep account", () => {
     await tick(50);
     expect(told).toEqual(["open", "snapshot"]);
     off();
+  });
+
+  describe("the reads spent of spacesheep's limit", () => {
+    /** A relay as full as it gets: 50 000 events, a hundred reads to take it all. */
+    const fill = (): void => {
+      const all: ReturnType<Session["ev"]>[] = [];
+      for (let i = 0; i < 100; i++) {
+        const s = new Session(`s-${i}`);
+        for (let n = 0; n < 500; n++)
+          all.push(s.ev(n ? "tool.started" : "session.started", { call_id: `c${n}` }, { tier: 2 }));
+      }
+      r.ss.push(all);
+    };
+    const keptReads = (): number[] => {
+      const text = [...r.stored.entries()].find(([k]) => k.startsWith("sessionpipe-gui.account.reads."))?.[1];
+      return text ? (JSON.parse(text) as { reads: number[] }).reads : [];
+    };
+
+    it("are written down with every page, so a page killed in the middle of a backlog has lost none", async () => {
+      fill();
+      await r.start();
+      // A moment in: no timer of the reader's has run, nothing was stopped or hidden.
+      await tick(300);
+      const spent = r.ss.relayReads;
+      expect(spent).toBeGreaterThan(10);
+      expect(keptReads().length).toBeGreaterThanOrEqual(spent - 1);
+      // Killed here (never stopped): the next page starts from what was written.
+    });
+
+    it("are kept with nowhere to keep the sessions: opened four times in ten minutes, spacesheep's limit is never met", async () => {
+      fill();
+      const seen: string[] = [];
+      for (let launch = 1; launch <= 4; launch++) {
+        const b = await r.start();
+        for (let i = 0; i < 12; i++) {
+          await tick(5000);
+          seen.push(b.view().relay.state);
+        }
+        b.stop();
+        await tick(30_000);
+      }
+      // Six minutes in all, inside one of spacesheep's windows: it counted every read, and
+      // never had to refuse one.
+      expect(seen).not.toContain("limited");
+      expect(r.ss.relayReads).toBeLessThanOrEqual(240);
+      expect(r.ss.log.filter((l) => l.includes("/relay?")).length).toBe(r.ss.relayReads);
+      expect(keptReads().length).toBeGreaterThan(150);
+      expect(keptReads().length).toBe(r.ss.relayReads);
+    }, 120_000);
+
+    it("where the page's own storage will not take them, they are kept beside the sessions as before", async () => {
+      const cache = keptCache();
+      r = rig({ cache, noStorage: true });
+      const s = new Session("s-1");
+      r.ss.push([s.ev("session.started", {}, { tier: 2 })]);
+      const b = await r.start();
+      await tick(400);
+      b.stop();
+      expect(r.stored.size).toBe(0);
+      expect((JSON.parse(cache.meta.get("reads")!) as { reads: number[] }).reads.length).toBeGreaterThan(0);
+    });
+
+    it("go with a disconnect: a new connect is a new key", async () => {
+      const s = new Session("s-1");
+      r.ss.push([s.ev("session.started", {}, { tier: 2 })]);
+      const b = await r.start();
+      await tick(400);
+      expect(keptReads().length).toBeGreaterThan(0);
+      await b.disconnect();
+      expect(keptReads()).toEqual([]);
+    });
   });
 
   describe("a cold start whose first read fails", () => {

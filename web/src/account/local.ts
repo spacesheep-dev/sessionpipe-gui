@@ -97,3 +97,27 @@ export function claimLocal(id: string, local: Kept | null = storage("localStorag
   }
   return gone;
 }
+
+/** Where the reader's read times of account `id` are kept (backend.ts): a small value that
+ *  must survive a page killed without a word, so it is written here, where a write is done
+ *  when it returns. Not a setting: it goes with a disconnect (a new connect is a new key). */
+export const readsKey = (id: string): string => `sessionpipe-gui.account.reads.${id}`;
+
+export function readLocal(key: string, local: Kept | null = storage("localStorage")): string | null {
+  try {
+    return local?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** False when it could not be kept (no storage, or it is full). */
+export function writeLocal(key: string, value: string, local: Kept | null = storage("localStorage")): boolean {
+  try {
+    if (!local) return false;
+    local.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -43,7 +43,7 @@ import type { ApiBackend } from "../lib/net";
 import { type EventCache, openCache, withoutSessions } from "./cache";
 import { type AccountDocs, type DocName, openDocs } from "./docs";
 import { type AccountDoors, type DoorAnswer, openDoors } from "./doors";
-import { claimLocal, wipeLocal } from "./local";
+import { claimLocal, readLocal, readsKey, wipeLocal, writeLocal } from "./local";
 import { PageLog } from "./log";
 import { routes } from "./routes";
 import { fitSends, readSends } from "./sends";
@@ -75,8 +75,14 @@ export interface AccountBackendOptions {
   /** The cache itself, in place of one opened on `idb` (a test's). */
   cache?: EventCache;
   /** The page's own storage (local.ts): claimed for this account as the window opens, and
-   *  emptied of all but the app's settings when the account goes. Absent: this page's. */
-  local?: { claim(id: string): void; wipe(): void };
+   *  emptied of all but the app's settings when the account goes; and where the reader's
+   *  read times are written (`write` says whether it was kept). Absent: this page's. */
+  local?: {
+    claim(id: string): void;
+    wipe(): void;
+    read(key: string): string | null;
+    write(key: string, value: string): boolean;
+  };
   /** The account is gone from this phone (disconnected here, or the hub says it is no
    *  longer listed) and nothing of it is kept by this page any more: whoever draws the
    *  window leaves it. With the hub's answer when it was this page's own disconnect. */
@@ -153,7 +159,12 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     calls.status().catch(() => null),
   ]);
   const loaded = await cache.load();
-  const local = o.local ?? { claim: (id: string) => void claimLocal(id), wipe: () => void wipeLocal() };
+  const local = o.local ?? {
+    claim: (id: string) => void claimLocal(id),
+    wipe: () => void wipeLocal(),
+    read: (key: string) => readLocal(key),
+    write: (key: string, value: string) => writeLocal(key, value),
+  };
   // What another account's sessions left in this page's own storage goes before this one's
   // are shown. (What an account left in IndexedDB is swept by every window as it opens: gone.ts.)
   local.claim(shell.id);
@@ -307,6 +318,16 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     onUnauthorized: () => reader?.unauthorized(),
   });
   const kept = new Map<RelayKept, unknown>(Object.entries(loaded.kept) as [RelayKept, unknown][]);
+  // The read times are kept in the page's own storage, whatever the events are kept in: it
+  // is there when IndexedDB is not, and a write to it is done when it returns, so a page
+  // reloaded or killed in the middle of a backlog has not lost what it spent. (What
+  // IndexedDB holds of them is from a page that had nowhere else, and is read only then.)
+  try {
+    const text = local.read(readsKey(shell.id));
+    if (text) kept.set("reads", JSON.parse(text) as unknown);
+  } catch {
+    // Not readable: as with none kept, a third of the budget is taken as spent.
+  }
   let pending: StoredEvent[] = [];
   const me = first?.accounts.find((a) => a.id === shell.id);
   const connectedAt = me?.connectedAt ? Date.parse(me.connectedAt) : Number.NaN;
@@ -357,6 +378,10 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
         read: (name) => kept.get(name),
         write(name, value) {
           kept.set(name, value);
+          if (name === "reads") {
+            if (!local.write(readsKey(shell.id), JSON.stringify(value))) cache.put(name, value);
+            return;
+          }
           if (name !== "cursor") return cache.put(name, value);
           // The page and the cursor after it, as one write.
           cache.page((value as { cursor: number }).cursor, pending, value);
@@ -397,6 +422,9 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
       backlog: true,
       fresh,
       onPage(p) {
+        // Every read spent is written down as it is spent (a few kilobytes, at once): a
+        // backlog is a hundred reads in a few seconds, and the next launch must know of them.
+        reader?.flush();
         if (!p.more) return caughtUp();
         if (!catching) {
           catching = true;
@@ -442,9 +470,10 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
       onJobs: (jobs, through, serverNow) => control.remote.applyRemoteJobs(jobs as RemoteJobWord[], through, serverNow),
     });
   control.onRemoteKick = () => reader?.kickJobs();
-  // A page is closed without a word (the app goes to the background, the window reloads):
-  // the read times are written down when it leaves the screen, so the next launch goes on
-  // from the same budget and not from a third taken as spent.
+  // The read times are written with every page taken (above) and by the reader's own timer.
+  // A read that brought no page (a failure, spacesheep's limit) is written by that timer,
+  // within fifteen seconds; when the page leaves the screen they are written at once, so a
+  // launch after the app was put away goes on from the same budget.
   const onHide = (): void => {
     if (typeof document === "undefined" || document.visibilityState === "hidden") reader?.flush();
   };
