@@ -54,7 +54,12 @@ export function phoneLine(view: ApproveView | null): { mark: "ok" | "wait" | "wa
     case "approved":
       return { mark: "ok", words: N.approveCanSend };
     case "cooling":
-      return { mark: "wait", words: N.composerCooling(ThisPhone(), clock(view.phase.until)) };
+      return {
+        mark: "wait",
+        words: view.phase.exact
+          ? N.composerCooling(ThisPhone(), clock(view.phase.until))
+          : N.rowCoolingBy(ThisPhone(), clock(view.phase.until)),
+      };
     case "waiting":
       return { mark: "wait", words: N.approveWaiting };
     case "dropped":

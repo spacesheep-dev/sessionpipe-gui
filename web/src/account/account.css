@@ -102,6 +102,8 @@
 }
 .approve-actions .btn--lg {
   flex: 1 1 auto;
+  /* The width of a phone's column at most: on a tablet it is a button, not a bar. */
+  max-width: 360px;
   min-height: 46px;
   border-radius: 12px;
 }

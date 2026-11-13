@@ -59,6 +59,8 @@ export default function ApprovePhone() {
     return () => clearInterval(t);
   }, []);
 
+  /** Approved, and inside the hour a new device waits: no computer's row says it can send. */
+  const cooling = view?.phase.kind === "cooling" ? view.phase : null;
   const ask = () => void watch?.ask();
   const err = st.error ? approveError(st.error, now) : null;
   const elsewhere = (
@@ -155,10 +157,21 @@ export default function ApprovePhone() {
             <section className="form-group" aria-label="Machines">
               <ul className="form-list">
                 {view.machines.map((m) => (
-                  <li key={m.id} className="form-row form-row--kv" data-machine={m.state}>
+                  <li
+                    key={m.id}
+                    className="form-row form-row--kv"
+                    data-machine={m.state === "can" && cooling ? "waits" : m.state}
+                  >
                     <span className="form-key approve-machine">{m.name}</span>
                     <span className="form-kv">
-                      {m.state === "can" ? (
+                      {m.state === "can" && cooling ? (
+                        // Approved there, and inside the hour: it does not say the phone can send.
+                        <Mark kind="wait">
+                          {cooling.exact
+                            ? N.approveRowFrom(clock(cooling.until))
+                            : N.approveRowBy(clock(cooling.until))}
+                        </Mark>
+                      ) : m.state === "can" ? (
                         <Mark kind="ok">{N.approveCanSend}</Mark>
                       ) : m.state === "old" ? (
                         <Mark kind="warn">{N.approveOld}</Mark>
