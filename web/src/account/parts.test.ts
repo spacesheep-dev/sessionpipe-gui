@@ -103,6 +103,27 @@ describe("the account's doors", () => {
     expect(JSON.stringify(asked.map((a) => a.init?.headers))).not.toMatch(/authorization/i);
   });
 
+  it("a send refused inside a new key's hour tells until when: on this phone's clock where spacesheep says its own", async () => {
+    const T0 = 1_800_000_000_000;
+    const told: number[] = [];
+    const cooling = (more: Record<string, unknown>) =>
+      answer(403, { error: "This device was approved less than an hour ago.", code: "cooling", ...more });
+    // spacesheep's clock is three hours ahead of this phone's, and twenty minutes are left.
+    const theirs = T0 + 3 * 3_600_000;
+    const { doors } = open(
+      [cooling({ until: theirs + 1_200_000, now: theirs }), cooling({ until: T0 + 900_000 }), cooling({})],
+      {
+        now: () => T0,
+        onCooling: (until: number) => void told.push(until),
+      },
+    );
+    // The refusal itself passes as it is, each time.
+    for (let i = 0; i < 3; i++)
+      expect(await doors.send(m, {})).toMatchObject({ status: 403, json: { code: "cooling" } });
+    // With its `now`: the time left, from this phone's now. Without: as it wrote it. No `until`: nothing told.
+    expect(told).toEqual([T0 + 1_200_000, T0 + 900_000]);
+  });
+
   it("spacesheep's own refusals pass as they are; only its own 401 says the key is refused", async () => {
     let refused = 0;
     const { doors } = open(
