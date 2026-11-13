@@ -82,19 +82,25 @@ export function Machines() {
       {!account && <PendingPairings />}
       {!account && <PendingDevices />}
       {rp === null ? null : machines.length === 0 ? (
-        <EmptyState
-          center
-          title="This Mac is the only machine"
-          actions={
-            account ? undefined : (
-              <Link to="/connect" className="btn btn--primary">
-                Pair another…
-              </Link>
-            )
-          }
-        >
-          Sessions from another computer show up here once it sends to this receiver.
-        </EmptyState>
+        account ? (
+          <EmptyState center title="No machines yet">
+            Pair a computer with this account on {new URL(receiverOrigin()).host}. Its sessions show up here.
+          </EmptyState>
+        ) : (
+          <EmptyState
+            center
+            title="This Mac is the only machine"
+            actions={
+              account ? undefined : (
+                <Link to="/connect" className="btn btn--primary">
+                  Pair another…
+                </Link>
+              )
+            }
+          >
+            Sessions from another computer show up here once it sends to this receiver.
+          </EmptyState>
+        )
       ) : (
         <>
           {paired && !secure && <p className="machines-note">{sentence(signHint(rp)).replace(/\.?$/, ".")}</p>}

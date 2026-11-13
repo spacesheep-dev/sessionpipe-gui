@@ -55,7 +55,8 @@ async function boot() {
   // The receiver this window shows is a spacesheep account (the shell's contract says so,
   // and only it): there is no receiver to ask, and the page carries its own board
   // (account/). Its code is loaded here and nowhere else.
-  const account = accountMode() ? await (await import("./account/start")).startAccount() : null;
+  const accountCode = accountMode() ? await import("./account/start") : null;
+  const account = accountCode ? await accountCode.startAccount() : null;
   const mock = !account && isMockMode();
   const transport: Transport = account
     ? account.transport
@@ -77,6 +78,7 @@ async function boot() {
       </StoreContext.Provider>
     </StrictMode>,
   );
+  accountCode?.showNotices();
 }
 
 void boot();

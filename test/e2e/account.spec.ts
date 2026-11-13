@@ -399,7 +399,7 @@ test("what only a receiver has is not offered, and no page asks for it", async (
   // …and are no pages when an address names them.
   for (const route of ["/workflows", "/connect", "/setup", "/themes", "/phone", "/pair?code=abcdefgh"]) {
     await page.goto(server.url + route);
-    await expect(page.locator("[data-missing]"), route).toBeVisible();
+    await expect(page.locator("[data-no-receiver]"), route).toContainText("This needs a sessionpipe-gui server");
   }
   // No session offers to be forgotten: the account holds it.
   await page.goto(`${server.url}/s/claude-code/s-invoice`);
@@ -466,4 +466,88 @@ test("in all of it, nothing was asked of a GUI server, and the hub was asked for
   expect(hub.log.filter((l) => /not_a_door|bad_query|bad_body|not_signed|forbidden/.test(l))).toEqual([]);
   // Every request the server saw is the bundle, the hub's own, or a door.
   expect(server.seen.filter((r) => /^\w+ \/(api|themes|skins|attachments)\//.test(r))).toEqual([]);
+});
+
+test.describe("a phone that cannot sign, with no storage to keep the board in", () => {
+  let ss2: FakeSpacesheep;
+  let hub2: HubStandIn;
+  let server2: AccountServer;
+  let context2: BrowserContext;
+  let page2: Page;
+
+  test.beforeAll(async ({ browser }) => {
+    ss2 = new FakeSpacesheep();
+    ss2.machines = [
+      {
+        id: MACHINE,
+        name: NAME,
+        online: true,
+        last_seen: Date.now(),
+        agents: ["claude-code"],
+        modes: ["waiter"],
+        passkey_ids: ["a-passkey-made-on-spacesheep"],
+        key_types: ["passkey", "device"],
+      },
+    ];
+    const s = new Session("s-android");
+    const named = { ...on, session: { ...on.session, title: "Read on an Android phone" } };
+    ss2.push([
+      s.ev("session.started", { source: "startup" }, named),
+      s.ev("turn.started", { turn_id: "t1" }, named),
+      s.ev("turn.transcript", { turn: 1, user: "Is the build green?", assistant: "It is." }, named),
+      s.ev("turn.ended", { turn_id: "t1" }, named),
+    ]);
+    // Android as the contract will say it once the mode is on there: the signer answers
+    // `status` and never signs.
+    hub2 = new HubStandIn({
+      upstream: { origin: "https://spacesheep.test", ask: (req) => ss2.handle(req) },
+      platform: "android",
+    });
+    hub2.add("me@example.com", ss2.key);
+    server2 = await startAccountServer({ web: WEB, hub: hub2 });
+    context2 = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      storageState: { cookies: [], origins: [] },
+    });
+    await context2.addInitScript(fakeShell, { signer: "Sending from this phone comes in a later version" });
+    // Storage that will not open, as in a private window.
+    await context2.addInitScript(() => {
+      Object.defineProperty(window, "indexedDB", {
+        value: {
+          open() {
+            throw new DOMException("The operation is insecure.", "SecurityError");
+          },
+        },
+      });
+    });
+    page2 = await context2.newPage();
+  });
+  test.afterAll(async () => {
+    await context2?.close();
+    await server2?.close();
+  });
+
+  test("the board is there all the same, from memory, and the phone says once that it is not kept", async () => {
+    await page2.goto(server2.url);
+    await expect(page2.getByText("Read on an Android phone").first()).toBeVisible();
+    await expect(page2.getByText("Sessions are not kept on this phone").first()).toBeVisible();
+    const kept = await page2.evaluate(
+      () =>
+        (window as unknown as { __sessionpipeAccount: { view(): { cache: string } } }).__sessionpipeAccount.view()
+          .cache,
+    );
+    expect(kept).toBe("memory");
+  });
+
+  test("it reads; where it would send, one line says why not and leads to the session on spacesheep", async () => {
+    await page2.goto(`${server2.url}/s/claude-code/s-android`);
+    await expect(page2.getByText("It is.").first()).toBeVisible();
+    await expect(page2.getByLabel("Message for the next turn")).toBeDisabled();
+    await expect(page2.getByText("Sending from this phone comes in a later version").first()).toBeVisible();
+    const link = page2.locator("[data-elsewhere]");
+    await expect(link).toHaveText("Open on spacesheep.test");
+    await expect(link).toHaveAttribute("href", "https://spacesheep.test/sessions?s=s-android");
+    expect(server2.strays).toEqual([]);
+    expect(ss2.jobs).toEqual([]);
+  });
 });

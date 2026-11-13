@@ -133,7 +133,7 @@ export function App() {
   if (account && RECEIVER_ONLY.has(route.name))
     return (
       <Shell route={route}>
-        <Missing path={pathname} />
+        <NoReceiver />
         <Palette />
         <Toasts />
       </Shell>
@@ -257,6 +257,25 @@ function useScrollPlace(pathname: string): void {
   useEffect(() => {
     markRestoring(false);
   });
+}
+
+/** A page only a receiver has, named by an address while the window shows a spacesheep
+ *  account: one line that says so, and the way back to the board. */
+function NoReceiver() {
+  return (
+    <div className="page missing">
+      <PageBar title="Not available here" />
+      <div className="state state--center" data-no-receiver>
+        <h2 className="state-title">This needs a sessionpipe-gui server</h2>
+        <p className="state-text">This app is showing a spacesheep account, which has none.</p>
+        <div className="state-actions">
+          <Link to="/" className="btn btn--primary">
+            Go to Board
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** A path the app has no page for: an empty state where the page would be, and the way

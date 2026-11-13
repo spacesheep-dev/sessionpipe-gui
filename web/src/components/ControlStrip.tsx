@@ -67,6 +67,9 @@ export interface ControlStripProps {
   working?: boolean;
   /** Why nothing here can work (no secure context): replaces the hint and disables the strip. */
   blocked?: string;
+  /** Where this session can be answered when this page cannot sign: its page on the
+   *  spacesheep account the window shows. */
+  elsewhere?: { href: string; host: string };
   /** The line under the field while it says something now: the last send's refusal, or a
    *  passkey prompt being up. It wins over every other reason. */
   note?: string;
@@ -294,6 +297,7 @@ export function ControlStrip({
   onSend,
   working,
   blocked,
+  elsewhere,
   note,
   noteKind = "info",
   answers,
@@ -403,6 +407,10 @@ export function ControlStrip({
         action: httpsHref ? (
           <a className="ctl-open-https" href={httpsHref}>
             Open on {new URL(httpsHref).host}
+          </a>
+        ) : elsewhere ? (
+          <a className="ctl-open-https" href={elsewhere.href} target="_blank" rel="noreferrer noopener" data-elsewhere>
+            Open on {elsewhere.host}
           </a>
         ) : undefined,
       };

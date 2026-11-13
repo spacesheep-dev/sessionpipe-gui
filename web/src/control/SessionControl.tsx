@@ -12,6 +12,7 @@ import type { Attention, ControlActivity, MachineControl, SessionSummary } from 
 import { useState } from "react";
 import { COMPOSER_SENT, ControlStrip } from "../components/ControlStrip";
 import { useAppState, useListedSessions, useStore } from "../data/hooks";
+import { accountMode, receiverOrigin } from "../lib/net";
 import { HandoffHost } from "../orchestrate/handoff/HandoffHost";
 import { canAskFrom } from "../orchestrate/handoff/handoff";
 import { openHandoff } from "../orchestrate/handoff/handoffState";
@@ -129,6 +130,16 @@ export function SessionControl({
         onSend={secure && rp ? onSend : undefined}
         working={working}
         blocked={secure ? undefined : (old ?? signHint(rp))}
+        elsewhere={
+          // On a spacesheep account a session this phone cannot sign for (no signer yet on
+          // Android) can still be answered on spacesheep itself.
+          accountMode() && !secure
+            ? {
+                href: `${receiverOrigin()}/sessions?s=${encodeURIComponent(session.id)}`,
+                host: new URL(receiverOrigin()).host,
+              }
+            : undefined
+        }
         note={note}
         noteKind={error ? "err" : "info"}
         answers={answers}
