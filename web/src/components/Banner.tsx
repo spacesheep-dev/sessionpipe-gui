@@ -105,9 +105,9 @@ export function Banner({ toast: t, closing }: { toast: Toast; closing: boolean }
   return (
     <div
       ref={ref}
-      // What is no session's news but something a person is told (the app's own notice) is
-      // read whole: its two sentences wrap, where a session's banner is one line.
-      className={`toast toast--banner toast--${t.kind}${t.session ? "" : " toast--told"}`}
+      // The app's own notice (something a person is told, not a session's news) is read
+      // whole: its two sentences wrap. Every other banner is one line, as it was.
+      className={`toast toast--banner toast--${t.kind}${t.label === "notice" && !t.session ? " toast--told" : ""}`}
       data-toast={t.kind}
       data-session={t.session}
       data-attention={t.attentionId}

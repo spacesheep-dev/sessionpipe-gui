@@ -103,7 +103,7 @@
   }
 }
 
-/* Something the app tells a person, with no session to open (toast--told): the title has
+/* The app's own notice, with no session to open (toast--told, Banner.tsx): the title has
    its line and what follows wraps under it. Neither sentence is cut. */
 .toast--banner.toast--told .toast-main {
   overflow: visible;
