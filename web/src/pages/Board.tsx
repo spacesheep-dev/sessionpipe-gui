@@ -12,8 +12,8 @@
 // rows slide there (lib/motion.ts). With nothing on it yet the board is a listening
 // state that names this machine and its hooked agents, and dissolves into the first row.
 // While the stream is down the rows stay, quiet, their clocks stopped.
-import type { ControlActivity, SessionState, SessionSummary } from "@shared/api";
-import { isEmptySession, SESSION_STATES, splitKey } from "@shared/api";
+import type { ControlActivity, Info, SessionState, SessionSummary } from "@shared/api";
+import { isEmptySession, ROUTES, SESSION_STATES, splitKey } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChipSelect,
@@ -76,7 +76,7 @@ import { focusSearch, inPanel, useListNav } from "../lib/keys";
 import { type LabelFilter, labelName, labelPasses, labelQuery, requestLabelRename } from "../lib/labels";
 import { isUnread, setUnread } from "../lib/marks";
 import { type Held, useFlip, useHeldOrder, useListHold, usePresence } from "../lib/motion";
-import { accountMode } from "../lib/net";
+import { accountMode, apiFetch } from "../lib/net";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
@@ -836,6 +836,32 @@ function FirstRun({ paired }: { paired?: string }) {
  *  place: the wait, and the one way on there is (a session on a paired computer, or the
  *  machines of the account). */
 function AccountFirstRun({ paired }: { paired?: string }) {
+  // How the account's relay stands, asked of the page's own backend while the board is empty.
+  const [relay, setRelay] = useState<string | null>(null);
+  useEffect(() => {
+    let off = false;
+    const read = () =>
+      void apiFetch(ROUTES.ui.info)
+        .then((r) => r.json() as Promise<Info>)
+        .then((i) => {
+          if (!off) setRelay(i.sources?.spacesheep?.state ?? null);
+        })
+        .catch(() => {});
+    read();
+    const t = window.setInterval(read, 2000);
+    return () => {
+      off = true;
+      window.clearInterval(t);
+    };
+  }, []);
+  // spacesheep asked this app to wait before the account was read once: an empty board says
+  // nothing of whether there are sessions. The words are the ones Settings has for this state.
+  if (relay === "limited")
+    return (
+      <EmptyState center title="This app is reading too often for spacesheep">
+        It catches up by itself.
+      </EmptyState>
+    );
   return (
     <EmptyState
       center

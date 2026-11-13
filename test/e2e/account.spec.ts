@@ -708,6 +708,18 @@ test.describe("an account with nothing on it yet, then a session from a computer
     await server3?.close();
   });
 
+  test("a first launch that meets spacesheep's limit says so, and says nothing of there being no sessions", async () => {
+    // spacesheep asks this key to wait before the account was read once.
+    ss3.limit = 0;
+    await page3.goto(server3.url);
+    await expect(page3.getByText("This app is reading too often for spacesheep")).toBeVisible();
+    await expect(page3.getByText("It catches up by itself.")).toBeVisible();
+    await expect(page3.getByText("Waiting for your first session")).toHaveCount(0);
+    await expect(page3.getByText(/Start an agent on a computer paired/)).toHaveCount(0);
+    // The wait is over by the next launch: the account is read, and it is empty.
+    ss3.limit = 240;
+  });
+
   test("the empty board says nothing of a terminal on this machine, a command to type, or sample sessions", async () => {
     await page3.goto(server3.url);
     await expect(page3.getByText("Waiting for your first session")).toBeVisible();
