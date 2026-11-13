@@ -311,6 +311,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const showPermission = levels.length >= 2;
   const showModel = !!opts && (!!opts.anyModel || !!opts.models?.length);
   const takesFiles = c?.files === true;
+  // Reached through spacesheep: no file can be carried there yet (server/control/state.ts).
+  const relayed = !!c?.remote;
   const listsFolders = !!c?.folders?.length;
   const folderCheck = machine
     ? typedFolder(folder, { folders: c?.folders, home: machineHome(c), machine })
@@ -368,6 +370,10 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   // ----- files: 📎, paste, drop; uploaded here, named by hash in the signed command -----
   const addFiles = (list: File[]) => {
     if (!list.length) return;
+    if (relayed) {
+      setNote(`Files can't be sent to ${machine ?? "this machine"} through spacesheep yet.`);
+      return;
+    }
     if (!takesFiles) {
       setNote(`${machine ?? "This machine"} can't take files on a new session. Update sessionpipe there.`);
       return;
@@ -545,11 +551,17 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     if (!harness) return { text: harnesses.length ? "Choose an agent" : `${m.name} hasn't said which agents it runs.` };
     if (!folderCheck.ok) return { text: folderCheck.reason };
     if (note) return { text: note };
+    if (files.length && relayed)
+      return { text: `Files can't be sent to ${m.name} through spacesheep yet. Remove them to start.` };
     if (files.length && !takesFiles)
       return { text: `${m.name} can't take files on a new session. Update sessionpipe there.` };
     if (model && !modelOk)
       return { text: `${model} isn't a model ${m.name} offers for ${harnessMark(harness).label}.` };
-    if (c && !c.online) return { text: `${m.name} is offline. It starts when the machine is back, within an hour.` };
+    // spacesheep holds a start a day (server/control/state.ts), this receiver an hour.
+    if (c && !c.online)
+      return {
+        text: `${m.name} is offline. It starts when the machine is back, within ${relayed ? "a day" : "an hour"}.`,
+      };
     return { text: `${m.name} is listening.` };
   })();
   // The passkey is a note on Start (its tooltip, and what a screen reader hears with it),

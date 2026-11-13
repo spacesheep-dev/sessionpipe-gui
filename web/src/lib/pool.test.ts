@@ -3,6 +3,8 @@
 // swap and served-by sentences, the picker's line, and the readings of a session's events.
 import type { ControlActivity, LimitsEntry, MachinePoolAccount, ProtocolEvent } from "@shared/api";
 import { describe, expect, it } from "vitest";
+import { MemoryControl } from "../../../server/control/remote";
+import { type MessageRow, type PoolCommand, toActivity } from "../../../server/control/rows";
 import {
   accountSentence,
   commandNote,
@@ -299,6 +301,92 @@ describe("a login.begin's detail", () => {
     expect(loginFromDetail("nothing here")).toEqual({ url: null, pendingId: null, text: "nothing here" });
     expect(loginFromDetail(undefined)).toEqual({ url: null, pendingId: null, text: "" });
   });
+
+  /** The link as the core's sign-in builds it (450 characters), after the pending id. */
+  const signIn = () => {
+    const u = new URL("https://claude.com/cai/oauth/authorize");
+    u.searchParams.append("code", "true");
+    u.searchParams.append("client_id", "00000000-0000-4000-8000-000000000000");
+    u.searchParams.append("response_type", "code");
+    u.searchParams.append("redirect_uri", "https://platform.claude.com/oauth/code/callback");
+    u.searchParams.append(
+      "scope",
+      "user:inference user:profile org:create_api_key user:sessions:claude_code user:mcp_servers user:file_upload",
+    );
+    u.searchParams.append("code_challenge", "c".repeat(43));
+    u.searchParams.append("code_challenge_method", "S256");
+    u.searchParams.append("state", "s".repeat(43));
+    return { url: u.toString(), note: `0a1b2c3d ${u}` };
+  };
+
+  it("a computer reached through spacesheep: the whole link, as the row hands the job's note on", () => {
+    const { url, note } = signIn();
+    expect(url).toHaveLength(450);
+    expect(note).toHaveLength(459);
+    // The row as the slice keeps it: spacesheep's job, its note as the detail.
+    const row: MessageRow = {
+      id: "01J0000000000000000000000A",
+      machineId: "m_0123456789abcdefghij",
+      kind: "pool",
+      session: "sessionpipe:pool",
+      poolAction: "login.begin",
+      at: "2026-01-01T00:00:00.000Z",
+      expiresAt: "2026-01-01T00:10:00.000Z",
+      remoteJob: 41,
+      outcome: "delivered",
+      detail: note,
+    } as MessageRow;
+    expect(loginFromDetail(toActivity(row).detail)).toEqual({ url, pendingId: "0a1b2c3d", text: "" });
+    // A detail as long as a daemon may make it (500): still the link it wrote, to the last character.
+    const longest = `${url}&${"x".repeat(500 - note.length - 1)}`;
+    const full = `0a1b2c3d ${longest}`;
+    expect(full).toHaveLength(500);
+    expect(loginFromDetail(toActivity({ ...row, detail: full }).detail).url).toBe(longest);
+  });
+
+  it("the same link through a page's own control, from the send to the row it reads", () => {
+    const { url, note } = signIn();
+    const control = new MemoryControl();
+    control.remote.setRemoteAccount({ origin: "https://spacesheep.test", email: "me@example.com" });
+    control.remote.upsertRemoteMachines(
+      [{ id: "m_0123456789abcdefghij", name: "lab-mac", online: true, passkey_ids: ["k1"] }] as never,
+      { via: "spacesheep", origin: "https://spacesheep.test", rpId: "spacesheep.test" },
+    );
+    const m = control.machine("m_0123456789abcdefghij")!;
+    const cmd: PoolCommand = {
+      v: 1,
+      t: "sessionpipe.control",
+      machine: m.id,
+      kind: "pool",
+      session: "sessionpipe:pool",
+      pool_action: "login.begin",
+      nonce: "n-login",
+      iat: 1,
+    };
+    const sent = control.remote.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 41);
+    control.remote.applyRemoteJobs([{ id: 41, status: "done", note, done_at: Date.now(), created_at: 1 }]);
+    const a = control.activityById(sent.id)!;
+    expect(a.outcome).toBe("delivered");
+    expect(loginFromDetail(a.detail)).toEqual({ url, pendingId: "0a1b2c3d", text: "" });
+  });
+
+  it("is a link only when it parses as an https URL", () => {
+    // Outside text: what starts like a link and is none is not put on the button.
+    for (const not of [
+      "https://[",
+      "https://[::1",
+      "https://%zz",
+      "https://:443/x",
+      "https://^",
+      "https://999.999.999.999/",
+    ])
+      expect(loginFromDetail(`lg1 ${not}`), not).toEqual({ url: null, pendingId: null, text: `lg1 ${not}` });
+    expect(loginFromDetail("lg1 http://claude.ai/x").url).toBeNull();
+    expect(loginFromDetail("lg1 javascript:alert(1)//https://x").url).toBe("https://x");
+    expect(loginFromDetail("lg1 HTTPS://claude.ai/x").url).toBeNull();
+    // What parses is handed on as it was written, not as the parser would write it.
+    expect(loginFromDetail("lg1 https://claude.ai/a%2Fb?x=1#y").url).toBe("https://claude.ai/a%2Fb?x=1#y");
+  });
 });
 
 describe("the Agent menu's pooled line (UX-SPEC §6)", () => {
@@ -403,6 +491,15 @@ describe("the section's words", () => {
       "It didn't reach lab-mac: socket closed.",
     );
     expect(commandNote({ outcome: "expired" }, "lab-mac", true, refusal)?.text).toBe("lab-mac didn't take it in time.");
+    // No word of the end: the computer took it, or (no job named) nobody knows that it did.
+    expect(commandNote({ outcome: "unconfirmed" }, "lab-mac", true, refusal)).toEqual({
+      text: "No word from lab-mac since it took this. Check spacesheep.dev to see how it went.",
+      err: true,
+    });
+    expect(commandNote({ outcome: "unconfirmed", code: "no_job" }, "lab-mac", true, refusal)).toEqual({
+      text: "Sent, but this app can't follow it. Check spacesheep.dev to see how it went.",
+      err: true,
+    });
   });
   it("words a sign-in's failures by the §4.2 table", () => {
     const complete = (over: Partial<ControlActivity>) =>

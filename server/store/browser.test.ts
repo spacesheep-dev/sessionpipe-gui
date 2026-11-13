@@ -4,7 +4,9 @@
 // bundle is the repo's own files with no package in it and no word of Node's globals, and
 // it runs in a context that has what a page on the oldest Safari we hold to has, and none
 // of Node's. Envelope validation (receiver/validate.ts) is held to the same, for a page
-// that reads events from a relay.
+// that reads events from a relay; so are the relay's reader (sources/relay.ts) and the
+// machines and sends of a spacesheep account (control/remote.ts, control/rows.ts), which
+// that page runs as the receiver does.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { format } from "node:util";
@@ -13,6 +15,9 @@ import { build } from "esbuild";
 import { expect, test } from "vitest";
 import type { ProtocolEvent } from "../../shared/api.js";
 import { Session, SID } from "../../test/events.js";
+import * as remoteModule from "../control/remote.js";
+import * as rowsModule from "../control/rows.js";
+import * as relayModule from "../sources/relay.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
@@ -82,7 +87,8 @@ const ITERATOR_HELPERS = [
   "find",
 ];
 
-/** The core, a memory log, detach and the validator as one browser bundle, an IIFE named `core`. */
+/** The core, a memory log, detach, the validator, the relay's reader and the remote slice
+ *  as one browser bundle, an IIFE named `core`. */
 async function bundle() {
   const out = await build({
     stdin: {
@@ -91,6 +97,16 @@ async function bundle() {
         'export { MemoryLog } from "./log.js";',
         'export { detach } from "./slim.js";',
         'export { eventProblem } from "../receiver/validate.js";',
+        'export { startRelayReader, relayPaceMs, backlogPaceMs } from "../sources/relay.js";',
+        'export { MemoryControl, RemoteSlice, forwardRemoteSend, SendRefused, newUlid } from "../control/remote.js";',
+        'export { toActivity, isFinal } from "../control/rows.js";',
+        // Every export of the three files a page runs, not only the ones named above: the
+        // bundler drops what the entry does not reach, and a word of Node's in a dropped
+        // export would pass. As namespaces: a plain `export *` from several modules drops,
+        // without a word, any name two of them share.
+        'export * as allRelay from "../sources/relay.js";',
+        'export * as allRemote from "../control/remote.js";',
+        'export * as allRows from "../control/rows.js";',
       ].join("\n"),
       resolveDir: here,
       sourcefile: "browser-entry.ts",
@@ -143,10 +159,14 @@ test("the core bundles for the browser from the repo's own files alone, naming n
   const files = inputs.filter((f) => f !== "browser-entry.ts").map((f) => path.relative(root, path.resolve(f)));
   expect(files.filter((f) => f.includes("node_modules") || f.startsWith(".."))).toEqual([]);
   // What the core may read: its own folder, the shared types and readings, the validator.
-  expect(files.filter((f) => !/^(server\/store|shared|server\/receiver|server\/control\/refs\.ts$)/.test(f))).toEqual(
-    [],
-  );
+  // The reader and the slice: their own files and the same.
+  const allowed =
+    /^(server\/store|shared|server\/receiver|server\/sources\/relay\.ts$|server\/control\/(refs|rows|remote)\.ts$)/;
+  expect(files.filter((f) => !allowed.test(f))).toEqual([]);
   expect(files).toContain("server/store/core.ts");
+  expect(files).toContain("server/sources/relay.ts");
+  expect(files).toContain("server/control/remote.ts");
+  expect(files).toContain("server/control/rows.ts");
   // Node's globals by name anywhere, through globalThis or a string too; Buffer only where
   // slim.ts asks whether there is one.
   expect(code.match(/\b(?:process|require|module|__dirname|__filename|setImmediate|global)\b/g) ?? []).toEqual([]);
@@ -155,6 +175,21 @@ test("the core bundles for the browser from the repo's own files alone, naming n
   // helpers share their names with an array's, so only the run catches those).
   const newer = NEWER_THAN_SAFARI_17.map((n) => (n.includes(".") ? `\\.${n.split(".").pop()}` : `\\b${n}`));
   expect(code.match(new RegExp(`(?:${newer.join("|")})\\b`, "g")) ?? []).toEqual([]);
+});
+
+test("the bundle holds every export of the reader, the slice and the rows: none is left unchecked", async () => {
+  const { code } = await bundle();
+  const page = pageContext([]);
+  vm.runInContext(`${code}\nglobalThis.core = core;`, page);
+  const lib = page.core as Record<"allRelay" | "allRemote" | "allRows", Record<string, unknown>>;
+  for (const [name, module] of [
+    ["allRelay", relayModule],
+    ["allRemote", remoteModule],
+    ["allRows", rowsModule],
+  ] as const) {
+    expect(Object.keys(lib[name] ?? {}).sort(), name).toEqual(Object.keys(module).sort());
+    expect(Object.keys(module).length, name).toBeGreaterThan(3);
+  }
 });
 
 test("the context is the floor: a page's globals, nothing of Node's, nothing newer than Safari 17", () => {
@@ -263,4 +298,124 @@ test("the bundle runs at the floor: ingest, board, pages, feed, search, files, d
   expect(again.session(key)!.children).toBe(1);
   await store.close();
   await again.close();
+});
+
+test("the relay's reader and the remote slice run at the floor: a page of events, a send, its job's word, a restart", async () => {
+  const { code } = await bundle();
+  const errors: string[] = [];
+  const page = pageContext(errors);
+  vm.runInContext(`${code}\nglobalThis.core = core;`, page);
+  const lib = page.core as typeof import("../sources/relay.js") &
+    typeof import("../control/remote.js") &
+    typeof import("../control/rows.js") &
+    typeof import("./core.js") &
+    typeof import("./log.js");
+
+  const s = new Session();
+  const events = [s.ev("session.started", { source: "startup" }), s.ev("turn.started", { turn_id: "t1" })];
+  const machine = {
+    id: "m_0123456789abcdefghij",
+    name: "lab-mac",
+    online: true,
+    last_seen: Date.now(),
+    agents: ["claude-code"],
+    modes: ["waiter"],
+    passkey_ids: ["k1"],
+    key_types: ["passkey", "device"],
+  };
+  const jobs: Array<Record<string, unknown>> = [];
+  const asked: string[] = [];
+  const answer = (body: unknown, status = 200) =>
+    ({
+      status,
+      ok: status >= 200 && status < 300,
+      headers: { get: () => null },
+      json: async () => body,
+    }) as unknown as Response;
+  const doors = async (door: string): Promise<Response> => {
+    asked.push(door);
+    if (door.includes("/machines")) return answer({ machines: [machine], rp_id: "spacesheep.test" });
+    if (door.includes("/jobs")) return answer({ jobs, now: Date.now() });
+    const since = Number(/since=(\d+)/.exec(door)![1]);
+    return answer({ events: since ? [] : events, next: since || events.length, oldest: 1, protocol: 1 });
+  };
+
+  const store = new lib.StoreCore("page", { tickMs: 60_000, statsMs: 60_000 }, new lib.MemoryLog());
+  const kept = new Map<string, unknown>();
+  let saved: Record<string, unknown[]> = {};
+  const open = () => {
+    const control = new lib.MemoryControl({
+      kept: JSON.parse(JSON.stringify(saved)),
+      onSave: (q) => {
+        saved = q;
+      },
+    });
+    control.remote.setRemoteAccount({ origin: "https://spacesheep.test", email: "me@example.com" });
+    const reader = lib.startRelayReader({
+      origin: "https://spacesheep.test",
+      email: "me@example.com",
+      doors,
+      keep: { read: (name) => kept.get(name), write: (name, value) => void kept.set(name, value) },
+      sink: { ingest: (list) => store.ingest(list, "spacesheep").accepted, setLoading: (on) => store.setLoading(on) },
+      hub: true,
+      backlog: true,
+      fresh: true,
+      onMachines: (list, origin, rpId) =>
+        control.remote.upsertRemoteMachines(list as never, { via: "spacesheep", origin, rpId }),
+      pendingJobs: () => control.remote.pendingRemoteJobs(),
+      jobsCadence: () => control.remote.remoteJobsCadence(),
+      onJobs: (list, through, now) => control.remote.applyRemoteJobs(list, through, now),
+    });
+    control.onRemoteKick = () => reader.kickJobs();
+    return { control, reader };
+  };
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+
+  let { control, reader } = open();
+  await settle();
+  expect(reader.status()).toMatchObject({ state: "ok", cursor: 2, events: 2, machines: ["lab-mac"] });
+  expect(store.snapshot().sessions.map((x) => x.id)).toEqual([SID]);
+  expect([...control.machines().keys()]).toEqual(["lab-mac"]);
+
+  const cmd = {
+    v: 1,
+    t: "sessionpipe.control",
+    machine: machine.id,
+    kind: "prompt",
+    session: `claude-code:${SID}`,
+    text: "hi",
+  };
+  const row = await control.send(
+    control.machine(machine.id)!,
+    { cmd: JSON.stringify(cmd), csig: "s", grant: {} },
+    async () => ({
+      status: 202,
+      json: { job: 7 },
+    }),
+  );
+  expect(lib.toActivity(row)).toMatchObject({ kind: "prompt", text: "hi", machineId: machine.id });
+  expect(row.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+  // A refusal is an error of the bundle's own class, with the route's status and code.
+  const refused = await control
+    .send(control.machine(machine.id)!, { cmd: JSON.stringify(cmd) }, async () => ({
+      status: 409,
+      json: { code: "confirm", error: "Confirm to send this.", why: "it is unusual" },
+    }))
+    .catch((e: unknown) => e);
+  expect(refused).toBeInstanceOf(lib.SendRefused);
+  expect(refused).toMatchObject({ status: 422, body: { code: "confirm_required", detail: "it is unusual" } });
+
+  // Stopped and opened again from what was kept: the row is there and its job is asked for.
+  reader.stop();
+  ({ control, reader } = open());
+  jobs.push({ id: 7, status: "done", note: null, done_at: Date.now(), created_at: Date.now() });
+  await settle();
+  reader.kickJobs();
+  await settle();
+  expect(asked.some((a) => a.endsWith("/jobs?since=6"))).toBe(true);
+  expect(control.activity()[0]).toMatchObject({ outcome: "delivered", kind: "prompt" });
+  expect(lib.isFinal(control.activity()[0]!.outcome)).toBe(true);
+  expect(errors).toEqual([]);
+  reader.stop();
+  await store.close();
 });

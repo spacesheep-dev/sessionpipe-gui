@@ -24,7 +24,7 @@ import {
   isFinal,
   outcomeWords,
   PERMISSION_LABEL,
-  refusalWords,
+  promptFailureWords,
   sendErrorWords,
   sentLine,
   shownState,
@@ -198,23 +198,6 @@ export function sentRow(
   };
 }
 
-/** A prompt that did not reach its session, in the words the timeline shows under it. */
-export function promptFailureWords(a: ControlActivity, machine: string): string | null {
-  const detail = a.detail?.trim();
-  switch (a.outcome) {
-    case "refused":
-      return `${machine} refused it: ${refusalWords(a.code)}.`;
-    case "failed":
-      return `It didn't reach the session${detail ? `: ${detail.replace(/[.!?…]?$/, ".")}` : "."}`;
-    case "expired":
-      return `${machine} didn't take it in time.`;
-    case "unsupported":
-      return `${machine} can't hand messages to this session's agent.`;
-    default:
-      return null;
-  }
-}
-
 /** The `backticked` command a machine's words carry, the first one. */
 const commandIn = (text: string): string | null => /`([^`]+)`/.exec(text)?.[1] ?? null;
 
@@ -242,6 +225,9 @@ export function SentFailure({
   const command = commandIn(words);
   const safe = control && safeOffered(a, control);
   const name = machines.find((m) => m.control?.machineId === a.machineId)?.name;
+  // Whether it ran is spacesheep's to say (an account no longer connected here): starting
+  // it again could make a second run, so no way on is offered here; the words point there.
+  const unknown = a.code === "untracked" || a.outcome === "unconfirmed";
   return (
     <div className="starting-failed" role="alert">
       <p className="sent-failed-text">
@@ -265,7 +251,7 @@ export function SentFailure({
             Start in Safe instead
           </ActionButton>
         )}
-        {a.kind === "start" ? (
+        {unknown ? null : a.kind === "start" ? (
           <button type="button" className="btn btn--sm" onClick={() => editAgain(a, name)} data-edit-again>
             Edit and start again
           </button>

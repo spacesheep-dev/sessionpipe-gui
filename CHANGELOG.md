@@ -6,6 +6,106 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A send to a computer reached through spacesheep outlives a restart.** Its row was
+  deleted when the app started, because such a computer is never saved here: a start
+  waiting for an offline computer then read "No such session here", and ran anyway when the
+  computer came back. The row is kept, followed again once the account is read, and settled
+  by spacesheep's word on the job. A row the connected account can't speak for (another
+  account) is settled as one this app can no longer follow, and offers no "Edit and start
+  again", since it may still run there. Disconnecting, or starting without an account,
+  leaves the rows waiting and marked as not followed; the same account connecting again
+  picks them up. While spacesheep refuses this app's key the waiting rows are marked so
+  too, rather than reading "Waiting for …" with nothing being read.
+- **A start waiting for a computer through spacesheep is no longer given up after an hour.**
+  The app called it expired on its own clock ("didn't come online in time", with "Edit and
+  start again") while spacesheep kept it for a day and still handed it out, so starting it
+  again meant two runs. Only spacesheep's word on the job settles it now; a job it still
+  lists as waiting, or no longer lists, is called expired here only an hour past
+  spacesheep's day, when spacesheep can no longer hand it out. The job list is read past a
+  job that waits for days, so a newer send's word is never out of reach. A send the
+  computer took and said nothing more of (spacesheep keeps it "running") ends past that
+  day as `unconfirmed` and is no longer read, rather than "Starting…" for ever. A job's
+  age is spacesheep's: its own `created_at` against the time spacesheep's answer carries,
+  so a clock here that jumps ends nothing early; with no time from spacesheep, the send's
+  own time on this clock. A send closed for want of word (`unconfirmed`, or `untracked`
+  while another account was connected) is settled after all when spacesheep later lists
+  its job as finished: an untracked one waits again when its account connects, an
+  unconfirmed one is read once more then and when events arrive for its session.
+- **Waiting sends through spacesheep are read for at a slower pace.** The job list was read
+  every 3 seconds whatever the send waited for (about 200 reads in 10 minutes, now for up
+  to a day). While every waiting send is queued for a computer the machine list shows
+  offline it is read every 45 seconds (about 13 in 10 minutes), and at once after a send,
+  when that computer shows online and when events for that session arrive; every 3
+  seconds only while a send is taken, just made, or its computer is online.
+- **A refusal through spacesheep keeps its reason.** Where spacesheep's job list says why a
+  job ended (`code`: the computer's own refusal code, `cancelled`, `expired`), the row takes
+  it, so the words for a folder, a permission level, a start limit or a model are the ones
+  a computer reached directly gets, and a start that ran out reads as one that expired.
+  Against a spacesheep without the field nothing is guessed from its note.
+- **No attachment is offered for a computer reached through spacesheep.** A start's file
+  stayed on this app's disk, spacesheep looked for it in its own store and refused the
+  start, and the person was told to add the file again. The new session sheet no longer
+  offers files there, and a session's message box offers images only when that computer is
+  this one (the block names files on this disk), until there is a way to carry one. A
+  send that names files for such a computer anyway is refused here (code `relay_files`),
+  never carried to spacesheep.
+- **Events spacesheep no longer holds are reported as a gap.** The gap was noted only when
+  a page came back empty, but spacesheep answers everything after the cursor that it still
+  holds, so an app that was off longer than spacesheep keeps events (7 days, 50 000 events)
+  lost the middle and said "reading". It now says "gap" whenever the first event back is
+  not the one after the cursor, and keeps saying it while it runs.
+- **A send that spacesheep refuses because this app's key was revoked there is no longer
+  mistaken for the page's own key.** spacesheep's 401 was passed on as it was, which a page
+  reads as "this page lost its key". It now comes back with its own code, and Settings →
+  Data says the key was revoked at the same moment, not at the relay's next poll.
+- **When spacesheep asks this app to slow down (HTTP 429), the app waits as long as it
+  says** (its Retry-After, at most 15 minutes) and its state is `limited`, no longer
+  `offline`, which Settings → Data read as "can't be reached".
+- **A steady stream of events no longer freezes the board for minutes.** The reader asked
+  spacesheep once per event, reached its limit (240 reads a key in 10 minutes) in about
+  four minutes at one event a second, and then waited out the rest of the window. It now
+  keeps count of its reads in the last 10 minutes: under a third of its budget of 230 it
+  reads at once; past that it waits between reads, a little more as the budget is spent,
+  so a stream is read in batches about 3 seconds apart (at most about 4 seconds behind)
+  and never meets the limit. The machine list is read every minute on its own, so it
+  stays fresh while the reader waits. The count is kept beside the cursor (every 15
+  seconds and at stop), so a restart in the middle of a stream goes on from it; with none
+  on file a third of the budget is taken as spent.
+- **What spacesheep says of a send is shown as plain text, and a send it took without saying
+  which job it is does not wait for ever.** The note on a job spacesheep carried (a
+  computer's reason for refusing, say) reached the page as it came: with line breaks,
+  characters that reorder text, any length. It is shown as one plain line now, with what
+  cannot be seen taken out, and whole: up to the 500 characters a computer may send, with
+  nothing cut short of that and nothing added, so the sign-in link of a pooled account on
+  such a computer arrives as the computer wrote it. That link is offered only when it
+  reads as an `https:` address; anything else is treated as no link. A code that is not
+  written as one is no longer passed on. A signed command
+  that is not a command is refused as a bad request instead of an error. And when
+  spacesheep takes a send but names no job (a job is one only as a whole number), its row
+  says "Sent, but this app can't follow it. Check spacesheep.dev to see how it went."
+  rather than waiting on a job that cannot be read, and rather than saying a computer took
+  it, which is not known. A handoff's card no longer says "not sent" of a send whose end is
+  not known: it says what is known ("no word · rc-mac took it and said nothing more", or
+  that it is not followed).
+- **Words, plain** (for approval): a start called off before it began reads "Cancelled before
+  rc-mac started it." and a message sent to it "Cancelled with its session, before rc-mac got
+  it."; a refusal with no specific reason "rc-mac refused it." plus the receiver's reason when
+  there is one, never "refused: refused"; a file for a computer reached through spacesheep
+  "Files can't be sent to rc-mac through spacesheep yet." (plus "Remove them to start." for a
+  start edited again that carried files, and "Not sent." in front when a send carried one); a
+  revoked key "Not sent. spacesheep no longer takes this app's key: disconnect and connect
+  again in Settings → Data."; a send this app can no longer follow "Sent through a spacesheep
+  account that's no longer connected here. Check spacesheep.dev to see if it started."; a send
+  the computer took and said nothing more of "No word from rc-mac since it took this. Check
+  spacesheep.dev to see how it went."; a send waiting while spacesheep is disconnected "Not
+  being followed while spacesheep is disconnected." (while its key is refused, "Not being
+  followed: spacesheep no longer takes this app's key."); Settings → Data, limited, "this app
+  is reading too often for spacesheep; it catches up by itself"; the activity line of a
+  cancelled start, "cancelled · before the machine started it"; an offline computer through
+  spacesheep is waited for "within a day".
+
 ## [0.8.1] - 2026-11-12
 
 ### Changed

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
-import { asSentence, cleanReason } from "./reason.js";
+import { asSentence, cleanNote, cleanReason, NOTE_MAX } from "./reason.js";
 
 /** Characters by code point, so this file holds none of the invisible ones itself. */
 const c = (...cps: number[]): string => String.fromCodePoint(...cps);
@@ -87,6 +87,44 @@ describe("cleanReason", () => {
   it("is empty for anything that is not a string", () => {
     expect(cleanReason(undefined)).toBe("");
     expect(cleanReason(42)).toBe("");
+  });
+});
+
+describe("cleanNote", () => {
+  it("keeps a note whole up to what a daemon may send, and adds nothing to it", () => {
+    expect(NOTE_MAX).toBe(500);
+    for (const n of [1, 199, 200, 201, 459, 499, 500]) {
+      const note = "x".repeat(n);
+      expect(cleanNote(note), String(n)).toBe(note);
+    }
+    // A note that ends in an ellipsis of its own keeps it; none is ever put there.
+    expect(cleanNote("and so…")).toBe("and so…");
+    const emoji = c(0x1f600).repeat(500);
+    expect(cleanNote(emoji)).toBe(emoji);
+  });
+  it("past that it is cut where the cap falls, with nothing in the cut's place and never half a character", () => {
+    expect(cleanNote("x".repeat(501))).toBe("x".repeat(500));
+    expect(cleanNote(`${"x".repeat(499)}${c(0x1f600)}${c(0x1f600)}`)).toBe(`${"x".repeat(499)}${c(0x1f600)}`);
+    expect(cleanNote(`${"x".repeat(499)} tail`)).toBe("x".repeat(499));
+    expect(cleanNote("x".repeat(30), 10)).toBe("x".repeat(10));
+    const huge = cleanNote(`${"word ".repeat(2_000_000)}tail`);
+    expect(Array.from(huge).length).toBeLessThanOrEqual(500);
+    expect(huge.endsWith("word")).toBe(true);
+    expect(cleanNote(c(0x1f600).repeat(5000))).toBe(c(0x1f600).repeat(500));
+  });
+  it("is cleaned as a reason is: one line, nothing that draws nothing", () => {
+    expect(cleanNote(`a\nb\r\n\tc${c(0)}d`)).toBe("a b c d");
+    expect(cleanNote(`safe ${c(0x202e)}elif.exe${c(0x202c)} ${c(0x200b)}z`)).toBe("safe elif.exe z");
+    expect(cleanNote(`x${c(0x301).repeat(150)}y`)).toBe(`x${c(0x301, 0x301)}y`);
+    expect(cleanNote(`${c(0x200b)}${c(0x202e)}`)).toBe("");
+    const allowed = /^[\p{L}\p{M}\p{N}\p{P}\p{S} ]*$/u;
+    const bad: string[] = [];
+    for (let cp = 0; cp <= 0x10ffff; cp += 7) if (!allowed.test(cleanNote(`a${c(cp)}b`))) bad.push(cp.toString(16));
+    expect(bad).toEqual([]);
+  });
+  it("is empty for anything that is not a string", () => {
+    expect(cleanNote(undefined)).toBe("");
+    expect(cleanNote({ toString: () => "x" })).toBe("");
   });
 });
 

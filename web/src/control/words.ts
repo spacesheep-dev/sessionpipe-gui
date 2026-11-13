@@ -86,6 +86,11 @@ export function outcomeWords(a: ControlActivity, o: { machine?: string; online?:
   const who = o.machine ?? "the machine";
   const mode = a.mode ? ` · ${a.mode}` : "";
   const state = shownState(a);
+  if (a.unfollowed && (state === "queued" || state === "taken")) return `waiting · ${unfollowedWords(a)}`;
+  // A person's own cancel (spacesheep's withdrawn start, a computer's stopped start) is not
+  // a refusal.
+  if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
+    return "cancelled · before the machine started it";
   switch (state === "queued" ? undefined : state) {
     case undefined:
       return o.online === false
@@ -102,9 +107,20 @@ export function outcomeWords(a: ControlActivity, o: { machine?: string; online?:
     case "unsupported":
       return `unsupported · ${who} has no way to ${KIND_LABEL[a.kind]} on this harness${a.detail ? `: ${a.detail}` : ""}`;
     case "failed":
+      // A send through spacesheep this app can no longer follow (server/control/state.ts).
+      if (a.code === "untracked") return "not followed · sent through an account that's no longer connected";
       return `failed · ${a.detail ?? "the path errored"}`;
-    case "refused":
-      return `refused · ${refusalWords(a.code)}${a.detail && !REFUSAL_WORDS[a.code ?? ""] ? `: ${a.detail}` : ""}`;
+    case "unconfirmed":
+      // spacesheep took the send and named no job (server/control/rows.ts NO_JOB_CODE):
+      // that a computer took it is not known here.
+      if (a.code === "no_job") return "not followed · spacesheep didn't say which job it is";
+      return `no word · ${who} took it and said nothing more`;
+    case "refused": {
+      // No code (spacesheep before its `code`): the reason alone, never "refused · refused".
+      const reason = reasonOf(a);
+      if (!a.code) return `refused${reason ? ` · ${reason}` : ""}`;
+      return `refused · ${refusalWords(a.code)}${reason && !REFUSAL_WORDS[a.code ?? ""] ? `: ${reason}` : ""}`;
+    }
     default:
       return String(a.outcome);
   }
@@ -115,12 +131,18 @@ export const isFinal = (a: ControlActivity): boolean =>
   a.outcome === "expired" ||
   a.outcome === "unsupported" ||
   a.outcome === "failed" ||
-  a.outcome === "refused";
+  a.outcome === "refused" ||
+  a.outcome === "unconfirmed";
 
 /** What went wrong before anything was queued, in words. */
 export function sendErrorWords(e: unknown): string {
   if (e instanceof ControlError) {
+    // A send naming files for a computer reached through spacesheep (forwardSend): its reason.
+    if (e.code === "relay_files") return `Not sent. ${e.detail ?? e.reason}`;
     if (e.status === 422 && e.code) return `not sent · ${refusalWords(e.code)}`;
+    // spacesheep refused this app's key (server/control/ui.ts forwardSend), not the page's.
+    if (e.code === "spacesheep_unauthorized")
+      return "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.";
     if (e.status === 404) return "not sent · this machine is no longer paired here";
     if (e.status === 401) return "not sent · this page lost its key; reload it from the terminal's link";
     return `not sent · ${e.detail ?? e.reason}`;
@@ -134,14 +156,79 @@ export function sendErrorWords(e: unknown): string {
   return `not sent · ${e instanceof Error ? e.message : String(e)}`;
 }
 
+/** A receiver's reason worth quoting: not the bare outcome an older spacesheep notes when the
+ *  computer gave none ("refused"), which would read "refused it: refused". */
+export const reasonOf = (a: Pick<ControlActivity, "detail" | "outcome">): string | undefined => {
+  const d = a.detail?.trim();
+  return d && d.toLowerCase() !== a.outcome ? d : undefined;
+};
+
+/** The words for a send spacesheep carried that this app can't say the end of. */
+export const UNTRACKED_WORDS =
+  "Sent through a spacesheep account that's no longer connected here. Check spacesheep.dev to see if it started.";
+/** A send spacesheep took without naming its job: sent, and nothing more is known here. */
+export const NO_JOB_WORDS = "Sent, but this app can't follow it. Check spacesheep.dev to see how it went.";
+/** A send that ended `unconfirmed`: a computer took it and said nothing more, or (the
+ *  code `no_job`) spacesheep took it and named no job, and then no computer is known to
+ *  have taken it. */
+export const unconfirmedWords = (machine: string, a?: Pick<ControlActivity, "code">): string =>
+  a?.code === "no_job"
+    ? NO_JOB_WORDS
+    : `No word from ${machine} since it took this. Check spacesheep.dev to see how it went.`;
+
+/** A handoff that ended any way but delivered, in the one phrase its card shows. "not sent"
+ *  only where that is so: a send whose end is not known here was sent, and says what is
+ *  known instead (outcomeWords). */
+export function handoffEndWords(a: ControlActivity, machine: string): string {
+  if (a.outcome === "unconfirmed" || (a.outcome === "failed" && a.code === "untracked"))
+    return outcomeWords(a, { machine });
+  return `not sent · ${a.outcome === "refused" ? refusalWords(a.code) : (a.detail ?? a.outcome)}`;
+}
+/** A waiting row nothing reads right now: disconnected, or the key refused. */
+export const unfollowedWords = (a: Pick<ControlActivity, "unfollowed">): string =>
+  a.unfollowed === "revoked"
+    ? "Not being followed: spacesheep no longer takes this app's key."
+    : "Not being followed while spacesheep is disconnected.";
+
 /** A machine's detail ends the sentence it is quoted in; most arrive without a full stop. */
 const ended = (s: string): string => (/[.!?…]$/.test(s) ? s : `${s}.`);
+
+/** A prompt that did not reach its session, in the words the timeline shows under it. */
+export function promptFailureWords(a: ControlActivity, machine: string): string | null {
+  const detail = a.detail?.trim();
+  if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
+    return `Cancelled with its session, before ${machine} got it.`;
+  if (a.outcome === "failed" && a.code === "untracked") return UNTRACKED_WORDS;
+  if (a.outcome === "unconfirmed") return unconfirmedWords(machine, a);
+  switch (a.outcome) {
+    case "refused": {
+      // No code (spacesheep before its `code`): the reason when there is one, never twice.
+      const reason = reasonOf(a);
+      if (!a.code)
+        return `${machine} refused it.${reason ? ` ${(reason.charAt(0).toUpperCase() + reason.slice(1)).replace(/[.!?…]?$/, ".")}` : ""}`;
+      return `${machine} refused it: ${refusalWords(a.code)}.`;
+    }
+    case "failed":
+      return `It didn't reach the session${detail ? `: ${detail.replace(/[.!?…]?$/, ".")}` : "."}`;
+    case "expired":
+      return `${machine} didn't take it in time.`;
+    case "unsupported":
+      return `${machine} can't hand messages to this session's agent.`;
+    default:
+      return null;
+  }
+}
 
 /** A start that did not start, in the words the session page shows under it (STEER-SPEC
  *  B.5), or null when it is still on its way or started. `agent` is the harness's name. */
 export function startFailureWords(a: ControlActivity, machine: string, agent: string): string | null {
-  const detail = a.detail?.trim();
+  const detail = reasonOf(a);
   const level = a.permission ? PERMISSION_LABEL[a.permission] : null;
+  // Called off before it began: by its owner on spacesheep, or by a cancel on the computer.
+  if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
+    return `Cancelled before ${machine} started it.`;
+  if (a.outcome === "failed" && a.code === "untracked") return UNTRACKED_WORDS;
+  if (a.outcome === "unconfirmed") return unconfirmedWords(machine, a);
   if (a.outcome === "refused")
     switch (a.code) {
       case "folder":
@@ -155,6 +242,9 @@ export function startFailureWords(a: ControlActivity, machine: string, agent: st
         return `${machine}'s ${agent} won't run ${a.model ?? "that model"}${detail ? `: ${ended(detail)}` : "."}`;
       case "start_limit":
         return `${machine} is already running as many new sessions as it allows. Try again in a few minutes.`;
+      case undefined:
+        // No code (spacesheep before its `code`): the reason when there is one, never twice.
+        return `${machine} refused it.${detail ? ` ${ended(detail.charAt(0).toUpperCase() + detail.slice(1))}` : ""}`;
       default:
         return `${machine} refused it: ${refusalWords(a.code)}${detail && !REFUSAL_WORDS[a.code ?? ""] ? `: ${ended(detail)}` : "."}`;
     }
@@ -203,6 +293,7 @@ export function sentLine(
   o: { machine: string; online: boolean; command: string },
 ): { text: string; running: boolean } | null {
   const state = shownState(a);
+  if (a.unfollowed && (state === "queued" || state === "taken")) return { text: unfollowedWords(a), running: false };
   switch (state) {
     case "queued":
       return {

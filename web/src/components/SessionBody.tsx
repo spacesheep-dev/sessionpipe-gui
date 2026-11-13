@@ -65,7 +65,7 @@ import {
 } from "../control/Starting";
 import { signHint } from "../control/signer";
 import { useSessionSend } from "../control/useSend";
-import { harnessCommand, isFinal, REFUSAL_WORDS, refusalWords, sentLine } from "../control/words";
+import { handoffEndWords, harnessCommand, isFinal, REFUSAL_WORDS, refusalWords, sentLine } from "../control/words";
 import { useLaunched, useLimits, useMachines, useMachinesMap, useResyncs, useSession, useStore } from "../data/hooks";
 import { LIST_PREVIEW, TAIL, takeWarm } from "../data/prefetch";
 import { mergeBySeq, rereadQuery, rereadShort, tapSession } from "../data/sessionFeed";
@@ -2884,11 +2884,7 @@ function askState(
   if (act) {
     const harness = a.to ? splitKey(a.to).harness : "";
     if (isFinal(act) && act.outcome !== "delivered")
-      return {
-        text: `not sent · ${act.outcome === "refused" ? refusalWords(act.code) : (act.detail ?? act.outcome)}`,
-        err: true,
-        glyph: "err",
-      };
+      return { text: handoffEndWords(act, o.machine), err: true, glyph: "err" };
     if (act.outcome === "delivered" && o.child)
       return o.child.state === "working" || o.child.state === "needs_you"
         ? { text: "running", since: o.child.stateSince, glyph: "run" }

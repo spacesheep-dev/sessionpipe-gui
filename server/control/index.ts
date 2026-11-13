@@ -14,7 +14,6 @@ import {
   type ControlActivity,
   type KeyType,
   type MachineControl,
-  type MachineSummary,
   ROUTES,
   type StreamMessage,
 } from "../../shared/api.js";
@@ -26,6 +25,8 @@ import {
   ControlState,
   type DemoStart,
   type DeviceRequestRow,
+  isPaired,
+  machineFrame,
   type RemoteMachine,
   toActivity,
   WAIT_MAX_S,
@@ -69,9 +70,29 @@ export interface Control {
   remote: {
     upsert: (list: RemoteMachine[], remote: { via: "spacesheep"; origin: string; rpId: string }) => void;
     drop: (via: "spacesheep") => void;
-    pendingFrom: () => number | null;
+    /** The account read through from now, or null: other accounts' sends settle as untracked. */
+    account: (account: { origin: string; email: string } | null) => void;
+    /** The unsettled job ids of the connected account, lowest first. */
+    pending: () => number[];
+    /** How soon the jobs are worth reading again (state.remoteJobsCadence). */
+    cadence: () => "fast" | "slow" | "none";
+    /** The relay brought events for these sessions (`harness:id`). */
+    eventsSeen: (keys: Iterable<string>) => void;
+    /** spacesheep refused the key (true), or not any more. */
+    revoked: (on: boolean) => void;
+    /** Who reads the jobs at once when one is worth reading now. */
+    onKick: (f: () => void) => void;
     applyJobs: (
-      jobs: Array<{ id: number; status: string; note: string | null; done_at: number | null; created_at: number }>,
+      jobs: Array<{
+        id: number;
+        status: string;
+        note: string | null;
+        code?: string | null;
+        done_at: number | null;
+        created_at: number;
+      }>,
+      through?: number,
+      serverNow?: number,
     ) => number;
   };
   activity(limit?: number): ControlActivity[];
@@ -133,17 +154,8 @@ export function createControl(deps: ControlDeps): Control {
     machinesTimer = setTimeout(() => {
       machinesTimer = null;
       for (const m of state.allMachines()) {
-        if (!m.tokenHash && !m.keys.length) continue;
-        const control = state.machineControl(m);
-        const machine: MachineSummary = {
-          name: m.name,
-          lastAt: control.lastPollAt ?? control.lastHelloAt ?? new Date().toISOString(),
-          harnesses: Object.fromEntries((control.harnesses ?? []).map((h) => [h, undefined])),
-          sessions: 0,
-          working: 0,
-          needsYou: 0,
-          control,
-        };
+        if (!isPaired(m)) continue;
+        const machine = machineFrame(m.name, state.machineControl(m));
         for (const l of listeners)
           try {
             l({ kind: "machine", machine });
@@ -185,12 +197,19 @@ export function createControl(deps: ControlDeps): Control {
     remote: {
       upsert: (list, remote) => state.upsertRemoteMachines(list, remote),
       drop: (via) => state.dropRemoteMachines(via),
-      pendingFrom: () => state.pendingRemoteJobsFrom(),
-      applyJobs: (jobs) => state.applyRemoteJobs(jobs),
+      account: (account) => state.setRemoteAccount(account),
+      pending: () => state.pendingRemoteJobs(),
+      cadence: () => state.remoteJobsCadence(),
+      eventsSeen: (keys) => state.remoteEventsSeen(keys),
+      revoked: (on) => state.setRemoteRevoked(on),
+      onKick: (f) => {
+        state.onRemoteKick = f;
+      },
+      applyJobs: (jobs, through, serverNow) => state.applyRemoteJobs(jobs, through, serverNow),
     },
     machines() {
       const out = new Map<string, MachineControl>();
-      for (const m of state.allMachines()) if (m.tokenHash || m.keys.length) out.set(m.name, state.machineControl(m));
+      for (const m of state.allMachines()) if (isPaired(m)) out.set(m.name, state.machineControl(m));
       return out;
     },
     activity: (limit) => state.activity(limit),

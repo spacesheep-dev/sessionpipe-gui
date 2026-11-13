@@ -17,27 +17,34 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { ulid } from "sessionpipe-core";
-import type { Assertion, ControlCommand, SignedCommand } from "sessionpipe-core/control";
-import type {
-  Applied,
-  ControlActivity,
-  ControlKind,
-  ControlOutcome,
-  HarnessStartOptions,
-  KeyType,
-  MachineControl,
-  MachineMode,
-  MachinePool,
-  PoolAction,
-  StartFile,
-  StartPermission,
-  TrustedKey,
-} from "../../shared/api.js";
-import type { DeviceSignature } from "./devicekeys.js";
+import type { ControlCommand, SignedCommand } from "sessionpipe-core/control";
+import type { Applied, ControlActivity, ControlOutcome, MachineControl, TrustedKey } from "../../shared/api.js";
 import { FileStore } from "./files.js";
-import { type AckIn, type HarnessAccount, type Hello, isFinal, MACHINE_RE } from "./parse.js";
-import type { PoolCommand } from "./pool.js";
+import { type AckIn, type Hello, isFinal, MACHINE_RE } from "./parse.js";
+import { type RemoteJobWord, RemoteSlice } from "./remote.js";
+import {
+  activity,
+  activityById,
+  applyFacts,
+  EXPIRES_DEFAULT_MS,
+  isRemoteRow,
+  type KeyRow,
+  keptQueue,
+  keyOf,
+  type MachineRow,
+  type MessageRow,
+  machineControl,
+  messageRow,
+  nowIso,
+  ONLINE_WINDOW_MS,
+  type PairingRow,
+  type Proof,
+  type RemoteMachine,
+} from "./rows.js";
 import { machineTakesTilde } from "./tilde.js";
+
+// The rows, their constants and what reads them for the UI moved to rows.ts as they were.
+export * from "./rows.js";
 
 /** Demo mode's machines have ids under this prefix (MACHINE_RE: `m_` and 16–40 more). */
 export const DEMO_MACHINE = "m_demo-";
@@ -56,20 +63,10 @@ export interface DemoStart {
   from?: string;
 }
 
-/** The longest long-poll we hold (HTTP.md §1 control.wait_max_s). */
-export const WAIT_MAX_S = 25;
-/** A machine that polled within this is online (HTTP.md §3: 2 × wait_max_s). */
-export const ONLINE_WINDOW_MS = 2 * WAIT_MAX_S * 1000;
 /** A pairing code lives this long unapproved (CONTROL.md §2 step 3). */
 export const PAIR_TTL_MS = 10 * 60_000;
 /** A `taken` ack pauses redelivery for this long (CONTROL.md §10). */
 export const TAKEN_PAUSE_MS = 35 * 60_000;
-/** A carried message lives at most a day (§3.3); an hour when the sender says nothing. */
-export const EXPIRES_MAX_MS = 24 * 3600_000;
-export const EXPIRES_DEFAULT_MS = 3600_000;
-/** Settled messages kept per machine for the activity view. */
-const KEEP_SETTLED = 300;
-const SETTLED_TTL_MS = 7 * 86_400_000;
 /** A pairing row is forgotten this long after it expired or was handed over. */
 const PAIRING_TTL_MS = 3600_000;
 /** A device request (a phone's own passkey waiting for a trusted device's `key.add`) lives
@@ -77,103 +74,6 @@ const PAIRING_TTL_MS = 3600_000;
  *  poll reads `expired` rather than 404. Never persisted: a restart forgets it. */
 export const DEVICE_TTL_MS = 10 * 60_000;
 const DEVICE_KEEP_MS = 3600_000;
-
-/** A key a machine trusts, mirrored here whole: a device key keeps its `type`, `store`
- *  and `uv` (CONTROL.md §2), so the early check verifies it the way the machine does. */
-export interface KeyRow {
-  id: string;
-  alg: number;
-  spki: string;
-  type?: "device";
-  store?: "hardware";
-  uv?: "each-use";
-  name?: string;
-  addedAt: string;
-}
-
-/** The key's own fields (TrustedKey), without this receiver's bookkeeping. */
-export function keyOf(k: TrustedKey): TrustedKey {
-  return {
-    id: k.id,
-    alg: k.alg,
-    spki: k.spki,
-    ...(k.type === "device" ? { type: k.type, store: k.store, uv: k.uv } : {}),
-  };
-}
-
-/** A proof or a signature as the receiver carries it: a passkey's assertion, or a device
- *  key's `{cred, sig}` (CONTROL.md §3.2). */
-export type Proof = Assertion | DeviceSignature;
-
-export interface PairingRow {
-  code: string;
-  check: string;
-  startedAt: string;
-  expiresAt: string;
-  fromIp: string;
-  /** Started with no sink token (open pairing): the poll_key's hash gates its status. */
-  open: boolean;
-  pollHash?: string;
-  approved?: { key: KeyRow; proof: Proof; by: string; at: string };
-  /** The paired answer (and the token) went out once; the code answers 404 from then on. */
-  deliveredAt?: string;
-}
-
-/** A machine as spacesheep's relay lists it (its publicMachine shape, the fields read here). */
-export interface RemoteMachine {
-  id: string;
-  name: string;
-  online?: boolean;
-  last_seen?: number | null;
-  folders?: string[];
-  mode?: string;
-  agents?: string[];
-  cli_version?: string | null;
-  modes?: string[];
-  passkey_ids?: string[];
-  files?: boolean;
-  prompt_files?: boolean;
-  key_types?: string[];
-  ask?: boolean;
-  handoff?: boolean;
-  start?: Record<string, HarnessStartOptions>;
-  pool?: MachinePool | null;
-}
-
-export interface MachineRow {
-  id: string;
-  name: string;
-  createdAt: string;
-  pairedAt?: string;
-  tokenHash?: string;
-  keys: KeyRow[];
-  harnesses: string[];
-  modes: string[];
-  version: string;
-  folders?: string[];
-  mode?: MachineMode;
-  accounts?: HarnessAccount[];
-  /** The last hello's word on files and start options: each hello says them again, so a
-   *  daemon that stopped advertising one (a downgrade) loses it here at once. */
-  files?: boolean;
-  promptFiles?: boolean;
-  start?: Record<string, HarnessStartOptions>;
-  /** Pairing or hello `key_types`; absent means passkeys only (an older daemon). */
-  keyTypes?: KeyType[];
-  /** The last hello's `pool` (sessionpipe 0.11); said again each time, so absent is absent. */
-  pool?: MachinePool;
-  /** The last hello's word on agents asking agents (CONTROL.md §13): `ask` on or off there,
-   *  `handoff` when it takes `reply_to`. Absent when the hello said nothing (a 0.10 daemon). */
-  ask?: boolean;
-  handoff?: boolean;
-  waiting?: string[];
-  lastHelloAt?: string;
-  lastPollAt?: string;
-  /** A machine paired on a spacesheep account (docs/rfcs/08): held in memory from the
-   *  relay's list, never saved, never polled here; its keys are ids only. */
-  remote?: { via: "spacesheep"; origin: string; rpId: string; online: boolean; lastSeen?: string };
-  pairings: PairingRow[];
-}
 
 /** A device that wants to be trusted: its passkey, made on that device, and the six
  *  digits the person compares on a device the machine already trusts. Nothing here hands
@@ -200,51 +100,6 @@ export interface DeviceRequestRow {
   doneAt?: string;
 }
 
-export interface MessageRow {
-  id: string;
-  machineId: string;
-  /** A send carried by spacesheep (a remote machine): its job id there, whose status the
-   *  relay reports (state.applyRemoteJobs). */
-  remoteJob?: number;
-  cmd: string;
-  csig?: string | null;
-  grant?: SignedCommand["grant"];
-  confirm?: SignedCommand["confirm"];
-  at: string;
-  expiresAt: string;
-  kind: ControlKind;
-  session: string;
-  text?: string;
-  /** Who queued it: "ui" for the browser, "test-door" for the conformance door. */
-  via: string;
-  outcome?: ControlOutcome;
-  mode?: string;
-  code?: string;
-  detail?: string;
-  reply?: string;
-  replySeq?: number;
-  takenAt?: string;
-  ackedAt?: string;
-  /** A fork or a started session the final ack named. */
-  ackSession?: string;
-  /** The final ack's `copy_of`: the session the command named, when a copy of it answered. */
-  copyOf?: string;
-  /** A start's signed folder, options and files, for the starting page and a retry. */
-  cwd?: string;
-  permission?: StartPermission;
-  model?: string;
-  files?: StartFile[];
-  /** What the machine ran the start with (`taken`, `delivered`). */
-  applied?: Applied;
-  /** A pool command's action and account, as signed (pool.ts read them). */
-  poolAction?: PoolAction;
-  poolAccount?: string;
-  /** A handoff: `reply_to` as signed on a prompt or a start (CONTROL.md §3.1). */
-  replyTo?: string;
-  /** The UI's unsigned note of which session's page sent it (SendBody.from). */
-  from?: string;
-}
-
 interface MachinesFile {
   v: 1;
   machines: MachineRow[];
@@ -254,7 +109,6 @@ interface QueueFile {
   messages: MessageRow[];
 }
 
-const nowIso = () => new Date().toISOString();
 const b64 = (n: number) => randomBytes(n).toString("base64url");
 export const hashToken = (t: string): string => createHash("sha256").update(`sessionpipe-gui.token:${t}`).digest("hex");
 export const hashPollKey = (k: string): string => createHash("sha256").update(`sessionpipe.poll:${k}`).digest("hex");
@@ -276,83 +130,12 @@ function readJson<T>(file: string): T | null {
   }
 }
 
-/** The receiver's reading of one carried message, for the UI (never the signature). */
-export function toActivity(m: MessageRow): ControlActivity {
-  const a: ControlActivity = {
-    id: m.id,
-    machineId: m.machineId,
-    kind: m.kind,
-    session: m.session,
-    at: m.at,
-    expiresAt: m.expiresAt,
-  };
-  if (m.text !== undefined) a.text = m.text;
-  if (m.outcome) a.outcome = m.outcome;
-  if (m.mode) a.mode = m.mode;
-  if (m.code) a.code = m.code;
-  if (m.detail) a.detail = m.detail;
-  if (m.reply !== undefined) a.reply = m.reply;
-  if (m.replySeq !== undefined) a.replySeq = m.replySeq;
-  if (m.ackSession) a.ackSession = m.ackSession;
-  if (m.copyOf) a.copyOf = m.copyOf;
-  if (m.takenAt) a.takenAt = m.takenAt;
-  if (m.ackedAt) a.ackedAt = m.ackedAt;
-  if (m.cwd) a.cwd = m.cwd;
-  if (m.permission) a.permission = m.permission;
-  if (m.model) a.model = m.model;
-  if (m.files) a.files = m.files;
-  if (m.applied) a.applied = m.applied;
-  if (m.poolAction) a.poolAction = m.poolAction;
-  if (m.poolAccount) a.poolAccount = m.poolAccount;
-  if (m.replyTo) a.replyTo = m.replyTo;
-  if (m.from) a.from = m.from;
-  return a;
-}
-
-/** What the UI shows of a command: its text, or a permission answer's decision and note. */
-function describe(cmd: ControlCommand): string | undefined {
-  if (typeof cmd.text === "string") return cmd.text;
-  if (cmd.kind === "permission.answer") return cmd.note ? `${cmd.decision}: ${cmd.note}` : cmd.decision;
-  if (cmd.kind === "key.add") return cmd.name ? `trust ${cmd.name}` : "trust a new device";
-  if ((cmd.kind as string) === "pool") return describePool(cmd as unknown as PoolCommand);
-  return cmd.note;
-}
-
-/** A pool command in words, as the activity shows it: "Turn the pool on", "Move Fiction
- *  first", "Refresh dev@example.com". `names` turns an account id into what the person
- *  calls it (its label, else its email, else the id itself); the activity keeps the id. */
-export function describePool(cmd: PoolCommand, names: (id: string) => string = (id) => id): string {
-  const who = cmd.pool_account ? names(cmd.pool_account) : "an account";
-  if (cmd.pool_action === "refresh" && !cmd.pool_account) return "Refresh usage";
-  switch (cmd.pool_action) {
-    case "on":
-      return "Turn the pool on";
-    case "off":
-      return "Turn the pool off";
-    case "enable":
-      return `Turn ${who} on`;
-    case "disable":
-      return `Turn ${who} off`;
-    case "remove":
-      return `Remove ${who}`;
-    case "refresh":
-      return `Refresh ${who}`;
-    case "order": {
-      const first = cmd.pool_order?.[0];
-      return first ? `Move ${names(first)} first` : "Reorder the accounts";
-    }
-    case "login.begin":
-      return "Sign in to Claude";
-    case "login.complete":
-      return "Finish signing in";
-  }
-}
-
 type Waiter = { resolve: (messages: MessageRow[]) => void; timer: NodeJS.Timeout };
 
 export class ControlState {
-  private machinesById = new Map<string, MachineRow>();
-  private queues = new Map<string, MessageRow[]>();
+  // The slice below holds these two maps themselves: they are filled and emptied, never replaced.
+  private readonly machinesById = new Map<string, MachineRow>();
+  private readonly queues = new Map<string, MessageRow[]>();
   private waiters = new Map<string, Set<Waiter>>();
   /** Device requests in flight, in memory only. */
   private devices = new Map<string, DeviceRequestRow>();
@@ -368,7 +151,21 @@ export class ControlState {
   /** Called when any machine row changed (pairing, hello, poll, removal) or a machine's
    *  online reading flipped, so the UI can refresh its machine list without an event. */
   onMachines: () => void = () => {};
+  /** A spacesheep job is worth reading now (a send just made, its computer back, events for
+   *  its session, the account connected): the source reads the jobs door at once. */
+  onRemoteKick: () => void = () => {};
   private onlineSig = "";
+  /** The machines and sends of a spacesheep account (remote.ts), over this state's rows. */
+  private readonly remote: RemoteSlice = new RemoteSlice({
+    machines: this.machinesById,
+    queues: this.queues,
+    enqueue: (m, signed, cmd, o) => this.enqueue(m, signed, cmd, o),
+    saveQueue: (id) => this.saveQueue(id),
+    onMessage: (row) => this.onMessage(row),
+    onMachines: () => this.onMachines(),
+    checkOnline: () => this.checkOnline(),
+    onRemoteKick: () => this.onRemoteKick(),
+  });
 
   constructor(readonly dir: string) {
     this.files = new FileStore(path.join(dir, "files"));
@@ -380,9 +177,22 @@ export class ControlState {
         if (!f.endsWith(".json")) continue;
         const id = f.slice(0, -5);
         const q = readJson<QueueFile>(path.join(qdir, f));
-        if (q?.messages && this.machinesById.has(id)) this.queues.set(id, q.messages);
+        // A machine paired on spacesheep is never in machines.json (it comes back with the
+        // relay's list), so its queue is kept for the rows spacesheep carried: they settle by
+        // spacesheep's word, or as untracked (setRemoteAccount, upsertRemoteMachines).
+        if (q?.messages && (this.machinesById.has(id) || (MACHINE_RE.test(id) && q.messages.some(isRemoteRow))))
+          this.queues.set(id, q.messages);
         else rmSync(path.join(qdir, f), { force: true });
       }
+    // Such a queue keeps what is unsettled and a week of history, like any other.
+    for (const id of [...this.queues.keys()]) {
+      if (this.machinesById.has(id)) continue;
+      this.saveQueue(id);
+      if (!this.queues.get(id)?.length) {
+        this.queues.delete(id);
+        this.saveQueue(id);
+      }
+    }
     this.sweeper = setInterval(() => this.sweep(), 5000);
     this.sweeper.unref();
   }
@@ -409,79 +219,27 @@ export class ControlState {
   }
 
   // --- machines paired elsewhere (docs/rfcs/08: a spacesheep account as the backend) ---
+  // Their rows are in this state's maps and its queue files; what is done with them is
+  // the slice's (remote.ts), the same one a page with no receiver under it runs.
 
-  /** The relay's machine list, as rows: created or refreshed in memory, with the facts
-   *  spacesheep's hellos kept and the keys it trusts (ids only; the signature is the
-   *  receiver's check). Rows the list no longer has go. */
   upsertRemoteMachines(list: RemoteMachine[], remote: { via: "spacesheep"; origin: string; rpId: string }): void {
-    const seen = new Set<string>();
-    let changed = false;
-    for (const r of list) {
-      if (!MACHINE_RE.test(r.id)) continue;
-      seen.add(r.id);
-      const facts: Hello = {
-        name: r.name,
-        harnesses: r.agents ?? [],
-        modes: r.modes ?? [],
-        version: r.cli_version ?? "",
-        folders: r.folders ?? undefined,
-        mode: r.mode === "auto" || r.mode === "inherit" || r.mode === "safe" ? r.mode : undefined,
-        accounts: [],
-        files: !!r.files,
-        promptFiles: !!r.prompt_files,
-        keyTypes: r.key_types?.includes("device") ? ["passkey", "device"] : ["passkey"],
-        ask: r.ask,
-        handoff: !!r.handoff,
-        start: r.start,
-        pool: r.pool ?? undefined,
-      } as unknown as Hello;
-      let m = this.machinesById.get(r.id);
-      if (!m) {
-        m = {
-          id: r.id,
-          name: r.name,
-          createdAt: nowIso(),
-          keys: [],
-          harnesses: facts.harnesses,
-          modes: facts.modes,
-          version: facts.version,
-          pairings: [],
-        };
-        this.machinesById.set(r.id, m);
-        changed = true;
-      }
-      this.applyFacts(m, facts);
-      m.pairedAt = m.pairedAt ?? nowIso();
-      m.remote = {
-        ...remote,
-        online: !!r.online,
-        lastSeen: r.last_seen ? new Date(r.last_seen).toISOString() : undefined,
-      };
-      m.lastHelloAt = m.remote.lastSeen;
-      const keys = (r.passkey_ids ?? []).map((id) => ({ id, alg: -7, spki: "", addedAt: nowIso() }));
-      if (keys.map((k) => k.id).join() !== m.keys.map((k) => k.id).join()) {
-        m.keys = keys;
-        changed = true;
-      }
-    }
-    for (const m of [...this.machinesById.values()]) {
-      if (m.remote?.via === remote.via && !seen.has(m.id)) {
-        this.machinesById.delete(m.id);
-        changed = true;
-      }
-    }
-    if (changed) this.checkOnline();
-    this.onMachines();
+    this.remote.upsertRemoteMachines(list, remote);
   }
-
-  /** Disconnected: the rows paired there leave the board. */
+  remoteJobsCadence(now = Date.now()): "fast" | "slow" | "none" {
+    return this.remote.remoteJobsCadence(now);
+  }
+  remoteEventsSeen(keys: Iterable<string>): void {
+    this.remote.remoteEventsSeen(keys);
+  }
   dropRemoteMachines(via: "spacesheep"): void {
-    for (const m of [...this.machinesById.values()]) if (m.remote?.via === via) this.machinesById.delete(m.id);
-    this.onMachines();
+    this.remote.dropRemoteMachines(via);
   }
-
-  /** A send spacesheep carried for a remote machine: its row here, settled by the relay's
-   *  job status (applyRemoteJobs), never by a poll of this receiver. */
+  setRemoteAccount(account: { origin: string; email: string } | null): void {
+    this.remote.setRemoteAccount(account);
+  }
+  setRemoteRevoked(on: boolean): void {
+    this.remote.setRemoteRevoked(on);
+  }
   enqueueRemote(
     m: MachineRow,
     signed: SignedCommand,
@@ -489,53 +247,16 @@ export class ControlState {
     o: { via: string; from?: string },
     remoteJob: number,
   ): MessageRow {
-    const row = this.enqueue(m, signed, cmd, { via: o.via, ...(o.from ? { from: o.from } : {}) });
-    row.remoteJob = remoteJob;
-    this.saveQueue(m.id);
-    return row;
+    return this.remote.enqueueRemote(m, signed, cmd, o, remoteJob);
   }
-
-  /** The lowest spacesheep job id still unsettled here, for the relay's `since`. */
+  pendingRemoteJobs(): number[] {
+    return this.remote.pendingRemoteJobs();
+  }
   pendingRemoteJobsFrom(): number | null {
-    let min: number | null = null;
-    for (const [, rows] of this.queues)
-      for (const row of rows) {
-        if (row.remoteJob === undefined || isFinal(row.outcome)) continue;
-        if (min === null || row.remoteJob < min) min = row.remoteJob;
-      }
-    return min;
+    return this.remote.pendingRemoteJobsFrom();
   }
-
-  /** The relay's word on the jobs spacesheep carried (its status column, worded there):
-   *  queued keeps waiting, taken/running is taken, done is delivered, refused and failed
-   *  are themselves, with the note as the detail. */
-  applyRemoteJobs(
-    jobs: Array<{ id: number; status: string; note: string | null; done_at: number | null; created_at: number }>,
-  ): number {
-    let n = 0;
-    const byJob = new Map(jobs.map((j) => [j.id, j]));
-    for (const [id, rows] of this.queues) {
-      let changed = false;
-      for (const row of rows) {
-        if (row.remoteJob === undefined || isFinal(row.outcome)) continue;
-        const j = byJob.get(row.remoteJob);
-        if (!j || j.status === "queued") continue;
-        if (j.status === "taken" || j.status === "running") {
-          if (row.outcome === "taken") continue;
-          row.outcome = "taken";
-          row.takenAt = nowIso();
-        } else {
-          row.outcome = j.status === "done" ? "delivered" : j.status === "refused" ? "refused" : "failed";
-          row.ackedAt = j.done_at ? new Date(j.done_at).toISOString() : nowIso();
-          if (j.note) row.detail = j.note;
-        }
-        changed = true;
-        n++;
-        this.onMessage(row);
-      }
-      if (changed) this.saveQueue(id);
-    }
-    return n;
+  applyRemoteJobs(jobs: RemoteJobWord[], through = 0, serverNow?: number): number {
+    return this.remote.applyRemoteJobs(jobs, through, serverNow);
   }
   private saveQueue(id: string): void {
     const q = this.queues.get(id);
@@ -543,12 +264,7 @@ export class ControlState {
       rmSync(this.queueFile(id), { force: true });
       return;
     }
-    const now = Date.now();
-    const live = q.filter((m) => !isFinal(m.outcome));
-    const settled = q
-      .filter((m) => isFinal(m.outcome) && now - Date.parse(m.ackedAt ?? m.at) < SETTLED_TTL_MS)
-      .slice(-KEEP_SETTLED);
-    const kept = [...live, ...settled].sort((a, b) => (a.id < b.id ? -1 : 1));
+    const kept = keptQueue(q, Date.now());
     this.queues.set(id, kept);
     writeAtomic(this.queueFile(id), { v: 1, messages: kept } satisfies QueueFile);
   }
@@ -607,30 +323,9 @@ export class ControlState {
     return m;
   }
 
-  /** The pairing request's or hello's facts about the machine (name, harnesses, folders, mode, accounts). */
+  /** The pairing request's or hello's facts about the machine (rows.ts applyFacts). */
   applyFacts(m: MachineRow, h: Hello): void {
-    if (h.name) m.name = h.name;
-    if (h.harnesses.length) m.harnesses = h.harnesses;
-    if (h.modes.length) m.modes = h.modes;
-    if (h.version) m.version = h.version;
-    if (h.folders) m.folders = h.folders;
-    if (h.mode) m.mode = h.mode;
-    if (h.accounts.length) m.accounts = h.accounts;
-    // Said again in every hello (CONTROL.md §2): absent now means absent.
-    if (h.files) m.files = true;
-    else delete m.files;
-    if (h.promptFiles) m.promptFiles = true;
-    else delete m.promptFiles;
-    if (h.start) m.start = h.start;
-    else delete m.start;
-    if (h.keyTypes) m.keyTypes = h.keyTypes;
-    else delete m.keyTypes;
-    if (h.pool) m.pool = h.pool;
-    else delete m.pool;
-    if (h.ask !== undefined) m.ask = h.ask;
-    else delete m.ask;
-    if (h.handoff) m.handoff = true;
-    else delete m.handoff;
+    applyFacts(m, h);
   }
 
   /** Mint the machine's own bearer token (once, at its first pairing). Returned in clear
@@ -674,36 +369,10 @@ export class ControlState {
   }
 
   machineControl(m: MachineRow): MachineControl {
-    const c: MachineControl = {
-      machineId: m.id,
-      online: m.remote ? m.remote.online : !!m.lastPollAt && Date.now() - Date.parse(m.lastPollAt) < ONLINE_WINDOW_MS,
-      ...(m.remote ? { remote: { via: m.remote.via, origin: m.remote.origin, rpId: m.remote.rpId } } : {}),
-      keys: m.keys.map((k) => ({
-        id: k.id,
-        alg: k.alg,
-        ...(k.type === "device" ? { type: k.type } : {}),
-        ...(k.name ? { name: k.name } : {}),
-        addedAt: k.addedAt,
-      })),
+    return machineControl(m, {
       queued: this.queued(m.id).length,
-    };
-    if (m.lastPollAt) c.lastPollAt = m.lastPollAt;
-    if (m.lastHelloAt) c.lastHelloAt = m.lastHelloAt;
-    if (m.mode) c.mode = m.mode;
-    if (m.folders) c.folders = m.folders;
-    if (m.harnesses.length) c.harnesses = m.harnesses;
-    if (m.modes.length) c.modes = m.modes;
-    if (m.version) c.version = m.version;
-    if (m.accounts) c.accounts = m.accounts;
-    if (m.files) c.files = true;
-    if (m.promptFiles) c.promptFiles = true;
-    if (this.takesTilde && machineTakesTilde(m)) c.tilde = true;
-    if (m.start) c.start = m.start;
-    if (m.keyTypes) c.keyTypes = m.keyTypes;
-    if (m.pool) c.pool = m.pool;
-    if (m.ask !== undefined) c.ask = m.ask;
-    if (m.handoff) c.handoff = true;
-    return c;
+      tilde: this.takesTilde && machineTakesTilde(m),
+    });
   }
 
   // --- pairings -------------------------------------------------------------------
@@ -805,63 +474,15 @@ export class ControlState {
     o: { expiresInMs?: number; via: string; from?: string },
   ): MessageRow {
     const now = Date.now();
-    const ttl = Math.min(EXPIRES_MAX_MS, Math.max(1000, o.expiresInMs ?? EXPIRES_DEFAULT_MS));
-    const row: MessageRow = {
-      id: ulid(now),
-      machineId: m.id,
-      cmd: signed.cmd,
-      at: new Date(now).toISOString(),
-      expiresAt: new Date(now + ttl).toISOString(),
-      kind: cmd.kind,
-      session: cmd.session,
-      via: o.via,
-    };
-    if (signed.csig) row.csig = signed.csig;
-    if (signed.grant) row.grant = signed.grant;
-    if (signed.confirm) row.confirm = signed.confirm;
-    const text =
-      (cmd.kind as string) === "pool"
-        ? describePool(cmd as unknown as PoolCommand, (id) => this.accountName(m, id))
-        : describe(cmd);
-    if (text !== undefined) row.text = text;
-    if ((cmd.kind as string) === "pool") {
-      const c = cmd as unknown as PoolCommand;
-      row.poolAction = c.pool_action;
-      if (c.pool_account) row.poolAccount = c.pool_account;
-    }
-    if (o.from) row.from = o.from;
-    // A handoff (CONTROL.md §3.1): the session the daemon relays the answer into. Inside the
-    // signed bytes; the caller's second look (ui.ts) held it to the machine's hello.
-    const replyTo = (cmd as ControlCommand & { reply_to?: unknown }).reply_to;
-    if ((cmd.kind === "prompt" || cmd.kind === "start") && typeof replyTo === "string") row.replyTo = replyTo;
-    if (cmd.kind === "start") {
-      // The fields a start may carry beyond core 0.7's type (CONTROL.md §3.1); the caller's
-      // pre-check (ui.ts) already held them to the machine's hello.
-      const c = cmd as ControlCommand & { files?: StartFile[]; permission?: StartPermission; model?: string };
-      if (typeof c.cwd === "string") row.cwd = c.cwd;
-      if (c.permission) row.permission = c.permission;
-      if (c.model) row.model = c.model;
-      if (Array.isArray(c.files) && c.files.length) {
-        row.files = c.files.map((f) => ({ name: f.name, type: f.type, size: f.size, sha256: f.sha256 }));
-        for (const f of row.files) this.files.keepUntil(f.sha256, row.expiresAt);
-      }
-    }
+    const row = messageRow(m, signed, cmd, { ...o, id: ulid(now), now });
+    // A start's files are held here until the row is over (files.ts).
+    for (const f of row.files ?? []) this.files.keepUntil(f.sha256, row.expiresAt);
     this.queue(m.id).push(row);
     this.saveQueue(m.id);
     if (cmd.kind === "key.add" && cmd.key) this.deviceSent(cmd.key.id, m.id, row.id);
     this.onMessage(row);
     this.wake(m.id);
     return row;
-  }
-
-  /** What the person calls a pooled account on this machine: its pool label, else its
-   *  email (from the pool or the hello's accounts), else the id as it is. */
-  private accountName(m: MachineRow, id: string): string {
-    const pooled = m.pool?.accounts.find((a) => a.id === id);
-    if (pooled?.label) return pooled.label;
-    if (pooled?.email) return pooled.email;
-    const named = m.accounts?.find((a) => a.id === id);
-    return named?.email ?? named?.name ?? id;
   }
 
   message(machineId: string, id: string): MessageRow | undefined {
@@ -943,6 +564,9 @@ export class ControlState {
     let changed = false;
     for (const row of this.queues.get(id) ?? []) {
       if (isFinal(row.outcome) || Date.parse(row.expiresAt) > now) continue;
+      // spacesheep's to settle (applyRemoteJobs): its day is its own, and it may still
+      // hand the job out after this receiver's clock said the row was over.
+      if (isRemoteRow(row)) continue;
       row.outcome = "expired";
       row.ackedAt = new Date(now).toISOString();
       row.detail = "expired before the machine took it";
@@ -1146,19 +770,12 @@ export class ControlState {
   }
 
   activity(limit = 100): ControlActivity[] {
-    const all: MessageRow[] = [];
-    for (const q of this.queues.values()) all.push(...q);
-    all.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
-    return all.slice(0, Math.max(0, limit)).map(toActivity);
+    return activity(this.queues, limit);
   }
 
   /** One carried command by its id, whichever machine's queue holds it; undefined once
    *  its queue is gone (the machine removed) or it was never here. */
   activityById(id: string): ControlActivity | undefined {
-    for (const q of this.queues.values()) {
-      const row = q.find((m) => m.id === id);
-      if (row) return toActivity(row);
-    }
-    return undefined;
+    return activityById(this.queues, id);
   }
 }
