@@ -147,6 +147,8 @@ export class HubStandIn {
   busy = 0;
   /** spacesheep cannot be reached (`unreachable`). */
   down = false;
+  /** Each door request takes this much longer, as a phone's network would make it. */
+  latencyMs = 0;
   /** The most a relay answer may hold, unpacked (8 MiB in the hub; a test lowers it). */
   relayMax = 8 * MIB;
   /** The native alerts: what the person answers ("use this account?", "disconnect?"). */
@@ -519,6 +521,7 @@ export class HubStandIn {
     if (door === "relay") this.relayReads++;
     let res: FakeAnswer;
     try {
+      if (this.latencyMs > 0) await new Promise<void>((r) => this.clock.setTimeout(r, this.latencyMs));
       const rebuilt = door === "device" ? `id=${a.deviceKeyId}` : params.map(([k, v]) => `${k}=${v}`).join("&");
       res = await this.o.upstream.ask({
         method: req.method,

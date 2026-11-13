@@ -2,7 +2,7 @@
 // Owned by: web. The backend of a page that shows a spacesheep account (docs/rfcs/08, "The
 // phone on an account"). There is no receiver: the page carries its own board. It puts
 // together the same parts the receiver does (server/app.ts), each of them the receiver's
-// own file: the store's core over a log in memory, the labels, the marks and the limits,
+// own file: the store's core over a log of the page's own, the labels, the marks and the limits,
 // the machines and sends of the account (MemoryControl), and the relay's reader. What is
 // the page's own is where they are kept (IndexedDB for the relay's pages, the hub's
 // documents for what is the person's) and how spacesheep is reached (the hub's five doors).
@@ -25,7 +25,6 @@ import {
   startRelayReader,
 } from "../../../server/sources/relay";
 import { StoreCore } from "../../../server/store/core";
-import { MemoryLog } from "../../../server/store/log";
 import { LabelsCore } from "../../../server/ui/labelsCore";
 import { LimitsCore } from "../../../server/ui/limitsCore";
 import { MarksCore } from "../../../server/ui/marksCore";
@@ -36,6 +35,7 @@ import type { ApiBackend } from "../lib/net";
 import { type EventCache, openCache } from "./cache";
 import { type AccountDocs, openDocs } from "./docs";
 import { type AccountDoors, type DoorAnswer, openDoors } from "./doors";
+import { PageLog } from "./log";
 import { routes } from "./routes";
 import { fitSends, readSends } from "./sends";
 import {
@@ -134,10 +134,10 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
   const loaded = await cache.load();
 
   // ---------- the parts, as the receiver puts them together ----------
-  const log = new MemoryLog();
-  log.seed(loaded.events);
+  // The index keeps its previews whole, so its copy of an event it did not cut is the
+  // event, and the log keeps only the ones it did (log.ts).
   const b0 = performance.now();
-  const store = new StoreCore("account", {}, log);
+  const store = new StoreCore("account", { keepDays: 0 }, new PageLog(loaded.events));
   const restored = loaded.events.length
     ? { events: loaded.events.length, pages: loaded.pages, readMs: loaded.ms, bootMs: performance.now() - b0 }
     : null;

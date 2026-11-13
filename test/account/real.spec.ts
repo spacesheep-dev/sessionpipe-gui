@@ -4,7 +4,7 @@
 // (test/account/hub.ts, with the real spacesheep upstream of its doors), the phone's
 // Secure Enclave key (a software P-256 key that spacesheep's computer already trusts), and
 // the computer (a script that takes its jobs and sends its hooks). spacesheep itself, its
-// relay, its jobs, its second look and its verifier are the real ones. See real.config.ts.
+// relay, its jobs, its second look and its verifier are the real ones. See manual.config.ts.
 import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,7 +40,7 @@ async function ask(req: FakeRequest): Promise<FakeAnswer> {
 }
 
 test("the page on an account against a real local spacesheep", async ({ browser }) => {
-  test.skip(!ORIGIN, "set ACCOUNT_REAL_ORIGIN (see real.config.ts)");
+  test.skip(!ORIGIN, "set ACCOUNT_REAL_ORIGIN (see manual.config.ts)");
   expect(new URL(ORIGIN).hostname, "a spacesheep on this machine only").toMatch(/^(localhost|127\.0\.0\.1)$/);
   const link = JSON.parse(readFileSync(process.env.ACCOUNT_REAL_KEY!, "utf8")) as { key: string; email: string };
   const device = readFileSync(process.env.ACCOUNT_REAL_DEVICE!, "utf8");

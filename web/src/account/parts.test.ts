@@ -2,13 +2,17 @@
 // The parts a page on a spacesheep account is made of, each alone: what it reads of the
 // shell's contract, how it tells the hub's own answers from spacesheep's at the doors, what
 // its cache keeps and drops, and how its documents are kept behind the hub.
-import type { StoredEvent } from "@shared/api";
-import { describe, expect, it } from "vitest";
+import type { ProtocolEvent, StoredEvent } from "@shared/api";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MachineRow } from "../../../server/control/rows";
 import { HUB_HEADER } from "../../../server/sources/relay";
+import { StoreCore } from "../../../server/store/core";
+import { MemoryLog } from "../../../server/store/log";
+import { Session } from "../../../test/events";
 import { CACHE_EVENTS_MAX, compacted, memoryCache, openCache, pagesToDrop } from "./cache";
 import { openDocs } from "./docs";
 import { hubCode, openDoors, SEND_BUSY_TRIES } from "./doors";
+import { PageLog } from "./log";
 import { accountShell } from "./shell";
 
 describe("the shell's contract, read for an account", () => {
@@ -263,5 +267,61 @@ describe("the account's documents", () => {
     await docs.flushed();
     expect(docs.keep("labels").load()).toEqual({ v: 1 });
     expect(docs.failed().sort()).toEqual(["labels", "sends"]);
+  });
+});
+
+describe("the page's event log", () => {
+  // One clock for both stores: an event's arrival is the store's own time.
+  beforeEach(() => void vi.useFakeTimers({ now: Date.now() }));
+  afterEach(() => void vi.useRealTimers());
+  const session = new Session("s-log");
+  const long = "x".repeat(6000);
+  const events = (): ProtocolEvent[] => [
+    session.ev("session.started", { source: "startup" }, { tier: 2 }),
+    session.ev("turn.started", { turn_id: "t1" }, { tier: 2 }),
+    session.ev("turn.transcript", { turn: 1, user: "short", assistant: long }, { tier: 2 }),
+    session.ev("tool.started", { tool: "Read", call_id: "c1" }, { tier: 2 }),
+    session.ev("turn.ended", { turn_id: "t1" }, { tier: 2 }),
+  ];
+  const readings = (store: StoreCore) => {
+    const key = store.snapshot().sessions[0]!.key;
+    const detail = store.sessionDetail(key, -1, 100)!;
+    return {
+      sessions: store.snapshot().sessions.map(({ lastAt: _l, stateSince: _s, ...rest }) => rest),
+      events: detail.events.map(({ arrivedAt: _a, ...rest }) => rest),
+      feed: store.feed({ limit: 50 }).events.map((e) => e.id),
+      bytes: store.stats().storageBytes,
+    };
+  };
+
+  it("gives the store the same board, session page and sizes as a log that keeps every event", async () => {
+    const list = events();
+    const mine = new StoreCore("page", { keepDays: 0, tickMs: 60_000, statsMs: 60_000 }, new PageLog());
+    const whole = new StoreCore("page", { keepDays: 0, tickMs: 60_000, statsMs: 60_000 }, new MemoryLog());
+    mine.ingest(list, "spacesheep");
+    whole.ingest(list, "spacesheep");
+    expect(readings(mine)).toEqual(readings(whole));
+    // The one event the index cut reads back whole; the rest are the index's own copies.
+    const detail = mine.sessionDetail(mine.snapshot().sessions[0]!.key, -1, 100)!;
+    expect((detail.events[2]!.data as { assistant: string }).assistant).toBe(long);
+    expect((detail.events[2] as { preview?: unknown }).preview).toBeUndefined();
+    await mine.close();
+    await whole.close();
+  });
+
+  it("boots from what was kept to the same readings, and lets the kept events go", async () => {
+    const first = new StoreCore("page", { keepDays: 0, tickMs: 60_000, statsMs: 60_000 }, new MemoryLog());
+    const stored = first.ingest(events(), "spacesheep").stored;
+    const log = new PageLog(JSON.parse(JSON.stringify(stored)) as StoredEvent[]);
+    const again = new StoreCore("page", { keepDays: 0, tickMs: 60_000, statsMs: 60_000 }, log);
+    expect(readings(again)).toEqual(readings(first));
+    // A second boot from the same log finds nothing: what was seeded is the store's now.
+    expect(log.scanEach(() => {})).toEqual([]);
+    // Forgetting a session forgets its kept lines.
+    const key = again.snapshot().sessions[0]!.key;
+    again.forget(key);
+    expect(log.readAt("claude-code", "s-log", [{ offset: 2, bytes: 0 }])).toEqual([undefined]);
+    await first.close();
+    await again.close();
   });
 });
