@@ -282,6 +282,11 @@ function statusLine(s: SearchIndexStatus): string {
     case "off":
       return `${n} sessions from sessionpipe · history search is off`;
     case "error":
+      if (s.historyLeft) {
+        // The error code (EPERM, ENOTEMPTY…) the server put in its sentence, when it has one.
+        const code = /\((E[A-Z]+)\)/.exec(s.error ?? "")?.[1];
+        return `History search is off, but its index could not be deleted${code ? ` (${code})` : ""}. sessionpipe-gui index --rebuild tries again`;
+      }
       return `The index needs rebuilding (${s.error ?? "error"}). sessionpipe-gui index --rebuild`;
     default:
       return `${n} sessions · up to date`;

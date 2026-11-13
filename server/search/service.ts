@@ -827,16 +827,15 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
       sources: st.bySource.filter((b) => b.sessions > 0 && (history || b.source !== "history")),
     };
     if (st.updatedAt) out.updatedAt = iso(st.updatedAt);
-    const left = !history && historyTried && !switchingOff && existsSync(histDir);
-    const error =
-      readerError ??
-      ixError ??
-      (left
+    const left =
+      !history && historyTried && !switchingOff && existsSync(histDir)
         ? `History search is off, but its index is still on disk: it could not be deleted${leftWhy ? ` (${leftWhy})` : ""}. It is tried again each time the indexer starts, and on Rebuild.`
-        : undefined);
+        : undefined;
+    const error = readerError ?? ixError ?? left;
     if (error) {
       out.state = "error";
       out.error = error;
+      if (error === left) out.historyLeft = true;
     } else if (!history) out.state = "off";
     else if (firstRun()) {
       out.state = "first-run";
