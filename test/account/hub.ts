@@ -367,8 +367,12 @@ export class HubStandIn {
         return this.account(args.id).docs.delete(this.docName(args.name));
       case "acct_needs": {
         const a = this.account(args.id);
-        if (!Array.isArray(args.sessions)) throw new HubRefused("bad_request", "sessions is a list.");
-        this.needs.push({ id: a.id, sessions: args.sessions });
+        // As the hub: a list, of at most 200 sessions, 16 attentions a session, 200 in all.
+        const all = Array.isArray(args.sessions) ? (args.sessions as { openAttentions?: unknown[] }[]) : null;
+        const counts = all?.map((x) => (Array.isArray(x?.openAttentions) ? x.openAttentions.length : 0)) ?? [];
+        if (!all || all.length > 200 || counts.some((n) => n > 16) || counts.reduce((a, n) => a + n, 0) > 200)
+          throw new HubRefused("bad_request", "That is not a list of sessions.");
+        this.needs.push({ id: a.id, sessions: all });
         return true;
       }
       case "rx_list":

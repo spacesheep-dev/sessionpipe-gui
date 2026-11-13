@@ -10,7 +10,16 @@ import { RELAY_BUDGET } from "../../../server/sources/relay";
 import { type FakeAnswer, FakeSpacesheep } from "../../../test/account/fake-spacesheep";
 import { HubStandIn } from "../../../test/account/hub";
 import { Session } from "../../../test/events";
-import { type AccountBackend, type AccountNotice, GONE_AGAIN_MS, startAccountBackend } from "./backend";
+import {
+  type AccountBackend,
+  type AccountNotice,
+  GONE_AGAIN_MS,
+  NEEDS_A_SESSION,
+  NEEDS_ATTENTIONS,
+  NEEDS_SESSIONS,
+  needsOf,
+  startAccountBackend,
+} from "./backend";
 import { FIRST_ASKING_OVER_MS, LOOK_PAGES } from "./doors";
 import { NOT_HERE } from "./routes";
 import { type AccountShell, accountShell, type ShellCalls } from "./shell";
@@ -1669,6 +1678,34 @@ describe("a page's own backend on a spacesheep account", () => {
       expect(r.hub.needs[1]!.sessions).toEqual([]);
       page.off();
     });
+    it("stays inside what the hub takes: 200 sessions, 16 attentions of one, 200 in all", () => {
+      const session = (i: number, asks: number, state = "needs_you") =>
+        ({
+          key: `claude-code:s-${i}`,
+          harness: "claude-code",
+          id: `s-${i}`,
+          state,
+          stateSince: "2026-11-13T10:00:00.000Z",
+          openAttentions: Array.from({ length: asks }, (_, j) => ({
+            attentionId: `a-${i}-${j}`,
+            kind: "permission",
+            at: "2026-11-13T10:00:00.000Z",
+            answerable: true,
+          })),
+        }) as never;
+      // Thirty sessions, each asking twenty things at once: sixteen of each, two hundred in all.
+      let said = needsOf(Array.from({ length: 30 }, (_, i) => session(i, 20)));
+      expect(said).toHaveLength(30);
+      expect(Math.max(...said.map((x) => x.openAttentions.length))).toBe(NEEDS_A_SESSION);
+      expect(said.reduce((n, x) => n + x.openAttentions.length, 0)).toBe(NEEDS_ATTENTIONS);
+      // Three hundred sessions that need the person, among others that do not: two hundred.
+      said = needsOf(Array.from({ length: 600 }, (_, i) => session(i, 1, i % 2 ? "working" : "needs_you")));
+      expect(said).toHaveLength(NEEDS_SESSIONS);
+      expect(said.every((x) => x.openAttentions.length === 1)).toBe(true);
+      // An ordinary list is as it was.
+      expect(needsOf([session(1, 2)])).toMatchObject([{ key: "claude-code:s-1", openAttentions: [{}, {}] }]);
+    });
+
     it("is not called at all on a shell that does not list it", async () => {
       r.ss.push(needing(new Session("s-1")));
       await r.start();
