@@ -27,6 +27,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { deviceWords } from "../control/signer";
 import { useAppState, useConnection, useStore } from "../data/hooks";
 import { tablistKey } from "../lib/focus";
 import { bytes } from "../lib/format";
@@ -949,11 +950,15 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
   const p = st?.pending ?? null;
   // On an account there is nothing to connect from here: once it is gone (or before it is
   // read) the group is not drawn, and the window is about to show something else.
-  if (accountMode() && !link) return null;
+  const account = accountMode();
+  if (account && !link) return null;
   const stateWords: Record<string, string> = {
     starting: "connecting…",
     ok: "reading",
-    unauthorized: "the key was revoked on spacesheep; disconnect and connect again",
+    // On an account nothing here connects: the sentence stops at what is so.
+    unauthorized: account
+      ? "the key was revoked on spacesheep"
+      : "the key was revoked on spacesheep; disconnect and connect again",
     offline: "spacesheep can't be reached right now",
     limited: "this app is reading too often for spacesheep; it catches up by itself",
     gap: "reading (an older gap the relay no longer holds)",
@@ -963,7 +968,12 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
       label="A spacesheep account"
       note={
         link
-          ? `Connected as ${link.email} since ${new Date(link.connectedAt).toLocaleDateString()}. ${link.events} events so far · ${stateWords[link.state] ?? link.state}${link.lastError && link.state !== "ok" ? ` · ${link.lastError}` : ""}${link.machines.length ? ` · machines there: ${link.machines.join(", ")}` : ""}. The key is under Settings → API keys on spacesheep; revoking it there disconnects this app.`
+          ? `Connected as ${link.email} since ${new Date(link.connectedAt).toLocaleDateString()}. ${link.events} events so far · ${stateWords[link.state] ?? link.state}${link.lastError && link.state !== "ok" ? ` · ${link.lastError}` : ""}${link.machines.length ? ` · machines there: ${link.machines.join(", ")}` : ""}. ${
+              account
+                ? // What Disconnect removes (account/backend.ts `drop`, account/local.ts), and what it does not.
+                  `Disconnect removes the account from ${deviceWords().this}: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep: Settings → API keys.`
+                : "The key is under Settings → API keys on spacesheep; revoking it there disconnects this app."
+            }`
           : "An option, not the default: read the sessions and machines paired on a spacesheep account through spacesheep, with nothing to host here. spacesheep then holds what those machines send, at the tier they send, under its privacy policy; a self-hosted board keeps everything on this disk. You can run both."
       }
     >

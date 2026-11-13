@@ -14,6 +14,7 @@ import { DOC_READ_WAITS_MS, openDocs } from "./docs";
 import { hubCode, openDoors, SEND_BUSY_TRIES } from "./doors";
 import { PageLog } from "./log";
 import { accountShell } from "./shell";
+import { noticeWords } from "./start";
 
 describe("the shell's contract, read for an account", () => {
   const contract = (receiver: unknown, over: Record<string, unknown> = {}) => ({
@@ -379,6 +380,25 @@ describe("the account's documents", () => {
     expect(hub.has("sends")).toBe(false);
     expect(docs.unread().sort()).toEqual(["labels", "sends"]);
     expect(docs.failed()).toEqual([]);
+  });
+});
+
+describe("what the page tells a person once", () => {
+  it("says that sessions are not kept, and that labels and read marks could not be read; nothing for the rest", () => {
+    expect(noticeWords({ kind: "cache_memory" })).toEqual({
+      title: "Sessions are not kept on this phone",
+      body: "Its storage could not be opened, so they load again each time the app opens.",
+    });
+    const unread = {
+      title: "Labels and read marks are not being saved",
+      body: "This phone could not read the ones it keeps, so changes made now are not kept.",
+    };
+    expect(noticeWords({ kind: "doc_unread", names: ["labels"] })).toEqual(unread);
+    expect(noticeWords({ kind: "doc_unread", names: ["limits", "marks"] })).toEqual(unread);
+    // The limits are read again from the events and the sends are spacesheep's to settle:
+    // nothing of the person's own is at stake, so nothing is said.
+    expect(noticeWords({ kind: "doc_unread", names: ["limits", "sends"] })).toBeNull();
+    expect(noticeWords({ kind: "doc_unread" })).toBeNull();
   });
 });
 

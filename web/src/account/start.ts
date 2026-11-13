@@ -41,7 +41,7 @@ export function noticeWords(n: AccountNotice): { title: string; body: string } |
   if (n.names?.includes("labels") || n.names?.includes("marks"))
     return {
       title: "Labels and read marks are not being saved",
-      body: "This phone could not write them down just now.",
+      body: "This phone could not read the ones it keeps, so changes made now are not kept.",
     };
   return null;
 }

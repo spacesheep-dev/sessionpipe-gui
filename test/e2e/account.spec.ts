@@ -502,6 +502,16 @@ test("Disconnect in Settings, once confirmed, leaves nothing of the account on s
   await leaveTraces();
   await page.goto(`${server.url}/settings?section=data`);
   await expect(page.getByText(/Connected as me@example\.com/).first()).toBeVisible();
+  // What Disconnect removes, and what it does not, said before it is pressed.
+  await expect(
+    page.getByText(
+      "Disconnect removes the account from this iPhone: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep: Settings → API keys.",
+      { exact: false },
+    ),
+  ).toBeVisible();
+  // The key was revoked in the test before: said as it is, with nothing to do here that is not here.
+  await expect(page.getByText(/the key was revoked on spacesheep ·|the key was revoked on spacesheep\./)).toBeVisible();
+  await expect(page.getByText(/disconnect and connect again/)).toHaveCount(0);
   const button = page.getByRole("button", { name: "Disconnect" });
   // The person says no in the app's own alert: nothing changes.
   hub.alert = () => false;
