@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The app's page can show a spacesheep account with no GUI server behind it.** Not in a
+  release yet: it waits for the app's half (the account's key and its doors) and for the
+  screens that connect one. With them, the phone keeps its own board from the account,
+  shows it again at the next launch before anything is read, and sends through spacesheep
+  as the desktop app does. Nothing changes for a browser, the desktop app, or the phone
+  on a receiver.
+
 ### Fixed
 
 - **A send to a computer reached through spacesheep outlives a restart.** Its row was
