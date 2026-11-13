@@ -6,6 +6,7 @@
 // reaches spacesheep is read at the far end.
 import type { ControlActivity, Snapshot, StreamMessage } from "@shared/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { RELAY_BUDGET } from "../../../server/sources/relay";
 import { type FakeAnswer, FakeSpacesheep } from "../../../test/account/fake-spacesheep";
 import { HubStandIn } from "../../../test/account/hub";
 import { Session } from "../../../test/events";
@@ -766,6 +767,25 @@ describe("a page's own backend on a spacesheep account", () => {
       expect(keptReads().length).toBeGreaterThan(150);
       expect(keptReads().length).toBe(r.ss.relayReads);
     }, 120_000);
+
+    it("none are taken as spent for a key made a moment ago; a third of the budget is, for one that is older", async () => {
+      const s = new Session("s-1");
+      r.ss.push([s.ev("session.started", {}, { tier: 2 })]);
+      // The account as a connect left it just now: nobody read with its key before this page.
+      let b = await r.start();
+      await tick(400);
+      expect(keptReads()).toHaveLength(1);
+      b.stop();
+      // The same phone with nothing kept (its storage was cleared) an hour after the
+      // connect: a page before this one may have spent some.
+      r.stored.clear();
+      const account = [...r.hub.accounts.values()][0]!;
+      account.connectedAt = new Date(Date.now() - 3_600_000).toISOString();
+      b = await r.start();
+      await tick(400);
+      b.stop();
+      expect(keptReads().length).toBeGreaterThanOrEqual(Math.floor(RELAY_BUDGET / 3) + 1);
+    });
 
     it("where the page's own storage will not take them, they are kept beside the sessions as before", async () => {
       const cache = keptCache();
