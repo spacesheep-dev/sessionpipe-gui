@@ -484,6 +484,73 @@ describe("a page's own backend on a spacesheep account", () => {
     });
   });
 
+  describe("a cold start whose first read fails", () => {
+    type Snap = { sessions: { key: string; newsAt?: string }[]; marks: { since: string } };
+    const unread = async (b: AccountBackend): Promise<string[]> => {
+      const snap = (await (await b.answer("/api/ui/snapshot")).json()) as Snap;
+      return snap.sessions.filter((x) => x.newsAt && x.newsAt > snap.marks.since).map((x) => x.key);
+    };
+    const history = (n: number) =>
+      Array.from({ length: n }, (_, i) => new Session(`s-${i}`)).flatMap((s) => [
+        s.ev("session.started", {}, { tier: 2 }),
+        s.ev("turn.transcript", { turn: 1, user: "hello", assistant: "hi" }, { tier: 2 }),
+      ]);
+
+    it("spacesheep unreachable, then a short history: one board, no live frames, none of it unread", async () => {
+      r.ss.push(history(2));
+      r.hub.down = true;
+      const b = await r.start();
+      const page = listen(b);
+      await tick(400);
+      expect(b.view()).toMatchObject({ relay: { state: "offline" }, catching: true });
+      // What is here is shown as it is (an empty board), not a page that waits for ever.
+      expect(page.last("snapshot")!.snapshot.sessions).toEqual([]);
+      r.hub.down = false;
+      await tick(120_000);
+      expect(b.view()).toMatchObject({ relay: { state: "ok" }, catching: false, store: { sessions: 2 } });
+      expect(page.frames.filter((m) => m.kind === "event")).toEqual([]);
+      expect(page.last("snapshot")!.snapshot.sessions).toHaveLength(2);
+      expect(await unread(b)).toEqual([]);
+      // What arrives from here on is news, and live.
+      await tick(5);
+      const again = new Session("s-0");
+      r.ss.push([
+        again.ev("turn.started", { turn_id: "t9" }, { tier: 2, seq: 7 }),
+        again.ev("turn.transcript", { turn: 2, user: "again", assistant: "yes" }, { tier: 2, seq: 8 }),
+        again.ev("turn.ended", { turn_id: "t9" }, { tier: 2, seq: 9 }),
+      ]);
+      await tick(30_000);
+      expect(page.frames.some((m) => m.kind === "event")).toBe(true);
+      expect(await unread(b)).toEqual(["claude-code:s-0"]);
+      page.off();
+    });
+
+    it("spacesheep's limit first, then the history: none of it unread", async () => {
+      r.ss.push(history(3));
+      r.ss.limitedUntil = Date.now() + 30_000;
+      const b = await r.start();
+      const page = listen(b);
+      await tick(400);
+      expect(b.view()).toMatchObject({ relay: { state: "limited" }, catching: true });
+      await tick(180_000);
+      expect(b.view()).toMatchObject({ relay: { state: "ok" }, catching: false, store: { sessions: 3 } });
+      expect(page.frames.filter((m) => m.kind === "event")).toEqual([]);
+      expect(await unread(b)).toEqual([]);
+      page.off();
+    });
+
+    it("a key refused before anything was read shows what is here and waits for nothing", async () => {
+      r.ss.push(history(1));
+      r.ss.revoked = true;
+      const b = await r.start();
+      const page = listen(b);
+      await tick(400);
+      expect(b.view()).toMatchObject({ state: "unauthorized", catching: false, store: { sessions: 0 } });
+      expect(page.last("snapshot")!.snapshot.sessions).toEqual([]);
+      page.off();
+    });
+  });
+
   it("a relay read from its start is history, none of it unread; what arrives after is news", async () => {
     const s = new Session("s-1");
     r.ss.push([

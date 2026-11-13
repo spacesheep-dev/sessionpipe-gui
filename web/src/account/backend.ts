@@ -316,17 +316,28 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     Math.abs(Date.now() - connectedAt) < FRESH_MS;
   /** The relay is read from its start (nothing was kept): all of it is history. */
   let cold = cursorFrom(kept.get("cursor"), shell.origin, shell.email) === 0;
+  /** History is in: a page came back that was not full. Only that ends it. A read that
+   *  failed, or that spacesheep asked to wait for, has brought nothing: history is still to
+   *  come, and when it does it is still history (held back as one board, none of it unread). */
   const caughtUp = (): void => {
+    // A session's news is dated by when it arrived here, and history arrived just now: none
+    // of it is news. What arrives from here on is.
+    if (cold) {
+      cold = false;
+      marks.sinceAtLeast(new Date().toISOString());
+    }
     if (!catching) return;
     catching = false;
     store.setLoading(false);
     if (caughtUpMs === null) caughtUpMs = performance.now() - t0;
-    // A session's news is dated by when it arrived here, and history arrived just now: none
-    // of it is news. What arrives from here on is.
-    if (cold && reader?.status().state !== "offline") {
-      cold = false;
-      marks.sinceAtLeast(new Date().toISOString());
-    }
+    board();
+  };
+  /** Nothing more will be read (the key is refused): what is here is all there is. Not the
+   *  end of history: a relay never read from its start is still unread when a new key reads it. */
+  const giveUp = (): void => {
+    if (!catching) return;
+    catching = false;
+    store.setLoading(false);
     board();
   };
   const open = (): RelayReader =>
@@ -387,8 +398,10 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
         if (performance.now() - lastBoard > BOARD_EVERY_MS) board();
       },
       onState(s) {
-        // It cannot be read just now: what is here is the board, said as it is.
-        if (s === "offline" || s === "limited" || s === "unauthorized") caughtUp();
+        // It cannot be read just now: what is here is the board, shown as it is. History is
+        // not over for that: it is still held back, and comes as one board when it comes.
+        if (s === "offline" || s === "limited") board();
+        else if (s === "unauthorized") giveUp();
         changed();
       },
       onMachines(list, _origin, rpId) {
