@@ -120,9 +120,10 @@ interface Connect {
 /** The hub's words where a key was made on spacesheep and is not kept (account.rs). */
 export const UNUSED_KEY_NOTE =
   "A key was made for this app on spacesheep and is not kept here. Revoke it there: Settings → API keys.";
-/** `acct_disconnect`'s note (hub/acct.rs). */
-export const DISCONNECT_NOTE =
-  "The key is forgotten on this device. It keeps working until you revoke it on spacesheep: Settings → API keys.";
+/** `acct_disconnect`'s note, in the hub's own words (hub/acct.rs), which name the device as
+ *  the app's platform has it: "this iPhone", or "this phone". */
+export const disconnectNote = (thisPhone: string): string =>
+  `The key is forgotten on ${thisPhone}. It keeps working until you revoke it on spacesheep: Settings → API keys.`;
 /** Three connects an hour, five device asks an hour, the same device answer for ten minutes,
  *  a held approval for a quarter of an hour (account.rs). */
 const STARTS_AN_HOUR = 3;
@@ -210,6 +211,11 @@ export class HubStandIn {
 
   constructor(private readonly o: HubOptions) {
     this.clock = o.clock ?? realClock;
+  }
+
+  /** The device in the hub's sentences, as the real hub words it on each platform. */
+  private get thisPhone(): string {
+    return (this.o.platform ?? "ios") === "android" ? "this phone" : "this iPhone";
   }
 
   get upstream(): Upstream {
@@ -441,7 +447,7 @@ export class HubStandIn {
       throw e;
     }
     if (this.connecting?.state === "asking")
-      throw new HubRefused("busy", "An account was approved and waits for your answer on this device.");
+      throw new HubRefused("busy", `An account was approved and waits for your answer on ${this.thisPhone}.`);
     if ([...this.accounts.values()].some((a) => a.origin === origin && a.state === "ok"))
       throw new HubRefused("already_connected", "Already connected. Disconnect first.");
     if (this.connecting?.state === "pending") return this.status().connect;
@@ -552,7 +558,7 @@ export class HubStandIn {
     if (answer === null) throw new HubRefused("not_asked", "The question could not be shown. Try again.");
     if (!answer) throw new HubRefused("cancelled", "Cancelled.");
     if (this.disconnectFails)
-      throw new HubRefused("io", "The key could not be removed from this device. Nothing was changed.");
+      throw new HubRefused("io", `The key could not be removed from ${this.thisPhone}. Nothing was changed.`);
     this.accounts.delete(a.id);
     if (this.active === a.id) this.active = null;
     this.say();
@@ -563,7 +569,7 @@ export class HubStandIn {
       forgotten: true,
       revoked: false,
       revokeUrl: `${a.origin}/settings/api-keys`,
-      note: DISCONNECT_NOTE,
+      note: disconnectNote(this.thisPhone),
     };
   }
 

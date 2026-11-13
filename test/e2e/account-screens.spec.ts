@@ -319,7 +319,7 @@ test.describe("each way a connect can end, with what to do next", () => {
 
   test("another question is open on the phone", async () => {
     await intro();
-    b.hub.startRefusal = new HubRefused("busy", "Another question is open on this device. Answer it first.");
+    b.hub.startRefusal = new HubRefused("busy", "Another question is open on this iPhone. Answer it first.");
     await button(b.page, "Continue").click();
     await expect(ended("busy")).toBeVisible();
     await expect(b.page.getByText("Another question is open on this iPhone. Answer it, then try again.")).toBeVisible();
@@ -740,7 +740,7 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await expect(page.getByText("Disconnected")).toBeVisible();
     await expect(
       page.getByText(
-        "The key is forgotten on this device. It keeps working until you revoke it on spacesheep: Settings → API keys.",
+        "The key is forgotten on this iPhone. It keeps working until you revoke it on spacesheep: Settings → API keys.",
       ),
     ).toBeVisible();
     await shot(page, "disconnected");
