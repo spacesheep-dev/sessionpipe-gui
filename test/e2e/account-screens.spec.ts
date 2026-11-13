@@ -672,6 +672,33 @@ test.describe("a phone that cannot sign", () => {
   });
 });
 
+test("an email as long as an email may be wraps beside its state in Settings › App, at any width", async ({
+  browser,
+}) => {
+  for (const email of [
+    "firstname.middlename.lastname+phone@a-long-company-name.example",
+    `${"a".repeat(64)}@${"long-label.".repeat(16)}${"b".repeat(10)}.example`,
+  ]) {
+    const b = await bed(browser);
+    b.hub.add(email, b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    try {
+      await b.page.goto(`${b.server.url}/settings?section=app`);
+      const group = b.page.locator("[data-account-settings]");
+      const label = group.getByText(email, { exact: true }).first();
+      await expect(label).toBeVisible({ timeout: 15_000 });
+      const mark = group.locator(".acct-state").first();
+      await expect(mark).toBeVisible();
+      const [l, m] = [(await label.boundingBox())!, (await mark.boundingBox())!];
+      // All of it is on screen, and it ends where its state begins.
+      expect(l.x + l.width, email).toBeLessThanOrEqual(m.x + 0.5);
+      expect(await label.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      expect(await b.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    } finally {
+      await b.close();
+    }
+  }
+});
+
 // What follows is not a screen of its own: it is what the page's own backend says on the
 // screens the app already has, each in its place (the pictures page's "What else an
 // account shows").

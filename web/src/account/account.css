@@ -161,3 +161,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* An email is as long as it is: it wraps beside its state, and neither runs under the other. */
+[data-account-settings] .settings-row-text {
+  flex: 1 1 0;
+}
+[data-account-settings] .settings-label,
+[data-account-settings] .settings-hint {
+  overflow-wrap: anywhere;
+}
