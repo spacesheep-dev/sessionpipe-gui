@@ -20,6 +20,7 @@ import {
   NOT_YET_FINAL,
   openDoors,
   SEND_BUSY_TRIES,
+  SEND_NOT_SENT,
   SEND_UNKNOWN,
   SEND_UNKNOWN_CODE,
   SEND_UNKNOWN_WAITS_MS,
@@ -123,7 +124,7 @@ describe("the account's doors", () => {
       [
         hubSays(401, "not_connected", "This device holds no key for the account. Connect again."),
         hubSays(400, "not_signed", "The app forwards only a signed command to a machine."),
-        hubSays(502, "redirected", "spacesheep answered with a redirect, which the app does not follow."),
+        hubSays(502, "not_sent", "spacesheep could not be reached."),
       ],
       { onUnauthorized: () => refused++ },
     );
@@ -132,8 +133,33 @@ describe("the account's doors", () => {
       json: { code: hubCode("not_connected"), error: "This device holds no key for the account. Connect again." },
     });
     expect(await doors.send(m, {})).toMatchObject({ status: 502, json: { code: "hub_not_signed" } });
-    expect(await doors.send(m, {})).toMatchObject({ status: 502, json: { code: "hub_redirected" } });
+    // No connection could be made: nothing of the command left the phone.
+    expect(await doors.send(m, {})).toEqual({
+      status: 502,
+      json: { code: "hub_not_sent", error: "spacesheep could not be reached." },
+    });
     expect(refused).toBe(0);
+  });
+
+  it("a hub code is not sent only when the contract lists it as given before any network; any other, known or not, is unknown", async () => {
+    // Every code on the list: refused at once, asked once.
+    for (const code of SEND_NOT_SENT) {
+      if (code === "busy") continue; // asked again a few times first (its own test)
+      const t = open([hubSays(code === "not_sent" ? 502 : 400, code, "The app's own words.")]);
+      expect(await t.doors.ask(m, {}), code).toMatchObject({ kind: "refused", json: { code: `hub_${code}` } });
+      expect(t.asked, code).toHaveLength(1);
+    }
+    // A redirect comes after spacesheep had the command; and a code this page has never
+    // heard of may have too: neither is "not sent". Each is asked again, and stays unknown.
+    for (const code of ["redirected", "teleported", "not_sent_v2"]) {
+      const t = open([hubSays(502, code, "Something the page does not know."), answer(202, { job: 3 })]);
+      expect(await t.doors.send(m, { cmd: "{}" }), code).toEqual({ status: 202, json: { job: 3 } });
+      const never = open([hubSays(502, code, "Something the page does not know.")]);
+      expect(await never.doors.ask(m, { cmd: "{}" }), code).toMatchObject({ kind: "unknown", dead: false });
+      expect(never.asked.length, code).toBe(1 + SEND_UNKNOWN_WAITS_MS.length);
+    }
+    // The two lists share nothing.
+    expect([...SEND_UNKNOWN].filter((c) => SEND_NOT_SENT.has(c))).toEqual([]);
   });
 
   describe("a send nobody heard the answer to", () => {

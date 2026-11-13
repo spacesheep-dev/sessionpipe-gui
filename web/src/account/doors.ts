@@ -25,9 +25,29 @@ export const hubCode = (code: string): string => `hub_${code}`;
 export const SEND_BUSY_TRIES = 3;
 export const SEND_BUSY_WAIT_MS = 1000;
 
-/** The hub's own answers after which nobody knows whether spacesheep took the send: it did
- *  not answer in the hub's time, its answer stopped or could not be passed on. (Every other
- *  answer of the hub's comes before any network, or says spacesheep did not take it.) */
+/** The hub's own answers to a send that come BEFORE any network, by the contract's list
+ *  (docs/rfcs/08, "The doors": the refusals of a request as it stands, the account's full
+ *  room, and `not_sent`, which says no connection to spacesheep could be made). After one of
+ *  these nothing of the command left the phone: the send is not sent. The list is the whole
+ *  of what is read so. Any other code of the hub's, one named below or one this page has
+ *  never heard of, may have come after spacesheep had the command, and is read as unknown. */
+export const SEND_NOT_SENT: ReadonlySet<string> = new Set([
+  "not_a_door",
+  "bad_query",
+  "bad_body",
+  "not_signed",
+  "too_large",
+  "forbidden_origin",
+  "account_off",
+  "bad_account",
+  "not_connected",
+  "no_device_key",
+  "busy",
+  "not_sent",
+]);
+/** The hub's own answers the contract names for a send that went out and whose answer did
+ *  not come back whole. Named for the reader: every code not in SEND_NOT_SENT is read the
+ *  same way (`redirected`, a code a later hub adds). */
 export const SEND_UNKNOWN: ReadonlySet<string> = new Set([
   "timeout",
   "unreachable",
@@ -270,9 +290,10 @@ export function openDoors(o: DoorsOptions): AccountDoors {
     // The app got no answer for it, or the answer stopped on its way.
     if (a === null) return unknown("");
     if (a.hub !== null) {
-      if (SEND_UNKNOWN.has(a.hub)) return unknown(wordsOf(a.json));
-      // The hub's own refusal comes before any network: this asking made no job. Of an
-      // asking before it, it says nothing.
+      // Only a code the contract lists as given before any network says this asking made
+      // no job; any other, known or not, may have come after spacesheep had the command.
+      if (!SEND_NOT_SENT.has(a.hub)) return unknown(wordsOf(a.json));
+      // Of an asking before this one, it says nothing.
       if (unheard) return unknown(wordsOf(a.json));
       return {
         kind: "refused",
