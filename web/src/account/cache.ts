@@ -5,7 +5,9 @@
 // person's account on the same phone is another database: the relay's pages as they were
 // ingested, one record a page under the cursor after it, and the reader's two small values
 // (`cursor`, `reads`). A page and the cursor after it are one write, so the two can never
-// disagree. It is bounded as the relay is (CACHE_EVENTS_MAX events, CACHE_KEEP_MS of age),
+// disagree. It is bounded as the relay is (CACHE_EVENTS_MAX events, CACHE_KEEP_MS since each
+// was taken; a count of events, not of bytes: at a kilobyte or so an event that is tens of
+// megabytes, and the browser's own quota is the bound on the rest),
 // read once at the start, and deleted when the account is disconnected (or found at a later
 // start to belong to an account that is no longer on this phone). A session the account
 // forgot (`session.forgotten`) is taken out of every page it is in, so nothing of it stays
@@ -16,8 +18,11 @@ import type { RelayKept } from "../../../server/sources/relay";
 
 /** The relay itself holds 50 000 events at most; the cache keeps as many, newest last. */
 export const CACHE_EVENTS_MAX = 50_000;
-/** The relay drops an event a week after it took it; so does the cache, by the event's own
- *  time (the relay's is not in what it hands over), a page at a time, at each start. */
+/** The relay drops an event a week after it took it; so does the cache, a page at a time,
+ *  at each start: by when this phone took the event (`arrivedAt`, the phone's own clock at
+ *  the read), which is never before the relay did. Not by the event's own time, which is
+ *  its machine's word: an outbox drained today holds events dated last week that the relay
+ *  will bring for a week yet, and one event dated next year would stop the trim for a year. */
 export const CACHE_KEEP_MS = 7 * 86_400_000;
 /** Past this many events over the bound the oldest pages go, in one write. */
 export const CACHE_SLACK = 2_000;
@@ -78,11 +83,13 @@ export function pagesToDrop(pages: readonly { key: number; n: number }[], max: n
   return out;
 }
 
-/** The pages at the front whose every event is older than `keepMs` at `now`: the ones a
- *  read of the relay from its start would no longer bring. Stops at the first page that
- *  holds a newer event; a page with no event at all goes with the old ones before it. */
+/** The pages at the front whose every event this phone took more than `keepMs` before
+ *  `now`: the ones a read of the relay from its start would no longer bring. Stops at the
+ *  first page that holds a newer arrival; a page with no event at all goes with the old
+ *  ones before it. (An arrival this phone's own clock dated ahead, a clock set back since,
+ *  holds the trim until a week past that date; the bound on the count holds meanwhile.) */
 export function pagesTooOld(
-  pages: readonly { key: number; events: readonly Pick<StoredEvent, "time">[] }[],
+  pages: readonly { key: number; events: readonly Pick<StoredEvent, "arrivedAt">[] }[],
   now: number,
   keepMs = CACHE_KEEP_MS,
 ): number[] {
@@ -90,8 +97,8 @@ export function pagesTooOld(
   for (const p of pages) {
     let newest = Number.NEGATIVE_INFINITY;
     for (const e of p.events) {
-      const t = Date.parse(e.time);
-      // An event with no readable time is never called old.
+      const t = Date.parse(e.arrivedAt);
+      // An arrival with no readable time is never called old.
       newest = Math.max(newest, Number.isFinite(t) ? t : Number.POSITIVE_INFINITY);
     }
     if (p.events.length && now - newest < keepMs) break;

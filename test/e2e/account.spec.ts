@@ -708,6 +708,77 @@ test.describe("an account with nothing on it yet, then a session from a computer
     await expect(page3.getByText("Pair it")).toHaveCount(0);
     expect(server3.strays).toEqual([]);
   });
+
+  test("at the next launch what the phone took more than a week ago is gone, and an old date on today's arrival is not", async () => {
+    // An outbox drained late: a session whose events are dated ten days ago, arriving now.
+    const late = new Session("s-late", "claude-code", Date.now() - 10 * 86_400_000);
+    const from = { tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/old", title: "Drained late" } };
+    ss3.push([
+      late.ev("session.started", { source: "startup" }, from),
+      late.ev("turn.transcript", { turn: 1, user: "From last week.", assistant: "Arrived today." }, from),
+    ]);
+    const kept = () =>
+      page3.evaluate(
+        () =>
+          (
+            window as unknown as { __sessionpipeAccount: { view(): { store: { sessions: number } } } }
+          ).__sessionpipeAccount.view().store.sessions,
+      );
+    await page3.goto(server3.url);
+    await expect(page3.getByText("Tidy the notes").first()).toBeVisible();
+    // (A session whose last event is ten days old is done: it is under the folded Done group.)
+    await expect.poll(kept).toBe(2);
+    await page3.evaluate(() =>
+      (window as unknown as { __sessionpipeAccount: { flushed(): Promise<void> } }).__sessionpipeAccount.flushed(),
+    );
+    // The page that brought "Tidy the notes" was taken eight days ago (its events' own dates are today's).
+    const pages = await page3.evaluate(async () => {
+      const name = (await indexedDB.databases()).find((d) => d.name?.startsWith("sessionpipe.account."))!.name!;
+      const db = await new Promise<IDBDatabase>((res, rej) => {
+        const o = indexedDB.open(name);
+        o.onsuccess = () => res(o.result);
+        o.onerror = () => rej(o.error);
+      });
+      const tx = db.transaction("pages", "readwrite");
+      const store = tx.objectStore("pages");
+      const [keys, values] = await Promise.all([
+        new Promise<IDBValidKey[]>((res) => {
+          const r = store.getAllKeys();
+          r.onsuccess = () => res(r.result);
+        }),
+        new Promise<{ session: { id: string }; arrivedAt: string }[][]>((res) => {
+          const r = store.getAll();
+          r.onsuccess = () => res(r.result);
+        }),
+      ]);
+      const then = new Date(Date.now() - 8 * 86_400_000).toISOString();
+      let aged = 0;
+      keys.forEach((key, i) => {
+        if (!values[i]!.some((e) => e.session.id === "s-unpaired")) return;
+        store.put(
+          values[i]!.map((e) => ({ ...e, arrivedAt: then })),
+          key,
+        );
+        aged++;
+      });
+      await new Promise<void>((res) => {
+        tx.oncomplete = () => res();
+      });
+      db.close();
+      return { all: keys.length, aged };
+    });
+    expect(pages.all).toBeGreaterThan(1);
+    expect(pages.aged).toBe(1);
+    // From what is kept alone: spacesheep cannot be reached.
+    hub3.down = true;
+    await page3.goto(`${server3.url}/s/claude-code/s-late`);
+    await expect(page3.getByText("Arrived today.").first()).toBeVisible();
+    expect(await kept()).toBe(1);
+    await page3.goto(server3.url);
+    await expect(page3.getByText("Done").first()).toBeVisible();
+    await expect(page3.getByText("Tidy the notes")).toHaveCount(0);
+    hub3.down = false;
+  });
 });
 
 test.describe("a phone that cannot sign, with no storage to keep the board in", () => {

@@ -4,7 +4,7 @@
 // its cache keeps and drops, and how its documents are kept behind the hub.
 import type { ProtocolEvent, StoredEvent } from "@shared/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MachineRow } from "../../../server/control/rows";
+import type { MachineRow, MessageRow } from "../../../server/control/rows";
 import { HUB_HEADER } from "../../../server/sources/relay";
 import { StoreCore } from "../../../server/store/core";
 import { MemoryLog } from "../../../server/store/log";
@@ -13,6 +13,7 @@ import { CACHE_EVENTS_MAX, compacted, memoryCache, openCache, pagesToDrop, pages
 import { DOC_READ_WAITS_MS, openDocs } from "./docs";
 import { hubCode, openDoors, SEND_BUSY_TRIES, SEND_UNKNOWN, SEND_UNKNOWN_CODE, SEND_UNKNOWN_WAITS_MS } from "./doors";
 import { PageLog } from "./log";
+import { fitSends, readSends, SETTLED_TEXT_CHARS } from "./sends";
 import { accountShell } from "./shell";
 import { noticeWords } from "./start";
 
@@ -279,9 +280,14 @@ describe("the cache of relay pages", () => {
     expect(compacted([{ key: 4, events: [] }], 3)).toEqual([{ key: 4, events: [] }]);
     expect(compacted([], 3)).toEqual([]);
   });
-  it("drops the pages a read of the relay would no longer bring: older than its week, oldest first", () => {
+  it("drops the pages a read of the relay would no longer bring: taken more than its week ago, oldest first", () => {
     const now = Date.parse("2026-11-12T12:00:00.000Z");
-    const at = (days: number) => ({ time: new Date(now - days * 86_400_000).toISOString() });
+    const day = 86_400_000;
+    /** An event this phone took `days` ago; its own time is its machine's word. */
+    const at = (days: number, time = now - days * day) => ({
+      arrivedAt: new Date(now - days * day).toISOString(),
+      time: new Date(time).toISOString(),
+    });
     const pages = [
       { key: 10, events: [at(30), at(9)] },
       { key: 11, events: [] },
@@ -289,16 +295,16 @@ describe("the cache of relay pages", () => {
       { key: 30, events: [at(9), at(6)] },
       { key: 40, events: [at(20)] },
     ];
-    // The first three hold nothing newer than a week; the fourth does, and everything after it stays.
+    // The first three hold nothing taken within a week; the fourth does, and everything after it stays.
     expect(pagesTooOld(pages, now)).toEqual([10, 11, 20]);
-    expect(pagesTooOld(pages, now, 40 * 86_400_000)).toEqual([]);
+    expect(pagesTooOld(pages, now, 40 * day)).toEqual([]);
     // All of it old: the last page stays, since it carries the cursor.
     expect(pagesTooOld(pages.slice(0, 3), now)).toEqual([10, 11]);
-    // A time that cannot be read is never called old.
+    // An arrival that cannot be read is never called old.
     expect(
       pagesTooOld(
         [
-          { key: 1, events: [{ time: "soon" }] },
+          { key: 1, events: [{ arrivedAt: "soon" }] },
           { key: 2, events: [at(0)] },
         ],
         now,
@@ -306,6 +312,45 @@ describe("the cache of relay pages", () => {
     ).toEqual([]);
     expect(pagesTooOld([], now)).toEqual([]);
   });
+
+  it("goes by when the phone took an event, never by the date its machine gave it", () => {
+    const now = Date.parse("2026-11-12T12:00:00.000Z");
+    const day = 86_400_000;
+    const ev = (arrivedDaysAgo: number, time: number) => ({
+      arrivedAt: new Date(now - arrivedDaysAgo * day).toISOString(),
+      time: new Date(time).toISOString(),
+    });
+    // One event dated next year in the first page: the trim goes on past it.
+    expect(
+      pagesTooOld(
+        [
+          { key: 1, events: [ev(9, now + 400 * day), ev(9, now - 9 * day)] },
+          { key: 2, events: [ev(8, now - 8 * day)] },
+          { key: 3, events: [ev(0, now)] },
+        ],
+        now,
+      ),
+    ).toEqual([1, 2]);
+    // An outbox drained today: events dated ten days ago, taken now. The relay holds them
+    // for a week yet, and so does the phone.
+    expect(
+      pagesTooOld(
+        [
+          { key: 1, events: [ev(0, now - 10 * day), ev(0, now - 8 * day)] },
+          { key: 2, events: [ev(0, now)] },
+        ],
+        now,
+      ),
+    ).toEqual([]);
+    // Only the phone's own clock can hold it off: a page it dated ahead stays until a week
+    // past that date (the bound on the count holds meanwhile).
+    const ahead = { key: 1, events: [ev(-30, now)] };
+    const last = { key: 2, events: [ev(-40, now)] };
+    expect(pagesTooOld([ahead, last], now)).toEqual([]);
+    expect(pagesTooOld([ahead, last], now + 36 * day)).toEqual([]);
+    expect(pagesTooOld([ahead, last], now + 38 * day)).toEqual([1]);
+  });
+
   it("deletes the databases of accounts that are no longer on this phone, and no other", async () => {
     const deleted: string[] = [];
     const idb = {
@@ -467,6 +512,67 @@ describe("the account's documents", () => {
     expect(hub.has("sends")).toBe(false);
     expect(docs.unread().sort()).toEqual(["labels", "sends"]);
     expect(docs.failed()).toEqual([]);
+  });
+});
+
+describe("the sends a page keeps", () => {
+  const row = (id: string, over: Partial<MessageRow> = {}): MessageRow =>
+    ({
+      id,
+      machineId: "m_0123456789abcdefghij",
+      cmd: "",
+      at: "2026-11-12T10:00:00.000Z",
+      expiresAt: "2026-11-13T10:00:00.000Z",
+      kind: "prompt",
+      session: "claude-code:s-1",
+      via: "ui",
+      remoteJob: Number(id.slice(1)),
+      text: "x".repeat(2000),
+      ...over,
+    }) as MessageRow;
+  const settled = (id: string) =>
+    row(id, { outcome: "delivered", ackedAt: "2026-11-12T10:01:00.000Z", reply: "y".repeat(2000) });
+  const bytes = (doc: unknown) => new TextEncoder().encode(JSON.stringify(doc)).length;
+
+  it("under the ceiling, are kept as they are", () => {
+    const queues = { m_0123456789abcdefghij: [settled("a1"), row("a2")] };
+    expect(fitSends(queues)).toEqual({ v: 1, queues });
+    expect(readSends(fitSends(queues))).toEqual(queues);
+  });
+
+  it("over it, lose the settled ones' long texts, then the oldest settled rows; never one that is still on its way", () => {
+    const old = Array.from({ length: 60 }, (_, i) => settled(`a${100 + i}`));
+    const waiting = [row("a900"), row("a901", { outcome: "taken" })];
+    const queues = { m_0123456789abcdefghij: [...old, ...waiting] };
+    const max = 40_000;
+    expect(bytes({ v: 1, queues })).toBeGreaterThan(max);
+    const kept = fitSends(queues, max).queues.m_0123456789abcdefghij!;
+    expect(bytes({ v: 1, queues: { m_0123456789abcdefghij: kept } })).toBeLessThanOrEqual(max);
+    // Both rows still on their way are there, whole: spacesheep's word can still settle them.
+    expect(kept.filter((r) => r.id === "a900" || r.id === "a901")).toEqual(waiting);
+    // Of the settled ones the newest stay, their texts cut.
+    const left = kept.filter((r) => r.outcome === "delivered");
+    expect(left.length).toBeGreaterThan(0);
+    expect(left.length).toBeLessThan(old.length);
+    expect(left.at(-1)!.id).toBe("a159");
+    expect(
+      left.every((r) => r.text!.length <= SETTLED_TEXT_CHARS + 1 && r.reply!.length <= SETTLED_TEXT_CHARS + 1),
+    ).toBe(true);
+  });
+
+  it("with nothing settled left to drop, keep every waiting row and cut its text: the row still says what went where", () => {
+    const waiting = Array.from({ length: 30 }, (_, i) => row(`a${i + 1}`));
+    const queues = { m_0123456789abcdefghij: waiting };
+    const kept = fitSends(queues, 20_000).queues.m_0123456789abcdefghij!;
+    expect(kept.map((r) => r.id)).toEqual(waiting.map((r) => r.id));
+    expect(kept.map((r) => r.remoteJob)).toEqual(waiting.map((r) => r.remoteJob));
+    expect(kept.every((r) => r.text!.length === SETTLED_TEXT_CHARS + 1)).toBe(true);
+  });
+
+  it("what is not a sends document reads as none", () => {
+    for (const raw of [null, undefined, "x", 7, [], { queues: [] }, { queues: null }])
+      expect(readSends(raw)).toBeNull();
+    expect(readSends({ v: 1, queues: { m_1: "not rows", m_2: [] } })).toEqual({ m_2: [] });
   });
 });
 
