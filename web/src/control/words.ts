@@ -111,6 +111,9 @@ export function outcomeWords(a: ControlActivity, o: { machine?: string; online?:
       if (a.code === "untracked") return "not followed · sent through an account that's no longer connected";
       return `failed · ${a.detail ?? "the path errored"}`;
     case "unconfirmed":
+      // spacesheep took the send and named no job (server/control/rows.ts NO_JOB_CODE):
+      // that a computer took it is not known here.
+      if (a.code === "no_job") return "not followed · spacesheep didn't say which job it is";
       return `no word · ${who} took it and said nothing more`;
     case "refused": {
       // No code (spacesheep before its `code`): the reason alone, never "refused · refused".
@@ -163,8 +166,24 @@ export const reasonOf = (a: Pick<ControlActivity, "detail" | "outcome">): string
 /** The words for a send spacesheep carried that this app can't say the end of. */
 export const UNTRACKED_WORDS =
   "Sent through a spacesheep account that's no longer connected here. Check spacesheep.dev to see if it started.";
-export const unconfirmedWords = (machine: string): string =>
-  `No word from ${machine} since it took this. Check spacesheep.dev to see how it went.`;
+/** A send spacesheep took without naming its job: sent, and nothing more is known here. */
+export const NO_JOB_WORDS = "Sent, but this app can't follow it. Check spacesheep.dev to see how it went.";
+/** A send that ended `unconfirmed`: a computer took it and said nothing more, or (the
+ *  code `no_job`) spacesheep took it and named no job, and then no computer is known to
+ *  have taken it. */
+export const unconfirmedWords = (machine: string, a?: Pick<ControlActivity, "code">): string =>
+  a?.code === "no_job"
+    ? NO_JOB_WORDS
+    : `No word from ${machine} since it took this. Check spacesheep.dev to see how it went.`;
+
+/** A handoff that ended any way but delivered, in the one phrase its card shows. "not sent"
+ *  only where that is so: a send whose end is not known here was sent, and says what is
+ *  known instead (outcomeWords). */
+export function handoffEndWords(a: ControlActivity, machine: string): string {
+  if (a.outcome === "unconfirmed" || (a.outcome === "failed" && a.code === "untracked"))
+    return outcomeWords(a, { machine });
+  return `not sent · ${a.outcome === "refused" ? refusalWords(a.code) : (a.detail ?? a.outcome)}`;
+}
 /** A waiting row nothing reads right now: disconnected, or the key refused. */
 export const unfollowedWords = (a: Pick<ControlActivity, "unfollowed">): string =>
   a.unfollowed === "revoked"
@@ -173,6 +192,32 @@ export const unfollowedWords = (a: Pick<ControlActivity, "unfollowed">): string 
 
 /** A machine's detail ends the sentence it is quoted in; most arrive without a full stop. */
 const ended = (s: string): string => (/[.!?…]$/.test(s) ? s : `${s}.`);
+
+/** A prompt that did not reach its session, in the words the timeline shows under it. */
+export function promptFailureWords(a: ControlActivity, machine: string): string | null {
+  const detail = a.detail?.trim();
+  if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
+    return `Cancelled with its session, before ${machine} got it.`;
+  if (a.outcome === "failed" && a.code === "untracked") return UNTRACKED_WORDS;
+  if (a.outcome === "unconfirmed") return unconfirmedWords(machine, a);
+  switch (a.outcome) {
+    case "refused": {
+      // No code (spacesheep before its `code`): the reason when there is one, never twice.
+      const reason = reasonOf(a);
+      if (!a.code)
+        return `${machine} refused it.${reason ? ` ${(reason.charAt(0).toUpperCase() + reason.slice(1)).replace(/[.!?…]?$/, ".")}` : ""}`;
+      return `${machine} refused it: ${refusalWords(a.code)}.`;
+    }
+    case "failed":
+      return `It didn't reach the session${detail ? `: ${detail.replace(/[.!?…]?$/, ".")}` : "."}`;
+    case "expired":
+      return `${machine} didn't take it in time.`;
+    case "unsupported":
+      return `${machine} can't hand messages to this session's agent.`;
+    default:
+      return null;
+  }
+}
 
 /** A start that did not start, in the words the session page shows under it (STEER-SPEC
  *  B.5), or null when it is still on its way or started. `agent` is the harness's name. */
@@ -183,7 +228,7 @@ export function startFailureWords(a: ControlActivity, machine: string, agent: st
   if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
     return `Cancelled before ${machine} started it.`;
   if (a.outcome === "failed" && a.code === "untracked") return UNTRACKED_WORDS;
-  if (a.outcome === "unconfirmed") return unconfirmedWords(machine);
+  if (a.outcome === "unconfirmed") return unconfirmedWords(machine, a);
   if (a.outcome === "refused")
     switch (a.code) {
       case "folder":

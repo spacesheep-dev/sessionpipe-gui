@@ -3,7 +3,19 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ControlState, EXPIRES_MAX_MS, REMOTE_GRACE_MS } from "./state.js";
+import { parseHello } from "./parse.js";
+import { MemoryControl } from "./remote.js";
+import {
+  ControlState,
+  EXPIRES_MAX_MS,
+  type MessageRow,
+  NO_JOB_CODE,
+  ONLINE_WINDOW_MS,
+  type PoolCommand,
+  REMOTE_GRACE_MS,
+  REMOTE_JUST_SENT_MS,
+  toActivity,
+} from "./state.js";
 
 // Machines paired on a spacesheep account (docs/rfcs/08): rows from the relay's list,
 // sends carried there settled by the relay's job status.
@@ -416,6 +428,56 @@ describe("remote machines in the control state", () => {
     expect(state.remoteJobsCadence()).toBe("none");
   });
 
+  it("the pace is asked at a time: the receiver's state hands its `now` on, and a page's control takes one", () => {
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed({ online: false })], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 40);
+    const sent = Date.parse(row.at);
+    // Just sent, to a computer shown offline: fast for a minute, slow after, by the time asked at.
+    expect(state.remoteJobsCadence(sent + 1000)).toBe("fast");
+    expect(state.remoteJobsCadence(sent + REMOTE_JUST_SENT_MS + 1000)).toBe("slow");
+    expect(state.remoteJobsCadence()).toBe("fast");
+    const page = new MemoryControl();
+    page.remote.setRemoteAccount(account);
+    page.remote.upsertRemoteMachines([listed({ online: false })], remote);
+    const pm = page.machine("m_0123456789abcdefghij")!;
+    const prow = page.remote.enqueueRemote(pm, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 40);
+    expect(page.remote.remoteJobsCadence(Date.parse(prow.at) + 1000)).toBe("fast");
+    expect(page.remote.remoteJobsCadence(Date.parse(prow.at) + REMOTE_JUST_SENT_MS + 1000)).toBe("slow");
+  });
+
+  it("a list from spacesheep that changed a row looks at who is online: a machine paired here whose poll lapsed is told then", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const local = state.createMachine(
+      "m_localrow000000000001",
+      parseHello({ name: "mac-mini", harnesses: ["claude-code"], modes: ["waiter"], version: "0.13.0" })!,
+    );
+    // It polls: online, and the state has looked.
+    await state.poll(local, 0);
+    let told = 0;
+    state.onMachines = () => told++;
+    // Its poll lapses, and nobody has looked since.
+    vi.setSystemTime(Date.now() + ONLINE_WINDOW_MS + 1000);
+    // The account's list brings a new row: the look is taken with it, so the lapse is told
+    // there and then, beside the list itself.
+    state.upsertRemoteMachines([listed()], remote);
+    expect(told).toBe(2);
+    // The look was taken: the sweep has nothing left to tell.
+    told = 0;
+    state.sweep();
+    expect(told).toBe(0);
+    // A list that changes no row is told once, as every list is, with no look.
+    await state.poll(local, 0);
+    vi.setSystemTime(Date.now() + ONLINE_WINDOW_MS + 1000);
+    told = 0;
+    state.upsertRemoteMachines([listed()], remote);
+    expect(told).toBe(1);
+    state.sweep();
+    expect(told).toBe(2);
+  });
+
   it("with no time from spacesheep, ages a job by the row's own time on this clock, not spacesheep's created_at", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     state.setRemoteAccount(account);
@@ -497,5 +559,194 @@ describe("remote machines in the control state", () => {
     // Only these two: a delivered row is never reopened.
     state.applyRemoteJobs([{ id: 71, status: "failed", note: "x", done_at: born, created_at: born }]);
     expect(state.activityById(row.id)?.outcome).toBe("delivered");
+  });
+
+  it("tells whoever listens when the relay's machines change, a listener set after the state was built too", () => {
+    let told = 0;
+    state.onMachines = () => told++;
+    state.upsertRemoteMachines([listed()], remote);
+    expect(told).toBeGreaterThan(0);
+    const before = told;
+    // Another listener takes over from the first: the slice calls whichever is there now.
+    let other = 0;
+    state.onMachines = () => other++;
+    state.upsertRemoteMachines([listed({ online: false })], remote);
+    expect(other).toBeGreaterThan(0);
+    expect(told).toBe(before);
+  });
+
+  it("holds a start's files for as long as the start can still be taken", () => {
+    vi.useFakeTimers({ now: 1_800_000_000_000 });
+    const T = Date.now();
+    const HOUR = 3_600_000;
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    // Uploaded now: held for a day by itself.
+    const held = state.files.put(Buffer.from("notes for the agent"), "text/plain");
+    const other = state.files.put(Buffer.from("a file no start names"), "text/plain");
+    // Six hours on, a start that names the first is queued for a day more.
+    vi.setSystemTime(T + 6 * HOUR);
+    const cmd = {
+      ...startCmd(m.id),
+      files: [{ name: "notes.txt", type: "text/plain", size: held.size, sha256: held.sha256 }],
+    };
+    const row = state.enqueue(m, { cmd: JSON.stringify(cmd), csig: "s" }, cmd, {
+      via: "ui",
+      expiresInMs: EXPIRES_MAX_MS,
+    });
+    expect(row.files?.map((f) => f.sha256)).toEqual([held.sha256]);
+    expect(Date.parse(row.expiresAt)).toBe(T + 30 * HOUR);
+    // Past the upload's own day the named file is still there, until the start's end; the
+    // other went with its day.
+    expect(state.files.has(held.sha256, T + 29 * HOUR)).toBe(true);
+    expect(state.files.has(held.sha256, T + 30 * HOUR + 1)).toBe(false);
+    expect(state.files.has(other.sha256, T + 23 * HOUR)).toBe(true);
+    expect(state.files.has(other.sha256, T + 25 * HOUR)).toBe(false);
+  });
+
+  it("a queue is trimmed where it is held, not only where it is written: what settled a week ago is gone from the activity", () => {
+    vi.useFakeTimers({ now: 1_800_000_000_000 });
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const send = (job: number) => {
+      const cmd = startCmd(m.id);
+      return state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, job);
+    };
+    const first = send(81);
+    vi.setSystemTime(Date.now() + 5);
+    const second = send(82);
+    state.applyRemoteJobs([{ id: 81, status: "done", note: null, done_at: Date.now(), created_at: Date.now() }]);
+    expect(state.activity().map((a) => a.id)).toEqual([second.id, first.id]);
+    // Eight days on the queue is saved again (a new send): the settled row is dropped from
+    // the state itself, as from its file; the one that waits stays.
+    vi.setSystemTime(Date.now() + 8 * 86_400_000);
+    const third = send(83);
+    expect(state.activity().map((a) => a.id)).toEqual([third.id, second.id]);
+    expect(state.activityById(first.id)).toBeUndefined();
+    // A state opened on the same folder reads the same.
+    const again = new ControlState(path.join(dir, "control"));
+    expect(again.activity().map((a) => a.id)).toEqual([third.id, second.id]);
+    again.close();
+  });
+
+  it("a job's note is outside text: handed on as one plain line, whole up to what a daemon may send, kept as it came", () => {
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 91);
+    // A right-to-left override, a line break, markup, and more than any daemon sends.
+    const note = `The folder\u202E isn't allowed.\n<b>second line</b> ${"x".repeat(700)}`;
+    state.applyRemoteJobs([{ id: 91, status: "refused", note, done_at: Date.now(), created_at: 1 }]);
+    const shown = state.activityById(row.id)!.detail!;
+    expect(shown.startsWith("The folder isn't allowed. <b>second line</b> xxx")).toBe(true);
+    expect(shown).not.toMatch(/[\u202E\n]/u);
+    // Cut at the daemon's own 500, and nothing put where it was cut.
+    expect(Array.from(shown)).toHaveLength(500);
+    expect(shown.endsWith("xxx")).toBe(true);
+    // The same through the list, and the row itself is as spacesheep wrote it.
+    expect(state.activity()[0]!.detail).toBe(shown);
+    expect(state.message(m.id, row.id)!.detail).toBe(note);
+    // A computer's own reason, as long as its daemon may make it, is shown whole.
+    const long = `${"The folder is not one this computer starts in. ".repeat(10)}Ask its owner.`.padEnd(500, "!");
+    expect(long).toHaveLength(500);
+    const whole = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 93);
+    state.applyRemoteJobs([{ id: 93, status: "refused", note: long, done_at: Date.now(), created_at: 1 }]);
+    expect(state.activityById(whole.id)!.detail).toBe(long);
+    // A note that is nothing but what cannot be seen is no detail at all.
+    const quiet = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 92);
+    state.applyRemoteJobs([{ id: 92, status: "failed", note: "\u200B\u202E", done_at: Date.now(), created_at: 1 }]);
+    expect(state.activityById(quiet.id)).toMatchObject({ outcome: "failed" });
+    expect(state.activityById(quiet.id)!.detail).toBeUndefined();
+  });
+
+  it("the sign-in link of a pooled account comes through a job's note whole", () => {
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed({ pool: { on: true, harness: "claude-code", accounts: [] } })], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    // The link as the core's sign-in builds it (450 characters), after the pending id: what a
+    // daemon acks a `login.begin` with, and what spacesheep keeps as the job's note.
+    const u = new URL("https://claude.com/cai/oauth/authorize");
+    u.searchParams.append("code", "true");
+    u.searchParams.append("client_id", "00000000-0000-4000-8000-000000000000");
+    u.searchParams.append("response_type", "code");
+    u.searchParams.append("redirect_uri", "https://platform.claude.com/oauth/code/callback");
+    u.searchParams.append(
+      "scope",
+      "user:inference user:profile org:create_api_key user:sessions:claude_code user:mcp_servers user:file_upload",
+    );
+    u.searchParams.append("code_challenge", "c".repeat(43));
+    u.searchParams.append("code_challenge_method", "S256");
+    u.searchParams.append("state", "s".repeat(43));
+    const note = `0a1b2c3d ${u}`;
+    expect(note.length).toBeGreaterThan(450);
+    const cmd: PoolCommand = {
+      v: 1,
+      t: "sessionpipe.control",
+      machine: m.id,
+      kind: "pool",
+      session: "sessionpipe:pool",
+      pool_action: "login.begin",
+      nonce: "n-login",
+      iat: 1,
+    };
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 41);
+    state.applyRemoteJobs([{ id: 41, status: "done", note, done_at: Date.now(), created_at: 1 }]);
+    expect(state.activityById(row.id)).toMatchObject({ outcome: "delivered", detail: note });
+    expect(state.activity()[0]!.detail).toBe(note);
+  });
+
+  it("a row of this receiver's own machine says its detail as the machine acked it, cleaned by no one", () => {
+    // What is cleaned is spacesheep's note alone: a row with no job of spacesheep's is as it was.
+    const detail = `first line\nsecond\u202E line ${"x".repeat(700)}`;
+    const own = {
+      id: "01J0000000000000000000000A",
+      machineId: "m_0123456789abcdefghij",
+      kind: "prompt",
+      session: "claude-code:abc",
+      at: "2026-01-01T00:00:00.000Z",
+      expiresAt: "2026-01-01T00:10:00.000Z",
+      outcome: "failed",
+      detail,
+    } as MessageRow;
+    expect(toActivity(own).detail).toBe(detail);
+    expect(toActivity({ ...own, remoteJob: 7 }).detail).not.toBe(detail);
+  });
+
+  it("a send spacesheep took without naming its job is said as it is: sent, and no word of how it went", () => {
+    let kicks = 0;
+    const told: string[] = [];
+    state.onRemoteKick = () => kicks++;
+    state.onMessage = (row) => told.push(`${row.remoteJob} ${row.outcome ?? "waiting"}`);
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    kicks = 0;
+    for (const job of [Number.NaN, 0, -3, 1.5, Number.POSITIVE_INFINITY]) {
+      const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, job);
+      expect(row, String(job)).toMatchObject({ remoteJob: 0, outcome: "unconfirmed", code: NO_JOB_CODE });
+      // The page is told which unconfirmed this is, and nothing of a computer having taken it.
+      const shown = state.activityById(row.id)!;
+      expect(shown, String(job)).toMatchObject({ outcome: "unconfirmed", code: "no_job" });
+      expect(shown.takenAt, String(job)).toBeUndefined();
+    }
+    // Nothing of them is read for: no job id to ask after, no kick, and none on a reconnect.
+    expect(state.pendingRemoteJobs()).toEqual([]);
+    expect(kicks).toBe(0);
+    state.setRemoteAccount(account);
+    state.remoteEventsSeen(["claude-code:abc"]);
+    expect(state.pendingRemoteJobs()).toEqual([]);
+    expect(told.filter((t) => t === "0 unconfirmed")).toHaveLength(5);
+    // And a job that was named is followed as ever.
+    const named = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 7);
+    expect(named.outcome).toBeUndefined();
+    expect(state.pendingRemoteJobs()).toEqual([7]);
+    // A state opened on the same folder reads none of it as waiting.
+    const again = new ControlState(path.join(dir, "control"));
+    again.setRemoteAccount(account);
+    expect(again.pendingRemoteJobs()).toEqual([7]);
+    again.close();
   });
 });

@@ -9,14 +9,11 @@
 // own (`key_types` in its pairing and hello); the page also needs that (signer.ts).
 import * as core from "sessionpipe-core/control";
 import type { KeyType } from "../../shared/api.js";
+import type { DeviceSignature } from "./rows.js";
+
+export type { DeviceSignature };
 
 export type DevicePurpose = "grant" | "confirm" | "pair";
-
-/** A device key's signature (CONTROL.md §3.2): its id and 64 bytes r‖s, base64url. */
-export interface DeviceSignature {
-  cred: string;
-  sig: string;
-}
 
 /** The day's grant from a device key: its signature over the grant string's hash. */
 export interface DeviceGrant extends DeviceSignature {

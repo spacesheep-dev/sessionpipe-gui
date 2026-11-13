@@ -1537,9 +1537,12 @@ export interface Applied {
  *  `key.add` (server/control/pool.ts); its fields are `pool_action`, `pool_account`,
  *  `pool_order` and `pool_code`. */
 export type ControlKind = "prompt" | "permission.answer" | "cancel" | "start" | "key.add" | "pool";
-/** `unconfirmed` is this receiver's own, never a machine's ack: a send spacesheep carried
- *  that the computer took and said nothing more of within spacesheep's day (state.ts
- *  applyRemoteJobs). Final; whether it ran is spacesheep's to say. */
+/** `unconfirmed` is this app's own, never a machine's ack: a send spacesheep carried whose
+ *  end nobody here can say. Either the computer took it and said nothing more within
+ *  spacesheep's day (server/control/remote.ts applyRemoteJobs; a later read of its job may
+ *  still settle it), or spacesheep took the send without naming its job, so there was never
+ *  anything to follow (enqueueRemote; the row's `code` is then `no_job`, and it is not
+ *  known that a computer took it). Final here; whether it ran is spacesheep's to say. */
 export type ControlOutcome =
   | "progress"
   | "taken"

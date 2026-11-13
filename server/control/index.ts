@@ -14,7 +14,6 @@ import {
   type ControlActivity,
   type KeyType,
   type MachineControl,
-  type MachineSummary,
   ROUTES,
   type StreamMessage,
 } from "../../shared/api.js";
@@ -26,6 +25,8 @@ import {
   ControlState,
   type DemoStart,
   type DeviceRequestRow,
+  isPaired,
+  machineFrame,
   type RemoteMachine,
   toActivity,
   WAIT_MAX_S,
@@ -153,17 +154,8 @@ export function createControl(deps: ControlDeps): Control {
     machinesTimer = setTimeout(() => {
       machinesTimer = null;
       for (const m of state.allMachines()) {
-        if (!m.tokenHash && !m.keys.length) continue;
-        const control = state.machineControl(m);
-        const machine: MachineSummary = {
-          name: m.name,
-          lastAt: control.lastPollAt ?? control.lastHelloAt ?? new Date().toISOString(),
-          harnesses: Object.fromEntries((control.harnesses ?? []).map((h) => [h, undefined])),
-          sessions: 0,
-          working: 0,
-          needsYou: 0,
-          control,
-        };
+        if (!isPaired(m)) continue;
+        const machine = machineFrame(m.name, state.machineControl(m));
         for (const l of listeners)
           try {
             l({ kind: "machine", machine });
@@ -217,7 +209,7 @@ export function createControl(deps: ControlDeps): Control {
     },
     machines() {
       const out = new Map<string, MachineControl>();
-      for (const m of state.allMachines()) if (m.tokenHash || m.keys.length) out.set(m.name, state.machineControl(m));
+      for (const m of state.allMachines()) if (isPaired(m)) out.set(m.name, state.machineControl(m));
       return out;
     },
     activity: (limit) => state.activity(limit),

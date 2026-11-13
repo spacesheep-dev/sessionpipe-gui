@@ -259,10 +259,22 @@ export function servedBy(
 
 // ----- the ack's detail -----
 
+/** The link as it was written when it reads as an `https:` URL, else nothing: it comes
+ *  from outside (a machine's ack, by way of spacesheep for a computer paired there) and is
+ *  put on a button, so what does not parse as one is no link. */
+function httpsUrl(s: string): string | null {
+  try {
+    return new URL(s).protocol === "https:" ? s : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A `login.begin`'s answer (CONTROL.md, the pool: the ack's `detail` is
  *  "<pending login id> <URL>", the id, one space, the URL): the id is the first word when
  *  it has the shape of one, the URL the first https URL anywhere in the line (so a daemon
- *  that words it more fully still reads), and `text` what is left besides them. */
+ *  that words it more fully still reads) when it parses as one, and `text` what is left
+ *  besides them. */
 export function loginFromDetail(detail: string | undefined): {
   url: string | null;
   pendingId: string | null;
@@ -270,7 +282,7 @@ export function loginFromDetail(detail: string | undefined): {
 } {
   const d = (detail ?? "").trim();
   const m = /https:\/\/[^\s<>"']+/.exec(d);
-  const url = m ? m[0].replace(/[.,;:)\]]+$/, "") : null;
+  const url = m ? httpsUrl(m[0].replace(/[.,;:)\]]+$/, "")) : null;
   const first = d.split(/\s+/)[0] ?? "";
   const pendingId =
     url && first && !first.startsWith("https://") && /^[A-Za-z0-9._:-]{1,128}$/.test(first) ? first : null;
@@ -466,8 +478,13 @@ export function commandNote(
     case "expired":
       return { text: `${machine} didn't take it in time.`, err: true };
     case "unconfirmed":
+      // The code `no_job`: spacesheep took the send and named no job, so no computer is
+      // known to have taken it (the same two sentences as web/src/control/words.ts).
       return {
-        text: `No word from ${machine} since it took this. Check spacesheep.dev to see how it went.`,
+        text:
+          a.code === "no_job"
+            ? "Sent, but this app can't follow it. Check spacesheep.dev to see how it went."
+            : `No word from ${machine} since it took this. Check spacesheep.dev to see how it went.`,
         err: true,
       };
   }
