@@ -1440,7 +1440,10 @@ describe("a page's own backend on a spacesheep account", () => {
     ]);
     // The key that was enrolled is the hub's, whatever the page sent.
     expect([...r.ss.deviceRequests.keys()]).toEqual(["A".repeat(43)]);
-    r.ss.trusting.set("A".repeat(43), [M1]);
+    // The request is open until a computer takes the key (approved on spacesheep's Devices).
+    res = await b.answer("/api/ui/spacesheep/device");
+    expect(await res.json()).toMatchObject({ trustedOn: [], pending: true });
+    r.ss.approveDevice("A".repeat(43));
     res = await b.answer("/api/ui/spacesheep/device");
     expect(await res.json()).toMatchObject({ trustedOn: [M1], pending: false });
   });

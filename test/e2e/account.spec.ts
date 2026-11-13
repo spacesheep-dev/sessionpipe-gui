@@ -171,8 +171,8 @@ test("connects: the digits, the approval on spacesheep, the account as this wind
   expect(status.accounts[0]!.id).toMatch(/^[a-z2-7]{52}$/);
   // The key is nowhere a page can read.
   expect(JSON.stringify(status)).not.toContain(ss.key);
-  await invoke("rx_select", { id: status.connect.receiver });
-  await page.reload();
+  // The shell reopens the window on the account it was told to show.
+  await Promise.all([page.waitForEvent("load"), invoke("rx_select", { id: status.connect.receiver })]);
   expect(
     await page.evaluate(
       () => (window as unknown as { sessionpipeShell: { receiver: { kind: string } } }).sessionpipeShell.receiver.kind,

@@ -107,10 +107,29 @@ interface Connect {
   receiver?: string;
   email?: string;
   error?: string;
+  /** A key was made on spacesheep and is not kept here: where to revoke it, and the words. */
+  revokeUrl?: string;
+  note?: string;
   code: string;
   poll: string;
   url: string;
+  /** The approval the hub holds until the person answers here. */
+  held?: { key: string; email: string; at: number };
 }
+
+/** The hub's words where a key was made on spacesheep and is not kept (account.rs). */
+export const UNUSED_KEY_NOTE =
+  "A key was made for this app on spacesheep and is not kept here. Revoke it there: Settings → API keys.";
+/** `acct_disconnect`'s note (hub/acct.rs). */
+export const DISCONNECT_NOTE =
+  "The key is forgotten on this device. It keeps working until you revoke it on spacesheep: Settings → API keys.";
+/** Three connects an hour, five device asks an hour, the same device answer for ten minutes,
+ *  a held approval for a quarter of an hour (account.rs). */
+const STARTS_AN_HOUR = 3;
+const ASKS_AN_HOUR = 5;
+const SAME_ASK_MS = 600_000;
+const HELD_MS = 900_000;
+const HOUR = 3_600_000;
 
 const realClock: FakeClock = {
   now: () => Date.now(),
@@ -154,8 +173,22 @@ export class HubStandIn {
   latencyMs = 0;
   /** The most a relay answer may hold, unpacked (8 MiB in the hub; a test lowers it). */
   relayMax = 8 * MIB;
-  /** The native alerts: what the person answers ("use this account?", "disconnect?"). */
-  alert: (question: "use_account" | "disconnect", about: { email: string; host: string }) => boolean = () => true;
+  /** The native alerts: what the person answers ("use this account?", "disconnect?"). `null`:
+   *  the alert could not be shown (another is up, the app is in the background), which is
+   *  no answer: an approval stays held and is asked about again (`nudge`), a disconnect is
+   *  refused `not_asked`. */
+  alert: (question: "use_account" | "disconnect", about: { email: string; host: string }) => boolean | null = () =>
+    true;
+  /** What keeping an approved account does: `ok`, or the failure the connect ends with. */
+  keep: "ok" | "keystore" | "io" | "conflict" = "ok";
+  /** The next `acct_connect_start` is refused with this, once. */
+  startRefusal: HubRefused | null = null;
+  /** `acct_disconnect` cannot remove the key (`io`: nothing was changed). */
+  disconnectFails = false;
+  /** When each connect was started and each device ask was made, for the hub's own limits. */
+  private starts: number[] = [];
+  private asks: number[] = [];
+  private lastAsk: { id: string; at: number; answer: Record<string, unknown> } | null = null;
   /** This phone's own device key, as the signer holds it (`acct_device_ask` reads it natively). */
   deviceKey: Record<string, unknown> | null = null;
   /** What `acct_connect_open` opened in the system browser. */
@@ -244,6 +277,7 @@ export class HubStandIn {
             state: c.state,
             ...(c.receiver ? { receiver: c.receiver, email: c.email } : {}),
             ...(c.error ? { error: c.error } : {}),
+            ...(c.note ? { revokeUrl: c.revokeUrl, note: c.note } : {}),
           }
         : null,
     };
@@ -270,14 +304,19 @@ export class HubStandIn {
         return this.connectStart();
       case "acct_connect_open": {
         const c = this.connecting;
-        if (c?.state !== "pending") throw new HubRefused("no_connect", "No connect is under way.");
+        if (c?.state !== "pending") throw new HubRefused("no_connect", "No connect is waiting.");
         this.opened.push(c.url);
         return null;
       }
       case "acct_connect_cancel": {
         const was = this.connecting;
-        this.connecting = null;
         if (this.connectTimer) this.clock.clearTimeout(this.connectTimer);
+        // Cancelled while the person was being asked here: the key was made and is not kept.
+        if (was?.state === "asking") {
+          this.unkept(was, "declined");
+          return true;
+        }
+        this.connecting = null;
         this.say();
         return was?.state === "pending";
       }
@@ -335,24 +374,57 @@ export class HubStandIn {
     return name;
   }
 
+  /** A connect that ends with a key made on spacesheep and not kept here. */
+  private unkept(c: Connect, state: Connect["state"], error?: string): void {
+    c.state = state;
+    if (error) c.error = error;
+    c.revokeUrl = `${c.origin}/settings/api-keys`;
+    c.note = UNUSED_KEY_NOTE;
+    delete c.held;
+    this.say();
+  }
+
   private async connectStart(): Promise<unknown> {
     const origin = this.o.upstream.origin;
+    const host = new URL(origin).host;
+    if (!(this.o.features ?? ["account"]).includes("account"))
+      throw new HubRefused("unsupported", "A spacesheep account is not available in this build.");
+    if (this.startRefusal) {
+      const e = this.startRefusal;
+      this.startRefusal = null;
+      throw e;
+    }
+    if (this.connecting?.state === "asking")
+      throw new HubRefused("busy", "An account was approved and waits for your answer on this device.");
     if ([...this.accounts.values()].some((a) => a.origin === origin && a.state === "ok"))
-      throw new HubRefused("already_connected", "An account at that origin is connected. Disconnect it first.");
+      throw new HubRefused("already_connected", "Already connected. Disconnect first.");
     if (this.connecting?.state === "pending") return this.status().connect;
+    const now = this.clock.now();
+    this.starts = this.starts.filter((t) => now - t < HOUR);
+    if (this.starts.length >= STARTS_AN_HOUR)
+      throw new HubRefused("too_many_starts", "Too many tries. Wait a while, then connect again.", {
+        retryAfterS: Math.ceil((this.starts[0]! + HOUR - now) / 1000),
+      });
+    if (this.down) throw new HubRefused("unreachable", `Couldn't reach ${host}: timed out`);
     const r = await this.o.upstream.ask({
       method: "POST",
       path: "/api/gui/connect",
       body: JSON.stringify({ device: "iPhone", version: this.o.appVersion ?? "0.9.0" }),
     });
-    if (r.status !== 201) throw new HubRefused("refused", `${origin} answered ${r.status}.`);
-    const j = JSON.parse(r.body) as {
-      code: string;
-      digits: string;
-      url: string;
-      poll_token: string;
-      expires_at: string;
-    };
+    if (r.status === 429)
+      throw new HubRefused("rate_limited", "spacesheep asked to wait a bit. Try again in a minute.", {
+        retryAfterS: Number(r.headers["retry-after"] ?? 60) || 60,
+      });
+    if (r.status !== 201)
+      throw new HubRefused("refused", `${host} answered ${r.status}. Is it a spacesheep this version knows?`);
+    let j: { code: string; digits: string; url: string; poll_token: string; expires_at: string };
+    try {
+      j = JSON.parse(r.body) as typeof j;
+      if (!j.code || !j.digits || !j.poll_token) throw new Error("no code");
+    } catch {
+      throw new HubRefused("bad_answer", `${host}'s answer can't be used: not JSON.`);
+    }
+    this.starts.push(now);
     this.connecting = {
       origin,
       digits: j.digits,
@@ -388,27 +460,53 @@ export class HubStandIn {
     if (j?.state === "approved" && j.key && j.email) {
       // The key is held, not kept: the person is asked whose account this phone will show.
       c.state = "asking";
+      c.held = { key: j.key, email: j.email, at: this.clock.now() };
       this.say();
-      const host = new URL(c.origin).host;
-      if (!this.alert("use_account", { email: j.email, host })) {
-        c.state = "declined";
-        return this.say();
-      }
-      const a = this.add(j.email, j.key);
-      c.state = "approved";
-      c.receiver = a.id;
-      c.email = a.email;
-      return this.say();
+      return this.nudge();
     }
-    if (j?.state === "denied") c.state = "denied";
+    if (r && r.status === 200 && !j?.state) {
+      c.state = "failed";
+      c.error = "bad_answer";
+    } else if (j?.state === "denied") c.state = "denied";
     else if (r && r.status === 410) c.state = "expired";
     else return this.schedulePoll(2000);
     this.say();
   }
 
+  /** The held approval's question, asked (again): when the hub got the key, when the app
+   *  comes to the front, every fifteen seconds meanwhile. Only an answer ends it; held for a
+   *  quarter of an hour at most. */
+  nudge(): void {
+    const c = this.connecting;
+    if (c?.state !== "asking" || !c.held) return;
+    if (this.clock.now() - c.held.at >= HELD_MS) {
+      this.unkept(c, "expired");
+      return;
+    }
+    const answer = this.alert("use_account", { email: c.held.email, host: new URL(c.origin).host });
+    if (answer === null) return;
+    if (!answer) {
+      this.unkept(c, "declined");
+      return;
+    }
+    if (this.keep !== "ok") {
+      this.unkept(c, "failed", this.keep);
+      return;
+    }
+    const a = this.add(c.held.email, c.held.key);
+    delete c.held;
+    c.state = "approved";
+    c.receiver = a.id;
+    c.email = a.email;
+    this.say();
+  }
+
   private disconnect(a: HubAccount): unknown {
-    if (!this.alert("disconnect", { email: a.email, host: new URL(a.origin).host }))
-      throw new HubRefused("cancelled", "Not disconnected.");
+    const answer = this.alert("disconnect", { email: a.email, host: new URL(a.origin).host });
+    if (answer === null) throw new HubRefused("not_asked", "The question could not be shown. Try again.");
+    if (!answer) throw new HubRefused("cancelled", "Cancelled.");
+    if (this.disconnectFails)
+      throw new HubRefused("io", "The key could not be removed from this device. Nothing was changed.");
     this.accounts.delete(a.id);
     if (this.active === a.id) this.active = null;
     this.say();
@@ -418,14 +516,24 @@ export class HubStandIn {
       email: a.email,
       forgotten: true,
       revoked: false,
-      revokeUrl: `${a.origin}/settings`,
-      note: "The key is forgotten on this phone. To end it for good, revoke it on spacesheep: Settings → API keys.",
+      revokeUrl: `${a.origin}/settings/api-keys`,
+      note: DISCONNECT_NOTE,
     };
   }
 
   private async deviceAsk(a: HubAccount): Promise<unknown> {
-    if (!this.deviceKey) throw new HubRefused("unsupported", "This device has no signer.");
-    if (!a.key) throw new HubRefused("unauthorized", "This device holds no key for the account.");
+    if (!this.deviceKey) throw new HubRefused("unsupported", "Sending from this phone comes in a later version.");
+    if (!a.key) throw new HubRefused("not_connected", "This device holds no key for the account. Connect again.");
+    const now = this.clock.now();
+    // Asked again within ten minutes for the same key: the answer it got then, no request.
+    if (this.lastAsk && this.lastAsk.id === a.id && now - this.lastAsk.at < SAME_ASK_MS) return this.lastAsk.answer;
+    this.asks = this.asks.filter((t) => now - t < HOUR);
+    if (this.asks.length >= ASKS_AN_HOUR)
+      throw new HubRefused("too_many_asks", "Too many tries. Wait a while, then ask again.", {
+        retryAfterS: Math.ceil((this.asks[0]! + HOUR - now) / 1000),
+      });
+    if (this.down) throw new HubRefused("unreachable", "spacesheep could not be reached.");
+    this.asks.push(now);
     const r = await this.o.upstream.ask({
       method: "POST",
       path: "/api/gui/device",
@@ -433,14 +541,35 @@ export class HubStandIn {
       body: JSON.stringify({ key: this.deviceKey, name: "iPhone" }),
     });
     const j = JSON.parse(r.body || "{}") as Record<string, unknown>;
-    if (r.status === 401) throw new HubRefused("unauthorized", String(j.error ?? "The key is refused."));
-    if (r.status < 200 || r.status >= 300)
-      throw new HubRefused("refused", String(j.error ?? `spacesheep answered ${r.status}.`), {
+    if (r.status === 401) {
+      this.mark(a, "unauthorized");
+      throw new HubRefused("unauthorized", String(j.error ?? "spacesheep answered 401."), {
         upstream: String(j.code ?? ""),
       });
+    }
+    if (r.status < 200 || r.status >= 300)
+      throw new HubRefused(
+        r.status === 429 ? "rate_limited" : "refused",
+        String(j.error ?? `spacesheep answered ${r.status}.`),
+        { upstream: String(j.code ?? "") },
+      );
+    if (typeof j.code !== "string" || typeof j.key_id !== "string")
+      throw new HubRefused("bad_answer", "spacesheep's answer can't be used by this version.");
     a.deviceKeyId = String(j.key_id);
     this.say();
-    return { code: String(j.code), keyId: a.deviceKeyId, trustedOn: j.trusted_on ?? [], devicesUrl: j.devices_url };
+    const answer = {
+      code: String(j.code),
+      keyId: a.deviceKeyId,
+      trustedOn: (j.trusted_on as string[] | undefined) ?? [],
+      devicesUrl: j.devices_url,
+    };
+    this.lastAsk = { id: a.id, at: now, answer };
+    return answer;
+  }
+
+  /** The person asked again after the request was dropped: the hub's ten minutes are over. */
+  forgetAsk(): void {
+    this.lastAsk = null;
   }
 
   // ---------- the doors ----------
