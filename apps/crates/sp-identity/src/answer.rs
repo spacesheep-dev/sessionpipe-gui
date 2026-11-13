@@ -492,6 +492,101 @@ mod tests {
         }
     }
 
+    /// A phone on a spacesheep account can send. Its page names the ACCOUNT as the
+    /// receiver (the Hub lists it at the account's own origin, with the rp id its
+    /// machines door gave, never as local), so the rp id a command is signed for is
+    /// held to that origin by the same rule as any receiver's, and the page's own word
+    /// for it counts for nothing beyond having to agree. (The Mac app's page names its
+    /// local receiver and asks for spacesheep's rp id, which is the `rp_mismatch` in the
+    /// test above: that refusal is right, and is not this path.)
+    #[test]
+    fn a_command_for_a_computer_on_an_account_is_signed_for_the_accounts_own_rp() {
+        use crate::validate::Mode;
+        let (s, hw, clock) = signer();
+        clock.store(now_ms(), std::sync::atomic::Ordering::SeqCst);
+        let s = Arc::new(s);
+        let account = rx("https://spacesheep.dev", Some("spacesheep.dev"), false);
+        let t = run(target(&account, "rx1", Some("spacesheep.dev"))).unwrap();
+        assert_eq!(
+            t,
+            Target {
+                rp: "spacesheep.dev".into(),
+                host: "spacesheep.dev".into()
+            }
+        );
+        assert_eq!(run(target(&account, "rx1", None)).unwrap(), t);
+        // The page cannot have it signed for any other rp id, whatever it names.
+        for asked in ["localhost", "evil.example", "app.spacesheep.dev", "dev", ""] {
+            assert_eq!(
+                run(target(&account, "rx1", Some(asked))).unwrap_err().code,
+                "rp_mismatch",
+                "{asked}"
+            );
+        }
+        // Nor can a server: an rp id the account's own origin cannot claim signs nothing,
+        // whether the page agrees with it or not.
+        for (origin, rp) in [
+            ("https://spacesheep.dev", "evil.example"),
+            ("https://evil.example", "spacesheep.dev"),
+            ("https://spacesheep.dev.evil.example", "spacesheep.dev"),
+            ("http://spacesheep.dev", "spacesheep.dev"),
+        ] {
+            let liar = rx(origin, Some(rp), false);
+            for asked in [None, Some(rp)] {
+                assert_eq!(
+                    run(target(&liar, "rx1", asked)).unwrap_err().code,
+                    "rp_mismatch",
+                    "{origin} {rp}"
+                );
+            }
+        }
+
+        // The key spacesheep was asked to trust (`device_key`, what `acct_device_ask`
+        // hands the Hub) is the key that signs.
+        let enrolled = run(device_key_of(s.clone(), &account, "rx1")).unwrap();
+        let cmd = command(
+            &NativeAnswer::Reply {
+                machine: M.into(),
+                session: "claude-code:s".into(),
+                text: "ok go".into(),
+            },
+            &b64::enc(&s.random(16)),
+            now_ms(),
+        )
+        .unwrap();
+        // Under the day's grant: one prompt, naming the account's host, and the three
+        // fields the Hub's send door takes (`{ cmd, csig, grant }`).
+        let signed = s
+            .sign(&t.rp, &t.host, Some(&cmd), Mode::Grant, false, "")
+            .unwrap();
+        let mut fields: Vec<&String> = signed.as_object().unwrap().keys().collect();
+        fields.sort();
+        assert_eq!(fields, ["cmd", "csig", "grant"]);
+        assert_eq!(signed["cmd"], cmd);
+        assert_eq!(signed["grant"]["cred"], enrolled.id);
+        assert!(signed["csig"].is_string() && signed["grant"]["str"].is_string());
+        {
+            let prompts = hw.prompts.lock().unwrap();
+            assert_eq!(prompts.len(), 1);
+            assert!(prompts[0].contains("spacesheep.dev"), "{}", prompts[0]);
+        }
+        // A fresh confirmation: `{ cmd, confirm }`, by the same key.
+        let confirmed = s
+            .sign(
+                &t.rp,
+                &t.host,
+                Some(&cmd),
+                Mode::Confirm,
+                false,
+                "studio-mac",
+            )
+            .unwrap();
+        let mut fields: Vec<&String> = confirmed.as_object().unwrap().keys().collect();
+        fields.sort();
+        assert_eq!(fields, ["cmd", "confirm"]);
+        assert_eq!(confirmed["confirm"]["cred"], enrolled.id);
+    }
+
     #[test]
     fn pairing_is_read_by_rust() {
         let r = rx("http://127.0.0.1:7819", Some("localhost"), true);
