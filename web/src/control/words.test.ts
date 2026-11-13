@@ -4,6 +4,7 @@
 import type { ControlActivity } from "@shared/api";
 import { describe, expect, it, vi } from "vitest";
 import { ControlError } from "./api";
+import { noteMachineControl } from "./remoteRp";
 import {
   handoffEndWords,
   harnessCommand,
@@ -105,6 +106,15 @@ describe("startFailureWords", () => {
       "not followed · spacesheep didn't say which job it is",
       "not followed · spacesheep didn't say which job it is",
     ]);
+    // The account's own host is the one named, where the machine's row says where it lives.
+    noteMachineControl({
+      machineId: "m-else",
+      remote: { via: "spacesheep", origin: "https://sheep.example.org", rpId: "sheep.example.org" },
+    } as never);
+    expect(startFailureWords({ ...n, machineId: "m-else" }, "rc-mac", "Claude Code")).toBe(
+      "Sent, but this app can't follow it. Check sheep.example.org to see how it went.",
+    );
+    noteMachineControl({ machineId: "m-else" } as never);
     // Nothing here knows that the computer took it, or that it was not sent.
     for (const s of said) {
       expect(s).not.toContain("rc-mac");

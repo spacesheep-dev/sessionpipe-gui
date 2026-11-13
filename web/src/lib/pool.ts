@@ -456,6 +456,8 @@ export function commandNote(
   machine: string,
   online: boolean,
   refusal: (code: string | undefined) => string,
+  /** Where the account that carries the machine's commands lives ("spacesheep.dev"). */
+  host?: string,
 ): CommandNote | null {
   const detail = a.detail?.trim();
   switch (a.outcome) {
@@ -483,7 +485,7 @@ export function commandNote(
       return {
         text:
           a.code === "no_job"
-            ? "Sent, but this app can't follow it. Check spacesheep.dev to see how it went."
+            ? `Sent, but this app can't follow it. Check ${host || "spacesheep.dev"} to see how it went.`
             : `No word from ${machine} since it took this. Check spacesheep.dev to see how it went.`,
         err: true,
       };

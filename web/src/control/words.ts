@@ -6,6 +6,7 @@ import { asSentence } from "@shared/reason";
 import { accountMode } from "../lib/net";
 import { ControlError, UNHEARD_CODE, wrongOriginHere } from "./api";
 import { wrongOriginWords } from "./origin";
+import { remoteHostFor } from "./remoteRp";
 import { deviceRefusal, nativeErrorWords } from "./signer";
 import { webauthnError } from "./webauthn";
 
@@ -189,14 +190,17 @@ export const reasonOf = (a: Pick<ControlActivity, "detail" | "outcome">): string
 /** The words for a send spacesheep carried that this app can't say the end of. */
 export const UNTRACKED_WORDS =
   "Sent through a spacesheep account that's no longer connected here. Check spacesheep.dev to see if it started.";
-/** A send spacesheep took without naming its job: sent, and nothing more is known here. */
-export const NO_JOB_WORDS = "Sent, but this app can't follow it. Check spacesheep.dev to see how it went.";
+/** A send spacesheep took without naming its job: sent, and nothing more is known here.
+ *  `host`: where the account that carried it lives, as the machine's row says (an account
+ *  need not be on spacesheep.dev); absent, spacesheep.dev. */
+export const noJobWords = (host?: string): string =>
+  `Sent, but this app can't follow it. Check ${host || "spacesheep.dev"} to see how it went.`;
 /** A send that ended `unconfirmed`: a computer took it and said nothing more, or (the
  *  code `no_job`) spacesheep took it and named no job, and then no computer is known to
  *  have taken it. */
-export const unconfirmedWords = (machine: string, a?: Pick<ControlActivity, "code">): string =>
+export const unconfirmedWords = (machine: string, a?: Pick<ControlActivity, "code" | "machineId">): string =>
   a?.code === "no_job"
-    ? NO_JOB_WORDS
+    ? noJobWords(a.machineId ? remoteHostFor(a.machineId) : undefined)
     : `No word from ${machine} since it took this. Check spacesheep.dev to see how it went.`;
 
 /** A handoff that ended any way but delivered, in the one phrase its card shows. "not sent"
