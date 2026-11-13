@@ -106,25 +106,12 @@ test("a first connect and a restart with a full relay", async () => {
     const heap = await cdp.send("Runtime.getHeapUsage");
     const v = (await view())!;
     const long = await page.evaluate(() => (window as unknown as { __long: number[] }).__long);
-    const reads = await page.evaluate(async () => {
-      const b = (
-        window as unknown as {
-          __sessionpipeAccount: {
-            transport: {
-              feed(q: object): Promise<{ events: { harness: { name: string }; session: { id: string } }[] }>;
-              session(h: string, id: string, q: object): Promise<unknown>;
-            };
-          };
-        }
-      ).__sessionpipeAccount;
-      const t = performance.now();
-      const f = await b.transport.feed({ limit: 50 });
-      const feedMs = performance.now() - t;
-      const e = f.events[0]!;
-      const t2 = performance.now();
-      await b.transport.session(e.harness.name, e.session.id, { tail: true, limit: 200 });
-      return { feedMs: Math.round(feedMs * 10) / 10, sessionMs: Math.round((performance.now() - t2) * 10) / 10 };
-    });
+    // A session's page, as a person opens one: from the tap to its last turn on screen. (The
+    // page leaves nothing in reach of a test that reads a feed or a session by itself.)
+    const t = Date.now();
+    await page.locator("a[href^='/s/']").first().click();
+    await page.locator(".turn-head").first().waitFor({ timeout: 60_000 });
+    const reads = { sessionOnScreenMs: Date.now() - t };
     await context.close();
     const disk =
       Number(
