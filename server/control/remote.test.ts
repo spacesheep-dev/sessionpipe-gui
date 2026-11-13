@@ -7,6 +7,7 @@ import {
   ControlState,
   EXPIRES_MAX_MS,
   type MessageRow,
+  NO_JOB_CODE,
   type PoolCommand,
   REMOTE_GRACE_MS,
   toActivity,
@@ -671,8 +672,11 @@ describe("remote machines in the control state", () => {
     kicks = 0;
     for (const job of [Number.NaN, 0, -3, 1.5, Number.POSITIVE_INFINITY]) {
       const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, job);
-      expect(row, String(job)).toMatchObject({ remoteJob: 0, outcome: "unconfirmed" });
-      expect(state.activityById(row.id), String(job)).toMatchObject({ outcome: "unconfirmed" });
+      expect(row, String(job)).toMatchObject({ remoteJob: 0, outcome: "unconfirmed", code: NO_JOB_CODE });
+      // The page is told which unconfirmed this is, and nothing of a computer having taken it.
+      const shown = state.activityById(row.id)!;
+      expect(shown, String(job)).toMatchObject({ outcome: "unconfirmed", code: "no_job" });
+      expect(shown.takenAt, String(job)).toBeUndefined();
     }
     // Nothing of them is read for: no job id to ask after, no kick, and none on a reconnect.
     expect(state.pendingRemoteJobs()).toEqual([]);

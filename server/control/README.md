@@ -239,7 +239,10 @@ from the relay's machine list, held in memory, never in `machines.json`, never p
 here. `POST /send` for one is not verified here (its keys are ids only): the signed body
 goes to spacesheep's jobs route as the account, and the row that comes back is settled by
 spacesheep's jobs list alone (its status, `code` and clock; a day and an hour with no word
-ends it as `expired`, or `unconfirmed` once the computer took it). A row names the
+ends it as `expired`, or `unconfirmed` once the computer took it). A send spacesheep took
+without naming its job has nothing to be settled by: its row is `unconfirmed` at once,
+with the code `no_job`. A job is one only as spacesheep writes it, a whole number above
+zero (`remoteJobOf`). A row names the
 account that carried it; with none connected, or its key refused, it waits and says
 `unfollowed`; another account connecting settles it as `untracked`.
 

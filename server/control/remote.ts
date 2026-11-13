@@ -24,6 +24,7 @@ import {
   type MessageRow,
   machineControl,
   messageRow,
+  NO_JOB_CODE,
   nowIso,
   REMOTE_CODE_RE,
   REMOTE_GRACE_MS,
@@ -329,8 +330,10 @@ export class RemoteSlice {
    *  job status (applyRemoteJobs), never by a poll of this receiver. `remoteJob` is
    *  spacesheep's id for it; an answer that named none (remoteJobOf: anything but a number
    *  that is whole and above zero) is a send spacesheep took and nobody can follow: its row
-   *  is kept under job 0, which spacesheep never lists, and closed at once as `unconfirmed`,
-   *  never left waiting for a word that cannot come and never said to be not sent. */
+   *  is kept under job 0, which spacesheep never lists, and closed at once as `unconfirmed`
+   *  with the code NO_JOB_CODE, never left waiting for a word that cannot come and never
+   *  said to be not sent. The code says which `unconfirmed` this is: nobody here knows that
+   *  a computer took it. */
   enqueueRemote(
     m: MachineRow,
     signed: SignedCommand,
@@ -350,6 +353,7 @@ export class RemoteSlice {
     if (this.remoteAccount) row.remoteAccount = this.remoteAccount;
     if (!named) {
       row.outcome = "unconfirmed";
+      row.code = NO_JOB_CODE;
       row.ackedAt = new Date().toISOString();
     }
     this.saveQueue(m.id);

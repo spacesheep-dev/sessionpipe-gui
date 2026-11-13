@@ -94,6 +94,10 @@ export const REMOTE_JUST_SENT_MS = 60_000;
  *  that carried it is not the one connected (disconnected, or another account), or its
  *  machine was not on the account's list when it was read again after a restart. */
 export const UNTRACKED_CODE = "untracked";
+/** The code of a send spacesheep took without naming its job: closed `unconfirmed` at
+ *  once, since there is nothing to read its end from. The page words it apart from a send
+ *  a computer took and said nothing more of, which is `unconfirmed` with no code. */
+export const NO_JOB_CODE = "no_job";
 /** A code as spacesheep's jobs door may carry it: a word, as a computer's ack codes are. */
 export const REMOTE_CODE_RE = /^[a-z][a-z0-9_]{0,39}$/;
 /** Why a waiting spacesheep-carried row is not being followed right now. */
