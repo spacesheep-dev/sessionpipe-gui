@@ -129,6 +129,8 @@ export interface AccountBackend {
 
 /** An account whose key was made this recently has had no reader before this one. */
 export const FRESH_MS = 120_000;
+/** A stream opened while spacesheep cannot be reached reads the relay at once, this often at most. */
+export const RETRY_EVERY_MS = 3000;
 /** While history is read, the board is handed over again this often. */
 export const BOARD_EVERY_MS = 1500;
 /** A page of this many events or more is history, whenever it comes: one board, not a frame an event. */
@@ -314,6 +316,12 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     kept.get("reads") === undefined &&
     Number.isFinite(connectedAt) &&
     Math.abs(Date.now() - connectedAt) < FRESH_MS;
+  /** spacesheep could not be reached at the last read (the reader's `offline`). */
+  let unreachable = false;
+  /** The streams the page holds open: told when spacesheep cannot be reached. */
+  const streams = new Set<StreamHandlers>();
+  /** When the reader was last started again because somebody asked (RETRY_EVERY_MS). */
+  let retriedAt = Number.NEGATIVE_INFINITY;
   /** The relay is read from its start (nothing was kept): all of it is history. */
   let cold = cursorFrom(kept.get("cursor"), shell.origin, shell.email) === 0;
   /** History is in: a page came back that was not full. Only that ends it. A read that
@@ -400,8 +408,19 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
       onState(s) {
         // It cannot be read just now: what is here is the board, shown as it is. History is
         // not over for that: it is still held back, and comes as one board when it comes.
-        if (s === "offline" || s === "limited") board();
+        // (Once history is in, the board is on the page already and only its state changes.)
+        if ((s === "offline" || s === "limited") && catching) board();
         else if (s === "unauthorized") giveUp();
+        // spacesheep cannot be reached: every open stream says so, as a receiver's dropped
+        // stream does (the page reads "Reconnecting…", not "live"). Reached again, a board
+        // says it is live.
+        if (s === "offline") {
+          unreachable = true;
+          for (const h of [...streams]) h.onError(0);
+        } else if (unreachable) {
+          unreachable = false;
+          if (s !== "unauthorized") board();
+        }
         changed();
       },
       onMachines(list, _origin, rpId) {
@@ -534,10 +553,25 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
         // The messages carried so far, as a stream would have brought them.
         for (const message of control.activity(100).reverse()) send({ kind: "control", message });
         listeners.add(send);
+        streams.add(h);
+        if (!unreachable || gone) return;
+        // The rows are what was last read, and spacesheep cannot be reached: said, not "live".
+        h.onError(0);
+        // A stream opened while it cannot be reached is somebody asking again ("Retry now",
+        // the app back in front): the relay is read now, not at the end of the reader's own
+        // growing pause. The reader is started anew from what was kept (its cursor, its read
+        // times), so there is never a second read beside one already out.
+        const now = performance.now();
+        if (reader?.status().state === "offline" && now - retriedAt >= RETRY_EVERY_MS) {
+          retriedAt = now;
+          reader.stop();
+          reader = open();
+        }
       });
       return () => {
         closed = true;
         listeners.delete(send);
+        streams.delete(h);
       };
     },
     info: async () => info(),

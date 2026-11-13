@@ -484,6 +484,64 @@ describe("a page's own backend on a spacesheep account", () => {
     });
   });
 
+  it("says so while spacesheep cannot be reached, reads at once when asked again, and is live when it answers", async () => {
+    const s = new Session("s-1");
+    r.ss.push([s.ev("session.started", {}, { tier: 2 })]);
+    const b = await r.start();
+    /** What a page's stream is told, in order: "open", "snapshot", "down". */
+    const told: string[] = [];
+    const watch = () =>
+      b.transport.openStream({
+        onOpen: () => told.push("open"),
+        onMessage: (m) => m.kind === "snapshot" && told.push("snapshot"),
+        onError: () => told.push("down"),
+      });
+    let off = watch();
+    await tick(400);
+    expect(told).toEqual(["open", "snapshot"]);
+    // spacesheep goes away: the open stream is told, once it shows.
+    r.hub.down = true;
+    r.ss.push([s.ev("turn.started", { turn_id: "t1" }, { tier: 2 })]);
+    await tick(30_000);
+    expect(b.view().relay.state).toBe("offline");
+    expect(told.at(-1)).toBe("down");
+    // "Retry now" closes the stream and opens it again: the rows as they were, still down,
+    // and the relay asked at once rather than at the end of the reader's pause.
+    off();
+    told.length = 0;
+    const reads = () => r.asked.filter((a) => a === "GET /api/sessionpipe/v1/relay").length;
+    const before = reads();
+    off = watch();
+    await tick(50);
+    expect(told.slice(0, 3)).toEqual(["open", "snapshot", "down"]);
+    expect(told.at(-1)).toBe("down");
+    expect(told.filter((t) => t === "snapshot")).toHaveLength(1);
+    // (A reader started anew reads, and on a failure once more before its pause begins.)
+    const after = reads();
+    expect(after).toBeGreaterThan(before);
+    expect(after).toBeLessThanOrEqual(before + 2);
+    // Asked again and again, it does not hammer: it starts anew every few seconds at most.
+    for (let i = 0; i < 5; i++) {
+      off();
+      off = watch();
+      await tick(50);
+    }
+    expect(reads()).toBe(after);
+    // It answers: the stream that is open is handed a board, and that is live.
+    r.hub.down = false;
+    told.length = 0;
+    await tick(60_000);
+    expect(b.view().relay.state).toBe("ok");
+    expect(told).toEqual(["snapshot"]);
+    // A stream opened now is told nothing of a drop.
+    off();
+    told.length = 0;
+    off = watch();
+    await tick(50);
+    expect(told).toEqual(["open", "snapshot"]);
+    off();
+  });
+
   describe("a cold start whose first read fails", () => {
     type Snap = { sessions: { key: string; newsAt?: string }[]; marks: { since: string } };
     const unread = async (b: AccountBackend): Promise<string[]> => {

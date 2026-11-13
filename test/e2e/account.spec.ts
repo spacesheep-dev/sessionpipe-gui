@@ -307,9 +307,13 @@ test("after a reload the board is there from what was kept, before the relay ans
   await expect
     .poll(async () => (await view()).relay)
     .toMatchObject({ state: "offline", lastError: "hub: unreachable" });
+  // The rows are from before and spacesheep cannot be reached: the page says so, not "live".
+  const reconnecting = page.locator("text=/^Reconnecting/ >> visible=true");
+  await expect(reconnecting.first()).toBeVisible();
   // The labels the person set are the hub's to keep, and the sends are still listed.
   hub.down = false;
   await expect.poll(async () => (await view()).relay.state, { timeout: 20_000 }).toBe("ok");
+  await expect(reconnecting).toHaveCount(0);
 });
 
 /** Everything the page's cache holds for the account, as text (the relay's pages in IndexedDB). */
