@@ -498,6 +498,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     kept.get("reads") === undefined &&
     Number.isFinite(connectedAt) &&
     Math.abs(Date.now() - connectedAt) < FRESH_MS;
+  /** The account's machines were listed once in this launch. */
+  let listed1 = false;
   /** spacesheep could not be reached at the last read (the reader's `offline`). */
   let unreachable = false;
   /** spacesheep asked this app to wait at the last read (the reader's `limited`). */
@@ -630,8 +632,11 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
           origin: shell.origin,
           rpId,
         });
-        // The machines are listed: a send kept from before can be asked for.
-        unheard?.kick();
+        // The machines are listed, for the first time in this launch: a send kept from
+        // before can be asked for. (Every later listing is the minute's own; the sends have
+        // their own times to be asked at.)
+        if (!listed1) unheard?.kick();
+        listed1 = true;
       },
       pendingJobs: () => control.remote.pendingRemoteJobs(),
       jobsCadence: () => control.remote.remoteJobsCadence(),

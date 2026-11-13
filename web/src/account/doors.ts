@@ -70,8 +70,11 @@ export const LOOK_SLACK_MS = 5000;
  *  (`start_limited`). Its nonce look and the making of the job are not one step, so such an
  *  answer says nothing of an asking that may still be running. */
 export const NOT_YET_FINAL: ReadonlySet<string> = new Set(["confirm", "start_limited"]);
-/** An asking nobody heard the answer to cannot still be running this long after it began. */
-export const FIRST_ASKING_OVER_MS = 30_000;
+/** An asking nobody heard the answer to cannot still be running this long after it began.
+ *  By spacesheep's source the latest its job can be made is about 27 s in (the hub's 15 s
+ *  to arrive, a second look of up to 12 s), plus whatever its database stalls: a minute
+ *  leaves that stall room. */
+export const FIRST_ASKING_OVER_MS = 60_000;
 
 /** What became of a send, as far as anyone can say. */
 export type Sent =

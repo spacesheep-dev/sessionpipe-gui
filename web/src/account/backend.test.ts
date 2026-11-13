@@ -11,7 +11,7 @@ import { type FakeAnswer, FakeSpacesheep } from "../../../test/account/fake-spac
 import { HubStandIn } from "../../../test/account/hub";
 import { Session } from "../../../test/events";
 import { type AccountBackend, type AccountNotice, GONE_AGAIN_MS, startAccountBackend } from "./backend";
-import { LOOK_PAGES } from "./doors";
+import { FIRST_ASKING_OVER_MS, LOOK_PAGES } from "./doors";
 import { NOT_HERE } from "./routes";
 import { type AccountShell, accountShell, type ShellCalls } from "./shell";
 import { type KeptCache, keptCache } from "./testCache";
@@ -828,16 +828,21 @@ describe("a page's own backend on a spacesheep account", () => {
       expect((await rows(b))[0]).toMatchObject({ id: sent.body.id, outcome: "delivered" });
     });
 
-    it("`confirm` on every asking, and spacesheep never had it: said as held only once the first asking is over and the jobs door holds none", async () => {
+    it("`confirm` on every asking, and spacesheep never had it: said as held at the minute the first asking is over, by one asking", async () => {
       const held = refusal(409, { error: "Confirm with your passkey to send this.", code: "confirm", why: "unusual" });
       const b = await ready();
       r.sendFaults.push("lost");
       r.ss.sendAnswers.push(held, held, held, held, held);
       const sent = await send(b, signed("claude-code:s-1", "delete the old folder"), 7000);
       expect(sent.body).toMatchObject({ unheard: { state: "asking" } });
-      await tick(24_000);
+      // A second short of the minute it is still unknown, and it has been asked five times
+      // in all: as it was sent (three), and 8 and 15 seconds after.
+      await tick(52_000);
       expect((await rows(b))[0]).toMatchObject({ unheard: { state: "asking" } });
-      await tick(32_000);
+      expect(sends()).toBe(5);
+      // At the minute (FIRST_ASKING_OVER_MS after the send began) one more asking, and that is it.
+      await tick(2000);
+      expect(sends()).toBe(6);
       expect((await rows(b))[0]).toMatchObject({
         id: sent.body.id,
         outcome: "failed",
@@ -845,6 +850,7 @@ describe("a page's own backend on a spacesheep account", () => {
         unheard: { state: "unsent", status: 422 },
       });
       expect(r.ss.jobs).toHaveLength(0);
+      expect(FIRST_ASKING_OVER_MS).toBe(60_000);
     });
 
     it("a message spacesheep really held is never shown as sent by another device's job for the session", async () => {

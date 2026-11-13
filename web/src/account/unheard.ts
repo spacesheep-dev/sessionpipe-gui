@@ -13,10 +13,12 @@ import type { ControlActivity } from "@shared/api";
 import { cleanReason } from "@shared/reason";
 import type { ControlCommand } from "sessionpipe-core/control";
 import { type MachineRow, type MessageRow, messageRow, REMOTE_CODE_RE, toActivity } from "../../../server/control/rows";
-import { type AccountDoors, SEND_UNKNOWN_CODE, type Sent } from "./doors";
+import { type AccountDoors, FIRST_ASKING_OVER_MS, SEND_UNKNOWN_CODE, type Sent } from "./doors";
 
 /** How long after an asking the next one is made, while nothing else says to ask sooner. */
 export const UNHEARD_WAITS_MS: readonly number[] = [8000, 15_000, 30_000, 60_000];
+/** An asking meant for the moment the first asking is over is made this long after it. */
+export const BOUND_MARGIN_MS = 500;
 /** A send that was settled as not sent, or as one nobody can say, is kept this long. */
 export const UNHEARD_KEEP_MS = 86_400_000;
 /** At most this many are kept; the oldest settled ones go first. */
@@ -184,7 +186,12 @@ export function openUnheard(o: UnheardOptions): Unheard {
   const schedule = (u: UnheardKept): void => {
     if (stopped || u.state !== "asking" || timers.has(u.row.id)) return;
     const n = tries.get(u.row.id) ?? 0;
-    const wait = UNHEARD_WAITS_MS[Math.min(n, UNHEARD_WAITS_MS.length - 1)]!;
+    let wait = UNHEARD_WAITS_MS[Math.min(n, UNHEARD_WAITS_MS.length - 1)]!;
+    // A hold can be the answer only once the first asking is over (doors.ts): an asking
+    // that would fall just short of that moment, or well past it, is made at it instead, so
+    // what is held is said at the bound, by one asking.
+    const toBound = u.askedAt + FIRST_ASKING_OVER_MS + BOUND_MARGIN_MS - now();
+    if (toBound > 0 && (wait > toBound || toBound <= wait * 1.5)) wait = toBound;
     timers.set(
       u.row.id,
       later(() => {

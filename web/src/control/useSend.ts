@@ -156,8 +156,13 @@ export function useSessionSend(
       const typed = was.typed;
       // spacesheep holds it for a confirm, and it is known that no job was made: the hold's
       // own notice, with its Confirm, as if the send's answer had been heard. One press.
-      if (a.unheard?.state === "unsent" && a.code === "confirm_required" && notice && was.fields && rp && machineId) {
-        const fields = was.fields;
+      // (After a reload the page no longer has what was pressed; a message's fields are its
+      // row's own, so its notice comes all the same. An answer's are not, and it reads as
+      // the refusal.)
+      const again: CommandFields | undefined =
+        was.fields ?? (a.kind === "prompt" && a.text ? { kind: "prompt", session: key, text: a.text } : undefined);
+      if (a.unheard?.state === "unsent" && a.code === "confirm_required" && notice && again && rp && machineId) {
+        const fields = again;
         const refusal = new ControlError(a.unheard.status ?? 422, a.unheard.reason ?? "", a.code, a.detail);
         const h = new HeldForConfirm<ControlActivity>(
           refusal,
