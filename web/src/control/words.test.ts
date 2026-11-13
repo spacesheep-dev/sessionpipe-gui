@@ -173,4 +173,17 @@ describe("sendErrorWords", () => {
       "not sent · this page lost its key; reload it from the terminal's link",
     );
   });
+
+  it("a send nobody heard the answer to is never said to be not sent", () => {
+    expect(sendErrorWords(new ControlError(502, "spacesheep did not answer in time.", "hub_unknown"))).toBe(
+      "It may have been sent: spacesheep did not answer in time. Look at the session before you send it again.",
+    );
+    expect(sendErrorWords(new ControlError(502, "spacesheep could not be reached", "hub_unknown"))).toBe(
+      "It may have been sent: spacesheep could not be reached. Look at the session before you send it again.",
+    );
+    // A refusal the app made before any network is not sent, as before.
+    expect(sendErrorWords(new ControlError(502, "That is too large to send.", "hub_too_large"))).toBe(
+      "not sent · That is too large to send.",
+    );
+  });
 });

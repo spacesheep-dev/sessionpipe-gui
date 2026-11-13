@@ -2,6 +2,7 @@
 // Owned by: control-web. A carried message's lifecycle and a refusal's code, in words a
 // person reads under the strip (CONTROL.md §5, §10).
 import type { ControlActivity, ControlKind, ControlOutcome, RunLevel } from "@shared/api";
+import { asSentence } from "@shared/reason";
 import { ControlError, wrongOriginHere } from "./api";
 import { wrongOriginWords } from "./origin";
 import { deviceRefusal, nativeErrorWords } from "./signer";
@@ -144,8 +145,10 @@ export function sendErrorWords(e: unknown): string {
     if (e.code === "spacesheep_unauthorized")
       return "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.";
     // The app could get no answer for it (account/doors.ts): nobody knows whether spacesheep
-    // took it, so it is never said to be not sent. The app's own words for what happened.
-    if (e.code === "hub_unknown") return e.detail ?? e.reason;
+    // took it, so it is never said to be not sent. The app's own words for what happened,
+    // and the one thing to do before sending it again.
+    if (e.code === "hub_unknown")
+      return `It may have been sent: ${asSentence(e.detail ?? e.reason)} Look at the session before you send it again.`;
     if (e.status === 404) return "not sent · this machine is no longer paired here";
     if (e.status === 401) return "not sent · this page lost its key; reload it from the terminal's link";
     return `not sent · ${e.detail ?? e.reason}`;
