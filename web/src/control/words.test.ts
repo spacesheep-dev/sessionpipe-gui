@@ -2,7 +2,7 @@
 // The words a start that did not start shows on its session page (words.ts): a machine's
 // own detail ends the sentence it is quoted in, once, whatever punctuation it came with.
 import type { ControlActivity } from "@shared/api";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ControlError } from "./api";
 import {
   handoffEndWords,
@@ -163,6 +163,25 @@ describe("sentLine", () => {
 });
 
 describe("sendErrorWords", () => {
+  it("on a spacesheep account names no place that is not there: a refused key is said, and nothing of connecting in Settings", async () => {
+    const g = globalThis as { sessionpipeShell?: unknown };
+    g.sessionpipeShell = {
+      rxBase: "rx://localhost/ACCT",
+      receiver: { kind: "spacesheep", origin: "https://spacesheep.dev" },
+    };
+    vi.resetModules();
+    try {
+      const { sendErrorWords: words } = await import("./words");
+      const { ControlError: Refused } = await import("./api");
+      const said = words(new Refused(502, "Unknown or revoked API key.", "spacesheep_unauthorized"));
+      expect(said).toBe("Not sent. spacesheep no longer takes this app's key.");
+      expect(said).not.toMatch(/Settings|connect again/);
+    } finally {
+      delete g.sessionpipeShell;
+      vi.resetModules();
+    }
+  });
+
   it("tells spacesheep's refusal of this app's key from the page's own key", () => {
     expect(sendErrorWords(new ControlError(502, "Unknown or revoked API key.", "spacesheep_unauthorized"))).toBe(
       "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.",
