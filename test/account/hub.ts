@@ -351,7 +351,17 @@ export class HubStandIn {
         return true;
       }
       case "rx_list":
-        return this.status().accounts;
+        // A receiver's row, with the three an account adds (kind, email, state now).
+        return [...this.accounts.values()].map((a) => ({
+          id: a.id,
+          name: a.email,
+          origin: a.origin,
+          local: false,
+          connected: a.state === "ok",
+          kind: "spacesheep",
+          email: a.email,
+          state: a.state,
+        }));
       case "rx_select": {
         this.active = this.account(args.id).id;
         this.say();

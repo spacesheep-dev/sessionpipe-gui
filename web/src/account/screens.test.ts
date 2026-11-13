@@ -61,9 +61,13 @@ describe("where this phone's key stands, in a row", () => {
     expect(phoneLine(view({ kind: "waiting", code: "71" }))).toEqual({ mark: "wait", words: N.approveWaiting });
     expect(phoneLine(view({ kind: "approved" }))).toEqual({ mark: "ok", words: N.approveCanSend });
     expect(phoneLine(view({ kind: "dropped" }))).toEqual({ mark: "warn", words: N.approveDroppedTitle });
-    expect(phoneLine(view({ kind: "cooling", until: Date.now() + 60_000, exact: true }))).toMatchObject({
-      mark: "wait",
-    });
+    // Inside the hour: "from" when the time is known, "by" when it is the latest it can be.
+    const until = Date.parse("2026-11-12T14:05:00Z");
+    const exact = phoneLine(view({ kind: "cooling", until, exact: true }))!;
+    const bound = phoneLine(view({ kind: "cooling", until, exact: false }))!;
+    expect([exact.mark, bound.mark]).toEqual(["wait", "wait"]);
+    expect(exact.words).toMatch(/ can send from \d/);
+    expect(bound.words).toMatch(/ can send by \d/);
   });
 });
 

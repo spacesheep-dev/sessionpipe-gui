@@ -417,6 +417,9 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
       ),
     ).toBeVisible();
     await expect(group.getByRole("button", { name: "Disconnect" })).toBeVisible();
+    // Its own group is where it is: not a second time under Receivers.
+    await expect(page.getByText("me@example.com")).toHaveCount(1);
+    await expect(page.getByText("No receivers yet")).toBeVisible();
     // The receiver's own group for an account, and the receiver's signing row with its command, are not here.
     await expect(page.getByText(/sessionpipe control keys remove/)).toHaveCount(0);
     await group.scrollIntoViewIfNeeded();
@@ -457,7 +460,11 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await expect(approve("cooling")).toBeVisible({ timeout: 12_000 });
     await expect(page.getByText(/^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?/)).toBeVisible();
     await expect(page.getByText("New devices wait an hour, so a stolen sign-in can't act at once.")).toBeVisible();
-    await expect(page.locator("[data-machine='can']")).toContainText(NAME);
+    // The computer has approved it and the hour runs: its row does not say the phone can send.
+    const row = page.locator("[data-machine='waits']");
+    await expect(row).toContainText(NAME);
+    await expect(row).toHaveText(/Approved · sends from \d{1,2}:\d{2}( [AP]M)?$/);
+    await expect(page.getByText("Can send", { exact: true })).toHaveCount(0);
     await shot(page, "approve-cooling");
     // It looked every few seconds while it waited, through the device door, never the relay.
     expect(b.hub.log.filter((l) => l.startsWith("GET /api/gui/device")).length).toBeGreaterThan(before);
@@ -474,6 +481,16 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await expect(page.getByText(/This iPhone can send from \d{1,2}:\d{2}( [AP]M)?/).first()).toBeVisible();
     await shot(page, "composer-cooling");
     expect(b.ss.jobs).toHaveLength(0);
+    // Machines says which devices a computer trusts, and nothing of sending; Settings' row
+    // for the phone's key says the same time.
+    await page.goto(`${b.server.url}/machines`);
+    await expect(page.getByText(NAME).first()).toBeVisible();
+    await expect(page.getByText(/can send/i)).toHaveCount(0);
+    await shot(page, "machines-cooling");
+    await page.goto(`${b.server.url}/settings?section=app`);
+    await expect(page.locator("[data-account-settings] .acct-state--wait")).toHaveText(
+      /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?$/,
+    );
   });
 
   test("approved while the page was not looking: the latest it can be, said as that", async () => {
@@ -489,6 +506,8 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await page.goto(`${b.server.url}/add-device`);
     await expect(approve("cooling")).toBeVisible();
     await expect(page.getByText(/^This iPhone can send by \d{1,2}:\d{2}( [AP]M)? at the latest\./)).toBeVisible();
+    await expect(page.locator("[data-machine='waits']")).toHaveText(/Approved · sends by \d{1,2}:\d{2}( [AP]M)?$/);
+    await expect(page.getByText("Can send", { exact: true })).toHaveCount(0);
     await shot(page, "approve-cooling-bound");
   });
 
@@ -519,6 +538,7 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
       Date.now = real;
     }
     await expect(page.getByText("This iPhone can send.")).toBeVisible();
+    await expect(page.locator("[data-machine='can']")).toHaveText(/Can send$/);
     await expect(page.getByText("Remove this iPhone")).toBeVisible();
     await expect(
       page.getByText("On spacesheep: Devices → Remove. It stops carrying anything this iPhone sends, right away."),
