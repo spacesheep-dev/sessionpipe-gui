@@ -8,6 +8,10 @@ import { type AccountBackend, type AccountNotice, startAccountBackend } from "./
 import { cacheName } from "./cache";
 import { accountShell, tauriCalls } from "./shell";
 
+let started: AccountBackend | null = null;
+/** The backend of the account this window shows, once it is up; null anywhere else. */
+export const accountBackend = (): AccountBackend | null => started;
+
 /** What the backend had to say once (set before the app renders). */
 export const notices: AccountNotice[] = [];
 
@@ -102,6 +106,7 @@ export async function startAccount(): Promise<AccountBackend | null> {
     },
   });
   setApiBackend(backend.answer);
+  started = backend;
   (window as unknown as { __sessionpipeAccount?: AccountHook }).__sessionpipeAccount = hookOf(backend);
   return backend;
 }

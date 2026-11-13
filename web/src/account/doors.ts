@@ -154,6 +154,9 @@ export interface DoorsOptions {
   /** The highest spacesheep job id this page knows of: the job of a send that was taken
    *  unheard is looked for after it. Absent: from the start of the list. */
   lastJob?: () => number;
+  /** spacesheep refused a send because the key that signed it was approved less than an
+   *  hour ago (its 403 `cooling`): until when, in its own clock's milliseconds. */
+  onCooling?: (until: number) => void;
 }
 
 async function read1(res: Response): Promise<DoorAnswer> {
@@ -308,6 +311,9 @@ export function openDoors(o: DoorsOptions): AccountDoors {
     // An error of spacesheep's own is no refusal: the job may have been made before it.
     if (a.status >= 500) return unknown(wordsOf(a.json));
     const code = typeof a.json.code === "string" ? a.json.code : "";
+    // spacesheep refused it because the key that signed it was approved less than an hour
+    // ago: until when, by its own clock, whatever else this answer settles.
+    if (a.status === 403 && code === "cooling" && typeof a.json.until === "number") o.onCooling?.(a.json.until);
     if (unheard) {
       // spacesheep had taken it on an asking before this one: it is sent. Its job is the
       // one fit made since the send began, when the list singles one out.

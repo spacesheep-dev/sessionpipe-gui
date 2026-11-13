@@ -147,6 +147,12 @@ export interface AccountBackend {
   deviceAsk(): Promise<DeviceAsked>;
   /** Where that key stands (the device door). */
   device(): Promise<DoorAnswer>;
+  /** Reads the account's machines again now, not at the minute's turn: after this phone's
+   *  key was approved, so the rest of the page agrees at once. Not metered by spacesheep. */
+  machinesNow(): Promise<void>;
+  /** Told when spacesheep refused a send because this phone's key is inside its first
+   *  hour, with the hour's end. */
+  onCooling(l: (until: number) => void): () => void;
   /** Forgets the account on this phone, with everything this page kept for it. The hub
    *  asks the person first; a no is thrown as the hub's error. */
   disconnect(): Promise<Disconnected>;
@@ -383,11 +389,15 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
 
   // ---------- the doors and the reader ----------
   let reader: RelayReader | null = null;
+  const coolingWatchers = new Set<(until: number) => void>();
   const doors: AccountDoors = openDoors({
     rxBase: shell.rxBase,
     ...(o.fetch ? { fetch: o.fetch } : {}),
     onUnauthorized: () => reader?.unauthorized(),
     lastJob: () => lastJob,
+    onCooling: (until) => {
+      for (const l of [...coolingWatchers]) l(until);
+    },
   });
   let gone = false;
   unheard = openUnheard({
@@ -938,6 +948,13 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     },
     deviceAsk,
     device: () => doors.device(),
+    machinesNow: async () => {
+      await reader?.pollMachines();
+    },
+    onCooling(l) {
+      coolingWatchers.add(l);
+      return () => void coolingWatchers.delete(l);
+    },
     disconnect,
     asked,
     async flushed() {
