@@ -541,15 +541,29 @@ const databases = (): Promise<(string | undefined)[]> =>
   page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name));
 const stored = (): Promise<Record<string, string>> =>
   page.evaluate(() => Object.fromEntries(Object.entries(localStorage)) as Record<string, string>);
-/** What a person leaves behind while sessions are on screen: a draft, a search, a hidden session. */
+/** What a person leaves behind while the account's sessions are on screen (a draft, a hidden
+ *  session, an opened agent, a search), and what the same phone keeps of a GUI server's
+ *  sessions, shown in another window of the app over the same storage. */
 const leaveTraces = (): Promise<void> =>
   page.evaluate(() => {
     localStorage.setItem("sessionpipe-gui.draft:claude-code:s-invoice", "half a message about the webhook");
+    localStorage.setItem("sessionpipe-gui.draft:claude-code:home-1", "a draft on the receiver at home");
+    localStorage.setItem(
+      "sessionpipe-gui.hidden",
+      JSON.stringify({ "claude-code:s-invoice": "2026-01-01T00:00:00Z", "claude-code:home-2": "2026-01-01T00:00:00Z" }),
+    );
+    localStorage.setItem(
+      "sessionpipe-gui.agentsOpen",
+      JSON.stringify([
+        ["claude-code:s-invoice", true],
+        ["claude-code:home-1", true],
+      ]),
+    );
     localStorage.setItem("sp.search.recent", JSON.stringify(["invoice webhook"]));
-    localStorage.setItem("sessionpipe-gui.hidden", JSON.stringify(["claude-code:s-login"]));
+    localStorage.setItem("sessionpipe.workflows.mine", JSON.stringify(["run-at-home"]));
     localStorage.setItem("sessionpipe-gui.textSize", "large");
   });
-const TRACES = ["sessionpipe-gui.draft:claude-code:s-invoice", "sp.search.recent", "sessionpipe-gui.hidden"];
+const TRACES = ["sessionpipe-gui.draft:claude-code:s-invoice", "sp.search.recent"];
 const welcome = () => page.locator(".onb[data-step='welcome']");
 
 test("Disconnect in Settings, once confirmed, leaves nothing of the account on screen or on the phone", async () => {
@@ -589,7 +603,13 @@ test("Disconnect in Settings, once confirmed, leaves nothing of the account on s
   await expect.poll(databases).not.toContain(name);
   const left = await stored();
   for (const key of TRACES) expect(left[key], key).toBeUndefined();
-  expect(Object.keys(left).filter((k) => /draft|recent|hidden|account/.test(k))).toEqual([]);
+  expect(Object.keys(left).filter((k) => k.startsWith("sessionpipe-gui.account."))).toEqual([]);
+  expect(JSON.stringify(left)).not.toContain("s-invoice");
+  // What the phone keeps of a GUI server's sessions is not the account's: it is all still there.
+  expect(left["sessionpipe-gui.draft:claude-code:home-1"]).toBe("a draft on the receiver at home");
+  expect(JSON.parse(left["sessionpipe-gui.hidden"]!)).toEqual({ "claude-code:home-2": "2026-01-01T00:00:00Z" });
+  expect(JSON.parse(left["sessionpipe-gui.agentsOpen"]!)).toEqual([["claude-code:home-1", true]]);
+  expect(left["sessionpipe.workflows.mine"]).toBe('["run-at-home"]');
   // The app's own settings are the person's, not the account's: they stay.
   expect(left["sessionpipe-gui.textSize"]).toBe("large");
   expect(left["sessionpipe-gui.settings"]).toBeTruthy();
@@ -608,6 +628,7 @@ test("an account that goes while no window shows it is cleaned up after by the n
   );
   expect(await databases()).toContain(name);
   await leaveTraces();
+  await page.evaluate(() => localStorage.setItem("sessionpipe-gui.draft:claude-code:s-notes", "a note to self"));
   // The window is elsewhere when the account leaves the phone (replaced by another
   // connect, removed by the hub): no page of the account runs to clean up.
   await page.goto("about:blank");
@@ -615,9 +636,20 @@ test("an account that goes while no window shows it is cleaned up after by the n
   hub.active = null;
   await page.goto(server.url);
   await expect(welcome()).toBeVisible();
-  await expect.poll(databases).not.toContain(name);
-  await expect.poll(async () => Object.keys(await stored()).filter((k) => TRACES.includes(k))).toEqual([]);
-  expect((await stored())["sessionpipe-gui.textSize"]).toBe("large");
+  // The hub is asked twice, a few seconds apart, before anything is removed on its word.
+  expect(await databases()).toContain(name);
+  await expect.poll(databases, { timeout: 15_000 }).not.toContain(name);
+  // What the storage keeps of its sessions goes with it: they are read from what was kept of them.
+  await expect
+    .poll(async () => (await stored())["sessionpipe-gui.draft:claude-code:s-notes"], { timeout: 15_000 })
+    .toBeUndefined();
+  const left = await stored();
+  // What is no session's was nobody's to remove from here (nobody disconnected it in its window),
+  // and what the phone keeps of a GUI server's sessions is that server's.
+  expect(left["sp.search.recent"]).toBe('["invoice webhook"]');
+  expect(left["sessionpipe-gui.draft:claude-code:home-1"]).toBe("a draft on the receiver at home");
+  expect(JSON.parse(left["sessionpipe-gui.hidden"]!)).toMatchObject({ "claude-code:home-2": "2026-01-01T00:00:00Z" });
+  expect(left["sessionpipe-gui.textSize"]).toBe("large");
 });
 
 test("in all of it, nothing was asked of a GUI server, and the hub was asked for its doors only", async () => {

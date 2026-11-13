@@ -3,8 +3,17 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { sweepGone } from "./gone";
-import { claimLocal, KEPT_LOCAL, OWNER_KEY, ownerOf, wipeLocal } from "./local";
+import { SWEEP_AGAIN_MS, sweepGone } from "./gone";
+import {
+  ACCOUNT_KEYED,
+  accountsKept,
+  CONVENIENCES,
+  forgetLocal,
+  readsKey,
+  SESSION_KEYED,
+  SESSION_LISTS,
+  wipeAccount,
+} from "./local";
 
 /** A Storage, as much of one as the page uses. */
 function storage(init: Record<string, string> = {}) {
@@ -21,44 +30,109 @@ function storage(init: Record<string, string> = {}) {
   };
 }
 
-/** What a page that showed an account's sessions has written, and the app's own settings. */
+/** One phone, three windows over one storage: two accounts connected, and a GUI server. */
+const ONE = ["claude-code:one-1", "codex:one-2"];
+const TWO = ["claude-code:two-1"];
+const RECEIVER = ["claude-code:home-1", "claude-code:home-2"];
 const used = () =>
   storage({
     "sessionpipe-gui.settings": '{"mode":"advanced"}',
     "sessionpipe-gui.theme": "dark",
-    "sessionpipe-gui.textSize": "large",
-    "sessionpipe-gui.native.firstRun": "1",
-    "sessionpipe-gui.draft:claude-code:s-1": "half a message about the staging password",
+    "sessionpipe-gui.draft:claude-code:one-1": "half a message about the staging password",
+    "sessionpipe-gui.draft:claude-code:two-1": "the other account's draft",
+    "sessionpipe-gui.draft:claude-code:home-1": "the receiver's draft",
+    "sessionpipe-gui.hidden": JSON.stringify({
+      "codex:one-2": "2026-01-01T00:00:00Z",
+      "claude-code:two-1": { since: "2026-01-01T00:00:00Z", until: "needs" },
+      "claude-code:home-2": "2026-01-01T00:00:00Z",
+    }),
+    "sessionpipe-gui.agentsOpen": JSON.stringify([
+      ["claude-code:one-1", true],
+      ["claude-code:home-1", false],
+    ]),
+    [readsKey("acct-one")]: '{"reads":[1]}',
+    [readsKey("acct-two")]: '{"reads":[2]}',
+    "sessionpipe-gui.account.device.acct-one": '{"code":"71"}',
     "sp.search.recent": '["staging password"]',
     "sp.newSession.last": '{"machine":"studio-mac","cwd":"/Users/me/billing"}',
-    "sp.newSession.byMachine": "{}",
     "sp.handoff.draft": "ask codex",
-    "sessionpipe-gui.hidden": '["claude-code:s-2"]',
-    "sessionpipe-gui.splitTabs": '["claude-code:s-1"]',
+    "sessionpipe-gui.splitTabs": '{"tabs":["claude-code:home-1"]}',
+    "sessionpipe.workflows.mine": '["run-1"]',
     "sessionpipe-gui.theme.e2e-counter.count": "3",
-    "sessionpipe-gui.account.device.abc": '{"code":"71"}',
     "a-key-added-tomorrow": "anything",
-    [OWNER_KEY]: "acct-one",
   });
+const parsed = (s: ReturnType<typeof storage>, k: string) => JSON.parse(s.m.get(k) ?? "null") as unknown;
 
 describe("what the page keeps outside an account's cache", () => {
-  it("a wipe leaves the app's settings and removes everything else, and all of sessionStorage", () => {
+  it("an account that goes takes what is kept of its sessions and under its id, and nothing of anybody else's", () => {
     const local = used();
-    const session = storage({ "sessionpipe.device-request": "x", other: "y" });
-    const gone = wipeLocal(local, session);
-    expect([...local.m.keys()].sort()).toEqual([
-      "sessionpipe-gui.native.firstRun",
-      "sessionpipe-gui.settings",
-      "sessionpipe-gui.textSize",
-      "sessionpipe-gui.theme",
+    const before = new Map(local.m);
+    const gone = wipeAccount("acct-one", ONE, {}, local);
+    expect(gone.sort()).toEqual([
+      "sessionpipe-gui.account.device.acct-one",
+      "sessionpipe-gui.account.reads.acct-one",
+      "sessionpipe-gui.agentsOpen",
+      "sessionpipe-gui.draft:claude-code:one-1",
+      "sessionpipe-gui.hidden",
     ]);
-    expect(session.m.size).toBe(0);
-    expect(gone).toContain("sessionpipe-gui.draft:claude-code:s-1");
-    expect(gone).toContain("a-key-added-tomorrow");
-    expect(gone).toContain(OWNER_KEY);
-    expect(gone).toHaveLength(13);
-    // Nothing to remove, nothing thrown: no storage at all, or one that refuses.
-    expect(wipeLocal(null, null)).toEqual([]);
+    // The other account's and the receiver's: their drafts, their entries, as they were.
+    for (const key of [TWO[0]!, RECEIVER[0]!])
+      expect(local.m.get(`sessionpipe-gui.draft:${key}`), key).toBe(before.get(`sessionpipe-gui.draft:${key}`));
+    expect(Object.keys(parsed(local, "sessionpipe-gui.hidden") as object)).toEqual([TWO[0]!, RECEIVER[1]!]);
+    expect(parsed(local, "sessionpipe-gui.agentsOpen")).toEqual([["claude-code:home-1", false]]);
+    expect(local.m.has(readsKey("acct-two"))).toBe(true);
+    // And everything that is nobody's session: untouched, the conveniences too.
+    for (const k of [
+      "sessionpipe-gui.settings",
+      "sessionpipe-gui.theme",
+      "sp.search.recent",
+      "sp.newSession.last",
+      "sp.handoff.draft",
+      "sessionpipe-gui.splitTabs",
+      "sessionpipe.workflows.mine",
+      "sessionpipe-gui.theme.e2e-counter.count",
+      "a-key-added-tomorrow",
+    ])
+      expect(local.m.get(k), k).toBe(before.get(k));
+  });
+
+  it("disconnected by the person in its own window, what belongs to no session goes too; a receiver's own stays", () => {
+    const local = used();
+    const gone = wipeAccount("acct-one", ONE, { conveniences: true }, local);
+    for (const k of ["sp.search.recent", "sp.newSession.last", "sp.handoff.draft", "sessionpipe-gui.splitTabs"]) {
+      expect(gone, k).toContain(k);
+      expect(local.m.has(k), k).toBe(false);
+    }
+    // The receiver's drafts and hidden list, its signing marks, a view's own state, the settings.
+    expect(local.m.get("sessionpipe-gui.draft:claude-code:home-1")).toBe("the receiver's draft");
+    expect(Object.keys(parsed(local, "sessionpipe-gui.hidden") as object)).toContain("claude-code:home-2");
+    expect(local.m.get("sessionpipe.workflows.mine")).toBe('["run-1"]');
+    expect(local.m.get("sessionpipe-gui.theme.e2e-counter.count")).toBe("3");
+    expect(local.m.get("sessionpipe-gui.settings")).toBe('{"mode":"advanced"}');
+    expect(local.m.get("a-key-added-tomorrow")).toBe("anything");
+  });
+
+  it("two accounts and a receiver over one storage: a session one account forgets takes its own, and nothing of the others", () => {
+    // Opening a window removes nothing (backend.test.ts): only a session forgotten, or an account gone, does.
+    const local = used();
+    const before = new Map(local.m);
+    expect(forgetLocal([], local)).toEqual([]);
+    expect(local.m).toEqual(before);
+    // One session forgotten by its account: its draft and its entries, and no other's.
+    expect(forgetLocal(["codex:one-2"], local)).toEqual(["sessionpipe-gui.hidden"]);
+    expect(forgetLocal(["claude-code:one-1"], local).sort()).toEqual([
+      "sessionpipe-gui.agentsOpen",
+      "sessionpipe-gui.draft:claude-code:one-1",
+    ]);
+    expect(local.m.has("sessionpipe-gui.draft:claude-code:two-1")).toBe(true);
+    // A list left empty is removed; one that is no list is left alone.
+    const lone = storage({ "sessionpipe-gui.agentsOpen": '[["a:1",true]]', "sessionpipe-gui.hidden": "not json" });
+    forgetLocal(["a:1"], lone);
+    expect([...lone.m.keys()]).toEqual(["sessionpipe-gui.hidden"]);
+  });
+
+  it("nothing to remove, nothing thrown: no storage at all, or one that refuses", () => {
+    expect(wipeAccount("acct-one", ONE, { conveniences: true }, null)).toEqual([]);
     const refusing = {
       get length(): number {
         throw new Error("denied");
@@ -68,28 +142,12 @@ describe("what the page keeps outside an account's cache", () => {
       setItem: () => {},
       removeItem: () => {},
     };
-    expect(wipeLocal(refusing, null)).toEqual([]);
+    expect(wipeAccount("acct-one", ONE, { conveniences: true }, refusing)).toEqual([]);
+    expect(accountsKept(refusing)).toEqual([]);
+    expect(accountsKept(used()).sort()).toEqual(["acct-one", "acct-two"]);
   });
 
-  it("nothing that says something of a session is on the list of what stays", () => {
-    for (const k of [
-      "sessionpipe-gui.draft:claude-code:s-1",
-      "sp.search.recent",
-      "sp.newSession.last",
-      "sp.newSession.draft",
-      "sp.newSession.byMachine",
-      "sp.handoff.draft",
-      "sp.handoff.byMachine",
-      "sessionpipe-gui.hidden",
-      "sessionpipe-gui.splitTabs",
-      "sessionpipe.workflows.mine",
-      "sessionpipe.device-request",
-      OWNER_KEY,
-    ])
-      expect(KEPT_LOCAL.has(k), k).toBe(false);
-  });
-
-  it("every key on the list of what stays is one the app writes (none is a leftover name)", () => {
+  it("every key named here is one the app writes (none is a leftover name)", () => {
     const src = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
     let text = "";
     const walk = (dir: string): void => {
@@ -101,23 +159,9 @@ describe("what the page keeps outside an account's cache", () => {
       }
     };
     walk(src);
-    for (const k of KEPT_LOCAL) expect(text.includes(`"${k}"`) || text.includes(`\`${k}\``), k).toBe(true);
-  });
-
-  it("a window that opens on another account removes what the last one left; on the same one, nothing", () => {
-    const local = used();
-    expect(claimLocal("acct-one", local)).toEqual([]);
-    expect(local.m.has("sp.search.recent")).toBe(true);
-    const gone = claimLocal("acct-two", local);
-    expect(gone).toContain("sp.search.recent");
-    expect(local.m.has("sessionpipe-gui.draft:claude-code:s-1")).toBe(false);
-    expect(local.m.get("sessionpipe-gui.settings")).toBe('{"mode":"advanced"}');
-    expect(ownerOf(local)).toBe("acct-two");
-    // The first account ever shown here: nothing to remove, and it is marked.
-    const fresh = storage({ "sp.search.recent": "[]" });
-    expect(claimLocal("acct-one", fresh)).toEqual([]);
-    expect(fresh.m.get(OWNER_KEY)).toBe("acct-one");
-    expect(fresh.m.has("sp.search.recent")).toBe(true);
+    for (const k of [...SESSION_KEYED, ...SESSION_LISTS, ...CONVENIENCES])
+      expect(text.includes(`"${k}`) || text.includes(`\`${k}`), k).toBe(true);
+    expect(readsKey("x").startsWith(ACCOUNT_KEYED)).toBe(true);
   });
 });
 
@@ -135,7 +179,7 @@ describe("what an account that is no longer on this phone left behind", () => {
       } as unknown as IDBFactory,
     };
   };
-  const status = (ids: string[]) => async () => ({
+  const answer = (ids: string[]) => ({
     enabled: true,
     accounts: ids.map((id) => ({
       id,
@@ -144,67 +188,92 @@ describe("what an account that is no longer on this phone left behind", () => {
       state: "ok" as const,
     })),
   });
-
-  it("goes as any window opens: its cached sessions, and the page's storage when it was written beside it", async () => {
-    const db = idb(["sessionpipe.account.acct-one", "sessionpipe.account.acct-two", "somebody-else"]);
-    let wiped = 0;
-    const swept = await sweepGone(status(["acct-two"]), {
-      idb: db.factory,
-      owner: () => "acct-one",
-      wipe: () => {
-        wiped++;
-        return ["sp.search.recent"];
-      },
-    });
-    expect(db.deleted).toEqual(["sessionpipe.account.acct-one"]);
-    expect(wiped).toBe(1);
-    expect(swept).toEqual({ caches: ["sessionpipe.account.acct-one"], local: ["sp.search.recent"] });
-  });
-
-  it("an account that is still here keeps everything; a storage no account wrote beside is left alone", async () => {
-    const db = idb(["sessionpipe.account.acct-one"]);
-    let wiped = 0;
-    const wipe = () => {
-      wiped++;
-      return [];
+  /** A hub that answers these in turn (the last one for ever). */
+  const hub = (...answers: unknown[]) => {
+    let n = 0;
+    const waits: number[] = [];
+    return {
+      waits,
+      asked: () => n,
+      status: (async () => {
+        const a = answers[Math.min(n++, answers.length - 1)];
+        if (a instanceof Error) throw a;
+        return a;
+      }) as never,
+      sleep: async (ms: number) => void waits.push(ms),
     };
-    await sweepGone(status(["acct-one"]), { idb: db.factory, owner: () => "acct-one", wipe });
-    await sweepGone(status([]), { idb: idb([]).factory, owner: () => null, wipe });
-    expect(db.deleted).toEqual([]);
-    expect(wiped).toBe(0);
-  });
+  };
 
-  it("with no account left at all, everything of the last one goes", async () => {
-    const db = idb(["sessionpipe.account.acct-one"]);
+  it("goes as any window opens, once two answers a few seconds apart both leave it out: its cached sessions, and what the storage keeps of them", async () => {
+    const db = idb(["sessionpipe.account.acct-one", "sessionpipe.account.acct-two", "somebody-else"]);
     const local = used();
-    const swept = await sweepGone(status([]), {
+    const h = hub(answer(["acct-two"]));
+    const swept = await sweepGone(h.status, {
       idb: db.factory,
-      owner: () => ownerOf(local),
-      wipe: () => wipeLocal(local, null),
+      sleep: h.sleep,
+      sessions: async (name) => (name === "sessionpipe.account.acct-one" ? ONE : []),
+      kept: () => accountsKept(local),
+      wipe: (id, sessions) => wipeAccount(id, sessions, {}, local),
     });
+    expect(h.asked()).toBe(2);
+    expect(h.waits).toEqual([SWEEP_AGAIN_MS]);
     expect(db.deleted).toEqual(["sessionpipe.account.acct-one"]);
-    expect(swept.local).toContain("sessionpipe-gui.draft:claude-code:s-1");
-    expect(local.m.has(OWNER_KEY)).toBe(false);
+    expect(swept.caches).toEqual(["sessionpipe.account.acct-one"]);
+    expect(swept.local).toContain("sessionpipe-gui.draft:claude-code:one-1");
+    // The account that is here, and the receiver, keep everything; so do the conveniences.
+    expect(local.m.has("sessionpipe-gui.draft:claude-code:two-1")).toBe(true);
+    expect(local.m.has("sessionpipe-gui.draft:claude-code:home-1")).toBe(true);
+    expect(local.m.has(readsKey("acct-two"))).toBe(true);
+    expect(local.m.has("sp.search.recent")).toBe(true);
   });
 
-  it("a hub that does not answer is not an empty list: nothing is removed", async () => {
-    const db = idb(["sessionpipe.account.acct-one"]);
-    let wiped = 0;
-    const swept = await sweepGone(
-      async () => {
-        throw { code: "failed", message: "The app is not ready yet." };
-      },
-      {
+  it("one answer that lists no accounts removes nothing: the second lists them, or does not come, or is no list", async () => {
+    for (const second of [answer(["acct-one"]), new Error("not ready"), { enabled: true }, null, { accounts: [{}] }]) {
+      const db = idb(["sessionpipe.account.acct-one"]);
+      let wiped = 0;
+      const h = hub(answer([]), second);
+      const swept = await sweepGone(h.status, {
         idb: db.factory,
-        owner: () => "acct-one",
+        sleep: h.sleep,
+        kept: () => ["acct-one"],
+        sessions: async () => ONE,
         wipe: () => {
           wiped++;
           return [];
         },
-      },
-    );
-    expect(swept).toEqual({ caches: [], local: [] });
+      });
+      expect(swept, JSON.stringify(second)).toEqual({ caches: [], local: [] });
+      expect(db.deleted).toEqual([]);
+      expect(wiped).toBe(0);
+    }
+    // Nor does a first answer that is none; and with nothing kept of anybody, the hub is asked once.
+    const db = idb(["sessionpipe.account.acct-one"]);
+    expect(await sweepGone(hub(new Error("not ready")).status, { idb: db.factory, kept: () => [] })).toEqual({
+      caches: [],
+      local: [],
+    });
+    const quiet = hub(answer(["acct-one"]));
+    await sweepGone(quiet.status, { idb: db.factory, kept: () => ["acct-one"], sleep: quiet.sleep });
+    expect(quiet.asked()).toBe(1);
     expect(db.deleted).toEqual([]);
-    expect(wiped).toBe(0);
+  });
+
+  it("the account this window shows is never swept from it, whatever the hub lists", async () => {
+    const db = idb(["sessionpipe.account.acct-one", "sessionpipe.account.acct-gone"]);
+    const wiped: string[] = [];
+    const h = hub(answer([]));
+    await sweepGone(h.status, {
+      idb: db.factory,
+      showing: "acct-one",
+      sleep: h.sleep,
+      kept: () => ["acct-one", "acct-gone"],
+      sessions: async () => [],
+      wipe: (id) => {
+        wiped.push(id);
+        return [];
+      },
+    });
+    expect(wiped).toEqual(["acct-gone"]);
+    expect(db.deleted).toEqual(["sessionpipe.account.acct-gone"]);
   });
 });

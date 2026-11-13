@@ -130,6 +130,43 @@ export async function sweepCaches(
   return gone;
 }
 
+/** The sessions (`harness:id`) a cache database holds events of; none when it cannot be
+ *  opened or read. For whoever removes what else was kept of them (gone.ts). */
+export async function cacheSessions(
+  name: string,
+  idb: IDBFactory | undefined = globalThis.indexedDB,
+): Promise<string[]> {
+  if (!idb) return [];
+  try {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const o = idb.open(name);
+      // Not there: nothing is made of it here.
+      o.onupgradeneeded = () => o.transaction?.abort();
+      o.onsuccess = () => resolve(o.result);
+      o.onerror = () => reject(o.error);
+      o.onblocked = () => reject(new Error("blocked"));
+    });
+    try {
+      if (!db.objectStoreNames.contains("pages")) return [];
+      const pages = await new Promise<unknown[]>((resolve, reject) => {
+        const r = db.transaction("pages", "readonly").objectStore("pages").getAll();
+        r.onsuccess = () => resolve(r.result as unknown[]);
+        r.onerror = () => reject(r.error);
+      });
+      const keys = new Set<string>();
+      for (const page of pages)
+        if (Array.isArray(page))
+          for (const e of page as Partial<StoredEvent>[])
+            if (e?.harness?.name && e.session?.id) keys.add(`${e.harness.name}:${e.session.id}`);
+      return [...keys];
+    } finally {
+      db.close();
+    }
+  } catch {
+    return [];
+  }
+}
+
 /** Many small pages as full ones, each under the cursor of its last. */
 export function compacted(
   pages: readonly { key: number; events: StoredEvent[] }[],

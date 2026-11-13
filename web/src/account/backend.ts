@@ -52,7 +52,8 @@ import type { ApiBackend } from "../lib/net";
 import { type EventCache, openCache, withoutSessions } from "./cache";
 import { type AccountDocs, type DocName, openDocs } from "./docs";
 import { type AccountDoors, type DoorAnswer, openDoors, SEND_UNKNOWN_CODE, type Sent } from "./doors";
-import { claimLocal, readLocal, readsKey, wipeLocal, writeLocal } from "./local";
+import { listed } from "./gone";
+import { forgetLocal, readLocal, readsKey, wipeAccount, writeLocal } from "./local";
 import { PageLog } from "./log";
 import { routes } from "./routes";
 import { fitSends, readSends } from "./sends";
@@ -84,12 +85,14 @@ export interface AccountBackendOptions {
   idb?: IDBFactory | null;
   /** The cache itself, in place of one opened on `idb` (a test's). */
   cache?: EventCache;
-  /** The page's own storage (local.ts): claimed for this account as the window opens, and
-   *  emptied of all but the app's settings when the account goes; and where the reader's
-   *  read times are written (`write` says whether it was kept). Absent: this page's. */
+  /** The page's own storage (local.ts): what it keeps of a session goes when the account
+   *  forgets the session (`forget`), and what it keeps of the account's sessions and under
+   *  its id when the account goes (`wipe`; `conveniences` when the person disconnected it
+   *  here); and where the reader's read times are written (`write` says whether it was
+   *  kept). Absent: this page's. */
   local?: {
-    claim(id: string): void;
-    wipe(): void;
+    forget(sessions: string[]): void;
+    wipe(id: string, sessions: string[], o: { conveniences: boolean }): void;
     read(key: string): string | null;
     write(key: string, value: string): boolean;
   };
@@ -145,6 +148,8 @@ export interface AccountBackend {
 
 /** An account whose key was made this recently has had no reader before this one. */
 export const FRESH_MS = 120_000;
+/** How long after one answer of the hub's that leaves the account out it is asked again. */
+export const GONE_AGAIN_MS = 3000;
 /** A stream opened while spacesheep cannot be reached reads the relay at once, this often at most. */
 export const RETRY_EVERY_MS = 3000;
 /** While history is read, the board is handed over again this often. */
@@ -169,15 +174,15 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     calls.status().catch(() => null),
   ]);
   const loaded = await cache.load();
+  // Opening this window removes nothing of anybody's: the storage is every window's, and
+  // another account, or a GUI server, may be connected beside this one. (What an account
+  // that is gone left behind is swept by every window as it opens: gone.ts.)
   const local = o.local ?? {
-    claim: (id: string) => void claimLocal(id),
-    wipe: () => void wipeLocal(),
+    forget: (sessions: string[]) => void forgetLocal(sessions),
+    wipe: (id: string, sessions: string[], w: { conveniences: boolean }) => void wipeAccount(id, sessions, w),
     read: (key: string) => readLocal(key),
     write: (key: string, value: string) => writeLocal(key, value),
   };
-  // What another account's sessions left in this page's own storage goes before this one's
-  // are shown. (What an account left in IndexedDB is swept by every window as it opens: gone.ts.)
-  local.claim(shell.id);
 
   // ---------- the parts, as the receiver puts them together ----------
   // The index keeps its previews whole, so its copy of an event it did not cut is the
@@ -246,12 +251,12 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
   let state: AccountView["state"] = shell.state;
   let rp = "";
 
-  const snapshot = (): Snapshot => ({
-    ...snapshotWithControl(store, control),
-    labels: labels.get(),
-    marks: marks.get(),
-    limits: limits.list(),
-  });
+  const snapshot = (): Snapshot => {
+    const s = snapshotWithControl(store, control);
+    // Gone, there is no board: an empty one, with nothing of the person's on it.
+    if (gone) return { ...s, sessions: [], machines: [] };
+    return { ...s, labels: labels.get(), marks: marks.get(), limits: limits.list() };
+  };
   const board = (): void => {
     boarded = true;
     lastBoard = performance.now();
@@ -515,6 +520,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
             if (gone.size) {
               pending = [...withoutSessions(pending, gone)];
               cache.forget([...gone]);
+              // And its draft, and its place in the page's own lists.
+              local.forget([...gone]);
             }
             return r.accepted;
           } finally {
@@ -606,10 +613,13 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
 
   // ---------- the hub's word on the account ----------
   /** Everything this page holds of the account goes: the reader stops, the machines and
-   *  the board leave the screen, the cached sessions are deleted, and the page's own
-   *  storage is emptied of all but the app's settings. Then whoever draws the window is told. */
+   *  the board leave the screen, the cached sessions are deleted, and what the page's own
+   *  storage keeps of the account's sessions and under its id is removed (with what
+   *  belongs to no session, when the person disconnected it here). Then whoever draws the
+   *  window is told. */
   const drop = async (disconnected: Disconnected | null = null): Promise<void> => {
     if (gone) return;
+    const sessions = store.snapshot().sessions.map((s) => s.key);
     gone = true;
     state = "gone";
     reader?.stop();
@@ -618,8 +628,10 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     offAccount?.();
     control.remote.dropRemoteMachines("spacesheep");
     control.remote.setRemoteAccount(null);
-    for (const key of store.snapshot().sessions.map((s) => s.key)) store.forget(key);
-    local.wipe();
+    // The board leaves the screen as an empty one (`snapshot`). Its sessions are not
+    // forgotten one by one: the labels and the marks follow a forgotten session, and would
+    // write themselves empty at the hub, where they are the hub's to keep or to delete.
+    local.wipe(shell.id, sessions, { conveniences: disconnected !== null });
     await cache.destroy();
     emit({ kind: "snapshot", snapshot: snapshot() });
     changed();
@@ -627,11 +639,29 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
   };
   /** This page's own disconnect is with the hub: its answer says what became of the account. */
   let disconnecting = false;
+  /** An event that leaves the account out changes nothing by its own word (a hub that
+   *  spoke too soon would cost the phone everything it keeps): the hub is asked, twice, a
+   *  few seconds apart, and the account is gone when both answers are lists without it. */
+  let confirming = false;
+  const confirmGone = async (): Promise<void> => {
+    if (confirming || gone) return;
+    confirming = true;
+    try {
+      for (let i = 0; i < 2; i++) {
+        if (i) await new Promise<void>((r) => setTimeout(r, GONE_AGAIN_MS));
+        const here = listed(await calls.status().catch(() => null));
+        if (!here || here.includes(shell.id)) return;
+      }
+      if (!disconnecting) await drop();
+    } finally {
+      confirming = false;
+    }
+  };
   const onAccount = (s: AccountStatus): void => {
-    const row = s.accounts.find((a) => a.id === shell.id);
+    const row = listed(s) ? s.accounts.find((a) => a.id === shell.id) : undefined;
     // Gone by this page's own asking: the hub's answer is on its way and is handed on with it.
     if (!row && disconnecting) return;
-    if (!row) return void drop();
+    if (!row) return void confirmGone();
     if (gone || row.state === state) return;
     const was = state;
     state = row.state;
@@ -773,7 +803,9 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
       restored,
       firstBoardMs,
       caughtUpMs,
-      store: { events: s.events, sessions: s.sessions, bytes: s.storageBytes },
+      store: gone
+        ? { events: 0, sessions: 0, bytes: 0 }
+        : { events: s.events, sessions: s.sessions, bytes: s.storageBytes },
     };
   };
   const deviceAsk = (): Promise<DeviceAsked> => calls.deviceAsk(shell.id);

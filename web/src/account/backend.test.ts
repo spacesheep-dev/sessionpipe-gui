@@ -10,7 +10,7 @@ import { RELAY_BUDGET } from "../../../server/sources/relay";
 import { type FakeAnswer, FakeSpacesheep } from "../../../test/account/fake-spacesheep";
 import { HubStandIn } from "../../../test/account/hub";
 import { Session } from "../../../test/events";
-import { type AccountBackend, type AccountNotice, startAccountBackend } from "./backend";
+import { type AccountBackend, type AccountNotice, GONE_AGAIN_MS, startAccountBackend } from "./backend";
 import { NOT_HERE } from "./routes";
 import { type AccountShell, accountShell, type ShellCalls } from "./shell";
 import { type KeptCache, keptCache } from "./testCache";
@@ -97,7 +97,7 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
     needs: (id, sessions) => hub.invoke("acct_needs", { id, sessions }),
   };
   const notices: AccountNotice[] = [];
-  /** The page's own storage, as the backend used it: "claim <id>", "wipe". */
+  /** The page's own storage, as the backend used it: "forget <sessions>", "wipe <id> [<sessions>]". */
   const local: string[] = [];
   /** What it holds, across launches (a wipe empties it). */
   const stored = new Map<string, string>();
@@ -113,10 +113,10 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
       idb: null,
       ...(o.cache ? { cache: o.cache } : {}),
       local: {
-        claim: (id) => void local.push(`claim ${id}`),
-        wipe: () => {
-          local.push("wipe");
-          stored.clear();
+        forget: (sessions) => void local.push(`forget ${sessions.join(",")}`),
+        wipe: (id, sessions, w) => {
+          local.push(`wipe ${id} [${sessions.join(",")}]${w.conveniences ? " and the conveniences" : ""}`);
+          for (const k of [...stored.keys()]) if (k.endsWith(`.${id}`)) stored.delete(k);
         },
         read: (key) => stored.get(key) ?? null,
         write: (key, value) => {
@@ -1156,8 +1156,9 @@ describe("a page's own backend on a spacesheep account", () => {
     const page = listen(b);
     await tick(400);
     const id = b.view().id;
-    // The window opened on this account: the page's own storage is its from now.
-    expect(r.local).toEqual([`claim ${id}`]);
+    // The window opened on this account: nothing of the page's own storage was touched for it.
+    expect(r.local).toEqual([]);
+    const docsBefore = r.sets.length;
     expect(cache.events()).toHaveLength(1);
     const settings = async () => (await (await b.answer("/api/ui/spacesheep")).json()) as { link: unknown };
     expect((await settings()).link).toMatchObject({ email: "me@example.com" });
@@ -1168,7 +1169,7 @@ describe("a page's own backend on a spacesheep account", () => {
     const refused = await b.answer("/api/ui/spacesheep", { method: "DELETE" });
     expect([refused.status, ((await refused.json()) as { reason: string }).reason]).toEqual([409, "cancelled"]);
     expect(b.view().state).toBe("ok");
-    expect(r.local).toEqual([`claim ${id}`]);
+    expect(r.local).toEqual([]);
     expect(cache.destroyed).toBe(false);
     expect(r.gone).toEqual([]);
 
@@ -1184,7 +1185,11 @@ describe("a page's own backend on a spacesheep account", () => {
     // Not on the phone: the cached sessions and the page's own storage are gone...
     expect(cache.destroyed).toBe(true);
     expect(cache.events()).toEqual([]);
-    expect(r.local).toEqual([`claim ${id}`, "wipe"]);
+    // (what it keeps of the account's sessions and under its id, and, the person having
+    // disconnected it here, what belongs to no session), and nothing was written to the hub
+    // on the way out: its documents are the hub's to delete, not the page's to empty.
+    expect(r.local).toEqual([`wipe ${id} [claude-code:s-1] and the conveniences`]);
+    expect(r.sets.length).toBe(docsBefore);
     // ...and not on screen: the board is empty, no machine is listed, Settings has no account.
     expect(b.view()).toMatchObject({ state: "gone", store: { sessions: 0 } });
     const last = page.last("snapshot")!.snapshot;
@@ -1216,12 +1221,54 @@ describe("a page's own backend on a spacesheep account", () => {
     r.hub.active = null;
     r.hub.on(() => {})();
     await r.hub.invoke("acct_connect_cancel");
+    // The event by itself changes nothing: the hub is asked, and asked again a few seconds on.
     await tick(50);
+    expect(b.view()).toMatchObject({ state: "ok", store: { sessions: 1 } });
+    await tick(GONE_AGAIN_MS);
     expect(b.view()).toMatchObject({ state: "gone", store: { sessions: 0 } });
     expect(cache.destroyed).toBe(true);
-    expect(r.local).toContain("wipe");
+    // Its sessions' and its own, and nothing that is no session's: nobody disconnected it here.
+    expect(r.local).toEqual([`wipe ${b.view().id} [claude-code:s-1]`]);
     expect(r.gone).toEqual([null]);
     expect(page.last("snapshot")!.snapshot.sessions).toEqual([]);
+    page.off();
+  });
+
+  it("a word from the hub that leaves the account out while it is still there changes nothing: not the board, not a label", async () => {
+    const cache = keptCache();
+    r = rig({ cache });
+    let tell: ((s: never) => void) | null = null;
+    const on = r.calls.onAccount;
+    r.calls.onAccount = async (fn) => {
+      tell = fn as never;
+      return on(fn);
+    };
+    const s = new Session("s-1");
+    r.ss.push([s.ev("session.started", {}, { tier: 2 })]);
+    const b = await r.start();
+    const page = listen(b);
+    await tick(400);
+    await b.transport.patchLabels!({ sessions: { "claude-code:s-1": "red" } } as never).catch(() => {});
+    await b.flushed();
+    const docs = () => JSON.stringify([...[...r.hub.accounts.values()][0]!.docs.entries()].sort());
+    const before = docs();
+    const sets = r.sets.length;
+    // An event with no accounts, one that is no list at all, and one that lists another account.
+    for (const wrong of [
+      { enabled: true, accounts: [] },
+      { enabled: true },
+      { enabled: true, accounts: [{ id: "x" }] },
+    ]) {
+      tell!(wrong as never);
+      await tick(GONE_AGAIN_MS * 3);
+    }
+    expect(b.view()).toMatchObject({ state: "ok", store: { sessions: 1 } });
+    expect(r.gone).toEqual([]);
+    expect(r.local).toEqual([]);
+    expect(cache.destroyed).toBe(false);
+    expect(docs()).toBe(before);
+    expect(r.sets.length).toBe(sets);
+    expect(page.last("snapshot")!.snapshot.sessions).toHaveLength(1);
     page.off();
   });
 
