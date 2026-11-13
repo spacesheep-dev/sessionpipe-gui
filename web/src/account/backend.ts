@@ -11,7 +11,15 @@
 // where the receiver has a stream, and as the answer to the page's plain requests of
 // /api/ui/* (lib/net.ts apiFetch; routes.ts). Nothing here reaches the network but the
 // doors.
-import type { Info, ProtocolEvent, Snapshot, SpacesheepSourceStatus, StoredEvent, StreamMessage } from "@shared/api";
+import type {
+  Info,
+  ProtocolEvent,
+  SessionKey,
+  Snapshot,
+  SpacesheepSourceStatus,
+  StoredEvent,
+  StreamMessage,
+} from "@shared/api";
 import { sessionKey } from "@shared/api";
 import { indexTouches } from "@shared/files";
 import { type KeptQueues, MemoryControl, type RemoteJobWord } from "../../../server/control/remote";
@@ -32,7 +40,7 @@ import { cutPreview } from "../../../server/ui/preview";
 import { snapshotWithControl } from "../../../server/ui/snapshot";
 import { HttpError, type StreamHandlers, type Transport } from "../data/transport";
 import type { ApiBackend } from "../lib/net";
-import { type EventCache, openCache, sweepCaches } from "./cache";
+import { type EventCache, openCache, sweepCaches, withoutSessions } from "./cache";
 import { type AccountDocs, openDocs } from "./docs";
 import { type AccountDoors, type DoorAnswer, openDoors } from "./doors";
 import { PageLog } from "./log";
@@ -62,6 +70,8 @@ export interface AccountBackendOptions {
   fetch?: typeof fetch;
   /** Where the relay's pages are cached; null: nowhere (memory). Absent: this page's own. */
   idb?: IDBFactory | null;
+  /** The cache itself, in place of one opened on `idb` (a test's). */
+  cache?: EventCache;
   clock?: RelayClock;
   notice?: (n: AccountNotice) => void;
 }
@@ -127,7 +137,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
   const t0 = performance.now();
   const startedAt = new Date().toISOString();
   const [cache, docs, first] = await Promise.all([
-    openCache(shell.id, o.idb === null ? undefined : (o.idb ?? globalThis.indexedDB)),
+    o.cache ?? openCache(shell.id, o.idb === null ? undefined : (o.idb ?? globalThis.indexedDB)),
     openDocs(calls, shell.id),
     calls.status().catch(() => null),
   ]);
@@ -333,7 +343,17 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
           holding = events.length >= BURST_EVENTS;
           try {
             const r = store.ingest(events, "spacesheep");
-            for (const e of r.stored) pending.push(e);
+            // A session the account forgot is gone from the store; it goes from what is
+            // kept too: from this page (its earlier events came with it) and from every
+            // page before it, so nothing of it stays here or comes back at the next start.
+            const gone = new Set<SessionKey>();
+            for (const e of events)
+              if (e.type === "session.forgotten") gone.add(sessionKey(e.harness.name, e.session.id));
+            for (const e of withoutSessions(r.stored, gone)) pending.push(e);
+            if (gone.size) {
+              pending = [...withoutSessions(pending, gone)];
+              cache.forget([...gone]);
+            }
             return r.accepted;
           } finally {
             if (holding && !catching) {

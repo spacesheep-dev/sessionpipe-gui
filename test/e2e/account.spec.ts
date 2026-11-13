@@ -312,6 +312,64 @@ test("after a reload the board is there from what was kept, before the relay ans
   await expect.poll(async () => (await view()).relay.state, { timeout: 20_000 }).toBe("ok");
 });
 
+/** Everything the page's cache holds for the account, as text (the relay's pages in IndexedDB). */
+const keptText = (): Promise<string> =>
+  page.evaluate(async () => {
+    const all = await indexedDB.databases();
+    let out = "";
+    for (const d of all) {
+      if (!d.name?.startsWith("sessionpipe.account.")) continue;
+      const db = await new Promise<IDBDatabase>((res, rej) => {
+        const o = indexedDB.open(d.name!);
+        o.onsuccess = () => res(o.result);
+        o.onerror = () => rej(o.error);
+      });
+      const pages = await new Promise<unknown[]>((res, rej) => {
+        const r = db.transaction("pages", "readonly").objectStore("pages").getAll();
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+      });
+      db.close();
+      out += JSON.stringify(pages);
+    }
+    return out;
+  });
+
+test("a session the account forgets leaves the board and the phone, and a reload does not bring it back", async () => {
+  ss.push(
+    started(
+      "s-secret",
+      "Rotate the staging password",
+      "The staging password is in the old wiki, rotate it.",
+      "Rotated; the wiki page is gone.",
+    ),
+  );
+  await expect(page.getByText("Rotate the staging password").first()).toBeVisible();
+  await page.evaluate(() =>
+    (window as unknown as { __sessionpipeAccount: { flushed(): Promise<void> } }).__sessionpipeAccount.flushed(),
+  );
+  expect(await keptText()).toContain("The staging password is in the old wiki");
+  // Forgotten on the account: spacesheep relays it as an event of that session.
+  ss.push([session("s-secret").ev("session.forgotten", {}, on)]);
+  await expect(page.getByText("Rotate the staging password")).toHaveCount(0);
+  await page.evaluate(() =>
+    (window as unknown as { __sessionpipeAccount: { flushed(): Promise<void> } }).__sessionpipeAccount.flushed(),
+  );
+  const kept = await keptText();
+  expect(kept).not.toContain("s-secret");
+  expect(kept).not.toContain("The staging password is in the old wiki");
+  expect(kept).toContain("s-invoice");
+  // From what was kept alone (spacesheep cannot be reached): it is not back.
+  hub.down = true;
+  await page.goto(server.url);
+  await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+  await expect(page.getByText("Rotate the staging password")).toHaveCount(0);
+  hub.down = false;
+  await expect.poll(async () => (await view()).relay.state, { timeout: 20_000 }).toBe("ok");
+  await expect(page.getByText("Rotate the staging password")).toHaveCount(0);
+  expect((await view()).store.sessions).toBe(2);
+});
+
 test("a 429 from spacesheep is waited out and read on from; a full room at the hub and an answer too large are not errors", async () => {
   ss.limitedUntil = Date.now() + 9000;
   // Something happens on the account: the next read of the relay meets spacesheep's limit

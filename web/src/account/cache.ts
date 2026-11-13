@@ -7,9 +7,11 @@
 // (`cursor`, `reads`). A page and the cursor after it are one write, so the two can never
 // disagree. It is bounded as the relay is (CACHE_EVENTS_MAX events, CACHE_KEEP_MS of age),
 // read once at the start, and deleted when the account is disconnected (or found at a later
-// start to belong to an account that is no longer on this phone). Where IndexedDB cannot
-// be opened, the same thing in memory: nothing survives the launch, and the backend says so.
-import type { StoredEvent } from "@shared/api";
+// start to belong to an account that is no longer on this phone). A session the account
+// forgot (`session.forgotten`) is taken out of every page it is in, so nothing of it stays
+// on the phone and a later start does not bring it back. Where IndexedDB cannot be opened,
+// the same thing in memory: nothing survives the launch, and the backend says so.
+import { type SessionKey, type StoredEvent, sessionKey } from "@shared/api";
 import type { RelayKept } from "../../../server/sources/relay";
 
 /** The relay itself holds 50 000 events at most; the cache keeps as many, newest last. */
@@ -43,12 +45,24 @@ export interface EventCache {
   page(cursor: number, events: StoredEvent[], cursorDoc: unknown): void;
   /** One of the reader's small values. */
   put(name: RelayKept, value: unknown): void;
+  /** These sessions were forgotten by the account: every event of theirs goes, from every
+   *  page written so far. */
+  forget(sessions: readonly SessionKey[]): void;
   /** Everything kept for this account goes (a disconnect). */
   destroy(): Promise<void>;
   /** Resolves when everything handed over so far is written. */
   flushed(): Promise<void>;
   /** Bytes the browser says this origin's storage holds, when it says. */
   bytes(): Promise<number | null>;
+}
+
+/** The events of `page` that belong to none of `gone` (the same array when none does). */
+export function withoutSessions<E extends Pick<StoredEvent, "harness" | "session">>(
+  page: readonly E[],
+  gone: ReadonlySet<SessionKey>,
+): readonly E[] {
+  if (!gone.size || !page.some((e) => gone.has(sessionKey(e.harness.name, e.session.id)))) return page;
+  return page.filter((e) => !gone.has(sessionKey(e.harness.name, e.session.id)));
 }
 
 /** Which records go so that at most `max` events stay: the oldest whole pages. */
@@ -136,6 +150,7 @@ export function memoryCache(): EventCache {
     load: async () => ({ events: [], kept: {}, pages: 0, ms: 0 }),
     page: () => {},
     put: () => {},
+    forget: () => {},
     destroy: async () => {},
     flushed: async () => {},
     bytes: async () => null,
@@ -256,6 +271,34 @@ export async function openCache(
       });
     },
     put: (n, value) => write((tx) => void tx.objectStore("meta").put(value, n)),
+    forget(sessions) {
+      const gone = new Set(sessions);
+      if (!gone.size) return;
+      // One transaction over every page, after the writes already asked for and before any
+      // asked for later: each page is put back without those sessions' events, or deleted
+      // when nothing else was in it.
+      write((tx) => {
+        const walk = tx.objectStore("pages").openCursor();
+        walk.onsuccess = () => {
+          const at = walk.result;
+          if (!at) return;
+          const events = at.value as StoredEvent[];
+          const kept = withoutSessions(events, gone);
+          if (kept !== events) {
+            const i = index.findIndex((p) => p.key === Number(at.key));
+            total -= events.length - kept.length;
+            if (kept.length) {
+              at.update(kept);
+              if (i >= 0) index[i] = { key: index[i]!.key, n: kept.length };
+            } else {
+              at.delete();
+              if (i >= 0) index.splice(i, 1);
+            }
+          }
+          at.continue();
+        };
+      });
+    },
     async destroy() {
       await last;
       dead = true;

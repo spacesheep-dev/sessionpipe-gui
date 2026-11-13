@@ -8,6 +8,7 @@ import type { ControlActivity, Snapshot, StreamMessage } from "@shared/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type FakeAnswer, FakeSpacesheep } from "../../../test/account/fake-spacesheep";
 import { HubStandIn } from "../../../test/account/hub";
+import { type KeptCache, keptCache } from "../../../test/account/kept-cache";
 import { Session } from "../../../test/events";
 import { type AccountBackend, type AccountNotice, startAccountBackend } from "./backend";
 import { NOT_HERE } from "./routes";
@@ -30,7 +31,7 @@ const machine = (over: Record<string, unknown> = {}) => ({
 });
 
 /** A hub over a spacesheep, an account connected on it, and a page's backend on that. */
-function rig(o: { features?: string[] } = {}) {
+function rig(o: { features?: string[]; cache?: KeptCache } = {}) {
   const ss = new FakeSpacesheep();
   ss.machines = [machine()];
   const hub = new HubStandIn({
@@ -67,10 +68,17 @@ function rig(o: { features?: string[] } = {}) {
   let backend: AccountBackend | null = null;
   const start = async (): Promise<AccountBackend> => {
     const shell = accountShell(hub.contract()) as AccountShell;
-    backend = await startAccountBackend({ shell, calls, fetch: fetchDoors, idb: null, notice: (n) => notices.push(n) });
+    backend = await startAccountBackend({
+      shell,
+      calls,
+      fetch: fetchDoors,
+      idb: null,
+      ...(o.cache ? { cache: o.cache } : {}),
+      notice: (n) => notices.push(n),
+    });
     return backend;
   };
-  return { ss, hub, asked, notices, start, stop: () => backend?.stop() };
+  return { ss, hub, asked, notices, calls, start, stop: () => backend?.stop() };
 }
 
 /** The frames a page gets from a stream it opened. */
@@ -322,6 +330,48 @@ describe("a page's own backend on a spacesheep account", () => {
     await tick(3200);
     expect(again.last("control")?.message).toMatchObject({ outcome: "delivered" });
     again.off();
+  });
+
+  it("a session the account forgot is gone from what the phone keeps, and does not come back at the next start", async () => {
+    const cache = keptCache();
+    r = rig({ cache });
+    const kept = new Session("s-kept");
+    const gone = new Session("s-gone");
+    r.ss.push([
+      kept.ev("session.started", {}, { tier: 2 }),
+      gone.ev("session.started", {}, { tier: 2 }),
+      gone.ev("turn.transcript", { turn: 1, user: "the prompt nobody should keep", assistant: "ok" }, { tier: 2 }),
+    ]);
+    let b = await r.start();
+    await tick(400);
+    expect(b.view().store.sessions).toBe(2);
+    expect(JSON.stringify(cache.events())).toContain("the prompt nobody should keep");
+    // More of it arrives, and in the same page the account forgets the session.
+    r.ss.push([
+      gone.ev("turn.transcript", { turn: 2, user: "one more line of it", assistant: "ok" }, { tier: 2 }),
+      gone.ev("session.forgotten", {}, { tier: 2 }),
+      kept.ev("turn.started", { turn_id: "t1" }, { tier: 2 }),
+    ]);
+    await tick(30_000);
+    expect(b.view().store.sessions).toBe(1);
+    // Nothing of it is kept: not the page it came in on, not the one it left in.
+    expect(cache.forgotten).toEqual([["claude-code:s-gone"]]);
+    const text = JSON.stringify(cache.pages());
+    expect(text).not.toContain("s-gone");
+    expect(text).not.toContain("the prompt nobody should keep");
+    expect(text).not.toContain("one more line of it");
+    expect(cache.events().map((e) => e.session.id)).toEqual(["s-kept", "s-kept"]);
+    // The next start reads what was kept: the session is not back, and stays away once the
+    // relay (read on from the kept cursor, past the forget) has answered.
+    b.stop();
+    b = await r.start();
+    const page = listen(b);
+    await tick(400);
+    expect(b.view()).toMatchObject({ restored: { events: 2 }, store: { sessions: 1 } });
+    await tick(30_000);
+    expect(b.view().store.sessions).toBe(1);
+    expect(page.last("snapshot")!.snapshot.sessions.map((x) => x.id)).toEqual(["s-kept"]);
+    page.off();
   });
 
   it("a relay read from its start is history, none of it unread; what arrives after is news", async () => {
