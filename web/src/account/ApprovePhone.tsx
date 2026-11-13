@@ -62,7 +62,8 @@ export default function ApprovePhone() {
   /** Approved, and inside the hour a new device waits: no computer's row says it can send. */
   const cooling = view?.phase.kind === "cooling" ? view.phase : null;
   const ask = () => void watch?.ask();
-  const err = st.error ? approveError(st.error, now) : null;
+  // A time the refusal names is counted from when it came, not from the minute now on screen.
+  const err = st.error ? approveError(st.error, st.errorAt ?? now) : null;
   const elsewhere = (
     <a className="btn" href={`${origin}/sessions`} target="_blank" rel="noreferrer noopener" data-elsewhere>
       {`Open on ${host}`}

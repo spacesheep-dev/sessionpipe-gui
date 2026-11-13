@@ -34,6 +34,9 @@ export interface PhoneState {
   asking: boolean;
   /** The last ask's refusal, or the last look's. */
   error: HubError | null;
+  /** When that refusal came, on this page's clock: a time it names ("ask again at") is
+   *  counted from here, once, and does not move while the page stays open. */
+  errorAt: number | null;
 }
 
 export interface PhoneWatch {
@@ -70,7 +73,7 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
   let door: DeviceDoor | null = null;
   let looked = false;
   let lookedAt = 0;
-  let state: PhoneState = { view: null, memo: read(), asking: false, error: null };
+  let state: PhoneState = { view: null, memo: read(), asking: false, error: null, errorAt: null };
   let timer: ReturnType<typeof setTimeout> | null = null;
   let turn: ReturnType<typeof setTimeout> | null = null;
   let watching = false;
@@ -92,6 +95,8 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
     }
   };
   const set = (patch: Partial<PhoneState>): void => {
+    // A refusal is stamped as it comes, and its time stays while it is the one shown.
+    if ("error" in patch) patch = { ...patch, errorAt: patch.error ? now() : null };
     state = { ...state, ...patch };
     for (const l of [...listeners]) l();
   };
@@ -235,7 +240,7 @@ export function phoneWatch(): PhoneWatch | null {
   return watch;
 }
 
-const NOTHING: PhoneState = { view: null, memo: {}, asking: false, error: null };
+const NOTHING: PhoneState = { view: null, memo: {}, asking: false, error: null, errorAt: null };
 const never = (): (() => void) => () => {};
 
 /** Where this phone's key stands, for a component; `view: null` where there is no account. */

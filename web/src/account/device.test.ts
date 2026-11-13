@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NEW_DEVICE_WAIT_MS } from "./approve";
 import { LOOK_FAST_MS, LOOK_IDLE_MS, memoKey, type PhoneWatch, startPhoneWatch } from "./device";
 import type { DoorAnswer } from "./doors";
+import { approveError } from "./screenWords";
 
 const T = Date.parse("2026-11-12T13:05:00Z");
 const M = { id: "m_studio", name: "studio-mac", takes_device: true };
@@ -190,5 +192,26 @@ describe("this phone's key, watched", () => {
     b.s.doorError = { status: 403, hub: null, json: { code: "talk_off", error: "Turn it on." } };
     await w.look();
     expect(w.get().error).toEqual({ code: "talk_off", message: "Turn it on.", upstream: "talk_off" });
+  });
+
+  it("a refusal is stamped when it comes: the time it names is said once and does not move with the clock", async () => {
+    const b = bed();
+    w = b.w;
+    b.s.refuse = { code: "too_many_asks", message: "Too many tries.", retryAfterS: 900 };
+    const at = Date.now();
+    await w.ask();
+    expect(w.get().errorAt).toBe(at);
+    const said = approveError(w.get().error!, w.get().errorAt!).words;
+    // Ten minutes on, the page still open: the same refusal, the same time.
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(w.get().error).toMatchObject({ code: "too_many_asks" });
+    expect(w.get().errorAt).toBe(at);
+    expect(approveError(w.get().error!, w.get().errorAt!).words).toBe(said);
+    // Counted from now instead, it would have moved.
+    expect(approveError(w.get().error!, Date.now()).words).not.toBe(said);
+    // No refusal, no time.
+    b.s.refuse = null;
+    await w.ask();
+    expect(w.get()).toMatchObject({ error: null, errorAt: null });
   });
 });

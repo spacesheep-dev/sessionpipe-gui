@@ -69,10 +69,11 @@ export function phoneLine(view: ApproveView | null): { mark: "ok" | "wait" | "wa
   }
 }
 
-/** An ask's refusal, or a look's, in words; `elsewhere`: the way on is spacesheep itself. */
-export function approveError(e: HubError, now: number): { words: string; elsewhere: boolean } {
+/** An ask's refusal, or a look's, in words; `elsewhere`: the way on is spacesheep itself.
+ *  `at`: when the refusal came (a time it names is counted from then). */
+export function approveError(e: HubError, at: number): { words: string; elsewhere: boolean } {
   if (e.code === "too_many_asks")
-    return { words: N.approveTooMany(clock(now + (e.retryAfterS ?? 3600) * 1000)), elsewhere: false };
+    return { words: N.approveTooMany(clock(at + (e.retryAfterS ?? 3600) * 1000)), elsewhere: false };
   if (e.code === "unreachable" || e.code === "timeout") return { words: R.unreachableNow, elsewhere: false };
   // No signer on this phone, or it would not hand over its key: its own reason.
   if (e.code === "unsupported" || e.code === "signer")
