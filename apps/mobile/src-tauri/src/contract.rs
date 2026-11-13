@@ -106,16 +106,21 @@ impl ShellInfo {
         let mut features = vec!["notifications", "signer", "haptics", "scanner"];
         // "account": the `acct_*` commands are here and the Hub takes a spacesheep
         // account as a receiver (`Os::account`).
+        // "account-needs": `acct_needs` is here too: the page hands the Hub the
+        // account's sessions that need the person, and they are notified of as a
+        // receiver's are.
         if os.account() {
             features.push("account");
+            features.push("account-needs");
         }
         ShellInfo {
             v: 1,
             platform: os.name(),
             app_version: app_version.to_owned(),
-            // "signer": the identity plugin answers `status` here, so the page shows the
-            // Signing row and why sending is off ("Sending needs a real phone"). It never
-            // makes a key in this build (identity.rs).
+            // "signer": the identity plugin answers `status` here. On an iPhone it is
+            // the signer itself (sp-identity: the key in the Secure Enclave, Face ID);
+            // in the simulator and on Android `status` says why sending is off
+            // ("Sending needs a real iPhone", identity.rs) and no key is ever made.
             // "haptics": `app_haptic` plays a `Haptic` on the phone's engine (§11.3); on
             // Android the page calls MainActivity's `spHaptic.perform` directly.
             // "scanner": the QR scanner (§11.5, `web/src/native/scanner.ts`):
@@ -188,6 +193,27 @@ impl Scheme {
 /// The first line of the contract script: how the shell finds its own script among the
 /// webview's user scripts to swap it when the person switches receivers.
 pub const MARKER: &str = "/* sessionpipe shell contract v1 */";
+
+/// The contract script the window was last given (iOS: the WKUserScript that runs as
+/// each page starts). The Hub's list changes under a page that stays (an account is
+/// disconnected, a key is refused, a receiver says its name); the script is swapped
+/// when what it would say changed, so a page that reloads itself reads the contract as
+/// it is now, and not the one the window was opened with.
+#[derive(Debug, Default)]
+pub struct Injected(std::sync::Mutex<String>);
+
+impl Injected {
+    /// Notes `script` as the one in the window. True when it is not the one that was
+    /// there (and so has to be swapped in).
+    pub fn renew(&self, script: &str) -> bool {
+        let mut last = self.0.lock().unwrap();
+        if *last == script {
+            return false;
+        }
+        *last = script.to_owned();
+        true
+    }
+}
 
 /// The initialization script: runs before any page script, in the main frame only.
 ///
@@ -306,7 +332,7 @@ mod tests {
         assert_eq!(
             v,
             serde_json::json!({
-                "v": 1, "platform": "ios", "appVersion": "0.2.0", "features": ["notifications", "signer", "haptics", "scanner", "account"],
+                "v": 1, "platform": "ios", "appVersion": "0.2.0", "features": ["notifications", "signer", "haptics", "scanner", "account", "account-needs"],
                 "receiver": { "id": "abcdefghij", "name": "studio-mac", "origin": "http://127.0.0.1:7823", "local": true },
                 "rxBase": "rx://localhost/abcdefghij"
             })
@@ -348,6 +374,34 @@ mod tests {
             .features
             .contains(&"account"));
         assert_eq!(Os::Ios.device_name(), "iPhone");
+        // The needs-you hand-over is there exactly where the account is.
+        for os in [Os::Ios, Os::Android] {
+            let f = ShellInfo::new(os, "0.8.0", None).features;
+            assert_eq!(f.contains(&"account-needs"), f.contains(&"account"));
+        }
+    }
+
+    /// The window's contract script is swapped when what it says changed, and only then.
+    #[test]
+    fn the_contract_in_the_window_is_renewed_when_it_changed() {
+        let with = init_script(&ShellInfo::new(Os::Ios, "0.8.0", Some(account())));
+        let without = init_script(&ShellInfo::new(Os::Ios, "0.8.0", None));
+        assert_ne!(with, without);
+        let window = Injected::default();
+        assert!(window.renew(&with), "the first one is new");
+        assert!(!window.renew(&with), "the same again is not");
+        // The account was disconnected: the next page must not start on it.
+        assert!(window.renew(&without));
+        assert!(!without.contains("klmnopqrst") && !without.contains("misha@example.com"));
+        assert!(!window.renew(&without));
+        // The account's state is part of what a page reads as it starts.
+        let mut refused = account();
+        refused.state = Some("unauthorized");
+        assert!(window.renew(&init_script(&ShellInfo::new(
+            Os::Ios,
+            "0.8.0",
+            Some(refused)
+        ))));
     }
 
     #[test]

@@ -15,6 +15,7 @@ use crate::account::{
     DeviceAsked, Disconnected, Door, Opened, PollAnswer, Problem, Question, Refused,
 };
 use crate::docs::Docs;
+use crate::needs::NeedsYou;
 use crate::proxy;
 use crate::registry::{account_key_name, KeyStore, Receiver};
 use crate::status::{iso_ms, iso_now, now_ms};
@@ -166,6 +167,8 @@ pub(super) struct Accounts {
     asking: AtomicBool,
     docs: Docs,
     docs_lock: Mutex<()>,
+    /// Each account's needs-you, as its page last handed it over (`Hub::account_needs`).
+    needs: Mutex<HashMap<String, NeedsYou>>,
 }
 
 impl Accounts {
@@ -204,6 +207,7 @@ impl Accounts {
             asking: AtomicBool::new(false),
             docs: Docs::new(&cfg.home),
             docs_lock: Mutex::new(()),
+            needs: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -664,6 +668,7 @@ impl Hub {
         }
         self.0.acct.limits.lock().unwrap().remove(id);
         self.0.acct.asked.lock().unwrap().remove(id);
+        self.0.acct.needs.lock().unwrap().remove(id);
         let removed = self.remove_entry(id).map_err(|e| {
             Problem::new(
                 "io",
@@ -1791,6 +1796,56 @@ impl Hub {
             revoked: false,
             note: "The key is forgotten on this device. It keeps working until you revoke it on spacesheep: Settings → API keys.".into(),
         })
+    }
+
+    // ---- needs-you ----
+
+    /// The account's sessions that need the person, handed over whole by its page. A
+    /// receiver's are read by the Hub from its stream; an account has no stream (its
+    /// page reads the relay and carries the board), so the page says the list: once
+    /// after its first board, then whenever it changed, empty when the last one clears.
+    /// It is applied as a stream's `snapshot` is, and said as a receiver's is said (the
+    /// same `NeedsYou` and `AttentionClosed` events, the same count in the status file),
+    /// so whatever posts a notification for a receiver's session does so for these.
+    /// The first list only seeds: nothing in it counts as having just opened.
+    ///
+    /// The page is not trusted with more than that: the account must be one in the list,
+    /// the list is at most `needs::LIST_MAX_SESSIONS` long, and every text in it is cut
+    /// to size. The answer is how many sessions need the person now.
+    pub fn account_needs(&self, id: &str, sessions: serde_json::Value) -> Result<usize, Problem> {
+        if !self.account_on() || self.account_entry(id).is_none() {
+            return Err(Problem::new("unknown_account", "No such account."));
+        }
+        let (change, items) = {
+            let mut all = self.0.acct.needs.lock().unwrap();
+            let needs = all
+                .entry(id.to_string())
+                .or_insert_with(|| NeedsYou::new(id));
+            let change = needs
+                .apply_sessions(sessions)
+                .ok_or_else(|| Problem::new("bad_request", "That is not a list of sessions."))?;
+            (change, needs.items())
+        };
+        for a in change.closed {
+            self.emit(HubEvent::AttentionClosed {
+                id: id.to_string(),
+                attention_id: a,
+            });
+        }
+        let n = items.len();
+        if change.items_changed {
+            self.0.cfg.status.set_needs_you(id, n);
+            self.0
+                .needs
+                .lock()
+                .unwrap()
+                .insert(id.to_string(), items.clone());
+            self.emit(HubEvent::NeedsYou {
+                id: id.to_string(),
+                items,
+            });
+        }
+        Ok(n)
     }
 
     // ---- the account's documents ----

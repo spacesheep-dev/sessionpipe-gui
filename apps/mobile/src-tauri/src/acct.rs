@@ -83,9 +83,11 @@ pub async fn acct_connect_start<R: Runtime>(
 
 /// Opens the pending connect's page in the system browser. The link is the Hub's and
 /// goes from there to the browser: the page never holds it (it carries the code, and
-/// whoever has the code can have any account approve it).
+/// whoever has the code can have any account approve it). Ok once the system took the
+/// link; `not_opened` when it did not, so the page does not say it is waiting for an
+/// answer in a browser that never came up.
 #[tauri::command]
-pub fn acct_connect_open<R: Runtime>(
+pub async fn acct_connect_open<R: Runtime>(
     app: AppHandle<R>,
     webview: Webview<R>,
     hub: State<'_, Hub>,
@@ -94,9 +96,15 @@ pub fn acct_connect_open<R: Runtime>(
     let link = hub
         .account_connect_link()
         .ok_or_else(|| Problem::new("no_connect", "No connect is waiting."))?;
-    crate::open_external(&app, &link);
-    Ok(())
+    if crate::open_external_told(&app, &link).await {
+        Ok(())
+    } else {
+        Err(Problem::new(NOT_OPENED.0, NOT_OPENED.1))
+    }
 }
+
+/// `acct_connect_open` when the system browser did not take the link.
+pub(crate) const NOT_OPENED: (&str, &str) = ("not_opened", "The browser could not be opened.");
 
 /// Stops a pending connect (true), or clears a finished one's outcome (false).
 #[tauri::command]
@@ -115,12 +123,19 @@ pub fn acct_connect_cancel<R: Runtime>(
 /// the welcome.
 #[tauri::command]
 pub async fn acct_disconnect<R: Runtime>(
+    app: AppHandle<R>,
     webview: Webview<R>,
     hub: State<'_, Hub>,
     id: String,
 ) -> Result<Disconnected, Problem> {
     gate(&webview)?;
-    hub.account_disconnect(&id).await
+    let gone = hub.account_disconnect(&id).await?;
+    // Before the page hears of it: the page it loads next (it reloads itself to the
+    // welcome, or to the receiver that is left) must not start on the account that is
+    // gone. `watch` does the same on the Hub's events; here it is in line ahead of the
+    // answer.
+    crate::sync_contract(&app);
+    Ok(gone)
 }
 
 /// Asks spacesheep to trust this phone's own device key for the account, for the person
@@ -157,6 +172,23 @@ pub async fn acct_device_ask<R: Runtime>(
             "Sending from this phone comes in a later version.",
         ))
     }
+}
+
+/// The account's sessions that need the person, handed over by the page that works
+/// them out (an account has no stream for the Hub to read them from): every session of
+/// its board whose state is `needs_you`, each a cut of its summary. The Hub says them as
+/// it says a receiver's, so a notification is posted for one that opens while the app is
+/// behind. Listed in the contract as the feature `"account-needs"`. The answer is how
+/// many need the person now.
+#[tauri::command(async)]
+pub fn acct_needs<R: Runtime>(
+    webview: Webview<R>,
+    hub: State<'_, Hub>,
+    id: String,
+    sessions: Value,
+) -> Result<usize, Problem> {
+    gate(&webview)?;
+    hub.account_needs(&id, sessions)
 }
 
 /// One of the account's documents, or null. (The documents' commands read and write a
@@ -197,30 +229,95 @@ pub fn acct_doc_delete<R: Runtime>(
     hub.account_doc_delete(&id, &name)
 }
 
+/// What one of the Hub's events asks of the window: the `account` event said to the
+/// page, the contract a reload would read brought up to date, both, or neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Told {
+    pub account: bool,
+    pub contract: bool,
+}
+
+/// An account changed: both. The list changed (a receiver added, removed, renamed, an
+/// account's key refused): the contract. Fell behind (`None`): both, as it is now.
+pub(crate) fn told_by(event: Option<&HubEvent>) -> Told {
+    let (account, contract) = match event {
+        None | Some(HubEvent::Account) => (true, true),
+        Some(HubEvent::Receivers) => (false, true),
+        Some(_) => (false, false),
+    };
+    Told { account, contract }
+}
+
 /// Tells the page whenever what `acct_status` says changed: the `account` event carries
-/// the same value, so a page waiting for a connect needs no timer of its own.
+/// the same value, so a page waiting for a connect needs no timer of its own. And keeps
+/// the window's contract in step with the list (`sync_contract`), for the page that
+/// reloads itself after an account is gone.
 pub fn watch<R: Runtime>(app: &AppHandle<R>, hub: Hub) {
     let app = app.clone();
     let mut events = hub.subscribe();
     tauri::async_runtime::spawn(async move {
         loop {
-            match events.recv().await {
-                Ok(HubEvent::Account) => {}
+            let told = match events.recv().await {
+                Ok(e) => told_by(Some(&e)),
                 // Fell behind: say how it is now rather than nothing.
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                Ok(_) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => told_by(None),
                 Err(_) => return,
+            };
+            if told.contract {
+                crate::sync_contract(&app);
             }
-            let status = app.state::<Hub>().account_status();
-            let _ = app.emit_to("main", "account", status);
+            if told.account {
+                let status = app.state::<Hub>().account_status();
+                let _ = app.emit_to("main", "account", status);
+            }
         }
     });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::allowed;
+    use super::{allowed, told_by, Told};
     use crate::contract::Os;
+    use sp_receivers::HubEvent;
+
+    /// Which of the Hub's events reach the page as `account`, and which bring the
+    /// window's contract up to date.
+    #[test]
+    fn an_account_event_is_said_and_any_change_of_the_list_renews_the_contract() {
+        let both = Told {
+            account: true,
+            contract: true,
+        };
+        assert_eq!(told_by(Some(&HubEvent::Account)), both);
+        assert_eq!(told_by(None), both, "fell behind: as it is now");
+        assert_eq!(
+            told_by(Some(&HubEvent::Receivers)),
+            Told {
+                account: false,
+                contract: true
+            }
+        );
+        for quiet in [
+            HubEvent::Connected { id: "a".into() },
+            HubEvent::Disconnected {
+                id: "a".into(),
+                retry_in_ms: 0,
+            },
+            HubEvent::NeedsYou {
+                id: "a".into(),
+                items: vec![],
+            },
+        ] {
+            assert_eq!(
+                told_by(Some(&quiet)),
+                Told {
+                    account: false,
+                    contract: false
+                }
+            );
+        }
+        assert_eq!(super::NOT_OPENED.0, "not_opened");
+    }
 
     fn at(url: &str) -> Option<tauri::Url> {
         url.parse().ok()

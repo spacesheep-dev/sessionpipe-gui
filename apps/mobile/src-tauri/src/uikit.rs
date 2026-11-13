@@ -41,14 +41,32 @@ pub unsafe fn fit(wk: *mut AnyObject) {
     }
 }
 
-/// Swaps the user script that starts with `marker` for `source` (first, at document start,
-/// main frame only), keeping every other script (Tauri's IPC) in order, then loads `url`.
-/// iOS can't replace the app's only window, so switching receivers renews the shell
-/// contract in place and reloads the bundled UI.
+/// Swaps the shell contract (`swap_contract`), then loads `url`. iOS can't replace the
+/// app's only window, so switching receivers renews the contract in place and reloads the
+/// bundled UI.
 ///
 /// # Safety
 /// `wk` must be the live WKWebView, on the main thread.
 pub unsafe fn renew_contract(wk: *mut AnyObject, marker: &str, source: &str, url: &str) {
+    if wk.is_null() {
+        return;
+    }
+    swap_contract(wk, marker, source);
+    let u: *mut AnyObject = msg_send![class!(NSURL), URLWithString: nsstring(url)];
+    if !u.is_null() {
+        let req: *mut AnyObject = msg_send![class!(NSURLRequest), requestWithURL: u];
+        let _: *mut AnyObject = msg_send![wk, loadRequest: req];
+    }
+}
+
+/// Swaps the user script that starts with `marker` for `source` (first, at document start,
+/// main frame only), keeping every other script (Tauri's IPC) in order. The page that is
+/// showing is not touched: the next one to load in this webview (a reload, a
+/// `location.replace`) starts with `source`.
+///
+/// # Safety
+/// `wk` must be the live WKWebView, on the main thread.
+pub unsafe fn swap_contract(wk: *mut AnyObject, marker: &str, source: &str) {
     if wk.is_null() {
         return;
     }
@@ -78,38 +96,51 @@ pub unsafe fn renew_contract(wk: *mut AnyObject, marker: &str, source: &str, url
         let us: *mut AnyObject = msg_send![keep, objectAtIndex: i];
         let _: () = msg_send![ucc, addUserScript: us];
     }
-    let u: *mut AnyObject = msg_send![class!(NSURL), URLWithString: nsstring(url)];
-    if !u.is_null() {
-        let req: *mut AnyObject = msg_send![class!(NSURLRequest), requestWithURL: u];
-        let _: *mut AnyObject = msg_send![wk, loadRequest: req];
-    }
 }
 
 /// Opens an http(s) URL in Safari. Main thread.
 pub fn open_external(url: &str) {
+    open_external_then(url, |_| {});
+}
+
+/// Opens an http(s) URL in Safari and tells `done` whether iOS opened it (UIKit's own
+/// word, given a moment later on the main thread); false at once for anything that is
+/// not an http(s) URL. Main thread.
+pub fn open_external_then(url: &str, done: impl FnOnce(bool) + Send + 'static) {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
-        return;
+        return done(false);
     }
-    open_url(url);
+    open_url(url, done);
 }
 
 /// Opens the app's own page in Settings (UIApplicationOpenSettingsURLString): where
 /// notifications are turned back on once refused. Main thread.
 pub fn open_settings() {
-    open_url("app-settings:");
+    open_url("app-settings:", |_| {});
 }
 
-/// Hands a URL to UIKit. Main thread.
-fn open_url(url: &str) {
+/// Hands a URL to UIKit; `done` hears whether it was opened. Main thread.
+fn open_url(url: &str, done: impl FnOnce(bool) + Send + 'static) {
+    use block2::RcBlock;
+    use std::sync::Mutex;
+    // UIKit calls its completion handler once; a block is `Fn`, so the one call is kept
+    // behind a lock, as the alert's answers are.
+    let done = Mutex::new(Some(done));
+    let say = move |opened: bool| {
+        if let Some(f) = done.lock().unwrap().take() {
+            f(opened);
+        }
+    };
     unsafe {
         let u: *mut AnyObject = msg_send![class!(NSURL), URLWithString: nsstring(url)];
         if u.is_null() {
-            return;
+            return say(false);
         }
         let app: *mut AnyObject = msg_send![class!(UIApplication), sharedApplication];
         let opts: *mut AnyObject = msg_send![class!(NSDictionary), dictionary];
-        let done: Option<&block2::Block<dyn Fn(Bool)>> = None;
-        let _: () = msg_send![app, openURL: u, options: opts, completionHandler: done];
+        let handler = RcBlock::new(move |opened: Bool| say(opened.as_bool()));
+        let handler: Option<&block2::Block<dyn Fn(Bool)>> = Some(&*handler);
+        let _: () = msg_send![app, openURL: u, options: opts, completionHandler: handler];
     }
 }
 

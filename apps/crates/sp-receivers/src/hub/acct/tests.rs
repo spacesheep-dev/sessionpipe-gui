@@ -2331,6 +2331,128 @@ async fn each_account_has_its_own_room_and_the_hubs_own_requests_theirs() {
     );
 }
 
+/// An account has no stream for the Hub to read needs-you from: its page hands the list
+/// over, and the Hub says it exactly as it says a receiver's (the events a notification
+/// is posted from, the list the menu reads, the count in the status file). Nothing of it
+/// goes to spacesheep, and it goes with the account.
+#[tokio::test]
+async fn an_accounts_needs_you_is_its_pages_to_hand_over_and_is_said_as_a_receivers_is() {
+    let t = TempDir::new("acct-needs");
+    let fake = Fake::start("needs").await;
+    let h = hub_in(t.path());
+    let id = connected(&h, &fake).await;
+    let rest = fake.count();
+    let mut events = h.subscribe();
+    let mut said = move || {
+        let mut out = Vec::new();
+        while let Ok(e) = events.try_recv() {
+            if matches!(
+                e,
+                HubEvent::NeedsYou { .. } | HubEvent::AttentionClosed { .. }
+            ) {
+                out.push(e);
+            }
+        }
+        out
+    };
+    let session = |sid: &str, asks: &[&str]| {
+        json!({
+            "key": format!("claude:{sid}"), "harness": "claude", "id": sid,
+            "title": format!("T {sid}"), "machine": "studio-mac", "cwd": "/src/app",
+            "state": "needs_you", "stateSince": format!("2026-11-13T08:00:0{}.000Z", sid.len()),
+            "openAttentions": asks.iter().map(|a| json!({
+                "attentionId": a, "kind": "permission", "tool": "Bash", "message": "ls",
+                "at": "2026-11-13T08:00:00.000Z", "answerable": true,
+            })).collect::<Vec<_>>(),
+            // Whatever else a session's summary holds is not read.
+            "counts": { "events": 7 }, "model": "x",
+        })
+    };
+    let needs_in_file =
+        |h: &Hub| serde_json::to_value(h.status().doc()).unwrap()["needsYou"].clone();
+
+    // The first list: said, with the account as its receiver.
+    assert_eq!(h.account_needs(&id, json!([session("a", &["p1"])])), Ok(1));
+    let e = said();
+    let [HubEvent::NeedsYou { id: whose, items }] = e.as_slice() else {
+        panic!("{e:?}");
+    };
+    assert_eq!(whose, &id);
+    assert_eq!(
+        (items[0].receiver.as_str(), items[0].session.as_str()),
+        (id.as_str(), "claude:a")
+    );
+    assert_eq!(items[0].attentions[0].attention_id, "p1");
+    assert_eq!(h.needs_you(), *items);
+    assert_eq!(needs_in_file(&h), json!(1));
+    // The same list again says nothing.
+    assert_eq!(h.account_needs(&id, json!([session("a", &["p1"])])), Ok(1));
+    assert!(said().is_empty());
+    // One answered, another asking: the answered one is closed, then the new list.
+    let both = json!([session("a", &[]), session("bb", &["q1"])]);
+    assert_eq!(h.account_needs(&id, both), Ok(2));
+    let e = said();
+    assert!(
+        matches!(
+            e.as_slice(),
+            [HubEvent::AttentionClosed { attention_id, .. }, HubEvent::NeedsYou { items, .. }]
+                if attention_id == "p1" && items.len() == 2
+        ),
+        "{e:?}"
+    );
+    assert_eq!(needs_in_file(&h), json!(2));
+
+    // What is not a list of sessions is refused and changes nothing; so is a list for an
+    // id that is no account here.
+    for bad in [
+        json!(null),
+        json!({ "sessions": [] }),
+        json!([{ "key": 1 }]),
+    ] {
+        assert_eq!(h.account_needs(&id, bad).unwrap_err().code, "bad_request");
+    }
+    let stranger = crate::id::account_id("https://spacesheep.dev", "stranger@example.com");
+    for who in [stranger.as_str(), "abcdefghij", ""] {
+        assert_eq!(
+            h.account_needs(who, json!([])).unwrap_err().code,
+            "unknown_account",
+            "{who}"
+        );
+    }
+    assert!(said().is_empty());
+    assert_eq!(h.needs_you().len(), 2);
+
+    // The last one clears: the empty list.
+    assert_eq!(h.account_needs(&id, json!([])), Ok(0));
+    let e = said();
+    assert!(
+        matches!(
+            e.as_slice(),
+            [HubEvent::AttentionClosed { attention_id, .. }, HubEvent::NeedsYou { items, .. }]
+                if attention_id == "q1" && items.is_empty()
+        ),
+        "{e:?}"
+    );
+    assert!(h.needs_you().is_empty());
+    assert_eq!(needs_in_file(&h), json!(0));
+    assert_eq!(fake.count(), rest, "nothing of it is spacesheep's to hear");
+
+    // It goes with the account: nothing is left to list, and nothing more is taken.
+    assert_eq!(h.account_needs(&id, json!([session("a", &["p1"])])), Ok(1));
+    h.account_disconnect(&id).await.unwrap();
+    assert!(h.needs_you().is_empty());
+    assert_eq!(
+        h.account_needs(&id, json!([])).unwrap_err().code,
+        "unknown_account"
+    );
+    // A build without the mode takes none either.
+    let off = hub_with(TempDir::new("acct-needs-off").path(), false, true);
+    assert_eq!(
+        off.account_needs(&id, json!([])).unwrap_err().code,
+        "unknown_account"
+    );
+}
+
 #[tokio::test]
 async fn the_documents_are_the_accounts_and_go_with_it() {
     let t = TempDir::new("acct-docs");
