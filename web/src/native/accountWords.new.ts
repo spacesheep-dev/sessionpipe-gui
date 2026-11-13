@@ -67,7 +67,8 @@ export const NEW_WORDS = {
   approveNoMachines: "No computer on this account can take a phone's key yet.",
   approveCannot: (reason: string) => `${reason}.`,
   removeLabel: (phone: string) => `Remove ${phone}`,
-  removeHint: "On spacesheep: Devices → Remove. It stops carrying anything this phone sends, right away.",
+  removeHint: (phone: string) =>
+    `On spacesheep: Devices → Remove. It stops carrying anything ${phone} sends, right away.`,
   openDevices: "Open Devices",
   composerCooling: (Phone: string, time: string) => `${Phone} can send from ${time}`,
   machinesApprove: (phone: string) => `Approve ${phone}`,

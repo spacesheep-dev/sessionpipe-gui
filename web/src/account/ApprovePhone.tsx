@@ -175,7 +175,7 @@ export default function ApprovePhone() {
                 <li className="form-row">
                   <span className="form-row-text">
                     <span className="form-label">{N.removeLabel(thisPhone())}</span>
-                    <span className="form-caption">{N.removeHint}</span>
+                    <span className="form-caption">{N.removeHint(thisPhone())}</span>
                   </span>
                   <button type="button" className="btn btn--sm" onClick={() => openOutside(devices)} data-remove>
                     {N.openDevices}
