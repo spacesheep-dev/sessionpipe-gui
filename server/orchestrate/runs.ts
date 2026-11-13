@@ -177,8 +177,8 @@ export function resolveText(run: WorkflowRun, step: WorkflowStep): string {
  *  run), every step pending, then moved once so the roots are ready. */
 export function newRun(w: Workflow, o: { id: string; input?: string; now: number; online: Online }): WorkflowRun {
   const plan = w.steps.map((s) => ({ ...s, agent: { ...s.agent }, ...(s.after ? { after: [...s.after] } : {}) }));
-  const steps: Record<string, StepRun> = {};
-  for (const s of plan) steps[s.id] = { status: "pending" };
+  // Defined, not assigned: a step id `__proto__` is a key of its own, not the prototype.
+  const steps: Record<string, StepRun> = Object.fromEntries(plan.map((s) => [s.id, { status: "pending" }]));
   const run: WorkflowRun = {
     id: o.id,
     workflowId: w.id,
@@ -375,10 +375,12 @@ export function settle(run: WorkflowRun, a: ControlActivity, now: number, online
 export function cancel(run: WorkflowRun, now: number): WorkflowRun {
   if (runEnded(run)) return run;
   const at = iso(now);
-  const steps: Record<string, StepRun> = {};
-  for (const [id, s] of Object.entries(run.steps))
-    steps[id] =
-      s.status === "pending" || s.status === "ready" || s.status === "sending" ? { status: "skipped", endedAt: at } : s;
+  const steps: Record<string, StepRun> = Object.fromEntries(
+    Object.entries(run.steps).map(([id, s]) => [
+      id,
+      s.status === "pending" || s.status === "ready" || s.status === "sending" ? { status: "skipped", endedAt: at } : s,
+    ]),
+  );
   const next: WorkflowRun = { ...run, rev: run.rev + 1, status: "cancelled", endedAt: at, steps };
   delete next.waitingFor;
   return next;
