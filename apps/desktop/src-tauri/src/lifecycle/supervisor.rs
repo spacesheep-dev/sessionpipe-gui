@@ -3207,7 +3207,7 @@ mod tests {
                 let body = if line.contains("/api/ui/info") {
                     r#"{"name":"sessionpipe-gui","version":"0.7.2","startedAt":"2026-11-12T10:00:00.000Z"}"#
                 } else {
-                    r#"{"machines":[],"rp_id":"localhost"}"#
+                    r#"{"machines":[],"rp_id":"127.0.0.1"}"#
                 };
                 log.lock().unwrap().push(line);
                 let _ = write!(
@@ -3283,7 +3283,7 @@ mod tests {
         // It is connected: the signer's question reaches it, through its machines door.
         // (That is the one thing a Hub ever asks an account when asked for "info".)
         let info = tauri::async_runtime::block_on(hub.get(&r.id, "/api/ui/info")).unwrap();
-        assert!(String::from_utf8_lossy(&info).contains(r#""rpId":"localhost""#));
+        assert!(String::from_utf8_lossy(&info).contains(r#""rpId":"127.0.0.1""#));
         assert!(hub.is_connected(&r.id));
         let asked = || seen.lock().unwrap().clone();
         assert_eq!(asked().len(), 1);

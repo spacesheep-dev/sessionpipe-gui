@@ -389,7 +389,12 @@ impl Hub {
             // Only a receiver is ever this computer's own.
             local: r.local && r.kind == Kind::Receiver,
             rp_id: match &r.account {
-                Some(a) if r.is_account() => a.rp_id.clone(),
+                // An account's is its own host or none, whatever the list holds (an
+                // entry saved before that was the rule, or rewritten on disk).
+                Some(a) if r.is_account() => a
+                    .rp_id
+                    .clone()
+                    .filter(|rp| crate::account::rp_is_the_hosts(rp, &r.origin)),
                 _ => info.rp_id,
             },
             account: self.account_ref(r),

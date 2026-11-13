@@ -895,6 +895,25 @@ pub fn rp_id_in(body: &[u8]) -> Option<String> {
     ok.then(|| rp.to_string())
 }
 
+/// Is `rp` the rp id an account at `origin` may have? Only its origin's own host,
+/// exactly: spacesheep's rp id is its hostname. Not a parent of it ("dev" for
+/// spacesheep.dev, "co.uk" for a host under it: the signer's own rule, written for
+/// receivers a person added, has no list of public suffixes and would take either), and
+/// not the name of the server one label up. The port is not part of it.
+pub fn rp_is_the_hosts(rp: &str, origin: &str) -> bool {
+    url::Url::parse(origin)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h == rp))
+        .unwrap_or(false)
+}
+
+/// The rp id an account at `origin` signs for, from its machines door's answer: what
+/// the answer names, when that is the origin's own host (`rp_is_the_hosts`). Anything
+/// else the door names is not kept, not said to the signer, and signs nothing.
+pub fn account_rp_id(body: &[u8], origin: &str) -> Option<String> {
+    rp_id_in(body).filter(|rp| rp_is_the_hosts(rp, origin))
+}
+
 /// Is `needle` anywhere in `hay`? (The key in an answer.)
 pub fn holds(hay: &[u8], needle: &[u8]) -> bool {
     !needle.is_empty()
@@ -1844,6 +1863,53 @@ mod tests {
         ] {
             assert_eq!(r.words("this iPhone"), r.words("this device"), "{r:?}");
         }
+    }
+
+    /// An account signs for its own host and nothing wider, whatever its door says.
+    #[test]
+    fn an_accounts_rp_id_is_its_origins_own_host_exactly() {
+        let door = |rp: &str| format!(r#"{{"machines":[],"rp_id":"{rp}"}}"#).into_bytes();
+        for (rp, origin) in [
+            ("spacesheep.dev", "https://spacesheep.dev"),
+            ("spacesheep.dev", "https://spacesheep.dev:8443"),
+            ("stagesheep.dev", "https://stagesheep.dev"),
+            ("localhost", "http://localhost:8841"),
+            ("127.0.0.1", "http://127.0.0.1:8841"),
+        ] {
+            assert!(rp_is_the_hosts(rp, origin), "{rp} {origin}");
+            assert_eq!(account_rp_id(&door(rp), origin).as_deref(), Some(rp));
+        }
+        for (rp, origin) in [
+            // A parent of the host, a public suffix among them.
+            ("dev", "https://spacesheep.dev"),
+            ("co.uk", "https://relay.evil.co.uk"),
+            ("uk", "https://relay.evil.co.uk"),
+            ("github.io", "https://evil.github.io"),
+            ("workers.dev", "https://evil.workers.dev"),
+            // The server one label up: an account on a subdomain does not sign as it.
+            ("spacesheep.dev", "https://acme.spacesheep.dev"),
+            ("spacesheep.dev", "https://mcp.spacesheep.dev"),
+            // A child, a sibling, another name, a look-alike.
+            ("app.spacesheep.dev", "https://spacesheep.dev"),
+            ("good.github.io", "https://evil.github.io"),
+            ("evil.example", "https://spacesheep.dev"),
+            ("notspacesheep.dev", "https://spacesheep.dev"),
+            ("spacesheep.dev.evil.example", "https://spacesheep.dev"),
+            // Part of an address, the wrong loopback name, nothing.
+            ("4", "https://1.2.3.4"),
+            ("3.4", "https://1.2.3.4"),
+            ("localhost", "http://127.0.0.1:8841"),
+            ("", "https://spacesheep.dev"),
+            ("spacesheep.dev", "not an origin"),
+        ] {
+            assert!(!rp_is_the_hosts(rp, origin), "{rp} {origin}");
+            assert_eq!(account_rp_id(&door(rp), origin), None, "{rp} {origin}");
+        }
+        // No rp id in the answer is none, as before.
+        assert_eq!(
+            account_rp_id(br#"{"machines":[]}"#, "https://spacesheep.dev"),
+            None
+        );
     }
 
     #[test]

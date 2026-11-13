@@ -18,6 +18,8 @@ const MACHINE: &str = "m_0123456789abcdefABCD";
 const RELAY: &str = "/api/sessionpipe/v1/relay";
 const MACHINES: &str = "/api/sessionpipe/v1/relay/machines";
 const JOBS_DOOR: &str = "/api/sessionpipe/v1/relay/jobs";
+/// The fake's rp id: its own host, as spacesheep's is.
+const RP: &str = "127.0.0.1";
 /// A signed command as the signer writes one under the day's grant.
 const SEND: &[u8] = br#"{"cmd":"{\"v\":1,\"kind\":\"prompt\"}","csig":"c2ln","grant":{"cred":"k","sig":"s","str":"g"},"confirm":null}"#;
 
@@ -194,7 +196,7 @@ fn route(w: &World, origin: &str, s: &Seen) -> Reply {
             200,
             json!({
                 "machines": [{ "id": MACHINE, "name": "studio-mac", "online": true }],
-                "rp_id": "localhost", "origin": origin,
+                "rp_id": RP, "origin": origin,
             })
             .to_string(),
         ),
@@ -641,7 +643,7 @@ async fn a_connect_the_person_approves_puts_the_key_in_the_hub_alone() {
     .await;
     let r = h.receiver(&a.id).unwrap();
     assert_eq!(r.account.as_ref().map(|x| x.kind), Some("spacesheep"));
-    assert_eq!(r.rp_id.as_deref(), Some("localhost"));
+    assert_eq!(r.rp_id.as_deref(), Some(RP));
     assert!(!r.local);
     assert_eq!(h.active().unwrap().id, a.id);
     let row = serde_json::to_value(&r).unwrap();
@@ -1870,13 +1872,27 @@ async fn a_redirect_is_neither_followed_nor_passed_on() {
                 (!s.target().starts_with("/api/gui/connect"))
                     .then(|| Reply::json(status, "{}").header("location", &to2))
             });
-            for (method, path, body) in [
-                ("GET", RELAY.to_string(), &b""[..]),
-                ("POST", format!("/api/machines/{MACHINE}/jobs"), SEND),
+            // A read says `redirected`. A send does not: whoever answered with a
+            // redirect had the command, whole, and nobody here knows whether a job was
+            // made of it first, so it is `unreachable`, which the page reads as unknown
+            // and never as "made no job".
+            for (method, path, body, code) in [
+                ("GET", RELAY.to_string(), &b""[..], "redirected"),
+                ("GET", MACHINES.to_string(), &b""[..], "redirected"),
+                ("GET", JOBS_DOOR.to_string(), &b""[..], "redirected"),
+                (
+                    "POST",
+                    format!("/api/machines/{MACHINE}/jobs"),
+                    SEND,
+                    "unreachable",
+                ),
             ] {
                 let before = fake.count();
                 let res = ask(&h, method, &id, &path, body).await;
-                assert_eq!(said(&res), (502, Some("redirected")), "{status} {to}");
+                assert_eq!(said(&res), (502, Some(code)), "{method} {status} {to}");
+                if method == "POST" {
+                    assert_eq!(fake.last().body, SEND, "spacesheep holds the command");
+                }
                 assert!(res.headers().get("location").is_none());
                 assert!(!dump(&res).contains("/api/keys") && !dump(&res).contains(&thief.origin()));
                 assert_eq!(fake.count(), before + 1, "asked once, never again");
@@ -2168,6 +2184,200 @@ async fn a_send_that_never_left_says_so_and_one_whose_answer_stopped_does_not() 
     assert!(!logged().join("\n").contains("ss_KEY-not-sent-dead"));
 }
 
+/// A frame of HTTP/2 as it comes off the wire: (type, flags, stream, payload).
+async fn h2_frame(s: &mut tokio::net::TcpStream) -> Option<(u8, u8, u32, Vec<u8>)> {
+    use tokio::io::AsyncReadExt;
+    let mut h = [0u8; 9];
+    s.read_exact(&mut h).await.ok()?;
+    let len = ((h[0] as usize) << 16) | ((h[1] as usize) << 8) | h[2] as usize;
+    let mut p = vec![0u8; len];
+    s.read_exact(&mut p).await.ok()?;
+    Some((
+        h[3],
+        h[4],
+        u32::from_be_bytes([h[5] & 0x7f, h[6], h[7], h[8]]),
+        p,
+    ))
+}
+
+/// A server that speaks HTTP/2 to one connection: it reads a request whole, then refuses
+/// it the way a line being drained does (`nack`: a `GOAWAY`, or a `REFUSED_STREAM` and
+/// then a `GOAWAY`), having stopped listening first, so that a second try cannot connect.
+/// What it read of the request's body is the second value.
+async fn h2_refusing(
+    nack: &'static str,
+) -> (u16, Arc<Mutex<Vec<u8>>>, tokio::task::JoinHandle<()>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    let got = Arc::new(Mutex::new(Vec::new()));
+    let g = got.clone();
+    let task = tokio::spawn(async move {
+        let (mut s, _) = l.accept().await.unwrap();
+        drop(l);
+        let mut preface = [0u8; 24];
+        s.read_exact(&mut preface).await.unwrap();
+        s.write_all(&[0, 0, 0, 4, 0, 0, 0, 0, 0]).await.unwrap(); // SETTINGS
+        let mut stream = 0u32;
+        loop {
+            let Some((kind, flags, id, payload)) = h2_frame(&mut s).await else {
+                return;
+            };
+            match kind {
+                // SETTINGS: acknowledged.
+                4 if flags & 1 == 0 => s.write_all(&[0, 0, 0, 4, 1, 0, 0, 0, 0]).await.unwrap(),
+                1 => stream = id,
+                0 => {
+                    g.lock().unwrap().extend_from_slice(&payload);
+                    // END_STREAM: the whole command is here.
+                    if flags & 1 == 1 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        // GOAWAY, last stream 0, NO_ERROR.
+        const GOAWAY: [u8; 17] = [0, 0, 8, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        if nack == "refused" {
+            let id = stream.to_be_bytes();
+            // RST_STREAM(REFUSED_STREAM) on the request's stream.
+            s.write_all(&[0, 0, 4, 3, 0, id[0], id[1], id[2], id[3], 0, 0, 0, 7])
+                .await
+                .unwrap();
+        }
+        s.write_all(&GOAWAY).await.unwrap();
+        let _ = s.flush().await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    });
+    (port, got, task)
+}
+
+/// One send to `port`, as the Hub makes one, over HTTP/2 without TLS (over https the same
+/// HTTP/2 is what spacesheep's edge negotiates); its error.
+async fn h2_send(client: reqwest::ClientBuilder, port: u16) -> reqwest::Error {
+    crate::ensure_crypto();
+    client
+        .http2_prior_knowledge()
+        .build()
+        .unwrap()
+        .post(format!(
+            "http://127.0.0.1:{port}/api/machines/{MACHINE}/jobs"
+        ))
+        .header(AUTHORIZATION, "Bearer ss_KEY-h2-refused")
+        .header(CONTENT_TYPE, JSON)
+        .body(SEND)
+        .timeout(request_timeout())
+        .send()
+        .await
+        .unwrap_err()
+}
+
+/// `not_sent` is said on a connect error, and means nothing of the command left this
+/// device. So a connect error must never follow a request that was already written. The
+/// Hub's client sends nothing twice; when spacesheep's edge refuses a stream it has read
+/// whole and the line is gone, the error is not a connect error, and the send is
+/// `unreachable`: unknown, asked again by the page with the same bytes.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_send_the_server_read_whole_and_refused_is_never_a_connect_error() {
+    let t = TempDir::new("acct-h2-refused");
+    let h = hub_in(t.path());
+    for nack in ["goaway", "refused"] {
+        let (port, got, task) = h2_refusing(nack).await;
+        let e = h2_send(Accounts::client_builder(&h.0.cfg), port).await;
+        task.await.unwrap();
+        assert_eq!(
+            got.lock().unwrap().as_slice(),
+            SEND,
+            "{nack}: the server holds the whole command"
+        );
+        assert!(!e.is_connect(), "{nack}: {e:?}");
+    }
+}
+
+/// Why the Hub's client turns reqwest's own retry off: with it on (reqwest's default),
+/// the same failure IS a connect error, because the request is sent a second time and
+/// that try cannot connect. Should a later reqwest stop doing so, this fails, and the
+/// reason above is to be read again.
+#[tokio::test(flavor = "multi_thread")]
+async fn with_reqwests_own_retry_a_connect_error_follows_a_request_the_server_read_whole() {
+    for nack in ["goaway", "refused"] {
+        let (port, got, task) = h2_refusing(nack).await;
+        let as_reqwest_comes = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none());
+        let e = h2_send(as_reqwest_comes, port).await;
+        task.await.unwrap();
+        assert_eq!(got.lock().unwrap().as_slice(), SEND, "{nack}");
+        assert!(
+            e.is_connect(),
+            "{nack}: the Hub would have said not_sent: {e:?}"
+        );
+    }
+}
+
+/// An account signs for its own host and no other name, whatever its machines door says
+/// and whatever the list on disk says.
+#[tokio::test]
+async fn an_accounts_rp_id_is_its_own_host_whatever_the_door_or_the_list_say() {
+    let t = TempDir::new("acct-rp");
+    let fake = Fake::start("rp").await;
+    let h = hub_in(t.path());
+    let id = connected(&h, &fake).await;
+    assert_eq!(h.receiver(&id).unwrap().rp_id.as_deref(), Some(RP));
+    let saved = || std::fs::read_to_string(t.path().join("receivers.json")).unwrap();
+    assert!(
+        saved().contains(&format!("\"rpId\": \"{RP}\"")),
+        "{}",
+        saved()
+    );
+    let info = |h: &Hub| {
+        let (h, id) = (h.clone(), id.clone());
+        async move {
+            let b = h.get(&id, "/api/ui/info").await.unwrap();
+            serde_json::from_slice::<Value>(&b).unwrap()["control"]["rpId"].clone()
+        }
+    };
+    // The door names a parent of the host, a public suffix, another server, a bare
+    // label: none is kept, none is said to the signer, and what was known stays.
+    for rp in [
+        "0.0.1",
+        "1",
+        "dev",
+        "com",
+        "co.uk",
+        "evil.example",
+        "localhost",
+    ] {
+        let body = format!(r#"{{"machines":[],"rp_id":"{rp}"}}"#);
+        fake.hook(move |s| (s.target() == MACHINES).then(|| Reply::json(200, body.clone())));
+        let res = ask(&h, "GET", &id, MACHINES, b"").await;
+        assert_eq!(res.status(), 200, "the page still gets the answer");
+        assert_eq!(h.receiver(&id).unwrap().rp_id.as_deref(), Some(RP), "{rp}");
+        assert!(!saved().contains(&format!("\"rpId\": \"{rp}\"")), "{rp}");
+        assert_eq!(info(&h).await, Value::Null, "{rp}: the signer is told none");
+    }
+    fake.set(|w| w.hook = None);
+    assert_eq!(info(&h).await, json!(RP));
+    // A list that holds another rp id for the account (saved by an earlier version, or
+    // rewritten): the account has none until its door says its own again.
+    let list = saved();
+    for rp in ["dev", "0.0.1", "evil.example"] {
+        let to = list.replace(
+            &format!("\"rpId\": \"{RP}\""),
+            &format!("\"rpId\": \"{rp}\""),
+        );
+        assert_ne!(to, list);
+        std::fs::write(t.path().join("receivers.json"), to).unwrap();
+        let again = hub_in(t.path());
+        assert_eq!(again.receiver(&id).unwrap().rp_id, None, "{rp}");
+        assert!(again.receivers().iter().all(|r| r.rp_id.is_none()));
+        let res = ask(&again, "GET", &id, MACHINES, b"").await;
+        assert_eq!(res.status(), 200);
+        assert_eq!(again.receiver(&id).unwrap().rp_id.as_deref(), Some(RP));
+    }
+}
+
 #[tokio::test]
 async fn a_401_marks_the_account_and_a_429_passes_with_its_wait() {
     let t = TempDir::new("acct-401");
@@ -2337,7 +2547,7 @@ async fn each_account_has_its_own_room_and_the_hubs_own_requests_theirs() {
     // The Hub's own questions are not the page's: the signer still learns what it signs
     // for, and this device's key can still be asked about.
     let info: Value = serde_json::from_slice(&h.get(&id, "/api/ui/info").await.unwrap()).unwrap();
-    assert_eq!(info["control"]["rpId"], "localhost");
+    assert_eq!(info["control"]["rpId"], RP);
     assert!(h.account_device_ask(&id, &device_key('K')).await.is_ok());
     // Another account is not this one: all its room is its own.
     assert_eq!(ask(&h, "GET", &id2, RELAY, b"").await.status(), 200);
@@ -2671,11 +2881,7 @@ async fn an_account_survives_a_restart_of_the_hub() {
     assert_eq!(st.connect, None, "an old outcome is not news");
     let r = h.active().unwrap();
     assert_eq!(r.id, id);
-    assert_eq!(
-        r.rp_id.as_deref(),
-        Some("localhost"),
-        "the rp id is kept too"
-    );
+    assert_eq!(r.rp_id.as_deref(), Some(RP), "the rp id is kept too");
     assert_eq!(
         h.account_doc_get(&id, "labels").unwrap(),
         Some(json!({ "rev": 1 }))
@@ -2848,7 +3054,7 @@ async fn nothing_that_speaks_to_a_receiver_speaks_to_an_account() {
     // What the signer asks of a receiver, answered from the machines door: the rp id it
     // signs for, the machines' names for a prompt.
     let info: Value = serde_json::from_slice(&h.get(&id, "/api/ui/info").await.unwrap()).unwrap();
-    assert_eq!(info["control"]["rpId"], "localhost");
+    assert_eq!(info["control"]["rpId"], RP);
     let ms: Value =
         serde_json::from_slice(&h.get(&id, "/api/ui/control/machines").await.unwrap()).unwrap();
     assert_eq!(

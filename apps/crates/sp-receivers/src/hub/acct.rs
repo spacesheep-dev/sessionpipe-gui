@@ -179,13 +179,7 @@ impl Accounts {
                 "acct: account keys were given the receivers' key store; the account mode is off"
             );
         }
-        let client = reqwest::Client::builder()
-            .user_agent(cfg.user_agent.clone())
-            .connect_timeout(Duration::from_secs(5))
-            .redirect(reqwest::redirect::Policy::none())
-            .https_only(!cfg.account.allow_local_http)
-            .build()
-            .expect("http client");
+        let client = Accounts::client_builder(cfg).build().expect("http client");
         Accounts {
             enabled: cfg.account.enabled && apart,
             client,
@@ -209,6 +203,30 @@ impl Accounts {
             docs_lock: Mutex::new(()),
             needs: Mutex::new(HashMap::new()),
         }
+    }
+}
+
+impl Accounts {
+    /// The client every request to spacesheep is made with. No redirect is followed. No
+    /// cookie is kept (reqwest keeps none unless asked to). Outside a debug build or a
+    /// test nothing but https is spoken.
+    ///
+    /// And nothing is sent twice: reqwest's own retry is off. By default it sends a
+    /// request again when the server refuses its HTTP/2 stream (a `GOAWAY`, a
+    /// `REFUSED_STREAM`: routine on a line being drained), and if that second try
+    /// cannot connect, the error it returns is the second try's: a connect error, for
+    /// a request whose bytes the first connection carried whole. The send door says
+    /// `not_sent` on a connect error and means that nothing left this device, so here a
+    /// connect error must be the first and only try's. Nothing is lost by it: the page
+    /// asks a send again itself, with the same signed bytes, and reads are asked again
+    /// by their reader.
+    fn client_builder(cfg: &HubConfig) -> reqwest::ClientBuilder {
+        reqwest::Client::builder()
+            .user_agent(cfg.user_agent.clone())
+            .connect_timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
+            .https_only(!cfg.account.allow_local_http)
     }
 }
 
@@ -848,7 +866,17 @@ impl Hub {
         let status = res.status().as_u16();
         if (300..400).contains(&status) {
             failed("a redirect, not followed");
-            return Err(Refused::Redirected);
+            // A redirect is an answer: whoever gave it had the request. For a read
+            // that is all there is to say. For a send it means the command was
+            // delivered, whole, to spacesheep or to something in front of it, and
+            // nobody here knows whether a job was made of it before the redirect was
+            // written: that is `unreachable` (the page asks again with the same
+            // bytes), never a code the page may read as "made no job".
+            return Err(if door == Door::MachineJobs {
+                Refused::Unreachable
+            } else {
+                Refused::Redirected
+            });
         }
         let content_type = res.headers().get(CONTENT_TYPE).cloned();
         let retry_after = res
@@ -903,8 +931,14 @@ impl Hub {
                 self.0.cfg.status.frame(&rx.id);
             }
             if door == Door::RelayMachines {
-                if let Some(rp) = account::rp_id_in(&body) {
-                    self.account_rp(&rx.id, rp);
+                // Kept only when it is the account's own host: see `rp_is_the_hosts`.
+                match account::account_rp_id(&body, &origin) {
+                    Some(rp) => self.account_rp(&rx.id, rp),
+                    None if account::rp_id_in(&body).is_some() => log::warn!(
+                        "acct {}: the machines door names an rp id that is not its own host; not kept",
+                        rx.id
+                    ),
+                    None => {}
                 }
             }
         }
@@ -944,7 +978,7 @@ impl Hub {
         let out = if path == "/api/ui/info" {
             serde_json::json!({
                 "name": "sessionpipe-gui",
-                "control": { "rpId": account::rp_id_in(&a.body) },
+                "control": { "rpId": account::account_rp_id(&a.body, &rx.origin) },
             })
         } else {
             let machines: Vec<serde_json::Value> = v["machines"]
