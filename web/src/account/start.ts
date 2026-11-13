@@ -53,27 +53,55 @@ const leave = (): void => {
   location.replace("/");
 };
 
+/** Starts the backend on what the phone kept. When that cannot be read into a board (a
+ *  cache from a version that wrote it another way, a write cut short) it is never a blank
+ *  page: what was kept is deleted and the backend is started once more with nowhere to
+ *  keep the sessions, so the board is read from the relay again. That is for this launch
+ *  only (the next one has its storage back), so the notice that sessions are not kept on
+ *  this phone is not passed on from it: it would not be true. */
+export async function startOnKept(
+  start: (o: { idb?: null; notice: (n: AccountNotice) => void }) => Promise<AccountBackend>,
+  o: { notice: (n: AccountNotice) => void; forgetKept: () => void; unsay: () => void },
+): Promise<AccountBackend> {
+  try {
+    return await start({ notice: o.notice });
+  } catch (e) {
+    console.error("[account] the kept board could not be read:", e);
+    // Whatever the first try had to say is of a backend that never came up.
+    o.unsay();
+    o.forgetKept();
+    return start({ idb: null, notice: (n) => void (n.kind !== "cache_memory" && o.notice(n)) });
+  }
+}
+
+/** What of the backend the page leaves where a test, or somebody looking into a problem,
+ *  can read it: how the account stands and what was asked. Nothing that acts (no send, no
+ *  disconnect, no key): a script in the page has the app's own ways for those already. */
+export type AccountHook = Pick<AccountBackend, "view" | "subscribe" | "asked" | "flushed">;
+export const hookOf = (b: AccountBackend): AccountHook => ({
+  view: () => b.view(),
+  subscribe: (l) => b.subscribe(l),
+  asked: b.asked,
+  flushed: () => b.flushed(),
+});
+
 export async function startAccount(): Promise<AccountBackend | null> {
   const shell = accountShell();
   if (!shell) return null;
-  const notice = (n: AccountNotice): void => void notices.push(n);
-  let backend: AccountBackend;
-  try {
-    backend = await startAccountBackend({ shell, calls: tauriCalls, notice, onGone: leave });
-  } catch (e) {
-    // What was kept could not be read into a board (a cache from a version that wrote it
-    // another way, a write cut short): never a blank page. It is deleted and the board is
-    // read from the relay again, kept in memory this once.
-    console.error("[account] the kept board could not be read:", e);
-    notices.length = 0;
-    try {
-      indexedDB.deleteDatabase(cacheName(shell.id));
-    } catch {
-      // no IndexedDB to delete from
-    }
-    backend = await startAccountBackend({ shell, calls: tauriCalls, idb: null, notice, onGone: leave });
-  }
+  const backend = await startOnKept((o) => startAccountBackend({ shell, calls: tauriCalls, onGone: leave, ...o }), {
+    notice: (n) => void notices.push(n),
+    unsay: () => {
+      notices.length = 0;
+    },
+    forgetKept: () => {
+      try {
+        indexedDB.deleteDatabase(cacheName(shell.id));
+      } catch {
+        // no IndexedDB to delete from
+      }
+    },
+  });
   setApiBackend(backend.answer);
-  (window as unknown as { __sessionpipeAccount?: AccountBackend }).__sessionpipeAccount = backend;
+  (window as unknown as { __sessionpipeAccount?: AccountHook }).__sessionpipeAccount = hookOf(backend);
   return backend;
 }

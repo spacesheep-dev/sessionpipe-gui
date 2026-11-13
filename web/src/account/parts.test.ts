@@ -9,13 +9,14 @@ import { HUB_HEADER } from "../../../server/sources/relay";
 import { StoreCore } from "../../../server/store/core";
 import { MemoryLog } from "../../../server/store/log";
 import { Session } from "../../../test/events";
+import type { AccountBackend, AccountNotice } from "./backend";
 import { CACHE_EVENTS_MAX, compacted, memoryCache, openCache, pagesToDrop, pagesTooOld, sweepCaches } from "./cache";
 import { DOC_READ_WAITS_MS, openDocs } from "./docs";
 import { hubCode, openDoors, SEND_BUSY_TRIES, SEND_UNKNOWN, SEND_UNKNOWN_CODE, SEND_UNKNOWN_WAITS_MS } from "./doors";
 import { PageLog } from "./log";
 import { fitSends, readSends, SETTLED_TEXT_CHARS } from "./sends";
 import { accountShell } from "./shell";
-import { noticeWords } from "./start";
+import { hookOf, noticeWords, startOnKept } from "./start";
 
 describe("the shell's contract, read for an account", () => {
   const contract = (receiver: unknown, over: Record<string, unknown> = {}) => ({
@@ -573,6 +574,82 @@ describe("the sends a page keeps", () => {
     for (const raw of [null, undefined, "x", 7, [], { queues: [] }, { queues: null }])
       expect(readSends(raw)).toBeNull();
     expect(readSends({ v: 1, queues: { m_1: "not rows", m_2: [] } })).toEqual({ m_2: [] });
+  });
+});
+
+describe("starting on what the phone kept", () => {
+  const backend = (name: string) =>
+    ({
+      name,
+      view: () => ({ id: name }),
+      subscribe: () => () => {},
+      asked: new Map([["GET /api/ui/info", 200]]),
+      flushed: async () => {},
+      transport: {},
+      answer: async () => new Response("x"),
+      disconnect: async () => ({}),
+      deviceAsk: async () => ({}),
+      device: async () => ({}),
+      stop: () => {},
+    }) as unknown as AccountBackend & { name: string };
+
+  it("a kept board that reads is the backend, with what it had to say", async () => {
+    const said: AccountNotice[] = [];
+    const steps: string[] = [];
+    const b = await startOnKept(
+      async (o) => {
+        steps.push(o.idb === null ? "start with nothing kept" : "start");
+        o.notice({ kind: "cache_memory" });
+        return backend("first");
+      },
+      { notice: (n) => said.push(n), forgetKept: () => steps.push("forget"), unsay: () => steps.push("unsay") },
+    );
+    expect((b as unknown as { name: string }).name).toBe("first");
+    expect(steps).toEqual(["start"]);
+    expect(said).toEqual([{ kind: "cache_memory" }]);
+  });
+
+  it("one that cannot be read is deleted and read again from the relay, without saying sessions are never kept here", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const said: AccountNotice[] = [];
+      const steps: string[] = [];
+      let n = 0;
+      const b = await startOnKept(
+        async (o) => {
+          steps.push(o.idb === null ? "start with nothing kept" : "start");
+          if (n++ === 0) {
+            o.notice({ kind: "doc_unread", names: ["labels"] });
+            throw new Error("a page that is not a page");
+          }
+          // Nowhere to keep the sessions this once, and the labels read fine this time.
+          o.notice({ kind: "cache_memory" });
+          o.notice({ kind: "doc_unread", names: ["marks"] });
+          return backend("second");
+        },
+        {
+          notice: (x) => said.push(x),
+          forgetKept: () => steps.push("forget"),
+          unsay: () => {
+            steps.push("unsay");
+            said.length = 0;
+          },
+        },
+      );
+      expect((b as unknown as { name: string }).name).toBe("second");
+      expect(steps).toEqual(["start", "unsay", "forget", "start with nothing kept"]);
+      // Next launch the storage is there again: "they load again each time" would be false.
+      expect(said).toEqual([{ kind: "doc_unread", names: ["marks"] }]);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it("leaves in the page only what reads: nothing there sends, disconnects or holds a key", () => {
+    const hook = hookOf(backend("b"));
+    expect(Object.keys(hook).sort()).toEqual(["asked", "flushed", "subscribe", "view"]);
+    expect(hook.view()).toEqual({ id: "b" });
+    expect(hook.asked.get("GET /api/ui/info")).toBe(200);
   });
 });
 

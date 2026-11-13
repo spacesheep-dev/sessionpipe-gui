@@ -216,11 +216,13 @@ test("shows the board and a session from the relay, and what happens next as it 
 
 test("this phone's key is asked to be trusted through the hub; once the computer trusts it a message goes, and its answer comes back", async () => {
   // The page supplies nothing: the hub reads the key from the signer and asks spacesheep.
-  const asked = await page.evaluate(() =>
-    (
-      window as unknown as { __sessionpipeAccount: { deviceAsk(): Promise<{ code: string; keyId: string }> } }
-    ).__sessionpipeAccount.deviceAsk(),
-  );
+  expect(
+    await page.evaluate(() =>
+      Object.keys((window as unknown as { __sessionpipeAccount: object }).__sessionpipeAccount).sort(),
+    ),
+    "what the page leaves for a test to read: nothing in it acts on the account",
+  ).toEqual(["asked", "flushed", "subscribe", "view"]);
+  const asked = await invoke<{ code: string; keyId: string }>("acct_device_ask", { id: [...hub.accounts.keys()][0]! });
   expect(asked.code).toBe("71");
   expect([...ss.deviceRequests.keys()]).toEqual([asked.keyId]);
   // Approved on spacesheep's Devices page: the computer trusts the key from now on.
