@@ -112,7 +112,7 @@ impl Signer {
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
-            return Err(Error::new("busy", "Finish the Touch ID prompt first"));
+            return Err(Error::new("busy", crate::words::Device::current().busy()));
         }
         Ok(Prompting(&self.prompting))
     }
@@ -122,7 +122,12 @@ impl Signer {
             .lock()
             .unwrap()
             .prompt(rp, op, self.now(), retry)
-            .map_err(|_| Error::new("rate_limited", "Slow down: too many Touch ID requests"))
+            .map_err(|_| {
+                Error::new(
+                    "rate_limited",
+                    crate::words::Device::current().too_many_prompts(),
+                )
+            })
     }
 
     fn stored_device(&self, rp: &str) -> Option<DeviceRecord> {

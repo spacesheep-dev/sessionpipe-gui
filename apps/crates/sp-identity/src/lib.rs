@@ -25,6 +25,7 @@ pub mod se;
 pub mod signer;
 pub mod validate;
 pub mod vault;
+pub mod words;
 
 #[cfg(feature = "plugin")]
 pub mod plugin;

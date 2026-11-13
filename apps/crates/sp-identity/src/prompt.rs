@@ -1,6 +1,7 @@
 //! The Touch ID prompt's words, written by Rust from what is really being signed, never by
 //! the page (arch-identity §6.4). macOS shows them as “"sessionpipe" is trying to <reason>”.
 use crate::validate::Checked;
+use crate::words::Device;
 
 /// A name from a receiver or a command, safe on a system sheet: no control characters,
 /// no bidi overrides, at most 40 characters.
@@ -19,14 +20,35 @@ pub fn clean(s: &str) -> String {
 
 /// The day grant: “send to your machines through <host> for the next 24 hours”.
 pub fn grant(host: &str) -> String {
-    format!(
-        "send to your machines through {} for the next 24 hours",
-        clean(host)
-    )
+    grant_on(Device::current(), host)
+}
+
+/// The day grant's words on `device`. An iPhone shows them alone, as a sentence, and
+/// calls what it sends to "your computers", as the rest of the phone's words do.
+pub fn grant_on(device: Device, host: &str) -> String {
+    match device {
+        Device::Mac => format!(
+            "send to your machines through {} for the next 24 hours",
+            clean(host)
+        ),
+        Device::IPhone => format!(
+            "Send to your computers through {} for the next 24 hours.",
+            clean(host)
+        ),
+    }
 }
 
 /// A confirm: what the command does, on which machine.
 pub fn confirm(c: &Checked, machine: &str) -> String {
+    confirm_on(Device::current(), c, machine)
+}
+
+/// A confirm's words on `device`: the Mac's fragment, or the same as a sentence.
+pub fn confirm_on(device: Device, c: &Checked, machine: &str) -> String {
+    device.reason(confirm_fragment(c, machine))
+}
+
+fn confirm_fragment(c: &Checked, machine: &str) -> String {
     let m = clean(machine);
     match c.kind.as_str() {
         "key.add" => format!(
@@ -142,6 +164,60 @@ mod tests {
         assert_eq!(
             confirm(&p, "lab-mac"),
             "start signing in to Claude on lab-mac"
+        );
+    }
+
+    /// On an iPhone the sheet shows the reason alone: each is a sentence there. What is
+    /// signed is the same; only the words around it differ.
+    #[test]
+    fn on_an_iphone_each_reason_is_a_sentence() {
+        let i = Device::IPhone;
+        assert_eq!(
+            grant_on(i, "spacesheep.dev"),
+            "Send to your computers through spacesheep.dev for the next 24 hours."
+        );
+        assert_eq!(
+            grant_on(Device::Mac, "spacesheep.dev"),
+            grant("spacesheep.dev"),
+            "the tests run on a Mac"
+        );
+        let on = |c: &Checked| confirm_on(i, c, "studio-mac");
+        assert_eq!(
+            on(&checked("key.add", None, Some("iPhone"))),
+            "Trust “iPhone” on studio-mac."
+        );
+        assert_eq!(
+            on(&checked("permission.answer", Some("allow"), None)),
+            "Allow a permission request on studio-mac."
+        );
+        assert_eq!(
+            on(&checked("permission.answer", Some("deny"), None)),
+            "Deny a permission request on studio-mac."
+        );
+        assert_eq!(
+            on(&checked("start", None, None)),
+            "Start a session on studio-mac."
+        );
+        assert_eq!(
+            on(&checked("cancel", None, None)),
+            "Stop a session on studio-mac."
+        );
+        assert_eq!(
+            on(&checked("prompt", None, None)),
+            "Send a message to a session on studio-mac."
+        );
+        // A name is cleaned the same wherever it is shown.
+        assert_eq!(
+            confirm_on(
+                i,
+                &checked("key.add", None, Some("a\u{0007}b")),
+                "m\u{202E}"
+            ),
+            "Trust “ab” on m."
+        );
+        assert_eq!(
+            confirm_on(Device::Mac, &checked("prompt", None, None), "studio-mac"),
+            confirm(&checked("prompt", None, None), "studio-mac")
         );
     }
 

@@ -23,13 +23,15 @@ pub const SPID_NOT_INTERACTIVE: i32 = 5;
 pub const SPID_NOT_FOUND: i32 = 6;
 
 pub fn status_error(code: i32) -> Error {
+    status_error_on(crate::words::Device::current(), code)
+}
+
+/// `status_error` in the words of `device`.
+pub fn status_error_on(device: crate::words::Device, code: i32) -> Error {
     match code {
-        SPID_CANCELLED => Error::new("cancelled", "Touch ID was cancelled"),
-        SPID_LOCKOUT => Error::new("lockout", "Touch ID is locked"),
-        SPID_UNAVAILABLE => Error::new(
-            "unavailable",
-            "no Secure Enclave with Touch ID or a password here",
-        ),
+        SPID_CANCELLED => Error::new("cancelled", device.cancelled()),
+        SPID_LOCKOUT => Error::new("lockout", device.locked_out()),
+        SPID_UNAVAILABLE => Error::new("unavailable", device.no_hardware()),
         SPID_NOT_INTERACTIVE => Error::new(
             "cancelled",
             "the key needs the person, and no prompt may show",
@@ -119,7 +121,7 @@ impl Hardware for Enclave {
         if rc == SPID_NOT_INTERACTIVE {
             return Err(Error::new(
                 "unavailable",
-                "unlock this Mac first: a key can't be made while it is locked",
+                crate::words::Device::current().unlock_first(),
             ));
         }
         if rc != SPID_OK {
