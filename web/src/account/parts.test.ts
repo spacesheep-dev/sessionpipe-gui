@@ -10,7 +10,7 @@ import { StoreCore } from "../../../server/store/core";
 import { MemoryLog } from "../../../server/store/log";
 import { Session } from "../../../test/events";
 import { CACHE_EVENTS_MAX, compacted, memoryCache, openCache, pagesToDrop, pagesTooOld, sweepCaches } from "./cache";
-import { openDocs } from "./docs";
+import { DOC_READ_WAITS_MS, openDocs } from "./docs";
 import { hubCode, openDoors, SEND_BUSY_TRIES } from "./doors";
 import { PageLog } from "./log";
 import { accountShell } from "./shell";
@@ -293,24 +293,92 @@ describe("the account's documents", () => {
     expect(docs.failed()).toEqual([]);
   });
 
-  it("a document the hub cannot read or keep stays in memory, and is named", async () => {
+  it("a save the hub cannot keep stays in memory, is named, and is tried again with the next", async () => {
+    let refuse = true;
+    const kept = new Map<string, unknown>();
     const docs = await openDocs(
       {
-        docGet: async (_id, name) => {
-          if (name === "sends") throw { code: "io", message: "disk" };
-          return null;
-        },
-        docSet: async () => {
-          throw { code: "too_large", message: "too large" };
+        docGet: async () => null,
+        docSet: async (_id, name, value) => {
+          if (refuse) throw { code: "too_large", message: "too large" };
+          kept.set(name, value);
+          return 1;
         },
       },
       "ACCT",
     );
-    expect(docs.failed()).toEqual(["sends"]);
     docs.keep("labels").save({ v: 1 });
     await docs.flushed();
     expect(docs.keep("labels").load()).toEqual({ v: 1 });
-    expect(docs.failed().sort()).toEqual(["labels", "sends"]);
+    expect(docs.failed()).toEqual(["labels"]);
+    expect(docs.unread()).toEqual([]);
+    refuse = false;
+    docs.keep("labels").save({ v: 2 });
+    await docs.flushed();
+    expect(kept.get("labels")).toEqual({ v: 2 });
+    expect(docs.failed()).toEqual([]);
+  });
+
+  it("a read that fails is tried again; one that comes back the second time is the document", async () => {
+    const waits: number[] = [];
+    let labelsReads = 0;
+    const docs = await openDocs(
+      {
+        docGet: async (_id, name) => {
+          if (name === "labels" && labelsReads++ === 0) throw { code: "io", message: "disk" };
+          return name === "labels" ? { v: 1, names: { red: "Urgent" } } : null;
+        },
+        docSet: async () => 1,
+      },
+      "ACCT",
+      { sleep: async (ms) => void waits.push(ms) },
+    );
+    expect(waits).toEqual([DOC_READ_WAITS_MS[0]]);
+    expect(docs.unread()).toEqual([]);
+    expect(docs.keep("labels").load()).toEqual({ v: 1, names: { red: "Urgent" } });
+  });
+
+  it("a document that could not be read is never written over: in memory for this launch, the hub's left as it is", async () => {
+    const hub = new Map<string, unknown>([
+      ["labels", { v: 1, names: { red: "Urgent" } }],
+      ["marks", { v: 1, read: { a: "2026-11-01T00:00:00.000Z" } }],
+    ]);
+    const sets: string[] = [];
+    const waits: number[] = [];
+    const docs = await openDocs(
+      {
+        docGet: async (_id, name) => {
+          if (name === "labels" || name === "sends") throw { code: "io", message: "disk" };
+          return hub.get(name) ?? null;
+        },
+        docSet: async (_id, name, value) => {
+          sets.push(name);
+          hub.set(name, value);
+          return 1;
+        },
+      },
+      "ACCT",
+      { sleep: async (ms) => void waits.push(ms) },
+    );
+    // Each was tried three times in all.
+    expect(waits.sort()).toEqual([...DOC_READ_WAITS_MS, ...DOC_READ_WAITS_MS].sort());
+    expect(docs.unread().sort()).toEqual(["labels", "sends"]);
+    // Nothing was read, so the page starts that document from nothing...
+    const labels = docs.keep("labels");
+    expect(labels.load()).toBeUndefined();
+    // ...and what it saves is its own for this launch: none of it reaches the hub.
+    labels.save({ v: 1, names: {} });
+    labels.save({ v: 1, names: { blue: "Later" } });
+    docs.keep("sends").save({ v: 1, queues: {} });
+    // A document that was read is kept as ever.
+    docs.keep("marks").save({ v: 1, read: { a: "2026-11-02T00:00:00.000Z" } });
+    await docs.flushed();
+    expect(labels.load()).toEqual({ v: 1, names: { blue: "Later" } });
+    expect(sets).toEqual(["marks"]);
+    expect(hub.get("labels")).toEqual({ v: 1, names: { red: "Urgent" } });
+    expect(hub.has("sends")).toBe(false);
+    expect(docs.unread().sort()).toEqual(["labels", "sends"]);
+    expect(docs.failed()).toEqual([]);
   });
 });
 

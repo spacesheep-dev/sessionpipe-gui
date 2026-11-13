@@ -5,6 +5,11 @@
 // account's id (`acct_doc_get` / `acct_doc_set`); here each is a DocKeep (server/ui/
 // docKeep.ts), which reads and writes at once: every document is read before anything
 // opens one, and a save is handed to the hub behind it, the last value winning.
+//
+// A document that could not be read is not a document that is empty. Its read is tried
+// again a few times at the start; if it still fails, what the hub keeps of it is left
+// exactly as it is: this launch works on that document in memory and writes nothing over
+// it (`unread`), so one bad read can never replace the person's labels with none.
 import type { DocKeep } from "../../../server/ui/docKeep";
 import type { ShellCalls } from "./shell";
 
@@ -17,21 +22,38 @@ export interface AccountDocs {
   keep(name: DocName): DocKeep;
   /** Resolves when every save so far reached the hub (or failed). */
   flushed(): Promise<void>;
-  /** The documents that could not be read or written, by name: kept in memory only. */
+  /** The documents that could not be read at the start, by name: in memory for this
+   *  launch, and nothing is written over what the hub keeps of them. */
+  unread(): DocName[];
+  /** The documents whose last save did not reach the hub, by name (the next save tries again). */
   failed(): DocName[];
 }
 
-export async function openDocs(calls: Pick<ShellCalls, "docGet" | "docSet">, id: string): Promise<AccountDocs> {
+/** How long each further try of a document's read waits: three tries in all. */
+export const DOC_READ_WAITS_MS: readonly number[] = [150, 400];
+
+export async function openDocs(
+  calls: Pick<ShellCalls, "docGet" | "docSet">,
+  id: string,
+  o: { sleep?: (ms: number) => Promise<void> } = {},
+): Promise<AccountDocs> {
+  const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const values = new Map<DocName, unknown>();
+  const unread = new Set<DocName>();
   const failed = new Set<DocName>();
   await Promise.all(
     DOC_NAMES.map(async (name) => {
-      try {
-        const v = await calls.docGet(id, name);
-        if (v !== null && v !== undefined) values.set(name, v);
-      } catch (e) {
-        failed.add(name);
-        console.warn(`[account] ${name} could not be read:`, e);
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const v = await calls.docGet(id, name);
+          if (v !== null && v !== undefined) values.set(name, v);
+          return;
+        } catch (e) {
+          console.warn(`[account] ${name} could not be read:`, e);
+          const wait = DOC_READ_WAITS_MS[attempt];
+          if (wait === undefined) return void unread.add(name);
+          await sleep(wait);
+        }
       }
     }),
   );
@@ -63,6 +85,8 @@ export async function openDocs(calls: Pick<ShellCalls, "docGet" | "docSet">, id:
         // Its own copy, as a file's would be: what the document changes next is not this.
         const copy = JSON.parse(JSON.stringify(value)) as unknown;
         values.set(name, copy);
+        // Never read: what the hub keeps is not known, so nothing is written over it.
+        if (unread.has(name)) return;
         waiting.set(name, copy);
         flush(name);
       },
@@ -72,6 +96,7 @@ export async function openDocs(calls: Pick<ShellCalls, "docGet" | "docSet">, id:
     async flushed() {
       while (writing.size) await Promise.all([...writing.values()]);
     },
+    unread: () => [...unread],
     failed: () => [...failed],
   };
 }

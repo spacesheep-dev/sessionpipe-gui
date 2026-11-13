@@ -12,23 +12,38 @@ import { accountShell, tauriCalls } from "./shell";
 export const notices: AccountNotice[] = [];
 
 /** Says each of them, once, as a quiet toast: nothing is wrong with the board, it is only
- *  not kept. */
+ *  not kept. Of the documents, the person's own are said (their labels and read marks);
+ *  the usage limits are read again from the events, so nothing of theirs is lost. */
 export function showNotices(): void {
-  for (const n of notices.splice(0))
+  for (const n of notices.splice(0)) {
+    const words = noticeWords(n);
+    if (!words) continue;
     pushToast({
       id: `account|${n.kind}`,
       kind: "delivered",
       sticky: false,
       label: "notice",
-      title:
-        n.kind === "cache_memory" ? "Sessions are not kept on this phone" : "Labels and read marks are not being saved",
-      body:
-        n.kind === "cache_memory"
-          ? "Its storage could not be opened, so they load again each time the app opens."
-          : "This phone could not write them down just now.",
+      title: words.title,
+      body: words.body,
       at: Date.now(),
       ms: 12_000,
     });
+  }
+}
+
+/** A notice in words, or null when there is nothing a person needs to be told. */
+export function noticeWords(n: AccountNotice): { title: string; body: string } | null {
+  if (n.kind === "cache_memory")
+    return {
+      title: "Sessions are not kept on this phone",
+      body: "Its storage could not be opened, so they load again each time the app opens.",
+    };
+  if (n.names?.includes("labels") || n.names?.includes("marks"))
+    return {
+      title: "Labels and read marks are not being saved",
+      body: "This phone could not write them down just now.",
+    };
+  return null;
 }
 
 export async function startAccount(): Promise<AccountBackend | null> {

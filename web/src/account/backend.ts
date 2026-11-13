@@ -41,7 +41,7 @@ import { snapshotWithControl } from "../../../server/ui/snapshot";
 import { HttpError, type StreamHandlers, type Transport } from "../data/transport";
 import type { ApiBackend } from "../lib/net";
 import { type EventCache, openCache, sweepCaches, withoutSessions } from "./cache";
-import { type AccountDocs, openDocs } from "./docs";
+import { type AccountDocs, type DocName, openDocs } from "./docs";
 import { type AccountDoors, type DoorAnswer, openDoors } from "./doors";
 import { PageLog } from "./log";
 import { routes } from "./routes";
@@ -58,10 +58,11 @@ import {
 } from "./shell";
 
 /** Something a person should be told once: the events are not kept between launches
- *  (`cache_memory`), or one of the documents is not (`doc_memory`, with its names). */
+ *  (`cache_memory`), or some of the documents could not be read (`doc_unread`, with their
+ *  names): what is kept of those is left as it is, and what changes in this launch is not kept. */
 export interface AccountNotice {
-  kind: "cache_memory" | "doc_memory";
-  names?: string[];
+  kind: "cache_memory" | "doc_unread";
+  names?: DocName[];
 }
 
 export interface AccountBackendOptions {
@@ -419,7 +420,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
   if (loaded.events.length) boarded = true;
 
   if (cache.kind === "memory") o.notice?.({ kind: "cache_memory" });
-  if (docs.failed().length) o.notice?.({ kind: "doc_memory", names: docs.failed() });
+  if (docs.unread().length) o.notice?.({ kind: "doc_unread", names: docs.unread() });
 
   // ---------- the hub's word on the account ----------
   let gone = false;

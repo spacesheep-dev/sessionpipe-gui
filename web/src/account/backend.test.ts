@@ -54,12 +54,26 @@ function rig(o: { features?: string[]; cache?: KeptCache } = {}) {
     });
     return new Response(a.status === 204 ? null : a.body, { status: a.status, headers: a.headers });
   }) as typeof fetch;
+  /** Documents the hub cannot read: each name fails this many times more (an `io` error). */
+  const failGet = new Map<string, number>();
+  /** Every document write asked of the hub, by name. */
+  const sets: string[] = [];
   const calls: ShellCalls = {
     status: () => hub.invoke("acct_status") as never,
     disconnect: (id) => hub.invoke("acct_disconnect", { id }).catch((e) => Promise.reject(e.toJSON())) as never,
     deviceAsk: (id) => hub.invoke("acct_device_ask", { id }).catch((e) => Promise.reject(e.toJSON())) as never,
-    docGet: (id, name) => hub.invoke("acct_doc_get", { id, name }),
-    docSet: (id, name, value) => hub.invoke("acct_doc_set", { id, name, value }) as never,
+    docGet: (id, name) => {
+      const left = failGet.get(name) ?? 0;
+      if (left > 0) {
+        failGet.set(name, left - 1);
+        return Promise.reject({ code: "io", message: "The document could not be read." });
+      }
+      return hub.invoke("acct_doc_get", { id, name });
+    },
+    docSet: (id, name, value) => {
+      sets.push(name);
+      return hub.invoke("acct_doc_set", { id, name, value }) as never;
+    },
     docDelete: (id, name) => hub.invoke("acct_doc_delete", { id, name }) as never,
     onAccount: async (fn) => hub.on((event, payload) => event === "account" && fn(payload as never)),
     needs: (id, sessions) => hub.invoke("acct_needs", { id, sessions }),
@@ -78,7 +92,7 @@ function rig(o: { features?: string[]; cache?: KeptCache } = {}) {
     });
     return backend;
   };
-  return { ss, hub, asked, notices, calls, start, stop: () => backend?.stop() };
+  return { ss, hub, asked, notices, calls, failGet, sets, start, stop: () => backend?.stop() };
 }
 
 /** The frames a page gets from a stream it opened. */
@@ -372,6 +386,96 @@ describe("a page's own backend on a spacesheep account", () => {
     expect(b.view().store.sessions).toBe(1);
     expect(page.last("snapshot")!.snapshot.sessions.map((x) => x.id)).toEqual(["s-kept"]);
     page.off();
+  });
+
+  describe("a document the hub could not read at the start", () => {
+    const account = () => [...r.hub.accounts.values()][0]!;
+    /** A launch that needs the documents' reads tried again: time is moved while it starts. */
+    const startSlowly = async (): Promise<AccountBackend> => {
+      const starting = r.start();
+      await tick(1000);
+      return starting;
+    };
+    const seed = async (): Promise<void> => {
+      const one = new Session("s-1");
+      const two = new Session("s-2");
+      r.ss.push([one.ev("session.started", {}, { tier: 2 }), two.ev("session.started", {}, { tier: 2 })]);
+      const b = await r.start();
+      await tick(400);
+      await b.transport.patchLabels({ sessions: { "claude-code:s-1": "red" }, names: { red: "Urgent" } });
+      await b.transport.patchMarks({ read: { "claude-code:s-1": "2026-11-01T00:00:00.000Z" } });
+      await b.flushed();
+      b.stop();
+    };
+
+    it("once: the read is tried again and the document is there, kept on as ever", async () => {
+      await seed();
+      r.failGet.set("labels", 1);
+      r.failGet.set("marks", 1);
+      const b = await startSlowly();
+      await tick(400);
+      expect(r.notices.filter((n) => n.kind === "doc_unread")).toEqual([]);
+      expect((await b.transport.labels()).names).toEqual({ red: "Urgent" });
+      await b.transport.patchLabels({ sessions: { "claude-code:s-2": "blue" } });
+      await b.flushed();
+      const kept = account().docs.get("labels")!;
+      expect(kept).toContain("claude-code:s-1");
+      expect(kept).toContain("claude-code:s-2");
+      expect(kept).toContain("Urgent");
+    });
+
+    it("every time: nothing is written over what the hub keeps, the person is told, and the next launch has it all", async () => {
+      await seed();
+      const before = { labels: account().docs.get("labels"), marks: account().docs.get("marks") };
+      expect(before.labels).toContain("Urgent");
+      r.failGet.set("labels", 9);
+      r.failGet.set("marks", 9);
+      r.sets.length = 0;
+      let b = await startSlowly();
+      await tick(400);
+      expect(r.notices).toContainEqual({ kind: "doc_unread", names: ["labels", "marks"] });
+      // The page works: a label set now shows now.
+      await b.transport.patchLabels({ sessions: { "claude-code:s-2": "blue" }, names: { blue: "Later" } });
+      await b.transport.patchMarks({ read: { "claude-code:s-2": "2026-11-02T00:00:00.000Z" } });
+      expect((await b.transport.labels()).sessions).toEqual({ "claude-code:s-2": "blue" });
+      await b.flushed();
+      await tick(5000);
+      // Not one write of either reached the hub: what it keeps is what it kept.
+      expect(r.sets.filter((n) => n === "labels" || n === "marks")).toEqual([]);
+      expect(account().docs.get("labels")).toBe(before.labels);
+      expect(account().docs.get("marks")).toBe(before.marks);
+      b.stop();
+      // The next launch reads them: the label set before is there, with its name.
+      r.failGet.clear();
+      r.notices.length = 0;
+      b = await r.start();
+      await tick(400);
+      expect(r.notices.filter((n) => n.kind === "doc_unread")).toEqual([]);
+      expect(await b.transport.labels()).toMatchObject({
+        sessions: { "claude-code:s-1": "red" },
+        names: { red: "Urgent" },
+      });
+    });
+
+    it("the sends too: the rows kept of earlier sends are not replaced by this launch's", async () => {
+      const s = new Session("s-1");
+      r.ss.push([s.ev("session.started", {}, { tier: 2, session: { machine: "lab-mac" } })]);
+      let b = await r.start();
+      await tick(400);
+      expect((await post(b, "/api/ui/control/send", signed("claude-code:s-1", "the first"))).status).toBe(201);
+      await b.flushed();
+      const before = account().docs.get("sends")!;
+      expect(before).toContain("the first");
+      b.stop();
+      r.failGet.set("sends", 9);
+      b = await startSlowly();
+      await tick(400);
+      expect((await post(b, "/api/ui/control/send", signed("claude-code:s-1", "the second"))).status).toBe(201);
+      await b.flushed();
+      expect(account().docs.get("sends")).toBe(before);
+      // Nothing a person keeps was unread: no notice for it.
+      expect(r.notices.filter((n) => n.kind === "doc_unread")).toEqual([{ kind: "doc_unread", names: ["sends"] }]);
+    });
   });
 
   it("a relay read from its start is history, none of it unread; what arrives after is news", async () => {
