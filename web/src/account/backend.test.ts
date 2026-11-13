@@ -8,11 +8,11 @@ import type { ControlActivity, Snapshot, StreamMessage } from "@shared/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type FakeAnswer, FakeSpacesheep } from "../../../test/account/fake-spacesheep";
 import { HubStandIn } from "../../../test/account/hub";
-import { type KeptCache, keptCache } from "../../../test/account/kept-cache";
 import { Session } from "../../../test/events";
 import { type AccountBackend, type AccountNotice, startAccountBackend } from "./backend";
 import { NOT_HERE } from "./routes";
 import { type AccountShell, accountShell, type ShellCalls } from "./shell";
+import { type KeptCache, keptCache } from "./testCache";
 
 const M1 = "m_0123456789abcdefghij";
 const machine = (over: Record<string, unknown> = {}) => ({
