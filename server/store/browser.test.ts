@@ -15,6 +15,9 @@ import { build } from "esbuild";
 import { expect, test } from "vitest";
 import type { ProtocolEvent } from "../../shared/api.js";
 import { Session, SID } from "../../test/events.js";
+import * as remoteModule from "../control/remote.js";
+import * as rowsModule from "../control/rows.js";
+import * as relayModule from "../sources/relay.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
@@ -97,6 +100,13 @@ async function bundle() {
         'export { startRelayReader, relayPaceMs, backlogPaceMs } from "../sources/relay.js";',
         'export { MemoryControl, RemoteSlice, forwardRemoteSend, SendRefused, newUlid } from "../control/remote.js";',
         'export { toActivity, isFinal } from "../control/rows.js";',
+        // Every export of the three files a page runs, not only the ones named above: the
+        // bundler drops what the entry does not reach, and a word of Node's in a dropped
+        // export would pass. As namespaces: a plain `export *` from several modules drops,
+        // without a word, any name two of them share.
+        'export * as allRelay from "../sources/relay.js";',
+        'export * as allRemote from "../control/remote.js";',
+        'export * as allRows from "../control/rows.js";',
       ].join("\n"),
       resolveDir: here,
       sourcefile: "browser-entry.ts",
@@ -165,6 +175,21 @@ test("the core bundles for the browser from the repo's own files alone, naming n
   // helpers share their names with an array's, so only the run catches those).
   const newer = NEWER_THAN_SAFARI_17.map((n) => (n.includes(".") ? `\\.${n.split(".").pop()}` : `\\b${n}`));
   expect(code.match(new RegExp(`(?:${newer.join("|")})\\b`, "g")) ?? []).toEqual([]);
+});
+
+test("the bundle holds every export of the reader, the slice and the rows: none is left unchecked", async () => {
+  const { code } = await bundle();
+  const page = pageContext([]);
+  vm.runInContext(`${code}\nglobalThis.core = core;`, page);
+  const lib = page.core as Record<"allRelay" | "allRemote" | "allRows", Record<string, unknown>>;
+  for (const [name, module] of [
+    ["allRelay", relayModule],
+    ["allRemote", remoteModule],
+    ["allRows", rowsModule],
+  ] as const) {
+    expect(Object.keys(lib[name] ?? {}).sort(), name).toEqual(Object.keys(module).sort());
+    expect(Object.keys(module).length, name).toBeGreaterThan(3);
+  }
 });
 
 test("the context is the floor: a page's globals, nothing of Node's, nothing newer than Safari 17", () => {
