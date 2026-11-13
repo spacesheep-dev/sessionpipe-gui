@@ -58,10 +58,13 @@ pub(crate) async fn open_external_told<R: Runtime>(app: &AppHandle<R>, url: &str
     #[cfg(target_os = "android")]
     {
         use tauri_plugin_opener::OpenerExt;
+        // Not logged with its address, nor with the opener's own error (which may
+        // quote it): this is how the connect's link is opened, and the link holds the
+        // connect's code.
         match app.opener().open_url(url, None::<&str>) {
             Ok(()) => true,
-            Err(e) => {
-                log::warn!("open {url}: {e}");
+            Err(_) => {
+                log::warn!("a link could not be handed to the browser");
                 false
             }
         }
