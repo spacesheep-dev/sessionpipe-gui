@@ -5,7 +5,9 @@
 // attentions have an answer out or were closed by the machine, so no second answer goes.
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePhone } from "../account/device";
 import { type ControlAction, preHello } from "../components/ControlStrip";
+import { clock, NEW_WORDS, ThisPhone } from "../native/accountWords";
 import { ControlError, UNHEARD_CODE } from "./api";
 import { type CommandFields, HeldForConfirm, heldWhy, sendCommand, UnheardSend } from "./command";
 import { type Held, useHeld } from "./HeldNotice";
@@ -26,7 +28,7 @@ export function answerState(
   s: SessionSummary,
   a: Attention,
   control: MachineControl | undefined,
-  send: Pick<SessionSend, "rp" | "secure" | "tap" | "answers">,
+  send: Pick<SessionSend, "rp" | "secure" | "tap" | "answers"> & { cooling?: string | null },
 ): { reason: string | null; off: boolean; status: AnswerStatus | undefined; tag: string } {
   const status = send.answers[a.attentionId];
   const early = preHello(a, control);
@@ -37,17 +39,25 @@ export function answerState(
       ? signHint(send.rp)
       : old
         ? old
-        : early
-          ? "raised before this machine was paired; answer it in its terminal"
-          : status === "closed"
-            ? "answered in the terminal, or expired"
-            : status === "sent"
-              ? `answer sent · waiting for ${s.machine ?? "the machine"}`
-              : send.tap
-                ? `confirm with ${signerLabel()}`
-                : null;
-  const off = !control || !send.secure || !send.rp || !!old || early || !!status;
-  const tag = !control ? "unpaired" : !send.secure || old ? "blocked" : (status ?? (early ? "pre-hello" : "open"));
+        : send.cooling
+          ? // Inside the hour a newly approved phone waits, an answer would be refused like
+            // any send: the same line the composer has, and no button that will be refused.
+            send.cooling
+          : early
+            ? "raised before this machine was paired; answer it in its terminal"
+            : status === "closed"
+              ? "answered in the terminal, or expired"
+              : status === "sent"
+                ? `answer sent · waiting for ${s.machine ?? "the machine"}`
+                : send.tap
+                  ? `confirm with ${signerLabel()}`
+                  : null;
+  const off = !control || !send.secure || !send.rp || !!old || !!send.cooling || early || !!status;
+  const tag = !control
+    ? "unpaired"
+    : !send.secure || old || send.cooling
+      ? "blocked"
+      : (status ?? (early ? "pre-hello" : "open"));
   return { reason, off, status, tag };
 }
 
@@ -70,6 +80,9 @@ export interface SessionSend {
   /** Per attention id: "sent" while an answer is out, "closed" once the machine said the
    *  prompt is no longer open (answered in its terminal, or expired). */
   answers: Readonly<Record<string, AnswerStatus>>;
+  /** On a spacesheep account, a phone approved less than an hour ago cannot send yet: the
+   *  line that says from when (when the time is known exactly); null everywhere else. */
+  cooling: string | null;
   /** This session's control activity, newest first. */
   activity: ReturnType<typeof useControlActivity>;
   /** Signs and sends one strip action; throws the refusal after recording it in `error`. */
@@ -109,6 +122,11 @@ export function useSessionSend(
   const [tap, setTap] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const key = session.key;
+  const phoneKey = usePhone().view?.phase;
+  const cooling =
+    phoneKey?.kind === "cooling" && phoneKey.exact
+      ? NEW_WORDS.composerCooling(ThisPhone(), clock(phoneKey.until))
+      : null;
   const mine = useCallback((a: { session?: string }) => a.session === key, [key]);
   const activity = useControlActivity(mine);
 
@@ -279,5 +297,5 @@ export function useSessionSend(
 
   // A row still being asked for says so whenever the page is opened, not only after the send.
   const line = error ?? (asking[0] ? unheardWords(asking[0]) : null);
-  return { rp, secure, grant, tap, error: line, answers, activity, onSend, held };
+  return { rp, secure, grant, tap, error: line, answers, cooling, activity, onSend, held };
 }
