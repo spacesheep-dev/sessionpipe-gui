@@ -343,6 +343,46 @@ test.describe("each way a connect can end, with what to do next", () => {
     b.hub.alert = () => true;
   });
 
+  test("Cancel after spacesheep confirmed, before the hub's question was answered: the key that was made is said, with where to revoke it", async () => {
+    await start();
+    // The hub's own alert cannot be shown yet: it holds the approval, and the page says to answer it.
+    b.hub.alert = () => null;
+    b.ss.approve(await digits());
+    await b.hub.pollConnect();
+    await foreground(b.page);
+    await expect(step(b.page, "account-asking")).toBeVisible();
+    await button(b.page, "Cancel").click();
+    // Not the welcome: the hub's note, and the way to the key.
+    await expect(b.page.locator(".onb[data-step='account-ended']")).toBeVisible();
+    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toBeVisible();
+    await expect(button(b.page, "Open API keys on spacesheep")).toBeVisible();
+    expect(b.hub.accounts.size).toBe(0);
+    b.hub.alert = () => true;
+  });
+
+  test("found on opening: a connect that ended with a key made and not kept shows its note, once", async () => {
+    await start();
+    b.hub.alert = () => false;
+    b.ss.approve(await digits());
+    await b.hub.pollConnect();
+    await expect(ended("declined")).toBeVisible();
+    // The app is closed there and opened again: the note is the first thing shown.
+    await b.page.goto(b.server.url);
+    await expect(b.page.locator(".onb[data-step='account-ended']")).toBeVisible();
+    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toBeVisible();
+    await expect(button(b.page, "Open API keys on spacesheep")).toBeVisible();
+    // Left, it is not shown again.
+    await b.page
+      .locator(".onb[data-step='account-ended'] .onb-back, .onb[data-step='account-ended'] [data-back]")
+      .first()
+      .click();
+    await expect(b.page.locator(".onb[data-step='account-ended']")).toHaveCount(0);
+    await b.page.goto(b.server.url);
+    await expect(step(b.page, "welcome")).toBeVisible();
+    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toHaveCount(0);
+    b.hub.alert = () => true;
+  });
+
   test("nobody confirmed in time", async () => {
     await start();
     b.ss.expire(await digits());

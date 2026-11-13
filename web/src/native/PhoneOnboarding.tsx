@@ -57,7 +57,9 @@ export function Onboarding({ info }: { info: ShellInfo }) {
           (c.state === "pending" ||
             c.state === "asking" ||
             (c.state === "approved" && !!c.receiver && st.accounts.some((a) => a.id === c.receiver)));
-        if (on && going) send({ type: "account", resume: true });
+        // One that ended with a key made on spacesheep and not kept here is picked up too:
+        // its note has to be seen.
+        if (on && (going || !!c?.note)) send({ type: "account", resume: true });
       },
       () => {},
     );

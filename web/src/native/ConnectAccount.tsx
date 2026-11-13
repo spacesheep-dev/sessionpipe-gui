@@ -50,7 +50,10 @@ export function ConnectAccount({
       const st = await calls.status().catch(() => null);
       if (!st) return;
       const c = connectView(st.connect);
-      if (resume && !(c && (c.state === "pending" || c.state === "asking" || c.state === "approved"))) return;
+      // A finished one that left a key on spacesheep which is not kept here is news to
+      // whoever opens the app: its note is shown, whichever way it ended.
+      if (resume && !(c && (c.state === "pending" || c.state === "asking" || c.state === "approved" || !!c.note)))
+        return;
       send({ type: "connect", connect: c, accounts: st.accounts.map((a) => a.id) });
     },
     [calls],
@@ -142,7 +145,19 @@ export function ConnectAccount({
   const leave = async () => {
     if (busy.current) return;
     busy.current = true;
+    const was = s.kind;
     await calls.cancel().catch(() => false);
+    // Stopped after spacesheep had made a key for this app: the hub says so (its note), and
+    // the person is told here, with where to revoke it, before the screen is left.
+    if (was !== "ended") {
+      const st = await calls.status().catch(() => null);
+      const c = st ? connectView(st.connect) : null;
+      if (st && c?.note) {
+        busy.current = false;
+        send({ type: "connect", connect: c, accounts: st.accounts.map((a) => a.id) });
+        return;
+      }
+    }
     busy.current = false;
     send({ type: "reset" });
     onLeave();
