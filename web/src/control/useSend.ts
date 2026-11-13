@@ -7,11 +7,12 @@ import type { Attention, ControlActivity, MachineControl, SessionSummary } from 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ControlAction, preHello } from "../components/ControlStrip";
 import { ControlError, UNHEARD_CODE } from "./api";
-import { type CommandFields, sendCommand } from "./command";
+import { type CommandFields, HeldForConfirm, heldWhy, sendCommand, UnheardSend } from "./command";
 import { type Held, useHeld } from "./HeldNotice";
 import type { HeldMeta } from "./held";
 import { HELD_WORDS } from "./heldWords";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
+import { remoteHostFor } from "./remoteRp";
 import { canSign, machineTakes, signerLabel, signHint, updateWords } from "./signer";
 import { sendErrorWords, unheardWords } from "./words";
 
@@ -78,6 +79,14 @@ export interface SessionSend {
   held: Held<ControlActivity, StripSent>;
 }
 
+/** What was pressed for a send: the composer as it was (when it was typed there), the
+ *  fields that were signed, and the attachment lines the page wrote into the message. */
+interface Pressed {
+  typed?: string;
+  fields?: CommandFields;
+  attached?: readonly string[];
+}
+
 export function useSessionSend(
   session: SessionSummary,
   control: MachineControl | undefined,
@@ -117,21 +126,51 @@ export function useSessionSend(
   // A send of this session nobody heard the answer to (account/unheard.ts): its row says it
   // may have been sent while the app finds out, and holds the same kind of send meanwhile.
   const asking = useMemo(() => activity.filter((a) => a.unheard?.state === "asking"), [activity]);
-  /** Row id → the composer as it was when that send was pressed. */
-  const unheard = useRef(new Map<string, string | undefined>());
-  /** The composer at the send that is out now: the row of an unheard one takes it. */
-  const pressed = useRef<string | undefined>(undefined);
+  /** Row id → what was pressed: the composer as it was, and (where this page made the send)
+   *  the fields it signed, which a hold's Confirm signs again. */
+  const unheard = useRef(new Map<string, Pressed>());
+  /** The send that is out now: the row of an unheard one takes it. */
+  const pressed = useRef<Pressed>({});
   const confirmedNow = useRef(o.confirmed);
   confirmedNow.current = o.confirmed;
+  const held = useHeld<ControlActivity, StripSent>(
+    (carried, h, meta) => {
+      went(h.fields, carried);
+      o.confirmed?.(h.fields, meta.draft);
+      grant.refresh();
+    },
+    (e) => setError(sendErrorWords(e)),
+    o.draft,
+  );
+  const { catchHeld, drop: dropHeld, confirming: confirmingHeld } = held;
+  const machineId = control?.machineId;
   useEffect(() => {
     for (const a of activity) {
       if (a.unheard?.state === "asking") {
         if (!unheard.current.has(a.id)) unheard.current.set(a.id, pressed.current);
         continue;
       }
-      if (!unheard.current.has(a.id)) continue;
-      const typed = unheard.current.get(a.id);
+      const was = unheard.current.get(a.id);
+      if (!was) continue;
       unheard.current.delete(a.id);
+      const typed = was.typed;
+      // spacesheep holds it for a confirm, and it is known that no job was made: the hold's
+      // own notice, with its Confirm, as if the send's answer had been heard. One press.
+      if (a.unheard?.state === "unsent" && a.code === "confirm_required" && notice && was.fields && rp && machineId) {
+        const fields = was.fields;
+        const refusal = new ControlError(a.unheard.status ?? 422, a.unheard.reason ?? "", a.code, a.detail);
+        const h = new HeldForConfirm<ControlActivity>(
+          refusal,
+          heldWhy(refusal),
+          fields,
+          machineId,
+          remoteHostFor(machineId) ?? null,
+          (c = {}) => sendCommand(rp, machineId, fields, { onTap: c.onTap, confirm: true }),
+        );
+        const caught = catchHeld(h, { draft: typed, ...(was.attached ? { attached: was.attached } : {}) }, typed);
+        setError(caught === "changed" ? HELD_WORDS.changed : caught ? null : unheardWords(a));
+        continue;
+      }
       // Not sent, or nobody can say: the row's words, as a send's own answer would read.
       if (a.unheard) {
         setError(unheardWords(a));
@@ -145,17 +184,7 @@ export function useSessionSend(
           typed ?? JSON.stringify([a.text ?? "", []]),
         );
     }
-  }, [activity, key]);
-  const held = useHeld<ControlActivity, StripSent>(
-    (carried, h, meta) => {
-      went(h.fields, carried);
-      o.confirmed?.(h.fields, meta.draft);
-      grant.refresh();
-    },
-    (e) => setError(sendErrorWords(e)),
-    o.draft,
-  );
-  const { catchHeld, drop: dropHeld, confirming: confirmingHeld } = held;
+  }, [activity, key, notice, rp, machineId, catchHeld]);
   useEffect(() => {
     const closed: string[] = [];
     for (const a of activity) {
@@ -215,12 +244,15 @@ export function useSessionSend(
       }
       // A message depends on the composer it was typed in; an answer or a Stop on nothing.
       const keyAtSend = action.kind !== "cancel" && action.composer ? draftNow.current : undefined;
-      pressed.current = keyAtSend;
+      const attachedNow = action.kind === "prompt" ? action.attached : undefined;
+      pressed.current = { typed: keyAtSend, fields, ...(attachedNow ? { attached: attachedNow } : {}) };
       try {
         const carried = await sendCommand(rp, control.machineId, fields, { onTap: () => setTap(true) });
         went(fields, carried);
         dropHeld();
       } catch (e) {
+        // Nobody heard its answer: what was pressed is kept under its row's id.
+        if (e instanceof UnheardSend) unheard.current.set(e.id, pressed.current);
         if (att && e instanceof ControlError && e.code === "no_attention")
           setAnswers((prev) => ({ ...prev, [att]: "closed" }));
         // Held for a confirm: the notice says so where it is shown, the refusal elsewhere.
@@ -232,7 +264,7 @@ export function useSessionSend(
         else if (!caught) setError(sendErrorWords(e));
         throw e;
       } finally {
-        pressed.current = undefined;
+        pressed.current = {};
         setTap(false);
         grant.refresh();
       }

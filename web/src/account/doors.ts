@@ -81,13 +81,17 @@ export type Sent =
   /** No job was made: a refusal from before the request left, or one that proves it. */
   | { kind: "refused"; status: number; json: Record<string, unknown> }
   /** Nobody knows. `dead`: these bytes are too old to make a job any more, so what the
-   *  jobs door lists is all there will ever be. */
+   *  jobs door lists is all there will ever be. `why` is empty on an asking again that had
+   *  nothing new to say (what was said before stands). */
   | { kind: "unknown"; why: string; dead: boolean };
 
 /** What the jobs door lists that a send could have become. */
 export interface Looked {
   /** The list was read to its end: what follows is all of it. */
   read: boolean;
+  /** It was not, because it is longer than a look reads (LOOK_PAGES pages): reading it again
+   *  will say no more. False where it could not be read at all (a failure, to try again). */
+  more: boolean;
   /** The list tells this send's job apart from another's (a prompt, a start). */
   told: boolean;
   /** Jobs after the last this page knew of, for the send's machine, session and action. */
@@ -173,7 +177,7 @@ export function openDoors(o: DoorsOptions): AccountDoors {
     askedAt: number,
     floor: number,
   ): Promise<Looked> => {
-    const none: Looked = { read: false, told: false, fits: [], recent: [] };
+    const none: Looked = { read: false, more: false, told: false, fits: [], recent: [] };
     const as = listedAs(body);
     // From the last job the page knew of when the send BEGAN: a job heard of since (another
     // session's send) is after this send's own, and must not hide it.
@@ -202,10 +206,12 @@ export function openDoors(o: DoorsOptions): AccountDoors {
     } catch {
       return none;
     }
-    if (!read) return none;
+    // Longer than a look reads: said as that, so nobody reads it again for the same send.
+    if (!read) return { ...none, more: true };
     const from = newest - Math.max(0, now() - askedAt) - LOOK_SLACK_MS;
     return {
       read,
+      more: false,
       told: !!as,
       fits: fits.map((x) => x.id),
       recent: fits.filter((x) => x.at >= from).map((x) => x.id),
@@ -279,14 +285,6 @@ export function openDoors(o: DoorsOptions): AccountDoors {
     if (a.status >= 500) return unknown(wordsOf(a.json));
     const code = typeof a.json.code === "string" ? a.json.code : "";
     if (unheard) {
-      /** The job spacesheep made of these bytes, as the jobs door lists it from where the send began. */
-      const found = async (): Promise<Sent | null> => {
-        const l = await look(m, body, askedAt, floor);
-        // The list could not be read to its end, or cannot tell this send's job apart: no word.
-        if (!l.read || !l.told) return unknown(wordsOf(a.json));
-        if (l.recent.length) return { kind: "sent", job: l.recent.length === 1 ? l.recent[0]! : null };
-        return null;
-      };
       // spacesheep had taken it on an asking before this one: it is sent. Its job is the
       // one fit made since the send began, when the list singles one out.
       if (a.status === 409 && code === "replay") {
@@ -297,15 +295,14 @@ export function openDoors(o: DoorsOptions): AccountDoors {
       // what the jobs door lists.
       if (code === "too_old" || a.json.refusal === "too_old") return unknown(wordsOf(a.json), true);
       if (!AFTER_NONCE.has(code)) return unknown(wordsOf(a.json));
-      if (NOT_YET_FINAL.has(code)) {
-        // The first asking may still be running, and may yet make the job: not the end.
-        if (now() - askedAt < FIRST_ASKING_OVER_MS) return unknown(wordsOf(a.json));
-        // It is over. Before a hold (and its Confirm, which signs a new command) is ever
-        // offered for a send that had an asking nobody heard, the jobs door is looked in
-        // for this command's job: found, it was sent, and there is nothing to confirm.
-        const sent = await found();
-        if (sent) return sent;
-      }
+      // The first asking may still be running, and may yet make the job: not the end, and
+      // nothing new to say of it (the hold's own words would read as an offer).
+      if (NOT_YET_FINAL.has(code) && now() - askedAt < FIRST_ASKING_OVER_MS)
+        return { kind: "unknown", why: "", dead: false };
+      // Past that, this refusal is the proof: spacesheep looks the nonce up before it gives
+      // it, and the first asking is over, so a job of these bytes would have been answered
+      // `replay`. No job in the list is taken for this send's on a hold: another device's
+      // message to the same session looks the same there.
     }
     // spacesheep's own 401 that is not the grant's: the key is refused there.
     if (a.status === 401 && code !== "unlock") o.onUnauthorized?.();
@@ -318,13 +315,18 @@ export function openDoors(o: DoorsOptions): AccountDoors {
     let unheard = !!opts.again;
     let said = await heard(await post(m, body), unheard, m, body, askedAt, floor);
     // Asked for the first time and not heard: asked again, the same bytes, a few seconds on.
-    if (!opts.again)
+    if (!opts.again) {
+      /** What was last said of why nobody knows: an answer with nothing new to say keeps it. */
+      let why = said.kind === "unknown" ? said.why : "";
       for (const wait of SEND_UNKNOWN_WAITS_MS) {
         if (said.kind !== "unknown" || said.dead) break;
         unheard = true;
         await sleep(wait);
         said = await heard(await post(m, body), unheard, m, body, askedAt, floor);
+        if (said.kind === "unknown") why = said.why || why;
       }
+      if (said.kind === "unknown") said = { ...said, why: why || UNREACHED };
+    }
     return said;
   };
 

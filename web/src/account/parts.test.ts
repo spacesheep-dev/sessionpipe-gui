@@ -247,12 +247,29 @@ describe("the account's doors", () => {
       t = open([list([old, { ...mine, id: 30, created_at: T + 40_000 }, mine])], { now: () => T + 6000 });
       expect(await t.doors.look(m, body, T, 0)).toEqual({
         read: true,
+        more: false,
         told: true,
         fits: [7, 30, 41],
         recent: [41],
       });
       t = open([list([{ ...mine, action: "cancel" }])], { now: () => T + 6000 });
-      expect(await t.doors.look(m, stop, T, 0)).toEqual({ read: true, told: false, fits: [], recent: [] });
+      expect(await t.doors.look(m, stop, T, 0)).toEqual({
+        read: true,
+        more: false,
+        told: false,
+        fits: [],
+        recent: [],
+      });
+      // A list longer than a look reads is said as that, apart from one that cannot be read:
+      // the first will say no more the next time, the second may.
+      t = open(
+        Array.from({ length: LOOK_PAGES }, (_, i) => page(i * 100 + 1)),
+        { now: () => T + 6000 },
+      );
+      expect(await t.doors.look(m, body, T, 0)).toMatchObject({ read: false, more: true });
+      expect(t.asked).toHaveLength(LOOK_PAGES);
+      t = open([page(1), hubSays(502, "unreachable", "spacesheep could not be reached.")], { now: () => T + 6000 });
+      expect(await t.doors.look(m, body, T, 0)).toMatchObject({ read: false, more: false });
     });
 
     it("after an asking nobody heard, only an answer that speaks for it too is the end", async () => {
@@ -326,29 +343,40 @@ describe("the account's doors", () => {
         // Two and six seconds after the send began: nobody knows yet, and nothing is offered to confirm.
         let at = T;
         const t = open([timeout(), refusal(), refusal()], { now: () => at });
-        expect(await t.doors.send(m, body)).toMatchObject({ status: 504, json: { code: SEND_UNKNOWN_CODE } });
+        expect(await t.doors.send(m, body)).toEqual({
+          status: 504,
+          json: { code: SEND_UNKNOWN_CODE, error: "spacesheep did not answer in time." },
+        });
         expect(posts(t.asked)).toHaveLength(3);
-        // Half a minute after it began the first asking is over. The jobs door is looked in
-        // first, from where the send began: this command's job is there, so it was sent.
+        // Half a minute after it began the first asking is over, and spacesheep looks the
+        // nonce up before it gives this refusal: a job of these bytes would have been answered
+        // `replay`. So the refusal is the answer now, and no job in the list is taken for
+        // this send's (another device's message to the session looks the same there): the
+        // jobs door is not even read.
         at = T + FIRST_ASKING_OVER_MS;
-        let late = open([refusal(), list([{ ...mine, id: 41, created_at: T + 60_000 }])], {
-          now: () => at,
-          lastJob: () => 99,
-        });
-        expect(await late.doors.ask(m, body, { again: true, askedAt: T, floor: 39 })).toEqual({
-          kind: "sent",
-          job: 41,
-        });
-        expect(late.asked.at(-1)!.url).toMatch(/jobs\?since=39$/);
-        // No job of it there: the refusal is the answer, and only now is a hold offered.
-        late = open([refusal(), list([{ ...mine, id: 41, session: "other" }])], { now: () => at });
+        const late = open([refusal(), list([{ ...mine, id: 41, created_at: T + 60_000 }])], { now: () => at });
         expect(await late.doors.ask(m, body, { again: true, askedAt: T, floor: 39 })).toMatchObject({
           kind: "refused",
         });
-        // The list cannot be read: still nobody knows.
-        late = open([refusal(), hubSays(502, "unreachable", "spacesheep could not be reached.")], { now: () => at });
-        expect((await late.doors.ask(m, body, { again: true, askedAt: T, floor: 39 })).kind).toBe("unknown");
+        expect(late.asked.filter((x) => x.url.includes("/relay/jobs"))).toEqual([]);
+        // Inside the half minute an asking again has nothing new to say of why nobody knows.
+        at = T + 10_000;
+        const early = open([refusal()], { now: () => at });
+        expect(await early.doors.ask(m, body, { again: true, askedAt: T, floor: 39 })).toEqual({
+          kind: "unknown",
+          why: "",
+          dead: false,
+        });
       }
+      // A command the jobs list cannot tell apart (the pool's) reaches its hold the same way.
+      const pool = {
+        cmd: JSON.stringify({ kind: "pool", session: "sessionpipe:pool", pool_action: "remove", nonce: "p1" }),
+      };
+      const poolLate = open([held()], { now: () => T + FIRST_ASKING_OVER_MS });
+      expect(await poolLate.doors.ask(m, pool, { again: true, askedAt: T })).toMatchObject({
+        kind: "refused",
+        status: 409,
+      });
       // Asked for the first time, with nothing unheard before it, a hold is a hold at once.
       const first = open([held()]);
       expect(await first.doors.send(m, body)).toMatchObject({ status: 409, json: { code: "confirm" } });

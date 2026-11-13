@@ -321,6 +321,50 @@ test("a message spacesheep holds is shown held with its reason, and goes when co
   });
 });
 
+test("a message spacesheep held, with that answer lost: the held notice comes by itself, and one Confirm sends it once", async () => {
+  test.setTimeout(150_000);
+  const hold = () => ({
+    status: 409,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      code: "confirm",
+      error: "Confirm with your passkey to send this: it deletes a whole folder.",
+      why: "it deletes a whole folder",
+    }),
+  });
+  // spacesheep holds the message; its answer is lost on the way back, and every asking again is held too.
+  hub.unheard = 1;
+  ss.sendAnswers.push(hold, hold, hold, hold, hold, hold);
+  const before = ss.jobs.length;
+  const box = composer();
+  await box.fill("Delete the old exports folder.");
+  await box.press("Enter");
+  // While the first asking may still be running, nobody knows: the line says so, in the
+  // words of the lost answer, and offers nothing to confirm.
+  await expect(
+    page.getByText(
+      "It may have been sent: spacesheep did not answer in time. Look at the session before you send it again.",
+    ),
+  ).toBeVisible({ timeout: 15_000 });
+  const notice = page.locator("[data-held]");
+  await expect(notice).toHaveCount(0);
+  expect(ss.jobs).toHaveLength(before);
+  // Half a minute after the send began it is known: held, no job made. The notice comes by
+  // itself, with the reason and the words, and the line is gone.
+  await expect(notice).toBeVisible({ timeout: 80_000 });
+  await expect(notice.locator("[data-held-why]")).toContainText("deletes a whole folder");
+  await expect(notice.locator("[data-held-what]")).toHaveText("Delete the old exports folder.");
+  await expect(page.getByText(/It may have been sent/)).toHaveCount(0);
+  await expect(page.getByText(/not sent/i)).toHaveCount(0);
+  expect(ss.jobs).toHaveLength(before);
+  // One press: sent, once.
+  await notice.locator("[data-held-confirm]").click();
+  await expect(notice).toHaveCount(0);
+  await expect(page.getByText("Done: Delete the old exports folder.").first()).toBeVisible();
+  expect(ss.jobs).toHaveLength(before + 1);
+  await expect(box).toHaveValue("");
+});
+
 test("a permission question is answered from the inbox, and the computer gets the answer", async () => {
   const s = session("s-login");
   ss.push([

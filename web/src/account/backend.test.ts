@@ -11,6 +11,7 @@ import { type FakeAnswer, FakeSpacesheep } from "../../../test/account/fake-spac
 import { HubStandIn } from "../../../test/account/hub";
 import { Session } from "../../../test/events";
 import { type AccountBackend, type AccountNotice, GONE_AGAIN_MS, startAccountBackend } from "./backend";
+import { LOOK_PAGES } from "./doors";
 import { NOT_HERE } from "./routes";
 import { type AccountShell, accountShell, type ShellCalls } from "./shell";
 import { type KeptCache, keptCache } from "./testCache";
@@ -800,16 +801,21 @@ describe("a page's own backend on a spacesheep account", () => {
       // The first asking is taken and its answer lost; every asking again is told `confirm`
       // (two verdicts for two askings that met at spacesheep).
       r.sendFaults.push("unheard");
-      r.ss.sendAnswers.push(() => null, held, held, held, held, held);
+      // Inside the half minute; after it spacesheep answers as it then would: it has the job.
+      r.ss.sendAnswers.push(() => null, held, held, held, held);
       const sent = await send(b, signed("claude-code:s-1", "delete the old folder"), 7000);
-      // Not a hold: a row that says it may have been sent.
+      // Not a hold: a row that says it may have been sent, in the words of the lost answer.
       expect(sent.status).toBe(201);
-      expect(sent.body).toMatchObject({ code: "hub_unknown", unheard: { state: "asking" } });
+      expect(sent.body).toMatchObject({
+        code: "hub_unknown",
+        detail: "spacesheep did not answer in time.",
+        unheard: { state: "asking" },
+      });
       expect(r.ss.jobs).toHaveLength(1);
       // Asked again inside the half minute: still unknown, nothing to confirm.
       await tick(24_000);
       expect((await rows(b))[0]).toMatchObject({ id: sent.body.id, unheard: { state: "asking" } });
-      // Past it, the jobs door is looked in before a hold is offered: the job is there.
+      // Past it, spacesheep says it had it: the row is its job's.
       await tick(32_000);
       const row = (await rows(b))[0]!;
       expect(row.id).toBe(sent.body.id);
@@ -839,6 +845,82 @@ describe("a page's own backend on a spacesheep account", () => {
         unheard: { state: "unsent", status: 422 },
       });
       expect(r.ss.jobs).toHaveLength(0);
+    });
+
+    it("a message spacesheep really held is never shown as sent by another device's job for the session", async () => {
+      const held = refusal(409, { error: "Confirm with your passkey to send this.", code: "confirm", why: "unusual" });
+      const b = await ready();
+      // The first asking reaches spacesheep, which holds it (no job of ours), and that answer is lost.
+      r.sendFaults.push("unheard");
+      r.ss.sendAnswers.push(held, held, held);
+      const sent = await send(b, signed("claude-code:s-1", "delete the old folder"), 7000);
+      expect(sent.body).toMatchObject({ unheard: { state: "asking" } });
+      expect(r.ss.jobs).toHaveLength(0);
+      // Another device messages the same session meanwhile: a recent job for it, not ours.
+      const other = signed("claude-code:s-1", "from the laptop");
+      r.ss.sendAnswers.push(() => null);
+      await r.hub.door([...r.hub.accounts.keys()][0]!, {
+        method: "POST",
+        path: `/api/machines/${M1}/jobs`,
+        body: JSON.stringify({ cmd: other.cmd, csig: other.csig, grant: other.grant }),
+      });
+      expect(r.ss.jobs).toHaveLength(1);
+      r.ss.sendAnswers.push(held, held, held);
+      await tick(56_000);
+      // Held, and known not sent: never "on its way", and not delivered when the other's job is.
+      const mine = () => rows(b).then((all) => all.find((a) => a.id === sent.body.id)!);
+      expect(await mine()).toMatchObject({
+        outcome: "failed",
+        code: "confirm_required",
+        detail: "unusual",
+        unheard: { state: "unsent", status: 422 },
+      });
+      r.ss.settle(1, "done");
+      await tick(4000);
+      expect((await mine()).outcome).toBe("failed");
+      expect(r.ss.jobs).toHaveLength(1);
+    });
+
+    it("an account with more jobs than a look reads: one look, the row is settled as nobody-can-say, and the session's sends go again", async () => {
+      const old = refusal(400, { error: "That was signed too long ago.", code: "bad", refusal: "too_old" });
+      const b = await ready();
+      // A phone that keeps no send row (its floor is 0), on an account with 3,500 jobs.
+      const then = Date.now() - 90 * 86_400_000;
+      for (let id = 1; id <= 3500; id++)
+        r.ss.jobs.push({
+          id,
+          machine: M1,
+          status: "done",
+          note: null,
+          created_at: then,
+          done_at: then,
+          sent: { cmd: "{}" },
+          action: "message",
+          source: "claude-code",
+          session: `old-${id}`,
+        } as never);
+      (r.ss as unknown as { jobId: number }).jobId = 3500;
+      r.sendFaults.push("lost", "lost", "lost");
+      const sent = await send(b, signed("claude-code:s-1", "into the dark"), 7000);
+      expect(sent.body).toMatchObject({ unheard: { state: "asking" } });
+      // By the next asking the bytes are too old: the jobs door has the last word, and it is
+      // longer than a look reads.
+      r.ss.sendAnswers.push(old);
+      const reads = () => r.asked.filter((a) => a === "GET /api/sessionpipe/v1/relay/jobs").length;
+      const before = reads();
+      await tick(9000);
+      expect((await rows(b)).find((a) => a.id === sent.body.id)).toMatchObject({
+        outcome: "unconfirmed",
+        code: "hub_unknown",
+        unheard: { state: "unknown" },
+      });
+      const looked = reads() - before;
+      expect(looked).toBeGreaterThan(0);
+      expect(looked).toBeLessThanOrEqual(LOOK_PAGES);
+      // Never again, however long the page stays open; and the session is not held.
+      await tick(3 * 3_600_000);
+      expect(reads() - before).toBe(looked);
+      expect((await send(b, signed("claude-code:s-1", "and then"), 100)).body.unheard).toBeUndefined();
     });
 
     it("another session's send heard in between does not hide the unknown send's own job", async () => {

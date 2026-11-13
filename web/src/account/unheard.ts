@@ -21,6 +21,9 @@ export const UNHEARD_WAITS_MS: readonly number[] = [8000, 15_000, 30_000, 60_000
 export const UNHEARD_KEEP_MS = 86_400_000;
 /** At most this many are kept; the oldest settled ones go first. */
 export const UNHEARD_MAX = 50;
+/** A look in the jobs door that cannot be read is made again at most this often for one
+ *  send: at up to LOOK_PAGES reads a look, that bounds what one send may ever read. */
+export const UNHEARD_LOOKS_MAX = 20;
 /** A send nobody could say anything of for this long is one nobody ever will. */
 export const UNHEARD_GIVE_UP_MS = 7 * 86_400_000;
 
@@ -41,6 +44,8 @@ export interface UnheardKept {
   body?: { cmd: string; csig?: unknown; grant?: unknown; confirm?: unknown };
   /** The bytes are too old to make a job any more: the jobs door has the last word. */
   dead?: boolean;
+  /** How many looks in the jobs door could not be read (UNHEARD_LOOKS_MAX). */
+  looks?: number;
   /** Not sent: the refusal as a send answers it (`status`, and the body's reason, code, detail). */
   refusal?: { status: number; reason: string; code?: string; detail?: string };
   /** When it was settled. */
@@ -229,8 +234,15 @@ export function openUnheard(o: UnheardOptions): Unheard {
         if (!u.body) return settle(u, "unknown");
         const l = await o.doors.look({ id: u.row.machineId }, u.body, u.askedAt, u.floor);
         if (stopped || !rows.has(u.row.id)) return;
-        // The list could not be read to its end: nothing is said of it yet.
-        if (!l.read) return;
+        // The list is longer than a look reads: it will say no more the next time. Nobody can
+        // say, for good; one look, never a loop.
+        if (l.more) return settle(u, "unknown");
+        // It could not be read: tried again, a bounded number of times.
+        if (!l.read) {
+          u.looks = (u.looks ?? 0) + 1;
+          if (u.looks >= UNHEARD_LOOKS_MAX) return settle(u, "unknown");
+          return void o.changed(null);
+        }
         // Read from where the send began to the list's end, it holds nothing this send could
         // have become, and nothing more can come: that, and only that, is not sent.
         if (l.told && l.fits.length === 0) {
