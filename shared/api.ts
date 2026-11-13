@@ -938,6 +938,18 @@ export interface ParsedSearch {
   notFilters: Partial<Record<SearchFilterKey, string[]>>;
   /** Keys that are not filters (`foo:` in `foo:bar`); that token was searched as text. */
   unknown: string[];
+  /** Only on a search answer: filter values that did not read (`since:someday`, `in:everything`),
+   *  by key (agent … until, in, source); each was left out of the search. Their keys are in
+   *  `unknown` too. */
+  bad?: SearchBadFilter[];
+}
+
+/** A filter whose value did not read: a date `since:`/`until:` can't use, or an `in:` or
+ *  `source:` value that names no field or index. */
+export interface SearchBadFilter {
+  key: SearchFilterKey;
+  /** As `filters`/`notFilters` hold it (`after:` is read as `since:`; a `-` is not kept). */
+  value: string;
 }
 
 /** Query of GET /api/ui/search/sessions. The whole query, filters included, is `q`. */
