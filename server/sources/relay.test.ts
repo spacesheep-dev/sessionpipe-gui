@@ -2,7 +2,7 @@
 // The relay's reader with nothing of the receiver's under it: its doors a fake spacesheep
 // (test/account/fake-spacesheep.ts), its keep a map, its clock moved by hand. What the
 // receiver's source does with files and a key is in spacesheep.test.ts, unchanged.
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProtocolEvent } from "../../shared/api.js";
 import { asResponse, type FakeAnswer, FakeSpacesheep, ManualClock } from "../../test/account/fake-spacesheep.js";
 import { Session } from "../../test/events.js";
@@ -11,6 +11,7 @@ import {
   backlogPaceMs,
   cursorFrom,
   type Doors,
+  HUB_BUSY_RUN,
   HUB_HEADER,
   RELAY_BUDGET,
   RELAY_LIMIT,
@@ -22,6 +23,7 @@ import {
   readsFrom,
   relayPaceMs,
   startRelayReader,
+  TOO_LARGE_RUN,
 } from "./relay.js";
 
 const ORIGIN = "https://ss.test";
@@ -236,6 +238,255 @@ describe("the relay's reader over what its opener hands in", () => {
       down = false;
       await t.clock.advance(10_000);
       expect(r.status()).toMatchObject({ state: "ok", cursor: 1 });
+    });
+  });
+
+  describe("behind the native hub, where the first read or a single event goes wrong", () => {
+    /** What the sink was told, in order: "loading true", "ingest 250", "loading false". */
+    const told = (o: Parameters<typeof open>[0] = {}) => {
+      const t = open(o);
+      const order: string[] = [];
+      const start = (more: Partial<RelayReaderOptions> = {}) =>
+        t.start({
+          sink: {
+            ingest: (events) => {
+              order.push(`ingest ${events.length}`);
+              t.taken.push(...events);
+              return events.length;
+            },
+            setLoading: (on) => void order.push(`loading ${on}`),
+          },
+          ...more,
+        });
+      return { ...t, order, start };
+    };
+
+    it("a first read the hub finds too large is still the first: loading ends when its page is taken", async () => {
+      const t = told({
+        hub: true,
+        hubAnswer: (p) => {
+          const m = /since=(\d+)&limit=(\d+)/.exec(p);
+          return m && Number(m[1]) === 0 && Number(m[2]) > 250 ? hubSays(502, "answer_too_large") : null;
+        },
+      });
+      t.ss.push(events(400));
+      const r = t.start({ backlog: true, fresh: true });
+      await t.clock.advance(50);
+      expect(r.status()).toMatchObject({ state: "ok", cursor: 400 });
+      // Nothing was handed over as live traffic before the first page: history stays history.
+      expect(t.order.slice(0, 3)).toEqual(["loading true", "ingest 250", "loading false"]);
+      expect(t.order.filter((x) => x.startsWith("loading"))).toEqual(["loading true", "loading false"]);
+    });
+
+    it("a first read that met the hub's full room is still the first", async () => {
+      let busy = 2;
+      const t = told({
+        hub: true,
+        fresh: true,
+        hubAnswer: (p) => (p.includes("since=") && busy-- > 0 ? hubSays(429, "busy", { "retry-after": "1" }) : null),
+      });
+      t.ss.push(events(3));
+      t.start();
+      await t.clock.settle();
+      expect(t.order).toEqual(["loading true"]);
+      await t.clock.advance(2000);
+      expect(t.order).toEqual(["loading true", "ingest 3", "loading false"]);
+    });
+
+    it("a first read asked again that then fails, or is stopped, ends loading all the same", async () => {
+      let n = 0;
+      const failing = told({
+        hub: true,
+        fresh: true,
+        hubAnswer: (p) =>
+          p.includes("since=")
+            ? n++ === 0
+              ? hubSays(429, "busy", { "retry-after": "1" })
+              : hubSays(502, "unreachable")
+            : null,
+      });
+      const r = failing.start();
+      await failing.clock.settle();
+      expect(failing.order).toEqual(["loading true"]);
+      await failing.clock.advance(1000);
+      expect(r.status()).toMatchObject({ state: "offline", lastError: "hub: unreachable" });
+      expect(failing.order).toEqual(["loading true", "loading false"]);
+      r.stop();
+
+      const stopped = told({
+        hub: true,
+        fresh: true,
+        hubAnswer: (p) => (p.includes("since=") ? hubSays(429, "busy", { "retry-after": "1" }) : null),
+      });
+      const s = stopped.start();
+      await stopped.clock.settle();
+      expect(stopped.order).toEqual(["loading true"]);
+      s.stop();
+      expect(stopped.order).toEqual(["loading true", "loading false"]);
+    });
+
+    it("not behind the hub, loading ends with the first read whatever came of it, as it always did", async () => {
+      const t = told();
+      // spacesheep's limit is spent before the first read.
+      t.ss.limit = 0;
+      t.ss.push(events(2));
+      const r = t.start();
+      await t.clock.settle();
+      expect(r.status().state).toBe("limited");
+      expect(t.order).toEqual(["loading true", "loading false"]);
+    });
+
+    it("one event the hub cannot pass even alone is stepped over, said, and the rest is read", async () => {
+      const asked: string[] = [];
+      const t = open({
+        hub: true,
+        // The third event is more than the hub passes, in any answer that would hold it.
+        hubAnswer: (p) => {
+          const m = /since=(\d+)&limit=(\d+)/.exec(p);
+          if (!m) return null;
+          asked.push(`${m[1]}/${m[2]}`);
+          const [since, limit] = [Number(m[1]), Number(m[2])];
+          return since < 3 && since + limit >= 3 ? hubSays(502, "answer_too_large") : null;
+        },
+      });
+      const all = events(12);
+      t.ss.push(all);
+      const r = t.start({ backlog: true, fresh: true });
+      await t.clock.advance(100);
+      expect(r.status()).toMatchObject({ state: "ok", cursor: 12, skipped: 1 });
+      expect(t.taken.map((e) => e.id)).toEqual(all.filter((_, i) => i !== 2).map((e) => e.id));
+      // It was asked for alone once, and never again.
+      expect(asked.filter((a) => a === "2/1")).toHaveLength(1);
+      expect(t.kept.get("cursor")).toEqual({ origin: ORIGIN, email: EMAIL, cursor: 12 });
+    });
+
+    it("a hub that passes nothing at all is failing, not holding large events: a few are stepped over, no more", async () => {
+      const t = open({
+        hub: true,
+        hubAnswer: (p) => (p.includes("since=") ? hubSays(502, "answer_too_large") : null),
+      });
+      t.ss.push(events(50));
+      const r = t.start({ backlog: true, fresh: true });
+      await t.clock.advance(600_000);
+      expect(r.status()).toMatchObject({
+        state: "offline",
+        lastError: "hub: answer_too_large",
+        cursor: TOO_LARGE_RUN,
+        skipped: TOO_LARGE_RUN,
+      });
+      expect(t.taken).toHaveLength(0);
+    });
+
+    it("a hub that is always busy is said and waited out: a handful of asks in ten minutes, not one a second", async () => {
+      let busy = true;
+      const states: string[] = [];
+      const t = open({
+        hub: true,
+        fresh: true,
+        onState: (s) => states.push(s),
+        hubAnswer: (p) => (busy && p.includes("since=") ? hubSays(429, "busy", { "retry-after": "1" }) : null),
+      });
+      t.ss.push(events(2));
+      const r = t.start();
+      await t.clock.advance(600_000);
+      const reads = t.asked.filter((p) => p.includes("since=")).length;
+      expect(reads).toBeGreaterThan(HUB_BUSY_RUN);
+      expect(reads).toBeLessThan(40);
+      expect(r.status()).toMatchObject({ state: "offline", lastError: "hub: busy", cursor: 0 });
+      expect(states).toEqual(["offline"]);
+      // None of them was a read spacesheep counted.
+      expect(t.ss.relayReads).toBe(0);
+      // The hub has room again: read on, and the state says so.
+      busy = false;
+      await t.clock.advance(120_000);
+      expect(r.status()).toMatchObject({ state: "ok", cursor: 2 });
+      expect(states).toEqual(["offline", "ok"]);
+    });
+
+    it("a keep that throws stops nothing: the page is taken, the read times are written when it lets them", async () => {
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const t = open();
+        const kept = new Map<RelayKept, unknown>();
+        let refuse = true;
+        const pages: number[] = [];
+        t.ss.push(events(3));
+        const r = t.start({
+          fresh: true,
+          onPage: (p) => pages.push(p.cursor),
+          keep: {
+            read: (name) => kept.get(name),
+            write: (name, value) => {
+              if (refuse) throw new Error("storage is full");
+              kept.set(name, value);
+            },
+          },
+        });
+        await t.clock.settle();
+        // The cursor could not be kept: the page is taken all the same, and told.
+        expect(t.taken).toHaveLength(3);
+        expect(r.status()).toMatchObject({ state: "ok", cursor: 3 });
+        expect(pages).toEqual([3]);
+        // The timer that writes the read times goes on through a refusal...
+        await t.clock.advance(40_000);
+        expect(kept.get("reads")).toBeUndefined();
+        expect(errors).toHaveBeenCalled();
+        // ...and writes them once it can.
+        refuse = false;
+        await t.clock.advance(40_000);
+        expect((kept.get("reads") as { reads: number[] }).reads.length).toBeGreaterThan(0);
+        expect(r.status().state).toBe("ok");
+      } finally {
+        errors.mockRestore();
+      }
+    });
+
+    it("stopped while an answer is still being read (doors that ignore the signal): nothing of it is taken", async () => {
+      const t = open();
+      const kept = new Map<RelayKept, unknown>();
+      let release: (() => void) | null = null;
+      const page = {
+        events: events(2),
+        next: 2,
+        oldest: 1,
+        protocol: 1,
+      };
+      const r = startRelayReader({
+        origin: ORIGIN,
+        email: EMAIL,
+        clock: t.clock,
+        fresh: true,
+        keep: { read: (name) => kept.get(name), write: (name, value) => void kept.set(name, value) },
+        sink: {
+          ingest: (list) => {
+            t.taken.push(...list);
+            return list.length;
+          },
+          setLoading: () => {},
+        },
+        // These doors never look at the signal: the answer arrives whatever happens.
+        doors: async (path) =>
+          ({
+            status: 200,
+            ok: true,
+            headers: { get: () => null },
+            json: () =>
+              path.includes("since=")
+                ? new Promise((resolve) => {
+                    release = () => resolve(page);
+                  })
+                : Promise.resolve({ machines: [], rp_id: "ss.test" }),
+          }) as unknown as Response,
+      });
+      reader = r;
+      await t.clock.settle();
+      expect(release).not.toBeNull();
+      r.stop();
+      release!();
+      await t.clock.settle();
+      expect(t.taken).toHaveLength(0);
+      expect(kept.get("cursor")).toBeUndefined();
+      expect(r.status().cursor).toBe(0);
     });
   });
 
