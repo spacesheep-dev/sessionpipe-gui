@@ -408,7 +408,7 @@ mod tests {
         let full: Vec<String> = (0..13)
             .map(|i| session(&format!("claude:f{i}"), "needs_you", &asks[..16]))
             .collect();
-        assert!(13 * 16 > LIST_MAX_ATTENTIONS_IN_ALL);
+        assert!(full.len() * LIST_MAX_ATTENTIONS > LIST_MAX_ATTENTIONS_IN_ALL);
         assert_eq!(n.apply_sessions(list(&full)), None, "too many in all");
         assert_eq!(n.count(), 1, "what was held is still held");
         // Exactly the most a list may hold is a list.
