@@ -189,6 +189,8 @@ export class Store {
       // it lands the rows are the ones from before, and a page that dropped stays dropped.
       onOpen: () =>
         this.set({ connection: this.state.snapshotAt ? this.state.connection : "connecting", retryAt: null }),
+      // Not being added to, with nothing to retry: neither live nor dropped.
+      onWait: () => this.set({ connection: "connecting", retryAt: null }),
       onError: (retryIn) => {
         this.hush();
         const offline = typeof navigator !== "undefined" && navigator.onLine === false;

@@ -1184,10 +1184,20 @@ describe("a page's own backend on a spacesheep account", () => {
       r.ss.limitedUntil = Date.now() + 30_000;
       const b = await r.start();
       const page = listen(b);
+      // A stream that is open as the limit is met.
+      const early: string[] = [];
+      const offEarly = b.transport.openStream({
+        onOpen: () => early.push("open"),
+        onMessage: (m) => m.kind === "snapshot" && early.push("snapshot"),
+        onError: () => early.push("down"),
+        onWait: () => early.push("wait"),
+      });
       await tick(400);
       expect(b.view()).toMatchObject({ relay: { state: "limited" }, catching: true });
-      // Nothing is arriving: an open stream is told so (the page says "Reconnecting…", not
-      // "live"), and one opened meanwhile is told the same without the relay being asked.
+      expect(early).toEqual(["open", "snapshot", "wait"]);
+      offEarly();
+      // Nothing is arriving: an open stream is told so (the page says neither "live" nor
+      // "Reconnecting…": the limit has its own line), without the relay being asked.
       const told: string[] = [];
       const reads = () => r.asked.filter((a) => a === "GET /api/sessionpipe/v1/relay").length;
       const before = reads();
@@ -1195,9 +1205,11 @@ describe("a page's own backend on a spacesheep account", () => {
         onOpen: () => told.push("open"),
         onMessage: (m) => m.kind === "snapshot" && told.push("snapshot"),
         onError: () => told.push("down"),
+        onWait: () => told.push("wait"),
       });
       await tick(50);
-      expect(told).toEqual(["open", "snapshot", "down"]);
+      // Not live, and not dropped either: nothing to retry.
+      expect(told).toEqual(["open", "snapshot", "wait"]);
       expect(reads()).toBe(before);
       await tick(180_000);
       // Read again: a board says it is live.

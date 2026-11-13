@@ -498,9 +498,10 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     kept.get("reads") === undefined &&
     Number.isFinite(connectedAt) &&
     Math.abs(Date.now() - connectedAt) < FRESH_MS;
-  /** spacesheep was not read at the last try: out of reach (the reader's `offline`), or it
-   *  asked this app to wait (`limited`). */
+  /** spacesheep could not be reached at the last read (the reader's `offline`). */
   let unreachable = false;
+  /** spacesheep asked this app to wait at the last read (the reader's `limited`). */
+  let waiting = false;
   /** The streams the page holds open: told when spacesheep cannot be reached. */
   const streams = new Set<StreamHandlers>();
   /** When the reader was last started again because somebody asked (RETRY_EVERY_MS). */
@@ -607,17 +608,17 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
         // (Once history is in, the board is on the page already and only its state changes.)
         if ((s === "offline" || s === "limited") && catching) board();
         else if (s === "unauthorized") giveUp();
-        // spacesheep is not being read (it cannot be reached, or it asked this app to wait):
-        // every open stream says so, as a receiver's dropped stream does (the page reads
-        // "Reconnecting…", never "live" beside a board nothing is arriving on). Read again, a
-        // board says it is live.
-        if (s === "offline" || s === "limited") {
-          unreachable = true;
-          for (const h of [...streams]) h.onError(0);
-        } else if (unreachable) {
-          unreachable = false;
-          if (s !== "unauthorized") board();
-        }
+        // spacesheep cannot be reached: every open stream says so, as a receiver's dropped
+        // stream does (the page reads "Reconnecting…" with Retry, not "live"). It asked this
+        // app to wait: the streams are told that nothing is arriving and nothing is to be
+        // retried (the page says neither "live" nor "Reconnecting…"; the limit has its own
+        // line). Read again, a board says it is live.
+        const was = unreachable || waiting;
+        unreachable = s === "offline";
+        waiting = s === "limited";
+        if (unreachable) for (const h of [...streams]) h.onError(0);
+        else if (waiting) for (const h of [...streams]) h.onWait?.();
+        else if (was && s !== "unauthorized") board();
         // spacesheep answers again: a send nobody heard the answer to is asked for now.
         if (s === "ok") unheard?.kick();
         changed();
@@ -779,6 +780,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
         for (const message of activity(100).reverse()) send({ kind: "control", message });
         listeners.add(send);
         streams.add(h);
+        // Nothing is arriving, and nothing is to be retried: said, and the relay is not asked.
+        if (waiting && !gone) return void h.onWait?.();
         if (!unreachable || gone) return;
         // The rows are what was last read, and spacesheep cannot be reached: said, not "live".
         h.onError(0);

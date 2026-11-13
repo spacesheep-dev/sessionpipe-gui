@@ -760,8 +760,11 @@ test.describe("an account with nothing on it yet, then a session from a computer
     await expect(page3.getByText("It catches up by itself.")).toBeVisible();
     await expect(page3.getByText("Waiting for your first session")).toHaveCount(0);
     await expect(page3.getByText(/Start an agent on a computer paired/)).toHaveCount(0);
-    // Nothing is arriving: the app does not say "live" beside it.
-    await expect(page3.locator("text=Reconnecting… >> visible=true").first()).toBeVisible({ timeout: 10_000 });
+    // Nothing is arriving, and nothing is to be retried: the limit's line stands alone, with
+    // neither "live" nor "Reconnecting…" and its Retry beside it.
+    await expect(page3.locator(".conn--live")).toHaveCount(0);
+    await expect(page3.locator("text=Reconnecting… >> visible=true")).toHaveCount(0);
+    await expect(page3.locator("text=/^Retry/ >> visible=true")).toHaveCount(0);
     // The wait is over by the next launch: the account is read, and it is empty.
     ss3.limit = 240;
   });

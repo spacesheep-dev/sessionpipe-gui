@@ -29,6 +29,10 @@ export interface StreamHandlers {
   onOpen(): void;
   /** Called on each failed attempt with the delay before the next one. */
   onError(retryInMs: number): void;
+  /** What is shown is not being added to for now, and nothing the person can do changes
+   *  that (a page on a spacesheep account while spacesheep asks it to wait): not live, and
+   *  nothing to retry. A receiver's stream never says this. */
+  onWait?(): void;
 }
 
 export interface Transport {
