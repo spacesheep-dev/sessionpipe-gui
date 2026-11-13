@@ -188,7 +188,6 @@ export function writeLocal(key: string, value: string, local: Kept | null = stor
  *  the window opens on next (sessionStorage; written after the account left, read once). */
 export const GONE_KEY = "sessionpipe-gui.account.gone";
 export interface GoneNote {
-  email: string;
   host: string;
   note: string;
   revokeUrl?: string;
@@ -220,7 +219,6 @@ export function takeGoneNote(session: Kept | null = sessionStore()): GoneNote | 
     const n = JSON.parse(text) as Partial<GoneNote> | null;
     if (!n || typeof n.note !== "string" || !n.note) return null;
     return {
-      email: typeof n.email === "string" ? n.email : "",
       host: typeof n.host === "string" ? n.host : "",
       note: n.note,
       ...(typeof n.revokeUrl === "string" && /^https:\/\//.test(n.revokeUrl) ? { revokeUrl: n.revokeUrl } : {}),

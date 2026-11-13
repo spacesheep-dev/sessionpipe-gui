@@ -173,15 +173,15 @@ describe("what the hub said on a disconnect, for the screen the window opens on 
     const session = storage({ other: "x" });
     leaveGoneNote(
       {
-        email: "me@example.com",
         host: "spacesheep.dev",
         note: "The key is forgotten.",
         revokeUrl: "https://spacesheep.dev/settings/api-keys",
       },
       session,
     );
+    // Nothing of who the account was is kept for it: no screen shows it.
+    expect(session.m.get(GONE_KEY)).not.toMatch(/@|email/);
     expect(takeGoneNote(session)).toEqual({
-      email: "me@example.com",
       host: "spacesheep.dev",
       note: "The key is forgotten.",
       revokeUrl: "https://spacesheep.dev/settings/api-keys",
@@ -198,7 +198,7 @@ describe("what the hub said on a disconnect, for the screen the window opens on 
     const session = storage({
       [GONE_KEY]: JSON.stringify({ note: "Forgotten.", revokeUrl: "javascript:alert(1)", email: 3 }),
     });
-    expect(takeGoneNote(session)).toEqual({ email: "", host: "", note: "Forgotten." });
+    expect(takeGoneNote(session)).toEqual({ host: "", note: "Forgotten." });
     expect(takeGoneNote(null)).toBeNull();
   });
 });
@@ -316,5 +316,28 @@ describe("what an account that is no longer on this phone left behind", () => {
     });
     expect(wiped).toEqual(["acct-gone"]);
     expect(db.deleted).toEqual(["sessionpipe.account.acct-gone"]);
+  });
+});
+
+describe("an address the page was given, before it is handed to the browser", () => {
+  it("is opened only when it is https and on the account's own origin", async () => {
+    const { ownUrl } = await import("./outside");
+    const origin = "https://spacesheep.dev";
+    expect(ownUrl("https://spacesheep.dev/devices", origin)).toBe("https://spacesheep.dev/devices");
+    for (const not of [
+      "https://spacesheep.dev.evil.example/devices",
+      "https://evil.example/?https://spacesheep.dev/devices",
+      "http://spacesheep.dev/devices",
+      "javascript:alert(1)",
+      "https://user@evil.example/",
+      "//evil.example/devices",
+      "not an address",
+      "",
+      undefined,
+      null,
+    ])
+      expect(ownUrl(not, origin), String(not)).toBeNull();
+    // An origin that is no address opens nothing.
+    expect(ownUrl("https://spacesheep.dev/devices", "spacesheep")).toBeNull();
   });
 });

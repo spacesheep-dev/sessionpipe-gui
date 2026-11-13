@@ -7,6 +7,7 @@
 // `account` event, `acct_status`). This file turns what the hub says into the screen to
 // show and, where a connect ended, into why. No sentence lives here (accountWords.ts).
 // Tested on its own (accountConnect.test.ts).
+import { ownUrl } from "../account/outside";
 import { type ConnectView, hubError } from "../account/shell";
 
 /** Where the hub connects when no origin is named. */
@@ -141,7 +142,8 @@ export function connectStep(prev: ConnectStep, ev: ConnectEvent, host: string): 
         why: endedWhy(c),
         host: h,
         ...(c.note ? { note: c.note } : {}),
-        ...(c.revokeUrl ? { revokeUrl: c.revokeUrl } : {}),
+        // Where to revoke the key, when that is on the origin the connect was for.
+        ...(ownUrl(c.revokeUrl, c.origin) ? { revokeUrl: c.revokeUrl } : {}),
       };
     }
   }

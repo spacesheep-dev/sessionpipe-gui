@@ -9,6 +9,7 @@ import { type AccountBackend, type AccountNotice, startAccountBackend } from "./
 import { cacheName } from "./cache";
 import { setAccountBackend } from "./current";
 import { leaveGoneNote } from "./local";
+import { ownUrl } from "./outside";
 import { accountShell, type Disconnected, tauriCalls } from "./shell";
 
 /** What the backend had to say once (set before the app renders). */
@@ -62,7 +63,10 @@ const leave = (gone: Disconnected | null): void => {
     } catch {
       // as it came
     }
-    leaveGoneNote({ email: gone.email, host, note: cleanReason(gone.note, 300), revokeUrl: gone.revokeUrl });
+    // Nothing of who it was is left behind (no screen shows it): the hub's words, and where
+    // to revoke the key when that is on the account's own origin.
+    const revokeUrl = ownUrl(gone.revokeUrl, gone.origin);
+    leaveGoneNote({ host, note: cleanReason(gone.note, 300), ...(revokeUrl ? { revokeUrl } : {}) });
   }
   location.replace("/");
 };

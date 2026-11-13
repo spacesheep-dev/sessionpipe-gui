@@ -15,11 +15,13 @@ import { sentence } from "../control/PendingDevices";
 import { canSign, deviceWords, signHint, useOwnKeys } from "../control/signer";
 import { receiverOrigin } from "../lib/net";
 import { back, useSearchParam } from "../lib/router";
+import { hostOf } from "../native/accountConnect";
 import { clock, NEW_WORDS as N, ThisPhone, thisPhone } from "../native/accountWords";
 import { invoke } from "../native/bridge";
 import { Mark } from "./AccountSettings";
 import type { ApproveView } from "./approve";
 import { phoneWatch, usePhone } from "./device";
+import { ownUrl } from "./outside";
 import { approveError } from "./screenWords";
 import "../control/pairing.css";
 import "./account.css";
@@ -34,8 +36,9 @@ export default function ApprovePhone() {
   const auto = useSearchParam("ask") === "1";
   const asked = useRef(false);
   const origin = receiverOrigin();
-  const host = new URL(origin).host;
-  const devices = st.memo.devicesUrl ?? `${origin}/devices`;
+  const host = hostOf(origin);
+  // The hub's word for where Devices is, when it is on the account's own origin; else the page's own.
+  const devices = ownUrl(st.memo.devicesUrl, origin) ?? `${origin}/devices`;
   // Reading the phone's own keys is what asks the signer whether it can sign here at all,
   // and draws this again when it has said.
   useOwnKeys(rp);

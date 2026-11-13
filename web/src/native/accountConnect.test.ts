@@ -108,6 +108,16 @@ describe("connecting an account: the steps", () => {
       note,
       revokeUrl,
     });
+    // Where to revoke it is offered only on the origin the connect was for: the note stays, the button goes.
+    for (const elsewhere of [
+      "https://spacesheep.dev.evil.example/settings/api-keys",
+      "http://spacesheep.dev/x",
+      "javascript:x",
+    ]) {
+      const s = walk(from, { type: "connect", connect: connect("declined", { note, revokeUrl: elsewhere }) });
+      expect(s, elsewhere).toMatchObject({ kind: "ended", why: "declined", note });
+      expect(s, elsewhere).not.toHaveProperty("revokeUrl");
+    }
     for (const error of ["keystore", "io", "conflict"])
       expect(walk(from, { type: "connect", connect: connect("failed", { error, note, revokeUrl }) })).toMatchObject({
         why: "not-kept",
