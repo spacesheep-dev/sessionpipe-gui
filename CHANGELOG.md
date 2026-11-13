@@ -83,8 +83,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   reads as an `https:` address; anything else is treated as no link. A code that is not
   written as one is no longer passed on. A signed command
   that is not a command is refused as a bad request instead of an error. And when
-  spacesheep takes a send but names no job, its row says it was sent with no word of how
-  it went, rather than waiting on a job that cannot be read.
+  spacesheep takes a send but names no job (a job is one only as a whole number), its row
+  says "Sent, but this app can't follow it. Check spacesheep.dev to see how it went."
+  rather than waiting on a job that cannot be read, and rather than saying a computer took
+  it, which is not known. A handoff's card no longer says "not sent" of a send whose end is
+  not known: it says what is known ("no word · rc-mac took it and said nothing more", or
+  that it is not followed).
 - **Words, plain** (for approval): a start called off before it began reads "Cancelled before
   rc-mac started it." and a message sent to it "Cancelled with its session, before rc-mac got
   it."; a refusal with no specific reason "rc-mac refused it." plus the receiver's reason when

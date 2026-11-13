@@ -478,8 +478,13 @@ export function commandNote(
     case "expired":
       return { text: `${machine} didn't take it in time.`, err: true };
     case "unconfirmed":
+      // The code `no_job`: spacesheep took the send and named no job, so no computer is
+      // known to have taken it (the same two sentences as web/src/control/words.ts).
       return {
-        text: `No word from ${machine} since it took this. Check spacesheep.dev to see how it went.`,
+        text:
+          a.code === "no_job"
+            ? "Sent, but this app can't follow it. Check spacesheep.dev to see how it went."
+            : `No word from ${machine} since it took this. Check spacesheep.dev to see how it went.`,
         err: true,
       };
   }

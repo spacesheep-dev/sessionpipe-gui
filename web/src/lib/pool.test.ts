@@ -491,6 +491,15 @@ describe("the section's words", () => {
       "It didn't reach lab-mac: socket closed.",
     );
     expect(commandNote({ outcome: "expired" }, "lab-mac", true, refusal)?.text).toBe("lab-mac didn't take it in time.");
+    // No word of the end: the computer took it, or (no job named) nobody knows that it did.
+    expect(commandNote({ outcome: "unconfirmed" }, "lab-mac", true, refusal)).toEqual({
+      text: "No word from lab-mac since it took this. Check spacesheep.dev to see how it went.",
+      err: true,
+    });
+    expect(commandNote({ outcome: "unconfirmed", code: "no_job" }, "lab-mac", true, refusal)).toEqual({
+      text: "Sent, but this app can't follow it. Check spacesheep.dev to see how it went.",
+      err: true,
+    });
   });
   it("words a sign-in's failures by the §4.2 table", () => {
     const complete = (over: Partial<ControlActivity>) =>
