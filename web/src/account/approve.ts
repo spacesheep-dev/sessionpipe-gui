@@ -139,6 +139,13 @@ export function approveView(memo: DeviceMemo, door: DeviceDoor | null, now: numb
     until = (memo.trustedAt ?? now) + NEW_DEVICE_WAIT_MS;
     exact = memo.watched === true;
   }
+  // The wait is an hour and no more: a time remembered or reported past an hour from now
+  // (a clock that was wrong when it was written, or is wrong now) is that hour's end at
+  // the latest, and never said as exact.
+  if (until !== null && until > now + NEW_DEVICE_WAIT_MS) {
+    until = now + NEW_DEVICE_WAIT_MS;
+    exact = false;
+  }
   const phase: ApprovePhase = until !== null && until > now ? { kind: "cooling", until, exact } : { kind: "approved" };
   return { phase, machines, rest };
 }

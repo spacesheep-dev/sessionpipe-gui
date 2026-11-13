@@ -130,6 +130,25 @@ describe("where this phone's key stands", () => {
     expect(approveView(memo, door({ trusted: ["m_studio"] }), T + 1000).phase).toEqual({ kind: "approved" });
   });
 
+  it("the wait is an hour and no more: a time past an hour from now is that hour's end, and not said as exact", () => {
+    const hour = { kind: "cooling", until: T + NEW_DEVICE_WAIT_MS, exact: false };
+    // Remembered five hours ahead (the phone's clock was wrong when it was written).
+    const ahead: DeviceMemo = { ...asked, trustedAt: T + 4 * NEW_DEVICE_WAIT_MS, watched: true };
+    expect(approveView(ahead, door({ trusted: ["m_studio"] }), T).phase).toEqual(hour);
+    // A refusal's `until`, or the door's own, far off this clock.
+    const said: DeviceMemo = { ...asked, trustedAt: T, watched: true, until: T + 6 * NEW_DEVICE_WAIT_MS };
+    expect(approveView(said, door({ trusted: ["m_studio"] }), T).phase).toEqual(hour);
+    expect(approveView(asked, door({ trusted: ["m_studio"], cooling: T + 9 * NEW_DEVICE_WAIT_MS }), T).phase).toEqual(
+      hour,
+    );
+    // Inside the hour nothing is touched.
+    expect(approveView({ ...asked, trustedAt: T, watched: true }, door({ trusted: ["m_studio"] }), T).phase).toEqual({
+      kind: "cooling",
+      until: T + NEW_DEVICE_WAIT_MS,
+      exact: true,
+    });
+  });
+
   it("removed on spacesheep: the hour is forgotten with the trust", () => {
     const memo = remember({ ...asked, trustedAt: T, watched: true, until: T + 5 }, door(), T + 10);
     expect(memo).toEqual(asked);
