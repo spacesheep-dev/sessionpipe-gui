@@ -369,6 +369,24 @@ describe("a login.begin's detail", () => {
     expect(a.outcome).toBe("delivered");
     expect(loginFromDetail(a.detail)).toEqual({ url, pendingId: "0a1b2c3d", text: "" });
   });
+
+  it("is a link only when it parses as an https URL", () => {
+    // Outside text: what starts like a link and is none is not put on the button.
+    for (const not of [
+      "https://[",
+      "https://[::1",
+      "https://%zz",
+      "https://:443/x",
+      "https://^",
+      "https://999.999.999.999/",
+    ])
+      expect(loginFromDetail(`lg1 ${not}`), not).toEqual({ url: null, pendingId: null, text: `lg1 ${not}` });
+    expect(loginFromDetail("lg1 http://claude.ai/x").url).toBeNull();
+    expect(loginFromDetail("lg1 javascript:alert(1)//https://x").url).toBe("https://x");
+    expect(loginFromDetail("lg1 HTTPS://claude.ai/x").url).toBeNull();
+    // What parses is handed on as it was written, not as the parser would write it.
+    expect(loginFromDetail("lg1 https://claude.ai/a%2Fb?x=1#y").url).toBe("https://claude.ai/a%2Fb?x=1#y");
+  });
 });
 
 describe("the Agent menu's pooled line (UX-SPEC §6)", () => {

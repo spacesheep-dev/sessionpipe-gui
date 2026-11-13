@@ -79,8 +79,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   characters that reorder text, any length. It is shown as one plain line now, with what
   cannot be seen taken out, and whole: up to the 500 characters a computer may send, with
   nothing cut short of that and nothing added, so the sign-in link of a pooled account on
-  such a computer arrives as the computer wrote it. A code that is not written as one is
-  no longer passed on. A signed command
+  such a computer arrives as the computer wrote it. That link is offered only when it
+  reads as an `https:` address; anything else is treated as no link. A code that is not
+  written as one is no longer passed on. A signed command
   that is not a command is refused as a bad request instead of an error. And when
   spacesheep takes a send but names no job, its row says it was sent with no word of how
   it went, rather than waiting on a job that cannot be read.
