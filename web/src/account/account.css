@@ -199,10 +199,14 @@
 
 /* A label longer than the screen is wide (text at 200 %, a long host) goes to a second
    line inside its button, not off the edge. */
+/* In its own line of actions a button shrinks to the screen (and the large one keeps to a
+   phone's column, above); beside words in a row it is never wider than the row. */
 .approve-actions .btn {
   min-width: 0;
+  white-space: normal;
+  text-align: center;
+  overflow-wrap: break-word;
 }
-.approve-actions .btn,
 .approve .form-row .btn {
   max-width: 100%;
   white-space: normal;

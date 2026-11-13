@@ -784,6 +784,13 @@ test("the Approve page's blocks are panels that start at one edge, at any width"
   const b = await bed(browser);
   b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
   try {
+    // Nothing asked yet. On a tablet the page's large button is a button, a phone's column
+    // wide at most, not a bar across the panel.
+    await b.page.goto(`${b.server.url}/add-device`);
+    await expect(b.page.locator("[data-approve='idle']")).toBeVisible({ timeout: 15_000 });
+    const ask = button(b.page, "Ask spacesheep to approve");
+    await expect(ask).toBeEnabled();
+    expect((await ask.boundingBox())!.width).toBeLessThanOrEqual(360.5);
     // Asked, and waiting: where it stands, the computers, and taking the phone off again.
     await b.page.goto(`${b.server.url}/add-device?ask=1`);
     await expect(b.page.locator("[data-approve='waiting']")).toBeVisible({ timeout: 15_000 });
@@ -803,16 +810,14 @@ test("the Approve page's blocks are panels that start at one edge, at any width"
     );
     // A row's button is one line of label, whole: the words beside it wrap, not it.
     for (const name of ["Open Devices"]) {
-      const sizes = await b.page
-        .getByRole("button", { name })
-        .evaluateAll((els) =>
-          els.map((el) => ({
-            h: el.getBoundingClientRect().height,
-            lines: el.getClientRects().length,
-            w: el.scrollWidth <= el.clientWidth + 1,
-            lh: Number.parseFloat(getComputedStyle(el).lineHeight),
-          })),
-        );
+      const sizes = await b.page.getByRole("button", { name }).evaluateAll((els) =>
+        els.map((el) => ({
+          h: el.getBoundingClientRect().height,
+          lines: el.getClientRects().length,
+          w: el.scrollWidth <= el.clientWidth + 1,
+          lh: Number.parseFloat(getComputedStyle(el).lineHeight),
+        })),
+      );
       expect(sizes.length).toBeGreaterThanOrEqual(2);
       for (const z of sizes) {
         expect(z.w, JSON.stringify(z)).toBe(true);
