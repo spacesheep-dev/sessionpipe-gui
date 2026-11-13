@@ -324,6 +324,49 @@ describe("a page's own backend on a spacesheep account", () => {
     again.off();
   });
 
+  it("a relay read from its start is history, none of it unread; what arrives after is news", async () => {
+    const s = new Session("s-1");
+    r.ss.push([
+      s.ev("session.started", {}, { tier: 2 }),
+      s.ev("turn.started", { turn_id: "t1" }, { tier: 2 }),
+      s.ev("turn.transcript", { turn: 1, user: "hello", assistant: "hi" }, { tier: 2 }),
+      s.ev("turn.ended", { turn_id: "t1" }, { tier: 2 }),
+    ]);
+    let b = await r.start();
+    let page = listen(b);
+    await tick(400);
+    let snap = page.last("snapshot")!.snapshot;
+    const news = snap.sessions[0]!.newsAt!;
+    expect(news).toBeTruthy();
+    // The session's news is not after what the marks say is read.
+    expect(snap.marks!.since! >= news).toBe(true);
+    // A new turn ends while the page is open: that is news.
+    await tick(5);
+    r.ss.push([
+      s.ev("turn.started", { turn_id: "t2" }, { tier: 2 }),
+      s.ev("turn.transcript", { turn: 2, user: "again", assistant: "yes" }, { tier: 2 }),
+      s.ev("turn.ended", { turn_id: "t2" }, { tier: 2 }),
+    ]);
+    await tick(6000);
+    const later = page.last("event")!.session.newsAt!;
+    expect(later > snap.marks!.since!).toBe(true);
+    // The person reads it; then the phone loses what it kept (here: nowhere to keep it) and
+    // reads the relay from its start again. The read mark is the hub's, and nothing is unread.
+    await b.transport.patchMarks({ read: { "claude-code:s-1": later } });
+    await b.flushed();
+    page.off();
+    b.stop();
+    await tick(5);
+    b = await r.start();
+    page = listen(b);
+    await tick(400);
+    snap = page.last("snapshot")!.snapshot;
+    const marks = snap.marks!;
+    const again = snap.sessions[0]!.newsAt!;
+    expect(again > (marks.read["claude-code:s-1"] ?? marks.since!)).toBe(false);
+    page.off();
+  });
+
   it("answers in the page what has no route on an account, and asks the network nothing for it", async () => {
     const b = await r.start();
     await tick(400);

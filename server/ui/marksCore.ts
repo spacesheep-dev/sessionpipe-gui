@@ -129,6 +129,19 @@ export class MarksCore {
     return this.doc;
   }
 
+  /** Everything up to `at` is read: `since` moves up to it, never back, and the read marks
+   *  it passes go (they say no more than it does). For an opener whose history arrives
+   *  after the document was made: a page's read of a relay from its start is all of it
+   *  history, and none of it news. The receiver, whose events arrive as they happen, never
+   *  calls it. */
+  sinceAtLeast(at: string): Marks {
+    if (!isIso(at) || at <= this.doc.since) return this.doc;
+    const read: Marks["read"] = {};
+    for (const [k, v] of Object.entries(this.doc.read)) if (v > at) read[k] = v;
+    this.commit({ ...this.doc, rev: this.doc.rev + 1, since: at, read });
+    return this.doc;
+  }
+
   /** The session is gone (the UI's forget, or a session.forgotten): so are its marks. */
   forget(key: SessionKey): void {
     if (!(key in this.doc.read) && !(key in this.doc.unread) && !(key in this.doc.notify)) return;

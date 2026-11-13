@@ -17,6 +17,7 @@ import { indexTouches } from "@shared/files";
 import { type KeptQueues, MemoryControl, type RemoteJobWord } from "../../../server/control/remote";
 import { machineFrame, type RemoteMachine, toActivity } from "../../../server/control/rows";
 import {
+  cursorFrom,
   type RelayClock,
   type RelayKept,
   type RelayReader,
@@ -290,11 +291,19 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     kept.get("reads") === undefined &&
     Number.isFinite(connectedAt) &&
     Math.abs(Date.now() - connectedAt) < FRESH_MS;
+  /** The relay is read from its start (nothing was kept): all of it is history. */
+  let cold = cursorFrom(kept.get("cursor"), shell.origin, shell.email) === 0;
   const caughtUp = (): void => {
     if (!catching) return;
     catching = false;
     store.setLoading(false);
     if (caughtUpMs === null) caughtUpMs = performance.now() - t0;
+    // A session's news is dated by when it arrived here, and history arrived just now: none
+    // of it is news. What arrives from here on is.
+    if (cold && reader?.status().state !== "offline") {
+      cold = false;
+      marks.sinceAtLeast(new Date().toISOString());
+    }
     board();
   };
   const open = (): RelayReader =>

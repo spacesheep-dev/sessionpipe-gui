@@ -70,6 +70,30 @@ describe("MarkStore", () => {
     }
   });
 
+  it("moves since up when its opener says everything so far is read, never back, and drops the marks it passes", () => {
+    const tmp = tempDir();
+    try {
+      const s = new MarkStore(
+        tmp.dir,
+        () => true,
+        () => T0,
+      );
+      s.patch({ read: { a: iso(100), b: iso(500) }, unread: { c: true } });
+      const frames: number[] = [];
+      s.subscribe((m) => m.kind === "marks" && frames.push(m.marks.rev));
+      expect(s.sinceAtLeast(iso(300))).toMatchObject({ since: iso(300), read: { b: iso(500) }, unread: { c: true } });
+      expect(s.get().read.a).toBeUndefined();
+      expect(frames).toHaveLength(1);
+      // Not back, and not for something that is no time.
+      expect(s.sinceAtLeast(iso(200)).since).toBe(iso(300));
+      expect(s.sinceAtLeast("yesterday").since).toBe(iso(300));
+      expect(frames).toHaveLength(1);
+      expect(new MarkStore(tmp.dir, () => true).get().since).toBe(iso(300));
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
   it("never moves a read mark back: a late device's older newsAt changes nothing", () => {
     const tmp = tempDir();
     try {
