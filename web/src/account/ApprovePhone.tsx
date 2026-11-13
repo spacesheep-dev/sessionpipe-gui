@@ -16,7 +16,7 @@ import { canSign, deviceWords, signHint, useOwnKeys } from "../control/signer";
 import { receiverOrigin } from "../lib/net";
 import { back, useSearchParam } from "../lib/router";
 import { hostOf } from "../native/accountConnect";
-import { clock, NEW_WORDS as N, ThisPhone, thisPhone } from "../native/accountWords";
+import { clock, NEW_WORDS as N, REUSED as R, ThisPhone, thisPhone } from "../native/accountWords";
 import { invoke } from "../native/bridge";
 import { Mark } from "./AccountSettings";
 import type { ApproveView } from "./approve";
@@ -69,7 +69,7 @@ export default function ApprovePhone() {
   const err = st.error ? approveError(st.error, st.errorAt ?? now) : null;
   const elsewhere = (
     <a className="btn" href={`${origin}/sessions`} target="_blank" rel="noreferrer noopener" data-elsewhere>
-      {`Open on ${host}`}
+      {R.openOn(host)}
     </a>
   );
 
@@ -105,7 +105,7 @@ export default function ApprovePhone() {
                     onClick={ask}
                     disabled={!view || rp === null}
                     pending={st.asking}
-                    pendingLabel="Asking…"
+                    pendingLabel={R.asking}
                   >
                     {N.approveAsk}
                   </ActionButton>
@@ -135,7 +135,7 @@ export default function ApprovePhone() {
                 </p>
                 <p className="approve-note">{N.approveDroppedBody}</p>
                 <div className="approve-actions">
-                  <ActionButton className="btn btn--primary" onClick={ask} pending={st.asking} pendingLabel="Asking…">
+                  <ActionButton className="btn btn--primary" onClick={ask} pending={st.asking} pendingLabel={R.asking}>
                     {N.approveAskAgain}
                   </ActionButton>
                 </div>
@@ -265,7 +265,7 @@ function Waiting({
         <>
           <p className="approve-note">{N.approveNoNumber(ThisPhone())}</p>
           <div className="approve-actions">
-            <ActionButton className="btn btn--primary" onClick={onAsk} pending={asking} pendingLabel="Asking…">
+            <ActionButton className="btn btn--primary" onClick={onAsk} pending={asking} pendingLabel={R.asking}>
               {N.approveAskAgain}
             </ActionButton>
           </div>

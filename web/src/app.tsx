@@ -21,6 +21,7 @@ import { accountMode } from "./lib/net";
 import { titlePrefix, useAttentionEffects } from "./lib/notify";
 import { Link, navigate, parseRoute, usePath, useRoute } from "./lib/router";
 import { getSettings } from "./lib/settings";
+import { NEW_WORDS, thisPhone } from "./native/accountWords";
 import { Workflows } from "./orchestrate/workflows/Workflows";
 import { Board } from "./pages/Board";
 import { Connect } from "./pages/Connect";
@@ -83,7 +84,10 @@ export function App() {
   const open = useAnswerableCount();
   useAttentionEffects();
   useEffect(() => {
-    document.title = `${titlePrefix(open)}${themeName ?? TITLES[route.name] ?? "sessionpipe"} · sessionpipe gui`;
+    // On a spacesheep account that address is the page that approves this phone, and is
+    // named (and announced) as that page names itself.
+    const own = route.name === "add-device" && accountMode() ? NEW_WORDS.machinesApprove(thisPhone()) : undefined;
+    document.title = `${titlePrefix(open)}${themeName ?? own ?? TITLES[route.name] ?? "sessionpipe"} · sessionpipe gui`;
   }, [route, themeName, open]);
   // To the top when the path changes (not on a `?s=` tab change, not on a stream-driven
   // render: `route` is a fresh object every render, so it cannot be the dependency);

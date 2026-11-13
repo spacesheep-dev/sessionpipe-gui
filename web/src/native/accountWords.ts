@@ -33,8 +33,13 @@ export const REUSED = {
   later: WORDS.connected.later,
   done: WORDS.connected.done,
   disconnect: "Disconnect",
-  /** What the app's own doors say (the hub's words for it, account/doors.ts). */
+  /** What the app's own doors say (the hub's words for it, account/doors.ts); also said
+   *  for an error that came with no words of its own. */
   unreachableNow: "spacesheep could not be reached.",
+  /** A button while its ask is out (Add this device, a handoff's Ask). */
+  asking: "Asking…",
+  /** Where a session can be answered when this phone cannot ("Open on spacesheep.dev"). */
+  openOn: (host: string) => `Open on ${host}`,
 } as const;
 
 /** "this iPhone" / "this phone" (as control/signer.ts deviceWords says it; not imported

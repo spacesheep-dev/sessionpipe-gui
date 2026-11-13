@@ -185,3 +185,26 @@
     margin-top: 16px;
   }
 }
+
+/* Forced colours draw no background: the warn dot is filled by its own border there, so it
+   stays a dot and is not taken for the ring that says "waiting". */
+@media (forced-colors: active) {
+  .acct-state--warn::before {
+    width: 0;
+    height: 0;
+    border-width: 4px;
+    border-color: CanvasText;
+  }
+}
+
+/* A label longer than the screen is wide (text at 200 %, a long host) goes to a second
+   line inside its button, not off the edge. */
+.approve-actions .btn,
+.approve .form-row .btn {
+  max-width: 100%;
+  min-width: 0;
+  height: auto;
+  white-space: normal;
+  text-align: center;
+  overflow-wrap: anywhere;
+}

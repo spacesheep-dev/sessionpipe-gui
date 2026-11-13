@@ -387,6 +387,32 @@ test.describe("each way a connect can end, with what to do next", () => {
     b.hub.alert = () => true;
   });
 
+  test("two taps on the hand-off to the browser ask the hub once, and Connecting has a way out", async () => {
+    await start();
+    await digits();
+    const opens = async () => (await calls(b.page)).filter((c) => c === "acct_connect_open").length;
+    const before = await opens();
+    // Two taps before the first has answered.
+    await b.page.evaluate(() => {
+      const open = [...document.querySelectorAll("button")].find((x) => /^Open in /.test(x.textContent ?? ""))!;
+      open.click();
+      open.click();
+    });
+    await expect(step(b.page, "account-number")).toHaveAttribute("data-opened", "true");
+    expect((await opens()) - before).toBe(1);
+    await button(b.page, "Cancel").click();
+    // A start that does not answer: the screen says Connecting, and Cancel leaves it.
+    b.hub.down = true;
+    b.hub.latencyMs = 60_000;
+    await button(b.page, "Use a spacesheep account").click();
+    await button(b.page, "Continue").click();
+    await expect(step(b.page, "account-starting")).toBeVisible();
+    await button(b.page, "Cancel").click();
+    await expect(step(b.page, "account-starting")).toHaveCount(0);
+    b.hub.down = false;
+    b.hub.latencyMs = 0;
+  });
+
   test("nobody confirmed in time", async () => {
     await start();
     b.ss.expire(await digits());
@@ -741,6 +767,40 @@ test("the Approve page's blocks are panels that start at one edge, at any width"
     // page draws no panels of its own, each is one, and what is inside starts equally far in.
     for (const k of W >= 840 ? (["left", "right", "inner"] as const) : (["left", "right"] as const))
       expect(new Set(boxes.map((x) => Math.round(x[k]))).size, `${k}: ${JSON.stringify(boxes)}`).toBe(1);
+  } finally {
+    await b.close();
+  }
+});
+
+test("the Approve page is named as itself, wraps its buttons at twice the text size, and keeps its marks apart in forced colours", async ({
+  browser,
+}) => {
+  const b = await bed(browser);
+  b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+  try {
+    // 390 wide with the text at 200 %.
+    await b.page.setViewportSize({ width: 195, height: 422 });
+    await b.page.goto(`${b.server.url}/add-device`);
+    // The tab, and what a screen reader hears on arriving, is the page's own title.
+    await expect(b.page).toHaveTitle(/^Approve this iPhone · /);
+    const ask = button(b.page, "Ask spacesheep to approve");
+    await expect(ask).toBeVisible({ timeout: 15_000 });
+    const box = (await ask.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(195.5);
+    expect(await b.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    // Forced colours draw no background: the warn dot stays filled (by its border), not the wait's ring.
+    b.ss.revoked = true;
+    await b.page.emulateMedia({ forcedColors: "active" });
+    await b.page.setViewportSize({ width: W, height: H });
+    await b.page.goto(`${b.server.url}/settings?section=app`);
+    const warn = b.page.locator("[data-account-settings] .acct-state--warn").first();
+    await expect(warn).toBeVisible({ timeout: 20_000 });
+    const mark = await warn.evaluate((el) => {
+      const cs = getComputedStyle(el, "::before");
+      return { width: cs.width, border: cs.borderTopWidth };
+    });
+    // Its border is half its width on every side: all border, no hole.
+    expect(mark).toEqual({ width: "8px", border: "4px" });
   } finally {
     await b.close();
   }
