@@ -324,6 +324,7 @@ fn hub_asking(home: &Path, enabled: bool, local: bool, person: Option<Arc<Script
             allow_local_http: local,
             device: "iPhone".into(),
             version: "0.8.0".into(),
+            here: "this device".into(),
             confirm: person.map(|p| p as Arc<dyn Confirm>),
         },
     });
@@ -3251,6 +3252,7 @@ async fn an_account_that_cannot_be_saved_replaces_nothing() {
             allow_local_http: true,
             device: "iPhone".into(),
             version: "0.8.0".into(),
+            here: "this device".into(),
             confirm: Some(Script::saying(true)),
         },
     });

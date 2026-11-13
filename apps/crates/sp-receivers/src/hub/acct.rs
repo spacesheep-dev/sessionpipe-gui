@@ -397,7 +397,13 @@ fn settle(wire: Vec<u8>, gzip: bool, max: usize, key: &str) -> Result<Vec<u8>, R
 }
 
 /// An answer the Hub wrote itself: JSON, its code in `account::HUB_HEADER`, never cached.
-fn refusal(r: Refused, origin: Option<&str>, allowed: &[String]) -> http::Response<Vec<u8>> {
+/// `here`: what this device is called in its words (`AccountConfig::here`).
+fn refusal(
+    r: Refused,
+    here: &str,
+    origin: Option<&str>,
+    allowed: &[String],
+) -> http::Response<Vec<u8>> {
     let mut b = http::Response::builder()
         .status(r.status())
         .header("content-type", JSON)
@@ -407,7 +413,7 @@ fn refusal(r: Refused, origin: Option<&str>, allowed: &[String]) -> http::Respon
         b = b.header("retry-after", "1");
     }
     proxy::finish_exposing(
-        b.body(r.body()).expect("response"),
+        b.body(r.body(here)).expect("response"),
         origin,
         allowed,
         account::EXPOSE_HEADERS,
@@ -426,7 +432,12 @@ impl Hub {
         } else {
             Refused::NotADoor
         };
-        refusal(r, origin, allowed)
+        refusal(r, self.here(), origin, allowed)
+    }
+
+    /// What this device is called in a sentence ("this iPhone").
+    fn here(&self) -> &str {
+        &self.0.cfg.account.here
     }
 
     fn account_cfg(&self) -> &account::AccountConfig {
@@ -538,13 +549,19 @@ impl Hub {
         let Some(confirm) = self.account_cfg().confirm.clone() else {
             return Asked::Not(Problem::new(
                 "not_asked",
-                "This device can't ask that question.",
+                format!(
+                    "{} can't ask that question.",
+                    account::sentence_start(self.here())
+                ),
             ));
         };
         if self.0.acct.asking.swap(true, Ordering::SeqCst) {
             return Asked::Not(Problem::new(
                 "busy",
-                "Another question is open on this device. Answer it first.",
+                format!(
+                    "Another question is open on {}. Answer it first.",
+                    self.here()
+                ),
             ));
         }
         let _open = Asking(&self.0.acct.asking);
@@ -657,7 +674,10 @@ impl Hub {
             log::warn!("acct {id}: the key could not be deleted: {e}");
             return Err(Problem::new(
                 "io",
-                "The key could not be removed from this device. Nothing was changed.",
+                format!(
+                    "The key could not be removed from {}. Nothing was changed.",
+                    self.here()
+                ),
             ));
         }
         {
@@ -672,7 +692,7 @@ impl Hub {
         let removed = self.remove_entry(id).map_err(|e| {
             Problem::new(
                 "io",
-                format!("The key is removed from this device, but the entry could not be ({e}). It now shows as having no key."),
+                format!("The key is removed from {}, but the entry could not be ({e}). It now shows as having no key.", self.here()),
             )
         })?;
         self.emit(HubEvent::Account);
@@ -695,7 +715,7 @@ impl Hub {
         let method = req.method().as_str().to_string();
         let refuse = |r: Refused| {
             self.proxy_failed(&rx.id, &method, "(account)", r.code());
-            refusal(r, origin, allowed)
+            refusal(r, self.here(), origin, allowed)
         };
         // Only the bundled page: a frame or a page from anywhere else could not read the
         // answer, and must not cause the request either.
@@ -712,7 +732,7 @@ impl Hub {
         }
         let a = match self.account_send(&rx, opened, body, false).await {
             Ok(a) => a,
-            Err(r) => return refusal(r, origin, allowed),
+            Err(r) => return refusal(r, self.here(), origin, allowed),
         };
         // spacesheep's status and body as they are; of its headers only the type and a
         // wait. No `Set-Cookie`, no `Location`, nothing the webview would act on.
@@ -913,7 +933,7 @@ impl Hub {
         let a = self
             .account_send(&rx, Opened::machines(), Vec::new(), true)
             .await
-            .map_err(|r| r.words().to_string())?;
+            .map_err(|r| r.words(self.here()))?;
         if a.status != 200 {
             return Ok((a.status, Vec::new()));
         }
@@ -961,7 +981,10 @@ impl Hub {
             log::warn!("acct {id}: the signer's key is not one to ask about: {why}");
             return Err(Problem::new(
                 "bad_key",
-                "This device's key can't be used with a spacesheep account.",
+                format!(
+                    "{}'s key can't be used with a spacesheep account.",
+                    account::sentence_start(self.here())
+                ),
             ));
         }
         let key_id = key["id"].as_str().unwrap_or_default().to_string();
@@ -979,11 +1002,12 @@ impl Hub {
             .to_string()
             .into_bytes();
         let opened = Opened::device_ask();
-        account::check_body(opened.door, &body).map_err(|r| Problem::new(r.code(), r.words()))?;
+        account::check_body(opened.door, &body)
+            .map_err(|r| Problem::new(r.code(), r.words(self.here())))?;
         let a = self
             .account_send(&rx, opened, body, true)
             .await
-            .map_err(|r| Problem::new(r.code(), r.words()))?;
+            .map_err(|r| Problem::new(r.code(), r.words(self.here())))?;
         let v: serde_json::Value = serde_json::from_slice(&a.body).unwrap_or_default();
         let said = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("");
         if !(200..300).contains(&a.status) {
@@ -1151,7 +1175,10 @@ impl Hub {
             if g.as_ref().is_some_and(|p| p.state == ConnectState::Asking) {
                 return Err(Problem::new(
                     "busy",
-                    "An account was approved and waits for your answer on this device.",
+                    format!(
+                        "An account was approved and waits for your answer on {}.",
+                        self.here()
+                    ),
                 ));
             }
         }
@@ -1630,7 +1657,7 @@ impl Hub {
             log::warn!("acct: the key could not be kept: {e}");
             return fail(
                 "keystore",
-                &format!("The key could not be kept on this device. {REVOKE}"),
+                &format!("The key could not be kept on {}. {REVOKE}", self.here()),
             );
         }
         let saved = self.0.registry.lock().unwrap().upsert(rx.clone());
@@ -1643,7 +1670,10 @@ impl Hub {
             };
             return fail(
                 "io",
-                &format!("The account could not be saved on this device. {REVOKE}"),
+                &format!(
+                    "The account could not be saved on {}. {REVOKE}",
+                    self.here()
+                ),
             );
         }
         // Saved and confirmed. One account per origin: another person's at this origin
@@ -1794,7 +1824,7 @@ impl Hub {
             email,
             forgotten: true,
             revoked: false,
-            note: "The key is forgotten on this device. It keeps working until you revoke it on spacesheep: Settings → API keys.".into(),
+            note: format!("The key is forgotten on {}. It keeps working until you revoke it on spacesheep: Settings → API keys.", self.here()),
         })
     }
 

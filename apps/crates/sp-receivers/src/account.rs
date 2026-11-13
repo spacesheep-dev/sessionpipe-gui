@@ -137,6 +137,10 @@ pub struct AccountConfig {
     pub device: String,
     /// The app's version, for the key's name.
     pub version: String,
+    /// What this device is called in the middle of a sentence the person reads ("this
+    /// iPhone"): the Hub's own messages name it so. The shell says; "this device" until
+    /// it does.
+    pub here: String,
     /// Who asks the person. None: every question is answered no.
     pub confirm: Option<Arc<dyn Confirm>>,
 }
@@ -149,6 +153,7 @@ impl Default for AccountConfig {
             allow_local_http: false,
             device: "sessionpipe".into(),
             version: String::new(),
+            here: "this device".into(),
             confirm: None,
         }
     }
@@ -184,6 +189,15 @@ pub fn clean_origin(input: Option<&str>, allow_local_http: bool) -> Option<Strin
         _ => return None,
     }
     Some(u.origin().ascii_serialization())
+}
+
+/// `words` with its first letter a capital, to start a sentence with ("This iPhone").
+pub fn sentence_start(words: &str) -> String {
+    let mut c = words.chars();
+    match c.next() {
+        Some(first) => first.to_uppercase().chain(c).collect(),
+        None => String::new(),
+    }
 }
 
 /// The host of an origin, for the person to read.
@@ -411,8 +425,10 @@ impl Refused {
         }
     }
 
-    pub fn words(self) -> &'static str {
-        match self {
+    /// The words for the person. `here`: what this device is called in a sentence
+    /// (`AccountConfig::here`).
+    pub fn words(self, here: &str) -> String {
+        let fixed = match self {
             Refused::NotADoor => "The app does not forward this to a spacesheep account.",
             Refused::BadQuery => "That request has a parameter the app does not forward.",
             Refused::BadBody => "That request's body is not one the app forwards.",
@@ -421,8 +437,15 @@ impl Refused {
             Refused::ForbiddenOrigin => "Only the app's own page may ask.",
             Refused::AccountOff => "A spacesheep account is not available in this build.",
             Refused::BadAccount => "This account's entry is damaged. Disconnect and connect again.",
-            Refused::NotConnected => "This device holds no key for the account. Connect again.",
-            Refused::NoDeviceKey => "This device has not asked to be trusted yet.",
+            Refused::NotConnected => {
+                return format!(
+                    "{} holds no key for the account. Connect again.",
+                    sentence_start(here)
+                )
+            }
+            Refused::NoDeviceKey => {
+                return format!("{} has not asked to be trusted yet.", sentence_start(here))
+            }
             Refused::Busy => "Too many requests at once.",
             Refused::NotSent | Refused::Unreachable => "spacesheep could not be reached.",
             Refused::Timeout => "spacesheep did not answer in time.",
@@ -432,12 +455,13 @@ impl Refused {
             Refused::AnswerTooLarge => "spacesheep's answer is too large. Ask for less at once.",
             Refused::BadEncoding => "spacesheep's answer could not be read.",
             Refused::Withheld => "spacesheep's answer was not one the app passes on.",
-        }
+        };
+        fixed.to_string()
     }
 
     /// The answer's body: `{ hub: true, reason, error }`.
-    pub fn body(self) -> Vec<u8> {
-        serde_json::json!({ "hub": true, "reason": self.code(), "error": self.words() })
+    pub fn body(self, here: &str) -> Vec<u8> {
+        serde_json::json!({ "hub": true, "reason": self.code(), "error": self.words(here) })
             .to_string()
             .into_bytes()
     }
@@ -1563,7 +1587,8 @@ mod tests {
 
     #[test]
     fn a_refusal_says_whose_it_is() {
-        let v: serde_json::Value = serde_json::from_slice(&Refused::NotADoor.body()).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_slice(&Refused::NotADoor.body("this device")).unwrap();
         assert_eq!(v["hub"], true);
         assert_eq!(v["reason"], "not_a_door");
         assert!(v["error"].as_str().unwrap().ends_with('.'));
@@ -1781,6 +1806,44 @@ mod tests {
         );
         assert_eq!(link_on_origin("blob:https://spacesheep.dev/x", o), None);
         assert_eq!(link_on_origin("https://evil.example/devices", o), None);
+    }
+
+    /// The Hub's words name the device as the shell says it is called; every other
+    /// sentence is the same wherever it is said.
+    #[test]
+    fn the_hubs_words_name_this_device_as_the_shell_calls_it() {
+        assert_eq!(sentence_start("this iPhone"), "This iPhone");
+        assert_eq!(sentence_start("this device"), "This device");
+        assert_eq!(sentence_start(""), "");
+        assert_eq!(AccountConfig::default().here, "this device");
+        assert_eq!(
+            Refused::NotConnected.words("this iPhone"),
+            "This iPhone holds no key for the account. Connect again."
+        );
+        assert_eq!(
+            Refused::NoDeviceKey.words("this phone"),
+            "This phone has not asked to be trusted yet."
+        );
+        let body: serde_json::Value =
+            serde_json::from_slice(&Refused::NotConnected.body("this iPhone")).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "hub": true, "reason": "not_connected",
+                "error": "This iPhone holds no key for the account. Connect again."
+            })
+        );
+        // Nothing else says where: the same words on every device.
+        for r in [
+            Refused::NotADoor,
+            Refused::Busy,
+            Refused::NotSent,
+            Refused::Unreachable,
+            Refused::Timeout,
+            Refused::Withheld,
+        ] {
+            assert_eq!(r.words("this iPhone"), r.words("this device"), "{r:?}");
+        }
     }
 
     #[test]

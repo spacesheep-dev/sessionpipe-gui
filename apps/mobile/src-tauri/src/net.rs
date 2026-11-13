@@ -43,6 +43,8 @@ pub fn config(home: PathBuf, version: &str, identifier: &str) -> HubConfig {
             allow_local_http: cfg!(debug_assertions),
             device: os.device_name().into(),
             version: version.into(),
+            // The Hub's own word for now; the phone's own comes with its words.
+            here: AccountConfig::default().here,
             // The shell puts its native alerts here once there is an app to show them
             // (`acct::Alerts`, lib.rs); with none, no question can be asked, and nothing
             // that needs the person's answer happens.
