@@ -36,7 +36,7 @@ import { useResyncs, useStore } from "../data/hooks";
 import { toolLabel } from "../lib/format";
 import { fuzzy } from "../lib/fuzzy";
 import { copyText } from "../lib/menus";
-import { accountMode } from "../lib/net";
+import { accountMode, onSpacesheepDev } from "../lib/net";
 import { clockTime } from "../lib/pool";
 import { hintFor } from "../lib/shortcuts";
 import { ago, useNow } from "../lib/time";
@@ -575,7 +575,8 @@ function FileList({
         {!loading && (
           <p className="state-text">
             {accountMode() ? (
-              "The files this session reads and changes show here by name. spacesheep is never sent what is in them."
+              // What spacesheep.dev takes is its rule, said only of it: another server's is not ours to promise.
+              `The files this session reads and changes show here by name.${onSpacesheepDev() ? " spacesheep is never sent what is in them." : ""}`
             ) : (
               <>
                 The files this session reads and changes show here as its tools name them. Tier 3 carries the tool
@@ -1049,7 +1050,9 @@ function FileView({
             {entry.pending
               ? "A tool is still running on this file."
               : accountMode()
-                ? "Only this file's name is here: spacesheep is never sent a file's text."
+                ? onSpacesheepDev()
+                  ? "Only this file's name is here: spacesheep is never sent a file's text."
+                  : "Only this file's name is here."
                 : "The agent named this file, but its events carry none of its text: a lower tier or lens leaves tool inputs and outputs out."}
           </p>
         </div>

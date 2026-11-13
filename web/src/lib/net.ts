@@ -64,6 +64,11 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
  *  shell the page's origin is the app's). */
 export const receiverOrigin = (): string => shell?.receiver?.origin || location.origin;
 
+/** The account this window shows is on spacesheep.dev itself: what the page says of
+ *  spacesheep's own rules (what it takes, what it never holds) is said only there. An
+ *  account on another server of the same kind is that server's to speak for. */
+export const onSpacesheepDev = (): boolean => accountMode() && receiverOrigin() === "https://spacesheep.dev";
+
 /** A session's own page on the spacesheep account this window shows (`/sessions?s=<id>`
  *  there): the one address of the app's a person on an account can open or hand to
  *  somebody. The app's own paths (`/s/…`, `/feed`) are not pages spacesheep has. */
