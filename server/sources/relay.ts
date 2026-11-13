@@ -98,7 +98,9 @@ export interface RelayReaderOptions {
   hub?: boolean;
   /** History is read first: while a page comes back full (more is waiting) the next is
    *  read at once and with no wait, as long as BACKLOG_RESERVE reads of the budget stay
-   *  unspent (backlogPaceMs). Off, every read is paced alike (relayPaceMs) and waits. */
+   *  unspent (backlogPaceMs). And the read after one that failed does not wait either, so
+   *  the state says how things are as soon as spacesheep answers again, not a long poll
+   *  later. Off, every read is paced alike (relayPaceMs) and waits. */
   backlog?: boolean;
   /** The key was made just now, so no reader before this one spent any of its budget:
    *  with no read times kept, none are taken as spent (readsFrom's seed). */
@@ -132,6 +134,8 @@ export interface RelayReader {
   unauthorized(): void;
   /** Read the jobs door now (a send just made, its computer back, events for its session). */
   kickJobs(): void;
+  /** Write the read times down now (an opener that may be closed without a stop). */
+  flush(): void;
 }
 
 /** One job as the relay's jobs door lists it (spacesheep's `relay/jobs`). */
@@ -357,6 +361,11 @@ export function startRelayReader(opts: RelayReaderOptions): RelayReader {
   };
   /** The last page came back full: more is waiting (RelayReaderOptions.backlog). */
   let more = false;
+  /** The last read failed (RelayReaderOptions.backlog: the next one does not wait). */
+  let failed = false;
+  /** The read is the last one asked again (the hub's room was full, or its answer too
+   *  large): its pace was waited out already. */
+  let again = false;
   /** When each relay read in the last window was made (relayPaceMs). */
   // Kept beside the cursor (READS_SAVE_MS and at stop), so a restart mid-stream goes on
   // from the same budget rather than an empty one. One reader per key: each Connect mints
@@ -494,6 +503,7 @@ export function startRelayReader(opts: RelayReaderOptions): RelayReader {
     lastAt = new Date(clock.now()).toISOString();
     if (state === "ok") lastError = undefined;
     pause = opts.retryMs ?? 2000;
+    failed = false;
     more = page.events.length >= size;
     // Past what was too large: the next may ask for more again.
     if (limit < RELAY_PAGE && cursor >= smallUntil) limit = Math.min(RELAY_PAGE, limit * 2);
@@ -585,23 +595,27 @@ export function startRelayReader(opts: RelayReaderOptions): RelayReader {
   const loop = async (): Promise<void> => {
     while (!stopped) {
       try {
-        const pace = opts.backlog && more ? backlogPaceMs(reads, clock.now()) : relayPaceMs(reads, clock.now());
+        // Asked again, like history, it goes at once while the reserve holds.
+        const pace =
+          again || (opts.backlog && more) ? backlogPaceMs(reads, clock.now()) : relayPaceMs(reads, clock.now());
+        again = false;
         if (pace > 0) await sleep(pace);
         if (stopped) break;
         // History is not waited for: after a full page the next is asked for with no wait, so
         // the page that ends it comes back at once.
-        inFlight = poll(opts.backlog && more ? 0 : RELAY_WAIT_S);
+        inFlight = poll(opts.backlog && (more || failed) ? 0 : RELAY_WAIT_S);
         await inFlight;
         inFlight = null;
       } catch (e) {
         inFlight = null;
         if (stopped) break;
-        if (e instanceof TooLarge) continue;
-        if (e instanceof HubBusy) {
-          await sleep(e.pauseMs);
+        if (e instanceof TooLarge || e instanceof HubBusy) {
+          again = true;
+          if (e instanceof HubBusy) await sleep(e.pauseMs);
           continue;
         }
         lastError = (e as Error).message;
+        failed = true;
         // A first read that was asked again and then failed is over, as one that failed at once.
         loaded();
         if (e instanceof Limited) {
@@ -628,16 +642,14 @@ export function startRelayReader(opts: RelayReaderOptions): RelayReader {
   let firstPause = 0;
   const first = poll(0)
     .catch((e) => {
-      if (e instanceof TooLarge) {
+      if (e instanceof TooLarge || e instanceof HubBusy) {
         firstAgain = true;
-        return 0;
-      }
-      if (e instanceof HubBusy) {
-        firstAgain = true;
-        firstPause = e.pauseMs;
+        again = true;
+        if (e instanceof HubBusy) firstPause = e.pauseMs;
         return 0;
       }
       say(e instanceof Limited ? "limited" : "offline");
+      failed = true;
       if (e instanceof Limited) firstPause = e.pauseMs;
       lastError = (e as Error).message;
       return 0;
@@ -668,6 +680,7 @@ export function startRelayReader(opts: RelayReaderOptions): RelayReader {
     pollMachines: machinesPoll,
     unauthorized: revoked,
     kickJobs,
+    flush: saveReads,
   };
 }
 

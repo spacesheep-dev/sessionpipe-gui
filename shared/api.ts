@@ -1566,6 +1566,13 @@ export interface ControlActivity {
   /** A send carried by spacesheep, waiting while this app follows no account that can say
    *  how it went (disconnected): it is picked up again when that account connects. */
   unfollowed?: "disconnected" | "revoked";
+  /** A send of a page on a spacesheep account whose answer nobody heard
+   *  (web/src/account/unheard.ts); a receiver never sets it. `asking`: it may have been
+   *  sent, and the page is finding out (the row waits, `detail` is what the app said of the
+   *  asking). `unsent`: no job was made of it: `status`, `reason`, `code` and `detail` are
+   *  the refusal a send answers with. `unknown`: nobody can say any more. Once spacesheep is
+   *  known to hold it, the row is a send like any other and says none of this. */
+  unheard?: { state: "asking" | "unsent" | "unknown"; status?: number; reason?: string };
   /** The delivery mode the machine acked, one of `DELIVERY_MODES`. */
   mode?: string;
   code?: string;

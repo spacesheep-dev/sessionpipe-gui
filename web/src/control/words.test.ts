@@ -2,8 +2,9 @@
 // The words a start that did not start shows on its session page (words.ts): a machine's
 // own detail ends the sentence it is quoted in, once, whatever punctuation it came with.
 import type { ControlActivity } from "@shared/api";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ControlError } from "./api";
+import { noteMachineControl } from "./remoteRp";
 import {
   handoffEndWords,
   harnessCommand,
@@ -13,6 +14,7 @@ import {
   sendErrorWords,
   sentLine,
   startFailureWords,
+  unheardWords,
 } from "./words";
 
 const start = (over: Partial<ControlActivity>): ControlActivity => ({
@@ -104,6 +106,15 @@ describe("startFailureWords", () => {
       "not followed · spacesheep didn't say which job it is",
       "not followed · spacesheep didn't say which job it is",
     ]);
+    // The account's own host is the one named, where the machine's row says where it lives.
+    noteMachineControl({
+      machineId: "m-else",
+      remote: { via: "spacesheep", origin: "https://sheep.example.org", rpId: "sheep.example.org" },
+    } as never);
+    expect(startFailureWords({ ...n, machineId: "m-else" }, "rc-mac", "Claude Code")).toBe(
+      "Sent, but this app can't follow it. Check sheep.example.org to see how it went.",
+    );
+    noteMachineControl({ machineId: "m-else" } as never);
     // Nothing here knows that the computer took it, or that it was not sent.
     for (const s of said) {
       expect(s).not.toContain("rc-mac");
@@ -162,6 +173,25 @@ describe("sentLine", () => {
 });
 
 describe("sendErrorWords", () => {
+  it("on a spacesheep account names no place that is not there: a refused key is said, and nothing of connecting in Settings", async () => {
+    const g = globalThis as { sessionpipeShell?: unknown };
+    g.sessionpipeShell = {
+      rxBase: "rx://localhost/ACCT",
+      receiver: { kind: "spacesheep", origin: "https://spacesheep.dev" },
+    };
+    vi.resetModules();
+    try {
+      const { sendErrorWords: words } = await import("./words");
+      const { ControlError: Refused } = await import("./api");
+      const said = words(new Refused(502, "Unknown or revoked API key.", "spacesheep_unauthorized"));
+      expect(said).toBe("Not sent. spacesheep no longer takes this app's key.");
+      expect(said).not.toMatch(/Settings|connect again/);
+    } finally {
+      delete g.sessionpipeShell;
+      vi.resetModules();
+    }
+  });
+
   it("tells spacesheep's refusal of this app's key from the page's own key", () => {
     expect(sendErrorWords(new ControlError(502, "Unknown or revoked API key.", "spacesheep_unauthorized"))).toBe(
       "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.",
@@ -171,6 +201,59 @@ describe("sendErrorWords", () => {
     ).toBe("Not sent. Files can't be sent to rc-mac through spacesheep yet.");
     expect(sendErrorWords(new ControlError(401, "unauthorized"))).toBe(
       "not sent · this page lost its key; reload it from the terminal's link",
+    );
+  });
+
+  it("a send nobody heard the answer to says the same of its row: it may have been sent, then what it turned out to be", () => {
+    const row = start({ kind: "prompt", code: "hub_unknown", detail: "spacesheep did not answer in time." });
+    const may =
+      "It may have been sent: spacesheep did not answer in time. Look at the session before you send it again.";
+    // While the app finds out, and when nobody can say any more.
+    const asking = { ...row, unheard: { state: "asking" as const } };
+    const unknown = { ...row, outcome: "unconfirmed" as const, unheard: { state: "unknown" as const } };
+    for (const a of [asking, unknown]) {
+      expect(unheardWords(a)).toBe(may);
+      expect(outcomeWords(a, { machine: "rc-mac" })).toBe(may);
+      expect(sentLine(a, { machine: "rc-mac", online: true, command: "claude" })).toEqual({
+        text: may,
+        running: false,
+      });
+    }
+    // Still being asked for, it is no failure yet; settled as one nobody can say, it reads the same.
+    expect(promptFailureWords(asking, "rc-mac")).toBeNull();
+    expect(startFailureWords({ ...asking, kind: "start" }, "rc-mac", "Claude Code")).toBeNull();
+    expect(promptFailureWords(unknown, "rc-mac")).toBe(may);
+    // No job was made: a send's own words for the refusal, never the computer's.
+    const unsent = (over: Partial<ControlActivity>, u: { status: number; reason: string }) => ({
+      ...row,
+      code: undefined,
+      detail: undefined,
+      outcome: "failed" as const,
+      ...over,
+      unheard: { state: "unsent" as const, ...u },
+    });
+    const old = unsent({ code: "too_old" }, { status: 422, reason: "That was signed too long ago." });
+    expect(unheardWords(old)).toBe("not sent · signed too long ago; send it again");
+    expect(promptFailureWords(old, "rc-mac")).toBe("not sent · signed too long ago; send it again");
+    const folder = unsent(
+      { code: "folder", detail: "rc-mac only lets the agent work in: /srv." },
+      { status: 400, reason: "rc-mac only lets the agent work in: /srv." },
+    );
+    expect(unheardWords(folder)).toBe("not sent · rc-mac only lets the agent work in: /srv.");
+    // Every other row has nothing of this to say.
+    expect(unheardWords(start({ outcome: "delivered" }))).toBeNull();
+  });
+
+  it("a send nobody heard the answer to is never said to be not sent", () => {
+    expect(sendErrorWords(new ControlError(502, "spacesheep did not answer in time.", "hub_unknown"))).toBe(
+      "It may have been sent: spacesheep did not answer in time. Look at the session before you send it again.",
+    );
+    expect(sendErrorWords(new ControlError(502, "spacesheep could not be reached", "hub_unknown"))).toBe(
+      "It may have been sent: spacesheep could not be reached. Look at the session before you send it again.",
+    );
+    // A refusal the app made before any network is not sent, as before.
+    expect(sendErrorWords(new ControlError(502, "That is too large to send.", "hub_too_large"))).toBe(
+      "not sent · That is too large to send.",
     );
   });
 });

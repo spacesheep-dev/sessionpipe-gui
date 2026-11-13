@@ -500,6 +500,10 @@ describe("the section's words", () => {
       text: "Sent, but this app can't follow it. Check spacesheep.dev to see how it went.",
       err: true,
     });
+    // The account's own host, where the caller knows it.
+    expect(
+      commandNote({ outcome: "unconfirmed", code: "no_job" }, "lab-mac", true, refusal, "sheep.example.org")?.text,
+    ).toBe("Sent, but this app can't follow it. Check sheep.example.org to see how it went.");
   });
   it("words a sign-in's failures by the §4.2 table", () => {
     const complete = (over: Partial<ControlActivity>) =>

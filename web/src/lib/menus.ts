@@ -18,7 +18,7 @@ import { harnessMark, repoBranch, sessionTitle } from "./format";
 import { canHideUntilNeeded, hiddenNow, hide, hideUntilNeeded, unhide } from "./hidden";
 import { labelMenu } from "./labels";
 import { canMark, isUnread, notifyMenu, setUnread } from "./marks";
-import { receiverOrigin } from "./net";
+import { accountMode, accountSessionUrl, receiverOrigin } from "./net";
 import { hrefFor, navigate, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath } from "./router";
 import { getSettings } from "./settings";
 import { closeTab, openSplit, parseSplit } from "./split";
@@ -29,16 +29,35 @@ export { copyText };
 export const copyItem = (label: string, text: string | undefined | null): MenuItem | null =>
   text ? { label, run: () => copyText(text) } : null;
 
-/** The address of an in-app path, as a person would paste it. */
-export const absoluteUrl = (path: string): string => new URL(hrefFor(path), receiverOrigin()).href;
+/** The address of an in-app path, as a person would paste it; null where it has none. On a
+ *  spacesheep account the app's pages are in the app only: a session has its page on
+ *  spacesheep (`/sessions?s=<id>`), and nothing else has an address to open or copy. */
+export const absoluteUrl = (path: string): string | null => {
+  if (!accountMode()) return new URL(hrefFor(path), receiverOrigin()).href;
+  const session = /^\/s\/[^/?#]+\/([^/?#]+)/.exec(path);
+  if (!session) return null;
+  try {
+    return accountSessionUrl(decodeURIComponent(session[1]!));
+  } catch {
+    return null;
+  }
+};
+
+/** Opens the page of `path` in a new window, where it has an address. */
+export const openOutside = (path: string): void => {
+  const url = absoluteUrl(path);
+  if (url) window.open(url, "_blank", "noopener");
+};
 
 const desktop = () => typeof matchMedia === "function" && matchMedia("(min-width: 840px)").matches;
 
 /** Open in a new window and Copy link, for anything that is a page of the app. */
 export function linkItems(path: string): MenuList {
+  const url = absoluteUrl(path);
+  if (!url) return [];
   return [
-    desktop() && { label: "Open in new window", run: () => void window.open(absoluteUrl(path), "_blank", "noopener") },
-    { label: "Copy link", run: () => copyText(absoluteUrl(path)) },
+    desktop() && { label: "Open in new window", run: () => openOutside(path) },
+    { label: "Copy link", run: () => copyText(url) },
   ];
 }
 
@@ -117,7 +136,7 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
         action: list ? "list.background" : undefined,
         run: () => openSplit(s.key, { background: true }),
       },
-    !phone && { label: "Open in new window", run: () => void window.open(absoluteUrl(path), "_blank", "noopener") },
+    !phone && !!absoluteUrl(path) && { label: "Open in new window", run: () => openOutside(path) },
     { sep: true },
     paired && {
       label: "New session here",
@@ -191,7 +210,8 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
       ],
     },
     { sep: true },
-    { label: "Forget…", danger: true, run: forget },
+    // A spacesheep account holds the session, and the app's key has no door that forgets one.
+    !accountMode() && { label: "Forget…", danger: true, run: forget },
   ];
   return tidy(items);
 }

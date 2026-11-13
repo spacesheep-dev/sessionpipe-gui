@@ -2,8 +2,11 @@
 // Owned by: control-web. A carried message's lifecycle and a refusal's code, in words a
 // person reads under the strip (CONTROL.md §5, §10).
 import type { ControlActivity, ControlKind, ControlOutcome, RunLevel } from "@shared/api";
-import { ControlError, wrongOriginHere } from "./api";
+import { asSentence } from "@shared/reason";
+import { accountMode } from "../lib/net";
+import { ControlError, UNHEARD_CODE, wrongOriginHere } from "./api";
 import { wrongOriginWords } from "./origin";
+import { remoteHostFor } from "./remoteRp";
 import { deviceRefusal, nativeErrorWords } from "./signer";
 import { webauthnError } from "./webauthn";
 
@@ -83,6 +86,8 @@ export function shownState(a: ControlActivity): ControlOutcome | "queued" {
 /** One line for where the message stands. `machine` is the machine's name, `online`
  *  whether it is polling right now. */
 export function outcomeWords(a: ControlActivity, o: { machine?: string; online?: boolean } = {}): string {
+  const unheard = unheardWords(a);
+  if (unheard) return unheard;
   const who = o.machine ?? "the machine";
   const mode = a.mode ? ` · ${a.mode}` : "";
   const state = shownState(a);
@@ -134,6 +139,17 @@ export const isFinal = (a: ControlActivity): boolean =>
   a.outcome === "refused" ||
   a.outcome === "unconfirmed";
 
+/** A send nobody heard the answer to, in the words a send's own answer would have had
+ *  (account/unheard.ts): that it may have been sent, while the app is finding out and when
+ *  nobody can say any more; the refusal's own words once it is known that no job was made.
+ *  Null for every other row. */
+export function unheardWords(a: Pick<ControlActivity, "unheard" | "code" | "detail">): string | null {
+  const u = a.unheard;
+  if (!u) return null;
+  if (u.state === "unsent") return sendErrorWords(new ControlError(u.status ?? 502, u.reason ?? "", a.code, a.detail));
+  return sendErrorWords(new ControlError(504, a.detail ?? "", UNHEARD_CODE, a.detail));
+}
+
 /** What went wrong before anything was queued, in words. */
 export function sendErrorWords(e: unknown): string {
   if (e instanceof ControlError) {
@@ -141,8 +157,16 @@ export function sendErrorWords(e: unknown): string {
     if (e.code === "relay_files") return `Not sent. ${e.detail ?? e.reason}`;
     if (e.status === 422 && e.code) return `not sent · ${refusalWords(e.code)}`;
     // spacesheep refused this app's key (server/control/ui.ts forwardSend), not the page's.
+    // On an account (the phone) nothing connects in Settings: the sentence stops at what is so.
     if (e.code === "spacesheep_unauthorized")
-      return "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.";
+      return accountMode()
+        ? "Not sent. spacesheep no longer takes this app's key."
+        : "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.";
+    // The app could get no answer for it (account/doors.ts): nobody knows whether spacesheep
+    // took it, so it is never said to be not sent. The app's own words for what happened,
+    // and the one thing to do before sending it again.
+    if (e.code === UNHEARD_CODE)
+      return `It may have been sent: ${asSentence(e.detail ?? e.reason)} Look at the session before you send it again.`;
     if (e.status === 404) return "not sent · this machine is no longer paired here";
     if (e.status === 401) return "not sent · this page lost its key; reload it from the terminal's link";
     return `not sent · ${e.detail ?? e.reason}`;
@@ -166,14 +190,17 @@ export const reasonOf = (a: Pick<ControlActivity, "detail" | "outcome">): string
 /** The words for a send spacesheep carried that this app can't say the end of. */
 export const UNTRACKED_WORDS =
   "Sent through a spacesheep account that's no longer connected here. Check spacesheep.dev to see if it started.";
-/** A send spacesheep took without naming its job: sent, and nothing more is known here. */
-export const NO_JOB_WORDS = "Sent, but this app can't follow it. Check spacesheep.dev to see how it went.";
+/** A send spacesheep took without naming its job: sent, and nothing more is known here.
+ *  `host`: where the account that carried it lives, as the machine's row says (an account
+ *  need not be on spacesheep.dev); absent, spacesheep.dev. */
+export const noJobWords = (host?: string): string =>
+  `Sent, but this app can't follow it. Check ${host || "spacesheep.dev"} to see how it went.`;
 /** A send that ended `unconfirmed`: a computer took it and said nothing more, or (the
  *  code `no_job`) spacesheep took it and named no job, and then no computer is known to
  *  have taken it. */
-export const unconfirmedWords = (machine: string, a?: Pick<ControlActivity, "code">): string =>
+export const unconfirmedWords = (machine: string, a?: Pick<ControlActivity, "code" | "machineId">): string =>
   a?.code === "no_job"
-    ? NO_JOB_WORDS
+    ? noJobWords(a.machineId ? remoteHostFor(a.machineId) : undefined)
     : `No word from ${machine} since it took this. Check spacesheep.dev to see how it went.`;
 
 /** A handoff that ended any way but delivered, in the one phrase its card shows. "not sent"
@@ -198,6 +225,7 @@ export function promptFailureWords(a: ControlActivity, machine: string): string 
   const detail = a.detail?.trim();
   if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
     return `Cancelled with its session, before ${machine} got it.`;
+  if (a.unheard) return a.unheard.state === "asking" ? null : unheardWords(a);
   if (a.outcome === "failed" && a.code === "untracked") return UNTRACKED_WORDS;
   if (a.outcome === "unconfirmed") return unconfirmedWords(machine, a);
   switch (a.outcome) {
@@ -227,6 +255,7 @@ export function startFailureWords(a: ControlActivity, machine: string, agent: st
   // Called off before it began: by its owner on spacesheep, or by a cancel on the computer.
   if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
     return `Cancelled before ${machine} started it.`;
+  if (a.unheard) return a.unheard.state === "asking" ? null : unheardWords(a);
   if (a.outcome === "failed" && a.code === "untracked") return UNTRACKED_WORDS;
   if (a.outcome === "unconfirmed") return unconfirmedWords(machine, a);
   if (a.outcome === "refused")
@@ -293,6 +322,8 @@ export function sentLine(
   o: { machine: string; online: boolean; command: string },
 ): { text: string; running: boolean } | null {
   const state = shownState(a);
+  const unheard = unheardWords(a);
+  if (unheard) return { text: unheard, running: false };
   if (a.unfollowed && (state === "queued" || state === "taken")) return { text: unfollowedWords(a), running: false };
   switch (state) {
     case "queued":

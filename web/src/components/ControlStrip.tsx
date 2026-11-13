@@ -67,6 +67,9 @@ export interface ControlStripProps {
   working?: boolean;
   /** Why nothing here can work (no secure context): replaces the hint and disables the strip. */
   blocked?: string;
+  /** Where this session can be answered when this page cannot sign: its page on the
+   *  spacesheep account the window shows. */
+  elsewhere?: { href: string; host: string };
   /** The line under the field while it says something now: the last send's refusal, or a
    *  passkey prompt being up. It wins over every other reason. */
   note?: string;
@@ -294,6 +297,7 @@ export function ControlStrip({
   onSend,
   working,
   blocked,
+  elsewhere,
   note,
   noteKind = "info",
   answers,
@@ -404,6 +408,10 @@ export function ControlStrip({
           <a className="ctl-open-https" href={httpsHref}>
             Open on {new URL(httpsHref).host}
           </a>
+        ) : elsewhere ? (
+          <a className="ctl-open-https" href={elsewhere.href} target="_blank" rel="noreferrer noopener" data-elsewhere>
+            Open on {elsewhere.host}
+          </a>
         ) : undefined,
       };
     if (!paired)
@@ -414,7 +422,13 @@ export function ControlStrip({
             Pair <strong>{name}</strong> to message this session from here.
           </>
         ),
-        action: (
+        // On a spacesheep account a computer is paired on spacesheep, not here: no page of
+        // this app says how, and the session's own page there is the way on.
+        action: elsewhere ? (
+          <a className="ctl-open-https" href={elsewhere.href} target="_blank" rel="noreferrer noopener" data-elsewhere>
+            Open on {elsewhere.host}
+          </a>
+        ) : (
           <Link to="/connect" className="ctl-link">
             How to pair
           </Link>
@@ -493,9 +507,15 @@ export function ControlStrip({
     folded ? (
       <>
         Pair <strong>{name}</strong> to answer and message from here ·{"\u00a0"}
-        <Link to="/connect" className="ctl-link">
-          How to pair
-        </Link>
+        {elsewhere ? (
+          <a className="ctl-link" href={elsewhere.href} target="_blank" rel="noreferrer noopener" data-elsewhere>
+            Open on {elsewhere.host}
+          </a>
+        ) : (
+          <Link to="/connect" className="ctl-link">
+            How to pair
+          </Link>
+        )}
       </>
     ) : (
       `pair ${name} to answer here`

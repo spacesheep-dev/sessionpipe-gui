@@ -21,7 +21,7 @@ import type {
   StreamMessage,
 } from "@shared/api";
 import { ROUTES } from "@shared/api";
-import { apiUrl, type EventSourceLike, openEvents } from "../lib/net";
+import { apiFetch, apiUrl, type EventSourceLike, openEvents } from "../lib/net";
 import type { SearchClient } from "../search/types";
 
 export interface StreamHandlers {
@@ -29,6 +29,10 @@ export interface StreamHandlers {
   onOpen(): void;
   /** Called on each failed attempt with the delay before the next one. */
   onError(retryInMs: number): void;
+  /** What is shown is not being added to for now, and nothing the person can do changes
+   *  that (a page on a spacesheep account while spacesheep asks it to wait): not live, and
+   *  nothing to retry. A receiver's stream never says this. */
+  onWait?(): void;
 }
 
 export interface Transport {
@@ -121,9 +125,9 @@ async function json<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-const get = <T>(url: string) => fetch(apiUrl(url), { headers: { accept: "application/json" } }).then((r) => json<T>(r));
+const get = <T>(url: string) => apiFetch(url, { headers: { accept: "application/json" } }).then((r) => json<T>(r));
 const post = <T>(url: string, body?: unknown) =>
-  fetch(apiUrl(url), {
+  apiFetch(url, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -238,14 +242,14 @@ export function createHttpTransport(): Transport {
     qrUrl: () => apiUrl(ROUTES.ui.qr),
     labels: () => get<Labels>(ROUTES.ui.labels),
     patchLabels: (p) =>
-      fetch(apiUrl(ROUTES.ui.labels), {
+      apiFetch(ROUTES.ui.labels, {
         method: "PATCH",
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify(p),
       }).then((r) => json<Labels>(r)),
     marks: () => get<Marks>(ROUTES.ui.marks),
     patchMarks: (p) =>
-      fetch(apiUrl(ROUTES.ui.marks), {
+      apiFetch(ROUTES.ui.marks, {
         method: "PATCH",
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify(p),

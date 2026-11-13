@@ -41,6 +41,7 @@ import { useFocusTrap } from "../lib/focus";
 import "../lib/acp";
 import { bytes, harnessMark } from "../lib/format";
 import { reducedMotion, tokenMs, useSheetDrag } from "../lib/motion";
+import { accountMode } from "../lib/net";
 import { navigate, sessionPath } from "../lib/router";
 import { hintFor, matches, useShortcut } from "../lib/shortcuts";
 import { useNow } from "../lib/time";
@@ -855,7 +856,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const noMachine = !!snapshotAt && !listed.some((x) => x.control);
   const pairOne = () => {
     close();
-    navigate("/connect");
+    // A computer joins a spacesheep account on spacesheep; Machines says where.
+    navigate(accountMode() ? "/machines" : "/connect");
   };
   const empty = (
     <EmptyState

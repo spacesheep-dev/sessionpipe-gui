@@ -35,7 +35,7 @@ import {
 import { Redacted } from "../components/bits";
 import { useContextMenu } from "../components/ContextMenu";
 import { copyItem } from "../lib/menus";
-import { apiUrl } from "../lib/net";
+import { accountMode, apiFetch, apiUrl } from "../lib/net";
 import "./attachments.css";
 
 // ---------- the upload itself (also the theme api's control.attach) ----------
@@ -61,7 +61,7 @@ export function refuseFile(file: Blob): string | null {
 export async function uploadAttachment(file: Blob): Promise<Attachment> {
   const why = refuseFile(file);
   if (why) throw new Error(why);
-  const res = await fetch(apiUrl(ROUTES.ui.attachments), {
+  const res = await apiFetch(ROUTES.ui.attachments, {
     method: "POST",
     headers: { "content-type": file.type, accept: "application/json" },
     body: file,
@@ -84,7 +84,7 @@ export async function uploadAttachment(file: Blob): Promise<Attachment> {
 
 /** Take back an upload that was not sent. Best effort: the daily prune catches strays. */
 export function deleteAttachment(a: Pick<Attachment, "id" | "ext">): Promise<void> {
-  return fetch(apiUrl(`${ROUTES.attachments}/${a.id}.${a.ext}`), { method: "DELETE" })
+  return apiFetch(`${ROUTES.attachments}/${a.id}.${a.ext}`, { method: "DELETE" })
     .then(() => undefined)
     .catch(() => undefined);
 }
@@ -93,7 +93,7 @@ let infoPromise: Promise<Info> | null = null;
 /** Info, read once per page: `hostname` says which machine the paths mean something on. */
 function hostInfo(): Promise<Info> {
   if (!infoPromise)
-    infoPromise = fetch(apiUrl(ROUTES.ui.info), { headers: { accept: "application/json" } })
+    infoPromise = apiFetch(ROUTES.ui.info, { headers: { accept: "application/json" } })
       .then((r) => r.json() as Promise<Info>)
       .catch((e) => {
         infoPromise = null;
@@ -445,7 +445,9 @@ function TrayItem({ it, onRemove }: { it: PendingItem; onRemove: () => void }) {
 
 /** Thumbnails for the images a prompt text names; each opens the full image in a new tab. */
 export function AttachmentThumbs({ items, small }: { items: readonly AttachmentRef[]; small?: boolean }) {
-  if (items.length === 0) return null;
+  // The images a receiver holds are not on a spacesheep account's relay: nothing to show,
+  // and nothing to ask for that would come back broken.
+  if (items.length === 0 || accountMode()) return null;
   return (
     <span className={`att-thumbs ${small ? "att-thumbs--sm" : ""}`} data-attachment-thumbs={items.length}>
       {items.map((it) => (
