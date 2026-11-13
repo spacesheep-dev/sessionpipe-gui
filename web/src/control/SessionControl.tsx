@@ -10,9 +10,11 @@
 // it opens over whichever surface holds this session.
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
 import { useState } from "react";
+import { usePhone } from "../account/device";
 import { COMPOSER_SENT, ControlStrip } from "../components/ControlStrip";
 import { useAppState, useListedSessions, useStore } from "../data/hooks";
 import { accountMode, accountSessionUrl, receiverOrigin } from "../lib/net";
+import { clock, NEW_WORDS, ThisPhone } from "../native/accountWords";
 import { HandoffHost } from "../orchestrate/handoff/HandoffHost";
 import { canAskFrom } from "../orchestrate/handoff/handoff";
 import { openHandoff } from "../orchestrate/handoff/handoffState";
@@ -105,6 +107,13 @@ export function SessionControl({
   // A plugin's advice on an open permission (a reply from Telegram, say); Confirm signs as usual.
   const suggestions = all.length ? all.filter((s) => s.session === session.key) : all;
 
+  // On a spacesheep account a phone approved less than an hour ago cannot send yet: said
+  // here with the time, before a send is refused for it (when the time is known exactly).
+  const phoneKey = usePhone().view?.phase;
+  const cooling =
+    phoneKey?.kind === "cooling" && phoneKey.exact
+      ? NEW_WORDS.composerCooling(ThisPhone(), clock(phoneKey.until))
+      : null;
   const working = session.state === "working" || session.state === "stale" || !!session.currentTurn;
   // A secure page whose browser holds no passkey the machine trusts (a phone that can open
   // the https origin but never paired): a send would be refused untrusted_key, so point
@@ -129,7 +138,7 @@ export function SessionControl({
         attentions={attentions}
         onSend={secure && rp ? onSend : undefined}
         working={working}
-        blocked={secure ? undefined : (old ?? signHint(rp))}
+        blocked={secure ? (cooling ?? undefined) : (old ?? signHint(rp))}
         elsewhere={
           // On a spacesheep account a session this phone cannot send to (no signer yet on
           // Android, a computer not paired for it) can still be answered on spacesheep itself.

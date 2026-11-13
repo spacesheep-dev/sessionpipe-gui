@@ -6,6 +6,7 @@
 // back where it was left: its scroll here, its cursor in lib/keys.ts, its open trees in
 // the settings that already keep them.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ApprovePhonePage } from "./account/ApproveRoute";
 import { PageBar } from "./components/PageBar";
 import { Palette } from "./components/Palette";
 import { Settings } from "./components/Settings";
@@ -165,8 +166,10 @@ export function App() {
       )}
       {route.name === "theme" && <ThemeRoute key={route.id} id={route.id} />}
       {route.name === "pair" && <PairPage key={route.code} code={route.code} />}
-      {/* This phone's own key is asked for on Machines there (the hub asks spacesheep). */}
-      {route.name === "add-device" && (account ? <Machines /> : <AddDevicePage />)}
+      {route.name === "add-device" &&
+        // On a spacesheep account this is "Approve this iPhone": the phone's own key is
+        // approved on spacesheep, not by a device of this receiver.
+        (account ? <ApprovePhonePage /> : <AddDevicePage />)}
       {route.name === "phone" && <PhonePage />}
       {route.name === "missing" && <Missing path={route.path} />}
       <Palette />

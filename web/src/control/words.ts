@@ -4,6 +4,7 @@
 import type { ControlActivity, ControlKind, ControlOutcome, RunLevel } from "@shared/api";
 import { asSentence } from "@shared/reason";
 import { accountMode } from "../lib/net";
+import { NEW_WORDS } from "../native/accountWords.new";
 import { ControlError, UNHEARD_CODE, wrongOriginHere } from "./api";
 import { wrongOriginWords } from "./origin";
 import { remoteHostFor } from "./remoteRp";
@@ -157,10 +158,11 @@ export function sendErrorWords(e: unknown): string {
     if (e.code === "relay_files") return `Not sent. ${e.detail ?? e.reason}`;
     if (e.status === 422 && e.code) return `not sent · ${refusalWords(e.code)}`;
     // spacesheep refused this app's key (server/control/ui.ts forwardSend), not the page's.
-    // On an account (the phone) nothing connects in Settings: the sentence stops at what is so.
     if (e.code === "spacesheep_unauthorized")
+      // On a spacesheep account (the phone) the account is under Settings → App, and it is
+      // connected again there with no disconnect first.
       return accountMode()
-        ? "Not sent. spacesheep no longer takes this app's key."
+        ? NEW_WORDS.sendRevoked
         : "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.";
     // The app could get no answer for it (account/doors.ts): nobody knows whether spacesheep
     // took it, so it is never said to be not sent. The app's own words for what happened,
