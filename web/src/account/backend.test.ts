@@ -1279,6 +1279,11 @@ describe("a page's own backend on a spacesheep account", () => {
     const id = b.view().id;
     // The window opened on this account: nothing of the page's own storage was touched for it.
     expect(r.local).toEqual([]);
+    // The person keeps a label and a read mark for the session: both are the hub's to keep
+    // or delete, and leaving must not write either of them empty.
+    await b.transport.patchLabels({ sessions: { "claude-code:s-1": "red" }, names: { red: "Urgent" } });
+    await b.transport.patchMarks({ read: { "claude-code:s-1": "2026-11-01T00:00:00.000Z" } });
+    await b.flushed();
     const docsBefore = r.sets.length;
     expect(cache.events()).toHaveLength(1);
     const settings = async () => (await (await b.answer("/api/ui/spacesheep")).json()) as { link: unknown };
@@ -1326,6 +1331,24 @@ describe("a page's own backend on a spacesheep account", () => {
     await tick(120_000);
     expect(r.asked.length).toBe(before);
     page.off();
+  });
+
+  it("what the phone keeps of a session that has aged out of the board still goes with the account", async () => {
+    const id = [...r.hub.accounts.keys()][0]!;
+    // A session this account showed weeks ago: gone from what is kept, its key remembered.
+    r.stored.set(`sessionpipe-gui.account.sessions.${id}`, JSON.stringify(["claude-code:long-ago"]));
+    const s = new Session("s-1");
+    r.ss.push([s.ev("session.started", {}, { tier: 2 })]);
+    const b = await r.start();
+    await tick(400);
+    // Every session it shows is remembered beside it, as it comes.
+    expect(JSON.parse(r.stored.get(`sessionpipe-gui.account.sessions.${id}`)!)).toEqual([
+      "claude-code:long-ago",
+      "claude-code:s-1",
+    ]);
+    await b.disconnect();
+    expect(r.local).toEqual([`wipe ${id} [claude-code:s-1,claude-code:long-ago] and the conveniences`]);
+    expect([...r.stored.keys()].filter((k) => k.endsWith(`.${id}`))).toEqual([]);
   });
 
   it("an account the hub no longer lists is left the same way, with no answer to pass on", async () => {

@@ -211,7 +211,9 @@ describe("what an account that is no longer on this phone left behind", () => {
     const swept = await sweepGone(h.status, {
       idb: db.factory,
       sleep: h.sleep,
-      sessions: async (name) => (name === "sessionpipe.account.acct-one" ? ONE : []),
+      // One of its sessions is still in its cache; the other aged out, and is remembered by key.
+      sessions: async (name) => (name === "sessionpipe.account.acct-one" ? [ONE[0]!] : []),
+      seen: (id) => (id === "acct-one" ? [ONE[1]!] : []),
       kept: () => accountsKept(local),
       wipe: (id, sessions) => wipeAccount(id, sessions, {}, local),
     });
@@ -220,6 +222,7 @@ describe("what an account that is no longer on this phone left behind", () => {
     expect(db.deleted).toEqual(["sessionpipe.account.acct-one"]);
     expect(swept.caches).toEqual(["sessionpipe.account.acct-one"]);
     expect(swept.local).toContain("sessionpipe-gui.draft:claude-code:one-1");
+    expect(Object.keys(JSON.parse(local.m.get("sessionpipe-gui.hidden")!) as object)).not.toContain(ONE[1]);
     // The account that is here, and the receiver, keep everything; so do the conveniences.
     expect(local.m.has("sessionpipe-gui.draft:claude-code:two-1")).toBe(true);
     expect(local.m.has("sessionpipe-gui.draft:claude-code:home-1")).toBe(true);

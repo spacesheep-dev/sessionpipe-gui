@@ -12,7 +12,7 @@
 // each a list, taken a few seconds apart, both leave it out. An answer that fails, or is
 // no list, removes nothing; neither does the account this window itself shows.
 import { cacheName, cacheSessions, sweepCaches } from "./cache";
-import { accountsKept, wipeAccount } from "./local";
+import { accountsKept, sessionsSeen, wipeAccount } from "./local";
 import type { AccountStatus } from "./shell";
 
 /** How long after the first answer the hub is asked again. */
@@ -44,6 +44,8 @@ export async function sweepGone(
     /** What the storage keeps under account ids, and the removal of one account's. */
     kept?: () => string[];
     wipe?: (id: string, sessions: string[]) => string[];
+    /** Every session the account has shown on this phone (local.ts `sessionsSeen`). */
+    seen?: (id: string) => string[];
   } = {},
 ): Promise<Swept> {
   const none: Swept = { caches: [], local: [] };
@@ -77,8 +79,10 @@ export async function sweepGone(
   const here = [...new Set([...first, ...second, ...(o.showing ? [o.showing] : [])])];
   const local: string[] = [];
   for (const id of await absent(here)) {
-    // Its sessions are read from what was kept of them, before that is deleted.
-    const sessions = await (o.sessions ?? ((name: string) => cacheSessions(name, idb)))(cacheName(id)).catch(() => []);
+    // Its sessions are read from what was kept of them, before that is deleted, and from
+    // the list of every session it has shown here (one may have aged out of the cache).
+    const kept = await (o.sessions ?? ((name: string) => cacheSessions(name, idb)))(cacheName(id)).catch(() => []);
+    const sessions = [...new Set([...kept, ...(o.seen ?? sessionsSeen)(id)])];
     local.push(...(o.wipe ?? ((i: string, s: string[]) => wipeAccount(i, s)))(id, sessions));
   }
   return { caches: await sweepCaches(here, idb), local };

@@ -145,6 +145,22 @@ export function accountsKept(local: Kept | null = storage()): string[] {
  *  when it returns. It goes with the account (a new connect is a new key). */
 export const readsKey = (id: string): string => `${ACCOUNT_KEYED}reads.${id}`;
 
+/** Where the keys of every session an account has shown on this phone are kept (backend.ts):
+ *  a session ages out of the cache after a week, and what the page's storage keeps of it is
+ *  the account's all the same. It goes with the account. */
+export const seenKey = (id: string): string => `${ACCOUNT_KEYED}sessions.${id}`;
+/** At most this many are remembered; the oldest go first. */
+export const SEEN_MAX = 2000;
+/** Those keys, read with `read` (the page's storage by default); none when it holds none. */
+export function sessionsSeen(id: string, read: (key: string) => string | null = (k) => readLocal(k)): string[] {
+  try {
+    const v = JSON.parse(read(seenKey(id)) ?? "[]") as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Where an account's sends are kept while the hub's `sends` document cannot be written
  *  (backend.ts). It goes with the account. */
 export const sendsKey = (id: string): string => `${ACCOUNT_KEYED}sends.${id}`;

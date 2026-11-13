@@ -53,7 +53,17 @@ import { type EventCache, openCache, withoutSessions } from "./cache";
 import { type AccountDocs, type DocName, openDocs } from "./docs";
 import { type AccountDoors, type DoorAnswer, openDoors, SEND_UNKNOWN_CODE, type Sent } from "./doors";
 import { listed } from "./gone";
-import { forgetLocal, readLocal, readsKey, sendsKey, wipeAccount, writeLocal } from "./local";
+import {
+  forgetLocal,
+  readLocal,
+  readsKey,
+  SEEN_MAX,
+  seenKey,
+  sendsKey,
+  sessionsSeen,
+  wipeAccount,
+  writeLocal,
+} from "./local";
 import { PageLog } from "./log";
 import { routes } from "./routes";
 import { fitSends, mergeSends, readSends } from "./sends";
@@ -467,6 +477,19 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     // Not readable: as with none kept, a third of the budget is taken as spent.
   }
   let pending: StoredEvent[] = [];
+  // Every session this account has shown on this phone, by key: what the page's own
+  // storage keeps of one (a draft, a place in a list) is the account's also after the
+  // session itself has aged out of what is kept here, and goes with the account.
+  const seen = new Set<string>(sessionsSeen(shell.id, (key) => local.read(key)));
+  const noteSeen = (keys: Iterable<string>, forgotten: ReadonlySet<string> = new Set()): void => {
+    const before = seen.size;
+    let dropped = false;
+    for (const k of keys) seen.add(k);
+    for (const k of forgotten) dropped = seen.delete(k) || dropped;
+    if (seen.size === before && !dropped) return;
+    local.write(seenKey(shell.id), JSON.stringify([...seen].slice(-SEEN_MAX)));
+  };
+  noteSeen(loaded.events.map((e) => sessionKey(e.harness.name, e.session.id)));
   const me = first?.accounts.find((a) => a.id === shell.id);
   const connectedAt = me?.connectedAt ? Date.parse(me.connectedAt) : Number.NaN;
   // Nothing kept and the key made a moment ago: nobody read with it before this page.
@@ -540,6 +563,10 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
             for (const e of events)
               if (e.type === "session.forgotten") gone.add(sessionKey(e.harness.name, e.session.id));
             for (const e of withoutSessions(r.stored, gone)) pending.push(e);
+            noteSeen(
+              events.map((e) => sessionKey(e.harness.name, e.session.id)),
+              gone,
+            );
             if (gone.size) {
               pending = [...withoutSessions(pending, gone)];
               cache.forget([...gone]);
@@ -643,7 +670,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
    *  window is told. */
   const drop = async (disconnected: Disconnected | null = null): Promise<void> => {
     if (gone) return;
-    const sessions = store.snapshot().sessions.map((s) => s.key);
+    const sessions = [...new Set([...store.snapshot().sessions.map((s) => s.key), ...seen])];
     gone = true;
     state = "gone";
     reader?.stop();
