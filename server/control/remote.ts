@@ -268,7 +268,7 @@ export class RemoteSlice {
             delete row.ackedAt;
             changed = true;
             this.onMessage(row);
-          } else if (row.outcome === "unconfirmed") again.push(row);
+          } else if (this.reopenable(row)) again.push(row);
         }
         if (changed) this.saveQueue(id);
       }
@@ -326,7 +326,11 @@ export class RemoteSlice {
   }
 
   /** A send spacesheep carried for a remote machine: its row here, settled by the relay's
-   *  job status (applyRemoteJobs), never by a poll of this receiver. */
+   *  job status (applyRemoteJobs), never by a poll of this receiver. `remoteJob` is
+   *  spacesheep's id for it; an answer that named none (anything but a whole number above
+   *  zero) is a send spacesheep took and nobody can follow: its row is kept under job 0,
+   *  which spacesheep never lists, and closed at once as `unconfirmed`, never left waiting
+   *  for a word that cannot come and never said to be not sent. */
   enqueueRemote(
     m: MachineRow,
     signed: SignedCommand,
@@ -340,10 +344,16 @@ export class RemoteSlice {
       expiresInMs: EXPIRES_MAX_MS,
       ...(o.from ? { from: o.from } : {}),
     });
-    row.remoteJob = remoteJob;
+    const named = Number.isSafeInteger(remoteJob) && remoteJob > 0;
+    row.remoteJob = named ? remoteJob : 0;
     if (this.remoteAccount) row.remoteAccount = this.remoteAccount;
+    if (!named) {
+      row.outcome = "unconfirmed";
+      row.ackedAt = new Date().toISOString();
+    }
     this.saveQueue(m.id);
-    this.onRemoteKick();
+    if (named) this.onRemoteKick();
+    else this.onMessage(row);
     return row;
   }
 
@@ -461,6 +471,8 @@ export class RemoteSlice {
   private reopenable(row: MessageRow): boolean {
     return (
       isRemoteRow(row) &&
+      // Job 0 is a send whose job spacesheep never named: there is nothing to read again.
+      row.remoteJob! > 0 &&
       row.outcome === "unconfirmed" &&
       !!this.remoteAccount &&
       row.remoteAccount === this.remoteAccount
@@ -519,6 +531,9 @@ export async function forwardRemoteSend(
   } catch {
     throw new SendRefused(400, { reason: "bad_request", error: "cmd is not JSON." });
   }
+  // JSON that is no object (`null`, a number, a list) is no command: said so, not thrown on.
+  if (!cmd || typeof cmd !== "object" || Array.isArray(cmd))
+    throw new SendRefused(400, { reason: "bad_request", error: "cmd is not a command." });
   // A file a send names is held on this disk, and spacesheep looks for it in its own store:
   // none can be carried there yet (the pages offer none), so a page that sends one is told
   // here, before spacesheep answers that it "didn't finish uploading".
@@ -549,7 +564,9 @@ export async function forwardRemoteSend(
     );
     return row;
   }
-  const code = String(r.json.code ?? "");
+  // spacesheep's code and a machine's refusal are outside text too: a code is passed on only
+  // when it is written as one (REMOTE_CODE_RE), never markup, an object's name or a sentence.
+  const code = codeOf(r.json.code);
   // spacesheep's words, passed on as text the page can show (shared/reason.ts).
   const error = cleanReason(r.json.error) || "spacesheep did not take it";
   // The second look there wants a fresh tap: the same word the page knows from a machine,
@@ -561,9 +578,12 @@ export async function forwardRemoteSend(
   // key: its own code, never the 401 a page reads as "this page lost its key".
   if (r.status === 401) throw new SendRefused(502, { reason: error, code: SPACESHEEP_UNAUTHORIZED });
   if (r.status === 400 && (code === "bad" || code === "unlock"))
-    throw new SendRefused(422, { reason: error, code: String(r.json.refusal ?? "untrusted_key") });
+    throw new SendRefused(422, { reason: error, code: codeOf(r.json.refusal) || "untrusted_key" });
   throw new SendRefused(r.status >= 500 ? 502 : r.status, { reason: error, code: code || "refused" });
 }
+
+/** A code as spacesheep or a machine writes one (`confirm`, `untrusted_key`), or "". */
+const codeOf = (v: unknown): string => (typeof v === "string" && REMOTE_CODE_RE.test(v) ? v : "");
 
 /** spacesheep's reason for a hold, cleaned, when it gave one. */
 const whyOf = (j: Record<string, unknown>): { detail?: string } => {

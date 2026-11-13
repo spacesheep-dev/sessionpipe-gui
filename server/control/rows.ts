@@ -24,6 +24,7 @@ import type {
   StartPermission,
   TrustedKey,
 } from "../../shared/api.js";
+import { cleanReason } from "../../shared/reason.js";
 
 export const MACHINE_RE = /^m_[A-Za-z0-9_-]{16,40}$/;
 
@@ -283,7 +284,11 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.outcome) a.outcome = m.outcome;
   if (m.mode) a.mode = m.mode;
   if (m.code) a.code = m.code;
-  if (m.detail) a.detail = m.detail;
+  // A row spacesheep carried has its job's note as its detail: outside text, kept as it
+  // came and handed on as plain visible text (shared/reason.ts), here, where every reader
+  // of a row gets it. A row of this receiver's own machines is as it was.
+  const detail = isRemoteRow(m) ? cleanReason(m.detail) : m.detail;
+  if (detail) a.detail = detail;
   if (m.reply !== undefined) a.reply = m.reply;
   if (m.replySeq !== undefined) a.replySeq = m.replySeq;
   if (m.ackSession) a.ackSession = m.ackSession;

@@ -567,4 +567,61 @@ describe("remote machines in the control state", () => {
     expect(again.activity().map((a) => a.id)).toEqual([third.id, second.id]);
     again.close();
   });
+
+  it("a job's note is outside text: handed on as one plain line, kept as it came", () => {
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 91);
+    // A right-to-left override, a line break, markup, and far more than a line of it.
+    const note = `The folder\u202E isn't allowed.\n<b>second line</b> ${"x".repeat(700)}`;
+    state.applyRemoteJobs([{ id: 91, status: "refused", note, done_at: Date.now(), created_at: 1 }]);
+    const shown = state.activityById(row.id)!.detail!;
+    expect(shown.startsWith("The folder isn't allowed. <b>second line</b> xxx")).toBe(true);
+    expect(shown).not.toMatch(/[\u202E\n]/u);
+    expect(Array.from(shown).length).toBeLessThanOrEqual(200);
+    expect(shown.endsWith("…")).toBe(true);
+    // The same through the list, and the row itself is as spacesheep wrote it.
+    expect(state.activity()[0]!.detail).toBe(shown);
+    expect(state.message(m.id, row.id)!.detail).toBe(note);
+    // A note that is nothing but what cannot be seen is no detail at all.
+    const quiet = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 92);
+    state.applyRemoteJobs([{ id: 92, status: "failed", note: "\u200B\u202E", done_at: Date.now(), created_at: 1 }]);
+    expect(state.activityById(quiet.id)).toMatchObject({ outcome: "failed" });
+    expect(state.activityById(quiet.id)!.detail).toBeUndefined();
+  });
+
+  it("a send spacesheep took without naming its job is said as it is: sent, and no word of how it went", () => {
+    let kicks = 0;
+    const told: string[] = [];
+    state.onRemoteKick = () => kicks++;
+    state.onMessage = (row) => told.push(`${row.remoteJob} ${row.outcome ?? "waiting"}`);
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed()], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    kicks = 0;
+    for (const job of [Number.NaN, 0, -3, 1.5, Number.POSITIVE_INFINITY]) {
+      const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, job);
+      expect(row, String(job)).toMatchObject({ remoteJob: 0, outcome: "unconfirmed" });
+      expect(state.activityById(row.id), String(job)).toMatchObject({ outcome: "unconfirmed" });
+    }
+    // Nothing of them is read for: no job id to ask after, no kick, and none on a reconnect.
+    expect(state.pendingRemoteJobs()).toEqual([]);
+    expect(kicks).toBe(0);
+    state.setRemoteAccount(account);
+    state.remoteEventsSeen(["claude-code:abc"]);
+    expect(state.pendingRemoteJobs()).toEqual([]);
+    expect(told.filter((t) => t === "0 unconfirmed")).toHaveLength(5);
+    // And a job that was named is followed as ever.
+    const named = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 7);
+    expect(named.outcome).toBeUndefined();
+    expect(state.pendingRemoteJobs()).toEqual([7]);
+    // A state opened on the same folder reads none of it as waiting.
+    const again = new ControlState(path.join(dir, "control"));
+    again.setRemoteAccount(account);
+    expect(again.pendingRemoteJobs()).toEqual([7]);
+    again.close();
+  });
 });

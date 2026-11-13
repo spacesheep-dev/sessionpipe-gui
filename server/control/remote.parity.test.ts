@@ -612,6 +612,68 @@ describe("the control state of a page", () => {
     });
   });
 
+  it("what spacesheep answers a send with is outside text: a code is passed on only when it is one", async () => {
+    const control = new MemoryControl();
+    control.remote.setRemoteAccount(ME);
+    control.remote.upsertRemoteMachines([listed(M1, "lab-mac")] as never, remote);
+    const refusal = async (status: number, json: Record<string, unknown>) => {
+      try {
+        await control.send(control.machine(M1)!, command(M1, "prompt", "claude-code:s-1"), async () => ({
+          status,
+          json,
+        }));
+      } catch (e) {
+        if (e instanceof SendRefused) return { status: e.status, ...e.body };
+        throw e;
+      }
+      throw new Error("not refused");
+    };
+    // Markup, an object, a sentence, a number: none of them is a code.
+    for (const code of ["<i>x</i>", { a: 1 }, "Not Allowed here", 7, "", "a".repeat(41)])
+      expect(await refusal(403, { error: "No.", code }), JSON.stringify(code)).toEqual({
+        status: 403,
+        reason: "No.",
+        code: "refused",
+      });
+    expect(await refusal(403, { error: "No.", code: "cooling" })).toMatchObject({ code: "cooling" });
+    // A machine's refusal, passed on by spacesheep, the same.
+    for (const r of ["<i>x</i>", {}, ["untrusted"], 0])
+      expect(await refusal(400, { error: "No.", code: "bad", refusal: r }), JSON.stringify(r)).toMatchObject({
+        status: 422,
+        code: "untrusted_key",
+      });
+    expect(await refusal(400, { error: "No.", code: "bad", refusal: "bad_grant" })).toMatchObject({
+      code: "bad_grant",
+    });
+    // A code that is not one never picks a branch either: this 409 is not a hold.
+    expect(await refusal(409, { error: "No.", code: { toString: () => "confirm" } })).toMatchObject({
+      status: 409,
+      code: "refused",
+    });
+  });
+
+  it("a signed command that is not an object is refused as a bad request, never thrown on", async () => {
+    const control = new MemoryControl();
+    control.remote.setRemoteAccount(ME);
+    control.remote.upsertRemoteMachines([listed(M1, "lab-mac")] as never, remote);
+    let asked = 0;
+    for (const cmd of ["null", "7", '"prompt"', "[]", "true"]) {
+      const sent = control
+        .send(control.machine(M1)!, { cmd, csig: "sig", grant: {} }, async () => {
+          asked++;
+          return { status: 202, json: { job: 1 } };
+        })
+        .then(
+          () => "sent",
+          (e: unknown) => (e instanceof SendRefused ? `${e.status} ${e.body.reason}` : `thrown: ${String(e)}`),
+        );
+      expect(await sent, cmd).toBe("400 bad_request");
+    }
+    // spacesheep was never asked, and nothing was kept.
+    expect(asked).toBe(0);
+    expect(control.activity()).toEqual([]);
+  });
+
   it("trims a queue each time it is saved: what is settled goes after a week, what waits stays", async () => {
     vi.useFakeTimers({ now: 1_800_000_000_000 });
     let saved: KeptQueues = {};
