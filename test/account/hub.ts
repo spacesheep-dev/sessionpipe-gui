@@ -183,6 +183,8 @@ export class HubStandIn {
   keep: "ok" | "keystore" | "io" | "conflict" = "ok";
   /** The next `acct_connect_start` is refused with this, once. */
   startRefusal: HubRefused | null = null;
+  /** A start waits for this before it asks spacesheep (a test holds the "connecting" moment). */
+  holdStart: Promise<void> | null = null;
   /** `acct_disconnect` cannot remove the key (`io`: nothing was changed). */
   disconnectFails = false;
   /** When each connect was started and each device ask was made, for the hub's own limits. */
@@ -384,9 +386,18 @@ export class HubStandIn {
     this.say();
   }
 
+  /** The hub's own counts (three starts an hour, five asks) start over: a test that walks
+   *  every way a connect can end makes more of them than a person may. */
+  resetLimits(): void {
+    this.starts = [];
+    this.asks = [];
+    this.lastAsk = null;
+  }
+
   private async connectStart(): Promise<unknown> {
     const origin = this.o.upstream.origin;
     const host = new URL(origin).host;
+    if (this.holdStart) await this.holdStart;
     if (!(this.o.features ?? ["account"]).includes("account"))
       throw new HubRefused("unsupported", "A spacesheep account is not available in this build.");
     if (this.startRefusal) {
