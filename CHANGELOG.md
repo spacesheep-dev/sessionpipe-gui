@@ -8,6 +8,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **Search names a filter value it could not read.** `since:2026-2-1`, `until:3days`,
+  `in:everything` or `source:mars` was left out of the search but reported as "“since:”
+  isn't a filter, so it was searched as text", though `since:` is a filter and nothing was
+  searched as text. The page and `sessionpipe-gui search` now say "“since:2026-2-1” isn't a
+  date, so it was left out", with the forms that read (an unknown `in:` or `source:` value
+  lists the fields or indexes), and keep the old words for a key that is not a filter.
+
 - **A send to a computer reached through spacesheep outlives a restart.** Its row was
   deleted when the app started, because such a computer is never saved here: a start
   waiting for an offline computer then read "No such session here", and ran anyway when the

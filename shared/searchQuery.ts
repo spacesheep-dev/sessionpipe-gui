@@ -11,7 +11,7 @@
 //   migrat*              a prefix (at least 2 characters before the *)
 //   key:value key:"a b"  a filter: agent machine repo label since until in source
 //   -label:red           a negated filter
-import type { ParsedSearch, SearchClause, SearchFilterKey } from "./api.js";
+import type { ParsedSearch, SearchBadFilter, SearchClause, SearchFilterKey } from "./api.js";
 
 export const SEARCH_FILTER_KEYS: readonly SearchFilterKey[] = [
   "agent",
@@ -310,4 +310,34 @@ export function resolveSearchDate(
     return edge === "start" ? start : start + DAY - 1;
   }
   return undefined;
+}
+
+/** The notice under a search (page and CLI) for what the query had that was not used: a filter
+ *  value that did not read (that filter was left out), then a key that is not a filter (that
+ *  token was searched as text). Undefined when there is neither. */
+export function searchQueryNote(p: Pick<ParsedSearch, "unknown" | "bad">): string | undefined {
+  const notes: string[] = [];
+  const b = p.bad?.[0];
+  if (b) notes.push(badFilterNote(b));
+  const unknown = p.unknown.find((k) => !p.bad?.some((x) => x.key === k));
+  if (unknown !== undefined)
+    notes.push(
+      `“${unknown}:” isn't a filter, so it was searched as text. Filters: agent machine repo label since until in source`,
+    );
+  return notes.length ? notes.join(" ") : undefined;
+}
+
+function badFilterNote(b: SearchBadFilter): string {
+  const typed = `“${b.key}:${b.value}”`;
+  switch (b.key) {
+    case "in":
+      return `${typed} isn't a field, so it was left out. in: ${SEARCH_IN_VALUES.join(" ")}`;
+    case "source":
+      return `${typed} isn't an index, so it was left out. source: history sessionpipe`;
+    case "since":
+    case "until":
+      return `${typed} isn't a date, so it was left out. Dates: 7d, 12h, today, yesterday, 2026-10, 2026-10-01`;
+    default:
+      return `${typed} didn't read, so it was left out`;
+  }
 }
