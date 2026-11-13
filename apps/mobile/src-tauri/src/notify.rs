@@ -1,9 +1,11 @@
 //! Local notifications for needs-you (arch-mobile §6, NATIVE-SPEC §6), no cloud: while the
 //! app is in the background (the ~30 s iOS grants after leaving, see
-//! `uikit::watch_background`), each new attention a receiver reports becomes one
-//! notification, removed again when it is answered anywhere. In front, the page shows it
-//! and nothing is posted. A permission carries Allow and Deny (neither destructive, so
-//! neither is red); both open the app on the session, because this build can't sign.
+//! `uikit::watch_background`), each new attention a receiver reports, or an account's
+//! page hands over (`acct_needs`), becomes one notification, removed again when it is
+//! answered anywhere. In front, the page shows it and nothing is posted. A permission
+//! carries Allow and Deny (neither destructive, so neither is red); both open the app on
+//! the session, where the answer is given and signed: answering from the notification
+//! itself, with the app behind, is not built.
 
 use sp_receivers::{HubEvent, NeedsYouItem};
 use std::collections::{BTreeMap, BTreeSet};

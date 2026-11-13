@@ -385,8 +385,8 @@ mod notifications {
     pub fn start<R: Runtime>(app: &AppHandle<R>, hub: Hub) {
         let n = app.notification();
         // Allow and Deny: plain buttons (red is for errors), and both open the app on the
-        // session, where this build says why it can't send. A device build with a signer
-        // answers them in the background instead (arch-mobile §6.2).
+        // session, where the answer is given and signed. Answering from the notification
+        // itself, with the app behind, is not built (arch-mobile §6.2).
         let actions = ActionType::builder(PERMISSION)
             .actions(vec![
                 Action::builder("allow", "Allow")

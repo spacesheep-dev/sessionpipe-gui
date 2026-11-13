@@ -170,7 +170,7 @@ account's add three, flat:
 |---|---|
 | `window.sessionpipeShell.receiver` | `kind: "spacesheep"`, `email`, `state` (as the window opened) |
 | a row of `rx_list` | `kind: "spacesheep"`, `email`, `state` (now), `rpId` once known |
-| `window.sessionpipeShell.features` | `"account"` when this build has the mode (the iPhone) |
+| `window.sessionpipeShell.features` | `"account"` when this build has the mode (the iPhone), and with it `"account-needs"` (`acct_needs` below) |
 
 `rxBase` is made the same way (`rx://localhost/<id>`). `state` is `"ok"`,
 `"unauthorized"` (spacesheep answered 401 to the key and nothing has succeeded since) or
@@ -200,15 +200,27 @@ link, or a device key.
 |---|---|
 | `acct_status()` | `{ enabled, accounts: [{ id, origin, email, state, connectedAt, active, deviceKeyId? }], connect }` |
 | `acct_connect_start({ origin? })` | a connect: `{ origin, digits, expiresAt, state, revokeUrl?, note? }` |
-| `acct_connect_open()` | nothing: the hub's link for the pending connect is opened in the system browser |
+| `acct_connect_open()` | nothing, once the system browser took the hub's link for the pending connect; the error `not_opened` when it did not, `no_connect` when none is pending |
 | `acct_connect_cancel()` | `true` when a pending connect was stopped; `false` when it only cleared an outcome |
 | `acct_disconnect({ id })` | `{ id, origin, email, forgotten: true, revoked: false, revokeUrl, note }` |
 | `acct_device_ask({ id })` | `{ code, keyId, trustedOn, devicesUrl? }` |
 | `acct_doc_get({ id, name })` | the document, or `null` |
 | `acct_doc_set({ id, name, value })` | its size in bytes |
 | `acct_doc_delete({ id, name })` | `true` when there was one |
+| `acct_needs({ id, sessions })` | how many of the account's sessions need the person now |
 
 The event `account` carries `acct_status`'s value whenever it changes.
+
+**The contract a page reads is the hub's as it is now.** `window.sessionpipeShell` is
+fixed for a page's life, and the list changes under it: an account is disconnected, its
+key is refused, a receiver is removed. Whenever that changes what the contract would
+say, the shell renews it for the next page to load in the window, without touching the
+one that shows (on the iPhone the document-start script is swapped; Android's page asks
+for the contract as each page starts). So a page that reloads itself, as it does after
+`acct_disconnect` with `location.replace("/")`, starts on what is there: the next
+receiver, or none and the welcome, never the account that was just forgotten. The swap
+is in line ahead of `acct_disconnect`'s answer. `rx_select` renews the contract and
+reloads the window itself, as it always did.
 
 **Connecting.** `origin` is https and nothing but an origin; absent, it is
 `https://spacesheep.dev`. (`http://localhost` and `http://127.0.0.1` are origins in a
@@ -245,7 +257,8 @@ with its key and documents. On no: `declined`, and nothing was written or remove
 `connect.state` goes `pending` → `asking` → `approved` (with `receiver`, the account's
 id, and `email`), or ends as `denied` (on spacesheep), `declined` (here, or cancelled
 while `asking`), `expired` (the code ran out, or a held approval was never answered) or
-`failed` (with `error`: `bad_answer`, `conflict`, `keystore`, `io`). Whenever a key was
+`failed` (with `error`, one of the four words `"bad_answer"`, `"conflict"`, `"keystore"`,
+`"io"`, as text, and the hub's sentence for it in `errorMessage`). Whenever a key was
 made on spacesheep and is not kept here (`declined`, an `expired` that was `asking`, and
 a `failed` after the approval), the connect also says `revokeUrl` (Settings → API keys
 on the account's origin) and `note` ("A key was made for this app on spacesheep and is
@@ -253,6 +266,8 @@ not kept here. Revoke it there: Settings → API keys."): the hub cannot revoke 
 so the page tells the person. On `approved` the page calls `rx_select(receiver)`, as
 after `rx_add`. A second start while one is under way for the same origin returns the
 same connect; while an approval is held, a start for another origin is `busy`.
+`acct_connect_cancel` while a start is still asking spacesheep for its number ends that
+start `cancelled`: no connect is left polling for an answer nobody waits for.
 
 Start's errors: `unsupported` (no account mode in this build), `bad_origin`, `busy` (a
 start is already under way, another question is open, or an approval is held),
@@ -260,7 +275,7 @@ start is already under way, another question is open, or an approval is held),
 `unauthorized` or `no_key` may connect again, and the same person keeps their id,
 documents and device key id), `too_many_starts` (three an hour from this app, counted
 across restarts, with `retryAfterS`), `cancelled` (the person said no to another
-origin), `not_asked` (that question could not be shown), `unreachable`, `rate_limited`
+origin, or the page cancelled while the start was on its way), `not_asked` (that question could not be shown), `unreachable`, `rate_limited`
 (with `retryAfterS`), `refused` (not a 201), `bad_answer`.
 
 **Disconnecting** forgets the key, the documents and the entry on this phone. The person
@@ -289,12 +304,32 @@ across restarts (`too_many_asks`, with `retryAfterS`). Errors: `unknown_account`
 code in `upstream`, e.g. `pro_required`, `talk_off`), `bad_answer`, and the hub's own
 codes below.
 
+**Needs-you.** The hub reads a receiver's needs-you from its stream. An account has no
+stream, so its page, which works the board out from the relay, hands the list over:
+`acct_needs({ id, sessions })`, where `sessions` is every session of the account's
+board whose `state` is `"needs_you"`, each a cut of its summary: `{ key, harness, id,
+title?, machine?, cwd?, state, stateSince, openAttentions: [{ attentionId, kind, tool?,
+message?, at, answerable }] }` (other fields are not read). The page calls it once
+after its first board, then whenever the list changed, and with an empty list when the
+last one clears; it calls it only where the contract lists `"account-needs"`. The hub
+applies the list as it applies a stream's `snapshot` (the first one only seeds: nothing
+in it counts as having just opened; what is no longer in it closed) and says it with
+the same events and the same count as a receiver's, so a notification is posted for an
+account's session exactly as for a receiver's: when it opens while the app is in the
+background. The page is given no more than that. The id must be an account in the list
+(`unknown_account`); a list is at most 200 sessions of at most 16 open attentions each
+(`bad_request`, and what was held stays); every text is cut to size (a title 200
+characters, a message 300) and loses its control characters before it is kept or shown.
+The list is held in memory only, and goes with the account.
+
 ### What the person is asked
 
 Native alerts, one at a time; a second question while one is open is not shown and
 never queued. Cancel is the preferred action of each. A question that could not be shown
 is not an answer: a start or a disconnect is refused (`busy`, `not_asked`), an approval
-is held and asked about again. On Android "This iPhone" reads "This phone". An email is
+is held and asked about again. On Android "This iPhone" reads "This phone", here and in
+every sentence of the hub's own that names the device (the shell tells the hub what it
+is called; the hub's word for it is "this device"). An email is
 shown whole up to sixty characters, else its first 29 and last 30 around an ellipsis;
 it has exactly one `@`, at most 64 characters before it and 190 after.
 
@@ -363,7 +398,7 @@ on by name, so an answer with the header is the hub's and one without is spacesh
 
 | status | code | when |
 |---|---|---|
-| 403 | `not_a_door` | another path or method, a path not written as a door is, a cloud box, the device door's POST |
+| 403 | `not_a_door` | another path or method, a path not written as a door is, a cloud box, the device door's POST; and any request to an account's id when no such account is in the list (it was disconnected a moment ago) |
 | 400 | `bad_query` | a parameter the door does not take, out of range, or twice |
 | 400 | `bad_body` | a body on a GET, or one that is not a JSON object |
 | 400 | `not_signed` | a send that is not a signed command |
@@ -374,14 +409,20 @@ on by name, so an answer with the header is the hub's and one without is spacesh
 | 401 | `not_connected` | no key here for this account at this origin |
 | 409 | `no_device_key` | the device door, before `acct_device_ask` ever succeeded |
 | 429 | `busy` | the account's room is full (`Retry-After: 1`) |
-| 502 | `unreachable` | spacesheep could not be reached, or its answer stopped |
+| 502 | `not_sent` | the send door only: no connection to spacesheep could be made, so nothing of the command left this phone |
+| 502 | `unreachable` | spacesheep could not be reached (a read), or an answer stopped on its way (a read or a send) |
 | 504 | `timeout` | no answer in the hub's time |
 | 502 | `redirected` | spacesheep answered 3xx |
 | 502 | `answer_too_large` | the answer, unpacked, is over the door's limit |
 | 502 | `bad_encoding` | the answer is packed some other way than gzip, is not what it says, or has anything after its one gzip member |
 | 502 | `withheld` | the answer held the key |
 
-Every refusal in the upper eleven rows comes before any network.
+Every refusal in the upper eleven rows comes before any network. Of a send, the rest
+divide by what is known. After `not_sent`, nothing of the command left the phone. After
+`unreachable`, `timeout`, `answer_too_large`, `bad_encoding` and `withheld`, nobody
+knows whether spacesheep made a job of it: the request went out and its answer did not
+come back whole. The page asks again with the same signed bytes (spacesheep takes a
+command once, by its nonce), and says "not sent" only where that is known.
 
 ### The documents
 
@@ -424,12 +465,13 @@ error, URL, status file or returned value, and an answer that echoes it is withh
   https request there would end the app; this is true of an https receiver on Android
   too. The hub refuses to connect an account there and the contract does not list
   `"account"`. Android also has no signer, so `acct_device_ask` is `unsupported` there.
-- **Notifications and needs-you.** The hub reads needs-you from a receiver's stream; an
-  account has none, so no notification is posted for an account's session, and the status
-  file's `needsYou` counts receivers only. Its `receivers[]` row for an account says
-  `connected` (spacesheep answered the last door and took the key) and `lastFrameAt` (the
-  relay's last good answer). The hook is one command by which the page hands the hub its
-  needs-you list, emitted as the hub's own `NeedsYou` event; nothing arrives while iOS
-  has the app suspended without a push from spacesheep.
+- **Notifications while the app is suspended.** The hub reads needs-you from a
+  receiver's stream; an account has none, so its page hands the list over (`acct_needs`,
+  above) and the hub says it as a receiver's: a notification is posted for a session
+  that starts needing the person while the app is behind and still running (the half
+  minute or so iOS grants). Once iOS has suspended the app nothing arrives, for an
+  account as for a receiver: that needs a push from spacesheep. The status file's
+  `receivers[]` row for an account says `connected` (spacesheep answered the last door
+  and took the key) and `lastFrameAt` (the relay's last good answer).
 - **A file with a start, images beside a prompt, search, forget:** as the spike found,
   these need doors spacesheep does not have for this key.
