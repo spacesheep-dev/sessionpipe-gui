@@ -40,6 +40,10 @@ const read = (req: IncomingMessage): Promise<string> =>
     req.on("end", () => resolve(Buffer.concat(parts).toString("utf8")));
   });
 
+/** What the stand-in answers when it fails itself: fixed words, with the error in the test's
+ *  console and never in an answer. */
+export const FAILED = "The stand-in failed; see the test's console.";
+
 export async function startAccountServer(o: { web: string; hub: HubStandIn; port?: number }): Promise<AccountServer> {
   const { hub } = o;
   const strays: string[] = [];
@@ -74,10 +78,11 @@ export async function startAccountServer(o: { web: string; hub: HubStandIn; port
         try {
           return send(200, { ok: (await hub.invoke(cmd, args ?? {})) ?? null });
         } catch (e) {
-          return send(200, {
-            err:
-              e instanceof HubRefused ? e.toJSON() : typeof e === "string" ? e : { code: "failed", message: String(e) },
-          });
+          // The hub's own refusals are its answers. Anything else is a fault of the stand-in:
+          // said to the test's console, and answered in fixed words (never the error itself).
+          if (e instanceof HubRefused) return send(200, { err: e.toJSON() });
+          console.error("[account stand-in] %s failed:", cmd, e);
+          return send(200, { err: { code: "failed", message: FAILED } });
         }
       }
       if (p === "/__hub/events") {
@@ -125,7 +130,8 @@ export async function startAccountServer(o: { web: string; hub: HubStandIn; port
       });
       createReadStream(target).pipe(res);
     } catch (e) {
-      if (!res.headersSent) send(500, { error: String(e) });
+      console.error("[account stand-in] %s %s failed:", req.method, p, e);
+      if (!res.headersSent) send(500, { error: FAILED });
     }
   });
   await new Promise<void>((resolve) => server.listen(o.port ?? 0, "127.0.0.1", resolve));
