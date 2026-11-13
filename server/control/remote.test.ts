@@ -3,13 +3,17 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseHello } from "./parse.js";
+import { MemoryControl } from "./remote.js";
 import {
   ControlState,
   EXPIRES_MAX_MS,
   type MessageRow,
   NO_JOB_CODE,
+  ONLINE_WINDOW_MS,
   type PoolCommand,
   REMOTE_GRACE_MS,
+  REMOTE_JUST_SENT_MS,
   toActivity,
 } from "./state.js";
 
@@ -422,6 +426,56 @@ describe("remote machines in the control state", () => {
       { id: 40, status: "done", note: null, done_at: Date.now(), created_at: Date.parse(row.at) },
     ]);
     expect(state.remoteJobsCadence()).toBe("none");
+  });
+
+  it("the pace is asked at a time: the receiver's state hands its `now` on, and a page's control takes one", () => {
+    state.setRemoteAccount(account);
+    state.upsertRemoteMachines([listed({ online: false })], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    const cmd = startCmd(m.id);
+    const row = state.enqueueRemote(m, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 40);
+    const sent = Date.parse(row.at);
+    // Just sent, to a computer shown offline: fast for a minute, slow after, by the time asked at.
+    expect(state.remoteJobsCadence(sent + 1000)).toBe("fast");
+    expect(state.remoteJobsCadence(sent + REMOTE_JUST_SENT_MS + 1000)).toBe("slow");
+    expect(state.remoteJobsCadence()).toBe("fast");
+    const page = new MemoryControl();
+    page.remote.setRemoteAccount(account);
+    page.remote.upsertRemoteMachines([listed({ online: false })], remote);
+    const pm = page.machine("m_0123456789abcdefghij")!;
+    const prow = page.remote.enqueueRemote(pm, { cmd: JSON.stringify(cmd) }, cmd, { via: "ui" }, 40);
+    expect(page.remote.remoteJobsCadence(Date.parse(prow.at) + 1000)).toBe("fast");
+    expect(page.remote.remoteJobsCadence(Date.parse(prow.at) + REMOTE_JUST_SENT_MS + 1000)).toBe("slow");
+  });
+
+  it("a list from spacesheep that changed a row looks at who is online: a machine paired here whose poll lapsed is told then", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const local = state.createMachine(
+      "m_localrow000000000001",
+      parseHello({ name: "mac-mini", harnesses: ["claude-code"], modes: ["waiter"], version: "0.13.0" })!,
+    );
+    // It polls: online, and the state has looked.
+    await state.poll(local, 0);
+    let told = 0;
+    state.onMachines = () => told++;
+    // Its poll lapses, and nobody has looked since.
+    vi.setSystemTime(Date.now() + ONLINE_WINDOW_MS + 1000);
+    // The account's list brings a new row: the look is taken with it, so the lapse is told
+    // there and then, beside the list itself.
+    state.upsertRemoteMachines([listed()], remote);
+    expect(told).toBe(2);
+    // The look was taken: the sweep has nothing left to tell.
+    told = 0;
+    state.sweep();
+    expect(told).toBe(0);
+    // A list that changes no row is told once, as every list is, with no look.
+    await state.poll(local, 0);
+    vi.setSystemTime(Date.now() + ONLINE_WINDOW_MS + 1000);
+    told = 0;
+    state.upsertRemoteMachines([listed()], remote);
+    expect(told).toBe(1);
+    state.sweep();
+    expect(told).toBe(2);
   });
 
   it("with no time from spacesheep, ages a job by the row's own time on this clock, not spacesheep's created_at", () => {
