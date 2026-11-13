@@ -905,6 +905,37 @@ describe("a page's own backend on a spacesheep account", () => {
     expect(b.transport.qrUrl()).toBeNull();
   });
 
+  it("hands nothing to the network that is not a receiver's path: another origin, a protocol-relative one, a path in capitals", async () => {
+    const b = await r.start();
+    await tick(400);
+    const real = globalThis.fetch;
+    const went: string[] = [];
+    globalThis.fetch = (async (u: unknown) => {
+      went.push(String(u));
+      return new Response("x");
+    }) as typeof fetch;
+    try {
+      for (const path of [
+        "//evil.example/collect?x=1",
+        "https://evil.example/api/ui/info",
+        "http://account.invalid.evil.example/api/ui/info",
+        "/sessions?s=abc",
+        "/API/ui/info",
+        "data:text/plain,hello",
+        "http://[",
+        "",
+      ]) {
+        const res = await b.answer(path, { method: "POST", body: "the body" });
+        expect([path, res.status, await res.json()]).toEqual([path, 404, { reason: NOT_HERE }]);
+      }
+    } finally {
+      globalThis.fetch = real;
+    }
+    expect(went).toEqual([]);
+    // And none of it is taken for a route it resembles.
+    expect(b.asked.get("POST /api/ui/info")).toBeUndefined();
+  });
+
   it("asks spacesheep to trust this phone's own key through the hub, and reads where it stands", async () => {
     const b = await r.start();
     await tick(400);

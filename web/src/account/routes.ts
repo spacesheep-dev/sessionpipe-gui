@@ -34,6 +34,9 @@ export interface RouteDeps {
 
 type Handler = (url: URL, body: unknown) => Response | Promise<Response>;
 
+/** Where a path the page asks for is read against: no host of anybody's. */
+const HERE = "http://account.invalid";
+
 /** The paths of a receiver: the page's requests of these are the backend's to answer. */
 const OURS = /^\/(api\/|themes\/|skins\/|attachments\/|\.well-known\/)/;
 
@@ -107,14 +110,19 @@ export function routes(d: RouteDeps): ApiBackend {
   };
 
   return async (path, init) => {
-    const url = new URL(path, "http://account.invalid");
-    if (!OURS.test(url.pathname)) {
-      // Not a receiver's path at all (another origin, a data: URL): as fetch would.
-      return fetch(path, init);
+    // Whatever is asked of the page's backend is answered here, in the page: a path that is
+    // not a receiver's (another origin, `//host/…`, a data: URL) is not handed to the
+    // network on this function's word. It is answered 404 like any path with no meaning.
+    let url: URL | null = null;
+    try {
+      url = new URL(path, HERE);
+    } catch {
+      // not an address at all
     }
+    const ours = !!url && url.origin === HERE && OURS.test(url.pathname);
     const method = (init?.method ?? "GET").toUpperCase();
-    const name = `${method} ${url.pathname}`;
-    const h = table[name];
+    const name = ours ? `${method} ${url!.pathname}` : `${method} (not a receiver's path)`;
+    const h = ours ? table[name] : undefined;
     let res: Response;
     if (!h) res = json({ reason: NOT_HERE }, 404);
     else {
@@ -127,7 +135,7 @@ export function routes(d: RouteDeps): ApiBackend {
         }
       }
       try {
-        res = await h(url, body);
+        res = await h(url!, body);
       } catch (e) {
         console.error("[account] %s: %s", name, (e as Error).message);
         res = json({ reason: "failed" }, 500);
