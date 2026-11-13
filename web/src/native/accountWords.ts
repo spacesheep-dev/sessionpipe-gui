@@ -49,13 +49,37 @@ export const ThisPhone = (): string => {
 };
 
 /** A clock time as the phone writes one: "14:05". */
+/** The sentences are English, so a time or a day inside one is written in English digits
+ *  and names whatever the phone's own language is; only the phone's choice of a 12- or a
+ *  24-hour clock is taken from it. */
+const twelve = (): boolean => {
+  try {
+    const cycle = new Intl.DateTimeFormat(undefined, { hour: "numeric" }).resolvedOptions().hourCycle;
+    return cycle === "h12" || cycle === "h11";
+  } catch {
+    return true;
+  }
+};
+/** A time of day as the sentences write one: "5:30 PM", or "17:30" on a 24-hour phone. */
 export const clock = (ms: number): string =>
-  new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: twelve(),
+    numberingSystem: "latn",
+    calendar: "gregory",
+  }).format(new Date(ms));
 
-/** A day as the phone writes one: "12 Nov 2026". */
+/** A day as the sentences write one: "Nov 3, 2026". */
 export const day = (iso: string): string => {
   const t = Date.parse(iso);
   return Number.isFinite(t)
-    ? new Date(t).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })
+    ? new Intl.DateTimeFormat("en-US", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        numberingSystem: "latn",
+        calendar: "gregory",
+      }).format(new Date(t))
     : "";
 };

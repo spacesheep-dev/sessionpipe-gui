@@ -3,7 +3,7 @@
 // ended, how the account stands, where this phone's key stands in a row, and an ask's
 // refusal. (Each state drawn, start to end, is test/e2e/account-screens.spec.ts.)
 import { describe, expect, it } from "vitest";
-import { NEW_WORDS as N } from "../native/accountWords";
+import { clock, day, NEW_WORDS as N } from "../native/accountWords";
 import { accountState, approveError, endedWords, phoneLine } from "./screenWords";
 
 const HOST = "spacesheep.dev";
@@ -25,9 +25,7 @@ describe("how a connect ended, in words", () => {
     expect(endedWords({ kind: "ended", why: "expired", host: HOST }).body).toBe(N.expiredBody);
     // A time to try again when the hub gave one, else "in a few minutes".
     const at = Date.parse("2026-11-12T14:05:00Z");
-    expect(endedWords({ kind: "ended", why: "wait", host: HOST, at }).body).toBe(
-      N.waitAt(new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })),
-    );
+    expect(endedWords({ kind: "ended", why: "wait", host: HOST, at }).body).toBe(N.waitAt(clock(at)));
     expect(endedWords({ kind: "ended", why: "wait", host: HOST }).body).toBe(N.waitSoon);
   });
 });
@@ -74,7 +72,7 @@ describe("where this phone's key stands, in a row", () => {
 describe("an ask's refusal, in words", () => {
   const now = Date.parse("2026-11-12T13:00:00Z");
   it("says when to ask again, what could not be reached, why the phone cannot, or spacesheep's own sentence", () => {
-    const at = new Date(now + 900_000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const at = clock(now + 900_000);
     expect(approveError({ code: "too_many_asks", message: "x", retryAfterS: 900 }, now)).toEqual({
       words: N.approveTooMany(at),
       elsewhere: false,
@@ -105,5 +103,34 @@ describe("an ask's refusal, in words", () => {
     expect(
       approveError({ code: "bad_answer", message: "spacesheep's answer can't be used by this version." }, now),
     ).toEqual({ words: "spacesheep's answer can't be used by this version.", elsewhere: false });
+  });
+});
+
+describe("a time and a day inside a sentence", () => {
+  const at = Date.parse("2026-11-03T17:30:00Z");
+  const withLocale = (locale: string, f: () => void): void => {
+    const real = Intl.DateTimeFormat;
+    // The phone's own language, as `undefined` resolves to it.
+    const stub = function (this: unknown, l?: string | string[], o?: Intl.DateTimeFormatOptions) {
+      return new real(l ?? locale, o);
+    } as unknown as typeof Intl.DateTimeFormat;
+    stub.supportedLocalesOf = real.supportedLocalesOf;
+    Intl.DateTimeFormat = stub;
+    try {
+      f();
+    } finally {
+      Intl.DateTimeFormat = real;
+    }
+  };
+  it("is written in the sentence's language whatever the phone's is, with the phone's 12 or 24 hours", () => {
+    const utc = (s: string) => s.replace(/\u202f/g, " ");
+    for (const locale of ["ar-EG", "fa-IR", "hi-IN-u-nu-deva", "th-TH-u-ca-buddhist"])
+      withLocale(locale, () => {
+        // English digits and names: nothing of another script inside an English sentence.
+        expect(clock(at), locale).toMatch(/^\d{1,2}:\d{2}( [AP]M)?$/);
+        expect(utc(day("2026-11-03T09:00:00Z")), locale).toMatch(/^Nov \d{1,2}, 2026$/);
+      });
+    withLocale("en-GB", () => expect(clock(at)).toMatch(/^\d{1,2}:\d{2}$/));
+    withLocale("en-US", () => expect(utc(clock(at))).toMatch(/^\d{1,2}:\d{2} [AP]M$/));
   });
 });
