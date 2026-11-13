@@ -145,6 +145,10 @@ export function accountsKept(local: Kept | null = storage()): string[] {
  *  when it returns. It goes with the account (a new connect is a new key). */
 export const readsKey = (id: string): string => `${ACCOUNT_KEYED}reads.${id}`;
 
+/** Where an account's sends are kept while the hub's `sends` document cannot be written
+ *  (backend.ts). It goes with the account. */
+export const sendsKey = (id: string): string => `${ACCOUNT_KEYED}sends.${id}`;
+
 export function readLocal(key: string, local: Kept | null = storage()): string | null {
   try {
     return local?.getItem(key) ?? null;

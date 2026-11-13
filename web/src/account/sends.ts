@@ -69,3 +69,24 @@ export function readSends(raw: unknown): KeptQueues | null {
   for (const [id, rows] of Object.entries(q)) if (Array.isArray(rows)) out[id] = rows as MessageRow[];
   return out;
 }
+
+/** A kept document with what was kept beside it while it could not be written: every row
+ *  of either, once, by its id (the document's own first). */
+export function mergeSends(doc: unknown, beside: unknown): unknown {
+  const extra = readSends(beside);
+  const more = Array.isArray((beside as { unheard?: unknown } | null)?.unheard)
+    ? ((beside as { unheard: { row?: { id?: unknown } }[] }).unheard ?? [])
+    : [];
+  if (!extra && !more.length) return doc;
+  const queues: KeptQueues = { ...(readSends(doc) ?? {}) };
+  for (const [id, rows] of Object.entries(extra ?? {})) {
+    const have = new Set((queues[id] ?? []).map((r) => r.id));
+    const add = rows.filter((r) => r && typeof r.id === "string" && !have.has(r.id));
+    if (add.length) queues[id] = [...(queues[id] ?? []), ...add].sort((a, b) => (a.id < b.id ? -1 : 1));
+  }
+  const own = Array.isArray((doc as { unheard?: unknown } | null)?.unheard)
+    ? (doc as { unheard: { row?: { id?: unknown } }[] }).unheard
+    : [];
+  const ids = new Set(own.map((u) => u?.row?.id));
+  return { v: 1, queues, unheard: [...own, ...more.filter((u) => !ids.has(u?.row?.id))] };
+}

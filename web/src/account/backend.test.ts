@@ -542,6 +542,26 @@ describe("a page's own backend on a spacesheep account", () => {
       expect(account().docs.get("sends")).toBe(before);
       // Nothing a person keeps was unread: no notice for it.
       expect(r.notices.filter((n) => n.kind === "doc_unread")).toEqual([{ kind: "doc_unread", names: ["sends"] }]);
+      // What was sent in that launch is kept beside the document, in the page's own storage...
+      const beside = [...r.stored.entries()].find(([k]) => k.startsWith("sessionpipe-gui.account.sends."))!;
+      expect(beside[1]).toContain("the second");
+      expect(beside[1]).not.toContain("the first");
+      // ...so the launch after it, with the document readable again, follows both sends.
+      b.stop();
+      r.failGet.delete("sends");
+      b = await r.start();
+      await tick(400);
+      const rows = await b.transport.controlActivity!(10);
+      expect(rows.map((a) => a.text).sort()).toEqual(["the first", "the second"]);
+      r.ss.settle(r.ss.jobs.at(-1)!.id, "done");
+      await tick(4000);
+      expect((await b.transport.controlActivity!(10)).find((a) => a.text === "the second")).toMatchObject({
+        outcome: "delivered",
+      });
+      // The document holds them all now, and nothing is kept beside it.
+      await b.flushed();
+      expect(account().docs.get("sends")).toContain("the second");
+      expect(r.stored.get(beside[0])).toBe("");
     });
   });
 

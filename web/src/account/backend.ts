@@ -53,10 +53,10 @@ import { type EventCache, openCache, withoutSessions } from "./cache";
 import { type AccountDocs, type DocName, openDocs } from "./docs";
 import { type AccountDoors, type DoorAnswer, openDoors, SEND_UNKNOWN_CODE, type Sent } from "./doors";
 import { listed } from "./gone";
-import { forgetLocal, readLocal, readsKey, wipeAccount, writeLocal } from "./local";
+import { forgetLocal, readLocal, readsKey, sendsKey, wipeAccount, writeLocal } from "./local";
 import { PageLog } from "./log";
 import { routes } from "./routes";
-import { fitSends, readSends } from "./sends";
+import { fitSends, mergeSends, readSends } from "./sends";
 import {
   type AccountShell,
   type AccountState,
@@ -206,13 +206,33 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     for (const rows of Object.values(queues ?? {}))
       for (const row of rows) if (typeof row.remoteJob === "number" && row.remoteJob > lastJob) lastJob = row.remoteJob;
   };
-  const keptDoc = sends.load();
+  // A `sends` document the hub could not read is never written over (docs.ts), so what is
+  // sent in such a launch would be followed by nobody after it. Its rows are kept in the
+  // page's own storage until the document can be written again, and read back with it.
+  const sendsUnread = docs.unread().includes("sends");
+  let beside: unknown = null;
+  try {
+    const text = local.read(sendsKey(shell.id));
+    if (text) beside = JSON.parse(text) as unknown;
+  } catch {
+    // Not readable: as with none kept beside.
+  }
+  const keptDoc = mergeSends(sends.load(), beside);
   const keptSends = readSends(keptDoc);
   noteJobs(keptSends);
   /** The sends nobody heard the answer to (unheard.ts), kept in the same document. */
   let unheard: Unheard | null = null;
   let queuesNow: KeptQueues = keptSends ?? {};
-  const saveSends = (): void => sends.save({ ...fitSends(queuesNow), unheard: unheard?.kept() ?? [] });
+  const saveSends = (): void => {
+    const doc = { ...fitSends(queuesNow), unheard: unheard?.kept() ?? [] };
+    sends.save(doc);
+    if (sendsUnread) local.write(sendsKey(shell.id), JSON.stringify(doc));
+    else if (beside) {
+      // The document holds them now: nothing is kept beside it any more.
+      beside = null;
+      local.write(sendsKey(shell.id), "");
+    }
+  };
   /** The id the next row is made under: a send that was unknown keeps its row's when it turns out sent. */
   let nextId: string | null = null;
   const control = new MemoryControl({
