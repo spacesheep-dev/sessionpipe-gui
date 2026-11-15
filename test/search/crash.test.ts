@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: search perf. Crash torture (SEARCH-SPEC.md §8.4): the writer runs in a child over
-// a generated home and is SIGKILLed at a random moment, 20 times, with new bytes appended
+// a generated home and is SIGKILLed with jitter at commit boundaries, 20 times, with new bytes appended
 // between rounds. After every kill a reader must open clean; after a last full pass the index
 // must hold exactly the docs the oracle holds: none lost, none twice.
 import { type ChildProcess, fork } from "node:child_process";
@@ -21,6 +21,7 @@ let tmp: { dir: string; cleanup: () => void };
 let child = "";
 let m: GenManifest;
 const writers = new Set<ChildProcess>();
+let stopped = false;
 const home = (): string => path.join(tmp.dir, "gen", "home");
 const state = (): string => path.join(tmp.dir, "gen", "state");
 const dir = (): string => path.join(tmp.dir, "search");
@@ -47,8 +48,9 @@ if (checkpoint) {
   const pause = () => {
     // A synchronous pipe write works even while the indexer owns the event loop.
     fs.writeSync(4, "commit\\n");
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
-    throw new Error("commit barrier resumed without SIGKILL");
+    // The parent never releases this pipe. EOF also ends the child if its parent dies.
+    fs.readSync(5, Buffer.alloc(1), 0, 1, null);
+    throw new Error("commit barrier closed without SIGKILL");
   };
   fs.renameSync = (from, to) => {
     const name = basename(String(to));
@@ -85,8 +87,9 @@ function runWriter(
   how: "once" | "rebuild" = "once",
 ): Promise<{ how: "killed" | "done"; inCommit: boolean }> {
   return new Promise((resolve, reject) => {
+    if (stopped) return reject(new Error("crash test has finished"));
     const c = fork(child, [home(), state(), dir(), how, kill?.checkpoint ?? ""], {
-      stdio: ["ignore", "ignore", "ignore", "ipc", "pipe"],
+      stdio: ["ignore", "ignore", "ignore", "ipc", "pipe", "pipe"],
     });
     writers.add(c);
     let inCommit = false;
@@ -155,6 +158,7 @@ describe.skipIf(!existsSync(ENGINE))("crash torture: SIGKILL during commit", () 
     child = await bundleChild();
   }, 120_000);
   afterAll(() => {
+    stopped = true;
     for (const c of writers) c.kill("SIGKILL");
     writers.clear();
     tmp?.cleanup();
@@ -189,7 +193,7 @@ describe.skipIf(!existsSync(ENGINE))("crash torture: SIGKILL during commit", () 
       }
       const jitter = (round * 7) % 6;
       const r = await runWriter(
-        { jitter, checkpoint: checkpoints[round % checkpoints.length]! },
+        { jitter, checkpoint: checkpoints[Math.floor(round / 2) % checkpoints.length]! },
         rebuild ? "rebuild" : "once",
       );
       if (r.how === "killed") killed++;
