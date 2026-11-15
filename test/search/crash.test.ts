@@ -3,7 +3,7 @@
 // a generated home and is SIGKILLed at a random moment, 20 times, with new bytes appended
 // between rounds. After every kill a reader must open clean; after a last full pass the index
 // must hold exactly the docs the oracle holds: none lost, none twice.
-import { fork } from "node:child_process";
+import { type ChildProcess, fork } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -20,6 +20,7 @@ const NOW = Date.parse("2026-10-25T00:00:00Z");
 let tmp: { dir: string; cleanup: () => void };
 let child = "";
 let m: GenManifest;
+const writers = new Set<ChildProcess>();
 const home = (): string => path.join(tmp.dir, "gen", "home");
 const state = (): string => path.join(tmp.dir, "gen", "state");
 const dir = (): string => path.join(tmp.dir, "search");
@@ -33,9 +34,32 @@ async function bundleChild(): Promise<string> {
   const { writeFileSync } = await import("node:fs");
   writeFileSync(
     entry,
-    `import { runIndexer } from ${JSON.stringify(ENGINE)};
+    `import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { basename } from "node:path";
+import { runIndexer } from ${JSON.stringify(ENGINE)};
 import { eventsAdapter, historyAdapters, sourceEnv } from ${JSON.stringify(path.join(ROOT, "server/search/sources/index.ts"))};
-const [home, stateDir, dir, how] = process.argv.slice(2);
+const [home, stateDir, dir, how, checkpoint] = process.argv.slice(2);
+// Only this test's killed writers pause. Normal passes use the real fs unchanged.
+if (checkpoint) {
+  const [kind, side] = checkpoint.split(":");
+  const rename = fs.renameSync;
+  const pause = () => {
+    // A synchronous pipe write works even while the indexer owns the event loop.
+    fs.writeSync(4, "commit\\n");
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+    throw new Error("commit barrier resumed without SIGKILL");
+  };
+  fs.renameSync = (from, to) => {
+    const name = basename(String(to));
+    const match = String(from) === String(to) + ".tmp" &&
+      (kind === "manifest" ? name === "MANIFEST" : /^seg-\\d+\\.sps$/.test(name));
+    if (match && side === "before") pause();
+    rename(from, to);
+    if (match && side === "after") pause();
+  };
+  syncBuiltinESMExports();
+}
 const env = sourceEnv({ home, stateDir, hostname: "crash-host" });
 await runIndexer({ dir, env, adapters: [...historyAdapters(), eventsAdapter()], history: true, mode: "once", rebuild: how === "rebuild" });
 `,
@@ -54,44 +78,31 @@ await runIndexer({ dir, env, adapters: [...historyAdapters(), eventsAdapter()], 
   return file;
 }
 
-/** Any `*.tmp` under the index: a segment or the MANIFEST being written (a commit in flight). */
-function committing(d: string): boolean {
-  if (!existsSync(d)) return false;
-  for (const e of readdirSync(d, { withFileTypes: true })) {
-    if (e.isDirectory()) {
-      if (committing(path.join(d, e.name))) return true;
-    } else if (e.name.endsWith(".tmp")) return true;
-  }
-  return false;
-}
-
-/** Runs the writer; with `kill`, SIGKILLs it `jitter` ms after the first commit in flight is
- *  seen (or at `fallback` ms if none is seen first). */
+/** Park at a real commit boundary until the parent's jittered SIGKILL. No polling race,
+ *  calibration deadline, or LOCK.tmp mistaken for a commit. */
 function runWriter(
-  kill: { jitter: number; fallback: number } | null,
+  kill: { jitter: number; checkpoint: string } | null,
   how: "once" | "rebuild" = "once",
 ): Promise<{ how: "killed" | "done"; inCommit: boolean }> {
   return new Promise((resolve, reject) => {
-    const c = fork(child, [home(), state(), dir(), how], { stdio: "ignore" });
+    const c = fork(child, [home(), state(), dir(), how, kill?.checkpoint ?? ""], {
+      stdio: ["ignore", "ignore", "ignore", "ipc", "pipe"],
+    });
+    writers.add(c);
     let inCommit = false;
-    let fired = false;
-    const fire = (): void => {
-      if (fired) return;
-      fired = true;
-      c.kill("SIGKILL");
-    };
-    const t0 = Date.now();
-    const poll = kill
-      ? setInterval(() => {
-          if (fired) return;
-          if (committing(dir())) {
-            inCommit = true;
-            setTimeout(fire, kill.jitter);
-          } else if (Date.now() - t0 > kill.fallback) fire();
-        }, 1)
-      : undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let signal = "";
+    c.stdio[4]?.on("data", (data: Buffer) => {
+      signal += data.toString();
+      if (kill && !inCommit && signal.includes("commit\n")) {
+        inCommit = true;
+        timer = setTimeout(() => c.kill("SIGKILL"), kill.jitter);
+      }
+    });
+    c.on("error", reject);
     c.on("exit", (code, sig) => {
-      if (poll) clearInterval(poll);
+      writers.delete(c);
+      if (timer) clearTimeout(timer);
       if (sig === "SIGKILL") resolve({ how: "killed", inCommit });
       else if (code === 0) resolve({ how: "done", inCommit: false });
       else reject(new Error(`writer exited ${code}`));
@@ -143,7 +154,11 @@ describe.skipIf(!existsSync(ENGINE))("crash torture: SIGKILL during commit", () 
     m = generate({ out: path.join(tmp.dir, "gen"), profile: "dense", size: 8_000_000, seed: 21, now: NOW });
     child = await bundleChild();
   }, 120_000);
-  afterAll(() => tmp?.cleanup());
+  afterAll(() => {
+    for (const c of writers) c.kill("SIGKILL");
+    writers.clear();
+    tmp?.cleanup();
+  });
 
   it(`${ROUNDS} kills, each recovering clean; then nothing lost and nothing twice`, async () => {
     const e = await engineModule();
@@ -160,8 +175,9 @@ describe.skipIf(!existsSync(ENGINE))("crash torture: SIGKILL during commit", () 
     let rounds = 0;
     const opens: string[] = [];
     const probes: number[] = [];
-    // A commit can finish between two polls (a fast disk), and that kill lands outside one:
-    // keep going until enough kills hit a commit in flight, up to three times the rounds.
+    // Exercise both sides of segment publication and the manifest commit point. The
+    // writer stays there for the jitter, so disk speed cannot erase the observation.
+    const checkpoints = ["segment:before", "segment:after", "manifest:before", "manifest:after"];
     const wantInCommit = Math.ceil(ROUNDS * 0.6);
     for (let round = 0; round < ROUNDS * 3 && (round < ROUNDS || inCommit < wantInCommit); round++) {
       rounds++;
@@ -172,7 +188,10 @@ describe.skipIf(!existsSync(ENGINE))("crash torture: SIGKILL during commit", () 
         probes.push(round);
       }
       const jitter = (round * 7) % 6;
-      const r = await runWriter({ jitter, fallback: 0.6 * (rebuild ? full : inc) }, rebuild ? "rebuild" : "once");
+      const r = await runWriter(
+        { jitter, checkpoint: checkpoints[round % checkpoints.length]! },
+        rebuild ? "rebuild" : "once",
+      );
       if (r.how === "killed") killed++;
       if (r.inCommit) inCommit++;
       try {
