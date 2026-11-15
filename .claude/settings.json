@@ -1,0 +1,75 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.graphide/agent-signal\" edit; exit 0",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit"
+      },
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.graphide/agent-signal\" shell; exit 0",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash|exec"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.graphide/agent-signal\" run-prep hook; exit 0",
+            "timeout": 25,
+            "type": "command"
+          }
+        ],
+        "matcher": "mcp__.*__ci_run_tests"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.graphide/agent-signal\" end; exit 0",
+            "timeout": 2,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.graphide/agent-signal\" start; exit 0",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.graphide/agent-signal\" prompt; exit 0",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

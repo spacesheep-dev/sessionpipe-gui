@@ -1,0 +1,887 @@
+# shellcheck shell=sh
+# Graphide agent signals.
+#
+# Coding agents run this from their hooks so Graphide CI knows, ahead of the
+# push, that an agent is working in this repository, changed a dependency or
+# lock file, or is about to push or merge, and has machines ready in time.
+#
+# It is always run by sh, never executed itself: it has no file extension, no
+# #! line and no executable bit, so the repository's linters and formatters
+# (which find shell scripts by extension or #! line) never pick it up.
+#
+#   sh .graphide/agent-signal <start|prompt|edit|shell|tool|end> [harness]
+#
+# The hook's JSON comes on stdin (for `shell`, plain text is read as the
+# command that ran). This returns at once, prints nothing and always exits 0:
+# a detached copy of itself does the work, with every network call bounded
+# and no prompt of any kind. It sends this repository (github.com/owner/name),
+# the branch, the head commit, a session id and a random per-session secret.
+# Once per session it pushes an empty commit to refs/graphide/session/<id>, a
+# ref outside branches and tags that nothing fetches, to prove the session can
+# push here; Graphide reads and deletes it, and the session's end deletes it
+# too. A push never prompts: where origin's SSH agent could ask (1Password,
+# Secretive and the like) it goes over HTTPS if a credential helper answers
+# on its own, else it is not made. State stays in .git/graphide/.
+#
+#   sh .graphide/agent-signal run-prep [commit]
+#
+# run-prep pushes one commit (default HEAD) to refs/graphide/run/<sha>, the
+# same kind of hidden ref, so Graphide CI can test it (the hosted MCP's
+# ci_run_tests) before it is pushed to a branch. It prints `commit <sha>`, or
+# git's error, and exits with the push's status. A harness's pre-tool hook on
+# ci_run_tests runs `run-prep <harness>` (or `run-prep hook`): it reads the
+# call from stdin, pushes the call's commit (else HEAD) the same way and says
+# which commit it pushed, all within about 20 s, prints nothing (for Cursor
+# only its allow answer, which its hook must give) and always exits 0, so a
+# failed push never stops the call. Graphide deletes these refs a day later.
+#
+# Off: GRAPHIDE_SIGNALS=off in the environment, or a .graphide/signals-off
+# file. run-prep as a command still pushes then; it sends nothing.
+
+gs_off=
+case ${GRAPHIDE_SIGNALS-} in off | OFF | Off | 0 | false | no) gs_off=1 ;; esac
+case $0 in */*) gs_dir=${0%/*} ;; *) gs_dir=. ;; esac
+[ -e "$gs_dir/signals-off" ] && gs_off=1
+
+# gs_bounded <seconds> <command...>: runs it, killed after that long. The
+# timer holds no descriptor of ours, so nothing waits on it, and counts in
+# 1 s sleeps, so none outlives a quick command by more than a second.
+gs_bounded() {
+	gs_t=$1
+	shift
+	"$@" &
+	gs_p=$!
+	(
+		gs_i=0
+		while [ "$gs_i" -lt "$gs_t" ]; do
+			sleep 1
+			gs_i=$((gs_i + 1))
+		done
+		kill "$gs_p" 2>/dev/null
+	) </dev/null >/dev/null 2>&1 &
+	gs_w=$!
+	wait "$gs_p"
+	gs_r=$?
+	kill "$gs_w" 2>/dev/null
+	return "$gs_r"
+}
+
+# gs_mkin: sets gs_in to a new file for the hook's input that no one else can
+# name: mktemp's, else one in this clone's own state directory
+# (.git/graphide, only ours to write); "" when neither works.
+gs_mkin() {
+	gs_in=$(mktemp "${TMPDIR:-/tmp}/graphide-signal.XXXXXX" 2>/dev/null) || gs_in=
+	if [ -z "$gs_in" ] && [ -d "$gs_dir/../.git" ] && mkdir -p "$gs_dir/../.git/graphide" 2>/dev/null; then
+		gs_in=$gs_dir/../.git/graphide/in.$$
+		set -C
+		{ true >"$gs_in"; } 2>/dev/null || gs_in=
+		set +C
+	fi
+	case $gs_in in '' | /*) ;; *) gs_in=$PWD/$gs_in ;; esac
+}
+
+# gs_detach <arguments...>: starts sh <this script> <arguments...> detached,
+# with no descriptor of the hook's.
+gs_detach() {
+	if command -v setsid >/dev/null 2>&1; then
+		setsid sh "$gs_self" "$@" </dev/null >/dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &
+	elif command -v perl >/dev/null 2>&1; then
+		perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' sh "$gs_self" "$@" </dev/null >/dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &
+	else
+		nohup sh "$gs_self" "$@" </dev/null >/dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &
+	fi
+}
+
+# gs_github <remote url>: sets gs_repo to github.com/<owner>/<name>, or fails.
+gs_github() {
+	gs_repo=
+	u=$1
+	case $u in
+	*://*)
+		u=${u#*://}
+		h=${u%%/*}
+		case $h in *@*) u=${u#*@} h=${h#*@} ;; esac
+		case $h in github.com:*) u=github.com/${u#*/} ;; esac
+		;;
+	*@github.com:*) u=github.com/${u#*@github.com:} ;;
+	github.com:*) u=github.com/${u#github.com:} ;;
+	esac
+	case $u in github.com/*) u=${u#github.com/} ;; *) return 1 ;; esac
+	u=${u%/}
+	u=${u%.git}
+	o=${u%%/*} n=${u#*/}
+	case $o in '' | *[!A-Za-z0-9._-]*) return 1 ;; esac
+	case $n in '' | *[!A-Za-z0-9._-]*) return 1 ;; esac
+	gs_repo=github.com/$o/$n
+}
+
+# gs_noprompt: git asks nothing: no terminal or askpass prompt, no
+# credential manager window. gs_dest, before any push, puts ssh in batch mode.
+gs_noprompt() {
+	GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never GIT_ASKPASS=true SSH_ASKPASS_REQUIRE=never
+	export GIT_TERMINAL_PROMPT GCM_INTERACTIVE GIT_ASKPASS SSH_ASKPASS_REQUIRE
+}
+
+# gs_batchssh: ssh from git in batch mode, unless the environment or the
+# repository names its own ssh command.
+gs_batchssh() {
+	if [ -z "${GIT_SSH_COMMAND-}${GIT_SSH-}" ] && [ -z "$(git config --get core.sshCommand 2>/dev/null)" ]; then
+		GIT_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=5'
+		export GIT_SSH_COMMAND
+	fi
+}
+
+# gs_ssh <url>: true when git reaches <url> over SSH, with gs_sshhost its host.
+gs_ssh() {
+	gs_sshhost=
+	case $1 in
+	ssh://* | git+ssh://* | ssh+git://*) u=${1#*://} ;;
+	*://* | /* | [A-Za-z]:[/\\]*) return 1 ;;
+	*:*)
+		u=${1%%:*}
+		case $u in */*) return 1 ;; esac
+		;;
+	*) return 1 ;;
+	esac
+	u=${u%%/*}
+	u=${u##*@}
+	u=${u%%:*}
+	case $u in '' | -*) return 1 ;; esac
+	gs_sshhost=$u
+}
+
+# gs_asks: true when an SSH connection to gs_sshhost could put a prompt in
+# front of the person: the agent ssh would use asks before each use or for
+# a touch (1Password, Secretive, Bitwarden, gpg-agent's pinentry, a
+# security key), or does not list its keys within 2 s. ssh -G only reads
+# the configuration; both together take about 10 ms.
+gs_asks() {
+	a=$(gs_bounded 2 ssh -G "$gs_sshhost" </dev/null 2>/dev/null | sed -n 's/^identityagent //p')
+	case $a in '' | SSH_AUTH_SOCK | '$SSH_AUTH_SOCK') a=${SSH_AUTH_SOCK-} ;; none) return 1 ;; esac
+	[ -n "$a" ] || return 1
+	case $(printf '%s' "$a" | tr 'A-Z' 'a-z') in *1password* | *secretive* | *bitwarden* | *gpg-agent*) return 0 ;; esac
+	command -v ssh-add >/dev/null 2>&1 || return 1
+	k=$(
+		SSH_AUTH_SOCK=$a
+		export SSH_AUTH_SOCK
+		gs_bounded 2 ssh-add -l </dev/null 2>/dev/null
+		echo "status $?"
+	)
+	case $k in *-SK\)* | *-sk\)*) return 0 ;; esac
+	case ${k##*status } in 0 | 1 | 2) return 1 ;; esac
+	return 0
+}
+
+# gs_dest: sets gs_to to where a push of ours goes without any prompt:
+# origin, unless origin is reached over SSH through an agent that could ask
+# (gs_asks); then GitHub over HTTPS, when a credential helper answers for
+# it on its own. Fails when neither: that push is skipped.
+gs_dest() {
+	gs_batchssh
+	gs_to=origin
+	u=$(git remote get-url --push origin 2>/dev/null) || return 1
+	gs_ssh "$u" || return 0
+	gs_asks || return 0
+	r=$(gs_github "$(git config --get remote.origin.url 2>/dev/null)" || gs_github "$u" || exit 1
+		echo "$gs_repo") || return 1
+	gs_to=https://$r.git
+	# Where git sends a push to that URL: a pushInsteadOf rewrite, else an insteadOf one.
+	u=$(git config --get-regexp '^url\..*\.pushinsteadof$' 2>/dev/null | awk -v u="$gs_to" '
+		index(u, $2) == 1 && length($2) > best { best = length($2); k = $1; sub(/^url\./, "", k); sub(/\.pushinsteadof$/, "", k); out = k substr(u, best + 1) }
+		END { print out }')
+	[ -n "$u" ] || u=$(git ls-remote --get-url "$gs_to" 2>/dev/null) || return 1
+	case $u in
+	http://* | https://*)
+		gs_bounded 3 sh -c 'printf "url=%s\n\n" "$1" | git credential fill 2>/dev/null | grep -q "^password=."' sh "$u" </dev/null >/dev/null 2>&1
+		;;
+	*) ! gs_ssh "$u" ;;
+	esac
+}
+
+# gs_push <seconds> <refspec>: pushes it to gs_to, killed after that long.
+gs_push() {
+	gs_bounded "$1" git -c push.gpgSign=false -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 \
+		push --quiet --no-verify --no-recurse-submodules "$gs_to" "$2"
+}
+
+# gs_runpush <seconds> <sha>: pushes the commit to refs/graphide/run/<sha>,
+# never prompting, killed after that long; status 3 when no push could go
+# without a prompt. A ref already there is a push with nothing to send.
+gs_runpush() {
+	(
+		gs_noprompt
+		gs_dest || exit 3
+		gs_push "$1" "$2:refs/graphide/run/$2"
+	)
+}
+
+case $0 in /*) gs_self=$0 ;; *) gs_self=$PWD/$0 ;; esac
+
+if [ "${1-}" = run-prep ]; then
+	umask 077
+	case ${2-} in
+	hook | claude-code | codex | cursor)
+		# A pre-tool hook on ci_run_tests. Nothing may reach the harness but
+		# Cursor's answer (descriptor 3 until then), and it exits 0.
+		exec 3>&1 >/dev/null 2>&1
+		[ -t 0 ] && exit 0
+		gs_mkin
+		[ -n "$gs_in" ] || exit 0
+		head -c 65536 >>"$gs_in" 2>/dev/null
+		cat >/dev/null 2>&1
+		trap 'rm -f "$gs_in"' EXIT
+		# "<commit> <tool name>" from the call; escaped quotes (a tool input
+		# given as a JSON string) are read as plain ones.
+		gs_v=$(awk '{ s = s $0 " " } END {
+			gsub(/\\/, "", s)
+			t = ""; c = ""
+			if (match(s, /"(tool_name|toolName)"[ \t]*:[ \t]*"[^"]*"/)) {
+				t = substr(s, RSTART, RLENGTH); sub(/^"[A-Za-z_]*"[ \t]*:[ \t]*"/, "", t); sub(/"$/, "", t)
+			}
+			if (match(s, /"commit"[ \t]*:[ \t]*"[0-9A-Fa-f]+"/)) {
+				c = substr(s, RSTART, RLENGTH); sub(/^"commit"[ \t]*:[ \t]*"/, "", c); sub(/"$/, "", c)
+			}
+			print c " " t
+		}' "$gs_in" 2>/dev/null)
+		case ${gs_v#* } in *ci_run_tests*) ;; *) exit 0 ;; esac
+		[ "$2" = cursor ] && echo '{"permission":"allow"}' >&3
+		exec 3>&-
+		[ -n "$gs_off" ] && exit 0
+		cd "$gs_dir/.." 2>/dev/null && command -v git >/dev/null 2>&1 || exit 0
+		gs_c=${gs_v%% *}
+		gs_sha=$(git rev-parse -q --verify "${gs_c:-HEAD}^{commit}" 2>/dev/null)
+		case $gs_sha in *[!0-9a-f]* | '') exit 0 ;; esac
+		[ "${#gs_sha}" -eq 40 ] || exit 0
+		gs_runpush 12 "$gs_sha"
+		# Then tell Graphide, before the call goes out, which commit was
+		# pushed: ci_run_tests without a commit takes the branch's newest
+		# one the hooks reported. The child removes the input.
+		gs_h=$2
+		[ "$gs_h" = hook ] && gs_h=
+		trap - EXIT
+		gs_bounded 7 sh "$gs_self" __graphide_child run "$gs_h" "$gs_in" "$PPID" "$gs_sha" sync
+		exit 0
+		;;
+	esac
+	# By hand: the agent waits for the push and reads what happened.
+	gs_c=${2:-HEAD}
+	case $gs_c in -*)
+		echo "run-prep: $gs_c is not a commit" >&2
+		exit 2
+		;;
+	esac
+	cd "$gs_dir/.." 2>/dev/null || {
+		echo "run-prep: no repository at $gs_dir/.." >&2
+		exit 2
+	}
+	gs_sha=$(git rev-parse -q --verify "$gs_c^{commit}" 2>/dev/null)
+	case $gs_sha in *[!0-9a-f]* | '') gs_sha= ;; esac
+	if [ "${#gs_sha}" -ne 40 ]; then
+		echo "run-prep: $gs_c is not a commit in this repository" >&2
+		exit 2
+	fi
+	gs_runpush 20 "$gs_sha"
+	gs_st=$?
+	if [ "$gs_st" -eq 0 ]; then
+		echo "commit $gs_sha"
+		[ -n "$gs_off" ] || gs_detach __graphide_child run "" "" "$PPID" "$gs_sha"
+	elif [ "$gs_st" -eq 3 ]; then
+		echo "run-prep: pushing to origin from here could ask you to approve the SSH key; push it yourself: git push origin $gs_sha:refs/graphide/run/$gs_sha" >&2
+	elif [ "$gs_st" -gt 128 ]; then
+		echo "run-prep: the push to origin did not finish in 20 s" >&2
+	fi
+	exit "$gs_st"
+fi
+[ -n "$gs_off" ] && exit 0
+
+if [ "${1-}" != __graphide_child ]; then
+	# Foreground: keep the hook's input, start the background copy, return.
+	umask 077
+	gs_in=
+	if [ ! -t 0 ]; then
+		gs_mkin
+		if [ -n "$gs_in" ]; then
+			head -c 65536 >>"$gs_in" 2>/dev/null
+		fi
+		cat >/dev/null 2>&1
+	fi
+	gs_detach __graphide_child "${1:-tool}" "${2-}" "$gs_in" "$PPID"
+	exit 0
+fi
+
+# Background copy: arguments are __graphide_child <event> <harness> <input
+# file> <hook's parent pid> [<commit run-prep pushed> [sync]]. sync: the
+# hook waits for it, so it takes no proof push and waits less for the lock.
+gs_ev=$2 gs_h=$3 gs_in=$4 gs_ppid=$5 gs_runsha=${6-} gs_sync=${7-}
+exec </dev/null >/dev/null 2>&1
+umask 077
+gs_lk1='' gs_lk2='' gs_lk3='' gs_body='' gs_tmp=''
+gs_cleanup() {
+	[ -n "$gs_in" ] && rm -f "$gs_in"
+	[ -n "$gs_tmp" ] && rm -rf "$gs_tmp"
+	[ -n "$gs_body" ] && rm -f "$gs_body"
+	[ -n "$gs_lk1" ] && rmdir "$gs_lk1"
+	[ -n "$gs_lk2" ] && rmdir "$gs_lk2"
+	[ -n "$gs_lk3" ] && rmdir "$gs_lk3"
+	# Tests only: says this run is over.
+	[ -n "${GRAPHIDE_SIGNALS_TEST_DONE-}" ] && echo "done" >>"$GRAPHIDE_SIGNALS_TEST_DONE"
+}
+trap gs_cleanup EXIT
+trap '' HUP
+trap 'exit 0' TERM
+
+# Never take a lock another git command could need; pathspecs as written.
+GIT_OPTIONAL_LOCKS=0 LC_ALL=C
+export GIT_OPTIONAL_LOCKS LC_ALL
+unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
+
+case $gs_ev in start | prompt | edit | shell | tool | end | run) ;; *) gs_ev=tool ;; esac
+case $gs_runsha in *[!0-9a-f]*) gs_runsha= ;; esac
+[ "${#gs_runsha}" -eq 40 ] || gs_runsha=
+[ "$gs_ev" = run ] && [ -z "$gs_runsha" ] && exit 0
+gs_now=$(date +%s 2>/dev/null)
+case $gs_now in '' | *[!0-9]*) exit 0 ;; esac
+gs_tab=$(printf '\t')
+
+# The repository: this script sits in <repository>/.graphide/. Paths in the
+# hook's input are relative to where the hook ran.
+gs_cwd=${PWD:-$(pwd)}
+cd "$gs_dir/.." 2>/dev/null || exit 0
+command -v git >/dev/null 2>&1 || exit 0
+gs_noprompt
+gs_gd=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
+[ -n "$gs_gd" ] || exit 0
+case $gs_gd in /* | [A-Za-z]:[/\\]*) ;; *) gs_gd=$PWD/$gs_gd ;; esac
+gs_st=$gs_gd/graphide
+
+# The raw URL first: get-url applies url.*.insteadOf rewrites.
+gs_github "$(git config --get remote.origin.url 2>/dev/null)" ||
+	gs_github "$(git remote get-url origin 2>/dev/null)" || exit 0
+
+if command -v sha256sum >/dev/null 2>&1; then
+	gs_shacmd=sha256sum
+elif command -v shasum >/dev/null 2>&1; then
+	gs_shacmd='shasum -a 256'
+elif command -v openssl >/dev/null 2>&1; then
+	gs_shacmd='openssl dgst -sha256 -r'
+else
+	exit 0
+fi
+# gs_hashstr <string> / gs_hashfile <path>: set gs_h64 to the sha256 hex, or fail.
+gs_hashok() {
+	gs_h64=${gs_h64%% *}
+	case $gs_h64 in *[!0-9a-f]*) return 1 ;; esac
+	[ "${#gs_h64}" -eq 64 ]
+}
+gs_hashstr() {
+	gs_h64=$(printf '%s' "$1" | $gs_shacmd 2>/dev/null)
+	gs_hashok
+}
+gs_hashfile() {
+	gs_h64=$($gs_shacmd <"$1" 2>/dev/null)
+	gs_hashok
+}
+gs_first32() { gs_h32=${1%"${1#????????????????????????????????}"}; }
+
+# gs_read <file>: sets gs_v to its first line ("" when missing).
+gs_read() {
+	gs_v=
+	[ -f "$1" ] && IFS= read -r gs_v <"$1"
+	return 0
+}
+gs_num() { case $gs_v in '' | *[!0-9]*) gs_v=0 ;; esac; }
+
+# gs_lock <dir> <tries>: takes a lock directory, waiting 0.2 s between tries;
+# a lock older than two minutes is a crashed run's and is taken over.
+gs_lock() {
+	n=0
+	while ! mkdir "$1" 2>/dev/null; do
+		[ -d "$1" ] || return 1
+		n=$((n + 1))
+		[ "$n" -ge "$2" ] && return 1
+		if [ -n "$(find "$1" -prune -mmin +2 2>/dev/null)" ]; then
+			rmdir "$1" 2>/dev/null
+			continue
+		fi
+		sleep 0.2 2>/dev/null || sleep 1
+	done
+}
+
+# gs_jesc <string>: sets gs_q to it escaped for a JSON string.
+gs_jesc() {
+	case $1 in
+	*[\\\"]*) gs_q=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\000-\037') ;;
+	*) gs_q=$1 ;;
+	esac
+}
+
+# The dependency and lock files, by name.
+gs_depre='^(package[.]json|package-lock[.]json|npm-shrinkwrap[.]json|pnpm-lock[.]yaml|yarn[.]lock|bun[.]lockb?|go[.]mod|go[.]sum|Cargo[.]toml|Cargo[.]lock|pyproject[.]toml|poetry[.]lock|uv[.]lock|Pipfile|Pipfile[.]lock|requirements[^/]*[.]txt|Gemfile|Gemfile[.]lock|composer[.]json|composer[.]lock|pom[.]xml|build[.]gradle|build[.]gradle[.]kts|gradle[.]lockfile|mix[.]exs|mix[.]lock|flake[.]lock|Package[.]resolved|pubspec[.]lock)$'
+
+# What the hook said: the session, the tool, whether a shell command
+# commits, pushes or merges, and which dependency files an edit touched
+# (into $gs_tmp/e). Plain JSON scanning, no jq. Scratch goes in a directory
+# of our own: mktemp's, else one in the state directory.
+gs_sid='' gs_shape='' gs_push='' gs_merge='' gs_pr='' gs_edits=''
+if [ -n "$gs_in" ] && [ -s "$gs_in" ]; then
+	gs_tmp=$(mktemp -d "${TMPDIR:-/tmp}/graphide-signal.XXXXXX" 2>/dev/null) ||
+		{ gs_tmp=$gs_st/tmp.$$ && mkdir -p "$gs_st" 2>/dev/null && mkdir "$gs_tmp" 2>/dev/null; } || gs_tmp=
+fi
+if [ -n "$gs_tmp" ]; then
+	awk -v ev="$gs_ev" -v h="$gs_h" -v deps="$gs_depre" -v ef="$gs_tmp/e" '
+BEGIN { NL = ";" }
+# jtop <json>: TOP[key] is the value of each top-level key whose value is a
+# string; nested keys (a tool input naming a session) never count.
+function jtop(s,    j, d, c, k, rest) {
+	split("", TOP); d = 0; j = 1
+	for (;;) {
+		rest = substr(s, j)
+		if (!match(rest, /[{}"]|\[|\]/)) return
+		j += RSTART - 1
+		c = substr(s, j, 1)
+		if (c == "{" || c == "[") { d++; j++; continue }
+		if (c == "}" || c == "]") { if (--d <= 0) return; j++; continue }
+		k = jstr(s, j); j = JEND
+		if (d != 1) continue
+		while (substr(s, j, 1) ~ /[ \t\r\n]/) j++
+		if (substr(s, j, 1) != ":") continue
+		j++
+		while (substr(s, j, 1) ~ /[ \t\r\n]/) j++
+		if (substr(s, j, 1) == "\"") { TOP[k] = jstr(s, j); j = JEND }
+	}
+}
+function jstr(s, j,    out, rest, c) {
+	out = ""; j++
+	for (;;) {
+		rest = substr(s, j)
+		if (!match(rest, /["\\]/)) { JEND = length(s) + 1; return out rest }
+		out = out substr(rest, 1, RSTART - 1); j += RSTART - 1
+		if (substr(s, j, 1) == "\"") { JEND = j + 1; return out }
+		c = substr(s, j + 1, 1)
+		if (c == "n" || c == "r") out = out NL
+		else if (c == "t" || c == "b" || c == "f") out = out " "
+		else if (c == "u") { out = out "?"; j += 4 }
+		else out = out c
+		j += 2
+	}
+}
+function jget(s, key,    pat, off, i, j, c, out, v) {
+	pat = "\"" key "\""; off = 0
+	for (;;) {
+		i = index(substr(s, off + 1), pat)
+		if (i == 0) return ""
+		i += off
+		j = i + length(pat)
+		while (substr(s, j, 1) ~ /[ \t\r\n]/) j++
+		if (substr(s, j, 1) == ":") break
+		off = i
+	}
+	j++
+	while (substr(s, j, 1) ~ /[ \t\r\n]/) j++
+	c = substr(s, j, 1)
+	if (c == "\"") return jstr(s, j)
+	if (c != "[") return ""
+	out = ""; j++
+	for (;;) {
+		c = substr(s, j, 1)
+		if (c == "" || c == "]") return out
+		if (c == "\"") { v = jstr(s, j); out = (out == "" ? v : out " " v); j = JEND; continue }
+		j++
+	}
+}
+function line(v) { gsub(/[\r\n]/, " ", v); print v }
+function edited(p,    b) {
+	gsub(/\\/, "/", p) # Windows paths
+	if (p == "" || (p in eseen) || ne >= 32) return
+	b = p; sub(/.*\//, "", b)
+	if (b !~ deps) return
+	eseen[p] = 1; ne++
+	print p > ef
+}
+# patched <patch text>: the files an apply_patch patch adds, updates or moves to.
+function patched(v,    n, L, k, x) {
+	n = split(v, L, "\n")
+	for (k = 1; k <= n; k++) {
+		x = L[k]; sub(/\r$/, "", x)
+		if (sub(/^\*\*\* (Update|Add) File: /, "", x) || sub(/^\*\*\* Move to: /, "", x)) edited(x)
+	}
+}
+{ s = s $0 "\n" }
+END {
+	t = s; sub(/^[ \t\r\n]+/, "", t)
+	isjson = (substr(t, 1, 1) == "{")
+	sid = ""; shape = ""; tool = ""
+	if (isjson) {
+		# The session: a top-level key, in the order of the harness (Cursor:
+		# conversation_id; Copilot: sessionId; the rest: session_id).
+		jtop(s)
+		if (TOP["conversation_id"] != "") shape = "cursor"
+		else if (TOP["sessionId"] != "" && TOP["session_id"] == "") shape = "copilot"
+		hk = (h != "" ? h : shape)
+		if (hk == "cursor") order = "conversation_id session_id"
+		else if (hk == "copilot") order = "sessionId session_id"
+		else order = "session_id sessionId"
+		n = split(order, ok, " ")
+		for (k = 1; k <= n && sid == ""; k++) sid = TOP[ok[k]]
+		tool = TOP["tool_name"]; if (tool == "") tool = TOP["toolName"]
+	}
+	cmd = ""
+	if (ev == "shell" || ev == "tool") {
+		if (!isjson) cmd = s
+		else {
+			lt = tolower(tool)
+			if (ev == "shell" || lt == "" || lt ~ /bash|shell|exec|command|terminal|process|powershell/) {
+				cmd = jget(s, "command")
+				if (cmd == "") { a = jget(s, "toolArgs"); if (a != "") cmd = jget(a, "command") }
+			}
+		}
+	}
+	push = 0; merge = ""; pr = ""
+	if (cmd != "") {
+		c = ";" cmd ";"
+		gsub(/[\r\n]/, ";", c); gsub(/\t/, " ", c)
+		if (c ~ /[^A-Za-z0-9_.-]git( +-[^ ;&|]+( +[^- ;&|][^ ;&|]*)?)* +(commit|push)[^A-Za-z0-9_-]/) push = 1
+		if (match(c, /[^A-Za-z0-9_-]gh +pr +merge[^A-Za-z0-9_-]/)) {
+			r = substr(c, RSTART + RLENGTH - 1)
+			if (match(r, /[;&|]/)) r = substr(r, 1, RSTART - 1)
+			if (r !~ /--disable-auto/) {
+				merge = (r ~ /(^| )--auto( |=|$)/) ? "auto" : "now"
+				n = split(r, w, / +/)
+				for (k = 1; k <= n; k++) {
+					x = w[k]; sub(/^#/, "", x)
+					if (x ~ /^[0-9]+$/) { if (length(x) <= 9) pr = x; break }
+					if (match(x, /\/pull\/[0-9]+/)) { x = substr(x, RSTART + 6, RLENGTH - 6); if (length(x) <= 9) pr = x; break }
+				}
+			}
+		}
+	}
+	# An edit: the path(s) it names. Claude: tool_input.file_path; Cursor:
+	# file_path; Copilot: path in toolArgs (a JSON string); apply_patch
+	# (Codex): the patch headers.
+	if (isjson && (ev == "edit" || (ev == "tool" && tolower(tool) ~ /edit|write|create|replace|patch|save/))) {
+		a = jget(s, "toolArgs"); if (a == "") a = s
+		edited(jget(a, "file_path")); edited(jget(a, "path"))
+		NL = "\n"
+		split("command patch input patchText", pk, " ")
+		for (k = 1; k <= 4; k++) { v = jget(a, pk[k]); if (v ~ /\*\*\* (Update|Add) File: /) patched(v) }
+		NL = ";"
+		if (ne > 0) close(ef)
+	}
+	line(sid); line(shape); line(push); line(merge); line(pr)
+}' "$gs_in" >"$gs_tmp/p" 2>/dev/null
+	{
+		IFS= read -r gs_sid
+		IFS= read -r gs_shape
+		IFS= read -r gs_push
+		IFS= read -r gs_merge
+		IFS= read -r gs_pr
+	} <"$gs_tmp/p"
+	[ -s "$gs_tmp/e" ] && gs_edits=$gs_tmp/e
+fi
+
+# Which agent: the hook config says, else its environment or input shape.
+# Hooks ship for Claude Code, Codex and Cursor; Devin and VS Code's Copilot
+# run Claude Code's (.claude/settings.json).
+gs_known() {
+	case $1 in claude-code | codex | cursor | copilot | devin | other) return 0 ;; esac
+	return 1
+}
+if gs_known "$gs_h"; then
+	gs_harness=$gs_h
+elif gs_known "${GRAPHIDE_HARNESS-}"; then
+	gs_harness=$GRAPHIDE_HARNESS
+elif [ -n "${CURSOR_VERSION-}${CURSOR_PROJECT_DIR-}" ] || [ "$gs_shape" = cursor ]; then
+	gs_harness=cursor
+elif [ -n "${DEVIN_PROJECT_DIR-}" ]; then
+	gs_harness=devin
+elif [ "$gs_shape" = copilot ]; then
+	gs_harness=copilot
+elif [ -n "${CLAUDE_PROJECT_DIR-}${CLAUDECODE-}" ]; then
+	gs_harness=claude-code
+elif [ -n "${CODEX_SANDBOX-}${CODEX_THREAD_ID-}${CODEX_MANAGED_BY_NPM-}" ]; then
+	gs_harness=codex
+else
+	gs_harness=other
+fi
+
+# The session: the hook's id, else the nearest non-shell ancestor process
+# (the agent itself) and its start time.
+if [ -z "$gs_sid" ]; then
+	p=$gs_ppid i=0
+	while [ "$i" -lt 8 ]; do
+		case $p in '' | *[!0-9]* | 0 | 1) break ;; esac
+		c=$(ps -o comm= -p "$p" 2>/dev/null) || break
+		c=${c##*/}
+		c=${c#-}
+		case $c in sh | bash | dash | zsh | ksh | mksh | ash | fish | busybox | nohup | setsid | env | sudo) ;; *) break ;; esac
+		q=$(ps -o ppid= -p "$p" 2>/dev/null) || break
+		q=${q#"${q%%[! ]*}"}
+		p=$q i=$((i + 1))
+	done
+	b=$(ps -o lstart= -p "$p" 2>/dev/null)
+	[ -z "$b" ] && [ -r /proc/sys/kernel/random/boot_id ] && IFS= read -r b </proc/sys/kernel/random/boot_id
+	[ -z "$b" ] && b=$(sysctl -n kern.boottime 2>/dev/null)
+	gs_sid="pid:$p:$b"
+fi
+gs_hashstr "$gs_harness:$gs_sid" || exit 0
+gs_first32 "$gs_h64"
+gs_sd=$gs_st/s/$gs_h32
+# This working tree's state (dependency hashes, the last hooked run), by its
+# real path, however the hook named it.
+gs_root=$(pwd -P) || exit 0
+gs_hashstr "$gs_root" || exit 0
+gs_first32 "$gs_h64"
+gs_wt=$gs_h32
+
+# A hand run (no harness named or found) does nothing while a hooked agent works in
+# this working tree, which would count it twice; it still closes a session
+# it opened itself.
+if [ "$gs_harness" = other ] && ! { [ "$gs_ev" = end ] && [ -f "$gs_sd/open" ]; }; then
+	gs_read "$gs_st/hooked.$gs_wt"
+	gs_num
+	[ $((gs_now - gs_v)) -lt 600 ] && exit 0
+fi
+mkdir -p "$gs_sd" 2>/dev/null || exit 0
+
+gs_branch=$(git symbolic-ref --short -q HEAD 2>/dev/null)
+gs_head=$(git rev-parse -q --verify HEAD 2>/dev/null)
+
+# gs_deps: sets gs_files to the {path, sha256} of each dependency or lock
+# file in this working tree whose content changed since the last look: the
+# files the hook says it edited, at once, and a git status sweep at most
+# once per 30 s (always at session end).
+gs_deps() {
+	gs_files=
+	gs_dd=$gs_st/deps/$gs_wt
+	mkdir -p "$gs_dd" 2>/dev/null || return 0
+	if [ -n "$gs_edits" ]; then
+		gs_lock "$gs_dd.lock" 10 || return 0
+	else
+		gs_lock "$gs_dd.lock" 1 || return 0
+	fi
+	gs_lk2=$gs_dd.lock
+	gs_read "$gs_dd/head"
+	gs_lh=$gs_v
+	: >"$gs_dd/cand"
+	if [ -n "$gs_edits" ]; then
+		while IFS= read -r p; do
+			# To a path from this working tree's root, through any symlinks.
+			case $p in /* | [A-Za-z]:/*) ;; *) p=$gs_cwd/$p ;; esac
+			d=$(cd "${p%/*}/" 2>/dev/null && pwd -P) || continue
+			case $d/ in "$gs_root"/*) ;; *) continue ;; esac
+			p=${d#"$gs_root"}/${p##*/}
+			p=${p#/}
+			[ -f "$p" ] || continue
+			# Not seen before: skip it when it is as committed (a same-content rewrite).
+			if ! P=$p awk -F '\t' '$2 == ENVIRON["P"] { f = 1 } END { exit !f }' "$gs_dd/hashes" 2>/dev/null; then
+				b=$(git hash-object -- "$p" 2>/dev/null)
+				[ -n "$b" ] && [ "$b" = "$(git rev-parse -q --verify "${gs_lh:-HEAD}:$p" 2>/dev/null)" ] && continue
+			fi
+			echo "$p" >>"$gs_dd/cand"
+		done <"$gs_edits"
+	fi
+	gs_read "$gs_dd/at"
+	gs_num
+	if [ "$gs_ev" = end ] || [ $((gs_now - gs_v)) -ge 30 ]; then
+		echo "$gs_now" >"$gs_dd/at"
+		# The dependency files by name, as plain pathspecs: <name> and
+		# */<name>, where * crosses / (the GIT_*_PATHSPECS are unset). Git
+		# matches these far faster than :(glob)**/<name>; the awk below keeps
+		# only the names in gs_depre.
+		set --
+		for n in package.json package-lock.json npm-shrinkwrap.json pnpm-lock.yaml yarn.lock bun.lock bun.lockb \
+			go.mod go.sum Cargo.toml Cargo.lock pyproject.toml poetry.lock uv.lock Pipfile Pipfile.lock \
+			'requirements*.txt' Gemfile Gemfile.lock composer.json composer.lock pom.xml build.gradle \
+			build.gradle.kts gradle.lockfile mix.exs mix.lock flake.lock Package.resolved pubspec.lock; do
+			set -- "$@" "$n" "*/$n"
+		done
+		{
+			# Tracked files every 30 s, with no pathspec: git compares the
+			# index's stat data alone, cheaper than matching every path to
+			# the names. Untracked ones only at the session's end, which
+			# walks the tree, so with the names (an edit names a new one at
+			# once, a commit brings it into the diff).
+			if [ "$gs_ev" = end ]; then
+				git -c core.quotePath=false status --porcelain -unormal --ignore-submodules=all -- "$@" 2>/dev/null | head -n 5000
+			else
+				git -c core.quotePath=false status --porcelain -uno --ignore-submodules=all 2>/dev/null
+			fi
+			if [ -n "$gs_lh" ] && [ -n "$gs_head" ] && [ "$gs_lh" != "$gs_head" ]; then
+				git -c core.quotePath=false diff --name-only --no-renames "$gs_lh" "$gs_head" -- "$@" 2>/dev/null | head -n 5000 | sed 's/^/MM /'
+			fi
+		} | awk -v deps="$gs_depre" '{
+			p = substr($0, 4)
+			if ((i = index(p, " -> ")) > 0) p = substr(p, i + 4)
+			if (p ~ /^".*"$/) p = substr(p, 2, length(p) - 2)
+			b = p; sub(/.*\//, "", b)
+			if (b ~ deps && !(p in seen)) {
+				seen[p] = 1; print p
+				if (++n >= 32) exit
+			}
+		}' >>"$gs_dd/cand" 2>/dev/null
+		[ -n "$gs_head" ] && echo "$gs_head" >"$gs_dd/head"
+	fi
+	if [ -s "$gs_dd/cand" ]; then
+		: >"$gs_dd/new"
+		while IFS= read -r p; do
+			[ -f "$p" ] || continue
+			gs_hashfile "$p" || continue
+			printf '%s\t%s\n' "$gs_h64" "$p" >>"$gs_dd/new"
+		done <"$gs_dd/cand"
+		: >>"$gs_dd/hashes"
+		awk -F '\t' -v oldf="$gs_dd/hashes" 'BEGIN { while ((getline l < oldf) > 0) { split(l, a, "\t"); old[a[2]] = a[1] } }
+			old[$2] != $1 && !($2 in seen) { seen[$2] = 1; print }' "$gs_dd/new" >"$gs_dd/changed" 2>/dev/null
+		awk -F '\t' -v newf="$gs_dd/new" 'BEGIN { while ((getline l < newf) > 0) { split(l, a, "\t"); if (!(a[2] in cur)) print l; cur[a[2]] = 1 } }
+			!($2 in cur) { print }' "$gs_dd/hashes" >"$gs_dd/hashes.next" 2>/dev/null &&
+			mv -f "$gs_dd/hashes.next" "$gs_dd/hashes"
+		while IFS="$gs_tab" read -r h p; do
+			gs_jesc "$p"
+			gs_files="${gs_files:+$gs_files,}{\"path\":\"$gs_q\",\"sha256\":\"$h\"}"
+		done <"$gs_dd/changed"
+	fi
+	rmdir "$gs_lk2" 2>/dev/null
+	gs_lk2=
+}
+
+gs_events=
+gs_add() { gs_events=${gs_events:+$gs_events,}$1; }
+# gs_recent <name> <seconds>: true when <name> was sent that recently; marks it sent otherwise.
+gs_recent() {
+	gs_read "$gs_sd/k.$1"
+	gs_num
+	[ $((gs_now - gs_v)) -lt "$2" ] && return 0
+	echo "$gs_now" >"$gs_sd/k.$1"
+	return 1
+}
+
+# A hook waiting on this (sync) waits at most 2 s for the lock.
+gs_ltries=50
+[ -n "$gs_sync" ] && gs_ltries=10
+gs_lock "$gs_sd/lock" "$gs_ltries" || exit 0
+gs_lk1=$gs_sd/lock
+touch "$gs_sd" 2>/dev/null
+gs_read "$gs_sd/secret"
+gs_s=$gs_v
+if [ -z "$gs_s" ]; then
+	[ "$gs_ev" = end ] && exit 0
+	gs_s=$(head -c 32 /dev/urandom 2>/dev/null | base64 2>/dev/null | tr '+/' '-_' | tr -d '=\r\n ')
+	[ "${#gs_s}" -ge 43 ] || gs_s=$(openssl rand -base64 32 2>/dev/null | tr '+/' '-_' | tr -d '=\r\n ')
+	[ "${#gs_s}" -ge 43 ] || gs_s=$(od -An -tx1 -N32 /dev/urandom 2>/dev/null | tr -d ' \r\n')
+	[ "${#gs_s}" -ge 43 ] || exit 0
+	echo "$gs_s" >"$gs_sd/secret"
+	# A new session: clear sessions idle for over a day.
+	find "$gs_st/s" -mindepth 1 -maxdepth 1 -type d -mtime +0 -exec rm -rf {} + 2>/dev/null
+fi
+# The id on the wire comes from the secret: the first 32 hex of
+# sha256("graphide-session:" + secret). The server refuses an id that does
+# not, so no one who sees the proof ref can claim the session with a key of
+# their own, and a session whose state was cleared comes back as a new one.
+gs_hashstr "graphide-session:$gs_s" || exit 0
+gs_first32 "$gs_h64"
+gs_wire=$gs_h32
+
+if [ "$gs_ev" != end ] && [ ! -f "$gs_sd/open" ]; then
+	gs_add '{"kind":"working"}'
+	: >"$gs_sd/open"
+	# The commit this working tree's dependency files are measured from, when
+	# none is yet: an agent that edits and commits at once runs the edit hook
+	# after the commit, and against HEAD the edit would look committed.
+	if [ -n "$gs_head" ] && [ ! -s "$gs_st/deps/$gs_wt/head" ] && mkdir -p "$gs_st/deps/$gs_wt" 2>/dev/null; then
+		echo "$gs_head" >"$gs_st/deps/$gs_wt/head"
+	fi
+fi
+case $gs_ev in edit | shell | tool | end)
+	gs_deps
+	[ -n "$gs_files" ] && gs_add "{\"kind\":\"deps_changed\",\"files\":[$gs_files]}"
+	;;
+esac
+# run-prep pushed a commit for CI to test: always said, with that commit as
+# the head, which ci_run_tests without a commit reads.
+if [ "$gs_ev" = run ]; then
+	gs_add '{"kind":"push_soon"}'
+	gs_head=$gs_runsha
+elif [ "$gs_push" = 1 ] && ! gs_recent push 15; then
+	gs_add '{"kind":"push_soon"}'
+fi
+case $gs_pr in '' | *[!0-9]*) gs_pr= ;; esac
+if [ "$gs_merge" = auto ] && ! gs_recent merge_soon 15; then
+	gs_add "{\"kind\":\"merge_soon\"${gs_pr:+,\"pr\":$gs_pr}}"
+elif [ "$gs_merge" = now ] && ! gs_recent merge_now 15; then
+	gs_add "{\"kind\":\"merge_now\"${gs_pr:+,\"pr\":$gs_pr}}"
+fi
+if [ "$gs_ev" = end ] && [ -f "$gs_sd/open" ]; then
+	gs_add '{"kind":"session_end"}'
+	rm -f "$gs_sd/open"
+fi
+gs_read "$gs_sd/last"
+gs_num
+if [ -z "$gs_events" ] && [ "$gs_ev" != end ] && [ $((gs_now - gs_v)) -ge 300 ]; then
+	gs_add '{"kind":"heartbeat"}'
+fi
+if [ -n "$gs_events" ]; then
+	echo "$gs_now" >"$gs_sd/last"
+	[ "$gs_harness" != other ] && echo "$gs_now" >"$gs_st/hooked.$gs_wt"
+fi
+
+# The proof push: once per session, retried at most twice a minute apart.
+# A hook waiting on this (sync) leaves it to the next run.
+gs_proof=
+if [ "$gs_ev" != end ] && [ -z "$gs_sync" ] && [ ! -f "$gs_sd/proof" ]; then
+	gs_read "$gs_sd/ptries"
+	gs_num
+	gs_tries=$gs_v
+	gs_read "$gs_sd/ptry_at"
+	gs_num
+	if [ "$gs_tries" -lt 3 ] && [ $((gs_now - gs_v)) -ge 60 ]; then
+		echo $((gs_tries + 1)) >"$gs_sd/ptries"
+		echo "$gs_now" >"$gs_sd/ptry_at"
+		gs_proof=1
+	fi
+fi
+rmdir "$gs_lk1" 2>/dev/null
+gs_lk1=
+
+# The proof push holds plock, so the delete at the session's end comes after
+# it; ref marks that a push was tried (it may have landed). No push could
+# go without a prompt (gs_dest): none is tried, and the session's signals
+# stay unverified.
+if [ -n "$gs_proof" ] && gs_hashstr "$gs_s" && gs_lock "$gs_sd/plock" 1; then
+	gs_lk3=$gs_sd/plock
+	gs_dest &&
+		gs_tree=$(git mktree </dev/null 2>/dev/null) &&
+		gs_c=$(GIT_AUTHOR_NAME=Graphide GIT_AUTHOR_EMAIL=agent-signals@graphide.invalid \
+			GIT_COMMITTER_NAME=Graphide GIT_COMMITTER_EMAIL=agent-signals@graphide.invalid \
+			git commit-tree --no-gpg-sign -m 'graphide-session v1' -m "key-sha256: $gs_h64" "$gs_tree" 2>/dev/null) &&
+		[ -n "$gs_c" ] &&
+		: >"$gs_sd/ref" &&
+		gs_push 30 "$gs_c:refs/graphide/session/$gs_wire" &&
+		: >"$gs_sd/proof"
+	rmdir "$gs_lk3" 2>/dev/null
+	gs_lk3=
+fi
+
+if [ -n "$gs_events" ]; then
+	gs_jesc "$gs_branch"
+	gs_body=$gs_sd/body.$$
+	printf '{"v":1,"repo":"%s","session":"%s","secret":"%s","harness":"%s","branch":"%s","head":"%s","events":[%s]}\n' \
+		"$gs_repo" "$gs_wire" "$gs_s" "$gs_harness" "$gs_q" "$gs_head" "$gs_events" >"$gs_body"
+	gs_url=${GRAPHIDE_SIGNALS_URL:-https://api.graphide.com/v2/ci/agent-signals}
+	if command -v curl >/dev/null 2>&1; then
+		curl -q -s -o /dev/null --max-time 5 --connect-timeout 3 -X POST -A graphide-agent-signal/1 \
+			-H 'Content-Type: application/json' --data-binary "@$gs_body" "$gs_url"
+	elif command -v wget >/dev/null 2>&1; then
+		gs_bounded 8 wget -q -O /dev/null -T 5 -t 1 -U graphide-agent-signal/1 \
+			--header='Content-Type: application/json' --post-file="$gs_body" "$gs_url"
+	fi
+fi
+
+# The session's end: delete its proof ref (never a run ref), after any
+# proof push still going, the same way and ignoring failure (the server may
+# have read and deleted it already). A session that resumes proves itself
+# again.
+if [ "$gs_ev" = end ] && [ -f "$gs_sd/ref" ] && gs_lock "$gs_sd/plock" 200; then
+	gs_lk3=$gs_sd/plock
+	[ -f "$gs_sd/ref" ] && gs_dest && gs_push 15 ":refs/graphide/session/$gs_wire"
+	rm -f "$gs_sd/ref" "$gs_sd/proof" "$gs_sd/ptries" "$gs_sd/ptry_at"
+fi
+exit 0
