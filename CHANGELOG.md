@@ -6,6 +6,28 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-11-16
+
+0.8.2 was tagged and never published (its Apple builds could not be made that day); what
+is listed under it below ships in this release, with three fixes to the iPhone app on a
+spacesheep account.
+
+### Fixed
+
+- **Trying to connect a spacesheep account with no signal no longer locks connecting for an
+  hour.** The app counted every try against its limit of three an hour, also one that never
+  left the phone: three taps with no connection, and the fourth said "Too many tries".
+  A try for which no connection could be made is not counted now, for connecting and for
+  asking spacesheep to approve the phone. A try that may have reached spacesheep counts
+  as before.
+- **What spacesheep says when it refuses the phone's request arrives as it wrote it.** Its
+  sentence lost every character outside plain ASCII on the way to the page ("Turn on Talk
+  to your sessions in Settings  Account"): quotes, arrows and letters of other alphabets
+  are kept now, in one plain line.
+- **An account in Settings › App › Receivers is named by its email and reads as connected
+  when its key is in place.** It was named by its host and read "not connected" until
+  something had been asked of it since the app opened.
+
 ## [0.8.2] - 2026-11-16
 
 ### Added
@@ -1175,7 +1197,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.5...v0.8.0
