@@ -1718,7 +1718,7 @@ async fn this_devices_key_is_asked_about_by_the_hub_and_no_other_key_ever() {
         (s.target() == "/api/gui/device").then(|| {
             Reply::json(
                 403,
-                "{\"error\":\"Turn on \u{201c}Talk\u{201d} first.\\u202e\",\"code\":\"talk_off\"}",
+                "{\"error\":\"Turn on \u{201c}Talk to your sessions\u{201d} in Settings \u{2192} Account on spacesheep.dev.\\u202e\",\"code\":\"talk_off\"}",
             )
         })
     });
@@ -1728,7 +1728,12 @@ async fn this_devices_key_is_asked_about_by_the_hub_and_no_other_key_ever() {
         (e.code, e.upstream.as_deref()),
         ("refused", Some("talk_off"))
     );
-    assert_eq!(e.message, "Turn on Talk first.");
+    // As spacesheep wrote it, quotation marks and arrow and all; the override it ended
+    // with is gone.
+    assert_eq!(
+        e.message,
+        "Turn on “Talk to your sessions” in Settings → Account on spacesheep.dev."
+    );
     // An answer about another key, or with a link to elsewhere, is not believed.
     fake.hook(|s| {
         (s.target() == "/api/gui/device").then(|| {

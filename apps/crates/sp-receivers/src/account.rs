@@ -921,14 +921,12 @@ pub fn holds(hay: &[u8], needle: &[u8]) -> bool {
         && hay.windows(needle.len()).any(|w| w == needle)
 }
 
-/// One line of printable ASCII out of something spacesheep said, for the person to read.
+/// A sentence spacesheep said, for the person to read, as it was written: its quotation
+/// marks, its arrows, its accents and whatever language it is in. One line of at most
+/// `max` characters, with no control character and nothing invisible or reordering in
+/// it (`needs::shown`, the cleaner of everything from outside that is shown).
 pub fn plain_words(s: &str, max: usize) -> String {
-    s.chars()
-        .filter(|c| c.is_ascii() && !c.is_ascii_control())
-        .take(max)
-        .collect::<String>()
-        .trim()
-        .to_string()
+    crate::needs::shown(s.trim(), max).trim().to_string()
 }
 
 /// Why a command said no: `code` is stable, `message` is for the person. Never a key, a
@@ -1816,6 +1814,25 @@ mod tests {
             plain_words("  Too many tries.\u{202e}\n ", 40),
             "Too many tries."
         );
+        // spacesheep's own sentence arrives whole: its quotation marks and its arrow.
+        let talk = "Turn on “Talk to your sessions” in Settings → Account on spacesheep.dev.";
+        assert_eq!(plain_words(talk, 300), talk);
+        assert_eq!(
+            plain_words("Passez à l’offre Pro — 5 € par mois. 日本語も。", 300),
+            "Passez à l’offre Pro — 5 € par mois. 日本語も。"
+        );
+        // What is taken out is what cannot be seen or changes the order of what can:
+        // an override that would show "exe.png" for "gnp.exe", a second line, a
+        // zero-width space, a bell. And never more than the bound.
+        assert_eq!(
+            plain_words(
+                "Open \u{202E}gnp.exe\u{2028}now\u{200B}\u{0007}\tplease\n",
+                300
+            ),
+            "Open gnp.exe now please"
+        );
+        assert_eq!(plain_words(&"é".repeat(400), 300).chars().count(), 300);
+        assert_eq!(plain_words(" \u{200B}\n ", 300), "");
         assert_eq!(host_of("https://spacesheep.dev"), "spacesheep.dev");
         assert_eq!(host_of("http://localhost:8841"), "localhost:8841");
         let o = "https://spacesheep.dev";
