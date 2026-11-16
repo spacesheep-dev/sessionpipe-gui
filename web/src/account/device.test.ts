@@ -22,6 +22,8 @@ function bed(o: { visible?: () => boolean; known?: () => KnownMachine[] } = {}) 
     machines: 0,
     refuse: null as unknown,
     doorError: null as DoorAnswer | null,
+    /** The next look's answer is held on its way back until this settles (one look only). */
+    hold: null as Promise<void> | null,
     cooled: (_until: number): void => {},
   };
   const w = startPhoneWatch({
@@ -42,19 +44,25 @@ function bed(o: { visible?: () => boolean; known?: () => KnownMachine[] } = {}) 
     },
     async device() {
       s.looks++;
-      if (s.doorError) return s.doorError;
-      if (!s.asked)
-        return { status: 409, hub: "no_device_key", json: { hub: true, reason: "no_device_key", error: "x" } };
-      return {
-        status: 200,
-        hub: null,
-        json: {
-          trusted_on: s.trusted ? [M.id] : [],
-          machines: [{ ...M, trusts: s.trusted }],
-          pending: s.pending,
-          ...(s.cooling !== undefined ? { cooling_until: s.cooling } : {}),
-        },
-      };
+      // An answer says how things stood when the look was sent, however late it lands.
+      const answer: DoorAnswer = s.doorError
+        ? s.doorError
+        : !s.asked
+          ? { status: 409, hub: "no_device_key", json: { hub: true, reason: "no_device_key", error: "x" } }
+          : {
+              status: 200,
+              hub: null,
+              json: {
+                trusted_on: s.trusted ? [M.id] : [],
+                machines: [{ ...M, trusts: s.trusted }],
+                pending: s.pending,
+                ...(s.cooling !== undefined ? { cooling_until: s.cooling } : {}),
+              },
+            };
+      const hold = s.hold;
+      s.hold = null;
+      if (hold) await hold;
+      return answer;
     },
     async machinesNow() {
       s.machines++;
@@ -105,6 +113,54 @@ describe("this phone's key, watched", () => {
     expect(w.get()).toMatchObject({ asking: false, error: null, view: { phase: { kind: "waiting", code: "71" } } });
     expect(JSON.parse(b.kept.get(memoKey("acct"))!)).toMatchObject({ keyId: "key-1", code: "71", askedAt: T });
     expect(w.get().memo.devicesUrl).toBe("https://spacesheep.test/devices");
+  });
+
+  it("a look sent before the request does not speak for the time after it: its answer is dropped and a new look is made", async () => {
+    const b = bed();
+    w = b.w;
+    // The Approve page opens and looks; the answer is slow on its way back.
+    let land = () => {};
+    b.s.hold = new Promise<void>((r) => {
+      land = r;
+    });
+    w.watch(true);
+    await settle();
+    expect(b.s.looks).toBe(1);
+    // Meanwhile the person asks, and spacesheep takes the request.
+    const asking = w.ask();
+    await settle();
+    expect(b.s.asks).toBe(1);
+    expect(w.get().asking).toBe(true);
+    // The old look lands now, saying what was so before the request: no key to ask about.
+    land();
+    await asking;
+    // It was not believed (it would read "not asked yet", and stop the watch for good): the
+    // look after the request is a new one, and says the request waits.
+    expect(b.s.looks).toBe(2);
+    expect(w.get()).toMatchObject({ asking: false, error: null, view: { phase: { kind: "waiting", code: "71" } } });
+    // The watch goes on as for anything waited for.
+    await vi.advanceTimersByTimeAsync(LOOK_FAST_MS);
+    expect(b.s.looks).toBe(3);
+  });
+
+  it("an old look that lands with a refusal after the request is not shown either", async () => {
+    const b = bed();
+    w = b.w;
+    let land = () => {};
+    b.s.hold = new Promise<void>((r) => {
+      land = r;
+    });
+    b.s.doorError = { status: 502, hub: "unreachable", json: { hub: true, error: "spacesheep could not be reached." } };
+    const off = w.subscribe(() => {});
+    await settle();
+    b.s.doorError = null;
+    const asking = w.ask();
+    await settle();
+    land();
+    await asking;
+    expect(b.s.looks).toBe(2);
+    expect(w.get()).toMatchObject({ error: null, view: { phase: { kind: "waiting", code: "71" } } });
+    off();
   });
 
   it("while the Approve page is open it looks every five seconds, until nothing is waited for", async () => {

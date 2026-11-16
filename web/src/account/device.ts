@@ -89,6 +89,10 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
   let turn: ReturnType<typeof setTimeout> | null = null;
   let watching = false;
   let looking: Promise<void> | null = null;
+  /** How many requests spacesheep has taken for this phone's key. A look says how the key
+   *  stood when it was sent: one sent before the latest request speaks of a time before it
+   *  (no key to ask about, nothing pending), and its answer is not applied. */
+  let asked = 0;
   let stopped = false;
 
   function read(): DeviceMemo {
@@ -155,8 +159,11 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
 
   const look = (): Promise<void> => {
     looking ??= (async () => {
+      const sent = asked;
       try {
         const a = await o.device();
+        // Asked for since this look left: what it says is older than the request.
+        if (sent !== asked) return;
         lookedAt = now();
         if (a.hub === "no_device_key") {
           door = null;
@@ -188,6 +195,7 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
         show(memo, { error: null });
         if (door.trusted && !was) void o.machinesNow().catch(() => {});
       } catch (e) {
+        if (sent !== asked) return;
         mend = false;
         unreached++;
         set({ error: hubError(e) });
@@ -223,8 +231,12 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
         askedAt: now(),
         ...(a.devicesUrl ? { devicesUrl: a.devicesUrl } : {}),
       };
+      asked++;
       keep(memo);
       set({ memo });
+      // A look already on its way left before spacesheep had the request: it is waited out
+      // (its answer is dropped), and the look after the request is a new one.
+      if (looking) await looking;
       await look();
       set({ asking: false });
     } catch (e) {
