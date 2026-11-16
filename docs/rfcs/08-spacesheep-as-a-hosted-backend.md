@@ -188,6 +188,18 @@ account's add three, flat:
 | a row of `rx_list` | `kind: "spacesheep"`, `email`, `state` (now), `rpId` once known (its origin's own host, or absent) |
 | `window.sessionpipeShell.features` | `"account"` when this build has the mode (the iPhone), and with it `"account-needs"` (`acct_needs` below) |
 
+Two of the fields a receiver has mean something of their own for an account, in the
+contract and in a row of `rx_list` alike:
+
+- `name` is the account's email: an account is named by whose it is, and where it is,
+  is its `origin`. (A receiver's `name` is its machine's name, or its address until it
+  said one.) The saved list keeps the host as an account's name; that is not shown.
+- `connected`, in a row of `rx_list`, says that the account's key is here and spacesheep
+  has not refused it: it is true exactly when `state` is `"ok"`. Of a receiver it says
+  that the hub's own stream to it is up; an account has no stream, and whether a door
+  of it happened to be asked since the app started says nothing a person can use.
+  Whether spacesheep can be reached right now is what the page's own reader says.
+
 `rxBase` is made the same way (`rx://localhost/<id>`). `state` is `"ok"`,
 `"unauthorized"` (spacesheep answered 401 to the key and nothing has succeeded since) or
 `"no_key"` (the entry is here and its key is not: a backup restored on another phone).
@@ -300,9 +312,21 @@ start is already under way, another question is open, or an approval is held),
 `already_connected` (an account at that origin is `ok`: disconnect first; one that is
 `unauthorized` or `no_key` may connect again, and the same person keeps their id,
 documents and device key id), `too_many_starts` (three an hour from this app, counted
-across restarts, with `retryAfterS`), `cancelled` (the person said no to another
+across restarts, with `retryAfterS`; see "What is counted" below), `cancelled` (the person said no to another
 origin, or the page cancelled while the start was on its way), `not_asked` (that question could not be shown), `unreachable`, `rate_limited`
 (with `retryAfterS`), `refused` (not a 201), `bad_answer`.
+
+**What is counted.** Three starts an hour and five requests to trust this phone's key
+(below) are the hub's own limits, there so that this app does not spend what spacesheep
+allows an address or an account. A try is counted before its request is made, and
+taken back out when it provably never left the phone: no connection could be made (no
+signal, no name, no handshake) for the one try the hub makes of a request, the same
+certainty `not_sent` rests on. So a phone with no signal can be tried again as often
+as its person likes: each try answers `unreachable`, and none of them is one of the
+few. A try that may have reached spacesheep stays counted: an answer that stopped, a
+time limit, any status. So does a start the person was put a question for (any origin
+but spacesheep.dev), whatever became of it: the count is also what keeps a page from
+putting that question again and again.
 
 **Disconnecting** forgets the key, the documents and the entry on this phone. The person
 is always asked first (`cancelled` on no; `not_asked` or `busy` when the question could
@@ -328,7 +352,9 @@ across restarts (`too_many_asks`, with `retryAfterS`). Errors: `unknown_account`
 `upstream`), `bad_key`, `too_many_asks`,
 `unauthorized`, `rate_limited`, `refused` (with spacesheep's words in `message` and its
 code in `upstream`, e.g. `pro_required`, `talk_off`), `bad_answer`, and the hub's own
-codes below.
+codes below. spacesheep's words arrive as it wrote them, quotation marks, arrows and
+accents included, made one plain line of at most 300 characters as every text from
+outside is (no control character, nothing invisible or reordering).
 
 **Needs-you.** The hub reads a receiver's needs-you from its stream. An account has no
 stream, so its page, which works the board out from the relay, hands the list over:

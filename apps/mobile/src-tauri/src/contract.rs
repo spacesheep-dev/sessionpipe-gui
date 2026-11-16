@@ -326,7 +326,7 @@ mod tests {
     fn account() -> ShellReceiver {
         ShellReceiver {
             id: "klmnopqrst".into(),
-            name: "spacesheep.dev".into(),
+            name: "misha@example.com".into(),
             origin: "https://spacesheep.dev".into(),
             local: false,
             kind: Some("spacesheep"),
@@ -360,7 +360,7 @@ mod tests {
         assert_eq!(
             v["receiver"],
             serde_json::json!({
-                "id": "klmnopqrst", "name": "spacesheep.dev", "origin": "https://spacesheep.dev", "local": false,
+                "id": "klmnopqrst", "name": "misha@example.com", "origin": "https://spacesheep.dev", "local": false,
                 "kind": "spacesheep", "email": "misha@example.com", "state": "ok"
             })
         );

@@ -74,6 +74,8 @@ fn log_path(path: &str) -> &str {
 #[serde(rename_all = "camelCase")]
 pub struct ReceiverRef {
     pub id: String,
+    /// What the entry is called: a receiver's machine name (its address until it said
+    /// one); an account's email.
     pub name: String,
     pub origin: String,
     /// This computer's own receiver, on loopback. Never true of an account, whatever
@@ -392,7 +394,14 @@ impl Hub {
             .unwrap_or_default();
         ReceiverRef {
             id: r.id.clone(),
-            name: info.hostname.unwrap_or_else(|| r.name.clone()),
+            // A receiver is named by where it is: the machine's own name once it said
+            // it, its address until then. An account is named by whose it is, its
+            // email: where it is, is its `origin` (the list keeps the host as an
+            // account's `name`, and that is not what is shown).
+            name: match &r.account {
+                Some(a) if r.is_account() => a.email.clone(),
+                _ => info.hostname.unwrap_or_else(|| r.name.clone()),
+            },
             origin: r.origin.clone(),
             // Only a receiver is ever this computer's own.
             local: r.local && r.kind == Kind::Receiver,

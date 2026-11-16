@@ -604,6 +604,20 @@ async fn a_connect_the_person_approves_puts_the_key_in_the_hub_alone() {
             &json!(false)
         )
     );
+    // It is named by whose it is, wherever a name is read (the list, the window's
+    // contract); where it is, is its origin. The saved list keeps the host as before.
+    assert_eq!(row["name"], json!(fake.email()));
+    assert_eq!(row["origin"], json!(fake.origin()));
+    assert_eq!(h.active().unwrap().name, fake.email());
+    assert!(h.receivers().iter().all(|r| r.name == fake.email()));
+    let saved: Value =
+        serde_json::from_slice(&std::fs::read(t.path().join("receivers.json")).unwrap()).unwrap();
+    assert_eq!(saved["receivers"][0]["name"], json!("127.0.0.1"));
+    assert_eq!(
+        hub_in(t.path()).receiver(&a.id).unwrap().name,
+        fake.email(),
+        "and after a restart"
+    );
     assert_eq!(
         (a.email.as_str(), a.origin.as_str(), a.state, a.active),
         (

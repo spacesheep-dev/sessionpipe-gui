@@ -169,6 +169,25 @@ pub struct ListedReceiver {
     pub connected: bool,
 }
 
+impl ListedReceiver {
+    /// The row for `receiver`. `stream_up`: the Hub's own stream to it is up now, which
+    /// is what `connected` says of a receiver. An account has no stream: of an account
+    /// `connected` says that its key is here and spacesheep has not refused it (its
+    /// `state` is `ok`), whether or not anything was asked of spacesheep since the app
+    /// started. (Asked that way, a working account read "not connected" in Settings
+    /// until its window had been opened.)
+    pub fn of(receiver: ReceiverRef, stream_up: bool) -> ListedReceiver {
+        let connected = match &receiver.account {
+            Some(a) => a.state == sp_receivers::AccountState::Ok,
+            None => stream_up,
+        };
+        ListedReceiver {
+            receiver,
+            connected,
+        }
+    }
+}
+
 /// Every command here answers the bundled main window only.
 pub(crate) fn main_only<R: Runtime>(w: &Webview<R>) -> Result<(), String> {
     if w.label() == "main" {
@@ -187,9 +206,9 @@ pub fn rx_list<R: Runtime>(
     Ok(hub
         .receivers()
         .into_iter()
-        .map(|r| ListedReceiver {
-            connected: hub.is_connected(&r.id),
-            receiver: r,
+        .map(|r| {
+            let stream_up = hub.is_connected(&r.id);
+            ListedReceiver::of(r, stream_up)
         })
         .collect())
 }
@@ -430,7 +449,7 @@ mod tests {
     fn an_account_becomes_the_window_receiver_with_its_kind() {
         let r = ReceiverRef {
             id: "klmnopqrst".into(),
-            name: "spacesheep.dev".into(),
+            name: "misha@example.com".into(),
             origin: "https://spacesheep.dev".into(),
             rp_id: Some("spacesheep.dev".into()),
             account: Some(sp_receivers::AccountRef {
@@ -445,19 +464,43 @@ mod tests {
         assert_eq!(s.email.as_deref(), Some("misha@example.com"));
         assert_eq!(s.state, Some("unauthorized"));
         // And a row of `rx_list`: the receiver's fields, the account's three, `connected`.
-        let row = serde_json::to_value(ListedReceiver {
-            receiver: r,
-            connected: true,
-        })
-        .unwrap();
-        assert_eq!(
-            row,
-            serde_json::json!({
-                "id": "klmnopqrst", "name": "spacesheep.dev", "origin": "https://spacesheep.dev",
-                "local": false, "rpId": "spacesheep.dev", "kind": "spacesheep",
-                "email": "misha@example.com", "state": "unauthorized", "connected": true
-            })
-        );
+        // Of an account `connected` is whether its key is here and not refused, whatever
+        // the Hub has or has not asked of spacesheep in this run.
+        for stream_up in [true, false] {
+            let row = serde_json::to_value(ListedReceiver::of(r.clone(), stream_up)).unwrap();
+            assert_eq!(
+                row,
+                serde_json::json!({
+                    "id": "klmnopqrst", "name": "misha@example.com", "origin": "https://spacesheep.dev",
+                    "local": false, "rpId": "spacesheep.dev", "kind": "spacesheep",
+                    "email": "misha@example.com", "state": "unauthorized", "connected": false
+                })
+            );
+        }
+        for (state, connected) in [
+            (sp_receivers::AccountState::Ok, true),
+            (sp_receivers::AccountState::Unauthorized, false),
+            (sp_receivers::AccountState::NoKey, false),
+        ] {
+            let mut a = r.clone();
+            a.account.as_mut().unwrap().state = state;
+            for stream_up in [true, false] {
+                assert_eq!(
+                    ListedReceiver::of(a.clone(), stream_up).connected,
+                    connected,
+                    "{state:?}"
+                );
+            }
+        }
+        // Of a receiver it is what it was: its stream.
+        let plain = ReceiverRef {
+            id: "abcdefghij".into(),
+            name: "studio-mac".into(),
+            origin: "http://192.168.1.4:7373".into(),
+            ..Default::default()
+        };
+        assert!(ListedReceiver::of(plain.clone(), true).connected);
+        assert!(!ListedReceiver::of(plain, false).connected);
     }
 
     #[test]
