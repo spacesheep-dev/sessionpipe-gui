@@ -950,8 +950,10 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
   const p = st?.pending ?? null;
   // On an account there is nothing to connect from here: once it is gone (or before it is
   // read) the group is not drawn, and the window is about to show something else.
+  // On a spacesheep account (the phone app) the account is Settings › App's own group, with
+  // what a phone can do about it; this one is the receiver's.
   const account = accountMode();
-  if (account && !link) return null;
+  if (account) return null;
   const stateWords: Record<string, string> = {
     starting: "connecting…",
     ok: "reading",

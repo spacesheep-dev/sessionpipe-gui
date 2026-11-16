@@ -171,8 +171,8 @@ test("connects: the digits, the approval on spacesheep, the account as this wind
   expect(status.accounts[0]!.id).toMatch(/^[a-z2-7]{52}$/);
   // The key is nowhere a page can read.
   expect(JSON.stringify(status)).not.toContain(ss.key);
-  await invoke("rx_select", { id: status.connect.receiver });
-  await page.reload();
+  // The shell reopens the window on the account it was told to show.
+  await Promise.all([page.waitForEvent("load"), invoke("rx_select", { id: status.connect.receiver })]);
   expect(
     await page.evaluate(
       () => (window as unknown as { sessionpipeShell: { receiver: { kind: string } } }).sessionpipeShell.receiver.kind,
@@ -379,6 +379,12 @@ test("a permission question is answered from the inbox, and the computer gets th
   const row = page.locator(".inbox-row--answerable").first();
   await expect(row).toBeVisible();
   await expect(row).toContainText("Add a login test");
+  // The app's half is handed the session with its question (it took the list: the stand-in
+  // refuses one over the hub's bounds), so a notification can be posted as for a receiver's.
+  type Handed = { key: string; state: string; openAttentions: { attentionId: string; answerable: boolean }[] };
+  await expect
+    .poll(() => (hub.needs.at(-1)?.sessions as Handed[] | undefined)?.find((x) => x.key === "claude-code:s-login"))
+    .toMatchObject({ state: "needs_you", openAttentions: [{ attentionId: "perm-1", kind: "permission" }] });
   await row.getByRole("button", { name: "Allow" }).click();
   await expect.poll(() => ran.some((c) => c.kind === "permission.answer")).toBe(true);
   expect(ran.find((c) => c.kind === "permission.answer")).toMatchObject({
@@ -615,34 +621,37 @@ test("Disconnect in Settings, once confirmed, leaves nothing of the account on s
   const name = `sessionpipe.account.${id}`;
   expect(await databases()).toContain(name);
   await leaveTraces();
-  await page.goto(`${server.url}/settings?section=data`);
-  await expect(page.getByText(/Connected as me@example\.com/).first()).toBeVisible();
+  // On the phone the account is Settings › App's own group (account/AccountSettings.tsx).
+  await page.goto(`${server.url}/settings?section=app`);
+  const group = page.locator("[data-account-settings]");
+  await expect(group.getByText("me@example.com")).toBeVisible();
   // What Disconnect removes, and what it does not, said before it is pressed.
   await expect(
-    page.getByText(
+    group.getByText(
       "Disconnect removes the account from this iPhone: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep: Settings → API keys.",
-      { exact: false },
     ),
   ).toBeVisible();
-  // The key was revoked in the test before: said as it is, with nothing to do here that is not here.
-  await expect(page.getByText(/the key was revoked on spacesheep ·|the key was revoked on spacesheep\./)).toBeVisible();
+  // The key was revoked in the test before: said as it is, with the way to mend it beside it.
+  await expect(group.locator(".acct-state--warn").first()).toHaveText("The key was revoked on spacesheep");
   await expect(page.getByText(/disconnect and connect again/)).toHaveCount(0);
-  const button = page.getByRole("button", { name: "Disconnect" });
+  const button = group.locator("[data-disconnect]");
   // The person says no in the app's own alert: nothing changes.
   hub.alert = () => false;
   await button.click();
   await expect(button).toBeEnabled();
-  await expect(page.getByText(/Connected as me@example\.com/).first()).toBeVisible();
+  await expect(group.getByText("me@example.com")).toBeVisible();
   expect(hub.accounts.size).toBe(1);
   expect(await databases()).toContain(name);
   expect(Object.keys(await stored())).toEqual(expect.arrayContaining(TRACES));
-  // Yes: the window leaves the account for what the app shows with none, the welcome.
+  // Yes: the window leaves the account, says what became of the key, then is the welcome.
   hub.alert = () => true;
   await button.click();
+  await expect(page.locator(".onb[data-step='account-disconnected']")).toBeVisible();
+  await page.getByRole("button", { name: "Done" }).click();
   await expect(welcome()).toBeVisible();
   expect(hub.accounts.size).toBe(0);
   await expect(page.getByText("Fix the invoice webhook")).toHaveCount(0);
-  await expect(page.getByText(/Connected as/)).toHaveCount(0);
+  await expect(page.getByText("me@example.com")).toHaveCount(0);
   // Nothing of it is kept: not the sessions, not what was written beside them.
   await expect.poll(databases).not.toContain(name);
   const left = await stored();

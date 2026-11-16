@@ -1,0 +1,220 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The phone's own screens for a spacesheep account: Settings › App's group
+   (AccountSettings.tsx) and "Approve this iPhone" (ApprovePhone.tsx). Grouped panels as
+   the app's other grouped pages; a state is a mark and words, never colour alone. */
+
+/* A state: its mark, then its words. ok: a check; wait: a hollow ring; warn: a filled dot
+   in the colour that asks for a person. */
+.acct-state {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+  text-align: left;
+}
+.acct-state::before {
+  content: "";
+  flex: none;
+  /* Beside the first line, where the words run to a second. */
+  align-self: flex-start;
+  margin-top: 0.5em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--fg-3);
+}
+.acct-state--ok {
+  color: var(--fg);
+}
+.acct-state--ok::before {
+  content: "\2713";
+  margin-top: 0.25em;
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  font-size: 0.9em;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--ok-fg, var(--fg));
+}
+.acct-state--warn {
+  color: var(--fg);
+}
+.acct-state--warn::before {
+  border-color: var(--needs-fg);
+  background: var(--needs-fg);
+}
+
+/* Connecting again from Settings: the first run's screens, over the app. */
+.acct-over {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 1000);
+  overflow: auto;
+  background: var(--bg);
+}
+
+/* "Approve this iPhone": one panel for where it stands and the one thing to do, one for
+   the computers, one for taking the phone off again. */
+.approve-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 16px;
+  border-radius: var(--radius-pop);
+  background: var(--bg-2);
+}
+.approve-lead,
+.approve-note {
+  margin: 0;
+  color: var(--fg-2);
+  font-size: var(--text-md);
+  line-height: var(--lh);
+}
+.approve-note {
+  font-size: var(--text-sm);
+}
+.approve-err {
+  color: var(--fg);
+}
+.approve-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.approve-line .acct-state {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+.approve-line .spinner {
+  flex: none;
+}
+.approve-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.approve-actions .btn--lg {
+  flex: 1 1 auto;
+  /* The width of a phone's column at most: on a tablet it is a button, not a bar. */
+  max-width: 360px;
+  min-height: 46px;
+  border-radius: 12px;
+}
+/* The number to type on spacesheep: the thing to carry over, so the largest thing here. */
+.approve-code {
+  align-self: flex-start;
+  margin: 0;
+  padding: 6px 20px;
+  border-radius: 12px;
+  background: var(--bg-3);
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: 2.5rem;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.approve-steps {
+  display: flex;
+  flex-direction: column;
+  margin: 2px 0;
+  padding: 0;
+  list-style: none;
+  border-top: var(--hairline) solid var(--line);
+}
+.approve-steps > li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 6px 0;
+  border-bottom: var(--hairline) solid var(--line);
+}
+.approve-steps .form-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.approve-n {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--bg-3);
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+}
+.approve-machine {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An email is as long as it is: it wraps beside its state, and neither runs under the other. */
+[data-account-settings] .settings-row-text {
+  flex: 1 1 0;
+}
+[data-account-settings] .settings-label,
+[data-account-settings] .settings-hint {
+  overflow-wrap: anywhere;
+}
+
+/* Wide (a tablet on its side, a desktop window): there is no grouped ground under the page
+   there, so each of the three blocks is a panel by its own line, and all three start at
+   the same edge. Narrow, the grouped page draws them (settings.css). */
+@media (min-width: 840px) {
+  .approve > .form-group {
+    padding: 14px 16px 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pop);
+    background: var(--bg-2);
+  }
+  .approve > .form-group + .form-group {
+    margin-top: 16px;
+  }
+}
+
+/* Forced colours draw no background: the warn dot is filled by its own border there, so it
+   stays a dot and is not taken for the ring that says "waiting". */
+@media (forced-colors: active) {
+  .acct-state--warn::before {
+    width: 0;
+    height: 0;
+    border-width: 4px;
+    border-color: CanvasText;
+  }
+}
+
+/* A label longer than the screen is wide (text at 200 %, a long host) goes to a second
+   line inside its button, not off the edge. */
+/* In its own line of actions a button shrinks to the screen (and the large one keeps to a
+   phone's column, above); beside words in a row it is never wider than the row. */
+.approve-actions .btn {
+  min-width: 0;
+  white-space: normal;
+  text-align: center;
+  overflow-wrap: break-word;
+}
+.approve .form-row .btn {
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+  overflow-wrap: break-word;
+}
+/* A row's button keeps its label on one line while the row has room for it: the words
+   beside it give way first. */
+.approve .form-row .btn {
+  flex: none;
+}

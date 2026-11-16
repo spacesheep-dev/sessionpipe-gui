@@ -9,9 +9,12 @@ import {
   accountsKept,
   CONVENIENCES,
   forgetLocal,
+  GONE_KEY,
+  leaveGoneNote,
   readsKey,
   SESSION_KEYED,
   SESSION_LISTS,
+  takeGoneNote,
   wipeAccount,
 } from "./local";
 
@@ -165,6 +168,41 @@ describe("what the page keeps outside an account's cache", () => {
   });
 });
 
+describe("what the hub said on a disconnect, for the screen the window opens on next", () => {
+  it("is left and taken once", () => {
+    const session = storage({ other: "x" });
+    leaveGoneNote(
+      {
+        host: "spacesheep.dev",
+        note: "The key is forgotten.",
+        revokeUrl: "https://spacesheep.dev/settings/api-keys",
+      },
+      session,
+    );
+    // Nothing of who the account was is kept for it: no screen shows it.
+    expect(session.m.get(GONE_KEY)).not.toMatch(/@|email/);
+    expect(takeGoneNote(session)).toEqual({
+      host: "spacesheep.dev",
+      note: "The key is forgotten.",
+      revokeUrl: "https://spacesheep.dev/settings/api-keys",
+    });
+    expect(takeGoneNote(session)).toBeNull();
+    expect(session.m.has(GONE_KEY)).toBe(false);
+  });
+
+  it("is nothing when it is not a note, and a link that is not https is not kept", () => {
+    for (const text of ["not json", "null", "{}", JSON.stringify({ note: "" }), JSON.stringify({ note: 7 })]) {
+      const session = storage({ [GONE_KEY]: text });
+      expect(takeGoneNote(session), text).toBeNull();
+    }
+    const session = storage({
+      [GONE_KEY]: JSON.stringify({ note: "Forgotten.", revokeUrl: "javascript:alert(1)", email: 3 }),
+    });
+    expect(takeGoneNote(session)).toEqual({ host: "", note: "Forgotten." });
+    expect(takeGoneNote(null)).toBeNull();
+  });
+});
+
 describe("what an account that is no longer on this phone left behind", () => {
   const idb = (names: string[]) => {
     const deleted: string[] = [];
@@ -278,5 +316,28 @@ describe("what an account that is no longer on this phone left behind", () => {
     });
     expect(wiped).toEqual(["acct-gone"]);
     expect(db.deleted).toEqual(["sessionpipe.account.acct-gone"]);
+  });
+});
+
+describe("an address the page was given, before it is handed to the browser", () => {
+  it("is opened only when it is https and on the account's own origin", async () => {
+    const { ownUrl } = await import("./outside");
+    const origin = "https://spacesheep.dev";
+    expect(ownUrl("https://spacesheep.dev/devices", origin)).toBe("https://spacesheep.dev/devices");
+    for (const not of [
+      "https://spacesheep.dev.evil.example/devices",
+      "https://evil.example/?https://spacesheep.dev/devices",
+      "http://spacesheep.dev/devices",
+      "javascript:alert(1)",
+      "https://user@evil.example/",
+      "//evil.example/devices",
+      "not an address",
+      "",
+      undefined,
+      null,
+    ])
+      expect(ownUrl(not, origin), String(not)).toBeNull();
+    // An origin that is no address opens nothing.
+    expect(ownUrl("https://spacesheep.dev/devices", "spacesheep")).toBeNull();
   });
 });

@@ -8,6 +8,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Added
 
+- **The iPhone app's own screens for a spacesheep account.** Not in a release yet (they wait
+  for the app's half, as the entry below). The first run offers "Use a spacesheep account"
+  under the ways to a computer: a number to compare, a page in Safari to confirm on, and
+  the board, with each way it can go wrong said with what to do next. Settings › App
+  shows whose account it is, where, since when and how it stands, connects again when its
+  key was refused, and disconnects, saying first what that removes. "Approve this iPhone"
+  lets the phone send: it asks spacesheep, shows the number to type on its Devices page,
+  waits, and says from when the phone can send (a newly approved device waits an hour).
+  A phone that cannot sign yet says so in one line and leads to the session on spacesheep.
 - **The app's page can show a spacesheep account with no GUI server behind it.** Not in a
   release yet: it waits for the app's half (the account's key and its doors) and for the
   screens that connect one. With them, the phone keeps its own board from the account,

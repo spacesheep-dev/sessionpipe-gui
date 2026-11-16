@@ -71,6 +71,9 @@ export function SessionControl({
     activity,
     onSend,
     held,
+    // On a spacesheep account a phone approved less than an hour ago cannot send yet: said
+    // here with the time, before a send or an answer is refused for it.
+    cooling,
   } = useSessionSend(session, control, attentions, {
     draft,
     // A message the receiver held is confirmed from the notice under the composer; once
@@ -129,7 +132,8 @@ export function SessionControl({
         attentions={attentions}
         onSend={secure && rp ? onSend : undefined}
         working={working}
-        blocked={secure ? undefined : (old ?? signHint(rp))}
+        blocked={secure ? (cooling ?? undefined) : (old ?? signHint(rp))}
+        blockedSays={secure ? (cooling ?? undefined) : undefined}
         elsewhere={
           // On a spacesheep account a session this phone cannot send to (no signer yet on
           // Android, a computer not paired for it) can still be answered on spacesheep itself.

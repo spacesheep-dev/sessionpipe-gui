@@ -287,7 +287,20 @@ function MachineBlock({
                   </Link>
                 </>
               )}
-              {app === "setup" && c?.remote && <RemoteAppSetup rpId={c.remote.rpId} origin={c.remote.origin} />}
+              {app === "setup" &&
+                c?.remote &&
+                (accountMode() ? (
+                  // On a spacesheep account (the phone) the asking, the number and the wait
+                  // have a page of their own.
+                  <>
+                    {" · "}
+                    <Link to="/add-device" className="link" data-setup>
+                      {setupLabel()}
+                    </Link>
+                  </>
+                ) : (
+                  <RemoteAppSetup rpId={c.remote.rpId} origin={c.remote.origin} />
+                ))}
             </span>
           </li>
         )}

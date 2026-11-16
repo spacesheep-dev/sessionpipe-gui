@@ -53,6 +53,13 @@ export type ControlAction =
 /** The event that clears a session's composer once a message it held went another way. */
 export const COMPOSER_SENT = "sp:composer-sent";
 
+/** Why Allow / Deny are off where the page cannot send: at the wrong address, where it
+ *  can; where the block has a sentence of its own that is as true of an answer as of a
+ *  message (the hour a newly approved phone waits), that sentence; else that the page
+ *  cannot sign one. */
+export const blockedAnswer = (wrong: string | null | undefined, says?: string): string =>
+  wrong ? "answer it where sending works" : (says ?? "this page cannot sign an answer");
+
 export interface ControlStripProps {
   session: SessionSummary;
   /** The session machine's control status, when it paired. */
@@ -76,6 +83,8 @@ export interface ControlStripProps {
   noteKind?: "info" | "err";
   /** The composer's words and attachments, as one string, each time they change: a held
    *  message (control/HeldNotice.tsx) depends on them. */
+  /** The block in a sentence that holds for an answer too (blockedAnswer). */
+  blockedSays?: string;
   onDraft?: (draft: string) => void;
   /** This browser holds no passkey the machine trusts (in the app: the machine doesn't
    *  trust this Mac's device key): a send would be refused. */
@@ -308,6 +317,7 @@ export function ControlStrip({
   stream,
   unlock,
   ask,
+  blockedSays,
   onDraft,
 }: ControlStripProps) {
   const [text, setText] = useState(() => readDraft(session.key));
@@ -521,11 +531,7 @@ export function ControlStrip({
       `pair ${name} to answer here`
     )
   ) : blocked ? (
-    wrong ? (
-      "answer it where sending works"
-    ) : (
-      "this page cannot sign an answer"
-    )
+    blockedAnswer(wrong, blockedSays)
   ) : stream ? (
     "waiting for the connection"
   ) : null;

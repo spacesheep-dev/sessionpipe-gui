@@ -173,7 +173,7 @@ describe("sentLine", () => {
 });
 
 describe("sendErrorWords", () => {
-  it("on a spacesheep account names no place that is not there: a refused key is said, and nothing of connecting in Settings", async () => {
+  it("on a spacesheep account names no place that is not there: a refused key is connected again where the account is, Settings → App", async () => {
     const g = globalThis as { sessionpipeShell?: unknown };
     g.sessionpipeShell = {
       rxBase: "rx://localhost/ACCT",
@@ -184,8 +184,9 @@ describe("sendErrorWords", () => {
       const { sendErrorWords: words } = await import("./words");
       const { ControlError: Refused } = await import("./api");
       const said = words(new Refused(502, "Unknown or revoked API key.", "spacesheep_unauthorized"));
-      expect(said).toBe("Not sent. spacesheep no longer takes this app's key.");
-      expect(said).not.toMatch(/Settings|connect again/);
+      // The phone's own sentence: the account is under Settings → App, and is connected again there.
+      expect(said).toBe("Not sent. spacesheep no longer takes this app's key: connect again in Settings → App.");
+      expect(said).not.toMatch(/Settings → Data|disconnect/);
     } finally {
       delete g.sessionpipeShell;
       vi.resetModules();

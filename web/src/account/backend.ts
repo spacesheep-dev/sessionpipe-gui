@@ -16,6 +16,7 @@ import type {
   Info,
   ProtocolEvent,
   SessionKey,
+  SessionSummary,
   Snapshot,
   SpacesheepSourceStatus,
   StoredEvent,
@@ -147,6 +148,15 @@ export interface AccountBackend {
   deviceAsk(): Promise<DeviceAsked>;
   /** Where that key stands (the device door). */
   device(): Promise<DoorAnswer>;
+  /** The account's computers as this page lists them: each one's id and name, the ids of
+   *  the keys it trusts, and whether it takes a phone's own key at all. */
+  machines(): { id: string; name: string; keys: string[]; takesDevice: boolean }[];
+  /** Reads the account's machines again now, not at the minute's turn: after this phone's
+   *  key was approved, so the rest of the page agrees at once. Not metered by spacesheep. */
+  machinesNow(): Promise<void>;
+  /** Told when spacesheep refused a send because this phone's key is inside its first
+   *  hour, with the hour's end. */
+  onCooling(l: (until: number) => void): () => void;
   /** Forgets the account on this phone, with everything this page kept for it. The hub
    *  asks the person first; a no is thrown as the hub's error. */
   disconnect(): Promise<Disconnected>;
@@ -159,6 +169,11 @@ export interface AccountBackend {
 
 /** An account whose key was made this recently has had no reader before this one. */
 export const FRESH_MS = 120_000;
+/** What the hub takes in one `acct_needs`: this many sessions, this many attentions of one
+ *  session, and this many attentions in all (a longer list it refuses whole). */
+export const NEEDS_SESSIONS = 200;
+export const NEEDS_A_SESSION = 16;
+export const NEEDS_ATTENTIONS = 200;
 /** How long after one answer of the hub's that leaves the account out it is asked again. */
 export const GONE_AGAIN_MS = 3000;
 /** A stream opened while spacesheep cannot be reached reads the relay at once, this often at most. */
@@ -174,6 +189,39 @@ const json = (body: unknown, status = 200): Response =>
     status,
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
+
+/** The sessions that need the person, as the hub takes them in one `acct_needs`: at most
+ *  NEEDS_SESSIONS sessions, NEEDS_A_SESSION attentions of one and NEEDS_ATTENTIONS in all.
+ *  The hub refuses a longer list whole (docs/rfcs/08), so the list is cut to that here and
+ *  what a heavy account needs is still said. */
+export function needsOf(sessions: readonly SessionSummary[]): NeedsSession[] {
+  let left = NEEDS_ATTENTIONS;
+  return sessions
+    .filter((s) => s.state === "needs_you")
+    .slice(0, NEEDS_SESSIONS)
+    .map((s) => {
+      const mine = s.openAttentions.slice(0, Math.min(NEEDS_A_SESSION, left));
+      left -= mine.length;
+      return {
+        key: s.key,
+        harness: s.harness,
+        id: s.id,
+        ...(s.title ? { title: s.title } : {}),
+        ...(s.machine ? { machine: s.machine } : {}),
+        ...(s.cwd ? { cwd: s.cwd } : {}),
+        state: "needs_you" as const,
+        stateSince: s.stateSince,
+        openAttentions: mine.map((a) => ({
+          attentionId: a.attentionId,
+          kind: a.kind,
+          ...(a.tool ? { tool: a.tool } : {}),
+          ...(a.message ? { message: a.message.slice(0, 300) } : {}),
+          at: a.at,
+          answerable: !!a.answerable,
+        })),
+      };
+    });
+}
 
 export async function startAccountBackend(o: AccountBackendOptions): Promise<AccountBackend> {
   const { shell, calls } = o;
@@ -335,29 +383,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
   const needs = (() => {
     let said = "";
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const list = (): NeedsSession[] =>
-      store
-        .snapshot()
-        .sessions.filter((s) => s.state === "needs_you")
-        .slice(0, 200)
-        .map((s) => ({
-          key: s.key,
-          harness: s.harness,
-          id: s.id,
-          ...(s.title ? { title: s.title } : {}),
-          ...(s.machine ? { machine: s.machine } : {}),
-          ...(s.cwd ? { cwd: s.cwd } : {}),
-          state: "needs_you" as const,
-          stateSince: s.stateSince,
-          openAttentions: s.openAttentions.map((a) => ({
-            attentionId: a.attentionId,
-            kind: a.kind,
-            ...(a.tool ? { tool: a.tool } : {}),
-            ...(a.message ? { message: a.message.slice(0, 300) } : {}),
-            at: a.at,
-            answerable: !!a.answerable,
-          })),
-        }));
+    const list = (): NeedsSession[] => needsOf(store.snapshot().sessions);
     const send = (): void => {
       timer = null;
       const sessions = list();
@@ -383,11 +409,15 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
 
   // ---------- the doors and the reader ----------
   let reader: RelayReader | null = null;
+  const coolingWatchers = new Set<(until: number) => void>();
   const doors: AccountDoors = openDoors({
     rxBase: shell.rxBase,
     ...(o.fetch ? { fetch: o.fetch } : {}),
     onUnauthorized: () => reader?.unauthorized(),
     lastJob: () => lastJob,
+    onCooling: (until) => {
+      for (const l of [...coolingWatchers]) l(until);
+    },
   });
   let gone = false;
   unheard = openUnheard({
@@ -938,6 +968,20 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     },
     deviceAsk,
     device: () => doors.device(),
+    machines: () =>
+      [...control.machines()].map(([name, c]) => ({
+        id: c.machineId,
+        name,
+        keys: c.keys.map((k) => k.id),
+        takesDevice: !!c.keyTypes?.includes("device"),
+      })),
+    machinesNow: async () => {
+      await reader?.pollMachines();
+    },
+    onCooling(l) {
+      coolingWatchers.add(l);
+      return () => void coolingWatchers.delete(l);
+    },
     disconnect,
     asked,
     async flushed() {

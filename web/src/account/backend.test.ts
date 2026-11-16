@@ -10,7 +10,16 @@ import { RELAY_BUDGET } from "../../../server/sources/relay";
 import { type FakeAnswer, FakeSpacesheep } from "../../../test/account/fake-spacesheep";
 import { HubStandIn } from "../../../test/account/hub";
 import { Session } from "../../../test/events";
-import { type AccountBackend, type AccountNotice, GONE_AGAIN_MS, startAccountBackend } from "./backend";
+import {
+  type AccountBackend,
+  type AccountNotice,
+  GONE_AGAIN_MS,
+  NEEDS_A_SESSION,
+  NEEDS_ATTENTIONS,
+  NEEDS_SESSIONS,
+  needsOf,
+  startAccountBackend,
+} from "./backend";
 import { FIRST_ASKING_OVER_MS, LOOK_PAGES } from "./doors";
 import { NOT_HERE } from "./routes";
 import { type AccountShell, accountShell, type ShellCalls } from "./shell";
@@ -335,10 +344,24 @@ describe("a page's own backend on a spacesheep account", () => {
     expect(res.status).toBe(201);
     expect(r.ss.jobs[0]!.sent).toMatchObject({ confirm: { cred: "k1" }, match: "0417", csig: null, grant: null });
 
-    // The hub cannot reach spacesheep (or its answer stopped: the hub has one word for
-    // both): asked again twice, then its words under the code that says nobody knows, never
-    // a 401 or a hold.
+    // The hub can make no connection to spacesheep: nothing of the command left the phone.
+    // Not sent, in the hub's words, asked once, and nothing waits to be asked again.
     r.hub.down = true;
+    const jobs = r.ss.jobs.length;
+    const posts = r.asked.filter((x) => x.startsWith("POST ")).length;
+    res = await post(b, "/api/ui/control/send", signed("claude-code:s-1"));
+    expect([res.status, await res.json()]).toEqual([
+      502,
+      { reason: "spacesheep could not be reached.", code: "hub_not_sent" },
+    ]);
+    expect(r.asked.filter((x) => x.startsWith("POST ")).length - posts).toBe(1);
+    expect(r.ss.jobs).toHaveLength(jobs);
+    expect((await b.transport.controlActivity!(10)).filter((x) => x.unheard)).toEqual([]);
+    r.hub.down = false;
+    // A connection was made and the answer stopped on its way: nobody knows whether a job
+    // was made. Asked again twice, then the hub's words under the code that says nobody
+    // knows, never a 401 or a hold.
+    r.hub.stopped = true;
     const unreached = post(b, "/api/ui/control/send", signed("claude-code:s-1"));
     await tick(7000);
     res = await unreached;
@@ -350,7 +373,7 @@ describe("a page's own backend on a spacesheep account", () => {
       unheard: { state: "asking" },
     });
     expect(dark.outcome).toBeUndefined();
-    r.hub.down = false;
+    r.hub.stopped = false;
     // Reached again, the same bytes are asked once more and taken: the row is a send like any other.
     await tick(9000);
     const lit = (await b.transport.controlActivity!(10)).find((a) => a.id === dark.id)!;
@@ -976,7 +999,7 @@ describe("a page's own backend on a spacesheep account", () => {
       const big = "w".repeat(70_000);
       // Unknown sends with long words, to other sessions, while no answer comes back, until
       // one more would not fit.
-      r.hub.down = true;
+      r.hub.stopped = true;
       let n = 0;
       for (;;) {
         const before = sends();
@@ -1000,7 +1023,7 @@ describe("a page's own backend on a spacesheep account", () => {
       expect(doc.unheard).toHaveLength(n);
       expect(doc.unheard.every((u) => u.state === "asking" && u.row.text === big && !!u.body)).toBe(true);
       // A short message to another session still goes.
-      r.hub.down = false;
+      r.hub.stopped = false;
       const short = await send(b, signed("claude-code:s-2", "a short one"), 100);
       expect(short.status).toBe(201);
       expect(short.body.unheard).toBeUndefined();
@@ -1440,7 +1463,10 @@ describe("a page's own backend on a spacesheep account", () => {
     ]);
     // The key that was enrolled is the hub's, whatever the page sent.
     expect([...r.ss.deviceRequests.keys()]).toEqual(["A".repeat(43)]);
-    r.ss.trusting.set("A".repeat(43), [M1]);
+    // The request is open until a computer takes the key (approved on spacesheep's Devices).
+    res = await b.answer("/api/ui/spacesheep/device");
+    expect(await res.json()).toMatchObject({ trustedOn: [], pending: true });
+    r.ss.approveDevice("A".repeat(43));
     res = await b.answer("/api/ui/spacesheep/device");
     expect(await res.json()).toMatchObject({ trustedOn: [M1], pending: false });
   });
@@ -1666,7 +1692,37 @@ describe("a page's own backend on a spacesheep account", () => {
       expect(r.hub.needs[1]!.sessions).toEqual([]);
       page.off();
     });
+    it("stays inside what the hub takes: 200 sessions, 16 attentions of one, 200 in all", () => {
+      const session = (i: number, asks: number, state = "needs_you") =>
+        ({
+          key: `claude-code:s-${i}`,
+          harness: "claude-code",
+          id: `s-${i}`,
+          state,
+          stateSince: "2026-11-13T10:00:00.000Z",
+          openAttentions: Array.from({ length: asks }, (_, j) => ({
+            attentionId: `a-${i}-${j}`,
+            kind: "permission",
+            at: "2026-11-13T10:00:00.000Z",
+            answerable: true,
+          })),
+        }) as never;
+      // Thirty sessions, each asking twenty things at once: sixteen of each, two hundred in all.
+      let said = needsOf(Array.from({ length: 30 }, (_, i) => session(i, 20)));
+      expect(said).toHaveLength(30);
+      expect(Math.max(...said.map((x) => x.openAttentions.length))).toBe(NEEDS_A_SESSION);
+      expect(said.reduce((n, x) => n + x.openAttentions.length, 0)).toBe(NEEDS_ATTENTIONS);
+      // Three hundred sessions that need the person, among others that do not: two hundred.
+      said = needsOf(Array.from({ length: 600 }, (_, i) => session(i, 1, i % 2 ? "working" : "needs_you")));
+      expect(said).toHaveLength(NEEDS_SESSIONS);
+      expect(said.every((x) => x.openAttentions.length === 1)).toBe(true);
+      // An ordinary list is as it was.
+      expect(needsOf([session(1, 2)])).toMatchObject([{ key: "claude-code:s-1", openAttentions: [{}, {}] }]);
+    });
+
     it("is not called at all on a shell that does not list it", async () => {
+      // A shell with the account mode and without the hand-over (an older app).
+      r = rig({ features: ["notifications", "signer", "account"] });
       r.ss.push(needing(new Session("s-1")));
       await r.start();
       await tick(2000);

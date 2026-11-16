@@ -69,6 +69,48 @@ export interface AccountStatus {
   connect?: unknown;
 }
 
+/** Where a connect stands. `asking`: spacesheep approved it and the hub holds the key until
+ *  the person answers its question on this phone. */
+export type ConnectState = "pending" | "asking" | "approved" | "denied" | "declined" | "expired" | "failed";
+
+/** A connect, as `acct_connect_start` answers it and `acct_status.connect` says it after.
+ *  Never the link, the code or the key: the hub opens the link itself. */
+export interface ConnectView {
+  origin: string;
+  /** Four digits, shown here and on spacesheep's confirm page. */
+  digits: string;
+  expiresAt: string;
+  state: ConnectState;
+  /** On `approved`: the account's receiver id, for `rx_select`, and whose it is. */
+  receiver?: string;
+  email?: string;
+  /** On `failed`: `bad_answer`, `conflict`, `keystore`, `io`. */
+  error?: string;
+  /** A key was made on spacesheep and is not kept here: where to revoke it, in the hub's words. */
+  revokeUrl?: string;
+  note?: string;
+}
+
+const CONNECT_STATES: readonly string[] = ["pending", "asking", "approved", "denied", "declined", "expired", "failed"];
+
+/** A connect read from what the hub said, or null (none under way, none just ended). */
+export function connectView(raw: unknown): ConnectView | null {
+  if (!raw || typeof raw !== "object") return null;
+  const c = raw as Record<string, unknown>;
+  if (!str(c.origin) || !str(c.state) || !CONNECT_STATES.includes(c.state)) return null;
+  return {
+    origin: c.origin,
+    digits: str(c.digits) ? c.digits : "",
+    expiresAt: str(c.expiresAt) ? c.expiresAt : "",
+    state: c.state as ConnectState,
+    ...(str(c.receiver) ? { receiver: c.receiver } : {}),
+    ...(str(c.email) ? { email: c.email } : {}),
+    ...(str(c.error) ? { error: c.error } : {}),
+    ...(str(c.revokeUrl) ? { revokeUrl: c.revokeUrl } : {}),
+    ...(str(c.note) ? { note: c.note } : {}),
+  };
+}
+
 /** An error of the hub's commands. */
 export interface HubError {
   code: string;
@@ -143,6 +185,34 @@ export interface ShellCalls {
   /** The sessions that need the person. Only where the shell lists NEEDS_FEATURE. */
   needs(id: string, sessions: NeedsSession[]): Promise<unknown>;
 }
+
+/** The hub's commands for connecting an account, and the one that shows it. They need no
+ *  account in this window: the first run uses them with no receiver at all. */
+export interface ConnectCalls {
+  status(): Promise<AccountStatus>;
+  /** `origin` absent: spacesheep.dev. */
+  start(origin?: string): Promise<ConnectView>;
+  /** The hub opens the pending connect's page in the system browser. */
+  open(): Promise<void>;
+  /** True when a pending connect was stopped; false when it only cleared an outcome. */
+  cancel(): Promise<boolean>;
+  /** Shows the receiver (the account) in this window: the shell reopens the window on it. */
+  select(id: string): Promise<void>;
+  onAccount(fn: (s: AccountStatus) => void): Promise<() => void>;
+}
+
+export const tauriConnect: ConnectCalls = {
+  status: () => invoke<AccountStatus>("acct_status"),
+  start: async (origin) => {
+    const c = connectView(await invoke<unknown>("acct_connect_start", origin ? { origin } : {}));
+    if (!c) throw { code: "bad_answer", message: "The app's answer was not a connect." };
+    return c;
+  },
+  open: () => invoke<void>("acct_connect_open"),
+  cancel: () => invoke<boolean>("acct_connect_cancel"),
+  select: (id) => invoke<void>("rx_select", { id }),
+  onAccount: (fn) => listen<AccountStatus>("account", (s) => s && Array.isArray(s.accounts) && fn(s)),
+};
 
 /** The commands over the app's own IPC. */
 export const tauriCalls: ShellCalls = {
