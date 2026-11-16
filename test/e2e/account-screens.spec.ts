@@ -437,6 +437,35 @@ test.describe("each way a connect can end, with what to do next", () => {
     b.hub.startMs = 0;
   });
 
+  test("the browser could not be opened: the number keeps its button, and nothing says an answer is waited for there", async () => {
+    await start();
+    await digits();
+    const said = async () => calls(b.page);
+    const before = b.hub.opened.length;
+    const asked = (await said()).length;
+    // The hub's `not_opened`: the system browser did not take the link.
+    b.hub.openFails = true;
+    await button(b.page, "Open in Safari").click();
+    // The page asked the hub to open, was refused, and read where the connect stands.
+    await expect
+      .poll(async () => {
+        const since = (await said()).slice(asked);
+        const open = since.indexOf("acct_connect_open");
+        return open >= 0 && since.indexOf("acct_status", open) > open;
+      })
+      .toBe(true);
+    expect(b.hub.opened).toHaveLength(before);
+    await expect(step(b.page, "account-number")).not.toHaveAttribute("data-opened", "true");
+    await expect(b.page.getByText("Waiting for you to confirm on spacesheep.")).toHaveCount(0);
+    await expect(button(b.page, "Open in Safari")).toHaveClass(/btn--primary/);
+    // The next tap, with the browser there, hands off as any other.
+    b.hub.openFails = false;
+    await button(b.page, "Open in Safari").click();
+    await expect(step(b.page, "account-number")).toHaveAttribute("data-opened", "true");
+    expect(b.hub.opened).toHaveLength(before + 1);
+    await button(b.page, "Cancel").click();
+  });
+
   test("nobody confirmed in time", async () => {
     await start();
     b.ss.expire(await digits());

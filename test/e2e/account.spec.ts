@@ -379,6 +379,12 @@ test("a permission question is answered from the inbox, and the computer gets th
   const row = page.locator(".inbox-row--answerable").first();
   await expect(row).toBeVisible();
   await expect(row).toContainText("Add a login test");
+  // The app's half is handed the session with its question (it took the list: the stand-in
+  // refuses one over the hub's bounds), so a notification can be posted as for a receiver's.
+  type Handed = { key: string; state: string; openAttentions: { attentionId: string; answerable: boolean }[] };
+  await expect
+    .poll(() => (hub.needs.at(-1)?.sessions as Handed[] | undefined)?.find((x) => x.key === "claude-code:s-login"))
+    .toMatchObject({ state: "needs_you", openAttentions: [{ attentionId: "perm-1", kind: "permission" }] });
   await row.getByRole("button", { name: "Allow" }).click();
   await expect.poll(() => ran.some((c) => c.kind === "permission.answer")).toBe(true);
   expect(ran.find((c) => c.kind === "permission.answer")).toMatchObject({
