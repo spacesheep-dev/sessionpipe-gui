@@ -344,10 +344,24 @@ describe("a page's own backend on a spacesheep account", () => {
     expect(res.status).toBe(201);
     expect(r.ss.jobs[0]!.sent).toMatchObject({ confirm: { cred: "k1" }, match: "0417", csig: null, grant: null });
 
-    // The hub cannot reach spacesheep (or its answer stopped: the hub has one word for
-    // both): asked again twice, then its words under the code that says nobody knows, never
-    // a 401 or a hold.
+    // The hub can make no connection to spacesheep: nothing of the command left the phone.
+    // Not sent, in the hub's words, asked once, and nothing waits to be asked again.
     r.hub.down = true;
+    const jobs = r.ss.jobs.length;
+    const posts = r.asked.filter((x) => x.startsWith("POST ")).length;
+    res = await post(b, "/api/ui/control/send", signed("claude-code:s-1"));
+    expect([res.status, await res.json()]).toEqual([
+      502,
+      { reason: "spacesheep could not be reached.", code: "hub_not_sent" },
+    ]);
+    expect(r.asked.filter((x) => x.startsWith("POST ")).length - posts).toBe(1);
+    expect(r.ss.jobs).toHaveLength(jobs);
+    expect((await b.transport.controlActivity!(10)).filter((x) => x.unheard)).toEqual([]);
+    r.hub.down = false;
+    // A connection was made and the answer stopped on its way: nobody knows whether a job
+    // was made. Asked again twice, then the hub's words under the code that says nobody
+    // knows, never a 401 or a hold.
+    r.hub.stopped = true;
     const unreached = post(b, "/api/ui/control/send", signed("claude-code:s-1"));
     await tick(7000);
     res = await unreached;
@@ -359,7 +373,7 @@ describe("a page's own backend on a spacesheep account", () => {
       unheard: { state: "asking" },
     });
     expect(dark.outcome).toBeUndefined();
-    r.hub.down = false;
+    r.hub.stopped = false;
     // Reached again, the same bytes are asked once more and taken: the row is a send like any other.
     await tick(9000);
     const lit = (await b.transport.controlActivity!(10)).find((a) => a.id === dark.id)!;
@@ -985,7 +999,7 @@ describe("a page's own backend on a spacesheep account", () => {
       const big = "w".repeat(70_000);
       // Unknown sends with long words, to other sessions, while no answer comes back, until
       // one more would not fit.
-      r.hub.down = true;
+      r.hub.stopped = true;
       let n = 0;
       for (;;) {
         const before = sends();
@@ -1009,7 +1023,7 @@ describe("a page's own backend on a spacesheep account", () => {
       expect(doc.unheard).toHaveLength(n);
       expect(doc.unheard.every((u) => u.state === "asking" && u.row.text === big && !!u.body)).toBe(true);
       // A short message to another session still goes.
-      r.hub.down = false;
+      r.hub.stopped = false;
       const short = await send(b, signed("claude-code:s-2", "a short one"), 100);
       expect(short.status).toBe(201);
       expect(short.body.unheard).toBeUndefined();
@@ -1707,6 +1721,8 @@ describe("a page's own backend on a spacesheep account", () => {
     });
 
     it("is not called at all on a shell that does not list it", async () => {
+      // A shell with the account mode and without the hand-over (an older app).
+      r = rig({ features: ["notifications", "signer", "account"] });
       r.ss.push(needing(new Session("s-1")));
       await r.start();
       await tick(2000);

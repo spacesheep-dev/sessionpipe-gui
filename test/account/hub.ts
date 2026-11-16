@@ -14,7 +14,8 @@ import type { FakeAnswer, FakeClock, FakeRequest } from "./fake-spacesheep.js";
 export const HUB_HEADER = "x-sessionpipe-hub";
 const MIB = 1024 * 1024;
 
-/** The hub's own refusals: status and words, as account.rs has them. */
+/** The hub's own refusals: status and words, as account.rs has them (`Refused::status`,
+ *  `Refused::words`). `{Here}` is the device as the shell names it, at a sentence's start. */
 const REFUSALS: Record<string, [number, string]> = {
   not_a_door: [403, "The app does not forward this to a spacesheep account."],
   bad_query: [400, "That request has a parameter the app does not forward."],
@@ -24,9 +25,10 @@ const REFUSALS: Record<string, [number, string]> = {
   forbidden_origin: [403, "Only the app's own page may ask."],
   account_off: [403, "A spacesheep account is not available in this build."],
   bad_account: [403, "This account's entry is damaged. Disconnect and connect again."],
-  not_connected: [401, "This device holds no key for the account. Connect again."],
-  no_device_key: [409, "This device has not asked to be trusted yet."],
+  not_connected: [401, "{Here} holds no key for the account. Connect again."],
+  no_device_key: [409, "{Here} has not asked to be trusted yet."],
   busy: [429, "Too many requests at once."],
+  not_sent: [502, "spacesheep could not be reached."],
   unreachable: [502, "spacesheep could not be reached."],
   timeout: [504, "spacesheep did not answer in time."],
   redirected: [502, "spacesheep answered with a redirect, which the app does not follow."],
@@ -35,8 +37,14 @@ const REFUSALS: Record<string, [number, string]> = {
   withheld: [502, "spacesheep's answer was not one the app passes on."],
 };
 
-export const refusal = (code: string): FakeAnswer => {
-  const [status, error] = REFUSALS[code] ?? [502, code];
+/** A sentence's first word, as the hub writes the device there ("This iPhone"). */
+const sentenceStart = (words: string): string => words.charAt(0).toUpperCase() + words.slice(1);
+
+/** One of the hub's own answers. `here`: what the shell calls the device in a sentence
+ *  ("this iPhone"); the hub's own word, until a shell says, is "this device". */
+export const refusal = (code: string, here = "this device"): FakeAnswer => {
+  const [status, words] = REFUSALS[code] ?? [502, code];
+  const error = words.replace("{Here}", sentenceStart(here));
   return {
     status,
     headers: {
@@ -165,8 +173,15 @@ export class HubStandIn {
   private relayReads = 0;
   /** The next this-many door requests find the account's room full (`busy`). */
   busy = 0;
-  /** spacesheep cannot be reached (`unreachable`). */
+  /** spacesheep cannot be reached: no connection can be made. A read is `unreachable`; a
+   *  send is `not_sent`, the hub's word for a command of which nothing left the phone. */
   down = false;
+  /** A connection is made and the answer stops on its way (`unreachable`, on a read and on
+   *  a send): of a send nobody then knows whether a job was made. Here spacesheep did not
+   *  get the command; `unheard` is the case where it did. */
+  stopped = false;
+  /** The system browser does not take the hub's link (`acct_connect_open` is `not_opened`). */
+  openFails = false;
   /** The next this-many sends reach spacesheep and its answer does not come back in the
    *  hub's time: the page gets the hub's `timeout`, and spacesheep holds the job. */
   unheard = 0;
@@ -248,7 +263,8 @@ export class HubStandIn {
       v: 1,
       platform: this.o.platform ?? "ios",
       appVersion: this.o.appVersion ?? "0.9.0",
-      features: this.o.features ?? ["notifications", "signer", "haptics", "scanner", "account"],
+      // As the iPhone's shell lists them: "account", and always with it "account-needs".
+      features: this.o.features ?? ["notifications", "signer", "haptics", "scanner", "account", "account-needs"],
       receiver: a
         ? {
             id: a.id,
@@ -292,11 +308,20 @@ export class HubStandIn {
             expiresAt: c.expiresAt,
             state: c.state,
             ...(c.receiver ? { receiver: c.receiver, email: c.email } : {}),
-            ...(c.error ? { error: c.error } : {}),
+            ...(c.error ? { error: c.error, errorMessage: this.failedWords(c.error) } : {}),
             ...(c.note ? { revokeUrl: c.revokeUrl, note: c.note } : {}),
           }
         : null,
     };
+  }
+
+  /** The hub's sentence for a connect that failed, beside its word (`errorMessage`). */
+  private failedWords(error: string): string {
+    const revoke = "Connect again, and revoke the unused key on spacesheep (Settings → API keys).";
+    if (error === "conflict") return "That account can't be kept beside the ones already here.";
+    if (error === "keystore") return `The key could not be kept on ${this.thisPhone}. ${revoke}`;
+    if (error === "io") return `The account could not be saved on ${this.thisPhone}. ${revoke}`;
+    return "spacesheep's answer can't be used by this version.";
   }
 
   private say(): void {
@@ -332,6 +357,7 @@ export class HubStandIn {
       case "acct_connect_open": {
         const c = this.connecting;
         if (c?.state !== "pending") throw new HubRefused("no_connect", "No connect is waiting.");
+        if (this.openFails) throw new HubRefused("not_opened", "The browser could not be opened.");
         this.opened.push(c.url);
         return null;
       }
@@ -379,7 +405,8 @@ export class HubStandIn {
         if (!all || all.length > 200 || counts.some((n) => n > 16) || counts.reduce((a, n) => a + n, 0) > 200)
           throw new HubRefused("bad_request", "That is not a list of sessions.");
         this.needs.push({ id: a.id, sessions: all });
-        return true;
+        // How many of the account's sessions need the person now.
+        return all.length;
       }
       case "rx_list":
         // A receiver's row, with the three an account adds (kind, email, state now).
@@ -409,7 +436,7 @@ export class HubStandIn {
 
   private account(id: unknown): HubAccount {
     const a = typeof id === "string" ? this.accounts.get(id) : undefined;
-    if (!a) throw new HubRefused("unknown_account", "No such account on this phone.");
+    if (!a) throw new HubRefused("unknown_account", "No such account.");
     return a;
   }
   private docName(name: unknown): string {
@@ -575,7 +602,7 @@ export class HubStandIn {
 
   private async deviceAsk(a: HubAccount): Promise<unknown> {
     if (!this.deviceKey) throw new HubRefused("unsupported", "Sending from this phone comes in a later version.");
-    if (!a.key) throw new HubRefused("not_connected", "This device holds no key for the account. Connect again.");
+    if (!a.key) throw this.problem("not_connected");
     const now = this.clock.now();
     // Asked again within ten minutes for the same key: the answer it got then, no request.
     if (this.lastAsk && this.lastAsk.id === a.id && now - this.lastAsk.at < SAME_ASK_MS) return this.lastAsk.answer;
@@ -584,7 +611,7 @@ export class HubStandIn {
       throw new HubRefused("too_many_asks", "Too many tries. Wait a while, then ask again.", {
         retryAfterS: Math.ceil((this.asks[0]! + HOUR - now) / 1000),
       });
-    if (this.down) throw new HubRefused("unreachable", "spacesheep could not be reached.");
+    if (this.down || this.stopped) throw this.problem("unreachable");
     this.asks.push(now);
     const r = await this.o.upstream.ask({
       method: "POST",
@@ -593,17 +620,17 @@ export class HubStandIn {
       body: JSON.stringify({ key: this.deviceKey, name: "iPhone" }),
     });
     const j = JSON.parse(r.body || "{}") as Record<string, unknown>;
+    // spacesheep's own code beside the hub's, where it gave one.
+    const upstream = typeof j.code === "string" && j.code ? { upstream: j.code } : {};
     if (r.status === 401) {
       this.mark(a, "unauthorized");
-      throw new HubRefused("unauthorized", String(j.error ?? "spacesheep answered 401."), {
-        upstream: String(j.code ?? ""),
-      });
+      throw new HubRefused("unauthorized", String(j.error ?? "spacesheep answered 401."), upstream);
     }
     if (r.status < 200 || r.status >= 300)
       throw new HubRefused(
         r.status === 429 ? "rate_limited" : "refused",
         String(j.error ?? `spacesheep answered ${r.status}.`),
-        { upstream: String(j.code ?? "") },
+        upstream,
       );
     if (typeof j.code !== "string" || typeof j.key_id !== "string")
       throw new HubRefused("bad_answer", "spacesheep's answer can't be used by this version.");
@@ -617,6 +644,14 @@ export class HubStandIn {
     };
     this.lastAsk = { id: a.id, at: now, answer };
     return answer;
+  }
+
+  /** One of the hub's own refusals as a command's error: its code, its words for this device. */
+  private problem(code: string): HubRefused {
+    return new HubRefused(code, (JSON.parse(this.refuse(code).body) as { error: string }).error);
+  }
+  private refuse(code: string): FakeAnswer {
+    return refusal(code, this.thisPhone);
   }
 
   /** The person asked again after the request was dropped: the hub's ten minutes are over. */
@@ -640,15 +675,15 @@ export class HubStandIn {
     id: string,
     req: { method: string; path: string; body?: string; origin?: string; signal?: AbortSignal },
   ): Promise<FakeAnswer> {
-    if (this.o.appOrigin && req.origin !== this.o.appOrigin) return refusal("forbidden_origin");
+    if (this.o.appOrigin && req.origin !== this.o.appOrigin) return this.refuse("forbidden_origin");
     const a = this.accounts.get(id);
-    if (!a) return refusal("not_a_door");
+    if (!a) return this.refuse("not_a_door");
     const q = req.path.indexOf("?");
     const path = q < 0 ? req.path : req.path.slice(0, q);
     const query = q < 0 ? "" : req.path.slice(q + 1);
     // A path is a door only when it is written exactly so.
     if (path.includes("..") || path.includes("//") || path.includes("%") || path.endsWith("/"))
-      return refusal("not_a_door");
+      return this.refuse("not_a_door");
     const jobs = MACHINE_JOBS.exec(path);
     let door: "relay" | "machines" | "jobs" | "send" | "device";
     if (req.method === "GET" && path === RELAY) door = "relay";
@@ -656,7 +691,7 @@ export class HubStandIn {
     else if (req.method === "GET" && path === `${RELAY}/jobs`) door = "jobs";
     else if (req.method === "POST" && jobs && !BOX.test(jobs[1]!)) door = "send";
     else if (req.method === "GET" && path === "/api/gui/device") door = "device";
-    else return refusal("not_a_door");
+    else return this.refuse("not_a_door");
 
     // The query: plain digits, each parameter once, only those the door takes.
     const allowed: Record<string, [number, number]> =
@@ -670,37 +705,39 @@ export class HubStandIn {
       const [k, v, ...rest] = part.split("=");
       const range = k ? allowed[k] : undefined;
       if (!k || v === undefined || rest.length || !range || !DIGITS.test(v) || params.some(([n]) => n === k))
-        return refusal("bad_query");
+        return this.refuse("bad_query");
       const n = Number(v);
-      if (!Number.isSafeInteger(n) || n < range[0] || n > range[1]) return refusal("bad_query");
+      if (!Number.isSafeInteger(n) || n < range[0] || n > range[1]) return this.refuse("bad_query");
       params.push([k, v]);
     }
 
     // The body: none on a GET; on a send, a signed command within the limit.
     if (door !== "send") {
-      if (req.body) return refusal("bad_body");
+      if (req.body) return this.refuse("bad_body");
     } else {
       const raw = req.body ?? "";
-      if (Buffer.byteLength(raw) > 256 * 1024) return refusal("too_large");
+      if (Buffer.byteLength(raw) > 256 * 1024) return this.refuse("too_large");
       let o: unknown;
       try {
         o = JSON.parse(raw);
       } catch {
-        return refusal("bad_body");
+        return this.refuse("bad_body");
       }
-      if (!o || typeof o !== "object" || Array.isArray(o)) return refusal("bad_body");
-      if (!isSignedCommand(o as Record<string, unknown>)) return refusal("not_signed");
+      if (!o || typeof o !== "object" || Array.isArray(o)) return this.refuse("bad_body");
+      if (!isSignedCommand(o as Record<string, unknown>)) return this.refuse("not_signed");
     }
-    if (!a.key) return refusal("not_connected");
-    if (door === "device" && !a.deviceKeyId) return refusal("no_device_key");
+    if (!a.key) return this.refuse("not_connected");
+    if (door === "device" && !a.deviceKeyId) return this.refuse("no_device_key");
 
     // The account's room: six of the page's requests in flight, of which two relay reads.
     if (this.busy > 0) {
       this.busy--;
-      return refusal("busy");
+      return this.refuse("busy");
     }
-    if (this.inFlight >= 6 || (door === "relay" && this.relayReads >= 2)) return refusal("busy");
-    if (this.down) return refusal("unreachable");
+    if (this.inFlight >= 6 || (door === "relay" && this.relayReads >= 2)) return this.refuse("busy");
+    // No connection: of a send nothing left the phone (`not_sent`); a read is `unreachable`.
+    if (this.down) return this.refuse(door === "send" ? "not_sent" : "unreachable");
+    if (this.stopped) return this.refuse("unreachable");
     this.inFlight++;
     if (door === "relay") this.relayReads++;
     let res: FakeAnswer;
@@ -715,18 +752,20 @@ export class HubStandIn {
         signal: req.signal,
       });
     } catch {
-      return refusal("unreachable");
+      return this.refuse("unreachable");
     } finally {
       this.inFlight--;
       if (door === "relay") this.relayReads--;
     }
     if (door === "send" && this.unheard > 0) {
       this.unheard--;
-      return refusal("timeout");
+      return this.refuse("timeout");
     }
-    if (res.status >= 300 && res.status < 400) return refusal("redirected");
-    if (Buffer.byteLength(res.body) > (door === "relay" ? this.relayMax : MIB)) return refusal("answer_too_large");
-    if (res.body.includes(a.key)) return refusal("withheld");
+    // A redirect is not followed. Whoever redirected a send had the command: `unreachable`,
+    // which the page reads as unknown; `redirected` is said of a read only.
+    if (res.status >= 300 && res.status < 400) return this.refuse(door === "send" ? "unreachable" : "redirected");
+    if (Buffer.byteLength(res.body) > (door === "relay" ? this.relayMax : MIB)) return this.refuse("answer_too_large");
+    if (res.body.includes(a.key)) return this.refuse("withheld");
     // spacesheep's own 401 marks the account (on a send only its `unauthorized`); a 2xx clears it.
     if (res.status === 401) {
       let code = "";
