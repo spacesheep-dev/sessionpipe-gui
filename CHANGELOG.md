@@ -6,28 +6,39 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-16
+
 ### Added
 
-- **The iPhone app's own screens for a spacesheep account.** Not in a release yet (they wait
-  for the app's half, as the entry below). The first run offers "Use a spacesheep account"
-  under the ways to a computer: a number to compare, a page in Safari to confirm on, and
-  the board, with each way it can go wrong said with what to do next. Settings › App
+- **The iPhone app's own screens for a spacesheep account.** The first run offers "Use a
+  spacesheep account" under the ways to a computer: a number to compare, a page in Safari
+  to confirm on, and the board, with each way it can go wrong said with what to do next.
+  Settings › App
   shows whose account it is, where, since when and how it stands, connects again when its
   key was refused, and disconnects, saying first what that removes. "Approve this iPhone"
   lets the phone send: it asks spacesheep, shows the number to type on its Devices page,
   waits, and says from when the phone can send (a newly approved device waits an hour).
   A phone that cannot sign yet says so in one line and leads to the session on spacesheep.
-- **The app's page can show a spacesheep account with no GUI server behind it.** Not in a
-  release yet: it waits for the app's half (the account's key and its doors) and for the
-  screens that connect one. With them, the phone keeps its own board from the account,
-  shows it again at the next launch before anything is read, and sends through spacesheep
-  as the desktop app does. A message whose answer is lost on the way back is never called
-  not sent: the phone says it may have been sent, holds that session's next send, asks
-  again by itself, and then says which it was. A session the account forgets leaves the
-  phone too.
+- **The app's page can show a spacesheep account with no GUI server behind it.** With the
+  app's half (the account's key and its doors) and the screens that connect one (the entry
+  above), the phone keeps its own board from the account, shows it again at the next launch
+  before anything is read, and sends through spacesheep as the desktop app does. A message
+  whose answer is lost on the way back is never called not sent: the phone says it may have
+  been sent, holds that session's next send, asks again by itself, and then says which it
+  was. A session the account forgets leaves the phone too.
   Disconnecting removes the account from the phone: its key, its sessions, labels and read
   marks, drafts and recent searches; the key itself keeps working until it is revoked on
   spacesheep. Nothing changes for a browser, the desktop app, or the phone on a receiver.
+- **The iPhone app's own half of a spacesheep account.** The account's key is kept in the
+  iPhone's keychain, on this device only, and never reaches the page: the app itself asks
+  spacesheep for the number to compare, opens Safari, and keeps a key only after its own
+  alert names the account and is answered. It carries five requests for the page and
+  nothing else: the relay, its machines and jobs, a signed command to a computer, and this
+  phone's own key. A command is signed with Face ID by the phone's key in the Secure
+  Enclave, for the account's own host only. A send is called not sent only when nothing of
+  it left the phone. A session that needs you posts a notification while the app is still
+  awake in the background. Not on Android yet, and not in the desktop app, which reaches an
+  account through its own server.
 
 ### Fixed
 
@@ -115,7 +126,7 @@ All notable changes to `sessionpipe-gui`. The format follows
   it, which is not known. A handoff's card no longer says "not sent" of a send whose end is
   not known: it says what is known ("no word · rc-mac took it and said nothing more", or
   that it is not followed).
-- **Words, plain** (for approval): a start called off before it began reads "Cancelled before
+- **Words, plain**: a start called off before it began reads "Cancelled before
   rc-mac started it." and a message sent to it "Cancelled with its session, before rc-mac got
   it."; a refusal with no specific reason "rc-mac refused it." plus the receiver's reason when
   there is one, never "refused: refused"; a file for a computer reached through spacesheep
@@ -1164,7 +1175,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.5...v0.8.0
 [0.7.5]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.4...v0.7.5
