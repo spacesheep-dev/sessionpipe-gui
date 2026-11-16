@@ -133,9 +133,25 @@ is in its own repository.
 
 ## The phone on an account
 
-Not shipped: the native half is built (`apps/crates/sp-receivers`: `account.rs`,
-`hub/acct.rs`, `docs.rs`, `keychain.rs`; `apps/mobile/src-tauri/src/acct.rs`), the page's
-half is not. Until a page uses it, nothing a person sees changes.
+Both halves are built. The native half is `apps/crates/sp-receivers` (`account.rs`,
+`hub/acct.rs`, `docs.rs`, `keychain.rs`) and `apps/mobile/src-tauri/src/acct.rs`. The
+page's half is `web/src/account/` (the board's own backend over the doors: `backend.ts`,
+`doors.ts`, `unheard.ts`; this phone's key: `device.ts`, `approve.ts`; the account in
+Settings and "Approve this iPhone") and `web/src/native/` (`ConnectAccount.tsx`,
+`accountConnect.ts`: the first run's connect). `test/account/hub.ts` plays the native half
+for the page's tests, written from this section.
+
+What a person sees, on an iPhone (the only build whose contract lists `"account"`): the
+first run offers "Use a spacesheep account" under the ways to a computer. It shows a
+number to compare, hands off to Safari to confirm on spacesheep, and, once the app's own
+question is answered (below), opens the board: the account's sessions as spacesheep
+relays them, with no computer to reach. Settings › App shows whose account it is and how
+it stands, connects again when its key was refused, and disconnects. To send, the phone's
+own key must be trusted: "Approve this iPhone" asks spacesheep, shows the number to type
+on its Devices page, and says from when the phone can send (spacesheep makes a newly
+approved device wait an hour). Until then a composer says so in one line and leads to the
+session on spacesheep. Nothing changes for a browser, the desktop app, or a phone on a
+receiver.
 
 Everything above needs a GUI server. A phone has none: the app is the bundled page and a
 Rust hub. In this mode the page carries its own board, fed by the account's relay, and
@@ -319,7 +335,10 @@ stream, so its page, which works the board out from the relay, hands the list ov
 `acct_needs({ id, sessions })`, where `sessions` is every session of the account's
 board whose `state` is `"needs_you"`, each a cut of its summary: `{ key, harness, id,
 title?, machine?, cwd?, state, stateSince, openAttentions: [{ attentionId, kind, tool?,
-message?, at, answerable }] }` (other fields are not read). The page calls it once
+message?, at, answerable }] }` (other fields are not read). A board that needs more
+than one list may hold (the bounds below) is handed cut to them, so that it is taken and
+not refused whole: the first 200 such sessions, sixteen attentions of each, 200
+attentions in all, a message 300 characters. The page calls it once
 after its first board, then whenever the list changed, and with an empty list when the
 last one clears; it calls it only where the contract lists `"account-needs"`. The hub
 applies the list as it applies a stream's `snapshot` (what is no longer in it closed)
@@ -466,7 +485,9 @@ spacesheep's own, and says for itself what became of the command.
 ### The documents
 
 For what nothing upstream holds in this mode: the person's labels and read marks, the
-sends not yet settled. Whole JSON values in `<home>/accounts/<id>/<name>.json`, owner-only.
+usage limits the account's machines last reported, the sends not yet settled (the page
+keeps four: `labels`, `marks`, `limits`, `sends`). Whole JSON values in
+`<home>/accounts/<id>/<name>.json`, owner-only.
 A name is a lowercase letter, then up to 31 letters, digits or dashes. A document is at
 most 1 MiB as written; an account has at most eight. The last write wins. They are the
 account's (another id reads none of them), they outlive a refused key, and they go with
@@ -477,8 +498,9 @@ of the relay.
 They are ordinary files in the app's container, and so, unlike the key, they ARE in a
 backup of the phone (iCloud or a computer's), with `receivers.json` (which holds the
 account's email) beside them: nothing excludes them today. What that is: labels, read
-marks, and the sends not yet settled, each with the text of its prompt and its signed
-bytes. A signed command restored from a backup makes no job: spacesheep takes a nonce
+marks, the usage limits, and the sends not yet settled, each with the text of its prompt
+and its signed bytes. A signed command restored from a backup makes no job: spacesheep
+takes a nonce
 once, a command is refused once its signing time is old, and the grant behind it lasts
 a day. Excluding `accounts/` from backup is a later change, to be made with a phone in
 hand to see that it holds.
