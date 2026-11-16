@@ -761,11 +761,42 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     b.hub.alert = () => null;
     await group.locator("[data-disconnect]").click();
     await expect(group.getByRole("alert")).toHaveText("The question could not be shown. Try again.");
-    // Yes.
+    // Yes. The account's view turns to "gone" a moment before the window is replaced, and
+    // the group is drawn once more in between: as nothing, with the rest of Settings still
+    // there, and without a throw that takes the whole page down. The reload is held back
+    // so that the old page lives long enough to draw it; what it drew is told from inside
+    // (a page whose navigation is held answers no question from here).
+    const thrown: string[] = [];
+    const drawn: string[] = [];
+    const onError = (e: Error) => thrown.push(e.message);
+    const onConsole = (m: { text(): string }) => {
+      if (m.text().startsWith("group gone:")) drawn.push(m.text());
+    };
+    page.on("pageerror", onError);
+    page.on("console", onConsole);
+    await page.evaluate(() => {
+      new MutationObserver((_, o) => {
+        if (document.querySelector("[data-account-settings]")) return;
+        o.disconnect();
+        console.log(`group gone: the pane is ${document.querySelector(".settings-pane") ? "drawn" : "not drawn"}`);
+      }).observe(document.body, { childList: true, subtree: true });
+    });
+    await page.route(
+      (url) => url.pathname === "/",
+      async (route) => {
+        await new Promise((r) => setTimeout(r, 1500));
+        await route.continue();
+      },
+      { times: 1 },
+    );
     b.hub.alert = () => true;
     await group.locator("[data-disconnect]").click();
     const gone = step(page, "account-disconnected");
-    await expect(gone).toBeVisible();
+    await expect(gone).toBeVisible({ timeout: 15_000 });
+    expect(thrown).toEqual([]);
+    expect(drawn).toEqual(["group gone: the pane is drawn"]);
+    page.off("pageerror", onError);
+    page.off("console", onConsole);
     await expect(page.getByText("Disconnected")).toBeVisible();
     await expect(
       page.getByText(

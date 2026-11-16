@@ -46,6 +46,10 @@ export default function AccountSettings() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  // Every hook stands above the return below: the view turns to "gone" while this group is
+  // on the screen (a disconnect answered yes, an account removed elsewhere), and a render
+  // that ran fewer hooks than the one before would throw and take the page with it.
+  const asking = useRef(false);
   useEffect(() => {
     let on = true;
     apiFetch(ROUTES.ui.spacesheep, { headers: { accept: "application/json" } })
@@ -60,7 +64,6 @@ export default function AccountSettings() {
   const host = new URL(v.origin).host;
   const st = accountState(v);
   const key = phoneLine(phone.view);
-  const asking = useRef(false);
   const disconnect = async () => {
     // One question at a time: a second tap while the app's alert is up asks nothing.
     if (asking.current) return;
