@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
 import type { ConnectView } from "../account/shell";
-import { alreadyHere, type ConnectStep, connectStep, refusedWhy, spaced } from "./accountConnect";
+import { alreadyHere, type ConnectStep, connectStep, refusedWhy, spaced, tryAt, WAIT_SOON_MS } from "./accountConnect";
 
 const HOST = "spacesheep.dev";
 const connect = (state: ConnectView["state"], more: Partial<ConnectView> = {}): ConnectView => ({
@@ -185,7 +185,15 @@ describe("connecting an account: the steps", () => {
       host: HOST,
       at: now + 1_200_000,
     });
-    expect(refused({ code: "rate_limited", message: "x" })).toEqual({ kind: "ended", why: "wait", host: HOST });
+    // A wait that names no time: none is said (`at`), and the try is offered a few minutes on.
+    const soon = refused({ code: "rate_limited", message: "x" });
+    expect(soon).toEqual({ kind: "ended", why: "wait", host: HOST, soonAt: now + WAIT_SOON_MS });
+    expect(tryAt(soon)).toBe(now + WAIT_SOON_MS);
+    expect(tryAt(refused({ code: "rate_limited", message: "x", retryAfterS: 0 }))).toBe(now + WAIT_SOON_MS);
+    expect(tryAt(refused({ code: "too_many_starts", message: "x", retryAfterS: 1200 }))).toBe(now + 1_200_000);
+    // No other end waits: its try is there at once.
+    expect(tryAt(refused({ code: "unreachable", message: "x" }))).toBeNull();
+    expect(tryAt({ kind: "intro" })).toBeNull();
     expect(refused({ code: "busy", message: "x" })).toMatchObject({ why: "busy" });
     expect(refused({ code: "not_asked", message: "x" })).toMatchObject({ why: "busy" });
     for (const code of ["refused", "bad_answer", "unsupported", "bad_origin", "forbidden"])

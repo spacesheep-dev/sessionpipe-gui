@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { endedWords } from "../account/screenWords";
 import { type ConnectCalls, connectView, hubError, tauriConnect } from "../account/shell";
-import { alreadyHere, type ConnectStep, connectStep, DEFAULT_ORIGIN, hostOf, spaced } from "./accountConnect";
+import { alreadyHere, type ConnectStep, connectStep, DEFAULT_ORIGIN, hostOf, spaced, tryAt } from "./accountConnect";
 import { NEW_WORDS as N, REUSED as R, ThisPhone, thisPhone } from "./accountWords";
 import { invoke } from "./bridge";
 import { Primary, Quiet, Screen, Secondary } from "./OnbParts";
@@ -195,8 +195,9 @@ export function ConnectAccount({
     }
   };
 
-  // A wait that names a time offers the try when that time has come.
-  const waitUntil = s.kind === "ended" && s.why === "wait" ? (s.at ?? null) : null;
+  // A wait offers the try when its time has come: the time it names, or a few minutes on
+  // where it names none (a wait with no way on but Back would be a dead end).
+  const waitUntil = tryAt(s);
   const [due, setDue] = useState(false);
   useEffect(() => {
     setDue(false);

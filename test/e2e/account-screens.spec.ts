@@ -514,6 +514,42 @@ test.describe("each way a connect can end, with what to do next", () => {
   });
 });
 
+test("a wait that names no time offers its try a few minutes on, and one that names a time when it has come", async ({
+  browser,
+}) => {
+  const b = await bed(browser);
+  try {
+    // The page's clock is this test's to move: nobody waits three minutes here.
+    await b.page.clock.install();
+    await b.page.goto(b.server.url);
+    await button(b.page, "Use a spacesheep account").click();
+    // spacesheep asked the app to wait and named no time (no Retry-After).
+    b.hub.startRefusal = new HubRefused("rate_limited", "spacesheep asked to wait a bit. Try again in a minute.");
+    await button(b.page, "Continue").click();
+    await expect(b.page.locator(".onb[data-step='account-ended'][data-why='wait']")).toBeVisible();
+    await expect(b.page.getByText("Try again in a few minutes.")).toBeVisible();
+    await expect(button(b.page, "Try again")).toHaveCount(0);
+    await b.page.clock.fastForward(170_000);
+    await expect(button(b.page, "Try again")).toHaveCount(0);
+    // A few minutes on the try is there: the screen is not a dead end with only Back.
+    await b.page.clock.fastForward(15_000);
+    await expect(button(b.page, "Try again")).toBeVisible();
+    // Tried, and refused with a time: no button until that time, then the button.
+    b.hub.startRefusal = new HubRefused("too_many_starts", "Too many tries. Wait a while, then connect again.", {
+      retryAfterS: 600,
+    });
+    await button(b.page, "Try again").click();
+    await expect(b.page.getByText(/^Try again at \d{1,2}:\d{2}( [AP]M)?/)).toBeVisible();
+    await expect(button(b.page, "Try again")).toHaveCount(0);
+    await b.page.clock.fastForward(590_000);
+    await expect(button(b.page, "Try again")).toHaveCount(0);
+    await b.page.clock.fastForward(15_000);
+    await expect(button(b.page, "Try again")).toBeVisible();
+  } finally {
+    await b.close();
+  }
+});
+
 test.describe("Settings and 'Approve this iPhone' on a connected account", () => {
   let b: Bed;
   const approve = (state: string) => b.page.locator(`[data-approve='${state}']`);

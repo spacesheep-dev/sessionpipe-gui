@@ -37,8 +37,29 @@ export type ConnectStep =
   /** The account is kept: the shell is asked to show it. */
   | { kind: "opening"; host: string; receiver: string }
   /** `digits`: the number of the connect that ended, so an older word of the same connect
-   *  (still "pending") that arrives late is known for what it is. */
-  | { kind: "ended"; why: Ended; host: string; at?: number; note?: string; revokeUrl?: string; digits?: string };
+   *  (still "pending") that arrives late is known for what it is. `at`: the time a wait
+   *  names, which the screen says. `soonAt`: for a wait that names none, when the screen
+   *  offers the try by itself; it is said as no time. */
+  | {
+      kind: "ended";
+      why: Ended;
+      host: string;
+      at?: number;
+      soonAt?: number;
+      note?: string;
+      revokeUrl?: string;
+      digits?: string;
+    };
+
+/** A wait that names no time ("Try again in a few minutes.") offers its try this long after
+ *  it was said. Not at once: a start that is refused again still counts among the hub's
+ *  three an hour. */
+export const WAIT_SOON_MS = 180_000;
+
+/** When a wait's "Try again" is offered: at the time it names, or a few minutes after one
+ *  that names none. Null for a step that is no wait (its try, if it has one, is there at once). */
+export const tryAt = (s: ConnectStep): number | null =>
+  s.kind === "ended" && s.why === "wait" ? (s.at ?? s.soonAt ?? null) : null;
 
 export type ConnectEvent =
   /** Continue on the intro; Try again where a connect ended. */
@@ -113,7 +134,7 @@ export function connectStep(prev: ConnectStep, ev: ConnectEvent, host: string): 
         kind: "ended",
         why,
         host: prev.kind === "opening" ? prev.host : host,
-        ...(why === "wait" && wait && wait > 0 ? { at: ev.now + wait * 1000 } : {}),
+        ...(why !== "wait" ? {} : wait && wait > 0 ? { at: ev.now + wait * 1000 } : { soonAt: ev.now + WAIT_SOON_MS }),
       };
     }
     case "connect": {
