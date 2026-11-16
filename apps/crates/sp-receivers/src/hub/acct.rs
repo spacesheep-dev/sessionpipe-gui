@@ -221,12 +221,18 @@ impl Accounts {
     /// asks a send again itself, with the same signed bytes, and reads are asked again
     /// by their reader.
     fn client_builder(cfg: &HubConfig) -> reqwest::ClientBuilder {
-        reqwest::Client::builder()
+        let b = reqwest::Client::builder()
             .user_agent(cfg.user_agent.clone())
             .connect_timeout(Duration::from_secs(5))
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
-            .https_only(!cfg.account.allow_local_http)
+            .https_only(!cfg.account.allow_local_http);
+        // A test never reaches the real spacesheep.dev: there the name is a port on
+        // this machine where nothing listens, which is also what a phone with no signal
+        // meets (no connection can be made).
+        #[cfg(test)]
+        let b = b.resolve("spacesheep.dev", ([127, 0, 0, 1], 1).into());
+        b
     }
 }
 
@@ -322,6 +328,16 @@ impl Drop for Asking<'_> {
     fn drop(&mut self) {
         self.0.store(false, Ordering::SeqCst);
     }
+}
+
+/// Did this request never leave the device? True only of a failure to make a connection
+/// at all (no network, no name, no handshake), which is raised before a connection is
+/// handed to a request; and the Hub's client makes one try of each request
+/// (`Accounts::client_builder`), so it is that try's. Everything that says "nothing was
+/// sent" rests on this one test: `not_sent` on the send door, and a start or an ask that
+/// is not counted against the few an hour.
+fn never_left(e: &reqwest::Error) -> bool {
+    e.is_connect()
 }
 
 /// `Authorization: Bearer …`, marked sensitive so no debug print of a request shows it.
@@ -851,7 +867,9 @@ impl Hub {
                 // that timed out being made sent nothing either. Any other failure of a
                 // send, and every failure of the time limit as a whole, leaves it unknown
                 // whether spacesheep took the command.
-                let r = if door == Door::MachineJobs && e.is_connect() {
+                // The Hub's own request to trust this device's key is told the same way
+                // (`account_device_ask` does not count a try that never left).
+                let r = if matches!(door, Door::MachineJobs | Door::DeviceAsk) && never_left(&e) {
                     Refused::NotSent
                 } else if e.is_timeout() {
                     Refused::Timeout
@@ -1033,7 +1051,7 @@ impl Hub {
                 return Ok(asked.clone());
             }
         }
-        self.account_count(Counted::DeviceAsk)?;
+        let counted = self.account_count(Counted::DeviceAsk)?;
         let body = serde_json::json!({ "key": key, "name": self.account_cfg().device })
             .to_string()
             .into_bytes();
@@ -1043,7 +1061,18 @@ impl Hub {
         let a = self
             .account_send(&rx, opened, body, true)
             .await
-            .map_err(|r| Problem::new(r.code(), r.words(self.here())))?;
+            .map_err(|r| {
+                // No connection could be made: spacesheep never heard of this ask, so it
+                // is not one of the few an hour. To the page it is what it always was,
+                // `unreachable` (`not_sent` is the send door's word alone).
+                let r = if r == Refused::NotSent {
+                    self.account_uncount(Counted::DeviceAsk, counted);
+                    Refused::Unreachable
+                } else {
+                    r
+                };
+                Problem::new(r.code(), r.words(self.here()))
+            })?;
         let v: serde_json::Value = serde_json::from_slice(&a.body).unwrap_or_default();
         let said = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("");
         if !(200..300).contains(&a.status) {
@@ -1119,8 +1148,9 @@ impl Hub {
 
     /// May another connect start, or this device's key be asked about again, now? Counted
     /// here before anything is asked or sent, by the wall clock, and written down so a
-    /// restart of the app does not start the count again.
-    fn account_count(&self, what: Counted) -> Result<(), Problem> {
+    /// restart of the app does not start the count again. The answer is the time it was
+    /// counted at, by which `account_uncount` takes it back.
+    fn account_count(&self, what: Counted) -> Result<u64, Problem> {
         let acct = &self.0.acct;
         let mut counts = acct.counts.lock().unwrap();
         let now = now_ms();
@@ -1156,7 +1186,31 @@ impl Hub {
         if let Err(e) = crate::registry::write_atomic(&acct.counts_path, &bytes) {
             log::warn!("acct: the limits could not be written: {e}");
         }
-        Ok(())
+        Ok(now)
+    }
+
+    /// Takes back the one try counted at `at`: it never left this device. The limits
+    /// are there so that this app does not spend what spacesheep allows an address or
+    /// an account, and a request for which no connection could be made spent none of
+    /// it; counting it only locks out, for up to an hour, a person whose phone had no
+    /// signal when they tried. Only ever called on the certainty `not_sent` rests on: a
+    /// connect error of the one try there is (the client sends nothing twice). A try
+    /// that may have reached spacesheep stays counted.
+    fn account_uncount(&self, what: Counted, at: u64) {
+        let acct = &self.0.acct;
+        let mut counts = acct.counts.lock().unwrap();
+        let times = match what {
+            Counted::Start => &mut counts.starts,
+            Counted::DeviceAsk => &mut counts.device_asks,
+        };
+        let Some(i) = times.iter().rposition(|t| *t == at) else {
+            return;
+        };
+        times.remove(i);
+        let bytes = serde_json::to_vec(&*counts).expect("json");
+        if let Err(e) = crate::registry::write_atomic(&acct.counts_path, &bytes) {
+            log::warn!("acct: the limits could not be written: {e}");
+        }
     }
 
     /// Asks spacesheep for a connect code and starts polling for the person's answer.
@@ -1218,11 +1272,12 @@ impl Hub {
                 ));
             }
         }
-        self.account_count(Counted::Start)?;
+        let counted = self.account_count(Counted::Start)?;
         let host = account::host_of(&origin);
         // spacesheep.dev confirms a connect on its own page. Another origin's confirm page
         // is that server's, which could say yes to itself: the person says so here first.
-        if origin != account::DEFAULT_ORIGIN {
+        let questioned = origin != account::DEFAULT_ORIGIN;
+        if questioned {
             let q = Question::Origin {
                 origin: origin.clone(),
                 host: host.clone(),
@@ -1247,6 +1302,15 @@ impl Hub {
             .send()
             .await
             .map_err(|e| {
+                // No connection could be made (no signal, no name, no handshake): the
+                // start never left this device and is not one of the few an hour, or
+                // three tries in a tunnel would lock connecting for the hour. Unless the
+                // person was put a question for it: the count is also what keeps a page
+                // from putting that question again and again, whatever becomes of the
+                // start. Any other failure may have reached spacesheep, and stays.
+                if never_left(&e) && !questioned {
+                    self.account_uncount(Counted::Start, counted);
+                }
                 Problem::new(
                     "unreachable",
                     format!("Couldn't reach {host}: {}", describe(e)),

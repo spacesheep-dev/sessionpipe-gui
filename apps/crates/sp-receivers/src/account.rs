@@ -362,8 +362,10 @@ pub enum Refused {
     /// Too many of the page's requests in flight for this account.
     Busy,
     /// A send that never left this device: no connection to spacesheep was made, so
-    /// nothing of the command was sent. Said on the send door alone, and apart from
-    /// `Unreachable`, after which nobody knows whether spacesheep took the command.
+    /// nothing of the command was sent. Said to the page on the send door alone, and
+    /// apart from `Unreachable`, after which nobody knows whether spacesheep took the
+    /// command. (The Hub's own request to trust this device's key learns the same of
+    /// itself by it, and tells the page `unreachable`.)
     NotSent,
     /// spacesheep could not be reached, or its answer stopped on the way.
     Unreachable,

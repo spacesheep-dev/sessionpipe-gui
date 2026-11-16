@@ -813,6 +813,212 @@ async fn a_connect_cancelled_stops_asking_and_keeps_nothing() {
     fake.absent(&logged().join("\n"), "a log line");
 }
 
+/// What the limits file holds: (starts, device asks).
+fn counted(home: &Path) -> (usize, usize) {
+    let v: Value = std::fs::read(home.join(COUNTS_FILE))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    let n = |k: &str| v[k].as_array().map_or(0, Vec::len);
+    (n("starts"), n("device_asks"))
+}
+
+/// An address on this machine where nothing listens: no connection can be made to it.
+fn nowhere() -> String {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    format!("http://127.0.0.1:{}", l.local_addr().unwrap().port())
+}
+
+/// A server that takes a connection, reads what is sent, and hangs up without a word:
+/// its origin, and how many requests it took. The request left the phone and reached
+/// it; nobody knows what it made of it.
+async fn hanging_up() -> (String, Arc<AtomicUsize>) {
+    use tokio::io::AsyncReadExt;
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://127.0.0.1:{}", l.local_addr().unwrap().port());
+    let took = Arc::new(AtomicUsize::new(0));
+    let n = took.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut s, _)) = l.accept().await else {
+                return;
+            };
+            let mut buf = [0u8; 4096];
+            let _ = s.read(&mut buf).await;
+            n.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+    (origin, took)
+}
+
+/// An account at `origin` with a key, put into `h`'s list as a connect would; its id.
+fn account_at(h: &Hub, origin: &str, tag: &str) -> String {
+    let rx = Receiver::account(origin, "nobody@example.com", &iso_now()).unwrap();
+    h.account_keys()
+        .set(
+            &account_key_name(&rx.id),
+            &account::kept_key(origin, &format!("ss_KEY-{tag}-0123456789abcdef")),
+        )
+        .unwrap();
+    h.0.registry.lock().unwrap().upsert(rx.clone()).unwrap();
+    rx.id
+}
+
+/// A phone with no signal: a start for which no connection could be made never left
+/// it, spent nothing of what spacesheep allows, and is not one of the three an hour.
+/// (It used to be: three tries in a tunnel, and connecting was locked for the hour
+/// with spacesheep never reached.) A start that may have reached spacesheep counts,
+/// and so does one the person was put a question for.
+#[tokio::test]
+async fn a_start_that_never_left_the_phone_is_not_one_of_the_few() {
+    let t = TempDir::new("acct-starts-offline");
+    let person = Script::saying(true);
+    let h = hub_asking(t.path(), true, true, Some(person.clone()));
+    h.0.acct.start_limit.store(2, Ordering::Relaxed);
+    // spacesheep.dev, which in a test is a port where nothing listens.
+    for round in 0..5 {
+        let e = h.account_connect_start(None).await.unwrap_err();
+        assert_eq!(e.code, "unreachable", "try {round}: {}", e.message);
+        assert!(e.message.starts_with("Couldn't reach spacesheep.dev: "));
+        assert_eq!(e.retry_after_s, None);
+        assert_eq!(counted(t.path()), (0, 0), "try {round}");
+    }
+    assert!(
+        person.asked().is_empty(),
+        "spacesheep.dev needs no question"
+    );
+    assert_eq!(h.account_status().connect, None);
+    // Written down so: the app closed and opened again starts with nothing counted.
+    let again = hub_asking(t.path(), true, true, Some(person.clone()));
+    again.0.acct.start_limit.store(2, Ordering::Relaxed);
+    assert_eq!(
+        again.account_connect_start(None).await.unwrap_err().code,
+        "unreachable"
+    );
+
+    // A start that reached spacesheep counts, whatever came of it: a connection was
+    // made and the request went out, though the answer never came whole.
+    let fake = Fake::start("starts-offline").await;
+    fake.hook(|s| {
+        (s.target() == "/api/gui/connect").then(|| {
+            Reply::json(201, r#"{"code":"#)
+                .no_length()
+                .header("content-length", "64")
+        })
+    });
+    let t2 = TempDir::new("acct-starts-cut");
+    let h2 = hub_asking(t2.path(), true, true, Some(Script::saying(true)));
+    h2.0.acct.start_limit.store(2, Ordering::Relaxed);
+    for _ in 0..2 {
+        let e = h2
+            .account_connect_start(Some(&fake.origin()))
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, "bad_answer", "{}", e.message);
+    }
+    assert_eq!(counted(t2.path()), (2, 0));
+    assert_eq!(
+        h2.account_connect_start(Some(&fake.origin()))
+            .await
+            .unwrap_err()
+            .code,
+        "too_many_starts"
+    );
+    assert_eq!(fake.starts(), 2);
+
+    // A start the person was asked about counts even when no connection could then be
+    // made: the count is also what keeps a page from putting that question to them
+    // again and again.
+    let t3 = TempDir::new("acct-starts-asked");
+    let asked = Script::saying(true);
+    let h3 = hub_asking(t3.path(), true, true, Some(asked.clone()));
+    h3.0.acct.start_limit.store(2, Ordering::Relaxed);
+    let dead = nowhere();
+    for _ in 0..2 {
+        let e = h3.account_connect_start(Some(&dead)).await.unwrap_err();
+        assert_eq!(e.code, "unreachable");
+    }
+    assert_eq!(counted(t3.path()), (2, 0));
+    assert_eq!(
+        h3.account_connect_start(Some(&dead))
+            .await
+            .unwrap_err()
+            .code,
+        "too_many_starts"
+    );
+    assert_eq!(asked.asked().len(), 2, "two questions, and no third");
+}
+
+/// The same for the request to trust this phone's key: one for which no connection
+/// could be made is not one of the five an hour, and is `unreachable` to the page as it
+/// always was. One that reached spacesheep is counted.
+#[tokio::test]
+async fn an_ask_that_never_left_the_phone_is_not_one_of_the_few() {
+    let t = TempDir::new("acct-asks-offline");
+    let fake = Fake::start("asks-offline").await;
+    let h = hub_in(t.path());
+    let id = connected(&h, &fake).await;
+    h.0.acct.device_ask_limit.store(2, Ordering::Relaxed);
+    let key = device_key('K');
+    // An account whose spacesheep cannot be connected to.
+    let offline = account_at(&h, &nowhere(), "asks-offline-dead");
+    for round in 0..5 {
+        let e = h.account_device_ask(&offline, &key).await.unwrap_err();
+        assert_eq!(
+            (e.code, e.message.as_str()),
+            ("unreachable", "spacesheep could not be reached."),
+            "try {round}"
+        );
+        assert_eq!(counted(t.path()).1, 0, "try {round}");
+    }
+    assert_eq!(account(&h, &offline).unwrap().device_key_id, None);
+    // Connected to, sent, and hung up on: the ask left the phone, so it is counted. And
+    // a send to the same place is not `not_sent`: nobody knows what was made of it.
+    let (origin, took) = hanging_up().await;
+    let hung = account_at(&h, &origin, "asks-hung-up");
+    let e = h.account_device_ask(&hung, &key).await.unwrap_err();
+    assert_eq!(e.code, "unreachable");
+    assert_eq!((took.load(Ordering::SeqCst), counted(t.path()).1), (1, 1));
+    let res = ask(
+        &h,
+        "POST",
+        &hung,
+        &format!("/api/machines/{MACHINE}/jobs"),
+        SEND,
+    )
+    .await;
+    assert_eq!(said(&res), (502, Some("unreachable")), "{}", dump(&res));
+    assert_eq!(took.load(Ordering::SeqCst), 2);
+    tokio::time::sleep(Duration::from_millis(DEVICE_ASK_WINDOW_MS + 100)).await;
+    // Reached, and the answer stopped on its way: nobody knows what spacesheep made of
+    // it, so it is counted.
+    let rest = fake.asked("/api/gui/device").len();
+    fake.hook(|s| {
+        (s.target() == "/api/gui/device").then(|| {
+            Reply::json(200, r#"{"key_id":"#)
+                .no_length()
+                .header("content-length", "64")
+        })
+    });
+    for _ in 0..2 {
+        let e = h.account_device_ask(&id, &key).await.unwrap_err();
+        assert_eq!(e.code, "unreachable");
+    }
+    assert_eq!(counted(t.path()).1, 2);
+    assert_eq!(
+        h.account_device_ask(&id, &key).await.unwrap_err().code,
+        "too_many_asks"
+    );
+    // The limit is the app's, not an account's: it stands for the other one too, and
+    // nothing more was sent anywhere.
+    assert_eq!(
+        h.account_device_ask(&offline, &key).await.unwrap_err().code,
+        "too_many_asks"
+    );
+    assert_eq!(fake.asked("/api/gui/device").len(), rest + 2);
+    assert!(!logged().join("\n").contains("ss_KEY-asks-"));
+}
+
 /// The page left the screen that waits for a number while the Hub was still asking
 /// spacesheep for one: the start ends `cancelled`, and no connect is left polling for
 /// an answer nobody is waiting for.
