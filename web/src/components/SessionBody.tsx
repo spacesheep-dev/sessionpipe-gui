@@ -22,6 +22,7 @@
 // it has the view's options.
 import type {
   AgentRun,
+  Attention,
   ControlActivity,
   Delegation,
   MachineControl,
@@ -51,7 +52,7 @@ import {
 import { forkOf } from "../control/Activity";
 import { PromptBody, promptParts } from "../control/Attachments";
 import { machineHome, tildify } from "../control/folders";
-import { useControlActivity } from "../control/hooks";
+import { useAnswersOut, useControlActivity } from "../control/hooks";
 import { SessionControl } from "../control/SessionControl";
 import {
   appliedFact,
@@ -148,6 +149,8 @@ const QUIET_TYPES = new Set(["turn.progress", "session.heartbeat", "limits.obser
 /** A delivered message with no turn of its own yet keeps its row this long. */
 const DELIVERED_HOLD_MS = 120_000;
 
+/** No open prompts, as one array, so what is read from them is not read again each render. */
+const NO_PROMPTS: Attention[] = [];
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -219,9 +222,12 @@ interface Timeline {
   state?: SessionState;
   /** When the session's latest event came: how long a quiet one has been quiet. */
   lastAt?: string;
-  /** The tools an open prompt is about, by their own names: such a call is asking, not
-   *  running. A prompt names no call, only its tool. */
+  /** The tools an open prompt with no answer out is about, by their own names: such a call
+   *  is asking, not running. A prompt names no call, only its tool. */
   asking: ReadonlySet<string>;
+  /** An open prompt has no answer out yet: the session asks. With every answer out, its
+   *  calls run as far as this page knows. */
+  asks: boolean;
   root: RefObject<HTMLDivElement>;
   session: () => SessionSummary | undefined;
   /** The session's subagents (its summary's). */
@@ -1072,14 +1078,19 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     return [...answerItems(rootRef.current, cur), { sep: true }, send, cancel];
   });
 
+  // A prompt whose answer is out asks no more (answers.ts, the same on every surface).
+  const prompts = s?.openAttentions ?? NO_PROMPTS;
+  const out = useAnswersOut(prompts);
+  const unanswered = useMemo(() => prompts.filter((a) => out[a.attentionId]?.status !== "sent"), [prompts, out]);
   const timeline = useMemo<Timeline>(
     () => ({
       path,
-      open: new Set((s?.openAttentions ?? []).map((a) => a.attentionId)),
+      open: new Set(prompts.map((a) => a.attentionId)),
       working: s?.state === "working",
       state: s?.state,
       lastAt: s?.lastAt,
-      asking: new Set((s?.openAttentions ?? []).flatMap((a) => (a.tool ? [a.tool] : []))),
+      asking: new Set(unanswered.flatMap((a) => (a.tool ? [a.tool] : []))),
+      asks: unanswered.length > 0,
       root: rootRef,
       session: () => sRef.current,
       agents: agentRuns ?? [],
@@ -1094,7 +1105,8 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     }),
     [
       path,
-      s?.openAttentions,
+      prompts,
+      unanswered,
       s?.state,
       s?.lastAt,
       agentRuns,
@@ -1691,7 +1703,7 @@ function TurnBlock({
   /** The pool switched accounts during this turn: one quiet row each (UX-SPEC §7.2). */
   swaps?: string[];
 }) {
-  const { machine, online, control, compose, session, working, state, agents } = useTimeline();
+  const { machine, online, control, compose, session, working, state, agents, asks } = useTimeline();
   const transcript = [...turn.items].reverse().find((i) => i.kind === "event" && i.e.type === "turn.transcript") as
     | EventItem
     | undefined;
@@ -1713,13 +1725,16 @@ function TurnBlock({
   const live = liveTurn && !words.stopped;
   // A call with no end runs only in the latest turn of a working session, as the turn's
   // own Running row and the board say. While the session waits for the person it is
-  // asking; once nothing has come for a while, quiet; any other was cut off.
+  // asking, and once every answer is out it runs; once nothing has come for a while,
+  // quiet; any other was cut off.
   const look: ToolLook | undefined = !live
     ? undefined
     : working
       ? "run"
       : state === "needs_you"
-        ? "ask"
+        ? asks
+          ? "ask"
+          : "run"
         : state === "stale"
           ? "quiet"
           : undefined;

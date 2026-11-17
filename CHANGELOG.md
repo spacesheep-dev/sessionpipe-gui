@@ -36,12 +36,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   answer, not "Running Bash".** Claude Code asks before a tool runs, yet the line spun and
   the tool's time kept counting under the Allow it waited for, twelve minutes on. A tool
   spins and counts now only while its session works. While the session asks, the line
-  reads "Asking to run" and the tool, with the needs-you dot; when nothing has come for ten
-  minutes, "Bash · quiet for 12 m", with the quiet ring; on a computer that is offline, its
-  ring stands still and it shows no time. A subagent's tools follow the subagent; a stopped
-  turn stops them, unless the subagent works on in the background. "· 2 more tools", which
-  read as tools still to come, is gone, and the words start at the same place whether a
-  tool runs or the turn is over.
+  reads "Asking to run" and the tool, with the needs-you dot, and once your answer is out,
+  "Running" again; when nothing has come for ten minutes, "Bash · quiet for 12 m", with the
+  quiet ring; on a computer that is offline, its ring stands still and it shows no time. A
+  subagent's tools follow the subagent; a stopped turn stops them, unless the subagent
+  works on in the background. "· 2 more tools", which read as tools still to come, is gone,
+  and the words start at the same place whether a tool runs or the turn is over.
 - **A question from Claude Code reads as the question, not as "Allow AskUserQuestion?".**
   Its row showed only the tool's name, and its card offered Allow and Deny, neither of
   which can carry the answer. The card now shows the question and its options to read,

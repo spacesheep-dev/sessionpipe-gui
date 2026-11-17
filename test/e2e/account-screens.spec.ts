@@ -2095,6 +2095,7 @@ test.describe("what else an account shows", () => {
       b.ss.push([
         s.ev("session.started", { source: "startup" }, on),
         s.ev("turn.started", { turn_id: "t1" }, on),
+        s.ev("tool.started", { tool: "Bash", call_id: "c1", turn_id: "t1", input: { command: "npm test" } }, on),
         s.ev(
           "attention.needed",
           { attention_id: attention, kind: "permission", tool: "Bash", message: "npm test" },
@@ -2117,11 +2118,35 @@ test.describe("what else an account shows", () => {
       await expect(badge).toHaveText("1");
       await page.goto(`${b.server.url}/s/claude-code/s-refund`);
       const card = page.locator(".ctl-answer[data-attention='perm-refund']");
+      // The call the prompt is about asks, with the needs-you glyph.
+      const call = page.locator(".turn--live li.tool .tool-status").last();
+      await expect(call).toHaveAttribute("aria-label", "asking");
       await card.getByRole("button", { name: "Allow" }).click();
       const receipt = card.locator(".ctl-answer-receipt");
       await expect(receipt).toHaveText(words, { timeout: 15_000 });
       // The pressed button went with the pair: its focus is on the line that took its place.
       await expect(receipt).toBeFocused();
+      // The call asks no more: it runs, and no row has the needs-you glyph.
+      await expect(call).toHaveAttribute("aria-label", "running");
+      await expect(page.locator(".tool-status.is-ask")).toHaveCount(0);
+      // Simple: the tools line runs it too, after a reload, from the answer's own row.
+      const settings = await page.evaluate(() => {
+        const was = localStorage.getItem("sessionpipe-gui.settings");
+        localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ mode: "simple" }));
+        return was;
+      });
+      await page.reload();
+      const tools = page.locator(".chat-tools-sum").last();
+      await expect(tools).toHaveText("Running Bash", { timeout: 15_000 });
+      await expect(tools.locator(".spinner")).toHaveCount(1);
+      await expect(page.locator(".chat-tools .dot--needs_you, .tool-status.is-ask")).toHaveCount(0);
+      await page.evaluate(
+        (was) =>
+          was === null
+            ? localStorage.removeItem("sessionpipe-gui.settings")
+            : localStorage.setItem("sessionpipe-gui.settings", was),
+        settings,
+      );
       await expect(card.getByRole("button")).toHaveCount(0);
       await expect(page.locator(".ctl-acts")).toHaveCount(0);
       await expect(badge).toHaveCount(0);
