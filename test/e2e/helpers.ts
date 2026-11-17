@@ -30,12 +30,26 @@ export async function openBoard(page: Page): Promise<void> {
 }
 
 /** Rests the pointer on the board's list, so it holds still (Board.tsx `useListHold`): a row
- *  read is then the row clicked. The list itself never moves, so this waits on no card. */
+ *  read is then the row clicked. The list itself never moves, so this waits on no card. The
+ *  pointer goes 40 px into the part of the list on screen, not its top: a click far down a
+ *  long board (the Done toggle) scrolls the page, which takes the list's top off screen and
+ *  puts the sticky page bar over what is left of it. */
 export async function holdBoard(page: Page): Promise<void> {
   const list = page.locator(".board-list");
   await expect(list).toBeVisible();
-  const box = (await list.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + Math.min(40, box.height / 2));
+  const at = await list.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const x = box.left + box.width / 2;
+    const bottom = Math.min(box.bottom, innerHeight);
+    for (let top = Math.max(box.top, 0); top < bottom; top++) {
+      if (!el.contains(document.elementFromPoint(x, top))) continue;
+      const y = top + Math.min(40, (bottom - top) / 2);
+      return { x, y: el.contains(document.elementFromPoint(x, y)) ? y : top };
+    }
+    return null;
+  });
+  expect(at, "some of the board's list is on screen").not.toBeNull();
+  await page.mouse.move(at!.x, at!.y);
   await expect(page.locator(".page.board")).toHaveAttribute("data-held", "");
 }
 
