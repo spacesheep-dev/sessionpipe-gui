@@ -247,10 +247,11 @@ export async function postSession(
 }
 
 /** A Claude Code session on `machine` whose permission prompt was raised `agoMs` ago, as
- *  its hooks send one; `clear()` closes the prompt again. */
+ *  its hooks send one; `clear()` closes the prompt again. `command`: what Bash asks to run
+ *  (npm run deploy). */
 export async function postPrompt(
   token: string,
-  o: { machine: string; title: string; agoMs: number; harness?: string },
+  o: { machine: string; title: string; agoMs: number; harness?: string; command?: string },
 ): Promise<{ key: string; attention: string; clear: () => Promise<void> }> {
   const harness = o.harness ?? "claude-code";
   const id = randomUUID();
@@ -283,7 +284,7 @@ export async function postPrompt(
     ev("turn.started", { turn_id: "t1", prompt_chars: 20 }, "UserPromptSubmit"),
     ev(
       "attention.needed",
-      { attention_id: attention, kind: "permission", tool: "Bash", message: "npm run deploy" },
+      { attention_id: attention, kind: "permission", tool: "Bash", message: o.command ?? "npm run deploy" },
       "PermissionRequest",
     ),
   ]);

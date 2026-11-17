@@ -157,6 +157,18 @@
   .card-disclose::before {
     inset: 0 -28px 0 -2px;
   }
+  /* The card's way on reaches 13 px over its line: the note's 5 and the card's 8 px gap.
+     Show n more lines takes that gap for its own 44, so under it the note takes all 13. */
+  .ctl-more + .ctl-answer-note:has(> :is(.ctl-link, .ctl-open-https)) {
+    padding-top: 13px;
+  }
+}
+/* Wider, the card is a grid whose rows are 2 px apart: the note takes 11 over its way on,
+   so the box stops at the question or Show n more lines (an iPad held wide, in the hour). */
+@media (pointer: coarse) and (min-width: 840px) {
+  .ctl-answer > .ctl-answer-note:has(> :is(.ctl-link, .ctl-open-https)) {
+    padding-top: 11px;
+  }
 }
 
 /* ---------- the phone's back button and empty states ---------- */

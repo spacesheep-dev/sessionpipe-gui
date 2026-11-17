@@ -508,41 +508,57 @@ test.describe("phone: the composer", () => {
   });
 
   // Not paired, with a prompt: the card alone, its line ending in How to pair, over
-  // Deny | Allow (off until the machine is paired). The way on's box stops at the pair,
-  // also on an iPad, whose wider card has no extra room above the pair.
-  test("on the folded card, How to pair takes no tap from the question or the pair", async ({ context, page }) => {
+  // Deny | Allow (off until the machine is paired). The way on's box stops at the pair and
+  // at what is over it: the question, or a long command's Show 2 more lines, whose 44 px
+  // reach down to the note. Also on an iPad, whose wider card has no extra room above the
+  // pair. (Wider still the card is not folded; the hour's card is: account-screens.)
+  test("on the folded card, How to pair takes no tap from the question, Show more or the pair", async ({
+    context,
+    page,
+  }) => {
     await seenSetupHere(context);
-    const p = await postPrompt(await sinkToken(), {
-      machine: `unpaired-${Math.random().toString(36).slice(2, 8)}`,
-      title: "Folded on a phone",
-      agoMs: 5_000,
-    });
-    const colon = p.key.indexOf(":");
-    await page.goto(`${CONTROL_BASE}${sessionUrl(p.key.slice(0, colon), p.key.slice(colon + 1))}`);
-    const card = page.locator(".ctl--folded .ctl-answer");
-    const link = card.locator(".ctl-answer-note .ctl-link");
-    for (const size of [
-      { width: 390, height: 844 },
-      { width: 820, height: 1180 },
+    for (const command of [
+      undefined,
+      "cd /Users/e2e/code && npm ci && npm run lint && npm test && npm run build && npm run deploy",
     ]) {
-      await page.setViewportSize(size);
-      await expect(link).toHaveText("How to pair");
-      await expect(card.getByRole("button", { name: /^Allow/ })).toBeDisabled();
-      const hits = await link.evaluate((el) => {
-        const r = el.getBoundingClientRect();
-        const note = el.closest(".ctl-answer-note")!;
-        const above = note.previousElementSibling!.getBoundingClientRect();
-        const pair = note.parentElement!.querySelector(".ctl-answer-btns")!.getBoundingClientRect();
-        const at = (x: number, y: number) => document.elementFromPoint(x, y);
-        const cx = r.left + r.width / 2;
-        return {
-          over: at(cx, r.top - 8) === el,
-          under: at(cx, r.bottom + 12) === el,
-          question: at(cx, above.bottom - 1) !== el,
-          pair: !!at(cx, pair.top + 1)?.closest(".ctl-answer-btns"),
-        };
+      const p = await postPrompt(await sinkToken(), {
+        machine: `unpaired-${Math.random().toString(36).slice(2, 8)}`,
+        title: "Folded on a phone",
+        agoMs: 5_000,
+        command,
       });
-      expect(hits, `${size.width}`).toEqual({ over: true, under: true, question: true, pair: true });
+      const colon = p.key.indexOf(":");
+      await page.goto(`${CONTROL_BASE}${sessionUrl(p.key.slice(0, colon), p.key.slice(colon + 1))}`);
+      const card = page.locator(".ctl--folded .ctl-answer");
+      const link = card.locator(".ctl-answer-note .ctl-link");
+      for (const size of [
+        { width: 390, height: 844 },
+        { width: 820, height: 1180 },
+      ]) {
+        const at = `${command ? "Show more" : "question"} at ${size.width}`;
+        await page.setViewportSize(size);
+        await expect(link).toHaveText("How to pair");
+        await expect(card.getByRole("button", { name: /^Allow/ })).toBeDisabled();
+        if (command) await expect(card.locator(".ctl-more")).toHaveText("Show 2 more lines");
+        const hits = await link.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const note = el.closest(".ctl-answer-note")!;
+          const above = note.previousElementSibling!.getBoundingClientRect();
+          const c = note.parentElement!.getBoundingClientRect();
+          const pair = note.parentElement!.querySelector(".ctl-answer-btns")!.getBoundingClientRect();
+          const at = (x: number, y: number) => document.elementFromPoint(x, y);
+          const cx = r.left + r.width / 2;
+          // Across the box's width, inside the card.
+          const xs = [Math.max(r.left - 6, c.left + 1), cx, Math.min(r.right + 6, c.right - 1)];
+          return {
+            over: at(cx, r.top - 8) === el,
+            under: at(cx, r.bottom + 12) === el,
+            above: xs.every((x) => at(x, above.bottom - 1) !== el),
+            pair: xs.every((x) => !!at(x, pair.top + 1)?.closest(".ctl-answer-btns")),
+          };
+        });
+        expect(hits, at).toEqual({ over: true, under: true, above: true, pair: true });
+      }
     }
   });
 });

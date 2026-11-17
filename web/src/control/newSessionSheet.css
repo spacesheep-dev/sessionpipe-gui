@@ -536,6 +536,7 @@
   font: inherit;
   font-size: var(--text-sm);
 }
+/* Off, it is the grey of the words: the Add account sheet's Start over, while Done waits. */
 .ns-discard:disabled {
   color: var(--fg-3);
 }
