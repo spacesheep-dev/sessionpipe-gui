@@ -513,7 +513,13 @@ function Answer({
   onOut: (out: "going" | "held" | null) => void;
 }) {
   const { session: s, attention: a } = row;
-  const send = useSessionSend(s, control, s.openAttentions);
+  // This row's prompt only: what became of an answer to another prompt of the session (a
+  // refusal, `send.error`) is that prompt's row's to say.
+  const send = useSessionSend(
+    s,
+    control,
+    useMemo(() => [a], [a]),
+  );
   // No clock of its own: the row leaves this group as its window runs out (useOpenAttentions).
   const st = answerState(s, a, control, send, Date.now());
   const { reason, off, status, tag, approve, receipt } = st;

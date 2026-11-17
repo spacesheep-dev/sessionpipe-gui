@@ -5,7 +5,7 @@
 // answer can reach it (control/useSend.ts). A click opens the session beside the page, a
 // right-click has the rest.
 import type { MachineControl, SessionSummary } from "@shared/api";
-import { type MutableRefObject, useEffect, useLayoutEffect, useRef } from "react";
+import { type MutableRefObject, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { answerState, useSessionSend } from "../control/useSend";
 import { useAnswerClock } from "../lib/answerWindow";
 import { copyItem } from "../lib/menus";
@@ -131,7 +131,12 @@ function ToastAnswer({
   control?: MachineControl;
   into: MutableRefObject<MenuList>;
 }) {
-  const send = useSessionSend(s, control, s.openAttentions);
+  // This banner's prompt only: another prompt's refused answer is not this one's to say.
+  const send = useSessionSend(
+    s,
+    control,
+    useMemo(() => [a], [a]),
+  );
   const st = answerState(s, a, control, send, useAnswerClock([a]));
   const { reason, off, status, tag } = st;
   // An answer out (from anywhere), closed, its hook stopped waiting, or this device not

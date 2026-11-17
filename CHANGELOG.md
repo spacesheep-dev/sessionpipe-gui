@@ -60,8 +60,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   answer went, and what it waits for, in place of the buttons, the note and the row under
   the field; its glyph turns while it waits. The Inbox row says the same, and the badge and
   the count drop the moment the answer goes. An answer the computer refuses gives Allow and
-  Deny back, with why. A disabled Allow no longer looks like the one pressed, and VoiceOver
-  hears why Allow, Deny and Start are off.
+  Deny back, with why, in the Inbox and on a banner only on that prompt's own row. A
+  disabled Allow no longer looks like the one pressed, and VoiceOver hears why Allow, Deny
+  and Start are off.
 - **On a phone, the link under the message field reads as an action and takes a finger's
   tap.** "Approve this iPhone", "Unlock now", "Retry now" and "Open on spacesheep.dev" were
   the grey of the sentence beside them, on a line 18 points tall. They are the orange of

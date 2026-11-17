@@ -108,6 +108,15 @@ describe("answersHere: what the surface that pressed knows", () => {
     expect(here.ended).toMatchObject({ id: refused.id, answer: { for: "perm-1", decision: "allow" } });
   });
 
+  it("read for one prompt (a list row, a banner), another prompt's refused answer says nothing of it", () => {
+    const other: Attention = { ...prompt, attentionId: "perm-2" };
+    const refused = row({ outcome: "refused", code: "grant" });
+    // Read for the session's prompts, the refusal is perm-1's, said once...
+    expect(answersHere([refused], [prompt, other], {}).ended).toBe(refused);
+    // ...and perm-2's row, which reads its own prompt only, has nothing to say.
+    expect(answersHere([refused], [other], {})).toEqual({ answers: {} });
+  });
+
   it("leaves a row that says what it answered, and rows it did not make, as they are", () => {
     const refused = row({ outcome: "refused", code: "grant" });
     expect(answersHere([refused], [prompt], pressed(refused))).toEqual({ answers: {}, ended: refused });
