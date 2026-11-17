@@ -2,8 +2,9 @@
 // Owned by: web. Whether this device can send to one computer, as one state that every
 // screen which says so reads: the composer, New session, Ask another agent, Machines. On a
 // spacesheep account spacesheep is the gate, so its device door decides (approve.ts's view:
-// the phase, and the computer's own entry); the computer's key list is read only where the
-// door has no entry for it. Off an account the key list decides, as it always has: a key
+// the phase, and the computer's own entry); the computer's key list says yes over that entry
+// (both read spacesheep's list of the keys each computer trusts, and the key list is the
+// newer reading), and says it where the door has no entry. Off an account the key list decides, as it always has: a key
 // this device holds among the ones the machine trusts. `sendWords` picks each state's
 // words, which are accountWords.new.ts's SEND (the signer's own off an account). Tested on
 // its own (sendable.test.ts).
@@ -25,9 +26,10 @@ export type SendState =
   | { kind: "unapproved"; dropped: boolean }
   /** A request is open on spacesheep; `code`: the number to type there, when this phone has it. */
   | { kind: "waiting"; code: string | null }
-  /** This computer does not trust the key yet. On an account the phone is approved and the
-   *  computer adds the key when it is next online; off one (`account: false`) the device
-   *  is not approved on it. */
+  /** This computer does not trust the key yet. On an account the phone is approved and this
+   *  computer has not added the key: spacesheep gives it one only through a key.add someone
+   *  signs (Devices' approve, or its "Add to …"), so the way on is Approve this iPhone. Off one
+   *  (`account: false`) the device is not approved on it. */
   | { kind: "catching-up"; account: boolean }
   /** The computer's sessionpipe predates device keys. */
   | { kind: "old" }
@@ -66,10 +68,11 @@ export function sendState(
   if (p.kind === "idle" || p.kind === "dropped")
     return o.keyKnown ? { kind: "unapproved", dropped: p.kind === "dropped" } : UNKNOWN;
   if (p.kind === "waiting") return { kind: "waiting", code: p.code };
-  // Approved: whether this computer has the key yet, by the door's entry for it, else by its list.
+  // Approved: whether this computer has the key yet. Its list saying yes wins over the door's
+  // entry for it, which is the older reading of the same list; else the entry, else the list.
   const here = view.machines.find((m) => m.id === control.machineId);
   if (here?.state === "old") return { kind: "old" };
-  if (here ? here.state !== "can" : !listed) {
+  if (here ? here.state !== "can" && !listed : !listed) {
     // No entry, and the list read before the key was: nothing is known of this computer yet.
     return here || o.keyKnown ? { kind: "catching-up", account: true } : UNKNOWN;
   }
@@ -80,8 +83,8 @@ export function sendState(
  *  - "unapproved": only an approval made elsewhere brings them back (not approved, a request
  *    waiting, or off an account a computer that trusts no key of this device). Allow and
  *    Deny give way to the way to approve it.
- *  - "catching-up": they come back by themselves (approved, and the computer adds the key
- *    when it is next online). Allow and Deny stay, disabled.
+ *  - "catching-up": approved, and this computer has not added the key yet. Allow and Deny
+ *    stay, disabled, and the way on beside them is Approve this iPhone.
  *  - "ok": nothing here turns them off.
  *  Only for the app's own device key (`device`), and only once the signer has said which key
  *  it holds (`keyKnown`): a browser's list of its passkeys misses synced ones, and the app's
@@ -141,7 +144,7 @@ export function sendWords(
       return { short: SEND.short.waiting, long: SEND.long.notYet(ThisPhone()), approve: true };
     case "catching-up":
       return s.account
-        ? { short: SEND.short.notHere, long: SEND.long.notHere(machine, thisPhone()), approve: false }
+        ? { short: SEND.short.notHere, long: SEND.long.notHere(machine, thisPhone()), approve: true }
         : null;
     case "old":
       return { short: SEND.short.old, long: updateWords(machine), approve: false };

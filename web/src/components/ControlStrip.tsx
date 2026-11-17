@@ -12,10 +12,11 @@
 // Allow and Deny are hidden where only something done elsewhere brings them back (this
 // device is not approved, or its request waits): the card says so and offers the way to
 // approve it in their place, and on the phone it stands alone, as unpaired. They are
-// disabled where they come back by themselves (the hour a new device waits, reconnecting,
-// a computer catching up on an approval, a send under way). The hour is said once: on the
-// card, with the way to answer on spacesheep, while it has a prompt to answer (on the phone
-// the card then stands alone too), else under the field. A question from the agent has no
+// disabled where they come back by themselves (the hour a new device waits, reconnecting, a
+// send under way), and where this device is approved and the computer has not added its key
+// (the card says so, with Approve this iPhone). Each of those is said once: on the card,
+// with its way on, while it has a prompt to answer (in the hour, on the phone, the card then
+// stands alone too), else under the field. A question from the agent has no
 // pair at all: its card is the question and its options to read, and where to answer it.
 // The draft is kept per session. Disabled with its reason until the machine paired and
 // `onSend` is wired (web/src/control/SessionControl.tsx signs and sends). Keep this
@@ -533,6 +534,9 @@ export function ControlStrip({
               </Link>
             ),
           };
+    // Approved, and this machine has not added the key: beside a prompt to answer the card
+    // says it, with the way on, and this line does not.
+    if (approval === "catching-up" && asks) return null;
     // On an account: not approved, waiting for it, or approved and this machine has not
     // added the key yet. Nothing where it can send, or inside the hour (`blocked` says that).
     const trust = send?.kind === "unapproved" || send?.kind === "waiting" || send?.kind === "catching-up" ? send : null;
@@ -588,6 +592,21 @@ export function ControlStrip({
   // one sentence (on the card), and no composer. A desktop keeps its field and the line under
   // it, and so does the phone where every prompt is late: that card says only that it is too late.
   const folded = phone && asks && (((!paired || approve) && !blocked) || hourOnCard);
+  // A card note's sentence and its way on: on the phone the link takes a line of its own;
+  // wider, it follows a "·" that never starts a line.
+  const withWay = (sentence: string, way: ReactNode): ReactNode =>
+    phone ? (
+      <>
+        {sentence} <br />
+        {way}
+      </>
+    ) : (
+      <>
+        {sentence.replace(/\.$/, "")}
+        {"\u00a0"}· {way}
+      </>
+    );
+  const notAdded = approval === "catching-up" && send ? sendWords(send, name)?.long : null;
   // Why Allow / Deny are off, said on their own bar (the line under the field says the rest).
   const offWhy: ReactNode = enabled ? null : !paired ? (
     folded ? (
@@ -623,8 +642,13 @@ export function ControlStrip({
     `${NEW_WORDS.answerNotYet(ThisPhone())}.`
   ) : stream ? (
     "waiting for the connection"
-  ) : approval === "catching-up" && send ? (
-    sendWords(send, name)?.long
+  ) : notAdded ? (
+    withWay(
+      notAdded,
+      <Link to="/add-device" className="ctl-link">
+        {setupLabel()}
+      </Link>,
+    )
   ) : null;
   const canSend = review
     ? enabled && !busy && !!text.trim() && !tooLong && answers?.[review.attentionId]?.status !== "sent"

@@ -64,6 +64,7 @@ export const NEW_WORDS = {
   approveCoolingWhy: "New devices wait an hour, so a stolen sign-in can't act at once.",
   approveDone: (Phone: string) => `${Phone} can send.`,
   approveRest: (code: string) => `Not on every computer yet: type ${code} on Devices for the rest.`,
+  approveAddRest: "Not on every computer yet: add it to the rest on Devices.",
   approveDroppedTitle: "Not approved",
   approveDroppedBody: "The request was removed on spacesheep, or ran out after 24 hours.",
   approveTooMany: (time: string) => `Too many tries. Ask again at ${time}.`,
@@ -128,7 +129,7 @@ export const SEND = {
     from: NEW_WORDS.approveCoolingAt,
     by: (Phone: string, time: string) => `${Phone} can send by ${time}.`,
     notYet: (Phone: string) => `${Phone} can't send yet.`,
-    notHere: (machine: string, phone: string) => `${machine} adds ${phone} when it's next online.`,
+    notHere: (machine: string, phone: string) => `${machine} hasn't added ${phone} yet.`,
   },
 } as const;
 
@@ -137,7 +138,7 @@ export const SEND = {
  *  where the machine sets the level. */
 export const START = {
   notApproved: (Phone: string) => `${Phone} isn't approved yet`,
-  notHere: "not approved",
+  notHere: SEND.short.notHere,
   old: "update sessionpipe",
   ownSettings: "Its own settings",
   ownSettingsRefused: "Anything it asks permission for is refused.",
@@ -154,7 +155,7 @@ export const MACHINES = {
   canBy: (Phone: string, time: string) => `${Phone} can send by ${time}`,
   can: (Phone: string) => `${Phone} can send`,
   canSome: (Phone: string, n: number, m: number) => `${Phone} can send to ${n} of ${m} computers`,
-  notHere: "Not approved on this computer",
+  notHere: SEND.short.notHere,
   old: "Update sessionpipe on this computer to send from the app",
   status: "Status",
   online: "Online",

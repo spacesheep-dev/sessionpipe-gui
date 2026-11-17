@@ -71,8 +71,9 @@ import { openSplit } from "../lib/split";
 import { NEW_WORDS, ThisPhone } from "../native/accountWords";
 
 const rowKey = (r: OpenAttention) => `${r.session.key}|${r.attention.attentionId}`;
-/** Why a row's Allow / Deny are off for a standing reason, and answerState's tag for it. */
-type Off = { reason: string; tag: string };
+/** Why a row's Allow / Deny are off for a standing reason, answerState's tag for it, and
+ *  whether its way on is Approve this iPhone. */
+type Off = { reason: string; tag: string; approve: boolean };
 /** A standing reason as the page says it: one that is a sentence of its own (it starts with
  *  a capital: "This iPhone can send from 3:09 AM") as it is; a phrase after what it turns off. */
 const offLine = (r: string): string =>
@@ -151,7 +152,7 @@ export function Inbox() {
   const report = useCallback((id: string, off: Off | null) => {
     setReasons((prev) => {
       const was = prev[id];
-      if (was?.reason === off?.reason && was?.tag === off?.tag) return prev;
+      if (was?.reason === off?.reason && was?.tag === off?.tag && was?.approve === off?.approve) return prev;
       const next = { ...prev };
       if (off) next[id] = off;
       else delete next[id];
@@ -160,7 +161,7 @@ export function Inbox() {
   }, []);
   const offs = answer.map((h) => reasons[h.key]).filter((x): x is Off => !!x);
   const unapproved = offs.some((o) => o.tag === "unapproved");
-  const said = [...new Set(offs.filter((o) => o.tag !== "unapproved").map((o) => o.reason))];
+  const said = [...new Map(offs.filter((o) => o.tag !== "unapproved").map((o) => [o.reason, o])).values()];
 
   const bgMenu = useBackgroundMenu(
     () => [
@@ -259,9 +260,15 @@ export function Inbox() {
             </Notice>
           )}
           <NotifyBlocked permission={notify.permission} app={app} />
-          {said.map((r) => (
-            <p key={r} id={reasonId(r)} className="page-note inbox-reason">
-              {offLine(r)}
+          {said.map((o) => (
+            <p key={o.reason} id={reasonId(o.reason)} className="page-note inbox-reason">
+              {offLine(o.reason)}
+              {o.approve && (
+                <>
+                  {" "}
+                  <Link to="/add-device">{setupLabel()}</Link>
+                </>
+              )}
             </p>
           ))}
           <LensNote lens={lens} hidden={hiddenByLens} />
@@ -509,7 +516,7 @@ function Answer({
   const send = useSessionSend(s, control, s.openAttentions);
   // No clock of its own: the row leaves this group as its window runs out (useOpenAttentions).
   const st = answerState(s, a, control, send, Date.now());
-  const { reason, off, status, tag, receipt } = st;
+  const { reason, off, status, tag, approve, receipt } = st;
   // A plan review's pair asks the plan's question (lib/format.ts isPlanReview).
   const plan = isPlanReview(a);
   /** The answer pressed here, from the press until it is out (or the send fails). */
@@ -546,8 +553,8 @@ function Answer({
   const standing = whole || tag === "unapproved" ? offFor : null;
   const id = rowKey(row);
   useEffect(() => {
-    report(id, standing ? { reason: standing, tag } : null);
-  }, [id, standing, tag, report]);
+    report(id, standing ? { reason: standing, tag, approve: !!approve } : null);
+  }, [id, standing, tag, approve, report]);
   useEffect(() => () => report(id, null), [id, report]);
   useLayoutEffect(() => {
     into.current = whole ? answerItems(a.tool, st, answer) : [];

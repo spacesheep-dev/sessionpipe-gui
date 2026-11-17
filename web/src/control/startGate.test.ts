@@ -47,8 +47,9 @@ describe("on an account, each phase against each way the computer stands", () =>
   };
   const NOT_HERE: StartGate = {
     kind: "machine",
-    short: "not approved",
-    long: "Misha-Petrov-laptop adds this iPhone when it's next online.",
+    short: "Not on this computer yet",
+    long: "Misha-Petrov-laptop hasn't added this iPhone yet.",
+    approve: true,
   };
   const OLD: StartGate = {
     kind: "machine",
@@ -122,7 +123,7 @@ describe("off an account (the Mac app, a browser), the key list", () => {
     g.sessionpipeShell = { platform: "macos" };
     expect(gate(untrusted)).toEqual({
       kind: "machine",
-      short: "not approved",
+      short: "Not on this computer yet",
       long: "Misha-Petrov-laptop doesn't trust this Mac yet.",
       approve: true,
     });

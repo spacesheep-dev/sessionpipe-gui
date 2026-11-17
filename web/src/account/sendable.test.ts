@@ -33,7 +33,8 @@ const PHASES: Record<string, ApprovePhase> = {
 
 describe("on an account: the device door decides", () => {
   // Every phase against every way the door can name this computer (or not name it), with
-  // the computer's own key list both ways: the list matters only where the door is silent.
+  // the computer's own key list both ways: once approved, the list saying yes wins over the
+  // door's "not yet" (the newer reading of the same list), and decides where the door is silent.
   const table: [phase: string, entry: MachineState | null, listed: boolean, state: SendState][] = [];
   for (const listed of [true, false])
     for (const entry of ["can", "not-yet", "old", null] as const) {
@@ -43,7 +44,7 @@ describe("on an account: the device door decides", () => {
       const there: SendState | null =
         entry === "old"
           ? { kind: "old" }
-          : entry === "not-yet" || (entry === null && !listed)
+          : !listed && (entry === "not-yet" || entry === null)
             ? { kind: "catching-up", account: true }
             : null;
       table.push(["cooling", entry, listed, there ?? { kind: "cooling", until: T + 600_000, exact: true }]);
@@ -62,6 +63,21 @@ describe("on an account: the device door decides", () => {
     });
     // Listed, but not approved on spacesheep: not approved.
     expect(sendState(view(PHASES.idle!), control(true), [MINE], ON)).toEqual({ kind: "unapproved", dropped: false });
+  });
+
+  it("approved: the computer's list saying yes wins over a door entry read before it added the key", () => {
+    expect(sendState(view(PHASES.approved!, "not-yet"), control(true), [MINE], ON)).toEqual({ kind: "can" });
+    // In the hour it still waits for the hour.
+    expect(sendState(view(PHASES.cooling!, "not-yet"), control(true), [MINE], ON)).toEqual({
+      kind: "cooling",
+      until: T + 600_000,
+      exact: true,
+    });
+    // Not listed: the door's "not yet" stands.
+    expect(sendState(view(PHASES.approved!, "not-yet"), control(false), [MINE], ON)).toEqual({
+      kind: "catching-up",
+      account: true,
+    });
   });
 
   it("nothing is said before it is known: no machine, the door's first word, or the key while the door is silent", () => {
@@ -101,7 +117,7 @@ describe("off an account: the key list decides, as it always has", () => {
 
 describe("what turns sending off before anything is signed", () => {
   const DEVICE = { device: true, keyKnown: true };
-  it("the app's own key: not approved or waiting hides the answers; catching up disables them", () => {
+  it("the app's own key: not approved or waiting hides the answers; not added yet disables them", () => {
     expect(approvalOf({ kind: "unapproved", dropped: false }, DEVICE)).toBe("unapproved");
     expect(approvalOf({ kind: "unapproved", dropped: true }, DEVICE)).toBe("unapproved");
     expect(approvalOf({ kind: "waiting", code: "71" }, DEVICE)).toBe("unapproved");
@@ -175,8 +191,8 @@ describe("each state in words", () => {
     });
     expect(sendWords({ kind: "catching-up", account: true }, name)).toEqual({
       short: "Not on this computer yet",
-      long: "Misha-Petrov-laptop adds this iPhone when it's next online.",
-      approve: false,
+      long: "Misha-Petrov-laptop hasn't added this iPhone yet.",
+      approve: true,
     });
     expect(sendWords({ kind: "old" }, name)).toEqual({
       short: "Update sessionpipe there",

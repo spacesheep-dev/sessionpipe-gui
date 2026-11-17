@@ -246,7 +246,13 @@ describe("an answer from a device that is not approved, or that its computer has
     g.sessionpipeShell = { platform: "ios" };
     for (const state of [unapproved, { kind: "waiting", code: "71" } as SendState]) {
       const st = answerState(s, a, control, { ...send, approval: app(state) }, now);
-      expect(st).toEqual({ reason: "This iPhone can't answer yet", off: true, status: undefined, tag: "unapproved" });
+      expect(st).toEqual({
+        reason: "This iPhone can't answer yet",
+        off: true,
+        status: undefined,
+        tag: "unapproved",
+        approve: true,
+      });
       expect(answerItems(a.tool, st, () => {})).toEqual([]);
     }
   });
@@ -260,14 +266,15 @@ describe("an answer from a device that is not approved, or that its computer has
     });
   });
 
-  it("approved, and the computer has not added the key yet: off with the computer's sentence, the pair kept", () => {
+  it("approved, and the computer has not added the key yet: off with the computer's sentence, the pair kept, the way on Approve", () => {
     g.sessionpipeShell = { platform: "ios" };
     const st = answerState(s, a, control, { ...send, approval: app({ kind: "catching-up", account: true }) }, now);
     expect(st).toEqual({
-      reason: "Misha-Petrov-laptop adds this iPhone when it's next online",
+      reason: "Misha-Petrov-laptop hasn't added this iPhone yet",
       off: true,
       status: undefined,
       tag: "blocked",
+      approve: true,
     });
     expect(answerItems(a.tool, st, () => {})).toMatchObject([
       { label: "Allow Bash", disabled: st.reason },

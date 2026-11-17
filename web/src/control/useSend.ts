@@ -31,7 +31,8 @@ export type { AnswerOut, AnswerStatus };
  *  prompt's hook stopped waiting as of `now` (`late`: lib/answerWindow.ts), or an answer
  *  is already out (the receipt: which answer, and what it waits for). Shared by the inbox
  *  rows, the toasts and a row's menu. `tag` is the short state for a data attribute;
- *  "unapproved" offers no answer at all, only the way to approve this device. */
+ *  "unapproved" offers no answer at all, only the way to approve this device. `approve`:
+ *  the reason is this device's approval, whose way on is Approve this iPhone. */
 export function answerState(
   s: SessionSummary,
   a: Attention,
@@ -46,6 +47,7 @@ export function answerState(
   off: boolean;
   status: AnswerStatus | undefined;
   tag: string;
+  approve?: true;
   /** While an answer is out: the receipt, `what` went first (receiptWords). */
   receipt?: { what: string; text: string };
 } {
@@ -96,7 +98,15 @@ export function answerState(
         : late
           ? "late"
           : (status ?? "open");
-  return { reason, off, status, tag, ...(receipt && reason === receipt.text ? { receipt } : {}) };
+  const approve = !!control && send.secure && !old && !send.cooling && approval !== "ok";
+  return {
+    reason,
+    off,
+    status,
+    tag,
+    ...(approve ? { approve } : {}),
+    ...(receipt && reason === receipt.text ? { receipt } : {}),
+  };
 }
 
 /** A send nobody heard the answer to, as the line under the field says it. */

@@ -156,7 +156,7 @@ describe("where this phone stands on Machines: one row above the computers, a li
     for (const phase of [{ kind: "approved" }, { kind: "cooling", until, exact: true }] as const)
       expect(machineNote(view(phase, "can", "not-yet"), "m_1")).toEqual({
         mark: "wait",
-        words: "Not approved on this computer",
+        words: "Not on this computer yet",
         link: true,
       });
     // Not approved yet: the row above says it once, no computer says it again.

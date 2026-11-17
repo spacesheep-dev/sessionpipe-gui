@@ -1604,7 +1604,7 @@ test.describe("what else an account shows", () => {
     }
   });
 
-  test("approved, and this computer has not added the key yet: Allow, Deny and Send wait, disabled, with one sentence and no Approve", async ({
+  test("approved, and this computer has not added the key yet: Allow, Deny and Send wait, disabled, with one sentence and Approve this iPhone", async ({
     browser,
   }) => {
     const b = await bed(browser);
@@ -1614,7 +1614,7 @@ test.describe("what else an account shows", () => {
       await page.goto(b.server.url);
       await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
       // Approved on spacesheep by another computer of the account, long ago; studio-mac has
-      // not taken the key yet.
+      // not taken the key, and only a key.add someone signs on spacesheep gives it one.
       const id = [...b.hub.accounts.keys()][0]!;
       const asked = await page.evaluate(
         (account) =>
@@ -1629,19 +1629,29 @@ test.describe("what else an account shows", () => {
       b.ss.deviceRequests.delete(asked.keyId);
       asks(b);
       await page.goto(`${b.server.url}/s/claude-code/s-refund`);
-      const line = "studio-mac adds this iPhone when it's next online.";
+      const line = "studio-mac hasn't added this iPhone yet.";
       const card = page.locator(".ctl-answer[data-attention='perm-1']");
-      await expect(card.locator(".ctl-answer-note")).toHaveText(line, { timeout: 15_000 });
+      // Said once, on the card, with the way on; the line under the field says nothing.
+      await expect(card.locator(".ctl-answer-note")).toHaveText(`${line} Approve this iPhone`, { timeout: 15_000 });
+      await expect(card.getByRole("link", { name: "Approve this iPhone" })).toHaveAttribute("href", "/add-device");
       await expect(card.getByRole("button", { name: "Allow" })).toBeDisabled();
       await expect(card.getByRole("button", { name: "Deny" })).toBeDisabled();
       await expect(composer(page)).toBeDisabled();
-      await expect(page.locator(".ctl-foot[data-reason='catching-up']")).toHaveText(line);
-      await expect(page.getByText(/Approve this iPhone|can't answer yet/)).toHaveCount(0);
+      await expect(page.locator(".ctl-foot[data-reason]")).toHaveCount(0);
+      await expect(page.getByText(line)).toHaveCount(1);
+      await expect(page.getByText(/can't answer yet|next online/)).toHaveCount(0);
       await shot(page, "also-catching-up-prompt");
       await page.goto(`${b.server.url}/inbox`);
       const row = page.locator(".inbox-row[data-attention='perm-1']");
       await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
-      await expect(page.getByText(`Allow and Deny are off: ${line}`)).toBeVisible();
+      const said = page.locator(".inbox-reason");
+      await expect(said).toHaveText(`Allow and Deny are off: ${line} Approve this iPhone`);
+      await expect(said.getByRole("link", { name: "Approve this iPhone" })).toHaveAttribute("href", "/add-device");
+      // There, where studio-mac gets the key: spacesheep's Devices.
+      await page.goto(`${b.server.url}/add-device`);
+      await expect(page.locator("[data-rest='add']")).toHaveText(
+        "Not on every computer yet: add it to the rest on Devices. Open Devices",
+      );
       // New session: on its own it opens on attic-mini, which can take a start, though the
       // newest session is studio-mac's; studio-mac is listed, off, with why in two words.
       await page.goto(b.server.url);
@@ -1652,20 +1662,21 @@ test.describe("what else an account shows", () => {
       await machine.click();
       const off = page.locator(".sel-opt", { hasText: NAME });
       await expect(off).toHaveAttribute("aria-disabled", "true");
-      await expect(off.locator(".sel-opt-hint")).toHaveText("not approved");
+      await expect(off.locator(".sel-opt-hint")).toHaveText("Not on this computer yet");
       await shot(page, "also-new-session-catching-up-picker");
       await page.keyboard.press("Escape");
       await sheet.locator("[data-ns-cancel]").click();
       await expect(sheet).toHaveCount(0);
-      // From studio-mac's own "New session on studio-mac…": on it, its sentence under the form,
-      // Start off, no Approve, and the Permission row where it always is.
+      // From studio-mac's own "New session on studio-mac…": on it, its sentence under the form
+      // with Approve this iPhone, Start off, and the Permission row where it always is.
       await page.goto(`${b.server.url}/?new=1&machine=${NAME}`);
       await expect(machine).toHaveAttribute("data-value", NAME);
       await sheet.locator("[data-ns-text]").fill("Look around.");
-      await expect(sheet.locator(".ns-status")).toHaveText(line);
+      await expect(sheet.locator(".ns-status")).toHaveText(`${line} Approve this iPhone`);
+      await expect(sheet.locator("[data-ns-approve]")).toBeVisible();
       await expect(sheet.locator("[data-ns-start]")).toBeDisabled();
       await expect(sheet.locator("[data-ns-row=options]")).toHaveText(/^Permission\s*Safe$/);
-      await expect(sheet.getByText(/Approve this iPhone|doesn't trust/)).toHaveCount(0);
+      await expect(sheet.getByText(/doesn't trust/)).toHaveCount(0);
       await shot(page, "also-new-session-catching-up");
       expect(await signs(page)).toBe(0);
     } finally {

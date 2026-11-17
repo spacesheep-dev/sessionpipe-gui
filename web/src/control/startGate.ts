@@ -6,7 +6,8 @@
 // the key), then this device's: not approved at all (the sheet gives way to Approve this
 // iPhone), approved and this machine has not added the key yet (off an account: does not
 // trust it), inside the hour a new device waits where its end is known (approve.ts `exact`;
-// the form stays, Start waits). Built on account/sendable.ts's state, so the sheets say what
+// the form stays, Start waits). Approved and not added yet, the way on is Approve this iPhone
+// too, under the form. Built on account/sendable.ts's state, so the sheets say what
 // the composer, Machines and the Approve page say. Pure: startGate.test.ts.
 import type { MachineControl } from "@shared/api";
 import type { SendState } from "../account/sendable";
@@ -48,7 +49,7 @@ export function startGate(
   if (!machineTakes(c) || s.kind === "old") return machine(START.old, updateWords(name));
   if (s.kind === "unapproved" || s.kind === "waiting") return { kind: "approve" };
   if (s.kind === "catching-up") {
-    if (s.account) return machine(START.notHere, SEND.long.notHere(name, thisPhone()));
+    if (s.account) return machine(START.notHere, SEND.long.notHere(name, thisPhone()), true);
     return device
       ? machine(START.notHere, `${name} doesn't trust ${deviceWords().this} yet.`, true)
       : machine(
