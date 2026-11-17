@@ -162,9 +162,13 @@ test.describe("accessibility", () => {
     const card = page.locator("article.card a.card-link[tabindex='0']");
     await card.focus();
     await expect(card).toBeFocused();
+    // The demo board is live and moves its cards, and the cursor goes with its card: which
+    // card it is on is checked, not where that card is.
+    const first = await card.evaluate((el) => el.closest("article.card")?.getAttribute("data-flip"));
     await page.keyboard.press("ArrowDown");
-    await expect(page.locator("article.card[aria-current='true']")).toHaveAttribute("data-cursor", "1");
-    await expect(page.locator("article.card a.card-link").nth(1)).toBeFocused();
+    const current = page.locator("article.card[aria-current='true']");
+    await expect(current.locator("a.card-link")).toBeFocused();
+    await expect(current).not.toHaveAttribute("data-flip", first ?? "");
 
     // `g f` is the feed; the title is announced and main takes focus.
     await page.keyboard.press("g");
