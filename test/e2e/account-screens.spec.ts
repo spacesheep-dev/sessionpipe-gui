@@ -1650,8 +1650,9 @@ test.describe("what else an account shows", () => {
       await page.goto(`${b.server.url}/inbox`);
       const row = page.locator(".inbox-row[data-attention='perm-1']");
       await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
-      const said = page.locator(".inbox-reason");
-      await expect(said).toHaveText(`${line} Approve this iPhone`);
+      // Said once, in a notice above Notifications, with the way on.
+      const said = page.locator(".inbox-notes .notice").first();
+      await expect(said.locator(".inbox-reason")).toHaveText(line);
       await expect(said.getByRole("link", { name: "Approve this iPhone" })).toHaveAttribute("href", "/add-device");
       // There, where studio-mac gets the key: spacesheep's Devices.
       await page.goto(`${b.server.url}/add-device`);
@@ -2081,6 +2082,10 @@ test.describe("what else an account shows", () => {
       await expect(row.getByRole("button", { name: "Allow" })).toHaveAccessibleDescription(line);
       await expect(page.locator(".inbox-reason")).toHaveText(/^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.$/);
       await expect(page.getByText(/Allow and Deny are off/)).toHaveCount(0);
+      // In a notice of its own, the first, above Notifications, with nothing to press.
+      const notice = page.locator(".inbox-notes .notice").first();
+      await expect(notice.locator(".inbox-reason")).toBeVisible();
+      await expect(notice.locator(".notice-action")).toHaveCount(0);
       expect(b.ss.log.filter((l) => l.startsWith("POST /api/machines/"))).toEqual([]);
     } finally {
       await b.close();

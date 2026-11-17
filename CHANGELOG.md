@@ -141,7 +141,8 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **An iPhone that isn't approved offers Approve this iPhone instead of an Allow that would
   only be refused.** Allow, Deny, Send and Stop asked for Face ID twice, then failed with
   words about a day grant. A prompt now says "This iPhone can't answer yet." with Approve
-  this iPhone in their place, the field is off, and the Inbox says it once; the Mac app
+  this iPhone in their place, the field is off, and the Inbox says it once, in a panel above
+  Notifications, as it says the hour and any other reason Allow and Deny are off; the Mac app
   does the same where a computer doesn't trust the Mac. Where a computer has not added an
   approved phone's key, Allow and Deny stay, off, the prompt says so once, with Approve this
   iPhone, and that page says to add it on spacesheep's Devices; a refused send takes one

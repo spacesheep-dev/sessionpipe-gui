@@ -153,8 +153,9 @@ export function Inbox() {
   const page = useRef<HTMLDivElement>(null);
   useStickyTop(page);
 
-  // Why Allow / Deny are off, reported by each answerable row and said once for all: this
-  // device not approved, by the notice with the way to approve it; anything else as a line.
+  // Why Allow / Deny are off, reported by each answerable row and said once for all, each
+  // in a notice of its own above Notifications: this device not approved, with the way to
+  // approve it; a computer that has not added it, the same way on; anything else, alone.
   const [reasons, setReasons] = useState<Record<string, Off>>({});
   const report = useCallback((id: string, off: Off | null) => {
     setReasons((prev) => {
@@ -273,18 +274,23 @@ export function Inbox() {
               {NEW_WORDS.answerNotYet(ThisPhone())}
             </Notice>
           )}
-          <NotifyBlocked permission={notify.permission} app={app} />
           {said.map((o) => (
-            <p key={o.reason} id={reasonId(o.reason)} className="page-note inbox-reason">
-              <WithName text={offLine(o)} name={o.machine} />
-              {o.approve && (
-                <>
-                  {" "}
-                  <Link to="/add-device">{setupLabel()}</Link>
-                </>
-              )}
-            </p>
+            <Notice
+              key={o.reason}
+              action={
+                o.approve ? (
+                  <Link to="/add-device" className="btn btn--sm btn--ghost">
+                    {setupLabel()}
+                  </Link>
+                ) : undefined
+              }
+            >
+              <span id={reasonId(o.reason)} className="inbox-reason">
+                <WithName text={offLine(o)} name={o.machine} />
+              </span>
+            </Notice>
           ))}
+          <NotifyBlocked permission={notify.permission} app={app} />
           <LensNote lens={lens} hidden={hiddenByLens} />
         </div>
       )}
