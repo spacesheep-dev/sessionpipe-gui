@@ -396,8 +396,9 @@ export interface PromptWords {
  *  reading). A list page holds it slim: past the index's 2 KB `user` is cut, and
  *  `preview.user` says so. Cut, and sent from here (`sent`, with its attachments block),
  *  it is drawn as it was signed when the cut words are the head of it: the source line the
- *  machine put before it stays, and nothing has to be read. Any other cut prompt is drawn
- *  as far as it goes, marked `cut`. */
+ *  machine put before it stays, and nothing has to be read. (A new session's first message
+ *  has its source note at the end, which the cut took: it is drawn without one.) Any other
+ *  cut prompt is drawn as far as it goes, marked `cut`. */
 export function promptWords(e: Pick<StoredEvent, "data" | "preview"> | undefined, sent?: string): PromptWords {
   const user = e?.data.user;
   const text = typeof user === "string" ? user : undefined;

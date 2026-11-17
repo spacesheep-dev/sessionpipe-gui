@@ -229,8 +229,9 @@ interface Timeline {
   /** Puts a message's words back in the composer ("Edit and send again"). */
   compose: (text: string) => void;
   /** A row about to open or close in place: keep it where it is on screen, and stop
-   *  following the bottom (the person is reading). */
-  anchorOn: (el: HTMLElement) => void;
+   *  following the bottom (the person is reading). Returns the let-go for a change that
+   *  did not come (a read that failed), so no later change is held to it. */
+  anchorOn: (el: HTMLElement) => () => void;
 }
 const TimelineCtx = createContext<Timeline | null>(null);
 const useTimeline = () => useContext(TimelineCtx)!;
@@ -691,7 +692,11 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     followRef.current = false;
     pinned.current = false;
     setFollow(false);
-    held.current = { el, top: el.getBoundingClientRect().top };
+    const a = { el, top: el.getBoundingClientRect().top };
+    held.current = a;
+    return () => {
+      if (held.current === a) held.current = null;
+    };
   }, []);
   // Every disclosure in the timeline (a tool's details, "Ran 4 tools", a subagent's
   // block) keeps the row that was clicked where it is: caught on the way down, before the
@@ -1789,7 +1794,7 @@ function TurnBlock({
             text={prompt}
             seq={startSeq}
             by={submittedLabel(turn.start?.data.submitted_by)}
-            sent={written.fromSent ? sent : undefined}
+            files={written.fromSent ? sent?.files : undefined}
             e={promptEv}
             cut={written.cut}
             fill={fill}
@@ -1952,6 +1957,7 @@ function Prompt({
   seq,
   bubble = false,
   sent,
+  files,
   by,
   e,
   cut = false,
@@ -1960,7 +1966,10 @@ function Prompt({
   text: string;
   seq?: number;
   bubble?: boolean;
+  /** The message on its way, drawn before the session has a record of it. */
   sent?: ControlActivity;
+  /** The files a message sent from here carried, when its words are the record's. */
+  files?: ControlActivity["files"];
   /** Who submitted the turn, when the harness said it was not the person ("Scheduled"). */
   by?: string;
   /** The record the words came in, and whether they are cut there (`preview.user`). */
@@ -1994,27 +2003,33 @@ function Prompt({
     ro.observe(el);
     return () => ro.disconnect();
   }, [words]);
-  /** Open it in place, the whole of it read first when it was cut, or fold it again; the
-   *  bubble's top stays where it is on screen. */
-  const open = (on = true) => {
-    if (boxRef.current) anchorOn(boxRef.current);
-    if (on && canLoad) void whole.load().then((ok) => ok && setAll(true));
+  /** Open it in place, the whole of it read first when it was cut: the bubble's top stays
+   *  where it is on screen. Or fold it again from its button (`at`), which stays under the
+   *  finger as "Show all" with the eight lines above it: the top of a message opened past
+   *  a screen is long gone, and held there the folded bubble would be gone with it. */
+  const open = (on: boolean, at?: HTMLElement) => {
+    const keep = on ? boxRef.current : (at ?? boxRef.current);
+    const letGo = keep ? anchorOn(keep) : undefined;
+    if (on && canLoad) void whole.load().then((ok) => (ok ? setAll(true) : letGo?.()));
     else setAll(on);
   };
   const menu = useContextMenu(() => [
     copyItem(cut ? NEW_WORDS.sessionCopyPreview : "Copy message", words),
     copyItem("Copy link to this turn", seqLink(path, seq)),
     canLoad && { sep: true },
-    canLoad && { label: "Load full text", run: () => open() },
+    canLoad && { label: "Load full text", run: () => open(true) },
     { sep: true },
     controlItems(root.current).send,
   ]);
   const cls = bubble ? "chat-bubble" : sent?.kind === "start" ? "prompt chat-bubble" : "prompt";
   const folded = !all && (long || cut);
+  // How the read goes, only while there is one to make: once the words are whole, by
+  // this read or another (the reply's "Show more" reads the same turn), it is over.
+  const reading = canLoad ? whole.state : "idle";
   const label =
-    whole.state === "loading"
+    reading === "loading"
       ? "Loading…"
-      : whole.state === "failed"
+      : reading === "failed"
         ? NEW_WORDS.sessionLoadFailed
         : all
           ? "Show less"
@@ -2030,8 +2045,8 @@ function Prompt({
           className="cut-btn prompt-more"
           aria-expanded={!folded}
           aria-controls={wordsId}
-          disabled={whole.state === "loading"}
-          onClick={() => open(!all)}
+          disabled={reading === "loading"}
+          onClick={(ev) => open(!all, ev.currentTarget)}
         >
           {label}
         </button>
@@ -2055,7 +2070,7 @@ function Prompt({
         )}
         {by && <span className="prompt-via">{by}</span>}
       </blockquote>
-      <SentFiles files={sent?.files} />
+      <SentFiles files={files ?? sent?.files} />
     </>
   );
 }
@@ -2136,8 +2151,8 @@ function Reply({
         onClick={(ev) => {
           // The rest opens under it: the reply's top stays where it is on screen.
           const box = ev.currentTarget.parentElement;
-          if (box) anchorOn(box);
-          void whole.load();
+          const letGo = box ? anchorOn(box) : undefined;
+          void whole.load().then((ok) => ok || letGo?.());
         }}
       >
         {whole.state === "loading"
@@ -2401,7 +2416,7 @@ function ChatTurn({
               seq={startSeq}
               bubble
               by={submittedLabel(turn.start?.data.submitted_by)}
-              sent={written.fromSent ? sent : undefined}
+              files={written.fromSent ? sent?.files : undefined}
               e={(transcript ?? progress)?.e}
               cut={written.cut}
               fill={fill}

@@ -458,7 +458,11 @@ test.describe("phone: long turns", () => {
     ];
     const events = [
       ev("session.started", { source: "startup" }),
-      ...turn(1, "Read the export code.", reply("FIRSTEND closes the first reply.")),
+      ...turn(
+        1,
+        long("Read the export code, batch by batch.", 3000, "ASKEND is the ask's last line."),
+        reply("FIRSTEND closes the first reply."),
+      ),
       ...turn(2, long("Resume from the batch that failed.", 3000, "PLANEND is the plan's last line."), reply("OLDEND")),
       ...turn(
         3,
@@ -501,6 +505,24 @@ test.describe("phone: long turns", () => {
     expect(await shows(logWords, "LOGEND")).toBe(true);
     expect(Math.abs((await log.boundingBox())!.y - top)).toBeLessThan(2);
 
+    // Folded again from its end, with its top long gone off screen: "Show all" stays under
+    // the finger with the eight lines above it, the bubble in sight.
+    // A row held in place is put back in the frame after it changed (SessionBody's
+    // ResizeObserver): measured only once that frame is drawn.
+    const settled = () =>
+      page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    const less = log.getByRole("button", { name: "Show less" });
+    await settled();
+    await less.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    expect((await log.boundingBox())!.y).toBeLessThan(0);
+    const at = (await less.boundingBox())!;
+    await page.touchscreen.tap(at.x + 10, at.y + at.height / 2);
+    await expect(all).toHaveAttribute("aria-expanded", "false");
+    await settled();
+    await expect(logWords).toHaveClass(/is-clamped/);
+    expect(Math.abs((await all.boundingBox())!.y - at.y)).toBeLessThan(2);
+    await expect(log).toBeInViewport({ ratio: 1 });
+
     // 3,000 characters come cut: "Show all" reads the turn whole first. The same read
     // brings its reply whole, so that one's "Show more" goes.
     const plan = bubbles.nth(1);
@@ -512,13 +534,23 @@ test.describe("phone: long turns", () => {
     await expect(cards.nth(1)).toContainText("OLDEND");
     await expect(cards.nth(1).locator(".reply-more")).toHaveCount(0);
 
+    // A read that fails says so on the button.
+    const ask = bubbles.nth(0);
+    await page.route(/\/api\/ui\/sessions\/.*[?&]limit=1(&|$)/, (r) => r.abort(), { times: 1 });
+    await ask.getByRole("button", { name: "Show all" }).click();
+    await expect(ask.locator(".prompt-more")).toHaveText("Couldn't load. Try again");
+
     // An older reply the receiver cut ends cleanly in "…"; "Show more" reads it and goes.
+    // That read makes its turn's message whole too: the failed read is over, and the
+    // message's button says "Show all" again.
     const first = cards.nth(0);
     await expect(first).not.toContainText("FIRSTEND");
     expect((await first.locator(".md").innerText()).trimEnd()).toMatch(/…$/);
     await first.getByRole("button", { name: "Show more" }).click();
     await expect(first).toContainText("FIRSTEND closes the first reply.");
     await expect(first.locator(".reply-more")).toHaveCount(0);
+    await expect(ask).toContainText("ASKEND");
+    await expect(ask.locator(".prompt-more")).toHaveText("Show all");
     await noSidewaysScroll(page);
   });
 });
