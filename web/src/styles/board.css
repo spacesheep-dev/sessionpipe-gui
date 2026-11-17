@@ -398,7 +398,7 @@
 .card[data-menu-open] > .card-row {
   background: var(--sel);
 }
-.card-row:active {
+.card-row:active:not(:has(> .card-disclose:active)) {
   background: var(--press);
   transition: none;
 }
@@ -420,7 +420,7 @@
 }
 
 /* A parent with agents: a disclosure chevron in the gutter left of the glyph, turned
-   down while its agents show. */
+   down while its agents show. Pressed, it lights itself, not the row it folds. */
 .card-disclose {
   position: absolute;
   top: 0;
@@ -443,6 +443,9 @@
   .card-disclose:hover {
     color: var(--fg);
   }
+}
+.card-disclose:active {
+  color: var(--fg);
 }
 
 /* Subagents: single-line child rows at the title's start, on a 1 px tree guide drawn
@@ -729,6 +732,13 @@
   .card-link:not(:has(.card-text, .card-attn, .card-agents, .card-flags)) > .card-line {
     display: none;
   }
+  /* Three lines fill the row from its top, so the chevron moves up with line 1: level with
+     the glyph (measured: line 1's middle is 17 px down). A line 2 with nothing to show
+     leaves the row centred, and the chevron with it. */
+  .card-row:has(.card-text, .card-attn, .card-agents:not(.sr-only), .card-flags) > .card-disclose {
+    place-items: start center;
+    padding-top: 11px;
+  }
   .card-meta {
     justify-self: start;
     /* Its area, not its text: a long repo or branch is cut, never widens the row. */
@@ -761,10 +771,8 @@
     min-height: 64px;
     row-gap: 3px;
   }
+  /* A tree's rows, subagents and the sessions it asked alike. */
   .kid {
-    min-height: 40px;
-  }
-  .agent-row {
     min-height: 44px;
   }
   /* The phone's gutter is 16 px: the chevron sits in it, clear of the screen's edge. */
@@ -772,6 +780,12 @@
     left: -6px;
     width: 14px;
     height: 44px;
+  }
+  /* "Show n finished" is a row of the tree: its words start where the agents' names do
+     (after the glyph's 10 px and the 8 px gap), and the whole row takes the tap. */
+  .kid-more-btn {
+    width: calc(100% - 8px);
+    padding-left: 54px;
   }
 }
 

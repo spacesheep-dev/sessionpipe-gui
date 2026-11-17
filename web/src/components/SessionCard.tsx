@@ -26,8 +26,9 @@ import {
 import { answerState, useSessionSend } from "../control/useSend";
 import { useAppState, useStore, useUnread } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
-import { agentsChoice, agentsFact, agentsShown, agentTabKey, setAgentsChoice } from "../lib/agents";
+import { agentsChoice, agentsRunningFact, agentsShown, agentTabKey, setAgentsChoice } from "../lib/agents";
 import { useAnswerClock } from "../lib/answerWindow";
+import { usePhoneLayout } from "../lib/device";
 import {
   ATTENTION_LABEL,
   attentionMessage,
@@ -178,9 +179,9 @@ export const SessionCard = memo(function SessionCard({
   const toggleAgents = (to = !showAgents) => {
     if (agents.length > 0 && to !== showAgents) setAgentsChoice(s.key, to);
   };
-  // The subagents running, and the agents it asked (one fact when both: "2 subagents
+  // The subagents running now, and the agents it asked (one fact when both: "2 subagents
   // running · asking Codex").
-  const fact = [agentsFact(s), askingFact(s)].filter(Boolean).join(" · ") || null;
+  const fact = [agentsRunningFact(s), askingFact(s)].filter(Boolean).join(" · ") || null;
   // sessionpipe 0.10: paused on its own background work, a turn nobody typed, a run
   // nobody attended. One trailing fact at most, after the subagents'.
   const quiet = quietRun(s);
@@ -394,7 +395,8 @@ export const SessionCard = memo(function SessionCard({
   );
 }, sameCard);
 
-/** How many finished agents show under a parent before "Show n more". */
+/** How many finished agents show under a parent before "Show n more". A phone shows none
+ *  while any agent is unfinished: they fold into "Show n finished". */
 const DONE_SHOWN = 3;
 
 type KidItem = { kind: "agent"; a: AgentRun } | { kind: "kid"; c: SessionSummary };
@@ -402,7 +404,8 @@ const kidKey = (k: KidItem) => (k.kind === "agent" ? `a:${k.a.id}` : `c:${k.c.ke
 const kidGroup = (k: KidItem) => (k.kind === "agent" ? (k.a.state === "done" ? "done" : "open") : "kid");
 
 /** A parent's tree: its agents (the open ones, then the newest finished, then "Show n
- *  more") and its child sessions. It holds still under the pointer like the board does:
+ *  more"; on a phone, while any is open, the open ones and "Show n finished") and its
+ *  child sessions. It holds still under the pointer like the board does:
  *  an agent that finishes stays where it is until the pointer leaves, then slides down
  *  to the finished ones. */
 function KidList({
@@ -425,9 +428,10 @@ function KidList({
 } & Pick<SessionCardProps, "onlyMachine" | "onlyHarness">) {
   const ref = useRef<HTMLUListElement>(null);
   const hold = useListHold(ref) || held;
-  const { shown, more } = agents
-    ? agentsShown(s.agents, all ? Number.POSITIVE_INFINITY : DONE_SHOWN)
-    : { shown: [], more: 0 };
+  const phone = usePhoneLayout();
+  const unfinished = s.agents.some((a) => a.state !== "done");
+  const done = all ? Number.POSITIVE_INFINITY : phone && unfinished ? 0 : DONE_SHOWN;
+  const { shown, more } = agents ? agentsShown(s.agents, done) : { shown: [], more: 0 };
   const items: KidItem[] = [
     ...shown.map((a): KidItem => ({ kind: "agent", a })),
     ...kids.map((c): KidItem => ({ kind: "kid", c })),
@@ -459,7 +463,7 @@ function KidList({
       {more > 0 && (
         <li className="kid-more">
           <button type="button" className="kid-more-btn" onClick={onAll}>
-            Show {more} more
+            Show {more} {done === 0 ? "finished" : "more"}
           </button>
         </li>
       )}

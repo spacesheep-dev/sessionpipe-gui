@@ -48,7 +48,7 @@ export function agentNow(a: AgentRun, now: number): string {
 export const agentTip = (a: AgentRun): string | undefined =>
   a.attributed || a.session ? undefined : "Codex doesn't report a subagent's tools separately";
 
-/** The parent row's trailing fact while any agent is open: "2 subagents running", or
+/** The session page's fact while any agent is open: "2 subagents running", or
  *  "2 subagents · 1 quiet" when some went silent. Null when none is open. */
 export function agentsFact(s: Pick<SessionSummary, "agents" | "counts">): string | null {
   const open = s.counts.agentsRunning ?? 0;
@@ -57,6 +57,23 @@ export function agentsFact(s: Pick<SessionSummary, "agents" | "counts">): string
   const n = `${open} subagent${open === 1 ? "" : "s"}`;
   return quiet > 0 ? `${n} · ${quiet} quiet` : `${n} running`;
 }
+
+/** The board row's fact: "2 subagents running", the ones running now and no others (a
+ *  quiet one is not news on the board). Null when none runs. */
+export function agentsRunningFact(s: Pick<SessionSummary, "agents">): string | null {
+  const n = (s.agents ?? []).filter((a) => a.state === "running").length;
+  return n > 0 ? `${n} subagent${n === 1 ? "" : "s"} running` : null;
+}
+
+/** Whether a parent's tree opens by itself: it is working or needs you, and one of its
+ *  agents runs now. Not `counts.agentsRunning`, which counts the quiet ones too. */
+export const agentsLive = (s: Pick<SessionSummary, "state" | "agents">): boolean =>
+  (s.state === "working" || s.state === "needs_you") && (s.agents ?? []).some((a) => a.state === "running");
+
+/** Whether a parent's agents show under it: the person's choice on this device
+ *  (agentsChoice), else while one runs. */
+export const agentsOpen = (s: Pick<SessionSummary, "state" | "agents">, choice: boolean | undefined): boolean =>
+  choice ?? agentsLive(s);
 
 /** Whether a search word finds an agent (its type or what it was asked). */
 export const agentMatches = (a: AgentRun, word: string): boolean =>
@@ -125,7 +142,7 @@ function readChoices(): [SessionKey, boolean][] {
 }
 
 /** The person's choice for a parent's disclosure, or undefined when they made none (the
- *  row then opens while any agent is open). */
+ *  row then opens while an agent runs). */
 export const agentsChoice = (key: SessionKey): boolean | undefined => readChoices().find(([k]) => k === key)?.[1];
 
 /** Remember opening or closing a parent's agents on this device. */

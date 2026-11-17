@@ -65,6 +65,8 @@
    only gain height. Last in the cascade so no surface's own min-height undercuts it. */
 @media (pointer: coarse) {
   .group-toggle,
+  .kid,
+  .kid-more-btn,
   .tool,
   .marker,
   .tool--x > details > summary,
@@ -96,7 +98,7 @@
     inset: -11px 0;
   }
   /* The subagent disclosure stays 18 px to the eye; a finger gets 44, reaching into the
-     gutter rather than over the row's own glyph. */
+     gutter where there is one (a phone's is narrower: below). */
   .card-disclose::before {
     content: "";
     position: absolute;
@@ -119,6 +121,15 @@
   .ev-beside {
     position: relative;
     z-index: 1;
+  }
+}
+
+/* A phone's gutter has no room left of the chevron (2 px to the screen's edge), so its
+   44 x 44 reaches right instead: from the edge to where the title starts, over the row's
+   glyph. A tap on the glyph of a row with subagents folds them; the title opens the row. */
+@media (pointer: coarse) and (max-width: 839px) {
+  .card-disclose::before {
+    inset: 0 -28px 0 -2px;
   }
 }
 
@@ -182,9 +193,10 @@
 /* On the phone the press ground runs edge to edge with square corners, as a plain cell's
    does, not an inset pill. The row keeps its box (nothing moves under the finger): two
    flat shadows, each the row's own height, carry the ground over the 4 px margin and the
-   gutter on either side. Not while a swipe has the row, whose pane has its own ground. */
+   gutter on either side. Not while a swipe has the row, whose pane has its own ground,
+   nor while the finger is on its chevron, which folds the tree rather than opening it. */
 @media (hover: none) and (max-width: 839px) {
-  .card-row:active:not([data-swipe]),
+  .card-row:active:not([data-swipe], :has(> .card-disclose:active)),
   .kid:active,
   .inbox-row:not([data-swipe]):has(.inbox-main:active),
   .ev:active,
