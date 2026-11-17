@@ -52,6 +52,18 @@ describe("the device door, read", () => {
     expect(deviceDoor({ cooling_until: "soon" }).coolingUntil).toBeNull();
     expect(deviceDoor({})).toEqual({ trusted: false, machines: [], pending: false });
   });
+
+  it("reads spacesheep's hour on its own clock: the time left there is the time left here", () => {
+    // spacesheep's clock is five minutes ahead of the phone's; twenty minutes are left.
+    const theirs = T + 300_000;
+    const d = deviceDoor({ trusted_on: ["m_studio"], cooling_until: theirs + 1_200_000, now: theirs }, T);
+    expect(d.coolingUntil).toBe(T + 1_200_000);
+    expect(approveView(asked, d, T).phase).toEqual({ kind: "cooling", until: T + 1_200_000, exact: true });
+    // Null says it may send, whatever the clocks; with no `now` (or not a time) the end is as written.
+    expect(deviceDoor({ cooling_until: null, now: theirs }, T).coolingUntil).toBeNull();
+    expect(deviceDoor({ cooling_until: T + 5 }, T).coolingUntil).toBe(T + 5);
+    expect(deviceDoor({ cooling_until: T + 5, now: "soon" }, T).coolingUntil).toBe(T + 5);
+  });
 });
 
 describe("where this phone's key stands", () => {
@@ -88,6 +100,28 @@ describe("where this phone's key stands", () => {
     expect(memo.trustedAt).toBe(T + 5000);
     // And when the hour is over it can send.
     expect(approveView(memo, door({ trusted: ["m_studio"] }), T + 5000 + HOUR).phase).toEqual({ kind: "approved" });
+  });
+
+  it("approved in Safari a few minutes after the page last saw the request: the hour's end is known, never early", () => {
+    // Seen open, then the app was in the background while the person approved on spacesheep;
+    // the first look back (the app in front again) sees it trusted.
+    for (const away of [5_000, 4 * 60_000, WATCHED_MS]) {
+      const memo = remember({ ...asked, openAt: T }, door({ trusted: ["m_studio"] }), T + away);
+      expect(memo).toMatchObject({ trustedAt: T + away, watched: true });
+      // The approval came between the two looks: an hour from the second ends no earlier than
+      // spacesheep's hour and at most `away` later, and sends wait for it.
+      expect(approveView(memo, door({ trusted: ["m_studio"] }), T + away).phase).toEqual({
+        kind: "cooling",
+        until: T + away + HOUR,
+        exact: true,
+      });
+    }
+    // A quarter of an hour away: the latest it can be, and nothing is held back for it.
+    const long = remember({ ...asked, openAt: T }, door({ trusted: ["m_studio"] }), T + 15 * 60_000);
+    expect(long.watched).toBe(false);
+    expect(approveView(long, door({ trusted: ["m_studio"] }), T + 15 * 60_000).phase).toMatchObject({ exact: false });
+    // Never seen open: no time at all.
+    expect(remember(asked, door({ trusted: ["m_studio"] }), T + 5_000).trustedAt).toBeUndefined();
   });
 
   it("trusted while the page was not looking: an hour from first sight, the latest it can be", () => {

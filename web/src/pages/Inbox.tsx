@@ -50,6 +50,10 @@ import { NEW_WORDS, ThisPhone } from "../native/accountWords";
 const rowKey = (r: OpenAttention) => `${r.session.key}|${r.attention.attentionId}`;
 /** Why a row's Allow / Deny are off for a standing reason, and answerState's tag for it. */
 type Off = { reason: string; tag: string };
+/** A standing reason as the page says it: one that is a sentence of its own (it starts with
+ *  a capital: "This iPhone can send from 3:09 AM") as it is; a phrase after what it turns off. */
+const offLine = (r: string): string =>
+  /^\p{Lu}/u.test(r) ? `${r.replace(/\.$/, "")}.` : `Allow and Deny are off: ${r}.`;
 const groupOf = (r: OpenAttention) => (r.answerable ? "answer" : "terminal");
 
 export function Inbox() {
@@ -220,7 +224,7 @@ export function Inbox() {
           <NotifyBlocked permission={notify.permission} app={app} />
           {said.map((r) => (
             <p key={r} className="page-note inbox-reason">
-              Allow and Deny are off: {r}.
+              {offLine(r)}
             </p>
           ))}
           <LensNote lens={lens} hidden={hiddenByLens} />

@@ -193,7 +193,7 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
         mend = false;
         unreached = 0;
         const was = door?.trusted ?? false;
-        door = deviceDoor(a.json);
+        door = deviceDoor(a.json, now());
         looked = true;
         const memo = remember(state.memo, door, now());
         keep(memo);

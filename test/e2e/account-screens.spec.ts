@@ -699,16 +699,17 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     );
   });
 
-  test("approved while the page was not looking: the latest it can be, said as that", async () => {
+  test("approved while the page was not looking: the latest it can be, said as that, and nothing held back for it", async () => {
     const { page } = b;
-    // The page last saw the request open ten minutes before it saw it trusted (the app was
-    // closed in between): what it remembered of watching is that.
+    // spacesheep's door names no hour (as it does not yet), and the page last saw the request
+    // open a quarter of an hour before it saw it trusted (the app was closed in between).
+    b.ss.saysCooling = false;
     await page.evaluate(() => {
       const key = Object.keys(localStorage).find((k) => k.startsWith("sessionpipe-gui.account.device."))!;
       const memo = JSON.parse(localStorage.getItem(key)!) as Record<string, unknown>;
       delete memo.trustedAt;
       delete memo.watched;
-      memo.openAt = Date.now() - 600_000;
+      memo.openAt = Date.now() - 15 * 60_000;
       localStorage.setItem(key, JSON.stringify(memo));
     });
     await page.goto(`${b.server.url}/add-device`);
@@ -717,6 +718,12 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await expect(page.locator("[data-machine='waits']")).toHaveText(/Approved · sends by \d{1,2}:\d{2}( [AP]M)?$/);
     await expect(page.getByText("Can send", { exact: true })).toHaveCount(0);
     await shot(page, "approve-cooling-bound");
+    // The hour may be over already: the composer stays, and a send that spacesheep would still
+    // hold back says so itself.
+    await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+    await expect(page.getByText("Found the loop.").first()).toBeVisible();
+    await expect(page.locator("textarea").first()).toBeEnabled();
+    await expect(page.getByText(/can send (by|from)/)).toHaveCount(0);
   });
 
   test("where spacesheep says when the hour ends, that is the time", async () => {
@@ -1200,6 +1207,8 @@ test.describe("what else an account shows", () => {
   }) => {
     const b = await bed(browser);
     b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    // The door names no hour: the page saw the approval come, and counts it itself.
+    b.ss.saysCooling = false;
     const { page } = b;
     try {
       await page.goto(`${b.server.url}/add-device`);
@@ -1801,22 +1810,126 @@ test.describe("what else an account shows", () => {
       ]);
       await page.goto(`${b.server.url}/s/claude-code/s-refund`);
       const line = /This iPhone can send from \d{1,2}:\d{2}( [AP]M)?/;
-      await expect(page.getByText(line).first()).toBeVisible({ timeout: 15_000 });
-      // Over Deny / Allow: the hour's own line, and no button that would be refused.
+      const card = page.locator(".ctl-answer[data-attention='perm-1']");
+      // Over Deny / Allow, once: the hour's own line with the way to answer it on spacesheep,
+      // and no button that would be refused.
+      await expect(card.locator(".ctl-answer-note")).toHaveText(
+        /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\s·\sOpen on spacesheep\.dev$/,
+        { timeout: 15_000 },
+      );
+      await expect(card.locator("[data-elsewhere]")).toBeVisible();
       await expect(page.getByText("this page cannot sign an answer")).toHaveCount(0);
-      const allow = page.getByRole("button", { name: "Allow" }).first();
+      const allow = card.getByRole("button", { name: "Allow" });
       await expect(allow).toBeVisible();
       await expect(allow).toBeDisabled();
-      await expect(page.getByRole("button", { name: "Deny" }).first()).toBeDisabled();
-      expect(await page.getByText(line).count()).toBeGreaterThanOrEqual(2);
+      await expect(card.getByRole("button", { name: "Deny" })).toBeDisabled();
+      await expect(page.getByText(line)).toHaveCount(1);
+      // On the phone the card stands alone: the field, off for the hour too, takes no room.
+      if (W < 840) await expect(page.locator(".ctl-field")).toHaveCount(0);
       await shot(page, "also-prompt-cooling");
-      // The Inbox card: the same reason, and the same two buttons off.
+      // The Inbox card: the same two buttons off, and the hour said once, as its own sentence.
       await page.goto(`${b.server.url}/inbox`);
       const row = page.locator(".inbox-row").first();
       await expect(row).toBeVisible();
       await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
-      await expect(page.getByText(line).first()).toBeVisible();
+      await expect(page.locator(".inbox-reason")).toHaveText(/^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.$/);
+      await expect(page.getByText(/Allow and Deny are off/)).toHaveCount(0);
       expect(b.ss.log.filter((l) => l.startsWith("POST /api/machines/"))).toEqual([]);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("approved in Safari a few minutes after the app last looked, where spacesheep's door names no hour: the field, Allow and the Inbox's Allow wait, and nothing asks for Face ID or goes", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    b.ss.saysCooling = false;
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}/add-device`);
+      await button(page, "Ask spacesheep to approve").click();
+      await expect(page.locator("[data-approve='waiting']")).toBeVisible();
+      // The last look before the app goes to the background sees the request open.
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.locator(".ctl-foot[data-reason='waiting']")).toBeVisible();
+      // In Safari: approved on Devices, four minutes on. The app is back in front then.
+      b.ss.approveDevice([...b.hub.accounts.values()][0]!.deviceKeyId!);
+      asks(b);
+      await page.evaluate(() => {
+        const key = Object.keys(localStorage).find((k) => k.startsWith("sessionpipe-gui.account.device."))!;
+        const memo = JSON.parse(localStorage.getItem(key)!) as Record<string, unknown>;
+        memo.openAt = Date.now() - 4 * 60_000;
+        localStorage.setItem(key, JSON.stringify(memo));
+      });
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      const line = /This iPhone can send from \d{1,2}:\d{2}( [AP]M)?/;
+      const card = page.locator(".ctl-answer[data-attention='perm-1']");
+      await expect(card.locator(".ctl-answer-note")).toHaveText(
+        /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\s·\sOpen on spacesheep\.dev$/,
+        { timeout: 15_000 },
+      );
+      await expect(card.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(card.getByRole("button", { name: "Deny" })).toBeDisabled();
+      await expect(page.getByText(line)).toHaveCount(1);
+      if (W < 840) await expect(page.locator(".ctl-field")).toHaveCount(0);
+      // With no prompt open, the line under the field, which is off.
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.locator(".ctl-foot[data-reason='blocked']")).toContainText(line, { timeout: 15_000 });
+      await expect(page.locator(".ctl-foot [data-elsewhere]")).toHaveText(`Open on ${HOST}`);
+      await expect(composer(page)).toBeDisabled();
+      await page.goto(`${b.server.url}/inbox`);
+      const row = page.locator(".inbox-row[data-attention='perm-1']");
+      await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(page.locator(".inbox-reason")).toHaveText(/^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.$/);
+      expect(await signs(page)).toBe(0);
+      expect(b.ss.jobs).toEqual([]);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("a send spacesheep holds back for the hour the app did not know of: one Face ID, one line that says from when, and nothing offered after it", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    b.ss.saysCooling = false;
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      // Asked and approved before the app ever saw the request wait: no hour is known here.
+      const id = [...b.hub.accounts.keys()][0]!;
+      const asked = await page.evaluate(
+        (account) =>
+          (
+            window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }
+          ).__TAURI_INTERNALS__.invoke("acct_device_ask", { id: account }) as Promise<{ keyId: string }>,
+        id,
+      );
+      b.ss.approveDevice(asked.keyId);
+      await page.reload();
+      const box = composer(page);
+      await expect(box).toBeEnabled();
+      const taps = () => page.evaluate(() => (window as unknown as { __taps: unknown[] }).__taps.length);
+      const before = await taps();
+      await box.fill("Does the retry stop now?");
+      await box.press("Enter");
+      const foot = page.locator(".ctl-foot[data-reason='blocked']");
+      await expect(foot).toContainText(/^Not sent\. This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\./, {
+        timeout: 15_000,
+      });
+      await expect(foot.locator("[data-elsewhere]")).toHaveText(`Open on ${HOST}`);
+      // One line: the hour's own is not said beside it, and spacesheep's paragraph never is.
+      await expect(page.getByText(/can send from/)).toHaveCount(1);
+      await expect(page.getByText(/This device|stolen sign-in/)).toHaveCount(0);
+      // The phone knows the hour from here: nothing more is offered, and that one Face ID was all.
+      await expect(box).toBeDisabled();
+      expect((await taps()) - before).toBe(1);
+      expect(b.ss.jobs).toEqual([]);
+      await shot(page, "also-refused-cooling");
     } finally {
       await b.close();
     }

@@ -376,8 +376,9 @@
     max-width: 100%;
     vertical-align: baseline;
   }
-  /* Unpaired, with a prompt to answer (ControlStrip.tsx `folded`): the card alone, its
-     one line saying how to pair; the line's link reads as the card's other words do. */
+  /* Unpaired, or inside the hour a new device waits, with a prompt to answer (ControlStrip.tsx
+     `folded`): the card alone, its one line saying why, with the way on; the line's link
+     reads as the card's other words do. */
   .ctl--folded .ctl-answer-note .ctl-link {
     color: var(--fg-2);
   }

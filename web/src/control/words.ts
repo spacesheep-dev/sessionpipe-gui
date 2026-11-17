@@ -4,7 +4,7 @@
 import type { ControlActivity, ControlKind, ControlOutcome, RunLevel } from "@shared/api";
 import { asSentence } from "@shared/reason";
 import { accountMode } from "../lib/net";
-import { NEW_WORDS } from "../native/accountWords.new";
+import { clock, NEW_WORDS, ThisPhone } from "../native/accountWords";
 import { ControlError, UNHEARD_CODE, wrongOriginHere } from "./api";
 import { wrongOriginWords } from "./origin";
 import { remoteHostFor } from "./remoteRp";
@@ -157,6 +157,11 @@ export function sendErrorWords(e: unknown, machine?: string | null): string {
   if (e instanceof ControlError) {
     // A send naming files for a computer reached through spacesheep (forwardSend): its reason.
     if (e.code === "relay_files") return `Not sent. ${e.detail ?? e.reason}`;
+    // spacesheep holds a key approved from another device for an hour (its 403 `cooling`):
+    // from when this device can send, in the app's words; never spacesheep's own sentence,
+    // which calls it "This device" and counts the minutes.
+    if (e.status === 403 && e.code === "cooling")
+      return e.until === undefined ? NEW_WORDS.sendCoolingWhy : NEW_WORDS.sendCooling(ThisPhone(), clock(e.until));
     // On a spacesheep account the computer's key list is spacesheep's: the phone's key is
     // not on it yet (not approved, or approved and not added there yet).
     if (e.status === 422 && e.code === "untrusted_key" && accountMode())

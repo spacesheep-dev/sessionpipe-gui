@@ -13,7 +13,9 @@
 // device is not approved, or its request waits): the card says so and offers the way to
 // approve it in their place, and on the phone it stands alone, as unpaired. They are
 // disabled where they come back by themselves (the hour a new device waits, reconnecting,
-// a computer catching up on an approval, a send under way).
+// a computer catching up on an approval, a send under way). The hour is said once: on the
+// card, with the way to answer on spacesheep, while it has a prompt to answer (on the phone
+// the card then stands alone too), else under the field.
 // The draft is kept per session. Disabled with its reason until the machine paired and
 // `onSend` is wired (web/src/control/SessionControl.tsx signs and sends). Keep this
 // component self-contained: everything it needs comes through props.
@@ -407,6 +409,12 @@ export function ControlStrip({
   // Approve plan carries no note (an allow reaches Claude Code with none), so while the
   // composer holds one it waits: the words would otherwise stay behind as the next prompt.
   const noted = !!review && !!text.trim();
+  // A prompt whose card says why it can't be answered from here (`offWhy`): one that is not
+  // late, waiting in a terminal, or answered already.
+  const asks = open.some((a) => answerable(a) && !late(a) && !answers?.[a.attentionId]);
+  // Inside the hour a new device waits, with such a prompt: the card says the hour, once,
+  // with the way to answer it on spacesheep, and the line under the field does not.
+  const hourOnCard = paired && !!blockedSays && !wrong && asks;
   // One reason at a time, most fundamental first (the wrong address or an insecure page
   // come before pairing, which needs the right address too), each with its one way out; none when
   // sending simply works (the composer then carries no caption at all).
@@ -426,6 +434,7 @@ export function ControlStrip({
           </>
         ),
       };
+    if (blocked && hourOnCard) return null;
     if (blocked)
       return {
         kind: "blocked",
@@ -540,10 +549,10 @@ export function ControlStrip({
       };
     return null;
   })();
-  // The phone, unpaired or not approved, with a prompt to answer: one state, one sentence
-  // (on the card), and no composer. A desktop keeps its field and the line under it, and so
-  // does the phone where every prompt is late: that card says only that it is too late.
-  const folded = phone && (!paired || approve) && !blocked && open.some((a) => answerable(a) && !late(a));
+  // The phone, unpaired, not approved or inside the hour, with a prompt to answer: one state,
+  // one sentence (on the card), and no composer. A desktop keeps its field and the line under
+  // it, and so does the phone where every prompt is late: that card says only that it is too late.
+  const folded = phone && asks && (((!paired || approve) && !blocked) || hourOnCard);
   // Why Allow / Deny are off, said on their own bar (the line under the field says the rest).
   const offWhy: ReactNode = enabled ? null : !paired ? (
     folded ? (
@@ -563,7 +572,18 @@ export function ControlStrip({
       `pair ${name} to answer here`
     )
   ) : blocked ? (
-    blockedAnswer(wrong, blockedSays)
+    hourOnCard && elsewhere ? (
+      // Where it wraps, after the dot: no line starts with it.
+      <>
+        {blockedSays?.replace(/\.$/, "")}
+        {"\u00a0"}·{" "}
+        <a className="ctl-link" href={elsewhere.href} target="_blank" rel="noreferrer noopener" data-elsewhere>
+          Open on {elsewhere.host}
+        </a>
+      </>
+    ) : (
+      blockedAnswer(wrong, blockedSays)
+    )
   ) : approve ? (
     `${NEW_WORDS.answerNotYet(ThisPhone())}.`
   ) : stream ? (

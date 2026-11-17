@@ -111,9 +111,11 @@ export class FakeSpacesheep {
   private acceptedAt = new Map<string, number>();
   /** Talking to computers from spacesheep: on, switched off, or not in the plan. */
   talk: "on" | "talk_off" | "pro_required" = "on";
-  /** The device door also says until when a key waits (`cooling_until`). The real one does
-   *  not yet: a page finds out from the field being there. */
-  saysCooling = false;
+  /** The device door also says until when a key waits (`cooling_until`, null once it may
+   *  send) and its own clock (`now`), as spacesheep is to. Off: the door as spacesheep's is
+   *  today, with neither, and the page works the hour out itself (a page finds out from the
+   *  field being there). */
+  saysCooling = true;
   /** What the next ask of the device door (POST) gets instead, once. */
   deviceAnswer: FakeAnswer | null = null;
 
@@ -354,7 +356,7 @@ export class FakeSpacesheep {
     const asked = this.deviceRequests.get(id);
     if (asked && this.clock.now() - asked.at >= DEVICE_REQUEST_MS) this.deviceRequests.delete(id);
     return json({
-      ...(this.saysCooling ? { cooling_until: this.coolingUntil(id) } : {}),
+      ...(this.saysCooling ? { cooling_until: this.coolingUntil(id), now: this.clock.now() } : {}),
       trusted_on: trusted,
       machines: this.machines.map((m) => ({
         id: m.id,

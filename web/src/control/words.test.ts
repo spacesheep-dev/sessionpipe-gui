@@ -217,6 +217,39 @@ describe("sendErrorWords", () => {
     }
   });
 
+  it("a send held back for the hour a new device waits says from when in one sentence, never spacesheep's paragraph", async () => {
+    const g = globalThis as { sessionpipeShell?: unknown };
+    g.sessionpipeShell = {
+      platform: "ios",
+      rxBase: "rx://localhost/ACCT",
+      receiver: { kind: "spacesheep", origin: "https://spacesheep.dev" },
+    };
+    vi.resetModules();
+    try {
+      const { sendErrorWords: words } = await import("./words");
+      const { ControlError: Refused } = await import("./api");
+      const { clock } = await import("../native/accountWords");
+      const paragraph =
+        "This device was approved from another device less than an hour ago. New devices wait an hour before they can send, so a stolen sign-in can't act at once. It can send in 58 minutes.";
+      const until = Date.parse("2026-11-16T05:26:00Z");
+      const said = words(new Refused(403, paragraph, "cooling", paragraph, until));
+      expect(said).toBe(`Not sent. This iPhone can send from ${clock(until)}.`);
+      expect(said).toMatch(/^Not sent\. This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.$/);
+      // spacesheep named no time: why it waits, still in the app's words.
+      expect(words(new Refused(403, paragraph, "cooling", paragraph))).toBe(
+        "Not sent. New devices wait an hour, so a stolen sign-in can't act at once.",
+      );
+      for (const e of [
+        new Refused(403, paragraph, "cooling", paragraph, until),
+        new Refused(403, paragraph, "cooling"),
+      ])
+        expect(words(e)).not.toMatch(/This device|minutes/);
+    } finally {
+      delete g.sessionpipeShell;
+      vi.resetModules();
+    }
+  });
+
   it("tells spacesheep's refusal of this app's key from the page's own key", () => {
     expect(sendErrorWords(new ControlError(502, "Unknown or revoked API key.", "spacesheep_unauthorized"))).toBe(
       "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.",

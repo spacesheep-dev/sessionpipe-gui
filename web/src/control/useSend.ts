@@ -106,7 +106,8 @@ export interface SessionSend {
    *  prompt is no longer open (already answered, or timed out). */
   answers: Readonly<Record<string, AnswerStatus>>;
   /** On a spacesheep account, a phone approved less than an hour ago cannot send yet: the
-   *  line that says from when (when the time is known exactly); null everywhere else. */
+   *  line that says from when (when the time is known exactly), or the refusal of a send
+   *  for that hour in its place; null everywhere else. */
   cooling: string | null;
   /** Whether this device can send to the session's machine (account/sendable.ts). */
   sendable: SendState;
@@ -151,12 +152,18 @@ export function useSessionSend(
   const grant = useGrant(rp);
   const [tap, setTap] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** spacesheep refused the last send for the hour a new device waits, and said until when. */
+  const [refusedHour, setRefusedHour] = useState<{ words: string; until: number } | null>(null);
   const key = session.key;
   const machine = session.machine;
   const phoneKey = usePhone().view?.phase;
+  // Inside that hour, where its end is known (approve.ts `exact`), nothing is offered: the
+  // line says from when. A send refused for the hour says so in that line's place ("Not
+  // sent. …"), never beside it.
+  const hourRefusal = refusedHour && Date.now() < refusedHour.until ? refusedHour.words : null;
   const cooling =
     phoneKey?.kind === "cooling" && phoneKey.exact
-      ? NEW_WORDS.composerCooling(ThisPhone(), clock(phoneKey.until))
+      ? (hourRefusal ?? NEW_WORDS.composerCooling(ThisPhone(), clock(phoneKey.until)))
       : null;
   // Where a send would only be refused, nothing offers one: one fact for the strip, the
   // inbox, the toasts and a row's menu.
@@ -273,6 +280,7 @@ export function useSessionSend(
       // A held send's confirm is on its way: nothing else goes until it has answered.
       if (confirmingHeld()) return;
       setError(null);
+      setRefusedHour(null);
       let fields: CommandFields;
       switch (action.kind) {
         case "prompt":
@@ -319,6 +327,10 @@ export function useSessionSend(
           ? catchHeld(e, { draft: keyAtSend, ...(attached ? { attached } : {}) }, keyAtSend)
           : false;
         if (caught === "changed") setError(HELD_WORDS.changed);
+        // Refused for the hour, whose end the phone holds from here on (doors.ts onCooling):
+        // said where the hour is said (`cooling`).
+        else if (!caught && e instanceof ControlError && e.code === "cooling" && e.until !== undefined)
+          setRefusedHour({ words: notSentWords(e, machine), until: e.until });
         // A prompt the person closed is no refusal: the field and the answer stay as they were.
         else if (!caught) setError(isCancel(e) ? null : notSentWords(e, machine));
         throw e;
@@ -332,6 +344,7 @@ export function useSessionSend(
   );
 
   // A row still being asked for says so whenever the page is opened, not only after the send.
-  const line = error ?? (asking[0] ? unheardWords(asking[0]) : null);
+  // A refusal for the hour where the phone does not hold the hour's end is the send's own.
+  const line = error ?? (asking[0] ? unheardWords(asking[0]) : null) ?? (cooling ? null : hourRefusal);
   return { rp, secure, grant, tap, error: line, answers, cooling, sendable, approval, activity, onSend, held };
 }

@@ -86,6 +86,8 @@ export const NEW_WORDS = {
   sendNotAdded: (machine: string, phone: string) => `Not sent: ${machine} hasn't added ${phone} yet.`,
   signerTap: (auth: string) => `Confirm with ${auth}…`,
   signerLocked: (auth: string, secret: string) => `${auth} is locked. Unlock it with your ${secret}, then try again.`,
+  sendCooling: (Phone: string, time: string) => `Not sent. ${Phone} can send from ${time}.`,
+  sendCoolingWhy: "Not sent. New devices wait an hour, so a stolen sign-in can't act at once.",
 } as const;
 
 /** Whether this phone can send to a computer (account/sendable.ts), the same on every screen

@@ -95,6 +95,14 @@ All notable changes to `sessionpipe-gui`. The format follows
   cancelled Face ID or passkey leaves everything as it was, typed words included, with no
   "not sent". In a browser a cancelled Unlock now brings the line back, and a refused one is
   said until a send goes. Every refusal reads "Not sent: …", in the Inbox too.
+- **In the hour after the iPhone is approved, Allow, Deny, Send and Stop wait instead of
+  asking for Face ID only to be refused.** The app held them back only when it had seen the
+  approval come within 20 seconds, which a trip to Safari to approve it never is, so the
+  first tap got spacesheep's three-sentence refusal. An approval seen within ten minutes now
+  counts, and a send that is still refused says "Not sent. This iPhone can send from 5:26
+  AM." The hour is said once: with a prompt open, on its card with Open on spacesheep.dev
+  (on the phone the card stands alone), else under the field. The Inbox says it as it is,
+  without "Allow and Deny are off:" in front.
 
 ## [0.8.3] - 2026-11-16
 
