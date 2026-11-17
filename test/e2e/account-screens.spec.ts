@@ -1349,6 +1349,69 @@ test.describe("what else an account shows", () => {
       await b.close();
     }
   });
+
+  test("a first connect with a long history: loading rows under 'Catching up…' and no badge, then the whole board once", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    // Three pages of history: a question asked in the first and answered in the last, so
+    // a board drawn from part of it would say the session needs the person.
+    const asked = new Session("s-asked");
+    const busy = new Session("s-busy", "claude-code", Date.now() - 2 * 3_600_000);
+    const at = (title: string) => ({ tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/billing", title } });
+    const payout = at("Rename the payout job");
+    const ledger = at("Index the ledger");
+    b.ss.push([
+      asked.ev("session.started", { source: "startup" }, payout),
+      asked.ev("turn.started", { turn_id: "t1" }, payout),
+      asked.ev(
+        "attention.needed",
+        { attention_id: "perm-1", kind: "permission", tool: "Bash", message: "Bash npm test" },
+        payout,
+      ),
+      busy.ev("session.started", { source: "startup" }, ledger),
+      ...Array.from({ length: 1000 }, (_, i) => busy.ev("tool.started", { tool: "Read", call_id: `c${i}` }, ledger)),
+      asked.ev("attention.cleared", { attention_id: "perm-1" }, payout),
+      asked.ev("turn.ended", { turn_id: "t1" }, payout),
+    ]);
+    // spacesheep answers the first read, and holds every later one until the test lets it.
+    let release = () => {};
+    const held = new Promise<void>((y) => {
+      release = y;
+    });
+    let reads = 0;
+    const handle = b.ss.handle.bind(b.ss);
+    b.ss.handle = async (req) => {
+      if (req.path.startsWith("/api/sessionpipe/v1/relay?") && reads++ > 0) await held;
+      return handle(req);
+    };
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      const catching = page.getByRole("status").filter({ hasText: "Catching up…" });
+      await expect(catching).toBeVisible();
+      await expect(page.getByRole("status", { name: "Catching up", exact: true })).toBeVisible();
+      // Past the wait after which a receiver would be said to be slow: still the loading rows.
+      await page.waitForTimeout(6500);
+      await expect(page.getByText("Still connecting to the receiver…")).toHaveCount(0);
+      await expect(catching).toBeVisible();
+      await expect(page.locator(".nav-badge")).toHaveCount(0);
+      expect(await page.title()).not.toMatch(/^\(/);
+      await shot(page, "also-catching-up");
+      // The rest of the history: the board, once, with nobody waiting, and the line gone.
+      release();
+      await expect(page.getByText("Rename the payout job").first()).toBeVisible({ timeout: 15_000 });
+      await expect(catching).toHaveCount(0);
+      await expect(page.locator(".group--needs_you")).toHaveCount(0);
+      await expect(page.locator(".nav-badge")).toHaveCount(0);
+      // The hub's starting point for notifications is that board.
+      await expect.poll(() => b.hub.needs.map((x) => x.sessions)).toEqual([[]]);
+    } finally {
+      release();
+      await b.close();
+    }
+  });
 });
 
 test("back after spacesheep stopped keeping an approval for the app, before the code's end: time ran out, and the key that was made is said, with the way to it", async ({

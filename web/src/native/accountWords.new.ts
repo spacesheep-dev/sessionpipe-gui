@@ -76,6 +76,8 @@ export const NEW_WORDS = {
   machinesApprove: (phone: string) => `Approve ${phone}`,
   answerLate: (machine?: string) => `too late to answer from here; answer it on ${machine ?? "its computer"}`,
   answerClosed: "already answered, or timed out",
+  catchingUp: "Catching up…",
+  catchingUpSpoken: "Catching up",
 } as const;
 
 /** Whether this phone can send to a computer (account/sendable.ts), the same on every screen

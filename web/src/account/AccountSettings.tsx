@@ -13,23 +13,10 @@ import { apiFetch } from "../lib/net";
 import { Link } from "../lib/router";
 import { day, NEW_WORDS as N, REUSED as R, thisPhone } from "../native/accountWords";
 import { ConnectAccount } from "../native/ConnectAccount";
-import type { AccountView } from "./backend";
-import { accountBackend } from "./current";
+import { useAccountView } from "./current";
 import { usePhone } from "./device";
 import { accountState, phoneLine } from "./screenWords";
 import "./account.css";
-
-/** How the account stands, as the backend says it, for a component. */
-export function useAccountView(): AccountView | null {
-  const b = accountBackend();
-  const [v, setV] = useState<AccountView | null>(() => b?.view() ?? null);
-  useEffect(() => {
-    if (!b) return;
-    setV(b.view());
-    return b.subscribe(() => setV(b.view()));
-  }, [b]);
-  return v;
-}
 
 export function Mark({ kind, children }: { kind: "ok" | "wait" | "warn"; children: string }) {
   return (

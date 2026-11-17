@@ -21,6 +21,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { useBehind } from "../account/current";
 // The one reading of `answerable` the strip and the inbox share (an older server leaves the field unset).
 import { answerable } from "../components/ControlStrip";
 import { answerLate, useAnswerClock } from "../lib/answerWindow";
@@ -54,10 +55,12 @@ export const SLOW_FIRST_LOAD_MS = 6000;
 
 /** A page before its first snapshot: "loading" (the skeleton), "slow" (still connecting
  *  after SLOW_FIRST_LOAD_MS), "down" (the stream failed; the transport retries); null
- *  once loaded. No page sits on a skeleton without saying why. */
+ *  once loaded. No page sits on a skeleton without saying why: an account reading its
+ *  history (account/current.ts useBehind) is not slow, and its page bar says "Catching up…". */
 export function useFirstLoad(): "loading" | "slow" | "down" | null {
   const { connection, snapshotAt } = useAppState();
-  const waiting = !snapshotAt && (connection === "live" || connection === "connecting");
+  const behind = useBehind();
+  const waiting = !snapshotAt && !behind && (connection === "live" || connection === "connecting");
   const [slow, setSlow] = useState(false);
   useEffect(() => {
     setSlow(false);
@@ -66,6 +69,7 @@ export function useFirstLoad(): "loading" | "slow" | "down" | null {
     return () => window.clearTimeout(t);
   }, [waiting]);
   if (snapshotAt) return null;
+  if (behind) return "loading";
   if (!waiting) return "down";
   return slow ? "slow" : "loading";
 }

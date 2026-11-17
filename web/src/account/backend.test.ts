@@ -7,7 +7,7 @@
 import type { ControlActivity, Snapshot, StreamMessage } from "@shared/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RELAY_BUDGET } from "../../../server/sources/relay";
-import { type FakeAnswer, FakeSpacesheep } from "../../../test/account/fake-spacesheep";
+import { type FakeAnswer, type FakeRequest, FakeSpacesheep } from "../../../test/account/fake-spacesheep";
 import { HubStandIn } from "../../../test/account/hub";
 import { Session } from "../../../test/events";
 import {
@@ -274,6 +274,153 @@ describe("a page's own backend on a spacesheep account", () => {
     expect(page.last("snapshot")!.snapshot.sessions).toHaveLength(5);
     expect(b.view().firstBoardMs).not.toBeNull();
     page.off();
+  });
+
+  describe("history of more than one page", () => {
+    /** A question asked in the first of three pages and answered in the third: read from
+     *  part of the history, the session needs the person; with all of it, nobody does. */
+    const answeredLater = () => {
+      const asked = new Session("s-asked");
+      const busy = new Session("s-busy");
+      return [
+        asked.ev("session.started", {}, { tier: 2 }),
+        asked.ev("turn.started", { turn_id: "t1" }, { tier: 2 }),
+        asked.ev(
+          "attention.needed",
+          { attention_id: "a1", kind: "permission", tool: "Bash", message: "Bash rm -rf build" },
+          { tier: 2 },
+        ),
+        busy.ev("session.started", {}, { tier: 2 }),
+        ...Array.from({ length: 1000 }, (_, i) => busy.ev("tool.started", { call_id: `c${i}` }, { tier: 2 })),
+        asked.ev("attention.cleared", { attention_id: "a1" }, { tier: 2 }),
+        asked.ev("turn.ended", { turn_id: "t1" }, { tier: 2 }),
+      ];
+    };
+    /** The relay's reads past the first: held until `release`, or failed while `failing`. */
+    const gate = () => {
+      const g = { release: () => {}, failing: false };
+      let reads = 0;
+      const held = new Promise<void>((y) => {
+        g.release = y;
+      });
+      const handle = r.ss.handle.bind(r.ss);
+      r.ss.handle = async (req: FakeRequest) => {
+        if (!req.path.startsWith("/api/sessionpipe/v1/relay?") || reads++ === 0) return handle(req);
+        if (g.failing) return { status: 503, headers: {}, body: "" };
+        await held;
+        return handle(req);
+      };
+      return g;
+    };
+    const boards = (frames: StreamMessage[]) =>
+      frames.filter((m): m is Extract<StreamMessage, { kind: "snapshot" }> => m.kind === "snapshot");
+
+    it("is one board, drawn once it is in, and the hub's first list is of that board", async () => {
+      r.ss.push(answeredLater());
+      const g = gate();
+      const b = await r.start();
+      const page = listen(b);
+      await tick(3000);
+      // A page in and more to come: behind, nothing drawn, nothing handed to the hub.
+      expect(b.view()).toMatchObject({ catching: true, behind: true, store: { sessions: 2 } });
+      expect(page.frames.filter((m) => m.kind === "snapshot" || m.kind === "event")).toEqual([]);
+      expect(r.hub.needs).toEqual([]);
+      g.release();
+      await tick(3000);
+      expect(b.view()).toMatchObject({ catching: false, behind: false, store: { sessions: 2 } });
+      expect(b.view().caughtUpMs).not.toBeNull();
+      const [only, ...more] = boards(page.frames);
+      expect(more).toEqual([]);
+      expect(only!.snapshot.sessions.find((s) => s.id === "s-asked")?.state).toBe("idle");
+      // The hub's starting point is the board with history in: nobody needs the person.
+      expect(r.hub.needs).toEqual([{ id: expect.any(String), sessions: [] }]);
+      page.off();
+    });
+
+    it("stalls part-way: nothing is drawn, the page is told why, and history still comes as one board", async () => {
+      r.ss.push(answeredLater());
+      const g = gate();
+      g.failing = true;
+      const b = await r.start();
+      const told: string[] = [];
+      const off = b.transport.openStream({
+        onOpen: () => told.push("open"),
+        onMessage: (m) => m.kind === "snapshot" && told.push("snapshot"),
+        onError: () => told.push("down"),
+        onWait: () => told.push("wait"),
+      });
+      await tick(3000);
+      expect(b.view()).toMatchObject({ relay: { state: "offline" }, catching: true });
+      expect(told).toEqual(["open", "down"]);
+      // Read again: no longer down, and still nothing drawn until the last page.
+      g.failing = false;
+      g.release();
+      await tick(30_000);
+      expect(b.view()).toMatchObject({ relay: { state: "ok" }, catching: false, behind: false });
+      expect(told).toEqual(["open", "down", "wait", "snapshot"]);
+      expect(r.hub.needs).toEqual([{ id: expect.any(String), sessions: [] }]);
+      off();
+    });
+
+    it("after a long time away: the kept board, held while the rest is read, then one board", async () => {
+      const cache = keptCache();
+      r = rig({ cache });
+      const s = new Session("s-kept");
+      r.ss.push([s.ev("session.started", {}, { tier: 2 }), s.ev("turn.started", { turn_id: "t1" }, { tier: 2 })]);
+      let b = await r.start();
+      await tick(400);
+      await b.flushed();
+      b.stop();
+      const lists = r.hub.needs.length;
+      r.ss.push(answeredLater());
+      const g = gate();
+      b = await r.start();
+      const page = listen(b);
+      await tick(3000);
+      // The kept board is on the page at once; what was read since is not, nor handed on.
+      expect(b.view()).toMatchObject({ restored: { events: 2 }, behind: true, store: { sessions: 3 } });
+      expect(boards(page.frames).map((m) => m.snapshot.sessions.map((x) => x.id))).toEqual([["s-kept"]]);
+      expect(r.hub.needs).toHaveLength(lists);
+      // The app back in front (a stream opened again): the page keeps the board it has.
+      const told: string[] = [];
+      const again = b.transport.openStream({
+        onOpen: () => told.push("open"),
+        onMessage: (m) => m.kind === "snapshot" && told.push("snapshot"),
+        onError: () => told.push("down"),
+        onWait: () => told.push("wait"),
+      });
+      await tick(50);
+      expect(told).toEqual(["open", "wait"]);
+      g.release();
+      await tick(3000);
+      expect(b.view()).toMatchObject({ catching: false, behind: false });
+      expect(boards(page.frames)).toHaveLength(2);
+      expect(told).toEqual(["open", "wait", "snapshot"]);
+      expect(r.hub.needs.slice(lists)).toEqual([{ id: expect.any(String), sessions: [] }]);
+      again();
+      page.off();
+    });
+
+    it("a launch with little to read is never behind: the kept board, then one quiet update", async () => {
+      const cache = keptCache();
+      r = rig({ cache });
+      const s = new Session("s-kept");
+      r.ss.push([s.ev("session.started", {}, { tier: 2 })]);
+      let b = await r.start();
+      await tick(400);
+      await b.flushed();
+      b.stop();
+      r.ss.push(Array.from({ length: 120 }, (_, i) => s.ev("tool.started", { call_id: `c${i}` }, { tier: 2 })));
+      b = await r.start();
+      const views: boolean[] = [];
+      b.subscribe(() => views.push(b.view().behind));
+      const page = listen(b);
+      await tick(3000);
+      expect(b.view()).toMatchObject({ catching: false, behind: false, store: { events: 121 } });
+      expect(views).not.toContain(true);
+      expect(boards(page.frames)).toHaveLength(2);
+      page.off();
+    });
   });
 
   it("sends a signed message through the jobs door with only what the door takes, and follows its job", async () => {

@@ -15,6 +15,7 @@
 import type { ControlActivity, Info, SessionState, SessionSummary } from "@shared/api";
 import { isEmptySession, ROUTES, SESSION_STATES, splitKey } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useBehind, useCatchingUp } from "../account/current";
 import {
   ChipSelect,
   CommandWell,
@@ -30,7 +31,7 @@ import { type MenuList, MoreButton, useContextMenu } from "../components/Context
 import { LabelChip, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
 import { OfflineLine } from "../components/OfflineLine";
-import { PageBar } from "../components/PageBar";
+import { BarStatus, PageBar } from "../components/PageBar";
 import {
   BesideButton,
   cardHides,
@@ -82,6 +83,7 @@ import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib
 import { useShortcut } from "../lib/shortcuts";
 import { openSplit, useSplitKey } from "../lib/split";
 import { useNow } from "../lib/time";
+import { NEW_WORDS as N } from "../native/accountWords";
 import { useSetupStatus } from "../setup/api";
 
 const isStart = (a: ControlActivity) => a.kind === "start";
@@ -202,6 +204,9 @@ export function Board() {
   const { all } = tree;
   const { snapshotAt } = useAppState();
   const firstLoad = useFirstLoad();
+  // An account reading its history: the board it has stays as it is until the history is in.
+  const behind = useBehind();
+  const catchingUp = useCatchingUp();
   const [q, setQ] = useState("");
   const [machine, setMachine] = useState("");
   const [harness, setHarness] = useState("");
@@ -493,6 +498,7 @@ export function Board() {
     >
       <PageBar
         title="Board"
+        meta={catchingUp ? <BarStatus>{N.catchingUp}</BarStatus> : undefined}
         tools={
           // Not before the first snapshot: the filters it decides would push the search
           // over as they arrive (the layout shift the board had on every load).
@@ -553,7 +559,11 @@ export function Board() {
       <LensNote lens={lens} hidden={hiddenByLens} />
 
       {firstLoad === "loading" ? (
-        <div className="skeleton board-skeleton" role="status" aria-label="Loading sessions">
+        <div
+          className="skeleton board-skeleton"
+          role="status"
+          aria-label={behind ? N.catchingUpSpoken : "Loading sessions"}
+        >
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="skeleton-row" />
           ))}

@@ -60,6 +60,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   Settings › App said "This iPhone can send by" an hour from then when, say, the app's
   storage had been cleared. It says "Can send" now; if spacesheep does hold a send back,
   its answer says until when.
+- **On a spacesheep account the board holds still while the app reads the account's
+  history, and says "Catching up…".** The iPhone app drew the board from part of the
+  history every second and a half, oldest first, so for its first minute the same sessions
+  read as Done, then as needing you (with a badge), then as Working. The board on screen
+  stays as it was, or its loading rows on a first connect, and changes once, when the
+  history is in. Nothing it hands over for notifications comes from the part read so far.
 
 ## [0.8.3] - 2026-11-16
 

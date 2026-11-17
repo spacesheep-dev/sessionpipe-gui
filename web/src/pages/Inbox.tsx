@@ -11,12 +11,13 @@
 // the bar, not on every row.
 import type { MachineControl } from "@shared/api";
 import { type MutableRefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useBehind, useCatchingUp } from "../account/current";
 import { ActionButton, Ago, EmptyState, HarnessGlyph, Redacted, StateDot } from "../components/bits";
 import { type MenuList, openMenu, useContextMenu } from "../components/ContextMenu";
 import { LabelChip, LabelDot, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
 import { NotifyBlocked, NotifyMenu, notifyBlocked, useAppNotify } from "../components/NotifyToggle";
-import { PageBar } from "../components/PageBar";
+import { BarStatus, PageBar } from "../components/PageBar";
 import {
   answerItems,
   lensMenu,
@@ -64,6 +65,9 @@ export function Inbox() {
   );
   const { machines } = useAppState();
   const firstLoad = useFirstLoad();
+  // An account reading its history: the prompts it has stay as they are until the history is in.
+  const behind = useBehind();
+  const catchingUp = useCatchingUp();
   // Answerable first, then the ones waiting in a terminal; held still while read.
   const sorted = useMemo(() => [...rows.filter((r) => r.answerable), ...rows.filter((r) => !r.answerable)], [rows]);
   const listRef = useRef<HTMLDivElement>(null);
@@ -180,7 +184,7 @@ export function Inbox() {
       <PageBar
         title="Inbox"
         className="inbox-head"
-        meta={meta || undefined}
+        meta={catchingUp ? <BarStatus>{NEW_WORDS.catchingUp}</BarStatus> : meta || undefined}
         tools={<LabelChip value={label} onChange={setLabelFilter} />}
         actions={
           <>
@@ -202,7 +206,7 @@ export function Inbox() {
         </div>
       )}
       {firstLoad === "loading" ? (
-        <div className="skeleton" role="status" aria-label="Loading">
+        <div className="skeleton" role="status" aria-label={behind ? NEW_WORDS.catchingUpSpoken : "Loading"}>
           {[0, 1, 2].map((i) => (
             <div key={i} className="skeleton-row" />
           ))}

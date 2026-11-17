@@ -26,7 +26,7 @@ export const STATE_HINT: Record<SessionState, string> = {
   working: "A turn is running and events are still arriving.",
   stale: "A turn started but nothing has arrived for over ten minutes.",
   idle: "The last turn ended; the session is open and waiting for a prompt.",
-  done: "Ended, or silent for six hours, or only known from backfill.",
+  done: "Ended, or silent for a day, or only known from backfill.",
 };
 
 /** A title cut upstream ("Why does the staging deploy take 14 minutes?...") keeps its

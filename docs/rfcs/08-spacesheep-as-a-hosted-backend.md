@@ -373,8 +373,10 @@ message?, at, answerable }] }` (other fields are not read). A board that needs m
 than one list may hold (the bounds below) is handed cut to them, so that it is taken and
 not refused whole: the first 200 such sessions, sixteen attentions of each, 200
 attentions in all, a message 300 characters. The page calls it once
-after its first board, then whenever the list changed, and with an empty list when the
-last one clears; it calls it only where the contract lists `"account-needs"`. The hub
+history is in (the relay read to a page that is not full: before that its board is a
+part of the past, read oldest first, and is not drawn either), then whenever the list
+changed, and with an empty list when the last one clears; it calls it only where the
+contract lists `"account-needs"`. The hub
 applies the list as it applies a stream's `snapshot` (what is no longer in it closed)
 and says it with the same count as a receiver's, so a notification is posted for an
 account's session as for a receiver's: when it opens while the app is in the
