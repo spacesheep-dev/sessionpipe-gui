@@ -13,6 +13,8 @@ pub struct Ask {
     /// Cancel is the alert's preferred action (the one in bold, the one the return key
     /// of a keyboard gives), not the button that goes ahead.
     pub prefer_cancel: bool,
+    /// The button that goes ahead removes something: drawn as such (red on iOS).
+    pub destructive: bool,
 }
 
 /// The words for adding a receiver: its address as the person will see it in the list.
@@ -32,42 +34,46 @@ pub fn add_receiver(os: crate::contract::Os, origin: &str, pinned: bool) -> Ask 
         ok: "Connect",
         cancel: "Cancel",
         prefer_cancel: false,
+        destructive: false,
     }
 }
 
 /// The words for a question the Hub asks about a spacesheep account (docs/rfcs/08,
-/// `sp_receivers::Question`). In each, Cancel is the answer a stray tap or the return key
-/// gives; nothing is kept, replaced or removed unless the other button is pressed.
+/// `sp_receivers::Question`). Nothing is kept, replaced or removed unless the button that
+/// goes ahead is pressed. Cancel is the preferred answer where saying yes loses something
+/// or the server is not spacesheep.dev; for an approved account that replaces none, the
+/// person has just confirmed it on spacesheep, and going ahead is.
 pub fn for_question(os: crate::contract::Os, q: &sp_receivers::Question) -> Ask {
     use sp_receivers::Question;
     let device = sp_receivers::account::sentence_start(os.here());
-    let (title, message, ok) = match q {
+    let (title, message, ok, prefer_cancel) = match q {
         // spacesheep.dev confirms a connect on its own page; another server's confirm
         // page is that server's, so the person is asked here first.
         Question::Origin { host, .. } => (
             "Use an account on this server?".to_string(),
             format!("{device} will ask {host} for an account and show its sessions. It is not spacesheep.dev: continue only if you know this server."),
             "Continue",
+            true,
         ),
-        // Whose account was approved, and where: the person sees it before this phone
-        // keeps it. The host first, on a line of its own, then the address (cut in the
-        // middle when long, so neither can push the other out of sight), then what
-        // saying yes does. Only spacesheep.dev is called a spacesheep account.
+        // Whose account was approved, in the title (the address cut in the middle when
+        // long), and where it is signed in: the person sees both before this phone keeps
+        // it. When another account here goes with a yes, that is said too.
         Question::Attach {
             email,
             host,
-            origin,
+            replaces,
+            ..
         } => (
-            if origin == sp_receivers::account::DEFAULT_ORIGIN {
-                "Use this spacesheep account?".to_string()
-            } else {
-                "Use this account?".to_string()
+            format!("Use {}?", sp_receivers::account::shown_email(email)),
+            match replaces {
+                Some(old) => format!(
+                    "Signed in on {host}.\n{} and its labels here go.",
+                    sp_receivers::account::shown_email(old)
+                ),
+                None => format!("Signed in on {host}."),
             },
-            format!(
-                "{host}\n{}\n{device} will show its sessions.",
-                sp_receivers::account::shown_email(email)
-            ),
             "Use it",
+            replaces.is_some(),
         ),
         // One sentence whether or not labels were kept: the page removes everything it
         // holds for the account either way, and the key is only forgotten here.
@@ -75,6 +81,7 @@ pub fn for_question(os: crate::contract::Os, q: &sp_receivers::Question) -> Ask 
             format!("Disconnect {}?", sp_receivers::account::shown_email(email)),
             format!("{device} forgets the account: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep."),
             "Disconnect",
+            true,
         ),
     };
     Ask {
@@ -82,7 +89,8 @@ pub fn for_question(os: crate::contract::Os, q: &sp_receivers::Question) -> Ask 
         message,
         ok,
         cancel: "Cancel",
-        prefer_cancel: true,
+        prefer_cancel,
+        destructive: matches!(q, Question::Disconnect { .. }),
     }
 }
 
@@ -204,6 +212,13 @@ mod tests {
             email: email.into(),
             origin: origin.into(),
             host: host.into(),
+            replaces: None,
+        };
+        let replacing = |old: &str| Question::Attach {
+            email: "misha@example.com".into(),
+            origin: "https://spacesheep.dev".into(),
+            host: "spacesheep.dev".into(),
+            replaces: Some(old.into()),
         };
         let disconnect = |documents: bool| Question::Disconnect {
             email: "misha@example.com".into(),
@@ -216,24 +231,19 @@ mod tests {
         assert_eq!(a.message, "This iPhone will ask stagesheep.dev for an account and show its sessions. It is not spacesheep.dev: continue only if you know this server.");
         assert_eq!((a.cancel, a.ok), ("Cancel", "Continue"));
 
-        // On spacesheep.dev: named so. The host, then the address, then what yes does.
+        // Whose account, in the title; where it is signed in, under it. The same words on
+        // both phones.
         let here = attach(
             "https://spacesheep.dev",
             "spacesheep.dev",
             "misha@example.com",
         );
         let a = super::for_question(Os::Ios, &here);
-        assert_eq!(a.title, "Use this spacesheep account?");
-        assert_eq!(
-            a.message,
-            "spacesheep.dev\nmisha@example.com\nThis iPhone will show its sessions."
-        );
+        assert_eq!(a.title, "Use misha@example.com?");
+        assert_eq!(a.message, "Signed in on spacesheep.dev.");
         assert_eq!((a.cancel, a.ok), ("Cancel", "Use it"));
-        assert_eq!(
-            super::for_question(Os::Android, &here).message,
-            "spacesheep.dev\nmisha@example.com\nThis phone will show its sessions."
-        );
-        // Anywhere else the title does not say whose server it is; the first line does.
+        assert_eq!(super::for_question(Os::Android, &here), a);
+        // Anywhere else, the host it names is that one.
         for (origin, host) in [
             ("https://stagesheep.dev", "stagesheep.dev"),
             (
@@ -243,25 +253,32 @@ mod tests {
             ("http://localhost:8841", "localhost:8841"),
         ] {
             let a = super::for_question(Os::Ios, &attach(origin, host, "misha@example.com"));
-            assert_eq!(a.title, "Use this account?", "{origin}");
-            assert_eq!(
-                a.message,
-                format!("{host}\nmisha@example.com\nThis iPhone will show its sessions.")
-            );
+            assert_eq!(a.title, "Use misha@example.com?", "{origin}");
+            assert_eq!(a.message, format!("Signed in on {host}."));
         }
-        // The longest address there can be takes one line, cut in its middle: the host
-        // stays the first thing read, and the last line stays in sight.
+        // The longest address there can be is cut in its middle: the title stays one
+        // address long, and the host stays in sight.
         let long = format!("{}@{}", "a".repeat(64), "d".repeat(190));
         let a = super::for_question(
             Os::Ios,
             &attach("https://spacesheep.dev", "spacesheep.dev", &long),
         );
+        assert_eq!(a.title.chars().count(), "Use ?".len() + 60);
+        assert!(a.title.contains('…'));
+        assert_eq!(a.message, "Signed in on spacesheep.dev.");
+        // Another account here goes with a yes: it is named, cut the same way.
+        let a = super::for_question(Os::Ios, &replacing("masha@example.com"));
+        assert_eq!(a.title, "Use misha@example.com?");
+        assert_eq!(
+            a.message,
+            "Signed in on spacesheep.dev.\nmasha@example.com and its labels here go."
+        );
+        assert_eq!((a.cancel, a.ok), ("Cancel", "Use it"));
+        let a = super::for_question(Os::Ios, &replacing(&long));
         let lines: Vec<&str> = a.message.split('\n').collect();
-        assert_eq!(lines.len(), 3);
-        assert_eq!(lines[0], "spacesheep.dev");
-        assert_eq!(lines[1].chars().count(), 60);
-        assert!(lines[1].contains('…'));
-        assert_eq!(lines[2], "This iPhone will show its sessions.");
+        let tail = " and its labels here go.";
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[1].chars().count(), 60 + tail.len());
 
         // A disconnect says all that goes, and what does not: the same whether or not
         // labels were kept (the page removes what it holds for the account either way).
@@ -278,13 +295,24 @@ mod tests {
                 "This phone forgets the account: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep."
             );
         }
-        // Cancel is the preferred action of every one of them, on both phones; adding a
-        // receiver keeps the button it had.
+        // Cancel is the preferred action where a yes loses something or the server is not
+        // spacesheep.dev, on both phones; an approved account that replaces none prefers
+        // Use it, as adding a receiver prefers Connect. Only a disconnect's button is red.
         for os in [Os::Ios, Os::Android] {
-            for q in [&origin, &here, &disconnect(true), &disconnect(false)] {
-                assert!(super::for_question(os, q).prefer_cancel);
+            let ask = |q: &Question| super::for_question(os, q);
+            assert!(!ask(&here).prefer_cancel, "nothing is lost by a yes");
+            assert!(ask(&replacing("masha@example.com")).prefer_cancel);
+            assert!(ask(&origin).prefer_cancel);
+            for documents in [true, false] {
+                assert!(ask(&disconnect(documents)).prefer_cancel);
+                assert!(ask(&disconnect(documents)).destructive);
+            }
+            for q in [&origin, &here, &replacing("masha@example.com")] {
+                assert!(!ask(q).destructive);
             }
         }
-        assert!(!super::add_receiver(Os::Ios, "http://192.168.1.4:7373", false).prefer_cancel);
+        let add = super::add_receiver(Os::Ios, "http://192.168.1.4:7373", false);
+        assert!(!add.prefer_cancel);
+        assert!(!add.destructive);
     }
 }

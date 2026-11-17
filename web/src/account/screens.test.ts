@@ -3,30 +3,43 @@
 // ended, how the account stands, where this phone's key stands in a row, and an ask's
 // refusal. (Each state drawn, start to end, is test/e2e/account-screens.spec.ts.)
 import { describe, expect, it } from "vitest";
-import { clock, day, NEW_WORDS as N } from "../native/accountWords";
+import type { Ended } from "../native/accountConnect";
+import { clock, day, NEW_WORDS as N, thisPhone } from "../native/accountWords";
 import { accountState, approveError, endedWords, phoneLine } from "./screenWords";
 
 const HOST = "spacesheep.dev";
 const relay = (state: string) => ({ state, events: 0, cursor: 0, machines: [] }) as never;
 
 describe("how a connect ended, in words", () => {
-  it("has a title and a next step for each way, and the hub's own note where a key was made and not kept", () => {
-    const note =
-      "A key was made for this app on spacesheep and is not kept here. Revoke it there: Settings → API keys.";
+  const note = "A key was made for this app on spacesheep and is not kept here. Revoke it there: Settings → API keys.";
+  const revokeUrl = "https://spacesheep.dev/settings/api-keys";
+  const ended = (why: Ended, more: object = {}) => endedWords({ kind: "ended", why, host: HOST, ...more });
+
+  it("has a title that says what happened and one line for what to do next", () => {
     for (const why of ["unreachable", "wait", "busy", "denied", "expired", "unexpected"] as const) {
-      const w = endedWords({ kind: "ended", why, host: HOST });
+      const w = ended(why);
       expect(w.title, why).not.toBe("");
       expect(w.body, why).not.toBe("");
     }
-    expect(endedWords({ kind: "ended", why: "declined", host: HOST, note }).body).toBe(note);
-    expect(endedWords({ kind: "ended", why: "not-kept", host: HOST, note }).body).toBe(note);
-    // A held approval that ran out says the note too: a key was made.
-    expect(endedWords({ kind: "ended", why: "expired", host: HOST, note }).body).toBe(note);
-    expect(endedWords({ kind: "ended", why: "expired", host: HOST }).body).toBe(N.expiredBody);
+    expect(ended("unreachable")).toEqual({ title: `Couldn't reach ${HOST}`, body: N.unreachableBody });
+    expect(ended("busy")).toEqual({ title: N.busyTitle, body: N.busyBody });
+    expect(ended("denied")).toEqual({ title: N.notConnected, body: N.deniedBody });
+    expect(ended("expired")).toEqual({ title: N.expiredTitle, body: N.expiredBody });
+    expect(ended("unexpected")).toEqual({ title: N.unexpectedTitle, body: N.unexpectedBody });
     // A time to try again when the hub gave one, else "in a few minutes".
     const at = Date.parse("2026-11-12T14:05:00Z");
-    expect(endedWords({ kind: "ended", why: "wait", host: HOST, at }).body).toBe(N.waitAt(clock(at)));
-    expect(endedWords({ kind: "ended", why: "wait", host: HOST }).body).toBe(N.waitSoon);
+    expect(ended("wait", { at }).body).toBe(N.waitAt(clock(at)));
+    expect(ended("wait").body).toBe(N.waitSoon);
+  });
+
+  it("where a key was made and not kept, says to revoke it once: the button opens the page, the hub's note says where only without one", () => {
+    // With the button: one short line, not the way there in words.
+    expect(ended("declined", { note, revokeUrl })).toEqual({ title: N.notConnected, body: N.unusedKey });
+    expect(ended("not-kept", { note, revokeUrl })).toEqual({ title: N.notKeptTitle(thisPhone()), body: N.unusedKey });
+    // A held approval that ran out says it too: a key was made.
+    expect(ended("expired", { note, revokeUrl })).toEqual({ title: N.expiredTitle, body: N.unusedKey });
+    // Without the button (its page would be on another origin), the hub's note, which says where.
+    for (const why of ["declined", "expired", "not-kept"] as const) expect(ended(why, { note }).body, why).toBe(note);
   });
 });
 

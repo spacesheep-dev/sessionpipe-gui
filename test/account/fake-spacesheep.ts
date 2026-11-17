@@ -100,6 +100,8 @@ export class FakeSpacesheep {
   private connects = new Map<string, { digits: string; poll: string; approved: boolean; denied: boolean }>();
   /** What the next `POST /api/gui/connect` gets instead of a code, once. */
   connectAnswer: FakeAnswer | null = null;
+  /** How long a connect's code is good for, from its start (`GUI_CONNECT_TTL_S`). */
+  connectTtlMs = 600_000;
   /** Device keys that asked to be trusted, by key id, and the number each shows. */
   deviceRequests = new Map<string, { code: string; name: string; at: number }>();
   /** The machines that trust each device key. */
@@ -170,7 +172,8 @@ export class FakeSpacesheep {
       }
   }
 
-  /** The connect's code ran out before anybody answered. */
+  /** The connect's record is gone: its code ran out before anybody answered, or an approval
+   *  waited for the app's poll longer than spacesheep keeps its key. */
   expire(digits: string): void {
     for (const [code, c] of this.connects) if (c.digits === digits) this.connects.delete(code);
   }
@@ -225,7 +228,7 @@ export class FakeSpacesheep {
           digits,
           url: `https://${this.rpId}/connect/gui?code=${code}`,
           poll_token: poll,
-          expires_at: new Date(this.clock.now() + 600_000).toISOString(),
+          expires_at: new Date(this.clock.now() + this.connectTtlMs).toISOString(),
         },
         201,
       );

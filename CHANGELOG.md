@@ -13,6 +13,19 @@ All notable changes to `sessionpipe-gui`. The format follows
   sharp through the tab labels and into the home-indicator strip, and the transcript
   through the session's title and the command waiting for Allow or Deny. The bars are
   solid now.
+- **Connecting a spacesheep account on the iPhone: "Use it" is the answer the question
+  offers first.** Back from Safari, the question put Cancel first, and one tap on it threw
+  the connect away and left a key behind on spacesheep. It now names the account in its
+  title ("Use misha@startrise.io?") and where it is signed in, and offers Use it first.
+  Cancel stays first where a yes would remove another account here (the question says
+  which), and Disconnect's button is red.
+- **Coming back late after confirming is no longer called "Not confirmed in time".** The
+  app asks spacesheep once more after the code's time and takes its word: an approval it
+  still holds is collected, and one it dropped is said, with the key left there to revoke.
+- **Each way a connect can end says what happened in a title and one line.** "Not now" on
+  spacesheep reads as the person's own choice, not a refusal; another open question,
+  "Time ran out" and "Couldn't connect" have titles of their own; and where a key was left
+  on spacesheep, the screen says to revoke it once, with "Open API keys" to do it.
 
 ## [0.8.3] - 2026-11-16
 

@@ -29,6 +29,9 @@ const NAME = "studio-mac";
 /** The account's origin as a person reads it. Nothing is asked of it: spacesheep is stood in. */
 const ORIGIN = "https://spacesheep.dev";
 const HOST = "spacesheep.dev";
+/** What an ended connect says where a key was made and is not kept here, beside the button
+ *  to it (the hub's own note says the way there in words, and is shown only without one). */
+const UNUSED_KEY = "Revoke the unused key on spacesheep.";
 
 test.describe.configure({ mode: "serial" });
 
@@ -296,7 +299,7 @@ test.describe("each way a connect can end, with what to do next", () => {
     await start();
     await expect(ended("unreachable")).toBeVisible();
     await expect(b.page.getByText(`Couldn't reach ${HOST}`)).toBeVisible();
-    await expect(b.page.getByText("Check this iPhone's connection, then try again.")).toBeVisible();
+    await expect(b.page.getByText("Check your connection, then try again.")).toBeVisible();
     await shot(b.page, "end-unreachable");
     // Try again, with spacesheep back: the number.
     b.hub.down = false;
@@ -322,28 +325,33 @@ test.describe("each way a connect can end, with what to do next", () => {
     b.hub.startRefusal = new HubRefused("busy", "Another question is open on this iPhone. Answer it first.");
     await button(b.page, "Continue").click();
     await expect(ended("busy")).toBeVisible();
-    await expect(b.page.getByText("Another question is open on this iPhone. Answer it, then try again.")).toBeVisible();
+    await expect(b.page.getByText("Another question is open", { exact: true })).toBeVisible();
+    await expect(b.page.getByText("Answer it, then try again.")).toBeVisible();
     await shot(b.page, "end-busy");
   });
 
-  test("refused on spacesheep's page", async () => {
+  test("Not now on spacesheep's page: said as the person's own choice", async () => {
     await start();
     b.ss.approve(await digits(), false);
     await b.hub.pollConnect();
     await expect(ended("denied")).toBeVisible();
-    await expect(b.page.getByText("The request was refused on spacesheep.")).toBeVisible();
+    await expect(b.page.getByText("You chose Not now on spacesheep.")).toBeVisible();
     await shot(b.page, "end-denied");
   });
 
-  test("refused here, in the hub's own question: a key was made, and the page says where to revoke it", async () => {
+  test("refused here, in the hub's own question: a key was made, and the page says to revoke it, once, with the way there", async () => {
     await start();
     b.hub.alert = () => false;
     b.ss.approve(await digits());
     await b.hub.pollConnect();
     await expect(ended("declined")).toBeVisible();
-    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toBeVisible();
+    await expect(b.page.getByText(UNUSED_KEY)).toBeVisible();
+    // The button says the way there, so the words do not: the hub's note is not shown.
+    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toHaveCount(0);
+    // Try again where it is on every ended screen, the way to the key under it.
+    await expect(ended("declined").locator(".onb-primary, .onb-secondary")).toHaveText(["Try again", "Open API keys"]);
     await shot(b.page, "end-declined");
-    await button(b.page, "Open API keys on spacesheep").click();
+    await button(b.page, "Open API keys").click();
     expect(await opened(b.page)).toEqual([`${ORIGIN}/settings/api-keys`]);
     expect(b.hub.accounts.size).toBe(0);
     b.hub.alert = () => true;
@@ -358,10 +366,10 @@ test.describe("each way a connect can end, with what to do next", () => {
     await foreground(b.page);
     await expect(step(b.page, "account-asking")).toBeVisible();
     await button(b.page, "Cancel").click();
-    // Not the welcome: the hub's note, and the way to the key.
+    // Not the welcome: the key that was made, and the way to it.
     await expect(b.page.locator(".onb[data-step='account-ended']")).toBeVisible();
-    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toBeVisible();
-    await expect(button(b.page, "Open API keys on spacesheep")).toBeVisible();
+    await expect(b.page.getByText(UNUSED_KEY)).toBeVisible();
+    await expect(button(b.page, "Open API keys")).toBeVisible();
     expect(b.hub.accounts.size).toBe(0);
     b.hub.alert = () => true;
   });
@@ -375,8 +383,8 @@ test.describe("each way a connect can end, with what to do next", () => {
     // The app is closed there and opened again: the note is the first thing shown.
     await b.page.goto(b.server.url);
     await expect(b.page.locator(".onb[data-step='account-ended']")).toBeVisible();
-    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toBeVisible();
-    await expect(button(b.page, "Open API keys on spacesheep")).toBeVisible();
+    await expect(b.page.getByText(UNUSED_KEY)).toBeVisible();
+    await expect(button(b.page, "Open API keys")).toBeVisible();
     // Left, it is not shown again.
     await b.page
       .locator(".onb[data-step='account-ended'] .onb-back, .onb[data-step='account-ended'] [data-back]")
@@ -385,7 +393,7 @@ test.describe("each way a connect can end, with what to do next", () => {
     await expect(b.page.locator(".onb[data-step='account-ended']")).toHaveCount(0);
     await b.page.goto(b.server.url);
     await expect(step(b.page, "welcome")).toBeVisible();
-    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toHaveCount(0);
+    await expect(b.page.getByText(UNUSED_KEY)).toHaveCount(0);
     b.hub.alert = () => true;
   });
 
@@ -467,13 +475,17 @@ test.describe("each way a connect can end, with what to do next", () => {
   });
 
   test("nobody confirmed in time", async () => {
+    // Its end has passed when spacesheep says it ran out.
+    b.ss.connectTtlMs = 0;
     await start();
     b.ss.expire(await digits());
     await b.hub.pollConnect();
     await expect(ended("expired")).toBeVisible();
-    await expect(b.page.getByText("Not confirmed in time")).toBeVisible();
+    await expect(b.page.getByText("Time ran out")).toBeVisible();
     await expect(b.page.getByText("Try again for a new number.")).toBeVisible();
+    await expect(button(b.page, "Open API keys")).toHaveCount(0);
     await shot(b.page, "end-expired");
+    b.ss.connectTtlMs = 600_000;
   });
 
   test("approved, and the phone could not keep it: the same note, the same way to revoke", async () => {
@@ -482,9 +494,9 @@ test.describe("each way a connect can end, with what to do next", () => {
     b.ss.approve(await digits());
     await b.hub.pollConnect();
     await expect(ended("not-kept")).toBeVisible();
-    await expect(b.page.getByText("Couldn't keep the account on this iPhone")).toBeVisible();
-    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toBeVisible();
-    await expect(button(b.page, "Open API keys on spacesheep")).toBeVisible();
+    await expect(b.page.getByText("Couldn't save the account on this iPhone")).toBeVisible();
+    await expect(b.page.getByText(UNUSED_KEY)).toBeVisible();
+    await expect(ended("not-kept").locator(".onb-primary, .onb-secondary")).toHaveText(["Try again", "Open API keys"]);
     await shot(b.page, "end-not-kept");
     b.hub.keep = "ok";
   });
@@ -493,8 +505,8 @@ test.describe("each way a connect can end, with what to do next", () => {
     b.ss.connectAnswer = { status: 500, headers: {}, body: "{}" };
     await start();
     await expect(ended("unexpected")).toBeVisible();
-    await expect(b.page.getByText(`${HOST} didn't answer as expected`)).toBeVisible();
-    await expect(b.page.getByText("Try again. If it keeps happening, update sessionpipe.")).toBeVisible();
+    await expect(b.page.getByText("Couldn't connect")).toBeVisible();
+    await expect(b.page.getByText("If it keeps happening, update this app.")).toBeVisible();
     await shot(b.page, "end-unexpected");
     // Back leaves nothing behind: the welcome, and no outcome held at the hub.
     await button(b.page, "Back").click();
@@ -840,7 +852,7 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
       ),
     ).toBeVisible();
     await shot(page, "disconnected");
-    await button(page, "Open API keys on spacesheep").click();
+    await button(page, "Open API keys").click();
     expect((await opened(page)).at(-1)).toBe(`${ORIGIN}/settings/api-keys`);
     await button(page, "Done").click();
     await expect(step(page, "welcome")).toBeVisible();
@@ -1251,4 +1263,31 @@ test.describe("what else an account shows", () => {
       await b.close();
     }
   });
+});
+
+test("back after spacesheep stopped keeping an approval for the app, before the code's end: time ran out, and the key that was made is said, with the way to it", async ({
+  browser,
+}) => {
+  const b = await bed(browser);
+  try {
+    await b.page.goto(b.server.url);
+    await button(b.page, "Use a spacesheep account").click();
+    await button(b.page, "Continue").click();
+    await expect(step(b.page, "account-number")).toBeVisible();
+    const number = (await b.page.locator(".onb-digits").getAttribute("data-digits"))!;
+    // Confirmed there; the app comes back after spacesheep dropped the key it held for it.
+    b.ss.approve(number);
+    b.ss.expire(number);
+    await b.hub.pollConnect();
+    const end = step(b.page, "account-ended");
+    await expect(end).toHaveAttribute("data-why", "expired");
+    await expect(b.page.getByText("Time ran out")).toBeVisible();
+    await expect(b.page.getByText(UNUSED_KEY)).toBeVisible();
+    await expect(end.locator(".onb-primary, .onb-secondary")).toHaveText(["Try again", "Open API keys"]);
+    await shot(b.page, "end-expired-key");
+    await button(b.page, "Open API keys").click();
+    expect(await opened(b.page)).toEqual([`${ORIGIN}/settings/api-keys`]);
+  } finally {
+    await b.close();
+  }
 });

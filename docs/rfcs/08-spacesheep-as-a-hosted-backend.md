@@ -271,10 +271,14 @@ origin, in its own scheme, or the connect fails. The poll token never leaves the
 either.
 
 The hub polls by itself: 0.8 s after the start, then every 2 s, backing off to a minute
-when spacesheep cannot be reached or asks to wait, until approved, denied or expired, and
-never past the code's end plus the two minutes spacesheep keeps an approved key for
-collection. The pending connect is kept beside the keys, so it goes on when the app was
-closed while the person confirmed in the browser; coming back to the front polls at once.
+when spacesheep cannot be reached or asks to wait, until approved, denied or expired.
+Past the code's end plus a quarter of an hour (by the wall clock), it asks once more and
+believes the answer: an approval still there is collected, and no answer is `expired`.
+So a phone that comes back late still collects an approval spacesheep keeps for it
+(today spacesheep keeps an approved key two minutes; a later poll is told the code
+expired). The pending connect is kept beside the keys, so it goes on when the app was
+closed while the person confirmed in the browser, however late it opens again; coming
+back to the front polls at once.
 
 When spacesheep says the code was approved it hands the key over, once, and its own
 record of the connect is gone. Nothing is an account yet. The hub checks that this
@@ -294,11 +298,15 @@ with its key and documents. On no: `declined`, and nothing was written or remove
 
 `connect.state` goes `pending` → `asking` → `approved` (with `receiver`, the account's
 id, and `email`), or ends as `denied` (on spacesheep), `declined` (here, or cancelled
-while `asking`), `expired` (the code ran out, or a held approval was never answered) or
+while `asking`), `expired` (the code ran out, a held approval was never answered, or
+spacesheep no longer knew the code before its end) or
 `failed` (with `error`, one of the four words `"bad_answer"`, `"conflict"`, `"keystore"`,
-`"io"`, as text, and the hub's sentence for it in `errorMessage`). Whenever a key was
-made on spacesheep and is not kept here (`declined`, an `expired` that was `asking`, and
-a `failed` after the approval), the connect also says `revokeUrl` (Settings → API keys
+`"io"`, as text, and the hub's sentence for it in `errorMessage`). spacesheep keeps a
+code nobody answered until its end, so one it answers 410 for before then (by more than
+half a minute, for the two clocks) was answered, and the answer not collected in time.
+Whenever a key was made on spacesheep and is not kept here (`declined`, an `expired`
+that was `asking` or whose code was dropped so, and a `failed` after the approval), the
+connect also says `revokeUrl` (Settings → API keys
 on the account's origin) and `note` ("A key was made for this app on spacesheep and is
 not kept here. Revoke it there: Settings → API keys."): the hub cannot revoke a key,
 so the page tells the person. On `approved` the page calls `rx_select(receiver)`, as
@@ -394,7 +402,9 @@ held in memory only, and goes with the account.
 ### What the person is asked
 
 Native alerts, one at a time; a second question while one is open is not shown and
-never queued. Cancel is the preferred action of each. A question that could not be shown
+never queued. Cancel is the preferred action of each, but for keeping an approved account
+that replaces none: the person has just confirmed it on spacesheep, so Use it is. A
+disconnect's button is drawn as destructive (red on iOS). A question that could not be shown
 (another alert is up, there is no window or nothing in it to show an alert over) is not
 an answer: a start or a disconnect is refused (`busy`, `not_asked`), an approval is held
 and asked about again. On Android "This iPhone" reads "This phone", here and in
@@ -405,12 +415,12 @@ it has exactly one `@`, at most 64 characters before it and 190 after.
 
 | when | title | message | buttons |
 |---|---|---|---|
-| before a connect to any origin but `https://spacesheep.dev` | Use an account on this server? | This iPhone will ask {host} for an account and show its sessions. It is not spacesheep.dev: continue only if you know this server. | Cancel / Continue |
-| before an approved account is kept, on spacesheep.dev | Use this spacesheep account? | {host}⏎{email}⏎This iPhone will show its sessions. | Cancel / Use it |
-| the same, on any other origin | Use this account? | {host}⏎{email}⏎This iPhone will show its sessions. | Cancel / Use it |
-| before an account is disconnected | Disconnect {email}? | This iPhone forgets the account: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep. | Cancel / Disconnect |
+| before a connect to any origin but `https://spacesheep.dev` | Use an account on this server? | This iPhone will ask {host} for an account and show its sessions. It is not spacesheep.dev: continue only if you know this server. | **Cancel** / Continue |
+| before an approved account is kept | Use {email}? | Signed in on {host}. | Cancel / **Use it** |
+| the same, when another account at that origin goes with a yes | Use {email}? | Signed in on {host}.⏎{the other email} and its labels here go. | **Cancel** / Use it |
+| before an account is disconnected | Disconnect {email}? | This iPhone forgets the account: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep. | **Cancel** / Disconnect (destructive) |
 
-(⏎ is a line break: the host has a line of its own, first.)
+(⏎ is a line break; the preferred action is in bold.)
 
 ### The doors
 

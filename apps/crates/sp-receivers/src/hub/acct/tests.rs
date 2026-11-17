@@ -575,7 +575,8 @@ async fn a_connect_the_person_approves_puts_the_key_in_the_hub_alone() {
         Question::Attach {
             email: fake.email(),
             origin: fake.origin(),
-            host: fake.host()
+            host: fake.host(),
+            replaces: None,
         }
     );
     assert_eq!(person.asked().len(), 2);
@@ -694,10 +695,19 @@ async fn a_connect_denied_or_expired_ends_with_nothing_kept() {
         let fake = Fake::start(tag).await;
         let h = hub_in(t.path());
         h.account_connect_start(Some(&fake.origin())).await.unwrap();
+        // After the code's end (moved into the past here rather than waited for).
+        h.0.acct
+            .connect
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .expires_at_ms = now_ms() - 1;
         fake.set(|w| w.verdict = verdict);
         until("the end", || connect_state(&h) == Some(state)).await;
         let c = h.account_status().connect.unwrap();
         assert_eq!((c.receiver, c.email, c.error), (None, None, None));
+        assert_eq!((c.revoke_url, c.note), (None, None), "no key was made");
         assert!(h.account_status().accounts.is_empty());
         assert!(h.receivers().is_empty());
         assert_eq!(h.account_connect_link(), None);
@@ -714,6 +724,130 @@ async fn a_connect_denied_or_expired_ends_with_nothing_kept() {
         assert_eq!(next.state, ConnectState::Pending);
         assert!(h.account_connect_cancel());
     }
+}
+
+/// A poll that wakes after the code's end and the time to collect after it (the phone was
+/// away) asks spacesheep once more and believes it: an approval still there is collected
+/// and the person is asked; no answer yet ends the connect, after that one poll.
+#[tokio::test]
+async fn a_poll_that_wakes_past_its_time_asks_once_more_and_believes_it() {
+    let t = TempDir::new("acct-late");
+    let fake = Fake::start("late").await;
+    let person = Script::saying(true);
+    let h = hub_asking(t.path(), true, true, Some(person.clone()));
+    let late = |h: &Hub| {
+        h.0.acct
+            .connect
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .expires_at_ms = now_ms() - account::CONNECT_COLLECT_MS - 1;
+    };
+    // Approved there while the app was away; its first poll is already past the time.
+    person.hold();
+    h.account_connect_start(Some(&fake.origin())).await.unwrap();
+    fake.set(|w| w.verdict = Verdict::Approved);
+    late(&h);
+    until("asked", || person.attach_questions() == 1).await;
+    assert_eq!(connect_state(&h), Some(ConnectState::Asking));
+    assert_eq!(fake.asked("/api/gui/connect/poll").len(), 1);
+    person.release();
+    until("approved", || {
+        connect_state(&h) == Some(ConnectState::Approved)
+    })
+    .await;
+
+    // Nothing answered there yet: that one poll, and the connect ends with nothing made.
+    let other = Fake::start("late-unanswered").await;
+    let polls = || other.asked("/api/gui/connect/poll").len();
+    h.account_connect_start(Some(&other.origin())).await.unwrap();
+    late(&h);
+    until("expired", || {
+        connect_state(&h) == Some(ConnectState::Expired)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(polls(), 1, "one poll, then no more");
+    let c = h.account_status().connect.unwrap();
+    assert_eq!((c.revoke_url, c.note), (None, None));
+}
+
+/// spacesheep keeps a code nobody answered until its end. One it no longer knows before
+/// then was answered, and the answer was not collected in time (the phone was away longer
+/// than spacesheep keeps a key for it): the connect ends expired, and says a key was made
+/// and where to revoke it. Only spacesheep's own word for that (410) is taken so.
+#[tokio::test]
+async fn a_code_gone_before_its_end_says_a_key_was_made() {
+    let t = TempDir::new("acct-gone");
+    let fake = Fake::start("gone").await;
+    let h = hub_in(t.path());
+    h.account_connect_start(Some(&fake.origin())).await.unwrap();
+    fake.set(|w| w.verdict = Verdict::Expired);
+    until("expired", || {
+        connect_state(&h) == Some(ConnectState::Expired)
+    })
+    .await;
+    let c = h.account_status().connect.unwrap();
+    assert_eq!(
+        (c.revoke_url, c.note),
+        (
+            Some(format!("{}/settings/api-keys", fake.origin())),
+            Some(account::UNUSED_KEY_NOTE)
+        )
+    );
+    assert!(h.account_status().accounts.is_empty());
+    assert_eq!(key_store(t.path()), json!({}));
+    for status in [401, 404] {
+        fake.hook(move |s| {
+            s.target()
+                .starts_with("/api/gui/connect/poll")
+                .then(|| Reply::json(status, r#"{"state":"expired"}"#))
+        });
+        h.account_connect_start(Some(&fake.origin())).await.unwrap();
+        until("expired", || {
+            connect_state(&h) == Some(ConnectState::Expired)
+        })
+        .await;
+        let c = h.account_status().connect.unwrap();
+        assert_eq!((c.revoke_url, c.note), (None, None), "{status}");
+    }
+}
+
+/// What the last question said a yes replaces.
+fn replaced(person: &Script) -> Option<String> {
+    match person.asked().last() {
+        Some(Question::Attach { replaces, .. }) => replaces.clone(),
+        q => panic!("not about an approved account: {q:?}"),
+    }
+}
+
+/// The question about an approved account names another person's account at the same
+/// origin, which a yes replaces; the first account there, or the same person connecting
+/// again, replaces nobody's.
+#[tokio::test]
+async fn the_question_names_the_account_a_yes_replaces() {
+    let t = TempDir::new("acct-replaces");
+    let fake = Fake::start("replaces").await;
+    let person = Script::saying(true);
+    let h = hub_asking(t.path(), true, true, Some(person.clone()));
+    let first = connected(&h, &fake).await;
+    assert_eq!(replaced(&person), None);
+    // spacesheep stops taking the key, and the same person connects again.
+    fake.set(|w| w.revoked = true);
+    ask(&h, "GET", &first, RELAY, b"").await;
+    fake.set(|w| w.revoked = false);
+    connected(&h, &fake).await;
+    assert_eq!(replaced(&person), None);
+    // Then someone else is approved at the same origin.
+    fake.set(|w| w.revoked = true);
+    ask(&h, "GET", &first, RELAY, b"").await;
+    fake.set(|w| {
+        w.revoked = false;
+        w.email = "someone-else@example.com".into();
+    });
+    connected(&h, &fake).await;
+    assert_eq!(replaced(&person).as_deref(), Some("replaces@example.com"));
 }
 
 #[tokio::test]
@@ -1333,6 +1467,7 @@ async fn the_person_is_asked_before_an_account_is_kept_and_no_means_nothing_chan
                 email: "someone-else@example.com".into(),
                 origin: fake.origin(),
                 host: fake.host(),
+                replaces: Some("attach@example.com".into()),
             })
     })
     .await;
@@ -3232,10 +3367,6 @@ async fn a_pending_connect_goes_on_after_the_app_was_closed() {
             "a link elsewhere",
             Box::new(|v| v["url"] = json!("https://evil.example/connect/gui")),
         ),
-        (
-            "long expired",
-            Box::new(|v| v["expires_at"] = json!("2020-01-01T00:00:00.000Z")),
-        ),
         ("no token", Box::new(|v| v["poll_token"] = json!(""))),
     ];
     for (what, f) in changes {
@@ -3255,6 +3386,29 @@ async fn a_pending_connect_goes_on_after_the_app_was_closed() {
         assert_eq!(key_store(t2.path()), json!({}), "{what}: dropped");
     }
     assert_eq!(other.count(), 0, "the poll token went nowhere else");
+
+    // One whose time ran out long ago is not dropped unasked: spacesheep is asked once
+    // more, and believed (here it no longer knows the code).
+    let t3 = TempDir::new("acct-resume-late");
+    let mut all: Value = serde_json::from_slice(&saved).unwrap();
+    let mut rec: Value = serde_json::from_str(all[PENDING_NAME].as_str().unwrap()).unwrap();
+    rec["expires_at"] = json!("2020-01-01T00:00:00.000Z");
+    all[PENDING_NAME] = json!(rec.to_string());
+    std::fs::write(t3.path().join("receivers.json"), r#"{"receivers":[]}"#).unwrap();
+    std::fs::write(t3.path().join("account-keys.json"), all.to_string()).unwrap();
+    fake.set(|w| w.verdict = Verdict::Expired);
+    let polls = fake.asked("/api/gui/connect/poll").len();
+    let h3 = hub_in(t3.path());
+    h3.start(tokio::runtime::Handle::current());
+    until("expired", || {
+        connect_state(&h3) == Some(ConnectState::Expired)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert_eq!(fake.asked("/api/gui/connect/poll").len(), polls + 1);
+    let c = h3.account_status().connect.unwrap();
+    assert_eq!((c.revoke_url, c.note), (None, None), "its end had passed");
+    assert_eq!(key_store(t3.path()), json!({}));
     fake.absent(&logged().join("\n"), "a log line");
 }
 
@@ -3875,7 +4029,8 @@ async fn an_approval_is_held_until_the_person_has_really_answered() {
         Question::Attach {
             email: fake.email(),
             origin: fake.origin(),
-            host: fake.host()
+            host: fake.host(),
+            replaces: None,
         }
     );
     // The app comes to the front (a nudge) and the alert can be shown: yes.

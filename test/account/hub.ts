@@ -139,6 +139,8 @@ const ASKS_AN_HOUR = 5;
 const SAME_ASK_MS = 600_000;
 const HELD_MS = 900_000;
 const HOUR = 3_600_000;
+/** How far the hub's clock and spacesheep's may disagree (hub/acct.rs CLOCK_SLACK_MS). */
+const CLOCK_SLACK_MS = 30_000;
 
 const realClock: FakeClock = {
   now: () => Date.now(),
@@ -547,8 +549,12 @@ export class HubStandIn {
       c.state = "failed";
       c.error = "bad_answer";
     } else if (j?.state === "denied") c.state = "denied";
-    else if (r && r.status === 410) c.state = "expired";
-    else return this.schedulePoll(2000);
+    else if (r && r.status === 410) {
+      // spacesheep keeps a code nobody answered until its end: one it no longer knows before
+      // then was answered, and the answer not collected in time. For a yes, a key was made.
+      if (this.clock.now() + CLOCK_SLACK_MS < Date.parse(c.expiresAt)) return this.unkept(c, "expired");
+      c.state = "expired";
+    } else return this.schedulePoll(2000);
     this.say();
   }
 

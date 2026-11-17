@@ -9,26 +9,29 @@ import type { ApproveView } from "./approve";
 import type { AccountView } from "./backend";
 import type { HubError } from "./shell";
 
-/** How a connect ended, in words. Where a key was made on spacesheep and is not kept here,
- *  the hub's own note is the line: it says what to do about it. */
+/** How a connect ended, in words: the title says what happened, the body the one next step.
+ *  Where a key was made on spacesheep and is not kept here, that step is to revoke it, and the
+ *  screen's button opens the page for it; with no such button (the page would be on another
+ *  origin), the hub's own note is the line, as it says where. */
 export function endedWords(s: Extract<ConnectStep, { kind: "ended" }>): { title: string; body: string } {
+  const key = s.revokeUrl ? N.unusedKey : s.note;
   switch (s.why) {
     case "unreachable":
-      return { title: R.unreachable(s.host), body: N.unreachableBody(thisPhone()) };
+      return { title: R.unreachable(s.host), body: N.unreachableBody };
     case "wait":
       return { title: N.waitTitle, body: s.at ? N.waitAt(clock(s.at)) : N.waitSoon };
     case "busy":
-      return { title: N.notConnected, body: N.busyBody(thisPhone()) };
+      return { title: N.busyTitle, body: N.busyBody };
     case "denied":
       return { title: N.notConnected, body: N.deniedBody };
     case "declined":
-      return { title: N.notConnected, body: s.note ?? "" };
+      return { title: N.notConnected, body: key ?? "" };
     case "expired":
-      return { title: N.expiredTitle, body: s.note ?? N.expiredBody };
+      return { title: N.expiredTitle, body: key ?? N.expiredBody };
     case "not-kept":
-      return { title: N.notKeptTitle(thisPhone()), body: s.note ?? N.unexpectedBody };
+      return { title: N.notKeptTitle(thisPhone()), body: key ?? N.unexpectedBody };
     default:
-      return { title: N.unexpectedTitle(s.host), body: N.unexpectedBody };
+      return { title: N.unexpectedTitle, body: N.unexpectedBody };
   }
 }
 
