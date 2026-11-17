@@ -76,14 +76,16 @@ import { sentence } from "./PendingDevices";
 import {
   canSign,
   deviceWords,
+  isCancel,
   machineTakes,
   setupLabel,
   setupWords,
   signerKind,
   signHint,
+  tapWords,
   updateWords,
 } from "./signer";
-import { PERMISSION_LABEL, sendErrorWords, WRONG_ORIGIN } from "./words";
+import { notSentWords, PERMISSION_LABEL, WRONG_ORIGIN } from "./words";
 import "./newSessionSheet.css";
 
 /** A level's one line in the Permission pop-up (only the sheet shows them, so they live here). */
@@ -479,7 +481,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       started(h.fields, s);
       grant.refresh();
     },
-    (e) => setError(sendErrorWords(e).replace(/^not sent · /, "Not sent: ")),
+    (e) => setError(notSentWords(e)),
     sheetKey,
   );
   const startButton = useCallback(() => ref.current?.querySelector<HTMLElement>("[data-ns-start]") ?? null, []);
@@ -521,7 +523,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     } catch (e) {
       const caught = held.catchHeld(e, sent, keyAtSend);
       if (caught === "changed") setError(HELD_WORDS.changed);
-      else if (!caught) setError(sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
+      // A prompt the person closed is no refusal: the sheet stays as it was.
+      else if (!caught) setError(isCancel(e) ? null : notSentWords(e));
       setBusy(false);
     } finally {
       // Started, Start keeps saying "Starting…" while the sheet dissolves: it never flips
@@ -554,8 +557,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   // ----- the one-fact status line -----
   const status = ((): { text: string; tone?: "err"; approve?: boolean } | null => {
     if (error) return { text: error, tone: "err" };
-    if (tap)
-      return { text: signerKind() === "device" ? `Confirm with ${deviceWords().auth}…` : "Confirm with your passkey…" };
+    if (tap) return { text: tapWords() };
     if (busy) return { text: `Sending to ${machine}…` };
     if (!m) return { text: listed.length ? "Choose a machine" : "Pair a machine to start sessions on it." };
     if (blocked) return { text: blocked.long, approve: blocked.approve };
@@ -576,13 +578,10 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     return { text: `${m.name} is listening.` };
   })();
   // The passkey is a note on Start (its tooltip, and what a screen reader hears with it),
-  // not the status line: that line is for what is happening.
+  // not the status line: that line is for what is happening. A browser's only: the app's
+  // Start brings up its own prompt, which says what it is.
   const passkeyNote =
-    grant.exp === null && !blocked
-      ? signerKind() === "device"
-        ? `Start asks for ${deviceWords().auth}, once today.`
-        : "Start asks for your passkey, once today."
-      : null;
+    signerKind() === "passkey" && grant.exp === null && !blocked ? "Start asks for your passkey, once today." : null;
 
   // ----- the rows -----
   const agentLabel = (h: string) => harnessMark(h).label;

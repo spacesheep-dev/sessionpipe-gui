@@ -25,8 +25,8 @@ import {
 import { sendCommand } from "../control/command";
 import { useRpId } from "../control/hooks";
 import { type NewSessionTarget, openNewSession } from "../control/newSessionState";
-import { canSign, signHint } from "../control/signer";
-import { sendErrorWords } from "../control/words";
+import { canSign, isCancel, signHint, tapWords } from "../control/signer";
+import { notSentWords } from "../control/words";
 import { byStateThenRecent, useAppState, useLabels, useStore } from "../data/hooks";
 import { openDrawer, toggleDrawer } from "../files/state";
 import { agentLabel, agentMatches, openAgent } from "../lib/agents";
@@ -380,7 +380,8 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     try {
       await fn();
     } catch (e) {
-      setNote({ text: sendErrorWords(e), err: true });
+      // A prompt the person closed is no refusal.
+      setNote(isCancel(e) ? null : { text: notSentWords(e), err: true });
     } finally {
       setBusy(null);
     }
@@ -645,7 +646,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
                       for: a.attentionId,
                       decision: allow ? "allow" : "deny",
                     },
-                    { onTap: () => setNote({ text: "Confirm with your passkey…", err: false }) },
+                    { onTap: () => setNote({ text: tapWords(), err: false }) },
                   );
                   setAnswered((prev) => new Set(prev).add(a.attentionId));
                   closePalette();
@@ -1256,7 +1257,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
         rp as string,
         can.machineId,
         { kind: "prompt", session: s.key, text },
-        { onTap: () => setNote({ text: "Confirm with your passkey…", err: false }) },
+        { onTap: () => setNote({ text: tapWords(), err: false }) },
       );
       closePalette();
     });

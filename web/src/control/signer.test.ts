@@ -5,7 +5,7 @@
 import type { KeyType } from "@shared/api";
 import "../native/test-env";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resetInfoCache, rpId } from "./api";
+import { ControlError, resetInfoCache, rpId } from "./api";
 import { commandString } from "./command";
 import { keyTypesOf, refresh } from "./nativeSigner";
 import {
@@ -15,6 +15,7 @@ import {
   deviceWords,
   dropGrant,
   grantExpiry,
+  isCancel,
   machineTakes,
   NoGrantError,
   nativeErrorWords,
@@ -29,9 +30,11 @@ import {
   signerKind,
   signerLabel,
   signHint,
+  tapWords,
   unlock,
   updateWords,
 } from "./signer";
+import { notSentWords } from "./words";
 
 const g = globalThis as Record<string, unknown>;
 const DEVICE = {
@@ -112,6 +115,58 @@ describe("the device's words", () => {
     // The <html> mark shell.ts sets wins over the flag once it is there.
     (document.documentElement as unknown as { dataset: Record<string, string> }).dataset.shell = "macos";
     expect(setupLabel()).toBe("Approve this Mac");
+  });
+});
+
+describe("the words while a prompt is up, and a prompt closed", () => {
+  it("name what confirms here: Face ID on the iPhone, Touch ID on the Mac, the passkey in a browser", () => {
+    expect(tapWords()).toBe("Confirm with your passkey…");
+    inShell(() => null, ["signer"], { platform: "ios" });
+    expect(signerLabel()).toBe("Face ID");
+    expect(tapWords()).toBe("Confirm with Face ID…");
+    inShell(() => null, ["signer"], { platform: "macos" });
+    expect(tapWords()).toBe("Confirm with Touch ID…");
+  });
+
+  it("a prompt closed, or one already up, is no refusal; anything else is", () => {
+    const dom = (name: string, message = "The operation either timed out or was not allowed.") =>
+      new DOMException(message, name);
+    const table: [unknown, boolean][] = [
+      // The app's signer, in its own codes.
+      [{ code: "cancelled", message: "Cancelled." }, true],
+      [{ code: "busy", message: "A prompt is up." }, true],
+      [{ code: "lockout", message: "Locked." }, false],
+      [{ code: "rate_limited", message: "Slow down." }, false],
+      // A browser's passkey prompt: dismissed or timed out, aborted.
+      [dom("NotAllowedError"), true],
+      [dom("AbortError", "The operation was aborted."), true],
+      // The browser refused it for the page's certificate: that wants fixing.
+      [dom("NotAllowedError", "WebAuthn is not supported on sites with TLS certificate errors."), false],
+      [dom("InvalidStateError"), false],
+      // A refusal from a machine or spacesheep that happens to carry the word.
+      [new ControlError(422, "refused", "cancelled"), false],
+      [new Error("cancelled"), false],
+      ["cancelled", false],
+      [null, false],
+      [undefined, false],
+    ];
+    for (const [e, cancel] of table) expect([e, isCancel(e)]).toEqual([e, cancel]);
+  });
+
+  it("a locked Face ID says how to unlock it in a sentence of its own", async () => {
+    inShell(() => null, ["signer"], { platform: "ios" });
+    await nativeSigner();
+    expect(nativeErrorWords({ code: "lockout", message: "x" })).toBe(
+      "Face ID is locked. Unlock it with your passcode, then try again.",
+    );
+    // Under the field: one colon, then the two sentences.
+    expect(notSentWords({ code: "lockout", message: "x" })).toBe(
+      "Not sent: Face ID is locked. Unlock it with your passcode, then try again.",
+    );
+    inShell(() => null, ["signer"], { platform: "macos" });
+    expect(nativeErrorWords({ code: "lockout", message: "x" })).toBe(
+      "Touch ID is locked. Unlock it with your password, then try again.",
+    );
   });
 });
 

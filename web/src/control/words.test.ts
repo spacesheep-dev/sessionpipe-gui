@@ -3,11 +3,13 @@
 // own detail ends the sentence it is quoted in, once, whatever punctuation it came with.
 import type { ControlActivity } from "@shared/api";
 import { describe, expect, it, vi } from "vitest";
-import { ControlError } from "./api";
+import { ControlError, UNHEARD_CODE } from "./api";
 import { noteMachineControl } from "./remoteRp";
 import {
   handoffEndWords,
   harnessCommand,
+  notSentLine,
+  notSentWords,
   outcomeWords,
   promptFailureWords,
   refusalWords,
@@ -278,5 +280,32 @@ describe("sendErrorWords", () => {
     expect(sendErrorWords(new ControlError(502, "That is too large to send.", "hub_too_large"))).toBe(
       "not sent · That is too large to send.",
     );
+  });
+});
+
+describe("notSentWords", () => {
+  it("a send that did not go, as a line of its own says it: one form under a field, in a sheet and in the Inbox", () => {
+    expect(notSentWords(new ControlError(422, "refused", "nonce_store"))).toBe(
+      "Not sent: the machine could not record the nonce, so it did not run it",
+    );
+    expect(notSentWords(new ControlError(404, "unknown_machine"))).toBe(
+      "Not sent: this machine is no longer paired here",
+    );
+    expect(notSentLine("not sent · x")).toBe("Not sent: x");
+    // Words that are already a sentence of their own stay as they are.
+    expect(notSentWords(new ControlError(502, "Unknown or revoked API key.", "spacesheep_unauthorized"))).toBe(
+      "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.",
+    );
+    // A send nobody heard the answer to is never said to be not sent.
+    const unheard = new ControlError(
+      504,
+      "spacesheep did not answer in time.",
+      UNHEARD_CODE,
+      "spacesheep did not answer in time.",
+    );
+    expect(notSentWords(unheard)).toBe(sendErrorWords(unheard));
+    expect(notSentWords(unheard)).toMatch(/^It may have been sent: /);
+    // Only the start of the line: a reason that quotes the words keeps them.
+    expect(notSentLine("Not sent: the reason says not sent · here")).toBe("Not sent: the reason says not sent · here");
   });
 });

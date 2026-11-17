@@ -1554,6 +1554,77 @@ test.describe("what else an account shows", () => {
     }
   });
 
+  test("before the day's first send nothing warns of Face ID; while it is up the line says so, and a cancel leaves everything as it was", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    // studio-mac's agents can ask each other (Ask another agent…).
+    Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+      await trusted(b);
+      asks(b);
+      // Face ID stays up until the test cancels it, as the plugin then says.
+      await b.context.addInitScript(() => {
+        const w = window as unknown as {
+          __TAURI_INTERNALS__: { invoke(c: string, a?: unknown): Promise<unknown> };
+          __cancelFaceId?: () => void;
+        };
+        const inner = w.__TAURI_INTERNALS__.invoke.bind(w.__TAURI_INTERNALS__);
+        w.__TAURI_INTERNALS__.invoke = async (c, a) => {
+          if (c === "plugin:identity|sign")
+            await new Promise((_, cancel) => {
+              w.__cancelFaceId = () => cancel({ code: "cancelled", message: "Cancelled." });
+            });
+          return inner(c, a);
+        };
+      });
+      const cancelFaceId = () =>
+        page.evaluate(() => (window as unknown as { __cancelFaceId(): void }).__cancelFaceId());
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      const allow = page.locator(".ctl-answer[data-attention='perm-1']").getByRole("button", { name: "Allow" });
+      await expect(allow).toBeEnabled({ timeout: 15_000 });
+      // No grant yet today, and nothing says so ahead: the first Allow or Send brings Face ID up.
+      const line = page.locator(".ctl-foot[data-reason]");
+      await expect(line).toHaveCount(0);
+      await expect(page.getByText(/passkey|Unlock now|asks for/)).toHaveCount(0);
+      await shot(page, "also-ready-before-face-id");
+      await allow.click();
+      await expect(line.locator(".ctl-hint")).toHaveText("Confirm with Face ID…");
+      await shot(page, "also-face-id-up");
+      await cancelFaceId();
+      // Cancelled: no line, and Allow is there to press again.
+      await expect(allow).toBeEnabled();
+      await expect(line).toHaveCount(0);
+      await expect(page.getByText(/not sent|cancelled/i)).toHaveCount(0);
+      // A message: cancelled, its words stay in the field.
+      const box = composer(page);
+      await box.fill("Run the tests first.");
+      await box.press("Enter");
+      await expect(line.locator(".ctl-hint")).toHaveText("Confirm with Face ID…");
+      await cancelFaceId();
+      await expect(line).toHaveCount(0);
+      await expect(box).toHaveValue("Run the tests first.");
+      // Ask another agent: no note ahead either, and the same line while Face ID is up.
+      await box.fill("");
+      await page.locator("[data-ctl-ask]").click();
+      const sheet = page.locator("[data-handoff]");
+      await expect(sheet.locator(".ns-status")).toHaveText("studio-mac is listening.");
+      await expect(sheet.getByText(/asks for|passkey|Touch ID/)).toHaveCount(0);
+      await sheet.locator("[data-hs-text]").fill("Check the refund rounding.");
+      await sheet.locator("[data-hs-ask]").first().click();
+      await expect(sheet.locator(".ns-status")).toHaveText("Confirm with Face ID…");
+      await cancelFaceId();
+      await expect(sheet.locator(".ns-status")).toHaveText("studio-mac is listening.");
+      await expect(sheet.locator("[data-hs-text]")).toHaveValue("Check the refund rounding.");
+    } finally {
+      await b.close();
+    }
+  });
+
   test("a page only a GUI server has, the search, and the files of a session", async ({ browser }) => {
     const b = await bed(browser);
     b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));

@@ -346,6 +346,30 @@ test("a prompt from the Session page reaches the daemon signed, and its reply co
   await expect(foot.locator(".ctl-hint")).toHaveText("The first send today asks for your passkey.");
   await expect(foot.getByRole("button", { name: "Unlock now" })).toBeVisible();
   await shot(page, "strip-ready-desktop");
+  /** The next passkey prompt ends with `name` instead of a passkey. */
+  const failNext = (name: string, message: string) =>
+    page.evaluate(
+      ([name, message]) => {
+        const real = navigator.credentials.get.bind(navigator.credentials);
+        navigator.credentials.get = () => {
+          navigator.credentials.get = real;
+          return Promise.reject(new DOMException(message, name));
+        };
+      },
+      [name, message],
+    );
+  // Unlock now, and the prompt closed: the line is as it was, Unlock now with it, no refusal.
+  await failNext("NotAllowedError", "The operation either timed out or was not allowed.");
+  await foot.getByRole("button", { name: "Unlock now" }).click();
+  await expect(foot.locator(".ctl-hint")).toHaveText("The first send today asks for your passkey.");
+  await expect(foot.getByRole("button", { name: "Unlock now" })).toBeVisible();
+  await expect(page.getByText(/not sent|dismissed/i)).toHaveCount(0);
+  // Unlock now refused: said as a refusal, until a send takes the day grant.
+  await failNext("NotSupportedError", "x");
+  await foot.getByRole("button", { name: "Unlock now" }).click();
+  await expect(page.locator(".ctl-foot[data-reason=error] .ctl-hint")).toHaveText(
+    "Not sent: This browser cannot make a passkey of a kind the machine accepts.",
+  );
 
   await box.fill("Add the Oct 8 row");
   await box.press("Shift+Enter");
@@ -397,8 +421,9 @@ test("a prompt from the Session page reaches the daemon signed, and its reply co
   await expect(page.locator(REPLY).last()).toContainText("14 tests pass");
   await shot(page, "strip-delivered-desktop");
 
-  // The second send of the day signs by itself: no passkey line, same grant.
-  await expect(page.locator(".ctl-foot[data-reason=passkey]")).toHaveCount(0);
+  // The second send of the day signs by itself: no passkey line, same grant; and the
+  // refused Unlock now is no longer said.
+  await expect(page.locator(".ctl-foot[data-reason]")).toHaveCount(0);
 });
 
 test("a delivered prompt becomes its turn in the chat, with no row of its own; one that went to a copy links both ways", async () => {

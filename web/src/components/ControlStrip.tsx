@@ -34,7 +34,7 @@ import { type Approval, type SendState, sendWords } from "../account/sendable";
 import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachments";
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
 
-import { deviceWords, setupLabel, signerKind } from "../control/signer";
+import { deviceWords, setupLabel, signerKind, signerLabel } from "../control/signer";
 import { answerLate, useAnswerClock } from "../lib/answerWindow";
 import { useAskedInput } from "../lib/askedInput";
 import { usePhoneLayout } from "../lib/device";
@@ -104,7 +104,8 @@ export interface ControlStripProps {
   /** The app's stream to the receiver is down ("reconnecting" or "offline"): the strip
    *  waits for it, with Retry now. */
   stream?: { state: "reconnecting" | "offline"; retry: () => void };
-  /** The next send asks for the passkey (no day grant yet): the line offers Unlock now. */
+  /** The next send asks for the passkey (no day grant yet): the line offers Unlock now. A
+   *  browser's only: the app's first send brings up its own prompt, which says what it is. */
   unlock?: () => void;
   /** Opens the Ask another agent sheet (orchestrate/handoff), at the right end of the line
    *  under the field; absent, no button (hidden, never disabled: the line's own reason
@@ -652,7 +653,7 @@ export function ControlStrip({
               <span
                 className="ctl-suggestion"
                 data-suggestion={suggested.decision}
-                title={`Suggested by the ${suggested.plugin} plugin${suggested.note ? ` · ${suggested.note}` : ""}. Nothing is sent until you confirm with your passkey.`}
+                title={`Suggested by the ${suggested.plugin} plugin${suggested.note ? ` · ${suggested.note}` : ""}. Nothing is sent until you confirm with ${signerLabel()}.`}
               >
                 <span className="ctl-suggestion-text">
                   {suggested.decision === "allow" ? "Allow" : "Deny"} suggested by {suggested.by}

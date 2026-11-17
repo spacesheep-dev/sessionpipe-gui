@@ -87,6 +87,14 @@ All notable changes to `sessionpipe-gui`. The format follows
   this iPhone in their place, the field is off, and the Inbox says it once; the Mac app
   does the same where a computer doesn't trust the Mac. Until a computer adds an approved
   phone's key, Allow and Deny stay, off, and a refused send takes one Face ID and says why.
+- **In the app, nothing warns of Face ID ahead of time, and a cancel is not an error.**
+  Every session said "The first send today asks for your passkey. Unlock now" on the
+  iPhone, and New session and Ask another agent each had a note of their own. Now the first
+  Allow, Send, Start or Ask of the day just brings Face ID up (Touch ID on the Mac). While
+  it is up the line says "Confirm with Face ID…", never Touch ID on the iPhone. A
+  cancelled Face ID or passkey leaves everything as it was, typed words included, with no
+  "not sent". In a browser a cancelled Unlock now brings the line back, and a refused one is
+  said until a send goes. Every refusal reads "Not sent: …", in the Inbox too.
 
 ## [0.8.3] - 2026-11-16
 

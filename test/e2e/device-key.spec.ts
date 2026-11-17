@@ -142,6 +142,11 @@ test("the app's device key: asked for, approved from a browser, key.add delivere
     await app.page.goto(`${CONTROL_BASE}/settings?section=app`);
     await expect(app.page.locator("[data-device-key]")).toContainText("The next send asks for Touch ID");
     await expect(app.page.locator("[data-device-key] [data-setup]")).toHaveCount(0);
+    // The session's composer says nothing ahead of the day's first Touch ID: the send brings it up.
+    await app.page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+    await expect(app.page.locator("textarea")).toBeEnabled();
+    await expect(app.page.locator(".ctl-foot[data-reason]")).toHaveCount(0);
+    await expect(app.page.getByText(/passkey|Unlock now/)).toHaveCount(0);
 
     // The app sends: a start, signed under the device key's day grant (no passkey anywhere).
     const sends: Record<string, unknown>[] = [];
@@ -154,8 +159,26 @@ test("the app's device key: asked for, approved from a browser, key.add delivere
     await expect(sheet).toBeVisible();
     await sheet.locator("[data-ns-text]").fill("Signed by the Mac app.");
     await expect(sheet.locator("[data-ns-start]")).toBeEnabled();
+    await expect(sheet.getByText(/asks for/)).toHaveCount(0);
     await shot(app.page, "4-app-new-session");
+    // Touch ID stays up until the test lets it go: meanwhile the sheet names it.
+    await app.page.evaluate(() => {
+      const w = window as unknown as {
+        __TAURI_INTERNALS__: { invoke(c: string, a?: unknown): Promise<unknown> };
+        __touchId?: () => void;
+      };
+      const inner = w.__TAURI_INTERNALS__.invoke.bind(w.__TAURI_INTERNALS__);
+      w.__TAURI_INTERNALS__.invoke = async (c, a) => {
+        if (c === "plugin:identity|sign")
+          await new Promise<void>((done) => {
+            w.__touchId = done;
+          });
+        return inner(c, a);
+      };
+    });
     await sheet.locator("[data-ns-start]").click();
+    await expect(sheet.locator(".ns-status")).toHaveText("Confirm with Touch ID…");
+    await app.page.evaluate(() => (window as unknown as { __touchId(): void }).__touchId());
     await expect.poll(() => m.seen.some((c) => c.kind === "start"), { timeout: 15_000 }).toBe(true);
     const added = m.seen.find((c) => c.kind === "key.add");
     expect(added).toBeDefined();

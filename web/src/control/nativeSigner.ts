@@ -6,6 +6,7 @@
 // whether this page can sign, and the app's words. Rust validates each command, writes the
 // grant string itself and rate-limits; this file names the receiver and passes the bytes.
 import type { Info, KeyType } from "@shared/api";
+import { NEW_WORDS } from "../native/accountWords.new";
 import { invoke } from "../native/bridge";
 import { type DeviceSignature, lastInfo, rpId, type SendBody, type TrustedKey } from "./api";
 import { deviceWords, notifySigner, type SignOptions } from "./signer";
@@ -220,7 +221,8 @@ export function errorWords(e: unknown): string | null {
     case "cancelled":
       return `${deviceWords().auth} was cancelled, so nothing was signed`;
     case "lockout":
-      return `${deviceWords().auth} is locked: unlock it with your ${shell()?.platform === "macos" ? "password" : "passcode"}, then try again`;
+      // Two sentences: after "Not sent: " a second colon would not read.
+      return NEW_WORDS.signerLocked(deviceWords().auth, shell()?.platform === "macos" ? "password" : "passcode");
     case "rate_limited":
       return "slow down: too many sends in a row";
     default:

@@ -3,7 +3,8 @@
 // nothing else: one line a sentence, so this file's history is the list the owner approves.
 // What these screens reuse as it is (already approved elsewhere) is in accountWords.ts,
 // with where each comes from. `phone` is "this iPhone" / "this phone"; `Phone` the same
-// with a capital; `host` the account's host; `time` a clock time such as "14:05".
+// with a capital; `host` the account's host; `time` a clock time such as "14:05"; `auth`
+// what confirms a send, "Face ID"; `secret` what unlocks it when it is locked, "passcode".
 export const NEW_WORDS = {
   or: "or",
   introBody:
@@ -83,6 +84,8 @@ export const NEW_WORDS = {
   sessionCopyPreview: "Copy message (preview)",
   answerNotYet: (Phone: string) => `${Phone} can't answer yet`,
   sendNotAdded: (machine: string, phone: string) => `Not sent: ${machine} hasn't added ${phone} yet.`,
+  signerTap: (auth: string) => `Confirm with ${auth}…`,
+  signerLocked: (auth: string, secret: string) => `${auth} is locked. Unlock it with your ${secret}, then try again.`,
 } as const;
 
 /** Whether this phone can send to a computer (account/sendable.ts), the same on every screen

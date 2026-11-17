@@ -187,6 +187,13 @@ export function sendErrorWords(e: unknown, machine?: string | null): string {
   return `not sent · ${e instanceof Error ? e.message : String(e)}`;
 }
 
+/** A send's words as a line of their own says them (under a field, in a sheet, on an
+ *  Inbox row): "Not sent: …" where a step in a list of them says "not sent · …". Any
+ *  other words as they are. */
+export const notSentLine = (words: string): string => words.replace(/^not sent · /, "Not sent: ");
+/** sendErrorWords as a line of its own says them (notSentLine). */
+export const notSentWords = (e: unknown, machine?: string | null): string => notSentLine(sendErrorWords(e, machine));
+
 /** A receiver's reason worth quoting: not the bare outcome an older spacesheep notes when the
  *  computer gave none ("refused"), which would read "refused it: refused". */
 export const reasonOf = (a: Pick<ControlActivity, "detail" | "outcome">): string | undefined => {

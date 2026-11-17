@@ -269,6 +269,33 @@ test.describe("inbox: a prompt's answer window", () => {
   });
 });
 
+test.describe("inbox: an answer refused", () => {
+  test("says it as the session's page does: Not sent, and why; Allow stays", async ({ context, page }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `refuse-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const asked = await postPrompt(token, { machine: d.name, title: "Asked a moment ago", agoMs: 5_000 });
+    try {
+      await page.route("**/api/ui/control/send", (r) =>
+        r.fulfill({ status: 422, json: { reason: "refused", code: "nonce_store" } }),
+      );
+      await page.goto(`${CONTROL_BASE}/inbox`);
+      const row = page.locator(`.inbox-row[data-attention="${asked.attention}"]`);
+      // With a pointer the pair shows on the hovered row.
+      await row.hover();
+      await row.getByRole("button", { name: "Allow" }).click();
+      await expect(row.locator(".inbox-note--err")).toHaveText(
+        "Not sent: the machine could not record the nonce, so it did not run it",
+      );
+      await expect(row.getByRole("button", { name: "Allow" })).toBeEnabled();
+    } finally {
+      await asked.clear();
+      await d.stop();
+    }
+  });
+});
+
 test.describe("installable", () => {
   test("the manifest and the install-only service worker are served", async ({ page, request }) => {
     await openPage(page, "/");

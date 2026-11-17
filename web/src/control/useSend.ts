@@ -17,8 +17,8 @@ import type { HeldMeta } from "./held";
 import { HELD_WORDS } from "./heldWords";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
 import { remoteHostFor } from "./remoteRp";
-import { canSign, machineTakes, ownKeyKnown, signerKind, signerLabel, signHint, updateWords } from "./signer";
-import { sendErrorWords, unheardWords } from "./words";
+import { canSign, isCancel, machineTakes, ownKeyKnown, signerKind, signerLabel, signHint, updateWords } from "./signer";
+import { notSentLine, notSentWords, unheardWords } from "./words";
 
 export type AnswerStatus = "sent" | "closed";
 
@@ -79,6 +79,12 @@ export function answerState(
   return { reason, off, status, tag };
 }
 
+/** A send nobody heard the answer to, as the line under the field says it. */
+const unheardLine = (a: ControlActivity): string | null => {
+  const words = unheardWords(a);
+  return words && notSentLine(words);
+};
+
 /** What a strip send kept beside a hold: the composer as it was when it was pressed, when
  *  what it signs was typed there. */
 export interface StripSent extends HeldMeta {
@@ -93,7 +99,8 @@ export interface SessionSend {
   grant: ReturnType<typeof useGrant>;
   /** A passkey prompt is up right now. */
   tap: boolean;
-  /** The last send's refusal, in words; null once a send is retried. */
+  /** The last send's refusal, as a line of its own ("Not sent: …"); null once a send is
+   *  retried, or when the person closed the prompt (nothing was signed, nothing is wrong). */
   error: string | null;
   /** Per attention id: "sent" while an answer is out, "closed" once the machine said the
    *  prompt is no longer open (already answered, or timed out). */
@@ -185,7 +192,7 @@ export function useSessionSend(
       o.confirmed?.(h.fields, meta.draft);
       grant.refresh();
     },
-    (e) => setError(sendErrorWords(e)),
+    (e) => setError(notSentWords(e)),
     o.draft,
   );
   const { catchHeld, drop: dropHeld, confirming: confirmingHeld } = held;
@@ -219,12 +226,12 @@ export function useSessionSend(
           (c = {}) => sendCommand(rp, machineId, fields, { onTap: c.onTap, confirm: true }),
         );
         const caught = catchHeld(h, { draft: typed, ...(was.attached ? { attached: was.attached } : {}) }, typed);
-        setError(caught === "changed" ? HELD_WORDS.changed : caught ? null : unheardWords(a));
+        setError(caught === "changed" ? HELD_WORDS.changed : caught ? null : unheardLine(a));
         continue;
       }
       // Not sent, or nobody can say: the row's words, as a send's own answer would read.
       if (a.unheard) {
-        setError(unheardWords(a));
+        setError(unheardLine(a));
         continue;
       }
       // spacesheep holds it: a send like any other. The composer that still holds its words is cleared.
@@ -290,7 +297,7 @@ export function useSessionSend(
       const out = asking.find((a) => a.kind === fields.kind);
       if (out) {
         const e = new ControlError(504, out.detail ?? "", UNHEARD_CODE, out.detail);
-        setError(sendErrorWords(e));
+        setError(notSentWords(e));
         throw e;
       }
       // A message depends on the composer it was typed in; an answer or a Stop on nothing.
@@ -312,7 +319,8 @@ export function useSessionSend(
           ? catchHeld(e, { draft: keyAtSend, ...(attached ? { attached } : {}) }, keyAtSend)
           : false;
         if (caught === "changed") setError(HELD_WORDS.changed);
-        else if (!caught) setError(sendErrorWords(e, machine));
+        // A prompt the person closed is no refusal: the field and the answer stay as they were.
+        else if (!caught) setError(isCancel(e) ? null : notSentWords(e, machine));
         throw e;
       } finally {
         pressed.current = {};

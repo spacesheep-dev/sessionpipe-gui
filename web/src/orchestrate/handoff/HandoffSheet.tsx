@@ -34,8 +34,18 @@ import { HELD_WORDS } from "../../control/heldWords";
 import { useGrant, useRpId } from "../../control/hooks";
 import { fixedPermission, permissionChoices, permissionToSend } from "../../control/newSessionState";
 import { sentence } from "../../control/PendingDevices";
-import { canSign, machineTakes, setupLabel, setupWords, signerKind, signHint, updateWords } from "../../control/signer";
-import { PERMISSION_LABEL, sendErrorWords, WRONG_ORIGIN } from "../../control/words";
+import {
+  canSign,
+  isCancel,
+  machineTakes,
+  setupLabel,
+  setupWords,
+  signerKind,
+  signHint,
+  tapWords,
+  updateWords,
+} from "../../control/signer";
+import { notSentWords, PERMISSION_LABEL, WRONG_ORIGIN } from "../../control/words";
 import { useListedSessions, useMachinesMap, useSession, useStore } from "../../data/hooks";
 import { useFocusTrap } from "../../lib/focus";
 import { harnessMark, STATE_LABEL, sessionTitle } from "../../lib/format";
@@ -311,7 +321,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
       asked(s);
       grant.refresh();
     },
-    (e) => setError(handoffRefusalWords(e, name) ?? sendErrorWords(e).replace(/^not sent · /, "Not sent: ")),
+    (e) => setError(handoffRefusalWords(e, name) ?? notSentWords(e)),
     sheetKey,
   );
   const askButton = useCallback(() => ref.current?.querySelector<HTMLElement>(".ns-start") ?? null, []);
@@ -345,8 +355,8 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
     } catch (e) {
       const caught = held.catchHeld(e, sent, keyAtSend);
       if (caught === "changed") setError(HELD_WORDS.changed);
-      else if (!caught)
-        setError(handoffRefusalWords(e, name) ?? sendErrorWords(e).replace(/^not sent · /, "Not sent: "));
+      // A prompt the person closed is no refusal: the sheet stays as it was.
+      else if (!caught) setError(isCancel(e) ? null : (handoffRefusalWords(e, name) ?? notSentWords(e)));
       setBusy(false);
     } finally {
       setTap(false);
@@ -381,7 +391,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   // ----- the one-fact status line (UX-SPEC §2.4) -----
   const status = ((): { text: string; tone?: "err"; approve?: boolean } | null => {
     if (error) return { text: error, tone: "err" };
-    if (tap) return { text: signerKind() === "device" ? "Confirm with Touch ID…" : "Confirm with your passkey…" };
+    if (tap) return { text: tapWords() };
     if (busy) return { text: `Sending to ${name}…` };
     if (!c) return { text: `Pair ${name} to ask from here.` };
     if (blocked) return blocked;
@@ -404,12 +414,9 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
       };
     return { text: `${name} is listening.` };
   })();
+  // A browser's only, as New session's: the app's Ask brings up its own prompt.
   const passkeyNote =
-    grant.exp === null && !blocked
-      ? signerKind() === "device"
-        ? "Ask asks for Touch ID, once today."
-        : "Ask asks for your passkey, once today."
-      : null;
+    signerKind() === "passkey" && grant.exp === null && !blocked ? "Ask asks for your passkey, once today." : null;
 
   // ----- the rows -----
   const agentOptions: SelectOption<string>[] = [
