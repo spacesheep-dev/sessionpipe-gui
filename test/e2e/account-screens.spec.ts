@@ -121,16 +121,21 @@ async function bed(browser: Browser, o: { platform?: string; shell?: ShellInitOp
 }
 
 let n = 0;
-/** The state on screen, as a picture, when pictures are asked for. */
-async function shot(page: Page, name: string): Promise<void> {
+/** The state on screen, as a picture, when pictures are asked for. Named by its size: W×H,
+ *  taken at W×H whatever size a test that walks the widths is at (its own size is put back
+ *  after); `own`, a test about one size: taken at that size, and named by it. */
+async function shot(page: Page, name: string, o: { own?: boolean } = {}): Promise<void> {
   n++;
   if (!SHOTS) return;
   mkdirSync(SHOTS, { recursive: true });
+  const was = page.viewportSize();
+  const moved = !o.own && !!was && (was.width !== W || was.height !== H);
+  if (moved) await page.setViewportSize({ width: W, height: H });
+  const size = o.own && was ? `${was.width}x${was.height}` : `${W}x${H}`;
   // Let a sheet or a row finish moving.
   await page.waitForTimeout(350);
-  await page.screenshot({
-    path: path.join(SHOTS, `${String(n).padStart(2, "0")}-${name}-${W}x${H}-${SCHEME}.png`),
-  });
+  await page.screenshot({ path: path.join(SHOTS, `${String(n).padStart(2, "0")}-${name}-${size}-${SCHEME}.png`) });
+  if (moved && was) await page.setViewportSize(was);
 }
 
 const step = (page: Page, name: string) => page.locator(`.onb[data-step='${name}']`);
@@ -2738,7 +2743,7 @@ test.describe("what else an account shows", () => {
         return Math.round(r.x + r.width);
       };
       expect(await end(from)).toBe(await end(fixed));
-      await shot(page, "also-handoff-long-from");
+      await shot(page, "also-handoff-long-from", { own: true });
     } finally {
       await b.close();
     }
