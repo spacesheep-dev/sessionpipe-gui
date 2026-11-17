@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: web. What the account's screens say for each state, apart from their React
-// (ConnectAccount.tsx, AccountSettings.tsx, ApprovePhone.tsx), so each is tested on its own
-// (screens.test.ts): how a connect ended, how the account stands, where this phone's key
-// stands in a row, and an ask's refusal. The sentences themselves are accountWords.ts's.
+// (ConnectAccount.tsx, AccountSettings.tsx, ApprovePhone.tsx, Machines), so each is tested on
+// its own (screens.test.ts): how a connect ended, how the account stands, where this phone's
+// key stands in a row and on Machines, and an ask's refusal. The sentences themselves are
+// accountWords.ts's.
 import type { ConnectStep } from "../native/accountConnect";
-import { clock, NEW_WORDS as N, REUSED as R, SEND, ThisPhone, thisPhone } from "../native/accountWords";
+import { clock, MACHINES as M, NEW_WORDS as N, REUSED as R, SEND, ThisPhone, thisPhone } from "../native/accountWords";
 import type { ApproveView } from "./approve";
 import type { AccountView } from "./backend";
 import type { HubError } from "./shell";
@@ -69,6 +70,57 @@ export function phoneLine(view: ApproveView | null): { mark: "ok" | "wait" | "wa
     default:
       return { mark: "wait", words: SEND.short.notYet };
   }
+}
+
+/** Machines' one row for this phone, above the computers: a sentence and its mark (none
+ *  where the row is the ask itself), and whether it opens Approve this iPhone. `cannot`: why
+ *  nothing can be signed here, when nothing can; that is the row then, and it opens nothing.
+ *  `state` names the row for the page and its tests. */
+export function phoneRow(
+  view: ApproveView | null,
+  cannot: string | null,
+): { mark: "ok" | "wait" | "warn" | null; words: string; link: boolean; state: string } | null {
+  if (cannot) return { mark: "warn", words: cannot, link: false, state: "cannot" };
+  if (!view) return null;
+  const p = view.phase;
+  switch (p.kind) {
+    case "idle":
+    case "dropped":
+      return { mark: null, words: M.approve(thisPhone()), link: true, state: p.kind };
+    case "waiting":
+      return { mark: "wait", words: M.waiting, link: true, state: p.kind };
+    case "cooling":
+      return {
+        mark: "wait",
+        words: p.exact ? M.canFrom(ThisPhone(), clock(p.until)) : M.canBy(ThisPhone(), clock(p.until)),
+        link: true,
+        state: p.kind,
+      };
+    default: {
+      // Approved: by every computer of the account, or only by some so far.
+      const can = view.machines.filter((m) => m.state === "can").length;
+      const all = view.machines.length;
+      return can < all
+        ? { mark: "wait", words: M.canSome(ThisPhone(), can, all), link: true, state: "some" }
+        : { mark: "ok", words: M.can(ThisPhone()), link: true, state: p.kind };
+    }
+  }
+}
+
+/** What one computer's rows on Machines add about this phone, only where it is so: a
+ *  sessionpipe there too old for a phone's key (whatever the phone's own state), or, once
+ *  the phone is approved, a computer that has not approved it (the way on is Approve this
+ *  iPhone). Nothing while the phone is not approved: Machines' own row says that once. */
+export function machineNote(
+  view: ApproveView | null,
+  machineId: string,
+): { mark: "wait" | "warn"; words: string; link: boolean } | null {
+  const here = view?.machines.find((m) => m.id === machineId);
+  if (!view || !here) return null;
+  if (here.state === "old") return { mark: "warn", words: M.old, link: false };
+  const approved = view.phase.kind === "approved" || view.phase.kind === "cooling";
+  if (approved && here.state === "not-yet") return { mark: "wait", words: M.notHere, link: true };
+  return null;
 }
 
 /** An ask's refusal, or a look's, in words; `elsewhere`: the way on is spacesheep itself.

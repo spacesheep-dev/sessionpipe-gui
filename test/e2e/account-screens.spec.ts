@@ -273,11 +273,11 @@ test.describe("the first run with a spacesheep account", () => {
     page.on("load", () => loads++);
     b.ss.approveDevice([...b.hub.accounts.values()][0]!.deviceKeyId!);
     await expect(page.locator("[data-approve='cooling']")).toBeVisible({ timeout: 12_000 });
-    // Machines, by its tab: the phone's key is its own there, and nothing offers to approve it again.
+    // Machines, by its tab: one row says the phone's hour, and nothing offers to approve it again.
     await page.locator("a[data-nav='machines']:visible").click();
-    await expect(page.locator(".machine-devices").first()).toContainText("(this one)");
+    await expect(page.locator("[data-this-phone='cooling']")).toHaveText(/^This iPhone can send from \d{1,2}:\d{2}/);
     await expect(page.locator("[data-setup]")).toHaveCount(0);
-    await expect(page.getByText("Approve this iPhone")).toHaveCount(0);
+    await expect(page.getByText(/Approve this iPhone/)).toHaveCount(0);
     // New session, from the Board's bar: nothing says the computer does not trust the phone.
     await page.locator("a[data-nav='board']:visible").click();
     await page.locator(".page.board .compose-btn--phone").click();
@@ -681,11 +681,16 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await expect(page.getByText(/This iPhone can send from \d{1,2}:\d{2}( [AP]M)?/).first()).toBeVisible();
     await shot(page, "composer-cooling");
     expect(b.ss.jobs).toHaveLength(0);
-    // Machines says which devices a computer trusts, and nothing of sending; Settings' row
-    // for the phone's key says the same time, in a row's few words.
+    // Machines says the same time once, in its one row for the phone, and no computer says
+    // it again; Settings' row for the phone's key says the same time, in a row's few words.
     await page.goto(`${b.server.url}/machines`);
     await expect(page.getByText(NAME).first()).toBeVisible();
-    await expect(page.getByText(/can send/i)).toHaveCount(0);
+    const phone = page.locator("[data-this-phone]");
+    await expect(phone).toHaveCount(1);
+    await expect(phone).toHaveAttribute("data-this-phone", "cooling");
+    await expect(phone).toHaveText(/^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?$/);
+    await expect(phone).toHaveAttribute("href", "/add-device");
+    await expect(page.getByText(/can send/i)).toHaveCount(1);
     await expect(page.locator("[data-setup]")).toHaveCount(0);
     await shot(page, "machines-cooling");
     await page.goto(`${b.server.url}/settings?section=app`);
@@ -1119,8 +1124,163 @@ test.describe("what else an account shows", () => {
       await expect(composer(page)).toBeEnabled();
       await expect(page.getByText(/can send (by|from)|doesn't trust|can't send yet/i)).toHaveCount(0);
       await page.goto(`${b.server.url}/machines`);
-      await expect(page.locator(".machine-devices").first()).toContainText("(this one)");
+      await expect(page.locator("[data-this-phone='approved']")).toHaveText("This iPhone can send");
       await expect(page.locator("[data-setup]")).toHaveCount(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  /** Each right-detail row of Machines: how far its key's top is from its value's. */
+  const rowDrift = (page: Page) =>
+    page
+      .locator(".machine-facts > .form-row--kv")
+      .evaluateAll((rows) =>
+        rows.map((r) =>
+          Math.abs(
+            r.querySelector(".form-key")!.getBoundingClientRect().top -
+              r.querySelector(".form-kv")!.getBoundingClientRect().top,
+          ),
+        ),
+      );
+
+  test("Machines, not approved: one row for the phone above the computers, no key named, and rows that keep their shape at 320 and 393", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    // A second computer: the one row is said once, not once a computer.
+    b.ss.machines.push({
+      ...b.ss.machines[0]!,
+      id: "m_build0123456789abcdef",
+      name: "build-box",
+      mode: "auto",
+      passkey_ids: ["another-passkey-of-this-account"],
+    });
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      for (const [width, height] of [
+        [320, 568],
+        [393, 852],
+      ] as const) {
+        await page.setViewportSize({ width, height });
+        await page.goto(`${b.server.url}/machines`);
+        await expect(page.locator("section.machine")).toHaveCount(2);
+        const row = page.locator("[data-this-phone]");
+        await expect(row).toHaveCount(1);
+        await expect(row).toHaveAttribute("data-this-phone", "idle");
+        await expect(row).toHaveText("Approve this iPhone to send");
+        expect((await row.boundingBox())!.height, `${width}`).toBeGreaterThanOrEqual(44);
+        // One way to Approve this iPhone on the page, and it is that row.
+        await expect(page.locator("a[href='/add-device']")).toHaveCount(1);
+        // No key is named, by any part of its id; nothing says paired, devices or "this one".
+        const text = await page.locator(".page.machines").innerText();
+        for (const m of b.ss.machines)
+          for (const id of m.passkey_ids as string[]) expect(text).not.toContain(id.slice(0, 8));
+        expect(text).not.toMatch(/paired on|Paired|Devices|this one|queued/);
+        // Status and Sessions, as iOS right-detail rows: each key level with its value.
+        await expect(page.locator("[data-status='online']")).toHaveCount(2);
+        const counts = page.locator(".machine-facts > .form-row--kv .form-kv.num");
+        await expect(counts).toHaveCount(2);
+        expect((await counts.allInnerTexts()).sort()).toEqual(["1", "None yet"]);
+        const drift = await rowDrift(page);
+        expect(drift).toHaveLength(4);
+        for (const d of drift) expect(d, `${width}`).toBeLessThanOrEqual(2);
+        await expect(page.locator(".machine-more summary").first()).toHaveText("Details");
+        expect((await page.locator(".machine-more summary").first().boundingBox())!.height).toBeGreaterThanOrEqual(44);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      }
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("Machines, approved on spacesheep before its list carries the key: the phone's hour, and no Approve this iPhone", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}/add-device`);
+      await button(page, "Ask spacesheep to approve").click();
+      await expect(page.locator("[data-approve='waiting']")).toBeVisible();
+      // Approved on Devices: the device door says so, the computer's key list not yet.
+      const keyId = [...b.hub.accounts.values()][0]!.deviceKeyId!;
+      b.ss.trusting.set(keyId, [MACHINE]);
+      b.ss.deviceRequests.delete(keyId);
+      await expect(page.locator("[data-approve='cooling']")).toBeVisible({ timeout: 12_000 });
+      expect(b.ss.machines[0]!.passkey_ids).not.toContain(keyId);
+      await page.goto(`${b.server.url}/machines`);
+      await expect(page.locator("[data-this-phone='cooling']")).toHaveText(
+        /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?$/,
+      );
+      await expect(page.getByText(/Approve this iPhone/)).toHaveCount(0);
+      await expect(page.locator("[data-not-here]")).toHaveCount(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("Machines in inherit mode: what it means is in sight with Details closed, and Details is closed again on the next visit", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.ss.machines[0]!.mode = "inherit";
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}/machines`);
+      await expect(
+        page.getByText(
+          `Sessions run as your own do on ${NAME}: the agents' own settings decide, which can mean no permission checks.`,
+        ),
+      ).toBeVisible();
+      const details = page.locator(".machine-more details");
+      await expect(details).not.toHaveAttribute("open");
+      await page.locator(".machine-more summary").click();
+      await expect(details).toHaveAttribute("open");
+      await expect(details.locator(".form-row--kv").first()).toHaveText(/^Mode\s*Inherit$/);
+      // To the Board and back, inside the app: Details is closed again.
+      await page.locator("a[data-nav='board']:visible").click();
+      await expect(page.locator(".page.board")).toBeVisible();
+      await page.goBack();
+      await expect(page.locator(".machine-more details")).toHaveCount(1);
+      await expect(page.locator(".machine-more details")).not.toHaveAttribute("open");
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("the board's offline line leads to Machines, which says the same computer is offline", async ({ browser }) => {
+    const b = await bed(browser);
+    // The computer's sessionpipe is down while a session there is still working: its events
+    // keep arriving, and it is offline all the same.
+    Object.assign(b.ss.machines[0]!, { online: false, last_seen: Date.now() - 3 * 3_600_000 });
+    const s = new Session("s-retry");
+    const on = { tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/billing", title: "Retry the export" } };
+    b.ss.push([s.ev("session.started", { source: "startup" }, on), s.ev("turn.started", { turn_id: "t1" }, on)]);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      for (const [width, height] of [
+        [320, 568],
+        [393, 852],
+      ] as const) {
+        await page.setViewportSize({ width, height });
+        await page.goto(b.server.url);
+        await expect(page.locator(".offline-line")).toHaveText(new RegExp(`${NAME} is offline`));
+        await page.locator(".offline-line-text").click();
+        await expect(page).toHaveURL(/\/machines$/);
+        await expect(page.getByText("0 of 1 online", { exact: true })).toBeVisible();
+        const status = page.locator("section.machine [data-status]");
+        await expect(status).toHaveAttribute("data-status", "offline");
+        await expect(status.locator(".form-kv")).toHaveText("Offline");
+        await expect(status.locator(".dot--stale")).toBeVisible();
+        expect(await status.locator(".form-kv").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+        await expect(page.getByText(/online ·|daemon offline|last event/)).toHaveCount(0);
+        for (const d of await rowDrift(page)) expect(d, `${width}`).toBeLessThanOrEqual(2);
+      }
     } finally {
       await b.close();
     }

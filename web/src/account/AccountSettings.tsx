@@ -15,16 +15,9 @@ import { day, NEW_WORDS as N, REUSED as R, thisPhone } from "../native/accountWo
 import { ConnectAccount } from "../native/ConnectAccount";
 import { useAccountView } from "./current";
 import { usePhone } from "./device";
+import { Mark } from "./Mark";
 import { accountState, phoneLine } from "./screenWords";
 import "./account.css";
-
-export function Mark({ kind, children }: { kind: "ok" | "wait" | "warn"; children: string }) {
-  return (
-    <span className={`acct-state acct-state--${kind}`} data-state={kind}>
-      {children}
-    </span>
-  );
-}
 
 export default function AccountSettings() {
   const v = useAccountView();

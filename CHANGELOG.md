@@ -72,6 +72,15 @@ All notable changes to `sessionpipe-gui`. The format follows
   up to 2,048 characters, the newest reply always whole, and a message sent from this
   device as it was signed. A long message folds to eight lines under "Show all"; an older
   reply longer than that ends in "…" with "Show more".
+- **Machines on a spacesheep account says in one row whether the iPhone can send, and calls
+  a computer offline when the board does.** Each computer listed its devices by key ids
+  ("Kq3mZ7wP, wDOATr0O (this one)") with an "Approve this iPhone" link of its own, and read
+  "online" while its sessionpipe was down, as long as a session there still sent. One row
+  above the computers now says where the iPhone stands ("This iPhone can send from 5:26
+  AM") and opens Approve this iPhone; each computer has Status and Sessions on a line each,
+  a line only where something is so (an old sessionpipe, a computer that has not approved
+  the iPhone, inherit mode), and the rest behind Details. On every Machines page a paired
+  machine is online only while its sessionpipe is.
 
 ## [0.8.3] - 2026-11-16
 

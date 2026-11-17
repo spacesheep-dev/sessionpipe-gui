@@ -6,10 +6,10 @@
 // its own. The hub's own words (its note about a key that is not kept, its alerts) are the
 // hub's and are shown as they come.
 import { shellPlatform } from "../lib/device";
-import { NEW_WORDS, SEND } from "./accountWords.new";
+import { MACHINES, NEW_WORDS, SEND } from "./accountWords.new";
 import { WORDS } from "./onboarding";
 
-export { NEW_WORDS, SEND };
+export { MACHINES, NEW_WORDS, SEND };
 
 /** Reused as they stand. */
 export const REUSED = {

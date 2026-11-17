@@ -105,3 +105,29 @@ export const SEND = {
     notHere: (machine: string, phone: string) => `${machine} adds ${phone} when it's next online.`,
   },
 } as const;
+
+/** Machines on an account: the one row that says where this phone stands with every
+ *  computer, then each computer's rows and what its Details hold. `n` of `m` computers. */
+export const MACHINES = {
+  approve: (phone: string) => `Approve ${phone} to send`,
+  waiting: NEW_WORDS.approveWaiting,
+  canFrom: NEW_WORDS.composerCooling,
+  canBy: (Phone: string, time: string) => `${Phone} can send by ${time}`,
+  can: (Phone: string) => `${Phone} can send`,
+  canSome: (Phone: string, n: number, m: number) => `${Phone} can send to ${n} of ${m} computers`,
+  notHere: "Not approved on this computer",
+  old: "Update sessionpipe on this computer to send from the app",
+  status: "Status",
+  online: "Online",
+  offline: "Offline",
+  noSessions: "None yet",
+  needsYou: (n: number) => `${n} ${n === 1 ? "needs" : "need"} you`,
+  working: (n: number) => `${n} working`,
+  details: "Details",
+  mode: "Mode",
+  modes: { safe: "Safe", auto: "Auto", inherit: "Inherit" },
+  agents: "Agents",
+  askOn: "Can ask each other",
+  askOff: "Asking is off",
+  queued: "Waiting to send",
+} as const;

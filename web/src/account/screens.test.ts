@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // What the account's screens say for each state, apart from their React: how a connect
-// ended, how the account stands, where this phone's key stands in a row, and an ask's
-// refusal. (Each state drawn, start to end, is test/e2e/account-screens.spec.ts.)
-import { describe, expect, it } from "vitest";
+// ended, how the account stands, where this phone's key stands in a row and on Machines,
+// and an ask's refusal. (Each state drawn, start to end, is test/e2e/account-screens.spec.ts.)
+import { afterEach, describe, expect, it } from "vitest";
 import type { Ended } from "../native/accountConnect";
 import { clock, day, NEW_WORDS as N, thisPhone } from "../native/accountWords";
-import { accountState, approveError, endedWords, phoneLine } from "./screenWords";
+import type { ApprovePhase, MachineState } from "./approve";
+import { accountState, approveError, endedWords, machineNote, phoneLine, phoneRow } from "./screenWords";
 
 const HOST = "spacesheep.dev";
 const relay = (state: string) => ({ state, events: 0, cursor: 0, machines: [] }) as never;
@@ -80,6 +81,91 @@ describe("where this phone's key stands, in a row", () => {
     // The same short words as every other row that says it (SEND).
     expect(exact.words).toBe(`Can send from ${clock(until)}`);
     expect(bound.words).toBe(`Can send by ${clock(until)}`);
+  });
+});
+
+describe("where this phone stands on Machines: one row above the computers, a line on a computer only where it is so", () => {
+  const g = globalThis as Record<string, unknown>;
+  afterEach(() => {
+    delete g.sessionpipeShell;
+  });
+  const until = Date.parse("2026-11-12T14:05:00Z");
+  const view = (phase: ApprovePhase, ...states: MachineState[]) => ({
+    phase,
+    machines: states.map((state, i) => ({ id: `m_${i}`, name: `mac-${i}`, state })),
+    rest: null,
+  });
+  const cannot = "Passkeys can't sign on this address.";
+
+  it("says each state in one sentence with its mark; the row is the way to Approve this iPhone", () => {
+    g.sessionpipeShell = { platform: "ios" };
+    // Nothing known before the first look: no row.
+    expect(phoneRow(null, null)).toBeNull();
+    // Not approved, or the request gone: the row is the ask itself, in the tint, with no mark.
+    for (const kind of ["idle", "dropped"] as const)
+      expect(phoneRow(view({ kind }, "not-yet"), null)).toEqual({
+        mark: null,
+        words: "Approve this iPhone to send",
+        link: true,
+        state: kind,
+      });
+    expect(phoneRow(view({ kind: "waiting", code: "71" }, "not-yet"), null)).toEqual({
+      mark: "wait",
+      words: "Waiting for approval",
+      link: true,
+      state: "waiting",
+    });
+    // Inside the hour: "from" when the time is known, "by" when it is the latest it can be.
+    expect(phoneRow(view({ kind: "cooling", until, exact: true }, "can"), null)).toMatchObject({
+      mark: "wait",
+      words: `This iPhone can send from ${clock(until)}`,
+    });
+    expect(phoneRow(view({ kind: "cooling", until, exact: false }, "can"), null)).toMatchObject({
+      mark: "wait",
+      words: `This iPhone can send by ${clock(until)}`,
+    });
+    expect(phoneRow(view({ kind: "approved" }, "can", "can"), null)).toEqual({
+      mark: "ok",
+      words: "This iPhone can send",
+      link: true,
+      state: "approved",
+    });
+    // Approved, and one computer has not taken the key yet: how many it can send to.
+    expect(phoneRow(view({ kind: "approved" }, "can", "not-yet"), null)).toEqual({
+      mark: "wait",
+      words: "This iPhone can send to 1 of 2 computers",
+      link: true,
+      state: "some",
+    });
+  });
+
+  it("a page that cannot sign says why in that row, whatever the approval, and opens nothing", () => {
+    for (const v of [null, view({ kind: "idle" }), view({ kind: "approved" }, "can")])
+      expect(phoneRow(v, cannot)).toEqual({ mark: "warn", words: cannot, link: false, state: "cannot" });
+  });
+
+  it("a computer says only what is so of it: a sessionpipe too old, or, once approved, not approved there", () => {
+    // An old sessionpipe, whatever the phone's own state.
+    for (const phase of [{ kind: "idle" }, { kind: "approved" }] as const)
+      expect(machineNote(view(phase, "old"), "m_0")).toEqual({
+        mark: "warn",
+        words: "Update sessionpipe on this computer to send from the app",
+        link: false,
+      });
+    // Approved or inside the hour, and this computer has not taken the key: the way on.
+    for (const phase of [{ kind: "approved" }, { kind: "cooling", until, exact: true }] as const)
+      expect(machineNote(view(phase, "can", "not-yet"), "m_1")).toEqual({
+        mark: "wait",
+        words: "Not approved on this computer",
+        link: true,
+      });
+    // Not approved yet: the row above says it once, no computer says it again.
+    for (const phase of [{ kind: "idle" }, { kind: "waiting", code: "71" }, { kind: "dropped" }] as const)
+      expect(machineNote(view(phase, "not-yet"), "m_0")).toBeNull();
+    // Nothing to add where it can send, where the door has no word of the computer, or before the first look.
+    expect(machineNote(view({ kind: "approved" }, "can"), "m_0")).toBeNull();
+    expect(machineNote(view({ kind: "approved" }, "can"), "m_other")).toBeNull();
+    expect(machineNote(null, "m_0")).toBeNull();
   });
 });
 

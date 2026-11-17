@@ -1,0 +1,56 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* A state: its mark, then its words (Mark.tsx). ok: a check; wait: a hollow ring; warn: a
+   filled dot in the colour that asks for a person. Never colour alone. */
+.acct-state {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+  text-align: left;
+}
+.acct-state::before {
+  content: "";
+  flex: none;
+  /* Beside the first line, where the words run to a second. */
+  align-self: flex-start;
+  margin-top: 0.5em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--fg-3);
+}
+.acct-state--ok {
+  color: var(--fg);
+}
+.acct-state--ok::before {
+  content: "\2713";
+  margin-top: 0.25em;
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  font-size: 0.9em;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--ok-fg, var(--fg));
+}
+.acct-state--warn {
+  color: var(--fg);
+}
+.acct-state--warn::before {
+  border-color: var(--needs-fg);
+  background: var(--needs-fg);
+}
+
+/* Forced colours draw no background: the warn dot is filled by its own border there, so it
+   stays a dot and is not taken for the ring that says "waiting". */
+@media (forced-colors: active) {
+  .acct-state--warn::before {
+    width: 0;
+    height: 0;
+    border-width: 4px;
+    border-color: CanvasText;
+  }
+}
