@@ -9,13 +9,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 ### Changed
 
 - **A session's subagents open under it on the board only while one of them runs.** A
-  tree whose agents had gone quiet for hours opened by itself, and its row said "2
-  subagents · 2 quiet"; it now stays folded and the row says nothing of them. The row says
-  "1 subagent running" only while one is. On a phone, an open tree lists the agents still at
-  work and one row, "Show 19 finished", in place of three finished agents and "Show 16
-  more"; the chevron sits level with the glyph and takes a tap anywhere on the row's
-  leading 44 points, so on a row with subagents a tap on the glyph folds them and the title
-  opens the session. On a touch screen "Show n more" and a tree's rows are 44 points tall.
+  tree whose agents had gone quiet opened by itself; it stays folded now, and the row says
+  only how many run. On a phone an open tree lists the agents at work and one row, "Show n
+  finished", for the rest (a search lists the finished ones it found). A tap on the row's
+  leading 44 points, its glyph included, folds the tree; the title opens the session. On a
+  touch screen a tree's rows are 44 points tall, and no tree hides one agent behind "Show
+  1 more".
 
 ### Fixed
 

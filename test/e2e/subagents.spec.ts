@@ -7,8 +7,8 @@
 // its tools inside, and reads Claude Code's <task-notification> turns as "Subagent
 // finished"; an agent opens beside as a tab right after its parent's; the palette lists
 // agents under their session and `is:subagent` keeps only them. Parents of the test's own
-// show when a tree opens by itself (only while an agent runs) and how a phone folds the
-// finished agents, with the chevron's 44 pt target.
+// show when a tree opens by itself (only while an agent runs), how a phone folds the
+// finished agents (but for those a search found), and the chevron's 44 pt target.
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
 import { EVENTS, holdBoard, INFO, openBoard, openPage, ulid } from "./helpers.js";
@@ -38,11 +38,13 @@ async function bm25(page: Page, { live = false } = {}) {
 
 /** A parent session of the test's own, sent as a sink would, with `running` agents still
  *  at work, `quiet` ones and `finished` ones. A quiet parent's events are all 30 minutes
- *  old (it and its open agents read stale); one with no open agent ended its turn (idle). */
+ *  old (it and its open agents read stale); one with no open agent ended its turn (idle).
+ *  `scouts` are finished agents of a type of its own (for a search), older than the other
+ *  finished ones; `tool` leaves the parent's Agent call running with nothing on line 2. */
 async function postParent(
   page: Page,
-  o: { running?: number; quiet?: number; finished: number },
-): Promise<{ title: string; row: ReturnType<Page["locator"]> }> {
+  o: { running?: number; quiet?: number; finished: number; scouts?: number; tool?: boolean },
+): Promise<{ title: string; scout: string; row: ReturnType<Page["locator"]> }> {
   const { sinkToken } = (await (await page.request.get(INFO)).json()) as { sinkToken: string };
   const id = randomUUID();
   const title = `E2E tree ${id.slice(0, 8)}`;
@@ -63,14 +65,18 @@ async function postParent(
       data,
     };
   };
-  const agent = { agent_type: "general-purpose" };
-  const start = (n: string) => ev("subagent.started", { ...agent, agent_id: n }, "SubagentStart");
-  const stop = (n: string) => ev("subagent.ended", { ...agent, agent_id: n }, "SubagentStop");
+  const scout = `Scout${id.slice(0, 6)}`;
+  const start = (n: string, t = "general-purpose") =>
+    ev("subagent.started", { agent_type: t, agent_id: n }, "SubagentStart");
+  const stop = (n: string, t = "general-purpose") =>
+    ev("subagent.ended", { agent_type: t, agent_id: n }, "SubagentStop");
   const events = [
     ev("session.started", { source: "startup" }, "SessionStart"),
     ev("turn.started", { turn_id: "t1", prompt_chars: 40 }, "UserPromptSubmit"),
   ];
+  for (let i = 0; i < (o.scouts ?? 0); i++) events.push(start(`scout${i}`, scout), stop(`scout${i}`, scout));
   for (let i = 0; i < o.finished; i++) events.push(start(`done${i}`), stop(`done${i}`));
+  if (o.tool) events.push(ev("tool.started", { tool: "Agent", call_id: "toolu_e2e", turn_id: "t1" }, "PreToolUse"));
   for (let i = 0; i < (o.quiet ?? 0); i++) events.push(start(`quiet${i}`));
   for (let i = 0; i < (o.running ?? 0); i++) events.push(start(`run${i}`));
   if (!quiet && !o.running) events.push(ev("turn.ended", { turn_id: "t1", reason: "stop", ms: 3000 }, "Stop"));
@@ -79,7 +85,7 @@ async function postParent(
     data: { events },
   });
   expect(res.status()).toBe(202);
-  return { title, row: page.locator("article.card", { hasText: title }) };
+  return { title, scout, row: page.locator("article.card", { hasText: title }) };
 }
 
 test.describe("subagents", () => {
@@ -236,6 +242,16 @@ test.describe("subagents", () => {
   });
 });
 
+/** How far the chevron's middle sits from the glyph's, in px. */
+const chevronOff = (row: ReturnType<Page["locator"]>) =>
+  row.locator(".card-row").evaluate((r) => {
+    const mid = (q: string) => {
+      const b = r.querySelector(q)!.getBoundingClientRect();
+      return b.y + b.height / 2;
+    };
+    return Math.abs(mid(".card-disclose svg") - mid(".card-state .dot"));
+  });
+
 // The desktop project's file (the phone project does not run it), with a phone of its own.
 test.describe("subagents on a phone", () => {
   test.use({ viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true });
@@ -258,15 +274,7 @@ test.describe("subagents on a phone", () => {
     await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
     const line = row.locator(".card-row");
     // The chevron sits level with the glyph, whether line 2 shows the fact or nothing.
-    const level = () =>
-      line.evaluate((r) => {
-        const mid = (q: string) => {
-          const b = r.querySelector(q)!.getBoundingClientRect();
-          return b.y + b.height / 2;
-        };
-        return Math.abs(mid(".card-disclose svg") - mid(".card-state .dot"));
-      });
-    expect(await level()).toBeLessThanOrEqual(1.5);
+    expect(await chevronOff(row)).toBeLessThanOrEqual(1.5);
     const { x0, y, hits } = await line.evaluate((r) => {
       const svg = r.querySelector(".card-disclose svg")!.getBoundingClientRect();
       const y = svg.y + svg.height / 2;
@@ -288,7 +296,7 @@ test.describe("subagents on a phone", () => {
     // Folded, the row says what runs, on line 2.
     await expect(row.locator(".card-agents")).toHaveText("1 subagent running");
     await expect(row.locator(".card-agents")).not.toHaveClass(/sr-only/);
-    expect(await level()).toBeLessThanOrEqual(1.5);
+    expect(await chevronOff(row)).toBeLessThanOrEqual(1.5);
     await tapAt(22);
     await expect(disclose).toHaveAttribute("aria-expanded", "true");
     // "Show 19 finished" lists every one in place.
@@ -311,5 +319,26 @@ test.describe("subagents on a phone", () => {
     await expect(disclose).toHaveAttribute("aria-expanded", "true");
     await expect(row.locator("li[data-agent]")).toHaveCount(3);
     await expect(row.locator(".kid-more-btn")).toHaveText("Show 17 more");
+  });
+
+  test("a search lists the finished agents it found, and the chevron stays level over a tool", async ({ page }) => {
+    // One agent running, three finished, and two finished before them of a type the search finds.
+    const { scout, row } = await postParent(page, { running: 1, finished: 3, scouts: 2, tool: true });
+    await openBoard(page);
+    await page.getByRole("searchbox", { name: "Search sessions" }).fill(scout);
+    await expect(page.locator("article.card")).toHaveCount(1);
+    await expect(row.locator("button.card-disclose")).toHaveAttribute("aria-expanded", "true");
+    // The running one and the two it found, older than the three left under "Show 3 more".
+    await expect(row.locator("li[data-agent]")).toHaveCount(3);
+    const found = row.locator("li[data-agent] .agent-type", { hasText: scout });
+    await expect(found).toHaveCount(2);
+    await expect(found.first()).toBeVisible();
+    await expect(row.locator(".kid-more-btn")).toHaveText("Show 3 more");
+    // Line 2 is the tool it runs and nothing else (the fact is a screen reader's while the
+    // tree is open), and the row has three lines: the chevron moves up with line 1.
+    await expect(row.locator(".card-tool")).toBeVisible();
+    await expect(row.locator(".card-text, .card-attn")).toHaveCount(0);
+    await expect(row.locator(".card-agents")).toHaveClass(/sr-only/);
+    expect(await chevronOff(row)).toBeLessThanOrEqual(1.5);
   });
 });

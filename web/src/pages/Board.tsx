@@ -58,7 +58,7 @@ import {
   useStreamDown,
   useUnreadKeys,
 } from "../data/hooks";
-import { agentMatches } from "../lib/agents";
+import { agentFound } from "../lib/agents";
 import { foldsAway, nestDelegated } from "../lib/delegated";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import {
@@ -89,10 +89,7 @@ const isStart = (a: ControlActivity) => a.kind === "start";
 const PENDING_MAX_MS = 3600_000;
 
 /** Whether a search finds one of a session's agents (their type or what they were asked). */
-const agentsMatch = (s: SessionSummary, q: string): boolean => {
-  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  return words.length > 0 && (s.agents ?? []).some((a) => words.every((w) => agentMatches(a, w)));
-};
+const agentsMatch = (s: SessionSummary, q: string): boolean => (s.agents ?? []).some((a) => agentFound(a, q));
 
 const matches = (s: SessionSummary, q: string) => {
   if (!q) return true;
@@ -464,7 +461,7 @@ export function Board() {
         openBeside={beside}
         open={s.key === openKey}
         openTab={s.agents?.length ? openKey : null}
-        agentsMatch={!!lq.rest && agentsMatch(s, lq.rest)}
+        agentsMatch={lq.rest && agentsMatch(s, lq.rest) ? lq.rest : undefined}
         onlyMachine={setMachine}
         onlyHarness={setHarness}
         gone={h.gone}

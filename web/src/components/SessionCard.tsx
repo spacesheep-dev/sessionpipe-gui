@@ -26,7 +26,7 @@ import {
 import { answerState, useSessionSend } from "../control/useSend";
 import { useAppState, useStore, useUnread } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
-import { agentsChoice, agentsRunningFact, agentsShown, agentTabKey, setAgentsChoice } from "../lib/agents";
+import { agentFound, agentsChoice, agentsRunningFact, agentsShown, agentTabKey, setAgentsChoice } from "../lib/agents";
 import { useAnswerClock } from "../lib/answerWindow";
 import { usePhoneLayout } from "../lib/device";
 import {
@@ -80,8 +80,9 @@ interface SessionCardProps {
   open?: boolean;
   /** The panel's active tab, when it is one of this session's agents (that row is open). */
   openTab?: string | null;
-  /** A search found one of its agents: they show, whatever the disclosure says. */
-  agentsMatch?: boolean;
+  /** The search that found one of its agents: they show, whatever the disclosure says, and
+   *  the finished ones listed are the ones it found. */
+  agentsMatch?: string;
   /** The board's filters, for the menu's "Show only …" (stable setters). */
   onlyMachine?: (m: string) => void;
   onlyHarness?: (h: string) => void;
@@ -152,7 +153,7 @@ export const SessionCard = memo(function SessionCard({
   openBeside = false,
   open = false,
   openTab = null,
-  agentsMatch = false,
+  agentsMatch,
   onlyMachine,
   onlyHarness,
   gone = false,
@@ -174,7 +175,7 @@ export const SessionCard = memo(function SessionCard({
   // the person opens or folds does it at once.
   const auto = useRef(chosen);
   if (!held || agentsChoice(s.key) !== undefined) auto.current = chosen;
-  const showAgents = agents.length > 0 && (auto.current || agentsMatch);
+  const showAgents = agents.length > 0 && (auto.current || !!agentsMatch);
   const [allDone, setAllDone] = useState(false);
   const toggleAgents = (to = !showAgents) => {
     if (agents.length > 0 && to !== showAgents) setAgentsChoice(s.key, to);
@@ -382,6 +383,7 @@ export const SessionCard = memo(function SessionCard({
         <KidList
           s={s}
           agents={showAgents}
+          match={agentsMatch}
           kids={kids ?? []}
           openTab={openTab}
           all={allDone}
@@ -396,7 +398,8 @@ export const SessionCard = memo(function SessionCard({
 }, sameCard);
 
 /** How many finished agents show under a parent before "Show n more". A phone shows none
- *  while any agent is unfinished: they fold into "Show n finished". */
+ *  while any agent is unfinished (they fold into "Show n finished"), unless a search found
+ *  the tree. */
 const DONE_SHOWN = 3;
 
 type KidItem = { kind: "agent"; a: AgentRun } | { kind: "kid"; c: SessionSummary };
@@ -404,13 +407,14 @@ const kidKey = (k: KidItem) => (k.kind === "agent" ? `a:${k.a.id}` : `c:${k.c.ke
 const kidGroup = (k: KidItem) => (k.kind === "agent" ? (k.a.state === "done" ? "done" : "open") : "kid");
 
 /** A parent's tree: its agents (the open ones, then the newest finished, then "Show n
- *  more"; on a phone, while any is open, the open ones and "Show n finished") and its
- *  child sessions. It holds still under the pointer like the board does:
- *  an agent that finishes stays where it is until the pointer leaves, then slides down
- *  to the finished ones. */
+ *  more"; on a phone, while any is open, the open ones and "Show n finished"; the finished
+ *  ones a search found, when one did) and its child sessions. It holds still under the
+ *  pointer like the board does: an agent that finishes stays where it is until the
+ *  pointer leaves, then slides down to the finished ones. */
 function KidList({
   s,
   agents,
+  match,
   kids,
   openTab,
   all,
@@ -420,6 +424,7 @@ function KidList({
 }: {
   s: SessionSummary;
   agents: boolean;
+  match?: string;
   kids: SessionSummary[];
   openTab: string | null;
   all: boolean;
@@ -429,9 +434,13 @@ function KidList({
   const ref = useRef<HTMLUListElement>(null);
   const hold = useListHold(ref) || held;
   const phone = usePhoneLayout();
-  const unfinished = s.agents.some((a) => a.state !== "done");
-  const done = all ? Number.POSITIVE_INFINITY : phone && unfinished ? 0 : DONE_SHOWN;
-  const { shown, more } = agents ? agentsShown(s.agents, done) : { shown: [], more: 0 };
+  const list = s.agents ?? [];
+  const unfinished = list.some((a) => a.state !== "done");
+  const done = all ? Number.POSITIVE_INFINITY : phone && unfinished && !match ? 0 : DONE_SHOWN;
+  const keep = match && !all ? (a: AgentRun) => agentFound(a, match) : undefined;
+  const { shown, more } = agents ? agentsShown(list, done, keep) : { shown: [], more: 0 };
+  // "Show 2 more" under finished rows, "Show 19 finished" where none is listed.
+  const what = shown.some((a) => a.state === "done") ? "more" : "finished";
   const items: KidItem[] = [
     ...shown.map((a): KidItem => ({ kind: "agent", a })),
     ...kids.map((c): KidItem => ({ kind: "kid", c })),
@@ -463,7 +472,7 @@ function KidList({
       {more > 0 && (
         <li className="kid-more">
           <button type="button" className="kid-more-btn" onClick={onAll}>
-            Show {more} {done === 0 ? "finished" : "more"}
+            Show {more} {what}
           </button>
         </li>
       )}

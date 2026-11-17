@@ -733,9 +733,12 @@
     display: none;
   }
   /* Three lines fill the row from its top, so the chevron moves up with line 1: level with
-     the glyph (measured: line 1's middle is 17 px down). A line 2 with nothing to show
-     leaves the row centred, and the chevron with it. */
-  .card-row:has(.card-text, .card-attn, .card-agents:not(.sr-only), .card-flags) > .card-disclose {
+     the glyph (measured: line 1's middle is 17 px down). That is when line 2 shows words,
+     or the tool it runs while the tree is open (the fact beside it, a screen reader's
+     only, still keeps the third line). A line 2 with nothing to show leaves the row
+     centred, and the chevron with it. */
+  .card-row:has(.card-text, .card-attn, .card-agents:not(.sr-only), .card-flags) > .card-disclose,
+  .card-row:has(.card-agents):has(.card-tool) > .card-disclose {
     place-items: start center;
     padding-top: 11px;
   }
@@ -782,10 +785,15 @@
     height: 44px;
   }
   /* "Show n finished" is a row of the tree: its words start where the agents' names do
-     (after the glyph's 10 px and the 8 px gap), and the whole row takes the tap. */
+     (after the glyph's 10 px and the 8 px gap), the whole row takes the tap, and a press
+     lights it as it does an agent's row. */
   .kid-more-btn {
     width: calc(100% - 8px);
     padding-left: 54px;
+  }
+  .kid-more-btn:active {
+    background: var(--press);
+    transition: none;
   }
 }
 

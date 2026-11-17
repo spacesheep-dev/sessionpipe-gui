@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 // The router (which opening an agent goes through) listens on the window when loaded.
 (globalThis as { window?: unknown }).window ??= { addEventListener() {}, removeEventListener() {} };
 const {
+  agentFound,
   agentLabel,
   agentNow,
   agentsChoice,
@@ -101,21 +102,37 @@ describe("agent rows", () => {
     expect(agentLabel({ type: "Explore" })).toBe("Explore");
     expect(agentLabel({})).toBe("Subagent");
   });
+  const list = [
+    run({ id: "o1", type: "general-purpose" }),
+    ...[1, 2, 3, 4, 5].map((n) => run({ id: `d${n}`, state: "done", type: n % 2 ? "Explore" : "general-purpose" })),
+  ];
   it("show every open agent, then the newest finished ones", () => {
-    const list = [
-      run({ id: "o1" }),
-      run({ id: "d1", state: "done" }),
-      run({ id: "d2", state: "done" }),
-      run({ id: "d3", state: "done" }),
-      run({ id: "d4", state: "done" }),
-    ];
     const { shown, more } = agentsShown(list, 3);
     expect(shown.map((a) => a.id)).toEqual(["o1", "d1", "d2", "d3"]);
-    expect(more).toBe(1);
+    expect(more).toBe(2);
     // A phone with an agent still open: the open ones, every finished one left for "Show n finished".
     const folded = agentsShown(list, 0);
     expect(folded.shown.map((a) => a.id)).toEqual(["o1"]);
-    expect(folded.more).toBe(4);
+    expect(folded.more).toBe(5);
+  });
+  it("list the one a fold would leave out", () => {
+    const { shown, more } = agentsShown(list.slice(0, 5), 3);
+    expect(shown.map((a) => a.id)).toEqual(["o1", "d1", "d2", "d3", "d4"]);
+    expect(more).toBe(0);
+  });
+  it("list the finished ones a search found, whatever their age", () => {
+    expect(agentFound(list[1]!, "explore")).toBe(true);
+    expect(agentFound(list[1]!, "Explore general")).toBe(false);
+    expect(agentFound(list[1]!, " ")).toBe(false);
+    const found = (a: AgentRun) => agentFound(a, "Explore");
+    // The open one stays; d1, d3 and d5 are the Explore ones, d2 and d4 wait under "Show 2 more".
+    const { shown, more } = agentsShown(list, 3, found);
+    expect(shown.map((a) => a.id)).toEqual(["o1", "d1", "d3", "d5"]);
+    expect(more).toBe(2);
+    // Nothing finished that it found: the open ones, and every finished one left.
+    const none = agentsShown(list, 3, (a) => agentFound(a, "Plan"));
+    expect(none.shown.map((a) => a.id)).toEqual(["o1"]);
+    expect(none.more).toBe(5);
   });
 });
 

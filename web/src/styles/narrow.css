@@ -184,6 +184,7 @@
 @media (pointer: coarse) {
   .card-row,
   .kid,
+  .kid-more-btn,
   .inbox-row,
   .ev,
   .hit {
@@ -198,6 +199,7 @@
 @media (hover: none) and (max-width: 839px) {
   .card-row:active:not([data-swipe], :has(> .card-disclose:active)),
   .kid:active,
+  .kid-more-btn:active,
   .inbox-row:not([data-swipe]):has(.inbox-main:active),
   .ev:active,
   .hit:active {

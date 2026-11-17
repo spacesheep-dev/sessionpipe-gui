@@ -79,6 +79,12 @@ export const agentsOpen = (s: Pick<SessionSummary, "state" | "agents">, choice: 
 export const agentMatches = (a: AgentRun, word: string): boolean =>
   `${a.type ?? ""} ${a.description ?? ""}`.toLowerCase().includes(word);
 
+/** Whether a search finds an agent: every one of its words does. */
+export function agentFound(a: AgentRun, q: string): boolean {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.every((w) => agentMatches(a, w));
+}
+
 const phone = () => typeof matchMedia === "function" && matchMedia("(max-width: 839px)").matches;
 
 /** Open an agent: beside, as the panel's agent tab (a phone opens the page, which is how
@@ -110,12 +116,20 @@ export function taskNotification(text: string | undefined): { agentId: string; s
   return { agentId: m[1]!, summary: summary || undefined };
 }
 
-/** A parent's agents for a list: every open one, then the newest `done` finished ones,
- *  and how many finished ones that leaves out. */
-export function agentsShown(agents: readonly AgentRun[], done: number): { shown: AgentRun[]; more: number } {
+/** A parent's agents for a list: every open one, then the newest `done` finished ones
+ *  (of those `keep` passes, when given: the ones a search found), and how many finished
+ *  ones that leaves out. One left out is listed instead: its "Show 1 more" would take the
+ *  same room. */
+export function agentsShown(
+  agents: readonly AgentRun[],
+  done: number,
+  keep?: (a: AgentRun) => boolean,
+): { shown: AgentRun[]; more: number } {
   const open = agents.filter((a) => a.state !== "done");
   const ended = agents.filter((a) => a.state === "done");
-  return { shown: [...open, ...ended.slice(0, done)], more: Math.max(0, ended.length - done) };
+  const listed = (keep ? ended.filter(keep) : ended).slice(0, done);
+  const more = ended.length - listed.length;
+  return more === 1 ? { shown: [...open, ...ended], more: 0 } : { shown: [...open, ...listed], more };
 }
 
 // ----- the board's disclosure, per device -----
