@@ -6,9 +6,40 @@ import { approvalOf, type SendState } from "../account/sendable";
 import { answerState } from "../control/useSend";
 import { markLate, openAttentions } from "../data/hooks";
 import { ANSWER_WINDOW_MS, answerLate } from "../lib/answerWindow";
-import { answerable, blockedAnswer, keepPlanning } from "./ControlStrip";
+import { answerable, blockedAnswer, keepPlanning, shownCommand } from "./ControlStrip";
 import { foldPlan } from "./PlanText";
 import { answerItems } from "./SessionCard";
+
+describe("a shell prompt's command on its card", () => {
+  // 139 characters; Claude Code's adapter puts the first 120 in the message, with no mark.
+  const cmd =
+    "rsync -av --delete --exclude .env ./dist/ deploy@staging.acme.dev:/srv/billing/next && ssh deploy@staging.acme.dev systemctl reload billing";
+  const sent = { tool: "Bash", message: `Bash ${cmd.slice(0, 120)}` };
+  it("is the whole command where the session sent the call's input (tier 3)", () => {
+    expect(cmd).toHaveLength(139);
+    expect(shownCommand(sent, "claude-code", { command: cmd })).toEqual({ cmd, cut: null });
+  });
+  it("ends in … and says it is the first 120 characters where it did not (tier 2)", () => {
+    expect(shownCommand(sent, "claude-code", undefined)).toEqual({
+      cmd: `${cmd.slice(0, 120)}…`,
+      cut: "The machine sends the first 120 characters",
+    });
+    // A call that is not the one the message names is not taken for it.
+    expect(shownCommand(sent, "claude-code", { command: "npm test" })?.cmd).toBe(`${cmd.slice(0, 120)}…`);
+  });
+  it("is whole as sent from another harness, and the server's cut at 200 is its own", () => {
+    expect(shownCommand({ tool: "Bash", message: `Bash ${cmd}` }, "codex", undefined)).toEqual({ cmd, cut: null });
+    const long = `Bash ${"a".repeat(195)}`;
+    expect(shownCommand({ tool: "Bash", message: long }, "codex", undefined)).toEqual({
+      cmd: `${"a".repeat(195)}…`,
+      cut: "The machine sends the first 200 characters",
+    });
+    expect(shownCommand({ tool: "Bash", message: "npm test" }, "claude-code", undefined)).toEqual({
+      cmd: "npm test",
+      cut: null,
+    });
+  });
+});
 
 describe("keepPlanning", () => {
   it("says no to the plan with what the composer says should change", () => {

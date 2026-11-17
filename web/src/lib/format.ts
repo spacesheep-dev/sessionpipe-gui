@@ -349,20 +349,34 @@ export const isShellTool = (tool: string | undefined): boolean => !!tool && SHEL
 export const saidCommand = (msg: string | undefined): string | undefined =>
   msg && !/\b(permission|wants|needs)\b/i.test(msg) ? msg : undefined;
 
+/** How much of a shell command sessionpipe's Claude Code adapter puts in a prompt's
+ *  message, with no mark where it cut (describe() in its claude-code.ts). */
+export const CC_COMMAND_MAX = 120;
+
+/** Whether the machine cut a prompt's request: the server keeps 200 characters of the
+ *  message and marks nothing, a Claude Code session's shell command is cut at
+ *  CC_COMMAND_MAX with no mark either (`harness`: the session's), and anything else cut
+ *  ends in "…". */
+export function askCut(a: { tool?: string; message?: string }, harness: string | undefined): boolean {
+  const said = attentionMessage(a) ?? "";
+  if ((a.message?.length ?? 0) >= 200 || said.trimEnd().endsWith("…")) return true;
+  return harness === "claude-code" && isShellTool(a.tool) && said.length >= CC_COMMAND_MAX;
+}
+
 /** The longest request a list row shows whole beside Allow and Deny: about three lines of
  *  mono at 320 points, and any number at a larger text size, never cut. */
 export const ROW_ASK_MAX = 100;
 
 /** Whether a list row (the Inbox, the Board's menu) shows this prompt's whole request, so
  *  Allow and Deny can stand beside it: a request of its own (not a plan, whose plan the
- *  row cannot hold, nor a bare tool name), not cut by the machine (it keeps 200 characters
- *  and marks nothing), on one line, at most ROW_ASK_MAX characters, and for a shell tool
- *  the command itself. Anything else is answered where it is shown whole: the session. */
-export function askFitsRow(a: { kind?: string; tool?: string; message?: string }): boolean {
+ *  row cannot hold, nor a bare tool name), not cut by the machine (askCut), on one line,
+ *  at most ROW_ASK_MAX characters, and for a shell tool the command itself. Anything else
+ *  is answered where it is shown whole: the session. `harness`: the session's. */
+export function askFitsRow(a: { kind?: string; tool?: string; message?: string }, harness?: string): boolean {
   if (isPlanReview(a)) return false;
   const msg = attentionMessage(a)?.trim();
   if (!msg) return false;
-  if ((a.message?.length ?? 0) >= 200 || msg.endsWith("…")) return false;
+  if (askCut(a, harness)) return false;
   if (msg.includes("\n") || msg.length > ROW_ASK_MAX) return false;
   return !isShellTool(a.tool) || !!saidCommand(msg);
 }

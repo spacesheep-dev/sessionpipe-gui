@@ -384,7 +384,7 @@ function InboxRow({
   const msg = attentionMessage(a);
   // Allow and Deny only beside a request the row shows whole (lib/format.ts askFitsRow);
   // any other, a plan or a long command, offers Open, to the session that shows it whole.
-  const whole = askFitsRow(a);
+  const whole = askFitsRow(a, s.harness);
   // A prompt in a terminal is answered there: `a` and `d` on its row do nothing (Answer has
   // the answerable rows' keys).
   useRowKeys(cursor !== undefined && !row.answerable, null);

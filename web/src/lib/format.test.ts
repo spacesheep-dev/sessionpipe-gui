@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
 import {
+  askCut,
   askedQuestion,
   askFitsRow,
   attentionMessage,
+  CC_COMMAND_MAX,
   isPlanReview,
   isQuestion,
   ROW_ASK_MAX,
@@ -114,6 +116,16 @@ describe("askFitsRow", () => {
     expect(askFitsRow(bash(`Bash: ${"a".repeat(194)}`))).toBe(false);
     expect(askFitsRow(bash("npm run deploy -- --target prod…"))).toBe(false);
     expect(askFitsRow(bash("cat <<EOF > notes.md\nhello\nEOF"))).toBe(false);
+  });
+  it("fails for a Claude Code command of 120 characters or more, which its machine cut with no mark", () => {
+    const cmd = `npm run deploy -- ${"x".repeat(CC_COMMAND_MAX - 18)}`;
+    expect(cmd).toHaveLength(CC_COMMAND_MAX);
+    expect(askCut(bash(`Bash ${cmd}`), "claude-code")).toBe(true);
+    expect(askCut(bash(`Bash ${cmd.slice(1)}`), "claude-code")).toBe(false);
+    expect(askCut(bash(`Bash ${cmd}`), "codex")).toBe(false);
+    // A row asks the same of it, whatever its own measure is.
+    expect(askFitsRow(bash(`Bash ${cmd.slice(0, 90)}`), "claude-code")).toBe(true);
+    expect(askFitsRow(bash(`Bash ${cmd}`), "claude-code")).toBe(false);
   });
   it("fails for a plan, a question, a tool with no request of its own, and a sentence about a shell's", () => {
     expect(askFitsRow({ kind: "permission", tool: "ExitPlanMode", message: "ExitPlanMode" })).toBe(false);

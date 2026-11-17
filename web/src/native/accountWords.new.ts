@@ -99,6 +99,7 @@ export const NEW_WORDS = {
   questionMore: (n: number) => `+${n} more ${n === 1 ? "question" : "questions"}`,
   questionWhere: (machine?: string) => `answer it on ${machine ?? "its computer"}`,
   questionChip: "Question",
+  commandCut: "The machine sends the first 120 characters",
   questionOptions: "Options",
   inboxOpen: "Open",
   toolsRunning: (tool: string) => `Running ${tool}`,

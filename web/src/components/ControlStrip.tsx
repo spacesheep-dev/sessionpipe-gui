@@ -45,8 +45,10 @@ import { answerLate, useAnswerClock } from "../lib/answerWindow";
 import { useAskedInput } from "../lib/askedInput";
 import { usePhoneLayout, useTouchKeys } from "../lib/device";
 import {
+  askCut,
   askedQuestion,
   attentionMessage,
+  CC_COMMAND_MAX,
   isPlanReview,
   isQuestion,
   isShellTool,
@@ -203,6 +205,27 @@ export const answerable = (a: Attention): boolean => a.answerable ?? !a.attentio
 
 /** What the machine says of a command it cut: a message is its first 200 characters. */
 const CUT = "The machine sends the first 200 characters";
+
+/** A shell prompt's command as its card shows it: the whole command from the call's own
+ *  input where the session sent it (lib/askedInput.ts) and it is the one the message names,
+ *  else the message's, ending in "…" where the machine cut it (lib/format.ts askCut), with
+ *  `cut` saying how much it keeps (Claude Code's 120 characters, or the server's 200).
+ *  Undefined where the message is no command. */
+export function shownCommand(
+  a: Pick<Attention, "tool" | "message">,
+  harness: string | undefined,
+  input: Record<string, unknown> | undefined,
+): { cmd: string; cut: string | null } | undefined {
+  const said = saidCommand(attentionMessage(a));
+  // Cut is read off the message as sent: neither the server nor Claude Code marks it.
+  const cutMsg = askCut(a, harness);
+  const whole = askedCommand(input, said, cutMsg);
+  if (whole) return { cmd: whole, cut: null };
+  if (!said) return undefined;
+  if (!cutMsg) return { cmd: said, cut: null };
+  const short = (a.message?.length ?? 0) < 200 && said.length >= CC_COMMAND_MAX && harness === "claude-code";
+  return { cmd: said.endsWith("…") ? said : `${said}…`, cut: short ? NEW_WORDS.commandCut : CUT };
+}
 /** A command block shows this many steps until "Show more". */
 const CMD_LINES = 4;
 
@@ -273,23 +296,16 @@ function Question({ a, session, out }: { a: Attention; session: SessionSummary; 
     );
   const tool = <span className="ctl-tool">{toolLabel(a.tool)}</span>;
   const msg = attentionMessage(a);
-  const shell = isShellTool(a.tool);
-  const said = shell ? saidCommand(msg) : undefined;
-  // Cut is read off the message as sent: the server keeps 200 characters and adds no mark,
-  // and `said` has the tool's name taken off, so its own length never says.
-  const cutMsg = (a.message?.length ?? 0) >= 200 || !!said?.endsWith("…");
-  const whole = shell ? askedCommand(input, said, cutMsg) : undefined;
-  const cmd = whole ?? said;
-  if (!cmd)
+  const shown = isShellTool(a.tool) ? shownCommand(a, session.harness, input) : undefined;
+  if (!shown)
     return line(
       <>
         Allow {tool}?{msg ? <span className="ctl-answer-msg"> {msg}</span> : null}
       </>,
     );
   // One shape for every command, at every size: the question, then the command under it.
-  const steps = shellLines(cmd) ?? [cmd];
-  const cut = !whole && cutMsg;
-  if (cut && !steps[steps.length - 1]!.endsWith("…")) steps[steps.length - 1] += "…";
+  const steps = shellLines(shown.cmd) ?? [shown.cmd];
+  const cut = shown.cut;
   const more = steps.length - CMD_LINES;
   const all = more <= 0 || unfolded === a.attentionId;
   // A command of one step on one line is shown whole, however it wraps: nothing caps it.
@@ -303,12 +319,12 @@ function Question({ a, session, out }: { a: Attention; session: SessionSummary; 
         className={one ? "ctl-cmd-block ctl-cmd-block--one" : "ctl-cmd-block"}
         role="group"
         aria-label="Command"
-        title={cut ? CUT : undefined}
+        title={cut ?? undefined}
       >
         {(all ? steps : steps.slice(0, CMD_LINES)).map((step, i) => (
           <div key={i}>{step}</div>
         ))}
-        {cut && <span className="sr-only">{CUT}</span>}
+        {cut && <span className="sr-only">{cut}</span>}
       </div>
       {more > 0 && (
         <button

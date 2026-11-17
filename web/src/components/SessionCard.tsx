@@ -547,7 +547,7 @@ function CardAnswer({ s, into, shown }: { s: SessionSummary; into: MutableRefObj
   const st = a ? answerState(s, a, control, send, now) : null;
   useLayoutEffect(() => {
     into.current =
-      a && st && shown && !isQuestion(a) && askFitsRow(a)
+      a && st && shown && !isQuestion(a) && askFitsRow(a, s.harness)
         ? answerItems(a.tool, st, (allow) =>
             send.onSend({ kind: "permission.answer", attentionId: a.attentionId, allow }).catch(() => {}),
           )

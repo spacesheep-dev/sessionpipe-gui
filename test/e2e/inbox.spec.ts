@@ -335,11 +335,13 @@ test.describe("inbox: Allow only beside a whole request", () => {
       agoMs: 3_000,
       message: "npm run deploy -- --target staging",
     });
+    // As Claude Code sends it: its first 120 characters, and the whole in the call's input.
     const long = await postPrompt(token, {
       machine: d.name,
       title: "A long command",
       agoMs: 4_000,
-      message: LONG_COMMAND,
+      message: LONG_COMMAND.slice(0, 120),
+      input: { command: LONG_COMMAND },
     });
     const plan = await postPrompt(token, {
       machine: d.name,

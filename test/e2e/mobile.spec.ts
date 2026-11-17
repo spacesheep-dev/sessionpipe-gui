@@ -723,7 +723,14 @@ test.describe("phone: a request shown whole", () => {
     const token = await sinkToken();
     const d = await fakeDaemon(key, { name: `rows-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
     const short = await postPrompt(token, { machine: d.name, title: "Deploy", agoMs: 3_000, message: SHORT });
-    const long = await postPrompt(token, { machine: d.name, title: "Ship the release", agoMs: 4_000, message: LONG });
+    // As Claude Code sends it: its first 120 characters, and the whole in the call's input.
+    const long = await postPrompt(token, {
+      machine: d.name,
+      title: "Ship the release",
+      agoMs: 4_000,
+      message: LONG.slice(0, 120),
+      input: { command: LONG },
+    });
     try {
       await page.setViewportSize({ width: 320, height: 568 });
       await page.goto(`${CONTROL_BASE}/inbox`);

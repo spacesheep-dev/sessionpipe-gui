@@ -18,6 +18,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   to run:" (its own shell's name in place of Bash) with the command under it, at every
   size, and no "?" is left alone on a line after a command that wrapped. A command of one
   line is shown whole however it wraps, also on a phone, where it was cut at three lines.
+  A Claude Code command over 120 characters, which reaches the app cut with no mark, is
+  shown whole where the session sends its calls' input, and otherwise ends in "…".
 - **A session's subagents open under it on the board only while one of them runs.** A
   tree whose agents had gone quiet opened by itself; it stays folded now, and the row says
   only how many run. On a phone an open tree lists the agents at work and one row, "Show n
