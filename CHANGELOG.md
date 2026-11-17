@@ -32,14 +32,14 @@ All notable changes to `sessionpipe-gui`. The format follows
   the count drop the moment the answer goes. An answer the computer refuses gives Allow and
   Deny back, with why. A disabled Allow no longer looks like the one pressed, and VoiceOver
   hears why Allow, Deny and Start are off.
-- **On a phone, the way on under the message field reads as an action and takes a
-  finger's tap.** "Approve this iPhone", "Retry now" and "Open on spacesheep.dev" were the
-  grey of the sentence beside them, on a line 18 points tall. They are the orange of the
-  app's other actions now, bolder, and 44 points tall to a finger, without taking a tap
-  from the field above or from Ask another agent… beside them; the line itself is a size
-  larger. New session's Discard draft is orange and 44 points tall too, and Cancel still
-  keeps the draft. VoiceOver and Voice Control name the field by the words it shows
-  ("Message this session…").
+- **On a phone, the link under the message field reads as an action and takes a finger's
+  tap.** "Approve this iPhone", "Retry now" and "Open on spacesheep.dev" were the grey of
+  the sentence beside them, on a line 18 points tall. They are the orange of the app's
+  other actions now, bolder, and 44 points tall to a finger, without taking a tap from the
+  field above or from Ask another agent… beside them; the line itself is a size larger.
+  New session's Discard draft is orange and 44 points tall too, and Cancel still keeps the
+  draft. VoiceOver and Voice Control name the field by the words it shows ("Message this
+  session…").
 - **In the phone app nothing shows through the tab bar, the navigation bar or the session's
   control strip.** The bars were meant to blur what ran under them and never did: rows read
   sharp through the tab labels and into the home-indicator strip, and the transcript

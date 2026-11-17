@@ -393,11 +393,11 @@
     max-width: 100%;
     vertical-align: baseline;
   }
-  /* The line under the field at a footnote's size, and its way on (Approve this iPhone,
-     Retry now, Open on spacesheep.dev, How to pair) as a phone draws an action: the tint,
-     and 600 against the sentence's 400, so it reads as one without the colour too. It
-     ends the line, or wraps to the end of a line of its own; with Ask another agent after
-     it, that button takes the end. */
+  /* The line under the field at a footnote's size, and the way on, there and on the folded
+     card (Approve this iPhone, Retry now, Open on spacesheep.dev, How to pair), as a phone
+     draws an action: the tint, and 600 against the sentence's 400, so it reads as one
+     without the colour too. Under the field it ends the line, or wraps to the end of a line
+     of its own; with Ask another agent after it, that button takes the end. */
   .ctl-foot {
     font-size: var(--text-sm);
   }

@@ -1968,6 +1968,34 @@ test.describe("what else an account shows", () => {
       // On the phone the card stands alone: the field, off for the hour too, takes no room.
       if (W < 840) await expect(page.locator(".ctl-field")).toHaveCount(0);
       await shot(page, "also-prompt-cooling");
+      // On the phone and on an iPad's card, Open on spacesheep.dev is 45 tall to a finger and
+      // takes no tap from the question above it or from the pair under it.
+      const elsewhere = card.locator("[data-elsewhere]");
+      for (const size of [
+        { width: 390, height: 844 },
+        { width: 820, height: 1180 },
+      ]) {
+        await page.setViewportSize(size);
+        await expect(elsewhere).toBeVisible();
+        const hits = await elsewhere.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const note = el.closest(".ctl-answer-note")!;
+          const above = note.previousElementSibling!.getBoundingClientRect();
+          const pair = note.parentElement!.querySelector(".ctl-answer-btns")!.getBoundingClientRect();
+          const at = (x: number, y: number) => document.elementFromPoint(x, y);
+          const cx = r.left + r.width / 2;
+          // Across the box's width, inside the card.
+          const xs = [Math.max(r.left - 6, pair.left + 1), cx, Math.min(r.right + 6, pair.right - 1)];
+          return {
+            over: at(cx, r.top - 8) === el,
+            under: at(cx, r.bottom + 12) === el,
+            question: xs.every((x) => at(x, above.bottom - 1) !== el),
+            pair: xs.every((x) => !!at(x, pair.top + 1)?.closest(".ctl-answer-btns")),
+          };
+        });
+        expect(hits, `${size.width}`).toEqual({ over: true, under: true, question: true, pair: true });
+      }
+      await page.setViewportSize({ width: W, height: H });
       // The Inbox card: the same two buttons off, and the hour said once, as its own sentence.
       await page.goto(`${b.server.url}/inbox`);
       const row = page.locator(".inbox-row").first();
