@@ -19,6 +19,10 @@ declare global {
   }
 }
 
+/** Every test's prompts and answers reach every page on the one e2e server, as banners at
+ *  the top right, over a row's pair: a test that points at the pair keeps them out of it. */
+const hideBanners = (page: Page) => page.addStyleTag({ content: ".toasts { display: none !important; }" });
+
 /** A Notification that records itself; its permission lives in localStorage so it survives
  *  a reload like the real one would. `focused: false` makes the page look like a background tab. */
 const mockNotifications = (page: Page, opts: { permission?: string; focused?: boolean } = {}) =>
@@ -281,6 +285,7 @@ test.describe("inbox: an answer refused", () => {
         r.fulfill({ status: 422, json: { reason: "refused", code: "nonce_store" } }),
       );
       await page.goto(`${CONTROL_BASE}/inbox`);
+      await hideBanners(page);
       const row = page.locator(`.inbox-row[data-attention="${asked.attention}"]`);
       // With a pointer the pair shows on the hovered row.
       await row.hover();
@@ -346,6 +351,7 @@ test.describe("inbox: Allow only beside a whole request", () => {
     const answers = () => d.seen.filter((c) => c.kind === "permission.answer");
     try {
       await page.goto(`${CONTROL_BASE}/inbox`);
+      await hideBanners(page);
       const row = (p: { attention: string }) => page.locator(`.inbox-row[data-attention="${p.attention}"]`);
       // The short one: whole, on its line, with nothing cut; the pair on hover.
       const what = row(short).locator(".inbox-what");
@@ -405,6 +411,65 @@ test.describe("inbox: Allow only beside a whole request", () => {
       await short.clear();
       await long.clear();
       await plan.clear();
+      await d.stop();
+    }
+  });
+
+  test("with a session open beside, a and d on a row that shows Open or waits in a terminal answer nothing; with focus in the panel they are the panel's", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `beside-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const beside = await postPrompt(token, {
+      machine: d.name,
+      title: "Open beside",
+      agoMs: 3_000,
+      message: "npm run deploy -- --target staging",
+    });
+    const long = await postPrompt(token, {
+      machine: d.name,
+      title: "A long command",
+      agoMs: 4_000,
+      message: LONG_COMMAND,
+    });
+    const question = await postPrompt(token, {
+      machine: d.name,
+      title: "A question",
+      agoMs: 5_000,
+      tool: "AskUserQuestion",
+      message: "AskUserQuestion",
+    });
+    const answers = () => d.seen.filter((c) => c.kind === "permission.answer").map((c) => [c.for, c.decision]);
+    try {
+      await page.goto(`${CONTROL_BASE}/inbox`);
+      const row = (p: { attention: string }) => page.locator(`.inbox-row[data-attention="${p.attention}"]`);
+      await row(beside).locator(".inbox-main").click();
+      await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
+      const allow = page.locator("aside.panel .ctl .btn--allow");
+      await expect(allow).toBeEnabled({ timeout: 15_000 });
+      await expect(row(long)).toHaveClass(/inbox-row--open/);
+      await expect(row(question)).toHaveClass(/inbox-row--terminal/);
+      for (const p of [long, question]) {
+        await row(p).locator(".inbox-main").focus();
+        await expect(row(p)).toHaveAttribute("aria-current", "true");
+        await page.keyboard.press("a");
+        await page.keyboard.press("d");
+      }
+      await page.waitForTimeout(1_000);
+      expect(answers()).toEqual([]);
+      await expect(allow).toBeEnabled();
+      // Focus in the panel: its a, even on its Deny.
+      await page.locator("aside.panel .ctl .btn--deny").focus();
+      await page.keyboard.press("a");
+      await expect.poll(answers, { timeout: 15_000 }).toEqual([[beside.attention, "allow"]]);
+    } finally {
+      await beside.clear();
+      await long.clear();
+      await question.clear();
       await d.stop();
     }
   });

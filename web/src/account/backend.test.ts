@@ -1972,6 +1972,29 @@ describe("a page's own backend on a spacesheep account", () => {
       expect(needsOf([session(1, 2)])).toMatchObject([{ key: "claude-code:s-1", openAttentions: [{}, {}] }]);
     });
 
+    it("hands a question over as not answerable, so its notification has no Allow or Deny", () => {
+      const ask = (tool: string) =>
+        ({
+          key: "claude-code:s-1",
+          harness: "claude-code",
+          id: "s-1",
+          state: "needs_you",
+          stateSince: "2026-11-13T10:00:00.000Z",
+          openAttentions: [
+            {
+              attentionId: "a-1",
+              kind: "permission",
+              tool,
+              message: tool,
+              at: "2026-11-13T10:00:00.000Z",
+              answerable: true,
+            },
+          ],
+        }) as never;
+      expect(needsOf([ask("AskUserQuestion")])[0]!.openAttentions[0]).toMatchObject({ answerable: false });
+      expect(needsOf([ask("Bash")])[0]!.openAttentions[0]).toMatchObject({ answerable: true });
+    });
+
     it("is not called at all on a shell that does not list it", async () => {
       // A shell with the account mode and without the hand-over (an older app).
       r = rig({ features: ["notifications", "signer", "account"] });

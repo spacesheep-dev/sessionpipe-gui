@@ -50,6 +50,7 @@ import { MarksCore } from "../../../server/ui/marksCore";
 import { cutPreview } from "../../../server/ui/preview";
 import { snapshotWithControl } from "../../../server/ui/snapshot";
 import { HttpError, type StreamHandlers, type Transport } from "../data/transport";
+import { isQuestion } from "../lib/format";
 import type { ApiBackend } from "../lib/net";
 import { type EventCache, openCache, withoutSessions } from "./cache";
 import { type AccountDocs, type DocName, openDocs } from "./docs";
@@ -222,7 +223,8 @@ export function needsOf(sessions: readonly SessionSummary[]): NeedsSession[] {
           ...(a.tool ? { tool: a.tool } : {}),
           ...(a.message ? { message: a.message.slice(0, 300) } : {}),
           at: a.at,
-          answerable: !!a.answerable,
+          // A question is answered in its terminal: its notification has no Allow or Deny.
+          answerable: !!a.answerable && !isQuestion(a),
         })),
       };
     });

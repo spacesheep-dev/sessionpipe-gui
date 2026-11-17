@@ -59,7 +59,7 @@ import {
   toolLabel,
 } from "../lib/format";
 import { attentionKey, hide, isHidden, useHidden } from "../lib/hidden";
-import { useListNav } from "../lib/keys";
+import { inPanel, useListNav } from "../lib/keys";
 import { type LabelFilter, labelItems, labelPasses } from "../lib/labels";
 import { copyItem, sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
@@ -318,6 +318,19 @@ export function Inbox() {
   );
 }
 
+/** `a` and `d` while the list cursor is on a row: they are that row's, answered by `answer`
+ *  or, where it is null, taken and dropped, so they never fall through to the keys of a
+ *  session open beside the page (lib/shortcuts.ts tries inbox.* before session.*). With
+ *  focus inside the panel they are the panel's. */
+function useRowKeys(focused: boolean, answer: ((allow: boolean) => void) | null): void {
+  const run = (allow: boolean) => () => {
+    if (inPanel()) return false;
+    answer?.(allow);
+  };
+  useShortcut("inbox.allow", run(true), { enabled: focused, priority: 2 });
+  useShortcut("inbox.deny", run(false), { enabled: focused, priority: 2 });
+}
+
 function InboxRow({
   row,
   gone = false,
@@ -365,6 +378,9 @@ function InboxRow({
   // Allow and Deny only beside a request the row shows whole (lib/format.ts askFitsRow);
   // any other, a plan or a long command, offers Open, to the session that shows it whole.
   const whole = askFitsRow(a);
+  // A prompt in a terminal is answered there: `a` and `d` on its row do nothing (Answer has
+  // the answerable rows' keys).
+  useRowKeys(cursor !== undefined && !row.answerable, null);
   const titleId = useId();
   // With an answer out the orange glyph is the working ring, or a still hollow one while
   // the computer is offline (Answer says which).
@@ -460,8 +476,9 @@ function InboxRow({
  *  (from here or anywhere) the receipt takes the pair's place, "Allowed · waiting for
  *  studio-mac", until the machine clears the prompt and the row leaves. A refused send, or
  *  an answer the machine refused, gives both back. Beside a request the row does not show
- *  whole, one Open in the pair's place, as the row's tap: no menu items, no keys, never
- *  off, and no reason under the page bar but the one a device not approved is told. */
+ *  whole, one Open in the pair's place, as the row's tap: no menu items, `a` and `d` do
+ *  nothing, never off, and no reason under the page bar but the one a device not approved
+ *  is told. */
 function Answer({
   row,
   whole,
@@ -481,7 +498,7 @@ function Answer({
   /** The id of the row's title, which Open is described by. */
   titleId: string;
   control?: MachineControl;
-  /** The row under the list cursor: `a` / `d` answer it (lib/shortcuts.ts). */
+  /** The row under the list cursor: it takes `a` and `d` (useRowKeys). */
   focused?: boolean;
   into: MutableRefObject<MenuList>;
   report: (id: string, off: Off | null) => void;
@@ -520,10 +537,7 @@ function Answer({
   const lead = status === "sent" ? (control?.online === false ? "held" : "going") : null;
   useEffect(() => onOut(lead), [lead, onOut]);
   useEffect(() => () => onOut(null), [onOut]);
-  // The inbox row wins over a session open beside the page (priority 2 > the panel's 0).
-  const canKey = whole && focused && !off && chosen === null;
-  useShortcut("inbox.allow", () => answer(true), { enabled: canKey, priority: 2 });
-  useShortcut("inbox.deny", () => answer(false), { enabled: canKey, priority: 2 });
+  useRowKeys(focused, whole && !off && chosen === null ? answer : null);
   // Off for a standing reason (not paired, no passkeys here, not approved): the page says
   // it once, for the rows that show Allow and Deny. A moment's state (sent, a passkey
   // prompt, closed) stays on the row. Not approved, an Open row has no Open either, and
