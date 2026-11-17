@@ -1313,10 +1313,10 @@ test.describe("what else an account shows", () => {
     }
   });
 
-  /** In another session the agent asks to run something, now (well inside its hook's wait):
-   *  that session's id. */
-  const asks = (b: Bed, id = "s-refund"): string => {
-    const s = new Session(id, "claude-code", Date.now() - 4_000);
+  /** In another session the agent asks to run something, now (well inside its hook's wait)
+   *  unless `ago` says how long before: that session's id. */
+  const asks = (b: Bed, id = "s-refund", ago = 4_000): string => {
+    const s = new Session(id, "claude-code", Date.now() - ago);
     const on = {
       tier: 2 as const,
       session: { machine: NAME, cwd: "/Users/me/billing", title: "Refund the double charge" },
@@ -1367,6 +1367,10 @@ test.describe("what else an account shows", () => {
         // Nothing that would only be refused: no Allow, no Deny, no field to type in.
         await expect(page.getByRole("button", { name: /^(Allow|Deny)/ }), at).toHaveCount(0);
         await expect(page.locator("textarea"), at).toHaveCount(0);
+        // Deny's key (d) has no Deny to press: it does not follow the link instead.
+        await page.keyboard.press("d");
+        await expect(page, at).toHaveURL(new RegExp(`/s/claude-code/${sid}$`));
+        await expect(approve, at).toBeVisible();
         if (w === 390) await shot(page, "also-unapproved-prompt");
         // No prompt: the field and Send are off, and the line under it says why.
         await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
@@ -1399,6 +1403,32 @@ test.describe("what else an account shows", () => {
       await expect(page.locator("[data-approve='idle']")).toBeVisible();
       expect(await signs(page)).toBe(0);
       expect(b.ss.log.filter((l) => l.startsWith("POST /api/machines/"))).toEqual([]);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("not approved, and the prompt is past its answer window: the card says it is late, and the field stays, off, with the way to approve the phone", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      // Opened from a notification twelve minutes on: the hook stopped waiting long ago.
+      asks(b, "s-refund", 12 * 60_000);
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      const card = page.locator(".ctl-answer[data-attention='perm-1']");
+      await expect(card).toHaveAttribute("data-answer", "late");
+      await expect(card.locator(".ctl-answer-note")).toHaveText(/too late to answer from here/);
+      await expect(card.locator(".ctl-approve")).toHaveCount(0);
+      // Not folded away: the field, off, and the line under it with Approve this iPhone.
+      await expect(composer(page)).toBeDisabled();
+      const foot = page.locator(".ctl-foot[data-reason='unapproved']");
+      await expect(foot).toHaveText(/^This iPhone can't send yet\.\s*Approve this iPhone$/);
+      await expect(foot.getByRole("link", { name: "Approve this iPhone" })).toHaveAttribute("href", "/add-device");
+      await shot(page, "also-unapproved-late-prompt");
+      expect(await signs(page)).toBe(0);
     } finally {
       await b.close();
     }

@@ -82,14 +82,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   the iPhone, inherit mode), and the rest behind Details. On every Machines page a paired
   machine is online only while its sessionpipe is.
 - **An iPhone that isn't approved offers Approve this iPhone instead of an Allow that would
-  only be refused.** Allow, Deny, Send and Stop were live on a phone no computer trusted
-  yet: each tap asked for Face ID twice and was then refused, with words about a day grant
-  that weren't true. A prompt's card now says "This iPhone can't answer yet." with Approve
-  this iPhone in place of Deny and Allow (on the phone the card stands alone), the field is
-  off, and the Inbox says it once, above rows with nothing to press. Approved, while a
-  computer has yet to add the phone's key, the buttons stay, off, and say so. A send
-  spacesheep refuses for a key that computer doesn't list asks for Face ID once and says
-  "Not sent: … hasn't added this iPhone yet."
+  only be refused.** Allow, Deny, Send and Stop asked for Face ID twice, then failed with
+  words about a day grant. A prompt now says "This iPhone can't answer yet." with Approve
+  this iPhone in their place, the field is off, and the Inbox says it once; the Mac app
+  does the same where a computer doesn't trust the Mac. Until a computer adds an approved
+  phone's key, Allow and Deny stay, off, and a refused send takes one Face ID and says why.
 
 ## [0.8.3] - 2026-11-16
 

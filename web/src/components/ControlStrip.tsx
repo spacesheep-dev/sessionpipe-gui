@@ -540,8 +540,9 @@ export function ControlStrip({
     return null;
   })();
   // The phone, unpaired or not approved, with a prompt to answer: one state, one sentence
-  // (on the card), and no composer. A desktop keeps its field and the line under it.
-  const folded = phone && (!paired || approve) && !blocked && open.some(answerable);
+  // (on the card), and no composer. A desktop keeps its field and the line under it, and so
+  // does the phone where every prompt is late: that card says only that it is too late.
+  const folded = phone && (!paired || approve) && !blocked && open.some((a) => answerable(a) && !late(a));
   // Why Allow / Deny are off, said on their own bar (the line under the field says the rest).
   const offWhy: ReactNode = enabled ? null : !paired ? (
     folded ? (
@@ -674,8 +675,9 @@ export function ControlStrip({
               </span>
             ) : null}
             {!shut && approve ? (
-              // Never just "Approve": beside a question, that word is the agent's action.
-              <Link to="/add-device" className="btn btn--deny ctl-approve">
+              // Never just "Approve": beside a question, that word is the agent's action. A plain
+              // `btn` (Deny's face), not `btn--deny`: Deny's key (d) and a menu's Deny look for that.
+              <Link to="/add-device" className="btn ctl-approve">
                 {setupLabel()}
               </Link>
             ) : !shut ? (

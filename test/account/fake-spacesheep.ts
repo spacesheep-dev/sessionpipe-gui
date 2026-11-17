@@ -5,11 +5,12 @@
 // when there are none), the machine list, the jobs list (100 after `since`, with `now` and
 // `code`), a send (202 with a job id, 401 `unlock` for a key the computer does not list, or
 // whatever the test queued for it), a revoked key (401 `unauthorized`), and its limit on
-// relay reads (240 in a fixed 600 s window, 429 with Retry-After). It also plays the two doors an app uses before and beside the relay: the
-// connect (a code and four digits, a poll that hands the key over once approved) and the
-// app's own device key (asked to be trusted, and where it stands; approved or removed on
-// its Devices page; the hour a newly approved device waits before it can send). Nothing
-// here is Node's: a unit test and a browser test's server both run it.
+// relay reads (240 in a fixed 600 s window, 429 with Retry-After). It also plays the two
+// doors an app uses before and beside the relay: the connect (a code and four digits, a
+// poll that hands the key over once approved) and the app's own device key (asked to be
+// trusted, and where it stands; approved or removed on its Devices page; the hour a newly
+// approved device waits before it can send). Nothing here is Node's: a unit test and a
+// browser test's server both run it.
 
 export interface FakeClock {
   now(): number;
