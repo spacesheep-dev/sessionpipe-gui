@@ -860,8 +860,17 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     close();
     navigate("/add-device");
   };
+  // A Start that is off is described by the line that says why, and by the passkey note.
+  const startWhy =
+    [!canStart && status ? "ns-status" : null, passkeyNote ? "ns-passkey" : null].filter(Boolean).join(" ") ||
+    undefined;
   const statusLine = status && (
-    <p className={`ns-status ${status.tone === "err" ? "ns-status--err" : ""}`} role="status" aria-live="polite">
+    <p
+      id="ns-status"
+      className={`ns-status ${status.tone === "err" ? "ns-status--err" : ""}`}
+      role="status"
+      aria-live="polite"
+    >
       {status.text}
       {status.approve && (
         <>
@@ -932,7 +941,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
               onClick={() => void start()}
               disabled={!canStart}
               aria-busy={busy || undefined}
-              aria-describedby={passkeyNote ? "ns-passkey" : undefined}
+              aria-describedby={startWhy}
               data-ns-start
             >
               {busy ? "Starting…" : "Start"}
@@ -1047,7 +1056,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
                   disabled={!canStart && !busy}
                   pending={busy}
                   pendingLabel="Starting…"
-                  aria-describedby={passkeyNote ? "ns-passkey" : undefined}
+                  aria-describedby={startWhy}
                   data-tip={passkeyNote ?? undefined}
                   data-tip-side="top"
                   data-ns-start

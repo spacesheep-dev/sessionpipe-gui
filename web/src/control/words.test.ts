@@ -6,12 +6,14 @@ import { describe, expect, it, vi } from "vitest";
 import { ControlError, UNHEARD_CODE } from "./api";
 import { noteMachineControl } from "./remoteRp";
 import {
+  answerEndWords,
   handoffEndWords,
   harnessCommand,
   notSentLine,
   notSentWords,
   outcomeWords,
   promptFailureWords,
+  receiptWords,
   refusalWords,
   sendErrorWords,
   sentLine,
@@ -340,5 +342,41 @@ describe("notSentWords", () => {
     expect(notSentWords(unheard)).toMatch(/^It may have been sent: /);
     // Only the start of the line: a reason that quotes the words keeps them.
     expect(notSentLine("Not sent: the reason says not sent · here")).toBe("Not sent: the reason says not sent · here");
+  });
+});
+
+describe("receiptWords", () => {
+  it("says which answer went first, then what it waits for", () => {
+    expect(receiptWords({ decision: "allow", machine: "studio-mac" })).toEqual({
+      what: "Allowed",
+      text: "Allowed · waiting for studio-mac",
+    });
+    expect(receiptWords({ decision: "deny", machine: "studio-mac" }).text).toBe("Denied · waiting for studio-mac");
+    expect(receiptWords({ decision: "allow", plan: true, machine: "studio-mac" }).text).toBe(
+      "Plan approved · waiting for studio-mac",
+    );
+    expect(receiptWords({ decision: "deny", plan: true, machine: "studio-mac" }).text).toBe(
+      "Asked for changes · waiting for studio-mac",
+    );
+    expect(receiptWords({ machine: "studio-mac" }).text).toBe("Answer sent · waiting for studio-mac");
+    expect(receiptWords({ decision: "allow", machine: "studio-mac", offline: true }).text).toBe(
+      "Allowed · waiting for studio-mac to come back",
+    );
+    expect(receiptWords({ decision: "allow" }).text).toBe("Allowed · waiting for its computer");
+  });
+});
+
+describe("answerEndWords", () => {
+  const answer = (over: Partial<ControlActivity>) =>
+    start({ kind: "permission.answer", text: "allow", answer: { for: "perm-1", decision: "allow" }, ...over });
+  it("says why an answer did not go as a line of its own", () => {
+    expect(answerEndWords(answer({ outcome: "refused", code: "nonce_store" }), "studio-mac")).toBe(
+      "Not sent: the machine could not record the nonce, so it did not run it",
+    );
+    expect(answerEndWords(answer({ outcome: "failed", detail: "the hook is gone" }), "studio-mac")).toBe(
+      "Not sent: the hook is gone",
+    );
+    // Taken and never heard of again is no "not sent".
+    expect(answerEndWords(answer({ outcome: "unconfirmed" }), "studio-mac")).toMatch(/^No word from studio-mac/);
   });
 });

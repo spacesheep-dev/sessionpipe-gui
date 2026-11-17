@@ -231,12 +231,34 @@
   opacity: 0.45;
 }
 @media (hover: hover) {
-  .inbox-row--answerable:has(.inbox-answer[data-chosen]) :is(.inbox-age, .inbox-where) {
+  .inbox-row--answerable:has(.inbox-answer[data-chosen] .btn) :is(.inbox-age, .inbox-where) {
     visibility: hidden;
   }
   .inbox-row:has(.inbox-answer[data-chosen]) .inbox-answer {
     pointer-events: auto;
   }
+  /* The receipt takes room of its own at the row's end, beside the time and machine. */
+  .inbox-answer:has(.inbox-receipt) {
+    position: static;
+  }
+}
+/* An answer out: the receipt in the pair's place, what went first, wrapping. At the row's
+   end on a wide row; under the request on a narrow one (below). */
+.inbox-receipt {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 22em;
+  margin-left: 8px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+  white-space: normal;
+  text-wrap: pretty;
+  animation: fade-in 150ms var(--ease-out) both;
+}
+.inbox-receipt-what {
+  color: var(--fg-2);
+  font-weight: 500;
 }
 .inbox-row:hover .inbox-answer .btn,
 .inbox-row[aria-current="true"] .inbox-answer .btn,
@@ -255,11 +277,9 @@
 .inbox-note {
   color: var(--fg-3);
   font-size: var(--text-sm);
-  white-space: nowrap;
 }
 .inbox-note--err {
   color: var(--err);
-  white-space: normal;
 }
 
 /* "Notify me" (components/NotifyToggle.tsx): the switch, its name and one line of what
@@ -345,6 +365,10 @@
   }
   .inbox-answer:empty {
     display: none;
+  }
+  .inbox-receipt {
+    max-width: none;
+    margin-left: 0;
   }
   .inbox-row--terminal .inbox-answer {
     display: none;

@@ -88,6 +88,13 @@ export const NEW_WORDS = {
   signerLocked: (auth: string, secret: string) => `${auth} is locked. Unlock it with your ${secret}, then try again.`,
   sendCooling: (Phone: string, time: string) => `Not sent. ${Phone} can send from ${time}.`,
   sendCoolingWhy: "Not sent. New devices wait an hour, so a stolen sign-in can't act at once.",
+  answerOut: (what: string, machine: string) => `${what} · waiting for ${machine}`,
+  answerOutOffline: (what: string, machine: string) => `${what} · waiting for ${machine} to come back`,
+  answerAllowed: "Allowed",
+  answerDenied: "Denied",
+  answerPlanApproved: "Plan approved",
+  answerPlanChanges: "Asked for changes",
+  answerSent: "Answer sent",
 } as const;
 
 /** Whether this phone can send to a computer (account/sendable.ts), the same on every screen

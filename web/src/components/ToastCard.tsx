@@ -133,16 +133,16 @@ function ToastAnswer({
   const send = useSessionSend(s, control, s.openAttentions);
   const st = answerState(s, a, control, send, useAnswerClock([a]));
   const { reason, off, status, tag } = st;
-  // Closed, its hook stopped waiting, or this device not approved: nothing to press, and
-  // the note says why.
-  const shut = status === "closed" || tag === "late" || tag === "unapproved";
+  // An answer out (from anywhere), closed, its hook stopped waiting, or this device not
+  // approved: nothing to press, and the note says why (the receipt, while an answer is out).
+  const shut = !!status || tag === "late" || tag === "unapproved";
   const answer = (allow: boolean) =>
     void send
       .onSend({ kind: "permission.answer", attentionId: a.attentionId, allow })
       .then(() => dismissToast(toast.id))
       .catch(() => {});
   useLayoutEffect(() => {
-    into.current = status === "closed" ? [] : answerItems(a.tool, st, answer);
+    into.current = answerItems(a.tool, st, answer);
   });
   useEffect(
     () => () => {

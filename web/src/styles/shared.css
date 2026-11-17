@@ -74,6 +74,11 @@
 .dot--stale {
   border-style: dashed;
 }
+/* A prompt whose answer waits for its computer to come back online: a hollow ring that
+   holds still, a tier above idle's. */
+.dot--held {
+  border-color: var(--fg-3);
+}
 /* A state change seen on screen, drawn once (bits.tsx StateDot): the new glyph settles
    from 0.6 in --dur; a finish draws its check left to right in 240 ms. No loop, no
    pulse. The working ring keeps turning: its own animation is listed with the arrival. */
@@ -463,6 +468,14 @@
   border-color: transparent;
   background: var(--fg);
   color: var(--bg);
+}
+/* Off, Allow wears Deny's face, faded as Deny is: two equal buttons, so neither reads as
+   the one pressed. A pending Allow is busy, not disabled, and keeps the ink. */
+.btn--allow:disabled {
+  border-color: var(--line-2);
+  background: var(--raised);
+  box-shadow: var(--shadow-sm);
+  color: var(--fg);
 }
 @media (hover: hover) {
   .btn--primary:hover:not(:disabled),

@@ -108,6 +108,23 @@
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
+/* An answer out: one line in the note's and the pair's place, under the question's words,
+   saying what went (in the stronger tier) and what it waits for. It fades in over 150 ms;
+   reduced motion shows it at once (base.css). */
+.ctl-answer-receipt {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-left: 16px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+  text-wrap: pretty;
+  animation: fade-in 150ms var(--ease-out) both;
+}
+.ctl-answer-receipt-what {
+  color: var(--fg-2);
+  font-weight: 500;
+}
 .ctl-answer-btns {
   display: flex;
   gap: 8px;

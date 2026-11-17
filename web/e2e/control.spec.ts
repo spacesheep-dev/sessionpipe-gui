@@ -532,12 +532,20 @@ test("Allow on an open permission sends a permission.answer naming the attention
     decision: "allow",
   });
   expect(msg.cmd).not.toHaveProperty("text");
-  // On its way, the answer has its row under the composer; delivered, it is done and goes.
-  const row = page.locator(`li[data-message="${msg.id}"]`);
-  await expect(row).toContainText("answer");
-  await expect(row).toContainText("allow");
+  // On its way, the card says which answer went and what it waits for, in the pair's place,
+  // and nothing under the composer says it again.
+  const receipt = answer.locator(".ctl-answer-receipt");
+  await expect(receipt).toHaveText(`Allowed · waiting for ${MACHINE}`);
+  await expect(answer).toHaveAttribute("data-answer", "sent");
+  await expect(answer.getByRole("button")).toHaveCount(0);
+  await expect(page.locator(`li[data-message="${msg.id}"]`)).toHaveCount(0);
+  // Delivered, it stays said until the prompt clears: nothing to answer twice.
   await daemon.ack(msg.id, "delivered", { mode: "waiter" });
-  await expect(row).toHaveCount(0);
+  await expect(receipt).toHaveText(`Allowed · waiting for ${MACHINE}`);
+  // A reload knows it too, from the answer's row.
+  await page.reload();
+  await expect(answer.locator(".ctl-answer-receipt")).toHaveText(`Allowed · waiting for ${MACHINE}`);
+  await expect(answer.getByRole("button")).toHaveCount(0);
 });
 
 test("Cancel on a working turn sends a cancel", async () => {
@@ -563,19 +571,39 @@ test("a refused no_attention closes the prompt here: the pair goes, the words st
   await answer.getByRole("button", { name: "Allow" }).click();
   const msg = await daemon.next();
   expect(msg.cmd).toMatchObject({ kind: "permission.answer", for: "perm-2", decision: "allow" });
-  // While the answer is out the pair stays, disabled, and a second click goes nowhere.
+  // While the answer is out the receipt stands in the pair's place: nothing to press twice.
   await expect(answer).toHaveAttribute("data-answer", "sent");
-  await expect(answer.getByRole("button", { name: "Allow" })).toBeDisabled();
-  await expect(answer).toContainText("answer sent");
+  await expect(answer.getByRole("button")).toHaveCount(0);
+  await expect(answer.locator(".ctl-answer-receipt")).toHaveText(`Allowed · waiting for ${MACHINE}`);
   // The terminal had answered first: the daemon says the prompt is no longer open.
   await daemon.ack(msg.id, "refused", { code: "no_attention" });
   await expect(answer).toHaveAttribute("data-answer", "closed");
   await expect(answer.getByRole("button")).toHaveCount(0);
   await expect(answer).toContainText("already answered, or timed out");
-  await expect(page.locator(`li[data-message="${msg.id}"]`)).toContainText("no longer open");
+  await expect(page.locator(`li[data-message="${msg.id}"]`)).toHaveCount(0);
   expect(await daemon.poll(0)).toEqual([]);
   await events.post(events.ev("attention.cleared", { attention_id: "perm-2", how: "answered" }));
   await expect(answer).toHaveCount(0);
+});
+
+test("an answer the machine refused for another reason gives the pair back, and says why", async () => {
+  await events.post(
+    events.ev("attention.needed", { attention_id: "perm-4", kind: "permission", tool: "Bash", message: "make" }),
+  );
+  const answer = page.locator('.ctl-answer[data-attention="perm-4"]');
+  await answer.getByRole("button", { name: "Deny" }).click();
+  const msg = await daemon.next();
+  expect(msg.cmd).toMatchObject({ kind: "permission.answer", for: "perm-4", decision: "deny" });
+  await expect(answer.locator(".ctl-answer-receipt")).toHaveText(`Denied · waiting for ${MACHINE}`);
+  await daemon.ack(msg.id, "refused", { code: "nonce_store" });
+  await expect(answer).toHaveAttribute("data-answer", "open");
+  await expect(answer.getByRole("button", { name: "Allow" })).toBeEnabled();
+  await expect(page.locator(".ctl-foot[data-reason='error']")).toHaveText(
+    "Not sent: the machine could not record the nonce, so it did not run it",
+  );
+  await events.post(events.ev("attention.cleared", { attention_id: "perm-4", how: "answered" }));
+  await expect(answer).toHaveCount(0);
+  await expect(page.locator(".ctl-foot[data-reason='error']")).toHaveCount(0);
 });
 
 test("a prompt its hook stopped waiting on cannot be answered here, and offers nothing; a tier-0 copy still has a label", async () => {

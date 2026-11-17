@@ -1314,6 +1314,8 @@ test.describe("what else an account shows", () => {
       const sheet = page.locator("[data-new-session]");
       await expect(sheet.locator(".ns-status")).toHaveText(/^This iPhone can't send yet\.\s*Approve this iPhone$/);
       await expect(sheet.locator("[data-ns-start]")).toBeDisabled();
+      // An off Start is described by the line that says why.
+      await expect(sheet.locator("[data-ns-start]")).toHaveAccessibleDescription(/^This iPhone can't send yet\./);
       await sheet.locator("[data-ns-approve]").click();
       await expect(page.locator("[data-approve='idle']")).toBeVisible();
       await expect(sheet).toHaveCount(0);
@@ -1820,10 +1822,17 @@ test.describe("what else an account shows", () => {
       await expect(card.locator("[data-elsewhere]")).toBeVisible();
       await expect(page.getByText("this page cannot sign an answer")).toHaveCount(0);
       const allow = card.getByRole("button", { name: "Allow" });
+      const deny = card.getByRole("button", { name: "Deny" });
       await expect(allow).toBeVisible();
       await expect(allow).toBeDisabled();
-      await expect(card.getByRole("button", { name: "Deny" })).toBeDisabled();
+      await expect(deny).toBeDisabled();
       await expect(page.getByText(line)).toHaveCount(1);
+      // VoiceOver hears the hour with each button, not only in the line above them.
+      await expect(allow).toHaveAccessibleDescription(line);
+      await expect(deny).toHaveAccessibleDescription(line);
+      // Off, Allow wears Deny's face: neither reads as the one pressed.
+      const face = (l: typeof allow) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
+      expect(await face(allow)).toBe(await face(deny));
       // On the phone the card stands alone: the field, off for the hour too, takes no room.
       if (W < 840) await expect(page.locator(".ctl-field")).toHaveCount(0);
       await shot(page, "also-prompt-cooling");
@@ -1832,9 +1841,115 @@ test.describe("what else an account shows", () => {
       const row = page.locator(".inbox-row").first();
       await expect(row).toBeVisible();
       await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(row.getByRole("button", { name: "Allow" })).toHaveAccessibleDescription(line);
       await expect(page.locator(".inbox-reason")).toHaveText(/^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.$/);
       await expect(page.getByText(/Allow and Deny are off/)).toHaveCount(0);
       expect(b.ss.log.filter((l) => l.startsWith("POST /api/machines/"))).toEqual([]);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("an answer sent is said on every screen and after a reload, in one line in the pair's place; nothing counts it or sends it twice, and a refusal gives the pair back", async ({
+    browser,
+  }) => {
+    test.setTimeout(180_000);
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    /** A prompt now in session `id`, under its own attention id. */
+    const prompt = (id: string, attention: string, title: string) => {
+      const s = new Session(id, "claude-code", Date.now() - 4_000);
+      const on = { tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/billing", title } };
+      b.ss.push([
+        s.ev("session.started", { source: "startup" }, on),
+        s.ev("turn.started", { turn_id: "t1" }, on),
+        s.ev(
+          "attention.needed",
+          { attention_id: attention, kind: "permission", tool: "Bash", message: "npm test" },
+          on,
+        ),
+      ]);
+    };
+    const words = `Allowed · waiting for ${NAME}`;
+    const badge = page.locator("a[data-nav='inbox'] .nav-badge >> visible=true");
+    const wide = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    try {
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      await trusted(b);
+      // 393 pt: Allow on the session's page, then the Inbox.
+      await page.setViewportSize({ width: 393, height: 852 });
+      prompt("s-refund", "perm-refund", "Refund the double charge");
+      await page.goto(`${b.server.url}/inbox`);
+      await expect(page.getByText("1 needs an answer")).toBeVisible({ timeout: 15_000 });
+      await expect(badge).toHaveText("1");
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      const card = page.locator(".ctl-answer[data-attention='perm-refund']");
+      await card.getByRole("button", { name: "Allow" }).click();
+      const receipt = card.locator(".ctl-answer-receipt");
+      await expect(receipt).toHaveText(words, { timeout: 15_000 });
+      // The pressed button went with the pair: its focus is on the line that took its place.
+      await expect(receipt).toBeFocused();
+      await expect(card.getByRole("button")).toHaveCount(0);
+      await expect(page.locator(".ctl-acts")).toHaveCount(0);
+      await expect(badge).toHaveCount(0);
+      expect(b.ss.jobs).toHaveLength(1);
+      // The Inbox: the row stays where it was, with the same line and nothing to press, and
+      // nothing counts it.
+      await page.goto(`${b.server.url}/inbox`);
+      const row = page.locator(".inbox-row[data-attention='perm-refund']");
+      await expect(row.locator(".inbox-receipt")).toHaveText(words, { timeout: 15_000 });
+      await expect(row.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      await expect(page.getByText(/\d+ needs? an answer/)).toHaveCount(0);
+      await expect(badge).toHaveCount(0);
+      // Reloaded: the same, read from the answer's own row.
+      await page.reload();
+      await expect(row.locator(".inbox-receipt")).toHaveText(words, { timeout: 15_000 });
+      await expect(row.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      await expect(badge).toHaveCount(0);
+      // On the session's page Deny is nowhere, not even its key: nothing more goes.
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      await expect(receipt).toHaveText(words, { timeout: 15_000 });
+      await page.keyboard.press("d");
+      await page.waitForTimeout(500);
+      expect(b.ss.jobs).toHaveLength(1);
+
+      // 820 pt: Allow in the Inbox, then the session's page.
+      await page.setViewportSize({ width: 820, height: 1180 });
+      prompt("s-payout", "perm-payout", "Retry the payout webhook");
+      await page.goto(`${b.server.url}/inbox`);
+      const payout = page.locator(".inbox-row[data-attention='perm-payout']");
+      await payout.getByRole("button", { name: "Allow" }).click({ timeout: 15_000 });
+      await expect(payout.locator(".inbox-receipt")).toHaveText(words, { timeout: 15_000 });
+      await expect(payout.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      expect(b.ss.jobs).toHaveLength(2);
+      await page.goto(`${b.server.url}/s/claude-code/s-payout`);
+      const payoutCard = page.locator(".ctl-answer[data-attention='perm-payout']");
+      await expect(payoutCard.locator(".ctl-answer-receipt")).toHaveText(words, { timeout: 15_000 });
+      await expect(payoutCard.getByRole("button")).toHaveCount(0);
+
+      // 320 pt: the line wraps inside the card and the row; nothing runs off the side.
+      await page.setViewportSize({ width: 320, height: 568 });
+      await expect(payoutCard.locator(".ctl-answer-receipt")).toBeVisible();
+      expect(await wide()).toBe(0);
+      await page.goto(`${b.server.url}/inbox`);
+      await expect(payout.locator(".inbox-receipt")).toBeVisible({ timeout: 15_000 });
+      expect(await wide()).toBe(0);
+
+      // The computer refuses an answer for its grant: the pair is back, and the line says why.
+      await page.setViewportSize({ width: 393, height: 852 });
+      prompt("s-deploy", "perm-deploy", "Deploy to staging");
+      await page.goto(`${b.server.url}/s/claude-code/s-deploy`);
+      const deploy = page.locator(".ctl-answer[data-attention='perm-deploy']");
+      await deploy.getByRole("button", { name: "Allow" }).click({ timeout: 15_000 });
+      await expect(deploy.locator(".ctl-answer-receipt")).toHaveText(words, { timeout: 15_000 });
+      b.ss.settle(b.ss.jobs.at(-1)!.id, "refused", { code: "bad_grant" });
+      await expect(deploy.getByRole("button", { name: "Allow" })).toBeEnabled({ timeout: 30_000 });
+      await expect(deploy.locator(".ctl-answer-receipt")).toHaveCount(0);
+      await expect(page.locator(".ctl-foot[data-reason='error']")).toHaveText(
+        /^Not sent: the day grant did not verify/,
+      );
     } finally {
       await b.close();
     }

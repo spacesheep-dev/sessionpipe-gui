@@ -24,6 +24,7 @@ import {
 import { useBehind } from "../account/current";
 // The one reading of `answerable` the strip and the inbox share (an older server leaves the field unset).
 import { answerable } from "../components/ControlStrip";
+import { answersOut } from "../control/answers";
 import { answerLate, useAnswerClock } from "../lib/answerWindow";
 import { sessionTitle } from "../lib/format";
 import { canMark, isUnread, markSeen, SEEN_AFTER_MS, setUnread } from "../lib/marks";
@@ -371,7 +372,21 @@ export function useOpenAttentions(): OpenAttention[] {
   return markLate(all, machines, now);
 }
 
-/** Open attentions a person can answer from here: the inbox badge and the title's "(n)". */
+/** Open attentions a person can answer from here: the inbox badge, the title's "(n)" and
+ *  the app's badge. One with an answer out, or that its computer closed (control/answers.ts),
+ *  no longer counts, from the moment the answer went. */
 export function useAnswerableCount(): number {
-  return useOpenAttentions().filter((r) => r.answerable).length;
+  const store = useStore();
+  const { control } = useAppState();
+  const rows = useOpenAttentions().filter((r) => r.answerable);
+  // Which prompts have an answer out is the activity's word: read it while one is open.
+  const asks = rows.length > 0;
+  useEffect(() => {
+    if (asks) store.loadControl();
+  }, [store, asks]);
+  const out = answersOut(
+    control,
+    rows.map((r) => r.attention),
+  );
+  return rows.filter((r) => !out[r.attention.attentionId]).length;
 }

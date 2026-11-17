@@ -18,6 +18,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **An answer to a prompt shows as sent on every screen, in one line: "Allowed · waiting
+  for" its computer.** Only the screen it was pressed on knew it went: the Inbox, the
+  session's page and a reload offered Allow and Deny again, and a second tap cost a Face ID
+  and came back "already answered". The prompt's card keeps its question and says which
+  answer went, and what it waits for, in place of the buttons, the note and the row under
+  the field; its glyph turns while it waits. The Inbox row says the same, and the badge and
+  the count drop the moment the answer goes. An answer the computer refuses gives Allow and
+  Deny back, with why. A disabled Allow no longer looks like the one pressed, and VoiceOver
+  hears why Allow, Deny and Start are off.
 - **In the phone app nothing shows through the tab bar, the navigation bar or the session's
   control strip.** The bars were meant to blur what ran under them and never did: rows read
   sharp through the tab labels and into the home-indicator strip, and the transcript

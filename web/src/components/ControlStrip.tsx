@@ -34,9 +34,11 @@ import {
 } from "react";
 import { type Approval, type SendState, sendWords } from "../account/sendable";
 import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachments";
+import type { AnswerOut } from "../control/answers";
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
 
 import { deviceWords, setupLabel, signerKind, signerLabel } from "../control/signer";
+import { receiptWords } from "../control/words";
 import { answerLate, useAnswerClock } from "../lib/answerWindow";
 import { useAskedInput } from "../lib/askedInput";
 import { usePhoneLayout } from "../lib/device";
@@ -113,9 +115,10 @@ export interface ControlStripProps {
    *  under the field; absent, no button (hidden, never disabled: the line's own reason
    *  already says why sending is off). */
   ask?: () => void;
-  /** Per attention id: "sent" while an answer is out (no second one goes), "closed" once
-   *  the machine said the prompt is no longer open (already answered, or timed out). */
-  answers?: Readonly<Record<string, "sent" | "closed">>;
+  /** Per attention id: "sent" while an answer is out (no second one goes; the card says
+   *  which, in place of the pair), "closed" once the machine said the prompt is no longer
+   *  open (already answered, or timed out). */
+  answers?: Readonly<Record<string, AnswerOut>>;
   /** Plugins' suggested answers for this session's attentions (shared/plugin-api.ts).
    *  Advice only: Confirm sends the ordinary signed answer through `onSend`. */
   suggestions?: readonly Suggestion[];
@@ -197,15 +200,21 @@ const CMD_LINES = 4;
  *  long chained command reads one step per line under "Allow Shell to run:", four steps
  *  until "Show more"; the whole command comes from the call's own input when the session
  *  sent it (lib/askedInput.ts), else from the message, cut at 200 characters. A plan
- *  review asks about the plan, from the same input, and shows it under the question. */
-function Question({ a, session }: { a: Attention; session: SessionSummary }) {
+ *  review asks about the plan, from the same input, and shows it under the question. Its
+ *  glyph is the orange one while it asks; with an answer out, the working ring, or a still
+ *  hollow one while the computer is offline (`out`). */
+function Question({ a, session, out }: { a: Attention; session: SessionSummary; out?: "going" | "held" }) {
   const { input } = useAskedInput(session, a);
   // The prompt whose steps are all shown: another prompt starts folded.
   const [unfolded, setUnfolded] = useState<string | null>(null);
   const blockId = useId();
   const line = (words: ReactNode) => (
     <p className="ctl-q">
-      <StateDot state="needs_you" size={8} decorative />
+      {out === "held" ? (
+        <span className="dot dot--held" style={{ width: 8, height: 8 }} aria-hidden="true" />
+      ) : (
+        <StateDot state={out === "going" ? "working" : "needs_you"} size={8} decorative />
+      )}
       <span className="ctl-q-text">{words}</span>
     </p>
   );
@@ -341,6 +350,11 @@ export function ControlStrip({
   const field = useRef<HTMLTextAreaElement>(null);
   // The line under the field describes it: why it is off, or what a send will ask for.
   const reasonId = useId();
+  // Each prompt's card line describes its Allow and Deny (`${cardId}-${attentionId}`).
+  const cardId = useId();
+  /** The prompt an answer was pressed for here: its receipt takes the focus the pressed
+   *  button had, as it takes the button's place. */
+  const refocus = useRef<string | null>(null);
   useGrow(field, text);
   useEffect(() => {
     const t = window.setTimeout(() => writeDraft(session.key, text), 300);
@@ -403,7 +417,7 @@ export function ControlStrip({
   // A plan review this strip can answer: the composer then says what should change, and
   // sending it is Keep planning. A prompt could not reach the agent anyway, blocked on it.
   const review = open.find(
-    (a) => isPlanReview(a) && answerable(a) && !late(a) && answers?.[a.attentionId] !== "closed",
+    (a) => isPlanReview(a) && answerable(a) && !late(a) && answers?.[a.attentionId]?.status !== "closed",
   );
   const tooLong = text.trim().length > NOTE_MAX;
   // Approve plan carries no note (an allow reaches Claude Code with none), so while the
@@ -592,12 +606,13 @@ export function ControlStrip({
     sendWords(send, name)?.long
   ) : null;
   const canSend = review
-    ? enabled && !busy && !!text.trim() && !tooLong && answers?.[review.attentionId] !== "sent"
+    ? enabled && !busy && !!text.trim() && !tooLong && answers?.[review.attentionId]?.status !== "sent"
     : enabled && !busy && !att.uploading && (!!text.trim() || att.items.length > 0);
 
   const run = (id: string, action: ControlAction, after?: () => void) => {
     if (!enabled || busy) return;
     if (action.kind === "permission.answer" && answers?.[action.attentionId]) return;
+    refocus.current = action.kind === "permission.answer" ? action.attentionId : null;
     setBusy(id);
     void onSend?.(action)
       .then(after)
@@ -642,23 +657,34 @@ export function ControlStrip({
       }}
     >
       {open.map((a) => {
-        const status = answers?.[a.attentionId];
+        const out = answers?.[a.attentionId];
+        const status = out?.status;
         const plan = isPlanReview(a);
         const terminal = !answerable(a);
         // Its hook let go: an answer from here would only be refused, so none is offered.
         const gone = late(a);
-        const off = !enabled || !!busy || status === "sent";
+        const off = !enabled || !!busy;
         const suggested = suggestions?.find((s) => s.attentionId === a.attentionId);
-        const shut = terminal || gone || status === "closed";
+        // An answer is out: one line says which, and what it waits for, in the pair's place.
+        const sent = !terminal && !gone && status === "sent";
+        const offline = control?.online === false;
+        const receipt = sent
+          ? receiptWords({ decision: out?.decision, plan, machine: session.machine, offline })
+          : null;
+        const shut = terminal || gone || status === "closed" || sent;
         const why: ReactNode = terminal
           ? "waiting in the terminal"
           : gone
             ? NEW_WORDS.answerLate(session.machine ?? undefined)
             : status === "closed"
               ? NEW_WORDS.answerClosed
-              : status === "sent"
-                ? `answer sent · waiting for ${session.machine ?? "the machine"}`
-                : offWhy;
+              : offWhy;
+        // The card's line describes both buttons; a button's own reason is its alone.
+        const noteId = `${cardId}-${a.attentionId}`;
+        const denyWhy = plan && tooLong ? "Keep it under 2,000 characters" : null;
+        const allowWhy = plan && noted && !off ? NOTED : null;
+        const describedBy = (own: string | null, side: string) =>
+          [why ? noteId : null, own ? `${noteId}-${side}` : null].filter(Boolean).join(" ") || undefined;
         return (
           <div
             className={plan ? "ctl-answer ctl-answer--plan" : "ctl-answer"}
@@ -666,9 +692,28 @@ export function ControlStrip({
             data-attention={a.attentionId}
             data-answer={terminal ? "terminal" : gone ? "late" : (status ?? (approve ? "unapproved" : "open"))}
           >
-            <Question a={a} session={session} />
-            {why ? (
-              <span className="ctl-answer-note">{why}</span>
+            <Question a={a} session={session} out={sent ? (offline ? "held" : "going") : undefined} />
+            {receipt ? (
+              <p
+                className="ctl-answer-receipt"
+                role="status"
+                aria-live="polite"
+                tabIndex={-1}
+                ref={(el) => {
+                  // The pressed button went with the pair: its focus comes here.
+                  if (!el || refocus.current !== a.attentionId) return;
+                  refocus.current = null;
+                  const at = document.activeElement;
+                  if (!at || at === document.body) el.focus({ preventScroll: true });
+                }}
+              >
+                <span className="ctl-answer-receipt-what">{receipt.what}</span>
+                {receipt.text.slice(receipt.what.length)}
+              </p>
+            ) : why ? (
+              <span className="ctl-answer-note" id={noteId}>
+                {why}
+              </span>
             ) : suggested && !shut ? (
               <span
                 className="ctl-suggestion"
@@ -709,7 +754,7 @@ export function ControlStrip({
                   pending={busy === `deny:${a.attentionId}`}
                   pendingLabel={plan ? "Sending…" : "Denying…"}
                   data-tip-keys={hintFor("session.deny") || undefined}
-                  aria-description={plan && tooLong ? "Keep it under 2,000 characters" : undefined}
+                  aria-describedby={describedBy(denyWhy, "deny")}
                   onClick={() =>
                     plan
                       ? keep(`deny:${a.attentionId}`, a.attentionId)
@@ -728,7 +773,7 @@ export function ControlStrip({
                   pending={busy === `allow:${a.attentionId}`}
                   pendingLabel={plan ? "Approving…" : "Allowing…"}
                   data-tip-keys={hintFor("session.allow") || undefined}
-                  aria-description={plan && noted && !off ? NOTED : undefined}
+                  aria-describedby={describedBy(allowWhy, "allow")}
                   onClick={() =>
                     run(`allow:${a.attentionId}`, {
                       kind: "permission.answer",
@@ -739,6 +784,16 @@ export function ControlStrip({
                 >
                   {plan ? "Approve plan" : "Allow"}
                 </ActionButton>
+                {denyWhy && (
+                  <span className="sr-only" id={`${noteId}-deny`}>
+                    {denyWhy}
+                  </span>
+                )}
+                {allowWhy && (
+                  <span className="sr-only" id={`${noteId}-allow`}>
+                    {allowWhy}
+                  </span>
+                )}
               </span>
             ) : null}
           </div>

@@ -126,11 +126,53 @@ describe("a prompt's answer window", () => {
   });
 
   it("says a prompt the computer no longer holds was already answered, or timed out", () => {
-    expect(answerState(claude, prompt, local, { ...send, answers: { a1: "closed" } }, after(5_000))).toMatchObject({
+    const closed = { ...send, answers: { a1: { status: "closed" as const } } };
+    expect(answerState(claude, prompt, local, closed, after(5_000))).toMatchObject({
       reason: "already answered, or timed out",
       off: true,
       tag: "closed",
     });
+  });
+
+  it("says which answer is out, and what it waits for, in one line every surface shares", () => {
+    const out = (decision?: "allow" | "deny", a: Attention = prompt, control: MachineControl = local) =>
+      answerState(claude, a, control, { ...send, answers: { a1: { status: "sent", decision } } }, after(5_000));
+    expect(out("allow")).toEqual({
+      reason: "Allowed · waiting for Misha-Petrov-laptop",
+      off: true,
+      status: "sent",
+      tag: "sent",
+      receipt: { what: "Allowed", text: "Allowed · waiting for Misha-Petrov-laptop" },
+    });
+    expect(out("deny").reason).toBe("Denied · waiting for Misha-Petrov-laptop");
+    // An answer whose decision is not known (a row from before the rows said it).
+    expect(out().reason).toBe("Answer sent · waiting for Misha-Petrov-laptop");
+    // A plan review's.
+    const plan = { ...prompt, tool: "ExitPlanMode" };
+    expect(out("allow", plan).receipt).toEqual({
+      what: "Plan approved",
+      text: "Plan approved · waiting for Misha-Petrov-laptop",
+    });
+    expect(out("deny", plan).reason).toBe("Asked for changes · waiting for Misha-Petrov-laptop");
+    // Its computer offline: until it is back.
+    expect(out("allow", prompt, { ...local, online: false }).reason).toBe(
+      "Allowed · waiting for Misha-Petrov-laptop to come back",
+    );
+    // Its hook let go: late says so, not the receipt.
+    const late = answerState(claude, prompt, local, { ...send, answers: { a1: { status: "sent" } } }, after(130_000));
+    expect(late.tag).toBe("late");
+    expect(late.receipt).toBeUndefined();
+  });
+
+  it("offers nothing in a menu while an answer is out or the prompt closed", () => {
+    for (const status of ["sent", "closed"] as const) {
+      const st = answerState(claude, prompt, local, { ...send, answers: { a1: { status } } }, after(5_000));
+      expect(
+        answerItems("Bash", st, () => {}),
+        status,
+      ).toEqual([]);
+    }
+    expect(answerItems("Bash", answerState(claude, prompt, local, send, after(5_000)), () => {})).toHaveLength(2);
   });
 
   it("leaves a late prompt out of the count", () => {

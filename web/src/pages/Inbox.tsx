@@ -9,9 +9,19 @@
 // bell in the page bar; why the buttons are off (the machine is not paired, this page
 // cannot use passkeys, notifications are off for the site or the app) is said once under
 // the bar, not on every row. A device not approved gets no buttons at all, and one notice
-// with the way to approve it.
+// with the way to approve it. A prompt with an answer out, from here or anywhere, keeps
+// its row with the receipt in the pair's place until it clears, and counts no more.
 import type { MachineControl } from "@shared/api";
-import { type MutableRefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type MutableRefObject,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useBehind, useCatchingUp } from "../account/current";
 import { ActionButton, Ago, EmptyState, HarnessGlyph, Notice, Redacted, StateDot } from "../components/bits";
 import { type MenuList, openMenu, useContextMenu } from "../components/ContextMenu";
@@ -28,6 +38,7 @@ import {
   useStickyTop,
   useSwipe,
 } from "../components/SessionCard";
+import { useAnswersOut } from "../control/hooks";
 import { ComposeButton } from "../control/NewSession";
 import { setupLabel } from "../control/signer";
 import { answerState, useSessionSend } from "../control/useSend";
@@ -54,6 +65,13 @@ type Off = { reason: string; tag: string };
  *  a capital: "This iPhone can send from 3:09 AM") as it is; a phrase after what it turns off. */
 const offLine = (r: string): string =>
   /^\p{Lu}/u.test(r) ? `${r.replace(/\.$/, "")}.` : `Allow and Deny are off: ${r}.`;
+/** The id of the page line that says a standing reason, which the rows' buttons are
+ *  described by: the same words, the same id. */
+const reasonId = (r: string): string => {
+  let h = 0;
+  for (let i = 0; i < r.length; i++) h = (Math.imul(h, 31) + r.charCodeAt(i)) | 0;
+  return `inbox-reason-${(h >>> 0).toString(36)}`;
+};
 const groupOf = (r: OpenAttention) => (r.answerable ? "answer" : "terminal");
 
 export function Inbox() {
@@ -159,8 +177,12 @@ export function Inbox() {
     { title: () => "Inbox" },
   );
 
+  // A prompt with an answer out (or closed) keeps its row, and needs no answer any more.
+  const asked = useMemo(() => answer.map((h) => h.item.attention), [answer]);
+  const answered = useAnswersOut(asked);
+  const needs = answer.filter((h) => !answered[h.item.attention.attentionId]).length;
   const meta = [
-    answer.length > 0 && `${answer.length} ${answer.length === 1 ? "needs" : "need"} an answer`,
+    needs > 0 && `${needs} ${needs === 1 ? "needs" : "need"} an answer`,
     terminal.length > 0 && `${terminal.length} waiting in a terminal`,
   ]
     .filter(Boolean)
@@ -223,7 +245,7 @@ export function Inbox() {
           )}
           <NotifyBlocked permission={notify.permission} app={app} />
           {said.map((r) => (
-            <p key={r} className="page-note inbox-reason">
+            <p key={r} id={reasonId(r)} className="page-note inbox-reason">
               {offLine(r)}
             </p>
           ))}
@@ -325,6 +347,9 @@ function InboxRow({
   );
   const kind = ATTENTION_LABEL[a.kind] ?? a.kind;
   const msg = attentionMessage(a);
+  // With an answer out the orange glyph is the working ring, or a still hollow one while
+  // the computer is offline (Answer says which).
+  const [out, setOut] = useState<"going" | "held" | null>(null);
   // A phone's swipes: trailing hides this prompt here (Undo), leading labels its session.
   // Allow and Deny are never a swipe: they are signed, and final.
   useSwipe(ref, {
@@ -353,7 +378,11 @@ function InboxRow({
         {...prefetchProps(store, s)}
       >
         <span className="inbox-lead">
-          <StateDot state={row.answerable ? "needs_you" : s.state} decorative />
+          {out === "held" ? (
+            <span className="dot dot--held" style={{ width: 10, height: 10 }} aria-hidden="true" />
+          ) : (
+            <StateDot state={out === "going" ? "working" : row.answerable ? "needs_you" : s.state} decorative />
+          )}
           <LabelDot session={s.key} />
         </span>
         <span className="inbox-title">{sessionTitle(s)}</span>
@@ -384,7 +413,14 @@ function InboxRow({
       </button>
       {/* A prompt in a terminal has nothing to press here; its section says where it waits. */}
       {row.answerable && (
-        <Answer row={row} control={control} focused={cursor !== undefined} into={answerMenu} report={report} />
+        <Answer
+          row={row}
+          control={control}
+          focused={cursor !== undefined}
+          into={answerMenu}
+          report={report}
+          onOut={setOut}
+        />
       )}
     </li>
   );
@@ -394,15 +430,17 @@ function InboxRow({
  *  page; disabled when nothing can go (control/useSend.ts answerState), the reason said
  *  once under the page bar. The row's menu gets the same two as items. A press answers in
  *  the same frame: the pressed one turns into "Allowing…" (its spinner, its width held)
- *  and the other steps back, through the passkey, the send and the wait for the machine
- *  (said under it), until the machine clears the prompt and the row leaves. A refused
- *  send gives both back. */
+ *  and the other steps back, through the passkey and the send. Once the answer is out
+ *  (from here or anywhere) the receipt takes the pair's place, "Allowed · waiting for
+ *  studio-mac", until the machine clears the prompt and the row leaves. A refused send, or
+ *  an answer the machine refused, gives both back. */
 function Answer({
   row,
   control,
   focused = false,
   into,
   report,
+  onOut,
 }: {
   row: OpenAttention;
   control?: MachineControl;
@@ -410,26 +448,43 @@ function Answer({
   focused?: boolean;
   into: MutableRefObject<MenuList>;
   report: (id: string, off: Off | null) => void;
+  /** An answer is out ("going"), to a computer that is offline ("held"), or none is. */
+  onOut: (out: "going" | "held" | null) => void;
 }) {
   const { session: s, attention: a } = row;
   const send = useSessionSend(s, control, s.openAttentions);
   // No clock of its own: the row leaves this group as its window runs out (useOpenAttentions).
   const st = answerState(s, a, control, send, Date.now());
-  const { reason, off, status, tag } = st;
+  const { reason, off, status, tag, receipt } = st;
   // A plan review's pair asks the plan's question (lib/format.ts isPlanReview).
   const plan = isPlanReview(a);
-  /** The answer pressed, from the press until the prompt leaves (or the send fails). */
+  /** The answer pressed here, from the press until it is out (or the send fails). */
   const [chosen, setChosen] = useState<boolean | null>(null);
+  /** Pressed here: the receipt takes the focus the pressed button had. */
+  const pressed = useRef(false);
   const answer = (allow: boolean) => {
     if (chosen !== null) return;
+    pressed.current = true;
     setChosen(allow);
-    void send.onSend({ kind: "permission.answer", attentionId: a.attentionId, allow }).catch(() => setChosen(null));
+    void send.onSend({ kind: "permission.answer", attentionId: a.attentionId, allow }).catch(() => {
+      pressed.current = false;
+      setChosen(null);
+    });
   };
-  // Pending from the press until the machine clears the prompt: "sent" is the receiver
-  // holding it, not the agent taking it.
-  const going = chosen !== null && status !== "closed";
+  // Out, or closed: from here on the prompt's own state says it, and a refusal of the answer
+  // that went brings both buttons back.
+  useEffect(() => {
+    if (status) setChosen(null);
+  }, [status]);
+  const decision = send.answers[a.attentionId]?.decision;
+  const picked = chosen ?? (decision ? decision === "allow" : null);
+  // Pending from the press until the answer is out.
+  const going = chosen !== null && !status;
+  const lead = status === "sent" ? (control?.online === false ? "held" : "going") : null;
+  useEffect(() => onOut(lead), [lead, onOut]);
+  useEffect(() => () => onOut(null), [onOut]);
   // The inbox row wins over a session open beside the page (priority 2 > the panel's 0).
-  const canKey = focused && !off && chosen === null && status !== "closed";
+  const canKey = focused && !off && chosen === null;
   useShortcut("inbox.allow", () => answer(true), { enabled: canKey, priority: 2 });
   useShortcut("inbox.deny", () => answer(false), { enabled: canKey, priority: 2 });
   // Off for a standing reason (not paired, no passkeys here, not approved): the page says
@@ -441,22 +496,49 @@ function Answer({
   }, [id, standing, tag, report]);
   useEffect(() => () => report(id, null), [id, report]);
   useLayoutEffect(() => {
-    into.current = status === "closed" ? [] : answerItems(a.tool, st, answer);
+    into.current = answerItems(a.tool, st, answer);
   });
+  const noteId = useId();
   const note = send.error ? (
-    <span className="inbox-note inbox-note--err">{send.error}</span>
+    <span className="inbox-note inbox-note--err" id={noteId}>
+      {send.error}
+    </span>
   ) : reason && !standing ? (
-    <span className="inbox-note">{reason}</span>
+    <span className="inbox-note" id={noteId}>
+      {reason}
+    </span>
   ) : null;
+  // What the buttons are described by: the row's line, and the page's line for a standing reason.
+  const describedBy =
+    [note ? noteId : null, standing ? reasonId(standing) : null].filter(Boolean).join(" ") || undefined;
   return (
     <span
       className="inbox-answer"
       data-answer={tag}
-      data-chosen={chosen === null ? undefined : chosen ? "allow" : "deny"}
+      data-chosen={picked === null ? undefined : picked ? "allow" : "deny"}
     >
-      {note}
+      {receipt ? (
+        <span
+          className="inbox-receipt"
+          role="status"
+          aria-live="polite"
+          tabIndex={-1}
+          ref={(el) => {
+            // The pressed button went with the pair: its focus comes here.
+            if (!el || !pressed.current) return;
+            pressed.current = false;
+            const at = document.activeElement;
+            if (!at || at === document.body) el.focus({ preventScroll: true });
+          }}
+        >
+          <span className="inbox-receipt-what">{receipt.what}</span>
+          {receipt.text.slice(receipt.what.length)}
+        </span>
+      ) : (
+        note
+      )}
       {/* Not approved: no pair at all (the page's notice has the way on); the row still opens. */}
-      {status !== "closed" && tag !== "unapproved" && (
+      {!status && tag !== "unapproved" && (
         <>
           <ActionButton
             className="btn btn--sm btn--deny"
@@ -464,7 +546,7 @@ function Answer({
             pending={going && chosen === false}
             pendingLabel={plan ? "Sending…" : "Denying…"}
             onClick={() => answer(false)}
-            aria-description={standing ?? undefined}
+            aria-describedby={describedBy}
             aria-pressed={chosen === false || undefined}
           >
             {plan ? "Keep planning" : "Deny"}
@@ -475,7 +557,7 @@ function Answer({
             pending={going && chosen === true}
             pendingLabel={plan ? "Approving…" : "Allowing…"}
             onClick={() => answer(true)}
-            aria-description={standing ?? undefined}
+            aria-describedby={describedBy}
             aria-pressed={chosen === true || undefined}
           >
             {plan ? "Approve plan" : "Allow"}

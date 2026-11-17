@@ -2,8 +2,8 @@
 // Owned by: control-web. The session page's control: the strip wired to a signed send
 // (a message, Allow / Deny on an open permission, Stop), with the one reason under its
 // field (control/ControlStrip.tsx picks it from the facts this hands it), and under it
-// what became of an answer or a stop. A message sent from here and its reply are drawn
-// in the timeline, where its turn is (SessionView), not here. The signing and the answer
+// what became of a stop. An answer is said on its prompt's card, and a message sent from
+// here and its reply in the timeline, where its turn is (SessionView). The signing and the answer
 // bookkeeping live in useSend.ts, shared with the inbox; the first send of the day asks
 // for the passkey once (the day grant), and in a browser "Unlock now" takes it ahead. The
 // app says nothing ahead: its first send's own prompt (Face ID, Touch ID) says what it is.
@@ -25,13 +25,13 @@ import { isFinal, notSentWords } from "./words";
 import "./control.css";
 import "../orchestrate/handoff/handoff.css";
 
-/** What stays under the composer: an answer or a Stop on its way, or one that didn't
- *  make it; and a message that went to a copy of this session (CONTROL.md §6), whose turn
- *  is the copy's and never shows here: its row says so and links there. A message's own
- *  progress is its turn's, in the timeline. */
+/** What stays under the composer: a Stop on its way, or one that didn't make it; and a
+ *  message that went to a copy of this session (CONTROL.md §6), whose turn is the copy's
+ *  and never shows here: its row says so and links there. A message's own progress is its
+ *  turn's, in the timeline; an answer's is its prompt's card's (the receipt, or why it did
+ *  not go). */
 const underStrip = (a: ControlActivity) =>
-  ((a.kind === "permission.answer" || a.kind === "cancel") && (!isFinal(a) || a.outcome !== "delivered")) ||
-  !!forkOf(a);
+  (a.kind === "cancel" && (!isFinal(a) || a.outcome !== "delivered")) || !!forkOf(a);
 
 /** Where the focus goes when the notice under the composer goes: the composer, the form
  *  just before it. */

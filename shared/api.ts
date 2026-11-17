@@ -1577,6 +1577,9 @@ export interface ControlActivity {
   unheard?: { state: "asking" | "unsent" | "unknown"; status?: number; reason?: string };
   /** The delivery mode the machine acked, one of `DELIVERY_MODES`. */
   mode?: string;
+  /** A `permission.answer`'s prompt and decision, as signed (`for`, `decision`): every
+   *  surface reads from it which prompt has an answer out, also after a reload. */
+  answer?: { for: string; decision: "allow" | "deny" };
   code?: string;
   detail?: string;
   reply?: string;

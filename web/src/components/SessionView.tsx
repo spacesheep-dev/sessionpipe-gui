@@ -86,14 +86,22 @@ export function answerItems(root: HTMLElement | null, s: SessionSummary, attenti
   const plan = isPlanReview({ kind: "permission", tool });
   // Either button can be off on its own (Approve plan while the composer holds a note, Keep
   // planning with one over 2,000 characters): its item says so rather than pressing a
-  // button that cannot go.
-  const own = allow.getAttribute("aria-description");
+  // button that cannot go. That reason is what the button is described by beside the
+  // card's line.
+  const note = row.querySelector(".ctl-answer-note");
+  const ownWhy = (b: HTMLElement): string | null => {
+    for (const id of b.getAttribute("aria-describedby")?.split(/\s+/) ?? []) {
+      if (!id || id === note?.id) continue;
+      const words = b.ownerDocument.getElementById(id)?.textContent?.trim();
+      if (words) return words;
+    }
+    return null;
+  };
+  const own = ownWhy(allow);
   const why =
-    allow.disabled && !own
-      ? row.querySelector(".ctl-answer-note")?.textContent?.trim() || "This prompt cannot be answered from here"
-      : undefined;
+    allow.disabled && !own ? note?.textContent?.trim() || "This prompt cannot be answered from here" : undefined;
   const allowWhy = why ?? (allow.disabled ? own || true : undefined);
-  const denyWhy = why ?? (deny.disabled ? deny.getAttribute("aria-description") || true : undefined);
+  const denyWhy = why ?? (deny.disabled ? ownWhy(deny) || true : undefined);
   return [
     {
       label: plan ? "Approve plan" : `Allow${name}`,

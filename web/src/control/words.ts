@@ -230,6 +230,39 @@ export function handoffEndWords(a: ControlActivity, machine: string): string {
     return outcomeWords(a, { machine });
   return `not sent · ${a.outcome === "refused" ? refusalWords(a.code) : (a.detail ?? a.outcome)}`;
 }
+
+/** The one line a prompt's card, its Inbox row and its toast say while an answer to it is
+ *  out: which answer went (`what`, its first words) and what it waits for, "Allowed ·
+ *  waiting for studio-mac"; "Answer sent" where the answer is not known. `offline`: the
+ *  computer is not online now. */
+export function receiptWords(o: {
+  decision?: "allow" | "deny";
+  plan?: boolean;
+  machine?: string | null;
+  offline?: boolean;
+}): { what: string; text: string } {
+  const what =
+    o.decision === "allow"
+      ? o.plan
+        ? NEW_WORDS.answerPlanApproved
+        : NEW_WORDS.answerAllowed
+      : o.decision === "deny"
+        ? o.plan
+          ? NEW_WORDS.answerPlanChanges
+          : NEW_WORDS.answerDenied
+        : NEW_WORDS.answerSent;
+  const machine = o.machine || "its computer";
+  return { what, text: o.offline ? NEW_WORDS.answerOutOffline(what, machine) : NEW_WORDS.answerOut(what, machine) };
+}
+
+/** An answer that ended without reaching its prompt, which takes an answer again: why, as
+ *  a line of its own ("Not sent: …"), in the words a send's own refusal has. */
+export function answerEndWords(a: ControlActivity, machine: string): string {
+  if (a.unheard) return notSentLine(unheardWords(a) ?? "");
+  if (a.outcome === "failed" && a.code === "untracked") return UNTRACKED_WORDS;
+  if (a.outcome === "unconfirmed") return unconfirmedWords(machine, a);
+  return notSentLine(handoffEndWords(a, machine));
+}
 /** A waiting row nothing reads right now: disconnected, or the key refused. */
 export const unfollowedWords = (a: Pick<ControlActivity, "unfollowed">): string =>
   a.unfollowed === "revoked"
