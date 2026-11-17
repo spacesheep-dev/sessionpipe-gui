@@ -281,6 +281,24 @@
 .ns-status--err {
   color: var(--err);
 }
+/* The way on after the line's sentence ("Approve this iPhone"), as the composer's line has it. */
+.ns-status-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .ns-status-link:hover {
+    color: var(--fg);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
 .ns-actions {
   flex: none;
   display: inline-flex;

@@ -73,8 +73,30 @@ export const NEW_WORDS = {
     `On spacesheep: Devices → Remove. It stops carrying anything ${phone} sends, right away.`,
   openDevices: "Open Devices",
   composerCooling: (Phone: string, time: string) => `${Phone} can send from ${time}`,
-  rowCoolingBy: (Phone: string, time: string) => `${Phone} can send by ${time}`,
   machinesApprove: (phone: string) => `Approve ${phone}`,
   answerLate: (machine?: string) => `too late to answer from here; answer it on ${machine ?? "its computer"}`,
   answerClosed: "already answered, or timed out",
+} as const;
+
+/** Whether this phone can send to a computer (account/sendable.ts), the same on every screen
+ *  that says it: `short` where a row or a list has room for a few words, `long` where one
+ *  sentence goes (the composer's line, New session's). A line already approved above is
+ *  named, not written again. `machine` is a computer's name. */
+export const SEND = {
+  short: {
+    can: NEW_WORDS.approveCanSend,
+    from: (time: string) => `Can send from ${time}`,
+    by: (time: string) => `Can send by ${time}`,
+    notYet: NEW_WORDS.approveNotYet,
+    dropped: NEW_WORDS.approveDroppedTitle,
+    waiting: NEW_WORDS.approveWaiting,
+    notHere: "Not on this computer yet",
+    old: "Update sessionpipe there",
+  },
+  long: {
+    from: NEW_WORDS.approveCoolingAt,
+    by: (Phone: string, time: string) => `${Phone} can send by ${time}.`,
+    notYet: (Phone: string) => `${Phone} can't send yet.`,
+    notHere: (machine: string, phone: string) => `${machine} adds ${phone} when it's next online.`,
+  },
 } as const;

@@ -33,6 +33,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { type SendState, sendWords, useSendStates } from "../account/sendable";
 import { ActionButton, EmptyState, HarnessGlyph } from "../components/bits";
 import { MoreButton } from "../components/ContextMenu";
 import { Select, type SelectOption } from "../components/Select";
@@ -76,11 +77,11 @@ import {
   canSign,
   deviceWords,
   machineTakes,
+  setupLabel,
   setupWords,
   signerKind,
   signHint,
   updateWords,
-  useOwnKeys,
 } from "./signer";
 import { PERMISSION_LABEL, sendErrorWords, WRONG_ORIGIN } from "./words";
 import "./newSessionSheet.css";
@@ -129,11 +130,13 @@ interface FileItem {
   error?: string;
 }
 
-/** Why a machine cannot take a start from this page, short (the list's secondary text). */
+/** Why a machine cannot take a start from this page, short (the list's secondary text).
+ *  `send`: whether this device can send there (account/sendable.ts); `approve`: the way on
+ *  is approving this device. */
 function blocker(
   m: MachineSummary,
-  o: { wrong: string | null; secure: boolean; mine: ReadonlySet<string> },
-): { short: string; long: string } | null {
+  o: { wrong: string | null; secure: boolean; send: SendState },
+): { short: string; long: string; approve?: boolean } | null {
   const c = m.control;
   if (!c) return { short: "not paired", long: `Pair ${m.name} from its terminal to start sessions there.` };
   if (o.wrong) return { short: "can't sign from this address", long: WRONG_ORIGIN(o.wrong) };
@@ -141,14 +144,19 @@ function blocker(
   if (!o.secure)
     return { short: device ? "can't sign here" : "can't sign from this address", long: `${sentence(signHint())}.` };
   if (!machineTakes(c)) return { short: "needs a newer sessionpipe", long: updateWords(m.name) };
-  if (!c.keys.some((k) => o.mine.has(k.id)))
+  const s = o.send;
+  // Off an account: no key this device holds is among the machine's.
+  if (s.kind === "catching-up" && !s.account)
     return device
       ? { short: `${m.name} doesn't trust ${deviceWords().this}`, long: setupWords(m.name) }
       : {
           short: `no passkey here that ${m.name} trusts`,
           long: `${m.name} trusts no passkey from this browser. Add this device from one it trusts.`,
         };
-  return null;
+  // On an account: not approved, waiting, not on this computer yet, or too old for the key.
+  const says = s.kind === "unapproved" || s.kind === "waiting" || s.kind === "catching-up" || s.kind === "old";
+  const w = says ? sendWords(s, m.name) : null;
+  return w?.long ? { short: w.short, long: w.long, approve: w.approve } : null;
 }
 
 export function Sheet({ target, closing }: { target: NewSessionTarget; closing: boolean }) {
@@ -162,8 +170,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const grant = useGrant(rp);
   const secure = canSign(rp);
   const wrong = wrongOriginHere();
-  const own = useOwnKeys(rp);
-  const mine = useMemo(() => new Set(own.map((k) => k.id)), [own]);
+  const sendTo = useSendStates(rp);
   const ref = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -173,7 +180,10 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     () => [...machines.filter((m) => m.control), ...machines.filter((m) => !m.control)],
     [machines],
   );
-  const why = useCallback((m: MachineSummary) => blocker(m, { wrong, secure, mine }), [wrong, secure, mine]);
+  const why = useCallback(
+    (m: MachineSummary) => blocker(m, { wrong, secure, send: sendTo(m.control) }),
+    [wrong, secure, sendTo],
+  );
 
   // ----- the first values: an explicit target, the draft, the board's context -----
   const initial = useMemo(() => {
@@ -542,13 +552,13 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   };
 
   // ----- the one-fact status line -----
-  const status = ((): { text: string; tone?: "err" } | null => {
+  const status = ((): { text: string; tone?: "err"; approve?: boolean } | null => {
     if (error) return { text: error, tone: "err" };
     if (tap)
       return { text: signerKind() === "device" ? `Confirm with ${deviceWords().auth}…` : "Confirm with your passkey…" };
     if (busy) return { text: `Sending to ${machine}…` };
     if (!m) return { text: listed.length ? "Choose a machine" : "Pair a machine to start sessions on it." };
-    if (blocked) return { text: blocked.long };
+    if (blocked) return { text: blocked.long, approve: blocked.approve };
     if (!harness) return { text: harnesses.length ? "Choose an agent" : `${m.name} hasn't said which agents it runs.` };
     if (!folderCheck.ok) return { text: folderCheck.reason };
     if (note) return { text: note };
@@ -846,9 +856,22 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const fixed = m && c && harness && !blocked ? fixedPermission(c, harness, PERMISSION_LABEL) : null;
   const startKeys = hintFor("newSession.start");
   const more = () => [{ label: "Discard draft", disabled: !text && !files.length, run: discard }];
+  // Not approved yet: the way on is Approve this iPhone; the draft stays for when it can.
+  const approveHere = () => {
+    close();
+    navigate("/add-device");
+  };
   const statusLine = status && (
     <p className={`ns-status ${status.tone === "err" ? "ns-status--err" : ""}`} role="status" aria-live="polite">
       {status.text}
+      {status.approve && (
+        <>
+          {" "}
+          <button type="button" className="ns-status-link" onClick={approveHere} data-ns-approve>
+            {setupLabel()}
+          </button>
+        </>
+      )}
     </p>
   );
 

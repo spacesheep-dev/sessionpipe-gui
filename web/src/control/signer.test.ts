@@ -19,7 +19,10 @@ import {
   NoGrantError,
   nativeErrorWords,
   nativeSigner,
+  ownKeyFailed,
+  ownKeyKnown,
   ownKeys,
+  rereadOwnKeys,
   setupLabel,
   setupWords,
   sign,
@@ -354,6 +357,57 @@ describe("the native adapter (mocked invoke)", () => {
     expect(await refresh("localhost")).toEqual(DEVICE);
     expect(ownKeys("localhost")).toEqual([DEVICE]);
     expect(calls.map((c) => c.cmd)).toEqual(["plugin:identity|status"]);
+  });
+
+  it("a key made where the page did not see it is read again: after the ask, and back in front", async () => {
+    // Rust holds no key yet: that is known, and the page asks nothing more by itself.
+    let made = false;
+    const calls = inShell(() => ({ available: true, ...(made ? { key: DEVICE } : {}), grantExp: null }));
+    await nativeSigner();
+    expect(await refresh("made.example")).toBeNull();
+    expect(ownKeyKnown("made.example")).toBe(true);
+    expect(ownKeys("made.example")).toEqual([]);
+    // The hub's ask makes the key natively; read again, it is there.
+    made = true;
+    await rereadOwnKeys("made.example");
+    expect(ownKeys("made.example")).toEqual([DEVICE]);
+    // Another rp id with no key: the app coming to the front reads it again, by itself.
+    made = false;
+    await refresh("front.example");
+    made = true;
+    const before = calls.length;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => expect(ownKeys("front.example")).toEqual([DEVICE]));
+    // Only what held no key was read again, not what is known.
+    expect(calls.slice(before).map((c) => c.args.rp)).toEqual(["front.example"]);
+  });
+
+  it("a read that fails is not kept as 'no key': not known, not asked again by every draw, read again in front", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let fail = true;
+    const calls = inShell((cmd) => {
+      if (cmd === "plugin:identity|status" && fail) throw new Error("the plugin is not ready");
+      return { available: true, key: DEVICE, grantExp: null };
+    });
+    await nativeSigner();
+    expect(await refresh("fail.example")).toBeNull();
+    expect(ownKeyKnown("fail.example")).toBe(false);
+    expect(ownKeyFailed("fail.example")).toMatch(/not ready/);
+    // Each draw reads ownKeys: none of them asks again (or the page would loop).
+    const before = calls.length;
+    expect(ownKeys("fail.example")).toEqual([]);
+    expect(ownKeys("fail.example")).toEqual([]);
+    expect(calls.length).toBe(before);
+    // Said once in the log, however often it fails.
+    await refresh("fail.example");
+    expect(warn).toHaveBeenCalledTimes(1);
+    // Back in front it reads again, and now it answers.
+    fail = false;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => expect(ownKeys("fail.example")).toEqual([DEVICE]));
+    expect(ownKeyKnown("fail.example")).toBe(true);
+    expect(ownKeyFailed("fail.example")).toBeNull();
+    warn.mockRestore();
   });
 
   it("a plugin refusal reads as words; anything else is not one", async () => {

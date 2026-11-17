@@ -77,8 +77,9 @@ describe("where this phone's key stands, in a row", () => {
     const exact = phoneLine(view({ kind: "cooling", until, exact: true }))!;
     const bound = phoneLine(view({ kind: "cooling", until, exact: false }))!;
     expect([exact.mark, bound.mark]).toEqual(["wait", "wait"]);
-    expect(exact.words).toMatch(/ can send from \d/);
-    expect(bound.words).toMatch(/ can send by \d/);
+    // The same short words as every other row that says it (SEND).
+    expect(exact.words).toBe(`Can send from ${clock(until)}`);
+    expect(bound.words).toBe(`Can send by ${clock(until)}`);
   });
 });
 

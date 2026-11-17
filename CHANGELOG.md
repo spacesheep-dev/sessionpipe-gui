@@ -40,6 +40,16 @@ All notable changes to `sessionpipe-gui`. The format follows
   late to answer from here; answer it on" its computer, with no buttons, moves to Waiting
   in a terminal in the Inbox, and no longer counts on the Inbox badge. One that was gone
   already reads "already answered, or timed out".
+- **Once the iPhone is approved on a spacesheep account, every screen agrees that it can
+  send.** Machines kept offering "Approve this iPhone", and New session and the composer
+  said a computer did not trust the phone, until the app was opened again: the app had
+  read its own key before the ask made it, and never read it again. It reads it again
+  after the ask, when the approval is first seen and when the app comes back to the
+  front; and on an account, what spacesheep says about the phone decides on every screen.
+- **A phone approved before the app saw it wait is no longer said to wait an hour.**
+  Settings › App said "This iPhone can send by" an hour from then when, say, the app's
+  storage had been cleared. It says "Can send" now; if spacesheep does hold a send back,
+  its answer says until when.
 
 ## [0.8.3] - 2026-11-16
 

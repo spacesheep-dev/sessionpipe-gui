@@ -264,6 +264,35 @@ test.describe("the first run with a spacesheep account", () => {
     await expect(page.locator(".approve-code")).toHaveAttribute("data-code", /^\d{2}$/);
     expect(b.ss.deviceRequests.size).toBe(1);
   });
+
+  test("approved with the app open and nothing reloaded: Machines, New session and the composer say what the Approve page says", async () => {
+    const { page } = b;
+    // From here on the page is never loaded again: what it knows of its own key is what the
+    // ask left it (the hub made the key then, where the page does not see it).
+    let loads = 0;
+    page.on("load", () => loads++);
+    b.ss.approveDevice([...b.hub.accounts.values()][0]!.deviceKeyId!);
+    await expect(page.locator("[data-approve='cooling']")).toBeVisible({ timeout: 12_000 });
+    // Machines, by its tab: the phone's key is its own there, and nothing offers to approve it again.
+    await page.locator("a[data-nav='machines']:visible").click();
+    await expect(page.locator(".machine-devices").first()).toContainText("(this one)");
+    await expect(page.locator("[data-setup]")).toHaveCount(0);
+    await expect(page.getByText("Approve this iPhone")).toHaveCount(0);
+    // New session, from the Board's bar: nothing says the computer does not trust the phone.
+    await page.locator("a[data-nav='board']:visible").click();
+    await page.locator(".page.board .compose-btn--phone").click();
+    const sheet = page.locator("[data-new-session]");
+    await expect(sheet.locator(".ns-status")).toBeVisible();
+    await expect(sheet).not.toContainText(/doesn't trust|can't send yet/);
+    await sheet.locator("[data-ns-cancel]").click();
+    await expect(sheet).toHaveCount(0);
+    // A session, from the board: the composer says the hour, and nothing of trust.
+    await page.getByText("Fix the invoice webhook").first().click();
+    await expect(page.getByText("Found the loop.").first()).toBeVisible();
+    await expect(page.getByText(/This iPhone can send from \d{1,2}:\d{2}( [AP]M)?/).first()).toBeVisible();
+    await expect(page.getByText(/doesn't trust|can't send yet|Approve this iPhone/)).toHaveCount(0);
+    expect(loads).toBe(0);
+  });
 });
 
 test.describe("each way a connect can end, with what to do next", () => {
@@ -653,25 +682,28 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await shot(page, "composer-cooling");
     expect(b.ss.jobs).toHaveLength(0);
     // Machines says which devices a computer trusts, and nothing of sending; Settings' row
-    // for the phone's key says the same time.
+    // for the phone's key says the same time, in a row's few words.
     await page.goto(`${b.server.url}/machines`);
     await expect(page.getByText(NAME).first()).toBeVisible();
     await expect(page.getByText(/can send/i)).toHaveCount(0);
+    await expect(page.locator("[data-setup]")).toHaveCount(0);
     await shot(page, "machines-cooling");
     await page.goto(`${b.server.url}/settings?section=app`);
     await expect(page.locator("[data-account-settings] .acct-state--wait")).toHaveText(
-      /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?$/,
+      /^Can send from \d{1,2}:\d{2}( [AP]M)?$/,
     );
   });
 
   test("approved while the page was not looking: the latest it can be, said as that", async () => {
     const { page } = b;
-    // What the page remembered of watching is gone (as after the app was closed for a while).
+    // The page last saw the request open ten minutes before it saw it trusted (the app was
+    // closed in between): what it remembered of watching is that.
     await page.evaluate(() => {
       const key = Object.keys(localStorage).find((k) => k.startsWith("sessionpipe-gui.account.device."))!;
       const memo = JSON.parse(localStorage.getItem(key)!) as Record<string, unknown>;
       delete memo.trustedAt;
       delete memo.watched;
+      memo.openAt = Date.now() - 600_000;
       localStorage.setItem(key, JSON.stringify(memo));
     });
     await page.goto(`${b.server.url}/add-device`);
@@ -1066,6 +1098,60 @@ test.describe("what else an account shows", () => {
     b.ss.trusting.set(asked.keyId, [MACHINE]);
   };
   const composer = (page: Page) => page.locator("textarea").first();
+
+  test("approved long ago, where the page never saw it wait: every screen says it can send, and no hour is made up", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+      await trusted(b);
+      await page.goto(`${b.server.url}/settings?section=app`);
+      await expect(page.locator("[data-account-settings] .acct-state--ok").last()).toHaveText("Can send");
+      await expect(page.getByText(/can send (by|from)/i)).toHaveCount(0);
+      await page.goto(`${b.server.url}/add-device`);
+      await expect(page.locator("[data-approve='approved']")).toBeVisible();
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      await expect(composer(page)).toBeEnabled();
+      await expect(page.getByText(/can send (by|from)|doesn't trust|can't send yet/i)).toHaveCount(0);
+      await page.goto(`${b.server.url}/machines`);
+      await expect(page.locator(".machine-devices").first()).toContainText("(this one)");
+      await expect(page.locator("[data-setup]")).toHaveCount(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("not approved yet: the composer and New session say it in one sentence, with Approve this iPhone as the way on", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      const foot = page.locator(".ctl-foot[data-reason='unapproved']");
+      await expect(foot).toHaveText(/^This iPhone can't send yet\.\s*Approve this iPhone$/);
+      await expect(foot.getByRole("link", { name: "Approve this iPhone" })).toHaveAttribute("href", "/add-device");
+      await expect(page.getByText(/doesn't trust/)).toHaveCount(0);
+      // New session: the same sentence, and its way on closes the sheet and opens the page.
+      await page.goto(b.server.url);
+      await page.locator(".page.board .compose-btn--phone").click();
+      const sheet = page.locator("[data-new-session]");
+      await expect(sheet.locator(".ns-status")).toHaveText(/^This iPhone can't send yet\.\s*Approve this iPhone$/);
+      await expect(sheet.locator("[data-ns-start]")).toBeDisabled();
+      await sheet.locator("[data-ns-approve]").click();
+      await expect(page.locator("[data-approve='idle']")).toBeVisible();
+      await expect(sheet).toHaveCount(0);
+    } finally {
+      await b.close();
+    }
+  });
 
   test("a page only a GUI server has, the search, and the files of a session", async ({ browser }) => {
     const b = await bed(browser);

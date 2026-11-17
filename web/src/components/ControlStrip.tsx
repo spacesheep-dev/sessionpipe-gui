@@ -25,6 +25,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { type SendState, sendWords } from "../account/sendable";
 import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachments";
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
 
@@ -88,9 +89,10 @@ export interface ControlStripProps {
   /** The block in a sentence that holds for an answer too (blockedAnswer). */
   blockedSays?: string;
   onDraft?: (draft: string) => void;
-  /** This browser holds no passkey the machine trusts (in the app: the machine doesn't
-   *  trust this Mac's device key): a send would be refused. */
-  untrusted?: boolean;
+  /** Whether this device can send to the machine (account/sendable.ts): where it is not
+   *  approved, waits for approval, or the machine does not trust its key yet, the line
+   *  says so, with the way on where there is one. Absent where the page cannot sign. */
+  send?: SendState;
   /** The app's stream to the receiver is down ("reconnecting" or "offline"): the strip
    *  waits for it, with Retry now. */
   stream?: { state: "reconnecting" | "offline"; retry: () => void };
@@ -309,7 +311,7 @@ export function ControlStrip({
   suggestions,
   placeholder = "Message this session…",
   chat = false,
-  untrusted = false,
+  send,
   stream,
   unlock,
   ask,
@@ -444,7 +446,8 @@ export function ControlStrip({
           </Link>
         ),
       };
-    if (untrusted)
+    // Off an account: the machine's key list has no key of this device.
+    if (send?.kind === "catching-up" && !send.account)
       return signerKind() === "device"
         ? {
             kind: "untrusted",
@@ -472,6 +475,20 @@ export function ControlStrip({
               </Link>
             ),
           };
+    // On an account: not approved, waiting for it, or approved and this machine has not
+    // added the key yet. Nothing where it can send, or inside the hour (`blocked` says that).
+    const trust = send?.kind === "unapproved" || send?.kind === "waiting" || send?.kind === "catching-up" ? send : null;
+    const says = trust ? sendWords(trust, name) : null;
+    if (trust && says?.long)
+      return {
+        kind: trust.kind,
+        text: says.long,
+        action: says.approve ? (
+          <Link to="/add-device" className="ctl-link">
+            {setupLabel()}
+          </Link>
+        ) : undefined,
+      };
     if (!onSend) return null;
     if (review && tooLong) return { kind: "too-long", text: "Keep it under 2,000 characters", tone: "err" };
     if (noted) return { kind: "plan-note", text: NOTED };

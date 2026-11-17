@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { type SendControl, type SendState, sendWords, useSendStates } from "../../account/sendable";
 import { ActionButton, HarnessGlyph, Toggle } from "../../components/bits";
 import { MoreButton } from "../../components/ContextMenu";
 import { Select, type SelectOption } from "../../components/Select";
@@ -33,12 +34,13 @@ import { HELD_WORDS } from "../../control/heldWords";
 import { useGrant, useRpId } from "../../control/hooks";
 import { fixedPermission, permissionChoices, permissionToSend } from "../../control/newSessionState";
 import { sentence } from "../../control/PendingDevices";
-import { canSign, machineTakes, setupWords, signerKind, signHint, updateWords, useOwnKeys } from "../../control/signer";
+import { canSign, machineTakes, setupLabel, setupWords, signerKind, signHint, updateWords } from "../../control/signer";
 import { PERMISSION_LABEL, sendErrorWords, WRONG_ORIGIN } from "../../control/words";
 import { useListedSessions, useMachinesMap, useSession, useStore } from "../../data/hooks";
 import { useFocusTrap } from "../../lib/focus";
 import { harnessMark, STATE_LABEL, sessionTitle } from "../../lib/format";
 import { useSheetDrag } from "../../lib/motion";
+import { navigate } from "../../lib/router";
 import { hintFor, matches, useShortcut } from "../../lib/shortcuts";
 import { ago, useNow } from "../../lib/time";
 import {
@@ -80,20 +82,28 @@ function usePhone(): boolean {
   return on;
 }
 
-/** Why this page cannot sign for the machine, in New session's own words. */
+/** Why this page cannot sign for the machine, in New session's own words. `send`: whether
+ *  this device can send there (account/sendable.ts); `approve`: the way on is approving
+ *  this device. */
 function blocker(
   name: string,
-  c: { keys: { id: string }[]; keyTypes?: ("passkey" | "device")[] },
-  o: { wrong: string | null; secure: boolean; mine: ReadonlySet<string> },
-): string | null {
-  if (o.wrong) return WRONG_ORIGIN(o.wrong);
-  if (!o.secure) return `${sentence(signHint())}.`;
-  if (!machineTakes(c)) return updateWords(name);
-  if (!c.keys.some((k) => o.mine.has(k.id)))
-    return signerKind() === "device"
-      ? setupWords(name)
-      : `${name} trusts no passkey from this browser. Add this device from one it trusts.`;
-  return null;
+  c: SendControl & { keyTypes?: ("passkey" | "device")[] },
+  o: { wrong: string | null; secure: boolean; send: SendState },
+): { text: string; approve?: boolean } | null {
+  if (o.wrong) return { text: WRONG_ORIGIN(o.wrong) };
+  if (!o.secure) return { text: `${sentence(signHint())}.` };
+  if (!machineTakes(c)) return { text: updateWords(name) };
+  const s = o.send;
+  if (s.kind === "catching-up" && !s.account)
+    return {
+      text:
+        signerKind() === "device"
+          ? setupWords(name)
+          : `${name} trusts no passkey from this browser. Add this device from one it trusts.`,
+    };
+  const says = s.kind === "unapproved" || s.kind === "waiting" || s.kind === "catching-up" || s.kind === "old";
+  const w = says ? sendWords(s, name) : null;
+  return w?.long ? { text: w.long, approve: w.approve } : null;
 }
 
 /** What an ask was when it was pressed: all its "asked" needs after a confirm. */
@@ -113,8 +123,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   const grant = useGrant(rp);
   const secure = canSign(rp);
   const wrong = wrongOriginHere();
-  const own = useOwnKeys(rp);
-  const mine = useMemo(() => new Set(own.map((k) => k.id)), [own]);
+  const sendTo = useSendStates(rp);
   const now = useNow("coarse");
   const ref = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
@@ -268,7 +277,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   if (!session) return null;
 
   // ----- what the machine advertises -----
-  const blocked = c ? blocker(name, c, { wrong, secure, mine }) : null;
+  const blocked = c ? blocker(name, c, { wrong, secure, send: sendTo(c) }) : null;
   const offersBack = c?.handoff === true;
   const oldDaemon = !!c && c.ask === undefined && c.handoff === undefined;
   const nobody = !others.length && !harnesses.length;
@@ -370,12 +379,12 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   };
 
   // ----- the one-fact status line (UX-SPEC §2.4) -----
-  const status = ((): { text: string; tone?: "err" } | null => {
+  const status = ((): { text: string; tone?: "err"; approve?: boolean } | null => {
     if (error) return { text: error, tone: "err" };
     if (tap) return { text: signerKind() === "device" ? "Confirm with Touch ID…" : "Confirm with your passkey…" };
     if (busy) return { text: `Sending to ${name}…` };
     if (!c) return { text: `Pair ${name} to ask from here.` };
-    if (blocked) return { text: blocked };
+    if (blocked) return blocked;
     if (nobody) return { text: `${name} hasn't said which agents it runs.` };
     if (target?.kind === "new" && folderCheck && !folderCheck.ok)
       return {
@@ -575,9 +584,22 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
       run: useLastReply,
     },
   ];
+  // Not approved yet: the way on is Approve this iPhone; the draft stays for when it can.
+  const approveHere = () => {
+    close();
+    navigate("/add-device");
+  };
   const statusLine = status && (
     <p className={`ns-status ${status.tone === "err" ? "ns-status--err" : ""}`} role="status" aria-live="polite">
       {status.text}
+      {status.approve && (
+        <>
+          {" "}
+          <button type="button" className="ns-status-link" onClick={approveHere} data-ns-approve>
+            {setupLabel()}
+          </button>
+        </>
+      )}
     </p>
   );
 

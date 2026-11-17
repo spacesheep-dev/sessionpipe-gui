@@ -59,9 +59,11 @@ export interface DeviceMemo {
   code?: string;
   askedAt?: number;
   devicesUrl?: string;
-  /** When the request was last seen open and the key trusted nowhere. */
+  /** When the request was last seen open and the key trusted nowhere (by a look, or by the
+   *  ask's own answer). */
   openAt?: number;
-  /** When the key was first seen trusted, and whether the page was watching just before. */
+  /** When the key was first seen trusted after that, and whether the page was watching just
+   *  before. Never set for a key that was trusted before this page saw it waiting. */
   trustedAt?: number;
   watched?: boolean;
   /** The hour's end in spacesheep's own word (a send it refused as `cooling`). */
@@ -94,9 +96,11 @@ export interface ApproveView {
 export function remember(memo: DeviceMemo, door: DeviceDoor, now: number): DeviceMemo {
   const next: DeviceMemo = { ...memo };
   if (door.trusted) {
-    if (next.trustedAt === undefined) {
+    // Only an approval this page saw coming has a time: a key trusted before the page ever
+    // saw it waiting was approved at some time nobody here knows, and no hour is made up.
+    if (next.trustedAt === undefined && next.openAt !== undefined) {
       next.trustedAt = now;
-      next.watched = next.openAt !== undefined && now - next.openAt <= WATCHED_MS;
+      next.watched = now - next.openAt <= WATCHED_MS;
     }
     delete next.openAt;
   } else {
@@ -162,14 +166,16 @@ export function approveView(
   }
   const rest = door.pending && machines.some((m) => m.state === "not-yet") ? code : null;
   // The hour's end: spacesheep's word on the door; its word in a refusal; else an hour from
-  // when this page first saw the key trusted, which is the approval's time when it watched
-  // and the latest it can have been when it did not.
-  let until: number | null;
+  // when this page first saw the key trusted after seeing it wait, which is the approval's
+  // time when it watched and the latest it can have been when it did not. A key it never
+  // saw wait can send as far as the page knows: if spacesheep still holds it, the first
+  // send it refuses says until when (`memo.until`).
+  let until: number | null = null;
   let exact = true;
   if (door.coolingUntil !== undefined) until = door.coolingUntil;
   else if (memo.until !== undefined) until = memo.until;
-  else {
-    until = (memo.trustedAt ?? now) + NEW_DEVICE_WAIT_MS;
+  else if (memo.trustedAt !== undefined) {
+    until = memo.trustedAt + NEW_DEVICE_WAIT_MS;
     exact = memo.watched === true;
   }
   // The wait is an hour and no more: a time remembered or reported past an hour from now

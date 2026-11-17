@@ -10,6 +10,7 @@
 // it opens over whichever surface holds this session.
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
 import { useState } from "react";
+import { useSendState } from "../account/sendable";
 import { COMPOSER_SENT, ControlStrip } from "../components/ControlStrip";
 import { useAppState, useListedSessions, useStore } from "../data/hooks";
 import { accountMode, accountSessionUrl, receiverOrigin } from "../lib/net";
@@ -26,7 +27,6 @@ import {
   signHint,
   unlock as takeGrant,
   updateWords,
-  useOwnKeys,
 } from "./signer";
 import { useSessionSend } from "./useSend";
 import { isFinal, sendErrorWords } from "./words";
@@ -88,7 +88,9 @@ export function SessionControl({
   // The app signs only for a machine whose daemon takes device keys (CONTROL.md §2).
   const old = device && control && !machineTakes(control) ? updateWords(session.machine) : null;
   const secure = canSignHere && !old;
-  const own = useOwnKeys(rp);
+  // Whether this device can send to the session's machine: on an account the device door's
+  // word, else the machine's key list (account/sendable.ts).
+  const send = useSendState(control);
   const { connection, suggestions: all } = useAppState();
   const sessions = useListedSessions();
   const store = useStore();
@@ -109,10 +111,6 @@ export function SessionControl({
   const suggestions = all.length ? all.filter((s) => s.session === session.key) : all;
 
   const working = session.state === "working" || session.state === "stale" || !!session.currentTurn;
-  // A secure page whose browser holds no passkey the machine trusts (a phone that can open
-  // the https origin but never paired): a send would be refused untrusted_key, so point
-  // at /add-device, where a trusted device vouches for this one (CONTROL.md §2).
-  const untrustedHere = secure && !!rp && !!control && !control.keys.some((k) => own.some((s) => s.id === k.id));
   // The line's one live fact: a refusal, the passkey prompt, or the unlock under way.
   const note = error
     ? error.replace(/^not sent · /, "Not sent: ")
@@ -144,7 +142,7 @@ export function SessionControl({
         answers={answers}
         suggestions={suggestions}
         chat={chat}
-        untrusted={untrustedHere}
+        send={secure && rp ? send : undefined}
         stream={down ? { state: down, retry: () => store.reconnect() } : undefined}
         unlock={control && secure && grant.exp === null ? () => void unlockNow() : undefined}
         ask={askable ? () => openHandoff({ session: session.key }) : undefined}

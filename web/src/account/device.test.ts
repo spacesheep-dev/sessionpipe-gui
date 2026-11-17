@@ -25,6 +25,10 @@ function bed(o: { visible?: () => boolean; known?: () => KnownMachine[] } = {}) 
     /** The next look's answer is held on its way back until this settles (one look only). */
     hold: null as Promise<void> | null,
     cooled: (_until: number): void => {},
+    /** What the ask's answer says the key is trusted on already. */
+    trustedOn: [] as string[],
+    /** The ask, the signer's re-read of the key (begun, done) and the looks, in order. */
+    log: [] as string[],
   };
   const w = startPhoneWatch({
     id: "acct",
@@ -38,12 +42,20 @@ function bed(o: { visible?: () => boolean; known?: () => KnownMachine[] } = {}) 
     async deviceAsk() {
       s.asks++;
       if (s.refuse) throw s.refuse;
+      s.log.push("ask");
       s.asked = true;
-      s.pending = true;
-      return { code: "71", keyId: "key-1", trustedOn: [], devicesUrl: "https://spacesheep.test/devices" };
+      s.pending = s.trustedOn.length === 0;
+      return { code: "71", keyId: "key-1", trustedOn: s.trustedOn, devicesUrl: "https://spacesheep.test/devices" };
+    },
+    async keyMade() {
+      s.log.push("key");
+      // Rust answers a moment later (a few turns of the page's own queue).
+      for (let i = 0; i < 3; i++) await Promise.resolve();
+      s.log.push("key read");
     },
     async device() {
       s.looks++;
+      s.log.push("look");
       // An answer says how things stood when the look was sent, however late it lands.
       const answer: DoorAnswer = s.doorError
         ? s.doorError
@@ -289,17 +301,84 @@ describe("this phone's key, watched", () => {
     expect(b.s.looks).toBe(before);
   });
 
-  it("takes spacesheep's word for the hour's end from a send it refused", async () => {
+  it("trusted before the page saw it wait: approved, with no hour made up; a refused send says until when", async () => {
     const b = bed();
     w = b.w;
+    // Nothing remembered (the page's storage was cleared), and spacesheep says trusted.
     b.s.asked = true;
     b.s.trusted = true;
     await w.look();
-    // Not watched: the latest it can be.
-    expect(w.get().view?.phase).toEqual({ kind: "cooling", until: T + NEW_DEVICE_WAIT_MS, exact: false });
+    expect(w.get().view?.phase).toEqual({ kind: "approved" });
+    // No timer waits for an hour's end that nobody knows of.
+    expect(vi.getTimerCount()).toBe(0);
+    // spacesheep refuses a send as inside the hour: its word, exactly, and kept.
     b.s.cooled(T + 600_000);
     expect(w.get().view?.phase).toEqual({ kind: "cooling", until: T + 600_000, exact: true });
     expect(JSON.parse(b.kept.get(memoKey("acct"))!).until).toBe(T + 600_000);
+  });
+
+  it("an ask that finds the key trusted nowhere is a sighting: approved later, the hour is the latest it can be", async () => {
+    const b = bed();
+    w = b.w;
+    // The ask goes; the look right after it reaches nobody.
+    b.s.doorError = { status: 502, hub: "unreachable", json: { hub: true, error: "spacesheep could not be reached." } };
+    await w.ask();
+    expect(JSON.parse(b.kept.get(memoKey("acct"))!)).toMatchObject({ askedAt: T, openAt: T });
+    // Approved while the app was away; seen an hour on.
+    b.s.doorError = null;
+    b.s.trusted = true;
+    b.s.pending = false;
+    vi.setSystemTime(T + NEW_DEVICE_WAIT_MS);
+    await w.look();
+    expect(w.get().view?.phase).toEqual({ kind: "cooling", until: T + 2 * NEW_DEVICE_WAIT_MS, exact: false });
+  });
+
+  it("an ask whose answer says the key is trusted already makes no sighting: approved", async () => {
+    const b = bed();
+    w = b.w;
+    b.s.trustedOn = [M.id];
+    b.s.trusted = true;
+    await w.ask();
+    expect(JSON.parse(b.kept.get(memoKey("acct"))!).openAt).toBeUndefined();
+    expect(w.get().view?.phase).toEqual({ kind: "approved" });
+  });
+
+  it("reads the phone's own key again once the ask made it, before it looks", async () => {
+    const b = bed();
+    w = b.w;
+    await w.ask();
+    // The hub makes the key in the ask; the signer is asked again before anything else is.
+    expect(b.s.log).toEqual(["ask", "key", "key read", "look"]);
+  });
+
+  it("reads the phone's own key again when it first sees it trusted, and back in front", async () => {
+    let visible = true;
+    const b = bed({ visible: () => visible });
+    w = b.w;
+    await w.ask();
+    b.s.log = [];
+    // Still waiting: nothing to read again.
+    await w.look();
+    expect(b.s.log).toEqual(["look"]);
+    // Approved: the key is read again with the machines, once.
+    b.s.trusted = true;
+    b.s.pending = false;
+    await w.look();
+    await settle();
+    expect(b.s.log.filter((l) => l === "key")).toHaveLength(1);
+    expect(b.s.machines).toBe(1);
+    await w.look();
+    await settle();
+    expect(b.s.log.filter((l) => l === "key")).toHaveLength(1);
+    // Back in front (a notification's answer, another window may have made it): read again.
+    w.front();
+    await settle();
+    expect(b.s.log.filter((l) => l === "key")).toHaveLength(2);
+    // A hidden page reads nothing.
+    visible = false;
+    w.front();
+    await settle();
+    expect(b.s.log.filter((l) => l === "key")).toHaveLength(2);
   });
 
   it("says a refused ask and a door that would not answer, and keeps what it knew", async () => {

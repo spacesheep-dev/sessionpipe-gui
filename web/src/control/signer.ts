@@ -84,6 +84,20 @@ export const signHint = (rp?: string | null): string =>
  *  device key once Rust reported it). Synchronous. */
 export const ownKeys = (rp: string): TrustedKey[] => (dev ? dev.ownKeys(rp) : inApp() ? [] : storedPasskeys(rp));
 
+/** Whether `ownKeys` is the whole answer for `rp`: a browser knows its passkeys at once; the
+ *  app once Rust has said whether it holds a key (an empty list before that says nothing). */
+export const ownKeyKnown = (rp: string): boolean => (dev ? dev.ownKeyKnown(rp) : !inApp());
+
+/** What the app's last read of its key for `rp` threw, when it failed; null anywhere else. */
+export const ownKeyFailed = (rp: string): string | null => (dev ? dev.ownKeyFailed(rp) : null);
+
+/** Ask Rust again which key the app holds for `rp`, after something outside the page may
+ *  have made it (the hub's ask makes it natively): every `useOwnKeys` then draws again.
+ *  Nothing in a browser, whose passkeys this page made itself. */
+export const rereadOwnKeys = async (rp: string): Promise<void> => {
+  if (inApp()) await (await nativeSigner()).refresh(rp);
+};
+
 /** `ownKeys`, the same array until `rp` changes or Rust reports a key. */
 export function useOwnKeys(rp: string | null): TrustedKey[] {
   const [version, bump] = useState(0);

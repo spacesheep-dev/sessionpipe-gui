@@ -4,7 +4,7 @@
 // (screens.test.ts): how a connect ended, how the account stands, where this phone's key
 // stands in a row, and an ask's refusal. The sentences themselves are accountWords.ts's.
 import type { ConnectStep } from "../native/accountConnect";
-import { clock, NEW_WORDS as N, REUSED as R, ThisPhone, thisPhone } from "../native/accountWords";
+import { clock, NEW_WORDS as N, REUSED as R, SEND, ThisPhone, thisPhone } from "../native/accountWords";
 import type { ApproveView } from "./approve";
 import type { AccountView } from "./backend";
 import type { HubError } from "./shell";
@@ -50,25 +50,24 @@ export function accountState(v: Pick<AccountView, "state" | "relay">): {
   return { mark: "ok", words: N.stateOk, again: false };
 }
 
-/** Where this phone's own key stands, in the few words a row has room for. */
+/** Where this phone's own key stands, in the few words a row has room for: the same short
+ *  words every screen says it in (SEND). */
 export function phoneLine(view: ApproveView | null): { mark: "ok" | "wait" | "warn"; words: string } | null {
   if (!view) return null;
   switch (view.phase.kind) {
     case "approved":
-      return { mark: "ok", words: N.approveCanSend };
+      return { mark: "ok", words: SEND.short.can };
     case "cooling":
       return {
         mark: "wait",
-        words: view.phase.exact
-          ? N.composerCooling(ThisPhone(), clock(view.phase.until))
-          : N.rowCoolingBy(ThisPhone(), clock(view.phase.until)),
+        words: view.phase.exact ? SEND.short.from(clock(view.phase.until)) : SEND.short.by(clock(view.phase.until)),
       };
     case "waiting":
-      return { mark: "wait", words: N.approveWaiting };
+      return { mark: "wait", words: SEND.short.waiting };
     case "dropped":
-      return { mark: "warn", words: N.approveDroppedTitle };
+      return { mark: "warn", words: SEND.short.dropped };
     default:
-      return { mark: "wait", words: N.approveNotYet };
+      return { mark: "wait", words: SEND.short.notYet };
   }
 }
 

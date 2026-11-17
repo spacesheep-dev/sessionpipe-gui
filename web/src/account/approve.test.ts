@@ -103,12 +103,27 @@ describe("where this phone's key stands", () => {
     // Just outside the watch: not exact either.
     const late = remember({ ...asked, openAt: T }, door({ trusted: ["m_studio"] }), T + WATCHED_MS + 1);
     expect(late.watched).toBe(false);
-    // Never seen open at all (the memo is new): the same bound, from now.
-    const fresh = remember({}, door({ trusted: ["m_studio"] }), T);
-    expect(approveView(fresh, door({ trusted: ["m_studio"] }), T).phase).toEqual({
+    // Seen open with no ask kept (the ask came from elsewhere): a sighting all the same.
+    const seen = remember({ openAt: T }, door({ trusted: ["m_studio"] }), T + 1_800_000);
+    expect(seen).toEqual({ trustedAt: T + 1_800_000, watched: false });
+  });
+
+  it("trusted before the page ever saw it wait: no hour is made up, and it can send as far as the page knows", () => {
+    const trusted = door({ trusted: ["m_studio"] });
+    // Never seen open at all (the memo is new, as after the page's storage was cleared).
+    const fresh = remember({}, trusted, T);
+    expect(fresh).toEqual({});
+    expect(approveView(fresh, trusted, T).phase).toEqual({ kind: "approved" });
+    // Asked once and never seen waiting (the ask came back trusted already): the ask alone
+    // is no time to count an hour from.
+    const onlyAsked = remember(asked, trusted, T + 1_800_000);
+    expect(onlyAsked.trustedAt).toBeUndefined();
+    expect(approveView(onlyAsked, trusted, T + 1_800_000).phase).toEqual({ kind: "approved" });
+    // spacesheep then refuses a send as inside the hour: its word, exactly.
+    expect(approveView({ ...onlyAsked, until: T + 2_000_000 }, trusted, T + 1_800_000).phase).toEqual({
       kind: "cooling",
-      until: T + HOUR,
-      exact: false,
+      until: T + 2_000_000,
+      exact: true,
     });
   });
 

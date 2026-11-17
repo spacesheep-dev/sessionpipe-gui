@@ -12,6 +12,7 @@
 // above the machines.
 import { accountLabel, type HarnessAccount, type MachinePool, type MachineSummary, ROUTES } from "@shared/api";
 import { useEffect, useState } from "react";
+import { useSendStates } from "../account/sendable";
 import { Ago, CommandWell, EmptyState, HarnessGlyph } from "../components/bits";
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
 import { PageBar } from "../components/PageBar";
@@ -138,6 +139,9 @@ function MachineBlock({
   // The keys this device holds for the rp id (this browser's passkeys, or the app's device
   // key): one of them trusted here is "this one".
   const mine = new Set(useOwnKeys(rp).map((k) => k.id));
+  // Whether this device can send there: on an account the device door's word (approved,
+  // the hour, this computer's own entry), else the key list (account/sendable.ts).
+  const send = useSendStates(rp)(c);
   // Simple mode: online, paired or the pair line, the start form; the daemon's details wait in Advanced.
   const simple = useSimple();
   const pairCmd = `sessionpipe control pair ${lanUrl}`;
@@ -145,7 +149,8 @@ function MachineBlock({
     c && {
       label: `New session on ${m.name}…`,
       run: () => openNewSession({ machine: m.name }),
-      disabled: secure ? undefined : "Passkeys cannot sign on this address",
+      // Nothing here can be signed: why, in the signer's words. Anything else the sheet says.
+      disabled: secure ? undefined : sentence(signHint(rp)),
     },
     c && !accountMode() && { label: "Add a phone…", run: () => navigate("/phone") },
     { sep: true },
@@ -163,16 +168,12 @@ function MachineBlock({
     ...Object.entries(m.harnesses),
     ...(c?.harnesses ?? []).filter((h) => !(h in m.harnesses)).map((h) => [h, undefined] as const),
   ];
-  // In the app: a daemon that predates device keys says so; one that takes them but doesn't
-  // trust this Mac's yet offers the setup (CONTROL.md §2).
+  // In the app: a daemon that predates device keys says so; one that takes them offers the
+  // setup only while this device is not approved (on an account: asked or not, while no
+  // computer trusts it; off one: while this one doesn't) (CONTROL.md §2).
+  const setup = send.kind === "unapproved" || send.kind === "waiting" || (send.kind === "catching-up" && !send.account);
   const app =
-    secure && c && signerKind() === "device"
-      ? !machineTakes(c, "device")
-        ? "update"
-        : c.keys.some((k) => mine.has(k.id))
-          ? null
-          : "setup"
-      : null;
+    secure && c && signerKind() === "device" ? (!machineTakes(c, "device") ? "update" : setup ? "setup" : null) : null;
   const devices =
     c && c.keys.length > 0
       ? c.keys.map((k) => `${k.name ?? k.id.slice(0, 8)}${mine.has(k.id) ? " (this one)" : ""}`).join(", ")
