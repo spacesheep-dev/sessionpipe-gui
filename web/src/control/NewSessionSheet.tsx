@@ -10,9 +10,11 @@
 // gate, and a choice it did not advertise is never sent (a daemon that predates a field
 // ignores it). A desktop sheet drops from under the title bar, 640 px wide, and lifts back
 // into it as it closes; a phone's is full height with Cancel and Start in its top bar, and
-// can be pulled down by its top to dismiss. With no machine paired it is an empty state
-// with the one way on, not a disabled form. Loaded once the page is idle (NewSession.tsx
-// mounts it).
+// can be pulled down by its top to dismiss. With no machine paired, or on a phone that isn't
+// approved, it is an empty state with the one way on, not a form nothing on could start; in
+// the hour a newly approved phone waits the form stays and Start waits (startGate.ts). On a
+// phone the foot says something only when something is to be said. Loaded once the page is
+// idle (NewSession.tsx mounts it).
 import type { ControlActivity, MachineSummary, RunLevel, StartFile } from "@shared/api";
 import {
   START_FILE_MAX_BYTES,
@@ -33,7 +35,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { type SendState, sendWords, useSendStates } from "../account/sendable";
+import { useSendStates } from "../account/sendable";
 import { ActionButton, EmptyState, HarnessGlyph } from "../components/bits";
 import { MoreButton } from "../components/ContextMenu";
 import { Select, type SelectOption } from "../components/Select";
@@ -46,6 +48,7 @@ import { accountMode } from "../lib/net";
 import { navigate, sessionPath } from "../lib/router";
 import { hintFor, matches, useShortcut } from "../lib/shortcuts";
 import { useNow } from "../lib/time";
+import { START, ThisPhone } from "../native/accountWords";
 import { controlApi, wrongOriginHere } from "./api";
 import { uuid } from "./bytes";
 import { type CommandFields, sendCommand } from "./command";
@@ -72,20 +75,9 @@ import {
   rememberStart,
   saveDraft,
 } from "./newSessionState";
-import { sentence } from "./PendingDevices";
-import {
-  canSign,
-  deviceWords,
-  isCancel,
-  machineTakes,
-  setupLabel,
-  setupWords,
-  signerKind,
-  signHint,
-  tapWords,
-  updateWords,
-} from "./signer";
-import { notSentWords, PERMISSION_LABEL, WRONG_ORIGIN } from "./words";
+import { canSign, isCancel, setupLabel, signerKind, signHint, tapWords } from "./signer";
+import { machineBlocked, startGate } from "./startGate";
+import { notSentWords, PERMISSION_LABEL } from "./words";
 import "./newSessionSheet.css";
 
 /** A level's one line in the Permission pop-up (only the sheet shows them, so they live here). */
@@ -132,35 +124,6 @@ interface FileItem {
   error?: string;
 }
 
-/** Why a machine cannot take a start from this page, short (the list's secondary text).
- *  `send`: whether this device can send there (account/sendable.ts); `approve`: the way on
- *  is approving this device. */
-function blocker(
-  m: MachineSummary,
-  o: { wrong: string | null; secure: boolean; send: SendState },
-): { short: string; long: string; approve?: boolean } | null {
-  const c = m.control;
-  if (!c) return { short: "not paired", long: `Pair ${m.name} from its terminal to start sessions there.` };
-  if (o.wrong) return { short: "can't sign from this address", long: WRONG_ORIGIN(o.wrong) };
-  const device = signerKind() === "device";
-  if (!o.secure)
-    return { short: device ? "can't sign here" : "can't sign from this address", long: `${sentence(signHint())}.` };
-  if (!machineTakes(c)) return { short: "needs a newer sessionpipe", long: updateWords(m.name) };
-  const s = o.send;
-  // Off an account: no key this device holds is among the machine's.
-  if (s.kind === "catching-up" && !s.account)
-    return device
-      ? { short: `${m.name} doesn't trust ${deviceWords().this}`, long: setupWords(m.name) }
-      : {
-          short: `no passkey here that ${m.name} trusts`,
-          long: `${m.name} trusts no passkey from this browser. Add this device from one it trusts.`,
-        };
-  // On an account: not approved, waiting, not on this computer yet, or too old for the key.
-  const says = s.kind === "unapproved" || s.kind === "waiting" || s.kind === "catching-up" || s.kind === "old";
-  const w = says ? sendWords(s, m.name) : null;
-  return w?.long ? { short: w.short, long: w.long, approve: w.approve } : null;
-}
-
 export function Sheet({ target, closing }: { target: NewSessionTarget; closing: boolean }) {
   const phone = usePhone();
   const machines = useMachines();
@@ -183,8 +146,17 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     [machines],
   );
   const why = useCallback(
-    (m: MachineSummary) => blocker(m, { wrong, secure, send: sendTo(m.control) }),
+    (m: MachineSummary) => startGate(m.name, m.control, { wrong, secure, hint: signHint(), send: sendTo(m.control) }),
     [wrong, secure, sendTo],
+  );
+  // The paired machines a start can go to from here: the sheet picks one of these itself.
+  const ready = useCallback(
+    (names: string[]) =>
+      names.filter((n) => {
+        const x = listed.find((y) => y.name === n);
+        return !!x && !machineBlocked(why(x));
+      }),
+    [listed, why],
   );
 
   // ----- the first values: an explicit target, the draft, the board's context -----
@@ -197,6 +169,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       last: readLast(),
       sessions: [...sessions.values()],
       machines: listed.filter((m) => m.control).map((m) => m.name),
+      ready: ready(listed.filter((m) => m.control).map((m) => m.name)),
     });
     return { draft, ctx };
     // Read once, when the sheet opens: later stream frames must not move what was picked.
@@ -279,6 +252,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       last: readLast(),
       sessions: [...sessions.values()],
       machines: names,
+      ready: ready(names),
     });
     if (!ctx.machine) return;
     const prefer: NewSessionTarget = {
@@ -291,7 +265,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     setFolder(v.folder);
     setPermission(v.permission);
     setModel(v.model ?? "");
-  }, [listed, sessions, target, valuesFor]);
+  }, [listed, sessions, target, valuesFor, ready]);
 
   const setMachine = (name: string) => {
     if (name === machine) return;
@@ -315,8 +289,11 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     setModel(r.harness === h && r.model && opts && (opts.anyModel || opts.models?.includes(r.model)) ? r.model : "");
   };
 
-  // ----- what the machine advertises -----
-  const blocked = m ? why(m) : null;
+  // ----- what the machine advertises, and whether a start can go there -----
+  const gate = m ? why(m) : null;
+  // This device isn't approved: nothing on the form could start anywhere, so the sheet is
+  // the way to approve it (the draft is kept as it is, for when it can).
+  const unapproved = listed.some((x) => why(x)?.kind === "approve");
   const harnesses = c?.harnesses ?? [];
   const opts = harness ? c?.start?.[harness] : undefined;
   // On an inherit machine the default ("As your own sessions") is one of the choices.
@@ -349,13 +326,15 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   }, [machine, harness, folder, text, permission, model, files]);
 
   const close = useCallback(() => closeNewSession(), []);
-  const initialFocus = !machine
-    ? "[data-ns-row=machine] button"
-    : !harness
-      ? "[data-ns-row=agent] button"
-      : !folderCheck.ok
-        ? "[data-ns-row=folder] button, [data-ns-row=folder] input"
-        : "textarea";
+  const initialFocus = unapproved
+    ? "[data-ns-approve]"
+    : !machine
+      ? "[data-ns-row=machine] button"
+      : !harness
+        ? "[data-ns-row=agent] button"
+        : !folderCheck.ok
+          ? "[data-ns-row=folder] button, [data-ns-row=folder] input"
+          : "textarea";
   useFocusTrap(ref, !closing, { onClose: close, initial: initialFocus });
   // A phone's sheet follows the finger down from its top, and goes past 40 % or a flick.
   useSheetDrag(ref, close, { handle: ".ns-grab, .ns-bar-title", enabled: phone && !closing });
@@ -439,7 +418,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const canStart =
     !!m &&
     !!c &&
-    !blocked &&
+    !gate &&
     !!rp &&
     !!harness &&
     harnesses.includes(harness) &&
@@ -555,12 +534,15 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   };
 
   // ----- the one-fact status line -----
-  const status = ((): { text: string; tone?: "err"; approve?: boolean } | null => {
+  // `ready`: nothing is wrong and nothing under way; a phone's foot then says nothing.
+  const status = ((): { text: string; tone?: "err"; approve?: boolean; ready?: boolean } | null => {
+    // Inside the hour, one sentence says from when: also in place of a refusal for it.
+    if (gate?.kind === "cooling") return { text: gate.long };
     if (error) return { text: error, tone: "err" };
     if (tap) return { text: tapWords() };
     if (busy) return { text: `Sending to ${machine}…` };
     if (!m) return { text: listed.length ? "Choose a machine" : "Pair a machine to start sessions on it." };
-    if (blocked) return { text: blocked.long, approve: blocked.approve };
+    if (gate?.kind === "machine") return { text: gate.long, approve: gate.approve };
     if (!harness) return { text: harnesses.length ? "Choose an agent" : `${m.name} hasn't said which agents it runs.` };
     if (!folderCheck.ok) return { text: folderCheck.reason };
     if (note) return { text: note };
@@ -575,24 +557,26 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       return {
         text: `${m.name} is offline. It starts when the machine is back, within ${relayed ? "a day" : "an hour"}.`,
       };
-    return { text: `${m.name} is listening.` };
+    return { text: `${m.name} is listening.`, ready: true };
   })();
   // The passkey is a note on Start (its tooltip, and what a screen reader hears with it),
   // not the status line: that line is for what is happening. A browser's only: the app's
   // Start brings up its own prompt, which says what it is.
   const passkeyNote =
-    signerKind() === "passkey" && grant.exp === null && !blocked ? "Start asks for your passkey, once today." : null;
+    signerKind() === "passkey" && grant.exp === null && !gate ? "Start asks for your passkey, once today." : null;
 
   // ----- the rows -----
   const agentLabel = (h: string) => harnessMark(h).label;
+  // A machine that can't take a start from here is listed, off, with its few words; the
+  // hour a new phone waits is the phone's, said once in the foot, not on every row.
   const machineOptions: SelectOption<string>[] = listed.map((x) => {
     const b = why(x);
     const f = machineFacts(x.control, agentLabel);
     return {
       value: x.name,
       label: x.name,
-      ...(b ? { hint: b.short } : f),
-      disabled: !!b,
+      ...(b?.kind === "machine" ? { hint: b.short } : f),
+      disabled: machineBlocked(b),
     };
   });
   // What each agent's account has left here: its tightest window, or each account's by
@@ -690,9 +674,9 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
           disabled={!harnesses.length}
           className="ns-sel"
         />,
-        chosen.hint ? (
+        chosen.aside ? (
           <span className={`ns-aside num ${chosen.out ? "ns-aside--out" : ""}`} data-ns-left>
-            {chosen.hint}
+            {chosen.aside}
           </span>
         ) : null,
       )}
@@ -852,7 +836,13 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
 
   // The Permission row is there on every machine, so the sheet keeps its height: the
   // pop-up where the machine offers a choice, else what it will run as, in words.
-  const fixed = m && c && harness && !blocked ? fixedPermission(c, harness, PERMISSION_LABEL) : null;
+  const fixed = m && c && harness ? fixedPermission(c, harness, PERMISSION_LABEL) : null;
+  const fixedValue = fixed && (
+    <span className="ns-fixed" title={machine ? START.setOn(machine) : undefined}>
+      {fixed.value}
+    </span>
+  );
+  const fixedNote = fixed?.note ? <span className="ns-aside">{fixed.note}</span> : null;
   const startKeys = hintFor("newSession.start");
   const more = () => [{ label: "Discard draft", disabled: !text && !files.length, run: discard }];
   // Not approved yet: the way on is Approve this iPhone; the draft stays for when it can.
@@ -860,19 +850,31 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     close();
     navigate("/add-device");
   };
-  // A Start that is off is described by the line that says why, and by the passkey note.
+  // On a phone the foot says one thing, and nothing when all is well: a problem, what is
+  // under way, else a browser's passkey note. A desktop keeps its line and the note on Start.
+  const line: typeof status = !phone
+    ? status
+    : status && !status.ready
+      ? status
+      : passkeyNote
+        ? { text: passkeyNote, ready: true }
+        : null;
+  // A Start that is off is described by the line that says why, and by the passkey note
+  // (on a phone that note is the line).
   const startWhy =
-    [!canStart && status ? "ns-status" : null, passkeyNote ? "ns-passkey" : null].filter(Boolean).join(" ") ||
-    undefined;
-  const statusLine = status && (
+    [line && (!canStart || (phone && line.ready)) ? "ns-status" : null, passkeyNote && !phone ? "ns-passkey" : null]
+      .filter(Boolean)
+      .join(" ") || undefined;
+  // Kept in place while empty, so what it says later is read out where it was.
+  const statusLine = (line || phone) && (
     <p
       id="ns-status"
-      className={`ns-status ${status.tone === "err" ? "ns-status--err" : ""}`}
+      className={`ns-status ${line?.tone === "err" ? "ns-status--err" : ""}`}
       role="status"
       aria-live="polite"
     >
-      {status.text}
-      {status.approve && (
+      {line?.text}
+      {line?.approve && (
         <>
           {" "}
           <button type="button" className="ns-status-link" onClick={approveHere} data-ns-approve>
@@ -890,7 +892,24 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     // A computer joins a spacesheep account on spacesheep; Machines says where.
     navigate(accountMode() ? "/machines" : "/connect");
   };
-  const empty = (
+  const empty = unapproved ? (
+    <EmptyState
+      className="ns-empty"
+      title={START.notApproved(ThisPhone())}
+      actions={
+        <>
+          <button type="button" className="btn btn--primary" onClick={approveHere} data-ns-approve>
+            {setupLabel()}
+          </button>
+          {!phone && (
+            <button type="button" className="btn" onClick={close}>
+              Cancel
+            </button>
+          )}
+        </>
+      }
+    />
+  ) : (
     <EmptyState
       className="ns-empty"
       title="No machine is paired yet"
@@ -910,6 +929,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       Pair a machine that runs sessionpipe, and you can start Claude Code, Codex or Gemini on it from here.
     </EmptyState>
   );
+  // Nothing to fill in: no machine, or nothing on the form could start (not approved).
+  const form = !noMachine && !unapproved;
 
   if (phone)
     return (
@@ -932,7 +953,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
           <h2 className="ns-bar-title" id="ns-title">
             New session
           </h2>
-          {noMachine ? (
+          {!form ? (
             <span />
           ) : (
             <button
@@ -950,7 +971,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
           <span className="ns-grab" aria-hidden="true" />
         </header>
         <div className="ns-scroll">
-          {noMachine ? (
+          {!form ? (
             empty
           ) : (
             <>
@@ -960,7 +981,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
               {(showPermission || fixed || showModel || takesFiles) && (
                 <div className="ns-group">
                   {showPermission && row("permission", "Permission", permissionSelect)}
-                  {fixed && row("options", "Permission", <span className="ns-fixed">{fixed}</span>)}
+                  {fixed && row("options", "Permission", fixedValue, fixedNote)}
                   {showModel && row("model", "Model", modelSelect)}
                   {takesFiles && <div className="ns-row">{fileButton}</div>}
                 </div>
@@ -968,11 +989,6 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
               <div className="ns-group-foot">
                 <HeldNotice h={held} focusBack={startButton} />
                 {statusLine}
-                {passkeyNote && (
-                  <p className="ns-passkey" id="ns-passkey">
-                    {passkeyNote}
-                  </p>
-                )}
                 {(text || files.length > 0) && (
                   <button type="button" className="ns-discard" onClick={discard}>
                     Discard draft
@@ -1010,7 +1026,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
         <h2 className="ns-title" id="ns-title">
           New session
         </h2>
-        {noMachine ? (
+        {!form ? (
           empty
         ) : (
           <>
@@ -1030,7 +1046,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
               {fixed && (
                 <span className="ns-opt" data-ns-row="options">
                   <span className="ns-opt-label">Permission</span>
-                  <span className="ns-fixed">{fixed}</span>
+                  {fixedValue}
+                  {fixedNote}
                 </span>
               )}
               {showModel && (

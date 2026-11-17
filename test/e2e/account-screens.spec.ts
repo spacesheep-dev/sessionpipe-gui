@@ -699,6 +699,43 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     );
   });
 
+  test("New session and Ask another agent in the hour: the form stays, Start and Ask wait under one line that says from when, and nothing goes", async () => {
+    const { page } = b;
+    // studio-mac's agents can ask each other (Ask another agent…), for this test.
+    Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+    try {
+      await page.goto(b.server.url);
+      await page.locator(".page.board .compose-btn--phone").click();
+      const sheet = page.locator("[data-new-session]");
+      await sheet.locator("[data-ns-text]").fill("Add a test for the rounding.");
+      const start = sheet.locator("[data-ns-start]");
+      await expect(start).toBeDisabled();
+      const hour = /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.$/;
+      await expect(sheet.locator(".ns-status")).toHaveText(hour);
+      await expect(start).toHaveAccessibleDescription(hour);
+      // The rest of the form is as it will be: the machine's level stays in its row.
+      await expect(sheet.locator("[data-ns-row=options]")).toHaveText(/^Permission\s*Safe$/);
+      await expect(sheet.getByText(/is listening|asks for|doesn't trust/)).toHaveCount(0);
+      await shot(page, "new-session-cooling");
+      await sheet.locator("[data-ns-cancel]").click();
+      await expect(sheet).toHaveCount(0);
+      // Ask another agent: the same line, and Ask waits.
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await page.locator("[data-ctl-ask]").click();
+      const ask = page.locator("[data-handoff]");
+      await ask.locator("[data-hs-text]").fill("Check the rounding.");
+      await expect(ask.locator("[data-hs-ask]")).toBeDisabled();
+      await expect(ask.locator(".ns-status")).toHaveText(hour);
+      await expect(ask.locator("[data-hs-ask]")).toHaveAccessibleDescription(hour);
+      await shot(page, "handoff-cooling");
+      await ask.locator("[data-hs-cancel]").click();
+      expect(b.ss.jobs).toHaveLength(0);
+    } finally {
+      delete b.ss.machines[0]!.ask;
+      delete b.ss.machines[0]!.handoff;
+    }
+  });
+
   test("approved while the page was not looking: the latest it can be, said as that, and nothing held back for it", async () => {
     const { page } = b;
     // spacesheep's door names no hour (as it does not yet), and the page last saw the request
@@ -724,6 +761,14 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await expect(page.getByText("Found the loop.").first()).toBeVisible();
     await expect(page.locator("textarea").first()).toBeEnabled();
     await expect(page.getByText(/can send (by|from)/)).toHaveCount(0);
+    // New session the same: Start goes, and a refusal for the hour would make the time known.
+    await page.goto(b.server.url);
+    await page.locator(".page.board .compose-btn--phone").click();
+    const sheet = page.locator("[data-new-session]");
+    await sheet.locator("[data-ns-text]").fill("Look around.");
+    await expect(sheet.locator("[data-ns-start]")).toBeEnabled();
+    await expect(sheet.getByText(/can send (by|from)/)).toHaveCount(0);
+    await sheet.locator("[data-ns-cancel]").click();
   });
 
   test("where spacesheep says when the hour ends, that is the time", async () => {
@@ -1130,6 +1175,20 @@ test.describe("what else an account shows", () => {
       await expect(page.getByText("Found the loop.").first()).toBeVisible();
       await expect(composer(page)).toBeEnabled();
       await expect(page.getByText(/can send (by|from)|doesn't trust|can't send yet/i)).toHaveCount(0);
+      // New session: all is well, so its foot says nothing (its line is there for what comes),
+      // and the level the machine sets is a value on one line.
+      await page.goto(b.server.url);
+      await page.locator(".page.board .compose-btn--phone").click();
+      const sheet = page.locator("[data-new-session]");
+      await sheet.locator("[data-ns-text]").fill("Look around.");
+      await expect(sheet.locator("[data-ns-start]")).toBeEnabled();
+      await expect(sheet.locator(".ns-status[role='status']")).toHaveText("");
+      await expect(sheet.locator(".ns-passkey")).toHaveCount(0);
+      await expect(sheet.getByText(/is listening|asks for|Face ID/)).toHaveCount(0);
+      const level = sheet.locator("[data-ns-row=options] .ns-fixed");
+      await expect(level).toHaveText("Safe");
+      await expect(level).toHaveCSS("text-align", "right");
+      await sheet.locator("[data-ns-cancel]").click();
       await page.goto(`${b.server.url}/machines`);
       await expect(page.locator("[data-this-phone='approved']")).toHaveText("This iPhone can send");
       await expect(page.locator("[data-setup]")).toHaveCount(0);
@@ -1295,30 +1354,74 @@ test.describe("what else an account shows", () => {
     }
   });
 
-  test("not approved yet: the composer and New session say it in one sentence, with Approve this iPhone as the way on", async ({
+  test("not approved yet: the composer says it in one sentence, and New session and Ask another agent are the way to approve it, with the draft kept", async ({
     browser,
   }) => {
     const b = await bed(browser);
     b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    // studio-mac's agents can ask each other (Ask another agent…).
+    Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
     const { page } = b;
     try {
       await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
       await expect(page.getByText("Found the loop.").first()).toBeVisible();
       const foot = page.locator(".ctl-foot[data-reason='unapproved']");
-      await expect(foot).toHaveText(/^This iPhone can't send yet\.\s*Approve this iPhone$/);
+      await expect(foot).toHaveText(/^This iPhone can't send yet\.\s*Approve this iPhone\s*Ask another agent…$/);
       await expect(foot.getByRole("link", { name: "Approve this iPhone" })).toHaveAttribute("href", "/add-device");
       await expect(page.getByText(/doesn't trust/)).toHaveCount(0);
-      // New session: the same sentence, and its way on closes the sheet and opens the page.
+      // Ask another agent: nothing on it could ask, so it is the way to approve the phone.
+      await page.locator("[data-ctl-ask]").click();
+      const ask = page.locator("[data-handoff]");
+      await expect(ask.locator(".state-title")).toHaveText("This iPhone isn't approved yet");
+      await expect(ask.locator("[data-hs-ask], textarea, [data-hs-row]")).toHaveCount(0);
+      await expect(ask.getByRole("button", { name: "Approve this iPhone" })).toBeVisible();
+      await shot(page, "also-handoff-not-approved");
+      await ask.locator("[data-hs-cancel]").click();
+      await expect(ask).toHaveCount(0);
+      // New session, with a message written before: at every width one sentence and one
+      // button, in place of a form nothing on could start; the message is kept.
       await page.goto(b.server.url);
-      await page.locator(".page.board .compose-btn--phone").click();
+      await page.evaluate(() =>
+        localStorage.setItem(
+          "sp.newSession.draft",
+          JSON.stringify({ machine: "studio-mac", text: "Check the refund rounding." }),
+        ),
+      );
       const sheet = page.locator("[data-new-session]");
-      await expect(sheet.locator(".ns-status")).toHaveText(/^This iPhone can't send yet\.\s*Approve this iPhone$/);
-      await expect(sheet.locator("[data-ns-start]")).toBeDisabled();
-      // An off Start is described by the line that says why.
-      await expect(sheet.locator("[data-ns-start]")).toHaveAccessibleDescription(/^This iPhone can't send yet\./);
+      for (const [width, height] of [
+        [320, 568],
+        [390, 844],
+        [820, 1180],
+      ] as const) {
+        await page.setViewportSize({ width, height });
+        await page.locator(".page.board .compose-btn--phone").click();
+        await expect(sheet.locator(".state-title")).toHaveText("This iPhone isn't approved yet");
+        await expect(sheet.locator(".state-text")).toHaveCount(0);
+        await expect(sheet.locator("[data-ns-start], textarea, [data-ns-row]")).toHaveCount(0);
+        await expect(sheet.locator(".ns-bar")).toHaveText(/^Cancel\s*New session$/);
+        const go = sheet.getByRole("button", { name: "Approve this iPhone" });
+        await expect(go).toBeVisible();
+        const box = (await go.boundingBox())!;
+        expect(box.height, `${width}`).toBeGreaterThanOrEqual(44);
+        // The width of the column on a phone; a button, not a bar, on a tablet.
+        expect(box.width, `${width}`).toBeGreaterThanOrEqual(Math.min(width - 64, 360) - 1);
+        expect(box.width, `${width}`).toBeLessThanOrEqual(360);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        if (width === W) await shot(page, "also-new-session-not-approved");
+        await sheet.locator("[data-ns-cancel]").click();
+        await expect(sheet).toHaveCount(0);
+      }
+      await page.setViewportSize({ width: W, height: H });
+      await page.locator(".page.board .compose-btn--phone").click();
       await sheet.locator("[data-ns-approve]").click();
       await expect(page.locator("[data-approve='idle']")).toBeVisible();
       await expect(sheet).toHaveCount(0);
+      // Approved (long ago, as far as this page knows): the form, with the message as it was.
+      await trusted(b);
+      await page.goto(b.server.url);
+      await page.locator(".page.board .compose-btn--phone").click();
+      await expect(sheet.locator("[data-ns-text]")).toHaveValue("Check the refund rounding.");
+      await expect(sheet.locator("[data-ns-start]")).toBeEnabled();
     } finally {
       await b.close();
     }
@@ -1483,6 +1586,31 @@ test.describe("what else an account shows", () => {
       const row = page.locator(".inbox-row[data-attention='perm-1']");
       await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
       await expect(page.getByText(`Allow and Deny are off: ${line}`)).toBeVisible();
+      // New session: on its own it opens on attic-mini, which can take a start, though the
+      // newest session is studio-mac's; studio-mac is listed, off, with why in two words.
+      await page.goto(b.server.url);
+      await page.locator(".page.board .compose-btn--phone").click();
+      const sheet = page.locator("[data-new-session]");
+      const machine = sheet.locator("[data-ns-row=machine] button.sel");
+      await expect(machine).toHaveAttribute("data-value", "attic-mini");
+      await machine.click();
+      const off = page.locator(".sel-opt", { hasText: NAME });
+      await expect(off).toHaveAttribute("aria-disabled", "true");
+      await expect(off.locator(".sel-opt-hint")).toHaveText("not approved");
+      await shot(page, "also-new-session-catching-up-picker");
+      await page.keyboard.press("Escape");
+      await sheet.locator("[data-ns-cancel]").click();
+      await expect(sheet).toHaveCount(0);
+      // From studio-mac's own "New session on studio-mac…": on it, its sentence under the form,
+      // Start off, no Approve, and the Permission row where it always is.
+      await page.goto(`${b.server.url}/?new=1&machine=${NAME}`);
+      await expect(machine).toHaveAttribute("data-value", NAME);
+      await sheet.locator("[data-ns-text]").fill("Look around.");
+      await expect(sheet.locator(".ns-status")).toHaveText(line);
+      await expect(sheet.locator("[data-ns-start]")).toBeDisabled();
+      await expect(sheet.locator("[data-ns-row=options]")).toHaveText(/^Permission\s*Safe$/);
+      await expect(sheet.getByText(/Approve this iPhone|doesn't trust/)).toHaveCount(0);
+      await shot(page, "also-new-session-catching-up");
       expect(await signs(page)).toBe(0);
     } finally {
       await b.close();
@@ -1623,13 +1751,15 @@ test.describe("what else an account shows", () => {
       await box.fill("");
       await page.locator("[data-ctl-ask]").click();
       const sheet = page.locator("[data-handoff]");
-      await expect(sheet.locator(".ns-status")).toHaveText("studio-mac is listening.");
-      await expect(sheet.getByText(/asks for|passkey|Touch ID/)).toHaveCount(0);
+      // All is well: the foot says nothing, and its line is there for what comes.
+      await expect(sheet.locator("[data-hs-text]")).toBeVisible();
+      await expect(sheet.locator(".ns-status[role='status']")).toHaveText("");
+      await expect(sheet.getByText(/asks for|passkey|Touch ID|is listening/)).toHaveCount(0);
       await sheet.locator("[data-hs-text]").fill("Check the refund rounding.");
       await sheet.locator("[data-hs-ask]").first().click();
       await expect(sheet.locator(".ns-status")).toHaveText("Confirm with Face ID…");
       await cancelFaceId();
-      await expect(sheet.locator(".ns-status")).toHaveText("studio-mac is listening.");
+      await expect(sheet.locator(".ns-status")).toHaveText("");
       await expect(sheet.locator("[data-hs-text]")).toHaveValue("Check the refund rounding.");
     } finally {
       await b.close();

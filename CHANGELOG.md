@@ -112,6 +112,15 @@ All notable changes to `sessionpipe-gui`. The format follows
   AM." The hour is said once: with a prompt open, on its card with Open on spacesheep.dev
   (on the phone the card stands alone), else under the field. The Inbox says it as it is,
   without "Allow and Deny are off:" in front.
+- **New session and Ask another agent offer nothing that would only be refused.** On an
+  iPhone that isn't approved they were a whole form with a faded Start and a grey footnote;
+  now each says "This iPhone isn't approved yet" with Approve this iPhone, and a message
+  written earlier is still there once it is. In the hour after approval the form stays and
+  Start waits under "This iPhone can send from 5:26 AM." instead of costing a Face ID. A
+  computer that hasn't added the iPhone is listed, off, as "not approved", and New session
+  opens on one that can start. When all is well the phone's sheet says nothing under the
+  form, the Permission row stays and reads "Safe" in the ink of the other values, and an
+  agent's allowance shows under its name only at 20% or less, never as a bare "Reset".
 
 ## [0.8.3] - 2026-11-16
 

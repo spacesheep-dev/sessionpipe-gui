@@ -119,6 +119,19 @@ export const SEND = {
   },
 } as const;
 
+/** New session and Ask another agent (control/startGate.ts): the sheet that stands in for a
+ *  form nothing on could start, a machine's few words in the picker, and the Permission row
+ *  where the machine sets the level. */
+export const START = {
+  notApproved: (Phone: string) => `${Phone} isn't approved yet`,
+  notHere: "not approved",
+  old: "update sessionpipe",
+  ownSettings: "Its own settings",
+  ownSettingsRefused: "Anything it asks permission for is refused.",
+  setOnMachine: "Set on the machine",
+  setOn: (machine: string) => `Set on ${machine}`,
+} as const;
+
 /** Machines on an account: the one row that says where this phone stands with every
  *  computer, then each computer's rows and what its Details hold. `n` of `m` computers. */
 export const MACHINES = {

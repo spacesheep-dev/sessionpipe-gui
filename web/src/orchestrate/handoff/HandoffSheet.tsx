@@ -8,7 +8,9 @@
 // permission and model only as advertised. It signs one `prompt` or `start` with
 // `reply_to` when the switch is on and `from` always, through the one send path
 // (control/command.ts), and closes without navigating: the asking session's page shows
-// the ask as a row at once. Loaded once the page is idle (HandoffHost.tsx mounts it).
+// the ask as a row at once. Whether it can ask is New session's gate (startGate.ts): not
+// approved, the sheet is the way to approve this phone; inside its hour, Ask waits. Loaded
+// once the page is idle (HandoffHost.tsx mounts it).
 import type { RunLevel } from "@shared/api";
 import { validModel } from "@shared/api";
 import {
@@ -20,8 +22,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { type SendControl, type SendState, sendWords, useSendStates } from "../../account/sendable";
-import { ActionButton, HarnessGlyph, Toggle } from "../../components/bits";
+import { useSendStates } from "../../account/sendable";
+import { ActionButton, EmptyState, HarnessGlyph, Toggle } from "../../components/bits";
 import { MoreButton } from "../../components/ContextMenu";
 import { Select, type SelectOption } from "../../components/Select";
 import { wrongOriginHere } from "../../control/api";
@@ -33,19 +35,9 @@ import type { HeldMeta } from "../../control/held";
 import { HELD_WORDS } from "../../control/heldWords";
 import { useGrant, useRpId } from "../../control/hooks";
 import { fixedPermission, permissionChoices, permissionToSend } from "../../control/newSessionState";
-import { sentence } from "../../control/PendingDevices";
-import {
-  canSign,
-  isCancel,
-  machineTakes,
-  setupLabel,
-  setupWords,
-  signerKind,
-  signHint,
-  tapWords,
-  updateWords,
-} from "../../control/signer";
-import { notSentWords, PERMISSION_LABEL, WRONG_ORIGIN } from "../../control/words";
+import { canSign, isCancel, setupLabel, signerKind, signHint, tapWords } from "../../control/signer";
+import { startGate } from "../../control/startGate";
+import { notSentWords, PERMISSION_LABEL } from "../../control/words";
 import { useListedSessions, useMachinesMap, useSession, useStore } from "../../data/hooks";
 import { useFocusTrap } from "../../lib/focus";
 import { harnessMark, STATE_LABEL, sessionTitle } from "../../lib/format";
@@ -53,6 +45,7 @@ import { useSheetDrag } from "../../lib/motion";
 import { navigate } from "../../lib/router";
 import { hintFor, matches, useShortcut } from "../../lib/shortcuts";
 import { ago, useNow } from "../../lib/time";
+import { START, ThisPhone } from "../../native/accountWords";
 import {
   askableSessions,
   defaultTarget,
@@ -90,30 +83,6 @@ function usePhone(): boolean {
     return () => mq.removeEventListener("change", up);
   }, []);
   return on;
-}
-
-/** Why this page cannot sign for the machine, in New session's own words. `send`: whether
- *  this device can send there (account/sendable.ts); `approve`: the way on is approving
- *  this device. */
-function blocker(
-  name: string,
-  c: SendControl & { keyTypes?: ("passkey" | "device")[] },
-  o: { wrong: string | null; secure: boolean; send: SendState },
-): { text: string; approve?: boolean } | null {
-  if (o.wrong) return { text: WRONG_ORIGIN(o.wrong) };
-  if (!o.secure) return { text: `${sentence(signHint())}.` };
-  if (!machineTakes(c)) return { text: updateWords(name) };
-  const s = o.send;
-  if (s.kind === "catching-up" && !s.account)
-    return {
-      text:
-        signerKind() === "device"
-          ? setupWords(name)
-          : `${name} trusts no passkey from this browser. Add this device from one it trusts.`,
-    };
-  const says = s.kind === "unapproved" || s.kind === "waiting" || s.kind === "catching-up" || s.kind === "old";
-  const w = says ? sendWords(s, name) : null;
-  return w?.long ? { text: w.long, approve: w.approve } : null;
 }
 
 /** What an ask was when it was pressed: all its "asked" needs after a confirm. */
@@ -258,7 +227,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   }, [open.session, text, target, folder, bringBack, permission, model]);
 
   const close = () => closeHandoff();
-  useFocusTrap(ref, !closing, { onClose: close, initial: "textarea" });
+  useFocusTrap(ref, !closing, { onClose: close, initial: "textarea, [data-ns-approve]" });
   useSheetDrag(ref, close, { handle: ".ns-grab, .ns-bar-title", enabled: phone && !closing });
   // Opened from a menu or the palette, whose own focus goes back where it was as they
   // close: take it once they have, and let Esc close the sheet from wherever it is.
@@ -266,7 +235,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
     const t = setTimeout(() => {
       const root = ref.current;
       if (root && !root.contains(document.activeElement))
-        root.querySelector<HTMLElement>("textarea")?.focus({ preventScroll: true });
+        root.querySelector<HTMLElement>("textarea, [data-ns-approve]")?.focus({ preventScroll: true });
     }, 120);
     return () => clearTimeout(t);
   }, []);
@@ -286,16 +255,22 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
 
   if (!session) return null;
 
-  // ----- what the machine advertises -----
-  const blocked = c ? blocker(name, c, { wrong, secure, send: sendTo(c) }) : null;
+  // ----- what the machine advertises, and whether an ask can go there -----
+  const gate = c ? startGate(name, c, { wrong, secure, hint: signHint(), send: sendTo(c) }) : null;
   const offersBack = c?.handoff === true;
   const oldDaemon = !!c && c.ask === undefined && c.handoff === undefined;
   const nobody = !others.length && !harnesses.length;
-  const fixed = harness && c && !blocked ? fixedPermission(c, harness, PERMISSION_LABEL) : null;
+  const fixed = harness && c ? fixedPermission(c, harness, PERMISSION_LABEL) : null;
+  const fixedValue = fixed && (
+    <span className="ns-fixed" title={START.setOn(name)}>
+      {fixed.value}
+    </span>
+  );
+  const fixedNote = fixed?.note ? <span className="ns-aside">{fixed.note}</span> : null;
 
   const canAsk =
     !!c &&
-    !blocked &&
+    !gate &&
     !!rp &&
     !!target &&
     (target.kind === "session" ? others.some((s) => s.key === target.key) : harnesses.includes(target.harness)) &&
@@ -389,12 +364,15 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   };
 
   // ----- the one-fact status line (UX-SPEC §2.4) -----
-  const status = ((): { text: string; tone?: "err"; approve?: boolean } | null => {
+  // `ready`: nothing is wrong and nothing under way; a phone's foot then says nothing.
+  const status = ((): { text: string; tone?: "err"; approve?: boolean; ready?: boolean } | null => {
+    // Inside the hour, one sentence says from when: also in place of a refusal for it.
+    if (gate?.kind === "cooling") return { text: gate.long };
     if (error) return { text: error, tone: "err" };
     if (tap) return { text: tapWords() };
     if (busy) return { text: `Sending to ${name}…` };
     if (!c) return { text: `Pair ${name} to ask from here.` };
-    if (blocked) return blocked;
+    if (gate?.kind === "machine") return { text: gate.long, approve: gate.approve };
     if (nobody) return { text: `${name} hasn't said which agents it runs.` };
     if (target?.kind === "new" && folderCheck && !folderCheck.ok)
       return {
@@ -412,11 +390,11 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
       return {
         text: `${name} is offline. It asks when the machine is back, within ${c.remote ? "a day" : "an hour"}.`,
       };
-    return { text: `${name} is listening.` };
+    return { text: `${name} is listening.`, ready: true };
   })();
   // A browser's only, as New session's: the app's Ask brings up its own prompt.
   const passkeyNote =
-    signerKind() === "passkey" && grant.exp === null && !blocked ? "Ask asks for your passkey, once today." : null;
+    signerKind() === "passkey" && grant.exp === null && !gate ? "Ask asks for your passkey, once today." : null;
 
   // ----- the rows -----
   const agentOptions: SelectOption<string>[] = [
@@ -596,10 +574,29 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
     close();
     navigate("/add-device");
   };
-  const statusLine = status && (
-    <p className={`ns-status ${status.tone === "err" ? "ns-status--err" : ""}`} role="status" aria-live="polite">
-      {status.text}
-      {status.approve && (
+  // On a phone the foot says one thing, and nothing when all is well, as New session's.
+  const line: typeof status = !phone
+    ? status
+    : status && !status.ready
+      ? status
+      : passkeyNote
+        ? { text: passkeyNote, ready: true }
+        : null;
+  // An Ask that is off is described by the line that says why, and by the passkey note.
+  const askWhy =
+    [line && (!canAsk || (phone && line.ready)) ? "hs-status" : null, passkeyNote && !phone ? "hs-passkey" : null]
+      .filter(Boolean)
+      .join(" ") || undefined;
+  // Kept in place while empty, so what it says later is read out where it was.
+  const statusLine = (line || phone) && (
+    <p
+      id="hs-status"
+      className={`ns-status ${line?.tone === "err" ? "ns-status--err" : ""}`}
+      role="status"
+      aria-live="polite"
+    >
+      {line?.text}
+      {line?.approve && (
         <>
           {" "}
           <button type="button" className="ns-status-link" onClick={approveHere} data-ns-approve>
@@ -608,6 +605,26 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
         </>
       )}
     </p>
+  );
+  // Not approved: nothing here could ask, so the sheet is the way to approve this device.
+  const unapproved = gate?.kind === "approve";
+  const empty = unapproved && (
+    <EmptyState
+      className="ns-empty"
+      title={START.notApproved(ThisPhone())}
+      actions={
+        <>
+          <button type="button" className="btn btn--primary" onClick={approveHere} data-ns-approve>
+            {setupLabel()}
+          </button>
+          {!phone && (
+            <button type="button" className="btn" onClick={close}>
+              Cancel
+            </button>
+          )}
+        </>
+      }
+    />
   );
 
   if (phone)
@@ -629,52 +646,55 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
           <h2 className="ns-bar-title" id="hs-title">
             Ask another agent
           </h2>
-          <button
-            type="button"
-            className="ns-bar-btn ns-bar-btn--start"
-            onClick={() => void ask()}
-            disabled={!canAsk}
-            aria-busy={busy || undefined}
-            aria-describedby={passkeyNote ? "hs-passkey" : undefined}
-            data-hs-ask
-          >
-            {busy ? "Asking…" : "Ask"}
-          </button>
+          {unapproved ? (
+            <span />
+          ) : (
+            <button
+              type="button"
+              className="ns-bar-btn ns-bar-btn--start"
+              onClick={() => void ask()}
+              disabled={!canAsk}
+              aria-busy={busy || undefined}
+              aria-describedby={askWhy}
+              data-hs-ask
+            >
+              {busy ? "Asking…" : "Ask"}
+            </button>
+          )}
           <span className="ns-grab" aria-hidden="true" />
         </header>
-        <div className="ns-scroll">
-          <div className="ns-group">{rows}</div>
-          <div className="ns-group ns-group--text">{message}</div>
-          {(offersBack || showPermission || fixed || showModel) && (
-            <div className="ns-group">
-              {offersBack && (
-                <div className="ns-row hs-switch" data-hs-row="back">
-                  <span className="ns-label hs-switch-label" id="hs-back">
-                    Bring the answer back
-                  </span>
-                  <span className="ns-value">{backSwitch}</span>
-                </div>
+        {unapproved ? (
+          <div className="ns-scroll">{empty}</div>
+        ) : (
+          <div className="ns-scroll">
+            <div className="ns-group">{rows}</div>
+            <div className="ns-group ns-group--text">{message}</div>
+            {(offersBack || showPermission || fixed || showModel) && (
+              <div className="ns-group">
+                {offersBack && (
+                  <div className="ns-row hs-switch" data-hs-row="back">
+                    <span className="ns-label hs-switch-label" id="hs-back">
+                      Bring the answer back
+                    </span>
+                    <span className="ns-value">{backSwitch}</span>
+                  </div>
+                )}
+                {showPermission && row("permission", "Permission", permissionSelect)}
+                {fixed && row("options", "Permission", fixedValue, fixedNote)}
+                {showModel && row("model", "Model", modelSelect)}
+              </div>
+            )}
+            <div className="ns-group-foot">
+              <HeldNotice h={held} focusBack={askButton} />
+              {statusLine}
+              {text && (
+                <button type="button" className="ns-discard" onClick={discard}>
+                  Discard draft
+                </button>
               )}
-              {showPermission && row("permission", "Permission", permissionSelect)}
-              {fixed && row("options", "Permission", <span className="ns-fixed">{fixed}</span>)}
-              {showModel && row("model", "Model", modelSelect)}
             </div>
-          )}
-          <div className="ns-group-foot">
-            <HeldNotice h={held} focusBack={askButton} />
-            {statusLine}
-            {passkeyNote && (
-              <p className="ns-passkey" id="hs-passkey">
-                {passkeyNote}
-              </p>
-            )}
-            {text && (
-              <button type="button" className="ns-discard" onClick={discard}>
-                Discard draft
-              </button>
-            )}
           </div>
-        </div>
+        )}
       </div>
     );
 
@@ -701,68 +721,75 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
         <h2 className="ns-title" id="hs-title">
           Ask another agent
         </h2>
-        {rows}
-        {message}
-        {(offersBack || showPermission || fixed || showModel) && (
-          <div className="ns-opts hs-opts">
-            {offersBack && (
-              <span className="ns-opt hs-switch" data-hs-row="back">
-                {backSwitch}
-                <span className="ns-opt-label hs-switch-label">Bring the answer back into this session</span>
-              </span>
+        {unapproved ? (
+          empty
+        ) : (
+          <>
+            {rows}
+            {message}
+            {(offersBack || showPermission || fixed || showModel) && (
+              <div className="ns-opts hs-opts">
+                {offersBack && (
+                  <span className="ns-opt hs-switch" data-hs-row="back">
+                    {backSwitch}
+                    <span className="ns-opt-label hs-switch-label">Bring the answer back into this session</span>
+                  </span>
+                )}
+                {showPermission && (
+                  <span className="ns-opt" data-hs-row="permission">
+                    <span className="ns-opt-label" id="hs-permission">
+                      Permission
+                    </span>
+                    {permissionSelect}
+                  </span>
+                )}
+                {fixed && (
+                  <span className="ns-opt" data-hs-row="options">
+                    <span className="ns-opt-label">Permission</span>
+                    {fixedValue}
+                    {fixedNote}
+                  </span>
+                )}
+                {showModel && (
+                  <span className="ns-opt" data-hs-row="model">
+                    <span className="ns-opt-label" id="hs-model">
+                      Model
+                    </span>
+                    {modelSelect}
+                  </span>
+                )}
+              </div>
             )}
-            {showPermission && (
-              <span className="ns-opt" data-hs-row="permission">
-                <span className="ns-opt-label" id="hs-permission">
-                  Permission
+            <HeldNotice h={held} focusBack={askButton} />
+            <footer className="ns-foot">
+              {statusLine}
+              <span className="ns-actions">
+                <MoreButton build={more} label="Draft" title={() => "Ask another agent"} className="ns-more" />
+                <button type="button" className="btn" onClick={close} data-hs-cancel>
+                  Cancel
+                </button>
+                <ActionButton
+                  className="btn btn--primary ns-start"
+                  onClick={ask}
+                  disabled={!canAsk && !busy}
+                  pending={busy}
+                  pendingLabel="Asking…"
+                  aria-describedby={askWhy}
+                  data-tip={passkeyNote ?? undefined}
+                  data-tip-side="top"
+                  data-hs-ask
+                >
+                  Ask {askKeys && <kbd className="ns-kbd">{askKeys}</kbd>}
+                </ActionButton>
+              </span>
+              {passkeyNote && (
+                <span className="sr-only" id="hs-passkey">
+                  {passkeyNote}
                 </span>
-                {permissionSelect}
-              </span>
-            )}
-            {fixed && (
-              <span className="ns-opt" data-hs-row="options">
-                <span className="ns-opt-label">Permission</span>
-                <span className="ns-fixed">{fixed}</span>
-              </span>
-            )}
-            {showModel && (
-              <span className="ns-opt" data-hs-row="model">
-                <span className="ns-opt-label" id="hs-model">
-                  Model
-                </span>
-                {modelSelect}
-              </span>
-            )}
-          </div>
+              )}
+            </footer>
+          </>
         )}
-        <HeldNotice h={held} focusBack={askButton} />
-        <footer className="ns-foot">
-          {statusLine}
-          <span className="ns-actions">
-            <MoreButton build={more} label="Draft" title={() => "Ask another agent"} className="ns-more" />
-            <button type="button" className="btn" onClick={close} data-hs-cancel>
-              Cancel
-            </button>
-            <ActionButton
-              className="btn btn--primary ns-start"
-              onClick={ask}
-              disabled={!canAsk && !busy}
-              pending={busy}
-              pendingLabel="Asking…"
-              aria-describedby={passkeyNote ? "hs-passkey" : undefined}
-              data-tip={passkeyNote ?? undefined}
-              data-tip-side="top"
-              data-hs-ask
-            >
-              Ask {askKeys && <kbd className="ns-kbd">{askKeys}</kbd>}
-            </ActionButton>
-          </span>
-          {passkeyNote && (
-            <span className="sr-only" id="hs-passkey">
-              {passkeyNote}
-            </span>
-          )}
-        </footer>
       </div>
     </>
   );

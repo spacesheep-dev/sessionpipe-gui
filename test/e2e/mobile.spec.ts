@@ -287,6 +287,13 @@ test.describe("phone: new session", () => {
       await page.locator(".sel-sheet .sel-opt", { hasText: d.name }).click();
       await sheet.locator("[data-ns-text]").fill("Run the e2e suite and tell me what fails.");
       await expect(sheet.locator("[data-ns-row=permission]")).toBeVisible();
+      // All is well: under the form at most one line, a browser's passkey note in the line's
+      // own size, and nothing that only says the machine is there.
+      const line = sheet.locator(".ns-group-foot .ns-status[role='status']");
+      await expect(line).toHaveCount(1);
+      await expect(line).toHaveText(/^(Start asks for your passkey, once today\.)?$/);
+      await expect(sheet.locator(".ns-passkey")).toHaveCount(0);
+      await expect(sheet.getByText(/is listening/)).toHaveCount(0);
       await sheet.locator(".ns-bar [data-ns-start]").click();
       await expect(page).toHaveURL(/\/s\/claude-code\//);
       await expect(page.locator(".starting .chat-bubble")).toHaveText("Run the e2e suite and tell me what fails.");

@@ -34,6 +34,7 @@ import { Link, navigate, useSearchParam } from "../../lib/router";
 import { actionById, useShortcut } from "../../lib/shortcuts";
 import { useNow } from "../../lib/time";
 import { pushUndo } from "../../lib/toasts";
+import { START } from "../../native/accountWords.new";
 import {
   cancelRun,
   copyWorkflowLink,
@@ -836,7 +837,9 @@ function StepRow({
                 ) : fixed ? (
                   <span className="wf-opt">
                     <span className="wf-opt-label">Permission</span>
-                    <span className="wf-fixed">{fixed}</span>
+                    <span className="wf-fixed" title={machine ? START.setOn(machine.name) : undefined}>
+                      {fixed.note ? `${fixed.value}. ${fixed.note}` : fixed.value}
+                    </span>
                   </span>
                 ) : null}
                 {showModel && (
