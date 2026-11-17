@@ -47,7 +47,8 @@ export function ToastCard({
     ],
     { title: () => t.title, subtitle: () => t.machine ?? "" },
   );
-  const verb = t.tool ? (SHELL.test(t.tool) ? " wants to run " : " wants to use ") : "";
+  // With nothing after it (a question, a plan), the tool's name stands alone.
+  const verb = t.tool && t.body ? (SHELL.test(t.tool) ? " wants to run " : " wants to use ") : "";
   const marked = t.kind === "needs-you" || t.kind === "error";
   return (
     <div

@@ -2175,6 +2175,71 @@ export class World {
     );
     this.push(s12, "turn.ended", { turn_id: "t_1", reason: "error", error: "rate_limit", ms: 16_000 }, t + 16_500);
     this.push(s12, "session.ended", { reason: "exit" }, t + 20_000);
+
+    // 13. needs you: a question from Claude Code, asked as a permission for its
+    // AskUserQuestion tool, tier 3: two questions of three options each, read here and
+    // answered on its computer (lib/format.ts isQuestion).
+    const s13 = this.add({
+      harness: "claude-code",
+      machine: "demo-laptop",
+      cwd: "~/code/explainer",
+      repo: "github.com/acme/explainer",
+      branch: "main",
+      model: "claude-fable-5-1",
+      title: "ElevenLabs explainer video",
+      tier: 3,
+    });
+    {
+      t = now - 11 * min;
+      this.push(s13, "session.started", { source: "startup" }, t);
+      s13.turn++;
+      const ask = "Make a 60-second explainer video with an ElevenLabs voice-over.";
+      this.push(s13, "turn.started", { turn_id: "t_1", prompt_chars: ask.length }, t + 500);
+      this.push(s13, "turn.progress", { turn: 1, user: ask, assistant: "", at: iso(t + 500) }, t + 600);
+      const input = {
+        questions: [
+          {
+            question: "Which voice should the explainer use?",
+            header: "Voice",
+            multiSelect: false,
+            options: [
+              { label: "Warm narrator", description: "Calm, mid-pitch, for a product story" },
+              { label: "Neutral", description: "Even and clear, for a how-to" },
+              { label: "ElevenLabs default", description: "The account's default voice" },
+            ],
+          },
+          {
+            question: "How long should the video be?",
+            header: "Length",
+            multiSelect: false,
+            options: [
+              { label: "30 seconds", description: "One idea" },
+              { label: "60 seconds", description: "The whole flow" },
+              { label: "90 seconds", description: "With a demo" },
+            ],
+          },
+        ],
+      };
+      const askAt = now - 3 * min;
+      this.push(
+        s13,
+        "tool.started",
+        { tool: "AskUserQuestion", call_id: "toolu_ask1", turn_id: "t_1", input },
+        askAt - 500,
+      );
+      this.push(
+        s13,
+        "attention.needed",
+        { attention_id: "att_ask1", kind: "permission", tool: "AskUserQuestion", message: "AskUserQuestion" },
+        askAt,
+      );
+      s13.script = {
+        kind: "attention",
+        attentionId: "att_ask1",
+        clearAt: now + rnd(240_000, 360_000),
+        resume: { kind: "idle", nextTurnAt: now + 10 * min },
+      };
+    }
   }
 }
 

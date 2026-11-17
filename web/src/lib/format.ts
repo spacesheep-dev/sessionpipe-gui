@@ -306,6 +306,8 @@ const SNAKE_TOOLS: Record<string, string> = {
   // Claude Code's plan review, asked as a permission: "… needs you · Plan".
   ExitPlanMode: "Plan",
   exit_plan_mode: "Plan",
+  // Claude Code's question to the person, asked as a permission (isQuestion).
+  AskUserQuestion: "Question",
 };
 
 /** A plan review: Claude Code asks to leave plan mode as an ordinary permission, so
@@ -313,6 +315,56 @@ const SNAKE_TOOLS: Record<string, string> = {
  *  is no permission and stays a row in the timeline. */
 export const isPlanReview = (a: { kind?: string; tool?: string }): boolean =>
   a.kind === "permission" && (a.tool === "ExitPlanMode" || a.tool === "exit_plan_mode");
+
+/** A question from the agent: Claude Code asks it as a permission for its AskUserQuestion
+ *  tool, and takes the answer as the option chosen, which an Allow cannot carry and a Deny
+ *  refuses. It is read here and answered on its computer. */
+export const isQuestion = (a: { kind?: string; tool?: string }): boolean =>
+  a.kind === "permission" && a.tool === "AskUserQuestion";
+
+/** An AskUserQuestion call's first question, from the call's input: its words, the labels
+ *  of up to four of its options, and how many questions follow it. Undefined when the
+ *  input holds no question. */
+export function askedQuestion(
+  input: Record<string, unknown> | undefined,
+): { text: string; options: string[]; more: number } | undefined {
+  const questions = input?.questions;
+  if (!Array.isArray(questions)) return undefined;
+  const words = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const q = (questions[0] ?? {}) as { question?: unknown; options?: unknown };
+  const text = words(q.question);
+  if (!text) return undefined;
+  const label = (o: unknown) => words(typeof o === "string" ? o : (o as { label?: unknown } | null)?.label);
+  const options = (Array.isArray(q.options) ? q.options : []).map(label).filter(Boolean).slice(0, 4);
+  return { text, options, more: questions.length - 1 };
+}
+
+/** A shell tool, whose message is the command it wants to run. */
+const SHELL_TOOL = /^(bash|shell|sh|zsh|powershell|run_shell_command|exec|terminal)$/i;
+export const isShellTool = (tool: string | undefined): boolean => !!tool && SHELL_TOOL.test(tool);
+
+/** The command a shell prompt's message names: the message, unless it is a sentence about
+ *  the request ("Claude needs your permission to use Bash"). */
+export const saidCommand = (msg: string | undefined): string | undefined =>
+  msg && !/\b(permission|wants|needs)\b/i.test(msg) ? msg : undefined;
+
+/** The longest request a list row shows whole beside Allow and Deny: about three lines of
+ *  mono at 320 points, and any number at a larger text size, never cut. */
+export const ROW_ASK_MAX = 100;
+
+/** Whether a list row (the Inbox, the Board's menu) shows this prompt's whole request, so
+ *  Allow and Deny can stand beside it: a request of its own (not a plan, whose plan the
+ *  row cannot hold, nor a bare tool name), not cut by the machine (it keeps 200 characters
+ *  and marks nothing), on one line, at most ROW_ASK_MAX characters, and for a shell tool
+ *  the command itself. Anything else is answered where it is shown whole: the session. */
+export function askFitsRow(a: { kind?: string; tool?: string; message?: string }): boolean {
+  if (isPlanReview(a)) return false;
+  const msg = attentionMessage(a)?.trim();
+  if (!msg) return false;
+  if ((a.message?.length ?? 0) >= 200 || msg.endsWith("…")) return false;
+  if (msg.includes("\n") || msg.length > ROW_ASK_MAX) return false;
+  return !isShellTool(a.tool) || !!saidCommand(msg);
+}
 
 /** A tool's name as a person reads it. An MCP tool arrives as `mcp__<server>__<tool>`
  *  and reads "github · search_issues"; a claude.ai connector's server drops its

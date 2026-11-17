@@ -33,6 +33,7 @@ import { agentLabel, agentMatches, openAgent } from "../lib/agents";
 import {
   attentionMessage,
   isPlanReview,
+  isQuestion,
   modelShort,
   repoShort,
   STATE_LABEL,
@@ -603,7 +604,8 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     if (want("Needs you")) {
       for (const s of sorted) {
         for (const a of s.openAttentions) {
-          if (a.kind !== "permission" || !answerable(a) || answered.has(a.attentionId)) continue;
+          // A question is answered on its computer: Allow cannot carry the option chosen.
+          if (a.kind !== "permission" || !answerable(a) || isQuestion(a) || answered.has(a.attentionId)) continue;
           const title = sessionTitle(s);
           for (const allow of [true, false]) {
             const verb = allow ? "Allow" : "Deny";

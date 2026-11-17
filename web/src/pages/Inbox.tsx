@@ -10,7 +10,9 @@
 // cannot use passkeys, notifications are off for the site or the app) is said once under
 // the bar, not on every row. A device not approved gets no buttons at all, and one notice
 // with the way to approve it. A prompt with an answer out, from here or anywhere, keeps
-// its row with the receipt in the pair's place until it clears, and counts no more.
+// its row with the receipt in the pair's place until it clears, and counts no more. Allow
+// and Deny stand only beside a request the row shows whole, wrapped; a plan or a longer
+// request is two lines and "Open". A question from the agent waits with the terminal's.
 import type { MachineControl } from "@shared/api";
 import {
   type MutableRefObject,
@@ -30,6 +32,7 @@ import { LensChip, LensNote } from "../components/LensChip";
 import { NotifyBlocked, NotifyMenu, notifyBlocked, useAppNotify } from "../components/NotifyToggle";
 import { BarStatus, PageBar } from "../components/PageBar";
 import {
+  AskedLine,
   answerItems,
   lensMenu,
   literalAsk,
@@ -45,7 +48,16 @@ import { answerState, useSessionSend } from "../control/useSend";
 import { type OpenAttention, useAppState, useFirstLoad, useLabels, useOpenAttentions, useStore } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
 import { phoneLayout, usePhoneLayout } from "../lib/device";
-import { ATTENTION_LABEL, attentionMessage, isPlanReview, oneLine, sessionTitle, toolLabel } from "../lib/format";
+import {
+  ATTENTION_LABEL,
+  askFitsRow,
+  attentionMessage,
+  isPlanReview,
+  isQuestion,
+  oneLine,
+  sessionTitle,
+  toolLabel,
+} from "../lib/format";
 import { attentionKey, hide, isHidden, useHidden } from "../lib/hidden";
 import { useListNav } from "../lib/keys";
 import { type LabelFilter, labelItems, labelPasses } from "../lib/labels";
@@ -348,8 +360,11 @@ function InboxRow({
     ],
     { title: () => sessionMenuTitle(s), subtitle: () => sessionMenuSubtitle(s) },
   );
-  const kind = ATTENTION_LABEL[a.kind] ?? a.kind;
+  const kind = ATTENTION_LABEL[isQuestion(a) ? "question" : a.kind] ?? a.kind;
   const msg = attentionMessage(a);
+  // Allow and Deny only beside a request the row shows whole (lib/format.ts askFitsRow);
+  // any other, a plan or a long command, offers Open, to the session that shows it whole.
+  const whole = askFitsRow(a);
   // With an answer out the orange glyph is the working ring, or a still hollow one while
   // the computer is offline (Answer says which).
   const [out, setOut] = useState<"going" | "held" | null>(null);
@@ -362,7 +377,7 @@ function InboxRow({
   return (
     <li
       ref={ref}
-      className={`inbox-row ${row.answerable ? "inbox-row--answerable" : "inbox-row--terminal"}`}
+      className={`inbox-row ${row.answerable ? `inbox-row--answerable${whole ? "" : " inbox-row--open"}` : "inbox-row--terminal"}`}
       data-attention={a.attentionId}
       data-session={s.key}
       data-flip={rowKey(row)}
@@ -395,7 +410,9 @@ function InboxRow({
         <span className="inbox-what">
           <span className={`inbox-kind ${a.tool ? "sr-only" : ""}`}>{kind}</span>
           {a.tool && <code className="inbox-tool">{toolLabel(a.tool)}</code>}
-          {msg ? (
+          {isQuestion(a) ? (
+            <AskedLine s={s} a={a} className="inbox-msg" />
+          ) : msg ? (
             <span className={`inbox-msg ${a.kind === "permission" && literalAsk(a.tool) ? "mono" : ""}`}>
               <Redacted text={oneLine(msg, 200)} />
             </span>
@@ -418,6 +435,8 @@ function InboxRow({
       {row.answerable && (
         <Answer
           row={row}
+          whole={whole}
+          onOpen={open}
           control={control}
           focused={cursor !== undefined}
           into={answerMenu}
@@ -436,9 +455,13 @@ function InboxRow({
  *  and the other steps back, through the passkey and the send. Once the answer is out
  *  (from here or anywhere) the receipt takes the pair's place, "Allowed · waiting for
  *  studio-mac", until the machine clears the prompt and the row leaves. A refused send, or
- *  an answer the machine refused, gives both back. */
+ *  an answer the machine refused, gives both back. Beside a request the row does not show
+ *  whole, one Open in the pair's place, as the row's tap: no menu items, no keys, never
+ *  off, and no reason under the page bar. */
 function Answer({
   row,
+  whole,
+  onOpen,
   control,
   focused = false,
   into,
@@ -446,6 +469,10 @@ function Answer({
   onOut,
 }: {
   row: OpenAttention;
+  /** The row shows the whole request (lib/format.ts askFitsRow): Allow and Deny, else Open. */
+  whole: boolean;
+  /** What a tap on the row does: the session beside the page, or pushed on a phone. */
+  onOpen: (background?: boolean) => void;
   control?: MachineControl;
   /** The row under the list cursor: `a` / `d` answer it (lib/shortcuts.ts). */
   focused?: boolean;
@@ -487,26 +514,28 @@ function Answer({
   useEffect(() => onOut(lead), [lead, onOut]);
   useEffect(() => () => onOut(null), [onOut]);
   // The inbox row wins over a session open beside the page (priority 2 > the panel's 0).
-  const canKey = focused && !off && chosen === null;
+  const canKey = whole && focused && !off && chosen === null;
   useShortcut("inbox.allow", () => answer(true), { enabled: canKey, priority: 2 });
   useShortcut("inbox.deny", () => answer(false), { enabled: canKey, priority: 2 });
   // Off for a standing reason (not paired, no passkeys here, not approved): the page says
-  // it once. A moment's state (sent, a passkey prompt, closed) stays on the row.
-  const standing = off && !status ? reason : null;
+  // it once, for the rows that show Allow and Deny. A moment's state (sent, a passkey
+  // prompt, closed) stays on the row.
+  const offFor = off && !status ? reason : null;
+  const standing = whole ? offFor : null;
   const id = rowKey(row);
   useEffect(() => {
     report(id, standing ? { reason: standing, tag } : null);
   }, [id, standing, tag, report]);
   useEffect(() => () => report(id, null), [id, report]);
   useLayoutEffect(() => {
-    into.current = answerItems(a.tool, st, answer);
+    into.current = whole ? answerItems(a.tool, st, answer) : [];
   });
   const noteId = useId();
   const note = send.error ? (
     <span className="inbox-note inbox-note--err" id={noteId}>
       {send.error}
     </span>
-  ) : reason && !standing ? (
+  ) : reason && !offFor ? (
     <span className="inbox-note" id={noteId}>
       {reason}
     </span>
@@ -541,7 +570,13 @@ function Answer({
         note
       )}
       {/* Not approved: no pair at all (the page's notice has the way on); the row still opens. */}
-      {!status && tag !== "unapproved" && (
+      {!status && tag !== "unapproved" && !whole && (
+        // Deny's face: it answers nothing, it opens the session where the request is whole.
+        <button type="button" className="btn btn--sm inbox-open" onClick={(e) => onOpen(e.metaKey || e.ctrlKey)}>
+          Open
+        </button>
+      )}
+      {!status && tag !== "unapproved" && whole && (
         <>
           <ActionButton
             className="btn btn--sm btn--deny"

@@ -94,6 +94,9 @@ export const NEW_WORDS = {
   answerDenied: "Denied",
   answerPlanApproved: "Plan approved",
   answerPlanChanges: "Asked for changes",
+  questionAsked: "Claude has a question.",
+  questionMore: (n: number) => `+${n} more ${n === 1 ? "question" : "questions"}`,
+  questionWhere: (machine?: string) => `answer it on ${machine ?? "its computer"}`,
 } as const;
 
 /** Whether this phone can send to a computer (account/sendable.ts), the same on every screen

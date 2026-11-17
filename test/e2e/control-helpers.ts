@@ -247,18 +247,28 @@ export async function postSession(
 }
 
 /** A Claude Code session on `machine` whose permission prompt was raised `agoMs` ago, as
- *  its hooks send one; `clear()` closes the prompt again. `command`: what Bash asks to run
- *  (npm run deploy). */
+ *  its hooks send one (`npm run deploy` for Bash, unless `tool` and `message` say
+ *  otherwise); with `input`, at tier 3, the call's `tool.started` carries it. `clear()`
+ *  closes the prompt again. */
 export async function postPrompt(
   token: string,
-  o: { machine: string; title: string; agoMs: number; harness?: string; command?: string },
-): Promise<{ key: string; attention: string; clear: () => Promise<void> }> {
+  o: {
+    machine: string;
+    title: string;
+    agoMs: number;
+    harness?: string;
+    tool?: string;
+    message?: string;
+    input?: Record<string, unknown>;
+  },
+): Promise<{ key: string; id: string; attention: string; clear: () => Promise<void> }> {
   const harness = o.harness ?? "claude-code";
+  const tool = o.tool ?? "Bash";
   const id = randomUUID();
   const attention = `perm-${id.slice(0, 8)}`;
   let seq = 0;
-  // Three events half a second apart, the prompt last.
-  let clock = Date.now() - o.agoMs - 1_500;
+  // The events half a second apart, the prompt last.
+  let clock = Date.now() - o.agoMs - 1_500 - (o.input ? 500 : 0);
   const ev = (type: string, data: Record<string, unknown>, hook: string) => {
     clock = type === "attention.cleared" ? Date.now() : clock + 500;
     return {
@@ -266,7 +276,7 @@ export async function postPrompt(
       id: ulid(clock),
       type,
       time: new Date(clock).toISOString(),
-      tier: 1,
+      tier: o.input ? 3 : 1,
       harness: { name: harness, version: "2.1.296", event: hook },
       session: { id, seq: seq++, machine: o.machine, cwd: "/Users/e2e/code", title: o.title, title_source: "custom" },
       privacy: { rulesets: ["secrets@1"], pii: false },
@@ -282,14 +292,16 @@ export async function postPrompt(
   await post([
     ev("session.started", { source: "startup" }, "SessionStart"),
     ev("turn.started", { turn_id: "t1", prompt_chars: 20 }, "UserPromptSubmit"),
+    ...(o.input ? [ev("tool.started", { tool, call_id: "toolu_1", turn_id: "t1", input: o.input }, "PreToolUse")] : []),
     ev(
       "attention.needed",
-      { attention_id: attention, kind: "permission", tool: "Bash", message: o.command ?? "npm run deploy" },
+      { attention_id: attention, kind: "permission", tool, message: o.message ?? "npm run deploy" },
       "PermissionRequest",
     ),
   ]);
   return {
     key: `${harness}:${id}`,
+    id,
     attention,
     clear: async () => {
       await post([ev("attention.cleared", { attention_id: attention, how: "answered" }, "PreToolUse")]);

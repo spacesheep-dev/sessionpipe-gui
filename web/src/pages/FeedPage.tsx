@@ -19,7 +19,7 @@ import { LensChip, LensNote } from "../components/LensChip";
 import { PageBar } from "../components/PageBar";
 import { BesideButton, Inline, lensMenu, useBackgroundMenu, useStickyTop } from "../components/SessionCard";
 import { useAppState, useLabels, useStore } from "../data/hooks";
-import { eventSummary, harnessMark, oneLine, sessionTitle, storedKey, toolLabel } from "../lib/format";
+import { eventSummary, harnessMark, isQuestion, oneLine, sessionTitle, storedKey, toolLabel } from "../lib/format";
 import { useListNav } from "../lib/keys";
 import { type LabelFilter, labelPasses, labelQuery } from "../lib/labels";
 import { absoluteUrl, copyItem, openOutside } from "../lib/menus";
@@ -142,7 +142,12 @@ export function eventWords(e: StoredEvent): string {
     case "files.changed":
       return "Changed files";
     case "attention.needed":
-      return d.kind === "permission" ? "Asks permission" : d.kind === "question" ? "Asks a question" : "Needs you";
+      // Claude Code asks its questions as permissions (lib/format.ts isQuestion).
+      return d.kind === "question" || isQuestion({ kind: str(d.kind), tool: str(d.tool) })
+        ? "Asks a question"
+        : d.kind === "permission"
+          ? "Asks permission"
+          : "Needs you";
     case "attention.cleared":
       return "Answered";
     case "subagent.started":

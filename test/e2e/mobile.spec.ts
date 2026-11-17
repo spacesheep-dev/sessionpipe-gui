@@ -525,7 +525,7 @@ test.describe("phone: the composer", () => {
         machine: `unpaired-${Math.random().toString(36).slice(2, 8)}`,
         title: "Folded on a phone",
         agoMs: 5_000,
-        command,
+        message: command,
       });
       const colon = p.key.indexOf(":");
       await page.goto(`${CONTROL_BASE}${sessionUrl(p.key.slice(0, colon), p.key.slice(colon + 1))}`);
@@ -657,6 +657,103 @@ test.describe("phone: a plan review", () => {
       expect(Math.abs(keep.y - approve.y), "one row").toBeLessThan(1);
       expect(keep.x, "Approve plan on the right").toBeLessThan(approve.x);
     } finally {
+      await d.stop();
+    }
+  });
+});
+
+// A shell prompt has one shape at every size, "Allow Bash to run:" over its command, so at
+// 320 no "?" is left on a line of its own; an Inbox row shows a short request whole beside
+// Deny | Allow, and a longer one as two lines and Open, which pushes its session.
+test.describe("phone: a request shown whole", () => {
+  test.skip(({ isMobile }) => !isMobile, "phone project only");
+
+  const SHORT = "npm run deploy -- --target staging";
+  /** 140 characters, a chain of two. */
+  const LONG =
+    "rsync -avz --delete --exclude .env ./dist/ deploy@staging.acme.dev:/srv/billing/new && ssh deploy@staging.acme.dev systemctl restart billing";
+
+  test("at 320 a shell prompt reads 'Allow Bash to run:' over its command, with no lone '?'; a cut one ends in '…' and says so", async ({
+    context,
+    page,
+  }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `shape-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const asked = await postPrompt(token, { machine: d.name, title: "Deploy", agoMs: 3_000, message: SHORT });
+    // The machine keeps a message's first 200 characters, and marks nothing.
+    const cutAt = `${SHORT} --note "${"a".repeat(200)}"`.slice(0, 200);
+    const cut = await postPrompt(token, { machine: d.name, title: "Deploy, noted", agoMs: 3_000, message: cutAt });
+    const lines = (l: Locator) =>
+      l.evaluate((el) =>
+        Math.round(el.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(el).lineHeight)),
+      );
+    try {
+      await page.setViewportSize({ width: 320, height: 568 });
+      await page.goto(`${CONTROL_BASE}${sessionUrl("claude-code", asked.id)}`);
+      const card = page.locator(`.ctl-answer[data-attention="${asked.attention}"]`);
+      await expect(card.locator(".ctl-q-text")).toHaveText("Allow Bash to run:");
+      await expect(card.locator(".ctl-cmd-block")).toHaveText(SHORT);
+      // The question and the command each on one line, and no "?" anywhere on the card.
+      expect(await lines(card.locator(".ctl-q"))).toBe(1);
+      expect(await lines(card.locator(".ctl-cmd-block > div"))).toBe(1);
+      expect(await card.innerText()).not.toContain("?");
+      await expect(card.getByRole("button", { name: "Allow" })).toBeVisible();
+      await noSidewaysScroll(page);
+      // One command cut by the machine: the same shape, its end marked.
+      await page.goto(`${CONTROL_BASE}${sessionUrl("claude-code", cut.id)}`);
+      const block = page.locator(`.ctl-answer[data-attention="${cut.attention}"] .ctl-cmd-block`);
+      await expect(block.locator("> div")).toHaveText(`${cutAt}…`);
+      await expect(block).toHaveAttribute("title", "The machine sends the first 200 characters");
+    } finally {
+      await asked.clear();
+      await cut.clear();
+      await d.stop();
+    }
+  });
+
+  test("an Inbox row at 320: a short command whole beside Deny | Allow; a 140-character one offers Open, which pushes its session with the whole command", async ({
+    context,
+    page,
+  }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `rows-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const short = await postPrompt(token, { machine: d.name, title: "Deploy", agoMs: 3_000, message: SHORT });
+    const long = await postPrompt(token, { machine: d.name, title: "Ship the release", agoMs: 4_000, message: LONG });
+    try {
+      await page.setViewportSize({ width: 320, height: 568 });
+      await page.goto(`${CONTROL_BASE}/inbox`);
+      const shortRow = page.locator(`.inbox-row[data-attention="${short.attention}"]`);
+      const what = shortRow.locator(".inbox-what");
+      // Wrapped whole: no ellipsis, nothing past the row's edge or under a clamp.
+      await expect(what.locator(".inbox-msg")).toHaveText(SHORT);
+      expect(
+        await what.evaluate(
+          (el) =>
+            el.scrollWidth <= el.clientWidth &&
+            el.scrollHeight <= el.clientHeight &&
+            getComputedStyle(el.querySelector(".inbox-msg")!).textOverflow !== "ellipsis",
+        ),
+      ).toBe(true);
+      await expect(shortRow.getByRole("button", { name: "Deny" })).toBeVisible();
+      await expect(shortRow.getByRole("button", { name: "Allow" })).toBeVisible();
+      const longRow = page.locator(`.inbox-row[data-attention="${long.attention}"]`);
+      await expect(longRow.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      const open = longRow.getByRole("button", { name: "Open" });
+      await expect(open).toBeVisible();
+      expect((await open.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await noSidewaysScroll(page);
+      // Open is the row's tap: its session's page, pushed, with Inbox behind Back.
+      await open.click();
+      await expect(page).toHaveURL(new RegExp(`/s/claude-code/${long.id}$`));
+      await expect(page.locator(".bar-back-label")).toHaveText("Inbox");
+      await expect(page.locator(".ctl-cmd-block")).toHaveText(LONG.replace(" && ", "&& "));
+    } finally {
+      await short.clear();
+      await long.clear();
       await d.stop();
     }
   });

@@ -41,19 +41,8 @@
 .ctl-tool {
   font-weight: 600;
 }
-.ctl-cmd {
-  padding: 1px 6px;
-  border-radius: var(--radius-inner);
-  background: var(--bg-3);
-  color: var(--fg);
-  font-size: var(--text-sm);
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-  -webkit-user-select: text;
-  user-select: text;
-}
-/* A chained command, one step per line under the question's words (not the dot): plain
-   mono text, nothing behind it. The steps after the first stand in by two characters, and
+/* The command, under the question's words (not the dot): plain mono text, nothing behind
+   it, a chain one step per line. The steps after the first stand in by two characters, and
    a step that wraps hangs two more, so a token breaks only when it alone is too wide.
    Unfolded, it scrolls inside half the view. */
 .ctl-cmd-block {
@@ -184,6 +173,44 @@
 }
 .ctl-plan > .ctl-more {
   margin-inline-start: 0;
+}
+/* A question from the agent: its options under it to read, as an inset group of their
+   labels in muted text with hairlines between, and nothing that looks pressable (no
+   chevron, no press state): it is answered on its computer. "+1 more question" after it.
+   The group is a tint of the ink, so it shows on the strip's ground in either scheme. */
+.ctl-options {
+  grid-column: 1;
+  min-width: 0;
+  max-width: 32rem;
+  margin: 0 0 0 16px;
+  padding: 0;
+  list-style: none;
+  border-radius: var(--radius-pop);
+  background: color-mix(in oklch, var(--fg) 5%, transparent);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+}
+.ctl-options > li {
+  position: relative;
+  padding: 6px 12px;
+  overflow-wrap: anywhere;
+}
+.ctl-options > li + li::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 0;
+  border-top: var(--hairline) solid var(--line-2);
+}
+.ctl-questions-more {
+  grid-column: 1;
+  margin: 0;
+  padding-left: 16px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
 }
 .ctl-plan.is-whole > .ctl-plan-text {
   max-height: 50dvh;
@@ -345,6 +372,13 @@
   .ctl-answer > .ctl-answer-note {
     padding-left: 0;
   }
+  /* A question's options: the card's width, as a phone's inset group is. */
+  .ctl-answer > .ctl-options {
+    margin-left: 0;
+  }
+  .ctl-answer > .ctl-questions-more {
+    padding-left: 0;
+  }
   .ctl-q {
     flex: none;
   }
@@ -385,13 +419,6 @@
   }
   .ctl-ask textarea {
     font-size: max(1rem, 16px);
-  }
-  /* The command is one thing: it moves to the next line whole, its "?" with it, and
-     only a command longer than the line wraps inside itself. */
-  .ctl-q .ctl-cmd {
-    display: inline-block;
-    max-width: 100%;
-    vertical-align: baseline;
   }
   /* The line under the field at a footnote's size, and the way on, there and on the folded
      card (Approve this iPhone, Retry now, Open on spacesheep.dev, How to pair), as a phone

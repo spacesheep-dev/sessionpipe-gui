@@ -9,7 +9,7 @@
 // touch) opens the session's menu; resting on a row warms its transcript (data/prefetch).
 // The class names are the e2e contract (`article.card`, `.card-status`, `.card-meta`…),
 // so they stay even though nothing here is a card any more.
-import type { AgentRun, SessionFlag, SessionKey, SessionSummary } from "@shared/api";
+import type { AgentRun, Attention, SessionFlag, SessionKey, SessionSummary } from "@shared/api";
 import {
   Fragment,
   type MutableRefObject,
@@ -28,12 +28,16 @@ import { useAppState, useStore, useUnread } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
 import { agentFound, agentsChoice, agentsRunningFact, agentsShown, agentTabKey, setAgentsChoice } from "../lib/agents";
 import { useAnswerClock } from "../lib/answerWindow";
+import { useAskedInput } from "../lib/askedInput";
 import { usePhoneLayout } from "../lib/device";
 import {
   ATTENTION_LABEL,
+  askedQuestion,
+  askFitsRow,
   attentionMessage,
   harnessMark,
   isPlanReview,
+  isQuestion,
   oneLine,
   repoShort,
   STATE_LABEL,
@@ -247,7 +251,7 @@ export const SessionCard = memo(function SessionCard({
       data-open={open ? "" : undefined}
       {...menu}
     >
-      {attention?.kind === "permission" && <CardAnswer s={s} into={answer} />}
+      {attention?.kind === "permission" && <CardAnswer s={s} into={answer} shown={showTools} />}
       <div className="card-row" ref={rowRef} {...warm}>
         <SwipePanes lead="Label" trail={hidden ? "Unhide" : "Hide"} />
         {agents.length > 0 && (
@@ -308,7 +312,7 @@ export const SessionCard = memo(function SessionCard({
             {attention && (
               <span className={`card-kind ${attnTool ? "sr-only" : ""}`}>
                 {attnTool ? " · " : ""}
-                {ATTENTION_LABEL[attention.kind] ?? attention.kind}
+                {ATTENTION_LABEL[isQuestion(attention) ? "question" : attention.kind] ?? attention.kind}
               </span>
             )}
             {attnTool && <code className="card-tool">{toolLabel(attnTool)}</code>}
@@ -327,7 +331,9 @@ export const SessionCard = memo(function SessionCard({
           </span>
 
           <span className="card-line">
-            {attention ? (
+            {attnTool && attention && isQuestion(attention) ? (
+              <AskedLine s={s} a={attention} className="card-attn" />
+            ) : attention ? (
               <span className={`card-attn ${literalAsk(attnTool) ? "mono" : ""}`}>
                 {attention.message && showTools ? (
                   attnTool ? (
@@ -522,8 +528,10 @@ function KidRow({
 }
 
 /** Keeps a row's Allow / Deny menu items current: mounted only while a permission is
- *  open, so the other rows never pay for the send's state. */
-function CardAnswer({ s, into }: { s: SessionSummary; into: MutableRefObject<MenuList> }) {
+ *  open, so the other rows never pay for the send's state. Only beside a request the row
+ *  shows (`shown`: the tier lens lets it) and shows whole (askFitsRow), and never for a
+ *  question: anything else is answered on the session's page, where it is shown whole. */
+function CardAnswer({ s, into, shown }: { s: SessionSummary; into: MutableRefObject<MenuList>; shown: boolean }) {
   const { machines } = useAppState();
   const control = s.machine ? machines.get(s.machine)?.control : undefined;
   const a = s.openAttentions.find((x) => x.kind === "permission");
@@ -532,7 +540,7 @@ function CardAnswer({ s, into }: { s: SessionSummary; into: MutableRefObject<Men
   const st = a ? answerState(s, a, control, send, now) : null;
   useLayoutEffect(() => {
     into.current =
-      a && st
+      a && st && shown && !isQuestion(a) && askFitsRow(a)
         ? answerItems(a.tool, st, (allow) =>
             send.onSend({ kind: "permission.answer", attentionId: a.attentionId, allow }).catch(() => {}),
           )
@@ -783,9 +791,23 @@ const tokenMsSafe = () => (reducedMotion() ? 0 : tokenMs("--dur", 200));
  *  mono without its ticks, emphasis and links are their words, a heading or quote mark
  *  goes. Placeholders for removed secrets keep their highlight. */
 /** Whether a tool's request is a literal a person might copy (a command, a path), set in
- *  mono; an MCP tool's is a sentence ("Open a pull request on acme/billing"), in the UI
- *  face. */
-export const literalAsk = (tool: string | undefined): boolean => !!tool && !tool.startsWith("mcp__");
+ *  mono; an MCP tool's is a sentence ("Open a pull request on acme/billing"), and so is a
+ *  question from the agent, in the UI face. */
+export const literalAsk = (tool: string | undefined): boolean =>
+  !!tool && !tool.startsWith("mcp__") && !isQuestion({ kind: "permission", tool });
+
+/** A question row's request: the question, from the call's input where the session sent
+ *  it, beside the "Question" chip; nothing (the chip alone) until it is read, or where it
+ *  was not sent. Its own component, so only a question's row reads the input. */
+export function AskedLine({ s, a, className }: { s: SessionSummary; a: Attention; className: string }) {
+  const { input } = useAskedInput(s, a);
+  const q = askedQuestion(input);
+  return q ? (
+    <span className={className}>
+      <Redacted text={oneLine(q.text, 240)} />
+    </span>
+  ) : null;
+}
 
 export function Inline({ text }: { text: string }) {
   const parts = text.split(/(`[^`\n]+`)/g);

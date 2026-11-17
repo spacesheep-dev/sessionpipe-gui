@@ -165,6 +165,28 @@
 .inbox-row--terminal .inbox-msg {
   color: var(--fg-3);
 }
+/* A row with Allow and Deny shows its whole request, wrapped, the lines after the first
+   starting under the tool's name, never cut (lib/format.ts askFitsRow keeps it short). One
+   that is not shown whole (a plan, a long request) is two lines ending in "…", and Open. */
+.inbox-row--answerable .inbox-what {
+  display: block;
+  white-space: normal;
+}
+.inbox-row--answerable :is(.inbox-tool, .inbox-kind:not(.sr-only)) {
+  margin-right: 8px;
+}
+.inbox-row--answerable .inbox-msg {
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+.inbox-row--open .inbox-what {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
 .inbox-where {
   grid-area: where;
   justify-self: end;

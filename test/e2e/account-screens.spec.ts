@@ -1474,9 +1474,10 @@ test.describe("what else an account shows", () => {
         const approve = card.getByRole("link", { name: "Approve this iPhone" });
         await expect(approve, at).toHaveAttribute("href", "/add-device");
         expect((await approve.boundingBox())!.height, at).toBeGreaterThanOrEqual(44);
-        // Read in that order: the question, the sentence, the link.
+        // Read in that order: the question and its command, the sentence, the link.
         expect(await card.evaluate((el) => Array.from(el.children, (c) => c.className.split(" ").pop())), at).toEqual([
           "ctl-q",
+          "ctl-cmd-block",
           "ctl-answer-note",
           "ctl-approve",
         ]);
@@ -2136,6 +2137,124 @@ test.describe("what else an account shows", () => {
       ]);
       expect(lineBox!.y + lineBox!.height).toBeLessThanOrEqual(allowBox!.y);
       expect(await wide()).toBe(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("a question from the agent, at every width: its words and options on its card, where to answer it, and nothing to press, count or answer anywhere", async ({
+    browser,
+  }) => {
+    test.setTimeout(180_000);
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    /** Claude Code's AskUserQuestion as its hooks send it: a permission whose message is the
+     *  tool's name; at tier 3 the call's input has the questions, at tier 2 nothing. */
+    const question = (id: string, title: string, tier: 2 | 3) => {
+      const s = new Session(id, "claude-code", Date.now() - 8_000);
+      const on = { tier, session: { machine: NAME, cwd: "/Users/me/explainer", title } };
+      const input = {
+        questions: [
+          {
+            question: "Which voice should the explainer use?",
+            header: "Voice",
+            multiSelect: false,
+            options: ["Warm narrator", "Neutral", "ElevenLabs default"].map((label) => ({ label, description: "" })),
+          },
+          {
+            question: "How long should the video be?",
+            header: "Length",
+            multiSelect: false,
+            options: ["30 seconds", "60 seconds", "90 seconds"].map((label) => ({ label, description: "" })),
+          },
+        ],
+      };
+      b.ss.push([
+        s.ev("session.started", { source: "startup" }, on),
+        s.ev("turn.started", { turn_id: "t1" }, on),
+        s.ev(
+          "tool.started",
+          { tool: "AskUserQuestion", call_id: `toolu_${id}`, turn_id: "t1", ...(tier === 3 ? { input } : {}) },
+          on,
+        ),
+        s.ev(
+          "attention.needed",
+          { attention_id: `perm-${id}`, kind: "permission", tool: "AskUserQuestion", message: "AskUserQuestion" },
+          on,
+        ),
+      ]);
+    };
+    const badge = page.locator("a[data-nav='inbox'] .nav-badge >> visible=true");
+    const wide = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    try {
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      await trusted(b);
+      question("s-explainer", "Hyperframe ElevenLabs explainer video", 3);
+      question("s-voice", "Pick a voice", 2);
+      for (const [w, h] of [
+        [320, 568],
+        [393, 852],
+        [820, 1180],
+      ] as const) {
+        await page.setViewportSize({ width: w, height: h });
+        const at = `${w}x${h}`;
+        // The board: "Question" and the question in the UI's face, or the chip alone; the
+        // row's menu answers nothing.
+        await page.goto(b.server.url);
+        const card = page.locator("article.card", { hasText: "Hyperframe ElevenLabs explainer video" });
+        await expect(card.locator(".card-tool"), at).toHaveText("Question", { timeout: 15_000 });
+        await expect(card.locator(".card-attn"), at).toHaveText("Which voice should the explainer use?");
+        await expect(card.locator(".card-attn"), at).not.toHaveClass(/mono/);
+        const plain = page.locator("article.card", { hasText: "Pick a voice" });
+        await expect(plain.locator(".card-tool"), at).toHaveText("Question");
+        await expect(plain.locator(".card-attn"), at).toHaveCount(0);
+        await card.locator("a.card-link").click({ button: "right" });
+        await expect(page.getByRole("menuitem", { name: "Hide", exact: true }), at).toBeVisible();
+        await expect(page.getByRole("menuitem", { name: /^(Allow|Deny)/ }), at).toHaveCount(0);
+        await page.keyboard.press("Escape");
+        await expect(badge, at).toHaveCount(0);
+        // The Inbox: with the prompts waiting in a terminal, the question beside its chip,
+        // nothing to press, and nothing that needs an answer from here.
+        await page.goto(`${b.server.url}/inbox`);
+        const terminal = page.locator("section[aria-label='Waiting in a terminal']");
+        const row = terminal.locator(".inbox-row[data-session='claude-code:s-explainer']");
+        await expect(row.locator(".inbox-msg"), at).toHaveText("Which voice should the explainer use?", {
+          timeout: 15_000,
+        });
+        await expect(terminal.locator(".inbox-row[data-session='claude-code:s-voice'] .inbox-tool"), at).toHaveText(
+          "Question",
+        );
+        await expect(page.getByRole("button", { name: /^(Allow|Deny|Open)$/ }), at).toHaveCount(0);
+        await expect(page.getByText(/needs? an answer/), at).toHaveCount(0);
+        await expect(badge, at).toHaveCount(0);
+        expect(await wide(), at).toBe(0);
+        // Its card: the question, its options to read, how many more, and where to answer it;
+        // no Allow, no Deny, not even a's key, and the field as it is.
+        await page.goto(`${b.server.url}/s/claude-code/s-explainer`);
+        const ask = page.locator(".ctl-answer[data-answer='question']");
+        await expect(ask.locator(".ctl-q-text"), at).toHaveText("Which voice should the explainer use?", {
+          timeout: 15_000,
+        });
+        await expect(ask.locator(".ctl-options li"), at).toHaveText(["Warm narrator", "Neutral", "ElevenLabs default"]);
+        await expect(ask.locator(".ctl-options button, .ctl-options a"), at).toHaveCount(0);
+        await expect(ask.locator(".ctl-questions-more"), at).toHaveText("+1 more question");
+        await expect(ask.locator(".ctl-answer-note"), at).toHaveText(`answer it on ${NAME}`);
+        await expect(page.getByRole("button", { name: /^(Allow|Deny)$/ }), at).toHaveCount(0);
+        await expect(page.locator("textarea").first(), at).toBeEnabled();
+        await page.keyboard.press("a");
+        await page.waitForTimeout(300);
+        expect(b.ss.jobs, at).toEqual([]);
+        expect(await wide(), at).toBe(0);
+        // Where the session sent no input: one sentence.
+        await page.goto(`${b.server.url}/s/claude-code/s-voice`);
+        await expect(page.locator(".ctl-answer[data-answer='question'] .ctl-q-text"), at).toHaveText(
+          "Claude has a question.",
+          { timeout: 15_000 },
+        );
+        await expect(page.locator(".ctl-options"), at).toHaveCount(0);
+      }
     } finally {
       await b.close();
     }

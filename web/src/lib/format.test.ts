@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { attentionMessage, isPlanReview, toolLabel } from "./format";
+import {
+  askedQuestion,
+  askFitsRow,
+  attentionMessage,
+  isPlanReview,
+  isQuestion,
+  ROW_ASK_MAX,
+  saidCommand,
+  toolLabel,
+} from "./format";
 
 describe("toolLabel", () => {
   it("reads an MCP tool as server · tool", () => {
@@ -22,6 +31,97 @@ describe("toolLabel", () => {
   });
   it("names Claude Code's plan review Plan", () => {
     expect(toolLabel("ExitPlanMode")).toBe("Plan");
+  });
+  it("names Claude Code's question to the person Question", () => {
+    expect(toolLabel("AskUserQuestion")).toBe("Question");
+  });
+});
+
+describe("isQuestion", () => {
+  it("is Claude Code's AskUserQuestion, asked as a permission", () => {
+    expect(isQuestion({ kind: "permission", tool: "AskUserQuestion" })).toBe(true);
+  });
+  it("is nothing else", () => {
+    expect(isQuestion({ kind: "permission", tool: "Bash" })).toBe(false);
+    expect(isQuestion({ kind: "permission", tool: "ExitPlanMode" })).toBe(false);
+    expect(isQuestion({ kind: "question", tool: "AskUserQuestion" })).toBe(false);
+    expect(isQuestion({ kind: "permission" })).toBe(false);
+  });
+});
+
+describe("askedQuestion", () => {
+  const option = (label: string) => ({ label, description: `${label}, said longer` });
+  it("is the first question's words, up to four option labels, and how many questions follow", () => {
+    const input = {
+      questions: [
+        {
+          question: " Which voice should the explainer use? ",
+          header: "Voice",
+          options: ["Warm narrator", "Neutral", "ElevenLabs default", "Mine", "Another"].map(option),
+          multiSelect: false,
+        },
+        { question: "How long should it be?", header: "Length", options: [option("30 s"), option("60 s")] },
+      ],
+    };
+    expect(askedQuestion(input)).toEqual({
+      text: "Which voice should the explainer use?",
+      options: ["Warm narrator", "Neutral", "ElevenLabs default", "Mine"],
+      more: 1,
+    });
+    expect(askedQuestion({ questions: [{ question: "Go on?", options: ["Yes", " ", { label: "No" }, 3] }] })).toEqual({
+      text: "Go on?",
+      options: ["Yes", "No"],
+      more: 0,
+    });
+  });
+  it("is nothing where the input holds no question", () => {
+    expect(askedQuestion(undefined)).toBeUndefined();
+    expect(askedQuestion({ command: "ls" })).toBeUndefined();
+    expect(askedQuestion({ questions: [] })).toBeUndefined();
+    expect(askedQuestion({ questions: [{ question: " ", options: [option("A")] }] })).toBeUndefined();
+    expect(askedQuestion({ questions: "Which?" })).toBeUndefined();
+  });
+});
+
+describe("saidCommand", () => {
+  it("is the message where it is the command, not a sentence about the request", () => {
+    expect(saidCommand("npm test")).toBe("npm test");
+    expect(saidCommand("Claude needs your permission to use Bash")).toBeUndefined();
+    expect(saidCommand(undefined)).toBeUndefined();
+  });
+});
+
+describe("askFitsRow", () => {
+  const bash = (message?: string) => ({ kind: "permission", tool: "Bash", message });
+  it("holds for a short request of its own, on one line, that the machine did not cut", () => {
+    expect(askFitsRow(bash("npm run deploy -- --target staging"))).toBe(true);
+    expect(askFitsRow(bash("Bash: npm run deploy -- --target staging"))).toBe(true);
+    expect(askFitsRow(bash(`ls ${"a".repeat(ROW_ASK_MAX - 3)}`))).toBe(true);
+    expect(askFitsRow({ kind: "permission", tool: "Write", message: "Write src/webhooks/invoice.ts" })).toBe(true);
+    expect(
+      askFitsRow({
+        kind: "permission",
+        tool: "mcp__github__create_pr",
+        message: "Open a pull request on acme/billing",
+      }),
+    ).toBe(true);
+    expect(askFitsRow({ kind: "permission", message: "Allow this?" })).toBe(true);
+  });
+  it("fails for one longer than a row holds, cut by the machine, or on more than one line", () => {
+    expect(askFitsRow(bash(`ls ${"a".repeat(ROW_ASK_MAX - 2)}`))).toBe(false);
+    // The machine keeps 200 characters and marks nothing; its tool's name taken off, what
+    // is left is under 200 too.
+    expect(askFitsRow(bash(`Bash: ${"a".repeat(194)}`))).toBe(false);
+    expect(askFitsRow(bash("npm run deploy -- --target prod…"))).toBe(false);
+    expect(askFitsRow(bash("cat <<EOF > notes.md\nhello\nEOF"))).toBe(false);
+  });
+  it("fails for a plan, a question, a tool with no request of its own, and a sentence about a shell's", () => {
+    expect(askFitsRow({ kind: "permission", tool: "ExitPlanMode", message: "ExitPlanMode" })).toBe(false);
+    expect(askFitsRow({ kind: "permission", tool: "ExitPlanMode", message: "ExitPlanMode: a short plan" })).toBe(false);
+    expect(askFitsRow({ kind: "permission", tool: "AskUserQuestion", message: "AskUserQuestion" })).toBe(false);
+    expect(askFitsRow(bash())).toBe(false);
+    expect(askFitsRow(bash("Bash"))).toBe(false);
+    expect(askFitsRow(bash("Claude needs your permission to use Bash"))).toBe(false);
   });
 });
 

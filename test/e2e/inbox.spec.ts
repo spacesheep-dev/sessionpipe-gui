@@ -309,6 +309,107 @@ test.describe("inbox: an answer refused", () => {
   });
 });
 
+/** 140 characters, a chain of two: more than a row shows beside Allow. */
+const LONG_COMMAND =
+  "rsync -avz --delete --exclude .env ./dist/ deploy@staging.acme.dev:/srv/billing/new && ssh deploy@staging.acme.dev systemctl restart billing";
+
+test.describe("inbox: Allow only beside a whole request", () => {
+  test("a short command is whole beside its pair, which hover, the menu and the a key answer; a long one and a plan offer Open, which none of them answer", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    expect(LONG_COMMAND).toHaveLength(140);
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `whole-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const short = await postPrompt(token, {
+      machine: d.name,
+      title: "A short command",
+      agoMs: 3_000,
+      message: "npm run deploy -- --target staging",
+    });
+    const long = await postPrompt(token, {
+      machine: d.name,
+      title: "A long command",
+      agoMs: 4_000,
+      message: LONG_COMMAND,
+    });
+    const plan = await postPrompt(token, {
+      machine: d.name,
+      title: "A plan",
+      agoMs: 5_000,
+      tool: "ExitPlanMode",
+      message: "ExitPlanMode",
+    });
+    const answers = () => d.seen.filter((c) => c.kind === "permission.answer");
+    try {
+      await page.goto(`${CONTROL_BASE}/inbox`);
+      const row = (p: { attention: string }) => page.locator(`.inbox-row[data-attention="${p.attention}"]`);
+      // The short one: whole, on its line, with nothing cut; the pair on hover.
+      const what = row(short).locator(".inbox-what");
+      await expect(what.locator(".inbox-msg")).toHaveText("npm run deploy -- --target staging");
+      expect(await what.evaluate((el) => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight)).toBe(
+        true,
+      );
+      await row(short).hover();
+      await expect(row(short).getByRole("button", { name: "Allow" })).toHaveCSS("opacity", "1");
+      await expect(row(short).getByRole("button", { name: "Open" })).toHaveCount(0);
+      // The long one and the plan: two lines at most, and Open in the pair's place.
+      for (const p of [long, plan]) {
+        await expect(row(p)).toHaveClass(/inbox-row--open/);
+        await row(p).hover();
+        await expect(row(p).getByRole("button", { name: "Open" })).toHaveCSS("opacity", "1");
+        await expect(row(p).getByRole("button", { name: /^(Allow|Deny|Approve plan|Keep planning)$/ })).toHaveCount(0);
+      }
+      const lines = await row(long)
+        .locator(".inbox-what")
+        .evaluate((el) => el.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(el).lineHeight));
+      expect(Math.round(lines)).toBeLessThanOrEqual(2);
+      // Their menus answer nothing; the short one's does.
+      for (const [p, items] of [
+        [long, 0],
+        [plan, 0],
+        [short, 2],
+      ] as const) {
+        await expect(async () => {
+          await row(p).locator(".inbox-main").click({ button: "right" });
+          await expect(page.getByRole("menuitem", { name: "Copy message" })).toBeVisible({ timeout: 2_000 });
+        }).toPass({ timeout: 20_000 });
+        await expect(
+          page.getByRole("menuitem", { name: /^(Allow|Deny) Bash$|^(Approve plan|Keep planning)$/ }),
+        ).toHaveCount(items);
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("menuitem", { name: "Copy message" })).toHaveCount(0);
+      }
+      // The a key answers nothing on the long one's row, and the short one on its own.
+      await row(long).locator(".inbox-main").focus();
+      await expect(row(long)).toHaveAttribute("aria-current", "true");
+      await page.keyboard.press("a");
+      await page.waitForTimeout(1_000);
+      expect(answers()).toEqual([]);
+      await row(short).locator(".inbox-main").focus();
+      await expect(row(short)).toHaveAttribute("aria-current", "true");
+      await page.keyboard.press("a");
+      await expect
+        .poll(() => answers().map((c) => [c.for, c.decision]), { timeout: 15_000 })
+        .toEqual([[short.attention, "allow"]]);
+      // Open is the row's tap: the session beside the page, its whole command in the block.
+      await row(long).hover();
+      await row(long).getByRole("button", { name: "Open" }).click();
+      await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
+      await expect(page.locator("aside.panel .panel-title")).toHaveText("A long command");
+      await expect(page.locator("aside.panel .ctl-cmd-block")).toHaveText(LONG_COMMAND.replace(" && ", "&& "));
+    } finally {
+      await short.clear();
+      await long.clear();
+      await plan.clear();
+      await d.stop();
+    }
+  });
+});
+
 test.describe("installable", () => {
   test("the manifest and the install-only service worker are served", async ({ page, request }) => {
     await openPage(page, "/");

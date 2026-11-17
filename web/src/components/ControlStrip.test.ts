@@ -4,9 +4,9 @@ import type { Attention, MachineControl, SessionSummary } from "@shared/api";
 import { afterEach, describe, expect, it } from "vitest";
 import { approvalOf, type SendState } from "../account/sendable";
 import { answerState } from "../control/useSend";
-import { markLate } from "../data/hooks";
+import { markLate, openAttentions } from "../data/hooks";
 import { ANSWER_WINDOW_MS, answerLate } from "../lib/answerWindow";
-import { blockedAnswer, keepPlanning } from "./ControlStrip";
+import { answerable, blockedAnswer, keepPlanning } from "./ControlStrip";
 import { foldPlan } from "./PlanText";
 import { answerItems } from "./SessionCard";
 
@@ -200,6 +200,24 @@ describe("a prompt's answer window", () => {
     ]);
     expect(count(after(130_000))).toBe(2);
     expect(count(after(230_000))).toBe(1);
+  });
+
+  it("leaves a question out of the count: it is answered on its computer, though its hook waits", () => {
+    const question = {
+      ...prompt,
+      attentionId: "q1",
+      tool: "AskUserQuestion",
+      message: "AskUserQuestion",
+      at: seen(1_000),
+    } as Attention;
+    const s = { ...claude, openAttentions: [question, prompt] } as SessionSummary;
+    const rows = openAttentions(new Map([[s.key, s]]));
+    expect(rows.map((r) => [r.attention.attentionId, r.answerable])).toEqual([
+      ["q1", false],
+      ["a1", true],
+    ]);
+    // The protocol's word is unchanged: the twin of a question is still told from it.
+    expect(answerable(question)).toBe(true);
   });
 });
 

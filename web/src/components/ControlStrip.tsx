@@ -15,7 +15,8 @@
 // disabled where they come back by themselves (the hour a new device waits, reconnecting,
 // a computer catching up on an approval, a send under way). The hour is said once: on the
 // card, with the way to answer on spacesheep, while it has a prompt to answer (on the phone
-// the card then stands alone too), else under the field.
+// the card then stands alone too), else under the field. A question from the agent has no
+// pair at all: its card is the question and its options to read, and where to answer it.
 // The draft is kept per session. Disabled with its reason until the machine paired and
 // `onSend` is wired (web/src/control/SessionControl.tsx signs and sends). Keep this
 // component self-contained: everything it needs comes through props.
@@ -42,7 +43,15 @@ import { receiptWords } from "../control/words";
 import { answerLate, useAnswerClock } from "../lib/answerWindow";
 import { useAskedInput } from "../lib/askedInput";
 import { usePhoneLayout, useTouchKeys } from "../lib/device";
-import { attentionMessage, isPlanReview, toolLabel } from "../lib/format";
+import {
+  askedQuestion,
+  attentionMessage,
+  isPlanReview,
+  isQuestion,
+  isShellTool,
+  saidCommand,
+  toolLabel,
+} from "../lib/format";
 
 import { Link } from "../lib/router";
 import { askedCommand, shellLines } from "../lib/shellCommand";
@@ -188,21 +197,20 @@ function StopIcon() {
  *  it (`notif-…`, nobody can answer). An older server leaves the field unset. */
 export const answerable = (a: Attention): boolean => a.answerable ?? !a.attentionId.startsWith("notif-");
 
-/** A shell tool, whose message is the command it wants to run. */
-const SHELL = /^(bash|shell|sh|zsh|powershell|run_shell_command|exec|terminal)$/i;
-
 /** What the machine says of a command it cut: a message is its first 200 characters. */
 const CUT = "The machine sends the first 200 characters";
 /** A command block shows this many steps until "Show more". */
 const CMD_LINES = 4;
 
-/** "Allow Bash to run `npm run deploy`?", or "Allow Write?" with its message after it. A
- *  long chained command reads one step per line under "Allow Shell to run:", four steps
- *  until "Show more"; the whole command comes from the call's own input when the session
- *  sent it (lib/askedInput.ts), else from the message, cut at 200 characters. A plan
- *  review asks about the plan, from the same input, and shows it under the question. Its
- *  glyph is the orange one while it asks; with an answer out, the working ring, or a still
- *  hollow one while the computer is offline (`out`). */
+/** "Allow Bash to run:" with the command on its own lines under it, or "Allow Write?" with
+ *  its message after it. A long chained command reads one step per line, four steps until
+ *  "Show more"; the whole command comes from the call's own input when the session sent it
+ *  (lib/askedInput.ts), else from the message, cut at 200 characters. A plan review asks
+ *  about the plan, from the same input, and shows it under the question. A question from
+ *  the agent is its own words, with the labels of its options under it to read (they are
+ *  answered on its computer), or one sentence where its input was not sent. Its glyph is
+ *  the orange one while it asks; with an answer out, the working ring, or a still hollow
+ *  one while the computer is offline (`out`). */
 function Question({ a, session, out }: { a: Attention; session: SessionSummary; out?: "going" | "held" }) {
   const { input } = useAskedInput(session, a);
   // The prompt whose steps are all shown: another prompt starts folded.
@@ -236,6 +244,23 @@ function Question({ a, session, out }: { a: Attention; session: SessionSummary; 
       </>
     );
   }
+  if (isQuestion(a)) {
+    const q = askedQuestion(input);
+    if (!q) return line(NEW_WORDS.questionAsked);
+    return (
+      <>
+        {line(q.text)}
+        {q.options.length > 0 && (
+          <ul className="ctl-options" aria-label="Options">
+            {q.options.map((o, i) => (
+              <li key={i}>{o}</li>
+            ))}
+          </ul>
+        )}
+        {q.more > 0 && <p className="ctl-questions-more">{NEW_WORDS.questionMore(q.more)}</p>}
+      </>
+    );
+  }
   if (!a.tool)
     return line(
       <>
@@ -244,8 +269,8 @@ function Question({ a, session, out }: { a: Attention; session: SessionSummary; 
     );
   const tool = <span className="ctl-tool">{toolLabel(a.tool)}</span>;
   const msg = attentionMessage(a);
-  const shell = SHELL.test(a.tool);
-  const said = msg && shell && !/\b(permission|wants|needs)\b/i.test(msg) ? msg : undefined;
+  const shell = isShellTool(a.tool);
+  const said = shell ? saidCommand(msg) : undefined;
   // Cut is read off the message as sent: the server keeps 200 characters and adds no mark,
   // and `said` has the tool's name taken off, so its own length never says.
   const cutMsg = (a.message?.length ?? 0) >= 200 || !!said?.endsWith("…");
@@ -257,13 +282,8 @@ function Question({ a, session, out }: { a: Attention; session: SessionSummary; 
         Allow {tool}?{msg ? <span className="ctl-answer-msg"> {msg}</span> : null}
       </>,
     );
-  const steps = shellLines(cmd);
-  if (!steps)
-    return line(
-      <>
-        Allow {tool} to run <code className="ctl-cmd">{cmd}</code>?
-      </>,
-    );
+  // One shape for every command, at every size: the question, then the command under it.
+  const steps = shellLines(cmd) ?? [cmd];
   const cut = !whole && cutMsg;
   if (cut && !steps[steps.length - 1]!.endsWith("…")) steps[steps.length - 1] += "…";
   const more = steps.length - CMD_LINES;
@@ -425,8 +445,8 @@ export function ControlStrip({
   // composer holds one it waits: the words would otherwise stay behind as the next prompt.
   const noted = !!review && !!text.trim();
   // A prompt whose card says why it can't be answered from here (`offWhy`): one that is not
-  // late, waiting in a terminal, or answered already.
-  const asks = open.some((a) => answerable(a) && !late(a) && !answers?.[a.attentionId]);
+  // late, waiting in a terminal, a question, or answered already.
+  const asks = open.some((a) => answerable(a) && !isQuestion(a) && !late(a) && !answers?.[a.attentionId]);
   // Inside the hour a new device waits, with such a prompt: the card says the hour, once,
   // with the way to answer it on spacesheep, and the line under the field does not.
   const hourOnCard = paired && !!blockedSays && !wrong && asks;
@@ -670,7 +690,10 @@ export function ControlStrip({
         const out = answers?.[a.attentionId];
         const status = out?.status;
         const plan = isPlanReview(a);
-        const terminal = !answerable(a);
+        // A question is read here and answered on its computer: Allow cannot carry the
+        // option chosen. `answerable` stays the protocol's, for the twin above.
+        const question = isQuestion(a);
+        const terminal = !answerable(a) || question;
         // Its hook let go: an answer from here would only be refused, so none is offered.
         const gone = late(a);
         const off = !enabled || !!busy;
@@ -683,13 +706,15 @@ export function ControlStrip({
             ? receiptWords({ decision: out.decision, plan, machine: session.machine, offline })
             : null;
         const shut = terminal || gone || status === "closed" || sent;
-        const why: ReactNode = terminal
-          ? "waiting in the terminal"
-          : gone
-            ? NEW_WORDS.answerLate(session.machine ?? undefined)
-            : status === "closed"
-              ? NEW_WORDS.answerClosed
-              : offWhy;
+        const why: ReactNode = question
+          ? NEW_WORDS.questionWhere(session.machine ?? undefined)
+          : terminal
+            ? "waiting in the terminal"
+            : gone
+              ? NEW_WORDS.answerLate(session.machine ?? undefined)
+              : status === "closed"
+                ? NEW_WORDS.answerClosed
+                : offWhy;
         // The card's line describes both buttons; a button's own reason is its alone.
         const noteId = `${cardId}-${a.attentionId}`;
         const denyWhy = plan && tooLong ? "Keep it under 2,000 characters" : null;
@@ -701,7 +726,15 @@ export function ControlStrip({
             className={plan ? "ctl-answer ctl-answer--plan" : "ctl-answer"}
             key={a.attentionId}
             data-attention={a.attentionId}
-            data-answer={terminal ? "terminal" : gone ? "late" : (status ?? (approve ? "unapproved" : "open"))}
+            data-answer={
+              question
+                ? "question"
+                : terminal
+                  ? "terminal"
+                  : gone
+                    ? "late"
+                    : (status ?? (approve ? "unapproved" : "open"))
+            }
           >
             <Question a={a} session={session} out={sent ? (offline ? "held" : "going") : undefined} />
             {receipt ? (

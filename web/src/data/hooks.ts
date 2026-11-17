@@ -26,7 +26,7 @@ import { useBehind } from "../account/current";
 import { answerable } from "../components/ControlStrip";
 import { answersOut } from "../control/answers";
 import { answerLate, useAnswerClock } from "../lib/answerWindow";
-import { sessionTitle } from "../lib/format";
+import { isQuestion, sessionTitle } from "../lib/format";
 import { canMark, isUnread, markSeen, SEEN_AFTER_MS, setUnread } from "../lib/marks";
 import { useShortcut } from "../lib/shortcuts";
 import type { AppState, Store } from "./store";
@@ -329,7 +329,8 @@ export function useMachines(): MachineSummary[] {
 export interface OpenAttention {
   session: SessionSummary;
   attention: Attention;
-  /** A control `permission.answer` can reach it (shared/api.ts `Attention.answerable`). */
+  /** A control `permission.answer` can reach it (shared/api.ts `Attention.answerable`), and
+   *  can carry its answer: a question's is the option chosen, given on its computer. */
   answerable: boolean;
   /** Its hook stopped waiting for an answer (lib/answerWindow.ts): no longer answerable,
    *  it waits in its terminal. Marked by `markLate`. */
@@ -341,7 +342,11 @@ export function openAttentions(sessions: ReadonlyMap<SessionKey, SessionSummary>
   const out: OpenAttention[] = [];
   for (const session of sessions.values())
     for (const attention of session.openAttentions)
-      out.push({ session, attention, answerable: attention.kind === "permission" && answerable(attention) });
+      out.push({
+        session,
+        attention,
+        answerable: attention.kind === "permission" && answerable(attention) && !isQuestion(attention),
+      });
   return out.sort((a, b) => b.attention.at.localeCompare(a.attention.at));
 }
 
