@@ -3,6 +3,8 @@ import "../native/test-env";
 import type { Attention, MachineControl, SessionSummary } from "@shared/api";
 import { describe, expect, it } from "vitest";
 import { answerState } from "../control/useSend";
+import { markLate } from "../data/hooks";
+import { ANSWER_WINDOW_MS, answerLate } from "../lib/answerWindow";
 import { blockedAnswer, keepPlanning } from "./ControlStrip";
 import { foldPlan } from "./PlanText";
 
@@ -45,10 +47,110 @@ describe("an answer inside the hour a newly approved phone waits", () => {
     const a = { attentionId: "a1", kind: "permission", at: "2026-11-13T10:00:00Z", answerable: true } as Attention;
     const control = { machineId: "m1", keys: [], harnesses: {}, modes: [] } as unknown as MachineControl;
     const send = { rp: "spacesheep.dev", secure: true, tap: false, answers: {} };
-    const open = answerState(s, a, control, send);
-    const cooling = answerState(s, a, control, { ...send, cooling: line });
+    const now = Date.parse(a.at) + 5_000;
+    const open = answerState(s, a, control, send, now);
+    const cooling = answerState(s, a, control, { ...send, cooling: line }, now);
     expect(cooling).toMatchObject({ reason: line, off: true, tag: "blocked" });
     // Outside the hour the same prompt is as open as it was.
     expect(open.reason === line || open.tag === "blocked").toBe(false);
+  });
+});
+
+describe("a prompt's answer window", () => {
+  const AT = "2026-11-16T10:00:00Z";
+  const at = Date.parse(AT);
+  const claude = { key: "claude-code:s-1", harness: "claude-code", machine: "Misha-Petrov-laptop" } as SessionSummary;
+  const codex = { ...claude, key: "codex:s-2", harness: "codex" } as SessionSummary;
+  const prompt = { attentionId: "a1", kind: "permission", tool: "Bash", at: AT, answerable: true } as Attention;
+  const base = { machineId: "m1", online: true, keys: [], queued: 0, keyTypes: ["passkey", "device"] };
+  /** A computer reached through spacesheep, whose last_seen moves on every poll. */
+  const remote = (lastHelloAt?: string) =>
+    ({
+      ...base,
+      ...(lastHelloAt ? { lastHelloAt } : {}),
+      remote: { via: "spacesheep", origin: "https://spacesheep.dev", rpId: "spacesheep.dev" },
+    }) as MachineControl;
+  const local = { ...base, lastHelloAt: AT } as MachineControl;
+  const send = { rp: "spacesheep.dev", secure: true, tap: false, answers: {} };
+  const after = (ms: number) => at + ms;
+  const seen = (ms: number) => new Date(after(ms)).toISOString();
+
+  it("is open at 30 s and 90 s on a computer spacesheep saw just now", () => {
+    for (const ms of [30_000, 90_000]) {
+      const st = answerState(claude, prompt, remote(seen(ms)), send, after(ms));
+      expect(st, `${ms / 1000} s`).toEqual({ reason: null, off: false, status: undefined, tag: "open" });
+      expect(answerLate(prompt, remote(seen(ms)), "claude-code", after(ms))).toBe(false);
+    }
+  });
+
+  it("is open when spacesheep has no last_seen", () => {
+    expect(answerState(claude, prompt, remote(), send, after(5_000)).tag).toBe("open");
+  });
+
+  it("is late once the hook let go, on a computer reached through spacesheep or here", () => {
+    expect(ANSWER_WINDOW_MS).toBe(120_000);
+    expect(answerLate(prompt, remote(), "claude-code", after(ANSWER_WINDOW_MS))).toBe(false);
+    for (const control of [remote(seen(130_000)), local]) {
+      expect(answerLate(prompt, control, "claude-code", after(130_000))).toBe(true);
+      expect(answerState(claude, prompt, control, send, after(130_000))).toEqual({
+        reason: "too late to answer from here; answer it on Misha-Petrov-laptop",
+        off: true,
+        status: undefined,
+        tag: "late",
+      });
+    }
+    // With no name: its computer.
+    const nameless = { ...claude, machine: undefined } as SessionSummary;
+    expect(answerState(nameless, prompt, local, send, after(130_000)).reason).toBe(
+      "too late to answer from here; answer it on its computer",
+    );
+    // No word of pairing.
+    expect(answerState(claude, prompt, remote(seen(720_000)), send, after(720_000)).reason).not.toMatch(/pair/);
+  });
+
+  it("is never late for another harness, or on an unpaired computer", () => {
+    expect(answerLate(prompt, local, "codex", after(720_000))).toBe(false);
+    expect(answerState(codex, prompt, local, send, after(720_000)).tag).toBe("open");
+    expect(answerState(claude, prompt, undefined, send, after(720_000)).tag).toBe("unpaired");
+  });
+
+  it("says the hour a newly approved phone waits first", () => {
+    const line = "This iPhone can send from 5:30 PM";
+    expect(answerState(claude, prompt, remote(), { ...send, cooling: line }, after(130_000))).toMatchObject({
+      reason: line,
+      off: true,
+      tag: "blocked",
+    });
+  });
+
+  it("says a prompt the computer no longer holds was already answered, or timed out", () => {
+    expect(answerState(claude, prompt, local, { ...send, answers: { a1: "closed" } }, after(5_000))).toMatchObject({
+      reason: "already answered, or timed out",
+      off: true,
+      tag: "closed",
+    });
+  });
+
+  it("leaves a late prompt out of the count", () => {
+    const fresh = { ...prompt, attentionId: "a2", at: seen(100_000) };
+    const machines = new Map([["Misha-Petrov-laptop", { name: "Misha-Petrov-laptop", control: local }]]);
+    const rows = [
+      { session: claude, attention: fresh, answerable: true },
+      { session: claude, attention: prompt, answerable: true },
+      { session: codex, attention: prompt, answerable: true },
+    ];
+    const count = (now: number) => markLate(rows, machines as never, now).filter((r) => r.answerable).length;
+    expect(count(after(110_000))).toBe(3);
+    // The same list while none has run out.
+    expect(markLate(rows, machines as never, after(110_000))).toBe(rows);
+    expect(
+      markLate(rows, machines as never, after(130_000)).map((r) => [r.attention.attentionId, r.answerable, !!r.late]),
+    ).toEqual([
+      ["a2", true, false],
+      ["a1", false, true],
+      ["a1", true, false],
+    ]);
+    expect(count(after(130_000))).toBe(2);
+    expect(count(after(230_000))).toBe(1);
   });
 });

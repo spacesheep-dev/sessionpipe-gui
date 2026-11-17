@@ -75,4 +75,6 @@ export const NEW_WORDS = {
   composerCooling: (Phone: string, time: string) => `${Phone} can send from ${time}`,
   rowCoolingBy: (Phone: string, time: string) => `${Phone} can send by ${time}`,
   machinesApprove: (phone: string) => `Approve ${phone}`,
+  answerLate: (machine?: string) => `too late to answer from here; answer it on ${machine ?? "its computer"}`,
+  answerClosed: "already answered, or timed out",
 } as const;

@@ -42,6 +42,7 @@ import { navigate, sessionPath } from "../lib/router";
 import { type Lens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import { openSplit } from "../lib/split";
+import { NEW_WORDS } from "../native/accountWords.new";
 
 const rowKey = (r: OpenAttention) => `${r.session.key}|${r.attention.attentionId}`;
 const groupOf = (r: OpenAttention) => (r.answerable ? "answer" : "terminal");
@@ -340,6 +341,12 @@ function InboxRow({
           <HarnessGlyph name={s.harness} size="sm" />
           {s.machine && <span className="inbox-machine">{s.machine}</span>}
         </span>
+        {/* Its hook stopped waiting: why it is down here, and where it can still be answered. */}
+        {row.late && (
+          <span className="inbox-late" data-answer="late">
+            {NEW_WORDS.answerLate(s.machine ?? undefined)}
+          </span>
+        )}
       </button>
       {/* A prompt in a terminal has nothing to press here; its section says where it waits. */}
       {row.answerable && (
@@ -372,7 +379,8 @@ function Answer({
 }) {
   const { session: s, attention: a } = row;
   const send = useSessionSend(s, control, s.openAttentions);
-  const st = answerState(s, a, control, send);
+  // No clock of its own: the row leaves this group as its window runs out (useOpenAttentions).
+  const st = answerState(s, a, control, send, Date.now());
   const { reason, off, status, tag } = st;
   // A plan review's pair asks the plan's question (lib/format.ts isPlanReview).
   const plan = isPlanReview(a);
@@ -390,8 +398,8 @@ function Answer({
   const canKey = focused && !off && chosen === null && status !== "closed";
   useShortcut("inbox.allow", () => answer(true), { enabled: canKey, priority: 2 });
   useShortcut("inbox.deny", () => answer(false), { enabled: canKey, priority: 2 });
-  // Off for a standing reason (not paired, no passkeys here, raised before pairing): the
-  // page says it once. A moment's state (sent, a passkey prompt, closed) stays on the row.
+  // Off for a standing reason (not paired, no passkeys here): the page says it once. A
+  // moment's state (sent, a passkey prompt, closed) stays on the row.
   const standing = off && !status ? reason : null;
   const id = rowKey(row);
   useEffect(() => {

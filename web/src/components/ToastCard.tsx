@@ -7,6 +7,7 @@
 import type { MachineControl, SessionSummary } from "@shared/api";
 import { type MutableRefObject, useEffect, useLayoutEffect, useRef } from "react";
 import { answerState, useSessionSend } from "../control/useSend";
+import { useAnswerClock } from "../lib/answerWindow";
 import { copyItem } from "../lib/menus";
 import { openSplit } from "../lib/split";
 import { dismissToast, type Toast } from "../lib/toasts";
@@ -130,8 +131,10 @@ function ToastAnswer({
   into: MutableRefObject<MenuList>;
 }) {
   const send = useSessionSend(s, control, s.openAttentions);
-  const st = answerState(s, a, control, send);
+  const st = answerState(s, a, control, send, useAnswerClock([a]));
   const { reason, off, status, tag } = st;
+  // Closed, or its hook stopped waiting: nothing to press, and the note says why.
+  const shut = status === "closed" || tag === "late";
   const answer = (allow: boolean) =>
     void send
       .onSend({ kind: "permission.answer", attentionId: a.attentionId, allow })
@@ -148,7 +151,7 @@ function ToastAnswer({
   );
   return (
     <span className="toast-actions" data-answer={tag}>
-      {status !== "closed" && (
+      {!shut && (
         <>
           <button type="button" className="btn btn--sm btn--deny" disabled={off} onClick={() => answer(false)}>
             Deny

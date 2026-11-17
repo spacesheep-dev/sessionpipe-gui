@@ -6,7 +6,8 @@
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePhone } from "../account/device";
-import { type ControlAction, preHello } from "../components/ControlStrip";
+import type { ControlAction } from "../components/ControlStrip";
+import { answerLate } from "../lib/answerWindow";
 import { clock, NEW_WORDS, ThisPhone } from "../native/accountWords";
 import { ControlError, UNHEARD_CODE } from "./api";
 import { type CommandFields, HeldForConfirm, heldWhy, sendCommand, UnheardSend } from "./command";
@@ -22,16 +23,18 @@ export type AnswerStatus = "sent" | "closed";
 
 /** Whether Allow / Deny can go for one prompt right now, and if not (or while an answer
  *  is out) why, in words: the machine is not paired, this page cannot use passkeys, the
- *  prompt predates the pairing, or an answer is already out. Shared by the inbox rows
- *  and the toasts. `tag` is the short state for a data attribute. */
+ *  prompt's hook stopped waiting as of `now` (`late`: lib/answerWindow.ts), or an answer
+ *  is already out. Shared by the inbox rows and the toasts. `tag` is the short state for
+ *  a data attribute. */
 export function answerState(
   s: SessionSummary,
   a: Attention,
   control: MachineControl | undefined,
   send: Pick<SessionSend, "rp" | "secure" | "tap" | "answers"> & { cooling?: string | null },
+  now: number,
 ): { reason: string | null; off: boolean; status: AnswerStatus | undefined; tag: string } {
   const status = send.answers[a.attentionId];
-  const early = preHello(a, control);
+  const late = answerLate(a, control, s.harness, now);
   const old = control && !machineTakes(control) ? updateWords(s.machine ?? undefined).replace(/\.$/, "") : null;
   const reason = !control
     ? `pair ${s.machine ?? "this machine"} to send messages`
@@ -43,21 +46,23 @@ export function answerState(
           ? // Inside the hour a newly approved phone waits, an answer would be refused like
             // any send: the same line the composer has, and no button that will be refused.
             send.cooling
-          : early
-            ? "raised before this machine was paired; answer it in its terminal"
+          : late
+            ? NEW_WORDS.answerLate(s.machine ?? undefined)
             : status === "closed"
-              ? "answered in the terminal, or expired"
+              ? NEW_WORDS.answerClosed
               : status === "sent"
                 ? `answer sent · waiting for ${s.machine ?? "the machine"}`
                 : send.tap
                   ? `confirm with ${signerLabel()}`
                   : null;
-  const off = !control || !send.secure || !send.rp || !!old || !!send.cooling || early || !!status;
+  const off = !control || !send.secure || !send.rp || !!old || !!send.cooling || late || !!status;
   const tag = !control
     ? "unpaired"
     : !send.secure || old || send.cooling
       ? "blocked"
-      : (status ?? (early ? "pre-hello" : "open"));
+      : late
+        ? "late"
+        : (status ?? "open");
   return { reason, off, status, tag };
 }
 
@@ -78,7 +83,7 @@ export interface SessionSend {
   /** The last send's refusal, in words; null once a send is retried. */
   error: string | null;
   /** Per attention id: "sent" while an answer is out, "closed" once the machine said the
-   *  prompt is no longer open (answered in its terminal, or expired). */
+   *  prompt is no longer open (already answered, or timed out). */
   answers: Readonly<Record<string, AnswerStatus>>;
   /** On a spacesheep account, a phone approved less than an hour ago cannot send yet: the
    *  line that says from when (when the time is known exactly); null everywhere else. */

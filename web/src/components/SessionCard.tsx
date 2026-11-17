@@ -27,6 +27,7 @@ import { answerState, useSessionSend } from "../control/useSend";
 import { useAppState, useStore, useUnread } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
 import { agentsChoice, agentsFact, agentsShown, agentTabKey, setAgentsChoice } from "../lib/agents";
+import { useAnswerClock } from "../lib/answerWindow";
 import {
   ATTENTION_LABEL,
   attentionMessage,
@@ -514,7 +515,8 @@ function CardAnswer({ s, into }: { s: SessionSummary; into: MutableRefObject<Men
   const control = s.machine ? machines.get(s.machine)?.control : undefined;
   const a = s.openAttentions.find((x) => x.kind === "permission");
   const send = useSessionSend(s, control, s.openAttentions);
-  const st = a ? answerState(s, a, control, send) : null;
+  const now = useAnswerClock(a ? [a] : []);
+  const st = a ? answerState(s, a, control, send, now) : null;
   useLayoutEffect(() => {
     into.current =
       a && st && st.status !== "closed"
@@ -533,12 +535,14 @@ function CardAnswer({ s, into }: { s: SessionSummary; into: MutableRefObject<Men
 }
 
 /** Allow and Deny as menu items, disabled with the reason when nothing can go; a plan
- *  review's are Approve plan and Keep planning. */
+ *  review's are Approve plan and Keep planning. None once the prompt's hook stopped
+ *  waiting (answerState's "late"): nothing could go again. */
 export function answerItems(
   tool: string | undefined,
-  st: { off: boolean; reason: string | null },
+  st: { off: boolean; reason: string | null; tag?: string },
   answer: (allow: boolean) => unknown,
 ): MenuItem[] {
+  if (st.tag === "late") return [];
   const disabled = st.off ? (st.reason ?? true) : undefined;
   const plan = isPlanReview({ kind: "permission", tool });
   const what = tool ? ` ${toolLabel(tool)}` : "";

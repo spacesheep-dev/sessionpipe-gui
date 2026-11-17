@@ -179,6 +179,14 @@
 .inbox-where .glyph-wrap {
   color: var(--fg-4);
 }
+/* A prompt its hook stopped waiting on: why, under the rest of the row, at every width. */
+.inbox-late {
+  grid-column: 2 / -1;
+  margin-top: 2px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh);
+}
 
 /* Deny then Allow (the primary on the right, as in a macOS alert). With a pointer they
    take the place of the time and machine while the row is hovered or selected, as Mail's

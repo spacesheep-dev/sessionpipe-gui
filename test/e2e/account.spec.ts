@@ -367,6 +367,8 @@ test("a message spacesheep held, with that answer lost: the held notice comes by
 
 test("a permission question is answered from the inbox, and the computer gets the answer", async () => {
   const s = session("s-login");
+  // Asked now, as a hook asks: an answer reaches it only while the hook waits (lib/answerWindow.ts).
+  s.clock = Date.now() - 2_000;
   ss.push([
     s.ev("turn.started", { turn_id: "t5" }, on),
     s.ev(

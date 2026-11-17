@@ -29,6 +29,7 @@ import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachm
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
 
 import { deviceWords, setupLabel, signerKind } from "../control/signer";
+import { answerLate, useAnswerClock } from "../lib/answerWindow";
 import { useAskedInput } from "../lib/askedInput";
 import { usePhoneLayout } from "../lib/device";
 import { attentionMessage, isPlanReview, toolLabel } from "../lib/format";
@@ -36,6 +37,7 @@ import { attentionMessage, isPlanReview, toolLabel } from "../lib/format";
 import { Link } from "../lib/router";
 import { askedCommand, shellLines } from "../lib/shellCommand";
 import { hintFor } from "../lib/shortcuts";
+import { NEW_WORDS } from "../native/accountWords.new";
 import { ActionButton, Spinner, StateDot } from "./bits";
 import "../control/control.css";
 
@@ -99,7 +101,7 @@ export interface ControlStripProps {
    *  already says why sending is off). */
   ask?: () => void;
   /** Per attention id: "sent" while an answer is out (no second one goes), "closed" once
-   *  the machine said the prompt is no longer open (answered in its terminal, or expired). */
+   *  the machine said the prompt is no longer open (already answered, or timed out). */
   answers?: Readonly<Record<string, "sent" | "closed">>;
   /** Plugins' suggested answers for this session's attentions (shared/plugin-api.ts).
    *  Advice only: Confirm sends the ordinary signed answer through `onSend`. */
@@ -164,12 +166,6 @@ function StopIcon() {
     </svg>
   );
 }
-
-/** An attention raised before the daemon said hello cannot be answered from here: the hook
- *  only waits on the daemon when it was already running. A minute of slack covers the two
- *  clocks (the sender stamps `at`, the receiver stamps the hello). */
-export const preHello = (a: Attention, control: MachineControl | undefined): boolean =>
-  !!control && (!control.lastHelloAt || Date.parse(a.at) < Date.parse(control.lastHelloAt) - 60_000);
 
 /** Whether a control answer can reach this prompt (shared/api.ts `answerable`). Claude Code
  *  raises two attentions per permission: the hook's (answerable) and a notification about
@@ -382,10 +378,14 @@ export function ControlStrip({
   // The answerable prompt(s) only; a notification twin adds nothing. With no answerable one,
   // the notification is shown as what it is: a prompt waiting in the terminal.
   const open = permissions.some(answerable) ? permissions.filter(answerable) : permissions;
+  // Each prompt's hook waits a while for an answer (lib/answerWindow.ts); past it, the card
+  // turns late on its own.
+  const now = useAnswerClock(open);
+  const late = (a: Attention) => answerable(a) && answerLate(a, control, session.harness, now);
   // A plan review this strip can answer: the composer then says what should change, and
   // sending it is Keep planning. A prompt could not reach the agent anyway, blocked on it.
   const review = open.find(
-    (a) => isPlanReview(a) && answerable(a) && !preHello(a, control) && answers?.[a.attentionId] !== "closed",
+    (a) => isPlanReview(a) && answerable(a) && !late(a) && answers?.[a.attentionId] !== "closed",
   );
   const tooLong = text.trim().length > NOTE_MAX;
   // Approve plan carries no note (an allow reaches Claude Code with none), so while the
@@ -589,16 +589,17 @@ export function ControlStrip({
         const status = answers?.[a.attentionId];
         const plan = isPlanReview(a);
         const terminal = !answerable(a);
-        const early = !terminal && preHello(a, control);
-        const off = !enabled || !!busy || status === "sent" || early;
+        // Its hook let go: an answer from here would only be refused, so none is offered.
+        const gone = late(a);
+        const off = !enabled || !!busy || status === "sent";
         const suggested = suggestions?.find((s) => s.attentionId === a.attentionId);
-        const shut = terminal || status === "closed";
+        const shut = terminal || gone || status === "closed";
         const why: ReactNode = terminal
           ? "waiting in the terminal"
-          : status === "closed"
-            ? "answered in the terminal, or expired"
-            : early
-              ? "raised before this machine was paired; answer it in its terminal"
+          : gone
+            ? NEW_WORDS.answerLate(session.machine ?? undefined)
+            : status === "closed"
+              ? NEW_WORDS.answerClosed
               : status === "sent"
                 ? `answer sent · waiting for ${session.machine ?? "the machine"}`
                 : offWhy;
@@ -607,7 +608,7 @@ export function ControlStrip({
             className={plan ? "ctl-answer ctl-answer--plan" : "ctl-answer"}
             key={a.attentionId}
             data-attention={a.attentionId}
-            data-answer={terminal ? "terminal" : (status ?? (early ? "pre-hello" : "open"))}
+            data-answer={terminal ? "terminal" : gone ? "late" : (status ?? "open")}
           >
             <Question a={a} session={session} />
             {why ? (

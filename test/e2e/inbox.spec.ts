@@ -5,8 +5,11 @@
 // count in the tab title's "(n)" and the nav badge. Notifications: the "Notify me" switch,
 // behind the bell in the page bar, asks the browser once and persists; a new prompt
 // notifies a background tab. The browser's Notification is mocked, since Chromium would
-// never grant it here.
+// never grant it here. On a paired machine, a prompt whose hook stopped waiting moves
+// down to the terminal's, saying why, with nothing to press.
+import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
+import { CONTROL_BASE, fakeDaemon, passkeyPage, postPrompt, seenSetupHere, sinkToken } from "./control-helpers.js";
 import { openPage } from "./helpers.js";
 
 declare global {
@@ -220,6 +223,49 @@ test.describe("inbox", () => {
     await page.evaluate(() => window.__notifications[0]!.onclick?.());
     await expect(page).toHaveURL(/\/inbox$/);
     await expect(page.locator("nav.rail a[data-nav='inbox']")).toHaveAttribute("aria-current", "page");
+  });
+});
+
+// A paired machine (the test-door instance, control-helpers.ts): Claude Code's hook waits
+// 125 s for an answer, so past 120 s a prompt can no longer be answered from here.
+test.describe("inbox: a prompt's answer window", () => {
+  test("a prompt its hook stopped waiting on waits in the terminal, saying so, with nothing to press; a fresh one moves there as its window runs out", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `window-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const late = await postPrompt(token, { machine: d.name, title: "Asked 130 s ago", agoMs: 130_000 });
+    const fresh = await postPrompt(token, { machine: d.name, title: "Asked 112 s ago", agoMs: 112_000 });
+    try {
+      await page.goto(`${CONTROL_BASE}/inbox`);
+      const words = `too late to answer from here; answer it on ${d.name}`;
+      const terminal = page.locator("section[aria-label='Waiting in a terminal']");
+      const lateRow = terminal.locator(`.inbox-row[data-attention="${late.attention}"]`);
+      await expect(lateRow.locator(".inbox-late")).toHaveText(words);
+      await expect(lateRow.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      // Inside its window: answerable as ever, and no page line for the late one.
+      const freshRow = page.locator(`.inbox-row[data-attention="${fresh.attention}"]`);
+      await expect(freshRow.locator("xpath=ancestor::section[1]")).toHaveAttribute("aria-label", "Needs an answer");
+      await expect(freshRow.locator(".inbox-answer")).toHaveAttribute("data-answer", "open");
+      await expect(freshRow.getByRole("button", { name: "Allow" })).toBeEnabled();
+      // (Other specs' prompts on this instance may have a page line of their own.)
+      const lines = page.locator(".inbox-reason", { hasText: /too late|paired/ });
+      await expect(lines).toHaveCount(0);
+      // Its window runs out with the page open: it moves down, and says why.
+      await expect(terminal.locator(`.inbox-row[data-attention="${fresh.attention}"] .inbox-late`)).toHaveText(words, {
+        timeout: 20_000,
+      });
+      await expect(freshRow.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      await expect(lines).toHaveCount(0);
+    } finally {
+      await late.clear();
+      await fresh.clear();
+      await d.stop();
+    }
   });
 });
 

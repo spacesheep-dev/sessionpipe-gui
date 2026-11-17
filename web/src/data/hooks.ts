@@ -23,6 +23,7 @@ import {
 } from "react";
 // The one reading of `answerable` the strip and the inbox share (an older server leaves the field unset).
 import { answerable } from "../components/ControlStrip";
+import { answerLate, useAnswerClock } from "../lib/answerWindow";
 import { sessionTitle } from "../lib/format";
 import { canMark, isUnread, markSeen, SEEN_AFTER_MS, setUnread } from "../lib/marks";
 import { useShortcut } from "../lib/shortcuts";
@@ -323,6 +324,9 @@ export interface OpenAttention {
   attention: Attention;
   /** A control `permission.answer` can reach it (shared/api.ts `Attention.answerable`). */
   answerable: boolean;
+  /** Its hook stopped waiting for an answer (lib/answerWindow.ts): no longer answerable,
+   *  it waits in its terminal. Marked by `markLate`. */
+  late?: boolean;
 }
 
 /** Every open attention across every session, newest first. */
@@ -334,9 +338,31 @@ export function openAttentions(sessions: ReadonlyMap<SessionKey, SessionSummary>
   return out.sort((a, b) => b.attention.at.localeCompare(a.attention.at));
 }
 
+/** `rows` with each answerable prompt past its window as of `now` marked late, and no
+ *  longer answerable; the same list when none is. */
+export function markLate(
+  rows: OpenAttention[],
+  machines: ReadonlyMap<string, MachineSummary>,
+  now: number,
+): OpenAttention[] {
+  const late = (r: OpenAttention) =>
+    r.answerable &&
+    answerLate(
+      r.attention,
+      r.session.machine ? machines.get(r.session.machine)?.control : undefined,
+      r.session.harness,
+      now,
+    );
+  return rows.some(late) ? rows.map((r) => (late(r) ? { ...r, answerable: false, late: true } : r)) : rows;
+}
+
+/** Every open attention, newest first; a prompt turns late (`markLate`) as its window
+ *  runs out. */
 export function useOpenAttentions(): OpenAttention[] {
-  const { sessions } = useAppState();
-  return useMemo(() => openAttentions(sessions), [sessions]);
+  const { sessions, machines } = useAppState();
+  const all = useMemo(() => openAttentions(sessions), [sessions]);
+  const now = useAnswerClock(all.filter((r) => r.answerable).map((r) => r.attention));
+  return markLate(all, machines, now);
 }
 
 /** Open attentions a person can answer from here: the inbox badge and the title's "(n)". */

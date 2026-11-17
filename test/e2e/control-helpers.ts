@@ -246,6 +246,56 @@ export async function postSession(
   return { harness, id };
 }
 
+/** A Claude Code session on `machine` whose permission prompt was raised `agoMs` ago, as
+ *  its hooks send one; `clear()` closes the prompt again. */
+export async function postPrompt(
+  token: string,
+  o: { machine: string; title: string; agoMs: number; harness?: string },
+): Promise<{ key: string; attention: string; clear: () => Promise<void> }> {
+  const harness = o.harness ?? "claude-code";
+  const id = randomUUID();
+  const attention = `perm-${id.slice(0, 8)}`;
+  let seq = 0;
+  // Three events half a second apart, the prompt last.
+  let clock = Date.now() - o.agoMs - 1_500;
+  const ev = (type: string, data: Record<string, unknown>, hook: string) => {
+    clock = type === "attention.cleared" ? Date.now() : clock + 500;
+    return {
+      protocol: 1,
+      id: ulid(clock),
+      type,
+      time: new Date(clock).toISOString(),
+      tier: 1,
+      harness: { name: harness, version: "2.1.296", event: hook },
+      session: { id, seq: seq++, machine: o.machine, cwd: "/Users/e2e/code", title: o.title, title_source: "custom" },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    };
+  };
+  const post = (events: unknown[]) =>
+    fetch(`${CONTROL_BASE}/api/sessionpipe/v1/events`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "sessionpipe-protocol": "1" },
+      body: JSON.stringify({ events }),
+    });
+  await post([
+    ev("session.started", { source: "startup" }, "SessionStart"),
+    ev("turn.started", { turn_id: "t1", prompt_chars: 20 }, "UserPromptSubmit"),
+    ev(
+      "attention.needed",
+      { attention_id: attention, kind: "permission", tool: "Bash", message: "npm run deploy" },
+      "PermissionRequest",
+    ),
+  ]);
+  return {
+    key: `${harness}:${id}`,
+    attention,
+    clear: async () => {
+      await post([ev("attention.cleared", { attention_id: attention, how: "answered" }, "PreToolUse")]);
+    },
+  };
+}
+
 /** The setup page's first-run redirect and Simple mode stay out of these pages. */
 export async function seenSetupHere(context: BrowserContext): Promise<void> {
   await context.addInitScript(() => {

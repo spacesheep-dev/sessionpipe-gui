@@ -546,26 +546,25 @@ test("a refused no_attention closes the prompt here: the pair goes, the words st
   await daemon.ack(msg.id, "refused", { code: "no_attention" });
   await expect(answer).toHaveAttribute("data-answer", "closed");
   await expect(answer.getByRole("button")).toHaveCount(0);
-  await expect(answer).toContainText("answered in the terminal, or expired");
+  await expect(answer).toContainText("already answered, or timed out");
   await expect(page.locator(`li[data-message="${msg.id}"]`)).toContainText("no longer open");
   expect(await daemon.poll(0)).toEqual([]);
   await events.post(events.ev("attention.cleared", { attention_id: "perm-2", how: "answered" }));
   await expect(answer).toHaveCount(0);
 });
 
-test("a prompt raised before the daemon's hello cannot be answered here; a tier-0 copy still has a label", async () => {
-  // Raised an hour ago, long before this daemon said hello; and with no tool or message.
+test("a prompt its hook stopped waiting on cannot be answered here, and offers nothing; a tier-0 copy still has a label", async () => {
+  // Raised an hour ago, long past the 125 s Claude Code's hook waits; and with no tool or message.
   const old = events.ev("attention.needed", { attention_id: "perm-3", kind: "permission" });
   old.time = new Date(Date.now() - 3600_000).toISOString();
   await events.post(old);
   const answer = page.locator('.ctl-answer[data-attention="perm-3"]');
   await expect(answer).toBeVisible();
-  await expect(answer).toHaveAttribute("data-answer", "pre-hello");
+  await expect(answer).toHaveAttribute("data-answer", "late");
   await expect(answer).toContainText("Allow this?");
   await expect(answer).toContainText("a permission request");
-  await expect(answer.getByRole("button", { name: "Allow" })).toBeDisabled();
-  await expect(answer.getByRole("button", { name: "Deny" })).toBeDisabled();
-  await expect(answer).toContainText("raised before this machine was paired; answer it in its terminal");
+  await expect(answer.getByRole("button")).toHaveCount(0);
+  await expect(answer).toContainText(`too late to answer from here; answer it on ${MACHINE}`);
   expect(await daemon.poll(0)).toEqual([]);
   await events.post(events.ev("attention.cleared", { attention_id: "perm-3", how: "answered" }));
   await expect(answer).toHaveCount(0);

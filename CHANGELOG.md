@@ -33,6 +33,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   most part of the line instead of pushing the reply out, only a slow tool or a loop is said
   there (compacting is on the session's page), and a reply still being written starts at
   its newest sentence, not at a word cut 300 characters back.
+- **A permission prompt is no longer greyed out as "raised before this machine was
+  paired".** On a spacesheep account almost every prompt older than a minute said so, with
+  Allow and Deny off, though the computer was paired long ago. Allow and Deny now stay for
+  as long as Claude Code waits for the answer, two minutes. After that the prompt says "too
+  late to answer from here; answer it on" its computer, with no buttons, moves to Waiting
+  in a terminal in the Inbox, and no longer counts on the Inbox badge. One that was gone
+  already reads "already answered, or timed out".
 
 ## [0.8.3] - 2026-11-16
 

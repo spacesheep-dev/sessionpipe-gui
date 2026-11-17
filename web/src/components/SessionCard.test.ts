@@ -28,6 +28,11 @@ describe("answerItems", () => {
         "Keep planning",
       ]);
   });
+  it("has none for a prompt whose hook stopped waiting", () => {
+    const st = { off: true, reason: "too late to answer from here; answer it on studio-mac", tag: "late" };
+    expect(answerItems("Bash", st, () => {})).toEqual([]);
+    expect(answerItems("Bash", { ...st, tag: "blocked" }, () => {})).toHaveLength(2);
+  });
 });
 
 describe("newest", () => {
