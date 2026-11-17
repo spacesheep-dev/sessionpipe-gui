@@ -175,7 +175,8 @@ describe("each state in words", () => {
     });
     expect(sendWords({ kind: "cooling", until: T + 600_000, exact: false }, name)).toEqual({
       short: `Can send by ${at}`,
-      long: `This iPhone can send by ${at}.`,
+      // The Approve page's own sentence: one way to say it everywhere.
+      long: `This iPhone can send by ${at} at the latest.`,
       approve: false,
     });
     expect(sendWords({ kind: "unapproved", dropped: false }, name)).toEqual({

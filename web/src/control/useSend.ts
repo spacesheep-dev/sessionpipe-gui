@@ -223,7 +223,7 @@ export function useSessionSend(
   const hourRefusal = refusedHour && Date.now() < refusedHour.until ? refusedHour.words : null;
   const cooling =
     phoneKey?.kind === "cooling" && phoneKey.exact
-      ? (hourRefusal ?? NEW_WORDS.composerCooling(ThisPhone(), clock(phoneKey.until)))
+      ? (hourRefusal ?? SEND.long.from(ThisPhone(), clock(phoneKey.until)))
       : null;
   // Where a send would only be refused, nothing offers one: one fact for the strip, the
   // inbox, the toasts and a row's menu.

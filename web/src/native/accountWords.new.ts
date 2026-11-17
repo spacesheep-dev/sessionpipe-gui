@@ -130,7 +130,7 @@ export const SEND = {
   },
   long: {
     from: NEW_WORDS.approveCoolingAt,
-    by: (Phone: string, time: string) => `${Phone} can send by ${time}.`,
+    by: NEW_WORDS.approveCoolingBy,
     notYet: (Phone: string) => `${Phone} can't send yet.`,
     notHere: (machine: string, phone: string) => `${machine} hasn't added ${phone} yet.`,
   },

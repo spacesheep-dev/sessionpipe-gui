@@ -162,8 +162,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   first tap got spacesheep's three-sentence refusal. An approval seen within ten minutes now
   counts, and a send that is still refused says "Not sent. This iPhone can send from 5:26
   AM." The hour is said once: with a prompt open, on its card with Open on spacesheep.dev
-  (on the phone the card stands alone), else under the field. The Inbox says it as it is,
-  without "Allow and Deny are off:" in front.
+  (on the phone the card stands alone, and the link takes a line of its own), else under
+  the field. The Inbox says it as it is, without "Allow and Deny are off:" in front. Every
+  screen says it in the same sentence, full stop included, and "by 5:26 AM at the latest"
+  where only the latest time is known.
 - **New session and Ask another agent offer nothing that would only be refused.** On an
   iPhone that isn't approved they were a whole form with a faded Start and a grey footnote;
   now each says "This iPhone isn't approved yet" with Approve this iPhone, and a message

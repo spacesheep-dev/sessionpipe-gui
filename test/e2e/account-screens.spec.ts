@@ -24,6 +24,12 @@ const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../di
 const SHOTS = process.env.ACCOUNT_SCREENS ?? "";
 const [W, H] = (process.env.ACCOUNT_SCREENS_SIZE ?? "390x844").split("x").map(Number) as [number, number];
 const SCHEME = process.env.ACCOUNT_SCREENS_SCHEME === "dark" ? "dark" : "light";
+/** The hour on a prompt's card, with the way to answer it on spacesheep: the hour's own
+ *  sentence, then on a phone the link on a line of its own, and wider after a "·". */
+const HOUR_ON_CARD =
+  W < 840
+    ? /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.\sOpen on spacesheep\.dev$/
+    : /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\s·\sOpen on spacesheep\.dev$/;
 const MACHINE = "m_studio0123456789abcd";
 const NAME = "studio-mac";
 /** The account's origin as a person reads it. Nothing is asked of it: spacesheep is stood in. */
@@ -2019,11 +2025,17 @@ test.describe("what else an account shows", () => {
       const card = page.locator(".ctl-answer[data-attention='perm-1']");
       // Over Deny / Allow, once: the hour's own line with the way to answer it on spacesheep,
       // and no button that would be refused.
-      await expect(card.locator(".ctl-answer-note")).toHaveText(
-        /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\s·\sOpen on spacesheep\.dev$/,
-        { timeout: 15_000 },
-      );
+      await expect(card.locator(".ctl-answer-note")).toHaveText(HOUR_ON_CARD, { timeout: 15_000 });
       await expect(card.locator("[data-elsewhere]")).toBeVisible();
+      if (W < 840) {
+        // The link starts its own line, where the sentence starts: no "·" left at a line's end.
+        const [note, link] = await Promise.all([
+          card.locator(".ctl-answer-note").boundingBox(),
+          card.locator("[data-elsewhere]").boundingBox(),
+        ]);
+        expect(Math.round(link!.x)).toBe(Math.round(note!.x));
+        await expect(card.locator(".ctl-answer-note")).not.toContainText("·");
+      }
       await expect(page.getByText("this page cannot sign an answer")).toHaveCount(0);
       const allow = card.getByRole("button", { name: "Allow" });
       const deny = card.getByRole("button", { name: "Deny" });
@@ -2422,10 +2434,7 @@ test.describe("what else an account shows", () => {
       await page.goto(`${b.server.url}/s/claude-code/s-refund`);
       const line = /This iPhone can send from \d{1,2}:\d{2}( [AP]M)?/;
       const card = page.locator(".ctl-answer[data-attention='perm-1']");
-      await expect(card.locator(".ctl-answer-note")).toHaveText(
-        /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\s·\sOpen on spacesheep\.dev$/,
-        { timeout: 15_000 },
-      );
+      await expect(card.locator(".ctl-answer-note")).toHaveText(HOUR_ON_CARD, { timeout: 15_000 });
       await expect(card.getByRole("button", { name: "Allow" })).toBeDisabled();
       await expect(card.getByRole("button", { name: "Deny" })).toBeDisabled();
       await expect(page.getByText(line)).toHaveCount(1);

@@ -655,15 +655,13 @@ export function ControlStrip({
       `pair ${name} to answer here`
     )
   ) : blocked ? (
-    hourOnCard && elsewhere ? (
-      // Where it wraps, after the dot: no line starts with it.
-      <>
-        {blockedSays?.replace(/\.$/, "")}
-        {"\u00a0"}·{" "}
+    hourOnCard && elsewhere && blockedSays ? (
+      withWay(
+        blockedSays,
         <a className="ctl-link" href={elsewhere.href} target="_blank" rel="noreferrer noopener" data-elsewhere>
           Open on {elsewhere.host}
-        </a>
-      </>
+        </a>,
+      )
     ) : (
       blockedAnswer(wrong, blockedSays)
     )
