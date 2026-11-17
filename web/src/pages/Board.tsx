@@ -439,8 +439,12 @@ export function Board() {
   const hiddenMenu = useContextMenu(() => [{ label: "Show hidden sessions", checked: showHidden, run: toggleHidden }]);
 
   const doneCount = groups.get("done")!.length;
-  const loaded = !!snapshotAt;
-  const empty = loaded && all.length === 0 && pending.length === 0;
+  const none = all.length === 0 && pending.length === 0;
+  // A board an account drew empty before any of its history came (its first read was
+  // refused), with history coming now: still loading, not the first run.
+  const filling = !!snapshotAt && behind && none;
+  const loaded = !!snapshotAt && !filling;
+  const empty = loaded && none;
   // The listening state leaves over 160 ms before the first row comes in.
   const emptyShown = usePresence(empty, EMPTY_EXIT_MS);
   const [witnessed, setWitnessed] = useState(false);
@@ -558,11 +562,13 @@ export function Board() {
       )}
       <LensNote lens={lens} hidden={hiddenByLens} />
 
-      {firstLoad === "loading" ? (
+      {firstLoad === "loading" || filling ? (
+        // While the page bar says "Catching up…", it is the one that says so.
         <div
           className="skeleton board-skeleton"
           role="status"
           aria-label={behind ? N.catchingUpSpoken : "Loading sessions"}
+          aria-hidden={catchingUp || undefined}
         >
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="skeleton-row" />

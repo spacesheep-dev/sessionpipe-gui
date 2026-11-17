@@ -63,11 +63,13 @@ export function Inbox() {
       ),
     [all, labels, label, hidden],
   );
-  const { machines } = useAppState();
+  const { machines, sessions, snapshotAt } = useAppState();
   const firstLoad = useFirstLoad();
   // An account reading its history: the prompts it has stay as they are until the history is in.
   const behind = useBehind();
   const catchingUp = useCatchingUp();
+  // As on the Board: an empty board drawn before any of the history came is still loading.
+  const filling = !!snapshotAt && behind && sessions.size === 0;
   // Answerable first, then the ones waiting in a terminal; held still while read.
   const sorted = useMemo(() => [...rows.filter((r) => r.answerable), ...rows.filter((r) => !r.answerable)], [rows]);
   const listRef = useRef<HTMLDivElement>(null);
@@ -205,8 +207,13 @@ export function Inbox() {
           <LensNote lens={lens} hidden={hiddenByLens} />
         </div>
       )}
-      {firstLoad === "loading" ? (
-        <div className="skeleton" role="status" aria-label={behind ? NEW_WORDS.catchingUpSpoken : "Loading"}>
+      {firstLoad === "loading" || filling ? (
+        <div
+          className="skeleton"
+          role="status"
+          aria-label={behind ? NEW_WORDS.catchingUpSpoken : "Loading"}
+          aria-hidden={catchingUp || undefined}
+        >
           {[0, 1, 2].map((i) => (
             <div key={i} className="skeleton-row" />
           ))}

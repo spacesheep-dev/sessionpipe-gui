@@ -130,6 +130,9 @@ export interface AccountView {
   /** A page of history came back full and its end is still to come: the page shows the
    *  board it had (or none), and "Catching up…". A launch that reads one page is never behind. */
   behind: boolean;
+  /** Since when it is (performance.now()), while it is: a page that opens later counts the
+   *  wait before "Catching up…" from here, not from when it opened. */
+  behindSince: number | null;
   /** Where the relay's pages are kept. */
   cache: EventCache["kind"];
   /** What was read back at the start, when anything was. */
@@ -332,7 +335,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
    *  before shows as needing the person until its later events come). */
   let catching = true;
   let holding = false;
-  let behind = false;
+  /** Since when a page came back full with history still to come (AccountView.behind). */
+  let behindSince: number | null = null;
   let boarded = false;
   /** A page of the relay was taken in this launch: the store holds more than was kept. */
   let paged = false;
@@ -351,13 +355,13 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     if (gone) return { ...s, sessions: [], machines: [] };
     return { ...s, labels: labels.get(), marks: marks.get(), limits: limits.list() };
   };
-  const board = (): void => {
+  const board = (tell = !catching): void => {
     boarded = true;
     if (firstBoardMs === null) firstBoardMs = performance.now() - t0;
     emit({ kind: "snapshot", snapshot: snapshot() });
     // The hub's first list is its starting point, posted as nothing (docs/rfcs/08): it is
     // the board with history in, never one from part of it.
-    if (!catching) needs.tell();
+    if (tell) needs.tell();
     changed();
   };
   store.subscribe((m) => {
@@ -397,6 +401,9 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     const list = (): NeedsSession[] => needsOf(store.snapshot().sessions);
     const send = (): void => {
       timer = null;
+      // A full page came while the list waited to be said: history again, and the board
+      // that ends it says the list.
+      if (catching) return;
       const sessions = list();
       const now = JSON.stringify(sessions);
       if (now === said) return;
@@ -587,7 +594,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     }
     if (!catching) return;
     catching = false;
-    behind = false;
+    behindSince = null;
     store.setLoading(false);
     if (caughtUpMs === null) caughtUpMs = performance.now() - t0;
     board();
@@ -596,10 +603,13 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
    *  end of history: a relay never read from its start is still unread when a new key reads it. */
   const giveUp = (): void => {
     if (!catching) return;
+    // Refused part-way through a backlog: what is here is part of the history. It is drawn
+    // (the page says the key is refused), and not handed to the hub.
+    const part = behindSince !== null;
     catching = false;
-    behind = false;
+    behindSince = null;
     store.setLoading(false);
-    board();
+    board(!part);
   };
   const open = (): RelayReader =>
     startRelayReader({
@@ -676,8 +686,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
           catching = true;
           store.setLoading(true);
         }
-        if (!behind) {
-          behind = true;
+        if (behindSince === null) {
+          behindSince = performance.now();
           changed();
         }
         // Read again after it could not be: not down any more, and nothing is added yet.
@@ -944,7 +954,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
       state,
       relay: reader?.status() ?? { events: 0, cursor: 0, state: "starting", machines: [] },
       catching,
-      behind,
+      behind: behindSince !== null,
+      behindSince,
       cache: cache.kind,
       restored,
       firstBoardMs,

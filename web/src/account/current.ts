@@ -3,7 +3,7 @@
 // can find it without loading it: start.ts sets it once it is up. Nothing here but a
 // variable and the hooks that read it, so a page that shows no account pays nothing for
 // asking.
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useReducer, useState, useSyncExternalStore } from "react";
 import type { AccountBackend, AccountView } from "./backend";
 
 let current: AccountBackend | null = null;
@@ -26,19 +26,15 @@ export function useAccountView(): AccountView | null {
   return v;
 }
 
-/** The relay's states in which it is read: offline, limited and refused are said elsewhere. */
-const READING: ReadonlySet<AccountView["relay"]["state"]> = new Set(["starting", "ok", "gap"]);
 const unheld = () => () => {};
 
-/** The account is reading a backlog of history and the read is going: the page keeps the
- *  board it has (or its skeleton) until the history is in. False with no account, and
- *  while the read is stalled. Renders again only when it turns. */
+/** The account has history still to come: a page of it came back full and its end is not
+ *  read yet, whether or not spacesheep can be read just now. The page keeps the board it
+ *  has (or its loading rows) until the history is in. False with no account. Renders again
+ *  only when it turns. */
 export function useBehind(): boolean {
   const b = accountBackend();
-  const read = useCallback(() => {
-    const v = b?.view();
-    return !!v && v.behind && READING.has(v.relay.state);
-  }, [b]);
+  const read = useCallback(() => !!b?.view().behind, [b]);
   return useSyncExternalStore(b ? b.subscribe : unheld, read, read);
 }
 
@@ -46,15 +42,23 @@ export function useBehind(): boolean {
  *  two is over before it, and never flashes "Catching up…". */
 export const BEHIND_SAID_AFTER_MS = 1000;
 
-/** Behind for BEHIND_SAID_AFTER_MS: the page bar says "Catching up…". */
+/** Behind for BEHIND_SAID_AFTER_MS, and the history coming: read, or held by spacesheep's
+ *  limit, after which it is read on by itself. Not while spacesheep cannot be reached: the
+ *  page says that instead. The page bar then says "Catching up…". The wait is counted from
+ *  when the account fell behind, so a page opened later (another tab) says it at once. */
 export function useCatchingUp(): boolean {
-  const behind = useBehind();
-  const [long, setLong] = useState(false);
+  const b = accountBackend();
+  const read = useCallback(() => {
+    const v = b?.view();
+    return v && v.relay.state !== "offline" ? v.behindSince : null;
+  }, [b]);
+  const since = useSyncExternalStore(b ? b.subscribe : unheld, read, read);
+  const [, wake] = useReducer((n: number) => n + 1, 0);
+  const said = since !== null && performance.now() - since >= BEHIND_SAID_AFTER_MS;
   useEffect(() => {
-    setLong(false);
-    if (!behind) return;
-    const t = window.setTimeout(() => setLong(true), BEHIND_SAID_AFTER_MS);
+    if (since === null || said) return;
+    const t = window.setTimeout(wake, since + BEHIND_SAID_AFTER_MS - performance.now());
     return () => window.clearTimeout(t);
-  }, [behind]);
-  return behind && long;
+  }, [since, said]);
+  return said;
 }

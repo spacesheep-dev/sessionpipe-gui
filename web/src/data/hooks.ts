@@ -55,12 +55,14 @@ export const SLOW_FIRST_LOAD_MS = 6000;
 
 /** A page before its first snapshot: "loading" (the skeleton), "slow" (still connecting
  *  after SLOW_FIRST_LOAD_MS), "down" (the stream failed; the transport retries); null
- *  once loaded. No page sits on a skeleton without saying why: an account reading its
- *  history (account/current.ts useBehind) is not slow, and its page bar says "Catching up…". */
+ *  once loaded. No page sits on a skeleton without saying why: an account with history
+ *  still to come (account/current.ts useBehind) is not slow, even at spacesheep's limit
+ *  (it reads on by itself), and its page bar says "Catching up…". */
 export function useFirstLoad(): "loading" | "slow" | "down" | null {
   const { connection, snapshotAt } = useAppState();
   const behind = useBehind();
-  const waiting = !snapshotAt && !behind && (connection === "live" || connection === "connecting");
+  const up = connection === "live" || connection === "connecting";
+  const waiting = !snapshotAt && !behind && up;
   const [slow, setSlow] = useState(false);
   useEffect(() => {
     setSlow(false);
@@ -69,8 +71,8 @@ export function useFirstLoad(): "loading" | "slow" | "down" | null {
     return () => window.clearTimeout(t);
   }, [waiting]);
   if (snapshotAt) return null;
+  if (!up) return "down";
   if (behind) return "loading";
-  if (!waiting) return "down";
   return slow ? "slow" : "loading";
 }
 

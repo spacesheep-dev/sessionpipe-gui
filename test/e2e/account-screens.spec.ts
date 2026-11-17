@@ -1350,12 +1350,11 @@ test.describe("what else an account shows", () => {
     }
   });
 
-  test("a first connect with a long history: loading rows under 'Catching up…' and no badge, then the whole board once", async ({
-    browser,
-  }) => {
-    const b = await bed(browser);
-    // Three pages of history: a question asked in the first and answered in the last, so
-    // a board drawn from part of it would say the session needs the person.
+  /** Three pages of history on spacesheep: a question asked in the first and answered in
+   *  the last, so a board drawn from part of it would say the session needs the person.
+   *  Its relay reads: at spacesheep's limit while `limited`; past the first one answered,
+   *  held until `release`. */
+  const longHistory = (b: Bed) => {
     const asked = new Session("s-asked");
     const busy = new Session("s-busy", "claude-code", Date.now() - 2 * 3_600_000);
     const at = (title: string) => ({ tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/billing", title } });
@@ -1374,24 +1373,43 @@ test.describe("what else an account shows", () => {
       asked.ev("attention.cleared", { attention_id: "perm-1" }, payout),
       asked.ev("turn.ended", { turn_id: "t1" }, payout),
     ]);
-    // spacesheep answers the first read, and holds every later one until the test lets it.
-    let release = () => {};
+    const g = { limited: false, release: () => {} };
     const held = new Promise<void>((y) => {
-      release = y;
+      g.release = y;
     });
     let reads = 0;
     const handle = b.ss.handle.bind(b.ss);
     b.ss.handle = async (req) => {
-      if (req.path.startsWith("/api/sessionpipe/v1/relay?") && reads++ > 0) await held;
+      if (!req.path.startsWith("/api/sessionpipe/v1/relay?")) return handle(req);
+      if (g.limited)
+        return {
+          status: 429,
+          headers: { "content-type": "application/json", "retry-after": "1" },
+          body: JSON.stringify({ error: "Too many requests.", code: "rate_limited" }),
+        };
+      if (reads++ > 0) await held;
       return handle(req);
     };
+    return g;
+  };
+  const tab = (page: Page, name: string) => page.locator(".tabbar").getByRole("link", { name: new RegExp(`^${name}`) });
+
+  test("a first connect with a long history: loading rows under 'Catching up…' and no badge, then the whole board once", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    const g = longHistory(b);
     b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
     const { page } = b;
     try {
       await page.goto(b.server.url);
       const catching = page.getByRole("status").filter({ hasText: "Catching up…" });
       await expect(catching).toBeVisible();
-      await expect(page.getByRole("status", { name: "Catching up", exact: true })).toBeVisible();
+      // The rows stand in for the board; the bar is what says why, so they are not said too.
+      const rows = page.locator(".board-skeleton");
+      await expect(rows).toBeVisible();
+      await expect(rows).toHaveAttribute("aria-label", "Catching up");
+      await expect(rows).toHaveAttribute("aria-hidden", "true");
       // Past the wait after which a receiver would be said to be slow: still the loading rows.
       await page.waitForTimeout(6500);
       await expect(page.getByText("Still connecting to the receiver…")).toHaveCount(0);
@@ -1399,8 +1417,17 @@ test.describe("what else an account shows", () => {
       await expect(page.locator(".nav-badge")).toHaveCount(0);
       expect(await page.title()).not.toMatch(/^\(/);
       await shot(page, "also-catching-up");
+      // Another tab says it as it opens, not a second after: it has been catching up a while.
+      await tab(page, "Inbox").click();
+      await expect(page.locator(".page.inbox").getByRole("status").filter({ hasText: "Catching up…" })).toBeVisible({
+        timeout: 600,
+      });
+      await tab(page, "Board").click();
+      await expect(page.locator(".page.board").getByRole("status").filter({ hasText: "Catching up…" })).toBeVisible({
+        timeout: 600,
+      });
       // The rest of the history: the board, once, with nobody waiting, and the line gone.
-      release();
+      g.release();
       await expect(page.getByText("Rename the payout job").first()).toBeVisible({ timeout: 15_000 });
       await expect(catching).toHaveCount(0);
       await expect(page.locator(".group--needs_you")).toHaveCount(0);
@@ -1408,7 +1435,50 @@ test.describe("what else an account shows", () => {
       // The hub's starting point for notifications is that board.
       await expect.poll(() => b.hub.needs.map((x) => x.sessions)).toEqual([[]]);
     } finally {
-      release();
+      g.release();
+      await b.close();
+    }
+  });
+
+  test("spacesheep's limit at the first read, then a long history: its line, then loading rows under 'Catching up…', never the first run", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    const g = longHistory(b);
+    g.limited = true;
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      // Nothing read yet: the board says what stands in the way (also-first-limited).
+      const limit = page.getByText("This app is reading too often for spacesheep");
+      await expect(limit).toBeVisible();
+      // The limit lifts into the history: the loading rows over that empty board, not
+      // "Waiting for your first session" with its way to start one.
+      g.limited = false;
+      const catching = page.getByRole("status").filter({ hasText: "Catching up…" });
+      await expect(catching).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator(".board-skeleton")).toBeVisible();
+      await expect(limit).toHaveCount(0);
+      await expect(page.getByText("Waiting for your first session")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: `Start a session on ${NAME}` })).toHaveCount(0);
+      await expect(page.locator(".nav-badge")).toHaveCount(0);
+      await shot(page, "also-catching-up-after-limit");
+      // The Inbox the same: its loading rows, not "Nothing needs you".
+      await tab(page, "Inbox").click();
+      await expect(page.locator(".page.inbox .skeleton")).toBeVisible();
+      await expect(page.getByText("Nothing needs you")).toHaveCount(0);
+      await shot(page, "also-catching-up-inbox");
+      await tab(page, "Board").click();
+      g.release();
+      await expect(page.getByText("Rename the payout job").first()).toBeVisible({ timeout: 15_000 });
+      await expect(catching).toHaveCount(0);
+      await expect(page.locator(".board-skeleton")).toHaveCount(0);
+      await expect(page.getByText("Waiting for your first session")).toHaveCount(0);
+      await expect(page.locator(".group--needs_you")).toHaveCount(0);
+      await expect.poll(() => b.hub.needs.map((x) => x.sessions)).toEqual([[]]);
+    } finally {
+      g.release();
       await b.close();
     }
   });
