@@ -312,7 +312,8 @@ export interface Delegation {
  *  3+ tool.ended were `ok: false`. loop: within the last 10 tool.started the same tool
  *  ran 3+ times on an identical input (tier 3 only). compacting: 2+ context.compacted
  *  within COMPACTING_WINDOW_MS of the last event. gap: seqs are missing behind the
- *  highest one for longer than GAP_AFTER_MS (they clear when they arrive). */
+ *  highest one for longer than GAP_AFTER_MS (they clear when they arrive). spacesheep
+ *  thins what it relays, so its events open no hole. */
 export type SessionFlagKind = "slow_tool" | "error_streak" | "loop" | "compacting" | "gap";
 
 export interface SessionFlag {

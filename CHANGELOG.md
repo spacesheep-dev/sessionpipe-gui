@@ -26,6 +26,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   spacesheep reads as the person's own choice, not a refusal; another open question,
   "Time ran out" and "Couldn't connect" have titles of their own; and where a key was left
   on spacesheep, the screen says to revoke it once, with "Open API keys" to do it.
+- **A busy session's row shows the newest words of its reply, and no longer says "waiting
+  for 25703 events" on a spacesheep account.** spacesheep relays a session thinned on
+  purpose, so the numbers it skips are events that were never sent; the row and the
+  session's page read them as missing, and the count only grew. A row's flag now takes at
+  most part of the line instead of pushing the reply out, only a slow tool or a loop is said
+  there (compacting is on the session's page), and a reply still being written starts at
+  its newest sentence, not at a word cut 300 characters back.
 
 ## [0.8.3] - 2026-11-16
 

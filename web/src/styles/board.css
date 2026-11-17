@@ -273,6 +273,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The words fill the line, and they are what gives way. */
+.card-text {
+  flex: 1 1 auto;
+}
 .card-attn {
   color: var(--fg-2);
 }
@@ -287,11 +291,19 @@
   flex: none;
   color: var(--fg-3);
 }
+/* Its own width, but never more than 45% of the line with the gap before it, so the words
+   keep 55% or more. One block of text, so a cut shows its ellipsis. */
 .card-flags {
   flex: none;
-  display: flex;
-  gap: 8px;
+  max-width: calc(45% - 8px);
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--fg-3);
+}
+.card-flags > * + * {
+  margin-left: 8px;
 }
 .sess-flags .is-err {
   color: var(--err);

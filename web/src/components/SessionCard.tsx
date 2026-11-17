@@ -338,7 +338,7 @@ export const SessionCard = memo(function SessionCard({
               </span>
             ) : liveText ? (
               <span className="card-text">
-                <Inline text={oneLine(isLiveText ? tail(liveText, 300) : liveText, 300)} />
+                <Inline text={oneLine(isLiveText ? newest(liveText) : liveText, 300)} />
               </span>
             ) : null}
             {/* The tree under the row says it once it is open: then the words are for a
@@ -594,11 +594,12 @@ export function useStickyTop(page: RefObject<HTMLElement | null>): void {
   }, [page]);
 }
 
-/** The store's flags, folded into the end of line 2 in the muted tier. A slow tool the
- *  row already names is not said again ("Read  Read · 3 m"); an error streak is the ✕ at
- *  the row's end, so it is not words here. */
+/** The store's flags that say a session is stuck, folded into the end of line 2 in the
+ *  muted tier: a slow tool and a loop. A slow tool the row already names is not said
+ *  again ("Read  Read · 3 m"); an error streak is the ✕ at the row's end; compacting and
+ *  a gap are the session page's. */
 function Flags({ flags, tool }: { flags: SessionFlag[] | undefined; tool?: string }) {
-  const shown = (flags ?? []).filter((f) => f.kind !== "error_streak" && !(f.kind === "slow_tool" && tool));
+  const shown = (flags ?? []).filter((f) => f.kind === "loop" || (f.kind === "slow_tool" && !tool));
   if (!shown.length) return null;
   return (
     <span className="card-flags">
@@ -895,5 +896,23 @@ export function BesideButton({
   );
 }
 
-const tail = (s: string, n: number) => (s.length > n ? `…${s.slice(-n + 1)}` : s);
+/** A reply still being written, from where its newest thought starts, so a row's line
+ *  shows the newest words and CSS cuts only its end. 140 characters or fewer stay whole.
+ *  Longer text starts after the latest sentence break (".", "!", "?" or ":" and a space,
+ *  or a new line) in its last 160 characters that leaves 40 or more; with none, at the
+ *  word that starts nearest 90 from the end, after a "…". */
+export function newest(text: string): string {
+  if (text.length <= 140) return text;
+  const from = Math.max(0, text.length - 160);
+  /** Where each match of `re` in the last 160 characters ends. */
+  const ends = (re: RegExp) => [...text.slice(from).matchAll(re)].map((m) => from + m.index + m[0].length);
+  const sentence = ends(/[.!?:]\s+|\n\s*/g)
+    .filter((at) => text.length - at >= 40)
+    .pop();
+  if (sentence !== undefined) return text.slice(sentence);
+  const off = (at: number) => Math.abs(text.length - at - 90);
+  const word = ends(/\s+/g).sort((a, b) => off(a) - off(b))[0];
+  return `…${text.slice(word ?? -89)}`;
+}
+
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
