@@ -292,11 +292,19 @@ function Question({ a, session, out }: { a: Attention; session: SessionSummary; 
   if (cut && !steps[steps.length - 1]!.endsWith("…")) steps[steps.length - 1] += "…";
   const more = steps.length - CMD_LINES;
   const all = more <= 0 || unfolded === a.attentionId;
+  // A command of one step on one line is shown whole, however it wraps: nothing caps it.
+  const one = steps.length === 1 && !steps[0]!.includes("\n");
   return (
     <>
       {line(<>Allow {tool} to run:</>)}
       {/* biome-ignore lint/a11y/useSemanticElements: lines of text, not form controls a fieldset would hold */}
-      <div id={blockId} className="ctl-cmd-block" role="group" aria-label="Command" title={cut ? CUT : undefined}>
+      <div
+        id={blockId}
+        className={one ? "ctl-cmd-block ctl-cmd-block--one" : "ctl-cmd-block"}
+        role="group"
+        aria-label="Command"
+        title={cut ? CUT : undefined}
+      >
         {(all ? steps : steps.slice(0, CMD_LINES)).map((step, i) => (
           <div key={i}>{step}</div>
         ))}

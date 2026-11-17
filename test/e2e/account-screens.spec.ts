@@ -1475,12 +1475,16 @@ test.describe("what else an account shows", () => {
         await expect(approve, at).toHaveAttribute("href", "/add-device");
         expect((await approve.boundingBox())!.height, at).toBeGreaterThanOrEqual(44);
         // Read in that order: the question and its command, the sentence, the link.
-        expect(await card.evaluate((el) => Array.from(el.children, (c) => c.className.split(" ").pop())), at).toEqual([
-          "ctl-q",
-          "ctl-cmd-block",
-          "ctl-answer-note",
-          "ctl-approve",
-        ]);
+        expect(
+          await card.evaluate((el) =>
+            Array.from(el.children, (c) =>
+              Array.from(c.classList)
+                .filter((k) => !k.includes("--"))
+                .pop(),
+            ),
+          ),
+          at,
+        ).toEqual(["ctl-q", "ctl-cmd-block", "ctl-answer-note", "ctl-approve"]);
         // Nothing that would only be refused: no Allow, no Deny, no field to type in.
         await expect(page.getByRole("button", { name: /^(Allow|Deny)/ }), at).toHaveCount(0);
         await expect(page.locator("textarea"), at).toHaveCount(0);
@@ -2076,6 +2080,42 @@ test.describe("what else an account shows", () => {
       await expect(page.locator(".inbox-reason")).toHaveText(/^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.$/);
       await expect(page.getByText(/Allow and Deny are off/)).toHaveCount(0);
       expect(b.ss.log.filter((l) => l.startsWith("POST /api/machines/"))).toEqual([]);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("at 320, a command of one line is shown whole beside a live Allow", async ({ browser }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    const cmd =
+      "npm run deploy -- --target staging --region ap-southeast-1 --confirm --skip-smoke-tests --tag release-2026-11-17";
+    try {
+      await page.setViewportSize({ width: 320, height: 568 });
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      await trusted(b);
+      const s = new Session("s-deploy", "claude-code", Date.now() - 4_000);
+      const on = { tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/billing", title: "Deploy to staging" } };
+      b.ss.push([
+        s.ev("session.started", { source: "startup" }, on),
+        s.ev("turn.started", { turn_id: "t1" }, on),
+        s.ev(
+          "attention.needed",
+          { attention_id: "perm-deploy", kind: "permission", tool: "Bash", message: `Bash ${cmd}` },
+          on,
+        ),
+      ]);
+      await page.goto(`${b.server.url}/s/claude-code/s-deploy`);
+      const card = page.locator(".ctl-answer[data-attention='perm-deploy']");
+      await expect(card.getByRole("button", { name: "Allow" })).toBeEnabled({ timeout: 15_000 });
+      const block = card.locator(".ctl-cmd-block");
+      await expect(block).toHaveText(cmd);
+      // Every line of it is there to read: nothing scrolls inside the block, or off the screen.
+      expect(await block.evaluate((el) => el.scrollHeight - el.clientHeight)).toBe(0);
+      await expect(block).toBeInViewport({ ratio: 1 });
+      await expect(card.locator(".ctl-more")).toHaveCount(0);
     } finally {
       await b.close();
     }

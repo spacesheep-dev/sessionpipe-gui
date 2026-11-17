@@ -62,6 +62,10 @@
   -webkit-user-select: text;
   user-select: text;
 }
+/* One step on one line: whole, however it wraps, with no scroll of its own. */
+.ctl-cmd-block--one {
+  max-height: none;
+}
 .ctl-cmd-block > div {
   padding-inline-start: 2ch;
   text-indent: -2ch;
@@ -383,9 +387,10 @@
     flex: none;
   }
   /* The strip stays about half the phone's height (the question, "Show less", the pair
-     and the field take 13.25rem of it): a long command scrolls inside, and the cap ends
-     half a line into a step, so a step below it always shows. Never under three lines. */
-  .ctl-cmd-block {
+     and the field take 13.25rem of it): a long chain scrolls inside, and the cap ends half
+     a line into a step, so a step below it always shows. Never under three lines. A
+     command of one step is never capped. */
+  .ctl-cmd-block:not(.ctl-cmd-block--one) {
     max-height: max(calc(3.5em * var(--lh)), calc(round(down, 50dvh - 13.25rem, 1em * var(--lh)) + 0.5em * var(--lh)));
   }
   .ctl-more {
