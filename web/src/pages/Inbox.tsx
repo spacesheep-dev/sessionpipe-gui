@@ -365,6 +365,7 @@ function InboxRow({
   // Allow and Deny only beside a request the row shows whole (lib/format.ts askFitsRow);
   // any other, a plan or a long command, offers Open, to the session that shows it whole.
   const whole = askFitsRow(a);
+  const titleId = useId();
   // With an answer out the orange glyph is the working ring, or a still hollow one while
   // the computer is offline (Answer says which).
   const [out, setOut] = useState<"going" | "held" | null>(null);
@@ -403,7 +404,9 @@ function InboxRow({
           )}
           <LabelDot session={s.key} />
         </span>
-        <span className="inbox-title">{sessionTitle(s)}</span>
+        <span className="inbox-title" id={titleId}>
+          {sessionTitle(s)}
+        </span>
         <span className="inbox-age">
           <Ago iso={a.at} />
         </span>
@@ -437,6 +440,7 @@ function InboxRow({
           row={row}
           whole={whole}
           onOpen={open}
+          titleId={titleId}
           control={control}
           focused={cursor !== undefined}
           into={answerMenu}
@@ -457,11 +461,12 @@ function InboxRow({
  *  studio-mac", until the machine clears the prompt and the row leaves. A refused send, or
  *  an answer the machine refused, gives both back. Beside a request the row does not show
  *  whole, one Open in the pair's place, as the row's tap: no menu items, no keys, never
- *  off, and no reason under the page bar. */
+ *  off, and no reason under the page bar but the one a device not approved is told. */
 function Answer({
   row,
   whole,
   onOpen,
+  titleId,
   control,
   focused = false,
   into,
@@ -473,6 +478,8 @@ function Answer({
   whole: boolean;
   /** What a tap on the row does: the session beside the page, or pushed on a phone. */
   onOpen: (background?: boolean) => void;
+  /** The id of the row's title, which Open is described by. */
+  titleId: string;
   control?: MachineControl;
   /** The row under the list cursor: `a` / `d` answer it (lib/shortcuts.ts). */
   focused?: boolean;
@@ -519,9 +526,10 @@ function Answer({
   useShortcut("inbox.deny", () => answer(false), { enabled: canKey, priority: 2 });
   // Off for a standing reason (not paired, no passkeys here, not approved): the page says
   // it once, for the rows that show Allow and Deny. A moment's state (sent, a passkey
-  // prompt, closed) stays on the row.
+  // prompt, closed) stays on the row. Not approved, an Open row has no Open either, and
+  // the page's notice is its way on: that one it reports too.
   const offFor = off && !status ? reason : null;
-  const standing = whole ? offFor : null;
+  const standing = whole || tag === "unapproved" ? offFor : null;
   const id = rowKey(row);
   useEffect(() => {
     report(id, standing ? { reason: standing, tag } : null);
@@ -572,8 +580,14 @@ function Answer({
       {/* Not approved: no pair at all (the page's notice has the way on); the row still opens. */}
       {!status && tag !== "unapproved" && !whole && (
         // Deny's face: it answers nothing, it opens the session where the request is whole.
-        <button type="button" className="btn btn--sm inbox-open" onClick={(e) => onOpen(e.metaKey || e.ctrlKey)}>
-          Open
+        // Described by the row's title, so a list of them does not read as one Open after another.
+        <button
+          type="button"
+          className="btn btn--sm inbox-open"
+          aria-describedby={titleId}
+          onClick={(e) => onOpen(e.metaKey || e.ctrlKey)}
+        >
+          {NEW_WORDS.inboxOpen}
         </button>
       )}
       {!status && tag !== "unapproved" && whole && (

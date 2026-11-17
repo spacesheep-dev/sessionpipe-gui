@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Readings of the wire shapes for display: titles, monograms, one-line event summaries.
 import type { ProtocolEvent, SessionState, SessionSummary, StoredEvent } from "@shared/api";
+import { NEW_WORDS } from "../native/accountWords.new";
 import { durShort } from "./time";
 
 export const STATE_LABEL: Record<SessionState, string> = {
@@ -307,7 +308,7 @@ const SNAKE_TOOLS: Record<string, string> = {
   ExitPlanMode: "Plan",
   exit_plan_mode: "Plan",
   // Claude Code's question to the person, asked as a permission (isQuestion).
-  AskUserQuestion: "Question",
+  AskUserQuestion: NEW_WORDS.questionChip,
 };
 
 /** A plan review: Claude Code asks to leave plan mode as an ordinary permission, so

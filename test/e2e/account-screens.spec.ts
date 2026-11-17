@@ -1525,6 +1525,59 @@ test.describe("what else an account shows", () => {
     }
   });
 
+  test("not approved, with only a plan and a long command waiting: the Inbox still says it once, with the way to approve, and the rows open their sessions", async ({
+    browser,
+  }) => {
+    test.setTimeout(120_000);
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    /** A prompt the Inbox shows as two lines and Open where it can be answered. */
+    const waits = (id: string, title: string, tool: string, message: string) => {
+      const s = new Session(id, "claude-code", Date.now() - 4_000);
+      const on = { tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/billing", title } };
+      b.ss.push([
+        s.ev("session.started", { source: "startup" }, on),
+        s.ev("turn.started", { turn_id: "t1" }, on),
+        s.ev("attention.needed", { attention_id: `perm-${id}`, kind: "permission", tool, message }, on),
+      ]);
+    };
+    waits("s-plan", "Plan the refund job", "ExitPlanMode", "ExitPlanMode");
+    waits("s-long", "Deploy the refund job", "Bash", `Bash ${"npm run deploy -- --target staging ".repeat(4).trim()}`);
+    try {
+      for (const [w, h] of [
+        [320, 568],
+        [390, 844],
+        [820, 1180],
+      ] as const) {
+        await page.setViewportSize({ width: w, height: h });
+        const at = `${w}x${h}`;
+        await page.goto(`${b.server.url}/inbox`);
+        await expect(page.locator(".inbox-row--open"), at).toHaveCount(2, { timeout: 15_000 });
+        // Nothing to press on the rows: no Open, no pair.
+        await expect(
+          page.getByRole("button", { name: /^(Open|Allow|Deny|Approve plan|Keep planning)$/ }),
+          at,
+        ).toHaveCount(0);
+        // The page's one notice says why, with the way on.
+        const notes = page.locator(".inbox-notes");
+        await expect(notes.getByText("This iPhone can't answer yet", { exact: true }), at).toHaveCount(1);
+        await expect(notes.getByRole("link", { name: "Approve this iPhone" }), at).toHaveAttribute(
+          "href",
+          "/add-device",
+        );
+        await expect(page.getByText("Allow and Deny are off"), at).toHaveCount(0);
+        if (w === 390) await shot(page, "also-unapproved-inbox-open");
+      }
+      // A row opens its session, whose card has the way to approve.
+      await page.locator(".inbox-row[data-session='claude-code:s-long'] .inbox-main").click();
+      await expect(page).toHaveURL(/\/s\/claude-code\/s-long/);
+      await expect(page.locator(".ctl-answer[data-answer='unapproved'] .ctl-approve")).toBeVisible();
+    } finally {
+      await b.close();
+    }
+  });
+
   test("not approved, and the prompt is past its answer window: the card says it is late, and the field stays, off, with the way to approve the phone", async ({
     browser,
   }) => {

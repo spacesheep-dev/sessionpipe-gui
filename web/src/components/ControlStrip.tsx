@@ -251,7 +251,7 @@ function Question({ a, session, out }: { a: Attention; session: SessionSummary; 
       <>
         {line(q.text)}
         {q.options.length > 0 && (
-          <ul className="ctl-options" aria-label="Options">
+          <ul className="ctl-options" aria-label={NEW_WORDS.questionOptions}>
             {q.options.map((o, i) => (
               <li key={i}>{o}</li>
             ))}

@@ -664,7 +664,8 @@ test.describe("phone: a plan review", () => {
 
 // A shell prompt has one shape at every size, "Allow Bash to run:" over its command, so at
 // 320 no "?" is left on a line of its own; an Inbox row shows a short request whole beside
-// Deny | Allow, and a longer one as two lines and Open, which pushes its session.
+// Deny | Allow, and a longer one as two lines and Open, which pushes its session; a board
+// row's menu answers only a command its one line does not cut.
 test.describe("phone: a request shown whole", () => {
   test.skip(({ isMobile }) => !isMobile, "phone project only");
 
@@ -754,6 +755,50 @@ test.describe("phone: a request shown whole", () => {
     } finally {
       await short.clear();
       await long.clear();
+      await d.stop();
+    }
+  });
+
+  test("a board row's long-press menu answers a command only where the row's one line shows it whole: not at 320, at 820", async ({
+    context,
+    page,
+  }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `menu-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const asked = await postPrompt(token, { machine: d.name, title: "Deploy", agoMs: 3_000, message: SHORT });
+    try {
+      for (const [w, h, cut] of [
+        [320, 568, true],
+        [820, 1180, false],
+      ] as const) {
+        await page.setViewportSize({ width: w, height: h });
+        await page.goto(CONTROL_BASE);
+        const card = page.locator(`article.card[data-flip="${asked.key}"]`);
+        const line = card.locator(".card-attn");
+        await expect(line, `${w}`).toHaveText(SHORT);
+        expect(await line.evaluate((el) => el.scrollWidth > el.clientWidth), `${w}`).toBe(cut);
+        // Held still, then a finger down for the long-press.
+        await card.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(300);
+        await card.locator(".card-title").evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          el.dispatchEvent(
+            new PointerEvent("pointerdown", {
+              bubbles: true,
+              pointerType: "touch",
+              clientX: r.left + 4,
+              clientY: r.top + 4,
+            }),
+          );
+        });
+        const sheet = page.locator(".menu-sheet");
+        await expect(sheet.getByRole("menuitem", { name: "Hide", exact: true }), `${w}`).toBeVisible();
+        await expect(sheet.getByRole("menuitem", { name: /^(Allow|Deny) Bash$/ }), `${w}`).toHaveCount(cut ? 0 : 2);
+      }
+    } finally {
+      await asked.clear();
       await d.stop();
     }
   });

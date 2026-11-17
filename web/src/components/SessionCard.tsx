@@ -214,14 +214,21 @@ export const SessionCard = memo(function SessionCard({
   const beside = (o: { background: boolean } = { background: false }) =>
     openSplit(s.key, { from: ref.current?.getBoundingClientRect(), background: o.background });
   // Allow / Deny in the menu, through the same signed send as the inbox, while a
-  // permission is open (CardAnswer keeps them current).
+  // permission is open (CardAnswer keeps them current) and the row's one line shows it
+  // whole, which on a phone a command often is not. The line is read as the menu opens, so
+  // nothing on the row moves for it.
   const answer = useRef<MenuList>([]);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const cut = () => {
+    const line = rowRef.current?.querySelector<HTMLElement>(".card-attn");
+    return !line || line.scrollWidth > line.clientWidth;
+  };
   const menu = useContextMenu(
     () =>
       sessionItems(s, {
         store,
         surface: "list",
-        answer: answer.current,
+        answer: cut() ? [] : answer.current,
         children,
         extra: onlyItems(s, { onlyMachine, onlyHarness }),
       }),
@@ -233,7 +240,6 @@ export const SessionCard = memo(function SessionCard({
   // The counts the row no longer prints are its tooltip: "2 turns · 5 tools · 1 error".
   const tip = [title, countsLine(s, showTools)].filter(Boolean).join("\n");
   const warm = prefetchProps(store, s);
-  const rowRef = useRef<HTMLDivElement>(null);
   // A phone's swipes (iOS Mail): trailing hides it (with Undo), or unhides a hidden one;
   // leading labels it.
   useSwipe(rowRef, {
@@ -529,8 +535,9 @@ function KidRow({
 
 /** Keeps a row's Allow / Deny menu items current: mounted only while a permission is
  *  open, so the other rows never pay for the send's state. Only beside a request the row
- *  shows (`shown`: the tier lens lets it) and shows whole (askFitsRow), and never for a
- *  question: anything else is answered on the session's page, where it is shown whole. */
+ *  shows (`shown`: the tier lens lets it) and could show whole (askFitsRow; the menu also
+ *  asks the line whether it is cut), and never for a question: anything else is answered
+ *  on the session's page, where it is shown whole. */
 function CardAnswer({ s, into, shown }: { s: SessionSummary; into: MutableRefObject<MenuList>; shown: boolean }) {
   const { machines } = useAppState();
   const control = s.machine ? machines.get(s.machine)?.control : undefined;
