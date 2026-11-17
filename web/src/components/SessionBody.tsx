@@ -2835,7 +2835,8 @@ function ToolRow({
           <span className="tool-subject mono ellipsis">{subject}</span>
         ) : null}
       </span>
-      <span className="tool-dur num">{dur(msv)}</span>
+      {/* No time to show, no column: the subject keeps the room up to the chevron. */}
+      {msv !== undefined && <span className="tool-dur num">{dur(msv)}</span>}
       {expandable && <Chevron />}
     </>
   );

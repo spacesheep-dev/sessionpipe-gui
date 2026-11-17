@@ -633,9 +633,9 @@ test.describe("a tool with no end, while nothing runs it", () => {
     const row = view.locator(".turn--live li.tool").last();
     await expect(row.locator(".tool-status")).toHaveAttribute("aria-label", "asking");
     await expect(view.locator(".tool-status.is-run")).toHaveCount(0);
-    await expect(row.locator(".tool-dur")).toHaveText("");
+    await expect(row.locator(".tool-dur")).toHaveCount(0);
     await page.clock.fastForward(5000);
-    await expect(row.locator(".tool-dur")).toHaveText("");
+    await expect(row.locator(".tool-dur")).toHaveCount(0);
 
     // Simple: the tools line asks too, its glyph in the chevron's place.
     await simple(page);
@@ -649,12 +649,19 @@ test.describe("a tool with no end, while nothing runs it", () => {
     const opened = view.locator(".chat-tools li.tool").last();
     await expect(opened).toBeVisible();
     await expect(opened.locator(".tool-status")).toHaveAttribute("aria-label", "asking");
-    const dur = opened.locator(".tool-dur");
-    const before = await dur.textContent();
+    // No time, and no empty column for one: the chevron ends the row.
+    await expect(opened.locator(".tool-dur")).toHaveCount(0);
     await page.clock.fastForward(5000);
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-    await expect(dur).toHaveText(before!);
-    expect(before).toBe("");
+    await expect(opened.locator(".tool-dur")).toHaveCount(0);
+    // Its chevron ends the row where the Read row's does, after that row's time.
+    const read = view.locator(".chat-tools li.tool").first();
+    await expect(read.locator(".tool-dur")).toHaveCount(1);
+    const [readChev, chev] = await Promise.all([
+      read.locator("summary .chev").boundingBox(),
+      opened.locator("summary .chev").boundingBox(),
+    ]);
+    expect(Math.round(chev!.x)).toBe(Math.round(readChev!.x));
 
     // Allowed, the call runs and the turn ends: the words stay where they were.
     await s.post(s.ev("attention.cleared", { attention_id: "att_deploy", how: "answered" }, "PreToolUse"));
@@ -776,10 +783,10 @@ test.describe("a tool with no end, its computer offline", () => {
     await expect(row.locator(".tool-status.is-run .spinner")).toHaveCSS("animation-play-state", "paused");
     await expect(ring(page)).toHaveCSS("animation-play-state", "paused");
     // The last heard of the call is its own start: a time held there would read "<0.1 s".
-    await expect(row.locator(".tool-dur")).toHaveText("");
+    await expect(row.locator(".tool-dur")).toHaveCount(0);
     await page.clock.fastForward(5000);
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-    await expect(row.locator(".tool-dur")).toHaveText("");
+    await expect(row.locator(".tool-dur")).toHaveCount(0);
 
     // It asks. The title's disc settles in (an arrival is not held) and stands dimmed with
     // the session's rings; Allow still works (the answer waits for the computer), so the
