@@ -143,10 +143,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   words about a day grant. A prompt now says "This iPhone can't answer yet." with Approve
   this iPhone in their place, the field is off, and the Inbox says it once, in a panel above
   Notifications, as it says the hour and any other reason Allow and Deny are off; the Mac app
-  does the same where a computer doesn't trust the Mac. Where a computer has not added an
-  approved phone's key, Allow and Deny stay, off, the prompt says so once, with Approve this
-  iPhone, and that page says to add it on spacesheep's Devices; a refused send takes one
-  Face ID and says why.
+  does the same where a computer doesn't trust the Mac, on that computer's prompts only (in
+  the Inbox, on their rows), while another computer's keep Allow and Deny. Where a computer
+  has not added an approved phone's key, Allow and Deny stay, off, the prompt says so once,
+  with Approve this iPhone, and that page says to add it on spacesheep's Devices; a refused
+  send takes one Face ID and says why.
 - **In the app, nothing warns of Face ID ahead of time, and a cancel is not an error.**
   Every session said "The first send today asks for your passkey. Unlock now" on the
   iPhone, and New session and Ask another agent each had a note of their own. Now the first

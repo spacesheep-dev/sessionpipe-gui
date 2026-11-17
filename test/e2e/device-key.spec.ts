@@ -9,7 +9,15 @@
 // Run with test/e2e/control-device.config.ts against a demo receiver on the identity port.
 import { randomUUID } from "node:crypto";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
-import { CONTROL_BASE, fakeDaemon, passkeyPage, postSession, seenSetupHere, sinkToken } from "./control-helpers.js";
+import {
+  CONTROL_BASE,
+  fakeDaemon,
+  passkeyPage,
+  postPrompt,
+  postSession,
+  seenSetupHere,
+  sinkToken,
+} from "./control-helpers.js";
 import { asMacApp } from "./control-shell.js";
 
 // The receiver's test door holds ONE device key, as a Mac has one: asking to be trusted
@@ -147,6 +155,35 @@ test("the app's device key: asked for, approved from a browser, key.add delivere
     await expect(app.page.locator("textarea")).toBeEnabled();
     await expect(app.page.locator(".ctl-foot[data-reason]")).toHaveCount(0);
     await expect(app.page.getByText(/passkey|Unlock now/)).toHaveCount(0);
+
+    // The Inbox, with a prompt here and one on a machine that doesn't trust this Mac: that
+    // one's row says so, as the composer does, with the way to approve it; this one's keeps
+    // its pair; and the page has no notice that this Mac can't answer.
+    const other = `attic-mini-${tag()}`;
+    const o = await fakeDaemon(key, hello(other, ["passkey", "device"]), { sinkToken: sink });
+    const here = await postPrompt(sink, { machine: name, title: `Ask ${name}`, agoMs: 2_000, message: "npm test" });
+    const there = await postPrompt(sink, { machine: other, title: `Ask ${other}`, agoMs: 3_000, message: "npm test" });
+    try {
+      await app.page.goto(`${CONTROL_BASE}/inbox`);
+      const thereRow = app.page.locator(`.inbox-row[data-attention="${there.attention}"]`);
+      await expect(thereRow.locator(".inbox-note")).toHaveText(
+        `${other} doesn't trust this Mac yet. Approve this Mac`,
+        {
+          timeout: 15_000,
+        },
+      );
+      await expect(thereRow.getByRole("link", { name: "Approve this Mac" })).toHaveAttribute("href", "/add-device");
+      await expect(thereRow.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      const hereRow = app.page.locator(`.inbox-row[data-attention="${here.attention}"]`);
+      await hereRow.hover();
+      await expect(hereRow.getByRole("button", { name: "Allow" })).toBeEnabled();
+      await expect(app.page.getByText("This Mac can't answer yet")).toHaveCount(0);
+      await shot(app.page, "3-app-inbox-one-machine-untrusted");
+    } finally {
+      await here.clear();
+      await there.clear();
+      await o.stop();
+    }
 
     // The app sends: a start, signed under the device key's day grant (no passkey anywhere).
     const sends: Record<string, unknown>[] = [];

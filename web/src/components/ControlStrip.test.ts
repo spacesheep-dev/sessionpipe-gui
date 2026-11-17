@@ -348,6 +348,21 @@ describe("an answer from a device that is not approved, or that its computer has
     ]);
   });
 
+  it("off an account, a computer that doesn't trust the app's key: its own words, as the composer's", () => {
+    g.sessionpipeShell = { platform: "macos" };
+    const untrusted: SendState = { kind: "catching-up", account: false };
+    const st = answerState(s, a, control, { ...send, approval: app(untrusted), sendable: untrusted }, now);
+    expect(st).toEqual({
+      reason: "Misha-Petrov-laptop doesn't trust this Mac yet",
+      off: true,
+      status: undefined,
+      tag: "unapproved",
+      approve: true,
+      sentence: true,
+    });
+    expect(answerItems(a.tool, st, () => {})).toEqual([]);
+  });
+
   it("a browser's passkey is never turned off by its list, nor the app before its key is read", () => {
     for (const o of [
       { device: false, keyKnown: true },

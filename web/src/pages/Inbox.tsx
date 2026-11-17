@@ -9,10 +9,12 @@
 // bell in the page bar; why the buttons are off (the machine is not paired, this page
 // cannot use passkeys, notifications are off for the site or the app) is said once under
 // the bar, not on every row. A device not approved gets no buttons at all, and one notice
-// with the way to approve it. A prompt with an answer out, from here or anywhere, keeps
-// its row with the receipt in the pair's place until it clears, and counts no more. Allow
-// and Deny stand only beside a request the row shows whole, wrapped; a plan or a longer
-// request is two lines and "Open". A question from the agent waits with the terminal's.
+// with the way to approve it (off a spacesheep account, where each computer approves it,
+// the rows of a computer that doesn't trust it say so, each with the way). A prompt with
+// an answer out, from here or anywhere, keeps its row with the receipt in the pair's place
+// until it clears, and counts no more. Allow and Deny stand only beside a request the row
+// shows whole, wrapped; a plan or a longer request is two lines and "Open". A question
+// from the agent waits with the terminal's.
 import type { MachineControl } from "@shared/api";
 import {
   type MutableRefObject,
@@ -576,7 +578,11 @@ function Answer({
   // prompt, closed) stays on the row. Not approved, an Open row has no Open either, and
   // the page's notice is its way on: that one it reports too.
   const offFor = off && !status ? reason : null;
-  const standing = whole || tag === "unapproved" ? offFor : null;
+  // Off an account, this computer trusts no key of this device: its own rows say so, as the
+  // composer does, with the way to approve it, and the page does not (another computer's
+  // rows answer as ever).
+  const untrusted = tag === "unapproved" && send.sendable.kind === "catching-up";
+  const standing = (whole || tag === "unapproved") && !untrusted ? offFor : null;
   const id = rowKey(row);
   useEffect(() => {
     report(
@@ -592,6 +598,13 @@ function Answer({
   const note = send.error ? (
     <span className="inbox-note inbox-note--err" id={noteId}>
       {send.error}
+    </span>
+  ) : untrusted && reason ? (
+    <span className="inbox-note" id={noteId}>
+      <WithName text={`${reason}.`} name={s.machine} />{" "}
+      <Link to="/add-device" className="inbox-note-way">
+        {setupLabel()}
+      </Link>
     </span>
   ) : reason && !offFor ? (
     <span className="inbox-note" id={noteId}>
@@ -627,7 +640,8 @@ function Answer({
       ) : (
         note
       )}
-      {/* Not approved: no pair at all (the page's notice has the way on); the row still opens. */}
+      {/* Not approved: no pair at all (the page's notice, or off an account the row's line, has
+          the way on); the row still opens. */}
       {!status && tag !== "unapproved" && !whole && (
         // Deny's face: it answers nothing, it opens the session where the request is whole.
         // Described by the row's title, so a list of them does not read as one Open after another.

@@ -21,7 +21,17 @@ import type { HeldMeta } from "./held";
 import { HELD_WORDS } from "./heldWords";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
 import { remoteHostFor } from "./remoteRp";
-import { canSign, isCancel, machineTakes, ownKeyKnown, signerKind, signerLabel, signHint, updateWords } from "./signer";
+import {
+  canSign,
+  deviceWords,
+  isCancel,
+  machineTakes,
+  ownKeyKnown,
+  signerKind,
+  signerLabel,
+  signHint,
+  updateWords,
+} from "./signer";
 import { answerEndWords, notSentLine, notSentWords, receiptWords, unheardWords } from "./words";
 
 export type { AnswerOut, AnswerStatus };
@@ -45,6 +55,7 @@ export function answerState(
     cooling?: string | null;
     approval?: Approval;
     catching?: boolean;
+    sendable?: SendState;
   },
   now: number,
 ): {
@@ -84,7 +95,10 @@ export function answerState(
             // any send: the same line the composer has, and no button that will be refused.
             send.cooling
           : approval === "unapproved"
-            ? NEW_WORDS.answerNotYet(ThisPhone())
+            ? // Off an account, this computer trusts no key of this device: as the composer says it.
+              send.sendable?.kind === "catching-up"
+              ? `${s.machine ?? "This machine"} doesn't trust ${deviceWords().this} yet`
+              : NEW_WORDS.answerNotYet(ThisPhone())
             : approval === "catching-up"
               ? SEND.long.notHere(s.machine ?? "its computer", thisPhone()).replace(/\.$/, "")
               : late

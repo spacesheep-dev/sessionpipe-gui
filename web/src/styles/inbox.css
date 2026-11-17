@@ -313,6 +313,25 @@
 .inbox-note--err {
   color: var(--err);
 }
+/* The way on in a row's line (Approve this Mac): an action, as under a session's field. */
+.inbox-note-way {
+  color: var(--fg-2);
+  font-weight: 500;
+  white-space: nowrap;
+}
+@media (hover: hover) {
+  .inbox-note-way:hover {
+    color: var(--fg);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+@media (max-width: 839px) {
+  .inbox-note-way {
+    color: var(--tint-fg);
+    font-weight: 600;
+  }
+}
 
 /* "Notify me" (components/NotifyToggle.tsx): the switch, its name and one line of what
    it does, inside the bell's popover. */
