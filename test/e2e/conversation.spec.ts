@@ -481,3 +481,42 @@ test("Stop before the first word says so, in the chat too; a message stopped bef
     expect(await drawn(page, words), words).toBe(0);
   expect(await drawn(page, "KILOB")).toBe(1);
 });
+
+test("a long message sent from here opens again whole, as it was signed, though the page holds it cut", async ({
+  context,
+  page,
+}) => {
+  const name = `cv-long-${tag()}`;
+  const m = await setup(context, page, { mode: "simple", name });
+  const s = await openSession(page, sink, name, `Long message ${name}`);
+  // Past the 2 KB a page holds of a prompt, with its last line at the end.
+  const LAST = "LONGEND: that is the whole of it.";
+  const text = `${"Read the export log and say which batch failed and why it failed. ".repeat(40)}${LAST}`;
+  const id = await send(page, s, text);
+  await ack(m, id, { outcome: "taken", mode: "resume" });
+  // The machine hands it over framed, as sessionpipe's control does.
+  const framed = `Message via localhost (sessionpipe control, signed on the sender's device):\n\n${text}`;
+  const at = await s.begin("t-long", framed);
+  await ack(m, id, { outcome: "delivered", mode: "resume", reply: "Batch 7." });
+  await s.end("t-long", framed, "Batch 7.", at);
+  await expect(block(page, "Read the export log").locator(REPLY)).toHaveText("Batch 7.");
+
+  // Opened again, the page holds the prompt cut; the bubble is the message as it was
+  // signed, with where it was sent from, and nothing is read for it.
+  const reads: string[] = [];
+  page.on("request", (r) => {
+    if (/\/api\/ui\/sessions\/.*[?&]limit=1(&|$)/.test(r.url())) reads.push(r.url());
+  });
+  await page.reload();
+  // The turn as the page read it (until then the message is drawn as on its way, whole).
+  const turn = block(page, "Read the export log");
+  await expect(turn).toHaveAttribute("data-seq", /^\d+$/);
+  const bubble = turn.locator("blockquote");
+  await expect(bubble).toContainText(LAST);
+  await expect(bubble.locator(".prompt-via")).toHaveText("Sent from localhost");
+  // Long, it folds like any other: "Show all" opens it without a read.
+  await bubble.getByRole("button", { name: "Show all" }).click();
+  await expect(bubble.getByRole("button", { name: "Show less" })).toBeVisible();
+  await expect(bubble.locator(".prompt-words")).not.toHaveClass(/is-clamped/);
+  expect(reads).toEqual([]);
+});

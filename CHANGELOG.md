@@ -66,6 +66,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   read as Done, then as needing you (with a badge), then as Working. The board on screen
   stays as it was, or its loading rows on a first connect, and changes once, when the
   history is in. Nothing it hands over for notifications comes from the part read so far.
+- **Long messages and long replies are no longer cut at 400 characters.** A session
+  opened again showed a message you sent cut mid-word, with no sign of it, and every reply
+  over 400 characters as a stub that needed its own "Load full text". Both now arrive whole
+  up to 2,048 characters, the newest reply always whole, and a message sent from this
+  device as it was signed. A long message folds to eight lines under "Show all"; an older
+  reply longer than that ends in "…" with "Show more".
 
 ## [0.8.3] - 2026-11-16
 

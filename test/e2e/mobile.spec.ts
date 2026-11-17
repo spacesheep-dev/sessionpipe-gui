@@ -6,9 +6,9 @@
 // list refreshes it, and an inbox row pushes its session's page (never the desktop's
 // panel as a sheet, and nothing of that panel comes back on the next launch).
 import { randomUUID } from "node:crypto";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { CONTROL_BASE, fakeDaemon, passkeyPage, seenSetupHere, sinkToken } from "./control-helpers.js";
-import { openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
+import { EVENTS, INFO, openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
 
 /** A finger down the page from its top, as touch events (page.touchscreen only taps):
  *  lands at y 200, moves `by` px in steps, and stays down until `lift` is called. */
@@ -393,6 +393,133 @@ test.describe("phone: a plan review", () => {
     } finally {
       await d.stop();
     }
+  });
+});
+
+// Long turns on a phone, in Simple mode (a phone's default): the person's long message folds
+// to eight lines under "Show all", which opens it in place (one the receiver cut is read
+// whole first); an older reply the receiver cut ends in "…" and "Show more"; the newest
+// reply is whole when the session opens. Never "A preview of N characters" in the chat.
+test.describe("phone: long turns", () => {
+  test.skip(({ isMobile }) => !isMobile, "phone project only");
+
+  /** About `n` characters of `s` said again and again, in paragraphs, then `last`. */
+  const long = (s: string, n: number, last: string) => {
+    let out = "";
+    for (let i = 1; out.length < n - last.length - 2; i++) out += `${s}${i % 4 ? " " : "\n\n"}`;
+    return `${out.trimEnd()}\n\n${last}`;
+  };
+  /** Whether `words` inside `l` are within its box on screen, not under its fold. */
+  const shows = (l: Locator, words: string) =>
+    l.evaluate((el, w) => {
+      const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        const at = n.textContent!.indexOf(w);
+        if (at < 0) continue;
+        const r = document.createRange();
+        r.setStart(n, at);
+        r.setEnd(n, at + w.length);
+        return r.getBoundingClientRect().bottom <= el.getBoundingClientRect().bottom + 1;
+      }
+      return false;
+    }, words);
+
+  test("a long message folds and opens in place; a cut one is read first; older replies say Show more, the newest is whole", async ({
+    context,
+    page,
+    request,
+  }) => {
+    await context.addInitScript(() =>
+      localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ mode: "simple" })),
+    );
+    const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+    const id = randomUUID();
+    let seq = 0;
+    let clock = Date.now() - 60_000;
+    const ev = (type: string, data: Record<string, unknown>) => {
+      clock += 1000;
+      return {
+        protocol: 1,
+        id: ulid(clock),
+        type,
+        time: new Date(clock).toISOString(),
+        tier: 3,
+        harness: { name: "claude-code", version: "2.1.296" },
+        session: { id, seq: seq++, machine: "e2e-box", cwd: "~/code/e2e", title: "Long turns", title_source: "custom" },
+        privacy: { rulesets: ["secrets@1"], pii: false },
+        data,
+      };
+    };
+    const reply = (last: string) => long("The export now takes a fresh connection for each batch.", 5000, last);
+    const turn = (n: number, user: string, assistant: string) => [
+      ev("turn.started", { turn_id: `t${n}` }),
+      ev("turn.transcript", { turn: n, user, assistant }),
+      ev("turn.ended", { turn_id: `t${n}`, reason: "stop" }),
+    ];
+    const events = [
+      ev("session.started", { source: "startup" }),
+      ...turn(1, "Read the export code.", reply("FIRSTEND closes the first reply.")),
+      ...turn(2, long("Resume from the batch that failed.", 3000, "PLANEND is the plan's last line."), reply("OLDEND")),
+      ...turn(
+        3,
+        long("Batch 7 failed: connection reset by peer.", 1500, "LOGEND is the log's last line."),
+        reply("NEWEND"),
+      ),
+    ];
+    const res = await request.post(EVENTS, {
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${sinkToken}`,
+        "sessionpipe-protocol": "1",
+      },
+      data: { events },
+    });
+    expect(res.status()).toBe(202);
+    await page.goto(sessionUrl("claude-code", id));
+    const bubbles = page.locator(".turn--chat .chat-bubble");
+    const cards = page.locator(".turn--chat .chat-card");
+    await expect(bubbles).toHaveCount(3);
+
+    // The newest reply is whole as the session opens, with nothing to tap.
+    await expect(cards.nth(2)).toContainText("NEWEND");
+    await expect(cards.nth(2).locator(".reply-more")).toHaveCount(0);
+    await expect(page.locator(".timeline")).not.toContainText("A preview of");
+
+    // 1,500 characters arrive whole and fold to eight lines; "Show all" opens them where
+    // they are, the bubble's top staying put.
+    const log = bubbles.nth(2);
+    const logWords = log.locator(".prompt-words");
+    await expect(log).toContainText("LOGEND");
+    await expect(logWords).toHaveClass(/is-clamped/);
+    expect(await shows(logWords, "LOGEND")).toBe(false);
+    const all = log.getByRole("button", { name: "Show all" });
+    await expect(all).toHaveAttribute("aria-expanded", "false");
+    await all.scrollIntoViewIfNeeded();
+    const top = (await log.boundingBox())!.y;
+    await all.click();
+    await expect(log.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
+    expect(await shows(logWords, "LOGEND")).toBe(true);
+    expect(Math.abs((await log.boundingBox())!.y - top)).toBeLessThan(2);
+
+    // 3,000 characters come cut: "Show all" reads the turn whole first. The same read
+    // brings its reply whole, so that one's "Show more" goes.
+    const plan = bubbles.nth(1);
+    await expect(plan).not.toContainText("PLANEND");
+    await expect(cards.nth(1).locator(".reply-more")).toHaveText("Show more");
+    await plan.getByRole("button", { name: "Show all" }).click();
+    await expect(plan.getByRole("button", { name: "Show less" })).toBeVisible();
+    expect(await shows(plan.locator(".prompt-words"), "PLANEND")).toBe(true);
+    await expect(cards.nth(1)).toContainText("OLDEND");
+    await expect(cards.nth(1).locator(".reply-more")).toHaveCount(0);
+
+    // An older reply the receiver cut ends cleanly in "…"; "Show more" reads it and goes.
+    const first = cards.nth(0);
+    await expect(first).not.toContainText("FIRSTEND");
+    expect((await first.locator(".md").innerText()).trimEnd()).toMatch(/…$/);
+    await first.getByRole("button", { name: "Show more" }).click();
+    await expect(first).toContainText("FIRSTEND closes the first reply.");
+    await expect(first.locator(".reply-more")).toHaveCount(0);
+    await noSidewaysScroll(page);
   });
 });
 

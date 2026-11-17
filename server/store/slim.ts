@@ -104,20 +104,22 @@ function slimData(ev: StoredEvent): SlimEvent {
   return { ...ev, data, preview: preview! };
 }
 
-/** The same slim copy with each big `data` string cut to at most `chars` (a list page's
- *  shorter preview, or an old event's). `preview` keeps the original lengths. */
-export function trimPreview(ev: SlimEvent, chars: number): SlimEvent {
+/** The same slim copy with each big `data` string of `keys` cut to at most `chars` (a list
+ *  page's shorter preview of tool input/output, or an old event's of all of them). A
+ *  running assistant text keeps its end, as in the index. `preview` keeps the original
+ *  lengths. */
+export function trimPreview(ev: SlimEvent, chars: number, keys: readonly string[] = BIG_KEYS): SlimEvent {
   const had = ev.preview ?? {};
   let data: Record<string, unknown> | null = null;
   let preview: Record<string, number> | null = null;
-  for (const k of BIG_KEYS) {
+  for (const k of keys) {
     const v = ev.data[k];
     if (v === undefined || v === null) continue;
     const text = typeof v === "string" ? v : JSON.stringify(v);
     if (text.length <= chars) continue;
     data ??= { ...ev.data };
     preview ??= { ...had };
-    data[k] = detach(text.slice(0, chars));
+    data[k] = detach(ev.type === "turn.progress" && k === "assistant" ? text.slice(-chars) : text.slice(0, chars));
     preview[k] = had[k] ?? text.length;
   }
   return data ? { ...ev, data, preview: preview! } : ev;

@@ -41,6 +41,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -93,7 +94,7 @@ import { reducedMotion, useFlip } from "../lib/motion";
 import { accountMode } from "../lib/net";
 import { leftOff, type NewLineAt, newLinePlace } from "../lib/newLine";
 import { clockTime, eventWindows, leftBecause, sentenceName, servedBy, swaps, swapWords } from "../lib/pool";
-import { said, stoppedWords, turnWords } from "../lib/replies";
+import { cutReply, cutReplyStart, cutWords, said, stoppedWords, turnWords } from "../lib/replies";
 import { AGENT_PARAM, back, hrefFor, Link, navigate, sessionPath, setSearchParam, useSearchParam } from "../lib/router";
 import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
@@ -108,6 +109,8 @@ import {
   eventWords,
   groupTurns,
   handoffAnswer,
+  type PromptWords,
+  promptWords,
   sentTurns,
   type ToolItem,
   type Turn,
@@ -115,6 +118,7 @@ import {
   turnSeq,
   unframe,
 } from "../lib/turns";
+import { NEW_WORDS } from "../native/accountWords.new";
 import { HistoryOrMissing } from "../search/HistoryEntry";
 import { AgentGlyph, AgentNow, AgentText } from "./AgentRow";
 import { CopyIconButton, HarnessGlyph, Redacted, Segmented, Since, Spinner, StateDot } from "./bits";
@@ -408,7 +412,9 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
             preview: LIST_PREVIEW,
           }));
         if (cancelled) return;
-        const acc = mergeBySeq(d.events.slice(), tap.release());
+        const page = await newestWhole(store, harness, id, d.events);
+        if (cancelled) return;
+        const acc = mergeBySeq(page.slice(), tap.release());
         lastSeq.current = acc[acc.length - 1]?.session.seq ?? -1;
         firstSeq.current = d.firstSeq ?? acc[0]?.session.seq;
         setSummary(d.session);
@@ -452,6 +458,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
         let d = await store.transport.session(harness, id, { ...q, ...page });
         const afresh = !!q.tail || rereadShort(d.events);
         if (afresh && !q.tail) d = await store.transport.session(harness, id, { tail: true, limit: TAIL, ...page });
+        d = { ...d, events: await newestWhole(store, harness, id, d.events, eventsRef.current) };
         if (cancelled) return;
         setSummary(d.session);
         setChildren(d.children);
@@ -700,12 +707,11 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     return () => root.removeEventListener("click", onClick, true);
   }, [anchorOn, shape]);
 
-  /** Stream and feed events are slim (data cut to a preview); the detail route has the
+  /** The events of a page are slim (data cut to a preview); the detail route has the
    *  whole event. Swap one in by its seq. */
   const fillEv = useCallback(
     async (e: StoredEvent) => {
-      const d = await store.transport.session(harness, id, { after: e.session.seq - 1, limit: 1 });
-      const full = d.events.find((x) => x.session.seq === e.session.seq);
+      const full = await wholeEvent(store, harness, id, e);
       if (full) setEvents((prev) => prev.map((p) => (p.session.seq === full.session.seq ? full : p)));
     },
     [store, harness, id],
@@ -1560,6 +1566,44 @@ function childrenFromStore(store: ReturnType<typeof useStore>, key: string): Ses
 
 type Fill = (e: StoredEvent) => Promise<void>;
 
+/** One event whole, by its seq, from the detail route (on a spacesheep account the page's
+ *  own store: a read on the phone). Undefined when the session no longer has it. */
+async function wholeEvent(
+  store: ReturnType<typeof useStore>,
+  harness: string,
+  id: string,
+  e: StoredEvent,
+): Promise<StoredEvent | undefined> {
+  const d = await store.transport.session(harness, id, { after: e.session.seq - 1, limit: 1 });
+  return d.events.find((x) => x.session.seq === e.session.seq);
+}
+
+/** A page with its newest reply whole: the view opens on it, and past the index's 2 KB it
+ *  came cut. The copy the view already holds when that one is whole (`held`), else one
+ *  event read before the page is drawn, so nothing grows under the reader; drawn cut, with
+ *  its "Show more", when that read fails. */
+async function newestWhole(
+  store: ReturnType<typeof useStore>,
+  harness: string,
+  id: string,
+  events: StoredEvent[],
+  held: readonly StoredEvent[] = [],
+): Promise<StoredEvent[]> {
+  let i = events.length - 1;
+  while (i >= 0 && events[i]!.type !== "turn.transcript" && events[i]!.type !== "turn.progress") i--;
+  const e = events[i];
+  if (!e || e.preview?.assistant === undefined) return events;
+  const swap = (full: StoredEvent) => events.map((x) => (x === e ? full : x));
+  const kept = held.find((x) => x.session.seq === e.session.seq);
+  if (kept && kept.preview?.assistant === undefined) return swap(kept);
+  try {
+    const full = await wholeEvent(store, harness, id, e);
+    return full ? swap(full) : events;
+  } catch {
+    return events;
+  }
+}
+
 /** The first timeline row of this view whose top edge is on screen (below the bar and a
  *  stuck turn head), by seq. Turn heads are sticky, so they never anchor. */
 function firstVisibleRow(root: HTMLElement | null, scroller: HTMLElement | null): { seq: number | null; top: number } {
@@ -1632,7 +1676,11 @@ function TurnBlock({
     !words.stopped &&
     turn.items.some((i) => (i.kind === "tool" && !i.ended) || (i.kind === "agent" && i.tools.some((t) => !t.ended)));
   const now = useNow(live || hasRunningTool ? "fine" : "off");
-  const prompt = (transcript?.e.data.user as string | undefined) ?? (progress?.e.data.user as string | undefined);
+  // The person's words as the record has them; cut there, the message sent from here
+  // as it was signed (lib/turns.ts promptWords).
+  const promptEv = (transcript ?? progress)?.e;
+  const written = promptWords(promptEv, sent?.text);
+  const prompt = written.text;
   const promptChars = turn.start?.data.prompt_chars as number | undefined;
   // A turn someone asked for: it began with a prompt, or with a message its Stop handed over.
   const asked = !!turn.start || turn.continues !== undefined;
@@ -1691,6 +1739,7 @@ function TurnBlock({
         now={now}
         harness={harness}
         prompt={prompt}
+        written={written}
         notice={notice?.agentId}
         answer={answer}
         promptChars={promptChars}
@@ -1736,7 +1785,15 @@ function TurnBlock({
         notice ? (
           <AgentNotice agentId={notice.agentId} seq={startSeq} />
         ) : prompt ? (
-          <Prompt text={prompt} seq={startSeq} by={submittedLabel(turn.start?.data.submitted_by)} />
+          <Prompt
+            text={prompt}
+            seq={startSeq}
+            by={submittedLabel(turn.start?.data.submitted_by)}
+            sent={written.fromSent ? sent : undefined}
+            e={promptEv}
+            cut={written.cut}
+            fill={fill}
+          />
         ) : sent?.text ? (
           <Prompt text={sent.text} seq={startSeq} sent={sent} />
         ) : (
@@ -1856,15 +1913,49 @@ function ErrGlyph() {
   );
 }
 
+/** Reading a slim event whole for a button that asks for it ("Show all", "Show more"):
+ *  `load` resolves true once the read went through, and `state` says how it goes. */
+function useWhole(e: StoredEvent | undefined, fill: Fill | undefined) {
+  const [state, setState] = useState<"idle" | "loading" | "failed">("idle");
+  const load = useCallback(async (): Promise<boolean> => {
+    if (!e || !fill) return false;
+    setState("loading");
+    try {
+      await fill(e);
+      setState("idle");
+      return true;
+    } catch {
+      setState("failed");
+      return false;
+    }
+  }, [e, fill]);
+  return { state, load };
+}
+
+/** Lines of a person's message shown before "Show all". */
+const PROMPT_LINES = 8;
+
+/** Whether an element's text runs past `lines` lines, clamped or not. */
+function overLines(el: HTMLElement, lines: number): boolean {
+  const lh = Number.parseFloat(getComputedStyle(el).lineHeight);
+  return lh > 0 ? el.scrollHeight > lh * lines + 1 : el.scrollHeight > el.clientHeight + 1;
+}
+
 /** The person's prompt: a well in the timeline, a bubble in the chat. A message sent from
  *  here keeps the files it carried as chips under it. A start's first message is the
- *  session's first bubble in both modes (the started moment is one surface). */
+ *  session's first bubble in both modes (the started moment is one surface). A long
+ *  message shows its first eight lines and "Show all", which opens it in place; one the
+ *  receiver cut short (`cut`) is read whole first. Only the words fold: the pictures it
+ *  carried and the lines that say where it came from stay in sight. */
 function Prompt({
   text,
   seq,
   bubble = false,
   sent,
   by,
+  e,
+  cut = false,
+  fill,
 }: {
   text: string;
   seq?: number;
@@ -1872,25 +1963,85 @@ function Prompt({
   sent?: ControlActivity;
   /** Who submitted the turn, when the harness said it was not the person ("Scheduled"). */
   by?: string;
+  /** The record the words came in, and whether they are cut there (`preview.user`). */
+  e?: StoredEvent;
+  cut?: boolean;
+  fill?: Fill;
 }) {
-  const { path, root, machine } = useTimeline();
+  const { path, root, machine, anchorOn } = useTimeline();
   // A message sent through sessionpipe arrives framed ("Message via … (sessionpipe
   // control, …):"); the words show as written, and where they came from as a quiet line.
   // A question another session asked (sessionpipe ask) says who asked under it; an answer
   // a handoff brought back shows raw here (the chat draws it as the agent's turn).
   const { text: words, via, askedBy } = unframe(text);
   const answer = bubble ? undefined : handoffAnswer(text);
+  const whole = useWhole(e, fill);
+  const canLoad = cut && !!e && !!fill;
+  const [all, setAll] = useState(false);
+  const [long, setLong] = useState(false);
+  const boxRef = useRef<HTMLQuoteElement>(null);
+  const wordsRef = useRef<HTMLSpanElement>(null);
+  const wordsId = useId();
+  // Measured, never counted: a narrower screen, a larger text size or a turn of the phone
+  // decide again by themselves.
+  useLayoutEffect(() => {
+    const el = wordsRef.current;
+    if (!el) return;
+    const measure = () => setLong(overLines(el, PROMPT_LINES));
+    measure();
+    if (typeof ResizeObserver !== "function") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [words]);
+  /** Open it in place, the whole of it read first when it was cut, or fold it again; the
+   *  bubble's top stays where it is on screen. */
+  const open = (on = true) => {
+    if (boxRef.current) anchorOn(boxRef.current);
+    if (on && canLoad) void whole.load().then((ok) => ok && setAll(true));
+    else setAll(on);
+  };
   const menu = useContextMenu(() => [
-    copyItem("Copy message", words),
+    copyItem(cut ? NEW_WORDS.sessionCopyPreview : "Copy message", words),
     copyItem("Copy link to this turn", seqLink(path, seq)),
+    canLoad && { sep: true },
+    canLoad && { label: "Load full text", run: () => open() },
     { sep: true },
     controlItems(root.current).send,
   ]);
   const cls = bubble ? "chat-bubble" : sent?.kind === "start" ? "prompt chat-bubble" : "prompt";
+  const folded = !all && (long || cut);
+  const label =
+    whole.state === "loading"
+      ? "Loading…"
+      : whole.state === "failed"
+        ? NEW_WORDS.sessionLoadFailed
+        : all
+          ? "Show less"
+          : "Show all";
+  const render = (body: string) => (
+    <>
+      <span id={wordsId} ref={wordsRef} className={`prompt-words${folded ? " is-clamped" : ""}`}>
+        <Redacted text={cut ? cutWords(body) : body} />
+      </span>
+      {(long || (canLoad && !all)) && (
+        <button
+          type="button"
+          className="cut-btn prompt-more"
+          aria-expanded={!folded}
+          aria-controls={wordsId}
+          disabled={whole.state === "loading"}
+          onClick={() => open(!all)}
+        >
+          {label}
+        </button>
+      )}
+    </>
+  );
   return (
     <>
-      <blockquote className={cls} data-start-message={sent?.kind === "start" ? "" : undefined} {...menu}>
-        <PromptBody text={words} />
+      <blockquote className={cls} data-start-message={sent?.kind === "start" ? "" : undefined} ref={boxRef} {...menu}>
+        <PromptBody text={words} render={render} />
         {via && <span className="prompt-via">Sent from {via}</span>}
         {askedBy && (
           <span className="prompt-via">
@@ -1935,7 +2086,10 @@ function AckReply({ text, live, seq, chat = false }: { text: string; live: boole
   );
 }
 
-/** The assistant's text as markdown: plain prose, no box. `live` while it is still arriving. */
+/** The assistant's text as markdown: plain prose, no box. `live` while it is still arriving.
+ *  Whole as the receiver keeps it (2 KB, and the newest reply always); one it cut short ends
+ *  cleanly with "…" and "Show more", which reads the rest and goes. A running reply it cut
+ *  keeps its end, and starts with "…" until its turn's transcript replaces it. */
 function Reply({
   e,
   text: given,
@@ -1953,11 +2107,14 @@ function Reply({
   live?: boolean;
   chat?: boolean;
 }) {
-  const { path, session } = useTimeline();
+  const { path, session, anchorOn } = useTimeline();
   const store = useStore();
   // Never Claude Code's stand-in for a reply that never came: nobody said that.
   const text = given ?? said(String(e.data.assistant ?? ""));
   const cut = e.preview?.assistant !== undefined;
+  const running = e.type === "turn.progress";
+  const whole = useWhole(e, fill);
+  const shown = cut && text ? (running ? cutReplyStart(text) : cutReply(text)) : text;
   const menu = useContextMenu(() => {
     const s = session();
     return [
@@ -1967,20 +2124,40 @@ function Reply({
       s &&
         askItem(s, store, { label: "Ask another agent about this…", reply: text, turnSeq: turnSeq ?? e.session.seq }),
       cut && { sep: true },
-      cut && { label: "Load full text", run: () => fill(e) },
+      cut && { label: "Load full text", run: () => void whole.load() },
     ];
   });
+  const more =
+    cut && text && !running ? (
+      <button
+        type="button"
+        className="cut-btn reply-more"
+        disabled={whole.state === "loading"}
+        onClick={(ev) => {
+          // The rest opens under it: the reply's top stays where it is on screen.
+          const box = ev.currentTarget.parentElement;
+          if (box) anchorOn(box);
+          void whole.load();
+        }}
+      >
+        {whole.state === "loading"
+          ? "Loading…"
+          : whole.state === "failed"
+            ? NEW_WORDS.sessionLoadFailed
+            : NEW_WORDS.sessionShowMore}
+      </button>
+    ) : null;
   if (chat)
     return (
       <div className="chat-card" data-seq={e.session.seq} {...menu}>
-        <Markdown text={text} />
-        {text && <Cut e={e} field="assistant" fill={fill} />}
+        <Markdown text={shown} />
+        {more}
       </div>
     );
   return (
     <li className={`reply ${live ? "reply--live" : ""}`} data-seq={e.session.seq} {...menu}>
-      <Markdown text={text} />
-      {text && <Cut e={e} field="assistant" fill={fill} />}
+      <Markdown text={shown} />
+      {more}
     </li>
   );
 }
@@ -2110,6 +2287,7 @@ function ChatTurn({
   now,
   harness,
   prompt,
+  written,
   notice,
   answer,
   promptChars,
@@ -2134,6 +2312,8 @@ function ChatTurn({
   now: number;
   harness: string;
   prompt: string | undefined;
+  /** Whether `prompt` is cut, or is the message sent from here (lib/turns.ts promptWords). */
+  written: PromptWords;
   /** The agent a `<task-notification>` prompt reports on: a quiet line, not a bubble. */
   notice?: string;
   /** The prompt is an answer a handoff brought back: the asked agent's turn, not a bubble. */
@@ -2216,7 +2396,16 @@ function ChatTurn({
             </time>
           )}
           {prompt ? (
-            <Prompt text={prompt} seq={startSeq} bubble by={submittedLabel(turn.start?.data.submitted_by)} />
+            <Prompt
+              text={prompt}
+              seq={startSeq}
+              bubble
+              by={submittedLabel(turn.start?.data.submitted_by)}
+              sent={written.fromSent ? sent : undefined}
+              e={(transcript ?? progress)?.e}
+              cut={written.cut}
+              fill={fill}
+            />
           ) : sent?.text ? (
             <Prompt text={sent.text} seq={startSeq} bubble sent={sent} />
           ) : (

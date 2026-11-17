@@ -78,6 +78,9 @@ export const NEW_WORDS = {
   answerClosed: "already answered, or timed out",
   catchingUp: "Catching up…",
   catchingUpSpoken: "Catching up",
+  sessionShowMore: "Show more",
+  sessionLoadFailed: "Couldn't load. Try again",
+  sessionCopyPreview: "Copy message (preview)",
 } as const;
 
 /** Whether this phone can send to a computer (account/sendable.ts), the same on every screen

@@ -107,7 +107,9 @@ export function ulid(at = Date.now()): string {
 const iso = (t: number) => new Date(t).toISOString();
 
 /** The stream and the feed carry slim events: long strings cut to a preview, with the
- *  original lengths in `preview` (ARCHITECTURE.md "Memory"). The detail route is full. */
+ *  original lengths in `preview` (ARCHITECTURE.md "Memory"); a page asks for less of tool
+ *  input/output (`chars`, server/ui/preview.ts). Cut as the server cuts: no "…" added, a
+ *  running reply keeps its end. The detail route is full. */
 const PREVIEW_CHARS = 2048;
 export function slim(e: StoredEvent, chars = PREVIEW_CHARS): StoredEvent {
   const preview: Record<string, number> = {};
@@ -115,9 +117,10 @@ export function slim(e: StoredEvent, chars = PREVIEW_CHARS): StoredEvent {
   for (const k of ["input", "output", "user", "assistant"]) {
     const v = data[k];
     const text = typeof v === "string" ? v : v !== undefined ? JSON.stringify(v) : undefined;
-    if (text !== undefined && text.length > chars) {
+    const max = k === "input" || k === "output" ? Math.min(chars, PREVIEW_CHARS) : PREVIEW_CHARS;
+    if (text !== undefined && text.length > max) {
       preview[k] = text.length;
-      data[k] = `${text.slice(0, chars)}…`;
+      data[k] = e.type === "turn.progress" && k === "assistant" ? text.slice(-max) : text.slice(0, max);
     }
   }
   return Object.keys(preview).length ? { ...e, data, preview } : e;

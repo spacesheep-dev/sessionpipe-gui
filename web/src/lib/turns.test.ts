@@ -6,7 +6,7 @@
 // have it.
 import type { AgentRun, StoredEvent } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { eventWords, groupTurns, handoffAnswer, sentTurns, type Turn, turnPrompt, unframe } from "./turns";
+import { eventWords, groupTurns, handoffAnswer, promptWords, sentTurns, type Turn, turnPrompt, unframe } from "./turns";
 
 const T0 = Date.parse("2026-10-22T10:00:00.000Z");
 const iso = (s: number) => new Date(T0 + s * 1000).toISOString();
@@ -621,6 +621,40 @@ describe("unframe", () => {
     const asked =
       "Review the diff.\n\n(Asked by claude-code:abc-1 on this machine with sessionpipe ask. Answer here in full: your reply is returned to that session automatically. Don't run a command or call a tool just to send it.)";
     expect(unframe(asked)).toEqual({ text: "Review the diff.", askedBy: "claude-code:abc-1" });
+  });
+});
+
+describe("promptWords", () => {
+  const HEAD = "Message via 127.0.0.1:7391 (sessionpipe control, signed on the sender's device):\n\n";
+  const sent = `${"Read the export log and say which batch failed and why it failed.  ".repeat(40)}Then stop.`;
+  /** The transcript as a list page holds it: `user` cut at `n`, its first length kept. */
+  const cutAt = (user: string, n = 2048) => ({ data: { user: user.slice(0, n) }, preview: { user: user.length } });
+
+  it("draws a cut prompt sent from here as it was signed, with the source line before it", () => {
+    const p = promptWords(cutAt(HEAD + sent.replace(/\s+/g, " ")), sent);
+    expect(p).toEqual({ text: HEAD + sent, cut: false, fromSent: true });
+    expect(unframe(p.text!)).toEqual({ text: sent, via: "127.0.0.1:7391" });
+  });
+
+  it("keeps the cut words of a prompt that is not the message's, marked cut", () => {
+    const other = "A different message that only starts the same way. ".repeat(60);
+    const e = cutAt(HEAD + other);
+    expect(promptWords(e, sent)).toEqual({ text: e.data.user, cut: true, fromSent: false });
+    expect(promptWords(e)).toEqual({ text: e.data.user, cut: true, fromSent: false });
+  });
+
+  it("leaves a prompt that is whole as it is, sent from here or not", () => {
+    const whole = { data: { user: `${HEAD}Fix it.` } };
+    expect(promptWords(whole, "Fix it.")).toEqual({ text: `${HEAD}Fix it.`, cut: false, fromSent: false });
+    expect(promptWords({ data: {} }, "Fix it.")).toEqual({ cut: false, fromSent: false });
+    expect(promptWords(undefined)).toEqual({ cut: false, fromSent: false });
+  });
+
+  it("marks a cut question another session asked: its asker's line is in what is missing", () => {
+    const asked = `${"Review the whole diff for retries. ".repeat(80)}\n\n(Asked by claude-code:abc-1 on this machine with sessionpipe ask. Answer here in full.)`;
+    const p = promptWords(cutAt(asked));
+    expect(p.cut).toBe(true);
+    expect(unframe(p.text!).askedBy).toBeUndefined();
   });
 });
 

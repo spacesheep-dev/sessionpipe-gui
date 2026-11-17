@@ -840,7 +840,8 @@ export interface DetailQuery {
   limit?: number;
   /** Slim events (big strings cut to a 2 KB preview) instead of the full lines from disk. */
   slim?: boolean;
-  /** With `slim`: a shorter cut, 200–2048 chars, for list pages. */
+  /** With `slim`: a shorter cut of tool input/output, 200–2048 chars, for list pages. The
+   *  turn's own words keep the 2 KB preview (an older receiver cuts them too). */
   preview?: number;
   /** Only this subagent's events (an AgentRun id): its subagent.started / .ended, the
    *  tool calls stamped with its `agent_id`, and the Agent / Task call that launched it.

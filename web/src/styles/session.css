@@ -290,6 +290,35 @@ html:has(.main > .session) {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* A long message folds its words to eight lines (the last one ends in "…") until "Show
+   all" opens them in place; the pictures it carried and the lines under it stay in sight. */
+.prompt-words {
+  display: block;
+}
+.prompt-words.is-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 8;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* "Show all" under the words, and "Show more" under a reply cut short: plain text at the
+   words' leading edge. */
+.prompt-more,
+.reply-more {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--text-sm);
+  text-align: start;
+  white-space: normal;
+}
+/* 44 px to a finger (narrow.css), the same quiet line to the eye: the height it gains
+   reaches into the space around it instead of adding to it. */
+@media (pointer: coarse) {
+  .prompt-more,
+  .reply-more {
+    margin: -8px 0;
+  }
+}
 /* Where a message sent through sessionpipe came from, under its words. */
 .prompt-via {
   display: block;
