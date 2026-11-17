@@ -631,8 +631,7 @@ export function ControlStrip({
       </>
     ) : (
       <>
-        <WithName text={sentence.replace(/\.$/, "")} name={session.machine} />
-        {"\u00a0"}· {way}
+        <WithName text={`${sentence.replace(/\.$/, "")}\u00a0·`} name={session.machine} /> {way}
       </>
     );
   const notAdded = approval === "catching-up" && send ? sendWords(send, name)?.long : null;

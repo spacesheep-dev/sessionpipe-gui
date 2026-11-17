@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { CONTROL_BASE, fakeDaemon, passkeyPage, postPrompt, seenSetupHere, sinkToken } from "./control-helpers.js";
-import { openPage } from "./helpers.js";
+import { openPage, strandedMarks } from "./helpers.js";
 
 declare global {
   interface Window {
@@ -251,6 +251,7 @@ test.describe("inbox: a prompt's answer window", () => {
       const terminal = page.locator("section[aria-label='Waiting in a terminal']");
       const lateRow = terminal.locator(`.inbox-row[data-attention="${late.attention}"]`);
       await expect(lateRow.locator(".inbox-late")).toHaveText(words);
+      expect(await strandedMarks(lateRow.locator(".inbox-late"))).toEqual([]);
       await expect(lateRow.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
       // Inside its window: answerable as ever, and no page line for the late one.
       const freshRow = page.locator(`.inbox-row[data-attention="${fresh.attention}"]`);

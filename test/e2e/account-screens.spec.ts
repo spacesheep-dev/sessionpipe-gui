@@ -19,6 +19,7 @@ import { HubRefused, HubStandIn, UNUSED_KEY_NOTE } from "../account/hub.js";
 import { type AccountServer, startAccountServer } from "../account/serve.js";
 import { fakeShell, type ShellInitOptions } from "../account/shell-init.js";
 import { Session } from "../events.js";
+import { strandedMarks } from "./helpers.js";
 
 const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../dist/web");
 const SHOTS = process.env.ACCOUNT_SCREENS ?? "";
@@ -1608,6 +1609,8 @@ test.describe("what else an account shows", () => {
       await expect(card.locator(".ctl-answer-note")).toHaveText(
         /^Too late to answer from here; answer it on studio-mac\.$/,
       );
+      // The name and its full stop are one piece: at no width does the "." start a line.
+      expect(await strandedMarks(card.locator(".ctl-answer-note"))).toEqual([]);
       await expect(card.locator(".ctl-approve")).toHaveCount(0);
       // Not folded away: the field, off, and the line under it with Approve this iPhone.
       await expect(composer(page)).toBeDisabled();
