@@ -549,13 +549,14 @@ function CardAnswer({ s, into }: { s: SessionSummary; into: MutableRefObject<Men
 
 /** Allow and Deny as menu items, disabled with the reason when nothing can go; a plan
  *  review's are Approve plan and Keep planning. None once the prompt's hook stopped
- *  waiting (answerState's "late"): nothing could go again. */
+ *  waiting (answerState's "late"), where nothing could go again, and none on a device not
+ *  approved ("unapproved"), where only an approval made elsewhere brings them back. */
 export function answerItems(
   tool: string | undefined,
   st: { off: boolean; reason: string | null; tag?: string },
   answer: (allow: boolean) => unknown,
 ): MenuItem[] {
-  if (st.tag === "late") return [];
+  if (st.tag === "late" || st.tag === "unapproved") return [];
   const disabled = st.off ? (st.reason ?? true) : undefined;
   const plan = isPlanReview({ kind: "permission", tool });
   const what = tool ? ` ${toolLabel(tool)}` : "";

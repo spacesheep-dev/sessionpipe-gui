@@ -5,7 +5,7 @@ import "../native/test-env";
 import { afterEach, describe, expect, it } from "vitest";
 import { clock } from "../native/accountWords";
 import type { ApprovePhase, ApproveView, MachineState } from "./approve";
-import { type SendState, sendState, sendWords } from "./sendable";
+import { approvalOf, type SendState, sendState, sendWords } from "./sendable";
 
 const T = Date.parse("2026-11-12T13:05:00Z");
 const ID = "m_laptop";
@@ -74,6 +74,10 @@ describe("on an account: the device door decides", () => {
     expect(sendState(view(PHASES.approved!), control(false), [], { ...ON, keyKnown: false })).toEqual({
       kind: "unknown",
     });
+    // "Not approved" read off the lists against a key not read yet (the app at launch, where
+    // the hub has no word of the key): nothing, not "can't send yet".
+    for (const phase of [PHASES.idle!, PHASES.dropped!])
+      expect(sendState(view(phase), control(false), [], { ...ON, keyKnown: false })).toEqual({ kind: "unknown" });
   });
 
   it("a page that cannot sign says that first, before any approval", () => {
@@ -92,6 +96,45 @@ describe("off an account: the key list decides, as it always has", () => {
     expect(sendState(null, control(false), [], { ...OFF, keyKnown: false })).toEqual({ kind: "unknown" });
     expect(sendState(null, control(true), [MINE], { ...OFF, secure: false })).toEqual({ kind: "cannot-sign" });
     expect(sendState(null, undefined, [MINE], OFF)).toEqual({ kind: "unknown" });
+  });
+});
+
+describe("what turns sending off before anything is signed", () => {
+  const DEVICE = { device: true, keyKnown: true };
+  it("the app's own key: not approved or waiting hides the answers; catching up disables them", () => {
+    expect(approvalOf({ kind: "unapproved", dropped: false }, DEVICE)).toBe("unapproved");
+    expect(approvalOf({ kind: "unapproved", dropped: true }, DEVICE)).toBe("unapproved");
+    expect(approvalOf({ kind: "waiting", code: "71" }, DEVICE)).toBe("unapproved");
+    expect(approvalOf({ kind: "catching-up", account: true }, DEVICE)).toBe("catching-up");
+    // Off an account (the Mac app): only an approval brings it back there too.
+    expect(approvalOf({ kind: "catching-up", account: false }, DEVICE)).toBe("unapproved");
+    for (const s of [
+      { kind: "can" },
+      { kind: "cooling", until: T, exact: true },
+      { kind: "unknown" },
+      { kind: "old" },
+      { kind: "cannot-sign" },
+    ] as SendState[])
+      expect(approvalOf(s, DEVICE), s.kind).toBe("ok");
+  });
+
+  it("from the send states themselves: a phone never asked is unapproved, one approved and listed is not", () => {
+    const idle = sendState(view(PHASES.idle!), control(false), [MINE], ON);
+    expect(approvalOf(idle, DEVICE)).toBe("unapproved");
+    expect(approvalOf(sendState(view(PHASES.approved!, "can"), control(true), [MINE], ON), DEVICE)).toBe("ok");
+  });
+
+  it("nothing before the app's key is read, and nothing in a browser, whose list misses synced passkeys", () => {
+    const states: SendState[] = [
+      { kind: "unapproved", dropped: false },
+      { kind: "waiting", code: "71" },
+      { kind: "catching-up", account: true },
+      { kind: "catching-up", account: false },
+    ];
+    for (const s of states) {
+      expect(approvalOf(s, { device: true, keyKnown: false }), s.kind).toBe("ok");
+      expect(approvalOf(s, { device: false, keyKnown: true }), s.kind).toBe("ok");
+    }
   });
 });
 

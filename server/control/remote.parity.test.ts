@@ -383,6 +383,9 @@ describe("the receiver's wiring and a page's, through one script", () => {
         "confirm_required",
       ],
       [answer(401, { error: "Unlock again.", code: "unlock" }), 422, "bad_grant"],
+      [answer(401, { error: "Unlock again.", code: "unlock", refusal: "bad_grant" }), 422, "bad_grant"],
+      // A key that computer does not trust: said as that, so the page asks for no new grant.
+      [answer(401, { error: "Unlock again.", code: "unlock", refusal: "untrusted_key" }), 422, "untrusted_key"],
       [
         answer(400, { error: "That key isn't trusted there.", code: "bad", refusal: "untrusted_key" }),
         422,

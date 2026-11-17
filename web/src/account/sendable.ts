@@ -61,7 +61,10 @@ export function sendState(
     return o.keyKnown && !o.account ? { kind: "catching-up", account: false } : UNKNOWN;
   }
   const p = view.phase;
-  if (p.kind === "idle" || p.kind === "dropped") return { kind: "unapproved", dropped: p.kind === "dropped" };
+  // Where the door has no word of the key, "not approved" was read off the computers' lists
+  // against the device's own key: said only once that key is read, never off an empty list.
+  if (p.kind === "idle" || p.kind === "dropped")
+    return o.keyKnown ? { kind: "unapproved", dropped: p.kind === "dropped" } : UNKNOWN;
   if (p.kind === "waiting") return { kind: "waiting", code: p.code };
   // Approved: whether this computer has the key yet, by the door's entry for it, else by its list.
   const here = view.machines.find((m) => m.id === control.machineId);
@@ -71,6 +74,25 @@ export function sendState(
     return here || o.keyKnown ? { kind: "catching-up", account: true } : UNKNOWN;
   }
   return p.kind === "cooling" ? { kind: "cooling", until: p.until, exact: p.exact } : CAN;
+}
+
+/** What of a state turns Allow, Deny and the composer off before anything is signed:
+ *  - "unapproved": only an approval made elsewhere brings them back (not approved, a request
+ *    waiting, or off an account a computer that trusts no key of this device). Allow and
+ *    Deny give way to the way to approve it.
+ *  - "catching-up": they come back by themselves (approved, and the computer adds the key
+ *    when it is next online). Allow and Deny stay, disabled.
+ *  - "ok": nothing here turns them off.
+ *  Only for the app's own device key (`device`), and only once the signer has said which key
+ *  it holds (`keyKnown`): a browser's list of its passkeys misses synced ones, and the app's
+ *  is empty until Rust answers, so neither turns anything off. */
+export type Approval = "ok" | "unapproved" | "catching-up";
+
+export function approvalOf(s: SendState, o: { device: boolean; keyKnown: boolean }): Approval {
+  if (!o.device || !o.keyKnown) return "ok";
+  if (s.kind === "unapproved" || s.kind === "waiting") return "unapproved";
+  if (s.kind === "catching-up") return s.account ? "catching-up" : "unapproved";
+  return "ok";
 }
 
 /** `sendState` for any computer, from what this page knows now: drawn again as the signer,

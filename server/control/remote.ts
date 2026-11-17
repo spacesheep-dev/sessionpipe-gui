@@ -582,7 +582,13 @@ export async function forwardRemoteSend(
   // and spacesheep's reason (`why`) as the detail the page's held notice shows.
   if (r.status === 409 && code === "confirm")
     throw new SendRefused(422, { reason: error, code: "confirm_required", ...whyOf(r.json) });
-  if (r.status === 401 && code === "unlock") throw new SendRefused(422, { reason: error, code: "bad_grant" });
+  // spacesheep's check of the signature: a key the machine does not trust (its `refusal`
+  // untrusted_key) is said as that, which no new grant mends; any other is the grant's.
+  if (r.status === 401 && code === "unlock")
+    throw new SendRefused(422, {
+      reason: error,
+      code: codeOf(r.json.refusal) === "untrusted_key" ? "untrusted_key" : "bad_grant",
+    });
   // Any other 401 is spacesheep refusing this app's key (revoked there), not the page's own
   // key: its own code, never the 401 a page reads as "this page lost its key".
   if (r.status === 401) throw new SendRefused(502, { reason: error, code: SPACESHEEP_UNAUTHORIZED });

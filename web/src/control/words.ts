@@ -8,7 +8,7 @@ import { NEW_WORDS } from "../native/accountWords.new";
 import { ControlError, UNHEARD_CODE, wrongOriginHere } from "./api";
 import { wrongOriginWords } from "./origin";
 import { remoteHostFor } from "./remoteRp";
-import { deviceRefusal, nativeErrorWords } from "./signer";
+import { deviceRefusal, deviceWords, nativeErrorWords } from "./signer";
 import { webauthnError } from "./webauthn";
 
 export const KIND_LABEL: Record<ControlKind, string> = {
@@ -151,11 +151,16 @@ export function unheardWords(a: Pick<ControlActivity, "unheard" | "code" | "deta
   return sendErrorWords(new ControlError(504, a.detail ?? "", UNHEARD_CODE, a.detail));
 }
 
-/** What went wrong before anything was queued, in words. */
-export function sendErrorWords(e: unknown): string {
+/** What went wrong before anything was queued, in words. `machine`: the name of the computer
+ *  it was for, where the words name it. */
+export function sendErrorWords(e: unknown, machine?: string | null): string {
   if (e instanceof ControlError) {
     // A send naming files for a computer reached through spacesheep (forwardSend): its reason.
     if (e.code === "relay_files") return `Not sent. ${e.detail ?? e.reason}`;
+    // On a spacesheep account the computer's key list is spacesheep's: the phone's key is
+    // not on it yet (not approved, or approved and not added there yet).
+    if (e.status === 422 && e.code === "untrusted_key" && accountMode())
+      return NEW_WORDS.sendNotAdded(machine || "the computer", deviceWords().this);
     if (e.status === 422 && e.code) return `not sent · ${refusalWords(e.code)}`;
     // spacesheep refused this app's key (server/control/ui.ts forwardSend), not the page's.
     if (e.code === "spacesheep_unauthorized")

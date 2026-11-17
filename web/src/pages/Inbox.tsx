@@ -8,11 +8,12 @@
 // cleared stays faded until the hand leaves. "Notify me" and the sounds live behind one
 // bell in the page bar; why the buttons are off (the machine is not paired, this page
 // cannot use passkeys, notifications are off for the site or the app) is said once under
-// the bar, not on every row.
+// the bar, not on every row. A device not approved gets no buttons at all, and one notice
+// with the way to approve it.
 import type { MachineControl } from "@shared/api";
 import { type MutableRefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useBehind, useCatchingUp } from "../account/current";
-import { ActionButton, Ago, EmptyState, HarnessGlyph, Redacted, StateDot } from "../components/bits";
+import { ActionButton, Ago, EmptyState, HarnessGlyph, Notice, Redacted, StateDot } from "../components/bits";
 import { type MenuList, openMenu, useContextMenu } from "../components/ContextMenu";
 import { LabelChip, LabelDot, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
@@ -28,6 +29,7 @@ import {
   useSwipe,
 } from "../components/SessionCard";
 import { ComposeButton } from "../control/NewSession";
+import { setupLabel } from "../control/signer";
 import { answerState, useSessionSend } from "../control/useSend";
 import { type OpenAttention, useAppState, useFirstLoad, useLabels, useOpenAttentions, useStore } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
@@ -39,13 +41,15 @@ import { type LabelFilter, labelItems, labelPasses } from "../lib/labels";
 import { copyItem, sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { setNotifyPref, useNotifyPref } from "../lib/notify";
-import { navigate, sessionPath } from "../lib/router";
+import { Link, navigate, sessionPath } from "../lib/router";
 import { type Lens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import { openSplit } from "../lib/split";
-import { NEW_WORDS } from "../native/accountWords.new";
+import { NEW_WORDS, ThisPhone } from "../native/accountWords";
 
 const rowKey = (r: OpenAttention) => `${r.session.key}|${r.attention.attentionId}`;
+/** Why a row's Allow / Deny are off for a standing reason, and answerState's tag for it. */
+type Off = { reason: string; tag: string };
 const groupOf = (r: OpenAttention) => (r.answerable ? "answer" : "terminal");
 
 export function Inbox() {
@@ -107,18 +111,22 @@ export function Inbox() {
   const page = useRef<HTMLDivElement>(null);
   useStickyTop(page);
 
-  // Why Allow / Deny are off, reported by each answerable row and said once for all.
-  const [reasons, setReasons] = useState<Record<string, string>>({});
-  const report = useCallback((id: string, reason: string | null) => {
+  // Why Allow / Deny are off, reported by each answerable row and said once for all: this
+  // device not approved, by the notice with the way to approve it; anything else as a line.
+  const [reasons, setReasons] = useState<Record<string, Off>>({});
+  const report = useCallback((id: string, off: Off | null) => {
     setReasons((prev) => {
-      if ((prev[id] ?? null) === reason) return prev;
+      const was = prev[id];
+      if (was?.reason === off?.reason && was?.tag === off?.tag) return prev;
       const next = { ...prev };
-      if (reason) next[id] = reason;
+      if (off) next[id] = off;
       else delete next[id];
       return next;
     });
   }, []);
-  const said = [...new Set(answer.map((h) => reasons[h.key]).filter((x): x is string => !!x))];
+  const offs = answer.map((h) => reasons[h.key]).filter((x): x is Off => !!x);
+  const unapproved = offs.some((o) => o.tag === "unapproved");
+  const said = [...new Set(offs.filter((o) => o.tag !== "unapproved").map((o) => o.reason))];
 
   const bgMenu = useBackgroundMenu(
     () => [
@@ -196,8 +204,19 @@ export function Inbox() {
           </>
         }
       />
-      {(blocked || said.length > 0 || hiddenByLens > 0) && (
+      {(blocked || unapproved || said.length > 0 || hiddenByLens > 0) && (
         <div className="inbox-notes">
+          {unapproved && (
+            <Notice
+              action={
+                <Link to="/add-device" className="btn btn--sm btn--ghost">
+                  {setupLabel()}
+                </Link>
+              }
+            >
+              {NEW_WORDS.answerNotYet(ThisPhone())}
+            </Notice>
+          )}
           <NotifyBlocked permission={notify.permission} app={app} />
           {said.map((r) => (
             <p key={r} className="page-note inbox-reason">
@@ -272,7 +291,7 @@ function InboxRow({
   control?: MachineControl;
   cursor?: number;
   lens?: Lens;
-  report: (id: string, reason: string | null) => void;
+  report: (id: string, off: Off | null) => void;
 }) {
   const store = useStore();
   const { session: s, attention: raw } = row;
@@ -386,7 +405,7 @@ function Answer({
   /** The row under the list cursor: `a` / `d` answer it (lib/shortcuts.ts). */
   focused?: boolean;
   into: MutableRefObject<MenuList>;
-  report: (id: string, reason: string | null) => void;
+  report: (id: string, off: Off | null) => void;
 }) {
   const { session: s, attention: a } = row;
   const send = useSessionSend(s, control, s.openAttentions);
@@ -409,13 +428,13 @@ function Answer({
   const canKey = focused && !off && chosen === null && status !== "closed";
   useShortcut("inbox.allow", () => answer(true), { enabled: canKey, priority: 2 });
   useShortcut("inbox.deny", () => answer(false), { enabled: canKey, priority: 2 });
-  // Off for a standing reason (not paired, no passkeys here): the page says it once. A
-  // moment's state (sent, a passkey prompt, closed) stays on the row.
+  // Off for a standing reason (not paired, no passkeys here, not approved): the page says
+  // it once. A moment's state (sent, a passkey prompt, closed) stays on the row.
   const standing = off && !status ? reason : null;
   const id = rowKey(row);
   useEffect(() => {
-    report(id, standing);
-  }, [id, standing, report]);
+    report(id, standing ? { reason: standing, tag } : null);
+  }, [id, standing, tag, report]);
   useEffect(() => () => report(id, null), [id, report]);
   useLayoutEffect(() => {
     into.current = status === "closed" ? [] : answerItems(a.tool, st, answer);
@@ -432,7 +451,8 @@ function Answer({
       data-chosen={chosen === null ? undefined : chosen ? "allow" : "deny"}
     >
       {note}
-      {status !== "closed" && (
+      {/* Not approved: no pair at all (the page's notice has the way on); the row still opens. */}
+      {status !== "closed" && tag !== "unapproved" && (
         <>
           <ActionButton
             className="btn btn--sm btn--deny"

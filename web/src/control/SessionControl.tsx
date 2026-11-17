@@ -10,7 +10,6 @@
 // it opens over whichever surface holds this session.
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
 import { useState } from "react";
-import { useSendState } from "../account/sendable";
 import { COMPOSER_SENT, ControlStrip } from "../components/ControlStrip";
 import { useAppState, useListedSessions, useStore } from "../data/hooks";
 import { accountMode, accountSessionUrl, receiverOrigin } from "../lib/net";
@@ -74,6 +73,10 @@ export function SessionControl({
     // On a spacesheep account a phone approved less than an hour ago cannot send yet: said
     // here with the time, before a send or an answer is refused for it.
     cooling,
+    // Whether this device can send to the session's machine (on an account the device door's
+    // word, else the machine's key list: account/sendable.ts), and what of it turns the strip off.
+    sendable: send,
+    approval,
   } = useSessionSend(session, control, attentions, {
     draft,
     // A message the receiver held is confirmed from the notice under the composer; once
@@ -88,9 +91,6 @@ export function SessionControl({
   // The app signs only for a machine whose daemon takes device keys (CONTROL.md §2).
   const old = device && control && !machineTakes(control) ? updateWords(session.machine) : null;
   const secure = canSignHere && !old;
-  // Whether this device can send to the session's machine: on an account the device door's
-  // word, else the machine's key list (account/sendable.ts).
-  const send = useSendState(control);
   const { connection, suggestions: all } = useAppState();
   const sessions = useListedSessions();
   const store = useStore();
@@ -143,6 +143,7 @@ export function SessionControl({
         suggestions={suggestions}
         chat={chat}
         send={secure && rp ? send : undefined}
+        approval={secure && rp ? approval : undefined}
         stream={down ? { state: down, retry: () => store.reconnect() } : undefined}
         unlock={control && secure && grant.exp === null ? () => void unlockNow() : undefined}
         ask={askable ? () => openHandoff({ session: session.key }) : undefined}

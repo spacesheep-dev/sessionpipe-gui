@@ -133,8 +133,9 @@ function ToastAnswer({
   const send = useSessionSend(s, control, s.openAttentions);
   const st = answerState(s, a, control, send, useAnswerClock([a]));
   const { reason, off, status, tag } = st;
-  // Closed, or its hook stopped waiting: nothing to press, and the note says why.
-  const shut = status === "closed" || tag === "late";
+  // Closed, its hook stopped waiting, or this device not approved: nothing to press, and
+  // the note says why.
+  const shut = status === "closed" || tag === "late" || tag === "unapproved";
   const answer = (allow: boolean) =>
     void send
       .onSend({ kind: "permission.answer", attentionId: a.attentionId, allow })

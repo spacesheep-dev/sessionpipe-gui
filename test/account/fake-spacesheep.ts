@@ -3,9 +3,9 @@
 // It answers what the real one answers, read from its source: the relay
 // (`{ events, next, oldest, protocol }`, every event after `since` it still holds, a wait
 // when there are none), the machine list, the jobs list (100 after `since`, with `now` and
-// `code`), a send (202 with a job id, or whatever the test queued for it), a revoked key
-// (401 `unauthorized`), and its limit on relay reads (240 in a fixed 600 s window, 429 with
-// Retry-After). It also plays the two doors an app uses before and beside the relay: the
+// `code`), a send (202 with a job id, 401 `unlock` for a key the computer does not list, or
+// whatever the test queued for it), a revoked key (401 `unauthorized`), and its limit on
+// relay reads (240 in a fixed 600 s window, 429 with Retry-After). It also plays the two doors an app uses before and beside the relay: the
 // connect (a code and four digits, a poll that hands the key over once approved) and the
 // app's own device key (asked to be trusted, and where it stands; approved or removed on
 // its Devices page; the hour a newly approved device waits before it can send). Nothing
@@ -377,10 +377,15 @@ export class FakeSpacesheep {
       return json({ error: "That computer isn't set up any more.", code: "not_found" }, 404);
     const scripted = this.sendAnswers.shift()?.(body);
     if (scripted) return scripted;
-    // A device approved from another device waits an hour (index.ts coolingFor).
     const signer = String(
       (body.grant as { cred?: unknown } | null)?.cred ?? (body.confirm as { cred?: unknown } | null)?.cred ?? "",
     );
+    // A key that computer does not list is refused before anything else (index.ts checks a
+    // send against machineKeys; machines.ts puts untrusted_key among UNLOCK_CODES).
+    const keys = this.machines.find((m) => m.id === machine)?.passkey_ids;
+    if (signer && Array.isArray(keys) && !keys.includes(signer))
+      return json({ error: "That key isn't trusted on this computer.", code: "unlock", refusal: "untrusted_key" }, 401);
+    // A device approved from another device waits an hour (index.ts coolingFor).
     const until = signer ? this.coolingUntil(signer) : null;
     if (until) {
       const min = Math.max(1, Math.ceil((until - this.clock.now()) / 60_000));

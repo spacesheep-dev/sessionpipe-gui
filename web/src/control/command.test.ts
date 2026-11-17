@@ -6,6 +6,8 @@
 import "../native/test-env";
 import { type MachineControl, POOL_SESSION } from "@shared/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AccountBackend } from "../account/backend";
+import { setAccountBackend } from "../account/current";
 import { ControlError, type SendBody } from "./api";
 import { b64url, sha256 } from "./bytes";
 import { commandString, HeldForConfirm, sendCommand, signAndDeliver } from "./command";
@@ -241,6 +243,41 @@ describe("a send a receiver holds for a confirm (CONTROL.md §3.2: a receiver's 
     expect(passkey.asked).toHaveLength(0);
     await expect((e as HeldForConfirm<string>).confirm()).resolves.toBe("taken");
     expect(posted.map((b) => (b.confirm ? "confirm" : "grant"))).toEqual(["grant", "grant", "confirm"]);
+  });
+
+  it("a key the machine does not trust is signed for once, never again under a new grant, and an account reads its machines again", async () => {
+    inApp();
+    const machinesNow = vi.fn(async () => {});
+    setAccountBackend({ machinesNow } as unknown as AccountBackend);
+    try {
+      // A refused grant earns one fresh grant (a second Face ID); a key nobody trusts, none.
+      for (const [code, signs] of [
+        ["untrusted_key", 1],
+        ["bad_grant", 2],
+      ] as const) {
+        native = [];
+        posted = [];
+        const deliver = vi.fn(async (body: SendBody) => {
+          posted.push(body);
+          throw Object.assign(new Error(code), { status: 422, code, reason: code });
+        });
+        const e = await signAndDeliver(
+          "localhost",
+          LOCAL,
+          { kind: "permission.answer", session: "claude-code:s1", for: "a1", decision: "allow" },
+          deliver,
+        ).catch((x: unknown) => x);
+        expect(e).toMatchObject({ code });
+        expect(
+          native.map((n) => n.mode),
+          code,
+        ).toEqual(Array(signs).fill("grant"));
+        expect(posted, code).toHaveLength(signs);
+      }
+      expect(machinesNow).toHaveBeenCalledTimes(1);
+    } finally {
+      setAccountBackend(null);
+    }
   });
 
   it("a caller that may not prompt (the workflows runner) gets the refusal itself, and nothing asks", async () => {

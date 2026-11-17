@@ -13,6 +13,7 @@ import {
   type StartPermission,
 } from "@shared/api";
 import { cleanReason } from "@shared/reason";
+import { accountBackend } from "../account/current";
 import { noteOwnSend } from "../lib/toasts";
 import { ControlError, controlApi, type SendBody, type TrustedKey, UNHEARD_CODE } from "./api";
 import { nonce } from "./bytes";
@@ -202,6 +203,11 @@ export async function signAndDeliver<T>(
     return await attempt();
   } catch (e) {
     const code = faultCode(e);
+    // A key the machine does not trust is no fault of the grant: nothing is signed again.
+    // On a spacesheep account its machines are read again, so the page knows the key list
+    // spacesheep checked the send against, and offers nothing else that would be refused.
+    const account = code === "untrusted_key" ? accountBackend() : null;
+    if (account) void account.machinesNow().catch(() => {});
     if (!o.confirm && code && GRANT_FAULTS.has(code)) {
       await dropGrant(rpUse);
       // A caller that may not prompt (the workflows runner) stops here: the grant is

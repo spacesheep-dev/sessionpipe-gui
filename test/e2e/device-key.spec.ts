@@ -80,12 +80,14 @@ test("the app's device key: asked for, approved from a browser, key.add delivere
     await expect(block.locator("[data-setup]")).toBeVisible();
     await block.locator(".machine-devices").scrollIntoViewIfNeeded();
     await shot(app.page, "0-app-machines-not-set-up");
-    // A session there: its composer says the same, with the same way out.
+    // A session there: its composer says the same, with the same way out, and is off: a send
+    // would only be refused.
     const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Notes ${name}` });
     await app.page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
     const foot = app.page.locator('[data-reason="untrusted"]');
     await expect(foot).toContainText(`${name} doesn't trust this Mac yet.`);
     await expect(foot.getByRole("link", { name: "Approve this Mac" })).toBeVisible();
+    await expect(app.page.locator("textarea")).toBeDisabled();
     await shot(app.page, "0-app-session-not-set-up");
     await app.page.goto(`${CONTROL_BASE}/machines`);
     await block.getByRole("link", { name: "Approve this Mac" }).click();

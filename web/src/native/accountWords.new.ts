@@ -81,6 +81,8 @@ export const NEW_WORDS = {
   sessionShowMore: "Show more",
   sessionLoadFailed: "Couldn't load. Try again",
   sessionCopyPreview: "Copy message (preview)",
+  answerNotYet: (Phone: string) => `${Phone} can't answer yet`,
+  sendNotAdded: (machine: string, phone: string) => `Not sent: ${machine} hasn't added ${phone} yet.`,
 } as const;
 
 /** Whether this phone can send to a computer (account/sendable.ts), the same on every screen

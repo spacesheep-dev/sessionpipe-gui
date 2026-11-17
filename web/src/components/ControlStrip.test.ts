@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import "../native/test-env";
 import type { Attention, MachineControl, SessionSummary } from "@shared/api";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { approvalOf, type SendState } from "../account/sendable";
 import { answerState } from "../control/useSend";
 import { markLate } from "../data/hooks";
 import { ANSWER_WINDOW_MS, answerLate } from "../lib/answerWindow";
 import { blockedAnswer, keepPlanning } from "./ControlStrip";
 import { foldPlan } from "./PlanText";
+import { answerItems } from "./SessionCard";
 
 describe("keepPlanning", () => {
   it("says no to the plan with what the composer says should change", () => {
@@ -152,5 +154,73 @@ describe("a prompt's answer window", () => {
     ]);
     expect(count(after(130_000))).toBe(2);
     expect(count(after(230_000))).toBe(1);
+  });
+});
+
+describe("an answer from a device that is not approved, or that its computer has not added yet", () => {
+  const g = globalThis as Record<string, unknown>;
+  afterEach(() => {
+    delete g.sessionpipeShell;
+  });
+  const AT = "2026-11-16T10:00:00Z";
+  const now = Date.parse(AT) + 5_000;
+  const s = { key: "claude-code:s-1", harness: "claude-code", machine: "Misha-Petrov-laptop" } as SessionSummary;
+  const a = { attentionId: "a1", kind: "permission", tool: "Bash", at: AT, answerable: true } as Attention;
+  // spacesheep's list of keys for the computer, without this phone's.
+  const control = {
+    machineId: "m1",
+    online: true,
+    keys: [{ id: "key-mac", alg: -7, addedAt: "" }],
+    queued: 0,
+    keyTypes: ["passkey", "device"],
+  } as MachineControl;
+  const send = { rp: "spacesheep.dev", secure: true, tap: false, answers: {} };
+  const unapproved: SendState = { kind: "unapproved", dropped: false };
+  const app = (s: SendState) => approvalOf(s, { device: true, keyKnown: true });
+
+  it("the app's key, not approved: off with one reason, and nothing to press, not even in a menu", () => {
+    g.sessionpipeShell = { platform: "ios" };
+    for (const state of [unapproved, { kind: "waiting", code: "71" } as SendState]) {
+      const st = answerState(s, a, control, { ...send, approval: app(state) }, now);
+      expect(st).toEqual({ reason: "This iPhone can't answer yet", off: true, status: undefined, tag: "unapproved" });
+      expect(answerItems(a.tool, st, () => {})).toEqual([]);
+    }
+  });
+
+  it("inside the hour a newly approved phone waits, the hour's line wins", () => {
+    const line = "This iPhone can send from 5:30 PM";
+    expect(answerState(s, a, control, { ...send, cooling: line, approval: app(unapproved) }, now)).toMatchObject({
+      reason: line,
+      off: true,
+      tag: "blocked",
+    });
+  });
+
+  it("approved, and the computer has not added the key yet: off with the computer's sentence, the pair kept", () => {
+    g.sessionpipeShell = { platform: "ios" };
+    const st = answerState(s, a, control, { ...send, approval: app({ kind: "catching-up", account: true }) }, now);
+    expect(st).toEqual({
+      reason: "Misha-Petrov-laptop adds this iPhone when it's next online",
+      off: true,
+      status: undefined,
+      tag: "blocked",
+    });
+    expect(answerItems(a.tool, st, () => {})).toMatchObject([
+      { label: "Allow Bash", disabled: st.reason },
+      { label: "Deny Bash", disabled: st.reason },
+    ]);
+  });
+
+  it("a browser's passkey is never turned off by its list, nor the app before its key is read", () => {
+    for (const o of [
+      { device: false, keyKnown: true },
+      { device: true, keyKnown: false },
+    ])
+      expect(answerState(s, a, control, { ...send, approval: approvalOf(unapproved, o) }, now)).toEqual({
+        reason: null,
+        off: false,
+        status: undefined,
+        tag: "open",
+      });
   });
 });

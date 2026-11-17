@@ -116,13 +116,15 @@
 .ctl-answer-btns .btn {
   min-width: 72px;
 }
-/* Their places on the bar's grid: the reason under the question, the pair beside both. */
+/* Their places on the bar's grid: the reason under the question, the pair beside both (or,
+   on a device not approved, the way to approve it in the pair's place). */
 .ctl-answer > .ctl-answer-note,
 .ctl-answer > .ctl-suggestion {
   grid-column: 1;
   padding-left: 16px;
 }
-.ctl-answer > .ctl-answer-btns {
+.ctl-answer > .ctl-answer-btns,
+.ctl-answer > .ctl-approve {
   grid-column: 2;
   grid-row: 1 / span 2;
 }
@@ -306,7 +308,8 @@
   .ctl-answer {
     grid-template-columns: minmax(0, 1fr);
   }
-  .ctl-answer > .ctl-answer-btns {
+  .ctl-answer > .ctl-answer-btns,
+  .ctl-answer > .ctl-approve {
     grid-column: 1;
     grid-row: auto;
     justify-self: end;
@@ -344,7 +347,9 @@
     grid-template-columns: 1fr 1fr;
     margin-left: 0;
   }
-  .ctl-answer-btns .btn {
+  /* The pair, or the way to approve this device in its place (the card's whole width). */
+  .ctl-answer-btns .btn,
+  .ctl-approve {
     min-height: var(--control-lg);
     font-size: var(--text-md);
   }

@@ -9,6 +9,11 @@
 // machine's own acks, never here. On the phone, unpaired with a prompt to answer, the
 // bar is the card alone: one sentence says how to pair (for answering and messaging
 // both), and the composer, which could do nothing, takes no room.
+// Allow and Deny are hidden where only something done elsewhere brings them back (this
+// device is not approved, or its request waits): the card says so and offers the way to
+// approve it in their place, and on the phone it stands alone, as unpaired. They are
+// disabled where they come back by themselves (the hour a new device waits, reconnecting,
+// a computer catching up on an approval, a send under way).
 // The draft is kept per session. Disabled with its reason until the machine paired and
 // `onSend` is wired (web/src/control/SessionControl.tsx signs and sends). Keep this
 // component self-contained: everything it needs comes through props.
@@ -25,7 +30,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { type SendState, sendWords } from "../account/sendable";
+import { type Approval, type SendState, sendWords } from "../account/sendable";
 import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachments";
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
 
@@ -38,7 +43,7 @@ import { attentionMessage, isPlanReview, toolLabel } from "../lib/format";
 import { Link } from "../lib/router";
 import { askedCommand, shellLines } from "../lib/shellCommand";
 import { hintFor } from "../lib/shortcuts";
-import { NEW_WORDS } from "../native/accountWords.new";
+import { NEW_WORDS, ThisPhone } from "../native/accountWords";
 import { ActionButton, Spinner, StateDot } from "./bits";
 import "../control/control.css";
 
@@ -93,6 +98,9 @@ export interface ControlStripProps {
    *  approved, waits for approval, or the machine does not trust its key yet, the line
    *  says so, with the way on where there is one. Absent where the page cannot sign. */
   send?: SendState;
+  /** What of `send` turns the strip off (sendable.ts approvalOf): "unapproved" puts the way
+   *  to approve this device in place of Allow and Deny, "catching-up" disables them. */
+  approval?: Approval;
   /** The app's stream to the receiver is down ("reconnecting" or "offline"): the strip
    *  waits for it, with Retry now. */
   stream?: { state: "reconnecting" | "offline"; retry: () => void };
@@ -312,6 +320,7 @@ export function ControlStrip({
   placeholder = "Message this session…",
   chat = false,
   send,
+  approval = "ok",
   stream,
   unlock,
   ask,
@@ -327,6 +336,8 @@ export function ControlStrip({
   }
   const [busy, setBusy] = useState<string | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  // The line under the field describes it: why it is off, or what a send will ask for.
+  const reasonId = useId();
   useGrow(field, text);
   useEffect(() => {
     const t = window.setTimeout(() => writeDraft(session.key, text), 300);
@@ -350,7 +361,9 @@ export function ControlStrip({
   // works, as a link to this very page there; never an offer to add a device.
   const wrong = blocked ? wrongOriginHere() : null;
   const httpsHref = blocked ? (wrong ? wrongOriginHref() : httpsHere()) : null;
-  const enabled = paired && !!onSend && !blocked && !stream;
+  const enabled = paired && !!onSend && !blocked && !stream && approval === "ok";
+  // Not approved: the way to approve it stands where Allow and Deny would.
+  const approve = paired && !blocked && approval === "unapproved";
   // Images beside the message (control/Attachments.tsx): paperclip, paste, drop, the phone's picker.
   // Not offered for a computer reached through spacesheep, unless it is this one (paths).
   const att = useAttachments({ machine: session.machine, enabled, localOnly: !!control?.remote });
@@ -526,9 +539,9 @@ export function ControlStrip({
       };
     return null;
   })();
-  // The phone, unpaired, with a prompt to answer: one state, one sentence (on the card),
-  // and no composer. A desktop keeps its field and the line under it.
-  const folded = phone && !paired && !blocked && open.some(answerable);
+  // The phone, unpaired or not approved, with a prompt to answer: one state, one sentence
+  // (on the card), and no composer. A desktop keeps its field and the line under it.
+  const folded = phone && (!paired || approve) && !blocked && open.some(answerable);
   // Why Allow / Deny are off, said on their own bar (the line under the field says the rest).
   const offWhy: ReactNode = enabled ? null : !paired ? (
     folded ? (
@@ -549,8 +562,12 @@ export function ControlStrip({
     )
   ) : blocked ? (
     blockedAnswer(wrong, blockedSays)
+  ) : approve ? (
+    `${NEW_WORDS.answerNotYet(ThisPhone())}.`
   ) : stream ? (
     "waiting for the connection"
+  ) : approval === "catching-up" && send ? (
+    sendWords(send, name)?.long
   ) : null;
   const canSend = review
     ? enabled && !busy && !!text.trim() && !tooLong && answers?.[review.attentionId] !== "sent"
@@ -625,7 +642,7 @@ export function ControlStrip({
             className={plan ? "ctl-answer ctl-answer--plan" : "ctl-answer"}
             key={a.attentionId}
             data-attention={a.attentionId}
-            data-answer={terminal ? "terminal" : gone ? "late" : (status ?? "open")}
+            data-answer={terminal ? "terminal" : gone ? "late" : (status ?? (approve ? "unapproved" : "open"))}
           >
             <Question a={a} session={session} />
             {why ? (
@@ -656,7 +673,12 @@ export function ControlStrip({
                 </button>
               </span>
             ) : null}
-            {!shut && (
+            {!shut && approve ? (
+              // Never just "Approve": beside a question, that word is the agent's action.
+              <Link to="/add-device" className="btn btn--deny ctl-approve">
+                {setupLabel()}
+              </Link>
+            ) : !shut ? (
               <span className="ctl-answer-btns">
                 <ActionButton
                   className="btn btn--deny"
@@ -695,7 +717,7 @@ export function ControlStrip({
                   {plan ? "Approve plan" : "Allow"}
                 </ActionButton>
               </span>
-            )}
+            ) : null}
           </div>
         );
       })}
@@ -712,6 +734,7 @@ export function ControlStrip({
               placeholder={review ? "What should change?" : placeholder}
               disabled={!enabled}
               aria-label="Message for the next turn"
+              aria-describedby={reason ? reasonId : undefined}
               rows={1}
               enterKeyHint="send"
             />
@@ -745,6 +768,7 @@ export function ControlStrip({
         <p className="ctl-foot" data-reason={reason?.kind}>
           {reason && (
             <span
+              id={reasonId}
               className={`ctl-hint ctl-context ${reason.tone === "err" ? "ctl-note--err" : ""}`}
               data-wrong-origin={reason.kind === "wrong-origin" ? "" : undefined}
             >

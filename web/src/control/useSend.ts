@@ -6,9 +6,10 @@
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePhone } from "../account/device";
+import { type Approval, approvalOf, type SendState, useSendStates } from "../account/sendable";
 import type { ControlAction } from "../components/ControlStrip";
 import { answerLate } from "../lib/answerWindow";
-import { clock, NEW_WORDS, ThisPhone } from "../native/accountWords";
+import { clock, NEW_WORDS, SEND, ThisPhone, thisPhone } from "../native/accountWords";
 import { ControlError, UNHEARD_CODE } from "./api";
 import { type CommandFields, HeldForConfirm, heldWhy, sendCommand, UnheardSend } from "./command";
 import { type Held, useHeld } from "./HeldNotice";
@@ -16,26 +17,32 @@ import type { HeldMeta } from "./held";
 import { HELD_WORDS } from "./heldWords";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
 import { remoteHostFor } from "./remoteRp";
-import { canSign, machineTakes, signerLabel, signHint, updateWords } from "./signer";
+import { canSign, machineTakes, ownKeyKnown, signerKind, signerLabel, signHint, updateWords } from "./signer";
 import { sendErrorWords, unheardWords } from "./words";
 
 export type AnswerStatus = "sent" | "closed";
 
 /** Whether Allow / Deny can go for one prompt right now, and if not (or while an answer
- *  is out) why, in words: the machine is not paired, this page cannot use passkeys, the
+ *  is out) why, in words: the machine is not paired, this page cannot use passkeys, this
+ *  device is not approved or the computer has not added its key yet (`approval`), the
  *  prompt's hook stopped waiting as of `now` (`late`: lib/answerWindow.ts), or an answer
- *  is already out. Shared by the inbox rows and the toasts. `tag` is the short state for
- *  a data attribute. */
+ *  is already out. Shared by the inbox rows, the toasts and a row's menu. `tag` is the
+ *  short state for a data attribute; "unapproved" offers no answer at all, only the way to
+ *  approve this device. */
 export function answerState(
   s: SessionSummary,
   a: Attention,
   control: MachineControl | undefined,
-  send: Pick<SessionSend, "rp" | "secure" | "tap" | "answers"> & { cooling?: string | null },
+  send: Pick<SessionSend, "rp" | "secure" | "tap" | "answers"> & {
+    cooling?: string | null;
+    approval?: Approval;
+  },
   now: number,
 ): { reason: string | null; off: boolean; status: AnswerStatus | undefined; tag: string } {
   const status = send.answers[a.attentionId];
   const late = answerLate(a, control, s.harness, now);
   const old = control && !machineTakes(control) ? updateWords(s.machine ?? undefined).replace(/\.$/, "") : null;
+  const approval = send.approval ?? "ok";
   const reason = !control
     ? `pair ${s.machine ?? "this machine"} to send messages`
     : !send.secure
@@ -46,23 +53,29 @@ export function answerState(
           ? // Inside the hour a newly approved phone waits, an answer would be refused like
             // any send: the same line the composer has, and no button that will be refused.
             send.cooling
-          : late
-            ? NEW_WORDS.answerLate(s.machine ?? undefined)
-            : status === "closed"
-              ? NEW_WORDS.answerClosed
-              : status === "sent"
-                ? `answer sent · waiting for ${s.machine ?? "the machine"}`
-                : send.tap
-                  ? `confirm with ${signerLabel()}`
-                  : null;
-  const off = !control || !send.secure || !send.rp || !!old || !!send.cooling || late || !!status;
+          : approval === "unapproved"
+            ? NEW_WORDS.answerNotYet(ThisPhone())
+            : approval === "catching-up"
+              ? SEND.long.notHere(s.machine ?? "its computer", thisPhone()).replace(/\.$/, "")
+              : late
+                ? NEW_WORDS.answerLate(s.machine ?? undefined)
+                : status === "closed"
+                  ? NEW_WORDS.answerClosed
+                  : status === "sent"
+                    ? `answer sent · waiting for ${s.machine ?? "the machine"}`
+                    : send.tap
+                      ? `confirm with ${signerLabel()}`
+                      : null;
+  const off = !control || !send.secure || !send.rp || !!old || !!send.cooling || approval !== "ok" || late || !!status;
   const tag = !control
     ? "unpaired"
-    : !send.secure || old || send.cooling
+    : !send.secure || old || send.cooling || approval === "catching-up"
       ? "blocked"
-      : late
-        ? "late"
-        : (status ?? "open");
+      : approval === "unapproved"
+        ? "unapproved"
+        : late
+          ? "late"
+          : (status ?? "open");
   return { reason, off, status, tag };
 }
 
@@ -88,6 +101,11 @@ export interface SessionSend {
   /** On a spacesheep account, a phone approved less than an hour ago cannot send yet: the
    *  line that says from when (when the time is known exactly); null everywhere else. */
   cooling: string | null;
+  /** Whether this device can send to the session's machine (account/sendable.ts). */
+  sendable: SendState;
+  /** What of it turns Allow, Deny and the composer off here (sendable.ts approvalOf): the
+   *  app's own key, not approved for that machine or not added there yet. */
+  approval: Approval;
   /** This session's control activity, newest first. */
   activity: ReturnType<typeof useControlActivity>;
   /** Signs and sends one strip action; throws the refusal after recording it in `error`. */
@@ -127,11 +145,16 @@ export function useSessionSend(
   const [tap, setTap] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const key = session.key;
+  const machine = session.machine;
   const phoneKey = usePhone().view?.phase;
   const cooling =
     phoneKey?.kind === "cooling" && phoneKey.exact
       ? NEW_WORDS.composerCooling(ThisPhone(), clock(phoneKey.until))
       : null;
+  // Where a send would only be refused, nothing offers one: one fact for the strip, the
+  // inbox, the toasts and a row's menu.
+  const sendable = useSendStates(rp)(control);
+  const approval = approvalOf(sendable, { device: signerKind() === "device", keyKnown: !!rp && ownKeyKnown(rp) });
   const mine = useCallback((a: { session?: string }) => a.session === key, [key]);
   const activity = useControlActivity(mine);
 
@@ -289,7 +312,7 @@ export function useSessionSend(
           ? catchHeld(e, { draft: keyAtSend, ...(attached ? { attached } : {}) }, keyAtSend)
           : false;
         if (caught === "changed") setError(HELD_WORDS.changed);
-        else if (!caught) setError(sendErrorWords(e));
+        else if (!caught) setError(sendErrorWords(e, machine));
         throw e;
       } finally {
         pressed.current = {};
@@ -297,10 +320,10 @@ export function useSessionSend(
         grant.refresh();
       }
     },
-    [control, rp, key, grant.refresh, answers, notice, catchHeld, dropHeld, confirmingHeld, went, asking],
+    [control, rp, key, machine, grant.refresh, answers, notice, catchHeld, dropHeld, confirmingHeld, went, asking],
   );
 
   // A row still being asked for says so whenever the page is opened, not only after the send.
   const line = error ?? (asking[0] ? unheardWords(asking[0]) : null);
-  return { rp, secure, grant, tap, error: line, answers, cooling, activity, onSend, held };
+  return { rp, secure, grant, tap, error: line, answers, cooling, sendable, approval, activity, onSend, held };
 }

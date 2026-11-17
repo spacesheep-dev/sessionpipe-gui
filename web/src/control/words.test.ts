@@ -193,6 +193,28 @@ describe("sendErrorWords", () => {
     }
   });
 
+  it("on a spacesheep account a key the computer does not list is said as that, with the computer's name", async () => {
+    const g = globalThis as { sessionpipeShell?: unknown };
+    g.sessionpipeShell = {
+      platform: "ios",
+      rxBase: "rx://localhost/ACCT",
+      receiver: { kind: "spacesheep", origin: "https://spacesheep.dev" },
+    };
+    vi.resetModules();
+    try {
+      const { sendErrorWords: words } = await import("./words");
+      const { ControlError: Refused } = await import("./api");
+      const refused = new Refused(422, "That key isn't trusted on this computer.", "untrusted_key");
+      expect(words(refused, "Misha-Petrov-laptop")).toBe("Not sent: Misha-Petrov-laptop hasn't added this iPhone yet.");
+      // Never the day grant's words, which would promise a Face ID that changes nothing.
+      expect(words(refused, "Misha-Petrov-laptop")).not.toMatch(/grant|Face ID/);
+      expect(words(refused)).toBe("Not sent: the computer hasn't added this iPhone yet.");
+    } finally {
+      delete g.sessionpipeShell;
+      vi.resetModules();
+    }
+  });
+
   it("tells spacesheep's refusal of this app's key from the page's own key", () => {
     expect(sendErrorWords(new ControlError(502, "Unknown or revoked API key.", "spacesheep_unauthorized"))).toBe(
       "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.",
