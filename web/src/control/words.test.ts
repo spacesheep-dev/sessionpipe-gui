@@ -358,7 +358,6 @@ describe("receiptWords", () => {
     expect(receiptWords({ decision: "deny", plan: true, machine: "studio-mac" }).text).toBe(
       "Asked for changes · waiting for studio-mac",
     );
-    expect(receiptWords({ machine: "studio-mac" }).text).toBe("Answer sent · waiting for studio-mac");
     expect(receiptWords({ decision: "allow", machine: "studio-mac", offline: true }).text).toBe(
       "Allowed · waiting for studio-mac to come back",
     );

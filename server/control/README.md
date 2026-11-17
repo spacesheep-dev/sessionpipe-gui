@@ -125,8 +125,11 @@ machine's reason in `detail`; a `copy_of` that is not a session ref is dropped. 
 objects arrive on the SSE stream as `{ kind: "control", message }` whenever one is queued,
 acked or expires.
 
-For a `permission.answer`, `text` is `"<decision>"` or `"<decision>: <note>"`; for a
-`key.add`, `"trust <name>"`. A `start`'s activity also carries what was signed (`cwd`,
+For a `permission.answer`, `text` is `"<decision>"` or `"<decision>: <note>"`, and
+`answer` is `{ for, decision }` as signed: the prompt it answers and how (a row kept from
+before the row stored them reads them from its signed command). The UI reads from it which
+open prompts have an answer out, on every page and after a reload. For a `key.add`, `text`
+is `"trust <name>"`. A `start`'s activity also carries what was signed (`cwd`,
 `permission`, `model`, `files`) and, from its `taken` / `delivered` ack, `applied`: what
 the machine ran it with. `from` is the page's own unsigned note of which session's page
 sent it (`SendBody.from`, a `<harness>:<id>`): kept on the activity for the lineage the

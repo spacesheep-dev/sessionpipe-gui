@@ -135,7 +135,7 @@ describe("a prompt's answer window", () => {
   });
 
   it("says which answer is out, and what it waits for, in one line every surface shares", () => {
-    const out = (decision?: "allow" | "deny", a: Attention = prompt, control: MachineControl = local) =>
+    const out = (decision: "allow" | "deny", a: Attention = prompt, control: MachineControl = local) =>
       answerState(claude, a, control, { ...send, answers: { a1: { status: "sent", decision } } }, after(5_000));
     expect(out("allow")).toEqual({
       reason: "Allowed · waiting for Misha-Petrov-laptop",
@@ -145,8 +145,6 @@ describe("a prompt's answer window", () => {
       receipt: { what: "Allowed", text: "Allowed · waiting for Misha-Petrov-laptop" },
     });
     expect(out("deny").reason).toBe("Denied · waiting for Misha-Petrov-laptop");
-    // An answer whose decision is not known (a row from before the rows said it).
-    expect(out().reason).toBe("Answer sent · waiting for Misha-Petrov-laptop");
     // A plan review's.
     const plan = { ...prompt, tool: "ExitPlanMode" };
     expect(out("allow", plan).receipt).toEqual({
@@ -159,17 +157,23 @@ describe("a prompt's answer window", () => {
       "Allowed · waiting for Misha-Petrov-laptop to come back",
     );
     // Its hook let go: late says so, not the receipt.
-    const late = answerState(claude, prompt, local, { ...send, answers: { a1: { status: "sent" } } }, after(130_000));
+    const late = answerState(
+      claude,
+      prompt,
+      local,
+      { ...send, answers: { a1: { status: "sent", decision: "allow" } } },
+      after(130_000),
+    );
     expect(late.tag).toBe("late");
     expect(late.receipt).toBeUndefined();
   });
 
   it("offers nothing in a menu while an answer is out or the prompt closed", () => {
-    for (const status of ["sent", "closed"] as const) {
-      const st = answerState(claude, prompt, local, { ...send, answers: { a1: { status } } }, after(5_000));
+    for (const out of [{ status: "sent", decision: "allow" }, { status: "closed" }] as const) {
+      const st = answerState(claude, prompt, local, { ...send, answers: { a1: out } }, after(5_000));
       expect(
         answerItems("Bash", st, () => {}),
-        status,
+        out.status,
       ).toEqual([]);
     }
     expect(answerItems("Bash", answerState(claude, prompt, local, send, after(5_000)), () => {})).toHaveLength(2);

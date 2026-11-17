@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Attention, ControlActivity, ControlOutcome } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { answerEnded, answersOut } from "./answers";
+import { answerEnded, answersHere, answersOut, type Press } from "./answers";
 
 const RAISED = "2026-11-17T10:00:00.000Z";
 const prompt: Attention = { attentionId: "perm-1", kind: "permission", tool: "Bash", at: RAISED, answerable: true };
@@ -73,9 +73,58 @@ describe("answerEnded: why the last answer did not go", () => {
     const refused = row({ outcome: "refused", code: "grant" });
     expect(answerEnded([refused], [prompt], {})).toBe(refused);
     // Another answer out, or the prompt closed: nothing to say.
-    expect(answerEnded([refused], [prompt], { "perm-1": { status: "sent" } })).toBeUndefined();
+    expect(answerEnded([refused], [prompt], { "perm-1": { status: "sent", decision: "deny" } })).toBeUndefined();
     const out = row();
     expect(answerEnded([out, refused], [prompt], answersOut([out, refused], [prompt]))).toBeUndefined();
     expect(answerEnded([row({ outcome: "refused", code: "no_attention" })], [prompt], {})).toBeUndefined();
+  });
+});
+
+describe("answersHere: what the surface that pressed knows", () => {
+  /** This surface's press for perm-1: the row it made, at that row's time. */
+  const pressed = (r: ControlActivity, decision: "allow" | "deny" = "allow"): Record<string, Press> => ({
+    "perm-1": { status: "sent", decision, at: Date.parse(r.at), row: r.id },
+  });
+  /** A receiver from before rows said which prompt they answered. */
+  const older = (r: ControlActivity): ControlActivity => ({ ...r, answer: undefined });
+
+  it("is out from the moment it went, before its row is in", () => {
+    const r = row();
+    expect(answersHere([], [prompt], pressed(r)).answers).toEqual({ "perm-1": { status: "sent", decision: "allow" } });
+  });
+
+  it("reads its own row as this prompt's where the row does not say so", () => {
+    const of = (r: ControlActivity) => answersHere([older(r)], [prompt], pressed(r));
+    expect(of(row()).answers["perm-1"]).toEqual({ status: "sent", decision: "allow" });
+    expect(of(row({ outcome: "delivered", decision: "deny" })).answers["perm-1"]).toEqual({
+      status: "sent",
+      decision: "allow",
+    });
+    expect(of(row({ outcome: "refused", code: "no_attention" })).answers["perm-1"]).toEqual({ status: "closed" });
+    // Refused for another reason: Allow and Deny back, and why.
+    const refused = row({ outcome: "refused", code: "grant" });
+    const here = answersHere([older(refused)], [prompt], pressed(refused));
+    expect(here.answers).toEqual({});
+    expect(here.ended).toMatchObject({ id: refused.id, answer: { for: "perm-1", decision: "allow" } });
+  });
+
+  it("leaves a row that says what it answered, and rows it did not make, as they are", () => {
+    const refused = row({ outcome: "refused", code: "grant" });
+    expect(answersHere([refused], [prompt], pressed(refused))).toEqual({ answers: {}, ended: refused });
+    // A row from an older receiver that no press here made: nothing says whose it is.
+    expect(answersHere([older(row())], [prompt], {})).toEqual({ answers: {} });
+  });
+
+  it("a press for an earlier prompt under the same id says nothing", () => {
+    const r = row({ ms: -30_000 });
+    expect(answersHere([older(r)], [prompt], pressed(r))).toEqual({ answers: {} });
+  });
+
+  it("a press the computer refused as no longer open, before any row, closes the prompt as raised", () => {
+    const closed: Record<string, Press> = { "perm-1": { status: "closed", at: Date.parse(prompt.at) } };
+    expect(answersHere([], [prompt], closed).answers).toEqual({ "perm-1": { status: "closed" } });
+    // The same id raised again later: a new prompt.
+    const again = { ...prompt, at: new Date(Date.parse(RAISED) + 60_000).toISOString() };
+    expect(answersHere([], [again], closed).answers).toEqual({});
   });
 });

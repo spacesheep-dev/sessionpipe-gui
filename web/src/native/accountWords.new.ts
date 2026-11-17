@@ -94,7 +94,6 @@ export const NEW_WORDS = {
   answerDenied: "Denied",
   answerPlanApproved: "Plan approved",
   answerPlanChanges: "Asked for changes",
-  answerSent: "Answer sent",
 } as const;
 
 /** Whether this phone can send to a computer (account/sendable.ts), the same on every screen

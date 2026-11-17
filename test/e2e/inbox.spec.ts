@@ -8,7 +8,7 @@
 // never grant it here. On a paired machine, a prompt whose hook stopped waiting moves
 // down to the terminal's, saying why, with nothing to press.
 import { randomUUID } from "node:crypto";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { CONTROL_BASE, fakeDaemon, passkeyPage, postPrompt, seenSetupHere, sinkToken } from "./control-helpers.js";
 import { openPage } from "./helpers.js";
 
@@ -285,10 +285,23 @@ test.describe("inbox: an answer refused", () => {
       // With a pointer the pair shows on the hovered row.
       await row.hover();
       await row.getByRole("button", { name: "Allow" }).click();
-      await expect(row.locator(".inbox-note--err")).toHaveText(
-        "Not sent: the machine could not record the nonce, so it did not run it",
-      );
+      const note = row.locator(".inbox-note--err");
+      await expect(note).toHaveText("Not sent: the machine could not record the nonce, so it did not run it");
       await expect(row.getByRole("button", { name: "Allow" })).toBeEnabled();
+      // The line takes room of its own at the row's end, the pair shown beside it: hovered
+      // or not, it lies over neither the time nor the machine.
+      const box = async (l: Locator) => (await l.boundingBox())!;
+      for (const hovered of [false, true]) {
+        if (hovered) await row.hover();
+        else await page.mouse.move(0, 0);
+        await expect(row.getByRole("button", { name: "Allow" })).toHaveCSS("opacity", "1");
+        const n = await box(note);
+        for (const part of [".inbox-age", ".inbox-where"]) {
+          await expect(row.locator(part), `${part}, hovered: ${hovered}`).toBeVisible();
+          const p = await box(row.locator(part));
+          expect(n.x >= p.x + p.width || p.x >= n.x + n.width, `${part}, hovered: ${hovered}`).toBe(true);
+        }
+      }
     } finally {
       await asked.clear();
       await d.stop();

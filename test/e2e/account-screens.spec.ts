@@ -1950,6 +1950,26 @@ test.describe("what else an account shows", () => {
       await expect(page.locator(".ctl-foot[data-reason='error']")).toHaveText(
         /^Not sent: the day grant did not verify/,
       );
+      // The Inbox says it too: at 820 beside the pair, in a measure that leaves the request
+      // its room; at 320 on a line of its own over the pair.
+      await page.setViewportSize({ width: 820, height: 1180 });
+      await page.goto(`${b.server.url}/inbox`);
+      const deployRow = page.locator(".inbox-row[data-attention='perm-deploy']");
+      const refused = deployRow.locator(".inbox-note--err");
+      await expect(refused).toHaveText(/^Not sent: the day grant did not verify/, { timeout: 15_000 });
+      await expect(deployRow.getByRole("button", { name: "Allow" })).toBeEnabled();
+      const [rowBox, mainBox] = await Promise.all([
+        deployRow.boundingBox(),
+        deployRow.locator(".inbox-main").boundingBox(),
+      ]);
+      expect(mainBox!.width).toBeGreaterThan(rowBox!.width * 0.4);
+      await page.setViewportSize({ width: 320, height: 568 });
+      const [lineBox, allowBox] = await Promise.all([
+        refused.boundingBox(),
+        deployRow.getByRole("button", { name: "Allow" }).boundingBox(),
+      ]);
+      expect(lineBox!.y + lineBox!.height).toBeLessThanOrEqual(allowBox!.y);
+      expect(await wide()).toBe(0);
     } finally {
       await b.close();
     }

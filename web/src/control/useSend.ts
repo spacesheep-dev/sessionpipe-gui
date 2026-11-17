@@ -3,7 +3,7 @@
 // page's strip (SessionControl) and the inbox's Allow / Deny: builds the command for a
 // strip action, signs it with the day grant (one passkey tap a day), and knows which
 // prompts have an answer out or were closed by the machine (answers.ts, over the page's
-// activity, with this surface's own press on top), so no second answer goes from anywhere.
+// activity, read with this surface's own presses), so no second answer goes from anywhere.
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePhone } from "../account/device";
@@ -12,13 +12,13 @@ import type { ControlAction } from "../components/ControlStrip";
 import { answerLate } from "../lib/answerWindow";
 import { isPlanReview } from "../lib/format";
 import { clock, NEW_WORDS, SEND, ThisPhone, thisPhone } from "../native/accountWords";
-import { type AnswerOut, type AnswerStatus, answerEnded } from "./answers";
+import { type AnswerOut, type AnswerStatus, answersHere, type Press } from "./answers";
 import { ControlError, UNHEARD_CODE } from "./api";
 import { type CommandFields, HeldForConfirm, heldWhy, sendCommand, UnheardSend } from "./command";
 import { type Held, useHeld } from "./HeldNotice";
 import type { HeldMeta } from "./held";
 import { HELD_WORDS } from "./heldWords";
-import { useAnswersOut, useControlActivity, useGrant, useRpId } from "./hooks";
+import { useControlActivity, useGrant, useRpId } from "./hooks";
 import { remoteHostFor } from "./remoteRp";
 import { canSign, isCancel, machineTakes, ownKeyKnown, signerKind, signerLabel, signHint, updateWords } from "./signer";
 import { answerEndWords, notSentLine, notSentWords, receiptWords, unheardWords } from "./words";
@@ -53,9 +53,9 @@ export function answerState(
   const status = out?.status;
   const late = answerLate(a, control, s.harness, now);
   const receipt =
-    status === "sent"
+    out?.status === "sent"
       ? receiptWords({
-          decision: out?.decision,
+          decision: out.decision,
           plan: isPlanReview(a),
           machine: s.machine,
           offline: control?.online === false,
@@ -124,7 +124,8 @@ export interface SessionSend {
   error: string | null;
   /** Per open attention id: "sent" while an answer is out, with the answer, "closed" once
    *  the machine said the prompt is no longer open (already answered, or timed out). The
-   *  same for every surface (answers.ts); this one's own press shows before its row does. */
+   *  same for every surface (answers.ts); this one's own press shows before its row does,
+   *  and is read into a row that does not say which prompt it answered. */
   answers: Readonly<Record<string, AnswerOut>>;
   /** On a spacesheep account, a phone approved less than an hour ago cannot send yet: the
    *  line that says from when (when the time is known exactly), or the refusal of a send
@@ -193,12 +194,11 @@ export function useSessionSend(
   const mine = useCallback((a: { session?: string }) => a.session === key, [key]);
   const activity = useControlActivity(mine);
 
-  // What every surface knows of the answers to these prompts, from the activity.
-  const shared = useAnswersOut(attentions);
-  /** This surface's own presses, per attention: what went and when (`row`: the row it made,
-   *  whose word takes over once the activity has it), or that the machine refused it as no
-   *  longer open before any row was made. */
-  const [own, setOwn] = useState<Record<string, AnswerOut & { at: number; row?: string }>>({});
+  /** This surface's own presses, per attention: what went and the row it made, or that the
+   *  machine refused it as no longer open before any row was made (answers.ts Press). */
+  const [own, setOwn] = useState<Record<string, Press>>({});
+  /** The prompt an answer is being signed and sent for right now. */
+  const [answering, setAnswering] = useState<string | null>(null);
   /** An answer that went is "sent" from the moment it went. */
   const went = useCallback((fields: CommandFields, carried: ControlActivity) => {
     if (fields.kind !== "permission.answer") return;
@@ -213,18 +213,10 @@ export function useSessionSend(
       },
     }));
   }, []);
-  const answers = useMemo(() => {
-    let out: Record<string, AnswerOut> | null = null;
-    for (const a of attentions) {
-      const mine = own[a.attentionId];
-      // A press for an earlier prompt under the same id, or one whose row the activity has.
-      if (!mine || mine.at < Date.parse(a.at) || shared[a.attentionId]?.status === "sent") continue;
-      if (mine.row && activity.some((r) => r.id === mine.row)) continue;
-      out ??= { ...shared };
-      out[a.attentionId] = { status: mine.status, ...(mine.decision ? { decision: mine.decision } : {}) };
-    }
-    return out ?? shared;
-  }, [attentions, own, shared, activity]);
+  // What this surface knows of the answers to these prompts: the activity's, read with its
+  // own presses; and the last answer that did not reach its prompt.
+  const here = useMemo(() => answersHere(activity, attentions, own), [activity, attentions, own]);
+  const answers = here.answers;
   const draftNow = useRef(o.draft);
   draftNow.current = o.draft;
   // A send of this session nobody heard the answer to (account/unheard.ts): its row says it
@@ -333,6 +325,7 @@ export function useSessionSend(
       const keyAtSend = action.kind !== "cancel" && action.composer ? draftNow.current : undefined;
       const attachedNow = action.kind === "prompt" ? action.attached : undefined;
       pressed.current = { typed: keyAtSend, fields, ...(attachedNow ? { attached: attachedNow } : {}) };
+      setAnswering(att);
       try {
         const carried = await sendCommand(rp, control.machineId, fields, { onTap: () => setTap(true) });
         went(fields, carried);
@@ -340,8 +333,13 @@ export function useSessionSend(
       } catch (e) {
         // Nobody heard its answer: what was pressed is kept under its row's id.
         if (e instanceof UnheardSend) unheard.current.set(e.id, pressed.current);
-        if (att && e instanceof ControlError && e.code === "no_attention")
-          setOwn((prev) => ({ ...prev, [att]: { status: "closed", at: Date.now() } }));
+        // Closed: the prompt as it was raised, by its own time (the clock its rows are on).
+        const prompt =
+          e instanceof ControlError && e.code === "no_attention"
+            ? attentions.find((a) => a.attentionId === att)
+            : undefined;
+        if (prompt)
+          setOwn((prev) => ({ ...prev, [prompt.attentionId]: { status: "closed", at: Date.parse(prompt.at) } }));
         // Held for a confirm: the notice says so where it is shown, the refusal elsewhere.
         const attached = action.kind === "prompt" ? action.attached : undefined;
         const caught = notice
@@ -357,20 +355,36 @@ export function useSessionSend(
         throw e;
       } finally {
         pressed.current = {};
+        setAnswering(null);
         setTap(false);
         grant.refresh();
       }
     },
-    [control, rp, key, machine, grant.refresh, answers, notice, catchHeld, dropHeld, confirmingHeld, went, asking],
+    [
+      control,
+      rp,
+      key,
+      machine,
+      grant.refresh,
+      answers,
+      attentions,
+      notice,
+      catchHeld,
+      dropHeld,
+      confirmingHeld,
+      went,
+      asking,
+    ],
   );
 
-  // An answer that did not reach its prompt, which takes one again: why, on every surface.
-  const ended = answerEnded(activity, attentions, answers);
+  // An answer that did not reach its prompt, which takes one again: why, on every surface,
+  // until another is pressed for it.
+  const ended = here.ended && here.ended.answer?.for !== answering ? here.ended : undefined;
   // A row still being asked for says so whenever the page is opened, not only after the send.
   // A refusal for the hour where the phone does not hold the hour's end is the send's own.
   const line =
     error ??
-    (ended ? answerEndWords(ended, machine ?? "the computer") : null) ??
+    (ended ? answerEndWords(ended, machine ?? "its computer") : null) ??
     (asking[0] ? unheardWords(asking[0]) : null) ??
     (cooling ? null : hourRefusal);
   return { rp, secure, grant, tap, error: line, answers, cooling, sendable, approval, activity, onSend, held };

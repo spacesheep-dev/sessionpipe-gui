@@ -73,10 +73,13 @@ export function SessionLoading({ mode, rootRef }: { mode: "page" | "panel"; root
 /** Allow / Deny for an open permission as menu items that press the strip's own buttons,
  *  so a menu answers through the one signed send (and its one-answer memory) the strip
  *  uses; disabled with the strip's reason when it cannot. `root` is the view (or the
- *  panel's active body); the first open prompt unless `attentionId` names one. */
+ *  panel's active body); the first open prompt that still has its pair (one with an
+ *  answer out has none) unless `attentionId` names one. */
 export function answerItems(root: HTMLElement | null, s: SessionSummary, attentionId?: string): MenuList {
   const rows = [...(root?.querySelectorAll<HTMLElement>(".ctl-answer[data-attention]") ?? [])];
-  const row = attentionId ? rows.find((r) => r.dataset.attention === attentionId) : rows[0];
+  const row = attentionId
+    ? rows.find((r) => r.dataset.attention === attentionId)
+    : rows.find((r) => r.querySelector(".btn--allow"));
   const allow = row?.querySelector<HTMLButtonElement>(".btn--allow");
   const deny = row?.querySelector<HTMLButtonElement>(".btn--deny");
   if (!row || !allow || !deny) return [];

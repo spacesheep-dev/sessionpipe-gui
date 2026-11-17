@@ -193,7 +193,8 @@
    row actions do, so the right column ends where the board's does (the 36 px the board
    keeps for "Open beside"); on touch they sit on the row, always there. */
 .inbox-answer {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -213,7 +214,7 @@
   .inbox-row:is(:hover, [aria-current="true"], :focus-within) .inbox-answer {
     pointer-events: auto;
   }
-  .inbox-row--answerable:is(:hover, [aria-current="true"], :focus-within):has(.inbox-answer .btn)
+  .inbox-row--answerable:is(:hover, [aria-current="true"], :focus-within):has(.inbox-answer .btn):not(:has(.inbox-note))
     :is(.inbox-age, .inbox-where) {
     visibility: hidden;
   }
@@ -223,11 +224,14 @@
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 /* An answer on its way stays on the row after the pointer leaves: the pressed button
-   turning, the other stepped back, the time and machine out of their way. */
-.inbox-answer[data-chosen] .btn {
+   turning, the other stepped back, the time and machine out of their way. So does the
+   pair beside a line on why the last answer did not go: it is how to answer again. */
+.inbox-answer[data-chosen] .btn,
+.inbox-answer:has(.inbox-note) .btn {
   opacity: 1;
 }
-.inbox-answer[data-chosen] .btn:disabled {
+.inbox-answer[data-chosen] .btn:disabled,
+.inbox-answer:has(.inbox-note) .btn:disabled {
   opacity: 0.45;
 }
 @media (hover: hover) {
@@ -237,23 +241,33 @@
   .inbox-row:has(.inbox-answer[data-chosen]) .inbox-answer {
     pointer-events: auto;
   }
-  /* The receipt takes room of its own at the row's end, beside the time and machine. */
-  .inbox-answer:has(.inbox-receipt) {
+  /* The receipt, or a line on why the last answer did not go (or that the prompt closed),
+     takes room of its own at the row's end, beside the time and machine; while a press is
+     on its way the pair keeps their place, as above. */
+  .inbox-answer:has(.inbox-receipt),
+  .inbox-answer:not([data-chosen]):has(.inbox-note) {
     position: static;
   }
 }
-/* An answer out: the receipt in the pair's place, what went first, wrapping. At the row's
-   end on a wide row; under the request on a narrow one (below). */
-.inbox-receipt {
+/* What the row says of its answer: the receipt in the pair's place (what went first), or a
+   line beside the pair. At the row's end on a wide row, wrapping in a measure of its own
+   so the request keeps its room (a line beside the pair, often a long one, in less);
+   under the request on a narrow one (below). */
+.inbox-receipt,
+.inbox-note {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 22em;
-  margin-left: 8px;
   color: var(--fg-3);
   font-size: var(--text-sm);
   line-height: var(--lh);
-  white-space: normal;
   text-wrap: pretty;
+}
+.inbox-note {
+  max-width: min(22em, 30cqi);
+}
+.inbox-receipt {
+  margin-left: 8px;
   animation: fade-in 150ms var(--ease-out) both;
 }
 .inbox-receipt-what {
@@ -271,10 +285,6 @@
   opacity: 0.45;
 }
 .inbox-answer--terminal {
-  color: var(--fg-3);
-  font-size: var(--text-sm);
-}
-.inbox-note {
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
@@ -359,6 +369,7 @@
     position: static;
     width: 100%;
     min-width: 0;
+    flex-wrap: wrap;
     justify-content: flex-start;
     padding: 0 0 12px 36px;
     pointer-events: auto;
@@ -366,9 +377,16 @@
   .inbox-answer:empty {
     display: none;
   }
-  .inbox-receipt {
+  .inbox-receipt,
+  .inbox-note {
     max-width: none;
+  }
+  .inbox-receipt {
     margin-left: 0;
+  }
+  /* Why the last answer did not go: a line of its own, over the pair. */
+  .inbox-note--err {
+    flex-basis: 100%;
   }
   .inbox-row--terminal .inbox-answer {
     display: none;

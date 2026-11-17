@@ -188,14 +188,17 @@ export function Inbox() {
     .filter(Boolean)
     .join(" · ");
 
-  const group = (title: string, list: Held<OpenAttention>[], offset: number) =>
+  // The count is what still needs it: a row with its answer out says so, and counts no more.
+  const group = (title: string, list: Held<OpenAttention>[], offset: number, count = list.length) =>
     list.length > 0 && (
       <section className="group inbox-group" aria-label={title}>
         <h2 className="group-head">
           {title}
-          <span key={list.length} className="group-count num">
-            {list.length}
-          </span>
+          {count > 0 && (
+            <span key={count} className="group-count num">
+              {count}
+            </span>
+          )}
         </h2>
         <ol className="inbox-rows">
           {list.map((h, i) => (
@@ -296,7 +299,7 @@ export function Inbox() {
       ) : null}
       {/* Always there once loaded, so a first prompt is a new row to useFlip (its entrance). */}
       <div className="inbox-list" ref={listRef} hidden={held.length === 0 || undefined}>
-        {group("Needs an answer", answer, 0)}
+        {group("Needs an answer", answer, 0, needs)}
         {group("Waiting in a terminal", terminal, answer.length)}
       </div>
     </div>

@@ -616,7 +616,10 @@ export function ControlStrip({
     setBusy(id);
     void onSend?.(action)
       .then(after)
-      .catch(() => {})
+      .catch(() => {
+        // Not sent from here: no receipt is this press's to take the focus.
+        refocus.current = null;
+      })
       .finally(() => setBusy(null));
   };
   // Keep planning with what the composer says; once it went, the composer is clear again.
@@ -666,11 +669,12 @@ export function ControlStrip({
         const off = !enabled || !!busy;
         const suggested = suggestions?.find((s) => s.attentionId === a.attentionId);
         // An answer is out: one line says which, and what it waits for, in the pair's place.
-        const sent = !terminal && !gone && status === "sent";
+        const sent = !terminal && !gone && out?.status === "sent";
         const offline = control?.online === false;
-        const receipt = sent
-          ? receiptWords({ decision: out?.decision, plan, machine: session.machine, offline })
-          : null;
+        const receipt =
+          sent && out?.status === "sent"
+            ? receiptWords({ decision: out.decision, plan, machine: session.machine, offline })
+            : null;
         const shut = terminal || gone || status === "closed" || sent;
         const why: ReactNode = terminal
           ? "waiting in the terminal"

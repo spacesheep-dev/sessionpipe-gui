@@ -8,7 +8,7 @@ type Side = { disabled: boolean; description?: string };
 
 /** The strip's bar as answerItems reads it: one answer row, its card line (`note`) and its
  *  two buttons, each described by the line where there is one and by its own reason. */
-function bar(allow: Side, deny: Side, note?: string) {
+function bar(allow: Side, deny: Side, note?: string, attention = "perm-1") {
   const texts: Record<string, string> = {};
   if (note) texts.note = note;
   const doc = { getElementById: (id: string) => (id in texts ? { textContent: texts[id] } : null) };
@@ -23,7 +23,7 @@ function bar(allow: Side, deny: Side, note?: string) {
   };
   const buttons = { allow: button(allow, "allow"), deny: button(deny, "deny") };
   const row = {
-    dataset: { attention: "perm-1" },
+    dataset: { attention },
     querySelector: (sel: string) =>
       sel === ".btn--allow"
         ? buttons.allow
@@ -57,6 +57,22 @@ describe("answerItems", () => {
     const root = bar({ disabled: true }, { disabled: true }, line);
     const items = answerItems(root, s) as unknown as { disabled?: unknown }[];
     expect(items.map((i) => i.disabled)).toEqual([line, line]);
+  });
+  it("offers the first prompt that still has its pair: one with its answer out has none", () => {
+    const out = { dataset: { attention: "perm-1" }, querySelector: () => null };
+    const [open] = bar({ disabled: false }, { disabled: false }, undefined, "perm-2").querySelectorAll("*");
+    const root = { querySelectorAll: () => [out, open] } as unknown as HTMLElement;
+    const two = {
+      openAttentions: [
+        { attentionId: "perm-1", kind: "permission", tool: "Bash" },
+        { attentionId: "perm-2", kind: "permission", tool: "Edit" },
+      ],
+    } as SessionSummary;
+    const items = answerItems(root, two) as unknown as { label: string; disabled?: unknown }[];
+    expect(items.map((i) => [i.label, i.disabled])).toEqual([
+      ["Allow Edit", undefined],
+      ["Deny Edit", undefined],
+    ]);
   });
   it("leaves both on when both buttons are", () => {
     const items = answerItems(bar({ disabled: false }, { disabled: false }), s) as unknown as { disabled?: unknown }[];

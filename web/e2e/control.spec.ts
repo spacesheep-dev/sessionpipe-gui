@@ -606,6 +606,104 @@ test("an answer the machine refused for another reason gives the pair back, and 
   await expect(page.locator(".ctl-foot[data-reason='error']")).toHaveCount(0);
 });
 
+test("against a receiver whose rows do not say which prompt they answer, the page that pressed still knows", async () => {
+  // A receiver from before ControlActivity.answer: none on the stream's frames, on GET
+  // /activity or on the send's own answer. The frames it strips are counted by id.
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem("e2e-older-receiver")) return;
+    const seen: string[] = [];
+    (window as unknown as { olderFrames: string[] }).olderFrames = seen;
+    const Real = window.EventSource;
+    window.EventSource = class extends Real {
+      addEventListener(kind: string, fn: EventListenerOrEventListenerObject, o?: boolean | AddEventListenerOptions) {
+        if (kind !== "control" || typeof fn !== "function") return super.addEventListener(kind, fn, o);
+        return super.addEventListener(
+          kind,
+          (e: Event) => {
+            const m = JSON.parse((e as MessageEvent).data);
+            if (m.message?.answer) {
+              delete m.message.answer;
+              seen.push(`${m.message.id}:${m.message.outcome ?? ""}`);
+            }
+            fn(new MessageEvent(e.type, { data: JSON.stringify(m), lastEventId: (e as MessageEvent).lastEventId }));
+          },
+          o,
+        );
+      }
+    } as typeof EventSource;
+  });
+  const strip = (x: unknown): unknown => {
+    if (Array.isArray(x)) for (const y of x) strip(y);
+    else if (x && typeof x === "object") {
+      delete (x as { answer?: unknown }).answer;
+      for (const y of Object.values(x)) strip(y);
+    }
+    return x;
+  };
+  let sends = 0;
+  await page.route("**/api/ui/control/activity**", async (r) => {
+    const res = await r.fetch();
+    await r.fulfill({ response: res, json: strip(await res.json()) });
+  });
+  await page.route("**/api/ui/control/send", async (r) => {
+    sends++;
+    const res = await r.fetch();
+    await r.fulfill({ response: res, json: strip(await res.json()) });
+  });
+  await page.evaluate(() => sessionStorage.setItem("e2e-older-receiver", "1"));
+  await page.reload();
+  const frames = (id: string) =>
+    expect.poll(() => page.evaluate(() => (window as unknown as { olderFrames: string[] }).olderFrames), {
+      message: `the stream's frames for ${id}`,
+    });
+
+  await events.post(
+    events.ev("attention.needed", { attention_id: "perm-5", kind: "permission", tool: "Bash", message: "make deploy" }),
+  );
+  const answer = page.locator('.ctl-answer[data-attention="perm-5"]');
+  await expect(answer).toHaveAttribute("data-answer", "open");
+  await answer.getByRole("button", { name: "Allow" }).click();
+  const msg = await daemon.next();
+  expect(msg.cmd).toMatchObject({ kind: "permission.answer", for: "perm-5", decision: "allow" });
+  const receipt = answer.locator(".ctl-answer-receipt");
+  await expect(receipt).toHaveText(`Allowed · waiting for ${MACHINE}`);
+  // Its row on the stream says nothing of perm-5: this page reads it as its own press's.
+  await daemon.ack(msg.id, "delivered", { mode: "waiter" });
+  await frames(msg.id).toContain(`${msg.id}:delivered`);
+  await expect(receipt).toHaveText(`Allowed · waiting for ${MACHINE}`);
+  await expect(answer).toHaveAttribute("data-answer", "sent");
+  await expect(answer.getByRole("button")).toHaveCount(0);
+  // Nothing to press twice: Deny's key finds no Deny, and no second answer goes.
+  await page.keyboard.press("d");
+  expect(await daemon.poll(1)).toEqual([]);
+  expect(sends).toBe(1);
+
+  // Refused for a reason of its own: the pair back, and why.
+  await events.post(
+    events.ev("attention.needed", { attention_id: "perm-6", kind: "permission", tool: "Bash", message: "make" }),
+  );
+  const other = page.locator('.ctl-answer[data-attention="perm-6"]');
+  await other.getByRole("button", { name: "Deny" }).click();
+  const refused = await daemon.next();
+  await expect(other.locator(".ctl-answer-receipt")).toHaveText(`Denied · waiting for ${MACHINE}`);
+  await daemon.ack(refused.id, "refused", { code: "nonce_store" });
+  await frames(refused.id).toContain(`${refused.id}:refused`);
+  await expect(other).toHaveAttribute("data-answer", "open");
+  await expect(other.getByRole("button", { name: "Allow" })).toBeEnabled();
+  await expect(page.locator(".ctl-foot[data-reason='error']")).toHaveText(
+    "Not sent: the machine could not record the nonce, so it did not run it",
+  );
+
+  await events.post(
+    events.ev("attention.cleared", { attention_id: "perm-5", how: "answered" }),
+    events.ev("attention.cleared", { attention_id: "perm-6", how: "answered" }),
+  );
+  await expect(page.locator(".ctl-answer")).toHaveCount(0);
+  await page.unrouteAll();
+  await page.evaluate(() => sessionStorage.removeItem("e2e-older-receiver"));
+  await page.reload();
+});
+
 test("a prompt its hook stopped waiting on cannot be answered here, and offers nothing; a tier-0 copy still has a label", async () => {
   // Raised an hour ago, long past the 125 s Claude Code's hook waits; and with no tool or message.
   const old = events.ev("attention.needed", { attention_id: "perm-3", kind: "permission" });
