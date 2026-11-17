@@ -8,7 +8,15 @@
 // panel as a sheet, and nothing of that panel comes back on the next launch).
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { CONTROL_BASE, fakeDaemon, passkeyPage, postSession, seenSetupHere, sinkToken } from "./control-helpers.js";
+import {
+  CONTROL_BASE,
+  fakeDaemon,
+  passkeyPage,
+  postPrompt,
+  postSession,
+  seenSetupHere,
+  sinkToken,
+} from "./control-helpers.js";
 import { composer, EVENTS, INFO, openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
 
 /** A finger down the page from its top, as touch events (page.touchscreen only taps):
@@ -427,6 +435,114 @@ test.describe("phone: the composer", () => {
       await expect.poll(prompts, { timeout: 20_000 }).toEqual(["Run the tests\nthen open a PR", "and the docs"]);
     } finally {
       await d.stop();
+    }
+  });
+
+  // A machine that asks, as real ones do: Ask another agent… ends the line. At 390 the
+  // sentence and its way on fill the first line and the button wraps under them, 2 px
+  // below; at 320 the way on and the button share the second line. The way on's box takes
+  // no tap from the field, nor from the top of the button, which keeps all of its 44 px.
+  test("beside Ask another agent… the way on, the button and the field each keep their taps", async ({
+    context,
+    page,
+  }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const d = await fakeDaemon(key, {
+      name: `ask-phone-${Math.random().toString(36).slice(2, 8)}`,
+      harnesses: ["claude-code", "codex"],
+      folders: ["/Users/e2e/code"],
+      mode: "auto",
+      ask: true,
+      handoff: true,
+    });
+    try {
+      const s = await postSession(await sinkToken(), {
+        machine: d.name,
+        cwd: "/Users/e2e/code",
+        title: "Ask on a phone",
+      });
+      await page.goto(`${CONTROL_BASE}${sessionUrl(s.harness, s.id)}`);
+      await expect(composer(page)).toBeEnabled();
+      const foot = page.locator(".ctl-foot[data-reason=passkey]");
+      const link = foot.getByRole("button", { name: "Unlock now" });
+      const ask = foot.getByRole("button", { name: "Ask another agent…" });
+      for (const { size, wrapped } of [
+        { size: { width: 390, height: 844 }, wrapped: true },
+        { size: { width: 320, height: 568 }, wrapped: false },
+      ]) {
+        await page.setViewportSize(size);
+        await expect(link).toBeVisible();
+        await expect(ask).toBeVisible();
+        const hits = await foot.evaluate((f) => {
+          const l = f.querySelector(".ctl-link")!;
+          const b = f.querySelector(".ctl-ask-agent")!;
+          const r = l.getBoundingClientRect();
+          const a = b.getBoundingClientRect();
+          const field = document.querySelector(".ctl-ask")!.getBoundingClientRect();
+          const at = (x: number, y: number) => document.elementFromPoint(x, y);
+          const cx = r.left + r.width / 2;
+          // Across the box's width, inside the field.
+          const xs = [Math.max(r.left - 6, field.left + 1), cx, Math.min(r.right + 6, field.right - 1)];
+          const under = at(cx, r.bottom + 12);
+          return {
+            wrapped: a.top > r.bottom,
+            field: xs.every((x) => !!at(x, field.bottom - 1)?.closest(".ctl-ask")),
+            ask: [a.left + 2, a.left + a.width / 2, a.right - 2].every((x) => at(x, a.top + 2) === b),
+            over: at(cx, r.top - 8) === l,
+            under: under === l ? "link" : under === b ? "ask" : (under?.className ?? null),
+          };
+        });
+        // 12 px under the way on is the button where it wrapped under it, else the way on.
+        expect(hits, `${size.width}`).toEqual({
+          wrapped,
+          field: true,
+          ask: true,
+          over: true,
+          under: wrapped ? "ask" : "link",
+        });
+      }
+    } finally {
+      await d.stop();
+    }
+  });
+
+  // Not paired, with a prompt: the card alone, its line ending in How to pair, over
+  // Deny | Allow (off until the machine is paired). The way on's box stops at the pair,
+  // also on an iPad, whose wider card has no extra room above the pair.
+  test("on the folded card, How to pair takes no tap from the question or the pair", async ({ context, page }) => {
+    await seenSetupHere(context);
+    const p = await postPrompt(await sinkToken(), {
+      machine: `unpaired-${Math.random().toString(36).slice(2, 8)}`,
+      title: "Folded on a phone",
+      agoMs: 5_000,
+    });
+    const colon = p.key.indexOf(":");
+    await page.goto(`${CONTROL_BASE}${sessionUrl(p.key.slice(0, colon), p.key.slice(colon + 1))}`);
+    const card = page.locator(".ctl--folded .ctl-answer");
+    const link = card.locator(".ctl-answer-note .ctl-link");
+    for (const size of [
+      { width: 390, height: 844 },
+      { width: 820, height: 1180 },
+    ]) {
+      await page.setViewportSize(size);
+      await expect(link).toHaveText("How to pair");
+      await expect(card.getByRole("button", { name: /^Allow/ })).toBeDisabled();
+      const hits = await link.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const note = el.closest(".ctl-answer-note")!;
+        const above = note.previousElementSibling!.getBoundingClientRect();
+        const pair = note.parentElement!.querySelector(".ctl-answer-btns")!.getBoundingClientRect();
+        const at = (x: number, y: number) => document.elementFromPoint(x, y);
+        const cx = r.left + r.width / 2;
+        return {
+          over: at(cx, r.top - 8) === el,
+          under: at(cx, r.bottom + 12) === el,
+          question: at(cx, above.bottom - 1) !== el,
+          pair: !!at(cx, pair.top + 1)?.closest(".ctl-answer-btns"),
+        };
+      });
+      expect(hits, `${size.width}`).toEqual({ over: true, under: true, question: true, pair: true });
     }
   });
 });

@@ -647,8 +647,8 @@ export function ControlStrip({
   // Shift+Return, Return is the new line (as in Messages) and ⌘/Ctrl+Return sends.
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
-    const send = touch ? e.metaKey || e.ctrlKey : !e.shiftKey;
-    if (send) {
+    const sends = touch ? e.metaKey || e.ctrlKey : !e.shiftKey;
+    if (sends) {
       e.preventDefault();
       sendText();
     }
