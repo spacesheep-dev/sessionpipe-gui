@@ -6,6 +6,14 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **In the phone app nothing shows through the tab bar, the navigation bar or the session's
+  control strip.** The bars were meant to blur what ran under them and never did: rows read
+  sharp through the tab labels and into the home-indicator strip, and the transcript
+  through the session's title and the command waiting for Allow or Deny. The bars are
+  solid now.
+
 ## [0.8.3] - 2026-11-16
 
 0.8.2 was tagged and never published (its Apple builds could not be made that day); what

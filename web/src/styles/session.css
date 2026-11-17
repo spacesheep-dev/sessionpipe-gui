@@ -616,7 +616,7 @@ html:has(.main > .session) {
   }
 }
 .sess-ctl--arrive {
-  animation: ctl-arrive var(--dur-slow) var(--ease-out) both;
+  animation: ctl-arrive var(--dur-slow) var(--ease-out) backwards;
 }
 /* "3 new": what landed below while the person reads above; it hides at the bottom. */
 .sess-new {
