@@ -10,13 +10,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 - **A list row offers Allow and Deny only beside a request it shows whole.** The Inbox
   cut a command to one line, on a phone often before its target, with a one-tap Allow under
-  it. A short request now wraps whole beside Deny and Allow. A plan, or a request that is
-  longer than 100 characters, cut by its computer, on more than one line or no more than
-  its tool's name, is two lines and Open, which opens the session where it is shown whole.
-  The row's menu and the a and d keys answer only a request shown whole, and a board row's
-  menu only one its line does not cut. Every shell prompt reads "Allow Bash to run:" with
-  the command under it, at every size, and no "?" is left alone on a line after a command
-  that wrapped.
+  it. A short, whole request now wraps beside Deny and Allow; anything else, a plan
+  included, is two lines and Open, which opens the session where it is shown whole. The
+  row's menu and the a and d keys answer only a request shown whole, and a board row's menu
+  only one its line does not cut. Every shell prompt reads "Allow Bash to run:" with the
+  command under it, at every size, and no "?" is left alone on a line after a command that
+  wrapped.
 - **A session's subagents open under it on the board only while one of them runs.** A
   tree whose agents had gone quiet opened by itself; it stays folded now, and the row says
   only how many run. On a phone an open tree lists the agents at work and one row, "Show n
@@ -37,8 +36,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   which can carry the answer. The card now shows the question and its options to read,
   and says to answer it on its computer; the board and the Inbox show the question after
   "Question". The Inbox lists it with the prompts waiting in a terminal and treats it as
-  one: the Inbox and the badge don't count it, it raises no system notification, and
-  nothing here offers to answer it.
+  one: the Inbox badge doesn't count it, a browser tab raises no notification for it, and
+  its card, its rows, their menus, the palette and the banners in the app offer no answer.
 - **An answer to a prompt shows as sent on every screen, in one line: "Allowed · waiting
   for" its computer.** Only the screen it was pressed on knew it went: the Inbox, the
   session's page and a reload offered Allow and Deny again, and a second tap cost a Face ID
