@@ -70,6 +70,7 @@ export function SessionControl({
     // word, else the machine's key list: account/sendable.ts), and what of it turns the strip off.
     sendable: send,
     approval,
+    catching,
   } = useSessionSend(session, control, attentions, {
     draft,
     // A message the receiver held is confirmed from the notice under the composer; once
@@ -138,6 +139,7 @@ export function SessionControl({
         chat={chat}
         send={secure && rp ? send : undefined}
         approval={secure && rp ? approval : undefined}
+        catching={catching}
         stream={down ? { state: down, retry: () => store.reconnect() } : undefined}
         unlock={!device && control && secure && grant.exp === null ? () => void unlockNow() : undefined}
         ask={askable ? () => openHandoff({ session: session.key }) : undefined}

@@ -38,6 +38,15 @@ export function useBehind(): boolean {
   return useSyncExternalStore(b ? b.subscribe : unheld, read, read);
 }
 
+/** History is still being read (AccountView `catching`): the backend holds what it reads of
+ *  a computer meanwhile, its pairing included, so a computer the page has no pairing for is
+ *  not known yet, not unpaired. False with no account. Renders again only when it turns. */
+export function useCatching(): boolean {
+  const b = accountBackend();
+  const read = useCallback(() => !!b?.view().catching, [b]);
+  return useSyncExternalStore(b ? b.subscribe : unheld, read, read);
+}
+
 /** How long the account is behind before a page says so: a launch that reads a page or
  *  two is over before it, and never flashes "Catching up…". */
 export const BEHIND_SAID_AFTER_MS = 1000;

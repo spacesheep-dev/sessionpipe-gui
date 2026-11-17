@@ -2552,6 +2552,65 @@ test.describe("what else an account shows", () => {
     }
   });
 
+  test("back after time away with a prompt open: 'Catching up…' is the one sentence, and nothing says to pair its computer", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    asks(b);
+    const { page } = b;
+    let release = () => {};
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Refund the double charge").first()).toBeVisible();
+      await trusted(b);
+      await page.evaluate(() =>
+        (window as unknown as { __sessionpipeAccount: { flushed(): Promise<void> } }).__sessionpipeAccount.flushed(),
+      );
+      // A long time away: a page of history to read, and the rest held back.
+      const busy = new Session("s-busy", "claude-code", Date.now() - 3_600_000);
+      const ledger = {
+        tier: 2 as const,
+        session: { machine: NAME, cwd: "/Users/me/billing", title: "Index the ledger" },
+      };
+      b.ss.push([
+        busy.ev("session.started", { source: "startup" }, ledger),
+        ...Array.from({ length: 1000 }, (_, i) => busy.ev("tool.started", { tool: "Read", call_id: `c${i}` }, ledger)),
+      ]);
+      const held = new Promise<void>((y) => {
+        release = y;
+      });
+      let reads = 0;
+      const handle = b.ss.handle.bind(b.ss);
+      b.ss.handle = async (req) => {
+        if (req.path.startsWith("/api/sessionpipe/v1/relay?") && reads++ >= 1) await held;
+        return handle(req);
+      };
+      await page.reload();
+      const catching = page.getByRole("status").filter({ hasText: "Catching up…" });
+      await expect(catching).toBeVisible();
+      // The kept board's prompt, in the Inbox and on its page: off while the computer's
+      // pairing is still to come, and the bar alone says why.
+      await tab(page, "Inbox").click();
+      await expect(page.locator(".page.inbox").getByRole("status").filter({ hasText: "Catching up…" })).toBeVisible();
+      const row = page.locator(".inbox-row[data-attention='perm-1']");
+      await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(page.getByText(/pair .* to (send|answer|message)/i)).toHaveCount(0);
+      await row.locator(".inbox-main").click();
+      const card = page.locator(".ctl-answer[data-attention='perm-1']");
+      await expect(card.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(page.getByText(/pair .* to (send|answer|message)/i)).toHaveCount(0);
+      await expect(page.locator(".ctl-foot[data-reason='unpaired']")).toHaveCount(0);
+      // The history in: Allow and Deny are back.
+      release();
+      await expect(catching).toHaveCount(0, { timeout: 15_000 });
+      await expect(card.getByRole("button", { name: "Allow" })).toBeEnabled();
+    } finally {
+      release();
+      await b.close();
+    }
+  });
+
   test("Ask another agent at 320: From is one line, cut at the row's width, however long the session's title, and ends where Permission does", async ({
     browser,
   }) => {

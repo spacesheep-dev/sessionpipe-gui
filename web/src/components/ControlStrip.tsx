@@ -115,6 +115,9 @@ export interface ControlStripProps {
   /** What of `send` turns the strip off (sendable.ts approvalOf): "unapproved" puts the way
    *  to approve this device in place of Allow and Deny, "catching-up" disables them. */
   approval?: Approval;
+  /** On an account, history is still being read: with no `control`, the machine is not known
+   *  yet, not unpaired, and nothing says to pair it (the page bar says "Catching up…"). */
+  catching?: boolean;
   /** The app's stream to the receiver is down ("reconnecting" or "offline"): the strip
    *  waits for it, with Retry now. */
   stream?: { state: "reconnecting" | "offline"; retry: () => void };
@@ -354,6 +357,7 @@ export function ControlStrip({
   chat = false,
   send,
   approval = "ok",
+  catching = false,
   stream,
   unlock,
   ask,
@@ -485,6 +489,7 @@ export function ControlStrip({
           </a>
         ) : undefined,
       };
+    if (!paired && catching) return null;
     if (!paired)
       return {
         kind: "unpaired",
@@ -591,7 +596,7 @@ export function ControlStrip({
   // The phone, unpaired, not approved or inside the hour, with a prompt to answer: one state,
   // one sentence (on the card), and no composer. A desktop keeps its field and the line under
   // it, and so does the phone where every prompt is late: that card says only that it is too late.
-  const folded = phone && asks && (((!paired || approve) && !blocked) || hourOnCard);
+  const folded = phone && asks && ((((!paired && !catching) || approve) && !blocked) || hourOnCard);
   // A card note's sentence and its way on: on the phone the link takes a line of its own;
   // wider, it follows a "·" that never starts a line.
   const withWay = (sentence: string, way: ReactNode): ReactNode =>
@@ -609,7 +614,7 @@ export function ControlStrip({
   const notAdded = approval === "catching-up" && send ? sendWords(send, name)?.long : null;
   // Why Allow / Deny are off, said on their own bar (the line under the field says the rest).
   const offWhy: ReactNode = enabled ? null : !paired ? (
-    folded ? (
+    catching ? null : folded ? (
       <>
         Pair <strong>{name}</strong> to answer and message from here ·{"\u00a0"}
         {elsewhere ? (

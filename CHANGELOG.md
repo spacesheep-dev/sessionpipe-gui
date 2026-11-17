@@ -115,6 +115,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   read as Done, then as needing you (with a badge), then as Working. The board on screen
   stays as it was, or its loading rows on a first connect, and changes once, when the
   history is in. Nothing it hands over for notifications comes from the part read so far.
+  Meanwhile a prompt it kept has Allow and Deny off, and nothing says to pair a computer
+  that is paired.
 - **Long messages and long replies are no longer cut at 400 characters.** A session
   opened again showed a message you sent cut mid-word, with no sign of it, and every reply
   over 400 characters as a stub that needed its own "Load full text". Both now arrive whole

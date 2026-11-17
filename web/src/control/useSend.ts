@@ -6,6 +6,7 @@
 // activity, read with this surface's own presses), so no second answer goes from anywhere.
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCatching } from "../account/current";
 import { usePhone } from "../account/device";
 import { type Approval, approvalOf, type SendState, useSendStates } from "../account/sendable";
 import type { ControlAction } from "../components/ControlStrip";
@@ -26,13 +27,15 @@ import { answerEndWords, notSentLine, notSentWords, receiptWords, unheardWords }
 export type { AnswerOut, AnswerStatus };
 
 /** Whether Allow / Deny can go for one prompt right now, and if not (or while an answer
- *  is out) why, in words: the machine is not paired, this page cannot use passkeys, this
- *  device is not approved or the computer has not added its key yet (`approval`), the
- *  prompt's hook stopped waiting as of `now` (`late`: lib/answerWindow.ts), or an answer
- *  is already out (the receipt: which answer, and what it waits for). Shared by the inbox
- *  rows, the toasts and a row's menu. `tag` is the short state for a data attribute;
- *  "unapproved" offers no answer at all, only the way to approve this device. `approve`:
- *  the reason is this device's approval, whose way on is Approve this iPhone. */
+ *  is out) why, in words: the machine is not paired (while an account reads its history, a
+ *  machine with no pairing is not known yet: off, with nothing said), this page cannot use
+ *  passkeys, this device is not approved or the computer has not added its key yet
+ *  (`approval`), the prompt's hook stopped waiting as of `now` (`late`:
+ *  lib/answerWindow.ts), or an answer is already out (the receipt: which answer, and what
+ *  it waits for). Shared by the inbox rows, the toasts and a row's menu. `tag` is the short
+ *  state for a data attribute; "unapproved" offers no answer at all, only the way to
+ *  approve this device. `approve`: the reason is this device's approval, whose way on is
+ *  Approve this iPhone. */
 export function answerState(
   s: SessionSummary,
   a: Attention,
@@ -40,6 +43,7 @@ export function answerState(
   send: Pick<SessionSend, "rp" | "secure" | "tap" | "answers"> & {
     cooling?: string | null;
     approval?: Approval;
+    catching?: boolean;
   },
   now: number,
 ): {
@@ -66,7 +70,9 @@ export function answerState(
   const old = control && !machineTakes(control) ? updateWords(s.machine ?? undefined).replace(/\.$/, "") : null;
   const approval = send.approval ?? "ok";
   const reason = !control
-    ? `pair ${s.machine ?? "this machine"} to send messages`
+    ? send.catching
+      ? null
+      : `pair ${s.machine ?? "this machine"} to send messages`
     : !send.secure
       ? signHint(send.rp)
       : old
@@ -90,7 +96,9 @@ export function answerState(
                       : null;
   const off = !control || !send.secure || !send.rp || !!old || !!send.cooling || approval !== "ok" || late || !!status;
   const tag = !control
-    ? "unpaired"
+    ? send.catching
+      ? "blocked"
+      : "unpaired"
     : !send.secure || old || send.cooling || approval === "catching-up"
       ? "blocked"
       : approval === "unapproved"
@@ -143,6 +151,8 @@ export interface SessionSend {
   cooling: string | null;
   /** Whether this device can send to the session's machine (account/sendable.ts). */
   sendable: SendState;
+  /** On an account, history is still being read: a machine with no pairing is not known yet. */
+  catching: boolean;
   /** What of it turns Allow, Deny and the composer off here (sendable.ts approvalOf): the
    *  app's own key, not approved for that machine or not added there yet. */
   approval: Approval;
@@ -200,6 +210,7 @@ export function useSessionSend(
   // Where a send would only be refused, nothing offers one: one fact for the strip, the
   // inbox, the toasts and a row's menu.
   const sendable = useSendStates(rp)(control);
+  const catching = useCatching();
   const approval = approvalOf(sendable, { device: signerKind() === "device", keyKnown: !!rp && ownKeyKnown(rp) });
   const mine = useCallback((a: { session?: string }) => a.session === key, [key]);
   const activity = useControlActivity(mine);
@@ -397,5 +408,19 @@ export function useSessionSend(
     (ended ? answerEndWords(ended, machine ?? "its computer") : null) ??
     (asking[0] ? unheardWords(asking[0]) : null) ??
     (cooling ? null : hourRefusal);
-  return { rp, secure, grant, tap, error: line, answers, cooling, sendable, approval, activity, onSend, held };
+  return {
+    rp,
+    secure,
+    grant,
+    tap,
+    error: line,
+    answers,
+    cooling,
+    sendable,
+    approval,
+    catching,
+    activity,
+    onSend,
+    held,
+  };
 }

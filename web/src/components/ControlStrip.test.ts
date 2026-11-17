@@ -116,6 +116,19 @@ describe("a prompt's answer window", () => {
     expect(answerState(claude, prompt, undefined, send, after(720_000)).tag).toBe("unpaired");
   });
 
+  it("while an account reads its history, a computer with no pairing yet is not called unpaired", () => {
+    expect(answerState(claude, prompt, undefined, send, after(5_000))).toMatchObject({
+      reason: "pair Misha-Petrov-laptop to send messages",
+      tag: "unpaired",
+    });
+    expect(answerState(claude, prompt, undefined, { ...send, catching: true }, after(5_000))).toEqual({
+      reason: null,
+      off: true,
+      status: undefined,
+      tag: "blocked",
+    });
+  });
+
   it("says the hour a newly approved phone waits first", () => {
     const line = "This iPhone can send from 5:30 PM";
     expect(answerState(claude, prompt, remote(), { ...send, cooling: line }, after(130_000))).toMatchObject({
