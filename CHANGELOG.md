@@ -99,10 +99,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **A permission prompt is no longer greyed out as "raised before this machine was
   paired".** On a spacesheep account almost every prompt older than a minute said so, with
   Allow and Deny off, though the computer was paired long ago. Allow and Deny now stay for
-  as long as Claude Code waits for the answer, two minutes. After that the prompt says "too
+  as long as Claude Code waits for the answer, two minutes. After that the prompt says "Too
   late to answer from here; answer it on" its computer, with no buttons, moves to Waiting
   in a terminal in the Inbox, and no longer counts on the Inbox badge. One that was gone
-  already reads "already answered, or timed out".
+  already reads "already answered, or timed out". A line that stands on its own reads as a
+  sentence, whatever the computer's name starts with, and a name such as
+  Misha-Petrov-laptop no longer breaks at its hyphens.
 - **Once the iPhone is approved on a spacesheep account, every screen agrees that it can
   send.** Machines kept offering "Approve this iPhone", and New session and the composer
   said a computer did not trust the phone, until the app was opened again: the app had

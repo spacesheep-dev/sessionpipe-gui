@@ -35,7 +35,8 @@ export type { AnswerOut, AnswerStatus };
  *  it waits for). Shared by the inbox rows, the toasts and a row's menu. `tag` is the short
  *  state for a data attribute; "unapproved" offers no answer at all, only the way to
  *  approve this device. `approve`: the reason is this device's approval, whose way on is
- *  Approve this iPhone. */
+ *  Approve this iPhone. `sentence`: the reason is a sentence of its own (the hour, the
+ *  approval, a sessionpipe too old), not a phrase after what it turns off. */
 export function answerState(
   s: SessionSummary,
   a: Attention,
@@ -52,6 +53,7 @@ export function answerState(
   status: AnswerStatus | undefined;
   tag: string;
   approve?: true;
+  sentence?: true;
   /** While an answer is out: the receipt, `what` went first (receiptWords). */
   receipt?: { what: string; text: string };
 } {
@@ -107,12 +109,14 @@ export function answerState(
           ? "late"
           : (status ?? "open");
   const approve = !!control && send.secure && !old && !send.cooling && approval !== "ok";
+  const sentence = !!control && send.secure && (!!old || !!send.cooling || approval !== "ok");
   return {
     reason,
     off,
     status,
     tag,
     ...(approve ? { approve } : {}),
+    ...(sentence ? { sentence } : {}),
     ...(receipt && reason === receipt.text ? { receipt } : {}),
   };
 }

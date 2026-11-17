@@ -246,7 +246,8 @@ test.describe("inbox: a prompt's answer window", () => {
     const fresh = await postPrompt(token, { machine: d.name, title: "Asked 112 s ago", agoMs: 112_000 });
     try {
       await page.goto(`${CONTROL_BASE}/inbox`);
-      const words = `too late to answer from here; answer it on ${d.name}`;
+      // On a line of its own, a sentence.
+      const words = `Too late to answer from here; answer it on ${d.name}.`;
       const terminal = page.locator("section[aria-label='Waiting in a terminal']");
       const lateRow = terminal.locator(`.inbox-row[data-attention="${late.attention}"]`);
       await expect(lateRow.locator(".inbox-late")).toHaveText(words);
@@ -257,7 +258,7 @@ test.describe("inbox: a prompt's answer window", () => {
       await expect(freshRow.locator(".inbox-answer")).toHaveAttribute("data-answer", "open");
       await expect(freshRow.getByRole("button", { name: "Allow" })).toBeEnabled();
       // (Other specs' prompts on this instance may have a page line of their own.)
-      const lines = page.locator(".inbox-reason", { hasText: /too late|paired/ });
+      const lines = page.locator(".inbox-reason", { hasText: /too late|paired/i });
       await expect(lines).toHaveCount(0);
       // Its window runs out with the page open: it moves down, and says why.
       await expect(terminal.locator(`.inbox-row[data-attention="${fresh.attention}"] .inbox-late`)).toHaveText(words, {

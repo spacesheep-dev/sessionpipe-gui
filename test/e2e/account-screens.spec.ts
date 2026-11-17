@@ -1594,7 +1594,9 @@ test.describe("what else an account shows", () => {
       await page.goto(`${b.server.url}/s/claude-code/s-refund`);
       const card = page.locator(".ctl-answer[data-attention='perm-1']");
       await expect(card).toHaveAttribute("data-answer", "late");
-      await expect(card.locator(".ctl-answer-note")).toHaveText(/too late to answer from here/);
+      await expect(card.locator(".ctl-answer-note")).toHaveText(
+        /^Too late to answer from here; answer it on studio-mac\.$/,
+      );
       await expect(card.locator(".ctl-approve")).toHaveCount(0);
       // Not folded away: the field, off, and the line under it with Approve this iPhone.
       await expect(composer(page)).toBeDisabled();
@@ -1649,7 +1651,7 @@ test.describe("what else an account shows", () => {
       const row = page.locator(".inbox-row[data-attention='perm-1']");
       await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
       const said = page.locator(".inbox-reason");
-      await expect(said).toHaveText(`Allow and Deny are off: ${line} Approve this iPhone`);
+      await expect(said).toHaveText(`${line} Approve this iPhone`);
       await expect(said.getByRole("link", { name: "Approve this iPhone" })).toHaveAttribute("href", "/add-device");
       // There, where studio-mac gets the key: spacesheep's Devices.
       await page.goto(`${b.server.url}/add-device`);
@@ -2369,7 +2371,7 @@ test.describe("what else an account shows", () => {
         await expect(ask.locator(".ctl-options li"), at).toHaveText(["Warm narrator", "Neutral", "ElevenLabs default"]);
         await expect(ask.locator(".ctl-options button, .ctl-options a"), at).toHaveCount(0);
         await expect(ask.locator(".ctl-questions-more"), at).toHaveText("+1 more question");
-        await expect(ask.locator(".ctl-answer-note"), at).toHaveText(`answer it on ${NAME}`);
+        await expect(ask.locator(".ctl-answer-note"), at).toHaveText(`Answer it on ${NAME}.`);
         await expect(page.getByRole("button", { name: /^(Allow|Deny)$/ }), at).toHaveCount(0);
         await expect(page.locator("textarea").first(), at).toBeEnabled();
         await page.keyboard.press("a");

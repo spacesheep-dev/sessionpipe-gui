@@ -166,7 +166,27 @@ describe("a prompt's answer window", () => {
       reason: line,
       off: true,
       tag: "blocked",
+      sentence: true,
     });
+  });
+
+  it("says which reasons are sentences of their own, and which are phrases after what they turn off", () => {
+    // A phrase: not paired, a page that cannot sign, too late.
+    expect(answerState(claude, prompt, undefined, send, after(5_000)).sentence).toBeUndefined();
+    expect(answerState(claude, prompt, local, { ...send, secure: false }, after(5_000)).sentence).toBeUndefined();
+    expect(answerState(claude, prompt, local, send, after(130_000)).sentence).toBeUndefined();
+    // A sentence: a sessionpipe too old for the app's key.
+    const g = globalThis as Record<string, unknown>;
+    g.sessionpipeShell = { platform: "ios" };
+    try {
+      const old = { ...local, keyTypes: ["passkey"] } as MachineControl;
+      expect(answerState(claude, prompt, old, send, after(5_000))).toMatchObject({
+        reason: "Update sessionpipe on Misha-Petrov-laptop to send from the app",
+        sentence: true,
+      });
+    } finally {
+      delete g.sessionpipeShell;
+    }
   });
 
   it("says a prompt the computer no longer holds was already answered, or timed out", () => {
@@ -296,6 +316,7 @@ describe("an answer from a device that is not approved, or that its computer has
         status: undefined,
         tag: "unapproved",
         approve: true,
+        sentence: true,
       });
       expect(answerItems(a.tool, st, () => {})).toEqual([]);
     }
@@ -319,6 +340,7 @@ describe("an answer from a device that is not approved, or that its computer has
       status: undefined,
       tag: "blocked",
       approve: true,
+      sentence: true,
     });
     expect(answerItems(a.tool, st, () => {})).toMatchObject([
       { label: "Allow Bash", disabled: st.reason },

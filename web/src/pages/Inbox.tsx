@@ -25,7 +25,7 @@ import {
   useState,
 } from "react";
 import { useBehind, useCatchingUp } from "../account/current";
-import { ActionButton, Ago, EmptyState, HarnessGlyph, Notice, Redacted, StateDot } from "../components/bits";
+import { ActionButton, Ago, EmptyState, HarnessGlyph, Notice, Redacted, StateDot, WithName } from "../components/bits";
 import { type MenuList, openMenu, useContextMenu } from "../components/ContextMenu";
 import { LabelChip, LabelDot, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
@@ -71,13 +71,14 @@ import { openSplit } from "../lib/split";
 import { NEW_WORDS, ThisPhone } from "../native/accountWords";
 
 const rowKey = (r: OpenAttention) => `${r.session.key}|${r.attention.attentionId}`;
-/** Why a row's Allow / Deny are off for a standing reason, answerState's tag for it, and
- *  whether its way on is Approve this iPhone. */
-type Off = { reason: string; tag: string; approve: boolean };
-/** A standing reason as the page says it: one that is a sentence of its own (it starts with
- *  a capital: "This iPhone can send from 3:09 AM") as it is; a phrase after what it turns off. */
-const offLine = (r: string): string =>
-  /^\p{Lu}/u.test(r) ? `${r.replace(/\.$/, "")}.` : `Allow and Deny are off: ${r}.`;
+/** Why a row's Allow / Deny are off for a standing reason, answerState's tag for it,
+ *  whether its way on is Approve this iPhone, and whether it is a sentence of its own. */
+type Off = { reason: string; tag: string; approve: boolean; sentence: boolean; machine?: string };
+/** A standing reason as the page says it: a sentence of its own (answerState's `sentence`:
+ *  "This iPhone can send from 3:09 AM.", "studio-mac hasn't added this iPhone yet.") as it
+ *  is, with its full stop; a phrase after what it turns off. */
+const offLine = (o: Off): string =>
+  o.sentence ? `${o.reason.replace(/\.$/, "")}.` : `Allow and Deny are off: ${o.reason}.`;
 /** The id of the page line that says a standing reason, which the rows' buttons are
  *  described by: the same words, the same id. */
 const reasonId = (r: string): string => {
@@ -158,7 +159,14 @@ export function Inbox() {
   const report = useCallback((id: string, off: Off | null) => {
     setReasons((prev) => {
       const was = prev[id];
-      if (was?.reason === off?.reason && was?.tag === off?.tag && was?.approve === off?.approve) return prev;
+      if (
+        was?.reason === off?.reason &&
+        was?.tag === off?.tag &&
+        was?.approve === off?.approve &&
+        was?.sentence === off?.sentence &&
+        was?.machine === off?.machine
+      )
+        return prev;
       const next = { ...prev };
       if (off) next[id] = off;
       else delete next[id];
@@ -268,7 +276,7 @@ export function Inbox() {
           <NotifyBlocked permission={notify.permission} app={app} />
           {said.map((o) => (
             <p key={o.reason} id={reasonId(o.reason)} className="page-note inbox-reason">
-              {offLine(o.reason)}
+              <WithName text={offLine(o)} name={o.machine} />
               {o.approve && (
                 <>
                   {" "}
@@ -459,7 +467,7 @@ function InboxRow({
         {/* Its hook stopped waiting: why it is down here, and where it can still be answered. */}
         {row.late && (
           <span className="inbox-late" data-answer="late">
-            {NEW_WORDS.answerLate(s.machine ?? undefined)}
+            <WithName text={NEW_WORDS.answerLateLine(s.machine ?? undefined)} name={s.machine} />
           </span>
         )}
       </button>
@@ -528,7 +536,7 @@ function Answer({
   );
   // No clock of its own: the row leaves this group as its window runs out (useOpenAttentions).
   const st = answerState(s, a, control, send, Date.now());
-  const { reason, off, status, tag, approve, receipt } = st;
+  const { reason, off, status, tag, approve, sentence, receipt } = st;
   // A plan review's pair asks the plan's question (lib/format.ts isPlanReview).
   const plan = isPlanReview(a);
   /** The answer pressed here, from the press until it is out (or the send fails). */
@@ -565,8 +573,11 @@ function Answer({
   const standing = whole || tag === "unapproved" ? offFor : null;
   const id = rowKey(row);
   useEffect(() => {
-    report(id, standing ? { reason: standing, tag, approve: !!approve } : null);
-  }, [id, standing, tag, approve, report]);
+    report(
+      id,
+      standing ? { reason: standing, tag, approve: !!approve, sentence: !!sentence, machine: s.machine } : null,
+    );
+  }, [id, standing, tag, approve, sentence, s.machine, report]);
   useEffect(() => () => report(id, null), [id, report]);
   useLayoutEffect(() => {
     into.current = whole ? answerItems(a.tool, st, answer) : [];
@@ -578,7 +589,7 @@ function Answer({
     </span>
   ) : reason && !offFor ? (
     <span className="inbox-note" id={noteId}>
-      {reason}
+      <WithName text={reason} name={s.machine} />
     </span>
   ) : null;
   // What the buttons are described by: the row's line, and the page's line for a standing reason.
@@ -605,7 +616,7 @@ function Answer({
           }}
         >
           <span className="inbox-receipt-what">{receipt.what}</span>
-          {receipt.text.slice(receipt.what.length)}
+          <WithName text={receipt.text.slice(receipt.what.length)} name={s.machine} />
         </span>
       ) : (
         note

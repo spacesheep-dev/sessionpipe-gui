@@ -60,7 +60,7 @@ import { Link } from "../lib/router";
 import { askedCommand, shellLines } from "../lib/shellCommand";
 import { hintFor } from "../lib/shortcuts";
 import { NEW_WORDS, ThisPhone } from "../native/accountWords";
-import { ActionButton, Spinner, StateDot } from "./bits";
+import { ActionButton, Spinner, StateDot, WithName } from "./bits";
 import "../control/control.css";
 
 // The plan reads as Markdown, whose renderer stays out of the first paint (PlanText.tsx).
@@ -519,7 +519,7 @@ export function ControlStrip({
         kind: "unpaired",
         text: (
           <>
-            Pair <strong>{name}</strong> to message this session from here.
+            Pair <strong className="whole-name">{name}</strong> to message this session from here.
           </>
         ),
         // On a spacesheep account a computer is paired on spacesheep, not here: no page of
@@ -541,7 +541,7 @@ export function ControlStrip({
             kind: "untrusted",
             text: (
               <>
-                <strong>{name}</strong> doesn't trust {deviceWords().this} yet.
+                <strong className="whole-name">{name}</strong> doesn't trust {deviceWords().this} yet.
               </>
             ),
             action: (
@@ -554,7 +554,7 @@ export function ControlStrip({
             kind: "untrusted",
             text: (
               <>
-                <strong>{name}</strong> trusts no passkey from this browser.
+                <strong className="whole-name">{name}</strong> trusts no passkey from this browser.
               </>
             ),
             action: (
@@ -601,7 +601,7 @@ export function ControlStrip({
         kind: "offline",
         text: (
           <>
-            <strong>{name}</strong> is offline. A message waits until it's back.
+            <strong className="whole-name">{name}</strong> is offline. A message waits until it's back.
           </>
         ),
       };
@@ -626,12 +626,12 @@ export function ControlStrip({
   const withWay = (sentence: string, way: ReactNode): ReactNode =>
     phone ? (
       <>
-        {sentence} <br />
+        <WithName text={sentence} name={session.machine} /> <br />
         {way}
       </>
     ) : (
       <>
-        {sentence.replace(/\.$/, "")}
+        <WithName text={sentence.replace(/\.$/, "")} name={session.machine} />
         {"\u00a0"}· {way}
       </>
     );
@@ -640,7 +640,7 @@ export function ControlStrip({
   const offWhy: ReactNode = enabled ? null : !paired ? (
     catching ? null : folded ? (
       <>
-        Pair <strong>{name}</strong> to answer and message from here ·{"\u00a0"}
+        Pair <strong className="whole-name">{name}</strong> to answer and message from here ·{"\u00a0"}
         {elsewhere ? (
           <a className="ctl-link" href={elsewhere.href} target="_blank" rel="noreferrer noopener" data-elsewhere>
             Open on {elsewhere.host}
@@ -759,15 +759,17 @@ export function ControlStrip({
             ? receiptWords({ decision: out.decision, plan, machine: session.machine, offline })
             : null;
         const shut = terminal || gone || status === "closed" || sent;
-        const why: ReactNode = question
-          ? NEW_WORDS.questionWhere(session.machine ?? undefined)
+        // On a line of its own: where it is answered, and that it is too late, as sentences.
+        const said = question
+          ? NEW_WORDS.questionWhereLine(session.machine ?? undefined)
           : terminal
             ? "waiting in the terminal"
             : gone
-              ? NEW_WORDS.answerLate(session.machine ?? undefined)
+              ? NEW_WORDS.answerLateLine(session.machine ?? undefined)
               : status === "closed"
                 ? NEW_WORDS.answerClosed
                 : offWhy;
+        const why: ReactNode = typeof said === "string" ? <WithName text={said} name={session.machine} /> : said;
         // The card's line describes both buttons; a button's own reason is its alone.
         const noteId = `${cardId}-${a.attentionId}`;
         const denyWhy = plan && tooLong ? "Keep it under 2,000 characters" : null;
@@ -805,7 +807,7 @@ export function ControlStrip({
                 }}
               >
                 <span className="ctl-answer-receipt-what">{receipt.what}</span>
-                {receipt.text.slice(receipt.what.length)}
+                <WithName text={receipt.text.slice(receipt.what.length)} name={session.machine} />
               </p>
             ) : why ? (
               <span className="ctl-answer-note" id={noteId}>

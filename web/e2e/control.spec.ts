@@ -729,7 +729,7 @@ test("a prompt its hook stopped waiting on cannot be answered here, and offers n
   await expect(answer).toContainText("Allow this?");
   await expect(answer).toContainText("a permission request");
   await expect(answer.getByRole("button")).toHaveCount(0);
-  await expect(answer).toContainText(`too late to answer from here; answer it on ${MACHINE}`);
+  await expect(answer).toContainText(`Too late to answer from here; answer it on ${MACHINE}.`);
   expect(await daemon.poll(0)).toEqual([]);
   await events.post(events.ev("attention.cleared", { attention_id: "perm-3", how: "answered" }));
   await expect(answer).toHaveCount(0);
