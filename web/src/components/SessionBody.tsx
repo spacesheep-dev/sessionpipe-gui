@@ -80,6 +80,8 @@ import {
   attentionMessage,
   basename,
   harnessMark,
+  isPlanReview,
+  isQuestion,
   modelShort,
   repoBranch,
   repoShort,
@@ -93,6 +95,7 @@ import { absoluteUrl, agentItems, askItem, copyItem, sessionItems } from "../lib
 import { reducedMotion, useFlip } from "../lib/motion";
 import { accountMode } from "../lib/net";
 import { leftOff, type NewLineAt, newLinePlace } from "../lib/newLine";
+import { lastHeard } from "../lib/offline";
 import { clockTime, eventWindows, leftBecause, sentenceName, servedBy, swaps, swapWords } from "../lib/pool";
 import { cutReply, cutReplyStart, cutWords, said, stoppedWords, turnWords } from "../lib/replies";
 import { AGENT_PARAM, back, hrefFor, Link, navigate, sessionPath, setSearchParam, useSearchParam } from "../lib/router";
@@ -101,7 +104,7 @@ import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import { openSplit } from "../lib/split";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
-import { ago, clock, dur, ms, useNow } from "../lib/time";
+import { ago, ClockHold, clock, dur, ms, useNow } from "../lib/time";
 import {
   type AgentItem,
   type DelegationItem,
@@ -213,6 +216,12 @@ interface Timeline {
   path: string;
   open: ReadonlySet<string>;
   working: boolean;
+  state?: SessionState;
+  /** When the session's latest event came: how long a quiet one has been quiet. */
+  lastAt?: string;
+  /** The tools an open prompt is about, by their own names: such a call is asking, not
+   *  running. A prompt names no call, only its tool. */
+  asking: ReadonlySet<string>;
   root: RefObject<HTMLDivElement>;
   session: () => SessionSummary | undefined;
   /** The session's subagents (its summary's). */
@@ -235,6 +244,14 @@ interface Timeline {
 }
 const TimelineCtx = createContext<Timeline | null>(null);
 const useTimeline = () => useContext(TimelineCtx)!;
+/** What the timeline's rows share, and the instant its clocks stand at (null: they run). */
+function TimelineScope({ value, standAt, children }: { value: Timeline; standAt: number | null; children: ReactNode }) {
+  return (
+    <ClockHold.Provider value={standAt}>
+      <TimelineCtx.Provider value={value}>{children}</TimelineCtx.Provider>
+    </ClockHold.Provider>
+  );
+}
 
 /** The link to a row of this session (the view jumps to it on open); none on a spacesheep
  *  account, whose page of the session has no address for a row. */
@@ -1060,6 +1077,9 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
       path,
       open: new Set((s?.openAttentions ?? []).map((a) => a.attentionId)),
       working: s?.state === "working",
+      state: s?.state,
+      lastAt: s?.lastAt,
+      asking: new Set((s?.openAttentions ?? []).flatMap((a) => (a.tool ? [a.tool] : []))),
       root: rootRef,
       session: () => sRef.current,
       agents: agentRuns ?? [],
@@ -1076,6 +1096,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
       path,
       s?.openAttentions,
       s?.state,
+      s?.lastAt,
       agentRuns,
       shownAgent,
       focusAgent,
@@ -1087,6 +1108,15 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
       anchorOn,
     ],
   );
+  // While its computer is offline nothing says how long a turn or a tool has run: its
+  // rings stop (styles/session.css) and, while the session says it is at work, the view's
+  // clocks stand at the last that was heard of it (its poll, or the session's latest
+  // event), as they stand while the stream is down (SessionView). How long a quiet one has
+  // been quiet still counts. A machine with no control has no heartbeat to miss: never so.
+  const machineOff = control?.online === false;
+  const downAt = useContext(ClockHold);
+  const heardAt = machineOff && isLive ? Math.max(ms(lastHeard(control)) || 0, ms(s?.lastAt) || 0) : 0;
+  const standAt = downAt ?? (heardAt > 0 ? heardAt : null);
 
   // The composer arrives once the session does: it slides in under a page that was
   // starting, and is simply there on an ordinary open.
@@ -1206,12 +1236,13 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   ];
 
   return (
-    <TimelineCtx.Provider value={timeline}>
+    <TimelineScope value={timeline} standAt={standAt}>
       <CodeFrame.Provider value={CodeWell}>
         <div
           className={`page session ${mode === "panel" ? "session--panel" : ""} ${chat ? "session--chat" : ""} ${drawer.open && s ? "session--files" : ""} ${s ? "" : "starting"}`}
           ref={rootRef}
           data-ui={chat ? "simple" : "advanced"}
+          data-machine={machineOff ? "offline" : undefined}
           data-starting={
             !s && started
               ? started.outcome === "taken" && started.reply !== undefined
@@ -1403,7 +1434,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
           )}
         </div>
       </CodeFrame.Provider>
-    </TimelineCtx.Provider>
+    </TimelineScope>
   );
 }
 
@@ -1655,7 +1686,7 @@ function TurnBlock({
   /** The pool switched accounts during this turn: one quiet row each (UX-SPEC §7.2). */
   swaps?: string[];
 }) {
-  const { machine, online, control, compose, session } = useTimeline();
+  const { machine, online, control, compose, session, working, state, agents } = useTimeline();
   const transcript = [...turn.items].reverse().find((i) => i.kind === "event" && i.e.type === "turn.transcript") as
     | EventItem
     | undefined;
@@ -1675,11 +1706,26 @@ function TurnBlock({
     reason: ended?.e.data.reason,
   });
   const live = liveTurn && !words.stopped;
+  // A call with no end runs only in the latest turn of a working session, as the turn's
+  // own Running row and the board say. While the session waits for the person it is
+  // asking; once nothing has come for a while, quiet; any other was cut off.
+  const look: ToolLook | undefined = !live
+    ? undefined
+    : working
+      ? "run"
+      : state === "needs_you"
+        ? "ask"
+        : state === "stale"
+          ? "quiet"
+          : undefined;
   // Only a running turn or a running tool shows a moving duration; the other blocks
-  // (most of the page) have nothing to redraw each second.
-  const hasRunningTool =
-    !words.stopped &&
-    turn.items.some((i) => (i.kind === "tool" && !i.ended) || (i.kind === "agent" && i.tools.some((t) => !t.ended)));
+  // (most of the page) have nothing to redraw each second. A subagent's tools run while
+  // it does, whatever its parent is at.
+  const hasRunningTool = turn.items.some(
+    (i) =>
+      (i.kind === "tool" && !i.ended && look === "run") ||
+      (i.kind === "agent" && runOf(i, agents).state === "running" && i.tools.some((t) => !t.ended)),
+  );
   const now = useNow(live || hasRunningTool ? "fine" : "off");
   // The person's words as the record has them; cut there, the message sent from here
   // as it was signed (lib/turns.ts promptWords).
@@ -1756,6 +1802,7 @@ function TurnBlock({
         ownReply={words.own}
         ackReply={ackReply}
         stopped={stoppedLine}
+        look={look}
         status={status}
         failure={failure}
         flip={flip}
@@ -1813,7 +1860,7 @@ function TurnBlock({
         {items.length === 0 && status && <StatusRow {...status} chat={false} />}
         {items.map((it) => {
           if (it.kind === "tool")
-            return <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} halted={words.stopped} />;
+            return <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} look={look} />;
           if (it.kind === "agent") return <AgentBlock key={it.key} item={it} lens={lens} now={now} fill={fill} />;
           if (it.kind === "delegation") return <AskRow key={it.key} item={it} as="li" />;
           const e = it.e;
@@ -2314,6 +2361,7 @@ function ChatTurn({
   ownReply,
   ackReply,
   stopped: stoppedLine,
+  look,
   status,
   failure,
   flip,
@@ -2344,6 +2392,8 @@ function ChatTurn({
   ackReply?: string;
   /** The turn was stopped: the line that says so, in the running row's place. */
   stopped: string | null;
+  /** How its calls with no end show (TurnBlock). */
+  look?: ToolLook;
   status: Status;
   failure: ReactNode;
   flip: boolean;
@@ -2436,7 +2486,7 @@ function ChatTurn({
             <HarnessGlyph name={harness} size="sm" />
             {harnessMark(harness).label}
           </span>
-          {tools.length > 0 && <ChatTools tools={tools} lens={lens} now={now} fill={fill} halted={!!stoppedLine} />}
+          {tools.length > 0 && <ChatTools tools={tools} lens={lens} now={now} fill={fill} look={look} />}
           {agentItems.length > 0 && (
             <ol className="turn-items chat-agents">
               {agentItems.map((it) => (
@@ -2503,24 +2553,49 @@ function NewLine({ chat = false }: { chat?: boolean }) {
   return chat ? line : <li>{line}</li>;
 }
 
-/** The tools of a turn as one quiet disclosure line, the usual rows when opened. */
+/** How a call with no end shows: running while its session works, asking while the
+ *  session waits for the person, quiet once nothing has come for a while. None: it is not
+ *  running (its turn was stopped, or is over). */
+type ToolLook = "run" | "ask" | "quiet";
+
+/** A call's tool, by its own name ("Bash", "AskUserQuestion"). */
+const toolOf = (t: ToolItem): string => String((t.started ?? t.ended)?.data.tool ?? "");
+
+/** The tools line while a call has no end: "Running Bash", "Asking to run Bash" (a
+ *  question or a plan as what it is), "Bash · quiet for 12 m". */
+function unendedWords(look: ToolLook, tool: string, quietMs: number): string {
+  const name = toolLabel(tool || "a tool");
+  if (look === "run") return NEW_WORDS.toolsRunning(name);
+  if (look === "quiet") return NEW_WORDS.toolsQuiet(name, dur(quietMs));
+  const asked = { kind: "permission", tool };
+  if (isQuestion(asked)) return NEW_WORDS.toolsAskingQuestion;
+  if (isPlanReview(asked)) return NEW_WORDS.toolsAskingPlan;
+  return NEW_WORDS.toolsAsking(name);
+}
+
+/** The tools of a turn as one quiet disclosure line, the usual rows when opened. While a
+ *  call has no end the line names it as the session stands, and its glyph takes the
+ *  chevron's place, so the words start where "Ran 3 tools" does. */
 function ChatTools({
   tools,
   lens,
   now,
   fill,
-  halted = false,
+  look,
 }: {
   tools: ToolItem[];
   lens: Tier;
   now: number;
   fill: Fill;
-  /** The turn was stopped: a call with no end was cut off, and is not running. */
-  halted?: boolean;
+  /** How a call with no end shows (TurnBlock); none, the run is over. */
+  look?: ToolLook;
 }) {
+  const { asking, lastAt } = useTimeline();
   const ref = useRef<HTMLDetailsElement>(null);
   const errors = tools.filter((t) => t.ended && t.ended.data.ok === false).length;
-  const running = halted ? undefined : tools.find((t) => !t.ended);
+  // The call the line names: the one an open prompt is about, else the latest with no end.
+  const unended = look ? tools.filter((t) => !t.ended) : [];
+  const named = unended.find((t) => asking.has(toolOf(t))) ?? unended[unended.length - 1];
   const menu = useContextMenu(() => {
     const d = ref.current;
     if (!d) return null;
@@ -2533,21 +2608,23 @@ function ChatTools({
       },
     ];
   });
-  const name = running ? toolLabel(String((running.started ?? running.ended)?.data.tool ?? "a tool")) : "";
   return (
     <details className="chat-tools" ref={ref}>
       <summary className="chat-tools-sum" {...menu}>
-        <Chevron />
-        {running ? (
+        {!named || !look ? (
           <>
-            <span className="spinner spinner--sm" aria-hidden="true" />
-            <span>
-              Running {name}
-              {tools.length > 1 ? ` · ${plural(tools.length - 1, "more tool")}` : ""}
-            </span>
+            <Chevron />
+            <span>Ran {plural(tools.length, "tool")}</span>
           </>
         ) : (
-          <span>Ran {plural(tools.length, "tool")}</span>
+          <>
+            {look === "run" ? (
+              <span className="spinner spinner--sm" aria-hidden="true" />
+            ) : (
+              <StateDot state={look === "ask" ? "needs_you" : "stale"} decorative />
+            )}
+            <span>{unendedWords(look, toolOf(named), now - ms(lastAt))}</span>
+          </>
         )}
         {errors > 0 && (
           <span className="chat-tools-err">
@@ -2558,7 +2635,7 @@ function ChatTools({
       </summary>
       <ol className="turn-items">
         {tools.map((it) => (
-          <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} halted={halted} />
+          <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} look={look} />
         ))}
       </ol>
     </details>
@@ -2632,27 +2709,44 @@ function toolSubject(input: unknown): string {
   return "";
 }
 
+/** A tool row's state: how a call with no end shows (none: "cut", cut off with its turn),
+ *  else how it ended. */
+type ToolStatus = ToolLook | "cut" | "ok" | "err";
+/** What a tool row's glyph says to a screen reader. */
+const TOOL_SAID: Record<ToolStatus, string> = {
+  run: "running",
+  ask: NEW_WORDS.toolAsking,
+  quiet: NEW_WORDS.toolQuiet,
+  cut: "stopped",
+  ok: "ok",
+  err: "error",
+};
+
 function ToolRow({
   item,
   lens,
   now,
   fill,
-  halted = false,
+  look,
 }: {
   item: ToolItem;
   lens: Tier;
   now: number;
   fill: Fill;
-  /** Its turn was stopped: a call with no end was cut off with it, and is not running. */
-  halted?: boolean;
+  /** How it shows while it has no end (its turn's look, a subagent's own state); none, it
+   *  was cut off with its turn and is not running. */
+  look?: ToolLook;
 }) {
   const e = item.ended ?? item.started!;
   const tool = String(e.data.tool);
   const label = toolLabel(tool);
-  const cut = !item.ended && halted;
-  const running = !item.ended && !halted;
-  const ok = item.ended ? item.ended.data.ok !== false : undefined;
-  const msv = item.ended ? (item.ended.data.ms as number | undefined) : cut ? undefined : now - ms(item.started?.time);
+  const status: ToolStatus = item.ended ? (item.ended.data.ok !== false ? "ok" : "err") : (look ?? "cut");
+  // Only a running call counts its time: one that asks or went quiet is not at work.
+  const msv = item.ended
+    ? (item.ended.data.ms as number | undefined)
+    : status === "run"
+      ? now - ms(item.started?.time)
+      : undefined;
   const input = lens >= 3 ? (item.ended?.data.input ?? item.started?.data.input) : undefined;
   const output = lens >= 3 ? item.ended?.data.output : undefined;
   const error = item.ended?.data.error as string | undefined;
@@ -2682,21 +2776,21 @@ function ToolRow({
     ];
   });
   // One 10 px glyph in the 16 px column, the same box as a subagent's: the spinner, the
-  // drawn check, or the red ✕.
+  // needs-you disc, the dashed ring, the drawn check, or the red ✕.
   const head = (
     <>
-      <span
-        className={`tool-status ${running ? "is-run" : cut ? "is-cut" : ok ? "is-ok" : "is-err"}`}
-        role="img"
-        aria-label={running ? "running" : cut ? "stopped" : ok ? "ok" : "error"}
-      >
-        {running ? (
+      <span className={`tool-status is-${status}`} role="img" aria-label={TOOL_SAID[status]}>
+        {status === "run" ? (
           <span className="spinner spinner--sm" aria-hidden="true" />
-        ) : cut ? null : ok ? (
+        ) : status === "ask" ? (
+          <StateDot state="needs_you" size={10} decorative />
+        ) : status === "quiet" ? (
+          <StateDot state="stale" size={10} decorative />
+        ) : status === "ok" ? (
           <StateDot state="done" size={10} decorative />
-        ) : (
+        ) : status === "err" ? (
           <ErrGlyph />
-        )}
+        ) : null}
       </span>
       <span className="tool-main">
         <span className="tool-name" title={tool === label ? undefined : tool}>
@@ -2831,9 +2925,13 @@ const AGENT_PAGE = 50;
  *  person or the URL opened it. */
 function AgentBlock({ item, lens, now, fill }: { item: AgentItem; lens: Tier; now: number; fill: Fill }) {
   const store = useStore();
-  const { agents, focus, session, mode } = useTimeline();
+  const { agents, focus, session, mode, asking } = useTimeline();
   const run = runOf(item, agents);
   const focused = focus === item.id;
+  // Its calls with no end follow the agent, not its parent: running while it runs, quiet
+  // when it went quiet, cut off once it is done; one an open prompt is about is asking.
+  const lookOf = (t: ToolItem): ToolLook | undefined =>
+    run.state === "done" ? undefined : asking.has(toolOf(t)) ? "ask" : run.state === "running" ? "run" : "quiet";
   const [chosen, setChosen] = useState<boolean | null>(null);
   const open = chosen ?? (focused || run.state !== "done");
   const [older, setOlder] = useState<ToolItem[]>([]);
@@ -2938,7 +3036,7 @@ function AgentBlock({ item, lens, now, fill }: { item: AgentItem; lens: Tier; no
             </li>
           )}
           {tools.map((t) => (
-            <ToolRow key={t.key} item={t} lens={lens} now={now} fill={fill} />
+            <ToolRow key={t.key} item={t} lens={lens} now={now} fill={fill} look={lookOf(t)} />
           ))}
         </ol>
       )}

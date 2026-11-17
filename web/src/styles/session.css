@@ -25,11 +25,12 @@ html:has(.main > .session) {
   scroll-padding-top: calc(var(--bar) + var(--safe-top, env(safe-area-inset-top)) + 28px);
   scroll-padding-bottom: calc(var(--sess-ctl-h, 120px) + 8px);
 }
-/* The stream is down (data/hooks.ts useStreamMark): what the session is doing is not known
-   while nothing arrives. Its rings stop where they are, one quiet tier, and its clocks
-   stand with them (lib/time.ts ClockHold), as the board's rows do; the shell's footer,
-   the phone's pill and the line under the composer say why. */
-[data-stream="down"] .session :is(.dot, .spinner) {
+/* The stream is down (data/hooks.ts useStreamMark), or the session's computer is offline:
+   what the session is doing is not known while nothing arrives. Its rings stop where they
+   are, one quiet tier, and its clocks stand with them (lib/time.ts ClockHold), as the
+   board's rows do; the shell's footer, the phone's pill and the line under the composer
+   say why. */
+:is([data-stream="down"] .session, .session[data-machine="offline"]) :is(.dot, .spinner) {
   animation-play-state: paused;
   opacity: 0.55;
 }

@@ -7,6 +7,8 @@
 // three ways: the device offline, the receiver gone while the browser is online, and a
 // stream that is open in name only (a page out of the back/forward cache, a laptop awake
 // again, a tab shown after a long time), which nothing but the page coming back reveals.
+// Nor does a tool claim to run when it does not: while the session asks the person, once
+// it went quiet, or while its computer is offline.
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -99,13 +101,17 @@ async function tapStreams(context: BrowserContext): Promise<void> {
 class Feed {
   readonly id = randomUUID();
   private seq = 0;
-  private clock = Date.now() - 600_000;
+  private clock: number;
+  /** Its first event comes `since` ms before now. */
   constructor(
     private readonly base: string,
     private readonly token: string,
     private readonly machine: string,
     readonly title: string,
-  ) {}
+    since = 600_000,
+  ) {
+    this.clock = Date.now() - since;
+  }
   get url(): string {
     return sessionUrl("claude-code", this.id);
   }
@@ -565,6 +571,172 @@ test.describe("a message across a dropped stream", () => {
     await expect(box(page)).toBeEnabled();
     await expect(box(page)).toHaveValue("then tag the release");
     await m.stop();
+  });
+});
+
+/** A turn whose Bash call waits on the person's Allow: Claude Code fires PreToolUse before
+ *  it asks, so the call has started and has not run. */
+async function askingSession(): Promise<Feed> {
+  const s = new Feed(BASE, await demoToken(), "lab-mac", "Deploy the webhook fix");
+  await s.post(
+    s.ev("session.started", { source: "startup" }, "SessionStart"),
+    s.ev("turn.started", { turn_id: "p0", prompt_chars: 30, submitted_by: "user" }, "UserPromptSubmit"),
+    s.ev("turn.progress", { turn: 0, user: "Fix the webhook, then deploy.", assistant: "" }, "UserPromptSubmit"),
+    s.ev(
+      "tool.started",
+      { tool: "Read", call_id: "toolu_r", turn_id: "p0", input: { file_path: "src/a.ts" } },
+      "PreToolUse",
+    ),
+    s.ev("tool.ended", { tool: "Read", call_id: "toolu_r", turn_id: "p0", ok: true, ms: 40 }, "PostToolUse"),
+    s.ev(
+      "tool.started",
+      { tool: "Bash", call_id: "toolu_d", turn_id: "p0", input: { command: "npm run deploy" } },
+      "PreToolUse",
+      { ago: 6000 },
+    ),
+    s.ev(
+      "attention.needed",
+      { attention_id: "att_deploy", kind: "permission", tool: "Bash", message: "npm run deploy" },
+      "PermissionRequest",
+      { ago: 5000 },
+    ),
+  );
+  return s;
+}
+/** The page in Simple mode (the suite starts every device in Advanced), read again. */
+async function simple(page: Page): Promise<void> {
+  await page.evaluate(() => localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ mode: "simple" })));
+  await page.reload();
+  await live(page);
+}
+
+test.describe("a tool with no end, while nothing runs it", () => {
+  test.use({ baseURL: BASE });
+
+  test("waiting on the person's Allow, it is asking: no spinner, no clock, and the line says so", async ({ page }) => {
+    await page.clock.install();
+    const s = await askingSession();
+    await page.goto(s.url);
+    await live(page);
+    await expect(ring(page)).toHaveClass(/dot--needs_you/);
+    const view = page.locator(".page.session");
+    // The full interface: the row's glyph is the needs-you disc, and it counts no time.
+    const row = view.locator(".turn--live li.tool").last();
+    await expect(row.locator(".tool-status")).toHaveAttribute("aria-label", "asking");
+    await expect(view.locator(".tool-status.is-run")).toHaveCount(0);
+    await expect(row.locator(".tool-dur")).toHaveText("");
+    await page.clock.fastForward(5000);
+    await expect(row.locator(".tool-dur")).toHaveText("");
+
+    // Simple: the tools line asks too, its glyph in the chevron's place.
+    await simple(page);
+    const line = view.locator(".chat-tools-sum").last();
+    await expect(line).toHaveText("Asking to run Bash");
+    await expect(line.locator(".dot--needs_you")).toHaveCount(1);
+    await expect(line.locator(".spinner, .chev")).toHaveCount(0);
+    await expect(view.locator(".tool-status.is-run")).toHaveCount(0);
+    await line.click();
+    const opened = view.locator(".chat-tools li.tool").last();
+    await expect(opened).toBeVisible();
+    await expect(opened.locator(".tool-status")).toHaveAttribute("aria-label", "asking");
+    const dur = opened.locator(".tool-dur");
+    const before = await dur.textContent();
+    await page.clock.fastForward(5000);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    await expect(dur).toHaveText(before!);
+    expect(before).toBe("");
+  });
+
+  test("in a session gone quiet, it is quiet for as long as nothing came", async ({ page }) => {
+    const s = new Feed(BASE, await demoToken(), "lab-mac", "Build the release", 40 * 60_000);
+    await s.post(
+      s.ev("session.started", { source: "startup" }, "SessionStart"),
+      s.ev("turn.started", { turn_id: "p0", prompt_chars: 20, submitted_by: "user" }, "UserPromptSubmit"),
+      s.ev("turn.progress", { turn: 0, user: "Build the release.", assistant: "" }, "UserPromptSubmit"),
+      s.ev(
+        "tool.started",
+        { tool: "Bash", call_id: "toolu_b", turn_id: "p0", input: { command: "npm run build" } },
+        "PreToolUse",
+      ),
+    );
+    await page.goto(s.url);
+    await live(page);
+    await expect(ring(page)).toHaveClass(/dot--stale/);
+    const view = page.locator(".page.session");
+    await expect(view.locator(".tool-status.is-run")).toHaveCount(0);
+    await expect(view.locator(".turn--live li.tool").last().locator(".tool-status")).toHaveAttribute(
+      "aria-label",
+      "quiet",
+    );
+    await simple(page);
+    const line = view.locator(".chat-tools-sum").last();
+    await expect(line).toHaveText(/^Bash · quiet for \d+ m/);
+    await expect(line.locator(".dot--stale")).toHaveCount(1);
+    await expect(line.locator(".spinner")).toHaveCount(0);
+  });
+
+  test("on a machine with no control, a working session's tool still runs, and the line starts where it will once it ran", async ({
+    page,
+  }) => {
+    const s = await runningSession();
+    await page.goto(s.url);
+    await live(page);
+    await simple(page);
+    const view = page.locator(".page.session");
+    // An event-only machine has no heartbeat: it is never offline, so nothing stands still.
+    await expect(view).not.toHaveAttribute("data-machine", /./);
+    const line = view.locator(".chat-tools-sum").last();
+    await expect(line).toHaveText("Running Bash");
+    await expect(line.locator(".spinner")).toHaveCSS("animation-play-state", "running");
+    await expect(view.locator(".turn--live .tool-status.is-run")).toHaveCount(1);
+    const x = async () => (await line.locator(":scope > span:not([class])").boundingBox())!.x;
+    const running = await x();
+    await endTurn(s);
+    await expect(line).toHaveText("Ran 1 tool");
+    await expect(line.locator(".spinner")).toHaveCount(0);
+    expect(Math.abs((await x()) - running), "the words did not move").toBeLessThanOrEqual(1);
+  });
+});
+
+test.describe("a tool with no end, its computer offline", () => {
+  test.use({ baseURL: CONTROL_BASE });
+
+  test("its ring stands still, and so does its clock", async ({ context, page }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const d = await fakeDaemon(
+      key,
+      { name: `quiet-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] },
+      { offline: true },
+    );
+    const s = new Feed(CONTROL_BASE, await sinkToken(), d.name, "Run the suite");
+    await s.post(
+      s.ev("session.started", { source: "startup" }, "SessionStart"),
+      s.ev("turn.started", { turn_id: "p0", prompt_chars: 20, submitted_by: "user" }, "UserPromptSubmit"),
+      s.ev("turn.progress", { turn: 0, user: "Run the whole suite.", assistant: "" }, "UserPromptSubmit"),
+      s.ev(
+        "tool.started",
+        { tool: "Bash", call_id: "toolu_t", turn_id: "p0", input: { command: "npm test" } },
+        "PreToolUse",
+        {
+          ago: 4000,
+        },
+      ),
+    );
+    await page.clock.install();
+    await page.goto(`${CONTROL_BASE}${s.url}`);
+    await live(page);
+    const view = page.locator(".page.session");
+    await expect(page.locator(".ctl-foot")).toContainText("is offline");
+    await expect(view).toHaveAttribute("data-machine", "offline");
+    const row = view.locator(".turn--live li.tool").last();
+    await expect(row.locator(".tool-status.is-run .spinner")).toHaveCSS("animation-play-state", "paused");
+    await expect(ring(page)).toHaveCSS("animation-play-state", "paused");
+    const stood = await row.locator(".tool-dur").textContent();
+    await page.clock.fastForward(5000);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    await expect(row.locator(".tool-dur")).toHaveText(stood!);
+    await d.stop();
   });
 });
 

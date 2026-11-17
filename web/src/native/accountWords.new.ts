@@ -100,6 +100,13 @@ export const NEW_WORDS = {
   questionChip: "Question",
   questionOptions: "Options",
   inboxOpen: "Open",
+  toolsRunning: (tool: string) => `Running ${tool}`,
+  toolsAsking: (tool: string) => `Asking to run ${tool}`,
+  toolsAskingQuestion: "Asking a question",
+  toolsAskingPlan: "Asking about the plan",
+  toolsQuiet: (tool: string, time: string) => `${tool} · quiet for ${time}`,
+  toolAsking: "asking",
+  toolQuiet: "quiet",
 } as const;
 
 /** Whether this phone can send to a computer (account/sendable.ts), the same on every screen
