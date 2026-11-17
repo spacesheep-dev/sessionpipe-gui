@@ -1155,6 +1155,8 @@ test.describe("what else an account shows", () => {
     b.ss.trusting.set(asked.keyId, [MACHINE]);
   };
   const composer = (page: Page) => page.locator("textarea").first();
+  /** The ↑ button: on a phone Return is a new line, and only the button sends. */
+  const tapSend = (page: Page) => page.locator(".ctl-send").click();
 
   test("approved long ago, where the page never saw it wait: every screen says it can send, and no hour is made up", async ({
     browser,
@@ -1681,7 +1683,7 @@ test.describe("what else an account shows", () => {
       const taps = () => page.evaluate(() => (window as unknown as { __taps: unknown[] }).__taps.length);
       const before = await taps();
       await box.fill("Does the retry stop now?");
-      await box.press("Enter");
+      await tapSend(page);
       await expect(page.locator(".ctl-foot")).toContainText("Not sent: studio-mac hasn't added this iPhone yet.", {
         timeout: 15_000,
       });
@@ -1742,7 +1744,7 @@ test.describe("what else an account shows", () => {
       // A message: cancelled, its words stay in the field.
       const box = composer(page);
       await box.fill("Run the tests first.");
-      await box.press("Enter");
+      await tapSend(page);
       await expect(line.locator(".ctl-hint")).toHaveText("Confirm with Face ID…");
       await cancelFaceId();
       await expect(line).toHaveCount(0);
@@ -1877,7 +1879,7 @@ test.describe("what else an account shows", () => {
       // spacesheep takes a send and its answer names no job.
       b.ss.sendAnswers.push(() => ({ status: 202, headers: json, body: "{}" }));
       await box.fill("Does the retry stop now?");
-      await box.press("Enter");
+      await tapSend(page);
       await expect(
         page.getByText("Sent, but this app can't follow it. Check spacesheep.dev to see how it went.").first(),
       ).toBeVisible({ timeout: 15_000 });
@@ -1885,7 +1887,7 @@ test.describe("what else an account shows", () => {
       // A send spacesheep takes, with every answer lost on the way back.
       b.hub.unheard = 99;
       await box.fill("And the payout webhook?");
-      await box.press("Enter");
+      await tapSend(page);
       await expect(
         page.getByText(
           "It may have been sent: spacesheep did not answer in time. Look at the session before you send it again.",
@@ -2181,7 +2183,7 @@ test.describe("what else an account shows", () => {
       const taps = () => page.evaluate(() => (window as unknown as { __taps: unknown[] }).__taps.length);
       const before = await taps();
       await box.fill("Does the retry stop now?");
-      await box.press("Enter");
+      await tapSend(page);
       const foot = page.locator(".ctl-foot[data-reason='blocked']");
       await expect(foot).toContainText(/^Not sent\. This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\./, {
         timeout: 15_000,

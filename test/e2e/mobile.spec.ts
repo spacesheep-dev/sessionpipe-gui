@@ -2,13 +2,14 @@
 /// <reference lib="dom" />
 // On a phone (the `phone` project, 390×844): the bottom tab bar is on every page with at
 // most five tabs (the rest behind More), nothing scrolls sideways, the session page's
-// control strip sits above the tabs, New session is a full-height sheet, a pull down a
+// control strip sits above the tabs (its Return a new line, its line's way on a finger's
+// 44 points), New session is a full-height sheet, a pull down a
 // list refreshes it, and an inbox row pushes its session's page (never the desktop's
 // panel as a sheet, and nothing of that panel comes back on the next launch).
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { CONTROL_BASE, fakeDaemon, passkeyPage, seenSetupHere, sinkToken } from "./control-helpers.js";
-import { EVENTS, INFO, openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
+import { CONTROL_BASE, fakeDaemon, passkeyPage, postSession, seenSetupHere, sinkToken } from "./control-helpers.js";
+import { composer, EVENTS, INFO, openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
 
 /** A finger down the page from its top, as touch events (page.touchscreen only taps):
  *  lands at y 200, moves `by` px in steps, and stays down until `lift` is called. */
@@ -47,6 +48,18 @@ const noSidewaysScroll = async (page: Page) => {
     innerWidth,
   );
 };
+
+/** An element's colour and weight, and the tint's colour where it stands. */
+const tinted = (l: Locator) =>
+  l.evaluate((el) => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--tint-fg)";
+    el.parentElement!.append(probe);
+    const tint = getComputedStyle(probe).color;
+    probe.remove();
+    const s = getComputedStyle(el);
+    return { color: s.color, tint, weight: Number(s.fontWeight) };
+  });
 
 const tabBarIsOn = async (page: Page) => {
   const bar = page.locator("nav.tabbar");
@@ -173,7 +186,7 @@ test.describe("phone", () => {
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
     await check();
     // The input is reachable and not hidden behind the tab bar.
-    const input = ctl.getByRole("textbox", { name: "Message for the next turn" });
+    const input = composer(page);
     await expect(input).toBeVisible();
     const ib = (await input.boundingBox())!;
     const tb = (await page.locator("nav.tabbar").boundingBox())!;
@@ -298,6 +311,120 @@ test.describe("phone: new session", () => {
       await expect(page).toHaveURL(/\/s\/claude-code\//);
       await expect(page.locator(".starting .chat-bubble")).toHaveText("Run the e2e suite and tell me what fails.");
       await noSidewaysScroll(page);
+    } finally {
+      await d.stop();
+    }
+  });
+
+  test("Discard draft is an action in the tint, 44 tall; Cancel keeps the draft", async ({ context, page }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const d = await fakeDaemon(key, {
+      name: `ns-draft-${Math.random().toString(36).slice(2, 8)}`,
+      harnesses: ["claude-code"],
+      folders: ["/Users/e2e/code"],
+      mode: "auto",
+    });
+    try {
+      await page.goto(`${CONTROL_BASE}/?new=1&machine=${d.name}`);
+      const sheet = page.locator("[data-new-session]");
+      const text = sheet.locator("[data-ns-text]");
+      await text.fill("Rename the export job.");
+      const discard = sheet.getByRole("button", { name: "Discard draft" });
+      const look = await tinted(discard);
+      expect(look.color).toBe(look.tint);
+      expect(look.weight).toBeLessThan(600);
+      expect((await discard.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      // Cancel is no discard: the sheet closes, and opens again with the words.
+      await page.locator("[data-ns-cancel]").click();
+      await expect(sheet).toHaveCount(0);
+      await page.locator(".page.board .compose-btn--phone").click();
+      await expect(text).toHaveValue("Rename the export job.");
+      await discard.click();
+      await expect(text).toHaveValue("");
+      await expect(discard).toHaveCount(0);
+    } finally {
+      await d.stop();
+    }
+  });
+});
+
+// The composer on a phone, a finger's (390 and 320 wide). The line under the field ends
+// in its way on, the tint at 600, 44 tall to a finger and taking no tap from the field
+// above it or the tab bar below. Return is a new line: Send sends, or ⌘Return.
+test.describe("phone: the composer", () => {
+  test.skip(({ isMobile }) => !isMobile, "phone project only");
+
+  test("the line's way on is the tint at 600, at its end, 44 tall; Return is a new line and Send sends", async ({
+    context,
+    page,
+  }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const d = await fakeDaemon(key, {
+      name: `keys-phone-${Math.random().toString(36).slice(2, 8)}`,
+      harnesses: ["claude-code"],
+      folders: ["/Users/e2e/code"],
+      mode: "auto",
+    });
+    try {
+      const s = await postSession(await sinkToken(), {
+        machine: d.name,
+        cwd: "/Users/e2e/code",
+        title: "Return on a phone",
+      });
+      await page.goto(`${CONTROL_BASE}${sessionUrl(s.harness, s.id)}`);
+      const box = composer(page);
+      await expect(box).toBeEnabled();
+      // No grant yet today, in a browser: the line offers Unlock now.
+      const foot = page.locator(".ctl-foot[data-reason=passkey]");
+      const link = foot.getByRole("button", { name: "Unlock now" });
+      for (const size of [
+        { width: 390, height: 844 },
+        { width: 320, height: 568 },
+      ]) {
+        await page.setViewportSize(size);
+        await expect(link).toBeVisible();
+        const look = await tinted(link);
+        expect(look.color, `${size.width}: the tint`).toBe(look.tint);
+        expect(look.weight, `${size.width}: 600`).toBeGreaterThanOrEqual(600);
+        const f = (await foot.boundingBox())!;
+        const l = (await link.boundingBox())!;
+        expect(f.x + f.width - (l.x + l.width), `${size.width}: at the line's end`).toBeLessThan(5);
+        // A finger 8 px over it or 12 px under it lands on it; the field's last pixel and
+        // the tab bar are still theirs.
+        const hits = await link.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const field = document.querySelector(".ctl-ask")!.getBoundingClientRect();
+          const tabs = document.querySelector("nav.tabbar")!.getBoundingClientRect();
+          const x = r.left + r.width / 2;
+          const at = (y: number) => document.elementFromPoint(x, y);
+          return {
+            over: at(r.top - 8) === el,
+            under: at(r.bottom + 12) === el,
+            field: !!at(field.bottom - 1)?.closest(".ctl-ask"),
+            tabs: !!at(tabs.top + 1)?.closest("nav.tabbar"),
+          };
+        });
+        expect(hits, `${size.width}`).toEqual({ over: true, under: true, field: true, tabs: true });
+      }
+
+      // Return is a new line, and nothing goes.
+      await expect(box).toHaveAttribute("enterkeyhint", "enter");
+      await box.fill("Run the tests");
+      await box.press("Enter");
+      await box.pressSequentially("then open a PR");
+      await expect(box).toHaveValue("Run the tests\nthen open a PR");
+      const prompts = () => d.seen.filter((c) => c.kind === "prompt").map((c) => c.text);
+      await page.waitForTimeout(500);
+      expect(prompts()).toEqual([]);
+      // Send sends both lines; ⌘Return, from a keyboard, sends too.
+      await page.locator(".ctl-send").tap();
+      await expect.poll(prompts, { timeout: 20_000 }).toEqual(["Run the tests\nthen open a PR"]);
+      await expect(box).toHaveValue("");
+      await box.fill("and the docs");
+      await box.press("Meta+Enter");
+      await expect.poll(prompts, { timeout: 20_000 }).toEqual(["Run the tests\nthen open a PR", "and the docs"]);
     } finally {
       await d.stop();
     }

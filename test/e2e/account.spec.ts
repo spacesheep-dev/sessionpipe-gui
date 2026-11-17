@@ -15,6 +15,7 @@ import { HubStandIn } from "../account/hub.js";
 import { type AccountServer, startAccountServer } from "../account/serve.js";
 import { fakeShell } from "../account/shell-init.js";
 import { Session } from "../events.js";
+import { composer as composerOf } from "./helpers.js";
 
 const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../dist/web");
 const MACHINE = "m_studio0123456789abcd";
@@ -101,7 +102,7 @@ const invoke = <T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> 
       ).__TAURI_INTERNALS__.invoke(c as string, a),
     [cmd, args] as const,
   ) as Promise<T>;
-const composer = () => page.getByLabel("Message for the next turn");
+const composer = () => composerOf(page);
 
 test.beforeAll(async ({ browser }) => {
   ss = new FakeSpacesheep();
@@ -1022,7 +1023,7 @@ test.describe("a phone that cannot sign, with no storage to keep the board in", 
   test("it reads; where it would send, one line says why not and leads to the session on spacesheep", async () => {
     await page2.goto(`${server2.url}/s/claude-code/s-android`);
     await expect(page2.getByText("It is.").first()).toBeVisible();
-    await expect(page2.getByLabel("Message for the next turn")).toBeDisabled();
+    await expect(composerOf(page2)).toBeDisabled();
     await expect(page2.getByText("Sending from this phone comes in a later version").first()).toBeVisible();
     const link = page2.locator("[data-elsewhere]");
     await expect(link).toHaveText("Open on spacesheep.test");

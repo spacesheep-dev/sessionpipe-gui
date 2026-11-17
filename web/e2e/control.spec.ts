@@ -19,6 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Browser, type BrowserContext, type CDPSession, expect, type Page, test } from "@playwright/test";
+import { composer } from "../../test/e2e/helpers.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const CONTROL = "/api/sessionpipe/v1/control";
@@ -338,7 +339,7 @@ test("a prompt from the Session page reaches the daemon signed, and its reply co
     events.ev("turn.ended", { reason: "stop", ms: 1200 }),
   );
   await page.goto(`/s/claude-code/${SID}`);
-  const box = page.getByLabel("Message for the next turn");
+  const box = composer(page);
   await expect(box).toBeEnabled();
   // Ready, with the one line under the field: the day grant's (paired, trusted, online,
   // no grant yet today), and Unlock now to take it ahead.
@@ -346,6 +347,19 @@ test("a prompt from the Session page reaches the daemon signed, and its reply co
   await expect(foot.locator(".ctl-hint")).toHaveText("The first send today asks for your passkey.");
   await expect(foot.getByRole("button", { name: "Unlock now" })).toBeVisible();
   await shot(page, "strip-ready-desktop");
+  // A desktop's line stays quiet: its way on is graphite at 500 (a phone's is the tint at
+  // 600, mobile.spec.ts), at the caption's size; and Return sends.
+  const quiet = await foot.getByRole("button", { name: "Unlock now" }).evaluate((el) => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--fg-2)";
+    el.parentElement!.append(probe);
+    const fg2 = getComputedStyle(probe).color;
+    probe.remove();
+    const s = getComputedStyle(el);
+    return { color: s.color === fg2, weight: s.fontWeight, size: getComputedStyle(el.parentElement!).fontSize };
+  });
+  expect(quiet).toEqual({ color: true, weight: "500", size: "12px" });
+  await expect(box).toHaveAttribute("enterkeyhint", "send");
   /** The next passkey prompt ends with `name` instead of a passkey. */
   const failNext = (name: string, message: string) =>
     page.evaluate(
@@ -427,7 +441,7 @@ test("a prompt from the Session page reaches the daemon signed, and its reply co
 });
 
 test("a delivered prompt becomes its turn in the chat, with no row of its own; one that went to a copy links both ways", async () => {
-  const box = page.getByLabel("Message for the next turn");
+  const box = composer(page);
   await box.fill("What is the coolest feature?");
   await box.press("Enter");
   const msg = await daemon.next();
@@ -873,9 +887,11 @@ test("a phone adds its own passkey: the paired browser approves with a key.add, 
 
   // The phone now sends a prompt itself, under a grant its own passkey signs.
   await phone.goto(`/s/claude-code/${SID}`);
-  const box = phone.getByLabel("Message for the next turn");
+  const box = composer(phone);
   await expect(box).toBeEnabled();
   await expect(phone.locator(".ctl-foot[data-reason=untrusted]")).toHaveCount(0);
+  // 390 wide with no touch screen (a narrow window): Return sends, as on any keyboard.
+  await expect(box).toHaveAttribute("enterkeyhint", "send");
   await box.fill("From the phone");
   await box.press("Enter");
   const sent = await daemon.next();
@@ -918,7 +934,7 @@ test("over plain LAN http every control affordance says passkeys need https or l
   // ?k= sets the cookie and redirects; the origin is a LAN ip, so isSecureContext is false.
   await p.goto(`${lan}/s/claude-code/${SID}?k=${info.uiKey}`);
   expect(await p.evaluate(() => window.isSecureContext)).toBe(false);
-  await expect(p.getByLabel("Message for the next turn")).toBeDisabled();
+  await expect(composer(p)).toBeDisabled();
   await expect(p.locator(".ctl-hint")).toContainText(/passkeys need https or localhost/i);
   await shot(p, "strip-insecure-desktop");
   const renewed = await daemon.pair();
@@ -940,7 +956,7 @@ test("a 390 px phone sees the same pages", async ({ browser }: { browser: Browse
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, baseURL: base, isMobile: true });
   const p = await phone.newPage();
   await p.goto(`/s/claude-code/${SID}`);
-  await expect(p.getByLabel("Message for the next turn")).toBeEnabled();
+  await expect(composer(p)).toBeEnabled();
   await expect(p.locator(".page.session ol.timeline > li.turn").first()).toBeVisible();
   await shot(p, "strip-phone");
   // A renewed code from the same terminal: the pair page at phone width.

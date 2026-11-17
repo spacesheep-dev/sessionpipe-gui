@@ -308,6 +308,11 @@
     text-underline-offset: 2px;
   }
 }
+/* On a phone the tint at 600, as the composer's line has it there. */
+.ns-sheet--phone .ns-status-link {
+  color: var(--tint-fg);
+  font-weight: 600;
+}
 .ns-actions {
   flex: none;
   display: inline-flex;
@@ -519,16 +524,27 @@
   gap: 8px;
   padding: 0 16px;
 }
-/* Neutral: discarding a draft is no error (MISHA-NOTES 15). Positioned, so it stays over the
-   44 pt of an Approve link that ends the line above it. */
+/* An action, so the tint, at the sentence's weight; never red: discarding a draft is no
+   error (MISHA-NOTES 15). On its own line it takes a finger's 44 px. Positioned, so it stays
+   over the 44 pt of an Approve link that ends the line above it. */
 .ns-discard {
   position: relative;
   padding: 0;
   border: none;
   background: none;
-  color: var(--fg-2);
+  color: var(--tint-fg);
   font: inherit;
   font-size: var(--text-sm);
+}
+.ns-discard:disabled {
+  color: var(--fg-3);
+}
+@media (pointer: coarse) {
+  .ns-discard {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
 }
 /* A value the machine sets: the ink of the values above it. */
 .ns-sheet--phone .ns-fixed {

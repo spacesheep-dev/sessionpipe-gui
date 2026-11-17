@@ -13,7 +13,7 @@ import path from "node:path";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import { E2E_PORT } from "../../playwright.config.js";
 import { CONTROL_BASE, fakeDaemon, passkeyPage, seenSetupHere, sinkToken } from "./control-helpers.js";
-import { EVENTS, INFO, sessionUrl, ulid } from "./helpers.js";
+import { composer, EVENTS, INFO, sessionUrl, ulid } from "./helpers.js";
 
 /** localhost, where the composer is live (the page's origin is one sending works from). */
 const BASE = `http://localhost:${E2E_PORT}`;
@@ -180,7 +180,7 @@ const live = async (page: Page) => expect(page.locator(".conn").first()).toHaveT
 const down = (page: Page) => expect(page.locator("html")).toHaveAttribute("data-stream", "down");
 const up = (page: Page) => expect(page.locator("html")).not.toHaveAttribute("data-stream", "down");
 const ring = (page: Page) => page.locator(".page.session h1.sess-title .dot");
-const box = (page: Page) => page.getByLabel("Message for the next turn");
+const box = composer;
 const stop = (page: Page) => page.getByRole("button", { name: "Stop the turn" });
 const send = (page: Page) => page.locator(".ctl-send");
 const reply = (page: Page) => page.locator(".page.session li.reply").last();

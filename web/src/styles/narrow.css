@@ -97,6 +97,26 @@
     position: absolute;
     inset: -11px 0;
   }
+  /* The way on at the end of the line under the composer, and Machines' Approve this
+     iPhone: a 19 px line to the eye, 45 to a finger. The line takes 5 px above and below,
+     so the box stops at the message field (the bar's 8 px gap and these 5) and at the tab
+     bar (the strip's 8 px and these 5), and takes no tap from either. Beside Ask another
+     agent… the line is that button's 44 px already. */
+  .ctl-foot:has(> :is(.ctl-link, .ctl-open-https):last-child) {
+    padding-block: 5px;
+  }
+  .ctl-link,
+  .ctl-open-https,
+  .link[data-setup] {
+    position: relative;
+  }
+  .ctl-link::before,
+  .ctl-open-https::before,
+  .link[data-setup]::before {
+    content: "";
+    position: absolute;
+    inset: -13px -8px;
+  }
   /* The subagent disclosure stays 18 px to the eye; a finger gets 44, reaching into the
      gutter where there is one (a phone's is narrower: below). */
   .card-disclose::before {

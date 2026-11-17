@@ -393,11 +393,21 @@
     max-width: 100%;
     vertical-align: baseline;
   }
-  /* Unpaired, or inside the hour a new device waits, with a prompt to answer (ControlStrip.tsx
-     `folded`): the card alone, its one line saying why, with the way on; the line's link
-     reads as the card's other words do. */
-  .ctl--folded .ctl-answer-note .ctl-link {
-    color: var(--fg-2);
+  /* The line under the field at a footnote's size, and its way on (Approve this iPhone,
+     Retry now, Open on spacesheep.dev, How to pair) as a phone draws an action: the tint,
+     and 600 against the sentence's 400, so it reads as one without the colour too. It
+     ends the line, or wraps to the end of a line of its own; with Ask another agent after
+     it, that button takes the end. */
+  .ctl-foot {
+    font-size: var(--text-sm);
+  }
+  .ctl-link,
+  .ctl-open-https {
+    color: var(--tint-fg);
+    font-weight: 600;
+  }
+  .ctl-foot > :is(.ctl-link, .ctl-open-https):last-child {
+    margin-inline-start: auto;
   }
 }
 

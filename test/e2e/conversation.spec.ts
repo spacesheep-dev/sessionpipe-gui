@@ -11,7 +11,7 @@
 import { randomUUID } from "node:crypto";
 import { type BrowserContext, expect, type Locator, type Page, test } from "@playwright/test";
 import { CONTROL_BASE, type FakeDaemon, fakeDaemon, type PageKey, passkeyPage, sinkToken } from "./control-helpers.js";
-import { ulid } from "./helpers.js";
+import { composer, ulid } from "./helpers.js";
 
 test.describe.configure({ mode: "serial" });
 test.skip(({ isMobile }) => isMobile, "desktop project");
@@ -169,14 +169,14 @@ async function openSession(
   await before?.(s);
   await page.goto(`${CONTROL_BASE}/s/claude-code/${s.id}`);
   await expect(page.locator(".conn").first()).toHaveText("live");
-  await expect(page.getByLabel("Message for the next turn")).toBeEnabled();
+  await expect(composer(page)).toBeEnabled();
   await expect(block(page, "start").locator(REPLY)).toHaveText("Started.");
   return s;
 }
 
 /** Sends `text` from the composer; resolves to the message's id once the receiver holds it. */
 async function send(page: Page, s: Hooks, text: string): Promise<string> {
-  const box = page.getByLabel("Message for the next turn");
+  const box = composer(page);
   await box.fill(text);
   await box.press("Enter");
   await expect(box).toHaveValue("");

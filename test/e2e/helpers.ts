@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Shared pieces for the end-to-end suite: page openers that wait for the live stream,
-// a hand-rolled ULID (so the specs need nothing but @playwright/test), and a tier-1
-// batch a sink would send, with a fresh session id per call.
+// the session's message field, a hand-rolled ULID (so the specs need nothing but
+// @playwright/test), and a tier-1 batch a sink would send, with a fresh session id per call.
 import { randomUUID } from "node:crypto";
 import { expect, type Page } from "@playwright/test";
 
@@ -11,6 +11,10 @@ export const WELL_KNOWN = "/.well-known/sessionpipe";
 
 export const sessionUrl = (harness: string, id: string) =>
   `/s/${encodeURIComponent(harness)}/${encodeURIComponent(id)}`;
+
+/** A session's message field, found by its place: its name is the words it shows, which
+ *  change with the mode ("What should change?" in a plan review). */
+export const composer = (page: Page) => page.locator(".ctl-ask textarea");
 
 /** Opens a page and waits until the stream is live and the first snapshot rendered. */
 export async function openPage(page: Page, path: string): Promise<void> {

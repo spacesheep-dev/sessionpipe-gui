@@ -41,7 +41,7 @@ import { deviceWords, setupLabel, signerKind, signerLabel } from "../control/sig
 import { receiptWords } from "../control/words";
 import { answerLate, useAnswerClock } from "../lib/answerWindow";
 import { useAskedInput } from "../lib/askedInput";
-import { usePhoneLayout } from "../lib/device";
+import { usePhoneLayout, useTouchKeys } from "../lib/device";
 import { attentionMessage, isPlanReview, toolLabel } from "../lib/format";
 
 import { Link } from "../lib/router";
@@ -122,7 +122,7 @@ export interface ControlStripProps {
   /** Plugins' suggested answers for this session's attentions (shared/plugin-api.ts).
    *  Advice only: Confirm sends the ordinary signed answer through `onSend`. */
   suggestions?: readonly Suggestion[];
-  /** The textarea's placeholder; one voice in both modes. */
+  /** The textarea's placeholder, and its name; one voice in both modes. */
   placeholder?: string;
   /** Simple mode's composer (its class only: the words are the same). */
   chat?: boolean;
@@ -374,6 +374,7 @@ export function ControlStrip({
   }, [session.key]);
   const paired = !!control;
   const phone = usePhoneLayout();
+  const touch = useTouchKeys();
   // The wrong address (control/origin.ts): the hint is the one line naming where sending
   // works, as a link to this very page there; never an offer to add a device.
   const wrong = blocked ? wrongOriginHere() : null;
@@ -642,12 +643,18 @@ export function ControlStrip({
       att.clear();
     });
   };
+  // Return sends and Shift+Return is a new line; on a touch screen, whose keyboard has no
+  // Shift+Return, Return is the new line (as in Messages) and ⌘/Ctrl+Return sends.
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+    const send = touch ? e.metaKey || e.ctrlKey : !e.shiftKey;
+    if (send) {
       e.preventDefault();
       sendText();
     }
   };
+  // The field's name is the words it shows, so saying them (Voice Control) finds it.
+  const named = review ? "What should change?" : placeholder;
 
   return (
     <form
@@ -813,12 +820,12 @@ export function ControlStrip({
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={onKey}
-              placeholder={review ? "What should change?" : placeholder}
+              placeholder={named}
               disabled={!enabled}
-              aria-label="Message for the next turn"
+              aria-label={named}
               aria-describedby={reason ? reasonId : undefined}
               rows={1}
-              enterKeyHint="send"
+              enterKeyHint={touch ? "enter" : "send"}
             />
             {working && (
               <button
@@ -839,7 +846,7 @@ export function ControlStrip({
               disabled={!canSend}
               aria-label={review ? "Keep planning" : "Send"}
               aria-busy={busy === "prompt" || undefined}
-              data-tip-keys="↩"
+              data-tip-keys={touch ? "⌘↩" : "↩"}
             >
               {busy === "prompt" ? <Spinner label="Sending" /> : <SendIcon />}
             </button>
