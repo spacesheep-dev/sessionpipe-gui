@@ -1521,7 +1521,7 @@ test.describe("what else an account shows", () => {
         await expect(row, at).toBeVisible();
         await expect(row.getByRole("button", { name: /^(Allow|Deny)$/ }), at).toHaveCount(0);
         const notice = page.locator(".inbox-notes .notice").first();
-        await expect(notice.locator(".notice-text"), at).toHaveText("This iPhone can't answer yet");
+        await expect(notice.locator(".notice-text"), at).toHaveText("This iPhone can't answer yet.");
         await expect(notice.getByRole("link", { name: "Approve this iPhone" }), at).toHaveAttribute(
           "href",
           "/add-device",
@@ -1577,7 +1577,7 @@ test.describe("what else an account shows", () => {
         ).toHaveCount(0);
         // The page's one notice says why, with the way on.
         const notes = page.locator(".inbox-notes");
-        await expect(notes.getByText("This iPhone can't answer yet", { exact: true }), at).toHaveCount(1);
+        await expect(notes.getByText("This iPhone can't answer yet.", { exact: true }), at).toHaveCount(1);
         await expect(notes.getByRole("link", { name: "Approve this iPhone" }), at).toHaveAttribute(
           "href",
           "/add-device",

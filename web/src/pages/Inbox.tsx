@@ -273,7 +273,7 @@ export function Inbox() {
                 </Link>
               }
             >
-              {NEW_WORDS.answerNotYet(ThisPhone())}
+              {`${NEW_WORDS.answerNotYet(ThisPhone())}.`}
             </Notice>
           )}
           {said.map((o) => (
