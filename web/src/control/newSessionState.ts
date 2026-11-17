@@ -296,6 +296,10 @@ export function fixedPermission(
   return { value: START.setOnMachine };
 }
 
+/** That value in one run, note and all ("Its own settings. Anything it asks permission for
+ *  is refused."), where nothing goes under it: a desktop's options line, a workflow step. */
+export const fixedLine = (f: { value: string; note?: string }): string => (f.note ? `${f.value}. ${f.note}` : f.value);
+
 /** What an agent's account has left on a machine, for its row in the Agent menu: on a
  *  machine whose hello pools that harness with the switch on and an account enabled, the
  *  pool's line (UX-SPEC §6: a start there goes to the current account, so its tightest

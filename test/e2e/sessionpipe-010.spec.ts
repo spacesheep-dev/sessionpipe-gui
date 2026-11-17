@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+/// <reference lib="dom" />
 // sessionpipe 0.10.0 on the demo server (server/demo/machine.ts, sim.ts): lab-mac is paired
 // in inherit mode with an ACP agent and an api.z.ai account; its sessions wait on
 // background work, take a scheduled turn and run unattended. The well-known says
@@ -21,6 +22,12 @@ interface Snap {
   }[];
 }
 const snap = async (page: Page): Promise<Snap> => (await (await page.request.get("/api/ui/snapshot")).json()) as Snap;
+/** How many lines an element's text takes on screen. */
+const lineCount = (el: Element): number => {
+  const r = document.createRange();
+  r.selectNodeContents(el);
+  return new Set(Array.from(r.getClientRects(), (x) => Math.round(x.top))).size;
+};
 
 test("the well-known says this receiver shows inherit mode", async ({ request }) => {
   const wk = (await (await request.get(WELL_KNOWN)).json()) as { control: { inherit?: boolean } };
@@ -53,6 +60,12 @@ test("New session on lab-mac: its own default first, read and safe; goose takes 
   await page.locator(".sel-opt", { hasText: "goose" }).click();
   await expect(sheet.locator("[data-ns-row=permission]")).toHaveCount(0);
   await expect(sheet.locator("[data-ns-row=model]")).toHaveCount(0);
+  // What it runs as instead, in the options line: value and note in one run, on one line.
+  const fixed = sheet.locator("[data-ns-row=options] .ns-fixed");
+  await expect(fixed).toHaveText("Its own settings. Anything it asks permission for is refused.");
+  await expect(fixed).toHaveAttribute("title", "Set on lab-mac");
+  await expect(sheet.locator("[data-ns-row=options] .ns-aside")).toHaveCount(0);
+  expect(await fixed.evaluate(lineCount)).toBe(1);
 });
 
 test("a session waiting on its own background work stays working, and says on what", async ({ page }) => {

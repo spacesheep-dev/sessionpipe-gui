@@ -34,7 +34,7 @@ import { HeldNotice, useHeld } from "../../control/HeldNotice";
 import type { HeldMeta } from "../../control/held";
 import { HELD_WORDS } from "../../control/heldWords";
 import { useGrant, useRpId } from "../../control/hooks";
-import { fixedPermission, permissionChoices, permissionToSend } from "../../control/newSessionState";
+import { fixedLine, fixedPermission, permissionChoices, permissionToSend } from "../../control/newSessionState";
 import { canSign, isCancel, setupLabel, signerKind, signHint, tapWords } from "../../control/signer";
 import { startGate } from "../../control/startGate";
 import { notSentWords, PERMISSION_LABEL } from "../../control/words";
@@ -253,17 +253,25 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
     ta.style.height = `${Math.min(ta.scrollHeight, phone ? 10_000 : Math.round(window.innerHeight * 0.45))}px`;
   }, [text, phone]);
 
-  if (!session) return null;
-
   // ----- what the machine advertises, and whether an ask can go there -----
   const gate = c ? startGate(name, c, { wrong, secure, hint: signHint(), send: sendTo(c) }) : null;
+  // The hour's line stands in for an error while it lasts (the status line below); what was
+  // refused in it is old news once it is over.
+  const cooling = gate?.kind === "cooling";
+  useEffect(() => {
+    if (!cooling) setError(null);
+  }, [cooling]);
+
+  if (!session) return null;
+
   const offersBack = c?.handoff === true;
   const oldDaemon = !!c && c.ask === undefined && c.handoff === undefined;
   const nobody = !others.length && !harnesses.length;
   const fixed = harness && c ? fixedPermission(c, harness, PERMISSION_LABEL) : null;
+  // A phone has its note under the row; a desktop's options line has it in one run.
   const fixedValue = fixed && (
     <span className="ns-fixed" title={START.setOn(name)}>
-      {fixed.value}
+      {phone ? fixed.value : fixedLine(fixed)}
     </span>
   );
   const fixedNote = fixed?.note ? <span className="ns-aside">{fixed.note}</span> : null;
@@ -747,7 +755,6 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
                   <span className="ns-opt" data-hs-row="options">
                     <span className="ns-opt-label">Permission</span>
                     {fixedValue}
-                    {fixedNote}
                   </span>
                 )}
                 {showModel && (

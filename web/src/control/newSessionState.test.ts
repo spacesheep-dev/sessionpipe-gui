@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   agentLeft,
   aliasHidden,
+  fixedLine,
   fixedPermission,
   machineFacts,
   permissionChoices,
@@ -152,6 +153,10 @@ describe("the Permission row on an inherit machine (CONTROL.md §3.1)", () => {
       value: "Its own settings",
       note: "Anything it asks permission for is refused.",
     });
+    // Where nothing goes under it (a desktop's options line, a workflow step): one run.
+    expect(fixedLine(fixedPermission(c, "goose", {})!)).toBe(
+      "Its own settings. Anything it asks permission for is refused.",
+    );
     expect(machineFacts(c, (h) => h).hint).toBe("inherit mode");
   });
   it("one level and no inherit: a fixed line, as before", () => {
@@ -161,6 +166,7 @@ describe("the Permission row on an inherit machine (CONTROL.md §3.1)", () => {
       start: { "claude-code": { permissions: ["safe"], permission: "safe" } },
     };
     expect(fixedPermission(one, "claude-code", { safe: "Safe" })).toEqual({ value: "Safe" });
+    expect(fixedLine({ value: "Safe" })).toBe("Safe");
   });
 });
 

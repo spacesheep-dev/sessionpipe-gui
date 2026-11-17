@@ -43,6 +43,10 @@
 .ns-sheet--phone .hs-switch .ns-value {
   padding-right: 8px;
 }
+/* The phone's From ends at the column the switch and Permission end at. */
+.ns-sheet--phone [data-hs-row="from"] .ns-value {
+  padding-right: 8px;
+}
 
 /* The strip's quiet entry point, at the right end of the line under the field. */
 .ctl-ask-agent {

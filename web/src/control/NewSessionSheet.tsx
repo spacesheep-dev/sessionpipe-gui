@@ -61,6 +61,7 @@ import {
   agentLeft,
   closeNewSession,
   type Draft,
+  fixedLine,
   fixedPermission,
   getBoardFilter,
   machineFacts,
@@ -291,6 +292,12 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
 
   // ----- what the machine advertises, and whether a start can go there -----
   const gate = m ? why(m) : null;
+  // The hour's line stands in for an error while it lasts (the status line below); what was
+  // refused in it is old news once it is over.
+  const cooling = gate?.kind === "cooling";
+  useEffect(() => {
+    if (!cooling) setError(null);
+  }, [cooling]);
   // This device isn't approved: nothing on the form could start anywhere, so the sheet is
   // the way to approve it (the draft is kept as it is, for when it can).
   const unapproved = listed.some((x) => why(x)?.kind === "approve");
@@ -837,9 +844,10 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   // The Permission row is there on every machine, so the sheet keeps its height: the
   // pop-up where the machine offers a choice, else what it will run as, in words.
   const fixed = m && c && harness ? fixedPermission(c, harness, PERMISSION_LABEL) : null;
+  // A phone has its note under the row; a desktop's options line has it in one run.
   const fixedValue = fixed && (
     <span className="ns-fixed" title={machine ? START.setOn(machine) : undefined}>
-      {fixed.value}
+      {phone ? fixed.value : fixedLine(fixed)}
     </span>
   );
   const fixedNote = fixed?.note ? <span className="ns-aside">{fixed.note}</span> : null;
@@ -1047,7 +1055,6 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
                 <span className="ns-opt" data-ns-row="options">
                   <span className="ns-opt-label">Permission</span>
                   {fixedValue}
-                  {fixedNote}
                 </span>
               )}
               {showModel && (

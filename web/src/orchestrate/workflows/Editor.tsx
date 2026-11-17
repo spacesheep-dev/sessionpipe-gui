@@ -25,7 +25,7 @@ import { type MenuList, MoreButton, useContextMenu } from "../../components/Cont
 import { BackButton, PageBar } from "../../components/PageBar";
 import { MultiSelect, Select, type SelectOption } from "../../components/Select";
 import { folderChoices, machineHome, tildify, typedFolder } from "../../control/folders";
-import { fixedPermission, permissionChoices } from "../../control/newSessionState";
+import { fixedLine, fixedPermission, permissionChoices } from "../../control/newSessionState";
 import { PERMISSION_LABEL } from "../../control/words";
 import { useAppState, useListedSessions, useMachines } from "../../data/hooks";
 import "../../lib/acp";
@@ -838,7 +838,7 @@ function StepRow({
                   <span className="wf-opt">
                     <span className="wf-opt-label">Permission</span>
                     <span className="wf-fixed" title={machine ? START.setOn(machine.name) : undefined}>
-                      {fixed.note ? `${fixed.value}. ${fixed.note}` : fixed.value}
+                      {fixedLine(fixed)}
                     </span>
                   </span>
                 ) : null}

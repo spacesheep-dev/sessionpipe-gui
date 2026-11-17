@@ -519,8 +519,10 @@
   gap: 8px;
   padding: 0 16px;
 }
-/* Neutral: discarding a draft is no error (MISHA-NOTES 15). */
+/* Neutral: discarding a draft is no error (MISHA-NOTES 15). Positioned, so it stays over the
+   44 pt of an Approve link that ends the line above it. */
 .ns-discard {
+  position: relative;
   padding: 0;
   border: none;
   background: none;
@@ -528,11 +530,15 @@
   font: inherit;
   font-size: var(--text-sm);
 }
-/* A value the machine sets: the ink of the values above it, at the chevron's column, never
-   cut (it wraps, right-aligned, at a large text size). */
+/* A value the machine sets: the ink of the values above it. */
 .ns-sheet--phone .ns-fixed {
   color: var(--fg-2);
   font-size: var(--text-md);
+}
+/* Permission's, at the chevron's column, is never cut: it wraps, right-aligned, at a large
+   text size. (The Ask sheet's From is cut at the row's width instead: .ellipsis.) */
+.ns-sheet--phone [data-ns-row="options"] .ns-fixed,
+.ns-sheet--phone [data-hs-row="options"] .ns-fixed {
   text-align: right;
   text-wrap: balance;
 }

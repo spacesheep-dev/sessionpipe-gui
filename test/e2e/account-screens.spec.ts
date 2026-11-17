@@ -2332,6 +2332,104 @@ test.describe("what else an account shows", () => {
       await b.close();
     }
   });
+
+  test("Ask another agent at 320: From is one line, cut at the row's width, however long the session's title, and ends where Permission does", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    // studio-mac's agents can ask each other (Ask another agent…).
+    Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+    const { page } = b;
+    try {
+      await page.setViewportSize({ width: 320, height: 568 });
+      await page.goto(b.server.url);
+      await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+      await trusted(b);
+      const title = "Retry the invoice webhook with exponential backoff and jitter";
+      const s = new Session("s-long-title");
+      const on = { tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/billing", title } };
+      b.ss.push([
+        s.ev("session.started", { source: "startup" }, on),
+        s.ev("turn.started", { turn_id: "t1" }, on),
+        s.ev("turn.transcript", { turn: 1, user: "Add backoff to the retries.", assistant: "Done." }, on),
+        s.ev("turn.ended", { turn_id: "t1" }, on),
+      ]);
+      await page.goto(`${b.server.url}/s/claude-code/s-long-title`);
+      await page.locator("[data-ctl-ask]").click();
+      const sheet = page.locator("[data-handoff]");
+      const from = sheet.locator(".hs-from");
+      await expect(from).toHaveText(`${title} · ${NAME}`);
+      const seen = await from.evaluate((el) => {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        const cs = getComputedStyle(el);
+        return {
+          lines: new Set(Array.from(r.getClientRects(), (x) => Math.round(x.top))).size,
+          cut: el.scrollWidth > el.clientWidth,
+          overflow: cs.textOverflow,
+        };
+      });
+      expect(seen).toEqual({ lines: 1, cut: true, overflow: "ellipsis" });
+      // One column at the right for the values the machine sets: From's end is Permission's.
+      const fixed = sheet.locator("[data-hs-row=options] .ns-fixed");
+      await expect(fixed).toHaveText("Safe");
+      const end = async (l: typeof from) => {
+        const r = (await l.boundingBox())!;
+        return Math.round(r.x + r.width);
+      };
+      expect(await end(from)).toBe(await end(fixed));
+      await shot(page, "also-handoff-long-from");
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("New session held back for the hour the app did not know of: the hour's line in place of the refusal, and once the hour is over the refusal is not back", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    b.ss.saysCooling = false;
+    const { page } = b;
+    try {
+      // The page's clock is this test's to move: nobody waits an hour here.
+      await page.clock.install();
+      await page.goto(b.server.url);
+      await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+      // Asked and approved before the app ever saw the request wait: no hour is known here.
+      const id = [...b.hub.accounts.keys()][0]!;
+      const asked = await page.evaluate(
+        (account) =>
+          (
+            window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }
+          ).__TAURI_INTERNALS__.invoke("acct_device_ask", { id: account }) as Promise<{ keyId: string }>,
+        id,
+      );
+      b.ss.approveDevice(asked.keyId);
+      await page.reload();
+      await page.locator(".page.board .compose-btn--phone").click();
+      const sheet = page.locator("[data-new-session]");
+      await sheet.locator("[data-ns-text]").fill("Add a test for the rounding.");
+      const start = sheet.locator("[data-ns-start]");
+      await expect(start).toBeEnabled();
+      await start.click();
+      // Refused for the hour, which is known from here: its line, not the refusal in red.
+      const hour = /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.$/;
+      await expect(sheet.locator(".ns-status")).toHaveText(hour, { timeout: 15_000 });
+      await expect(sheet.locator(".ns-status--err")).toHaveCount(0);
+      await expect(start).toBeDisabled();
+      expect(b.ss.jobs).toEqual([]);
+      // The hour is over with the sheet still open: nothing from it is left under the form.
+      await page.clock.fastForward(61 * 60_000);
+      await expect(sheet.locator(".ns-status")).not.toHaveText(hour);
+      await expect(sheet.locator(".ns-status--err")).toHaveCount(0);
+      await expect(sheet.getByText(/Not sent/)).toHaveCount(0);
+      await expect(sheet.locator("[data-ns-text]")).toHaveValue("Add a test for the rounding.");
+    } finally {
+      await b.close();
+    }
+  });
 });
 
 test("back after spacesheep stopped keeping an approval for the app, before the code's end: time ran out, and the key that was made is said, with the way to it", async ({
