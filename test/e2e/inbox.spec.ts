@@ -417,7 +417,7 @@ test.describe("inbox: Allow only beside a whole request", () => {
     }
   });
 
-  test("with a session open beside, a and d on a row that shows Open or waits in a terminal answer nothing; with focus in the panel they are the panel's", async ({
+  test("with a session open beside, a and d with no row under the cursor, or on a row that shows Open or waits in a terminal, answer nothing; with focus in the panel they are the panel's", async ({
     context,
     page,
   }) => {
@@ -447,12 +447,20 @@ test.describe("inbox: Allow only beside a whole request", () => {
     });
     const answers = () => d.seen.filter((c) => c.kind === "permission.answer").map((c) => [c.for, c.decision]);
     try {
-      await page.goto(`${CONTROL_BASE}/inbox`);
+      // Opened beside with no row under the cursor, the focus on the page: a and d are the
+      // Inbox's, and answer nothing.
+      await page.goto(`${CONTROL_BASE}/inbox?s=${beside.key}`);
       const row = (p: { attention: string }) => page.locator(`.inbox-row[data-attention="${p.attention}"]`);
-      await row(beside).locator(".inbox-main").click();
       await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
       const allow = page.locator("aside.panel .ctl .btn--allow");
       await expect(allow).toBeEnabled({ timeout: 15_000 });
+      await expect(row(beside)).toBeVisible();
+      await expect(page.locator(".inbox-row[aria-current='true']")).toHaveCount(0);
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.keyboard.press("a");
+      await page.keyboard.press("d");
+      await page.waitForTimeout(1_000);
+      expect(answers()).toEqual([]);
       await expect(row(long)).toHaveClass(/inbox-row--open/);
       await expect(row(question)).toHaveClass(/inbox-row--terminal/);
       for (const p of [long, question]) {

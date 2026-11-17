@@ -134,6 +134,12 @@ export function Inbox() {
     return true;
   };
   const { cursor } = useListNav(hrefs, true, keys, { peek: "inbox.peek", clear: () => clearRef.current(), store });
+  // `a` and `d` with no row of the Inbox to take them (none under the cursor): taken and
+  // dropped, so they never answer a session open beside it; with the focus in that panel
+  // they are the panel's.
+  const drop = () => (inPanel() ? false : undefined);
+  useShortcut("inbox.allow", drop, { priority: 1 });
+  useShortcut("inbox.deny", drop, { priority: 1 });
   // ⌥⌘1 … ⌥⌘7 label the session under the cursor, ⌥⌘0 clears it.
   useLabelKeys(() => (keys[cursor] ? [keys[cursor]!] : []));
   // The tier lens: attention messages and tool names travel at tier 1 (lib/tier.ts).
