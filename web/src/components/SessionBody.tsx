@@ -1108,12 +1108,13 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
       anchorOn,
     ],
   );
-  // While its computer is offline nothing says how long a turn or a tool has run: its
-  // rings stop (styles/session.css) and, while the session says it is at work, the view's
-  // clocks stand at the last that was heard of it (its poll, or the session's latest
-  // event), as they stand while the stream is down (SessionView). How long a quiet one has
-  // been quiet still counts. A machine with no control has no heartbeat to miss: never so.
-  const machineOff = control?.online === false;
+  // While its computer is offline nothing says how long a turn or a tool has run: the
+  // rings of a session at work or gone quiet stop (styles/session.css) and, while it says
+  // it is at work, the view's clocks stand at the last that was heard of it (its poll, or
+  // the session's latest event), as they stand while the stream is down (SessionView). How
+  // long a quiet one has been quiet still counts; an idle or done one has nothing to stop.
+  // A machine with no control has no heartbeat to miss: never so.
+  const machineOff = control?.online === false && (isLive || s?.state === "stale");
   const downAt = useContext(ClockHold);
   const heardAt = machineOff && isLive ? Math.max(ms(lastHeard(control)) || 0, ms(s?.lastAt) || 0) : 0;
   const standAt = downAt ?? (heardAt > 0 ? heardAt : null);
@@ -1429,7 +1430,11 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
                   <span className="num">{unseen > 99 ? "99+" : unseen}</span> new
                 </button>
               )}
-              <SessionControl session={s} control={control} attentions={s.openAttentions} chat={chat} />
+              {/* What this device sends goes on while the computer is offline: the control's
+                  clocks run, as its rings do (styles/session.css), unless the stream is down. */}
+              <ClockHold.Provider value={downAt}>
+                <SessionControl session={s} control={control} attentions={s.openAttentions} chat={chat} />
+              </ClockHold.Provider>
             </div>
           )}
         </div>
@@ -1720,12 +1725,14 @@ function TurnBlock({
           : undefined;
   // Only a running turn or a running tool shows a moving duration; the other blocks
   // (most of the page) have nothing to redraw each second. A subagent's tools run while
-  // it does, whatever its parent is at.
-  const hasRunningTool = turn.items.some(
-    (i) =>
-      (i.kind === "tool" && !i.ended && look === "run") ||
-      (i.kind === "agent" && runOf(i, agents).state === "running" && i.tools.some((t) => !t.ended)),
-  );
+  // it does, whatever its parent is at, unless this turn was stopped under it (agentOver).
+  const stoppedAt = words.stopped ? ms(ended?.e.time) : undefined;
+  const hasRunningTool = turn.items.some((i) => {
+    if (i.kind === "tool") return !i.ended && look === "run";
+    if (i.kind !== "agent") return false;
+    const run = runOf(i, agents);
+    return run.state === "running" && !agentOver(run, stoppedAt) && i.tools.some((t) => !t.ended);
+  });
   const now = useNow(live || hasRunningTool ? "fine" : "off");
   // The person's words as the record has them; cut there, the message sent from here
   // as it was signed (lib/turns.ts promptWords).
@@ -1861,7 +1868,8 @@ function TurnBlock({
         {items.map((it) => {
           if (it.kind === "tool")
             return <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} look={look} />;
-          if (it.kind === "agent") return <AgentBlock key={it.key} item={it} lens={lens} now={now} fill={fill} />;
+          if (it.kind === "agent")
+            return <AgentBlock key={it.key} item={it} lens={lens} now={now} fill={fill} stoppedAt={stoppedAt} />;
           if (it.kind === "delegation") return <AskRow key={it.key} item={it} as="li" />;
           const e = it.e;
           if (e.type === "turn.transcript") {
@@ -2490,7 +2498,14 @@ function ChatTurn({
           {agentItems.length > 0 && (
             <ol className="turn-items chat-agents">
               {agentItems.map((it) => (
-                <AgentBlock key={it.key} item={it} lens={lens} now={now} fill={fill} />
+                <AgentBlock
+                  key={it.key}
+                  item={it}
+                  lens={lens}
+                  now={now}
+                  fill={fill}
+                  stoppedAt={stoppedLine ? endedMs : undefined}
+                />
               ))}
             </ol>
           )}
@@ -2741,10 +2756,13 @@ function ToolRow({
   const tool = String(e.data.tool);
   const label = toolLabel(tool);
   const status: ToolStatus = item.ended ? (item.ended.data.ok !== false ? "ok" : "err") : (look ?? "cut");
-  // Only a running call counts its time: one that asks or went quiet is not at work.
+  // Only a running call counts its time: one that asks or went quiet is not at work. Nor
+  // does one whose computer is offline: the last heard of it is often its own start, and
+  // a time held there ("<0.1 s") would read as a measure.
+  const offline = useTimeline().control?.online === false;
   const msv = item.ended
     ? (item.ended.data.ms as number | undefined)
-    : status === "run"
+    : status === "run" && !offline
       ? now - ms(item.started?.time)
       : undefined;
   const input = lens >= 3 ? (item.ended?.data.input ?? item.started?.data.input) : undefined;
@@ -2913,6 +2931,12 @@ function runOf(item: AgentItem, agents: readonly AgentRun[]): AgentRun {
   };
 }
 
+/** Whether a subagent's calls with no end are over: it ended, or the turn that started it
+ *  was stopped (at `stoppedAt`, NaN when not known) and nothing of its own came since. One
+ *  heard from after the stop works on in the background. */
+const agentOver = (run: AgentRun, stoppedAt?: number): boolean =>
+  run.state === "done" || (stoppedAt !== undefined && !(ms(run.lastAt) > stoppedAt));
+
 /** A page of an agent's tools that came before the loaded ones. */
 const AGENT_PAGE = 50;
 
@@ -2923,15 +2947,28 @@ const AGENT_PAGE = 50;
  *  Open, its own tool rows on the tree guide, earlier ones a page at a time, then its
  *  result when the harness sent one. Open while it runs, folded once done, unless the
  *  person or the URL opened it. */
-function AgentBlock({ item, lens, now, fill }: { item: AgentItem; lens: Tier; now: number; fill: Fill }) {
+function AgentBlock({
+  item,
+  lens,
+  now,
+  fill,
+  stoppedAt,
+}: {
+  item: AgentItem;
+  lens: Tier;
+  now: number;
+  fill: Fill;
+  /** When the turn that started it was stopped (agentOver). */
+  stoppedAt?: number;
+}) {
   const store = useStore();
   const { agents, focus, session, mode, asking } = useTimeline();
   const run = runOf(item, agents);
   const focused = focus === item.id;
   // Its calls with no end follow the agent, not its parent: running while it runs, quiet
-  // when it went quiet, cut off once it is done; one an open prompt is about is asking.
+  // when it went quiet, cut off once it is over; one an open prompt is about is asking.
   const lookOf = (t: ToolItem): ToolLook | undefined =>
-    run.state === "done" ? undefined : asking.has(toolOf(t)) ? "ask" : run.state === "running" ? "run" : "quiet";
+    agentOver(run, stoppedAt) ? undefined : asking.has(toolOf(t)) ? "ask" : run.state === "running" ? "run" : "quiet";
   const [chosen, setChosen] = useState<boolean | null>(null);
   const open = chosen ?? (focused || run.state !== "done");
   const [older, setOlder] = useState<ToolItem[]>([]);

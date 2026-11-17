@@ -29,10 +29,19 @@ html:has(.main > .session) {
    what the session is doing is not known while nothing arrives. Its rings stop where they
    are, one quiet tier, and its clocks stand with them (lib/time.ts ClockHold), as the
    board's rows do; the shell's footer, the phone's pill and the line under the composer
-   say why. */
-:is([data-stream="down"] .session, .session[data-machine="offline"]) :is(.dot, .spinner) {
+   say why. With the computer offline the docked control still works (an answer or a
+   message waits for it), so its own rings, a press under way and the prompt's disc, are
+   left as they are. */
+[data-stream="down"] .session :is(.dot, .spinner),
+.session[data-machine="offline"] :is(.dot, .spinner):not(.sess-ctl *) {
   animation-play-state: paused;
   opacity: 0.55;
+}
+/* A session's events keep coming while its computer is offline (lib/offline.ts), so a
+   glyph that changes still settles in or draws its check, its first animation (shared.css
+   `.dot--arrive`); only a ring's turn stands. */
+.session[data-machine="offline"] .dot--arrive:not(.sess-ctl *) {
+  animation-play-state: running, paused;
 }
 .session {
   /* Where a row's text starts: a 16 px glyph, then 8 px. When a row happened is its turn

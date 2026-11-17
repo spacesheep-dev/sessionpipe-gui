@@ -12,7 +12,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { type BrowserContext, expect, type Page, test } from "@playwright/test";
+import { type BrowserContext, expect, type Locator, type Page, test } from "@playwright/test";
 import { E2E_PORT } from "../../playwright.config.js";
 import { CONTROL_BASE, fakeDaemon, passkeyPage, seenSetupHere, sinkToken } from "./control-helpers.js";
 import { composer, EVENTS, INFO, sessionUrl, ulid } from "./helpers.js";
@@ -609,6 +609,15 @@ async function simple(page: Page): Promise<void> {
   await page.reload();
   await live(page);
 }
+/** Where the tools line's words start. */
+const wordsAt = async (line: Locator): Promise<number> =>
+  (await line.locator(":scope > span:not([class])").boundingBox())!.x;
+/** Turn p0 ends, and its call with no end with it. */
+const endP0 = (s: Feed, tool: string, call: string) =>
+  s.post(
+    s.ev("tool.ended", { tool, call_id: call, turn_id: "p0", ok: true, ms: 900 }, "PostToolUse"),
+    s.ev("turn.ended", { turn_id: "p0", reason: "stop", background: 0 }, "Stop"),
+  );
 
 test.describe("a tool with no end, while nothing runs it", () => {
   test.use({ baseURL: BASE });
@@ -635,6 +644,7 @@ test.describe("a tool with no end, while nothing runs it", () => {
     await expect(line.locator(".dot--needs_you")).toHaveCount(1);
     await expect(line.locator(".spinner, .chev")).toHaveCount(0);
     await expect(view.locator(".tool-status.is-run")).toHaveCount(0);
+    const asking = await wordsAt(line);
     await line.click();
     const opened = view.locator(".chat-tools li.tool").last();
     await expect(opened).toBeVisible();
@@ -645,6 +655,12 @@ test.describe("a tool with no end, while nothing runs it", () => {
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
     await expect(dur).toHaveText(before!);
     expect(before).toBe("");
+
+    // Allowed, the call runs and the turn ends: the words stay where they were.
+    await s.post(s.ev("attention.cleared", { attention_id: "att_deploy", how: "answered" }, "PreToolUse"));
+    await endP0(s, "Bash", "toolu_d");
+    await expect(line).toHaveText("Ran 2 tools");
+    expect(Math.abs((await wordsAt(line)) - asking), "the words did not move").toBeLessThanOrEqual(1);
   });
 
   test("in a session gone quiet, it is quiet for as long as nothing came", async ({ page }) => {
@@ -673,6 +689,36 @@ test.describe("a tool with no end, while nothing runs it", () => {
     await expect(line).toHaveText(/^Bash · quiet for \d+ m/);
     await expect(line.locator(".dot--stale")).toHaveCount(1);
     await expect(line.locator(".spinner")).toHaveCount(0);
+    const quiet = await wordsAt(line);
+    await endP0(s, "Bash", "toolu_b");
+    await expect(line).toHaveText("Ran 1 tool");
+    expect(Math.abs((await wordsAt(line)) - quiet), "the words did not move").toBeLessThanOrEqual(1);
+  });
+
+  test("in a stopped turn, a subagent's call stops with it, unless the agent was heard from since", async ({
+    page,
+  }) => {
+    const s = new Feed(BASE, await demoToken(), "lab-mac", "Survey the cache paths", 60_000);
+    const agentTool = (agent: string, tool: string, call: string, o?: { ago: number }) =>
+      s.ev("tool.started", { tool, call_id: call, turn_id: "p0", agent_id: agent, input: {} }, "PreToolUse", o);
+    await s.post(
+      s.ev("session.started", { source: "startup" }, "SessionStart"),
+      s.ev("turn.started", { turn_id: "p0", prompt_chars: 24, submitted_by: "user" }, "UserPromptSubmit"),
+      s.ev("turn.progress", { turn: 0, user: "Survey the cache paths.", assistant: "" }, "UserPromptSubmit"),
+      s.ev("subagent.started", { agent_type: "Explore", agent_id: "ag_fg", turn_id: "p0" }, "SubagentStart"),
+      agentTool("ag_fg", "Grep", "toolu_g"),
+      s.ev("subagent.started", { agent_type: "general-purpose", agent_id: "ag_bg", turn_id: "p0" }, "SubagentStart"),
+      s.ev("turn.ended", { turn_id: "p0", reason: "interrupt", background: 1 }, "Stop", { ago: 3000 }),
+      // One in the background works on after the Esc.
+      agentTool("ag_bg", "Read", "toolu_b", { ago: 2000 }),
+    );
+    await page.goto(s.url);
+    await live(page);
+    const view = page.locator(".page.session");
+    const status = (agent: string) => view.locator(`.agent-block[data-agent="${agent}"] li.tool .tool-status`);
+    await expect(status("ag_bg")).toHaveAttribute("aria-label", "running");
+    await expect(status("ag_fg")).toHaveAttribute("aria-label", "stopped");
+    await expect(view.locator(".tool-status.is-run")).toHaveCount(1);
   });
 
   test("on a machine with no control, a working session's tool still runs, and the line starts where it will once it ran", async ({
@@ -689,19 +735,18 @@ test.describe("a tool with no end, while nothing runs it", () => {
     await expect(line).toHaveText("Running Bash");
     await expect(line.locator(".spinner")).toHaveCSS("animation-play-state", "running");
     await expect(view.locator(".turn--live .tool-status.is-run")).toHaveCount(1);
-    const x = async () => (await line.locator(":scope > span:not([class])").boundingBox())!.x;
-    const running = await x();
+    const running = await wordsAt(line);
     await endTurn(s);
     await expect(line).toHaveText("Ran 1 tool");
     await expect(line.locator(".spinner")).toHaveCount(0);
-    expect(Math.abs((await x()) - running), "the words did not move").toBeLessThanOrEqual(1);
+    expect(Math.abs((await wordsAt(line)) - running), "the words did not move").toBeLessThanOrEqual(1);
   });
 });
 
 test.describe("a tool with no end, its computer offline", () => {
   test.use({ baseURL: CONTROL_BASE });
 
-  test("its ring stands still, and so does its clock", async ({ context, page }) => {
+  test("its ring stands still and it shows no time; the control below still moves", async ({ context, page }) => {
     await seenSetupHere(context);
     const key = await passkeyPage(context, page);
     const d = await fakeDaemon(
@@ -718,9 +763,7 @@ test.describe("a tool with no end, its computer offline", () => {
         "tool.started",
         { tool: "Bash", call_id: "toolu_t", turn_id: "p0", input: { command: "npm test" } },
         "PreToolUse",
-        {
-          ago: 4000,
-        },
+        { ago: 4000 },
       ),
     );
     await page.clock.install();
@@ -732,10 +775,34 @@ test.describe("a tool with no end, its computer offline", () => {
     const row = view.locator(".turn--live li.tool").last();
     await expect(row.locator(".tool-status.is-run .spinner")).toHaveCSS("animation-play-state", "paused");
     await expect(ring(page)).toHaveCSS("animation-play-state", "paused");
-    const stood = await row.locator(".tool-dur").textContent();
+    // The last heard of the call is its own start: a time held there would read "<0.1 s".
+    await expect(row.locator(".tool-dur")).toHaveText("");
     await page.clock.fastForward(5000);
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-    await expect(row.locator(".tool-dur")).toHaveText(stood!);
+    await expect(row.locator(".tool-dur")).toHaveText("");
+
+    // It asks. The title's disc settles in (an arrival is not held) and stands dimmed with
+    // the session's rings; Allow still works (the answer waits for the computer), so the
+    // card's disc is not dimmed, nor would a press's spinner stand still.
+    await s.post(
+      s.ev(
+        "attention.needed",
+        { attention_id: "att_t", kind: "permission", tool: "Bash", message: "npm test" },
+        "PermissionRequest",
+      ),
+    );
+    await expect(ring(page)).toHaveClass(/dot--needs_you/);
+    await expect(ring(page)).toHaveCSS("opacity", "0.55");
+    const disc = page.locator(".sess-ctl .ctl-q .dot--needs_you");
+    await expect(disc).toBeVisible();
+    await expect(disc).toHaveCSS("opacity", "1");
+    await expect(disc).toHaveCSS("animation-play-state", "running");
+
+    // Over, the session has nothing that runs: nothing of it is dimmed.
+    await s.post(s.ev("attention.cleared", { attention_id: "att_t", how: "answered" }, "PreToolUse"));
+    await endP0(s, "Bash", "toolu_t");
+    await expect(view).not.toHaveAttribute("data-machine", /./);
+    await expect(ring(page)).toHaveCSS("opacity", "1");
     await d.stop();
   });
 });
