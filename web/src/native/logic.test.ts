@@ -28,28 +28,90 @@ const base: AppSettings = {
 };
 
 describe("the welcome's start", () => {
-  it("begins, follows progress, ends in the board or a reason", () => {
+  const starting: StartState = { kind: "starting", message: "Installing the background service…" };
+  /** What `rx_start_local` rejects with, as the shell serialises it (lifecycle/supervisor.rs
+   *  UpdateFailure: the kind, StartError's own words, the log a notRunning line names). */
+  const fail = (error: unknown) => startStep(starting, { type: "error", error });
+
+  it("begins and follows progress", () => {
     let s: StartState = { kind: "idle" };
     s = startStep(s, { type: "progress", message: "ignored before begin" });
     expect(s).toEqual({ kind: "idle" });
     s = startStep(s, { type: "begin" });
     expect(s).toEqual({ kind: "starting", message: "Starting sessionpipe…" });
     s = startStep(s, { type: "progress", step: "install", message: "Installing the background service…" });
-    expect(s).toEqual({ kind: "starting", message: "Installing the background service…" });
+    expect(s).toEqual(starting);
     s = startStep(s, { type: "progress", step: "wait", message: "  " });
-    expect(s).toEqual({ kind: "starting", message: "Installing the background service…" });
-    expect(startStep(s, { type: "error", error: "port 7373 is taken" })).toEqual({
-      kind: "failed",
-      message: "port 7373 is taken",
-    });
+    expect(s).toEqual(starting);
   });
-  it("no Node: the install line instead of an error", () => {
-    const s: StartState = { kind: "starting", message: "x" };
-    expect(startStep(s, { type: "progress", step: "no-node" })).toEqual({ kind: "needsNode" });
-    expect(startStep(s, { type: "error", error: { code: "no-node", message: "…" } })).toEqual({ kind: "needsNode" });
+  it("no Node: where to get it, by the shell's kind", () => {
+    expect(fail({ kind: "noNode", line: "sessionpipe needs Node 20 or later" })).toEqual({ kind: "needsNode" });
+  });
+  it("no Node, said in words alone: the same", () => {
+    // What the shell rejected with before it gave a kind, and never matched.
+    expect(fail("sessionpipe needs Node 20 or later")).toEqual({ kind: "needsNode" });
+    expect(isNoNode("sessionpipe needs Node 20 or later")).toBe(true);
+    expect(startStep(starting, { type: "progress", step: "no-node" })).toEqual({ kind: "needsNode" });
+    expect(fail({ code: "no-node", message: "…" })).toEqual({ kind: "needsNode" });
     expect(isNoNode(new Error("node not found on PATH"))).toBe(true);
     expect(isNoNode("no-node")).toBe(true);
     expect(isNoNode("launchctl failed")).toBe(false);
+  });
+  it("started and still loading: one sentence, and no line to unfold", () => {
+    expect(
+      fail({
+        kind: "timeout",
+        line: "sessionpipe started but isn't answering on port 7373 yet; a big board takes a while to load",
+      }),
+    ).toEqual({ kind: "failed", sentence: "Give it a minute to load, then try again." });
+  });
+  it("another install at work: waited for, and said not to have started only when nothing answers", () => {
+    const busy = fail({ kind: "busy", line: "an install or update is already running" });
+    expect(busy).toEqual({ kind: "busy", line: "an install or update is already running" });
+    expect(
+      fail({ kind: "stillRunning", line: "the update is still finishing; it carries on in the background" }),
+    ).toEqual({ kind: "busy", line: "the update is still finishing; it carries on in the background" });
+    // Progress from the run that was refused changes nothing.
+    expect(startStep(busy, { type: "progress", message: "Looking for Node…" })).toEqual(busy);
+    expect(startStep(busy, { type: "noAnswer" })).toEqual({
+      kind: "failed",
+      sentence: "It didn't start.",
+      detail: "an install or update is already running",
+    });
+    expect(startStep(starting, { type: "noAnswer" })).toEqual(starting);
+  });
+  it("anything else: it didn't start, with the shell's line kept for Details", () => {
+    expect(fail({ kind: "failed", line: "service install exited with 1" })).toEqual({
+      kind: "failed",
+      sentence: "It didn't start.",
+      detail: "service install exited with 1",
+    });
+    expect(
+      fail({ kind: "download", line: "couldn't download sessionpipe (npm error code E404); nothing was changed" }),
+    ).toEqual({
+      kind: "failed",
+      sentence: "It didn't start.",
+      detail: "couldn't download sessionpipe (npm error code E404); nothing was changed",
+    });
+    // The log goes under the line, unless the line names it already (the shell reads it from there).
+    const line = "sessionpipe-gui: 0.8.4 isn't running on :7373 after 90 s: see ~/s/service.log";
+    expect(fail({ kind: "notRunning", line, log: "~/s/service.log" })).toEqual({
+      kind: "failed",
+      sentence: "It didn't start.",
+      detail: line,
+    });
+    expect(fail({ kind: "notRunning", line: "it isn't running", log: "~/s/service.log" })).toEqual({
+      kind: "failed",
+      sentence: "It didn't start.",
+      detail: "it isn't running\n~/s/service.log",
+    });
+    // Words alone (a thrown Error, a string) are the line; nothing readable leaves nothing to unfold.
+    expect(fail(new Error("port 7373 is taken"))).toEqual({
+      kind: "failed",
+      sentence: "It didn't start.",
+      detail: "port 7373 is taken",
+    });
+    expect(fail(undefined)).toEqual({ kind: "failed", sentence: "It didn't start.", detail: "" });
   });
 });
 

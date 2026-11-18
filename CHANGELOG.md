@@ -234,6 +234,19 @@ pairing link that carries the board's key only for a pairing the sink token star
   "Show count on the Dock icon" is not shown, where it was greyed without a reason. On
   Windows and Linux "Menu bar only" is gone: all it did there was switch off the taskbar
   count.
+- **The desktop app's "Start sessionpipe" says what went wrong, in one sentence.** On a
+  computer without Node the welcome read "It didn't start: sessionpipe needs Node 20 or
+  later" and gave no next step. It now reads "Install Node 20 or later from nodejs.org,
+  then try again.", with the site as a link that opens in the browser, and Try again. A
+  start that failed reads "It didn't start."; the installer's own line is under Details,
+  with Copy. A receiver that started and is still loading its board reads "Give it a
+  minute to load, then try again." instead of being called not started, and while another
+  install or update is already running the button waits for it rather than being refused.
+  The button keeps the focus while it works, so Return tries again.
+- **The welcome and the phone's install steps no longer show `npx -y sessionpipe-gui
+  service install`.** The GUI is not on npm under that name, so the command could only
+  fail, or run whatever someone published there. Try again does what it was for; on the
+  phone, step 1 is "Download it from sessionpipe.org/gui."
 
 ## [0.8.4] - 2026-11-17
 

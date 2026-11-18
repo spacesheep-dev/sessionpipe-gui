@@ -148,13 +148,24 @@ struct Progress {
     message: String,
 }
 
+/// A refusal that is the app's own, in the shape the page reads a start or an update's by.
+fn failed(line: String) -> crate::lifecycle::supervisor::UpdateFailure {
+    crate::lifecycle::supervisor::UpdateFailure {
+        kind: "failed",
+        line,
+        log: None,
+    }
+}
+
+/// The welcome's "Start sessionpipe". It rejects as "Update sessionpipe" does, with the
+/// kind the page picks its one sentence by ("noNode", "timeout", "busy"…) and the raw line.
 #[tauri::command]
 async fn rx_start_local<R: Runtime>(
     window: WebviewWindow<R>,
     app: AppHandle<R>,
     on_progress: Channel<Progress>,
-) -> Result<ReceiverOut, String> {
-    main_only(&window)?;
+) -> Result<ReceiverOut, crate::lifecycle::supervisor::UpdateFailure> {
+    main_only(&window).map_err(failed)?;
     let r = crate::lifecycle::start_local_receiver(|step, message| {
         let _ = on_progress.send(Progress {
             step: step.into(),
@@ -162,10 +173,10 @@ async fn rx_start_local<R: Runtime>(
         });
     })
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| crate::lifecycle::supervisor::UpdateFailure::from(&e))?;
     let shell = app.state::<Shell>();
     shell.hub.add_transient(&r.origin);
-    out(&shell.hub, &r.id).ok_or_else(|| "gone".into())
+    out(&shell.hub, &r.id).ok_or_else(|| failed("gone".into()))
 }
 
 /// What the launch check found about this computer's receiver: its origin, the version it
@@ -188,11 +199,7 @@ async fn rx_update_local<R: Runtime>(
     Option<crate::lifecycle::supervisor::LocalUpdate>,
     crate::lifecycle::supervisor::UpdateFailure,
 > {
-    main_only(&window).map_err(|line| crate::lifecycle::supervisor::UpdateFailure {
-        kind: "failed",
-        line,
-        log: None,
-    })?;
+    main_only(&window).map_err(failed)?;
     crate::lifecycle::update_local_receiver(|step, message| {
         let _ = on_progress.send(Progress {
             step: step.into(),

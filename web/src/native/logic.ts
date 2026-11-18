@@ -2,6 +2,7 @@
 // The decisions behind the welcome, the first-run sheet and Settings › App, apart from
 // their React so they are tested on their own (logic.test.ts).
 import type { AppSettings, NotifyStatus } from "./appState";
+import type { UpdateFailure } from "./receiverUpdate";
 
 // ----- the welcome: Start sessionpipe on this Mac -----
 
@@ -9,12 +10,19 @@ export type StartState =
   | { kind: "idle" }
   | { kind: "starting"; message: string }
   | { kind: "needsNode" }
-  | { kind: "failed"; message: string };
+  /** Another install or update is at work from this app: its receiver is waited for
+   *  (StartHere.tsx). `line`: the shell's words for it, shown should nothing answer. */
+  | { kind: "busy"; line: string }
+  /** It ended with no receiver: one sentence. A start that failed has a `detail`, the
+   *  shell's raw line (and the log it names), kept folded away; one still loading has none. */
+  | { kind: "failed"; sentence: string; detail?: string };
 
 export type StartEvent =
   | { type: "begin" }
   | { type: "progress"; step?: string; message?: string }
-  | { type: "error"; error: unknown };
+  | { type: "error"; error: unknown }
+  /** The receiver another install was to bring never answered. */
+  | { type: "noAnswer" };
 
 const text = (e: unknown): string =>
   e instanceof Error
@@ -23,14 +31,26 @@ const text = (e: unknown): string =>
       ? e
       : e && typeof e === "object" && "message" in e
         ? String((e as { message: unknown }).message)
-        : "It did not start.";
+        : "";
 
-/** The start's failure for want of Node (no `node` or `npx` on this Mac). */
+/** The start's failure for want of Node (no `node` or `npx` on this Mac), by its words:
+ *  the shell says it by kind ("noNode"), and this reads what has no kind. */
 export const isNoNode = (e: unknown): boolean => {
   if (e && typeof e === "object" && (e as { code?: unknown }).code === "no-node") return true;
   const m = text(e);
-  return /\bno-node\b/.test(m) || /\bnode\b.*\b(not found|missing|required|needed)\b/i.test(m);
+  return (
+    /\bno-node\b/.test(m) || /\bneeds node\b/i.test(m) || /\bnode\b.*\b(not found|missing|required|needed)\b/i.test(m)
+  );
 };
+
+/** What `rx_start_local` rejected with: the shell's UpdateFailure (lifecycle/supervisor.rs:
+ *  a kind, its line, the log a line names), or words alone (a thrown Error, a string). */
+function startFailure(e: unknown): { kind?: UpdateFailure["kind"]; line: string; log?: string } {
+  if (e && typeof e === "object" && "kind" in e && "line" in e) return e as UpdateFailure;
+  return { line: text(e) };
+}
+
+const DID_NOT_START = "It didn't start.";
 
 export function startStep(prev: StartState, ev: StartEvent): StartState {
   switch (ev.type) {
@@ -40,13 +60,20 @@ export function startStep(prev: StartState, ev: StartEvent): StartState {
       if (prev.kind !== "starting") return prev;
       if (ev.step === "no-node") return { kind: "needsNode" };
       return { kind: "starting", message: ev.message?.trim() || prev.message };
-    case "error":
-      return isNoNode(ev.error) ? { kind: "needsNode" } : { kind: "failed", message: text(ev.error) };
+    case "error": {
+      const f = startFailure(ev.error);
+      if (f.kind === "noNode" || isNoNode(ev.error)) return { kind: "needsNode" };
+      // It did start, and its board is still loading: not a failure, and nothing to unfold.
+      if (f.kind === "timeout") return { kind: "failed", sentence: "Give it a minute to load, then try again." };
+      // Starting it again would only be refused.
+      if (f.kind === "busy" || f.kind === "stillRunning") return { kind: "busy", line: f.line };
+      const log = f.log && !f.line.includes(f.log) ? `\n${f.log}` : "";
+      return { kind: "failed", sentence: DID_NOT_START, detail: f.line + log };
+    }
+    case "noAnswer":
+      return prev.kind === "busy" ? { kind: "failed", sentence: DID_NOT_START, detail: prev.line } : prev;
   }
 }
-
-/** What to run once Node is there; shown with Copy. */
-export const INSTALL_COMMAND = "npx -y sessionpipe-gui service install";
 
 /** A pasted address or phone link, as `rx_add` takes it; null when it is not one. The
  *  link's `?k=` stays (it is the UI key the shell keeps in the Keychain). */

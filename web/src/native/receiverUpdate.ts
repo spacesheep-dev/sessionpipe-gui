@@ -19,9 +19,10 @@ export interface LocalUpdate {
   progress?: string;
 }
 
-/** lifecycle/supervisor.rs UpdateFailure: why "Update sessionpipe" didn't work. */
+/** lifecycle/supervisor.rs UpdateFailure: why "Update sessionpipe" didn't work, and the
+ *  welcome's "Start sessionpipe" (logic.ts startStep reads the same kinds). */
 export interface UpdateFailure {
-  kind: "notRunning" | "download" | "stillRunning" | "busy" | "failed";
+  kind: "noNode" | "timeout" | "notRunning" | "download" | "stillRunning" | "busy" | "failed";
   line: string;
   log?: string;
 }

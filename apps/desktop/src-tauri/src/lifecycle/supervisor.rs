@@ -1832,11 +1832,12 @@ pub fn update_tools(
     Ok(t)
 }
 
-/// What the page is told when "Update sessionpipe" didn't work.
+/// What the page is told when "Start sessionpipe" or "Update sessionpipe" didn't work.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateFailure {
-    /// "notRunning" (the old receiver was stopped and the new one isn't running),
+    /// "noNode" (no Node here to run it with), "timeout" (installed, and not answering
+    /// yet), "notRunning" (the old receiver was stopped and the new one isn't running),
     /// "download" (npx couldn't fetch it; nothing changed), "stillRunning" (still at work in
     /// the background), "busy", or "failed".
     pub kind: &'static str,
@@ -1850,6 +1851,8 @@ pub struct UpdateFailure {
 impl From<&StartError> for UpdateFailure {
     fn from(e: &StartError) -> Self {
         let kind = match e {
+            StartError::NoNode => "noNode",
+            StartError::Timeout(_) => "timeout",
             StartError::NotRunning(_) => "notRunning",
             StartError::Download(_) => "download",
             StartError::StillRunning => "stillRunning",
@@ -2785,6 +2788,33 @@ mod tests {
             update_with_cli(&npx_only, "0.8.1"),
             Err(StartError::NoNode)
         ));
+    }
+
+    /// The welcome picks its one sentence by the kind: a Mac without Node is told where to
+    /// get it, and a receiver that is still loading is never said not to have started.
+    #[test]
+    fn the_page_is_told_which_start_failed_by_kind_and_given_the_line() {
+        let f = UpdateFailure::from(&StartError::NoNode);
+        assert_eq!(
+            (f.kind, f.line.as_str(), f.log),
+            ("noNode", "sessionpipe needs Node 20 or later", None)
+        );
+        let f = UpdateFailure::from(&StartError::Timeout(7373));
+        assert_eq!(f.kind, "timeout");
+        assert!(f.line.contains("isn't answering on port 7373 yet"));
+        for (e, kind) in [
+            (StartError::Busy, "busy"),
+            (StartError::StillRunning, "stillRunning"),
+            (StartError::Download("npm error E404".into()), "download"),
+            (StartError::Failed("port 7373 is taken".into()), "failed"),
+        ] {
+            assert_eq!(UpdateFailure::from(&e).kind, kind);
+        }
+        // As the page reads it: camelCase, and no log where the line names none.
+        assert_eq!(
+            serde_json::to_value(UpdateFailure::from(&StartError::NoNode)).unwrap(),
+            serde_json::json!({ "kind": "noNode", "line": "sessionpipe needs Node 20 or later" })
+        );
     }
 
     #[test]

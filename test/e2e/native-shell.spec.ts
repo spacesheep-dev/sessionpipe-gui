@@ -17,8 +17,13 @@ interface FakeOptions {
   features?: string[];
   /** No receiver at first, and rx_discover finds this Mac's: "switch" plays the shell
    *  building a new window on it (a reload with the contract set), "stay" plays 0.3.1's
-   *  shell, which kept the welcome window and its first frame. */
-  discover?: "switch" | "stay";
+   *  shell, which kept the welcome window and its first frame. "none" finds nothing, and
+   *  "later" nothing until Start sessionpipe has been pressed. */
+  discover?: "switch" | "stay" | "none" | "later";
+  /** What each press of Start sessionpipe ends in, the last one for every press after it:
+   *  the failure rx_start_local rejects with (lifecycle/supervisor.rs UpdateFailure), or
+   *  "hang" for a start that sends one progress line and never ends. */
+  start?: StartOutcome[];
   /** The stream: "big" grows the receiver's snapshot past 400 KB (sessions cloned) on its
    *  way through the channel, as a busy Mac's is; "silent" opens and sends nothing;
    *  "down" fails every attempt. */
@@ -29,6 +34,8 @@ interface FakeOptions {
   settings?: Record<string, boolean>;
 }
 
+type StartOutcome = { kind: string; line: string; log?: string } | "hang";
+
 /** The fake shell, as an init script (runs before any page script, as the shell's does). */
 type FakeArgs = [
   boolean,
@@ -38,10 +45,11 @@ type FakeArgs = [
   FakeOptions["stream"],
   string,
   FakeOptions["settings"],
+  StartOutcome[] | undefined,
 ];
 
 function fakeShell() {
-  return ([hasReceiver, firstRunDone, features, discover, stream = "real", platform, saved]: FakeArgs) => {
+  return ([hasReceiver, firstRunDone, features, discover, stream = "real", platform, saved, start]: FakeArgs) => {
     const KINDS = [
       "snapshot",
       "event",
@@ -163,7 +171,20 @@ function fakeShell() {
             return { state: "ready", version: "0.3.1", lastChecked: new Date().toISOString() };
           case "rx_discover":
             if (!discover) throw new Error("fake shell: no rx_discover");
+            if (discover === "none" || (discover === "later" && !calls.some((c) => c.cmd === "rx_start_local")))
+              return { local: null };
             return { local: { id: "e2erx00001", name: "This Mac", origin: location.origin, local: true } };
+          case "rx_start_local": {
+            if (!start?.length) throw new Error("fake shell: no rx_start_local");
+            const nth = calls.filter((c) => c.cmd === "rx_start_local").length - 1;
+            const outcome = start[Math.min(nth, start.length - 1)] as StartOutcome;
+            if (outcome !== "hang") throw outcome;
+            send((args.onProgress as { id: number }).id, {
+              index: 0,
+              message: { step: "install", message: "Installing the background service…" },
+            });
+            return new Promise(() => {});
+          }
           case "rx_select":
             if (discover === "switch")
               setTimeout(() => {
@@ -192,6 +213,7 @@ async function openInShell(page: Page, path: string, opts: FakeOptions = {}) {
     opts.stream,
     opts.platform ?? "macos",
     opts.settings,
+    opts.start,
   ];
   await page.addInitScript(fakeShell(), arg);
   await page.goto(path);
@@ -500,6 +522,144 @@ test.describe("inside the native shell", () => {
     await page.getByRole("button", { name: "Try the demo" }).click();
     await expect(page).toHaveURL(/\?mock=1/);
     await expect(page.locator("section.group").first()).toBeVisible({ timeout: 15_000 });
+  });
+
+  // Start sessionpipe that didn't start (native/StartHere.tsx): one row, one sentence and
+  // one button in every state. The shell's words are lifecycle/supervisor.rs StartError's.
+  const startRow = (page: Page) => page.locator('[data-welcome="start"]');
+  const starts = async (page: Page) => (await calls(page)).filter((c) => c === "rx_start_local").length;
+
+  test("no Node on this Mac: the welcome says where to get it, and shows no command", async ({ page }) => {
+    await openInShell(page, "/", {
+      receiver: false,
+      start: [{ kind: "noNode", line: "sessionpipe needs Node 22.12 or later, or Node 20 from 20.19 on" }],
+    });
+    const row = startRow(page);
+    await row.getByRole("button", { name: "Start sessionpipe" }).click();
+    await expect(row.locator(".form-caption")).toHaveText(
+      "Install Node 22.12 or later (or Node 20 from 20.19 on) from nodejs.org, then try again.",
+    );
+    // Only the site's name is the link, and the shell opens it in the browser (a new window).
+    const link = row.getByRole("link");
+    await expect(link).toHaveText("nodejs.org");
+    await expect(link).toHaveAttribute("href", "https://nodejs.org/en/download");
+    await expect(link).toHaveAttribute("target", "_blank");
+    // No command to run by hand (the one there was named a package npm doesn't have), no Details.
+    await expect(page.locator(".cmdwell")).toHaveCount(0);
+    await expect(page.locator("main")).not.toContainText("npx");
+    await expect(row.locator("details")).toHaveCount(0);
+    // One button, and it starts again.
+    await expect(row.getByRole("button")).toHaveCount(1);
+    expect(await starts(page)).toBe(1);
+    await row.getByRole("button", { name: "Try again" }).click();
+    await expect.poll(() => starts(page)).toBe(2);
+    await expect(row.getByRole("button", { name: "Try again" })).toBeEnabled();
+  });
+
+  test("a start that failed: one sentence, the raw line under Details, and Try again starts over", async ({ page }) => {
+    const line =
+      "couldn't download sessionpipe (npm error 404 Not Found - GET https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe-gui-0.3.0.tgz); nothing was changed";
+    await openInShell(page, "/", { receiver: false, start: [{ kind: "download", line }, "hang"] });
+    const row = startRow(page);
+    // From the keyboard, as Return on the window's first button.
+    await row.getByRole("button", { name: "Start sessionpipe" }).focus();
+    await page.keyboard.press("Enter");
+    const caption = row.locator(".form-caption");
+    await expect(caption).toHaveText("It didn't start.");
+    await expect(caption).toHaveClass(/welcome-error/);
+    await expect(caption).toHaveAttribute("aria-live", "polite");
+    // The button kept the focus through the start (a disabled one would have dropped it).
+    const again = row.getByRole("button", { name: "Try again" });
+    await expect(again).toBeFocused();
+    // The raw line is folded away, outside what is read out, until Details is opened.
+    const details = row.locator("details");
+    await expect(details).not.toHaveAttribute("open");
+    await expect(row.getByText(line)).toBeHidden();
+    expect(await caption.evaluate((el) => el.contains(document.querySelector("details")))).toBe(false);
+    await details.locator("summary").click();
+    await expect(row.getByText(line)).toBeVisible();
+    await expect(row.getByRole("button", { name: "Copy details" })).toBeVisible();
+    // It wraps inside the row instead of scrolling sideways.
+    const well = details.locator(".cmdwell-text");
+    expect(await well.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    // Return on the button tries again: back to the progress line, the Details gone, and
+    // the focus still on it.
+    await again.focus();
+    await page.keyboard.press("Enter");
+    await expect(caption).toHaveText("Installing the background service…");
+    await expect(caption).not.toHaveClass(/welcome-error/);
+    await expect(details).toHaveCount(0);
+    expect(await starts(page)).toBe(2);
+    const working = row.getByRole("button", { name: "Start sessionpipe" });
+    await expect(working).toBeDisabled();
+    await expect(working).toHaveAttribute("aria-busy", "true");
+    await expect(working).toBeFocused();
+    // Pressing it while it works starts nothing more.
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Space");
+    expect(await starts(page)).toBe(2);
+  });
+
+  test("started, and still loading: said in the caption's own colour, with nothing to unfold", async ({ page }) => {
+    await openInShell(page, "/", {
+      receiver: false,
+      start: [
+        {
+          kind: "timeout",
+          line: "sessionpipe started but isn't answering on port 7373 yet; a big board takes a while to load",
+        },
+      ],
+    });
+    const row = startRow(page);
+    await row.getByRole("button", { name: "Start sessionpipe" }).click();
+    const caption = row.locator(".form-caption");
+    await expect(caption).toHaveText("Give it a minute to load, then try again.");
+    await expect(caption).not.toHaveClass(/welcome-error/);
+    await expect(row.locator("details")).toHaveCount(0);
+    await expect(row.getByRole("button", { name: "Try again" })).toBeEnabled();
+  });
+
+  test("another install at work: the button waits, and the receiver it brings is taken", async ({ page }) => {
+    await page.clock.install();
+    await openInShell(page, "/", {
+      receiver: false,
+      discover: "later",
+      start: [{ kind: "busy", line: "an install or update is already running" }],
+    });
+    const row = startRow(page);
+    await row.getByRole("button", { name: "Start sessionpipe" }).click();
+    // Pressing again would only be refused: it reads as starting, and can't be pressed.
+    const button = row.getByRole("button");
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveAttribute("aria-busy", "true");
+    await expect(row.locator(".form-caption")).toHaveText("Starting sessionpipe…");
+    expect(await calls(page)).not.toContain("rx_select");
+    // Two seconds on it looks for the receiver, finds it and hands the window to it.
+    await page.clock.fastForward(2000);
+    await expect.poll(() => calls(page)).toContain("rx_select");
+    expect(await starts(page)).toBe(1);
+  });
+
+  test("another install that brings no receiver in two minutes: it didn't start, Try again", async ({ page }) => {
+    await page.clock.install();
+    await openInShell(page, "/", {
+      receiver: false,
+      discover: "none",
+      start: [{ kind: "stillRunning", line: "the update is still finishing; it carries on in the background" }],
+    });
+    const row = startRow(page);
+    await row.getByRole("button", { name: "Start sessionpipe" }).click();
+    await expect(row.getByRole("button")).toBeDisabled();
+    const asked = async () => (await calls(page)).filter((c) => c === "rx_discover").length;
+    const atLaunch = await asked();
+    await page.clock.fastForward(2000);
+    await expect.poll(asked).toBe(atLaunch + 1);
+    await expect(row.locator(".form-caption")).toHaveText("Starting sessionpipe…");
+    await page.clock.fastForward(120_000);
+    await expect(row.locator(".form-caption")).toHaveText("It didn't start.");
+    await expect(row.getByRole("button", { name: "Try again" })).toBeEnabled();
+    await row.locator("summary").click();
+    await expect(row.getByText("the update is still finishing; it carries on in the background")).toBeVisible();
   });
 
   test("on Windows the welcome says this computer, not this Mac", async ({ page }) => {
