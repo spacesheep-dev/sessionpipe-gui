@@ -14,6 +14,9 @@ import { openInPhone } from "./phone-shell.js";
 interface FakeOptions {
   receiver?: boolean;
   firstRunDone?: boolean;
+  /** What the system says of the app's notifications ("undetermined" unless said), and
+   *  the app's own switch and pause as settings.json holds them (off, not paused). */
+  notify?: { status?: "granted" | "denied"; enabled?: boolean; pausedUntil?: string };
   features?: string[];
   /** No receiver at first, and rx_discover finds this Mac's: "switch" plays the shell
    *  building a new window on it (a reload with the contract set), "stay" plays 0.3.1's
@@ -81,6 +84,7 @@ function fakeShell() {
     const streams = new Map<number, EventSource>();
     let next = 1;
     const calls: { cmd: string; args: Record<string, unknown> }[] = [];
+    const notify = (w.__notify ?? {}) as NonNullable<FakeOptions["notify"]>;
     const settings = {
       launchAtLogin: false,
       menuBar: true,
@@ -88,7 +92,7 @@ function fakeShell() {
       keepRunning: true,
       menuBarOnly: false,
       hotkey: null as string | null,
-      notifications: { enabled: false, kinds: {}, pausedUntil: null },
+      notifications: { enabled: !!notify.enabled, kinds: {}, pausedUntil: notify.pausedUntil ?? null },
       firstRunDone,
       autoUpdate: true,
       ...saved,
@@ -164,9 +168,11 @@ function fakeShell() {
             settings.firstRunDone = true;
             return null;
           case "app_notify_status":
-            return "undetermined";
+            return notify.status ?? "undetermined";
           case "app_notify_request":
-            return "granted";
+            return notify.status ?? "granted";
+          case "app_notify_open_settings":
+            return null;
           case "app_update_status":
             return { state: "ready", version: "0.3.1", lastChecked: new Date().toISOString() };
           case "rx_discover":
@@ -217,6 +223,11 @@ function fakeShell() {
 const NAVIGATOR: Record<string, string> = { windows: "Win32", linux: "Linux x86_64" };
 
 async function openInShell(page: Page, path: string, opts: FakeOptions = {}) {
+  // Read by the fake shell as it starts (an init script of its own, before the shell's).
+  if (opts.notify)
+    await page.addInitScript((n) => {
+      (window as unknown as { __notify: unknown }).__notify = n;
+    }, opts.notify);
   const arg: FakeArgs = [
     opts.receiver ?? true,
     opts.firstRunDone ?? true,
@@ -782,6 +793,364 @@ test.describe("inside the native shell", () => {
     await expect(page.getByText("so this computer's sessions show up here")).toBeVisible();
     await expect(page.getByText("Nothing leaves this computer.")).toBeVisible();
     await expect(page.locator("main")).not.toContainText("Mac");
+  });
+});
+
+// The Mac app posts a prompt's notification itself (apps/desktop macos/notify.rs): there is
+// one switch for it, in Settings › Notifications, in the app's own words; the Inbox's bell
+// and note follow that switch and what macOS allows; and a prompt macOS sounds for is not
+// sounded a second time by its toast.
+test.describe("notifications in the Mac app", () => {
+  const SWITCH = "Notify me when a session needs me";
+  const ON = { status: "granted", enabled: true } as const;
+
+  const openPane = async (page: Page, opts: FakeOptions = {}) => {
+    await openInShell(page, "/settings?section=notifications", opts);
+    const pane = page.getByRole("tabpanel", { name: "Notifications" });
+    await expect(pane.getByText("Sounds for")).toBeVisible({ timeout: 15_000 });
+    return pane;
+  };
+  /** The notifications half of the settings the page last sent to app_settings_set. */
+  const sent = (page: Page) =>
+    page.evaluate(() => {
+      type Call = { cmd: string; args: { settings?: { notifications?: Record<string, unknown> } } };
+      const all = (window as unknown as { __calls: Call[] }).__calls;
+      return all.filter((c) => c.cmd === "app_settings_set").at(-1)?.args.settings?.notifications ?? null;
+    });
+
+  test("Settings › Notifications has the one switch, with Pause and the kinds while it is on; App has none", async ({
+    page,
+  }) => {
+    const pane = await openPane(page);
+    await expect(pane.getByRole("switch", { name: /Notify me/ })).toHaveCount(1);
+    const one = pane.getByRole("switch", { name: SWITCH, exact: true });
+    await expect(one).toHaveAttribute("aria-checked", "false");
+    // Off: nothing to pause and no kinds to choose.
+    await expect(pane.locator(".settings-label")).toHaveText([
+      SWITCH,
+      "Sounds",
+      "Volume",
+      "Permission requests",
+      "Questions",
+      "Errors",
+      "Delivered",
+      "Your own sound",
+    ]);
+    // Turning it on asks macOS then, never before.
+    expect(await calls(page)).not.toContain("app_notify_request");
+    await one.click();
+    await expect(one).toHaveAttribute("aria-checked", "true");
+    expect(await calls(page)).toContain("app_notify_request");
+    expect(await sent(page)).toMatchObject({ enabled: true });
+    await expect(pane.getByRole("combobox", { name: "Pause notifications" })).toHaveText("Not paused");
+    const about = pane.getByRole("region", { name: "Notify me about" });
+    await expect(about.locator(".settings-label")).toHaveText([
+      "Permission requests",
+      "Questions",
+      "Errors",
+      "Finished, waiting for you",
+    ]);
+    await expect(about.getByRole("switch", { name: "Finished, waiting for you" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    await about.getByRole("switch", { name: "Errors" }).click();
+    expect(await sent(page)).toMatchObject({ enabled: true, kinds: { error: false } });
+    // Four panels: the switch, what it notifies about, then the sounds.
+    await expect(pane.locator(".settings-group-label")).toHaveText(["Notify me about", "Sounds for"]);
+    await expect(pane.getByRole("switch", { name: "Sounds" })).toBeVisible();
+    // Nothing of the page's own switch: no tab, no browser, no site.
+    await expect(pane.locator(".ntf-row[data-row='notify']")).toHaveCount(0);
+    expect(await pane.innerText()).not.toMatch(/\btab\b|browser|this site/i);
+
+    await page.getByRole("tab", { name: "App" }).click();
+    const app = page.getByRole("tabpanel", { name: "App" });
+    await expect(app.getByRole("switch", { name: "Open at login" })).toBeVisible();
+    await expect(app.getByRole("switch", { name: /Notify me/ })).toHaveCount(0);
+    await expect(app.getByRole("region", { name: "Notifications" })).toHaveCount(0);
+  });
+
+  test("refused by macOS: one row with Open System Settings, and no switch", async ({ page }) => {
+    const pane = await openPane(page, { notify: { status: "denied", enabled: true } });
+    const off = pane.locator(".settings-group").first();
+    await expect(off.locator(".settings-row")).toHaveCount(1);
+    await expect(off.locator(".settings-label")).toHaveText("Notifications are off for sessionpipe");
+    await expect(off.locator(".settings-hint")).toHaveCount(0);
+    await expect(pane.getByRole("switch", { name: /Notify me/ })).toHaveCount(0);
+    await expect(pane.getByRole("region", { name: "Notify me about" })).toHaveCount(0);
+    await expect(pane.getByText("Pause")).toHaveCount(0);
+    expect(await calls(page)).not.toContain("app_notify_open_settings");
+    await off.getByRole("button", { name: "Open System Settings" }).click();
+    await expect.poll(() => calls(page)).toContain("app_notify_open_settings");
+    // The sounds are the page's own: still there.
+    await expect(pane.getByRole("switch", { name: "Sounds" })).toBeVisible();
+  });
+
+  test("a pause is one row, Paused until, with Resume", async ({ page }) => {
+    const pane = await openPane(page, { notify: ON });
+    const pause = pane.getByRole("combobox", { name: "Pause notifications" });
+    await pause.click();
+    await expect(page.getByRole("listbox").getByRole("option")).toHaveText([
+      "Not paused",
+      "For 1 hour",
+      "Until tomorrow",
+    ]);
+    await page.getByRole("option", { name: "Until tomorrow" }).click();
+    // 8 in the morning, by the day's short name (the suite runs in UTC).
+    const row = pane.locator(".settings-row").filter({ hasText: "Paused until" });
+    await expect(row.locator(".settings-label")).toHaveText(/^Paused until [A-Z][a-z]{2} 8:00 AM$/);
+    await expect(row.locator(".settings-hint")).toHaveCount(0);
+    await expect(pause).toHaveCount(0);
+    expect(Date.parse((await sent(page))?.pausedUntil as string)).toBeGreaterThan(Date.now());
+    // The switch and the kinds stay: it is still on, only quiet for now.
+    await expect(pane.getByRole("switch", { name: SWITCH, exact: true })).toHaveAttribute("aria-checked", "true");
+    await expect(pane.getByRole("region", { name: "Notify me about" })).toBeVisible();
+    await row.getByRole("button", { name: "Resume" }).click();
+    await expect(pause).toHaveText("Not paused");
+    await expect(row).toHaveCount(0);
+    expect(await sent(page)).toMatchObject({ enabled: true, pausedUntil: null });
+  });
+
+  test("a pause set elsewhere shows as paused", async ({ page }) => {
+    const pausedUntil = new Date(Date.now() + 3_600_000).toISOString();
+    const pane = await openPane(page, { notify: { ...ON, pausedUntil } });
+    await expect(pane.getByText(/^Paused until /)).toBeVisible();
+    await expect(pane.getByRole("button", { name: "Resume" })).toBeVisible();
+    await expect(pane.getByRole("combobox", { name: "Pause notifications" })).toHaveCount(0);
+  });
+
+  test("the Inbox's bell follows the app's switch, and its note macOS", async ({ page }) => {
+    await openInShell(page, "/inbox", { notify: ON });
+    const head = page.locator(".inbox-head");
+    const bell = head.getByRole("button", { name: "Notifications" });
+    // On and allowed: not struck through, and nothing said under the bar.
+    await expect(bell).toHaveAttribute("data-notify", "on", { timeout: 15_000 });
+    const note = page.locator(".inbox-notes .notify-hint");
+    await expect(note).toHaveCount(0);
+    await bell.click();
+    const toggle = head.getByRole("switch", { name: "Notify me" });
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await expect(head.locator(".notify-hint")).toHaveText("When a prompt needs you and the app is in the background.");
+    // Off from here is the same switch: the bell is struck, and still nothing under the bar.
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await expect(bell).toHaveAttribute("data-notify", "off");
+    expect(await sent(page)).toMatchObject({ enabled: false });
+    await expect(note).toHaveCount(0);
+  });
+
+  test("the Inbox says it once when the switch is on and macOS refuses", async ({ page }) => {
+    await openInShell(page, "/inbox", { notify: { status: "denied", enabled: true } });
+    const note = page.locator(".inbox-notes .notify-hint");
+    await expect(note).toContainText("Notifications are off for sessionpipe", { timeout: 15_000 });
+    await expect(note).not.toContainText("this site");
+    await expect(page.locator(".inbox-head").getByRole("button", { name: "Notifications" })).toHaveAttribute(
+      "data-notify",
+      "off",
+    );
+    await note.getByRole("button", { name: "Open System Settings" }).click();
+    await expect.poll(() => calls(page)).toContain("app_notify_open_settings");
+    // In the bell's popover the switch can't be turned on, and says where to allow it.
+    await page.locator(".inbox-head").getByRole("button", { name: "Notifications" }).click();
+    await expect(page.locator(".inbox-head").getByRole("switch", { name: "Notify me" })).toBeDisabled();
+    await expect(page.locator(".inbox-head .notify-hint")).toHaveText("Off for sessionpipe in System Settings.");
+  });
+
+  test("on Windows, where the app has no notifier, the pane is the page's own and App has no switch", async ({
+    page,
+  }) => {
+    // What the Windows and Linux shells list (apps/desktop window.rs features).
+    const opts = { platform: "windows", features: ["tray", "hotkey", "deeplink", "updater"] };
+    await openInShell(page, "/settings?section=notifications", opts);
+    const pane = page.getByRole("tabpanel", { name: "Notifications" });
+    await expect(pane.getByRole("switch", { name: "Notify me", exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(pane.getByRole("switch", { name: SWITCH, exact: true })).toHaveCount(0);
+    await expect(pane.getByRole("region", { name: "Notify me about" })).toHaveCount(0);
+    await page.getByRole("tab", { name: "App" }).click();
+    const app = page.getByRole("tabpanel", { name: "App" });
+    await expect(app.getByRole("button", { name: "Record shortcut" })).toBeVisible();
+    await expect(app.getByRole("switch", { name: /Notify me/ })).toHaveCount(0);
+    await expect(app.getByRole("button", { name: /^Open .*Settings$/ })).toHaveCount(0);
+    expect(await calls(page)).not.toContain("app_notify_status");
+  });
+
+  // An AudioContext that notes the first frequency of each oscillator it starts, which
+  // names the sound: 880 Hz is the two-note chime of a permission request, 150 Hz the thud
+  // of an error (web/src/lib/soundSynth.ts). The demo's own toasts sound too, so the
+  // tests count by sound, not in all.
+  const stubAudio = (page: Page) =>
+    page.addInitScript(() => {
+      const heard: number[] = [];
+      (window as unknown as { __heard: number[] }).__heard = heard;
+      class Param {
+        first: number | null = null;
+        setValueAtTime(v: number) {
+          this.first ??= v;
+          return this;
+        }
+        linearRampToValueAtTime() {
+          return this;
+        }
+        exponentialRampToValueAtTime() {
+          return this;
+        }
+      }
+      class Node {
+        connect() {
+          return this;
+        }
+      }
+      class Osc extends Node {
+        type = "sine";
+        frequency = new Param();
+        start() {
+          heard.push(this.frequency.first ?? 0);
+        }
+        stop() {}
+      }
+      class Gain extends Node {
+        gain = new Param();
+      }
+      class Ctx {
+        state = "running";
+        currentTime = 0;
+        destination = new Node();
+        resume() {
+          return Promise.resolve();
+        }
+        addEventListener() {}
+        createOscillator() {
+          return new Osc();
+        }
+        createGain() {
+          return new Gain();
+        }
+      }
+      Object.defineProperty(window, "AudioContext", { value: Ctx, configurable: true });
+    });
+  const CHIME = 880;
+  const THUD = 150;
+  const heard = (page: Page, hz: number) =>
+    page.evaluate((hz) => (window as unknown as { __heard: number[] }).__heard.filter((f) => f === hz).length, hz);
+  /** The window behind another app (or in front again), as document.hasFocus() says it. */
+  const inFront = (page: Page, yes: boolean) =>
+    page.evaluate((yes) => {
+      document.hasFocus = () => yes;
+    }, yes);
+  /** Behind another app from the first script on, so no sound from a moment in front is
+   *  still on its way when the test starts counting. */
+  const openBehind = async (page: Page, notify: FakeOptions["notify"]) => {
+    await stubAudio(page);
+    await page.addInitScript(() => {
+      document.hasFocus = () => false;
+    });
+    await openInShell(page, "/feed", { notify });
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    // The page has the app's switch and the system's answer (lib/systemSound.ts asks as it starts).
+    await expect.poll(() => calls(page)).toEqual(expect.arrayContaining(["app_settings_get", "app_notify_status"]));
+  };
+
+  /** A session on e2e-box whose events the test posts, as a sink would (toasts.spec.ts). */
+  const sink = async (page: Page, title: string) => {
+    const { sinkToken } = (await (await page.request.get(INFO)).json()) as { sinkToken: string };
+    const id = randomUUID();
+    const turn = randomUUID();
+    let seq = 0;
+    const post = async (type: string, data: Record<string, unknown>, hook: string) => {
+      const res = await page.request.post(EVENTS, {
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${sinkToken}`,
+          "sessionpipe-protocol": "1",
+        },
+        data: {
+          events: [
+            {
+              protocol: 1,
+              id: ulid(),
+              type,
+              time: new Date().toISOString(),
+              tier: 1,
+              harness: { name: "claude-code", version: "2.1.296", event: hook },
+              session: { id, seq: seq++, machine: "e2e-box", cwd: "~/code/e2e", title, title_source: "custom" },
+              privacy: { rulesets: ["secrets@1"], pii: false },
+              data,
+            },
+          ],
+        },
+      });
+      expect(res.status()).toBe(202);
+    };
+    await post("session.started", { source: "startup" }, "SessionStart");
+    await post("turn.started", { turn_id: turn, prompt_chars: 20 }, "UserPromptSubmit");
+    const open = new Set<string>();
+    return {
+      card: page.locator(`.toast[data-session="claude-code:${id}"]`),
+      async asks(message: string) {
+        const attention = `perm-${ulid()}`;
+        open.add(attention);
+        await post(
+          "attention.needed",
+          { attention_id: attention, kind: "permission", tool: "Bash", message },
+          "PermissionRequest",
+        );
+        return attention;
+      },
+      async answered(attention: string) {
+        open.delete(attention);
+        await post("attention.cleared", { attention_id: attention, how: "answered" }, "PreToolUse");
+      },
+      fails: () => post("turn.ended", { turn_id: turn, reason: "error", error: "api_overloaded", ms: 1200 }, "Stop"),
+      /** Cleared, so the inbox spec, which waits for nothing to be left to answer, is not left waiting. */
+      async done() {
+        for (const a of [...open]) await this.answered(a);
+      },
+    };
+  };
+
+  test("a prompt macOS sounds for plays no second sound; in front, and for an error, the toast's own plays", async ({
+    page,
+  }) => {
+    await openBehind(page, ON);
+    const s = await sink(page, `One sound ${randomUUID().slice(0, 6)}`);
+    try {
+      // Behind another app: macOS posts the banner with its sound, so the toast is silent.
+      const chimes = await heard(page, CHIME);
+      const behind = await s.asks("git push origin main");
+      await expect(s.card).toHaveClass(/toast--needs-you/);
+      await page.waitForTimeout(500);
+      expect(await heard(page, CHIME)).toBe(chimes);
+      await s.answered(behind);
+      await expect(s.card).toHaveCount(0);
+      // In front: macOS posts nothing, and the toast plays its chime.
+      await inFront(page, true);
+      const front = await s.asks("npm publish");
+      await expect(s.card).toHaveClass(/toast--needs-you/);
+      await expect.poll(() => heard(page, CHIME)).toBeGreaterThan(chimes);
+      await s.answered(front);
+      await expect(s.card).toHaveCount(0);
+      // An error's notification is posted silently, so its toast still sounds behind another app.
+      await inFront(page, false);
+      const thuds = await heard(page, THUD);
+      await s.fails();
+      await expect(s.card).toHaveClass(/toast--error/);
+      await expect.poll(() => heard(page, THUD)).toBeGreaterThan(thuds);
+    } finally {
+      await s.done();
+    }
+  });
+
+  test("while paused macOS posts nothing, so the toast keeps its sound", async ({ page }) => {
+    await openBehind(page, { ...ON, pausedUntil: new Date(Date.now() + 3_600_000).toISOString() });
+    const s = await sink(page, `Paused sound ${randomUUID().slice(0, 6)}`);
+    try {
+      const chimes = await heard(page, CHIME);
+      await s.asks("git push origin main");
+      await expect(s.card).toHaveClass(/toast--needs-you/);
+      await expect.poll(() => heard(page, CHIME)).toBeGreaterThan(chimes);
+    } finally {
+      await s.done();
+    }
   });
 });
 

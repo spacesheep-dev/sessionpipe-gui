@@ -124,6 +124,29 @@ export async function notifyToggle(
   return { enabled: false, note: null };
 }
 
+// ----- one sound per prompt -----
+
+/** Whether the Mac's own notification plays the sound for a new prompt of this kind (an
+ *  attention's `kind`), so the page's toast for it plays none. The shell's rule, kept
+ *  alike (apps/desktop macos/notify.rs on_needs_you, notifications.rs kind_on and content):
+ *  the switch on, allowed by macOS, not paused, the window not in front, that kind on,
+ *  and a kind macOS sounds for: a permission request or a question. An error and
+ *  "Finished" are posted silently, so their toast keeps its sound. */
+export function systemSounds(
+  settings: AppSettings | null,
+  status: NotifyStatus | null,
+  kind: string,
+  focused: boolean,
+  now = Date.now(),
+): boolean {
+  const n = settings?.notifications;
+  if (!n?.enabled || status !== "granted" || focused) return false;
+  if (n.pausedUntil && Date.parse(n.pausedUntil) > now) return false;
+  if (kind === "permission") return n.kinds?.permission ?? true;
+  if (kind === "question" || kind === "elicitation") return n.kinds?.question ?? true;
+  return false;
+}
+
 /** The suggested New session shortcut (NATIVE-SPEC §3.5). */
 export const DEFAULT_HOTKEY = "Control+Alt+N";
 

@@ -17,6 +17,13 @@ export function shellPlatform(): ShellPlatform | null {
   return typeof p === "string" && PLATFORMS.includes(p) ? (p as ShellPlatform) : null;
 }
 
+/** The app posts notifications itself (the shell lists "notifications": the Mac app and
+ *  the phone app, not Windows or Linux), so the page's own are not the ones to offer. */
+export const nativeNotify = (): boolean => {
+  const f = (globalThis as { sessionpipeShell?: { features?: unknown } }).sessionpipeShell?.features;
+  return shellPlatform() !== null && Array.isArray(f) && f.includes("notifications");
+};
+
 /** The phone app (iOS or Android), where the page is the whole screen and the person
  *  holds it in one hand; false on a desktop shell and in any browser, a phone's included. */
 export const phoneShell = (): boolean => {

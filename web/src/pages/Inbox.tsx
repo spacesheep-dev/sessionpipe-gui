@@ -186,7 +186,7 @@ export function Inbox() {
         ? {
             label: "Notify me",
             checked: app.enabled && app.status === "granted",
-            disabled: app.status === "denied" ? "Off for sessionpipe in Settings" : undefined,
+            disabled: app.status === "denied" ? `Off for sessionpipe in ${app.where}` : undefined,
             run: () => void (app.enabled && app.status === "granted" ? app.turnOff() : app.turnOn()),
           }
         : {

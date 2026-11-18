@@ -295,6 +295,28 @@ pairing link that carries the board's key only for a pairing the sink token star
 - **⌘1 to ⌘9 open a list's n-th item on a keyboard whose digits need Shift.** On an AZERTY
   keyboard the key types "&", which was read as another key. A shortcut recorded with ⌘ or
   Ctrl, Shift and a digit is now written with the digit (Ctrl+Shift+1, not Ctrl+!).
+- **The Mac app has one "Notify me" switch, in Settings › Notifications, and the Inbox's
+  bell follows it.** Settings › Notifications showed the browser's switch, which spoke of
+  "this tab" and could not be turned on in the app, while the one that works sat under App,
+  below the shortcut. Notifications now opens with "Notify me when a session needs me",
+  then Pause and what to notify about, then the sounds; App no longer has the group. A
+  pause is one row, "Paused until Thu 8:00 AM", with Resume, and the list's "Off" reads
+  "Not paused". When macOS refuses, the panel is one row, "Notifications are off for
+  sessionpipe", with Open System Settings, and no switch that can't be turned on. The
+  Inbox's bell was struck through with notifications on: the bell, its popover and the
+  Inbox's menu now read the same switch (in the phone app too), and the Inbox says
+  "Notifications are off for sessionpipe" only while the switch is on and macOS refuses.
+  On Windows and Linux, where the app posts no notifications, the switch that could only
+  be refused is gone from Settings › App and from the first-run sheet. In the phone app,
+  Settings › App keeps the switch without the kinds and Pause, which the phone never read.
+- **In the Mac app a prompt is heard once.** With the window behind another app, a
+  permission request or a question played the notification's sound and the banner's chime.
+  The banner in the window is silent now whenever macOS sounds its own; with the window in
+  front, while paused, and for an error or a finished session, whose notifications make no
+  sound, it plays as before.
+- **The sounds are named as the notifications are.** "Needs you", "Question", "Error" and
+  "Done" are "Permission requests", "Questions", "Errors" and "Delivered"; the sound
+  chosen for each is kept.
 
 ## [0.8.4] - 2026-11-17
 

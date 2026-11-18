@@ -4,38 +4,46 @@
 // lib/notify.ts; turning it on asks the browser once, a refusal there keeps it off) and
 // the way to the sounds. The bell is struck through while nothing will notify. The
 // switch on its own (NotifyToggle) stays for anywhere else that wants it. In the phone
-// app the notifications are the app's, not the page's (native/appState.ts): the same bell
-// and banner read the system's permission and the app's switch, "Turn on" asks the system
-// as Settings › App does, and a refusal there is "Open Settings", never the browser's words.
+// app and the Mac app the notifications are the app's, not the page's (native/appState.ts):
+// the same bell and banner read the system's permission and the app's switch, and a
+// refusal there is "Open Settings" ("Open System Settings" on a Mac), never the browser's
+// words. On the phone "Turn on" asks the system as Settings › App does; the Mac says
+// nothing under the bar while its switch is off: the struck bell says that.
 import { useEffect, useId, useReducer, useRef, useState } from "react";
-import { phoneShell, shellPlatform } from "../lib/device";
+import { nativeNotify, phoneShell, shellPlatform } from "../lib/device";
 import { usePresence } from "../lib/motion";
 import { type NotifyPermission, setNotifyPref, useNotifyPref } from "../lib/notify";
 import { Link } from "../lib/router";
+import { settingsApp } from "../native/logic";
 import { Notice, Toggle } from "./bits";
 
 type AppState = typeof import("../native/appState");
 let appState: Promise<AppState> | null = null;
-/** The app's stores, fetched once and only inside the phone app. */
+/** The app's stores, fetched once and only inside an app that notifies itself. */
 const loadAppState = (): Promise<AppState> => (appState ??= import("../native/appState"));
 
-/** The phone app's notifications: the system's permission and the app's own switch. */
+/** The app's notifications: the system's permission and the app's own switch. */
 export interface AppNotify {
   /** null until the shell has answered. */
   status: "granted" | "denied" | "undetermined" | null;
-  /** The app's switch ("Notify me when a session needs me", Settings › App). */
+  /** The app's switch ("Notify me when a session needs me", in Settings). */
   enabled: boolean;
-  /** Asks the system once (as Settings › App does), then turns the switch on. */
+  /** The phone app: it asks from the Inbox ("Turn on"); a computer's app does not. */
+  phone: boolean;
+  /** The system's own Settings as it is named here, where a refusal is undone. */
+  where: string;
+  /** Asks the system once (as the switch in Settings does), then turns the switch on. */
   turnOn(): Promise<void>;
   turnOff(): Promise<void>;
   /** The app's page in the system's Settings, where a refusal is undone. */
   openSettings(): void;
 }
 
-/** The app's notification state inside the phone app; null in a browser, and in a desktop
- *  shell, where the page's own notifications work. */
+/** The app's notification state inside an app that notifies itself (the phone app, the
+ *  Mac app); null in a browser, and on Windows and Linux, whose app has no notifier. */
 export function useAppNotify(): AppNotify | null {
-  const inApp = phoneShell();
+  const phone = phoneShell();
+  const inApp = phone || nativeNotify();
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const mod = useRef<AppState | null>(null);
   useEffect(() => {
@@ -65,6 +73,8 @@ export function useAppNotify(): AppNotify | null {
   return {
     status: m?.notify.get() ?? null,
     enabled: !!m?.settings.get()?.notifications.enabled,
+    phone,
+    where: settingsApp(shellPlatform()),
     turnOn: async () => {
       if (!m) return;
       const status = (await m.requestNotify()) ?? m.notify.get();
@@ -84,16 +94,19 @@ export function useAppNotify(): AppNotify | null {
 }
 
 /** Whether the page says, under the bar, that nothing will notify: the browser refused
- *  (or can't), or the phone app hasn't been allowed yet. */
+ *  (or can't), the phone app hasn't been allowed yet, or the Mac app's switch is on and
+ *  macOS refuses (with the switch off, the struck bell says it). */
 export const notifyBlocked = (app: AppNotify | null, permission: NotifyPermission): boolean =>
   app
-    ? app.status === "denied" || app.status === "undetermined"
+    ? app.phone
+      ? app.status === "denied" || app.status === "undetermined"
+      : app.enabled && app.status === "denied"
     : permission === "denied" || permission === "unsupported";
 
 const hintFor = (on: boolean, permission: string, app: AppNotify | null) =>
   app
     ? app.status === "denied"
-      ? "Off for sessionpipe in Settings."
+      ? `Off for sessionpipe in ${app.where}.`
       : on
         ? "When a prompt needs you and the app is in the background."
         : "A system notification when a prompt needs you."
@@ -125,7 +138,9 @@ export function NotifyToggle({ compact = false }: { compact?: boolean }) {
 
 /** The bell and its popover. */
 export function NotifyMenu() {
-  const { on } = useNotifyPref();
+  const browser = useNotifyPref();
+  const app = useAppNotify();
+  const on = app ? app.enabled && app.status === "granted" : browser.on;
   const [open, setOpen] = useState(false);
   const { mounted, closing } = usePresence(open);
   const wrap = useRef<HTMLDivElement>(null);
@@ -197,7 +212,8 @@ export function NotifyMenu() {
 
 /** "Notifications are off for this site · How to allow": the condition once, under the
  *  bar, with the steps behind the one button. In the phone app: "Notifications are off",
- *  with Turn on (the system's one question) or, once refused there, Open Settings. */
+ *  with Turn on (the system's one question) or, once refused there, Open Settings. In the
+ *  Mac app: "Notifications are off for sessionpipe", with Open System Settings. */
 export function NotifyBlocked({ permission, app = null }: { permission: NotifyPermission; app?: AppNotify | null }) {
   const [how, setHow] = useState(false);
   if (!notifyBlocked(app, permission)) return null;
@@ -212,11 +228,11 @@ export function NotifyBlocked({ permission, app = null }: { permission: NotifyPe
               className="btn btn--sm btn--ghost"
               onClick={() => (denied ? app.openSettings() : void app.turnOn())}
             >
-              {denied ? "Open Settings" : "Turn on"}
+              {denied ? `Open ${app.where}` : "Turn on"}
             </button>
           }
         >
-          Notifications are off
+          {app.phone ? "Notifications are off" : "Notifications are off for sessionpipe"}
         </Notice>
       </div>
     );

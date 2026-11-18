@@ -2,7 +2,9 @@
 // Settings › App (NATIVE-SPEC §3.9): the section only the native app has, in the
 // Settings window's own grammar (inset groups, a label and one caption per row, the
 // control on the trailing edge). Backed by the shell's app_settings_*, the receivers, the
-// notification permission, the updater and identity's signing panel.
+// notification permission, the updater and identity's signing panel. The app's own
+// notifications (SystemNotifications) are the phone's group here; on a Mac they lead
+// Settings › Notifications instead (components/NotificationsSettings.tsx), above the sounds.
 import { type ComponentType, lazy, Suspense, useEffect, useState } from "react";
 import { ActionButton, Toggle } from "../components/bits";
 import { Select } from "../components/Select";
@@ -70,7 +72,6 @@ export default function AppSettings() {
     void loadSettings();
     void loadReceivers();
     void loadUpdate();
-    void loadNotify();
   }, []);
   const set = (p: Partial<Settings>) => void patchSettings(p).catch(() => {});
   return (
@@ -132,7 +133,7 @@ export default function AppSettings() {
         </Group>
       )}
 
-      {f.has("notifications") && <NotificationsGroup s={s} set={set} />}
+      {f.has("notifications") && !desktop && <SystemNotifications full={false} />}
 
       {AccountGroup && (
         <Suspense fallback={null}>
@@ -154,80 +155,114 @@ export default function AppSettings() {
   );
 }
 
-function NotificationsGroup({ s, set }: { s: Settings | null; set: (p: Partial<Settings>) => void }) {
+/** The app's own notifications: the one switch, and on a computer (`full`) Pause and what
+ *  to notify about, which the phone's notifier does not read. A pause is one sentence with
+ *  Resume; a refusal by macOS is the whole panel, one row with the way to System Settings
+ *  and no switch that could only be refused. */
+export function SystemNotifications({ full }: { full: boolean }) {
+  const s = useCell(settings);
   const status = useCell(notify);
   const [note, setNote] = useState<string | null>(null);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    // In Settings › App (the phone) the section has asked for the settings itself.
+    if (full) void loadSettings();
+    void loadNotify();
+  }, [full]);
   const n = s?.notifications;
   const until = n?.pausedUntil ? Date.parse(n.pausedUntil) : Number.NaN;
   const paused = until > Date.now();
+  // The pause ends by itself: the row is the select again when it does.
+  useEffect(() => {
+    if (!paused) return;
+    const t = window.setTimeout(() => tick((x) => x + 1), until - Date.now());
+    return () => window.clearTimeout(t);
+  }, [paused, until]);
   const denied = status === "denied";
   const where = settingsApp(platform());
+  const set = (to: Partial<Settings["notifications"]>) => {
+    if (n) void patchSettings({ notifications: { ...n, ...to } }).catch(() => {});
+  };
+  const openSettings = (
+    <button
+      type="button"
+      className="btn btn--sm"
+      onClick={() => void invoke("app_notify_open_settings").catch(() => {})}
+    >
+      Open {where}
+    </button>
+  );
+  if (full && denied)
+    return (
+      <Group>
+        <Row label="Notifications are off for sessionpipe">{openSettings}</Row>
+      </Group>
+    );
+  const on = !!n?.enabled && !denied;
   return (
-    <Group label="Notifications" note={denied ? undefined : note}>
-      {denied && (
-        <Row label="Notifications are off for sessionpipe" hint={`Turn them on in ${where} › Notifications.`}>
-          <button
-            type="button"
-            className="btn btn--sm"
-            onClick={() => void invoke("app_notify_open_settings").catch(() => {})}
-          >
-            Open {where}
-          </button>
-        </Row>
-      )}
-      <Row label="Notify me when a session needs me">
-        <Toggle
-          label="Notify me when a session needs me"
-          on={!!n?.enabled && !denied}
-          disabled={!n || denied}
-          onChange={async (on) => {
-            const r = await notifyToggle(on, requestNotify, where);
-            setNote(r.note);
-            if (n) set({ notifications: { ...n, enabled: r.enabled } });
-          }}
-        />
-      </Row>
-      {n?.enabled &&
-        !denied &&
-        KINDS.map((k) => (
-          <Row key={k.kind} label={k.label}>
-            <Toggle
-              label={k.label}
-              on={n.kinds?.[k.kind] ?? k.kind !== "idle"}
-              onChange={(on) => set({ notifications: { ...n, kinds: { ...n.kinds, [k.kind]: on } } })}
-            />
+    <>
+      <Group label={full ? undefined : "Notifications"} note={denied ? undefined : note}>
+        {denied && (
+          <Row label="Notifications are off for sessionpipe" hint={`Turn them on in ${where} › Notifications.`}>
+            {openSettings}
           </Row>
-        ))}
-      {n?.enabled && !denied && (
-        <Row
-          label="Pause"
-          hint={
-            paused
-              ? `Until ${new Date(until).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`
-              : undefined
-          }
-        >
-          <Select<string>
-            className="settings-select"
-            size="sm"
-            align="end"
-            aria-label="Pause notifications"
-            value={paused ? "paused" : "off"}
-            options={[
-              { value: "off", label: paused ? "Resume" : "Off" },
-              { value: "hour", label: "For 1 hour" },
-              { value: "tomorrow", label: "Until tomorrow" },
-              ...(paused ? [{ value: "paused", label: "Paused" }] : []),
-            ]}
-            onChange={(v) => {
-              if (v === "paused") return;
-              const at = v === "hour" ? Date.now() + HOUR : v === "tomorrow" ? tomorrow() : null;
-              set({ notifications: { ...n, pausedUntil: at === null ? null : new Date(at).toISOString() } });
+        )}
+        <Row label="Notify me when a session needs me">
+          <Toggle
+            label="Notify me when a session needs me"
+            on={on}
+            disabled={!n || denied}
+            onChange={async (v) => {
+              const r = await notifyToggle(v, requestNotify, where);
+              setNote(r.note);
+              set({ enabled: r.enabled });
             }}
           />
         </Row>
+        {full && on && paused && (
+          <Row
+            label={`Paused until ${new Date(until).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`}
+          >
+            <button type="button" className="btn btn--sm" onClick={() => set({ pausedUntil: null })}>
+              Resume
+            </button>
+          </Row>
+        )}
+        {full && on && !paused && (
+          <Row label="Pause">
+            <Select<string>
+              className="settings-select"
+              size="sm"
+              align="end"
+              aria-label="Pause notifications"
+              value="off"
+              options={[
+                { value: "off", label: "Not paused" },
+                { value: "hour", label: "For 1 hour" },
+                { value: "tomorrow", label: "Until tomorrow" },
+              ]}
+              onChange={(v) => {
+                if (v !== "off")
+                  set({ pausedUntil: new Date(v === "hour" ? Date.now() + HOUR : tomorrow()).toISOString() });
+              }}
+            />
+          </Row>
+        )}
+      </Group>
+      {full && on && n && (
+        <Group label="Notify me about">
+          {KINDS.map((k) => (
+            <Row key={k.kind} label={k.label}>
+              <Toggle
+                label={k.label}
+                on={n.kinds?.[k.kind] ?? k.kind !== "idle"}
+                onChange={(v) => set({ kinds: { ...n.kinds, [k.kind]: v } })}
+              />
+            </Row>
+          ))}
+        </Group>
       )}
-    </Group>
+    </>
   );
 }
 

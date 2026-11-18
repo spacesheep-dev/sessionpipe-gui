@@ -12,6 +12,7 @@ import {
   type StartState,
   settingsApp,
   startStep,
+  systemSounds,
   trayPlace,
   updateHint,
   updateLine,
@@ -153,6 +154,39 @@ describe("the first-run sheet", () => {
     expect(settingsApp("macos")).toBe("System Settings");
     expect(settingsApp("windows")).toBe("Settings");
     expect(settingsApp("ios")).toBe("Settings");
+  });
+});
+
+// The shell's rule for a notification's sound (apps/desktop macos/notify.rs on_needs_you,
+// notifications.rs kind_on and content), so a prompt is heard once.
+describe("one sound per prompt", () => {
+  const now = Date.parse("2026-11-18T12:00:00Z");
+  const on = (n: Partial<AppSettings["notifications"]> = {}): AppSettings => ({
+    ...base,
+    notifications: { enabled: true, kinds: {}, pausedUntil: null, ...n },
+  });
+  const blurred = false;
+  it.each<[string, AppSettings | null, "granted" | "denied" | "undetermined" | null, string, boolean, boolean]>([
+    ["a permission request, the window behind another", on(), "granted", "permission", blurred, true],
+    ["a question", on(), "granted", "question", blurred, true],
+    ["an input request, which is a question's switch", on(), "granted", "elicitation", blurred, true],
+    ["the window in front: macOS posts nothing", on(), "granted", "permission", true, false],
+    ["the switch off", base, "granted", "permission", blurred, false],
+    ["macOS refuses", on(), "denied", "permission", blurred, false],
+    ["never asked", on(), "undetermined", "permission", blurred, false],
+    ["the permission not read yet", on(), null, "permission", blurred, false],
+    ["the settings not read yet", null, "granted", "permission", blurred, false],
+    ["paused", on({ pausedUntil: "2026-11-18T13:00:00Z" }), "granted", "permission", blurred, false],
+    ["a pause that is over", on({ pausedUntil: "2026-11-18T11:00:00Z" }), "granted", "question", blurred, true],
+    ["Permission requests off", on({ kinds: { permission: false } }), "granted", "permission", blurred, false],
+    ["Permission requests off, a question", on({ kinds: { permission: false } }), "granted", "question", blurred, true],
+    ["Questions off", on({ kinds: { question: false } }), "granted", "question", blurred, false],
+    ["Questions off, an input request", on({ kinds: { question: false } }), "granted", "elicitation", blurred, false],
+    ["an error is posted silently", on(), "granted", "error", blurred, false],
+    ["Finished is posted silently", on({ kinds: { idle: true } }), "granted", "idle", blurred, false],
+    ["a kind the shell doesn't know", on(), "granted", "plan", blurred, false],
+  ])("%s", (_name, settings, status, kind, focused, sounds) => {
+    expect(systemSounds(settings, status, kind, focused, now)).toBe(sounds);
   });
 });
 

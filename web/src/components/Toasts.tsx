@@ -13,7 +13,8 @@
 // On a phone it is iOS's banner (Banner.tsx), one at a time, the Inbox holding the
 // answers; "Hidden · Undo" sits at the bottom, by the thumb that just swiped. A session
 // set to Never (its own "Notify me", or a parent's) raises no banner, so no sound either;
-// it still waits in Needs you and the Inbox.
+// it still waits in Needs you and the Inbox. In the Mac app a prompt whose notification
+// macOS sounds for is a silent banner here (lib/systemSound.ts).
 import type { ControlActivity, SessionKey, SessionSummary, StoredEvent } from "@shared/api";
 import { splitKey } from "@shared/api";
 import { useEffect, useRef, useState } from "react";
@@ -26,6 +27,7 @@ import { SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath, usePath } from "../lib/ro
 import { useShortcut } from "../lib/shortcuts";
 import { installSoundUnlock, type SoundKind, useSounds } from "../lib/sounds";
 import { parseSplit } from "../lib/split";
+import { followSystemSound, systemSound } from "../lib/systemSound";
 import {
   dismissForSession,
   dismissToast,
@@ -89,7 +91,8 @@ function attentionToast(r: OpenAttention): Toast {
         : r.answerable
           ? "A permission request"
           : "Waiting in the terminal",
-    sound: soundFor(kind),
+    // In the Mac app the system's banner for this prompt plays the sound: once is enough.
+    sound: systemSound(a.kind) ? undefined : soundFor(kind),
     at: Date.now(),
   };
 }
@@ -267,6 +270,7 @@ function DesktopCard(p: Parameters<typeof ToastCardType>[0]) {
 export function Toasts() {
   useToastEffects();
   useEffect(() => installSoundUnlock(), []);
+  useEffect(followSystemSound, []);
   const list = useToasts();
   const { sessions, machines } = useAppState();
   const sounds = useSounds();

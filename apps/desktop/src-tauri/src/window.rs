@@ -55,9 +55,12 @@ pub fn rx_base(id: &str) -> String {
 }
 
 pub fn features() -> Vec<&'static str> {
-    let mut f = vec!["tray", "notifications", "hotkey", "deeplink", "updater"];
+    let mut f = vec!["tray", "hotkey", "deeplink", "updater"];
     if cfg!(target_os = "macos") {
         f.push("autostart");
+        // Only macOS has a notifier (macos/notify.rs). Elsewhere app_notify_* answer
+        // "denied", so the page would show a switch that can only be refused.
+        f.push("notifications");
     }
     if cfg!(feature = "identity") {
         f.push("signer");
@@ -338,6 +341,15 @@ pub fn open_view<R: Runtime>(app: &AppHandle<R>, receiver: &str, path: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notifications_are_offered_only_where_there_is_a_notifier() {
+        assert_eq!(
+            features().contains(&"notifications"),
+            cfg!(target_os = "macos")
+        );
+        assert!(features().contains(&"tray"));
+    }
 
     #[test]
     fn navigation_guard() {
