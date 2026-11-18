@@ -85,6 +85,9 @@ const HELD_MAX_MS: u64 = if cfg!(test) {
 } else {
     account::HELD_MAX_MS
 };
+/// How far this clock and spacesheep's may disagree: a code it calls expired this close
+/// to the end it gave may simply have run out.
+const CLOCK_SLACK_MS: u64 = 30_000;
 /// What the Hub counts across restarts (`Counts`), in its home.
 const COUNTS_FILE: &str = "account-limits.json";
 /// A connect answer, a poll answer: a few hundred bytes.
@@ -309,6 +312,7 @@ struct Live {
     origin: String,
     code: String,
     poll_token: String,
+    expires_at_ms: u64,
     deadline_ms: u64,
     kick: Arc<Notify>,
 }
@@ -1480,11 +1484,9 @@ impl Hub {
             pending.held = Some(held);
             ok
         } else {
-            let in_time = pending
-                .expires_at_ms
-                .saturating_add(account::CONNECT_COLLECT_MS)
-                > now;
-            match (in_time && same)
+            // However late: past its time the poll asks spacesheep once more and believes
+            // the answer (`connect_poll`).
+            match same
                 .then(|| account::parse_connect_answer(kept.as_bytes(), &origin, now).ok())
                 .flatten()
             {
@@ -1493,7 +1495,9 @@ impl Hub {
                     pending.poll_token = a.poll_token;
                     pending.digits = a.digits;
                     pending.url = a.url;
-                    pending.expires_at_ms = a.expires_at_ms;
+                    // The code ends when it was said to: a fresh answer's shortest time
+                    // is not given to one that ran out while the app was closed.
+                    pending.expires_at_ms = a.expires_at_ms.min(pending.expires_at_ms);
                     true
                 }
                 None => false,
@@ -1518,14 +1522,18 @@ impl Hub {
             origin: p.origin.clone(),
             code: p.code.clone(),
             poll_token: p.poll_token.clone(),
+            expires_at_ms: p.expires_at_ms,
             deadline_ms: p.expires_at_ms + account::CONNECT_COLLECT_MS,
             kick: p.kick.clone(),
         })
     }
 
-    /// The poll: until approved, denied or expired, never past the code's own end. A
-    /// failure to reach spacesheep backs off and tries again; so does coming back from
-    /// the background, where the wait simply ends late.
+    /// The poll: until approved, denied or expired. A failure to reach spacesheep backs
+    /// off and tries again; so does coming back from the background, where the wait
+    /// simply ends late. Past the code's end and the time to collect an approval after it
+    /// (by the wall clock: a phone asleep does not stop the code from expiring), it asks
+    /// once more and believes the answer, so a phone that comes back late still collects
+    /// an approval spacesheep holds for it.
     async fn connect_poll(self, gen: u64) {
         let mut backoff = Backoff::new();
         let mut delay = POLL_FIRST;
@@ -1540,11 +1548,7 @@ impl Hub {
             if self.connect_live(gen).is_none() {
                 return;
             }
-            // By the wall clock: a phone asleep does not stop the code from expiring.
-            if now_ms() > live.deadline_ms {
-                self.connect_finish(gen, ConnectState::Expired, None, None, None, false);
-                return;
-            }
+            let last = now_ms() > live.deadline_ms;
             let Some(auth) = bearer(&live.poll_token) else {
                 return;
             };
@@ -1560,6 +1564,8 @@ impl Hub {
                 .timeout(request_timeout())
                 .send()
                 .await;
+            // spacesheep's record of the code is gone (a 401 or a 404 is not that).
+            let gone = matches!(&sent, Ok(res) if res.status().as_u16() == 410);
             let answer = match sent {
                 Err(_) => PollAnswer::Retry { after_s: None },
                 Ok(res) => {
@@ -1573,6 +1579,11 @@ impl Hub {
                 }
             };
             match answer {
+                // The last poll heard no answer: the code's time is up.
+                PollAnswer::Pending | PollAnswer::Retry { .. } if last => {
+                    self.connect_finish(gen, ConnectState::Expired, None, None, None, false);
+                    return;
+                }
                 PollAnswer::Pending => {
                     backoff.reset();
                     delay = POLL_EVERY;
@@ -1589,8 +1600,12 @@ impl Hub {
                     self.connect_finish(gen, ConnectState::Denied, None, None, None, false);
                     return;
                 }
+                // spacesheep keeps a code nobody answered until its end. One it dropped
+                // before that was answered, and the answer not collected in time: for a
+                // yes, a key was made there, and it is the person's to revoke.
                 PollAnswer::Expired => {
-                    self.connect_finish(gen, ConnectState::Expired, None, None, None, false);
+                    let dropped = gone && now_ms() + CLOCK_SLACK_MS < live.expires_at_ms;
+                    self.connect_finish(gen, ConnectState::Expired, None, None, None, dropped);
                     return;
                 }
                 PollAnswer::Unreadable => {
@@ -1684,10 +1699,18 @@ impl Hub {
                 log::info!("acct: an approved account was never answered for; its key is dropped");
                 return self.connect_finish(gen, ConnectState::Expired, None, None, None, true);
             }
+            // Another person's account at this origin, which a yes replaces (`connect_keep`).
+            let id = crate::id::account_id(&origin, &held.email);
+            let replaces = self
+                .account_entries()
+                .into_iter()
+                .find(|r| r.origin == origin && r.id != id)
+                .and_then(|r| r.account.map(|a| a.email));
             let question = Question::Attach {
                 email: held.email.clone(),
                 origin: origin.clone(),
                 host: account::host_of(&origin),
+                replaces,
             };
             match self.account_ask(question).await {
                 Asked::Yes => return self.connect_keep(gen, &origin, &held).await,

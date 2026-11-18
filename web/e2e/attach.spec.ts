@@ -18,6 +18,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import { type Browser, type BrowserContext, expect, type Page, test } from "@playwright/test";
+import { composer } from "../../test/e2e/helpers.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const CONTROL = "/api/sessionpipe/v1/control";
@@ -244,7 +245,7 @@ async function paste(page: Page, files: Img[]): Promise<void> {
     };
     const dt = new DataTransfer();
     for (const i of imgs) dt.items.add(toFile(i));
-    const box = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message for the next turn"]')!;
+    const box = document.querySelector<HTMLTextAreaElement>(".ctl-ask textarea")!;
     let ev: ClipboardEvent;
     try {
       ev = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
@@ -367,7 +368,7 @@ test.afterAll(async () => {
 
 test("a pasted screenshot becomes a thumbnail; the sent text ends with the block naming its path on disk", async () => {
   await page.goto(`/s/claude-code/${SID}`);
-  const box = page.getByLabel("Message for the next turn");
+  const box = composer(page);
   await expect(box).toBeEnabled();
   // Ready: the one line under the field is the day grant's (paired, trusted, online).
   await expect(page.locator(".ctl-foot[data-reason=passkey] .ctl-hint")).toHaveText(
@@ -464,13 +465,13 @@ test("a 9 MB image is refused before and at the server", async () => {
   await expect(item.locator(".att-meta")).toHaveText("too large: 9 MB, limit 8 MB");
   // Nothing was uploaded for it, and Send will not take it.
   const before = (await (await fetch(`${base}/api/ui/info`)).json()) as { storage: { attachments: number } };
-  await page.getByLabel("Message for the next turn").fill("try anyway");
-  await page.getByLabel("Message for the next turn").press("Enter");
+  await composer(page).fill("try anyway");
+  await composer(page).press("Enter");
   await expect(page.locator(".att-note")).toContainText("remove the image that could not be attached");
   expect(await daemon.poll(0)).toEqual([]);
   await item.getByRole("button", { name: "Remove image" }).click();
   await expect(item).toHaveCount(0);
-  await page.getByLabel("Message for the next turn").fill("");
+  await composer(page).fill("");
 
   // Straight at the API, the server says the same.
   const big = new Uint8Array(9 * 1024 * 1024);
@@ -527,7 +528,7 @@ test("a 390 px phone composes with the native picker and the same thumbnails", a
   const item = p.locator(".att-item");
   await expect(item).toHaveAttribute("data-state", "ready", { timeout: 15_000 });
   await expect(item).toHaveAttribute("title", / · 640×480 · /);
-  await p.getByLabel("Message for the next turn").fill("From the phone");
+  await composer(p).fill("From the phone");
   await shot(p, "composer-thumbnail-phone", ".sess-ctl");
   await shot(p, "session-phone");
   await item.getByRole("button", { name: "Remove image" }).click();

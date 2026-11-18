@@ -19,9 +19,9 @@ export const DEFAULT_ORIGIN = "https://spacesheep.dev";
  *  - `busy`: another of the hub's questions is open on this phone;
  *  - `denied`: refused on spacesheep's page;
  *  - `declined`: refused here, in the hub's own question (a key was made there);
- *  - `expired`: nobody confirmed in time;
+ *  - `expired`: the code's time ran out before the account was kept;
  *  - `not-kept`: approved, and this phone could not keep the account;
- *  - `unexpected`: an answer this version cannot use. */
+ *  - `unexpected`: an answer this version cannot use, or a question the hub could not show. */
 export type Ended = "unreachable" | "wait" | "busy" | "denied" | "declined" | "expired" | "not-kept" | "unexpected";
 
 export type ConnectStep =
@@ -94,7 +94,6 @@ export function refusedWhy(error: unknown): Ended | null {
     case "rate_limited":
       return "wait";
     case "busy":
-    case "not_asked":
       return "busy";
     default:
       return "unexpected";

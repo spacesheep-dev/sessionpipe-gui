@@ -226,6 +226,10 @@ export interface MessageRow {
   kind: ControlKind;
   session: string;
   text?: string;
+  /** A permission answer's prompt and decision, as signed. A page on an account keeps no
+   *  `cmd`, so they are kept here; a receiver's row from before this field has them in its
+   *  `cmd` (toActivity reads them there). */
+  answer?: { for: string; decision: "allow" | "deny" };
   /** Who queued it: "ui" for the browser, "test-door" for the conformance door. */
   via: string;
   outcome?: ControlOutcome;
@@ -289,6 +293,8 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.text !== undefined) a.text = m.text;
   if (m.outcome) a.outcome = m.outcome;
   if (m.mode) a.mode = m.mode;
+  const answer = answerOf(m);
+  if (answer) a.answer = answer;
   if (m.code) a.code = m.code;
   // A row spacesheep carried has its job's note as its detail: outside text, kept as it
   // came and handed on as plain visible text (shared/reason.ts), here, where every reader
@@ -314,6 +320,24 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.from) a.from = m.from;
   if (m.unfollowed && !isFinal(m.outcome)) a.unfollowed = m.unfollowed === "revoked" ? "revoked" : "disconnected";
   return a;
+}
+
+/** A permission answer's prompt and decision: as the row keeps them, else as the signed
+ *  command says them (a receiver's row from before the row kept them). None for another
+ *  kind, or where neither says. */
+function answerOf(m: MessageRow): ControlActivity["answer"] {
+  if (m.kind !== "permission.answer") return undefined;
+  let said: unknown = m.answer;
+  if (!said && m.cmd)
+    try {
+      said = JSON.parse(m.cmd);
+    } catch {
+      return undefined;
+    }
+  const { for: id, decision } = (said ?? {}) as { for?: unknown; decision?: unknown };
+  return typeof id === "string" && id && (decision === "allow" || decision === "deny")
+    ? { for: id, decision }
+    : undefined;
 }
 
 /** What the UI shows of a command: its text, or a permission answer's decision and note. */
@@ -445,6 +469,8 @@ export function messageRow(
       ? describePool(cmd as unknown as PoolCommand, (id) => accountName(m, id))
       : describe(cmd);
   if (text !== undefined) row.text = text;
+  if (cmd.kind === "permission.answer" && typeof cmd.for === "string" && cmd.decision)
+    row.answer = { for: cmd.for, decision: cmd.decision };
   if ((cmd.kind as string) === "pool") {
     const c = cmd as unknown as PoolCommand;
     row.poolAction = c.pool_action;

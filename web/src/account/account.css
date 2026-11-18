@@ -1,52 +1,8 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* The phone's own screens for a spacesheep account: Settings › App's group
    (AccountSettings.tsx) and "Approve this iPhone" (ApprovePhone.tsx). Grouped panels as
-   the app's other grouped pages; a state is a mark and words, never colour alone. */
-
-/* A state: its mark, then its words. ok: a check; wait: a hollow ring; warn: a filled dot
-   in the colour that asks for a person. */
-.acct-state {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  color: var(--fg-2);
-  font-size: var(--text-sm);
-  line-height: var(--lh);
-  text-align: left;
-}
-.acct-state::before {
-  content: "";
-  flex: none;
-  /* Beside the first line, where the words run to a second. */
-  align-self: flex-start;
-  margin-top: 0.5em;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  border: 1.5px solid var(--fg-3);
-}
-.acct-state--ok {
-  color: var(--fg);
-}
-.acct-state--ok::before {
-  content: "\2713";
-  margin-top: 0.25em;
-  width: auto;
-  height: auto;
-  border: 0;
-  border-radius: 0;
-  font-size: 0.9em;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--ok-fg, var(--fg));
-}
-.acct-state--warn {
-  color: var(--fg);
-}
-.acct-state--warn::before {
-  border-color: var(--needs-fg);
-  background: var(--needs-fg);
-}
+   the app's other grouped pages; a state is a mark and words, never colour alone
+   (Mark.tsx, mark.css). */
 
 /* Connecting again from Settings: the first run's screens, over the app. */
 .acct-over {
@@ -183,17 +139,6 @@
   }
   .approve > .form-group + .form-group {
     margin-top: 16px;
-  }
-}
-
-/* Forced colours draw no background: the warn dot is filled by its own border there, so it
-   stays a dot and is not taken for the ring that says "waiting". */
-@media (forced-colors: active) {
-  .acct-state--warn::before {
-    width: 0;
-    height: 0;
-    border-width: 4px;
-    border-color: CanvasText;
   }
 }
 

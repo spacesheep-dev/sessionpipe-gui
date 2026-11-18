@@ -161,17 +161,26 @@ describe("UI API", () => {
     ).json()) as SessionDetail;
     expect(tail.events.map((e) => e.session.seq)).toEqual([1]);
     expect(tail).toMatchObject({ firstSeq: 1, hasOlder: true, total: 2 });
-    // A list page may ask for a shorter preview than the index's 2 KB.
+    // A list page may ask for a shorter preview than the index's 2 KB of tool input and
+    // output; the turn's own words come as the index holds them, whole up to 2 KB.
     const long = new Session("long");
     app.store.ingest(
-      [long.ev("session.started"), long.ev("tool.ended", { tool: "Bash", ok: true, output: "z".repeat(5000) })],
+      [
+        long.ev("session.started"),
+        long.ev("tool.ended", { tool: "Bash", ok: true, output: "z".repeat(5000) }),
+        long.ev("turn.transcript", { turn: 1, user: "u".repeat(1500), assistant: "a".repeat(5000) }),
+      ],
       "http",
     );
     const cut = (await (
-      await fetch(`${app.url}${ROUTES.ui.session}/claude-code/long?tail=1&limit=1&slim=1&preview=300`)
+      await fetch(`${app.url}${ROUTES.ui.session}/claude-code/long?tail=1&limit=2&slim=1&preview=300`)
     ).json()) as SessionDetail;
-    expect((cut.events[0]!.data.output as string).length).toBe(300);
-    expect(cut.events[0]!.preview).toEqual({ output: 5000 });
+    const [tool, turn] = cut.events;
+    expect((tool!.data.output as string).length).toBe(300);
+    expect(tool!.preview).toEqual({ output: 5000 });
+    expect(turn!.data.user).toBe("u".repeat(1500));
+    expect((turn!.data.assistant as string).length).toBe(2048);
+    expect(turn!.preview).toEqual({ assistant: 5000 });
     const full = (await (
       await fetch(`${app.url}${ROUTES.ui.session}/claude-code/long?after=0&limit=1`)
     ).json()) as SessionDetail;

@@ -3,13 +3,14 @@
 // It answers what the real one answers, read from its source: the relay
 // (`{ events, next, oldest, protocol }`, every event after `since` it still holds, a wait
 // when there are none), the machine list, the jobs list (100 after `since`, with `now` and
-// `code`), a send (202 with a job id, or whatever the test queued for it), a revoked key
-// (401 `unauthorized`), and its limit on relay reads (240 in a fixed 600 s window, 429 with
-// Retry-After). It also plays the two doors an app uses before and beside the relay: the
-// connect (a code and four digits, a poll that hands the key over once approved) and the
-// app's own device key (asked to be trusted, and where it stands; approved or removed on
-// its Devices page; the hour a newly approved device waits before it can send). Nothing
-// here is Node's: a unit test and a browser test's server both run it.
+// `code`), a send (202 with a job id, 401 `unlock` for a key the computer does not list, or
+// whatever the test queued for it), a revoked key (401 `unauthorized`), and its limit on
+// relay reads (240 in a fixed 600 s window, 429 with Retry-After). It also plays the two
+// doors an app uses before and beside the relay: the connect (a code and four digits, a
+// poll that hands the key over once approved) and the app's own device key (asked to be
+// trusted, and where it stands; approved or removed on its Devices page; the hour a newly
+// approved device waits before it can send). Nothing here is Node's: a unit test and a
+// browser test's server both run it.
 
 export interface FakeClock {
   now(): number;
@@ -100,6 +101,8 @@ export class FakeSpacesheep {
   private connects = new Map<string, { digits: string; poll: string; approved: boolean; denied: boolean }>();
   /** What the next `POST /api/gui/connect` gets instead of a code, once. */
   connectAnswer: FakeAnswer | null = null;
+  /** How long a connect's code is good for, from its start (`GUI_CONNECT_TTL_S`). */
+  connectTtlMs = 600_000;
   /** Device keys that asked to be trusted, by key id, and the number each shows. */
   deviceRequests = new Map<string, { code: string; name: string; at: number }>();
   /** The machines that trust each device key. */
@@ -108,9 +111,11 @@ export class FakeSpacesheep {
   private acceptedAt = new Map<string, number>();
   /** Talking to computers from spacesheep: on, switched off, or not in the plan. */
   talk: "on" | "talk_off" | "pro_required" = "on";
-  /** The device door also says until when a key waits (`cooling_until`). The real one does
-   *  not yet: a page finds out from the field being there. */
-  saysCooling = false;
+  /** The device door also says until when a key waits (`cooling_until`, null once it may
+   *  send) and its own clock (`now`), as spacesheep is to. Off: the door as spacesheep's is
+   *  today, with neither, and the page works the hour out itself (a page finds out from the
+   *  field being there). */
+  saysCooling = true;
   /** What the next ask of the device door (POST) gets instead, once. */
   deviceAnswer: FakeAnswer | null = null;
 
@@ -170,7 +175,8 @@ export class FakeSpacesheep {
       }
   }
 
-  /** The connect's code ran out before anybody answered. */
+  /** The connect's record is gone: its code ran out before anybody answered, or an approval
+   *  waited for the app's poll longer than spacesheep keeps its key. */
   expire(digits: string): void {
     for (const [code, c] of this.connects) if (c.digits === digits) this.connects.delete(code);
   }
@@ -225,7 +231,7 @@ export class FakeSpacesheep {
           digits,
           url: `https://${this.rpId}/connect/gui?code=${code}`,
           poll_token: poll,
-          expires_at: new Date(this.clock.now() + 600_000).toISOString(),
+          expires_at: new Date(this.clock.now() + this.connectTtlMs).toISOString(),
         },
         201,
       );
@@ -350,7 +356,7 @@ export class FakeSpacesheep {
     const asked = this.deviceRequests.get(id);
     if (asked && this.clock.now() - asked.at >= DEVICE_REQUEST_MS) this.deviceRequests.delete(id);
     return json({
-      ...(this.saysCooling ? { cooling_until: this.coolingUntil(id) } : {}),
+      ...(this.saysCooling ? { cooling_until: this.coolingUntil(id), now: this.clock.now() } : {}),
       trusted_on: trusted,
       machines: this.machines.map((m) => ({
         id: m.id,
@@ -374,10 +380,15 @@ export class FakeSpacesheep {
       return json({ error: "That computer isn't set up any more.", code: "not_found" }, 404);
     const scripted = this.sendAnswers.shift()?.(body);
     if (scripted) return scripted;
-    // A device approved from another device waits an hour (index.ts coolingFor).
     const signer = String(
       (body.grant as { cred?: unknown } | null)?.cred ?? (body.confirm as { cred?: unknown } | null)?.cred ?? "",
     );
+    // A key that computer does not list is refused before anything else (index.ts checks a
+    // send against machineKeys; machines.ts puts untrusted_key among UNLOCK_CODES).
+    const keys = this.machines.find((m) => m.id === machine)?.passkey_ids;
+    if (signer && Array.isArray(keys) && !keys.includes(signer))
+      return json({ error: "That key isn't trusted on this computer.", code: "unlock", refusal: "untrusted_key" }, 401);
+    // A device approved from another device waits an hour (index.ts coolingFor).
     const until = signer ? this.coolingUntil(signer) : null;
     if (until) {
       const min = Math.max(1, Math.ceil((until - this.clock.now()) / 60_000));

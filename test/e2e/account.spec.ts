@@ -15,6 +15,7 @@ import { HubStandIn } from "../account/hub.js";
 import { type AccountServer, startAccountServer } from "../account/serve.js";
 import { fakeShell } from "../account/shell-init.js";
 import { Session } from "../events.js";
+import { composer as composerOf } from "./helpers.js";
 
 const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../dist/web");
 const MACHINE = "m_studio0123456789abcd";
@@ -101,7 +102,7 @@ const invoke = <T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> 
       ).__TAURI_INTERNALS__.invoke(c as string, a),
     [cmd, args] as const,
   ) as Promise<T>;
-const composer = () => page.getByLabel("Message for the next turn");
+const composer = () => composerOf(page);
 
 test.beforeAll(async ({ browser }) => {
   ss = new FakeSpacesheep();
@@ -367,6 +368,8 @@ test("a message spacesheep held, with that answer lost: the held notice comes by
 
 test("a permission question is answered from the inbox, and the computer gets the answer", async () => {
   const s = session("s-login");
+  // Asked now, as a hook asks: an answer reaches it only while the hook waits (lib/answerWindow.ts).
+  s.clock = Date.now() - 2_000;
   ss.push([
     s.ev("turn.started", { turn_id: "t5" }, on),
     s.ev(
@@ -474,6 +477,40 @@ test("a session the account forgets leaves the board and the phone, and a reload
   await expect.poll(async () => (await view()).relay.state, { timeout: 20_000 }).toBe("ok");
   await expect(page.getByText("Rotate the staging password")).toHaveCount(0);
   expect((await view()).store.sessions).toBe(2);
+});
+
+test("long turns read whole from what the phone holds: the newest reply at once, an older one on Show more", async () => {
+  const s = session("s-long");
+  const named = { ...on, session: { ...on.session, title: "Long turns" } };
+  const reply = (last: string) => `${"The export now takes a fresh connection for each batch. ".repeat(88)}${last}`;
+  ss.push([
+    s.ev("session.started", { source: "startup" }, named),
+    s.ev("turn.started", { turn_id: "t1" }, named),
+    s.ev("turn.transcript", { turn: 1, user: "Read the export code.", assistant: reply("OLDEND") }, named),
+    s.ev("turn.ended", { turn_id: "t1" }, named),
+    s.ev("turn.started", { turn_id: "t2" }, named),
+    s.ev(
+      "turn.transcript",
+      { turn: 2, user: `${"Batch 7 failed: connection reset by peer. ".repeat(35)}LOGEND`, assistant: reply("NEWEND") },
+      named,
+    ),
+    s.ev("turn.ended", { turn_id: "t2" }, named),
+  ]);
+  await expect(page.getByText("Long turns").first()).toBeVisible();
+  await page.goto(`${server.url}/s/claude-code/s-long`);
+  const cards = page.locator(".timeline li.reply, .timeline .chat-card");
+  // The newest reply whole as it opens, and a message of 1,500 characters whole (folded).
+  await expect(cards.nth(1)).toContainText("NEWEND");
+  await expect(cards.nth(1).locator(".reply-more")).toHaveCount(0);
+  await expect(page.locator(".timeline blockquote").nth(1)).toContainText("LOGEND");
+  // The older reply ends in "…"; "Show more" brings the rest from what the phone holds.
+  await expect(cards.nth(0)).not.toContainText("OLDEND");
+  await cards.nth(0).getByRole("button", { name: "Show more" }).click();
+  await expect(cards.nth(0)).toContainText("OLDEND");
+  await expect(cards.nth(0).locator(".reply-more")).toHaveCount(0);
+  await expect(page.getByText(/A preview of/)).toHaveCount(0);
+  await page.goto(server.url);
+  await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
 });
 
 test("a 429 from spacesheep is waited out and read on from; a full room at the hub and an answer too large are not errors", async () => {
@@ -986,7 +1023,7 @@ test.describe("a phone that cannot sign, with no storage to keep the board in", 
   test("it reads; where it would send, one line says why not and leads to the session on spacesheep", async () => {
     await page2.goto(`${server2.url}/s/claude-code/s-android`);
     await expect(page2.getByText("It is.").first()).toBeVisible();
-    await expect(page2.getByLabel("Message for the next turn")).toBeDisabled();
+    await expect(composerOf(page2)).toBeDisabled();
     await expect(page2.getByText("Sending from this phone comes in a later version").first()).toBeVisible();
     const link = page2.locator("[data-elsewhere]");
     await expect(link).toHaveText("Open on spacesheep.test");

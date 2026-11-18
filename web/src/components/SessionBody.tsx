@@ -22,6 +22,7 @@
 // it has the view's options.
 import type {
   AgentRun,
+  Attention,
   ControlActivity,
   Delegation,
   MachineControl,
@@ -41,6 +42,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -50,7 +52,7 @@ import {
 import { forkOf } from "../control/Activity";
 import { PromptBody, promptParts } from "../control/Attachments";
 import { machineHome, tildify } from "../control/folders";
-import { useControlActivity } from "../control/hooks";
+import { useAnswersOut, useControlActivity } from "../control/hooks";
 import { SessionControl } from "../control/SessionControl";
 import {
   appliedFact,
@@ -79,6 +81,8 @@ import {
   attentionMessage,
   basename,
   harnessMark,
+  isPlanReview,
+  isQuestion,
   modelShort,
   repoBranch,
   repoShort,
@@ -92,15 +96,16 @@ import { absoluteUrl, agentItems, askItem, copyItem, sessionItems } from "../lib
 import { reducedMotion, useFlip } from "../lib/motion";
 import { accountMode } from "../lib/net";
 import { leftOff, type NewLineAt, newLinePlace } from "../lib/newLine";
+import { lastHeard } from "../lib/offline";
 import { clockTime, eventWindows, leftBecause, sentenceName, servedBy, swaps, swapWords } from "../lib/pool";
-import { said, stoppedWords, turnWords } from "../lib/replies";
+import { cutReply, cutReplyStart, cutWords, said, stoppedWords, turnWords } from "../lib/replies";
 import { AGENT_PARAM, back, hrefFor, Link, navigate, sessionPath, setSearchParam, useSearchParam } from "../lib/router";
 import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import { openSplit } from "../lib/split";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
-import { ago, clock, dur, ms, useNow } from "../lib/time";
+import { ago, ClockHold, clock, dur, ms, useNow } from "../lib/time";
 import {
   type AgentItem,
   type DelegationItem,
@@ -108,6 +113,8 @@ import {
   eventWords,
   groupTurns,
   handoffAnswer,
+  type PromptWords,
+  promptWords,
   sentTurns,
   type ToolItem,
   type Turn,
@@ -115,6 +122,7 @@ import {
   turnSeq,
   unframe,
 } from "../lib/turns";
+import { NEW_WORDS } from "../native/accountWords.new";
 import { HistoryOrMissing } from "../search/HistoryEntry";
 import { AgentGlyph, AgentNow, AgentText } from "./AgentRow";
 import { CopyIconButton, HarnessGlyph, Redacted, Segmented, Since, Spinner, StateDot } from "./bits";
@@ -141,6 +149,8 @@ const QUIET_TYPES = new Set(["turn.progress", "session.heartbeat", "limits.obser
 /** A delivered message with no turn of its own yet keeps its row this long. */
 const DELIVERED_HOLD_MS = 120_000;
 
+/** No open prompts, as one array, so what is read from them is not read again each render. */
+const NO_PROMPTS: Attention[] = [];
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -209,6 +219,15 @@ interface Timeline {
   path: string;
   open: ReadonlySet<string>;
   working: boolean;
+  state?: SessionState;
+  /** When the session's latest event came: how long a quiet one has been quiet. */
+  lastAt?: string;
+  /** The tools an open prompt with no answer out is about, by their own names: such a call
+   *  is asking, not running. A prompt names no call, only its tool. */
+  asking: ReadonlySet<string>;
+  /** An open prompt has no answer out yet: the session asks. With every answer out, its
+   *  calls run as far as this page knows. */
+  asks: boolean;
   root: RefObject<HTMLDivElement>;
   session: () => SessionSummary | undefined;
   /** The session's subagents (its summary's). */
@@ -225,11 +244,20 @@ interface Timeline {
   /** Puts a message's words back in the composer ("Edit and send again"). */
   compose: (text: string) => void;
   /** A row about to open or close in place: keep it where it is on screen, and stop
-   *  following the bottom (the person is reading). */
-  anchorOn: (el: HTMLElement) => void;
+   *  following the bottom (the person is reading). Returns the let-go for a change that
+   *  did not come (a read that failed), so no later change is held to it. */
+  anchorOn: (el: HTMLElement) => () => void;
 }
 const TimelineCtx = createContext<Timeline | null>(null);
 const useTimeline = () => useContext(TimelineCtx)!;
+/** What the timeline's rows share, and the instant its clocks stand at (null: they run). */
+function TimelineScope({ value, standAt, children }: { value: Timeline; standAt: number | null; children: ReactNode }) {
+  return (
+    <ClockHold.Provider value={standAt}>
+      <TimelineCtx.Provider value={value}>{children}</TimelineCtx.Provider>
+    </ClockHold.Provider>
+  );
+}
 
 /** The link to a row of this session (the view jumps to it on open); none on a spacesheep
  *  account, whose page of the session has no address for a row. */
@@ -408,7 +436,9 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
             preview: LIST_PREVIEW,
           }));
         if (cancelled) return;
-        const acc = mergeBySeq(d.events.slice(), tap.release());
+        const page = await newestWhole(store, harness, id, d.events);
+        if (cancelled) return;
+        const acc = mergeBySeq(page.slice(), tap.release());
         lastSeq.current = acc[acc.length - 1]?.session.seq ?? -1;
         firstSeq.current = d.firstSeq ?? acc[0]?.session.seq;
         setSummary(d.session);
@@ -452,6 +482,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
         let d = await store.transport.session(harness, id, { ...q, ...page });
         const afresh = !!q.tail || rereadShort(d.events);
         if (afresh && !q.tail) d = await store.transport.session(harness, id, { tail: true, limit: TAIL, ...page });
+        d = { ...d, events: await newestWhole(store, harness, id, d.events, eventsRef.current) };
         if (cancelled) return;
         setSummary(d.session);
         setChildren(d.children);
@@ -684,7 +715,11 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     followRef.current = false;
     pinned.current = false;
     setFollow(false);
-    held.current = { el, top: el.getBoundingClientRect().top };
+    const a = { el, top: el.getBoundingClientRect().top };
+    held.current = a;
+    return () => {
+      if (held.current === a) held.current = null;
+    };
   }, []);
   // Every disclosure in the timeline (a tool's details, "Ran 4 tools", a subagent's
   // block) keeps the row that was clicked where it is: caught on the way down, before the
@@ -700,12 +735,11 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     return () => root.removeEventListener("click", onClick, true);
   }, [anchorOn, shape]);
 
-  /** Stream and feed events are slim (data cut to a preview); the detail route has the
+  /** The events of a page are slim (data cut to a preview); the detail route has the
    *  whole event. Swap one in by its seq. */
   const fillEv = useCallback(
     async (e: StoredEvent) => {
-      const d = await store.transport.session(harness, id, { after: e.session.seq - 1, limit: 1 });
-      const full = d.events.find((x) => x.session.seq === e.session.seq);
+      const full = await wholeEvent(store, harness, id, e);
       if (full) setEvents((prev) => prev.map((p) => (p.session.seq === full.session.seq ? full : p)));
     },
     [store, harness, id],
@@ -1044,11 +1078,19 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     return [...answerItems(rootRef.current, cur), { sep: true }, send, cancel];
   });
 
+  // A prompt whose answer is out asks no more (answers.ts, the same on every surface).
+  const prompts = s?.openAttentions ?? NO_PROMPTS;
+  const out = useAnswersOut(prompts);
+  const unanswered = useMemo(() => prompts.filter((a) => out[a.attentionId]?.status !== "sent"), [prompts, out]);
   const timeline = useMemo<Timeline>(
     () => ({
       path,
-      open: new Set((s?.openAttentions ?? []).map((a) => a.attentionId)),
+      open: new Set(prompts.map((a) => a.attentionId)),
       working: s?.state === "working",
+      state: s?.state,
+      lastAt: s?.lastAt,
+      asking: new Set(unanswered.flatMap((a) => (a.tool ? [a.tool] : []))),
+      asks: unanswered.length > 0,
       root: rootRef,
       session: () => sRef.current,
       agents: agentRuns ?? [],
@@ -1063,8 +1105,10 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     }),
     [
       path,
-      s?.openAttentions,
+      prompts,
+      unanswered,
       s?.state,
+      s?.lastAt,
       agentRuns,
       shownAgent,
       focusAgent,
@@ -1076,6 +1120,16 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
       anchorOn,
     ],
   );
+  // While its computer is offline nothing says how long a turn or a tool has run: the
+  // rings of a session at work or gone quiet stop (styles/session.css) and, while it says
+  // it is at work, the view's clocks stand at the last that was heard of it (its poll, or
+  // the session's latest event), as they stand while the stream is down (SessionView). How
+  // long a quiet one has been quiet still counts; an idle or done one has nothing to stop.
+  // A machine with no control has no heartbeat to miss: never so.
+  const machineOff = control?.online === false && (isLive || s?.state === "stale");
+  const downAt = useContext(ClockHold);
+  const heardAt = machineOff && isLive ? Math.max(ms(lastHeard(control)) || 0, ms(s?.lastAt) || 0) : 0;
+  const standAt = downAt ?? (heardAt > 0 ? heardAt : null);
 
   // The composer arrives once the session does: it slides in under a page that was
   // starting, and is simply there on an ordinary open.
@@ -1195,12 +1249,13 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   ];
 
   return (
-    <TimelineCtx.Provider value={timeline}>
+    <TimelineScope value={timeline} standAt={standAt}>
       <CodeFrame.Provider value={CodeWell}>
         <div
           className={`page session ${mode === "panel" ? "session--panel" : ""} ${chat ? "session--chat" : ""} ${drawer.open && s ? "session--files" : ""} ${s ? "" : "starting"}`}
           ref={rootRef}
           data-ui={chat ? "simple" : "advanced"}
+          data-machine={machineOff ? "offline" : undefined}
           data-starting={
             !s && started
               ? started.outcome === "taken" && started.reply !== undefined
@@ -1387,12 +1442,16 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
                   <span className="num">{unseen > 99 ? "99+" : unseen}</span> new
                 </button>
               )}
-              <SessionControl session={s} control={control} attentions={s.openAttentions} chat={chat} />
+              {/* What this device sends goes on while the computer is offline: the control's
+                  clocks run, as its rings do (styles/session.css), unless the stream is down. */}
+              <ClockHold.Provider value={downAt}>
+                <SessionControl session={s} control={control} attentions={s.openAttentions} chat={chat} />
+              </ClockHold.Provider>
             </div>
           )}
         </div>
       </CodeFrame.Provider>
-    </TimelineCtx.Provider>
+    </TimelineScope>
   );
 }
 
@@ -1560,6 +1619,44 @@ function childrenFromStore(store: ReturnType<typeof useStore>, key: string): Ses
 
 type Fill = (e: StoredEvent) => Promise<void>;
 
+/** One event whole, by its seq, from the detail route (on a spacesheep account the page's
+ *  own store: a read on the phone). Undefined when the session no longer has it. */
+async function wholeEvent(
+  store: ReturnType<typeof useStore>,
+  harness: string,
+  id: string,
+  e: StoredEvent,
+): Promise<StoredEvent | undefined> {
+  const d = await store.transport.session(harness, id, { after: e.session.seq - 1, limit: 1 });
+  return d.events.find((x) => x.session.seq === e.session.seq);
+}
+
+/** A page with its newest reply whole: the view opens on it, and past the index's 2 KB it
+ *  came cut. The copy the view already holds when that one is whole (`held`), else one
+ *  event read before the page is drawn, so nothing grows under the reader; drawn cut, with
+ *  its "Show more", when that read fails. */
+async function newestWhole(
+  store: ReturnType<typeof useStore>,
+  harness: string,
+  id: string,
+  events: StoredEvent[],
+  held: readonly StoredEvent[] = [],
+): Promise<StoredEvent[]> {
+  let i = events.length - 1;
+  while (i >= 0 && events[i]!.type !== "turn.transcript" && events[i]!.type !== "turn.progress") i--;
+  const e = events[i];
+  if (!e || e.preview?.assistant === undefined) return events;
+  const swap = (full: StoredEvent) => events.map((x) => (x === e ? full : x));
+  const kept = held.find((x) => x.session.seq === e.session.seq);
+  if (kept && kept.preview?.assistant === undefined) return swap(kept);
+  try {
+    const full = await wholeEvent(store, harness, id, e);
+    return full ? swap(full) : events;
+  } catch {
+    return events;
+  }
+}
+
 /** The first timeline row of this view whose top edge is on screen (below the bar and a
  *  stuck turn head), by seq. Turn heads are sticky, so they never anchor. */
 function firstVisibleRow(root: HTMLElement | null, scroller: HTMLElement | null): { seq: number | null; top: number } {
@@ -1606,7 +1703,7 @@ function TurnBlock({
   /** The pool switched accounts during this turn: one quiet row each (UX-SPEC §7.2). */
   swaps?: string[];
 }) {
-  const { machine, online, control, compose, session } = useTimeline();
+  const { machine, online, control, compose, session, working, state, agents, asks } = useTimeline();
   const transcript = [...turn.items].reverse().find((i) => i.kind === "event" && i.e.type === "turn.transcript") as
     | EventItem
     | undefined;
@@ -1626,13 +1723,37 @@ function TurnBlock({
     reason: ended?.e.data.reason,
   });
   const live = liveTurn && !words.stopped;
+  // A call with no end runs only in the latest turn of a working session, as the turn's
+  // own Running row and the board say. While the session waits for the person it is
+  // asking, and once every answer is out it runs; once nothing has come for a while,
+  // quiet; any other was cut off.
+  const look: ToolLook | undefined = !live
+    ? undefined
+    : working
+      ? "run"
+      : state === "needs_you"
+        ? asks
+          ? "ask"
+          : "run"
+        : state === "stale"
+          ? "quiet"
+          : undefined;
   // Only a running turn or a running tool shows a moving duration; the other blocks
-  // (most of the page) have nothing to redraw each second.
-  const hasRunningTool =
-    !words.stopped &&
-    turn.items.some((i) => (i.kind === "tool" && !i.ended) || (i.kind === "agent" && i.tools.some((t) => !t.ended)));
+  // (most of the page) have nothing to redraw each second. A subagent's tools run while
+  // it does, whatever its parent is at, unless this turn was stopped under it (agentOver).
+  const stoppedAt = words.stopped ? ms(ended?.e.time) : undefined;
+  const hasRunningTool = turn.items.some((i) => {
+    if (i.kind === "tool") return !i.ended && look === "run";
+    if (i.kind !== "agent") return false;
+    const run = runOf(i, agents);
+    return run.state === "running" && !agentOver(run, stoppedAt) && i.tools.some((t) => !t.ended);
+  });
   const now = useNow(live || hasRunningTool ? "fine" : "off");
-  const prompt = (transcript?.e.data.user as string | undefined) ?? (progress?.e.data.user as string | undefined);
+  // The person's words as the record has them; cut there, the message sent from here
+  // as it was signed (lib/turns.ts promptWords).
+  const promptEv = (transcript ?? progress)?.e;
+  const written = promptWords(promptEv, sent?.text);
+  const prompt = written.text;
   const promptChars = turn.start?.data.prompt_chars as number | undefined;
   // A turn someone asked for: it began with a prompt, or with a message its Stop handed over.
   const asked = !!turn.start || turn.continues !== undefined;
@@ -1691,6 +1812,7 @@ function TurnBlock({
         now={now}
         harness={harness}
         prompt={prompt}
+        written={written}
         notice={notice?.agentId}
         answer={answer}
         promptChars={promptChars}
@@ -1702,6 +1824,7 @@ function TurnBlock({
         ownReply={words.own}
         ackReply={ackReply}
         stopped={stoppedLine}
+        look={look}
         status={status}
         failure={failure}
         flip={flip}
@@ -1736,7 +1859,15 @@ function TurnBlock({
         notice ? (
           <AgentNotice agentId={notice.agentId} seq={startSeq} />
         ) : prompt ? (
-          <Prompt text={prompt} seq={startSeq} by={submittedLabel(turn.start?.data.submitted_by)} />
+          <Prompt
+            text={prompt}
+            seq={startSeq}
+            by={submittedLabel(turn.start?.data.submitted_by)}
+            files={written.fromSent ? sent?.files : undefined}
+            e={promptEv}
+            cut={written.cut}
+            fill={fill}
+          />
         ) : sent?.text ? (
           <Prompt text={sent.text} seq={startSeq} sent={sent} />
         ) : (
@@ -1751,8 +1882,9 @@ function TurnBlock({
         {items.length === 0 && status && <StatusRow {...status} chat={false} />}
         {items.map((it) => {
           if (it.kind === "tool")
-            return <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} halted={words.stopped} />;
-          if (it.kind === "agent") return <AgentBlock key={it.key} item={it} lens={lens} now={now} fill={fill} />;
+            return <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} look={look} />;
+          if (it.kind === "agent")
+            return <AgentBlock key={it.key} item={it} lens={lens} now={now} fill={fill} stoppedAt={stoppedAt} />;
           if (it.kind === "delegation") return <AskRow key={it.key} item={it} as="li" />;
           const e = it.e;
           if (e.type === "turn.transcript") {
@@ -1856,41 +1988,145 @@ function ErrGlyph() {
   );
 }
 
+/** Reading a slim event whole for a button that asks for it ("Show all", "Show more"):
+ *  `load` resolves true once the read went through, and `state` says how it goes. */
+function useWhole(e: StoredEvent | undefined, fill: Fill | undefined) {
+  const [state, setState] = useState<"idle" | "loading" | "failed">("idle");
+  const load = useCallback(async (): Promise<boolean> => {
+    if (!e || !fill) return false;
+    setState("loading");
+    try {
+      await fill(e);
+      setState("idle");
+      return true;
+    } catch {
+      setState("failed");
+      return false;
+    }
+  }, [e, fill]);
+  return { state, load };
+}
+
+/** Lines of a person's message shown before "Show all". */
+const PROMPT_LINES = 8;
+
+/** Whether an element's text runs past `lines` lines, clamped or not. */
+function overLines(el: HTMLElement, lines: number): boolean {
+  const lh = Number.parseFloat(getComputedStyle(el).lineHeight);
+  return lh > 0 ? el.scrollHeight > lh * lines + 1 : el.scrollHeight > el.clientHeight + 1;
+}
+
 /** The person's prompt: a well in the timeline, a bubble in the chat. A message sent from
  *  here keeps the files it carried as chips under it. A start's first message is the
- *  session's first bubble in both modes (the started moment is one surface). */
+ *  session's first bubble in both modes (the started moment is one surface). A long
+ *  message shows its first eight lines and "Show all", which opens it in place; one the
+ *  receiver cut short (`cut`) is read whole first. Only the words fold: the pictures it
+ *  carried and the lines that say where it came from stay in sight. */
 function Prompt({
   text,
   seq,
   bubble = false,
   sent,
+  files,
   by,
+  e,
+  cut = false,
+  fill,
 }: {
   text: string;
   seq?: number;
   bubble?: boolean;
+  /** The message on its way, drawn before the session has a record of it. */
   sent?: ControlActivity;
+  /** The files a message sent from here carried, when its words are the record's. */
+  files?: ControlActivity["files"];
   /** Who submitted the turn, when the harness said it was not the person ("Scheduled"). */
   by?: string;
+  /** The record the words came in, and whether they are cut there (`preview.user`). */
+  e?: StoredEvent;
+  cut?: boolean;
+  fill?: Fill;
 }) {
-  const { path, root, machine } = useTimeline();
+  const { path, root, machine, anchorOn } = useTimeline();
   // A message sent through sessionpipe arrives framed ("Message via … (sessionpipe
   // control, …):"); the words show as written, and where they came from as a quiet line.
   // A question another session asked (sessionpipe ask) says who asked under it; an answer
   // a handoff brought back shows raw here (the chat draws it as the agent's turn).
   const { text: words, via, askedBy } = unframe(text);
   const answer = bubble ? undefined : handoffAnswer(text);
+  const whole = useWhole(e, fill);
+  const canLoad = cut && !!e && !!fill;
+  const [all, setAll] = useState(false);
+  const [long, setLong] = useState(false);
+  const boxRef = useRef<HTMLQuoteElement>(null);
+  const wordsRef = useRef<HTMLSpanElement>(null);
+  const wordsId = useId();
+  // Measured, never counted: a narrower screen, a larger text size or a turn of the phone
+  // decide again by themselves.
+  useLayoutEffect(() => {
+    const el = wordsRef.current;
+    if (!el) return;
+    const measure = () => setLong(overLines(el, PROMPT_LINES));
+    measure();
+    if (typeof ResizeObserver !== "function") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [words]);
+  /** Open it in place, the whole of it read first when it was cut: the bubble's top stays
+   *  where it is on screen. Or fold it again from its button (`at`), which stays under the
+   *  finger as "Show all" with the eight lines above it: the top of a message opened past
+   *  a screen is long gone, and held there the folded bubble would be gone with it. */
+  const open = (on: boolean, at?: HTMLElement) => {
+    const keep = on ? boxRef.current : (at ?? boxRef.current);
+    const letGo = keep ? anchorOn(keep) : undefined;
+    if (on && canLoad) void whole.load().then((ok) => (ok ? setAll(true) : letGo?.()));
+    else setAll(on);
+  };
   const menu = useContextMenu(() => [
-    copyItem("Copy message", words),
+    copyItem(cut ? NEW_WORDS.sessionCopyPreview : "Copy message", words),
     copyItem("Copy link to this turn", seqLink(path, seq)),
+    canLoad && { sep: true },
+    canLoad && { label: "Load full text", run: () => open(true) },
     { sep: true },
     controlItems(root.current).send,
   ]);
   const cls = bubble ? "chat-bubble" : sent?.kind === "start" ? "prompt chat-bubble" : "prompt";
+  const folded = !all && (long || cut);
+  // How the read goes, only while there is one to make: once the words are whole, by
+  // this read or another (the reply's "Show more" reads the same turn), it is over.
+  const reading = canLoad ? whole.state : "idle";
+  const label =
+    reading === "loading"
+      ? "Loading…"
+      : reading === "failed"
+        ? NEW_WORDS.sessionLoadFailed
+        : all
+          ? "Show less"
+          : "Show all";
+  const render = (body: string) => (
+    <>
+      <span id={wordsId} ref={wordsRef} className={`prompt-words${folded ? " is-clamped" : ""}`}>
+        <Redacted text={cut ? cutWords(body) : body} />
+      </span>
+      {(long || (canLoad && !all)) && (
+        <button
+          type="button"
+          className="cut-btn prompt-more"
+          aria-expanded={!folded}
+          aria-controls={wordsId}
+          disabled={reading === "loading"}
+          onClick={(ev) => open(!all, ev.currentTarget)}
+        >
+          {label}
+        </button>
+      )}
+    </>
+  );
   return (
     <>
-      <blockquote className={cls} data-start-message={sent?.kind === "start" ? "" : undefined} {...menu}>
-        <PromptBody text={words} />
+      <blockquote className={cls} data-start-message={sent?.kind === "start" ? "" : undefined} ref={boxRef} {...menu}>
+        <PromptBody text={words} render={render} />
         {via && <span className="prompt-via">Sent from {via}</span>}
         {askedBy && (
           <span className="prompt-via">
@@ -1904,7 +2140,7 @@ function Prompt({
         )}
         {by && <span className="prompt-via">{by}</span>}
       </blockquote>
-      <SentFiles files={sent?.files} />
+      <SentFiles files={files ?? sent?.files} />
     </>
   );
 }
@@ -1935,7 +2171,10 @@ function AckReply({ text, live, seq, chat = false }: { text: string; live: boole
   );
 }
 
-/** The assistant's text as markdown: plain prose, no box. `live` while it is still arriving. */
+/** The assistant's text as markdown: plain prose, no box. `live` while it is still arriving.
+ *  Whole as the receiver keeps it (2 KB, and the newest reply always); one it cut short ends
+ *  cleanly with "…" and "Show more", which reads the rest and goes. A running reply it cut
+ *  keeps its end, and starts with "…" until its turn's transcript replaces it. */
 function Reply({
   e,
   text: given,
@@ -1953,11 +2192,14 @@ function Reply({
   live?: boolean;
   chat?: boolean;
 }) {
-  const { path, session } = useTimeline();
+  const { path, session, anchorOn } = useTimeline();
   const store = useStore();
   // Never Claude Code's stand-in for a reply that never came: nobody said that.
   const text = given ?? said(String(e.data.assistant ?? ""));
   const cut = e.preview?.assistant !== undefined;
+  const running = e.type === "turn.progress";
+  const whole = useWhole(e, fill);
+  const shown = cut && text ? (running ? cutReplyStart(text) : cutReply(text)) : text;
   const menu = useContextMenu(() => {
     const s = session();
     return [
@@ -1967,20 +2209,40 @@ function Reply({
       s &&
         askItem(s, store, { label: "Ask another agent about this…", reply: text, turnSeq: turnSeq ?? e.session.seq }),
       cut && { sep: true },
-      cut && { label: "Load full text", run: () => fill(e) },
+      cut && { label: "Load full text", run: () => void whole.load() },
     ];
   });
+  const more =
+    cut && text && !running ? (
+      <button
+        type="button"
+        className="cut-btn reply-more"
+        disabled={whole.state === "loading"}
+        onClick={(ev) => {
+          // The rest opens under it: the reply's top stays where it is on screen.
+          const box = ev.currentTarget.parentElement;
+          const letGo = box ? anchorOn(box) : undefined;
+          void whole.load().then((ok) => ok || letGo?.());
+        }}
+      >
+        {whole.state === "loading"
+          ? "Loading…"
+          : whole.state === "failed"
+            ? NEW_WORDS.sessionLoadFailed
+            : NEW_WORDS.sessionShowMore}
+      </button>
+    ) : null;
   if (chat)
     return (
       <div className="chat-card" data-seq={e.session.seq} {...menu}>
-        <Markdown text={text} />
-        {text && <Cut e={e} field="assistant" fill={fill} />}
+        <Markdown text={shown} />
+        {more}
       </div>
     );
   return (
     <li className={`reply ${live ? "reply--live" : ""}`} data-seq={e.session.seq} {...menu}>
-      <Markdown text={text} />
-      {text && <Cut e={e} field="assistant" fill={fill} />}
+      <Markdown text={shown} />
+      {more}
     </li>
   );
 }
@@ -2110,6 +2372,7 @@ function ChatTurn({
   now,
   harness,
   prompt,
+  written,
   notice,
   answer,
   promptChars,
@@ -2121,6 +2384,7 @@ function ChatTurn({
   ownReply,
   ackReply,
   stopped: stoppedLine,
+  look,
   status,
   failure,
   flip,
@@ -2134,6 +2398,8 @@ function ChatTurn({
   now: number;
   harness: string;
   prompt: string | undefined;
+  /** Whether `prompt` is cut, or is the message sent from here (lib/turns.ts promptWords). */
+  written: PromptWords;
   /** The agent a `<task-notification>` prompt reports on: a quiet line, not a bubble. */
   notice?: string;
   /** The prompt is an answer a handoff brought back: the asked agent's turn, not a bubble. */
@@ -2149,6 +2415,8 @@ function ChatTurn({
   ackReply?: string;
   /** The turn was stopped: the line that says so, in the running row's place. */
   stopped: string | null;
+  /** How its calls with no end show (TurnBlock). */
+  look?: ToolLook;
   status: Status;
   failure: ReactNode;
   flip: boolean;
@@ -2216,7 +2484,16 @@ function ChatTurn({
             </time>
           )}
           {prompt ? (
-            <Prompt text={prompt} seq={startSeq} bubble by={submittedLabel(turn.start?.data.submitted_by)} />
+            <Prompt
+              text={prompt}
+              seq={startSeq}
+              bubble
+              by={submittedLabel(turn.start?.data.submitted_by)}
+              files={written.fromSent ? sent?.files : undefined}
+              e={(transcript ?? progress)?.e}
+              cut={written.cut}
+              fill={fill}
+            />
           ) : sent?.text ? (
             <Prompt text={sent.text} seq={startSeq} bubble sent={sent} />
           ) : (
@@ -2232,11 +2509,18 @@ function ChatTurn({
             <HarnessGlyph name={harness} size="sm" />
             {harnessMark(harness).label}
           </span>
-          {tools.length > 0 && <ChatTools tools={tools} lens={lens} now={now} fill={fill} halted={!!stoppedLine} />}
+          {tools.length > 0 && <ChatTools tools={tools} lens={lens} now={now} fill={fill} look={look} />}
           {agentItems.length > 0 && (
             <ol className="turn-items chat-agents">
               {agentItems.map((it) => (
-                <AgentBlock key={it.key} item={it} lens={lens} now={now} fill={fill} />
+                <AgentBlock
+                  key={it.key}
+                  item={it}
+                  lens={lens}
+                  now={now}
+                  fill={fill}
+                  stoppedAt={stoppedLine ? endedMs : undefined}
+                />
               ))}
             </ol>
           )}
@@ -2299,24 +2583,49 @@ function NewLine({ chat = false }: { chat?: boolean }) {
   return chat ? line : <li>{line}</li>;
 }
 
-/** The tools of a turn as one quiet disclosure line, the usual rows when opened. */
+/** How a call with no end shows: running while its session works, asking while the
+ *  session waits for the person, quiet once nothing has come for a while. None: it is not
+ *  running (its turn was stopped, or is over). */
+type ToolLook = "run" | "ask" | "quiet";
+
+/** A call's tool, by its own name ("Bash", "AskUserQuestion"). */
+const toolOf = (t: ToolItem): string => String((t.started ?? t.ended)?.data.tool ?? "");
+
+/** The tools line while a call has no end: "Running Bash", "Asking to run Bash" (a
+ *  question or a plan as what it is), "Bash · quiet for 12 m". */
+function unendedWords(look: ToolLook, tool: string, quietMs: number): string {
+  const name = toolLabel(tool || "a tool");
+  if (look === "run") return NEW_WORDS.toolsRunning(name);
+  if (look === "quiet") return NEW_WORDS.toolsQuiet(name, dur(quietMs));
+  const asked = { kind: "permission", tool };
+  if (isQuestion(asked)) return NEW_WORDS.toolsAskingQuestion;
+  if (isPlanReview(asked)) return NEW_WORDS.toolsAskingPlan;
+  return NEW_WORDS.toolsAsking(name);
+}
+
+/** The tools of a turn as one quiet disclosure line, the usual rows when opened. While a
+ *  call has no end the line names it as the session stands, and its glyph takes the
+ *  chevron's place, so the words start where "Ran 3 tools" does. */
 function ChatTools({
   tools,
   lens,
   now,
   fill,
-  halted = false,
+  look,
 }: {
   tools: ToolItem[];
   lens: Tier;
   now: number;
   fill: Fill;
-  /** The turn was stopped: a call with no end was cut off, and is not running. */
-  halted?: boolean;
+  /** How a call with no end shows (TurnBlock); none, the run is over. */
+  look?: ToolLook;
 }) {
+  const { asking, lastAt } = useTimeline();
   const ref = useRef<HTMLDetailsElement>(null);
   const errors = tools.filter((t) => t.ended && t.ended.data.ok === false).length;
-  const running = halted ? undefined : tools.find((t) => !t.ended);
+  // The call the line names: the one an open prompt is about, else the latest with no end.
+  const unended = look ? tools.filter((t) => !t.ended) : [];
+  const named = unended.find((t) => asking.has(toolOf(t))) ?? unended[unended.length - 1];
   const menu = useContextMenu(() => {
     const d = ref.current;
     if (!d) return null;
@@ -2329,21 +2638,23 @@ function ChatTools({
       },
     ];
   });
-  const name = running ? toolLabel(String((running.started ?? running.ended)?.data.tool ?? "a tool")) : "";
   return (
     <details className="chat-tools" ref={ref}>
       <summary className="chat-tools-sum" {...menu}>
-        <Chevron />
-        {running ? (
+        {!named || !look ? (
           <>
-            <span className="spinner spinner--sm" aria-hidden="true" />
-            <span>
-              Running {name}
-              {tools.length > 1 ? ` · ${plural(tools.length - 1, "more tool")}` : ""}
-            </span>
+            <Chevron />
+            <span>Ran {plural(tools.length, "tool")}</span>
           </>
         ) : (
-          <span>Ran {plural(tools.length, "tool")}</span>
+          <>
+            {look === "run" ? (
+              <span className="spinner spinner--sm" aria-hidden="true" />
+            ) : (
+              <StateDot state={look === "ask" ? "needs_you" : "stale"} decorative />
+            )}
+            <span>{unendedWords(look, toolOf(named), now - ms(lastAt))}</span>
+          </>
         )}
         {errors > 0 && (
           <span className="chat-tools-err">
@@ -2354,7 +2665,7 @@ function ChatTools({
       </summary>
       <ol className="turn-items">
         {tools.map((it) => (
-          <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} halted={halted} />
+          <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} look={look} />
         ))}
       </ol>
     </details>
@@ -2428,27 +2739,47 @@ function toolSubject(input: unknown): string {
   return "";
 }
 
+/** A tool row's state: how a call with no end shows (none: "cut", cut off with its turn),
+ *  else how it ended. */
+type ToolStatus = ToolLook | "cut" | "ok" | "err";
+/** What a tool row's glyph says to a screen reader. */
+const TOOL_SAID: Record<ToolStatus, string> = {
+  run: "running",
+  ask: NEW_WORDS.toolAsking,
+  quiet: NEW_WORDS.toolQuiet,
+  cut: "stopped",
+  ok: "ok",
+  err: "error",
+};
+
 function ToolRow({
   item,
   lens,
   now,
   fill,
-  halted = false,
+  look,
 }: {
   item: ToolItem;
   lens: Tier;
   now: number;
   fill: Fill;
-  /** Its turn was stopped: a call with no end was cut off with it, and is not running. */
-  halted?: boolean;
+  /** How it shows while it has no end (its turn's look, a subagent's own state); none, it
+   *  was cut off with its turn and is not running. */
+  look?: ToolLook;
 }) {
   const e = item.ended ?? item.started!;
   const tool = String(e.data.tool);
   const label = toolLabel(tool);
-  const cut = !item.ended && halted;
-  const running = !item.ended && !halted;
-  const ok = item.ended ? item.ended.data.ok !== false : undefined;
-  const msv = item.ended ? (item.ended.data.ms as number | undefined) : cut ? undefined : now - ms(item.started?.time);
+  const status: ToolStatus = item.ended ? (item.ended.data.ok !== false ? "ok" : "err") : (look ?? "cut");
+  // Only a running call counts its time: one that asks or went quiet is not at work. Nor
+  // does one whose computer is offline: the last heard of it is often its own start, and
+  // a time held there ("<0.1 s") would read as a measure.
+  const offline = useTimeline().control?.online === false;
+  const msv = item.ended
+    ? (item.ended.data.ms as number | undefined)
+    : status === "run" && !offline
+      ? now - ms(item.started?.time)
+      : undefined;
   const input = lens >= 3 ? (item.ended?.data.input ?? item.started?.data.input) : undefined;
   const output = lens >= 3 ? item.ended?.data.output : undefined;
   const error = item.ended?.data.error as string | undefined;
@@ -2478,21 +2809,21 @@ function ToolRow({
     ];
   });
   // One 10 px glyph in the 16 px column, the same box as a subagent's: the spinner, the
-  // drawn check, or the red ✕.
+  // needs-you disc, the dashed ring, the drawn check, or the red ✕.
   const head = (
     <>
-      <span
-        className={`tool-status ${running ? "is-run" : cut ? "is-cut" : ok ? "is-ok" : "is-err"}`}
-        role="img"
-        aria-label={running ? "running" : cut ? "stopped" : ok ? "ok" : "error"}
-      >
-        {running ? (
+      <span className={`tool-status is-${status}`} role="img" aria-label={TOOL_SAID[status]}>
+        {status === "run" ? (
           <span className="spinner spinner--sm" aria-hidden="true" />
-        ) : cut ? null : ok ? (
+        ) : status === "ask" ? (
+          <StateDot state="needs_you" size={10} decorative />
+        ) : status === "quiet" ? (
+          <StateDot state="stale" size={10} decorative />
+        ) : status === "ok" ? (
           <StateDot state="done" size={10} decorative />
-        ) : (
+        ) : status === "err" ? (
           <ErrGlyph />
-        )}
+        ) : null}
       </span>
       <span className="tool-main">
         <span className="tool-name" title={tool === label ? undefined : tool}>
@@ -2504,7 +2835,8 @@ function ToolRow({
           <span className="tool-subject mono ellipsis">{subject}</span>
         ) : null}
       </span>
-      <span className="tool-dur num">{dur(msv)}</span>
+      {/* No time to show, no column: the subject keeps the room up to the chevron. */}
+      {msv !== undefined && <span className="tool-dur num">{dur(msv)}</span>}
       {expandable && <Chevron />}
     </>
   );
@@ -2615,6 +2947,12 @@ function runOf(item: AgentItem, agents: readonly AgentRun[]): AgentRun {
   };
 }
 
+/** Whether a subagent's calls with no end are over: it ended, or the turn that started it
+ *  was stopped (at `stoppedAt`, NaN when not known) and nothing of its own came since. One
+ *  heard from after the stop works on in the background. */
+const agentOver = (run: AgentRun, stoppedAt?: number): boolean =>
+  run.state === "done" || (stoppedAt !== undefined && !(ms(run.lastAt) > stoppedAt));
+
 /** A page of an agent's tools that came before the loaded ones. */
 const AGENT_PAGE = 50;
 
@@ -2625,11 +2963,28 @@ const AGENT_PAGE = 50;
  *  Open, its own tool rows on the tree guide, earlier ones a page at a time, then its
  *  result when the harness sent one. Open while it runs, folded once done, unless the
  *  person or the URL opened it. */
-function AgentBlock({ item, lens, now, fill }: { item: AgentItem; lens: Tier; now: number; fill: Fill }) {
+function AgentBlock({
+  item,
+  lens,
+  now,
+  fill,
+  stoppedAt,
+}: {
+  item: AgentItem;
+  lens: Tier;
+  now: number;
+  fill: Fill;
+  /** When the turn that started it was stopped (agentOver). */
+  stoppedAt?: number;
+}) {
   const store = useStore();
-  const { agents, focus, session, mode } = useTimeline();
+  const { agents, focus, session, mode, asking } = useTimeline();
   const run = runOf(item, agents);
   const focused = focus === item.id;
+  // Its calls with no end follow the agent, not its parent: running while it runs, quiet
+  // when it went quiet, cut off once it is over; one an open prompt is about is asking.
+  const lookOf = (t: ToolItem): ToolLook | undefined =>
+    agentOver(run, stoppedAt) ? undefined : asking.has(toolOf(t)) ? "ask" : run.state === "running" ? "run" : "quiet";
   const [chosen, setChosen] = useState<boolean | null>(null);
   const open = chosen ?? (focused || run.state !== "done");
   const [older, setOlder] = useState<ToolItem[]>([]);
@@ -2734,7 +3089,7 @@ function AgentBlock({ item, lens, now, fill }: { item: AgentItem; lens: Tier; no
             </li>
           )}
           {tools.map((t) => (
-            <ToolRow key={t.key} item={t} lens={lens} now={now} fill={fill} />
+            <ToolRow key={t.key} item={t} lens={lens} now={now} fill={fill} look={lookOf(t)} />
           ))}
         </ol>
       )}

@@ -195,7 +195,8 @@ describe("connecting an account: the steps", () => {
     expect(tryAt(refused({ code: "unreachable", message: "x" }))).toBeNull();
     expect(tryAt({ kind: "intro" })).toBeNull();
     expect(refused({ code: "busy", message: "x" })).toMatchObject({ why: "busy" });
-    expect(refused({ code: "not_asked", message: "x" })).toMatchObject({ why: "busy" });
+    // The hub could not show its own question: no other question is open to answer.
+    expect(refused({ code: "not_asked", message: "x" })).toMatchObject({ why: "unexpected" });
     for (const code of ["refused", "bad_answer", "unsupported", "bad_origin", "forbidden"])
       expect(refused({ code, message: "x" })).toMatchObject({ why: "unexpected" });
     expect(refused("something else")).toMatchObject({ why: "unexpected" });

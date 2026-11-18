@@ -312,7 +312,8 @@ export interface Delegation {
  *  3+ tool.ended were `ok: false`. loop: within the last 10 tool.started the same tool
  *  ran 3+ times on an identical input (tier 3 only). compacting: 2+ context.compacted
  *  within COMPACTING_WINDOW_MS of the last event. gap: seqs are missing behind the
- *  highest one for longer than GAP_AFTER_MS (they clear when they arrive). */
+ *  highest one for longer than GAP_AFTER_MS (they clear when they arrive). spacesheep
+ *  thins what it relays, so its events open no hole. */
 export type SessionFlagKind = "slow_tool" | "error_streak" | "loop" | "compacting" | "gap";
 
 export interface SessionFlag {
@@ -839,7 +840,8 @@ export interface DetailQuery {
   limit?: number;
   /** Slim events (big strings cut to a 2 KB preview) instead of the full lines from disk. */
   slim?: boolean;
-  /** With `slim`: a shorter cut, 200–2048 chars, for list pages. */
+  /** With `slim`: a shorter cut of tool input/output, 200–2048 chars, for list pages. The
+   *  turn's own words keep the 2 KB preview (an older receiver cuts them too). */
   preview?: number;
   /** Only this subagent's events (an AgentRun id): its subagent.started / .ended, the
    *  tool calls stamped with its `agent_id`, and the Agent / Task call that launched it.
@@ -1575,6 +1577,9 @@ export interface ControlActivity {
   unheard?: { state: "asking" | "unsent" | "unknown"; status?: number; reason?: string };
   /** The delivery mode the machine acked, one of `DELIVERY_MODES`. */
   mode?: string;
+  /** A `permission.answer`'s prompt and decision, as signed (`for`, `decision`): every
+   *  surface reads from it which prompt has an answer out, also after a reload. */
+  answer?: { for: string; decision: "allow" | "deny" };
   code?: string;
   detail?: string;
   reply?: string;

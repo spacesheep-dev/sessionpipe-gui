@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Shared pieces for the end-to-end suite: page openers that wait for the live stream,
-// a hand-rolled ULID (so the specs need nothing but @playwright/test), and a tier-1
-// batch a sink would send, with a fresh session id per call.
+// the session's message field, a check for a full stop that starts a line, a hand-rolled ULID
+// (so the specs need nothing but @playwright/test), and a tier-1 batch a sink would send, with
+// a fresh session id per call.
 import { randomUUID } from "node:crypto";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 export const INFO = "/api/ui/info";
 export const EVENTS = "/api/sessionpipe/v1/events";
@@ -11,6 +12,10 @@ export const WELL_KNOWN = "/.well-known/sessionpipe";
 
 export const sessionUrl = (harness: string, id: string) =>
   `/s/${encodeURIComponent(harness)}/${encodeURIComponent(id)}`;
+
+/** A session's message field, found by its place: its name is the words it shows, which
+ *  change with the mode ("What should change?" in a plan review). */
+export const composer = (page: Page) => page.locator(".ctl-ask textarea");
 
 /** Opens a page and waits until the stream is live and the first snapshot rendered. */
 export async function openPage(page: Page, path: string): Promise<void> {
@@ -25,13 +30,66 @@ export async function openBoard(page: Page): Promise<void> {
 }
 
 /** Rests the pointer on the board's list, so it holds still (Board.tsx `useListHold`): a row
- *  read is then the row clicked. The list itself never moves, so this waits on no card. */
+ *  read is then the row clicked. The list itself never moves, so this waits on no card. The
+ *  pointer goes 40 px into the part of the list on screen, not its top: a click far down a
+ *  long board (the Done toggle) scrolls the page, which takes the list's top off screen and
+ *  puts the sticky page bar over what is left of it. */
 export async function holdBoard(page: Page): Promise<void> {
   const list = page.locator(".board-list");
   await expect(list).toBeVisible();
-  const box = (await list.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + Math.min(40, box.height / 2));
+  const at = await list.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const x = box.left + box.width / 2;
+    const bottom = Math.min(box.bottom, innerHeight);
+    for (let top = Math.max(box.top, 0); top < bottom; top++) {
+      if (!el.contains(document.elementFromPoint(x, top))) continue;
+      const y = top + Math.min(40, (bottom - top) / 2);
+      return { x, y: el.contains(document.elementFromPoint(x, y)) ? y : top };
+    }
+    return null;
+  });
+  expect(at, "some of the board's list is on screen").not.toBeNull();
+  await page.mouse.move(at!.x, at!.y);
   await expect(page.locator(".page.board")).toHaveAttribute("data-held", "");
+}
+
+/** The widths, 100 to 400 px, at which a line of `el` starts with a mark that belongs to
+ *  the word before it (a full stop, a "·", a no-break space). `el` is set to each width in
+ *  turn and given back as it was. */
+export function strandedMarks(el: Locator): Promise<number[]> {
+  return el.evaluate((node: HTMLElement) => {
+    const was = node.getAttribute("style");
+    if (getComputedStyle(node).display === "inline") node.style.display = "block";
+    node.style.maxWidth = "none";
+    const chars: Range[] = [];
+    const walk = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    for (let t = walk.nextNode() as Text | null; t; t = walk.nextNode() as Text | null) {
+      for (let i = 0; i < t.data.length; i++) {
+        const r = document.createRange();
+        r.setStart(t, i);
+        r.setEnd(t, i + 1);
+        chars.push(r);
+      }
+    }
+    const found: number[] = [];
+    for (let w = 100; w <= 400; w++) {
+      node.style.width = `${w}px`;
+      // Every line starts where the first does: a mark there begins a line.
+      let start: number | null = null;
+      for (const r of chars) {
+        const box = r.getClientRects()[0];
+        if (!box || box.width === 0) continue;
+        if (start === null) start = box.left;
+        else if (Math.abs(box.left - start) < 0.5 && /^[.,;:!?·\u00a0]$/.test(r.toString())) {
+          found.push(w);
+          break;
+        }
+      }
+    }
+    if (was === null) node.removeAttribute("style");
+    else node.setAttribute("style", was);
+    return found;
+  });
 }
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";

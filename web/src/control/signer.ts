@@ -10,10 +10,11 @@
 import type { MachineControl } from "@shared/api";
 import { useEffect, useMemo, useState } from "react";
 import { type ShellPlatform, shellPlatform } from "../lib/device";
+import { NEW_WORDS } from "../native/accountWords.new";
 import type { DeviceSignature, SendBody, TrustedKey } from "./api";
 import { sha256 } from "./bytes";
 import type * as Native from "./nativeSigner";
-import { insecureHint, passkeysAvailable, storedPasskeys } from "./webauthn";
+import { certificateRefusal, insecureHint, passkeysAvailable, storedPasskeys } from "./webauthn";
 
 export type SignerKind = "passkey" | "device";
 export type Signed = Omit<SendBody, "machineId">;
@@ -23,6 +24,19 @@ const inApp = (): boolean => !!(globalThis as { sessionpipeShell?: unknown }).se
 export const signerKind = (): SignerKind => (inApp() ? "device" : "passkey");
 /** What the person confirms with: "your passkey", or the app's own ("Touch ID", "Face ID"). */
 export const signerLabel = (): string => (inApp() ? deviceWords().auth : "your passkey");
+/** The one line while its prompt is up: "Confirm with Face ID…". */
+export const tapWords = (): string => NEW_WORDS.signerTap(signerLabel());
+
+/** The person closed the prompt, or one was up already: nothing was signed, and nothing
+ *  is wrong. The app's own `cancelled` and `busy`; a passkey prompt dismissed (also when it
+ *  timed out) or aborted, unless the browser refused it for the page's certificate, which
+ *  wants fixing (webauthn.ts certificateRefusal). */
+export function isCancel(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false;
+  const x = e as { code?: unknown; name?: unknown };
+  if (!(e instanceof Error) && (x.code === "cancelled" || x.code === "busy")) return true;
+  return (x.name === "NotAllowedError" || x.name === "AbortError") && !certificateRefusal(e);
+}
 
 /** The app's words for the device it runs on, by the shell's platform (lib/device.ts):
  *  the Mac app says "this Mac" and "Touch ID", the iPhone app "this iPhone" and "Face ID",
@@ -83,6 +97,20 @@ export const signHint = (rp?: string | null): string =>
 /** The keys this device holds for `rp` (the passkeys this browser made, or the app's one
  *  device key once Rust reported it). Synchronous. */
 export const ownKeys = (rp: string): TrustedKey[] => (dev ? dev.ownKeys(rp) : inApp() ? [] : storedPasskeys(rp));
+
+/** Whether `ownKeys` is the whole answer for `rp`: a browser knows its passkeys at once; the
+ *  app once Rust has said whether it holds a key (an empty list before that says nothing). */
+export const ownKeyKnown = (rp: string): boolean => (dev ? dev.ownKeyKnown(rp) : !inApp());
+
+/** What the app's last read of its key for `rp` threw, when it failed; null anywhere else. */
+export const ownKeyFailed = (rp: string): string | null => (dev ? dev.ownKeyFailed(rp) : null);
+
+/** Ask Rust again which key the app holds for `rp`, after something outside the page may
+ *  have made it (the hub's ask makes it natively): every `useOwnKeys` then draws again.
+ *  Nothing in a browser, whose passkeys this page made itself. */
+export const rereadOwnKeys = async (rp: string): Promise<void> => {
+  if (inApp()) await (await nativeSigner()).refresh(rp);
+};
 
 /** `ownKeys`, the same array until `rp` changes or Rust reports a key. */
 export function useOwnKeys(rp: string | null): TrustedKey[] {

@@ -5,8 +5,22 @@
 // already in `online`), and it matters: a message waits for it, or one of its sessions
 // needs you, works or went stale. Hiding the line is per device and keyed by the machine
 // and its last poll, so it stays hidden while nothing changes, clears itself when the
-// machine is back, and returns when the machine drops again (a new last poll).
-import type { MachineSummary, SessionSummary } from "@shared/api";
+// machine is back, and returns when the machine drops again (a new last poll). Machines
+// counts and marks a machine online by the same rule (`machineOnline`).
+import type { MachineControl, MachineSummary, SessionSummary } from "@shared/api";
+import { ms } from "./time";
+
+/** Whether a machine is online, the one rule every page reads: a paired machine by its
+ *  heartbeat alone (the receiver's `online`, spacesheep's on an account), since its
+ *  sessions' events keep arriving while its daemon is down; an event-only machine, which
+ *  has no heartbeat, by an event in the last minute. */
+export const machineOnline = (m: Pick<MachineSummary, "lastAt" | "control">, now: number): boolean =>
+  m.control ? m.control.online : now - ms(m.lastAt) < 60_000;
+
+/** When a paired machine was last heard from: its last poll here, else its last hello
+ *  (spacesheep's last_seen, for a computer reached through an account). */
+export const lastHeard = (c: Pick<MachineControl, "lastPollAt" | "lastHelloAt">): string | undefined =>
+  c.lastPollAt ?? c.lastHelloAt;
 
 export interface OfflineMachine {
   name: string;

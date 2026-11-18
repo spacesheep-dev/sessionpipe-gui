@@ -14,6 +14,7 @@ import {
   type WorkflowRun,
   type WorkflowStep,
 } from "@shared/api";
+import { signerLabel } from "../../control/signer";
 import { harnessMark } from "../../lib/format";
 
 /** A run is still moving: its steps may change under the page. */
@@ -226,7 +227,7 @@ export function stepRowWords(
           glyph: "needs",
           right: "",
           second: o.needsUnlock
-            ? "Waiting for your passkey."
+            ? `Waiting for ${signerLabel()}.`
             : o.untrusted
               ? `Waiting for a signer. ${machine} trusts no passkey from this browser.`
               : o.elsewhere

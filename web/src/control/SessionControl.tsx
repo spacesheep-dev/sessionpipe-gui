@@ -2,14 +2,15 @@
 // Owned by: control-web. The session page's control: the strip wired to a signed send
 // (a message, Allow / Deny on an open permission, Stop), with the one reason under its
 // field (control/ControlStrip.tsx picks it from the facts this hands it), and under it
-// what became of an answer or a stop. A message sent from here and its reply are drawn
-// in the timeline, where its turn is (SessionView), not here. The signing and the answer
+// what became of a stop. An answer is said on its prompt's card, and a message sent from
+// here and its reply in the timeline, where its turn is (SessionView). The signing and the answer
 // bookkeeping live in useSend.ts, shared with the inbox; the first send of the day asks
-// for the passkey once (the day grant), and "Unlock now" takes it ahead. "Ask another
-// agent…" under the field opens the Handoff sheet (orchestrate/handoff), hosted here so
-// it opens over whichever surface holds this session.
+// for the passkey once (the day grant), and in a browser "Unlock now" takes it ahead. The
+// app says nothing ahead: its first send's own prompt (Face ID, Touch ID) says what it is.
+// "Ask another agent…" under the field opens the Handoff sheet (orchestrate/handoff),
+// hosted here so it opens over whichever surface holds this session.
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { COMPOSER_SENT, ControlStrip } from "../components/ControlStrip";
 import { useAppState, useListedSessions, useStore } from "../data/hooks";
 import { accountMode, accountSessionUrl, receiverOrigin } from "../lib/net";
@@ -18,28 +19,19 @@ import { canAskFrom } from "../orchestrate/handoff/handoff";
 import { openHandoff } from "../orchestrate/handoff/handoffState";
 import { ActivityList, forkOf } from "./Activity";
 import { HeldNotice } from "./HeldNotice";
-import {
-  deviceWords,
-  machineTakes,
-  signerKind,
-  signerLabel,
-  signHint,
-  unlock as takeGrant,
-  updateWords,
-  useOwnKeys,
-} from "./signer";
+import { isCancel, machineTakes, signerKind, signHint, unlock as takeGrant, tapWords, updateWords } from "./signer";
 import { useSessionSend } from "./useSend";
-import { isFinal, sendErrorWords } from "./words";
+import { isFinal, notSentWords } from "./words";
 import "./control.css";
 import "../orchestrate/handoff/handoff.css";
 
-/** What stays under the composer: an answer or a Stop on its way, or one that didn't
- *  make it; and a message that went to a copy of this session (CONTROL.md §6), whose turn
- *  is the copy's and never shows here: its row says so and links there. A message's own
- *  progress is its turn's, in the timeline. */
+/** What stays under the composer: a Stop on its way, or one that didn't make it; and a
+ *  message that went to a copy of this session (CONTROL.md §6), whose turn is the copy's
+ *  and never shows here: its row says so and links there. A message's own progress is its
+ *  turn's, in the timeline; an answer's is its prompt's card's (the receipt, or why it did
+ *  not go). */
 const underStrip = (a: ControlActivity) =>
-  ((a.kind === "permission.answer" || a.kind === "cancel") && (!isFinal(a) || a.outcome !== "delivered")) ||
-  !!forkOf(a);
+  (a.kind === "cancel" && (!isFinal(a) || a.outcome !== "delivered")) || !!forkOf(a);
 
 /** Where the focus goes when the notice under the composer goes: the composer, the form
  *  just before it. */
@@ -74,6 +66,11 @@ export function SessionControl({
     // On a spacesheep account a phone approved less than an hour ago cannot send yet: said
     // here with the time, before a send or an answer is refused for it.
     cooling,
+    // Whether this device can send to the session's machine (on an account the device door's
+    // word, else the machine's key list: account/sendable.ts), and what of it turns the strip off.
+    sendable: send,
+    approval,
+    catching,
   } = useSessionSend(session, control, attentions, {
     draft,
     // A message the receiver held is confirmed from the notice under the composer; once
@@ -88,39 +85,35 @@ export function SessionControl({
   // The app signs only for a machine whose daemon takes device keys (CONTROL.md §2).
   const old = device && control && !machineTakes(control) ? updateWords(session.machine) : null;
   const secure = canSignHere && !old;
-  const own = useOwnKeys(rp);
   const { connection, suggestions: all } = useAppState();
   const sessions = useListedSessions();
   const store = useStore();
-  // "Unlock now": take the day grant ahead of the first send (one passkey tap).
+  // "Unlock now": take the day grant ahead of the first send (one passkey tap). A prompt
+  // the person closes leaves the line as it was, with Unlock now; a refusal is said until a
+  // grant is held, so a send that takes one ends it too.
   const [unlock, setUnlock] = useState<string | null>(null);
   const unlockNow = async () => {
     if (!rp) return;
-    setUnlock(`Confirm with ${signerLabel()}…`);
+    setUnlock(tapWords());
     try {
       await takeGrant(rp);
       grant.refresh();
       setUnlock(null);
     } catch (e) {
-      setUnlock(sendErrorWords(e));
+      setUnlock(isCancel(e) ? null : notSentWords(e));
     }
   };
+  // Once a grant is held what Unlock now said is over, also when that grant goes later.
+  useEffect(() => {
+    if (grant.exp) setUnlock(null);
+  }, [grant.exp]);
   // A plugin's advice on an open permission (a reply from Telegram, say); Confirm signs as usual.
   const suggestions = all.length ? all.filter((s) => s.session === session.key) : all;
 
   const working = session.state === "working" || session.state === "stale" || !!session.currentTurn;
-  // A secure page whose browser holds no passkey the machine trusts (a phone that can open
-  // the https origin but never paired): a send would be refused untrusted_key, so point
-  // at /add-device, where a trusted device vouches for this one (CONTROL.md §2).
-  const untrustedHere = secure && !!rp && !!control && !control.keys.some((k) => own.some((s) => s.id === k.id));
-  // The line's one live fact: a refusal, the passkey prompt, or the unlock under way.
-  const note = error
-    ? error.replace(/^not sent · /, "Not sent: ")
-    : tap
-      ? device
-        ? `Confirm with ${deviceWords().auth}: it vouches for ${deviceWords().this} for a day, so later sends need no prompt.`
-        : "Confirm with your passkey: it vouches for this browser for a day, so later sends need no tap."
-      : (unlock ?? undefined);
+  // The line's one live fact: a refusal, the prompt being up, or the unlock under way (or
+  // why it failed, while no grant is held). All but the prompt's own line are refusals.
+  const note = error ?? (tap ? tapWords() : grant.exp === null && unlock ? unlock : undefined);
   const down = connection === "reconnecting" || connection === "offline" ? connection : null;
   // Someone to ask on its machine: another session there, or a harness its hello lists.
   const askable = canAskFrom(session, control, sessions.values(), Date.now());
@@ -140,13 +133,15 @@ export function SessionControl({
           accountMode() ? { href: accountSessionUrl(session.id), host: new URL(receiverOrigin()).host } : undefined
         }
         note={note}
-        noteKind={error ? "err" : "info"}
+        noteKind={note && note !== tapWords() ? "err" : "info"}
         answers={answers}
         suggestions={suggestions}
         chat={chat}
-        untrusted={untrustedHere}
+        send={secure && rp ? send : undefined}
+        approval={secure && rp ? approval : undefined}
+        catching={catching}
         stream={down ? { state: down, retry: () => store.reconnect() } : undefined}
-        unlock={control && secure && grant.exp === null ? () => void unlockNow() : undefined}
+        unlock={!device && control && secure && grant.exp === null ? () => void unlockNow() : undefined}
         ask={askable ? () => openHandoff({ session: session.key }) : undefined}
         onDraft={setDraft}
       />

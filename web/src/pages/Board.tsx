@@ -15,6 +15,7 @@
 import type { ControlActivity, Info, SessionState, SessionSummary } from "@shared/api";
 import { isEmptySession, ROUTES, SESSION_STATES, splitKey } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useBehind, useCatchingUp } from "../account/current";
 import {
   ChipSelect,
   CommandWell,
@@ -30,7 +31,7 @@ import { type MenuList, MoreButton, useContextMenu } from "../components/Context
 import { LabelChip, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
 import { OfflineLine } from "../components/OfflineLine";
-import { PageBar } from "../components/PageBar";
+import { BarStatus, PageBar } from "../components/PageBar";
 import {
   BesideButton,
   cardHides,
@@ -58,7 +59,7 @@ import {
   useStreamDown,
   useUnreadKeys,
 } from "../data/hooks";
-import { agentMatches } from "../lib/agents";
+import { agentFound } from "../lib/agents";
 import { foldsAway, nestDelegated } from "../lib/delegated";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import {
@@ -82,6 +83,7 @@ import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib
 import { useShortcut } from "../lib/shortcuts";
 import { openSplit, useSplitKey } from "../lib/split";
 import { useNow } from "../lib/time";
+import { NEW_WORDS as N } from "../native/accountWords";
 import { useSetupStatus } from "../setup/api";
 
 const isStart = (a: ControlActivity) => a.kind === "start";
@@ -89,10 +91,7 @@ const isStart = (a: ControlActivity) => a.kind === "start";
 const PENDING_MAX_MS = 3600_000;
 
 /** Whether a search finds one of a session's agents (their type or what they were asked). */
-const agentsMatch = (s: SessionSummary, q: string): boolean => {
-  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  return words.length > 0 && (s.agents ?? []).some((a) => words.every((w) => agentMatches(a, w)));
-};
+const agentsMatch = (s: SessionSummary, q: string): boolean => (s.agents ?? []).some((a) => agentFound(a, q));
 
 const matches = (s: SessionSummary, q: string) => {
   if (!q) return true;
@@ -205,6 +204,9 @@ export function Board() {
   const { all } = tree;
   const { snapshotAt } = useAppState();
   const firstLoad = useFirstLoad();
+  // An account reading its history: the board it has stays as it is until the history is in.
+  const behind = useBehind();
+  const catchingUp = useCatchingUp();
   const [q, setQ] = useState("");
   const [machine, setMachine] = useState("");
   const [harness, setHarness] = useState("");
@@ -437,8 +439,12 @@ export function Board() {
   const hiddenMenu = useContextMenu(() => [{ label: "Show hidden sessions", checked: showHidden, run: toggleHidden }]);
 
   const doneCount = groups.get("done")!.length;
-  const loaded = !!snapshotAt;
-  const empty = loaded && all.length === 0 && pending.length === 0;
+  const none = all.length === 0 && pending.length === 0;
+  // A board an account drew empty before any of its history came (its first read was
+  // refused), with history coming now: still loading, not the first run.
+  const filling = !!snapshotAt && behind && none;
+  const loaded = !!snapshotAt && !filling;
+  const empty = loaded && none;
   // The listening state leaves over 160 ms before the first row comes in.
   const emptyShown = usePresence(empty, EMPTY_EXIT_MS);
   const [witnessed, setWitnessed] = useState(false);
@@ -464,7 +470,7 @@ export function Board() {
         openBeside={beside}
         open={s.key === openKey}
         openTab={s.agents?.length ? openKey : null}
-        agentsMatch={!!lq.rest && agentsMatch(s, lq.rest)}
+        agentsMatch={lq.rest && agentsMatch(s, lq.rest) ? lq.rest : undefined}
         onlyMachine={setMachine}
         onlyHarness={setHarness}
         gone={h.gone}
@@ -496,6 +502,7 @@ export function Board() {
     >
       <PageBar
         title="Board"
+        meta={catchingUp ? <BarStatus>{N.catchingUp}</BarStatus> : undefined}
         tools={
           // Not before the first snapshot: the filters it decides would push the search
           // over as they arrive (the layout shift the board had on every load).
@@ -555,8 +562,14 @@ export function Board() {
       )}
       <LensNote lens={lens} hidden={hiddenByLens} />
 
-      {firstLoad === "loading" ? (
-        <div className="skeleton board-skeleton" role="status" aria-label="Loading sessions">
+      {firstLoad === "loading" || filling ? (
+        // While the page bar says "Catching up…", it is the one that says so.
+        <div
+          className="skeleton board-skeleton"
+          role="status"
+          aria-label={behind ? N.catchingUpSpoken : "Loading sessions"}
+          aria-hidden={catchingUp || undefined}
+        >
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="skeleton-row" />
           ))}

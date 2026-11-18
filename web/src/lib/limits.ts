@@ -296,31 +296,44 @@ export function accountFor(
   return seen.length === 1 ? pick(seen[0]) : null;
 }
 
-/** An agent's line in New session: the hint at the right ("62% left"), the detail under
- *  its name ("5 hours, resets in 2 h 21 m"), and whether the hint is none left or over.
- *  Two accounts have no hint, since no one number is theirs; the detail has each one's
- *  tightest window ("dev 62% left, work 12% over"), or "2 accounts here" with none. */
-export function agentWords(pick: AccountPick, now: number): { hint?: string; detail?: string; out?: boolean } {
+/** An agent's line in New session: the hint at the right of its option ("62% left"), the
+ *  detail under its name ("5 hours, resets in 2 h 21 m"), whether the hint is none left or
+ *  over, and the `aside` under the chosen agent (agentAside). Two accounts have no hint and no
+ *  aside, since no one number is theirs; the detail has each one's tightest window ("dev 62%
+ *  left, work 12% over"), or "2 accounts here" with none. A window whose reset has passed
+ *  says nothing here: what was used since is unknown, and a lone "Reset" read as a button. */
+export function agentWords(
+  pick: AccountPick,
+  now: number,
+): { hint?: string; detail?: string; out?: boolean; aside?: string } {
   if (!pick) return {};
   if (pick.kind === "ambiguous") {
-    const each = pick.each.map(({ name, entry }) => {
+    const each = pick.each.flatMap(({ name, entry }) => {
       const t = tightest(entry, now);
-      const value = t ? readWindow(t, now).value : "Reset";
+      if (!t) return [];
+      const value = readWindow(t, now).value;
       const stale = staleWords(entry, now);
-      return `${name} ${value.charAt(0).toLowerCase()}${value.slice(1)}${stale ? ` ${stale}` : ""}`;
+      return [`${name} ${value.charAt(0).toLowerCase()}${value.slice(1)}${stale ? ` ${stale}` : ""}`];
     });
-    return { detail: each.length ? each.join(", ") : `${pick.count} accounts here` };
+    if (each.length) return { detail: each.join(", ") };
+    return pick.each.length ? {} : { detail: `${pick.count} accounts here` };
   }
   const e = pick.entry;
   const stale = staleWords(e, now);
   const t = tightest(e, now);
-  if (!t) {
-    const first = orderWindows(e.windows)[0];
-    return { hint: "Reset", ...(first ? { detail: windowSentence(first, now) } : {}) };
-  }
+  if (!t) return {};
   const r = readWindow(t, now);
   const detail = [windowLabel(t), r.when, stale].filter(Boolean).join(", ");
-  return { hint: r.value, detail, out: isOut(r) };
+  const aside = agentAside(r);
+  return { hint: r.value, detail, out: isOut(r), ...(aside ? { aside } : {}) };
+}
+
+/** The chosen agent's line under its name in New session, only where it would change what
+ *  is done: "12% left" at 20% or less, "None left, resets in 2 h 21 m" or "12% over, …" when
+ *  out; nothing above 20%. */
+export function agentAside(r: Reading): string | undefined {
+  if (isOut(r)) return `${r.value}${r.when ? `, ${r.when}` : ""}`;
+  return r.kind === "left" && Math.floor(r.room) <= 20 ? r.value : undefined;
 }
 
 // ----- the page's edges -----

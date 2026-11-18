@@ -415,6 +415,15 @@ describe("the Agent menu's pooled line (UX-SPEC §6)", () => {
       out: false,
     });
     expect(poolPickerWords(pool, () => undefined, NOW)).toEqual({ detail: "3 accounts, 2 with room · Misha" });
+    // Every window of the current account reset since: the count, no bare "Reset".
+    const reset = {
+      ...fresh,
+      windows: fresh.windows.map((w) => ({ ...w, resetsAt: new Date(NOW - H).toISOString() })),
+    };
+    expect(poolPickerWords(pool, () => reset, NOW)).toEqual({ detail: "3 accounts, 2 with room · Misha" });
+    // Low on room: the chosen agent's line says it.
+    const low = { ...fresh, windows: [{ ...fresh.windows[0]!, usedPercent: 88 }] };
+    expect(poolPickerWords(pool, () => low, NOW)).toMatchObject({ hint: "12% left", aside: "12% left", out: false });
     expect(poolPickerWords(pool, () => ({ ...fresh, observedAt: new Date(NOW - 3 * H).toISOString() }), NOW)).toEqual({
       hint: "62% left",
       detail: "3 accounts, 2 with room · Misha, 5 hours, resets in 2 h 21 m, numbers as of 3 h ago",
@@ -427,9 +436,10 @@ describe("the Agent menu's pooled line (UX-SPEC §6)", () => {
       hint: "None left",
       detail: "2 accounts, none with room · first back in 2 h 10 m",
       out: true,
+      aside: "None left",
     });
     expect(poolPickerWords({ ...pool, accounts: [{ ...sheep, until: undefined }, err] }, () => undefined, NOW)).toEqual(
-      { hint: "None left", detail: "2 accounts, none with room", out: true },
+      { hint: "None left", detail: "2 accounts, none with room", out: true, aside: "None left" },
     );
     expect(
       poolPickerWords({ ...pool, accounts: [err, acc({ id: "y", enabled: false })] }, () => undefined, NOW),

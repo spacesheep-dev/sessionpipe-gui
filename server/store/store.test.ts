@@ -964,6 +964,42 @@ describe("flags and turn stats", () => {
     expect(store.session(sessionKey("claude-code", "late"))!.flags).toEqual([]);
   });
 
+  it("never reads a hole in what spacesheep relays as a gap, before a reboot or after", async () => {
+    await store.close();
+    vi.useFakeTimers();
+    const t0 = Date.parse("2026-10-14T12:00:00.000Z");
+    vi.setSystemTime(t0);
+    store = new Store(tmp.dir, { tickMs: 1_000 });
+    const s = new Session();
+    s.clock = t0 - 60_000;
+    store.ingest([s.ev("session.started"), s.ev("turn.started"), s.ev("tool.started", { tool: "Read" })], "spacesheep");
+    store.ingest([s.ev("tool.started", { tool: "Edit" }, { seq: 5 })], "spacesheep");
+    vi.advanceTimersByTime(GAP_AFTER_MS + 2_000);
+    expect(store.session(KEY)!.flags).toEqual([]);
+    await store.close();
+    store = new Store(tmp.dir, { tickMs: 1_000 });
+    vi.advanceTimersByTime(GAP_AFTER_MS + 2_000);
+    expect(store.session(KEY)!.flags).toEqual([]);
+  });
+
+  it("clears a hole the sink opened when spacesheep brings its events", async () => {
+    await store.close();
+    vi.useFakeTimers();
+    const t0 = Date.parse("2026-10-14T12:00:00.000Z");
+    vi.setSystemTime(t0);
+    store = new Store(tmp.dir, { tickMs: 1_000 });
+    const s = new Session();
+    s.clock = t0 - 60_000;
+    store.ingest([s.ev("session.started"), s.ev("turn.started"), s.ev("tool.started", { tool: "Read" })], "http");
+    store.ingest([s.ev("tool.started", { tool: "Edit" }, { seq: 5 })], "http");
+    vi.advanceTimersByTime(GAP_AFTER_MS + 2_000);
+    expect(store.session(KEY)!.flags).toMatchObject([{ kind: "gap", detail: "waiting for 2 events (seq 3–4)" }]);
+    store.ingest([s.ev("tool.ended", { tool: "Read", ok: true }, { seq: 3 })], "spacesheep");
+    expect(store.session(KEY)!.flags).toMatchObject([{ kind: "gap", detail: "waiting for 1 event (seq 4)" }]);
+    store.ingest([s.ev("tool.ended", { tool: "Edit", ok: true }, { seq: 4 })], "spacesheep");
+    expect(store.session(KEY)!.flags).toEqual([]);
+  });
+
   it("measures turns: median and last duration, tools per turn", () => {
     const s = new Session();
     store.ingest(

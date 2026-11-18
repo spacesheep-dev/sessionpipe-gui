@@ -306,11 +306,13 @@ pub fn alert(
             drop(done.lock().unwrap().take());
             return;
         }
-        // UIAlertControllerStyleAlert = 1; UIAlertActionStyleDefault = 0, Cancel = 1.
+        // UIAlertControllerStyleAlert = 1; UIAlertActionStyleDefault = 0, Cancel = 1,
+        // Destructive = 2.
         let ac: *mut AnyObject = msg_send![class!(UIAlertController), alertControllerWithTitle: nsstring(&a.title), message: nsstring(&a.message), preferredStyle: 1isize];
         let (yes, no) = (answer(true), answer(false));
+        let style: isize = if a.destructive { 2 } else { 0 };
         let cancel: *mut AnyObject = msg_send![class!(UIAlertAction), actionWithTitle: nsstring(a.cancel), style: 1isize, handler: &*no];
-        let ok: *mut AnyObject = msg_send![class!(UIAlertAction), actionWithTitle: nsstring(a.ok), style: 0isize, handler: &*yes];
+        let ok: *mut AnyObject = msg_send![class!(UIAlertAction), actionWithTitle: nsstring(a.ok), style: style, handler: &*yes];
         let _: () = msg_send![ac, addAction: cancel];
         let _: () = msg_send![ac, addAction: ok];
         // The preferred action is the bold one, and what a keyboard's return key gives.

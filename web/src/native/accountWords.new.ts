@@ -3,7 +3,8 @@
 // nothing else: one line a sentence, so this file's history is the list the owner approves.
 // What these screens reuse as it is (already approved elsewhere) is in accountWords.ts,
 // with where each comes from. `phone` is "this iPhone" / "this phone"; `Phone` the same
-// with a capital; `host` the account's host; `time` a clock time such as "14:05".
+// with a capital; `host` the account's host; `time` a clock time such as "14:05"; `auth`
+// what confirms a send, "Face ID"; `secret` what unlocks it when it is locked, "passcode".
 export const NEW_WORDS = {
   or: "or",
   introBody:
@@ -15,18 +16,20 @@ export const NEW_WORDS = {
   askingTitle: "Confirmed on spacesheep",
   askingBody: (phone: string) => `Answer the question on ${phone} to finish.`,
   notConnected: "Not connected",
-  unreachableBody: (phone: string) => `Check ${phone}'s connection, then try again.`,
+  unreachableBody: "Check your connection, then try again.",
   waitTitle: "Too many tries",
   waitAt: (time: string) => `Try again at ${time}.`,
   waitSoon: "Try again in a few minutes.",
-  busyBody: (phone: string) => `Another question is open on ${phone}. Answer it, then try again.`,
-  deniedBody: "The request was refused on spacesheep.",
-  expiredTitle: "Not confirmed in time",
+  busyTitle: "Another question is open",
+  busyBody: "Answer it, then try again.",
+  deniedBody: "You chose Not now on spacesheep.",
+  expiredTitle: "Time ran out",
   expiredBody: "Try again for a new number.",
-  notKeptTitle: (phone: string) => `Couldn't keep the account on ${phone}`,
-  unexpectedTitle: (host: string) => `${host} didn't answer as expected`,
-  unexpectedBody: "Try again. If it keeps happening, update sessionpipe.",
-  revoke: "Open API keys on spacesheep",
+  notKeptTitle: (phone: string) => `Couldn't save the account on ${phone}`,
+  unexpectedTitle: "Couldn't connect",
+  unexpectedBody: "If it keeps happening, update this app.",
+  unusedKey: "Revoke the unused key on spacesheep.",
+  revoke: "Open API keys",
   disconnectedTitle: "Disconnected",
   connectedBody: (phone: string) => `Reading works now. To send from ${phone}, approve it once on spacesheep.`,
   since: (host: string, date: string) => `${host} · since ${date}`,
@@ -61,6 +64,7 @@ export const NEW_WORDS = {
   approveCoolingWhy: "New devices wait an hour, so a stolen sign-in can't act at once.",
   approveDone: (Phone: string) => `${Phone} can send.`,
   approveRest: (code: string) => `Not on every computer yet: type ${code} on Devices for the rest.`,
+  approveAddRest: "Not on every computer yet: add it to the rest on Devices.",
   approveDroppedTitle: "Not approved",
   approveDroppedBody: "The request was removed on spacesheep, or ran out after 24 hours.",
   approveTooMany: (time: string) => `Too many tries. Ask again at ${time}.`,
@@ -71,6 +75,102 @@ export const NEW_WORDS = {
     `On spacesheep: Devices → Remove. It stops carrying anything ${phone} sends, right away.`,
   openDevices: "Open Devices",
   composerCooling: (Phone: string, time: string) => `${Phone} can send from ${time}`,
-  rowCoolingBy: (Phone: string, time: string) => `${Phone} can send by ${time}`,
   machinesApprove: (phone: string) => `Approve ${phone}`,
+  answerLate: (machine?: string) => `too late to answer from here; answer it on ${machine ?? "its computer"}`,
+  answerLateLine: (machine?: string) => `Too late to answer from here; answer it on ${machine ?? "its computer"}.`,
+  answerClosed: "already answered, or timed out",
+  catchingUp: "Catching up…",
+  catchingUpSpoken: "Catching up",
+  sessionShowMore: "Show more",
+  sessionLoadFailed: "Couldn't load. Try again",
+  sessionCopyPreview: "Copy message (preview)",
+  answerNotYet: (Phone: string) => `${Phone} can't answer yet`,
+  sendNotAdded: (machine: string, phone: string) => `Not sent: ${machine} hasn't added ${phone} yet.`,
+  signerTap: (auth: string) => `Confirm with ${auth}…`,
+  signerLocked: (auth: string, secret: string) => `${auth} is locked. Unlock it with your ${secret}, then try again.`,
+  sendCooling: (Phone: string, time: string) => `Not sent. ${Phone} can send from ${time}.`,
+  sendCoolingWhy: "Not sent. New devices wait an hour, so a stolen sign-in can't act at once.",
+  answerOut: (what: string, machine: string) => `${what} · waiting for ${machine}`,
+  answerOutOffline: (what: string, machine: string) => `${what} · waiting for ${machine} to come back`,
+  answerAllowed: "Allowed",
+  answerDenied: "Denied",
+  answerPlanApproved: "Plan approved",
+  answerPlanChanges: "Asked for changes",
+  questionAsked: "Claude has a question.",
+  questionMore: (n: number) => `+${n} more ${n === 1 ? "question" : "questions"}`,
+  questionWhere: (machine?: string) => `answer it on ${machine ?? "its computer"}`,
+  questionWhereLine: (machine?: string) => `Answer it on ${machine ?? "its computer"}.`,
+  questionChip: "Question",
+  commandCut: "The machine sends the first 120 characters",
+  questionOptions: "Options",
+  inboxOpen: "Open",
+  toolsRunning: (tool: string) => `Running ${tool}`,
+  toolsAsking: (tool: string) => `Asking to run ${tool}`,
+  toolsAskingQuestion: "Asking a question",
+  toolsAskingPlan: "Asking about the plan",
+  toolsQuiet: (tool: string, time: string) => `${tool} · quiet for ${time}`,
+  toolAsking: "asking",
+  toolQuiet: "quiet",
+} as const;
+
+/** Whether this phone can send to a computer (account/sendable.ts), the same on every screen
+ *  that says it: `short` where a row or a list has room for a few words, `long` where one
+ *  sentence goes (the composer's line, New session's). A line already approved above is
+ *  named, not written again. `machine` is a computer's name. */
+export const SEND = {
+  short: {
+    can: NEW_WORDS.approveCanSend,
+    from: (time: string) => `Can send from ${time}`,
+    by: (time: string) => `Can send by ${time}`,
+    notYet: NEW_WORDS.approveNotYet,
+    dropped: NEW_WORDS.approveDroppedTitle,
+    waiting: NEW_WORDS.approveWaiting,
+    notHere: "Not on this computer yet",
+    old: "Update sessionpipe there",
+  },
+  long: {
+    from: NEW_WORDS.approveCoolingAt,
+    by: NEW_WORDS.approveCoolingBy,
+    notYet: (Phone: string) => `${Phone} can't send yet.`,
+    notHere: (machine: string, phone: string) => `${machine} hasn't added ${phone} yet.`,
+  },
+} as const;
+
+/** New session and Ask another agent (control/startGate.ts): the sheet that stands in for a
+ *  form nothing on could start, a machine's few words in the picker, and the Permission row
+ *  where the machine sets the level. */
+export const START = {
+  notApproved: (Phone: string) => `${Phone} isn't approved yet`,
+  notHere: SEND.short.notHere,
+  old: "update sessionpipe",
+  ownSettings: "Its own settings",
+  ownSettingsRefused: "Anything it asks permission for is refused.",
+  setOnMachine: "Set on the machine",
+  setOn: (machine: string) => `Set on ${machine}`,
+} as const;
+
+/** Machines on an account: the one row that says where this phone stands with every
+ *  computer, then each computer's rows and what its Details hold. `n` of `m` computers. */
+export const MACHINES = {
+  approve: (phone: string) => `Approve ${phone} to send`,
+  waiting: NEW_WORDS.approveWaiting,
+  canFrom: NEW_WORDS.composerCooling,
+  canBy: (Phone: string, time: string) => `${Phone} can send by ${time}`,
+  can: (Phone: string) => `${Phone} can send`,
+  canSome: (Phone: string, n: number, m: number) => `${Phone} can send to ${n} of ${m} computers`,
+  notHere: SEND.short.notHere,
+  old: "Update sessionpipe on this computer to send from the app",
+  status: "Status",
+  online: "Online",
+  offline: "Offline",
+  noSessions: "None yet",
+  needsYou: (n: number) => `${n} ${n === 1 ? "needs" : "need"} you`,
+  working: (n: number) => `${n} working`,
+  details: "Details",
+  mode: "Mode",
+  modes: { safe: "Safe", auto: "Auto", inherit: "Inherit" },
+  agents: "Agents",
+  askOn: "Can ask each other",
+  askOff: "Asking is off",
+  queued: "Waiting to send",
 } as const;

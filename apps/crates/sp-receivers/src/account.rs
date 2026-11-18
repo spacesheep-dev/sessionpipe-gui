@@ -86,18 +86,22 @@ pub const HELD_MAX_MS: u64 = 15 * 60_000;
 pub const UNUSED_KEY_NOTE: &str = "A key was made for this app on spacesheep and is not kept here. Revoke it there: Settings → API keys.";
 
 /// A question only the person answers, in UI the page cannot draw or click. The shell
-/// writes the words (`apps/mobile` `confirm.rs`); Cancel is the default answer of each.
+/// writes the words (`apps/mobile` `confirm.rs`). Cancel is the default answer of each,
+/// but for keeping an approved account that replaces none: the person has just confirmed
+/// that on spacesheep, so going ahead is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Question {
     /// Before a connect to an origin that is not spacesheep.dev: its confirm page is
     /// that server's own, which could say yes to itself.
     Origin { origin: String, host: String },
     /// Before an approved account is kept: whose it is. The page never held the code, but
-    /// the person must still see which account this phone is about to show.
+    /// the person must still see which account this phone is about to show. `replaces`:
+    /// the email of another account at this origin, which goes with its documents on yes.
     Attach {
         email: String,
         origin: String,
         host: String,
+        replaces: Option<String>,
     },
     /// Before an account is disconnected. `documents`: labels and read marks are kept
     /// for it here, and go with it.
@@ -772,10 +776,11 @@ pub struct ConnectAnswer {
 /// How long a connect may stay open whatever the answer says, and its shortest.
 pub const CONNECT_MAX_MS: u64 = 15 * 60_000;
 const CONNECT_DEFAULT_MS: u64 = 10 * 60_000;
-/// Once approved, spacesheep keeps the key for the poll this long (`GUI_CONNECT_KEY_TTL_S`):
-/// the poll goes on that much past the code's expiry, so an approval in its last second
-/// is still collected.
-pub const CONNECT_COLLECT_MS: u64 = 125_000;
+/// How long the poll goes on past the code's expiry, so an approval in its last minutes is
+/// still collected by a phone that comes back late: as long as an approval is held here
+/// (`HELD_MAX_MS`). spacesheep keeps an approved key for the poll `GUI_CONNECT_KEY_TTL_S`
+/// (two minutes today); a poll later than that is told the code expired.
+pub const CONNECT_COLLECT_MS: u64 = 15 * 60_000;
 
 /// Reads the connect answer. The link the person is sent to must be on the account's own
 /// origin (`link_on_origin`): the Hub opens no link to anywhere else, whatever the

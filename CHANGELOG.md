@@ -6,6 +6,178 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **A list row offers Allow and Deny only beside a request it shows whole.** The Inbox
+  cut a command to one line, on a phone often before its target, with a one-tap Allow under
+  it. A short, whole request now wraps beside Deny and Allow; anything else, a plan
+  included, takes at most two lines and offers Open, which opens the session where it is
+  shown whole. The row's menu and the a and d keys answer only a request shown whole, and
+  the keys never answer a session open beside the Inbox unless the focus is in it; a board
+  row's menu answers only one its line does not cut. Every shell prompt reads "Allow Bash
+  to run:" (its own shell's name in place of Bash) with the command under it, at every
+  size, and no "?" is left alone on a line after a command that wrapped. A command of one
+  line is shown whole however it wraps, also on a phone, where it was cut at three lines.
+  A Claude Code command over 120 characters, which reaches the app cut with no mark, is
+  shown whole where the session sends its calls' input, and otherwise ends in "…".
+- **A session's subagents open under it on the board only while one of them runs.** A
+  tree whose agents had gone quiet opened by itself; it stays folded now, and the row says
+  only how many run. On a phone an open tree lists the agents at work and one row, "Show n
+  finished", for the rest (a search lists the finished ones it found). A tap on the row's
+  leading 44 points, its glyph included, folds the tree; the title opens the session. On a
+  touch screen a tree's rows are 44 points tall, and no tree hides one agent behind "Show
+  1 more".
+- **On a touch screen, Return in a session's message field starts a new line.** The
+  iPhone's keyboard has no Shift+Return, so a message could not be more than one line, and
+  a stray Return sent half of one. The ↑ button sends now, as in Messages, and ⌘Return
+  (Ctrl+Return) from a keyboard; an iPad with a keyboard attached works the same way. A
+  computer keeps Return to send and Shift+Return for a new line, however narrow its window.
+
+### Fixed
+
+- **A session's tools line says "Asking to run Bash" while the agent waits for your
+  answer, not "Running Bash".** Claude Code asks before a tool runs, yet the line spun and
+  the tool's time kept counting under the Allow it waited for, twelve minutes on. A tool
+  spins and counts now only while its session works. While the session asks, the line
+  reads "Asking to run" and the tool, with the needs-you dot, and once your answer is out,
+  "Running" again; when nothing has come for ten minutes, "Bash · quiet for 12 m", with the
+  quiet ring; on a computer that is offline, its ring stands still and it shows no time.
+  A row that shows no time gives its command the room the time took. A subagent's tools
+  follow the subagent; a stopped turn stops them, unless the subagent works on in the
+  background. "· 2 more tools", which read as tools still to come, is gone, and the words
+  start at the same place whether a tool runs or the turn is over.
+- **A question from Claude Code reads as the question, not as "Allow AskUserQuestion?".**
+  Its row showed only the tool's name, and its card offered Allow and Deny, neither of
+  which can carry the answer. The card now shows the question and its options to read,
+  and says to answer it on its computer; the board and the Inbox show the question after
+  "Question". The Inbox lists it with the prompts waiting in a terminal and treats it as
+  one: the Inbox badge doesn't count it, a browser tab raises no notification for it, and
+  its card, its rows, their menus, the palette, the banners in the app and, on a spacesheep
+  account, the iPhone's notification offer no answer.
+- **An answer to a prompt shows as sent on every screen, in one line: "Allowed · waiting
+  for" its computer.** Only the screen it was pressed on knew it went: the Inbox, the
+  session's page and a reload offered Allow and Deny again, and a second tap cost a Face ID
+  and came back "already answered". The prompt's card keeps its question and says which
+  answer went, and what it waits for, in place of the buttons, the note and the row under
+  the field; its glyph turns while it waits. The Inbox row says the same, and the badge and
+  the count drop the moment the answer goes. An answer the computer refuses gives Allow and
+  Deny back, with why, in the Inbox and on a banner only on that prompt's own row. A
+  disabled Allow no longer looks like the one pressed, and VoiceOver hears why Allow, Deny
+  and Start are off.
+- **On a phone, the link under the message field reads as an action and takes a finger's
+  tap.** "Approve this iPhone", "Unlock now", "Retry now" and "Open on spacesheep.dev" were
+  the grey of the sentence beside them, on a line 18 points tall. They are the orange of
+  the app's other actions now, bolder, and 44 points tall to a finger, without taking a tap
+  from the field above or from Ask another agent… beside them; the line itself is a size
+  larger. New session's Discard draft is orange and 44 points tall too, and Cancel still
+  keeps the draft. VoiceOver and Voice Control name the field by the words it shows
+  ("Message this session…").
+- **In the phone app nothing shows through the tab bar, the navigation bar or the session's
+  control strip.** The bars were meant to blur what ran under them and never did: rows read
+  sharp through the tab labels and into the home-indicator strip, and the transcript
+  through the session's title and the command waiting for Allow or Deny. The bars are
+  solid now.
+- **Connecting a spacesheep account on the iPhone: "Use it" is the answer the question
+  offers first.** Back from Safari, the question put Cancel first, and one tap on it threw
+  the connect away and left a key behind on spacesheep. It now names the account in its
+  title ("Use you@example.com?") and where it is signed in, and offers Use it first.
+  Cancel stays first where a yes would remove another account here (the question says
+  which), and Disconnect's button is red.
+- **Coming back late after confirming is no longer called "Not confirmed in time".** The
+  app asks spacesheep once more after the code's time and takes its word: an approval it
+  still holds is collected, and one it dropped is said, with the key left there to revoke.
+- **Each way a connect can end says what happened in a title and one line.** "Not now" on
+  spacesheep reads as the person's own choice, not a refusal; another open question,
+  "Time ran out" and "Couldn't connect" have titles of their own; and where a key was left
+  on spacesheep, the screen says to revoke it once, with "Open API keys" to do it.
+- **A busy session's row shows the newest words of its reply, and no longer says "waiting
+  for 25703 events" on a spacesheep account.** spacesheep relays a session thinned on
+  purpose, so the numbers it skips are events that were never sent; the row and the
+  session's page read them as missing, and the count only grew. A row's flag now takes at
+  most part of the line instead of pushing the reply out, only a slow tool or a loop is said
+  there (compacting is on the session's page), and a reply still being written starts at
+  its newest sentence, not at a word cut 300 characters back.
+- **A permission prompt is no longer greyed out as "raised before this machine was
+  paired".** On a spacesheep account almost every prompt older than a minute said so, with
+  Allow and Deny off, though the computer was paired long ago. Allow and Deny now stay for
+  as long as Claude Code waits for the answer, two minutes. After that the prompt says "Too
+  late to answer from here; answer it on" its computer, with no buttons, moves to Waiting
+  in a terminal in the Inbox, and no longer counts on the Inbox badge. One that was gone
+  already reads "already answered, or timed out". A line that stands on its own reads as a
+  sentence, whatever the computer's name starts with, and a name such as
+  Misha-Petrov-laptop no longer breaks at its hyphens.
+- **Once the iPhone is approved on a spacesheep account, every screen agrees that it can
+  send.** Machines kept offering "Approve this iPhone", and New session and the composer
+  said a computer did not trust the phone, until the app was opened again: the app had
+  read its own key before the ask made it, and never read it again. It reads it again
+  after the ask, when the approval is first seen and when the app comes back to the
+  front; and on an account, what spacesheep says about the phone decides on every screen.
+- **A phone approved before the app saw it wait is no longer said to wait an hour.**
+  Settings › App said "This iPhone can send by" an hour from then when, say, the app's
+  storage had been cleared. It says "Can send" now; if spacesheep does hold a send back,
+  its answer says until when.
+- **On a spacesheep account the board holds still while the app reads the account's
+  history, and says "Catching up…".** The iPhone app drew the board from part of the
+  history every second and a half, oldest first, so for its first minute the same sessions
+  read as Done, then as needing you (with a badge), then as Working. The board on screen
+  stays as it was, or its loading rows on a first connect, and changes once, when the
+  history is in. Nothing it hands over for notifications comes from the part read so far.
+  Meanwhile a prompt it kept has Allow and Deny off, and nothing says to pair a computer
+  that is paired.
+- **Long messages and long replies are no longer cut at 400 characters.** A session
+  opened again showed a message you sent cut mid-word, with no sign of it, and every reply
+  over 400 characters as a stub that needed its own "Load full text". Both now arrive whole
+  up to 2,048 characters, the newest reply always whole, and a message sent from this
+  device as it was signed. A long message folds to eight lines under "Show all"; an older
+  reply longer than that ends in "…" with "Show more".
+- **Machines on a spacesheep account says in one row whether the iPhone can send, and calls
+  a computer offline when the board does.** Each computer listed its devices by key ids
+  ("Kq3mZ7wP, wDOATr0O (this one)") with an "Approve this iPhone" link of its own, and read
+  "online" while its sessionpipe was down, as long as a session there still sent. One row
+  above the computers now says where the iPhone stands ("This iPhone can send from 5:26
+  AM") and opens Approve this iPhone; each computer has Status and Sessions on a line each,
+  a line only where something is so (an old sessionpipe, a computer that has not approved
+  the iPhone, inherit mode), and the rest behind Details. On every Machines page a paired
+  machine is online only while its sessionpipe is.
+- **An iPhone that isn't approved offers Approve this iPhone instead of an Allow that would
+  only be refused.** Allow, Deny, Send and Stop asked for Face ID twice, then failed with
+  words about a day grant. A prompt now says "This iPhone can't answer yet." with Approve
+  this iPhone in their place, the field is off, and the Inbox says it once, in a panel above
+  Notifications, as it says the hour and any other reason Allow and Deny are off; the Mac app
+  does the same where a computer doesn't trust the Mac, on that computer's prompts only (in
+  the Inbox, on their rows), while another computer's keep Allow and Deny. Where a computer
+  has not added an approved phone's key, Allow and Deny stay, off, the prompt says so once,
+  with Approve this iPhone, and that page says to add it on spacesheep's Devices; a refused
+  send takes one Face ID and says why.
+- **In the app, nothing warns of Face ID ahead of time, and a cancel is not an error.**
+  Every session said "The first send today asks for your passkey. Unlock now" on the
+  iPhone, and New session and Ask another agent each had a note of their own. Now the first
+  Allow, Send, Start or Ask of the day just brings Face ID up (Touch ID on the Mac). While
+  it is up the line says "Confirm with Face ID…", never Touch ID on the iPhone. A
+  cancelled Face ID or passkey leaves everything as it was, typed words included, with no
+  "not sent". In a browser a cancelled Unlock now brings the line back, and a refused one is
+  said until a send goes. Every refusal reads "Not sent: …", in the Inbox too.
+- **In the hour after the iPhone is approved, Allow, Deny, Send and Stop wait instead of
+  asking for Face ID only to be refused.** The app held them back only when it had seen the
+  approval come within 20 seconds, which a trip to Safari to approve it never is, so the
+  first tap got spacesheep's three-sentence refusal. An approval seen within ten minutes now
+  counts, and a send that is still refused says "Not sent. This iPhone can send from 5:26
+  AM." The hour is said once: with a prompt open, on its card with Open on spacesheep.dev
+  (on the phone the card stands alone, and the link takes a line of its own), else under
+  the field. The Inbox says it as it is, without "Allow and Deny are off:" in front. Every
+  screen says it in the same sentence, full stop included, and "by 5:26 AM at the latest"
+  where only the latest time is known.
+- **New session and Ask another agent offer nothing that would only be refused.** On an
+  iPhone that isn't approved they were a whole form with a faded Start and a grey footnote;
+  now each says "This iPhone isn't approved yet" with Approve this iPhone, and a message
+  written earlier is still there once it is. In the hour after approval the form stays and
+  Start waits under "This iPhone can send from 5:26 AM." instead of costing a Face ID, and
+  once the hour is over no refusal from it is left on the sheet. A computer that hasn't
+  added the iPhone is listed, off, as "not approved", and New session opens on one that can
+  start. When all is well the phone's sheet says nothing under the form, the Permission row
+  stays and reads "Safe" in the ink of the other values, and an agent's allowance shows
+  under its name only at 20% or less, never as a bare "Reset".
+
 ## [0.8.3] - 2026-11-16
 
 0.8.2 was tagged and never published (its Apple builds could not be made that day); what

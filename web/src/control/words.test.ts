@@ -3,13 +3,17 @@
 // own detail ends the sentence it is quoted in, once, whatever punctuation it came with.
 import type { ControlActivity } from "@shared/api";
 import { describe, expect, it, vi } from "vitest";
-import { ControlError } from "./api";
+import { ControlError, UNHEARD_CODE } from "./api";
 import { noteMachineControl } from "./remoteRp";
 import {
+  answerEndWords,
   handoffEndWords,
   harnessCommand,
+  notSentLine,
+  notSentWords,
   outcomeWords,
   promptFailureWords,
+  receiptWords,
   refusalWords,
   sendErrorWords,
   sentLine,
@@ -193,6 +197,61 @@ describe("sendErrorWords", () => {
     }
   });
 
+  it("on a spacesheep account a key the computer does not list is said as that, with the computer's name", async () => {
+    const g = globalThis as { sessionpipeShell?: unknown };
+    g.sessionpipeShell = {
+      platform: "ios",
+      rxBase: "rx://localhost/ACCT",
+      receiver: { kind: "spacesheep", origin: "https://spacesheep.dev" },
+    };
+    vi.resetModules();
+    try {
+      const { sendErrorWords: words } = await import("./words");
+      const { ControlError: Refused } = await import("./api");
+      const refused = new Refused(422, "That key isn't trusted on this computer.", "untrusted_key");
+      expect(words(refused, "Misha-Petrov-laptop")).toBe("Not sent: Misha-Petrov-laptop hasn't added this iPhone yet.");
+      // Never the day grant's words, which would promise a Face ID that changes nothing.
+      expect(words(refused, "Misha-Petrov-laptop")).not.toMatch(/grant|Face ID/);
+      expect(words(refused)).toBe("Not sent: the computer hasn't added this iPhone yet.");
+    } finally {
+      delete g.sessionpipeShell;
+      vi.resetModules();
+    }
+  });
+
+  it("a send held back for the hour a new device waits says from when in one sentence, never spacesheep's paragraph", async () => {
+    const g = globalThis as { sessionpipeShell?: unknown };
+    g.sessionpipeShell = {
+      platform: "ios",
+      rxBase: "rx://localhost/ACCT",
+      receiver: { kind: "spacesheep", origin: "https://spacesheep.dev" },
+    };
+    vi.resetModules();
+    try {
+      const { sendErrorWords: words } = await import("./words");
+      const { ControlError: Refused } = await import("./api");
+      const { clock } = await import("../native/accountWords");
+      const paragraph =
+        "This device was approved from another device less than an hour ago. New devices wait an hour before they can send, so a stolen sign-in can't act at once. It can send in 58 minutes.";
+      const until = Date.parse("2026-11-16T05:26:00Z");
+      const said = words(new Refused(403, paragraph, "cooling", paragraph, until));
+      expect(said).toBe(`Not sent. This iPhone can send from ${clock(until)}.`);
+      expect(said).toMatch(/^Not sent\. This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.$/);
+      // spacesheep named no time: why it waits, still in the app's words.
+      expect(words(new Refused(403, paragraph, "cooling", paragraph))).toBe(
+        "Not sent. New devices wait an hour, so a stolen sign-in can't act at once.",
+      );
+      for (const e of [
+        new Refused(403, paragraph, "cooling", paragraph, until),
+        new Refused(403, paragraph, "cooling"),
+      ])
+        expect(words(e)).not.toMatch(/This device|minutes/);
+    } finally {
+      delete g.sessionpipeShell;
+      vi.resetModules();
+    }
+  });
+
   it("tells spacesheep's refusal of this app's key from the page's own key", () => {
     expect(sendErrorWords(new ControlError(502, "Unknown or revoked API key.", "spacesheep_unauthorized"))).toBe(
       "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.",
@@ -256,5 +315,67 @@ describe("sendErrorWords", () => {
     expect(sendErrorWords(new ControlError(502, "That is too large to send.", "hub_too_large"))).toBe(
       "not sent · That is too large to send.",
     );
+  });
+});
+
+describe("notSentWords", () => {
+  it("a send that did not go, as a line of its own says it: one form under a field, in a sheet and in the Inbox", () => {
+    expect(notSentWords(new ControlError(422, "refused", "nonce_store"))).toBe(
+      "Not sent: the machine could not record the nonce, so it did not run it",
+    );
+    expect(notSentWords(new ControlError(404, "unknown_machine"))).toBe(
+      "Not sent: this machine is no longer paired here",
+    );
+    expect(notSentLine("not sent · x")).toBe("Not sent: x");
+    // Words that are already a sentence of their own stay as they are.
+    expect(notSentWords(new ControlError(502, "Unknown or revoked API key.", "spacesheep_unauthorized"))).toBe(
+      "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.",
+    );
+    // A send nobody heard the answer to is never said to be not sent.
+    const unheard = new ControlError(
+      504,
+      "spacesheep did not answer in time.",
+      UNHEARD_CODE,
+      "spacesheep did not answer in time.",
+    );
+    expect(notSentWords(unheard)).toBe(sendErrorWords(unheard));
+    expect(notSentWords(unheard)).toMatch(/^It may have been sent: /);
+    // Only the start of the line: a reason that quotes the words keeps them.
+    expect(notSentLine("Not sent: the reason says not sent · here")).toBe("Not sent: the reason says not sent · here");
+  });
+});
+
+describe("receiptWords", () => {
+  it("says which answer went first, then what it waits for", () => {
+    expect(receiptWords({ decision: "allow", machine: "studio-mac" })).toEqual({
+      what: "Allowed",
+      text: "Allowed · waiting for studio-mac",
+    });
+    expect(receiptWords({ decision: "deny", machine: "studio-mac" }).text).toBe("Denied · waiting for studio-mac");
+    expect(receiptWords({ decision: "allow", plan: true, machine: "studio-mac" }).text).toBe(
+      "Plan approved · waiting for studio-mac",
+    );
+    expect(receiptWords({ decision: "deny", plan: true, machine: "studio-mac" }).text).toBe(
+      "Asked for changes · waiting for studio-mac",
+    );
+    expect(receiptWords({ decision: "allow", machine: "studio-mac", offline: true }).text).toBe(
+      "Allowed · waiting for studio-mac to come back",
+    );
+    expect(receiptWords({ decision: "allow" }).text).toBe("Allowed · waiting for its computer");
+  });
+});
+
+describe("answerEndWords", () => {
+  const answer = (over: Partial<ControlActivity>) =>
+    start({ kind: "permission.answer", text: "allow", answer: { for: "perm-1", decision: "allow" }, ...over });
+  it("says why an answer did not go as a line of its own", () => {
+    expect(answerEndWords(answer({ outcome: "refused", code: "nonce_store" }), "studio-mac")).toBe(
+      "Not sent: the machine could not record the nonce, so it did not run it",
+    );
+    expect(answerEndWords(answer({ outcome: "failed", detail: "the hook is gone" }), "studio-mac")).toBe(
+      "Not sent: the hook is gone",
+    );
+    // Taken and never heard of again is no "not sent".
+    expect(answerEndWords(answer({ outcome: "unconfirmed" }), "studio-mac")).toMatch(/^No word from studio-mac/);
   });
 });

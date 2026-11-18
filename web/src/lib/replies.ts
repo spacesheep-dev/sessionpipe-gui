@@ -4,7 +4,8 @@
 // message that began it (the last piece; for a turn that was stopped, all it had written).
 // Two strings in those records are nobody's words: Claude Code's stand-in for a reply that
 // never came, and the daemon's note that a turn was cancelled. Neither is ever drawn as
-// what the agent said; both say the turn was stopped. Pure, so all of it is unit-tested.
+// what the agent said; both say the turn was stopped. And how words the receiver cut short
+// are drawn until they are read whole. Pure, so all of it is unit-tested.
 
 /** Claude Code's own stand-in (model `<synthetic>`) for the reply of a turn that ended
  *  before it had one: written when the session is next resumed, so a stopped turn arrives
@@ -67,4 +68,51 @@ export function turnWords(o: { own?: unknown; reply?: string; final?: boolean; r
   const stopped = cut !== null || o.reason === "interrupt" || (raw.trim() !== "" && said(raw).trim() !== raw.trim());
   if (cut !== null) return cut.trim() ? { own: "", ack: cut, stopped } : { own, stopped };
   return { own, ...(o.reply?.trim() && !own ? { ack: o.reply } : {}), stopped };
+}
+
+/** Words cut short, as they are drawn until they are read whole: to their last space, so
+ *  never inside a word, then "…". */
+export function cutWords(text: string): string {
+  const t = text.trimEnd();
+  const space = t.search(/\s\S*$/);
+  return `${(space > 0 ? t.slice(0, space) : t).trimEnd()}…`;
+}
+
+/** The code fence a markdown text leaves open at its end (the run that opened it), read
+ *  as lib/markdown.ts reads fences; null when every fence is closed. */
+function openFence(text: string): string | null {
+  let open: string | null = null;
+  for (const line of text.split("\n")) {
+    const m = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (!m) continue;
+    const run = m[1]!;
+    const rest = m[2]!;
+    if (open === null) {
+      if (!(run.startsWith("`") && rest.includes("`"))) open = run;
+    } else if (run.startsWith(open) && !rest.trim()) open = null;
+  }
+  return open;
+}
+
+/** A reply the receiver cut short, as it is drawn until it is read whole: it ends at its
+ *  last paragraph break in the final quarter, else at its last space; a code block it
+ *  leaves open is closed; and "…" says there is more, after its last word (after a
+ *  sentence's full stop too, as an omission is written) or, after a code block, on a line
+ *  of its own. */
+export function cutReply(text: string): string {
+  const t = text.trimEnd();
+  const para = t.lastIndexOf("\n\n");
+  const head = (para > 0 && para >= t.length * 0.75 ? t.slice(0, para) : cutWords(t).slice(0, -1)).trimEnd();
+  const fence = openFence(head);
+  if (fence) return `${head}\n${fence}\n\n…`;
+  const last = head.slice(head.lastIndexOf("\n") + 1);
+  return /^ {0,3}(`{3,}|~{3,})\s*$/.test(last) ? `${head}\n\n…` : `${head}…`;
+}
+
+/** A running reply the receiver cut, which keeps its end: "…", then its words from the
+ *  first whole one. */
+export function cutReplyStart(text: string): string {
+  const at = /^\s/.test(text) ? 0 : text.search(/\s/);
+  const rest = at < 0 ? text : text.slice(at);
+  return /^[ \t]*\n/.test(rest) ? `…\n\n${rest.trimStart()}` : `…${rest.trimStart()}`;
 }

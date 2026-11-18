@@ -19,16 +19,26 @@ import { HubRefused, HubStandIn, UNUSED_KEY_NOTE } from "../account/hub.js";
 import { type AccountServer, startAccountServer } from "../account/serve.js";
 import { fakeShell, type ShellInitOptions } from "../account/shell-init.js";
 import { Session } from "../events.js";
+import { strandedMarks } from "./helpers.js";
 
 const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../dist/web");
 const SHOTS = process.env.ACCOUNT_SCREENS ?? "";
 const [W, H] = (process.env.ACCOUNT_SCREENS_SIZE ?? "390x844").split("x").map(Number) as [number, number];
 const SCHEME = process.env.ACCOUNT_SCREENS_SCHEME === "dark" ? "dark" : "light";
+/** The hour on a prompt's card, with the way to answer it on spacesheep: the hour's own
+ *  sentence, then on a phone the link on a line of its own, and wider after a "·". */
+const HOUR_ON_CARD =
+  W < 840
+    ? /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.\sOpen on spacesheep\.dev$/
+    : /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\s·\sOpen on spacesheep\.dev$/;
 const MACHINE = "m_studio0123456789abcd";
 const NAME = "studio-mac";
 /** The account's origin as a person reads it. Nothing is asked of it: spacesheep is stood in. */
 const ORIGIN = "https://spacesheep.dev";
 const HOST = "spacesheep.dev";
+/** What an ended connect says where a key was made and is not kept here, beside the button
+ *  to it (the hub's own note says the way there in words, and is shown only without one). */
+const UNUSED_KEY = "Revoke the unused key on spacesheep.";
 
 test.describe.configure({ mode: "serial" });
 
@@ -112,16 +122,21 @@ async function bed(browser: Browser, o: { platform?: string; shell?: ShellInitOp
 }
 
 let n = 0;
-/** The state on screen, as a picture, when pictures are asked for. */
-async function shot(page: Page, name: string): Promise<void> {
+/** The state on screen, as a picture, when pictures are asked for. Named by its size: W×H,
+ *  taken at W×H whatever size a test that walks the widths is at (its own size is put back
+ *  after); `own`, a test about one size: taken at that size, and named by it. */
+async function shot(page: Page, name: string, o: { own?: boolean } = {}): Promise<void> {
   n++;
   if (!SHOTS) return;
   mkdirSync(SHOTS, { recursive: true });
+  const was = page.viewportSize();
+  const moved = !o.own && !!was && (was.width !== W || was.height !== H);
+  if (moved) await page.setViewportSize({ width: W, height: H });
+  const size = o.own && was ? `${was.width}x${was.height}` : `${W}x${H}`;
   // Let a sheet or a row finish moving.
   await page.waitForTimeout(350);
-  await page.screenshot({
-    path: path.join(SHOTS, `${String(n).padStart(2, "0")}-${name}-${W}x${H}-${SCHEME}.png`),
-  });
+  await page.screenshot({ path: path.join(SHOTS, `${String(n).padStart(2, "0")}-${name}-${size}-${SCHEME}.png`) });
+  if (moved && was) await page.setViewportSize(was);
 }
 
 const step = (page: Page, name: string) => page.locator(`.onb[data-step='${name}']`);
@@ -261,6 +276,35 @@ test.describe("the first run with a spacesheep account", () => {
     await expect(page.locator(".approve-code")).toHaveAttribute("data-code", /^\d{2}$/);
     expect(b.ss.deviceRequests.size).toBe(1);
   });
+
+  test("approved with the app open and nothing reloaded: Machines, New session and the composer say what the Approve page says", async () => {
+    const { page } = b;
+    // From here on the page is never loaded again: what it knows of its own key is what the
+    // ask left it (the hub made the key then, where the page does not see it).
+    let loads = 0;
+    page.on("load", () => loads++);
+    b.ss.approveDevice([...b.hub.accounts.values()][0]!.deviceKeyId!);
+    await expect(page.locator("[data-approve='cooling']")).toBeVisible({ timeout: 12_000 });
+    // Machines, by its tab: one row says the phone's hour, and nothing offers to approve it again.
+    await page.locator("a[data-nav='machines']:visible").click();
+    await expect(page.locator("[data-this-phone='cooling']")).toHaveText(/^This iPhone can send from \d{1,2}:\d{2}/);
+    await expect(page.locator("[data-setup]")).toHaveCount(0);
+    await expect(page.getByText(/Approve this iPhone/)).toHaveCount(0);
+    // New session, from the Board's bar: nothing says the computer does not trust the phone.
+    await page.locator("a[data-nav='board']:visible").click();
+    await page.locator(".page.board .compose-btn--phone").click();
+    const sheet = page.locator("[data-new-session]");
+    await expect(sheet.locator(".ns-status")).toBeVisible();
+    await expect(sheet).not.toContainText(/doesn't trust|can't send yet/);
+    await sheet.locator("[data-ns-cancel]").click();
+    await expect(sheet).toHaveCount(0);
+    // A session, from the board: the composer says the hour, and nothing of trust.
+    await page.getByText("Fix the invoice webhook").first().click();
+    await expect(page.getByText("Found the loop.").first()).toBeVisible();
+    await expect(page.getByText(/This iPhone can send from \d{1,2}:\d{2}( [AP]M)?/).first()).toBeVisible();
+    await expect(page.getByText(/doesn't trust|can't send yet|Approve this iPhone/)).toHaveCount(0);
+    expect(loads).toBe(0);
+  });
 });
 
 test.describe("each way a connect can end, with what to do next", () => {
@@ -296,7 +340,7 @@ test.describe("each way a connect can end, with what to do next", () => {
     await start();
     await expect(ended("unreachable")).toBeVisible();
     await expect(b.page.getByText(`Couldn't reach ${HOST}`)).toBeVisible();
-    await expect(b.page.getByText("Check this iPhone's connection, then try again.")).toBeVisible();
+    await expect(b.page.getByText("Check your connection, then try again.")).toBeVisible();
     await shot(b.page, "end-unreachable");
     // Try again, with spacesheep back: the number.
     b.hub.down = false;
@@ -322,28 +366,33 @@ test.describe("each way a connect can end, with what to do next", () => {
     b.hub.startRefusal = new HubRefused("busy", "Another question is open on this iPhone. Answer it first.");
     await button(b.page, "Continue").click();
     await expect(ended("busy")).toBeVisible();
-    await expect(b.page.getByText("Another question is open on this iPhone. Answer it, then try again.")).toBeVisible();
+    await expect(b.page.getByText("Another question is open", { exact: true })).toBeVisible();
+    await expect(b.page.getByText("Answer it, then try again.")).toBeVisible();
     await shot(b.page, "end-busy");
   });
 
-  test("refused on spacesheep's page", async () => {
+  test("Not now on spacesheep's page: said as the person's own choice", async () => {
     await start();
     b.ss.approve(await digits(), false);
     await b.hub.pollConnect();
     await expect(ended("denied")).toBeVisible();
-    await expect(b.page.getByText("The request was refused on spacesheep.")).toBeVisible();
+    await expect(b.page.getByText("You chose Not now on spacesheep.")).toBeVisible();
     await shot(b.page, "end-denied");
   });
 
-  test("refused here, in the hub's own question: a key was made, and the page says where to revoke it", async () => {
+  test("refused here, in the hub's own question: a key was made, and the page says to revoke it, once, with the way there", async () => {
     await start();
     b.hub.alert = () => false;
     b.ss.approve(await digits());
     await b.hub.pollConnect();
     await expect(ended("declined")).toBeVisible();
-    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toBeVisible();
+    await expect(b.page.getByText(UNUSED_KEY)).toBeVisible();
+    // The button says the way there, so the words do not: the hub's note is not shown.
+    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toHaveCount(0);
+    // Try again where it is on every ended screen, the way to the key under it.
+    await expect(ended("declined").locator(".onb-primary, .onb-secondary")).toHaveText(["Try again", "Open API keys"]);
     await shot(b.page, "end-declined");
-    await button(b.page, "Open API keys on spacesheep").click();
+    await button(b.page, "Open API keys").click();
     expect(await opened(b.page)).toEqual([`${ORIGIN}/settings/api-keys`]);
     expect(b.hub.accounts.size).toBe(0);
     b.hub.alert = () => true;
@@ -358,10 +407,10 @@ test.describe("each way a connect can end, with what to do next", () => {
     await foreground(b.page);
     await expect(step(b.page, "account-asking")).toBeVisible();
     await button(b.page, "Cancel").click();
-    // Not the welcome: the hub's note, and the way to the key.
+    // Not the welcome: the key that was made, and the way to it.
     await expect(b.page.locator(".onb[data-step='account-ended']")).toBeVisible();
-    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toBeVisible();
-    await expect(button(b.page, "Open API keys on spacesheep")).toBeVisible();
+    await expect(b.page.getByText(UNUSED_KEY)).toBeVisible();
+    await expect(button(b.page, "Open API keys")).toBeVisible();
     expect(b.hub.accounts.size).toBe(0);
     b.hub.alert = () => true;
   });
@@ -375,8 +424,8 @@ test.describe("each way a connect can end, with what to do next", () => {
     // The app is closed there and opened again: the note is the first thing shown.
     await b.page.goto(b.server.url);
     await expect(b.page.locator(".onb[data-step='account-ended']")).toBeVisible();
-    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toBeVisible();
-    await expect(button(b.page, "Open API keys on spacesheep")).toBeVisible();
+    await expect(b.page.getByText(UNUSED_KEY)).toBeVisible();
+    await expect(button(b.page, "Open API keys")).toBeVisible();
     // Left, it is not shown again.
     await b.page
       .locator(".onb[data-step='account-ended'] .onb-back, .onb[data-step='account-ended'] [data-back]")
@@ -385,7 +434,7 @@ test.describe("each way a connect can end, with what to do next", () => {
     await expect(b.page.locator(".onb[data-step='account-ended']")).toHaveCount(0);
     await b.page.goto(b.server.url);
     await expect(step(b.page, "welcome")).toBeVisible();
-    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toHaveCount(0);
+    await expect(b.page.getByText(UNUSED_KEY)).toHaveCount(0);
     b.hub.alert = () => true;
   });
 
@@ -467,13 +516,17 @@ test.describe("each way a connect can end, with what to do next", () => {
   });
 
   test("nobody confirmed in time", async () => {
+    // Its end has passed when spacesheep says it ran out.
+    b.ss.connectTtlMs = 0;
     await start();
     b.ss.expire(await digits());
     await b.hub.pollConnect();
     await expect(ended("expired")).toBeVisible();
-    await expect(b.page.getByText("Not confirmed in time")).toBeVisible();
+    await expect(b.page.getByText("Time ran out")).toBeVisible();
     await expect(b.page.getByText("Try again for a new number.")).toBeVisible();
+    await expect(button(b.page, "Open API keys")).toHaveCount(0);
     await shot(b.page, "end-expired");
+    b.ss.connectTtlMs = 600_000;
   });
 
   test("approved, and the phone could not keep it: the same note, the same way to revoke", async () => {
@@ -482,9 +535,9 @@ test.describe("each way a connect can end, with what to do next", () => {
     b.ss.approve(await digits());
     await b.hub.pollConnect();
     await expect(ended("not-kept")).toBeVisible();
-    await expect(b.page.getByText("Couldn't keep the account on this iPhone")).toBeVisible();
-    await expect(b.page.getByText(UNUSED_KEY_NOTE)).toBeVisible();
-    await expect(button(b.page, "Open API keys on spacesheep")).toBeVisible();
+    await expect(b.page.getByText("Couldn't save the account on this iPhone")).toBeVisible();
+    await expect(b.page.getByText(UNUSED_KEY)).toBeVisible();
+    await expect(ended("not-kept").locator(".onb-primary, .onb-secondary")).toHaveText(["Try again", "Open API keys"]);
     await shot(b.page, "end-not-kept");
     b.hub.keep = "ok";
   });
@@ -493,8 +546,8 @@ test.describe("each way a connect can end, with what to do next", () => {
     b.ss.connectAnswer = { status: 500, headers: {}, body: "{}" };
     await start();
     await expect(ended("unexpected")).toBeVisible();
-    await expect(b.page.getByText(`${HOST} didn't answer as expected`)).toBeVisible();
-    await expect(b.page.getByText("Try again. If it keeps happening, update sessionpipe.")).toBeVisible();
+    await expect(b.page.getByText("Couldn't connect")).toBeVisible();
+    await expect(b.page.getByText("If it keeps happening, update this app.")).toBeVisible();
     await shot(b.page, "end-unexpected");
     // Back leaves nothing behind: the welcome, and no outcome held at the hub.
     await button(b.page, "Back").click();
@@ -640,26 +693,72 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await expect(page.getByText(/This iPhone can send from \d{1,2}:\d{2}( [AP]M)?/).first()).toBeVisible();
     await shot(page, "composer-cooling");
     expect(b.ss.jobs).toHaveLength(0);
-    // Machines says which devices a computer trusts, and nothing of sending; Settings' row
-    // for the phone's key says the same time.
+    // Machines says the same time once, in its one row for the phone, and no computer says
+    // it again; Settings' row for the phone's key says the same time, in a row's few words.
     await page.goto(`${b.server.url}/machines`);
     await expect(page.getByText(NAME).first()).toBeVisible();
-    await expect(page.getByText(/can send/i)).toHaveCount(0);
+    const phone = page.locator("[data-this-phone]");
+    await expect(phone).toHaveCount(1);
+    await expect(phone).toHaveAttribute("data-this-phone", "cooling");
+    await expect(phone).toHaveText(/^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?$/);
+    await expect(phone).toHaveAttribute("href", "/add-device");
+    await expect(page.getByText(/can send/i)).toHaveCount(1);
+    await expect(page.locator("[data-setup]")).toHaveCount(0);
     await shot(page, "machines-cooling");
     await page.goto(`${b.server.url}/settings?section=app`);
     await expect(page.locator("[data-account-settings] .acct-state--wait")).toHaveText(
-      /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?$/,
+      /^Can send from \d{1,2}:\d{2}( [AP]M)?$/,
     );
   });
 
-  test("approved while the page was not looking: the latest it can be, said as that", async () => {
+  test("New session and Ask another agent in the hour: the form stays, Start and Ask wait under one line that says from when, and nothing goes", async () => {
     const { page } = b;
-    // What the page remembered of watching is gone (as after the app was closed for a while).
+    // studio-mac's agents can ask each other (Ask another agent…), for this test.
+    Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+    try {
+      await page.goto(b.server.url);
+      await page.locator(".page.board .compose-btn--phone").click();
+      const sheet = page.locator("[data-new-session]");
+      await sheet.locator("[data-ns-text]").fill("Add a test for the rounding.");
+      const start = sheet.locator("[data-ns-start]");
+      await expect(start).toBeDisabled();
+      const hour = /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.$/;
+      await expect(sheet.locator(".ns-status")).toHaveText(hour);
+      await expect(start).toHaveAccessibleDescription(hour);
+      // The rest of the form is as it will be: the machine's level stays in its row.
+      await expect(sheet.locator("[data-ns-row=options]")).toHaveText(/^Permission\s*Safe$/);
+      await expect(sheet.getByText(/is listening|asks for|doesn't trust/)).toHaveCount(0);
+      await shot(page, "new-session-cooling");
+      await sheet.locator("[data-ns-cancel]").click();
+      await expect(sheet).toHaveCount(0);
+      // Ask another agent: the same line, and Ask waits.
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await page.locator("[data-ctl-ask]").click();
+      const ask = page.locator("[data-handoff]");
+      await ask.locator("[data-hs-text]").fill("Check the rounding.");
+      await expect(ask.locator("[data-hs-ask]")).toBeDisabled();
+      await expect(ask.locator(".ns-status")).toHaveText(hour);
+      await expect(ask.locator("[data-hs-ask]")).toHaveAccessibleDescription(hour);
+      await shot(page, "handoff-cooling");
+      await ask.locator("[data-hs-cancel]").click();
+      expect(b.ss.jobs).toHaveLength(0);
+    } finally {
+      delete b.ss.machines[0]!.ask;
+      delete b.ss.machines[0]!.handoff;
+    }
+  });
+
+  test("approved while the page was not looking: the latest it can be, said as that, and nothing held back for it", async () => {
+    const { page } = b;
+    // spacesheep's door names no hour (as it does not yet), and the page last saw the request
+    // open a quarter of an hour before it saw it trusted (the app was closed in between).
+    b.ss.saysCooling = false;
     await page.evaluate(() => {
       const key = Object.keys(localStorage).find((k) => k.startsWith("sessionpipe-gui.account.device."))!;
       const memo = JSON.parse(localStorage.getItem(key)!) as Record<string, unknown>;
       delete memo.trustedAt;
       delete memo.watched;
+      memo.openAt = Date.now() - 15 * 60_000;
       localStorage.setItem(key, JSON.stringify(memo));
     });
     await page.goto(`${b.server.url}/add-device`);
@@ -668,6 +767,20 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await expect(page.locator("[data-machine='waits']")).toHaveText(/Approved · sends by \d{1,2}:\d{2}( [AP]M)?$/);
     await expect(page.getByText("Can send", { exact: true })).toHaveCount(0);
     await shot(page, "approve-cooling-bound");
+    // The hour may be over already: the composer stays, and a send that spacesheep would still
+    // hold back says so itself.
+    await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+    await expect(page.getByText("Found the loop.").first()).toBeVisible();
+    await expect(page.locator("textarea").first()).toBeEnabled();
+    await expect(page.getByText(/can send (by|from)/)).toHaveCount(0);
+    // New session the same: Start goes, and a refusal for the hour would make the time known.
+    await page.goto(b.server.url);
+    await page.locator(".page.board .compose-btn--phone").click();
+    const sheet = page.locator("[data-new-session]");
+    await sheet.locator("[data-ns-text]").fill("Look around.");
+    await expect(sheet.locator("[data-ns-start]")).toBeEnabled();
+    await expect(sheet.getByText(/can send (by|from)/)).toHaveCount(0);
+    await sheet.locator("[data-ns-cancel]").click();
   });
 
   test("where spacesheep says when the hour ends, that is the time", async () => {
@@ -840,7 +953,7 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
       ),
     ).toBeVisible();
     await shot(page, "disconnected");
-    await button(page, "Open API keys on spacesheep").click();
+    await button(page, "Open API keys").click();
     expect((await opened(page)).at(-1)).toBe(`${ORIGIN}/settings/api-keys`);
     await button(page, "Done").click();
     await expect(step(page, "welcome")).toBeVisible();
@@ -1054,6 +1167,692 @@ test.describe("what else an account shows", () => {
     b.ss.trusting.set(asked.keyId, [MACHINE]);
   };
   const composer = (page: Page) => page.locator("textarea").first();
+  /** The ↑ button: on a phone Return is a new line, and only the button sends. */
+  const tapSend = (page: Page) => page.locator(".ctl-send").click();
+
+  test("approved long ago, where the page never saw it wait: every screen says it can send, and no hour is made up", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+      await trusted(b);
+      await page.goto(`${b.server.url}/settings?section=app`);
+      await expect(page.locator("[data-account-settings] .acct-state--ok").last()).toHaveText("Can send");
+      await expect(page.getByText(/can send (by|from)/i)).toHaveCount(0);
+      await page.goto(`${b.server.url}/add-device`);
+      await expect(page.locator("[data-approve='approved']")).toBeVisible();
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      await expect(composer(page)).toBeEnabled();
+      await expect(page.getByText(/can send (by|from)|doesn't trust|can't send yet/i)).toHaveCount(0);
+      // New session: all is well, so its foot says nothing (its line is there for what comes),
+      // and the level the machine sets is a value on one line.
+      await page.goto(b.server.url);
+      await page.locator(".page.board .compose-btn--phone").click();
+      const sheet = page.locator("[data-new-session]");
+      await sheet.locator("[data-ns-text]").fill("Look around.");
+      await expect(sheet.locator("[data-ns-start]")).toBeEnabled();
+      await expect(sheet.locator(".ns-status[role='status']")).toHaveText("");
+      await expect(sheet.locator(".ns-passkey")).toHaveCount(0);
+      await expect(sheet.getByText(/is listening|asks for|Face ID/)).toHaveCount(0);
+      const level = sheet.locator("[data-ns-row=options] .ns-fixed");
+      await expect(level).toHaveText("Safe");
+      await expect(level).toHaveCSS("text-align", "right");
+      await sheet.locator("[data-ns-cancel]").click();
+      await page.goto(`${b.server.url}/machines`);
+      await expect(page.locator("[data-this-phone='approved']")).toHaveText("This iPhone can send");
+      await expect(page.locator("[data-setup]")).toHaveCount(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  /** Each right-detail row of Machines: how far its key's top is from its value's. */
+  const rowDrift = (page: Page) =>
+    page
+      .locator(".machine-facts > .form-row--kv")
+      .evaluateAll((rows) =>
+        rows.map((r) =>
+          Math.abs(
+            r.querySelector(".form-key")!.getBoundingClientRect().top -
+              r.querySelector(".form-kv")!.getBoundingClientRect().top,
+          ),
+        ),
+      );
+
+  test("Machines, not approved: one row for the phone above the computers, no key named, and rows that keep their shape at 320 and 393", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    // A second computer: the one row is said once, not once a computer.
+    b.ss.machines.push({
+      ...b.ss.machines[0]!,
+      id: "m_build0123456789abcdef",
+      name: "build-box",
+      mode: "auto",
+      passkey_ids: ["another-passkey-of-this-account"],
+    });
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      for (const [width, height] of [
+        [320, 568],
+        [393, 852],
+      ] as const) {
+        await page.setViewportSize({ width, height });
+        await page.goto(`${b.server.url}/machines`);
+        await expect(page.locator("section.machine")).toHaveCount(2);
+        const row = page.locator("[data-this-phone]");
+        await expect(row).toHaveCount(1);
+        await expect(row).toHaveAttribute("data-this-phone", "idle");
+        await expect(row).toHaveText("Approve this iPhone to send");
+        expect((await row.boundingBox())!.height, `${width}`).toBeGreaterThanOrEqual(44);
+        // One way to Approve this iPhone on the page, and it is that row.
+        await expect(page.locator("a[href='/add-device']")).toHaveCount(1);
+        // No key is named, by any part of its id; nothing says paired, devices or "this one".
+        const text = await page.locator(".page.machines").innerText();
+        for (const m of b.ss.machines)
+          for (const id of m.passkey_ids as string[]) expect(text).not.toContain(id.slice(0, 8));
+        expect(text).not.toMatch(/paired on|Paired|Devices|this one|queued/);
+        // Status and Sessions, as iOS right-detail rows: each key level with its value.
+        await expect(page.locator("[data-status='online']")).toHaveCount(2);
+        const counts = page.locator(".machine-facts > .form-row--kv .form-kv.num");
+        await expect(counts).toHaveCount(2);
+        expect((await counts.allInnerTexts()).sort()).toEqual(["1", "None yet"]);
+        const drift = await rowDrift(page);
+        expect(drift).toHaveLength(4);
+        for (const d of drift) expect(d, `${width}`).toBeLessThanOrEqual(2);
+        await expect(page.locator(".machine-more summary").first()).toHaveText("Details");
+        expect((await page.locator(".machine-more summary").first().boundingBox())!.height).toBeGreaterThanOrEqual(44);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      }
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("Machines, approved on spacesheep before its list carries the key: the phone's hour, and no Approve this iPhone", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    // The door names no hour: the page saw the approval come, and counts it itself.
+    b.ss.saysCooling = false;
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}/add-device`);
+      await button(page, "Ask spacesheep to approve").click();
+      await expect(page.locator("[data-approve='waiting']")).toBeVisible();
+      // Approved on Devices: the device door says so, the computer's key list not yet.
+      const keyId = [...b.hub.accounts.values()][0]!.deviceKeyId!;
+      b.ss.trusting.set(keyId, [MACHINE]);
+      b.ss.deviceRequests.delete(keyId);
+      await expect(page.locator("[data-approve='cooling']")).toBeVisible({ timeout: 12_000 });
+      expect(b.ss.machines[0]!.passkey_ids).not.toContain(keyId);
+      await page.goto(`${b.server.url}/machines`);
+      await expect(page.locator("[data-this-phone='cooling']")).toHaveText(
+        /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?$/,
+      );
+      await expect(page.getByText(/Approve this iPhone/)).toHaveCount(0);
+      await expect(page.locator("[data-not-here]")).toHaveCount(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("Machines in inherit mode: what it means is in sight with Details closed, and Details is closed again on the next visit", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.ss.machines[0]!.mode = "inherit";
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}/machines`);
+      await expect(
+        page.getByText(
+          `Sessions run as your own do on ${NAME}: the agents' own settings decide, which can mean no permission checks.`,
+        ),
+      ).toBeVisible();
+      const details = page.locator(".machine-more details");
+      await expect(details).not.toHaveAttribute("open");
+      await page.locator(".machine-more summary").click();
+      await expect(details).toHaveAttribute("open");
+      await expect(details.locator(".form-row--kv").first()).toHaveText(/^Mode\s*Inherit$/);
+      // To the Board and back, inside the app: Details is closed again.
+      await page.locator("a[data-nav='board']:visible").click();
+      await expect(page.locator(".page.board")).toBeVisible();
+      await page.goBack();
+      await expect(page.locator(".machine-more details")).toHaveCount(1);
+      await expect(page.locator(".machine-more details")).not.toHaveAttribute("open");
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("the board's offline line leads to Machines, which says the same computer is offline", async ({ browser }) => {
+    const b = await bed(browser);
+    // The computer's sessionpipe is down while a session there is still working: its events
+    // keep arriving, and it is offline all the same.
+    Object.assign(b.ss.machines[0]!, { online: false, last_seen: Date.now() - 3 * 3_600_000 });
+    const s = new Session("s-retry");
+    const on = { tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/billing", title: "Retry the export" } };
+    b.ss.push([s.ev("session.started", { source: "startup" }, on), s.ev("turn.started", { turn_id: "t1" }, on)]);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      for (const [width, height] of [
+        [320, 568],
+        [393, 852],
+      ] as const) {
+        await page.setViewportSize({ width, height });
+        await page.goto(b.server.url);
+        await expect(page.locator(".offline-line")).toHaveText(new RegExp(`${NAME} is offline`));
+        await page.locator(".offline-line-text").click();
+        await expect(page).toHaveURL(/\/machines$/);
+        await expect(page.getByText("0 of 1 online", { exact: true })).toBeVisible();
+        const status = page.locator("section.machine [data-status]");
+        await expect(status).toHaveAttribute("data-status", "offline");
+        await expect(status.locator(".form-kv")).toHaveText("Offline");
+        await expect(status.locator(".dot--stale")).toBeVisible();
+        expect(await status.locator(".form-kv").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+        await expect(page.getByText(/online ·|daemon offline|last event/)).toHaveCount(0);
+        for (const d of await rowDrift(page)) expect(d, `${width}`).toBeLessThanOrEqual(2);
+      }
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("not approved yet: the composer says it in one sentence, and New session and Ask another agent are the way to approve it, with the draft kept", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    // studio-mac's agents can ask each other (Ask another agent…).
+    Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      const foot = page.locator(".ctl-foot[data-reason='unapproved']");
+      await expect(foot).toHaveText(/^This iPhone can't send yet\.\s*Approve this iPhone\s*Ask another agent…$/);
+      await expect(foot.getByRole("link", { name: "Approve this iPhone" })).toHaveAttribute("href", "/add-device");
+      await expect(page.getByText(/doesn't trust/)).toHaveCount(0);
+      // Ask another agent: nothing on it could ask, so it is the way to approve the phone.
+      await page.locator("[data-ctl-ask]").click();
+      const ask = page.locator("[data-handoff]");
+      await expect(ask.locator(".state-title")).toHaveText("This iPhone isn't approved yet");
+      await expect(ask.locator("[data-hs-ask], textarea, [data-hs-row]")).toHaveCount(0);
+      await expect(ask.getByRole("button", { name: "Approve this iPhone" })).toBeVisible();
+      await shot(page, "also-handoff-not-approved");
+      await ask.locator("[data-hs-cancel]").click();
+      await expect(ask).toHaveCount(0);
+      // New session, with a message written before: at every width one sentence and one
+      // button, in place of a form nothing on could start; the message is kept.
+      await page.goto(b.server.url);
+      await page.evaluate(() =>
+        localStorage.setItem(
+          "sp.newSession.draft",
+          JSON.stringify({ machine: "studio-mac", text: "Check the refund rounding." }),
+        ),
+      );
+      const sheet = page.locator("[data-new-session]");
+      for (const [width, height] of [
+        [320, 568],
+        [390, 844],
+        [820, 1180],
+      ] as const) {
+        await page.setViewportSize({ width, height });
+        await page.locator(".page.board .compose-btn--phone").click();
+        await expect(sheet.locator(".state-title")).toHaveText("This iPhone isn't approved yet");
+        await expect(sheet.locator(".state-text")).toHaveCount(0);
+        await expect(sheet.locator("[data-ns-start], textarea, [data-ns-row]")).toHaveCount(0);
+        await expect(sheet.locator(".ns-bar")).toHaveText(/^Cancel\s*New session$/);
+        const go = sheet.getByRole("button", { name: "Approve this iPhone" });
+        await expect(go).toBeVisible();
+        const box = (await go.boundingBox())!;
+        expect(box.height, `${width}`).toBeGreaterThanOrEqual(44);
+        // The width of the column on a phone; a button, not a bar, on a tablet.
+        expect(box.width, `${width}`).toBeGreaterThanOrEqual(Math.min(width - 64, 360) - 1);
+        expect(box.width, `${width}`).toBeLessThanOrEqual(360);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        if (width === W) await shot(page, "also-new-session-not-approved");
+        await sheet.locator("[data-ns-cancel]").click();
+        await expect(sheet).toHaveCount(0);
+      }
+      await page.setViewportSize({ width: W, height: H });
+      await page.locator(".page.board .compose-btn--phone").click();
+      await sheet.locator("[data-ns-approve]").click();
+      await expect(page.locator("[data-approve='idle']")).toBeVisible();
+      await expect(sheet).toHaveCount(0);
+      // Approved (long ago, as far as this page knows): the form, with the message as it was.
+      await trusted(b);
+      await page.goto(b.server.url);
+      await page.locator(".page.board .compose-btn--phone").click();
+      await expect(sheet.locator("[data-ns-text]")).toHaveValue("Check the refund rounding.");
+      await expect(sheet.locator("[data-ns-start]")).toBeEnabled();
+    } finally {
+      await b.close();
+    }
+  });
+
+  /** In another session the agent asks to run something, now (well inside its hook's wait)
+   *  unless `ago` says how long before: that session's id. */
+  const asks = (b: Bed, id = "s-refund", ago = 4_000): string => {
+    const s = new Session(id, "claude-code", Date.now() - ago);
+    const on = {
+      tier: 2 as const,
+      session: { machine: NAME, cwd: "/Users/me/billing", title: "Refund the double charge" },
+    };
+    b.ss.push([
+      s.ev("session.started", { source: "startup" }, on),
+      s.ev("turn.started", { turn_id: "t1" }, on),
+      s.ev(
+        "attention.needed",
+        { attention_id: "perm-1", kind: "permission", tool: "Bash", message: "Bash npm test" },
+        on,
+      ),
+    ]);
+    return id;
+  };
+  const signs = async (page: Page) => (await calls(page)).filter((c) => c === "plugin:identity|sign").length;
+
+  test("not approved, at every width: the prompt's card offers Approve this iPhone in place of Allow and Deny, the field is off, and the Inbox says it once", async ({
+    browser,
+  }) => {
+    test.setTimeout(120_000);
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      for (const [w, h] of [
+        [320, 568],
+        [390, 844],
+        [820, 1180],
+      ] as const) {
+        await page.setViewportSize({ width: w, height: h });
+        const at = `${w}x${h}`;
+        // The prompt: its question, one sentence, and the one way on, as wide as the card.
+        const sid = asks(b, `s-refund-${w}`);
+        await page.goto(`${b.server.url}/s/claude-code/${sid}`);
+        const card = page.locator(".ctl-answer[data-attention='perm-1']");
+        await expect(card, at).toHaveAttribute("data-answer", "unapproved");
+        await expect(card.locator(".ctl-answer-note"), at).toHaveText("This iPhone can't answer yet.");
+        const approve = card.getByRole("link", { name: "Approve this iPhone" });
+        await expect(approve, at).toHaveAttribute("href", "/add-device");
+        expect((await approve.boundingBox())!.height, at).toBeGreaterThanOrEqual(44);
+        // Read in that order: the question and its command, the sentence, the link.
+        expect(
+          await card.evaluate((el) =>
+            Array.from(el.children, (c) =>
+              Array.from(c.classList)
+                .filter((k) => !k.includes("--"))
+                .pop(),
+            ),
+          ),
+          at,
+        ).toEqual(["ctl-q", "ctl-cmd-block", "ctl-answer-note", "ctl-approve"]);
+        // Nothing that would only be refused: no Allow, no Deny, no field to type in.
+        await expect(page.getByRole("button", { name: /^(Allow|Deny)/ }), at).toHaveCount(0);
+        await expect(page.locator("textarea"), at).toHaveCount(0);
+        // Deny's key (d) has no Deny to press: it does not follow the link instead.
+        await page.keyboard.press("d");
+        await expect(page, at).toHaveURL(new RegExp(`/s/claude-code/${sid}$`));
+        await expect(approve, at).toBeVisible();
+        if (w === 390) await shot(page, "also-unapproved-prompt");
+        // No prompt: the field and Send are off, and the line under it says why.
+        await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+        await expect(page.getByText("Found the loop.").first()).toBeVisible();
+        const box = composer(page);
+        await expect(box, at).toBeDisabled();
+        await expect(page.getByRole("button", { name: "Send" }), at).toBeDisabled();
+        const foot = page.locator(".ctl-foot[data-reason='unapproved']");
+        await expect(foot, at).toHaveText(/^This iPhone can't send yet\.\s*Approve this iPhone$/);
+        const described = await box.getAttribute("aria-describedby");
+        await expect(page.locator(`[id='${described}']`), at).toHaveText("This iPhone can't send yet.");
+        // The Inbox: the row opens its session and offers no answer; the notice says why, once.
+        await page.goto(`${b.server.url}/inbox`);
+        const row = page.locator(`.inbox-row[data-session='claude-code:${sid}']`);
+        await expect(row, at).toBeVisible();
+        await expect(row.getByRole("button", { name: /^(Allow|Deny)$/ }), at).toHaveCount(0);
+        const notice = page.locator(".inbox-notes .notice").first();
+        await expect(notice.locator(".notice-text"), at).toHaveText("This iPhone can't answer yet.");
+        await expect(notice.getByRole("link", { name: "Approve this iPhone" }), at).toHaveAttribute(
+          "href",
+          "/add-device",
+        );
+        await expect(page.getByText("Allow and Deny are off"), at).toHaveCount(0);
+        if (w === 390) await shot(page, "also-unapproved-inbox");
+        await row.locator(".inbox-main").click();
+        await expect(page, at).toHaveURL(new RegExp(`/s/claude-code/${sid}`));
+      }
+      // The way on is the Approve page, and nothing on the way was signed.
+      await page.locator(".ctl-approve").click();
+      await expect(page.locator("[data-approve='idle']")).toBeVisible();
+      expect(await signs(page)).toBe(0);
+      expect(b.ss.log.filter((l) => l.startsWith("POST /api/machines/"))).toEqual([]);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("not approved, with only a plan and a long command waiting: the Inbox still says it once, with the way to approve, and the rows open their sessions", async ({
+    browser,
+  }) => {
+    test.setTimeout(120_000);
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    /** A prompt the Inbox shows as two lines and Open where it can be answered. */
+    const waits = (id: string, title: string, tool: string, message: string) => {
+      const s = new Session(id, "claude-code", Date.now() - 4_000);
+      const on = { tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/billing", title } };
+      b.ss.push([
+        s.ev("session.started", { source: "startup" }, on),
+        s.ev("turn.started", { turn_id: "t1" }, on),
+        s.ev("attention.needed", { attention_id: `perm-${id}`, kind: "permission", tool, message }, on),
+      ]);
+    };
+    waits("s-plan", "Plan the refund job", "ExitPlanMode", "ExitPlanMode");
+    waits("s-long", "Deploy the refund job", "Bash", `Bash ${"npm run deploy -- --target staging ".repeat(4).trim()}`);
+    try {
+      for (const [w, h] of [
+        [320, 568],
+        [390, 844],
+        [820, 1180],
+      ] as const) {
+        await page.setViewportSize({ width: w, height: h });
+        const at = `${w}x${h}`;
+        await page.goto(`${b.server.url}/inbox`);
+        await expect(page.locator(".inbox-row--open"), at).toHaveCount(2, { timeout: 15_000 });
+        // Nothing to press on the rows: no Open, no pair.
+        await expect(
+          page.getByRole("button", { name: /^(Open|Allow|Deny|Approve plan|Keep planning)$/ }),
+          at,
+        ).toHaveCount(0);
+        // The page's one notice says why, with the way on.
+        const notes = page.locator(".inbox-notes");
+        await expect(notes.getByText("This iPhone can't answer yet.", { exact: true }), at).toHaveCount(1);
+        await expect(notes.getByRole("link", { name: "Approve this iPhone" }), at).toHaveAttribute(
+          "href",
+          "/add-device",
+        );
+        await expect(page.getByText("Allow and Deny are off"), at).toHaveCount(0);
+        if (w === 390) await shot(page, "also-unapproved-inbox-open");
+      }
+      // A row opens its session, whose card has the way to approve.
+      await page.locator(".inbox-row[data-session='claude-code:s-long'] .inbox-main").click();
+      await expect(page).toHaveURL(/\/s\/claude-code\/s-long/);
+      await expect(page.locator(".ctl-answer[data-answer='unapproved'] .ctl-approve")).toBeVisible();
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("not approved, and the prompt is past its answer window: the card says it is late, and the field stays, off, with the way to approve the phone", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      // Opened from a notification twelve minutes on: the hook stopped waiting long ago.
+      asks(b, "s-refund", 12 * 60_000);
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      const card = page.locator(".ctl-answer[data-attention='perm-1']");
+      await expect(card).toHaveAttribute("data-answer", "late");
+      await expect(card.locator(".ctl-answer-note")).toHaveText(
+        /^Too late to answer from here; answer it on studio-mac\.$/,
+      );
+      // The name and its full stop are one piece: at no width does the "." start a line.
+      expect(await strandedMarks(card.locator(".ctl-answer-note"))).toEqual([]);
+      await expect(card.locator(".ctl-approve")).toHaveCount(0);
+      // Not folded away: the field, off, and the line under it with Approve this iPhone.
+      await expect(composer(page)).toBeDisabled();
+      const foot = page.locator(".ctl-foot[data-reason='unapproved']");
+      await expect(foot).toHaveText(/^This iPhone can't send yet\.\s*Approve this iPhone$/);
+      await expect(foot.getByRole("link", { name: "Approve this iPhone" })).toHaveAttribute("href", "/add-device");
+      await shot(page, "also-unapproved-late-prompt");
+      expect(await signs(page)).toBe(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("approved, and this computer has not added the key yet: Allow, Deny and Send wait, disabled, with one sentence and Approve this iPhone", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+      // Approved on spacesheep by another computer of the account, long ago; studio-mac has
+      // not taken the key, and only a key.add someone signs on spacesheep gives it one.
+      const id = [...b.hub.accounts.keys()][0]!;
+      const asked = await page.evaluate(
+        (account) =>
+          (
+            window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }
+          ).__TAURI_INTERNALS__.invoke("acct_device_ask", { id: account }) as Promise<{ keyId: string }>,
+        id,
+      );
+      const other = { ...b.ss.machines[0]!, id: "m_attic0123456789abcde", name: "attic-mini" };
+      b.ss.machines.push({ ...other, passkey_ids: [asked.keyId] });
+      b.ss.trusting.set(asked.keyId, [other.id]);
+      b.ss.deviceRequests.delete(asked.keyId);
+      asks(b);
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      const line = "studio-mac hasn't added this iPhone yet.";
+      const card = page.locator(".ctl-answer[data-attention='perm-1']");
+      // Said once, on the card, with the way on; the line under the field says nothing.
+      await expect(card.locator(".ctl-answer-note")).toHaveText(`${line} Approve this iPhone`, { timeout: 15_000 });
+      await expect(card.getByRole("link", { name: "Approve this iPhone" })).toHaveAttribute("href", "/add-device");
+      await expect(card.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(card.getByRole("button", { name: "Deny" })).toBeDisabled();
+      await expect(composer(page)).toBeDisabled();
+      await expect(page.locator(".ctl-foot[data-reason]")).toHaveCount(0);
+      await expect(page.getByText(line)).toHaveCount(1);
+      await expect(page.getByText(/can't answer yet|next online/)).toHaveCount(0);
+      await shot(page, "also-catching-up-prompt");
+      await page.goto(`${b.server.url}/inbox`);
+      const row = page.locator(".inbox-row[data-attention='perm-1']");
+      await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
+      // Said once, in a notice above Notifications, with the way on.
+      const said = page.locator(".inbox-notes .notice").first();
+      await expect(said.locator(".inbox-reason")).toHaveText(line);
+      await expect(said.getByRole("link", { name: "Approve this iPhone" })).toHaveAttribute("href", "/add-device");
+      // There, where studio-mac gets the key: spacesheep's Devices.
+      await page.goto(`${b.server.url}/add-device`);
+      await expect(page.locator("[data-rest='add']")).toHaveText(
+        "Not on every computer yet: add it to the rest on Devices. Open Devices",
+      );
+      // New session: on its own it opens on attic-mini, which can take a start, though the
+      // newest session is studio-mac's; studio-mac is listed, off, with why in two words.
+      await page.goto(b.server.url);
+      await page.locator(".page.board .compose-btn--phone").click();
+      const sheet = page.locator("[data-new-session]");
+      const machine = sheet.locator("[data-ns-row=machine] button.sel");
+      await expect(machine).toHaveAttribute("data-value", "attic-mini");
+      await machine.click();
+      const off = page.locator(".sel-opt", { hasText: NAME });
+      await expect(off).toHaveAttribute("aria-disabled", "true");
+      await expect(off.locator(".sel-opt-hint")).toHaveText("Not on this computer yet");
+      await shot(page, "also-new-session-catching-up-picker");
+      await page.keyboard.press("Escape");
+      await sheet.locator("[data-ns-cancel]").click();
+      await expect(sheet).toHaveCount(0);
+      // From studio-mac's own "New session on studio-mac…": on it, its sentence under the form
+      // with Approve this iPhone, Start off, and the Permission row where it always is.
+      await page.goto(`${b.server.url}/?new=1&machine=${NAME}`);
+      await expect(machine).toHaveAttribute("data-value", NAME);
+      await sheet.locator("[data-ns-text]").fill("Look around.");
+      await expect(sheet.locator(".ns-status")).toHaveText(`${line} Approve this iPhone`);
+      await expect(sheet.locator("[data-ns-approve]")).toBeVisible();
+      await expect(sheet.locator("[data-ns-start]")).toBeDisabled();
+      await expect(sheet.locator("[data-ns-row=options]")).toHaveText(/^Permission\s*Safe$/);
+      await expect(sheet.getByText(/doesn't trust/)).toHaveCount(0);
+      await shot(page, "also-new-session-catching-up");
+      expect(await signs(page)).toBe(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("approved, and the key read is slow at launch: Allow stays, and neither the Approve card nor the line under the field ever says to approve it", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+      await trusted(b);
+      // Connected again: the hub has no word of the phone's key under the new account, so what
+      // the page knows of it is the computer's list against the key the signer reads.
+      b.hub.accounts.clear();
+      b.hub.active = null;
+      b.hub.add("me@example.com", b.ss.key);
+      asks(b);
+      // The signer takes three seconds to say which key it holds; whatever offers to approve
+      // the phone meanwhile is noted.
+      await b.context.addInitScript(() => {
+        const w = window as unknown as {
+          __TAURI_INTERNALS__: { invoke(c: string, a?: unknown): Promise<unknown> };
+          __sawApprove?: boolean;
+        };
+        const inner = w.__TAURI_INTERNALS__.invoke.bind(w.__TAURI_INTERNALS__);
+        w.__TAURI_INTERNALS__.invoke = async (c, a) => {
+          if (c === "plugin:identity|status") await new Promise((r) => setTimeout(r, 3000));
+          return inner(c, a);
+        };
+        new MutationObserver(() => {
+          if (document.querySelector(".ctl-approve, [data-answer='unapproved'], .ctl-foot a[href='/add-device']"))
+            w.__sawApprove = true;
+        }).observe(document, { subtree: true, childList: true, attributes: true });
+      });
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      const allow = page.locator(".ctl-answer[data-attention='perm-1']").getByRole("button", { name: "Allow" });
+      await expect(allow).toBeVisible();
+      await page.waitForTimeout(3500);
+      await expect(allow).toBeEnabled();
+      expect(await page.evaluate(() => (window as unknown as { __sawApprove?: boolean }).__sawApprove ?? false)).toBe(
+        false,
+      );
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("a send spacesheep refuses for a key the computer does not list: one Face ID, and the words say so", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      await trusted(b);
+      await page.reload();
+      const box = composer(page);
+      await expect(box).toBeEnabled();
+      // spacesheep no longer lists the phone's key for studio-mac; the page has not read that yet.
+      b.ss.machines[0]!.passkey_ids = ["a-passkey-made-on-spacesheep"];
+      const taps = () => page.evaluate(() => (window as unknown as { __taps: unknown[] }).__taps.length);
+      const before = await taps();
+      await box.fill("Does the retry stop now?");
+      await tapSend(page);
+      await expect(page.locator(".ctl-foot")).toContainText("Not sent: studio-mac hasn't added this iPhone yet.", {
+        timeout: 15_000,
+      });
+      // The first send of the day takes the grant: that one Face ID, and no second for a new one.
+      expect((await taps()) - before).toBe(1);
+      await expect(page.getByText(/day grant/)).toHaveCount(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("before the day's first send nothing warns of Face ID; while it is up the line says so, and a cancel leaves everything as it was", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    // studio-mac's agents can ask each other (Ask another agent…).
+    Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+      await trusted(b);
+      asks(b);
+      // Face ID stays up until the test cancels it, as the plugin then says.
+      await b.context.addInitScript(() => {
+        const w = window as unknown as {
+          __TAURI_INTERNALS__: { invoke(c: string, a?: unknown): Promise<unknown> };
+          __cancelFaceId?: () => void;
+        };
+        const inner = w.__TAURI_INTERNALS__.invoke.bind(w.__TAURI_INTERNALS__);
+        w.__TAURI_INTERNALS__.invoke = async (c, a) => {
+          if (c === "plugin:identity|sign")
+            await new Promise((_, cancel) => {
+              w.__cancelFaceId = () => cancel({ code: "cancelled", message: "Cancelled." });
+            });
+          return inner(c, a);
+        };
+      });
+      const cancelFaceId = () =>
+        page.evaluate(() => (window as unknown as { __cancelFaceId(): void }).__cancelFaceId());
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      const allow = page.locator(".ctl-answer[data-attention='perm-1']").getByRole("button", { name: "Allow" });
+      await expect(allow).toBeEnabled({ timeout: 15_000 });
+      // No grant yet today, and nothing says so ahead: the first Allow or Send brings Face ID up.
+      const line = page.locator(".ctl-foot[data-reason]");
+      await expect(line).toHaveCount(0);
+      await expect(page.getByText(/passkey|Unlock now|asks for/)).toHaveCount(0);
+      await shot(page, "also-ready-before-face-id");
+      await allow.click();
+      await expect(line.locator(".ctl-hint")).toHaveText("Confirm with Face ID…");
+      await shot(page, "also-face-id-up");
+      await cancelFaceId();
+      // Cancelled: no line, and Allow is there to press again.
+      await expect(allow).toBeEnabled();
+      await expect(line).toHaveCount(0);
+      await expect(page.getByText(/not sent|cancelled/i)).toHaveCount(0);
+      // A message: cancelled, its words stay in the field.
+      const box = composer(page);
+      await box.fill("Run the tests first.");
+      await tapSend(page);
+      await expect(line.locator(".ctl-hint")).toHaveText("Confirm with Face ID…");
+      await cancelFaceId();
+      await expect(line).toHaveCount(0);
+      await expect(box).toHaveValue("Run the tests first.");
+      // Ask another agent: no note ahead either, and the same line while Face ID is up.
+      await box.fill("");
+      await page.locator("[data-ctl-ask]").click();
+      const sheet = page.locator("[data-handoff]");
+      // All is well: the foot says nothing, and its line is there for what comes.
+      await expect(sheet.locator("[data-hs-text]")).toBeVisible();
+      await expect(sheet.locator(".ns-status[role='status']")).toHaveText("");
+      await expect(sheet.getByText(/asks for|passkey|Touch ID|is listening/)).toHaveCount(0);
+      await sheet.locator("[data-hs-text]").fill("Check the refund rounding.");
+      await sheet.locator("[data-hs-ask]").first().click();
+      await expect(sheet.locator(".ns-status")).toHaveText("Confirm with Face ID…");
+      await cancelFaceId();
+      await expect(sheet.locator(".ns-status")).toHaveText("");
+      await expect(sheet.locator("[data-hs-text]")).toHaveValue("Check the refund rounding.");
+    } finally {
+      await b.close();
+    }
+  });
 
   test("a page only a GUI server has, the search, and the files of a session", async ({ browser }) => {
     const b = await bed(browser);
@@ -1166,7 +1965,7 @@ test.describe("what else an account shows", () => {
       // spacesheep takes a send and its answer names no job.
       b.ss.sendAnswers.push(() => ({ status: 202, headers: json, body: "{}" }));
       await box.fill("Does the retry stop now?");
-      await box.press("Enter");
+      await tapSend(page);
       await expect(
         page.getByText("Sent, but this app can't follow it. Check spacesheep.dev to see how it went.").first(),
       ).toBeVisible({ timeout: 15_000 });
@@ -1174,7 +1973,7 @@ test.describe("what else an account shows", () => {
       // A send spacesheep takes, with every answer lost on the way back.
       b.hub.unheard = 99;
       await box.fill("And the payout webhook?");
-      await box.press("Enter");
+      await tapSend(page);
       await expect(
         page.getByText(
           "It may have been sent: spacesheep did not answer in time. Look at the session before you send it again.",
@@ -1231,24 +2030,798 @@ test.describe("what else an account shows", () => {
       ]);
       await page.goto(`${b.server.url}/s/claude-code/s-refund`);
       const line = /This iPhone can send from \d{1,2}:\d{2}( [AP]M)?/;
-      await expect(page.getByText(line).first()).toBeVisible({ timeout: 15_000 });
-      // Over Deny / Allow: the hour's own line, and no button that would be refused.
+      const card = page.locator(".ctl-answer[data-attention='perm-1']");
+      // Over Deny / Allow, once: the hour's own line with the way to answer it on spacesheep,
+      // and no button that would be refused.
+      await expect(card.locator(".ctl-answer-note")).toHaveText(HOUR_ON_CARD, { timeout: 15_000 });
+      await expect(card.locator("[data-elsewhere]")).toBeVisible();
+      if (W < 840) {
+        // The link starts its own line, where the sentence starts: no "·" left at a line's end.
+        const [note, link] = await Promise.all([
+          card.locator(".ctl-answer-note").boundingBox(),
+          card.locator("[data-elsewhere]").boundingBox(),
+        ]);
+        expect(Math.round(link!.x)).toBe(Math.round(note!.x));
+        await expect(card.locator(".ctl-answer-note")).not.toContainText("·");
+      }
       await expect(page.getByText("this page cannot sign an answer")).toHaveCount(0);
-      const allow = page.getByRole("button", { name: "Allow" }).first();
+      const allow = card.getByRole("button", { name: "Allow" });
+      const deny = card.getByRole("button", { name: "Deny" });
       await expect(allow).toBeVisible();
       await expect(allow).toBeDisabled();
-      await expect(page.getByRole("button", { name: "Deny" }).first()).toBeDisabled();
-      expect(await page.getByText(line).count()).toBeGreaterThanOrEqual(2);
+      await expect(deny).toBeDisabled();
+      await expect(page.getByText(line)).toHaveCount(1);
+      // VoiceOver hears the hour with each button, not only in the line above them.
+      await expect(allow).toHaveAccessibleDescription(line);
+      await expect(deny).toHaveAccessibleDescription(line);
+      // Off, Allow wears Deny's face: neither reads as the one pressed.
+      const face = (l: typeof allow) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
+      expect(await face(allow)).toBe(await face(deny));
+      // On the phone the card stands alone: the field, off for the hour too, takes no room.
+      if (W < 840) await expect(page.locator(".ctl-field")).toHaveCount(0);
       await shot(page, "also-prompt-cooling");
-      // The Inbox card: the same reason, and the same two buttons off.
+      // On the phone and on an iPad's card, upright or held wide (a grid whose rows are 2 px
+      // apart, the pair beside), Open on spacesheep.dev is 45 tall to a finger and takes no
+      // tap from the question above it or from the pair under it.
+      const elsewhere = card.locator("[data-elsewhere]");
+      for (const size of [
+        { width: 390, height: 844 },
+        { width: 820, height: 1180 },
+        { width: 1180, height: 820 },
+      ]) {
+        await page.setViewportSize(size);
+        await expect(elsewhere).toBeVisible();
+        const hits = await elsewhere.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const note = el.closest(".ctl-answer-note")!;
+          const above = note.previousElementSibling!.getBoundingClientRect();
+          const c = note.parentElement!.getBoundingClientRect();
+          const pair = note.parentElement!.querySelector(".ctl-answer-btns")!.getBoundingClientRect();
+          const at = (x: number, y: number) => document.elementFromPoint(x, y);
+          const cx = r.left + r.width / 2;
+          // Across the box's width, inside the card; the pair where it is under the note.
+          const xs = [Math.max(r.left - 6, c.left + 1), cx, Math.min(r.right + 6, c.right - 1)];
+          const below = pair.top > r.bottom ? xs.map((x) => Math.min(Math.max(x, pair.left + 1), pair.right - 1)) : [];
+          return {
+            over: at(cx, r.top - 8) === el,
+            under: at(cx, r.bottom + 12) === el,
+            question: xs.every((x) => at(x, above.bottom - 1) !== el),
+            pair: [...below, pair.left + pair.width / 2].every(
+              (x) => !!at(x, pair.top + 1)?.closest(".ctl-answer-btns"),
+            ),
+          };
+        });
+        expect(hits, `${size.width}`).toEqual({ over: true, under: true, question: true, pair: true });
+      }
+      await page.setViewportSize({ width: W, height: H });
+      // The Inbox card: the same two buttons off, and the hour said once, as its own sentence.
       await page.goto(`${b.server.url}/inbox`);
       const row = page.locator(".inbox-row").first();
       await expect(row).toBeVisible();
       await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
-      await expect(page.getByText(line).first()).toBeVisible();
+      await expect(row.getByRole("button", { name: "Allow" })).toHaveAccessibleDescription(line);
+      await expect(page.locator(".inbox-reason")).toHaveText(/^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.$/);
+      await expect(page.getByText(/Allow and Deny are off/)).toHaveCount(0);
+      // In a notice of its own, the first, above Notifications, with nothing to press.
+      const notice = page.locator(".inbox-notes .notice").first();
+      await expect(notice.locator(".inbox-reason")).toBeVisible();
+      await expect(notice.locator(".notice-action")).toHaveCount(0);
       expect(b.ss.log.filter((l) => l.startsWith("POST /api/machines/"))).toEqual([]);
     } finally {
       await b.close();
     }
   });
+
+  test("at 320, a command of one line is shown whole beside a live Allow", async ({ browser }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    const cmd =
+      "npm run deploy -- --target staging --region ap-southeast-1 --confirm --skip-smoke-tests --tag release-2026-11-17";
+    try {
+      await page.setViewportSize({ width: 320, height: 568 });
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      await trusted(b);
+      const s = new Session("s-deploy", "claude-code", Date.now() - 4_000);
+      const on = { tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/billing", title: "Deploy to staging" } };
+      b.ss.push([
+        s.ev("session.started", { source: "startup" }, on),
+        s.ev("turn.started", { turn_id: "t1" }, on),
+        s.ev(
+          "attention.needed",
+          { attention_id: "perm-deploy", kind: "permission", tool: "Bash", message: `Bash ${cmd}` },
+          on,
+        ),
+      ]);
+      await page.goto(`${b.server.url}/s/claude-code/s-deploy`);
+      const card = page.locator(".ctl-answer[data-attention='perm-deploy']");
+      await expect(card.getByRole("button", { name: "Allow" })).toBeEnabled({ timeout: 15_000 });
+      const block = card.locator(".ctl-cmd-block");
+      await expect(block).toHaveText(cmd);
+      // Every line of it is there to read: nothing scrolls inside the block, or off the screen.
+      expect(await block.evaluate((el) => el.scrollHeight - el.clientHeight)).toBe(0);
+      await expect(block).toBeInViewport({ ratio: 1 });
+      await expect(card.locator(".ctl-more")).toHaveCount(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("an answer sent is said on every screen and after a reload, in one line in the pair's place; nothing counts it or sends it twice, and a refusal gives the pair back", async ({
+    browser,
+  }) => {
+    test.setTimeout(180_000);
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    /** A prompt now in session `id`, under its own attention id. */
+    const prompt = (id: string, attention: string, title: string) => {
+      const s = new Session(id, "claude-code", Date.now() - 4_000);
+      const on = { tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/billing", title } };
+      b.ss.push([
+        s.ev("session.started", { source: "startup" }, on),
+        s.ev("turn.started", { turn_id: "t1" }, on),
+        s.ev("tool.started", { tool: "Bash", call_id: "c1", turn_id: "t1", input: { command: "npm test" } }, on),
+        s.ev(
+          "attention.needed",
+          { attention_id: attention, kind: "permission", tool: "Bash", message: "npm test" },
+          on,
+        ),
+      ]);
+    };
+    const words = `Allowed · waiting for ${NAME}`;
+    const badge = page.locator("a[data-nav='inbox'] .nav-badge >> visible=true");
+    const wide = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    try {
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      await trusted(b);
+      // 393 pt: Allow on the session's page, then the Inbox.
+      await page.setViewportSize({ width: 393, height: 852 });
+      prompt("s-refund", "perm-refund", "Refund the double charge");
+      await page.goto(`${b.server.url}/inbox`);
+      await expect(page.getByText("1 needs an answer")).toBeVisible({ timeout: 15_000 });
+      await expect(badge).toHaveText("1");
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      const card = page.locator(".ctl-answer[data-attention='perm-refund']");
+      // The call the prompt is about asks, with the needs-you glyph.
+      const call = page.locator(".turn--live li.tool .tool-status").last();
+      await expect(call).toHaveAttribute("aria-label", "asking");
+      await card.getByRole("button", { name: "Allow" }).click();
+      const receipt = card.locator(".ctl-answer-receipt");
+      await expect(receipt).toHaveText(words, { timeout: 15_000 });
+      // The pressed button went with the pair: its focus is on the line that took its place.
+      await expect(receipt).toBeFocused();
+      // The call asks no more: it runs, and no row has the needs-you glyph.
+      await expect(call).toHaveAttribute("aria-label", "running");
+      await expect(page.locator(".tool-status.is-ask")).toHaveCount(0);
+      // Simple: the tools line runs it too, after a reload, from the answer's own row.
+      const settings = await page.evaluate(() => {
+        const was = localStorage.getItem("sessionpipe-gui.settings");
+        localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ mode: "simple" }));
+        return was;
+      });
+      await page.reload();
+      const tools = page.locator(".chat-tools-sum").last();
+      await expect(tools).toHaveText("Running Bash", { timeout: 15_000 });
+      await expect(tools.locator(".spinner")).toHaveCount(1);
+      await expect(page.locator(".chat-tools .dot--needs_you, .tool-status.is-ask")).toHaveCount(0);
+      await page.evaluate(
+        (was) =>
+          was === null
+            ? localStorage.removeItem("sessionpipe-gui.settings")
+            : localStorage.setItem("sessionpipe-gui.settings", was),
+        settings,
+      );
+      await expect(card.getByRole("button")).toHaveCount(0);
+      await expect(page.locator(".ctl-acts")).toHaveCount(0);
+      await expect(badge).toHaveCount(0);
+      expect(b.ss.jobs).toHaveLength(1);
+      // The Inbox: the row stays where it was, with the same line and nothing to press, and
+      // nothing counts it.
+      await page.goto(`${b.server.url}/inbox`);
+      const row = page.locator(".inbox-row[data-attention='perm-refund']");
+      await expect(row.locator(".inbox-receipt")).toHaveText(words, { timeout: 15_000 });
+      await expect(row.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      await expect(page.getByText(/\d+ needs? an answer/)).toHaveCount(0);
+      await expect(badge).toHaveCount(0);
+      // Reloaded: the same, read from the answer's own row.
+      await page.reload();
+      await expect(row.locator(".inbox-receipt")).toHaveText(words, { timeout: 15_000 });
+      await expect(row.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      await expect(badge).toHaveCount(0);
+      // On the session's page Deny is nowhere, not even its key: nothing more goes.
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      await expect(receipt).toHaveText(words, { timeout: 15_000 });
+      await page.keyboard.press("d");
+      await page.waitForTimeout(500);
+      expect(b.ss.jobs).toHaveLength(1);
+
+      // 820 pt: Allow in the Inbox, then the session's page.
+      await page.setViewportSize({ width: 820, height: 1180 });
+      prompt("s-payout", "perm-payout", "Retry the payout webhook");
+      await page.goto(`${b.server.url}/inbox`);
+      const payout = page.locator(".inbox-row[data-attention='perm-payout']");
+      await payout.getByRole("button", { name: "Allow" }).click({ timeout: 15_000 });
+      await expect(payout.locator(".inbox-receipt")).toHaveText(words, { timeout: 15_000 });
+      await expect(payout.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      expect(b.ss.jobs).toHaveLength(2);
+      await page.goto(`${b.server.url}/s/claude-code/s-payout`);
+      const payoutCard = page.locator(".ctl-answer[data-attention='perm-payout']");
+      await expect(payoutCard.locator(".ctl-answer-receipt")).toHaveText(words, { timeout: 15_000 });
+      await expect(payoutCard.getByRole("button")).toHaveCount(0);
+
+      // 320 pt: the line wraps inside the card and the row; nothing runs off the side.
+      await page.setViewportSize({ width: 320, height: 568 });
+      await expect(payoutCard.locator(".ctl-answer-receipt")).toBeVisible();
+      expect(await wide()).toBe(0);
+      await page.goto(`${b.server.url}/inbox`);
+      await expect(payout.locator(".inbox-receipt")).toBeVisible({ timeout: 15_000 });
+      expect(await wide()).toBe(0);
+
+      // The computer refuses an answer for its grant: the pair is back, and the line says why.
+      await page.setViewportSize({ width: 393, height: 852 });
+      prompt("s-deploy", "perm-deploy", "Deploy to staging");
+      await page.goto(`${b.server.url}/s/claude-code/s-deploy`);
+      const deploy = page.locator(".ctl-answer[data-attention='perm-deploy']");
+      await deploy.getByRole("button", { name: "Allow" }).click({ timeout: 15_000 });
+      await expect(deploy.locator(".ctl-answer-receipt")).toHaveText(words, { timeout: 15_000 });
+      b.ss.settle(b.ss.jobs.at(-1)!.id, "refused", { code: "bad_grant" });
+      await expect(deploy.getByRole("button", { name: "Allow" })).toBeEnabled({ timeout: 30_000 });
+      await expect(deploy.locator(".ctl-answer-receipt")).toHaveCount(0);
+      await expect(page.locator(".ctl-foot[data-reason='error']")).toHaveText(
+        /^Not sent: the day grant did not verify/,
+      );
+      // The Inbox says it too: at 820 beside the pair, in a measure that leaves the request
+      // its room; at 320 on a line of its own over the pair.
+      await page.setViewportSize({ width: 820, height: 1180 });
+      await page.goto(`${b.server.url}/inbox`);
+      const deployRow = page.locator(".inbox-row[data-attention='perm-deploy']");
+      const refused = deployRow.locator(".inbox-note--err");
+      await expect(refused).toHaveText(/^Not sent: the day grant did not verify/, { timeout: 15_000 });
+      await expect(deployRow.getByRole("button", { name: "Allow" })).toBeEnabled();
+      const [rowBox, mainBox] = await Promise.all([
+        deployRow.boundingBox(),
+        deployRow.locator(".inbox-main").boundingBox(),
+      ]);
+      expect(mainBox!.width).toBeGreaterThan(rowBox!.width * 0.4);
+      await page.setViewportSize({ width: 320, height: 568 });
+      const [lineBox, allowBox] = await Promise.all([
+        refused.boundingBox(),
+        deployRow.getByRole("button", { name: "Allow" }).boundingBox(),
+      ]);
+      expect(lineBox!.y + lineBox!.height).toBeLessThanOrEqual(allowBox!.y);
+      expect(await wide()).toBe(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("a question from the agent, at every width: its words and options on its card, where to answer it, and nothing to press, count or answer anywhere", async ({
+    browser,
+  }) => {
+    test.setTimeout(180_000);
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    /** Claude Code's AskUserQuestion as its hooks send it: a permission whose message is the
+     *  tool's name; at tier 3 the call's input has the questions, at tier 2 nothing. */
+    const question = (id: string, title: string, tier: 2 | 3) => {
+      const s = new Session(id, "claude-code", Date.now() - 8_000);
+      const on = { tier, session: { machine: NAME, cwd: "/Users/me/explainer", title } };
+      const input = {
+        questions: [
+          {
+            question: "Which voice should the explainer use?",
+            header: "Voice",
+            multiSelect: false,
+            options: ["Warm narrator", "Neutral", "ElevenLabs default"].map((label) => ({ label, description: "" })),
+          },
+          {
+            question: "How long should the video be?",
+            header: "Length",
+            multiSelect: false,
+            options: ["30 seconds", "60 seconds", "90 seconds"].map((label) => ({ label, description: "" })),
+          },
+        ],
+      };
+      b.ss.push([
+        s.ev("session.started", { source: "startup" }, on),
+        s.ev("turn.started", { turn_id: "t1" }, on),
+        s.ev(
+          "tool.started",
+          { tool: "AskUserQuestion", call_id: `toolu_${id}`, turn_id: "t1", ...(tier === 3 ? { input } : {}) },
+          on,
+        ),
+        s.ev(
+          "attention.needed",
+          { attention_id: `perm-${id}`, kind: "permission", tool: "AskUserQuestion", message: "AskUserQuestion" },
+          on,
+        ),
+      ]);
+    };
+    const badge = page.locator("a[data-nav='inbox'] .nav-badge >> visible=true");
+    const wide = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    try {
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      await trusted(b);
+      question("s-explainer", "Hyperframe ElevenLabs explainer video", 3);
+      question("s-voice", "Pick a voice", 2);
+      for (const [w, h] of [
+        [320, 568],
+        [393, 852],
+        [820, 1180],
+      ] as const) {
+        await page.setViewportSize({ width: w, height: h });
+        const at = `${w}x${h}`;
+        // The board: "Question" and the question in the UI's face, or the chip alone; the
+        // row's menu answers nothing.
+        await page.goto(b.server.url);
+        const card = page.locator("article.card", { hasText: "Hyperframe ElevenLabs explainer video" });
+        await expect(card.locator(".card-tool"), at).toHaveText("Question", { timeout: 15_000 });
+        await expect(card.locator(".card-attn"), at).toHaveText("Which voice should the explainer use?");
+        await expect(card.locator(".card-attn"), at).not.toHaveClass(/mono/);
+        const plain = page.locator("article.card", { hasText: "Pick a voice" });
+        await expect(plain.locator(".card-tool"), at).toHaveText("Question");
+        await expect(plain.locator(".card-attn"), at).toHaveCount(0);
+        await card.locator("a.card-link").click({ button: "right" });
+        await expect(page.getByRole("menuitem", { name: "Hide", exact: true }), at).toBeVisible();
+        await expect(page.getByRole("menuitem", { name: /^(Allow|Deny)/ }), at).toHaveCount(0);
+        await page.keyboard.press("Escape");
+        await expect(badge, at).toHaveCount(0);
+        // The Inbox: with the prompts waiting in a terminal, the question beside its chip,
+        // nothing to press, and nothing that needs an answer from here.
+        await page.goto(`${b.server.url}/inbox`);
+        const terminal = page.locator("section[aria-label='Waiting in a terminal']");
+        const row = terminal.locator(".inbox-row[data-session='claude-code:s-explainer']");
+        await expect(row.locator(".inbox-msg"), at).toHaveText("Which voice should the explainer use?", {
+          timeout: 15_000,
+        });
+        await expect(terminal.locator(".inbox-row[data-session='claude-code:s-voice'] .inbox-tool"), at).toHaveText(
+          "Question",
+        );
+        await expect(page.getByRole("button", { name: /^(Allow|Deny|Open)$/ }), at).toHaveCount(0);
+        await expect(page.getByText(/needs? an answer/), at).toHaveCount(0);
+        await expect(badge, at).toHaveCount(0);
+        expect(await wide(), at).toBe(0);
+        // Its card: the question, its options to read, how many more, and where to answer it;
+        // no Allow, no Deny, not even a's key, and the field as it is.
+        await page.goto(`${b.server.url}/s/claude-code/s-explainer`);
+        const ask = page.locator(".ctl-answer[data-answer='question']");
+        await expect(ask.locator(".ctl-q-text"), at).toHaveText("Which voice should the explainer use?", {
+          timeout: 15_000,
+        });
+        await expect(ask.locator(".ctl-options li"), at).toHaveText(["Warm narrator", "Neutral", "ElevenLabs default"]);
+        await expect(ask.locator(".ctl-options button, .ctl-options a"), at).toHaveCount(0);
+        await expect(ask.locator(".ctl-questions-more"), at).toHaveText("+1 more question");
+        await expect(ask.locator(".ctl-answer-note"), at).toHaveText(`Answer it on ${NAME}.`);
+        await expect(page.getByRole("button", { name: /^(Allow|Deny)$/ }), at).toHaveCount(0);
+        await expect(page.locator("textarea").first(), at).toBeEnabled();
+        await page.keyboard.press("a");
+        await page.waitForTimeout(300);
+        expect(b.ss.jobs, at).toEqual([]);
+        expect(await wide(), at).toBe(0);
+        // Where the session sent no input: one sentence.
+        await page.goto(`${b.server.url}/s/claude-code/s-voice`);
+        await expect(page.locator(".ctl-answer[data-answer='question'] .ctl-q-text"), at).toHaveText(
+          "Claude has a question.",
+          { timeout: 15_000 },
+        );
+        await expect(page.locator(".ctl-options"), at).toHaveCount(0);
+      }
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("approved in Safari a few minutes after the app last looked, where spacesheep's door names no hour: the field, Allow and the Inbox's Allow wait, and nothing asks for Face ID or goes", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    b.ss.saysCooling = false;
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}/add-device`);
+      await button(page, "Ask spacesheep to approve").click();
+      await expect(page.locator("[data-approve='waiting']")).toBeVisible();
+      // The last look before the app goes to the background sees the request open.
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.locator(".ctl-foot[data-reason='waiting']")).toBeVisible();
+      // In Safari: approved on Devices, four minutes on. The app is back in front then.
+      b.ss.approveDevice([...b.hub.accounts.values()][0]!.deviceKeyId!);
+      asks(b);
+      await page.evaluate(() => {
+        const key = Object.keys(localStorage).find((k) => k.startsWith("sessionpipe-gui.account.device."))!;
+        const memo = JSON.parse(localStorage.getItem(key)!) as Record<string, unknown>;
+        memo.openAt = Date.now() - 4 * 60_000;
+        localStorage.setItem(key, JSON.stringify(memo));
+      });
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      const line = /This iPhone can send from \d{1,2}:\d{2}( [AP]M)?/;
+      const card = page.locator(".ctl-answer[data-attention='perm-1']");
+      await expect(card.locator(".ctl-answer-note")).toHaveText(HOUR_ON_CARD, { timeout: 15_000 });
+      await expect(card.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(card.getByRole("button", { name: "Deny" })).toBeDisabled();
+      await expect(page.getByText(line)).toHaveCount(1);
+      if (W < 840) await expect(page.locator(".ctl-field")).toHaveCount(0);
+      // With no prompt open, the line under the field, which is off.
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.locator(".ctl-foot[data-reason='blocked']")).toContainText(line, { timeout: 15_000 });
+      await expect(page.locator(".ctl-foot [data-elsewhere]")).toHaveText(`Open on ${HOST}`);
+      await expect(composer(page)).toBeDisabled();
+      await page.goto(`${b.server.url}/inbox`);
+      const row = page.locator(".inbox-row[data-attention='perm-1']");
+      await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(page.locator(".inbox-reason")).toHaveText(/^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.$/);
+      expect(await signs(page)).toBe(0);
+      expect(b.ss.jobs).toEqual([]);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("a send spacesheep holds back for the hour the app did not know of: one Face ID, one line that says from when, and nothing offered after it", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    b.ss.saysCooling = false;
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.getByText("Found the loop.").first()).toBeVisible();
+      // Asked and approved before the app ever saw the request wait: no hour is known here.
+      const id = [...b.hub.accounts.keys()][0]!;
+      const asked = await page.evaluate(
+        (account) =>
+          (
+            window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }
+          ).__TAURI_INTERNALS__.invoke("acct_device_ask", { id: account }) as Promise<{ keyId: string }>,
+        id,
+      );
+      b.ss.approveDevice(asked.keyId);
+      await page.reload();
+      const box = composer(page);
+      await expect(box).toBeEnabled();
+      const taps = () => page.evaluate(() => (window as unknown as { __taps: unknown[] }).__taps.length);
+      const before = await taps();
+      await box.fill("Does the retry stop now?");
+      await tapSend(page);
+      const foot = page.locator(".ctl-foot[data-reason='blocked']");
+      await expect(foot).toContainText(/^Not sent\. This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\./, {
+        timeout: 15_000,
+      });
+      await expect(foot.locator("[data-elsewhere]")).toHaveText(`Open on ${HOST}`);
+      // One line: the hour's own is not said beside it, and spacesheep's paragraph never is.
+      await expect(page.getByText(/can send from/)).toHaveCount(1);
+      await expect(page.getByText(/This device|stolen sign-in/)).toHaveCount(0);
+      // The phone knows the hour from here: nothing more is offered, and that one Face ID was all.
+      await expect(box).toBeDisabled();
+      expect((await taps()) - before).toBe(1);
+      expect(b.ss.jobs).toEqual([]);
+      await shot(page, "also-refused-cooling");
+    } finally {
+      await b.close();
+    }
+  });
+
+  /** Three pages of history on spacesheep: a question asked in the first and answered in
+   *  the last, so a board drawn from part of it would say the session needs the person.
+   *  Its relay reads: at spacesheep's limit while `limited`; past the first one answered,
+   *  held until `release`. */
+  const longHistory = (b: Bed) => {
+    const asked = new Session("s-asked");
+    const busy = new Session("s-busy", "claude-code", Date.now() - 2 * 3_600_000);
+    const at = (title: string) => ({ tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/billing", title } });
+    const payout = at("Rename the payout job");
+    const ledger = at("Index the ledger");
+    b.ss.push([
+      asked.ev("session.started", { source: "startup" }, payout),
+      asked.ev("turn.started", { turn_id: "t1" }, payout),
+      asked.ev(
+        "attention.needed",
+        { attention_id: "perm-1", kind: "permission", tool: "Bash", message: "Bash npm test" },
+        payout,
+      ),
+      busy.ev("session.started", { source: "startup" }, ledger),
+      ...Array.from({ length: 1000 }, (_, i) => busy.ev("tool.started", { tool: "Read", call_id: `c${i}` }, ledger)),
+      asked.ev("attention.cleared", { attention_id: "perm-1" }, payout),
+      asked.ev("turn.ended", { turn_id: "t1" }, payout),
+    ]);
+    const g = { limited: false, release: () => {} };
+    const held = new Promise<void>((y) => {
+      g.release = y;
+    });
+    let reads = 0;
+    const handle = b.ss.handle.bind(b.ss);
+    b.ss.handle = async (req) => {
+      if (!req.path.startsWith("/api/sessionpipe/v1/relay?")) return handle(req);
+      if (g.limited)
+        return {
+          status: 429,
+          headers: { "content-type": "application/json", "retry-after": "1" },
+          body: JSON.stringify({ error: "Too many requests.", code: "rate_limited" }),
+        };
+      if (reads++ > 0) await held;
+      return handle(req);
+    };
+    return g;
+  };
+  const tab = (page: Page, name: string) => page.locator(".tabbar").getByRole("link", { name: new RegExp(`^${name}`) });
+
+  test("a first connect with a long history: loading rows under 'Catching up…' and no badge, then the whole board once", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    const g = longHistory(b);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      const catching = page.getByRole("status").filter({ hasText: "Catching up…" });
+      await expect(catching).toBeVisible();
+      // The rows stand in for the board; the bar is what says why, so they are not said too.
+      const rows = page.locator(".board-skeleton");
+      await expect(rows).toBeVisible();
+      await expect(rows).toHaveAttribute("aria-label", "Catching up");
+      await expect(rows).toHaveAttribute("aria-hidden", "true");
+      // Past the wait after which a receiver would be said to be slow: still the loading rows.
+      await page.waitForTimeout(6500);
+      await expect(page.getByText("Still connecting to the receiver…")).toHaveCount(0);
+      await expect(catching).toBeVisible();
+      await expect(page.locator(".nav-badge")).toHaveCount(0);
+      expect(await page.title()).not.toMatch(/^\(/);
+      await shot(page, "also-catching-up");
+      // Another tab says it as it opens, not a second after: it has been catching up a while.
+      await tab(page, "Inbox").click();
+      await expect(page.locator(".page.inbox").getByRole("status").filter({ hasText: "Catching up…" })).toBeVisible({
+        timeout: 600,
+      });
+      await tab(page, "Board").click();
+      await expect(page.locator(".page.board").getByRole("status").filter({ hasText: "Catching up…" })).toBeVisible({
+        timeout: 600,
+      });
+      // The rest of the history: the board, once, with nobody waiting, and the line gone.
+      g.release();
+      await expect(page.getByText("Rename the payout job").first()).toBeVisible({ timeout: 15_000 });
+      await expect(catching).toHaveCount(0);
+      await expect(page.locator(".group--needs_you")).toHaveCount(0);
+      await expect(page.locator(".nav-badge")).toHaveCount(0);
+      // The hub's starting point for notifications is that board.
+      await expect.poll(() => b.hub.needs.map((x) => x.sessions)).toEqual([[]]);
+    } finally {
+      g.release();
+      await b.close();
+    }
+  });
+
+  test("spacesheep's limit at the first read, then a long history: its line, then loading rows under 'Catching up…', never the first run", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    const g = longHistory(b);
+    g.limited = true;
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      // Nothing read yet: the board says what stands in the way (also-first-limited).
+      const limit = page.getByText("This app is reading too often for spacesheep");
+      await expect(limit).toBeVisible();
+      // The limit lifts into the history: the loading rows over that empty board, not
+      // "Waiting for your first session" with its way to start one.
+      g.limited = false;
+      const catching = page.getByRole("status").filter({ hasText: "Catching up…" });
+      await expect(catching).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator(".board-skeleton")).toBeVisible();
+      await expect(limit).toHaveCount(0);
+      await expect(page.getByText("Waiting for your first session")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: `Start a session on ${NAME}` })).toHaveCount(0);
+      await expect(page.locator(".nav-badge")).toHaveCount(0);
+      await shot(page, "also-catching-up-after-limit");
+      // The Inbox the same: its loading rows, not "Nothing needs you".
+      await tab(page, "Inbox").click();
+      await expect(page.locator(".page.inbox .skeleton")).toBeVisible();
+      await expect(page.getByText("Nothing needs you")).toHaveCount(0);
+      await shot(page, "also-catching-up-inbox");
+      await tab(page, "Board").click();
+      g.release();
+      await expect(page.getByText("Rename the payout job").first()).toBeVisible({ timeout: 15_000 });
+      await expect(catching).toHaveCount(0);
+      await expect(page.locator(".board-skeleton")).toHaveCount(0);
+      await expect(page.getByText("Waiting for your first session")).toHaveCount(0);
+      await expect(page.locator(".group--needs_you")).toHaveCount(0);
+      await expect.poll(() => b.hub.needs.map((x) => x.sessions)).toEqual([[]]);
+    } finally {
+      g.release();
+      await b.close();
+    }
+  });
+
+  test("back after time away with a prompt open: 'Catching up…' is the one sentence, and nothing says to pair its computer", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    asks(b);
+    const { page } = b;
+    let release = () => {};
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Refund the double charge").first()).toBeVisible();
+      await trusted(b);
+      await page.evaluate(() =>
+        (window as unknown as { __sessionpipeAccount: { flushed(): Promise<void> } }).__sessionpipeAccount.flushed(),
+      );
+      // A long time away: a page of history to read, and the rest held back.
+      const busy = new Session("s-busy", "claude-code", Date.now() - 3_600_000);
+      const ledger = {
+        tier: 2 as const,
+        session: { machine: NAME, cwd: "/Users/me/billing", title: "Index the ledger" },
+      };
+      b.ss.push([
+        busy.ev("session.started", { source: "startup" }, ledger),
+        ...Array.from({ length: 1000 }, (_, i) => busy.ev("tool.started", { tool: "Read", call_id: `c${i}` }, ledger)),
+      ]);
+      const held = new Promise<void>((y) => {
+        release = y;
+      });
+      let reads = 0;
+      const handle = b.ss.handle.bind(b.ss);
+      b.ss.handle = async (req) => {
+        if (req.path.startsWith("/api/sessionpipe/v1/relay?") && reads++ >= 1) await held;
+        return handle(req);
+      };
+      await page.reload();
+      const catching = page.getByRole("status").filter({ hasText: "Catching up…" });
+      await expect(catching).toBeVisible();
+      // The kept board's prompt, in the Inbox and on its page: off while the computer's
+      // pairing is still to come, and the bar alone says why.
+      await tab(page, "Inbox").click();
+      await expect(page.locator(".page.inbox").getByRole("status").filter({ hasText: "Catching up…" })).toBeVisible();
+      const row = page.locator(".inbox-row[data-attention='perm-1']");
+      await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(page.getByText(/pair .* to (send|answer|message)/i)).toHaveCount(0);
+      await row.locator(".inbox-main").click();
+      const card = page.locator(".ctl-answer[data-attention='perm-1']");
+      await expect(card.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(page.getByText(/pair .* to (send|answer|message)/i)).toHaveCount(0);
+      await expect(page.locator(".ctl-foot[data-reason='unpaired']")).toHaveCount(0);
+      // The history in: Allow and Deny are back.
+      release();
+      await expect(catching).toHaveCount(0, { timeout: 15_000 });
+      await expect(card.getByRole("button", { name: "Allow" })).toBeEnabled();
+    } finally {
+      release();
+      await b.close();
+    }
+  });
+
+  test("Ask another agent at 320: From is one line, cut at the row's width, however long the session's title, and ends where Permission does", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    // studio-mac's agents can ask each other (Ask another agent…).
+    Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+    const { page } = b;
+    try {
+      await page.setViewportSize({ width: 320, height: 568 });
+      await page.goto(b.server.url);
+      await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+      await trusted(b);
+      const title = "Retry the invoice webhook with exponential backoff and jitter";
+      const s = new Session("s-long-title");
+      const on = { tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/billing", title } };
+      b.ss.push([
+        s.ev("session.started", { source: "startup" }, on),
+        s.ev("turn.started", { turn_id: "t1" }, on),
+        s.ev("turn.transcript", { turn: 1, user: "Add backoff to the retries.", assistant: "Done." }, on),
+        s.ev("turn.ended", { turn_id: "t1" }, on),
+      ]);
+      await page.goto(`${b.server.url}/s/claude-code/s-long-title`);
+      await page.locator("[data-ctl-ask]").click();
+      const sheet = page.locator("[data-handoff]");
+      const from = sheet.locator(".hs-from");
+      await expect(from).toHaveText(`${title} · ${NAME}`);
+      const seen = await from.evaluate((el) => {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        const cs = getComputedStyle(el);
+        return {
+          lines: new Set(Array.from(r.getClientRects(), (x) => Math.round(x.top))).size,
+          cut: el.scrollWidth > el.clientWidth,
+          overflow: cs.textOverflow,
+        };
+      });
+      expect(seen).toEqual({ lines: 1, cut: true, overflow: "ellipsis" });
+      // One column at the right for the values the machine sets: From's end is Permission's.
+      const fixed = sheet.locator("[data-hs-row=options] .ns-fixed");
+      await expect(fixed).toHaveText("Safe");
+      const end = async (l: typeof from) => {
+        const r = (await l.boundingBox())!;
+        return Math.round(r.x + r.width);
+      };
+      expect(await end(from)).toBe(await end(fixed));
+      await shot(page, "also-handoff-long-from", { own: true });
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("New session held back for the hour the app did not know of: the hour's line in place of the refusal, and once the hour is over the refusal is not back", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    b.ss.saysCooling = false;
+    const { page } = b;
+    try {
+      // The page's clock is this test's to move: nobody waits an hour here.
+      await page.clock.install();
+      await page.goto(b.server.url);
+      await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+      // Asked and approved before the app ever saw the request wait: no hour is known here.
+      const id = [...b.hub.accounts.keys()][0]!;
+      const asked = await page.evaluate(
+        (account) =>
+          (
+            window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }
+          ).__TAURI_INTERNALS__.invoke("acct_device_ask", { id: account }) as Promise<{ keyId: string }>,
+        id,
+      );
+      b.ss.approveDevice(asked.keyId);
+      await page.reload();
+      await page.locator(".page.board .compose-btn--phone").click();
+      const sheet = page.locator("[data-new-session]");
+      await sheet.locator("[data-ns-text]").fill("Add a test for the rounding.");
+      const start = sheet.locator("[data-ns-start]");
+      await expect(start).toBeEnabled();
+      await start.click();
+      // Refused for the hour, which is known from here: its line, not the refusal in red.
+      const hour = /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.$/;
+      await expect(sheet.locator(".ns-status")).toHaveText(hour, { timeout: 15_000 });
+      await expect(sheet.locator(".ns-status--err")).toHaveCount(0);
+      await expect(start).toBeDisabled();
+      expect(b.ss.jobs).toEqual([]);
+      // The hour is over with the sheet still open: nothing from it is left under the form.
+      await page.clock.fastForward(61 * 60_000);
+      await expect(sheet.locator(".ns-status")).not.toHaveText(hour);
+      await expect(sheet.locator(".ns-status--err")).toHaveCount(0);
+      await expect(sheet.getByText(/Not sent/)).toHaveCount(0);
+      await expect(sheet.locator("[data-ns-text]")).toHaveValue("Add a test for the rounding.");
+    } finally {
+      await b.close();
+    }
+  });
+});
+
+test("back after spacesheep stopped keeping an approval for the app, before the code's end: time ran out, and the key that was made is said, with the way to it", async ({
+  browser,
+}) => {
+  const b = await bed(browser);
+  try {
+    await b.page.goto(b.server.url);
+    await button(b.page, "Use a spacesheep account").click();
+    await button(b.page, "Continue").click();
+    await expect(step(b.page, "account-number")).toBeVisible();
+    const number = (await b.page.locator(".onb-digits").getAttribute("data-digits"))!;
+    // Confirmed there; the app comes back after spacesheep dropped the key it held for it.
+    b.ss.approve(number);
+    b.ss.expire(number);
+    await b.hub.pollConnect();
+    const end = step(b.page, "account-ended");
+    await expect(end).toHaveAttribute("data-why", "expired");
+    await expect(b.page.getByText("Time ran out")).toBeVisible();
+    await expect(b.page.getByText(UNUSED_KEY)).toBeVisible();
+    await expect(end.locator(".onb-primary, .onb-secondary")).toHaveText(["Try again", "Open API keys"]);
+    await shot(b.page, "end-expired-key");
+    await button(b.page, "Open API keys").click();
+    expect(await opened(b.page)).toEqual([`${ORIGIN}/settings/api-keys`]);
+  } finally {
+    await b.close();
+  }
 });

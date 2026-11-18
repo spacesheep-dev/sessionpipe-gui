@@ -383,6 +383,32 @@ export function unframe(prompt: string): { text: string; via?: string; askedBy?:
   return { text, via: head?.[1] || tail?.[1] || undefined };
 }
 
+/** A turn's prompt as it is drawn. `cut`: these are only the first words (whatever is at
+ *  the end, the source note and an asker's line among it, is missing until the whole event
+ *  is read). `fromSent`: the words are the message sent from here, as it was signed. */
+export interface PromptWords {
+  text?: string;
+  cut: boolean;
+  fromSent: boolean;
+}
+
+/** The prompt of the record a turn's words came in (`e`, its transcript or running
+ *  reading). A list page holds it slim: past the index's 2 KB `user` is cut, and
+ *  `preview.user` says so. Cut, and sent from here (`sent`, with its attachments block),
+ *  it is drawn as it was signed when the cut words are the head of it: the source line the
+ *  machine put before it stays, and nothing has to be read. (A new session's first message
+ *  has its source note at the end, which the cut took: it is drawn without one.) Any other
+ *  cut prompt is drawn as far as it goes, marked `cut`. */
+export function promptWords(e: Pick<StoredEvent, "data" | "preview"> | undefined, sent?: string): PromptWords {
+  const user = e?.data.user;
+  const text = typeof user === "string" ? user : undefined;
+  if (text === undefined || e?.preview?.user === undefined) return { text, cut: false, fromSent: false };
+  const head = norm(unframe(text).text);
+  if (sent && head && norm(sent).startsWith(head))
+    return { text: (FRAME_HEAD.exec(text)?.[0] ?? "") + sent, cut: false, fromSent: true };
+  return { text, cut: true, fromSent: false };
+}
+
 // A handoff's answer as the daemon delivers it into `reply_to` (CONTROL.md §6): the
 // asked session by its harness and short id, the receiver it was asked through, the reply.
 const ANSWER_HEAD = /^Answer from ([a-z0-9-]+):([^\s]+) \(sessionpipe handoff[^)]*\):\n\n/;

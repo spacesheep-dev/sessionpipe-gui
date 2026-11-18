@@ -18,9 +18,9 @@ import { back, useSearchParam } from "../lib/router";
 import { hostOf } from "../native/accountConnect";
 import { clock, NEW_WORDS as N, REUSED as R, ThisPhone, thisPhone } from "../native/accountWords";
 import { invoke } from "../native/bridge";
-import { Mark } from "./AccountSettings";
 import type { ApproveView } from "./approve";
 import { phoneWatch, usePhone } from "./device";
+import { Mark } from "./Mark";
 import { ownUrl } from "./outside";
 import { approveError } from "./screenWords";
 import "../control/pairing.css";
@@ -141,13 +141,25 @@ export default function ApprovePhone() {
                 </div>
               </>
             )}
-            {view?.rest && (
+            {view?.rest ? (
               <p className="approve-note" data-rest>
                 {N.approveRest(view.rest)}{" "}
                 <button type="button" className="link" onClick={() => openOutside(devices)}>
                   {N.openDevices}
                 </button>
               </p>
+            ) : (
+              // Approved, no request open, and a computer without the key: spacesheep gives it
+              // one only when someone adds it there, on Devices.
+              (phase === "approved" || phase === "cooling") &&
+              view?.machines.some((m) => m.state === "not-yet") && (
+                <p className="approve-note" data-rest="add">
+                  {N.approveAddRest}{" "}
+                  <button type="button" className="link" onClick={() => openOutside(devices)}>
+                    {N.openDevices}
+                  </button>
+                </p>
+              )
             )}
             {err && view && (
               <p className="approve-note approve-err" role="alert">

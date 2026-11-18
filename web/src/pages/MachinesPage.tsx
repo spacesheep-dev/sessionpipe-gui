@@ -1,18 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 // Machines: one grouped section per sending machine, macOS Get Info style, in a centred
-// reading column. Its header row is the name and "online · last event 1 m" (a quiet
-// machine alone carries a hollow ring: online is the normal case and needs no mark); then
-// key/value rows: the sessions ("9 sessions · 3 working"), the harness versions, the
-// control pairing ("Paired · safe mode", the daemon's details on hover), the sessionpipe
-// version, its folders (each with "New session in this folder" on right-click), the
-// devices that can answer. New session and Add a phone live in the machine's ⋯ and
-// right-click menus, with one Add a phone… in the bar. A machine is online if an event
-// arrived in the last minute or its control daemon is online. Requests waiting for a
-// person (pairings, devices) come first; on an address that cannot sign, one line says so
-// above the machines.
+// reading column. Its header row is the name and "online · last event 1 m"; then key/value
+// rows: the sessions ("9 sessions · 3 working"), the harness versions, the control pairing
+// ("Paired · safe mode", the daemon's details on hover), the sessionpipe version, its
+// folders (each with "New session in this folder" on right-click), the devices that can
+// answer. New session and Add a phone live in the machine's ⋯ and right-click menus, with
+// one Add a phone… in the bar. A paired machine is online by its daemon's heartbeat alone,
+// one without a daemon by an event in the last minute (lib/offline.ts machineOnline, as
+// the board's offline line and the composer read it). Requests waiting for a person
+// (pairings, devices) come first; on an address that cannot sign, one line says so above
+// the machines.
+//
+// On a spacesheep account (the phone): one row above the computers says where this phone
+// stands with them and opens Approve this iPhone; each computer is its name and ⋯, then
+// iOS right-detail rows (Status, Sessions), a sentence only where something is so (an old
+// sessionpipe, a computer that has not approved the phone, inherit mode), and the rest
+// behind Details. Its words are accountWords.new.ts's MACHINES.
 import { accountLabel, type HarnessAccount, type MachinePool, type MachineSummary, ROUTES } from "@shared/api";
 import { useEffect, useState } from "react";
-import { Ago, CommandWell, EmptyState, HarnessGlyph } from "../components/bits";
+import type { ApproveView } from "../account/approve";
+import { usePhone } from "../account/device";
+import { Mark } from "../account/Mark";
+import { machineNote, phoneRow } from "../account/screenWords";
+import { useSendStates } from "../account/sendable";
+import { Ago, CommandWell, EmptyState, HarnessGlyph, StateDot } from "../components/bits";
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
 import { PageBar } from "../components/PageBar";
 import { machineHome, tildify } from "../control/folders";
@@ -27,12 +38,12 @@ import "../lib/acp";
 import { harnessMark } from "../lib/format";
 import { copyText } from "../lib/menus";
 import { receiverOrigin } from "../lib/net";
+import { lastHeard, machineOnline } from "../lib/offline";
 import { Link, navigate } from "../lib/router";
 import { useSimple } from "../lib/settings";
-import { ago, ms, useNow } from "../lib/time";
+import { ago, useNow } from "../lib/time";
+import { MACHINES as M, ThisPhone } from "../native/accountWords";
 import "../control/pairing.css";
-
-const isOnline = (m: MachineSummary, now: number) => now - ms(m.lastAt) < 60_000 || !!m.control?.online;
 
 /** The one pool word on this page (UX-SPEC §7.4): a login the machine's pool lists, while
  *  the switch is on. An account only in the pool is not a login here and is not drawn. */
@@ -50,7 +61,7 @@ export function Machines() {
       .then((i) => setLanUrl(i.urls.lan[0] ?? i.urls.local))
       .catch(() => {});
   }, [store]);
-  const online = machines.filter((m) => isOnline(m, now)).length;
+  const online = machines.filter((m) => machineOnline(m, now)).length;
   // Whether this address can sign decides a line on the page, so the machines wait for the
   // rp id (one local read, a frame or two) rather than grow a row each under the reader.
   const rp = useRpId();
@@ -59,6 +70,8 @@ export function Machines() {
   const secure = canSign(rp);
   const paired = machines.some((m) => !!m.control);
   const account = accountMode();
+  // Where this phone's key stands with the account's computers (null off an account).
+  const { view } = usePhone();
 
   return (
     <div className="page page--doc page--grouped machines">
@@ -103,10 +116,19 @@ export function Machines() {
         )
       ) : (
         <>
-          {paired && !secure && <p className="machines-note">{sentence(signHint(rp)).replace(/\.?$/, ".")}</p>}
-          {machines.map((m) => (
-            <MachineBlock key={m.name} m={m} online={isOnline(m, now)} lanUrl={lanUrl} rp={rp} secure={secure} />
-          ))}
+          {account ? (
+            // On an account the line is this phone's own row, where its state would be.
+            <PhoneRow row={phoneRow(view, paired && !secure ? cannotSign(rp) : null)} />
+          ) : (
+            paired && !secure && <p className="machines-note">{cannotSign(rp)}</p>
+          )}
+          {machines.map((m) =>
+            account ? (
+              <AccountMachine key={m.name} m={m} online={machineOnline(m, now)} view={view} rp={rp} secure={secure} />
+            ) : (
+              <MachineBlock key={m.name} m={m} online={machineOnline(m, now)} lanUrl={lanUrl} rp={rp} secure={secure} />
+            ),
+          )}
           {machines.length === 1 && !account && (
             <p className="machines-more">
               {machines[0]!.name} is the only machine.{" "}
@@ -138,41 +160,23 @@ function MachineBlock({
   // The keys this device holds for the rp id (this browser's passkeys, or the app's device
   // key): one of them trusted here is "this one".
   const mine = new Set(useOwnKeys(rp).map((k) => k.id));
+  // Whether this device can send there: on an account the device door's word (approved,
+  // the hour, this computer's own entry), else the key list (account/sendable.ts).
+  const send = useSendStates(rp)(c);
   // Simple mode: online, paired or the pair line, the start form; the daemon's details wait in Advanced.
   const simple = useSimple();
   const pairCmd = `sessionpipe control pair ${lanUrl}`;
-  const items = (): MenuList => [
-    c && {
-      label: `New session on ${m.name}…`,
-      run: () => openNewSession({ machine: m.name }),
-      disabled: secure ? undefined : "Passkeys cannot sign on this address",
-    },
-    c && !accountMode() && { label: "Add a phone…", run: () => navigate("/phone") },
-    { sep: true },
-    // That command pairs a machine with a receiver; an account's are paired on spacesheep.
-    !c && !accountMode() && { label: "Copy pair command", run: () => copyText(pairCmd) },
-    { label: "Copy machine name", run: () => copyText(m.name) },
-  ];
+  const items = () => machineItems(m, rp, secure, pairCmd);
   const menu = useContextMenu(items, {
     title: () => m.name,
     subtitle: () => (online ? "online" : "quiet"),
   });
-  // The harnesses its sessions came from, then the ones its daemon can start that sent none
-  // yet (sessionpipe 0.10: every ACP agent installed there).
-  const harnesses = [
-    ...Object.entries(m.harnesses),
-    ...(c?.harnesses ?? []).filter((h) => !(h in m.harnesses)).map((h) => [h, undefined] as const),
-  ];
-  // In the app: a daemon that predates device keys says so; one that takes them but doesn't
-  // trust this Mac's yet offers the setup (CONTROL.md §2).
+  // In the app: a daemon that predates device keys says so; one that takes them offers the
+  // setup only while this device is not approved (on an account: asked or not, while no
+  // computer trusts it; off one: while this one doesn't) (CONTROL.md §2).
+  const setup = send.kind === "unapproved" || send.kind === "waiting" || (send.kind === "catching-up" && !send.account);
   const app =
-    secure && c && signerKind() === "device"
-      ? !machineTakes(c, "device")
-        ? "update"
-        : c.keys.some((k) => mine.has(k.id))
-          ? null
-          : "setup"
-      : null;
+    secure && c && signerKind() === "device" ? (!machineTakes(c, "device") ? "update" : setup ? "setup" : null) : null;
   const devices =
     c && c.keys.length > 0
       ? c.keys.map((k) => `${k.name ?? k.id.slice(0, 8)}${mine.has(k.id) ? " (this one)" : ""}`).join(", ")
@@ -203,16 +207,7 @@ function MachineBlock({
         </li>
         <li className="form-row form-row--kv" hidden={simple}>
           <span className="form-key">Harnesses</span>
-          <span className="form-kv machine-harnesses">
-            {harnesses.length === 0 && <span className="machine-sub">None reported yet</span>}
-            {harnesses.map(([h, v]) => (
-              <span key={h} className="machine-harness">
-                <HarnessGlyph name={h} size="sm" />
-                <span>{harnessMark(h).label}</span>
-                {v && <span className="machine-ver num">{v}</span>}
-              </span>
-            ))}
-          </span>
+          <HarnessList m={m} className="form-kv" />
         </li>
         <li className="form-row form-row--kv machine-control">
           <span className="form-key">Control</span>
@@ -221,12 +216,7 @@ function MachineBlock({
               <span className="paired">Paired</span>
               {!c.online && <span className="machine-sub"> · daemon offline</span>}
               {c.mode && <span className="machine-sub"> · {c.mode} mode</span>}
-              {c.mode === "inherit" && (
-                <span className="machine-caution">
-                  Sessions run as your own do on {m.name}: the agents' own settings decide, which can mean no permission
-                  checks.
-                </span>
-              )}
+              {c.mode === "inherit" && <span className="machine-caution">{inheritLine(m.name)}</span>}
               {askLine(c, m.name, simple) && <span className="machine-caution">{askLine(c, m.name, simple)}</span>}
             </span>
           ) : (
@@ -287,20 +277,7 @@ function MachineBlock({
                   </Link>
                 </>
               )}
-              {app === "setup" &&
-                c?.remote &&
-                (accountMode() ? (
-                  // On a spacesheep account (the phone) the asking, the number and the wait
-                  // have a page of their own.
-                  <>
-                    {" · "}
-                    <Link to="/add-device" className="link" data-setup>
-                      {setupLabel()}
-                    </Link>
-                  </>
-                ) : (
-                  <RemoteAppSetup rpId={c.remote.rpId} origin={c.remote.origin} />
-                ))}
+              {app === "setup" && c?.remote && <RemoteAppSetup rpId={c.remote.rpId} origin={c.remote.origin} />}
             </span>
           </li>
         )}
@@ -320,6 +297,211 @@ function MachineBlock({
   );
 }
 
+/** On an account, the one row for this phone above the computers (screenWords.ts phoneRow):
+ *  a sentence and its mark, the whole row the way to Approve this iPhone. */
+function PhoneRow({ row }: { row: ReturnType<typeof phoneRow> }) {
+  if (!row) return null;
+  const words = row.mark ? (
+    <Mark kind={row.mark}>{row.words}</Mark>
+  ) : (
+    <span className="machines-phone-ask">{row.words}</span>
+  );
+  return (
+    <section className="form-group machines-phone" aria-label={ThisPhone()}>
+      <ul className="form-list">
+        <li>
+          {row.link ? (
+            <Link to="/add-device" className="form-row machine-line-link" data-this-phone={row.state}>
+              {words}
+              <span className="machines-chev" aria-hidden="true" />
+            </Link>
+          ) : (
+            <div className="form-row" data-this-phone={row.state}>
+              {words}
+            </div>
+          )}
+        </li>
+      </ul>
+    </section>
+  );
+}
+
+/** A computer of a spacesheep account: its name and ⋯, then Status and Sessions as iOS
+ *  right-detail rows that never change shape, a sentence only where something is so, and
+ *  the rest behind Details, closed on each visit. Devices are spacesheep's (This iPhone
+ *  above opens them); nothing here names a key. */
+function AccountMachine({
+  m,
+  online,
+  view,
+  rp,
+  secure,
+}: {
+  m: MachineSummary;
+  online: boolean;
+  view: ApproveView | null;
+  rp: string;
+  secure: boolean;
+}) {
+  const c = m.control;
+  const simple = useSimple();
+  const items = () => machineItems(m, rp, secure, "");
+  const menu = useContextMenu(items, {
+    title: () => m.name,
+    subtitle: () => (online ? M.online : M.offline),
+  });
+  const note = c ? machineNote(view, c.machineId) : null;
+  // The count and its most urgent part only: what needs you, else what is working.
+  const busy = m.needsYou > 0 ? M.needsYou(m.needsYou) : m.working > 0 ? M.working(m.working) : "";
+  const sessions = m.sessions === 0 ? M.noSessions : busy ? `${m.sessions} · ${busy}` : `${m.sessions}`;
+  const version = c?.version?.replace(/^sessionpipe\s+/, "");
+  // Details only where it holds something (Simple hides the daemon's own rows).
+  const details = !!c && (!!c.mode || c.ask !== undefined || c.queued > 0 || !simple);
+  return (
+    <section className="form-group machine machine--account" aria-label={m.name} {...menu}>
+      <header className="machine-head">
+        <h2 className="machine-name">{m.name}</h2>
+        <MoreButton build={items} label={`Actions for ${m.name}`} title={() => m.name} />
+      </header>
+      <ul className="form-list machine-facts">
+        <li className="form-row form-row--kv" data-status={!c ? "unpaired" : online ? "online" : "offline"}>
+          <span className="form-key">{M.status}</span>
+          <span className="form-kv">
+            {!c ? (
+              <span className="unpaired">Not paired</span>
+            ) : online ? (
+              M.online
+            ) : (
+              <>
+                <StateDot state="stale" decorative />
+                {M.offline}
+              </>
+            )}
+          </span>
+        </li>
+        <li className="form-row form-row--kv">
+          <span className="form-key">Sessions</span>
+          <span className="form-kv num">{sessions}</span>
+        </li>
+        {note && (
+          <li className={note.link ? "machine-line" : "form-row machine-line"}>
+            {note.link ? (
+              <Link to="/add-device" className="form-row machine-line-link" data-not-here>
+                <Mark kind={note.mark}>{note.words}</Mark>
+                <span className="machines-chev" aria-hidden="true" />
+              </Link>
+            ) : (
+              <Mark kind={note.mark}>{note.words}</Mark>
+            )}
+          </li>
+        )}
+        {c?.mode === "inherit" && (
+          // What inherit means is a safety line: always in sight, never behind Details.
+          <li className="form-row machine-line">
+            <span className="machine-caution">{inheritLine(m.name)}</span>
+          </li>
+        )}
+        {c && details && (
+          <li className="machine-more">
+            <details>
+              <summary className="form-row">
+                <span className="form-label">{M.details}</span>
+                <span className="machines-chev" aria-hidden="true" />
+              </summary>
+              <ul className="machine-more-list">
+                {c.mode && (
+                  <li className="form-row form-row--kv">
+                    <span className="form-key">{M.mode}</span>
+                    <span className="form-kv">{M.modes[c.mode]}</span>
+                  </li>
+                )}
+                {c.ask !== undefined && (
+                  <li className="form-row form-row--kv">
+                    <span className="form-key">{M.agents}</span>
+                    <span className="form-kv">{c.ask ? M.askOn : M.askOff}</span>
+                  </li>
+                )}
+                {c.queued > 0 && (
+                  <li className="form-row form-row--kv">
+                    <span className="form-key">{M.queued}</span>
+                    <span className="form-kv num">{c.queued}</span>
+                  </li>
+                )}
+                {version && !simple && (
+                  <li className="form-row form-row--kv">
+                    <span className="form-key">sessionpipe</span>
+                    <span className="form-kv num">{version}</span>
+                  </li>
+                )}
+                <li className="form-row form-row--stack" hidden={simple}>
+                  <span className="form-key">Harnesses</span>
+                  <HarnessList m={m} />
+                </li>
+                {!simple && c.folders && c.folders.length > 0 && (
+                  <li className="form-row form-row--stack">
+                    <span className="form-key">Folders</span>
+                    <span className="machine-folders">
+                      {c.folders.map((f) => (
+                        <FolderName key={f} machine={m.name} path={f} home={machineHome(c)} />
+                      ))}
+                    </span>
+                  </li>
+                )}
+              </ul>
+            </details>
+          </li>
+        )}
+      </ul>
+    </section>
+  );
+}
+
+/** A machine's ⋯ and right-click menu. */
+function machineItems(m: MachineSummary, rp: string, secure: boolean, pairCmd: string): MenuList {
+  const c = m.control;
+  return [
+    c && {
+      label: `New session on ${m.name}…`,
+      run: () => openNewSession({ machine: m.name }),
+      // Nothing here can be signed: why, in the signer's words. Anything else the sheet says.
+      disabled: secure ? undefined : sentence(signHint(rp)),
+    },
+    c && !accountMode() && { label: "Add a phone…", run: () => navigate("/phone") },
+    { sep: true },
+    // That command pairs a machine with a receiver; an account's are paired on spacesheep.
+    !c && !accountMode() && { label: "Copy pair command", run: () => copyText(pairCmd) },
+    { label: "Copy machine name", run: () => copyText(m.name) },
+  ];
+}
+
+/** The harnesses its sessions came from, then the ones its daemon can start that sent none
+ *  yet (sessionpipe 0.10: every ACP agent installed there). */
+function HarnessList({ m, className = "" }: { m: MachineSummary; className?: string }) {
+  const harnesses = [
+    ...Object.entries(m.harnesses),
+    ...(m.control?.harnesses ?? []).filter((h) => !(h in m.harnesses)).map((h) => [h, undefined] as const),
+  ];
+  return (
+    <span className={className ? `${className} machine-harnesses` : "machine-harnesses"}>
+      {harnesses.length === 0 && <span className="machine-sub">None reported yet</span>}
+      {harnesses.map(([h, v]) => (
+        <span key={h} className="machine-harness">
+          <HarnessGlyph name={h} size="sm" />
+          <span>{harnessMark(h).label}</span>
+          {v && <span className="machine-ver num">{v}</span>}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** What inherit mode (sessionpipe 0.10) means, in the one line said under the mode. */
+const inheritLine = (machine: string): string =>
+  `Sessions run as your own do on ${machine}: the agents' own settings decide, which can mean no permission checks.`;
+
+/** Why nothing can be signed on this address, as a sentence. */
+const cannotSign = (rp: string): string => sentence(signHint(rp)).replace(/\.?$/, ".");
+
 /** What the hello says about agents asking each other (CONTROL.md §13 `ask`) and answers
  *  coming back into a session (§3.1 `handoff`), as one line under the pairing; a daemon
  *  that says neither is an older sessionpipe, said only in Advanced. */
@@ -333,12 +515,13 @@ function askLine(c: NonNullable<MachineSummary["control"]>, machine: string, sim
 }
 
 /** The daemon's own details, for the Control row's tooltip: "daemon online · polled 4 s
- *  ago". */
+ *  ago" (a computer reached through spacesheep polls there: its last_seen). */
 function controlDetail(c: NonNullable<MachineSummary["control"]>, simple: boolean): string {
   const now = Date.now();
+  const heard = lastHeard(c);
   return [
     c.online ? "daemon online" : "daemon offline",
-    c.lastPollAt ? `polled ${ago(c.lastPollAt, now)}` : "",
+    heard ? `polled ${ago(heard, now)}` : "",
     simple && c.version ? `sessionpipe ${c.version}` : "",
   ]
     .filter(Boolean)

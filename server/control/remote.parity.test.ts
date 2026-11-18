@@ -383,6 +383,9 @@ describe("the receiver's wiring and a page's, through one script", () => {
         "confirm_required",
       ],
       [answer(401, { error: "Unlock again.", code: "unlock" }), 422, "bad_grant"],
+      [answer(401, { error: "Unlock again.", code: "unlock", refusal: "bad_grant" }), 422, "bad_grant"],
+      // A key that computer does not trust: said as that, so the page asks for no new grant.
+      [answer(401, { error: "Unlock again.", code: "unlock", refusal: "untrusted_key" }), 422, "untrusted_key"],
       [
         answer(400, { error: "That key isn't trusted there.", code: "bad", refusal: "untrusted_key" }),
         422,
@@ -652,6 +655,42 @@ describe("the control state of a page", () => {
       status: 409,
       code: "refused",
     });
+  });
+
+  it("a send held back for the hour a new device waits carries until when, on this clock", async () => {
+    vi.useFakeTimers({ now: 1_800_000_000_000 });
+    const here = Date.now();
+    const control = new MemoryControl();
+    control.remote.setRemoteAccount(ME);
+    control.remote.upsertRemoteMachines([listed(M1, "lab-mac")] as never, remote);
+    const refusal = async (status: number, json: Record<string, unknown>) => {
+      try {
+        await control.send(control.machine(M1)!, command(M1, "prompt", "claude-code:s-1"), async () => ({
+          status,
+          json,
+        }));
+      } catch (e) {
+        if (e instanceof SendRefused) return { status: e.status, ...e.body };
+        throw e;
+      }
+      throw new Error("not refused");
+    };
+    const said = "This device was approved from another device less than an hour ago.";
+    expect(await refusal(403, { error: said, code: "cooling", until: here + 600_000 })).toEqual({
+      status: 403,
+      reason: said,
+      code: "cooling",
+      until: here + 600_000,
+    });
+    // spacesheep's clock an hour ahead, with its own `now` beside: the time left, counted here.
+    const theirs = here + 3_600_000;
+    expect(await refusal(403, { error: said, code: "cooling", until: theirs + 600_000, now: theirs })).toMatchObject({
+      until: here + 600_000,
+    });
+    // Nothing that is not a time, and only on the hour's own refusal.
+    for (const until of ["soon", null, Number.POSITIVE_INFINITY, undefined])
+      expect(await refusal(403, { error: said, code: "cooling", until }), String(until)).not.toHaveProperty("until");
+    expect(await refusal(403, { error: "No.", code: "scope", until: here })).not.toHaveProperty("until");
   });
 
   it("a send's job is one only as spacesheep writes it: a whole number above zero, and nothing made into one", async () => {

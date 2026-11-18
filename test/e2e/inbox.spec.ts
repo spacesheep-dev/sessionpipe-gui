@@ -5,9 +5,12 @@
 // count in the tab title's "(n)" and the nav badge. Notifications: the "Notify me" switch,
 // behind the bell in the page bar, asks the browser once and persists; a new prompt
 // notifies a background tab. The browser's Notification is mocked, since Chromium would
-// never grant it here.
-import { expect, type Page, test } from "@playwright/test";
-import { openPage } from "./helpers.js";
+// never grant it here. On a paired machine, a prompt whose hook stopped waiting moves
+// down to the terminal's, saying why, with nothing to press.
+import { randomUUID } from "node:crypto";
+import { expect, type Locator, type Page, test } from "@playwright/test";
+import { CONTROL_BASE, fakeDaemon, passkeyPage, postPrompt, seenSetupHere, sinkToken } from "./control-helpers.js";
+import { openPage, strandedMarks } from "./helpers.js";
 
 declare global {
   interface Window {
@@ -15,6 +18,10 @@ declare global {
     __permissionRequests: number;
   }
 }
+
+/** Every test's prompts and answers reach every page on the one e2e server, as banners at
+ *  the top right, over a row's pair: a test that points at the pair keeps them out of it. */
+const hideBanners = (page: Page) => page.addStyleTag({ content: ".toasts { display: none !important; }" });
 
 /** A Notification that records itself; its permission lives in localStorage so it survives
  *  a reload like the real one would. `focused: false` makes the page look like a background tab. */
@@ -220,6 +227,263 @@ test.describe("inbox", () => {
     await page.evaluate(() => window.__notifications[0]!.onclick?.());
     await expect(page).toHaveURL(/\/inbox$/);
     await expect(page.locator("nav.rail a[data-nav='inbox']")).toHaveAttribute("aria-current", "page");
+  });
+});
+
+// A paired machine (the test-door instance, control-helpers.ts): Claude Code's hook waits
+// 125 s for an answer, so past 120 s a prompt can no longer be answered from here.
+test.describe("inbox: a prompt's answer window", () => {
+  test("a prompt its hook stopped waiting on waits in the terminal, saying so, with nothing to press; a fresh one moves there as its window runs out", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `window-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const late = await postPrompt(token, { machine: d.name, title: "Asked 130 s ago", agoMs: 130_000 });
+    const fresh = await postPrompt(token, { machine: d.name, title: "Asked 112 s ago", agoMs: 112_000 });
+    try {
+      await page.goto(`${CONTROL_BASE}/inbox`);
+      // On a line of its own, a sentence.
+      const words = `Too late to answer from here; answer it on ${d.name}.`;
+      const terminal = page.locator("section[aria-label='Waiting in a terminal']");
+      const lateRow = terminal.locator(`.inbox-row[data-attention="${late.attention}"]`);
+      await expect(lateRow.locator(".inbox-late")).toHaveText(words);
+      expect(await strandedMarks(lateRow.locator(".inbox-late"))).toEqual([]);
+      await expect(lateRow.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      // Inside its window: answerable as ever, and no page line for the late one.
+      const freshRow = page.locator(`.inbox-row[data-attention="${fresh.attention}"]`);
+      await expect(freshRow.locator("xpath=ancestor::section[1]")).toHaveAttribute("aria-label", "Needs an answer");
+      await expect(freshRow.locator(".inbox-answer")).toHaveAttribute("data-answer", "open");
+      await expect(freshRow.getByRole("button", { name: "Allow" })).toBeEnabled();
+      // (Other specs' prompts on this instance may have a page line of their own.)
+      const lines = page.locator(".inbox-reason", { hasText: /too late|paired/i });
+      await expect(lines).toHaveCount(0);
+      // Its window runs out with the page open: it moves down, and says why.
+      await expect(terminal.locator(`.inbox-row[data-attention="${fresh.attention}"] .inbox-late`)).toHaveText(words, {
+        timeout: 20_000,
+      });
+      await expect(freshRow.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      await expect(lines).toHaveCount(0);
+    } finally {
+      await late.clear();
+      await fresh.clear();
+      await d.stop();
+    }
+  });
+});
+
+test.describe("inbox: an answer refused", () => {
+  test("says it as the session's page does: Not sent, and why; Allow stays", async ({ context, page }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `refuse-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const asked = await postPrompt(token, { machine: d.name, title: "Asked a moment ago", agoMs: 5_000 });
+    try {
+      await page.route("**/api/ui/control/send", (r) =>
+        r.fulfill({ status: 422, json: { reason: "refused", code: "nonce_store" } }),
+      );
+      await page.goto(`${CONTROL_BASE}/inbox`);
+      await hideBanners(page);
+      const row = page.locator(`.inbox-row[data-attention="${asked.attention}"]`);
+      // With a pointer the pair shows on the hovered row.
+      await row.hover();
+      await row.getByRole("button", { name: "Allow" }).click();
+      const note = row.locator(".inbox-note--err");
+      await expect(note).toHaveText("Not sent: the machine could not record the nonce, so it did not run it");
+      await expect(row.getByRole("button", { name: "Allow" })).toBeEnabled();
+      // The line takes room of its own at the row's end, the pair shown beside it: hovered
+      // or not, it lies over neither the time nor the machine.
+      const box = async (l: Locator) => (await l.boundingBox())!;
+      for (const hovered of [false, true]) {
+        if (hovered) await row.hover();
+        else await page.mouse.move(0, 0);
+        await expect(row.getByRole("button", { name: "Allow" })).toHaveCSS("opacity", "1");
+        const n = await box(note);
+        for (const part of [".inbox-age", ".inbox-where"]) {
+          await expect(row.locator(part), `${part}, hovered: ${hovered}`).toBeVisible();
+          const p = await box(row.locator(part));
+          expect(n.x >= p.x + p.width || p.x >= n.x + n.width, `${part}, hovered: ${hovered}`).toBe(true);
+        }
+      }
+    } finally {
+      await asked.clear();
+      await d.stop();
+    }
+  });
+});
+
+/** 140 characters, a chain of two: more than a row shows beside Allow. */
+const LONG_COMMAND =
+  "rsync -avz --delete --exclude .env ./dist/ deploy@staging.acme.dev:/srv/billing/new && ssh deploy@staging.acme.dev systemctl restart billing";
+
+test.describe("inbox: Allow only beside a whole request", () => {
+  test("a short command is whole beside its pair, which hover, the menu and the a key answer; a long one and a plan offer Open, which none of them answer", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    expect(LONG_COMMAND).toHaveLength(140);
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `whole-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const short = await postPrompt(token, {
+      machine: d.name,
+      title: "A short command",
+      agoMs: 3_000,
+      message: "npm run deploy -- --target staging",
+    });
+    // As Claude Code sends it: its first 120 characters, and the whole in the call's input.
+    const long = await postPrompt(token, {
+      machine: d.name,
+      title: "A long command",
+      agoMs: 4_000,
+      message: LONG_COMMAND.slice(0, 120),
+      input: { command: LONG_COMMAND },
+    });
+    const plan = await postPrompt(token, {
+      machine: d.name,
+      title: "A plan",
+      agoMs: 5_000,
+      tool: "ExitPlanMode",
+      message: "ExitPlanMode",
+    });
+    const answers = () => d.seen.filter((c) => c.kind === "permission.answer");
+    try {
+      await page.goto(`${CONTROL_BASE}/inbox`);
+      await hideBanners(page);
+      const row = (p: { attention: string }) => page.locator(`.inbox-row[data-attention="${p.attention}"]`);
+      // The short one: whole, on its line, with nothing cut; the pair on hover.
+      const what = row(short).locator(".inbox-what");
+      await expect(what.locator(".inbox-msg")).toHaveText("npm run deploy -- --target staging");
+      expect(await what.evaluate((el) => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight)).toBe(
+        true,
+      );
+      await row(short).hover();
+      await expect(row(short).getByRole("button", { name: "Allow" })).toHaveCSS("opacity", "1");
+      await expect(row(short).getByRole("button", { name: "Open" })).toHaveCount(0);
+      // The long one and the plan: two lines at most, and Open in the pair's place.
+      for (const p of [long, plan]) {
+        await expect(row(p)).toHaveClass(/inbox-row--open/);
+        await row(p).hover();
+        await expect(row(p).getByRole("button", { name: "Open" })).toHaveCSS("opacity", "1");
+        await expect(row(p).getByRole("button", { name: /^(Allow|Deny|Approve plan|Keep planning)$/ })).toHaveCount(0);
+      }
+      const lines = await row(long)
+        .locator(".inbox-what")
+        .evaluate((el) => el.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(el).lineHeight));
+      expect(Math.round(lines)).toBeLessThanOrEqual(2);
+      // Their menus answer nothing; the short one's does.
+      for (const [p, items] of [
+        [long, 0],
+        [plan, 0],
+        [short, 2],
+      ] as const) {
+        await expect(async () => {
+          await row(p).locator(".inbox-main").click({ button: "right" });
+          await expect(page.getByRole("menuitem", { name: "Copy message" })).toBeVisible({ timeout: 2_000 });
+        }).toPass({ timeout: 20_000 });
+        await expect(
+          page.getByRole("menuitem", { name: /^(Allow|Deny) Bash$|^(Approve plan|Keep planning)$/ }),
+        ).toHaveCount(items);
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("menuitem", { name: "Copy message" })).toHaveCount(0);
+      }
+      // The a key answers nothing on the long one's row, and the short one on its own.
+      await row(long).locator(".inbox-main").focus();
+      await expect(row(long)).toHaveAttribute("aria-current", "true");
+      await page.keyboard.press("a");
+      await page.waitForTimeout(1_000);
+      expect(answers()).toEqual([]);
+      await row(short).locator(".inbox-main").focus();
+      await expect(row(short)).toHaveAttribute("aria-current", "true");
+      await page.keyboard.press("a");
+      await expect
+        .poll(() => answers().map((c) => [c.for, c.decision]), { timeout: 15_000 })
+        .toEqual([[short.attention, "allow"]]);
+      // Open is the row's tap: the session beside the page, its whole command in the block.
+      await row(long).hover();
+      await row(long).getByRole("button", { name: "Open" }).click();
+      await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
+      await expect(page.locator("aside.panel .panel-title")).toHaveText("A long command");
+      await expect(page.locator("aside.panel .ctl-cmd-block")).toHaveText(LONG_COMMAND.replace(" && ", "&& "));
+    } finally {
+      await short.clear();
+      await long.clear();
+      await plan.clear();
+      await d.stop();
+    }
+  });
+
+  test("with a session open beside, a and d with no row under the cursor, or on a row that shows Open or waits in a terminal, answer nothing; with focus in the panel they are the panel's", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `beside-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const beside = await postPrompt(token, {
+      machine: d.name,
+      title: "Open beside",
+      agoMs: 3_000,
+      message: "npm run deploy -- --target staging",
+    });
+    const long = await postPrompt(token, {
+      machine: d.name,
+      title: "A long command",
+      agoMs: 4_000,
+      message: LONG_COMMAND,
+    });
+    const question = await postPrompt(token, {
+      machine: d.name,
+      title: "A question",
+      agoMs: 5_000,
+      tool: "AskUserQuestion",
+      message: "AskUserQuestion",
+    });
+    const answers = () => d.seen.filter((c) => c.kind === "permission.answer").map((c) => [c.for, c.decision]);
+    try {
+      // Opened beside with no row under the cursor, the focus on the page: a and d are the
+      // Inbox's, and answer nothing.
+      await page.goto(`${CONTROL_BASE}/inbox?s=${beside.key}`);
+      const row = (p: { attention: string }) => page.locator(`.inbox-row[data-attention="${p.attention}"]`);
+      await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
+      const allow = page.locator("aside.panel .ctl .btn--allow");
+      await expect(allow).toBeEnabled({ timeout: 15_000 });
+      await expect(row(beside)).toBeVisible();
+      await expect(page.locator(".inbox-row[aria-current='true']")).toHaveCount(0);
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.keyboard.press("a");
+      await page.keyboard.press("d");
+      await page.waitForTimeout(1_000);
+      expect(answers()).toEqual([]);
+      await expect(row(long)).toHaveClass(/inbox-row--open/);
+      await expect(row(question)).toHaveClass(/inbox-row--terminal/);
+      for (const p of [long, question]) {
+        await row(p).locator(".inbox-main").focus();
+        await expect(row(p)).toHaveAttribute("aria-current", "true");
+        await page.keyboard.press("a");
+        await page.keyboard.press("d");
+      }
+      await page.waitForTimeout(1_000);
+      expect(answers()).toEqual([]);
+      await expect(allow).toBeEnabled();
+      // Focus in the panel: its a, even on its Deny.
+      await page.locator("aside.panel .ctl .btn--deny").focus();
+      await page.keyboard.press("a");
+      await expect.poll(answers, { timeout: 15_000 }).toEqual([[beside.attention, "allow"]]);
+    } finally {
+      await beside.clear();
+      await long.clear();
+      await question.clear();
+      await d.stop();
+    }
   });
 });
 

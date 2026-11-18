@@ -109,13 +109,15 @@ export interface DeviceRequest {
 export const UNHEARD_CODE = "hub_unknown";
 
 /** A refusal from the server: `status` and the body's `reason`; `code` is the verifier's
- *  word on a refused command (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …). */
+ *  word on a refused command (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …).
+ *  `until`: for spacesheep's `cooling`, when this device may send (ms). */
 export class ControlError extends Error {
   constructor(
     readonly status: number,
     readonly reason: string,
     readonly code?: string,
     readonly detail?: string,
+    readonly until?: number,
   ) {
     super(detail ?? reason);
     this.name = "ControlError";
@@ -140,7 +142,8 @@ async function call<T>(method: "GET" | "POST", url: string, body?: unknown): Pro
     const code = typeof json.code === "string" ? json.code : undefined;
     const detail =
       typeof json.detail === "string" ? json.detail : typeof json.error === "string" ? json.error : undefined;
-    throw new ControlError(res.status, reason, code, detail);
+    const until = typeof json.until === "number" && Number.isFinite(json.until) ? json.until : undefined;
+    throw new ControlError(res.status, reason, code, detail, until);
   }
   return json as T;
 }

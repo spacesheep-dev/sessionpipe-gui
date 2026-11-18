@@ -106,6 +106,14 @@ describe("a step's row", () => {
       tone: "needs",
     });
     expect(stepRowWords(signer, 1, { machineName: name, needsUnlock: true }).second).toBe("Waiting for your passkey.");
+    // The Mac app waits for what confirms there.
+    const g = globalThis as { sessionpipeShell?: unknown };
+    g.sessionpipeShell = { v: 1, platform: "macos", features: ["signer"] };
+    try {
+      expect(stepRowWords(signer, 1, { machineName: name, needsUnlock: true }).second).toBe("Waiting for Touch ID.");
+    } finally {
+      delete g.sessionpipeShell;
+    }
     expect(stepRowWords({ ...signer, waitingFor: "machine" }, 1, { machineName: name })).toEqual({
       glyph: "idle",
       right: "",

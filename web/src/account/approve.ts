@@ -12,9 +12,13 @@
  *  machines.ts NEW_DEVICE_WAIT_MS). */
 export const NEW_DEVICE_WAIT_MS = 3_600_000;
 
-/** A request seen open this recently, then trusted, was approved between the two looks: the
- *  moment it was first seen trusted is the approval's, to within this. */
-export const WATCHED_MS = 20_000;
+/** A request seen open this recently, then trusted, was approved between the two looks: an
+ *  hour from the moment it was first seen trusted ends no earlier than spacesheep's hour and
+ *  at most this much later. Long enough for a trip to Safari to approve it (the page does
+ *  not look while it is hidden, and looks again the moment it is back), short enough that
+ *  sends are held back by that hour: one held back a few minutes too long is the price of
+ *  never offering one that would only be refused. */
+export const WATCHED_MS = 600_000;
 
 /** `GET /api/gui/device`, read. */
 export interface DeviceDoor {
@@ -23,14 +27,18 @@ export interface DeviceDoor {
   machines: { id: string; name: string; trusts: boolean; takesDevice: boolean }[];
   /** A request is open on spacesheep (they last a day). */
   pending: boolean;
-  /** Until when the key waits, where spacesheep says it: a time, or null for "it may send".
-   *  Absent where it does not say (the page then works it out, below). */
+  /** Until when the key waits, where spacesheep says it: a time on this phone's clock, or
+   *  null for "it may send". Absent where it does not say (the page then works it out, below). */
   coolingUntil?: number | null;
 }
 
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
+const time = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
-export function deviceDoor(json: Record<string, unknown>): DeviceDoor {
+/** `here`: this phone's clock as the answer came. spacesheep's `cooling_until` is on its own
+ *  clock: where it says its own `now` beside it, the end is the time left from there, counted
+ *  on this phone's clock, as a refusal's `until` is (doors.ts). */
+export function deviceDoor(json: Record<string, unknown>, here: number = Date.now()): DeviceDoor {
   const trusted = Array.isArray(json.trusted_on) ? json.trusted_on.filter((x) => typeof x === "string") : [];
   const machines = (Array.isArray(json.machines) ? json.machines : [])
     .filter((m): m is Record<string, unknown> => !!m && typeof m === "object")
@@ -41,13 +49,14 @@ export function deviceDoor(json: Record<string, unknown>): DeviceDoor {
       takesDevice: m.takes_device === true,
     }))
     .filter((m) => m.id);
-  const until = json.cooling_until;
+  const until = time(json.cooling_until);
+  const theirs = time(json.now);
   return {
     trusted: trusted.length > 0 || machines.some((m) => m.trusts),
     machines,
     pending: json.pending === true,
     ...("cooling_until" in json
-      ? { coolingUntil: typeof until === "number" && Number.isFinite(until) ? until : null }
+      ? { coolingUntil: until === null || theirs === null ? until : here + (until - theirs) }
       : {}),
   };
 }
@@ -59,9 +68,12 @@ export interface DeviceMemo {
   code?: string;
   askedAt?: number;
   devicesUrl?: string;
-  /** When the request was last seen open and the key trusted nowhere. */
+  /** When the request was last seen open and the key trusted nowhere (by a look, or by the
+   *  ask's own answer). */
   openAt?: number;
-  /** When the key was first seen trusted, and whether the page was watching just before. */
+  /** When the key was first seen trusted after that, and whether the page had seen it open
+   *  within WATCHED_MS before. Never set for a key that was trusted before this page saw it
+   *  waiting. */
   trustedAt?: number;
   watched?: boolean;
   /** The hour's end in spacesheep's own word (a send it refused as `cooling`). */
@@ -75,8 +87,9 @@ export type ApprovePhase =
   | { kind: "idle" }
   /** A request is open on spacesheep; `code`: the number to type there, when this phone has it. */
   | { kind: "waiting"; code: string | null }
-  /** Trusted, inside its first hour. `exact`: the end is spacesheep's word or was watched;
-   *  otherwise the latest it can be. */
+  /** Trusted, inside its first hour. `exact`: the end is spacesheep's word, or an hour from
+   *  an approval the page saw coming (never early, at most WATCHED_MS late), and sends wait
+   *  for it; otherwise the latest it can be, and the first send finds out. */
   | { kind: "cooling"; until: number; exact: boolean }
   | { kind: "approved" }
   /** Asked, and the request is gone with nothing trusted: removed there, or ran out. */
@@ -94,9 +107,11 @@ export interface ApproveView {
 export function remember(memo: DeviceMemo, door: DeviceDoor, now: number): DeviceMemo {
   const next: DeviceMemo = { ...memo };
   if (door.trusted) {
-    if (next.trustedAt === undefined) {
+    // Only an approval this page saw coming has a time: a key trusted before the page ever
+    // saw it waiting was approved at some time nobody here knows, and no hour is made up.
+    if (next.trustedAt === undefined && next.openAt !== undefined) {
       next.trustedAt = now;
-      next.watched = next.openAt !== undefined && now - next.openAt <= WATCHED_MS;
+      next.watched = now - next.openAt <= WATCHED_MS;
     }
     delete next.openAt;
   } else {
@@ -162,14 +177,16 @@ export function approveView(
   }
   const rest = door.pending && machines.some((m) => m.state === "not-yet") ? code : null;
   // The hour's end: spacesheep's word on the door; its word in a refusal; else an hour from
-  // when this page first saw the key trusted, which is the approval's time when it watched
-  // and the latest it can have been when it did not.
-  let until: number | null;
+  // when this page first saw the key trusted after seeing it wait, which is the approval's
+  // time to within WATCHED_MS when it watched, and the latest it can have been when it did
+  // not. A key it never saw wait can send as far as the page knows: if spacesheep still
+  // holds it, the first send it refuses says until when (`memo.until`).
+  let until: number | null = null;
   let exact = true;
   if (door.coolingUntil !== undefined) until = door.coolingUntil;
   else if (memo.until !== undefined) until = memo.until;
-  else {
-    until = (memo.trustedAt ?? now) + NEW_DEVICE_WAIT_MS;
+  else if (memo.trustedAt !== undefined) {
+    until = memo.trustedAt + NEW_DEVICE_WAIT_MS;
     exact = memo.watched === true;
   }
   // The wait is an hour and no more: a time remembered or reported past an hour from now

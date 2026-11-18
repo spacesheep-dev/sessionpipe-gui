@@ -506,11 +506,12 @@ export type RemoteSend = (
   body: Record<string, unknown>,
 ) => Promise<{ status: number; json: Record<string, unknown> }>;
 
-/** A send that was not carried: the status and the body a page reads from /send. */
+/** A send that was not carried: the status and the body a page reads from /send. `until`:
+ *  for spacesheep's `cooling`, when the key may send (ms, on this clock). */
 export class SendRefused extends Error {
   constructor(
     readonly status: number,
-    readonly body: { reason: string; error?: string; code?: string; detail?: string },
+    readonly body: { reason: string; error?: string; code?: string; detail?: string; until?: number },
   ) {
     super(`HTTP ${status}`);
   }
@@ -582,13 +583,33 @@ export async function forwardRemoteSend(
   // and spacesheep's reason (`why`) as the detail the page's held notice shows.
   if (r.status === 409 && code === "confirm")
     throw new SendRefused(422, { reason: error, code: "confirm_required", ...whyOf(r.json) });
-  if (r.status === 401 && code === "unlock") throw new SendRefused(422, { reason: error, code: "bad_grant" });
+  // spacesheep's check of the signature: a key the machine does not trust (its `refusal`
+  // untrusted_key) is said as that, which no new grant mends; any other is the grant's.
+  if (r.status === 401 && code === "unlock")
+    throw new SendRefused(422, {
+      reason: error,
+      code: codeOf(r.json.refusal) === "untrusted_key" ? "untrusted_key" : "bad_grant",
+    });
   // Any other 401 is spacesheep refusing this app's key (revoked there), not the page's own
   // key: its own code, never the 401 a page reads as "this page lost its key".
   if (r.status === 401) throw new SendRefused(502, { reason: error, code: SPACESHEEP_UNAUTHORIZED });
   if (r.status === 400 && (code === "bad" || code === "unlock"))
     throw new SendRefused(422, { reason: error, code: codeOf(r.json.refusal) || "untrusted_key" });
+  // A key approved from another device waits an hour (spacesheep's 403 `cooling`): until
+  // when, so the page says the time in its own words.
+  if (r.status === 403 && code === "cooling") throw new SendRefused(403, { reason: error, code, ...untilOf(r.json) });
   throw new SendRefused(r.status >= 500 ? 502 : r.status, { reason: error, code: code || "refused" });
+}
+
+/** A `cooling` refusal's `until` on this clock. spacesheep writes it on its own: where it
+ *  says its `now` beside it, the time left is counted from here (as account/doors.ts counts
+ *  it). Nothing for a value that is not a time. */
+function untilOf(j: Record<string, unknown>, here = Date.now()): { until?: number } {
+  const time = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const until = time(j.until);
+  const theirs = time(j.now);
+  if (until === null) return {};
+  return { until: theirs === null ? until : here + (until - theirs) };
 }
 
 /** A send's job id as spacesheep's jobs route writes one, or 0 for none. spacesheep answers

@@ -7,10 +7,12 @@
 // for, every five seconds: the device door is not counted against the relay's limit (only
 // the relay's read is), and the hub's room for an account is six requests at a time. When
 // the key is first seen trusted the machines are read again at once, so the composer
-// agrees. Nothing here draws or holds a sentence.
+// agrees; and the signer is asked again which key the phone holds whenever the hub may have
+// made it (right after an ask, at that first sight, back in front), so every screen that
+// reads the phone's own keys agrees too. Nothing here draws or holds a sentence.
 import { useSyncExternalStore } from "react";
 import { rpId } from "../control/api";
-import { onSigner, ownKeys } from "../control/signer";
+import { onSigner, ownKeyFailed, ownKeyKnown, ownKeys, rereadOwnKeys } from "../control/signer";
 import {
   type ApproveView,
   approveView,
@@ -64,6 +66,9 @@ export interface PhoneWatchOptions {
   deviceAsk(): Promise<DeviceAsked>;
   device(): Promise<DoorAnswer>;
   machinesNow(): Promise<void>;
+  /** Asks the signer again which key this phone holds: the hub makes the key natively, where
+   *  the page does not see it. */
+  keyMade?: () => Promise<void>;
   onCooling(l: (until: number) => void): () => void;
   store?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
   now?: () => number;
@@ -188,12 +193,15 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
         mend = false;
         unreached = 0;
         const was = door?.trusted ?? false;
-        door = deviceDoor(a.json);
+        door = deviceDoor(a.json, now());
         looked = true;
         const memo = remember(state.memo, door, now());
         keep(memo);
         show(memo, { error: null });
-        if (door.trusted && !was) void o.machinesNow().catch(() => {});
+        if (door.trusted && !was) {
+          void o.keyMade?.().catch(() => {});
+          void o.machinesNow().catch(() => {});
+        }
       } catch (e) {
         if (sent !== asked) return;
         mend = false;
@@ -222,6 +230,8 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
         }
       }
       const a = await o.deviceAsk();
+      // The key exists from here on (the hub made it if it was not there): the page reads it.
+      await o.keyMade?.().catch(() => {});
       // Another key (a new install): nothing remembered of the old one applies.
       const base = state.memo.keyId === a.keyId ? state.memo : {};
       const memo: DeviceMemo = {
@@ -229,6 +239,9 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
         keyId: a.keyId,
         code: a.code,
         askedAt: now(),
+        // Trusted nowhere yet: the request is seen open now, so the approval that follows has
+        // a time even when the next look does not come back.
+        ...(a.trustedOn.length === 0 ? { openAt: now() } : {}),
         ...(a.devicesUrl ? { devicesUrl: a.devicesUrl } : {}),
       };
       asked++;
@@ -255,6 +268,7 @@ export function startPhoneWatch(o: PhoneWatchOptions): PhoneWatch {
   const front = (): void => {
     if (!visible()) return;
     if (looked) show(state.memo);
+    void o.keyMade?.().catch(() => {});
     void look();
   };
   if (typeof document !== "undefined") document.addEventListener("visibilitychange", front);
@@ -316,18 +330,43 @@ export function phoneWatch(): PhoneWatch | null {
     deviceAsk: b.deviceAsk,
     device: b.device,
     machinesNow: b.machinesNow,
+    keyMade: async () => rereadOwnKeys(rp ?? (await rpId())),
     onCooling: b.onCooling,
     known,
   });
   // What the page knows of the key by itself: read again when the machines are listed, when
   // the signer has said which key this phone holds, and when the rp id is known.
   const w = watch;
-  b.subscribe(() => w.refresh());
-  onSigner(() => w.refresh());
+  /** Once a launch, what decides whether this phone can send, for Safari's Web Inspector:
+   *  the phone's own key, each computer's trusted keys, and the key the hub asked about. */
+  let told = false;
+  const tell = (): void => {
+    const machines = b.machines();
+    const failed = rp ? ownKeyFailed(rp) : null;
+    if (told || !rp || !w.get().view || machines.length === 0 || !(ownKeyKnown(rp) || failed)) return;
+    told = true;
+    console.info("[trust]", {
+      rp,
+      own: ownKeys(rp).map((k) => k.id),
+      keyKnown: ownKeyKnown(rp),
+      ...(failed ? { why: "status_failed", error: failed } : {}),
+      machines: machines.map((m) => ({ id: m.id, keys: m.keys })),
+      hubKeyId: w.get().memo.keyId ?? null,
+    });
+  };
+  b.subscribe(() => {
+    w.refresh();
+    tell();
+  });
+  onSigner(() => {
+    w.refresh();
+    tell();
+  });
   void rpId().then(
     (r) => {
       rp = r;
       w.refresh();
+      tell();
     },
     () => {},
   );
