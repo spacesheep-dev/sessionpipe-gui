@@ -119,13 +119,15 @@ export interface RowProps {
   m: SessionMatch;
   index: number;
   active: boolean;
+  /** The list's one tab stop: the cursor's row, or the first. Not `active`, which the phone layout never sets. */
+  stop: boolean;
   now: number;
   /** The context read when a menu opens or a row is clicked (a ref's getter: stable). */
   ctx: () => RowMenuContext;
   onCursor: (i: number) => void;
 }
 
-export const Row = memo(function Row({ m, index, active, now, ctx, onCursor }: RowProps) {
+export const Row = memo(function Row({ m, index, active, stop, now, ctx, onCursor }: RowProps) {
   const ref = useRef<HTMLAnchorElement>(null);
   const rect = useCallback(() => ref.current?.getBoundingClientRect(), []);
   const menu = useContextMenu(() => rowMenu(m, { ...ctx(), from: rect }), {
@@ -164,7 +166,7 @@ export const Row = memo(function Row({ m, index, active, now, ctx, onCursor }: R
       data-nav-item=""
       data-key={m.key}
       aria-current={active ? "true" : undefined}
-      tabIndex={-1}
+      tabIndex={stop ? 0 : -1}
       onClick={onClick}
       onFocus={() => onCursor(index)}
       {...menu}

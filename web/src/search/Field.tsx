@@ -2,8 +2,8 @@
 // Owned by: search-ui. The search field, the page's hero: one filled field, no Search
 // button, every keystroke a query. While the caret ends a token a small list completes it
 // (keys with Tab; values with ↑↓ and Tab or ⏎). ↑↓ outside it walk the results, ⏎ / ⇧⏎ /
-// ⌘⏎ open the one under the cursor, Esc closes the list, then clears, then leaves for
-// the list.
+// ⌘⏎ open the one under the cursor, Tab goes from the field to the results, Esc closes the
+// list, then clears, then leaves for the list.
 import type { SearchFacets } from "@shared/api";
 import { forwardRef, type KeyboardEvent, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { HarnessGlyph } from "../components/bits";
@@ -15,8 +15,8 @@ import { applyCompletion, type Completion, completionAt } from "./complete";
 export interface FieldKeys {
   move: (d: 1 | -1) => void;
   open: (mode: "page" | "beside" | "background") => void;
-  /** Esc with nothing left to clear: focus goes to the list. */
-  leave: () => void;
+  /** Focus the row under the cursor; false when there are no rows. */
+  leave: () => boolean;
 }
 
 export interface FieldHandle {
@@ -76,6 +76,11 @@ export const SearchField = forwardRef<
       pick(sel >= 0 ? sel : 0);
       return;
     }
+    // Tab with rows under the field: the row under the cursor. With none, the browser's own.
+    if (e.key === "Tab" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && keys.leave()) {
+      e.preventDefault();
+      return;
+    }
     if (shown?.kind === "value" && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
       e.preventDefault();
       const n = shown.options.length;
@@ -106,7 +111,7 @@ export const SearchField = forwardRef<
       } else if (value) {
         markTyped();
         onChange("");
-      } else keys.leave();
+      } else if (!keys.leave()) input.current?.blur();
     }
   };
   const track = () => {

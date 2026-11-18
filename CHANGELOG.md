@@ -325,6 +325,17 @@ pairing link that carries the board's key only for a pairing the sink token star
   tab bar, which was drawn over its foot, and on an iPad held upright it fills the width,
   where the page showed beside it. A right-click on the sheet, or a finger held on it on a
   phone, opened the message bar's menu over it; it opens none now.
+- **Every way into Search puts the caret in its field, and Tab goes from the field to the
+  results.** Opened with g /, with / or Edit › Find on Review, from the command palette or
+  from the Board's "Search every session for…", Search left its field without the focus,
+  so the letters typed next were shortcuts: c opened New session, t switched dark and
+  light, l changed the lens. Only the sidebar's link and ⇧⌘F reached the field; they all do
+  now. From the field, Tab moves to the result under the cursor, where Space peeks, "."
+  opens its menu and ⌘C copies its resume line; no key from the field reached a row
+  before. The results are one Tab stop, the cursor's row. A filter's name still completes
+  with Tab first, and with no results Tab goes on to the next control. On a row, Esc goes
+  back to the field with its text selected, as "/" does (Esc did nothing there), and j
+  pressed from Sort lands on the top result, not the second.
 
 ## [0.8.4] - 2026-11-17
 

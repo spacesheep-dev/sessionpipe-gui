@@ -23,7 +23,7 @@ import { reducedMotion, usePresence } from "../lib/motion";
 import { accountMode } from "../lib/net";
 import { Link, navigate, type Route, usePath } from "../lib/router";
 import { getSettings as getAppSettings, setMode, useSimple } from "../lib/settings";
-import { hintFor, useShortcut, useShortcutMap } from "../lib/shortcuts";
+import { hintFor, isTyping, useShortcut, useShortcutMap } from "../lib/shortcuts";
 import { getSkins, isPlain } from "../lib/skins";
 import { restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
 import { getDisplaySettings as getDisplay, setSkin, setTheme, useSettings } from "../lib/theme";
@@ -554,7 +554,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   const side = useSideForm(splitOpen && !phone);
   const railMenuProps = useContextMenu(railMenu, { title: () => "sessionpipe gui" });
   // A route change moves focus to the page (not on the first paint, where Tab must start
-  // at the skip link) and says the page's name through the live region.
+  // at the skip link), unless the new page put the caret in a field of its own (Search's),
+  // and says the page's name through the live region.
   const mainRef = useRef<HTMLElement>(null);
   const [announce, setAnnounce] = useState("");
   const path = usePath().split("?")[0] ?? "/";
@@ -563,7 +564,12 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   useEffect(() => {
     if (lastPath.current === path) return;
     lastPath.current = path;
-    mainRef.current?.focus({ preventScroll: true });
+    const main = mainRef.current;
+    const at = document.activeElement;
+    // Only a field inside the page's own root: focus still moves on from the palette and
+    // the toasts (in <main> too), and from the row a list put it on after Back.
+    const placed = isTyping(at) && !!main?.contains(at) && !!at?.closest(".page");
+    if (!placed) main?.focus({ preventScroll: true });
     const t = setTimeout(
       () => setAnnounce(document.title.replace(/ · sessionpipe gui$/, "").replace(/^\(\d+\) /, "")),
       60,

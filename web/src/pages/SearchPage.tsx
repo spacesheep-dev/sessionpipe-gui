@@ -5,8 +5,8 @@
 // pushed when a result opens, so Back returns to the same results with the cursor where it
 // was. The field leads; under it the filter chips (which edit the query text: one state) and
 // the result line; then the rows. Keys: ↑↓ in the field and j/k in the list walk the results,
-// ⏎ opens, ⇧⏎ beside, ⌘⏎ beside keeping focus here, Space peeks, `.` the menu, ⌘C the
-// resume line, `/` the field, Esc steps back.
+// Tab from the field to the results, ⏎ opens, ⇧⏎ beside, ⌘⏎ beside keeping focus here, Space
+// peeks, `.` the menu, ⌘C the resume line, `/` the field, Esc steps back.
 import type { SearchFilterKey, SearchSort, SessionMatch } from "@shared/api";
 import {
   filterValue,
@@ -153,15 +153,22 @@ export function Search() {
     if (next !== cursor) setCursor(next);
   }
   onRow.current = cursor >= 0 ? (keyList[cursor] ?? null) : null;
-  const focusRow = useCallback((i: number) => {
+  /** Focus row `i` and bring it into view; false when it is not there. */
+  const focusRow = useCallback((i: number): boolean => {
     const el = listRef.current?.querySelector<HTMLElement>(`[data-cursor="${i}"] .sx-row`);
-    el?.focus({ preventScroll: true });
-    el?.scrollIntoView({ block: "nearest" });
+    if (!el) return false;
+    el.focus({ preventScroll: true });
+    el.scrollIntoView({ block: "nearest" });
+    return true;
   }, []);
   const inField = () => document.activeElement === field.current?.input();
+  const inList = () => !!listRef.current?.contains(document.activeElement);
   const move = useCallback(
     (d: 1 | -1) => {
       if (!keyList.length) return false;
+      // From anywhere else on the page (Sort), the first j lands on the cursor's row, not
+      // the one after it.
+      if (!inField() && !inList()) return focusRow(cursor < 0 ? 0 : cursor);
       const next = cursor < 0 ? 0 : Math.max(0, Math.min(keyList.length - 1, cursor + d));
       setCursor(next);
       if (inField()) listRef.current?.querySelector(`[data-cursor="${next}"]`)?.scrollIntoView({ block: "nearest" });
@@ -272,7 +279,15 @@ export function Search() {
       if (inField()) return false;
       if (closePeek()) return;
       if ((e.target as HTMLElement | null)?.closest?.("aside.panel")) return false;
-      if (document.querySelector("[data-dismiss]:not([data-closing])")?.checkVisibility?.()) return false;
+      // Something open that Esc closes first: one that is drawn, as lib/keys.ts asks it.
+      // The shut panel keeps its Close in the DOM, hidden by `visibility`, and is not. An
+      // engine with no checkVisibility (WebKit before 17.4) is asked for its box and that.
+      const drawn = (el: HTMLElement) =>
+        !el.closest("[data-closing]") &&
+        (typeof el.checkVisibility === "function"
+          ? el.checkVisibility({ visibilityProperty: true })
+          : el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden");
+      if ([...document.querySelectorAll<HTMLElement>("[data-dismiss]")].some(drawn)) return false;
       field.current?.focus(true);
     },
     { priority: 2 },
@@ -446,15 +461,9 @@ export function Search() {
     () => ({
       move: (d: 1 | -1) => void move(d),
       open: (mode: OpenMode) => void open(mode),
-      leave: () => {
-        if (sessions.length) {
-          const i = cursor < 0 ? 0 : cursor;
-          setCursor(i);
-          focusRow(i);
-        } else field.current?.input()?.blur();
-      },
+      leave: () => focusRow(cursor < 0 ? 0 : cursor),
     }),
-    [move, open, sessions.length, cursor, focusRow],
+    [move, open, cursor, focusRow],
   );
 
   const showRows = !empty && sessions.length > 0;
@@ -560,7 +569,15 @@ export function Search() {
               <Fragment key={m.key}>
                 {head && <li className="sx-day">{day}</li>}
                 <li className="sx-item" data-cursor={String(i)}>
-                  <Row m={m} index={i} active={i === cursor && !phone} now={now} ctx={ctx} onCursor={onCursor} />
+                  <Row
+                    m={m}
+                    index={i}
+                    active={i === cursor && !phone}
+                    stop={i === Math.max(cursor, 0)}
+                    now={now}
+                    ctx={ctx}
+                    onCursor={onCursor}
+                  />
                 </li>
               </Fragment>
             );
