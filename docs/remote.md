@@ -85,7 +85,9 @@ sessionpipe control pair http://<this-machine>:7373
 
 It prints a link and six digits; the page shows the same six; you approve with your
 passkey. Over Tailscale, `sessionpipe connect https://<machine>.<tailnet>.ts.net` does the
-hooks, the sink and the pairing in one approval.
+hooks, the sink and the pairing in one approval. A machine that has a sink for this board
+gets a link any browser can open; one that has none yet (`connect`) gets a link for a
+browser where the board is already open, and the Machines page lists its request too.
 
 ## Other proxies and tunnels
 

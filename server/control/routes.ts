@@ -17,8 +17,9 @@ export interface MachineRouteDeps {
   /** The browser origins passkeys work on (app.ts `origins`): the pairing link the
    *  terminal prints names one of these, never a bare LAN or tailnet address. */
   origins?: () => string[];
-  /** The UI key (config.ts): the pairing link carries it, so any browser that opens the
-   *  link is let in. The machine already holds the sink token, a secret of the same rank. */
+  /** The UI key (config.ts): the link of a pairing the sink token started carries it, so
+   *  any browser that opens that link is let in; the machine showed the sink token, a
+   *  secret of the same rank. An open pairing showed nothing, so its link carries none. */
   uiKey?: () => string;
 }
 
@@ -32,8 +33,9 @@ export interface MachineRouteDeps {
 export function pairUrlFor(requestOrigin: string, origins: readonly string[], code: string, uiKey?: string): string {
   const same = origins.find((o) => o.replace(/\/+$/, "") === requestOrigin.replace(/\/+$/, ""));
   const base = (same ?? origins[0] ?? requestOrigin).replace(/\/+$/, "");
-  // The key rides along (UI_KEY_PARAM): a phone or a laptop that never saw this board
-  // opens the link and is let in, instead of "This board needs its key".
+  // The key rides along (UI_KEY_PARAM) where the caller passes one: a phone or a laptop
+  // that never saw this board opens the link and is let in, instead of "This board needs
+  // its key". Which pairings get it is the route's to say (POST pair, below).
   return `${base}/pair?code=${encodeURIComponent(code)}${uiKey ? `&k=${encodeURIComponent(uiKey)}` : ""}`;
 }
 
@@ -117,7 +119,10 @@ export function registerMachineRoutes(router: Router, d: MachineRouteDeps): void
       json: {
         machine: m.id,
         code: p.code,
-        url: pairUrlFor(requestOrigin(ctx), d.origins?.() ?? [], p.code, d.uiKey?.()),
+        // The board's key goes only with a pairing the sink token started. An open pairing
+        // showed no token, so its link is the code alone: it is opened where the board is
+        // already open, and the board lists it among the pairings that wait.
+        url: pairUrlFor(requestOrigin(ctx), d.origins?.() ?? [], p.code, pollKey ? undefined : d.uiKey?.()),
         check: p.check,
         expires_at: p.expiresAt,
       },

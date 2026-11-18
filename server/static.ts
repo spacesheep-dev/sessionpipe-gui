@@ -64,7 +64,7 @@ export function staticFiles(dir: string, opts: StaticOptions): Handler {
         },
       };
     }
-    if (!opts.uiAuth(ctx)) return unauthorized();
+    if (!opts.uiAuth(ctx)) return unauthorized(pathname);
     if (!existsSync(path.join(dir, "index.html"))) {
       return { status: 503, text: "The web app is not built: run `npm run build` (dist/web is missing).\n" };
     }
@@ -115,7 +115,13 @@ function resolveFile(dir: string, pathname: string): string | null {
   }
 }
 
-function unauthorized(): Reply {
+/** The 401 page. A pairing link opened where the board never was says what to do next:
+ *  an open pairing's link carries no key (control/routes.ts). */
+function unauthorized(pathname: string): Reply {
+  const pairing =
+    pathname === "/pair"
+      ? "\n<p>This is a pairing link. Once this browser has the key, open the link again; or approve the pairing on the board itself, where Machines lists it.</p>"
+      : "";
   return {
     status: 401,
     headers: { "cache-control": "no-store" },
@@ -129,7 +135,7 @@ header{padding-bottom:12px;border-bottom:1px solid var(--line)}${WORDMARK_CSS}</
 <header>${wordmarkHtml()}</header>
 <h1>This board needs its key</h1>
 <p>You are reaching sessionpipe-gui from another device. Open it through the link or the QR code the terminal printed where it runs: that link carries the key (<code>?k=…</code>) and sets a cookie here, once.</p>
-<p>From the machine itself, <code>http://localhost</code> needs no key.</p>
+<p>From the machine itself, <code>http://localhost</code> needs no key.</p>${pairing}
 `,
   };
 }

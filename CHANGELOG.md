@@ -31,6 +31,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **A view's `control.attach` answers the board's own path to the image.** `url` is
   `/attachments/<id>.<ext>`, with no address: it shows the image on this board
   and opens nothing from another computer. A view that sends an image names its `path`.
+- **A pairing link carries the board's key only when the sink token started the pairing.**
+  A pairing started with no token (`sessionpipe connect`, or `sessionpipe control pair` on
+  a machine that has no sink for this GUI) gets a link with its code alone: open it in a
+  browser where the board is already open, or approve it on the Machines page, which lists
+  every pairing that waits. A pairing the sink token started (Setup's "Pair this machine",
+  a machine that has a sink for this GUI, `--token`) gets the link it always did.
 
 ## [0.8.4] - 2026-11-17
 

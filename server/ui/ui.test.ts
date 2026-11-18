@@ -384,6 +384,11 @@ describe("static", () => {
     const page = await fetch(`${base}/`);
     expect(page.status).toBe(401);
     expect(await page.text()).toContain("needs its key");
+    // A pairing link opened where the board never was: the page says what to do next.
+    const pair = await fetch(`${base}/pair?code=abc`);
+    expect(pair.status).toBe(401);
+    expect(await pair.text()).toContain("This is a pairing link");
+    expect(await (await fetch(`${base}/machines`)).text()).not.toContain("pairing link");
     expect((await fetch(`${base}${ROUTES.ui.snapshot}`)).status).toBe(401);
     expect((await fetch(`${base}${ROUTES.ui.rotateToken}`, { method: "POST" })).status).toBe(401);
     const key = app.config().uiKey;
