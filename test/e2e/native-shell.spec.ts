@@ -8,7 +8,7 @@
 // the flag never loads a byte of the native code.
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { EVENTS, INFO, openPrompt, sessionUrl, ulid } from "./helpers.js";
+import { EVENTS, INFO, openPrompt, sessionUrl, tier1Batch, ulid } from "./helpers.js";
 import { openInPhone } from "./phone-shell.js";
 
 interface FakeOptions {
@@ -212,6 +212,10 @@ function fakeShell() {
   };
 }
 
+/** What the page's `navigator.platform` reads in a Windows or Linux app. The keys follow it
+ *  (lib/shortcuts.ts: ⌘ on a Mac, Ctrl elsewhere), whatever computer runs the test. */
+const NAVIGATOR: Record<string, string> = { windows: "Win32", linux: "Linux x86_64" };
+
 async function openInShell(page: Page, path: string, opts: FakeOptions = {}) {
   const arg: FakeArgs = [
     opts.receiver ?? true,
@@ -224,7 +228,22 @@ async function openInShell(page: Page, path: string, opts: FakeOptions = {}) {
     opts.start,
   ];
   await page.addInitScript(fakeShell(), arg);
+  const os = NAVIGATOR[opts.platform ?? ""];
+  if (os) await page.addInitScript((os) => Object.defineProperty(navigator, "platform", { get: () => os }), os);
   await page.goto(path);
+}
+
+/** The keys that reach the page's own handlers from here on, by `code` (a modifier alone
+ *  is left out): one the key filter hands to the native menu never does. */
+async function keysThePageGets(page: Page): Promise<() => Promise<string[]>> {
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { __keys: string[] }).__keys = seen;
+    document.addEventListener("keydown", (e) => {
+      if (!["Control", "Shift", "Alt", "Meta"].includes(e.key)) seen.push(e.code);
+    });
+  });
+  return () => page.evaluate(() => (window as unknown as { __keys: string[] }).__keys);
 }
 
 const calls = (page: Page) =>
@@ -377,6 +396,61 @@ test.describe("inside the native shell", () => {
     await expect(
       pane.getByRole("button", { name: "New session shortcut: Ctrl+Alt+N. Click to record another" }),
     ).toBeVisible();
+  });
+
+  // Off a Mac the pages are Ctrl+Shift+1…5, so Ctrl+Alt+1…7 stay the colour labels (and
+  // AltGr, which Windows reports as Ctrl+Alt, types its characters).
+  test("on Windows Ctrl+Alt+1 labels the row under the cursor, and Ctrl+Shift+2 is the menu's Inbox", async ({
+    page,
+    request,
+  }) => {
+    const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+    const b = tier1Batch({ title: "E2E Windows keys" });
+    const posted = await request.post(EVENTS, {
+      headers: { authorization: `Bearer ${sinkToken}` },
+      data: { events: b.events },
+    });
+    expect(posted.status()).toBe(202);
+    // The Windows menu bar, played: View › Inbox answers Ctrl+Shift+2, whatever the page does.
+    await page.addInitScript(() => {
+      window.addEventListener(
+        "keydown",
+        (e) => {
+          if (!e.ctrlKey || !e.shiftKey || e.altKey || e.code !== "Digit2") return;
+          const emit = (window as unknown as { __emit: (e: string, p: unknown) => void }).__emit;
+          setTimeout(() => emit("menu", { action: "go-inbox" }));
+        },
+        true,
+      );
+    });
+    await openInShell(page, "/", { platform: "windows" });
+    const card = page.locator(`article.card:has(a.card-link[href^="${sessionUrl(b.harness, b.sessionId)}"])`);
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    const keys = await keysThePageGets(page);
+    // Focus puts the list's cursor on the row.
+    await card.locator("a.card-link").focus();
+    await expect(card).toHaveAttribute("aria-current", "true");
+    await page.keyboard.press("Control+Alt+Digit1");
+    await expect(card.locator(".card-state .label-dot--red")).toBeVisible();
+    await page.keyboard.press("Control+Alt+Digit0");
+    await expect(card.locator(".label-dot")).toHaveCount(0);
+    // Ctrl+Shift+2 is the menu's: the page lets it pass, and the menu opens the Inbox.
+    await page.keyboard.press("Control+Shift+Digit2");
+    await expect(page).toHaveURL(/\/inbox$/);
+    expect(await keys()).toEqual(["Digit1", "Digit0"]);
+  });
+
+  // GTK's menu does not answer Ctrl+Shift+2 where Shift+2 types "@": the key reaches the
+  // page, which opens the Inbox itself. Ctrl+K it leaves to the menu, as everywhere.
+  test("on Linux Ctrl+Shift+2 opens the Inbox when the menu lets it through", async ({ page }) => {
+    await openInShell(page, "/", { platform: "linux" });
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    await page.locator("main").click({ position: { x: 400, y: 300 } });
+    await page.keyboard.press("Control+Shift+Digit2");
+    await expect(page).toHaveURL(/\/inbox$/);
+    await page.keyboard.press("Control+k");
+    await page.waitForTimeout(300);
+    await expect(page.getByRole("dialog", { name: "Command palette" })).toBeHidden();
   });
 
   test("Settings › App renders", async ({ page }) => {
@@ -810,6 +884,15 @@ test.describe("inside the phone app", () => {
     const grouped = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
     await expect.poll(() => bar.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(grouped);
   });
+});
+
+// A phone or a tablet with a keyboard has no menu bar to answer a menu's key, so the page
+// keeps them all: ⌘K opens the palette.
+test("in the phone app ⌘K opens the palette", async ({ page }) => {
+  await openInPhone(page, "/", { receiver: true });
+  await expect(page.locator("section.group").first()).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
 });
 
 test("in a browser nothing native loads", async ({ page }) => {

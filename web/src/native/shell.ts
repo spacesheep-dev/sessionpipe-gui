@@ -199,7 +199,10 @@ export async function start(): Promise<boolean> {
   } catch {}
   shellStreams.open = openStream;
   restoreSidebar();
-  installKeyFilter();
+  // Only where a native menu answers the keys the filter lets pass: a phone or a tablet
+  // with a keyboard has none, and ⌘K, ⌘F and ⌘[ stay the page's.
+  if (info.platform === "macos" || info.platform === "windows" || info.platform === "linux")
+    installKeyFilter(window, info.platform === "linux");
   installDrag();
   const on = <T>(event: string, fn: (p: T) => void) => listen<T>(event, fn).catch(() => {});
   void on<MenuPayload>("menu", (p) => p?.action && runMenu(p.action, p));

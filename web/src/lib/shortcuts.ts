@@ -159,8 +159,10 @@ export function chordOf(e: KeyboardEvent): Chord | null {
   if (!key || ["Shift", "Control", "Alt", "Meta", "CapsLock", "Dead", "Unidentified", "Process"].includes(key))
     return null;
   // With alt held a Mac types another character ("∂" for alt+d): read the physical key.
+  // A digit is read that way under mod too: shift makes it "!" (mod+shift+1 is a page in
+  // the Windows and Linux app), and an AZERTY keyboard types "&" on the key that is mod+1.
   if (e.altKey && /^Key[A-Z]$/.test(e.code)) key = e.code.slice(3);
-  else if (e.altKey && /^Digit[0-9]$/.test(e.code)) key = e.code.slice(5);
+  else if ((e.altKey || (IS_MAC ? e.metaKey : e.ctrlKey)) && /^Digit[0-9]$/.test(e.code)) key = e.code.slice(5);
   const chord: Chord = {
     mod: IS_MAC ? e.metaKey : e.ctrlKey,
     ctrl: IS_MAC ? e.ctrlKey : false,
@@ -299,6 +301,10 @@ const nav = (id: string, label: string, key: string, hint?: string): Action => (
   keys: [key],
   hint,
 });
+
+/** Emacs' ctrl+n / ctrl+p, a Mac's alone: elsewhere ctrl is `mod`, and they are New
+ *  Session in the app's menu and the browser's new window and print. */
+const macOnly = (...keys: string[]): string[] => (IS_MAC ? keys : []);
 
 export const ACTIONS: readonly Action[] = [
   nav("nav.board", "Board", "g b"),
@@ -481,7 +487,7 @@ export const ACTIONS: readonly Action[] = [
     label: "Next row",
     group: "Command palette",
     scope: "palette",
-    keys: ["down", "ctrl+n"],
+    keys: ["down", ...macOnly("ctrl+n")],
     inInputs: true,
   },
   {
@@ -489,7 +495,7 @@ export const ACTIONS: readonly Action[] = [
     label: "Previous row",
     group: "Command palette",
     scope: "palette",
-    keys: ["up", "ctrl+p"],
+    keys: ["up", ...macOnly("ctrl+p")],
     inInputs: true,
   },
   {
@@ -630,8 +636,8 @@ export const PRESETS: Record<string, Preset> = {
       "list.up": ["k", "up", "alt+p"],
       back: ["esc", "ctrl+g"],
       "palette.toggle": ["mod+k", "alt+x"],
-      "palette.down": ["down", "ctrl+n", "alt+n"],
-      "palette.up": ["up", "ctrl+p", "alt+p"],
+      "palette.down": ["down", ...macOnly("ctrl+n"), "alt+n"],
+      "palette.up": ["up", ...macOnly("ctrl+p"), "alt+p"],
       "palette.close": ["esc", "ctrl+g"],
     },
   },

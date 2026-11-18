@@ -12,6 +12,9 @@ import { activeKeys, type Chord, chordOf, chordString, IS_MAC, parseBinding } fr
 export interface MenuItem {
   /** The key equivalent the shell's menu item carries, in lib/shortcuts.ts spelling. */
   keys?: string;
+  /** The keyboard action the item runs (lib/shortcuts.ts): the one action that may have
+   *  the item's key as its own. */
+  fires?: string;
   run: (payload: MenuPayload) => void;
 }
 /** The `menu` event: the action, and for New session (the global shortcut, a
@@ -36,24 +39,30 @@ export function prefillTarget(p: MenuPayload["prefill"]): NewSessionTarget {
 
 /** ⌃⌘1 … ⌃⌘5 for the pages, not ⌘1 … ⌘5: those open the n-th item of a list and the n-th
  *  tab of the side panel (lib/shortcuts.ts, list.jump / panel.tab). Off a Mac `ctrl` is
- *  `mod`, so ⌃⌘ would collapse to Ctrl+1 (the list's own key) and Ctrl+S: there it is
- *  Ctrl+Alt, as in menu.rs. */
-const PAGE = IS_MAC ? "ctrl+mod" : "alt+mod";
+ *  `mod`, so ⌃⌘ would collapse to Ctrl+1 (the list's own key): there it is Ctrl+Shift, as
+ *  in menu.rs. Not Ctrl+Alt: Windows reports AltGr as Ctrl+Alt, so the menu would take the
+ *  characters AltGr types (² and @ on the 2), and Ctrl+Alt+1 … 7 are the colour labels. */
+const PAGE = IS_MAC ? "ctrl+mod" : "shift+mod";
+/** Toggle Sidebar: ⌃⌘S on a Mac, Ctrl+B elsewhere (Ctrl+Alt+S is AltGr+S, a Polish ś). */
+const SIDEBAR = IS_MAC ? "ctrl+mod+s" : "mod+b";
+
+/** An item that is one of the page's keyboard actions, run as that action's key runs it. */
+const firing = (keys: string, id: string): MenuItem => ({ keys, fires: id, run: () => fire(id) });
 
 export const MENU: Record<string, MenuItem> = {
   settings: { keys: "mod+,", run: () => navigate("/settings") },
   "new-session": { keys: "mod+n", run: (p) => openNewSession(prefillTarget(p.prefill)) },
-  find: { keys: "mod+f", run: () => fire("search.focus") },
+  find: firing("mod+f", "search.focus"),
   "go-board": { keys: `${PAGE}+1`, run: () => navigate("/") },
   "go-inbox": { keys: `${PAGE}+2`, run: () => navigate("/inbox") },
   "go-feed": { keys: `${PAGE}+3`, run: () => navigate("/feed") },
   "go-review": { keys: `${PAGE}+4`, run: () => navigate("/review") },
   "go-machines": { keys: `${PAGE}+5`, run: () => navigate("/machines") },
-  palette: { keys: "mod+k", run: () => fire("palette.toggle") },
-  "toggle-sidebar": { keys: `${PAGE}+s`, run: () => toggleSidebar() },
+  palette: firing("mod+k", "palette.toggle"),
+  "toggle-sidebar": { keys: SIDEBAR, run: () => toggleSidebar() },
   back: { keys: "mod+[", run: () => back("/") },
   forward: { keys: "mod+]", run: () => history.forward() },
-  shortcuts: { keys: "mod+/", run: () => fire("help.toggle") },
+  shortcuts: firing("mod+/", "help.toggle"),
 };
 
 /** Runs a menu action; false for an id the page does not know (logged, ignored). */
@@ -67,23 +76,41 @@ export function runMenu(action: string, payload: MenuPayload = { action }): bool
   return true;
 }
 
-const OWNED = new Set(
-  Object.values(MENU).flatMap((m) => (m.keys ? (parseBinding(m.keys) ?? []).map(chordString) : [])),
+/** Each chord a menu item owns, and the item. */
+const OWNED = new Map(
+  Object.entries(MENU).flatMap(([id, m]) => (parseBinding(m.keys ?? "") ?? []).map((c) => [chordString(c), id])),
 );
 
-/** Whether a real key press belongs to a native menu item (synthetic ones never do: they
- *  are the menu's own actions arriving through `fire`). */
-export function menuOwns(e: KeyboardEvent): boolean {
-  if (!e.isTrusted || e.isComposing) return false;
+/** The native menu item a real key press belongs to (a synthetic one never does: it is
+ *  the menu's own action arriving through `fire`). */
+function ownerOf(e: KeyboardEvent): string | undefined {
+  if (!e.isTrusted || e.isComposing) return undefined;
   const c = chordOf(e);
-  return !!c && OWNED.has(chordString(c));
+  return c ? OWNED.get(chordString(c)) : undefined;
 }
 
+/** Whether a real key press belongs to a native menu item. */
+export const menuOwns = (e: KeyboardEvent): boolean => ownerOf(e) !== undefined;
+
 /** In the shell, a capture listener ahead of every other: a key a menu item owns goes to
- *  the menu, past the page's handlers. Returns the function that removes it. */
-export function installKeyFilter(target: Pick<Window, "addEventListener" | "removeEventListener"> = window) {
+ *  the menu, past the page's handlers. Returns the function that removes it.
+ *
+ *  `gtk` (Linux): a page's key that reaches the page is opened by the page. GTK 3 tries
+ *  the menu's keys before the page gets one, so a key it took never arrives; but where
+ *  Shift+1 types "!" it looks for Ctrl+! among them, finds no item, and passes the key
+ *  on. A route opened twice is still that route. */
+export function installKeyFilter(
+  target: Pick<Window, "addEventListener" | "removeEventListener"> = window,
+  gtk = false,
+) {
   const onKey = (e: KeyboardEvent) => {
-    if (menuOwns(e)) e.stopImmediatePropagation();
+    const id = ownerOf(e);
+    if (!id) return;
+    e.stopImmediatePropagation();
+    if (gtk && id.startsWith("go-")) {
+      e.preventDefault();
+      runMenu(id);
+    }
   };
   const capture = { capture: true };
   target.addEventListener("keydown", onKey as EventListener, capture);
@@ -128,7 +155,7 @@ export function fire(id: string, target: EventTarget = window): boolean {
 
 const RAIL_KEY = "sessionpipe-gui.native.rail";
 
-/** Toggle Sidebar (⌃⌘S): the rail folds away, remembered on this device. */
+/** Toggle Sidebar (⌃⌘S, Ctrl+B off a Mac): the rail folds away, remembered on this device. */
 export function toggleSidebar(on?: boolean): void {
   const d = document.documentElement;
   const hide = on === undefined ? !d.hasAttribute("data-rail-hidden") : !on;

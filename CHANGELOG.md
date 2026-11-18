@@ -223,6 +223,17 @@ pairing link that carries the board's key only for a pairing the sink token star
   the CLI send none of what is refused and work as before. A reverse proxy on this machine
   is answered once `--public-url` names its address and it sends `X-Forwarded-For`; one
   over plain http must pass on the `Host` it was asked for.
+- **The desktop app on Windows and Linux has its own menu bar.** It had the Mac's: a first
+  menu named after the app, with Services, Hide Others and Show All, and a Window menu. It
+  is now File (New Session, Settings…, and Exit on Windows or Quit on Linux), Edit, View, Go
+  and Help (Keyboard Shortcuts, Check for Updates…, About sessionpipe), and Alt+F opens
+  File, as Alt+E, V, G and H open the rest. A Mac's menu bar is as it was.
+- **On Windows and Linux the pages are Ctrl+Shift+1 to 5, and Toggle Sidebar is Ctrl+B.**
+  They were Ctrl+Alt+1 to 5 and Ctrl+Alt+S, which are the colour labels' keys and, on
+  Windows, the characters AltGr types. A Mac keeps ⌃⌘1 to 5 and ⌃⌘S.
+- **Off a Mac the command palette's rows move with the arrows alone.** Ctrl+N and Ctrl+P
+  were listed too; there they are New Session and the browser's print. A Mac keeps ⌃N and
+  ⌃P.
 
 ### Fixed
 
@@ -275,6 +286,15 @@ pairing link that carries the board's key only for a pairing the sink token star
   with its own way out, "Leave samples"; the bar and its "Leave the demo" are the only
   ones now, and Needs you sits right under the page's bar. The sidebar has no Setup entry
   in the demo: it led to the real machine's setup from a board of made-up sessions.
+- **Ctrl+Alt+1 to 5 set a colour label in the desktop app on Windows and Linux.** The menu
+  took them for the pages, so Red to Blue could not be set from the keyboard, though the
+  Shortcuts page and a row's Label menu listed them. On Windows AltGr also types again
+  where the menu had its keys: ² and @ on the 2, ś on the S.
+- **⌘K opens the command palette in the iPhone and Android app with a keyboard.** The page
+  left it, with ⌘F and ⌘[, to a menu bar a phone doesn't have.
+- **⌘1 to ⌘9 open a list's n-th item on a keyboard whose digits need Shift.** On an AZERTY
+  keyboard the key types "&", which was read as another key. A shortcut recorded with ⌘ or
+  Ctrl, Shift and a digit is now written with the digit (Ctrl+Shift+1, not Ctrl+!).
 
 ## [0.8.4] - 2026-11-17
 
