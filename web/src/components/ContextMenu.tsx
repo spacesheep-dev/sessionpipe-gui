@@ -156,6 +156,7 @@ export function openMenu(list: MenuList, at: { x: number; y: number } | DOMRect 
   const point = rect ? { x: rect.left, y: rect.bottom + 4 } : (at as { x: number; y: number });
   const source = o.source ?? "mouse";
   lastOpenAt = Date.now();
+  openedAt = point;
   menu?.owner?.removeAttribute("data-menu-open");
   const owner = o.owner ?? el;
   owner?.setAttribute("data-menu-open", "");
@@ -398,6 +399,18 @@ function useMenuPolicy() {
 // ----- rendering -----
 
 const EDGE = 8;
+
+/** Where the menu opened, which a right-click's pointer is still on. Letting the button go
+ *  chooses the item under it only for a press dragged there, as NSMenu tells one from the
+ *  click that opened the menu: the pointer has moved this far from that point, and the
+ *  button was held this long. (Distance alone lets a click made with the hand still moving
+ *  through: the first item starts a few pixels from the pointer.) */
+let openedAt = { x: 0, y: 0 };
+const DRAG_MIN = 4;
+const HOLD_MIN_MS = 200;
+/** Whether a right-button release at this point is a press dragged onto an item. */
+const dragged = (x: number, y: number): boolean =>
+  Date.now() - lastOpenAt >= HOLD_MIN_MS && Math.hypot(x - openedAt.x, y - openedAt.y) >= DRAG_MIN;
 
 function shortcutOf(i: Leaf): string {
   if (i.keys) return i.keys;
@@ -676,9 +689,10 @@ function MenuPanel({
                     hoverTimer.current = window.setTimeout(() => setOpen(null), heading ? 400 : 120);
                   }
                 },
-                // A right-press dragged onto an item runs it, as a native menu does.
+                // A right-press dragged onto an item runs it, as a native menu does; the
+                // click that opened the menu chooses nothing, wherever it is let go.
                 onMouseUp: (e) => {
-                  if (e.button === 2) run(n, false);
+                  if (e.button === 2 && dragged(e.clientX, e.clientY)) run(n, false);
                 },
               })}
             >

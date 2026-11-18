@@ -6,7 +6,9 @@
 // own harness, the session's folder), the switch that brings the answer back, and Ask: a
 // signed `start` the fake daemon takes with `reply_to` naming the asking session, `from`
 // and `replyTo` on the activity, and the row the asking session shows at once.
-// An older machine's session gets the disabled item with its reason and no strip button.
+// A row's menu has the item with no key beside it (⇧A is the session view's own, and shows
+// in its "⋯"). An older machine's session, or one on a machine that is not paired, gets
+// neither the strip's button nor the menu's item: an ask from there would only be refused.
 // The open sheet has the whole window, as New session's has: its scrim over the sidebar and
 // the page bar at each desktop size, and on a phone the sheet over the tab bar. A
 // right-click on the dimmed window opens no menu, and a phone's sheet dragged down takes
@@ -329,20 +331,79 @@ test("a reply's menu asks about that turn; ⌘K has the verb; Esc keeps the draf
   await expect(sheet(page).locator("[data-hs-text]")).toHaveValue("Is five enough?");
 });
 
-test("an older machine: the strip offers no ask, and the menu item says what it needs", async ({ page }) => {
+test("a row's menu asks with no key beside it; the session's own \"⋯\" shows ⇧A, the key that asks there", async ({
+  page,
+}) => {
+  const name = `ho-keys-${tag()}`;
+  const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+  daemons.push(m);
+  const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Keys ${name}` });
+  const ask = page.getByRole("menuitem", { name: "Ask another agent…" });
+  // The board's row: ⇧A does nothing there, so the item shows no key, and it opens the sheet.
+  await page.goto(`${CONTROL_BASE}/`);
+  await page
+    .locator("article.card", { hasText: `Keys ${name}` })
+    .locator(".card-title")
+    .click({ button: "right" });
+  await expect(ask).toBeVisible();
+  await expect(ask).not.toHaveAttribute("aria-disabled");
+  await expect(ask.locator(".menu-keys")).toHaveCount(0);
+  await ask.click();
+  await expect(sheet(page)).toBeVisible();
+  await expect(sheet(page).locator("[data-hs-row=from]")).toContainText(`Keys ${name}`);
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toHaveCount(0);
+  // Its own page: the key presses the strip's button, and the menu says so.
+  await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+  await expect(page.locator(".conn").first()).toHaveText("live");
+  await expect(page.locator("[data-ctl-ask]")).toBeVisible();
+  await page.getByRole("button", { name: "More actions" }).click();
+  await expect(ask).toBeVisible();
+  await expect(ask.locator(".menu-keys")).toHaveText(/a$/i);
+});
+
+test("an older machine, and one that is not paired: neither the strip nor a menu offers an ask that would be refused", async ({
+  page,
+}) => {
   const name = `ho-old-${tag()}`;
   const m = await fakeDaemon(key, older(name), { sinkToken: sink });
   daemons.push(m);
   const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Old ${name}` });
+  const lone = `ho-lone-${tag()}`;
+  await postSession(sink, { machine: lone, cwd: "/Users/e2e/code", title: `Lone ${lone}` });
+  const ask = page.getByRole("menuitem", { name: "Ask another agent…" });
+  const here = page.getByRole("menuitem", { name: "New session here" });
   await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
   await expect(page.locator(".conn").first()).toHaveText("live");
-  // The hello said neither `ask` nor `handoff`: the strip's button reads it the way the
-  // menu item does and is not shown (a capability shows only where the hello says so).
+  // The hello said neither `ask` nor `handoff`: the strip's button is not shown (a
+  // capability shows only where the hello says so), and the menu reads it the same way:
+  // no item, where it was a greyed one.
   await expect(page.locator(".ctl textarea")).toBeVisible();
   await expect(page.locator("[data-ctl-ask]")).toHaveCount(0);
   await page.getByRole("button", { name: "More actions" }).click();
-  const item = page.getByRole("menuitem", { name: "Ask another agent…" });
-  await expect(item).toBeVisible();
-  await expect(item).toHaveAttribute("aria-disabled", "true");
-  await expect(item).toHaveAttribute("aria-description", `${name} needs a newer sessionpipe for this`);
+  await expect(here).toBeVisible();
+  await expect(ask).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  // Its row on the board: a session can be started there, and nothing asked.
+  await page.goto(`${CONTROL_BASE}/`);
+  await page
+    .locator("article.card", { hasText: `Old ${name}` })
+    .locator(".card-title")
+    .click({ button: "right" });
+  await expect(here).toBeVisible();
+  await expect(ask).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  // A machine that is not paired here: neither, and no rule where the two were. (A menu
+  // opens no sooner than 400 ms after the last one did.)
+  await expect(async () => {
+    await page
+      .locator("article.card", { hasText: `Lone ${lone}` })
+      .locator(".card-title")
+      .click({ button: "right" });
+    await expect(page.getByRole("menuitem", { name: "Open as page" })).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  await expect(here).toHaveCount(0);
+  await expect(ask).toHaveCount(0);
+  await expect(page.locator(".menu > .menu-sep + .menu-sep")).toHaveCount(0);
 });

@@ -402,6 +402,10 @@ export const ACTIONS: readonly Action[] = [
   { id: "list.hide", label: "Hide or unhide", group: "Lists", scope: "lists", keys: ["e"] },
   { id: "list.hideUntil", label: "Hide until it needs you", group: "Lists", scope: "lists", keys: ["shift+e"] },
   { id: "board.peek", label: "Peek beside the page", group: "Board", scope: "board", keys: ["space"] },
+  // Before inbox.* and session.*, which share the keys: the row under the board's cursor
+  // gets them first, so they never reach a session open beside the board.
+  { id: "board.allow", label: "Allow the prompt under the cursor", group: "Board", scope: "board", keys: ["a"] },
+  { id: "board.deny", label: "Deny the prompt under the cursor", group: "Board", scope: "board", keys: ["d"] },
   { id: "search.peek", label: "Peek beside the page", group: "Search", scope: "search", keys: ["space"] },
   { id: "search.copyResume", label: "Copy resume command", group: "Search", scope: "search", keys: ["mod+c"] },
   ...Array.from({ length: 9 }, (_, i) => ({

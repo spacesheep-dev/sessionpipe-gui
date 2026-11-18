@@ -766,7 +766,7 @@ test.describe("phone: a request shown whole", () => {
     }
   });
 
-  test("a board row's long-press menu answers a command only where the row's one line shows it whole: not at 320, at 820", async ({
+  test("a board row's long-press menu answers a command only where the row's one line shows it whole: not at 320, at 820; where it does, Allow and Deny lead the sheet", async ({
     context,
     page,
   }) => {
@@ -775,16 +775,19 @@ test.describe("phone: a request shown whole", () => {
     const token = await sinkToken();
     const d = await fakeDaemon(key, { name: `menu-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
     const asked = await postPrompt(token, { machine: d.name, title: "Deploy", agoMs: 3_000, message: SHORT });
+    // One a 390 wide row shows whole.
+    const brief = await postPrompt(token, { machine: d.name, title: "Tests", agoMs: 3_000, message: "npm test" });
     try {
-      for (const [w, h, cut] of [
-        [320, 568, true],
-        [820, 1180, false],
+      for (const [w, h, cut, p] of [
+        [320, 568, true, asked],
+        [820, 1180, false, asked],
+        [390, 844, false, brief],
       ] as const) {
         await page.setViewportSize({ width: w, height: h });
         await page.goto(CONTROL_BASE);
-        const card = page.locator(`article.card[data-flip="${asked.key}"]`);
+        const card = page.locator(`article.card[data-flip="${p.key}"]`);
         const line = card.locator(".card-attn");
-        await expect(line, `${w}`).toHaveText(SHORT);
+        await expect(line, `${w}`).toHaveText(p === asked ? SHORT : "npm test");
         expect(await line.evaluate((el) => el.scrollWidth > el.clientWidth), `${w}`).toBe(cut);
         // Held still, then a finger down for the long-press.
         await card.scrollIntoViewIfNeeded();
@@ -803,9 +806,15 @@ test.describe("phone: a request shown whole", () => {
         const sheet = page.locator(".menu-sheet");
         await expect(sheet.getByRole("menuitem", { name: "Hide", exact: true }), `${w}`).toBeVisible();
         await expect(sheet.getByRole("menuitem", { name: /^(Allow|Deny) Bash$/ }), `${w}`).toHaveCount(cut ? 0 : 2);
+        // Where it answers, the pair comes first; where it does not, Open does, as ever.
+        const names = (await sheet.getByRole("menuitem").allTextContents()).slice(0, 3);
+        expect(names, `${w}`).toEqual(
+          cut ? ["Open as page", "Preview", "New session here"] : ["Allow Bash", "Deny Bash", "Open as page"],
+        );
       }
     } finally {
       await asked.clear();
+      await brief.clear();
       await d.stop();
     }
   });

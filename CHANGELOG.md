@@ -289,6 +289,23 @@ pairing link that carries the board's key only for a pairing the sink token star
   width it had. While it covers the page the keys are the session's (none moves a cursor
   or opens a row under it), another page chosen in the sidebar leaves it behind, and the
   page's own entry there brings the page back.
+- **On the Board, a and d answer the prompt under the cursor.** On a Needs you row they
+  did nothing, and with a session open beside the board they answered that session,
+  whichever row the cursor was on. They now answer the row under the cursor, where it
+  shows its request whole, as in the Inbox, and never another session open beside the
+  board. A row that is answered where it is shown whole (a cut command, a plan, a
+  question) takes the keys and does nothing, unless it is the one open beside: then the
+  panel answers, so Space, then a still works for a long command. With no row under the
+  cursor they answer nothing unless the focus is in the panel. The Inbox passes a and d
+  to the panel the same way. The row says what became of the answer in the request's
+  place: "Allowed · waiting for studio-mac" with the working ring while it is out (a
+  hollow ring and "to come back" while that computer is offline), "Not sent: …" when it
+  did not go, and why, where Allow is off. An answer from the row's menu says the same;
+  one that failed there said nothing.
+- **A row's menu leads with Allow and Deny, and shows their keys.** On a Board row, a
+  panel's tab and a view's session menu the pair came after Open, New session here and
+  Ask another agent…. It comes first now, as in the Inbox and a session's "⋯", with A and
+  D beside it on the Board and in the Inbox.
 
 ### Fixed
 
@@ -453,6 +470,17 @@ pairing link that carries the board's key only for a pairing the sink token star
   page's bar does.
 - **The Files drawer no longer lies over the sidebar in a window with a mouse under
   1000 px wide,** nor over the Mac app's traffic lights: it starts where the sidebar ends.
+- **A session's menu shows no key that does something else, and no item that would only
+  be refused.** "New session here" showed C, which opens New session for the board's
+  machine, never for that session's machine and folder; "Ask another agent…" showed ⇧A on
+  rows and tabs, where the key does nothing or asks about another session. "New session
+  here" has no key beside it now, and "Ask another agent…" shows ⇧A only in a session's
+  own "⋯". On a machine that is not paired, or whose sessionpipe cannot ask, "Ask another
+  agent…" was greyed with its reason in a tooltip only; it is left out, as the button
+  under the composer is.
+- **The right-click that opens a menu no longer chooses from it.** Letting the button go
+  ran the item under the pointer, and the first one starts a few pixels from where the
+  menu opens. Only a press held and dragged onto an item chooses it now.
 
 ## [0.8.4] - 2026-11-17
 

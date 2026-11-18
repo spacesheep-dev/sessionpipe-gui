@@ -280,6 +280,10 @@
 .card-attn {
   color: var(--fg-2);
 }
+/* Why an answer did not go, in the request's place until it is pressed again. */
+.card-attn[data-said="error"] {
+  color: var(--err);
+}
 /* A code span in a one-line preview: mono, without its ticks, one tier up. */
 .inline-code {
   color: var(--fg-2);

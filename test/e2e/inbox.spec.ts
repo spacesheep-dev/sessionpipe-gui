@@ -485,6 +485,68 @@ test.describe("inbox: Allow only beside a whole request", () => {
       await d.stop();
     }
   });
+
+  test("a row that shows Open, peeked beside with Space: a is the panel's, which shows the request whole", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `peek-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    // As Claude Code sends it: its first 120 characters, and the whole in the call's input.
+    const long = await postPrompt(token, {
+      machine: d.name,
+      title: "A long command",
+      agoMs: 3_000,
+      message: LONG_COMMAND.slice(0, 120),
+      input: { command: LONG_COMMAND },
+    });
+    const question = await postPrompt(token, {
+      machine: d.name,
+      title: "A question",
+      agoMs: 4_000,
+      tool: "AskUserQuestion",
+      message: "AskUserQuestion",
+    });
+    const answers = () => d.seen.filter((c) => c.kind === "permission.answer").map((c) => [c.for, c.decision]);
+    try {
+      await page.goto(`${CONTROL_BASE}/inbox`);
+      await hideBanners(page);
+      const row = (p: { attention: string }) => page.locator(`.inbox-row[data-attention="${p.attention}"]`);
+      await expect(row(long)).toHaveClass(/inbox-row--open/);
+      await row(long).locator(".inbox-main").focus();
+      await expect(row(long)).toHaveAttribute("aria-current", "true");
+      // Not open beside yet: a answers nothing, as before.
+      await page.keyboard.press("a");
+      await page.keyboard.press("Space");
+      const shown = page.locator("aside.panel .panel-body:not(.panel-body--off)");
+      await expect(page.locator("aside.panel .panel-title")).toHaveText("A long command");
+      await expect(shown.locator(".ctl-cmd-block")).toContainText("rsync -avz --delete");
+      await expect(shown.locator(".ctl .btn--allow")).toBeEnabled({ timeout: 15_000 });
+      // The cursor is still on the row and the focus outside the panel.
+      await expect(row(long)).toHaveAttribute("aria-current", "true");
+      expect(await page.evaluate(() => !!document.activeElement?.closest("aside.panel"))).toBe(false);
+      expect(answers()).toEqual([]);
+      // On another row the keys still answer nothing, the panel's prompt included.
+      await row(question).locator(".inbox-main").focus();
+      await expect(row(question)).toHaveAttribute("aria-current", "true");
+      await page.keyboard.press("a");
+      await page.keyboard.press("d");
+      await page.waitForTimeout(1_000);
+      expect(answers()).toEqual([]);
+      // Back on the row that is open beside: a is the panel's.
+      await row(long).locator(".inbox-main").focus();
+      await expect(row(long)).toHaveAttribute("aria-current", "true");
+      await page.keyboard.press("a");
+      await expect.poll(answers, { timeout: 15_000 }).toEqual([[long.attention, "allow"]]);
+    } finally {
+      await long.clear();
+      await question.clear();
+      await d.stop();
+    }
+  });
 });
 
 test.describe("installable", () => {

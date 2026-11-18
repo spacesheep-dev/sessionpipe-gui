@@ -193,10 +193,10 @@ describe("the entry points", () => {
     expect(askOff({ machine: "lab-mac" }, control({ ask: false }))).toBeNull();
     expect(askOff({ machine: "lab-mac" }, control({ handoff: true }))).toBeNull();
   });
-  it("canAskFrom: paired, a daemon that asks (as the menu item reads it), and a harness in the hello or another session there", () => {
+  it("canAskFrom: paired, a daemon that asks, and a harness in the hello or another session there", () => {
     expect(canAskFrom(me, undefined, sessions, NOW)).toBe(false);
-    // A 0.10 daemon (neither `ask` nor `handoff` in the hello): the menu item says what it
-    // needs, and the strip's button is not shown either.
+    // A 0.10 daemon (neither `ask` nor `handoff` in the hello): neither the strip's button
+    // nor the menu's item is shown.
     expect(canAskFrom(me, control({ harnesses: ["codex"] }), [], NOW)).toBe(false);
     expect(canAskFrom(me, control({ harnesses: ["codex"], ask: true }), [], NOW)).toBe(true);
     expect(canAskFrom(me, control({ handoff: true }), sessions, NOW)).toBe(true);

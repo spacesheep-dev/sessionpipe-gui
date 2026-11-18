@@ -413,6 +413,12 @@ export function Board() {
     store,
   });
   const cursorKey = ordered[cursor]?.key;
+  // `a` and `d` with no row of the board to take them (none under the cursor; the row
+  // under it has its own, components/SessionCard.tsx): taken and dropped, so they never
+  // answer a session open beside it; with the focus in that panel they are the panel's.
+  const drop = () => (inPanel() ? false : undefined);
+  useShortcut("board.allow", drop, { enabled: !cursorKey, priority: 1 });
+  useShortcut("board.deny", drop, { enabled: !cursorKey, priority: 1 });
   // ⌥⌘1 … ⌥⌘7 label the row under the cursor, ⌥⌘0 clears it; u marks it read or unread.
   useLabelKeys(() => (cursorKey ? [cursorKey] : []));
   useUnreadKeys(() => (ordered[cursor] ? [ordered[cursor]!.item] : []));

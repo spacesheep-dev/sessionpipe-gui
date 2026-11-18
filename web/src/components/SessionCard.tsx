@@ -7,6 +7,10 @@
 // on; a tool that failed last is one small ✕. Subagents nest under it as single-line child
 // rows on a tree guide that holds still under the pointer. A right-click (a long-press on
 // touch) opens the session's menu; resting on a row warms its transcript (data/prefetch).
+// A prompt the row shows whole is answered from it: Allow and Deny lead its menu, and `a`
+// and `d` answer the row under the board's cursor, never a session open beside the board.
+// What became of the answer is said in the request's place: the receipt while it is out,
+// why it did not go, or why nothing can.
 // The class names are the e2e contract (`article.card`, `.card-status`, `.card-meta`…),
 // so they stay even though nothing here is a card any more.
 import type { AgentRun, Attention, SessionFlag, SessionKey, SessionSummary } from "@shared/api";
@@ -17,6 +21,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type RefObject,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -45,12 +50,14 @@ import {
   toolLabel,
 } from "../lib/format";
 import { hide, unhide } from "../lib/hidden";
+import { inPanel } from "../lib/keys";
 import { labelItems } from "../lib/labels";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { reducedMotion, tokenMs, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { Link, sessionPath } from "../lib/router";
 import { backgroundFact, quietRun, submittedLabel } from "../lib/runs";
 import { LENSES, type Lens, setTierLens } from "../lib/settings";
+import { useShortcut } from "../lib/shortcuts";
 import { openSplit } from "../lib/split";
 import { durCoarse, ms } from "../lib/time";
 import { AgentRow, useAgentsOpen } from "./AgentRow";
@@ -216,13 +223,59 @@ export const SessionCard = memo(function SessionCard({
   // Allow / Deny in the menu, through the same signed send as the inbox, while a
   // permission is open (CardAnswer keeps them current) and the row's one line shows it
   // whole, which on a phone a command often is not. The line is read as the menu opens, so
-  // nothing on the row moves for it.
-  const answer = useRef<MenuList>([]);
+  // nothing on the row moves for it; while the row says what became of an answer in the
+  // request's place, the request is as whole as it last showed.
+  const answer = useRef<AnswerItem[]>([]);
   const rowRef = useRef<HTMLDivElement>(null);
-  const cut = () => {
+  const wasCut = useRef(true);
+  const cut = useCallback(() => {
     const line = rowRef.current?.querySelector<HTMLElement>(".card-attn");
-    return !line || line.scrollWidth > line.clientWidth;
+    if (!line) return true;
+    if (!line.hasAttribute("data-said")) wasCut.current = line.scrollWidth > line.clientWidth;
+    return wasCut.current;
+  }, []);
+  // What the row says of its prompt's answer (CardAnswer), read off the request first.
+  const [said, setSaid] = useState<Said | null>(null);
+  const say = useCallback(
+    (next: Said | null) => {
+      cut();
+      setSaid(next);
+    },
+    [cut],
+  );
+  // `a` or `d` pressed where nothing can go: the row says why, of that prompt, until the
+  // cursor leaves it.
+  const [asked, setAsked] = useState<string | null>(null);
+  const onRow = cursor !== undefined;
+  useEffect(() => {
+    if (!onRow) setAsked(null);
+  }, [onRow]);
+  // `a` and `d` on the row under the cursor (lib/shortcuts.ts tries board.* before
+  // session.*): they answer the prompt the row shows whole. A row that cannot (a cut
+  // command, a plan, a question, an answer already out) passes them to the panel where it
+  // is open beside, which shows the prompt whole; on any other row they are taken and
+  // dropped, so they never answer another session open beside the board.
+  const answerKey = (allow: boolean) => () => {
+    if (inPanel()) return false;
+    const [yes, no] = gone || cut() ? [] : answer.current;
+    if (yes && no && !yes.disabled && !no.disabled) return void (allow ? yes : no).run();
+    if (open) return false;
+    if (yes?.disabled && attention) setAsked(attention.attentionId);
   };
+  useShortcut("board.allow", answerKey(true), { enabled: onRow, priority: 2 });
+  useShortcut("board.deny", answerKey(false), { enabled: onRow, priority: 2 });
+  // One line at most, in the order it matters: the answer that is out, why the last one did
+  // not go, why none can.
+  const line: { kind: "receipt" | "error" | "off"; text: string } | null = !attention
+    ? null
+    : said?.receipt
+      ? { kind: "receipt", text: said.receipt }
+      : said?.error
+        ? { kind: "error", text: said.error }
+        : said?.off && asked === attention.attentionId
+          ? { kind: "off", text: asLine(said.off, s.machine) }
+          : null;
+  const out = said?.receipt ? (said.held ? "held" : "going") : null;
   const menu = useContextMenu(
     () =>
       sessionItems(s, {
@@ -257,7 +310,7 @@ export const SessionCard = memo(function SessionCard({
       data-open={open ? "" : undefined}
       {...menu}
     >
-      {attention?.kind === "permission" && <CardAnswer s={s} into={answer} shown={showTools} />}
+      {attention?.kind === "permission" && <CardAnswer s={s} into={answer} shown={showTools} say={say} />}
       <div className="card-row" ref={rowRef} {...warm}>
         <SwipePanes lead="Label" trail={hidden ? "Unhide" : "Hide"} />
         {agents.length > 0 && (
@@ -310,7 +363,13 @@ export const SessionCard = memo(function SessionCard({
               row's two lines (the glyph in the lead, the time at line 1's end). */}
           <span className="card-status">
             <span className="card-state" data-jump={jump}>
-              <StateDot state={s.state} decorative unread={unread} />
+              {/* With an answer out the orange glyph is the working ring, or a still hollow
+                  one while the computer is offline (as the Inbox's row has it). */}
+              {out === "held" ? (
+                <span className="dot dot--held" style={{ width: 10, height: 10 }} aria-hidden="true" />
+              ) : (
+                <StateDot state={out ? "working" : s.state} decorative unread={unread} />
+              )}
               <span className="sr-only">{STATE_LABEL[s.state]}</span>
               {unread && <span className="sr-only">Unread</span>}
               <LabelDot session={s.key} />
@@ -337,7 +396,12 @@ export const SessionCard = memo(function SessionCard({
           </span>
 
           <span className="card-line">
-            {attnTool && attention && isQuestion(attention) ? (
+            {line ? (
+              // A status: the key that answered moves no focus, so this is what is read out.
+              <span className="card-attn" data-said={line.kind} role="status">
+                {line.text}
+              </span>
+            ) : attnTool && attention && isQuestion(attention) ? (
               <AskedLine s={s} a={attention} className="card-attn" />
             ) : attention ? (
               <span className={`card-attn ${literalAsk(attnTool) ? "mono" : ""}`}>
@@ -533,52 +597,110 @@ function KidRow({
   );
 }
 
+/** What a row says of its prompt's answer, in the request's place: the receipt while an
+ *  answer is out ("Allowed · waiting for studio-mac"), to a computer that is offline
+ *  (`held`) or not; why the last one did not go ("Not sent: …"); and why Allow and Deny are
+ *  off, which the row says once `a` or `d` is pressed on it. */
+interface Said {
+  receipt?: string;
+  held?: boolean;
+  error?: string;
+  off?: string;
+}
+
+/** A reason as a line of its own, after the tool's name: its first letter a capital ("Pair
+ *  build-box to send messages"), unless a machine's name starts it. */
+const asLine = (reason: string, machine?: string): string =>
+  machine && reason.startsWith(machine) ? reason : reason.charAt(0).toUpperCase() + reason.slice(1);
+
+/** The keys a board row's Allow and Deny answer to, shown beside them in its menu. */
+const BOARD_KEYS = { allow: "board.allow", deny: "board.deny" };
+
 /** Keeps a row's Allow / Deny menu items current: mounted only while a permission is
  *  open, so the other rows never pay for the send's state. Only beside a request the row
  *  shows (`shown`: the tier lens lets it) and could show whole (askFitsRow; the menu also
  *  asks the line whether it is cut), and never for a question: anything else is answered
- *  on the session's page, where it is shown whole. */
-function CardAnswer({ s, into, shown }: { s: SessionSummary; into: MutableRefObject<MenuList>; shown: boolean }) {
+ *  on the session's page, where it is shown whole. What became of an answer, from here or
+ *  anywhere, it tells the row (`say`), as the Inbox's row is told. */
+function CardAnswer({
+  s,
+  into,
+  shown,
+  say,
+}: {
+  s: SessionSummary;
+  into: MutableRefObject<AnswerItem[]>;
+  shown: boolean;
+  say: (said: Said | null) => void;
+}) {
   const { machines } = useAppState();
   const control = s.machine ? machines.get(s.machine)?.control : undefined;
   const a = s.openAttentions.find((x) => x.kind === "permission");
   const send = useSessionSend(s, control, s.openAttentions);
   const now = useAnswerClock(a ? [a] : []);
   const st = a ? answerState(s, a, control, send, now) : null;
+  /** An answer is being signed and sent from this row: a second press waits for it. */
+  const going = useRef(false);
+  const items =
+    a && st && shown && !isQuestion(a) && askFitsRow(a, s.harness)
+      ? answerItems(
+          a.tool,
+          st,
+          (allow) => {
+            if (going.current) return;
+            going.current = true;
+            void send
+              .onSend({ kind: "permission.answer", attentionId: a.attentionId, allow })
+              .catch(() => {})
+              .finally(() => {
+                going.current = false;
+              });
+          },
+          BOARD_KEYS,
+        )
+      : [];
   useLayoutEffect(() => {
-    into.current =
-      a && st && shown && !isQuestion(a) && askFitsRow(a, s.harness)
-        ? answerItems(a.tool, st, (allow) =>
-            send.onSend({ kind: "permission.answer", attentionId: a.attentionId, allow }).catch(() => {}),
-          )
-        : [];
+    into.current = items;
   });
+  const receipt = st?.receipt?.text;
+  const held = !!receipt && control?.online === false;
+  const error = send.error ?? undefined;
+  const off = typeof items[0]?.disabled === "string" ? items[0].disabled : undefined;
+  useEffect(() => {
+    say(receipt || error || off ? { receipt, held, error, off } : null);
+  }, [say, receipt, held, error, off]);
   useEffect(
     () => () => {
       into.current = [];
+      say(null);
     },
-    [into],
+    [into, say],
   );
   return null;
 }
+
+/** An Allow or a Deny, as a menu's item. */
+export type AnswerItem = Extract<MenuItem, { run: unknown }>;
 
 /** Allow and Deny as menu items, disabled with the reason when nothing can go; a plan
  *  review's are Approve plan and Keep planning. None once the prompt's hook stopped
  *  waiting (answerState's "late"), once an answer is out or the prompt closed (`status`),
  *  where nothing could go again, and none on a device not approved ("unapproved"), where
- *  only an approval made elsewhere brings them back. */
+ *  only an approval made elsewhere brings them back. `keys`: the keymap actions that answer
+ *  on this surface, whose keys show beside the two; a surface no key answers on passes none. */
 export function answerItems(
   tool: string | undefined,
   st: { off: boolean; reason: string | null; tag?: string; status?: string },
   answer: (allow: boolean) => unknown,
-): MenuItem[] {
+  keys?: { allow: string; deny: string },
+): AnswerItem[] {
   if (st.tag === "late" || st.tag === "unapproved" || st.status) return [];
   const disabled = st.off ? (st.reason ?? true) : undefined;
   const plan = isPlanReview({ kind: "permission", tool });
   const what = tool ? ` ${toolLabel(tool)}` : "";
   return [
-    { label: plan ? "Approve plan" : `Allow${what}`, disabled, run: () => void answer(true) },
-    { label: plan ? "Keep planning" : `Deny${what}`, disabled, run: () => void answer(false) },
+    { label: plan ? "Approve plan" : `Allow${what}`, action: keys?.allow, disabled, run: () => void answer(true) },
+    { label: plan ? "Keep planning" : `Deny${what}`, action: keys?.deny, disabled, run: () => void answer(false) },
   ];
 }
 

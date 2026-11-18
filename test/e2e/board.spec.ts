@@ -5,7 +5,8 @@
 // asks for a permission, the collapsed done group,
 // live counts without a reload (with Advanced → Show counts), a list that holds still
 // under the pointer, the search that finds nothing, the keyboard (e with Hidden open
-// too), and the Hidden header's own menu.
+// too), the Hidden header's own menu, and a row's menu that the click which opened it
+// chooses nothing from.
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { EVENTS, holdBoard, INFO, openBoard, sessionUrl, tier1Batch, ulid } from "./helpers.js";
@@ -425,5 +426,46 @@ test.describe("board", () => {
     await expect(page.getByRole("menuitemcheckbox", { name: "Show done sessions" })).toHaveCount(0);
     await item.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
+  test("the right-click that opens a row's menu chooses nothing from it; a press held and dragged onto an item does", async ({
+    page,
+  }) => {
+    await openBoard(page);
+    await holdBoard(page);
+    const title = page.locator("section.group--working article.card .card-title").first();
+    const box = (await title.boundingBox())!;
+    const at = { x: Math.round(box.x + 40), y: Math.round(box.y + 6) };
+    // The page's clock in the test's hands: how long the button was held is what is tested.
+    await page.evaluate(() => {
+      const w = window as unknown as { heldAt: number };
+      w.heldAt = Date.now();
+      Date.now = () => w.heldAt;
+    });
+    // The press opens the menu under the pointer (as a Mac's right button does, before it
+    // is let go).
+    await title.evaluate((el, { x, y }) => {
+      el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+    }, at);
+    const first = page.getByRole("menu").getByRole("menuitem").first();
+    await expect(first).toHaveText(/^Open as page/);
+    /** The right button let go over the menu's first item, the pointer at `x`, `y`. */
+    const release = (x: number, y: number) =>
+      first.dispatchEvent("mouseup", { bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y });
+    // Let go at once, the hand having drifted onto the item: a click, and the menu stays.
+    await release(at.x + 9, at.y + 9);
+    await expect(first).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+    // Held, and let go where it was pressed: nothing either.
+    await page.evaluate(() => {
+      (window as unknown as { heldAt: number }).heldAt += 300;
+    });
+    await release(at.x + 1, at.y + 1);
+    await expect(first).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+    // Held and dragged onto the item: that is choosing it.
+    await release(at.x + 9, at.y + 9);
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/s\//);
   });
 });

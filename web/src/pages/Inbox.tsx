@@ -69,7 +69,7 @@ import { setNotifyPref, useNotifyPref } from "../lib/notify";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { type Lens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
-import { openSplit } from "../lib/split";
+import { openSplit, useSplitKey } from "../lib/split";
 import { NEW_WORDS, ThisPhone } from "../native/accountWords";
 
 const rowKey = (r: OpenAttention) => `${r.session.key}|${r.attention.attentionId}`;
@@ -89,6 +89,8 @@ const reasonId = (r: string): string => {
   return `inbox-reason-${(h >>> 0).toString(36)}`;
 };
 const groupOf = (r: OpenAttention) => (r.answerable ? "answer" : "terminal");
+/** The keys a row's Allow and Deny answer to, shown beside them in its menu. */
+const INBOX_KEYS = { allow: "inbox.allow", deny: "inbox.deny" };
 
 export function Inbox() {
   const store = useStore();
@@ -137,12 +139,13 @@ export function Inbox() {
     return true;
   };
   const { cursor } = useListNav(hrefs, true, keys, { peek: "inbox.peek", clear: () => clearRef.current(), store });
-  // `a` and `d` with no row of the Inbox to take them (none under the cursor): taken and
-  // dropped, so they never answer a session open beside it; with the focus in that panel
-  // they are the panel's.
+  const openKey = useSplitKey();
+  // `a` and `d` with no row of the Inbox to take them (none under the cursor; the row under
+  // it has its own, useRowKeys): taken and dropped, so they never answer a session open
+  // beside it; with the focus in that panel they are the panel's.
   const drop = () => (inPanel() ? false : undefined);
-  useShortcut("inbox.allow", drop, { priority: 1 });
-  useShortcut("inbox.deny", drop, { priority: 1 });
+  useShortcut("inbox.allow", drop, { enabled: !keys[cursor], priority: 1 });
+  useShortcut("inbox.deny", drop, { enabled: !keys[cursor], priority: 1 });
   // ⌥⌘1 … ⌥⌘7 label the session under the cursor, ⌥⌘0 clears it.
   useLabelKeys(() => (keys[cursor] ? [keys[cursor]!] : []));
   // The tier lens: attention messages and tool names travel at tier 1 (lib/tier.ts).
@@ -238,6 +241,7 @@ export function Inbox() {
               gone={h.gone}
               control={h.item.session.machine ? machines.get(h.item.session.machine)?.control : undefined}
               cursor={offset + i === cursor ? cursor : undefined}
+              open={h.item.session.key === openKey}
               lens={lens}
               report={report}
             />
@@ -352,13 +356,15 @@ export function Inbox() {
 }
 
 /** `a` and `d` while the list cursor is on a row: they are that row's, answered by `answer`
- *  or, where it is null, taken and dropped, so they never fall through to the keys of a
- *  session open beside the page (lib/shortcuts.ts tries inbox.* before session.*). With
- *  focus inside the panel they are the panel's. */
-function useRowKeys(focused: boolean, answer: ((allow: boolean) => void) | null): void {
+ *  or, where it is null, taken and dropped, so they never fall through to the keys of
+ *  another session open beside the page (lib/shortcuts.ts tries inbox.* before session.*).
+ *  A row that is not answered here and is the one open beside (`open`) passes them to the
+ *  panel, which shows its prompt whole. With focus inside the panel they are the panel's. */
+function useRowKeys(focused: boolean, answer: ((allow: boolean) => void) | null, open = false): void {
   const run = (allow: boolean) => () => {
     if (inPanel()) return false;
-    answer?.(allow);
+    if (answer) return void answer(allow);
+    if (open) return false;
   };
   useShortcut("inbox.allow", run(true), { enabled: focused, priority: 2 });
   useShortcut("inbox.deny", run(false), { enabled: focused, priority: 2 });
@@ -369,6 +375,7 @@ function InboxRow({
   gone = false,
   control,
   cursor,
+  open: beside = false,
   lens = null,
   report,
 }: {
@@ -377,6 +384,8 @@ function InboxRow({
   gone?: boolean;
   control?: MachineControl;
   cursor?: number;
+  /** Its session is the panel's active tab. */
+  open?: boolean;
   lens?: Lens;
   report: (id: string, off: Off | null) => void;
 }) {
@@ -411,9 +420,9 @@ function InboxRow({
   // Allow and Deny only beside a request the row shows whole (lib/format.ts askFitsRow);
   // any other, a plan or a long command, offers Open, to the session that shows it whole.
   const whole = askFitsRow(a, s.harness);
-  // A prompt in a terminal is answered there: `a` and `d` on its row do nothing (Answer has
-  // the answerable rows' keys).
-  useRowKeys(cursor !== undefined && !row.answerable, null);
+  // A prompt in a terminal is answered there: `a` and `d` on its row do nothing here (Answer
+  // has the answerable rows' keys).
+  useRowKeys(cursor !== undefined && !row.answerable, null, beside);
   const titleId = useId();
   // With an answer out the orange glyph is the working ring, or a still hollow one while
   // the computer is offline (Answer says which).
@@ -492,6 +501,7 @@ function InboxRow({
           titleId={titleId}
           control={control}
           focused={cursor !== undefined}
+          beside={beside}
           into={answerMenu}
           report={report}
           onOut={setOut}
@@ -519,6 +529,7 @@ function Answer({
   titleId,
   control,
   focused = false,
+  beside = false,
   into,
   report,
   onOut,
@@ -533,6 +544,8 @@ function Answer({
   control?: MachineControl;
   /** The row under the list cursor: it takes `a` and `d` (useRowKeys). */
   focused?: boolean;
+  /** Its session is open beside the page: what the row does not answer, the panel does. */
+  beside?: boolean;
   into: MutableRefObject<MenuList>;
   report: (id: string, off: Off | null) => void;
   /** An answer is out ("going"), to a computer that is offline ("held"), or none is. */
@@ -576,7 +589,8 @@ function Answer({
   const lead = status === "sent" ? (control?.online === false ? "held" : "going") : null;
   useEffect(() => onOut(lead), [lead, onOut]);
   useEffect(() => () => onOut(null), [onOut]);
-  useRowKeys(focused, whole && !off && chosen === null ? answer : null);
+  // The row's own answer on its way is nobody else's to send again.
+  useRowKeys(focused, whole && !off && chosen === null ? answer : null, beside && chosen === null);
   // Off for a standing reason (not paired, no passkeys here, not approved): the page says
   // it once, for the rows that show Allow and Deny. A moment's state (sent, a passkey
   // prompt, closed) stays on the row. Not approved, an Open row has no Open either, and
@@ -596,7 +610,7 @@ function Answer({
   }, [id, standing, tag, approve, sentence, s.machine, report]);
   useEffect(() => () => report(id, null), [id, report]);
   useLayoutEffect(() => {
-    into.current = whole ? answerItems(a.tool, st, answer) : [];
+    into.current = whole ? answerItems(a.tool, st, answer, INBOX_KEYS) : [];
   });
   const noteId = useId();
   const note = send.error ? (

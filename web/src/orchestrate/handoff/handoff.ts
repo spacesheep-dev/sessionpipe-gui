@@ -122,9 +122,9 @@ export function handoffFields(o: {
   };
 }
 
-/** Why "Ask another agent…" is off for a session, in the menu's words (UX-SPEC §2.1), or
- *  null when it can open: its machine is not paired here, or its daemon predates asking
- *  (a hello with neither `ask` nor `handoff`). */
+/** Why "Ask another agent…" is off for a session, in the words the palette answers its
+ *  row with (UX-SPEC §2.1), or null when it can open: its machine is not paired here, or
+ *  its daemon predates asking (a hello with neither `ask` nor `handoff`). */
 export function askOff(s: { machine?: string }, control: MachineControl | undefined): string | null {
   const name = s.machine ?? "this machine";
   if (!control) return `Pair ${name} to ask from here`;
@@ -132,10 +132,10 @@ export function askOff(s: { machine?: string }, control: MachineControl | undefi
   return null;
 }
 
-/** Whether the strip shows its "Ask another agent…" button: the machine is paired, its
- *  daemon can ask (`askOff`, the same reading the menu item makes) and there is someone
- *  to ask there (a harness in the hello, or another session). Hidden otherwise, never
- *  disabled: the strip's own line already says why sending is off. */
+/** Whether the strip shows its "Ask another agent…" button and a session's menu its item
+ *  (lib/menus.ts askItem): the machine is paired, its daemon can ask (`askOff`) and there
+ *  is someone to ask there (a harness in the hello, or another session). Hidden otherwise,
+ *  never disabled: the strip's own line already says why sending is off. */
 export function canAskFrom(
   s: { key: SessionKey; machine?: string },
   control: MachineControl | undefined,
