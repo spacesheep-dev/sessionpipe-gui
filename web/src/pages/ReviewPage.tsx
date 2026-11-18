@@ -11,6 +11,7 @@ import { LabelDot } from "../components/LabelDot";
 import { PageBar } from "../components/PageBar";
 import { useBackgroundMenu, useStickyTop } from "../components/SessionCard";
 import { useStore } from "../data/hooks";
+import { wideLayout } from "../lib/device";
 import { focusTab, tablistKey } from "../lib/focus";
 import { cleanTitle, repoShort } from "../lib/format";
 import { copyItem, openOutside } from "../lib/menus";
@@ -34,7 +35,6 @@ function openAt(key: string, seq: number | undefined, from?: DOMRect) {
 const tzOffset = () => new Date().getTimezoneOffset();
 const localDay = (ms: number) => new Date(ms - tzOffset() * 60_000).toISOString().slice(0, 10);
 const shiftDay = (day: string, days: number) => localDay(Date.parse(`${day}T12:00:00Z`) + days * DAY_MS);
-const desktop = () => typeof matchMedia === "function" && matchMedia("(min-width: 840px)").matches;
 
 type Range = "today" | "7d" | "30d";
 const RANGES: { value: Range; label: string }[] = [
@@ -429,7 +429,7 @@ function DayRow({ s }: { s: Digest["sessions"][number] }) {
     () => [
       { label: "Open beside", run: () => openAt(s.key, undefined) },
       { label: "Open as page", run: () => navigate(path) },
-      desktop() && {
+      wideLayout() && {
         label: "Open in new window",
         run: () => openOutside(path),
       },

@@ -25,6 +25,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { copyText } from "../lib/clipboard";
+import { phoneLayout } from "../lib/device";
 import { reducedMotion, tokenMs, useSheetDrag } from "../lib/motion";
 import { usePath } from "../lib/router";
 import { hintFor } from "../lib/shortcuts";
@@ -144,8 +145,6 @@ export function useMenuOpen(): boolean {
   return useSyncExternalStore(subscribe, getMenuOpen, getMenuOpen);
 }
 
-const PHONE = "(max-width: 839px)";
-const isPhone = () => typeof matchMedia === "function" && matchMedia(PHONE).matches;
 let lastOpenAt = 0;
 
 /** Opens a menu at a point, under a rect, or under an element (a "⋯" button). */
@@ -168,7 +167,7 @@ export function openMenu(list: MenuList, at: { x: number; y: number } | DOMRect 
     title: o.title,
     subtitle: o.subtitle,
     source,
-    sheet: source === "touch" || isPhone(),
+    sheet: source === "touch" || phoneLayout(),
     invoker: o.invoker ?? el ?? (document.activeElement as HTMLElement | null),
     owner,
   };
@@ -192,7 +191,7 @@ export function confirmAction(o: { title: string; body?: string; action: string;
     confirmReq = {
       ...o,
       resolve,
-      sheet: isPhone(),
+      sheet: phoneLayout(),
       invoker: document.activeElement as HTMLElement | null,
     };
     emit();

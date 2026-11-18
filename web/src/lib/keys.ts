@@ -22,7 +22,8 @@ export { isTyping };
 
 export function focusSearch(): boolean {
   const el = document.querySelector<HTMLInputElement>("[data-search]");
-  if (!el) return false;
+  // Not the field of a page that is covered (inert under the panel): it cannot take the caret.
+  if (!el || el.closest("[inert]")) return false;
   el.focus();
   el.select();
   return true;
@@ -361,9 +362,10 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
 
 /** Something open that Esc closes first (a popover, a confirm, the panel): a
  *  `[data-dismiss]` that is drawn, not one kept in the DOM while closed. */
-/** Drawn and not on its way out: an overlay fading through its exit is already closed. */
+/** Drawn and not on its way out: an overlay fading through its exit is already closed.
+ *  Nor one under something that covers it (inert): Esc closes what is on top. */
 const drawn = (el: HTMLElement): boolean =>
-  !el.closest("[data-closing]") &&
+  !el.closest("[data-closing], [inert]") &&
   (typeof el.checkVisibility === "function" ? el.checkVisibility({ visibilityProperty: true }) : !!el.offsetParent);
 const openDismiss = (): boolean => [...document.querySelectorAll<HTMLElement>("[data-dismiss]")].some(drawn);
 

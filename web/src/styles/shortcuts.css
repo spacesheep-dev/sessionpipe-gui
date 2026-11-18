@@ -281,7 +281,7 @@
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .pal.sc-help {
     width: 100%;
     max-height: none;

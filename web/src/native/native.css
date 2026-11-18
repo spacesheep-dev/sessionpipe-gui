@@ -642,7 +642,7 @@
 /* The tablet: a step keeps its title and actions in one glance, and the connected sheet
    is a centred form sheet rather than a strip along the bottom edge. The welcome keeps
    its full-height hero. */
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   .onb-body--step {
     max-height: 720px;
     margin: auto;

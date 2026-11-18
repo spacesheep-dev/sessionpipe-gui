@@ -97,7 +97,7 @@ body {
 }
 
 /* A desktop window never rubber-bands. */
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   html {
     overscroll-behavior: none;
   }

@@ -3,6 +3,7 @@
 // there a session opens as its page, nothing is mirrored and nothing is restored.
 import "../native/test-env";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { PHONE_QUERY } from "./device";
 import { agentTabKey, openSplit, parseSplit, restoreSplit, tabPath } from "./split";
 
 const g = globalThis as Record<string, unknown>;
@@ -24,7 +25,7 @@ function at(path: string) {
 const where = () => `${(g.location as URL).pathname}${(g.location as URL).search}`;
 const phone = (on: boolean) => {
   g.matchMedia = (q: string) => ({
-    matches: on && q === "(max-width: 839px)",
+    matches: on && q === PHONE_QUERY,
     addEventListener() {},
     removeEventListener() {},
   });

@@ -12,6 +12,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { flushSync } from "react-dom";
+import { phoneLayout } from "./device";
 import { agentTabKey, dropTab, parseSplit, splitParams } from "./splitState";
 import { type NavDirection, type NavKind, navDirection } from "./transitions";
 
@@ -53,10 +54,9 @@ const emit = () => {
   shownPath = current();
 };
 
-const PHONE = "(max-width: 839px)";
 /** What the device says of a move right now (lib/transitions.ts decides with it). */
 const navEnv = () => ({
-  phone: typeof matchMedia === "function" && matchMedia(PHONE).matches,
+  phone: phoneLayout(),
   reduced: typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches,
   supported: "startViewTransition" in document,
 });
@@ -91,11 +91,16 @@ function transition(dir: NavDirection | null, from: string, apply: () => void): 
  *  animate as a pop. It times out, so a Back that left the document (or never came back
  *  as a popstate) cannot claim a later gesture's. */
 let ownBack = 0;
+/** How the page last changed: the app's own move forward ("navigate"), a replace (a
+ *  redirect), or Back and Forward. Null until it has. */
+let lastKind: NavKind | null = null;
+export const lastMove = (): NavKind | null => lastKind;
 if (typeof window !== "undefined")
   window.addEventListener("popstate", () => {
     const ours = ownBack !== 0;
     window.clearTimeout(ownBack);
     ownBack = 0;
+    lastKind = ours ? "back" : "popstate";
     const from = shownPath;
     const to = location.pathname + location.search;
     const dir = navDirection(parseRoute(from).name, parseRoute(to).name, ours ? "back" : "popstate", navEnv());
@@ -221,6 +226,7 @@ export function navigate(to: string, opts: { replace?: boolean; back?: boolean }
     history.pushState(null, "", target);
     pushed++;
   }
+  lastKind = kind;
   transition(dir, from, emit);
 }
 

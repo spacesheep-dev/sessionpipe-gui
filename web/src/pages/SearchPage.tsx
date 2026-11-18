@@ -22,6 +22,7 @@ import { LabelSwatch } from "../components/LabelDot";
 import { PageBar } from "../components/PageBar";
 import { useBackgroundMenu } from "../components/SessionCard";
 import { useStore } from "../data/hooks";
+import { usePhoneLayout } from "../lib/device";
 import { focusSearch } from "../lib/keys";
 import { parseRoute, SPLIT_ACTIVE_PARAM, SPLIT_PARAM } from "../lib/router";
 import { useShortcut } from "../lib/shortcuts";
@@ -45,7 +46,6 @@ import {
 import { macWord, resultLine } from "../search/words";
 import "../styles/search.css";
 
-const PHONE = "(max-width: 839px)";
 function useMedia(q: string): boolean {
   const [on, setOn] = useState(() => typeof matchMedia === "function" && matchMedia(q).matches);
   useEffect(() => {
@@ -103,7 +103,7 @@ export function Search() {
   const store = useStore();
   const client = useSearchClient();
   const status = useSearchStatus(client);
-  const phone = useMedia(PHONE);
+  const phone = usePhoneLayout();
   const narrow = useMedia("(max-width: 759px)");
   const [{ q, sort }, setState] = useState(readUrl);
   const setQuery = useCallback((next: string) => {

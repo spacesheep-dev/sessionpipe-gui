@@ -417,7 +417,7 @@
 }
 
 /* ----- the phone: a full-screen sheet ----- */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .pal {
     inset: 0;
     top: 0;

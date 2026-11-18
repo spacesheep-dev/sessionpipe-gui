@@ -118,7 +118,7 @@
   box-shadow: var(--shadow-pop);
   animation: rise var(--dur) var(--ease-out) both;
 }
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   .chord-hint {
     bottom: 16px;
   }

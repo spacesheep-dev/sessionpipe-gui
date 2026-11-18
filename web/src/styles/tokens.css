@@ -223,7 +223,7 @@
 }
 
 /* The phone: touch-sized controls and the narrower gutter. */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   :root {
     --gutter: 16px;
     --bar: 44px;

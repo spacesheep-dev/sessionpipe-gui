@@ -231,34 +231,40 @@ test("the sheet dims the whole window, as New session's does: a click on the sid
   expect(page.url()).toBe(url);
 });
 
-test("a phone's sheet covers the tab bar, and a tablet's fills the width", async ({ page }) => {
-  const name = `ho-full-${tag()}`;
-  const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
-  daemons.push(m);
-  const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Totals ${name}` });
-  await postTurn(sink, { ...s, machine: name }, "The totals are summed once.");
+// A phone and a tablet are touch screens: under 840 px a window with a mouse keeps the
+// desktop's layout down to 720 (lib/device.ts), so the tablet here has a finger.
+test.describe("on a touch screen", () => {
+  test.use({ hasTouch: true });
 
-  for (const size of [
-    { width: 390, height: 844 },
-    { width: 834, height: 1194 },
-  ]) {
-    await page.setViewportSize(size);
-    await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
-    await expect(page.locator(".ctl textarea")).toBeVisible();
-    const tabbar = await centre(page, ".tabbar");
-    expect(await under(page, tabbar)).toBe("page");
-    await page.locator("[data-ctl-ask]").click();
-    await expect(sheet(page)).toBeVisible();
-    expect(await sheet(page).evaluate((el) => el.closest(".sess-ctl") === null)).toBe(true);
-    // The whole screen is the sheet's, edge to edge: nothing of the page beside it (the
-    // bar's ⋯, the composer), and the tab bar under it.
-    await expect.poll(async () => (await sheet(page).boundingBox())?.y).toBe(0);
-    expect(await sheet(page).boundingBox()).toEqual({ x: 0, y: 0, ...size });
-    for (const at of [tabbar, { x: size.width - 4, y: 24 }, { x: size.width - 4, y: size.height - 120 }])
-      expect(await under(page, at), `${at.x},${at.y} at ${size.width}`).toBe("sheet");
-    await sheet(page).locator("[data-hs-cancel]").click();
-    await expect(sheet(page)).toHaveCount(0);
-  }
+  test("a phone's sheet covers the tab bar, and a tablet's fills the width", async ({ page }) => {
+    const name = `ho-full-${tag()}`;
+    const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+    daemons.push(m);
+    const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Totals ${name}` });
+    await postTurn(sink, { ...s, machine: name }, "The totals are summed once.");
+
+    for (const size of [
+      { width: 390, height: 844 },
+      { width: 834, height: 1194 },
+    ]) {
+      await page.setViewportSize(size);
+      await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+      await expect(page.locator(".ctl textarea")).toBeVisible();
+      const tabbar = await centre(page, ".tabbar");
+      expect(await under(page, tabbar)).toBe("page");
+      await page.locator("[data-ctl-ask]").click();
+      await expect(sheet(page)).toBeVisible();
+      expect(await sheet(page).evaluate((el) => el.closest(".sess-ctl") === null)).toBe(true);
+      // The whole screen is the sheet's, edge to edge: nothing of the page beside it (the
+      // bar's ⋯, the composer), and the tab bar under it.
+      await expect.poll(async () => (await sheet(page).boundingBox())?.y).toBe(0);
+      expect(await sheet(page).boundingBox()).toEqual({ x: 0, y: 0, ...size });
+      for (const at of [tabbar, { x: size.width - 4, y: 24 }, { x: size.width - 4, y: size.height - 120 }])
+        expect(await under(page, at), `${at.x},${at.y} at ${size.width}`).toBe("sheet");
+      await sheet(page).locator("[data-hs-cancel]").click();
+      await expect(sheet(page)).toHaveCount(0);
+    }
+  });
 });
 
 test("a phone's sheet dragged down takes its mark with it: the next sheet has its dim", async ({ page }) => {

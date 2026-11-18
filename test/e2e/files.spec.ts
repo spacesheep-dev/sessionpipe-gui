@@ -202,6 +202,34 @@ test.describe("files drawer", () => {
     expect(files!.width, '"Files · 14" is narrower than "Problems · 12"').toBeLessThan(problems!.width - 10);
   });
 
+  test("with no room beside the session, the drawer covers the page and the sidebar stays", async ({
+    page,
+    request,
+  }) => {
+    const s = await postSession(request);
+    await page.setViewportSize({ width: 900, height: 800 });
+    await openPage(page, sessionUrl(s.harness, s.sessionId));
+    await page.locator(".sess-bar").getByRole("button", { name: "Files" }).click();
+    await expect(drawer(page)).toBeVisible();
+    const rail = page.locator("nav.rail");
+    // Under 1000 px, down to a window half a 13-inch screen wide: from the rail's edge to
+    // the window's, once it has slid in, with the rail still there to press.
+    for (const width of [900, 760, 720]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect(rail).toBeVisible();
+      const edge = Math.round((await rail.boundingBox())!.width);
+      await expect.poll(async () => Math.round((await drawer(page).boundingBox())!.x)).toBe(edge);
+      const box = (await drawer(page).boundingBox())!;
+      expect(Math.round(box.x + box.width)).toBe(width);
+      const top = await page.evaluate((x) => !!document.elementFromPoint(x, 200)?.closest("nav.rail"), edge / 2);
+      expect(top, `the rail is on top of its own column at ${width}`).toBe(true);
+    }
+    // The phone's layout has no rail: there the drawer has the screen.
+    await page.setViewportSize({ width: 700, height: 800 });
+    await expect(rail).toBeHidden();
+    await expect.poll(async () => Math.round((await drawer(page).boundingBox())!.x)).toBe(0);
+  });
+
   test("a comment on a range of lines becomes a review message in the composer", async ({ page, request }) => {
     const s = await postSession(request);
     await openPage(page, `${sessionUrl(s.harness, s.sessionId)}?file=src%2Foutbox.ts`);

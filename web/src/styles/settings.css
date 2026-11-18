@@ -160,7 +160,7 @@
   user-select: text;
 }
 
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   /* The document pages read as iOS grouped lists: the page on the grouped ground, each
      group an inset of cells, separators inset to the text. */
   body:has(.page--grouped) {
@@ -507,7 +507,7 @@ a.settings-row:focus-visible {
 }
 
 /* ----- the phone: a full-screen sheet and a navigation stack ----- */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .settings-wrap {
     padding: 0;
     place-items: stretch;
@@ -960,7 +960,7 @@ a.settings-row:focus-visible {
   font-size: var(--text-xs);
   text-align: center;
 }
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   .settings-nav-bar,
   .settings-nav-large {
     display: none;

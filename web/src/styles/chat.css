@@ -39,7 +39,8 @@
     opacity: 1;
   }
 }
-@media (hover: none), (max-width: 839px) {
+@media (hover: none), (max-width: 719px), (max-width: 839px) and (pointer: coarse),
+  (max-width: 839px) and (pointer: none) {
   .chat-time {
     display: none;
   }
@@ -164,7 +165,7 @@
   color: var(--fg-2);
   font-size: var(--text-sm);
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .chat-bubble {
     max-width: 85%;
   }

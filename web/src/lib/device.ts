@@ -2,8 +2,9 @@
 // What the page runs on, for page code that must not load the shell's module
 // (native/shell.ts, which only main.tsx imports): the shell's platform, which shell.ts
 // writes to `<html data-shell>` before the app renders (the flag it parsed stands in until
-// then, and in a unit test), the phone layout (Shell.tsx PHONE_QUERY, the width tokens.css
-// switches at) and whether a finger is the main pointer, each as a yes or no, now or live.
+// then, and in a unit test), the phone layout (where tokens.css switches) and whether a
+// finger is the main pointer, each as a yes or no, now or live. The layout's widths are
+// written here and nowhere else in the page's code (breakpoints.test.ts).
 import { useSyncExternalStore } from "react";
 
 export type ShellPlatform = "macos" | "windows" | "linux" | "ios" | "android";
@@ -31,11 +32,30 @@ export const phoneShell = (): boolean => {
   return p === "ios" || p === "android";
 };
 
-/** The phone layout's width (the same string as Shell.tsx PHONE_QUERY). */
-export const PHONE_QUERY = "(max-width: 839px)";
+/** The phone layout: a tab bar, sheets, large titles (tokens.css switches on the same
+ *  query). A screen under 840 px whose main pointer is a finger, or that has none: a phone,
+ *  a tablet held upright. A window with a mouse keeps the desktop's layout down to 720 px,
+ *  the narrowest the desktop app's window goes (apps/desktop window.rs) and half the screen
+ *  of a 13-inch laptop, so a window tiled to one side never turns into a phone. */
+export const PHONE_QUERY =
+  "(max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none)";
+
+/** The other layout, the exact opposite: a sidebar, a panel beside the page, dialogs. A
+ *  stylesheet writes one of the two whole, as its media query. */
+export const DESKTOP_QUERY = "(min-width: 840px), (min-width: 720px) and (pointer: fine)";
+
+/** The desktop layout with no room for a session beside its page: the panel's 420 px
+ *  would leave a list about 260. There the panel covers the page (styles/split.css). */
+export const PANEL_COVERS_QUERY = "(min-width: 720px) and (max-width: 839px) and (pointer: fine)";
 
 /** Whether the page is laid out as a phone right now. */
 export const phoneLayout = (): boolean => typeof matchMedia === "function" && matchMedia(PHONE_QUERY).matches;
+
+/** The other layout: a sidebar, a panel beside the page, dialogs. */
+export const wideLayout = (): boolean => !phoneLayout();
+
+/** Whether an open panel covers the page right now, having no room beside it. */
+export const panelCovers = (): boolean => typeof matchMedia === "function" && matchMedia(PANEL_COVERS_QUERY).matches;
 
 /** A finger is the main pointer: a phone or a tablet, in the app or a browser, at any
  *  width; never a desktop window, however narrow. */
@@ -52,10 +72,14 @@ const subscribeTo = (query: string) => (l: () => void) => {
   return () => mq.removeEventListener("change", l);
 };
 const onPhone = subscribeTo(PHONE_QUERY);
+const onCovers = subscribeTo(PANEL_COVERS_QUERY);
 const onTouch = subscribeTo(TOUCH_QUERY);
 
 /** `phoneLayout`, live: re-renders when the window crosses the width. */
 export const usePhoneLayout = (): boolean => useSyncExternalStore(onPhone, phoneLayout, () => false);
+
+/** `panelCovers`, live: re-renders when the window crosses either end of that width. */
+export const usePanelCovers = (): boolean => useSyncExternalStore(onCovers, panelCovers, () => false);
 
 /** `touchKeys`, live: re-renders when the main pointer changes. */
 export const useTouchKeys = (): boolean => useSyncExternalStore(onTouch, touchKeys, () => false);

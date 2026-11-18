@@ -14,6 +14,7 @@ import { askOff } from "../orchestrate/handoff/handoff";
 import { openHandoffFor } from "../orchestrate/handoff/handoffState";
 import { agentGlyph, agentLabel, openAgent } from "./agents";
 import { copyText } from "./clipboard";
+import { phoneLayout, wideLayout } from "./device";
 import { harnessMark, repoBranch, sessionTitle } from "./format";
 import { canHideUntilNeeded, hiddenNow, hide, hideUntilNeeded, unhide } from "./hidden";
 import { labelMenu } from "./labels";
@@ -49,14 +50,12 @@ export const openOutside = (path: string): void => {
   if (url) window.open(url, "_blank", "noopener");
 };
 
-const desktop = () => typeof matchMedia === "function" && matchMedia("(min-width: 840px)").matches;
-
 /** Open in a new window and Copy link, for anything that is a page of the app. */
 export function linkItems(path: string): MenuList {
   const url = absoluteUrl(path);
   if (!url) return [];
   return [
-    desktop() && { label: "Open in new window", run: () => openOutside(path) },
+    wideLayout() && { label: "Open in new window", run: () => openOutside(path) },
     { label: "Copy link", run: () => copyText(url) },
   ];
 }
@@ -93,7 +92,7 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
   const hidden = hideHere && hiddenNow(s);
   // e and ⇧E are the board's (useHideKeys); another list shows Hide without them.
   const onBoard = location.pathname === "/";
-  const phone = !desktop();
+  const phone = phoneLayout();
   const beside = getSettings().openSessions === "beside";
   const openPage: MenuItem | null = onItsPage
     ? null
@@ -266,7 +265,7 @@ export function agentItems(
 ): MenuItem[] {
   return tidy([
     // A phone opens an agent as the page on it: one item, not two that do the same.
-    desktop() && { label: "Open beside", run: () => openAgent(s, a, "beside") },
+    wideLayout() && { label: "Open beside", run: () => openAgent(s, a, "beside") },
     { label: "Open as page", run: () => openAgent(s, a, "page") },
     { sep: true },
     opts.parent && { label: "Open parent session", run: () => navigate(sessionPath(s.harness, s.id)) },

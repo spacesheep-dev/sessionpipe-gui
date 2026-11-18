@@ -16,17 +16,18 @@ import { type CSSProperties, Fragment, lazy, type ReactNode, Suspense, useEffect
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
 import { newSessionOpen, openNewSession } from "../control/newSessionState";
 import { useAnswerableCount, useAppState, useStore, useStreamMark } from "../data/hooks";
+import { phoneLayout, usePanelCovers, usePhoneLayout } from "../lib/device";
 import { useGlobalKeys } from "../lib/keys";
 import { lazyModule, whenIdle } from "../lib/lazy";
 import { linkItems } from "../lib/menus";
 import { reducedMotion, usePresence } from "../lib/motion";
 import { accountMode } from "../lib/net";
-import { Link, navigate, type Route, usePath } from "../lib/router";
+import { Link, lastMove, navigate, type Route, usePath } from "../lib/router";
 import { useReadyUpdate } from "../lib/selfUpdate";
 import { getSettings as getAppSettings, setMode, useSimple } from "../lib/settings";
-import { hintFor, isTyping, useShortcut, useShortcutMap } from "../lib/shortcuts";
+import { hintFor, isTyping, KeysOff, useShortcut, useShortcutMap } from "../lib/shortcuts";
 import { getSkins, isPlain } from "../lib/skins";
-import { restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
+import { closeSplit, leaveSplit, restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
 import { getDisplaySettings as getDisplay, setSkin, setTheme, useSettings } from "../lib/theme";
 import { NEW_WORDS } from "../native/accountWords";
 import { WORKFLOWS_ICON_PATHS } from "../orchestrate/workflows/glyphs";
@@ -64,8 +65,14 @@ const writeSetupHint = (on: boolean): void => {
   }
 };
 
-/** The phone layout: a tab bar, sheets, large titles (tokens.css switches at the same width). */
-export const PHONE_QUERY = "(max-width: 839px)";
+/** The phone layout: a tab bar, sheets, large titles (lib/device.ts decides it). */
+export { PHONE_QUERY } from "../lib/device";
+
+/** What is drawn over the page and is not the page (the palette, the toasts): its keys stay
+ *  live while the panel covers the page (a narrow window) and the page's own are off. */
+export function OverPage({ children }: { children: ReactNode }) {
+  return <KeysOff.Provider value={false}>{children}</KeysOff.Provider>;
+}
 
 /** Whether a media query matches, live. */
 export function useMedia(query: string): boolean {
@@ -390,21 +397,24 @@ function NavEntry({
   needs,
   tip,
   here,
+  covered,
 }: {
   n: NavItem;
   active: boolean;
   action: string | undefined;
   needs: number;
   tip: boolean;
-  /** The page is open at exactly this entry's address: a tap again goes to its top. */
+  /** The page is open at exactly this entry's address: a tap again goes to its top, or,
+   *  with the panel covering it (a narrow window), brings the page back. */
   here: boolean;
+  covered: boolean;
 }) {
   const menu = useContextMenu(() => navMenu(n, action), { title: () => n.label });
   const keys = action ? hintFor(action) : "";
   return (
     <Link
       to={n.to}
-      plainClick={here ? toTop : undefined}
+      plainClick={here ? (covered ? closeSplit : toTop) : undefined}
       className={`nav-link ${active ? "nav-link--on" : ""}`}
       aria-current={active ? "page" : undefined}
       data-nav={n.key}
@@ -497,8 +507,7 @@ function MoreTab({ items, active, views }: { items: NavItem[]; active: string; v
 /** The More sheet is a phone's alone: its code is fetched when a phone is idle after load
  *  (so the first tap opens it at once), never on a desktop. */
 const moreSheet = lazyModule(() => import("./MoreSheet"));
-if (typeof window !== "undefined" && window.matchMedia?.(PHONE_QUERY).matches)
-  whenIdle(() => void moreSheet.preload().catch(() => {}));
+if (typeof window !== "undefined" && phoneLayout()) whenIdle(() => void moreSheet.preload().catch(() => {}));
 function MoreSheetHost(p: MoreSheetProps) {
   const m = moreSheet.use();
   return m ? <m.MoreSheet {...p} /> : null;
@@ -542,7 +551,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   const simple = useSimple();
   const account = accountMode();
   const nav = navItems(useThemes().themes, { setup: showSetup, simple, account });
-  const phone = useMedia(PHONE_QUERY);
+  const phone = usePhoneLayout();
   useResize();
   useThemeColor();
   useStreamMark();
@@ -593,7 +602,50 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       navigate(v.to);
     });
   }
-  const shellStyle = { "--split-width": `${splitOpen && !phone ? splitWidth : 0}px` } as CSSProperties;
+  // A window with a mouse under 840 px has no room for a session beside its page: the
+  // panel covers the page (split.css), from the rail to the window's edge. The page under
+  // it leaves the tab order and the accessibility tree until the panel closes or the
+  // window widens, and its keys are off (KeysOff, below): the palette, the toasts and
+  // Settings are in <main> too, and stay live. The focus goes from the page to the panel,
+  // and back to the row it was on unless it has been put somewhere since.
+  const covers = usePanelCovers() && splitOpen;
+  const stillOpen = useRef(splitOpen);
+  stillOpen.current = splitOpen;
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main || !covers) return;
+    const pages = () => main.querySelectorAll<HTMLElement>(":scope > :is(.page, .theme-page)");
+    const at = document.activeElement as HTMLElement | null;
+    const held = at && [...pages()].some((page) => page.contains(at)) ? at : null;
+    const cover = () => {
+      for (const el of pages()) el.setAttribute("inert", "");
+    };
+    cover();
+    // From the page, or from nowhere in particular: not from the rail or something open.
+    if (held || !at || at === document.body || at === main)
+      document.querySelector<HTMLElement>("aside.panel")?.focus({ preventScroll: true });
+    // A page that arrives under the panel (a lazy page's code, the board under Settings).
+    const arrivals = new MutationObserver(cover);
+    arrivals.observe(main, { childList: true });
+    return () => {
+      arrivals.disconnect();
+      for (const el of pages()) el.removeAttribute("inert");
+      const now = document.activeElement;
+      const free = !now || now === document.body || (!stillOpen.current && !!now.closest("aside.panel"));
+      if (held?.isConnected && free) held.focus({ preventScroll: true });
+    };
+  }, [covers]);
+  // A move away from a page the panel covered leaves the panel behind: the page asked for
+  // is the one to see, not what was over the last. Not a redirect, nor Back and Forward,
+  // which show what was there; and Settings is a window over the page, which moves nothing.
+  const under = useRef<{ path: string; covered: boolean } | null>(null);
+  useEffect(() => {
+    if (route.name === "settings") return;
+    const was = under.current;
+    under.current = { path, covered: covers };
+    if (was?.covered && was.path !== path && lastMove() === "navigate") leaveSplit();
+  }, [path, route.name, covers]);
+  const shellStyle = { "--split-width": `${splitOpen && !phone && !covers ? splitWidth : 0}px` } as CSSProperties;
   const entry = (n: NavItem, tip: boolean) => (
     <NavEntry
       key={n.key}
@@ -603,6 +655,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       needs={needs}
       tip={tip}
       here={path === n.to || (n.key === "search" && active === "search")}
+      covered={covers}
     />
   );
   const firstView = nav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
@@ -710,7 +763,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         </div>
       </nav>
       <main className={`main ${route.name === "theme" ? "main--bleed" : ""}`} id="main" ref={mainRef} tabIndex={-1}>
-        {children}
+        <KeysOff.Provider value={covers}>{children}</KeysOff.Provider>
       </main>
       <nav className="tabbar" aria-label="Pages">
         {tabs.map((n) => entry(n, false))}

@@ -326,7 +326,7 @@
     text-underline-offset: 2px;
   }
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .inbox-note-way {
     color: var(--tint-fg);
     font-weight: 600;
@@ -395,7 +395,7 @@
     opacity: 0.45;
   }
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .inbox-main {
     min-height: 64px;
     row-gap: 3px;

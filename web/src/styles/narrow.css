@@ -173,7 +173,7 @@
 
 /* ---------- the phone's back button and empty states ---------- */
 
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   /* The chevron with the previous page's name beside it, both in the tint's ink (the name
      is text, so the readable --tint-fg, and the chevron matches it), as iOS's back button
      (PageBar.tsx BackButton): the name gives way to an ellipsis before it reaches the

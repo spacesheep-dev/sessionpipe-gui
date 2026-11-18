@@ -384,6 +384,152 @@ test.describe("split panel", () => {
     });
   });
 
+  // A window with a mouse under 840 px wide (half a 13-inch screen) keeps the desktop's
+  // layout, with no room for a session beside its page: the panel covers the page.
+  test.describe("a narrow window (desktop)", () => {
+    test.skip(({ isMobile }) => !!isMobile, "desktop project only");
+    test.use({ viewport: { width: 760, height: 800 } });
+
+    const rail = (page: Page) => page.locator("nav.rail");
+    const covered = (page: Page) => page.locator("main.main > .page[inert]");
+    /** The panel from the rail's edge to the window's, once it has slid in. */
+    const covers = async (page: Page) => {
+      const span = async () => {
+        const [r, p] = await Promise.all([rail(page).boundingBox(), panel(page).boundingBox()]);
+        return { rail: Math.round(r!.width), from: Math.round(p!.x), to: Math.round(p!.x + p!.width) };
+      };
+      const edge = (await span()).rail;
+      await expect.poll(span).toEqual({ rail: edge, from: edge, to: page.viewportSize()!.width });
+    };
+
+    test("the panel covers the page from the rail; Esc gives the list back, the focus on its row", async ({
+      page,
+      request,
+    }) => {
+      // A session of the test's own: its row stays where it is while the panel is over it.
+      const key = await postLongSession(request);
+      const row = `/s/${key.replace(":", "/")}`;
+      await openBoard(page);
+      // By the keys: the cursor on that row, then beside.
+      const link = page.locator(`article.card a.card-link[href="${row}"]`);
+      await link.focus();
+      await expect(link).toBeFocused();
+      await page.keyboard.press("Shift+Enter");
+      await expect(panel(page)).toHaveClass(/panel--open/);
+      await expect(panel(page)).not.toHaveClass(/panel--sheet/);
+      await covers(page);
+      await expect(rail(page)).toBeVisible();
+      await expect(page.locator("nav.tabbar")).toBeHidden();
+      // Nothing to resize, and nothing kept clear for it: the page under it has the column.
+      await expect(page.locator(".panel-grip")).toBeHidden();
+      expect(await page.locator(".shell").evaluate((el) => getComputedStyle(el).paddingRight)).toBe("0px");
+      // The page under it is out of the tab order and the accessibility tree; the palette
+      // and the toasts, which are in <main> too, are not.
+      await expect(covered(page)).toHaveCount(1);
+      // The focus the page gave up is in the panel, and the list's keys are off: nothing
+      // moves a cursor nobody sees, and Enter opens no row from under the panel.
+      await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest("aside.panel"))).toBe(true);
+      const here = page.url();
+      await page.keyboard.press("j");
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("e");
+      await page.waitForTimeout(300);
+      expect(page.url()).toBe(here);
+      await expect(panel(page)).toHaveClass(/panel--open/);
+      await expect(page.locator(`article.card a.card-link[href="${row}"]`)).toHaveCount(1);
+      await expect(page.locator("main.main")).not.toHaveAttribute("inert");
+      const taken = await page.evaluate(() => {
+        const link = document.querySelector<HTMLElement>("main.main > .page a.card-link")!;
+        link.focus();
+        return document.activeElement === link;
+      });
+      expect(taken, "a row under the panel takes the focus").toBe(false);
+      await page.keyboard.press("ControlOrMeta+k");
+      const palette = page.getByRole("dialog", { name: "Command palette" });
+      await expect(palette).toBeVisible();
+      await expect(palette.getByRole("combobox")).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(palette).toBeHidden();
+      await expect(panel(page)).toHaveClass(/panel--open/);
+      // Its own controls are as ever: the session, its close button, Esc.
+      await expect(panel(page).locator("ol.timeline li.turn").first()).toBeVisible();
+      await expect(panel(page).getByRole("button", { name: "Close panel" })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(panel(page)).not.toHaveClass(/panel--open/);
+      await expect(page).not.toHaveURL(/[?&]s=/);
+      await expect(covered(page)).toHaveCount(0);
+      await expect(page.getByRole("heading", { name: "Board", exact: true })).toBeVisible();
+      // The list is where it was, the focus back on the row the session was opened from.
+      await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute("href") ?? "")).toBe(row);
+    });
+
+    test("a wider window has it beside the page again, at the width it had", async ({ page }) => {
+      await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.splitWidth", "520"));
+      await page.setViewportSize({ width: 1000, height: 800 });
+      await openBeside(page);
+      const beside = async () => {
+        await expect.poll(async () => Math.round((await panel(page).boundingBox())!.width)).toBe(520);
+        await expect.poll(async () => Math.round((await panel(page).boundingBox())!.x)).toBe(480);
+        await expect(covered(page)).toHaveCount(0);
+        await expect(page.locator(".panel-grip")).toBeVisible();
+        expect(await page.locator(".shell").evaluate((el) => getComputedStyle(el).paddingRight)).toBe("520px");
+      };
+      await beside();
+      // Narrowed (the window tiled to half the screen): the same panel, over the page.
+      for (const width of [839, 720]) {
+        await page.setViewportSize({ width, height: 800 });
+        await expect(panel(page)).toHaveClass(/panel--open/);
+        await covers(page);
+        await expect(covered(page)).toHaveCount(1);
+      }
+      await page.setViewportSize({ width: 1000, height: 800 });
+      await beside();
+      // One pixel past the narrow window's last, it is beside the page: as wide as it was
+      // set, less what the page keeps (360 px of the window).
+      await page.setViewportSize({ width: 840, height: 800 });
+      await expect.poll(async () => Math.round((await panel(page).boundingBox())!.width)).toBe(480);
+      await expect(covered(page)).toHaveCount(0);
+      await expect(page.locator(".panel-grip")).toBeVisible();
+    });
+
+    test("a move to another page leaves the panel behind; the page's own entry brings the page back", async ({
+      page,
+    }) => {
+      await openBeside(page);
+      await covers(page);
+      const s = new URL(page.url()).searchParams.get("s");
+      // The sidebar is live beside the panel: the page asked for is shown, not kept under it.
+      await rail(page).locator('[data-nav="inbox"]').click();
+      await expect(page).toHaveURL(/\/inbox$/);
+      await expect(panel(page)).not.toHaveClass(/panel--open/);
+      await expect(page.getByRole("heading", { name: "Inbox", exact: true })).toBeVisible();
+      await expect(covered(page)).toHaveCount(0);
+      // One step in the history: Back is the board with its panel, as it was left.
+      await page.goBack();
+      await expect(page).toHaveURL(/\/\?s=/);
+      expect(new URL(page.url()).searchParams.get("s")).toBe(s);
+      await expect(panel(page)).toHaveClass(/panel--open/);
+      await covers(page);
+      // The entry of the page under the panel is lit: pressed, it shows that page.
+      await expect(rail(page).locator('[data-nav="board"]')).toHaveAttribute("aria-current", "page");
+      await rail(page).locator('[data-nav="board"]').click();
+      await expect(panel(page)).not.toHaveClass(/panel--open/);
+      await expect(page).toHaveURL(/\/$/);
+      await expect(page.getByRole("heading", { name: "Board", exact: true })).toBeVisible();
+      // Settings is a window over the page: opening and closing it moves nothing.
+      await page.goBack();
+      await expect(panel(page)).toHaveClass(/panel--open/);
+      await rail(page).locator('[data-nav="settings"]').click();
+      const settings = page.getByRole("dialog", { name: "Settings" });
+      await expect(settings).toBeVisible();
+      await expect(panel(page)).toHaveClass(/panel--open/);
+      await page.keyboard.press("Escape");
+      await expect(settings).toBeHidden();
+      await expect(panel(page)).toHaveClass(/panel--open/);
+      expect(new URL(page.url()).searchParams.get("s")).toBe(s);
+    });
+  });
+
   test.describe("tabs (desktop)", () => {
     test.skip(({ isMobile }) => !!isMobile, "desktop project only");
 

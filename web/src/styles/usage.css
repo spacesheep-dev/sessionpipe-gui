@@ -136,7 +136,7 @@
   font-size: var(--text-sm);
 }
 
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .usage-acct > .usage-head {
     order: 0;
     padding: 0 16px 6px;

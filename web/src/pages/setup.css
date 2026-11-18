@@ -465,7 +465,7 @@
 }
 
 /* ----- the phone: the steps as one inset group ----- */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .steps {
     padding: 0 16px;
     border-radius: var(--radius-pop);

@@ -9,6 +9,14 @@ use tauri::{LogicalPosition, TitleBarStyle};
 
 pub const MAIN: &str = "main";
 
+/// The narrowest a window goes, the main one and a view's. 720 is the width the page keeps
+/// its desktop layout from in a window with a mouse (web/src/lib/device.ts, DESKTOP_QUERY;
+/// web/src/lib/breakpoints.test.ts holds the two to one number): a pixel under it the page
+/// would be the phone's, tab bar and sheets. It is also half the screen of a 13-inch
+/// MacBook (1440 pt), so a window tiled to one side stays a Mac app.
+const MIN_WIDTH: f64 = 720.0;
+const MIN_HEIGHT: f64 = 480.0;
+
 /// Light and dark `--bg` of the sessionpipe skin (white #FFFFFF, ink #141414), painted before the page.
 pub const BG_LIGHT: (u8, u8, u8) = (255, 255, 255);
 pub const BG_DARK: (u8, u8, u8) = (20, 20, 20);
@@ -207,7 +215,7 @@ fn build_main<R: Runtime>(app: &AppHandle<R>, initial_path: Option<&str>) -> tau
     let builder = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
         .title("sessionpipe")
         .inner_size(1200.0, 800.0)
-        .min_inner_size(720.0, 480.0)
+        .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
         .center()
         .background_color(tauri::window::Color(r, g, b, 255))
         .initialization_script(init_script(&c, initial_path))
@@ -324,6 +332,7 @@ pub fn open_view<R: Runtime>(app: &AppHandle<R>, receiver: &str, path: &str) -> 
     WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url.clone()))
         .title("sessionpipe")
         .inner_size(1100.0, 760.0)
+        .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
         .on_navigation(move |u| {
             let same = u.origin() == origin;
             if !same && matches!(u.scheme(), "http" | "https") {

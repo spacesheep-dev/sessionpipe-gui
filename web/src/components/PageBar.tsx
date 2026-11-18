@@ -20,22 +20,9 @@ import {
   useState,
 } from "react";
 import { useStore } from "../data/hooks";
+import { usePhoneLayout } from "../lib/device";
 import { SearchInput } from "./bits";
 import { listBehind, useConnection } from "./Shell";
-
-const PHONE = "(max-width: 839px)";
-
-function usePhone(): boolean {
-  const [on, setOn] = useState(() => typeof matchMedia === "function" && matchMedia(PHONE).matches);
-  useEffect(() => {
-    const mq = matchMedia(PHONE);
-    const up = () => setOn(mq.matches);
-    up();
-    mq.addEventListener("change", up);
-    return () => mq.removeEventListener("change", up);
-  }, []);
-  return on;
-}
 
 /** The phone's subtitle line under a large title: the meta, or while the stream is down
  *  its state and Retry (ConnStatus below, in the phone's look). Its own component, so the
@@ -150,7 +137,7 @@ export function PageBar({
   titleClassName?: string;
   className?: string;
 }) {
-  const phone = usePhone();
+  const phone = usePhoneLayout();
   const bigTitle = phone && large;
   const big = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(!bigTitle);
@@ -219,7 +206,7 @@ const LIST_TITLE: Record<string, string> = {
  *  label is the tooltip; on a phone it stands beside the chevron in the tint, as iOS's
  *  back button does, cut with an ellipsis before it reaches the title. */
 export function BackButton({ onClick, label }: { onClick: () => void; label?: string }) {
-  const phone = usePhone();
+  const phone = usePhoneLayout();
   const text = label ?? LIST_TITLE[listBehind()] ?? "Board";
   return (
     <button

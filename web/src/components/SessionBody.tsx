@@ -76,6 +76,7 @@ import "../lib/acp";
 import { FilesButton } from "../files/FilesButton";
 import { BESIDE, FilesDrawer } from "../files/FilesDrawer";
 import { closeDrawer, FILE_PARAM, openDrawer, toggleDrawer, useDrawer } from "../files/state";
+import { wideLayout } from "../lib/device";
 import {
   ATTENTION_LABEL,
   attentionMessage,
@@ -3276,8 +3277,6 @@ function askState(
   return { text: `answered in ${took}${relay}`, glyph: "ok" };
 }
 
-const isWide = () => typeof matchMedia === "function" && matchMedia("(min-width: 840px)").matches;
-
 /** One agent this session asked, where the ask happened (UX-SPEC §3.1): one line in the
  *  agent's column, a glyph, "Asked Codex · <its title> · <state>", the whole row a link to
  *  the asked session; the answer folded under it only when it was not relayed here. */
@@ -3298,7 +3297,7 @@ function AskRow({ item, ask: given, as }: { item?: DelegationItem; ask?: Ask; as
   const menu = useContextMenu(
     () => [
       path && { label: "Open the asked session", run: () => navigate(path) },
-      path && isWide() && { label: "Open beside", run: () => openSplit(a.to!) },
+      path && wideLayout() && { label: "Open beside", run: () => openSplit(a.to!) },
       copyItem("Copy the answer", a.reply ?? null),
       target && copyItem("Copy session ID", target.id),
       { sep: true },

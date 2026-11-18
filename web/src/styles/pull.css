@@ -7,32 +7,34 @@
    clipped to it, emerging as the gap opens, as a native list's spinner does. Transform
    only: nothing is laid out twice while the finger moves. */
 
-@media (max-width: 839px) and (prefers-reduced-motion: no-preference) {
-  html[data-pull] .main {
-    transform: translateY(var(--pull-y, 0px));
-  }
-  /* The bar is the one thing that stays: it is inside the page, so it moves back. */
-  html[data-pull] .main > .page > .bar {
-    transform: translateY(calc(-1 * var(--pull-y, 0px)));
-  }
-  /* The dropped-stream pill rides with the content, under the ring. Its arrival's rise
-     would otherwise hold its transform. */
-  html[data-pull] .phone-conn {
-    animation: none;
-    transform: translateY(var(--pull-y, 0px));
-  }
-  /* Let go: the content settles to the resting line, or all the way back. */
-  html[data-pull="refreshing"] :is(.main, .main > .page > .bar, .phone-conn),
-  html[data-pull="refreshing"] .pull {
-    transition:
-      transform var(--dur) var(--ease-out),
-      height var(--dur) var(--ease-out);
-  }
-  html[data-pull="settling"] :is(.main, .main > .page > .bar, .phone-conn),
-  html[data-pull="settling"] .pull {
-    transition:
-      transform var(--dur-slow) var(--ease-out),
-      height var(--dur-slow) var(--ease-out);
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+  @media (prefers-reduced-motion: no-preference) {
+    html[data-pull] .main {
+      transform: translateY(var(--pull-y, 0px));
+    }
+    /* The bar is the one thing that stays: it is inside the page, so it moves back. */
+    html[data-pull] .main > .page > .bar {
+      transform: translateY(calc(-1 * var(--pull-y, 0px)));
+    }
+    /* The dropped-stream pill rides with the content, under the ring. Its arrival's rise
+       would otherwise hold its transform. */
+    html[data-pull] .phone-conn {
+      animation: none;
+      transform: translateY(var(--pull-y, 0px));
+    }
+    /* Let go: the content settles to the resting line, or all the way back. */
+    html[data-pull="refreshing"] :is(.main, .main > .page > .bar, .phone-conn),
+    html[data-pull="refreshing"] .pull {
+      transition:
+        transform var(--dur) var(--ease-out),
+        height var(--dur) var(--ease-out);
+    }
+    html[data-pull="settling"] :is(.main, .main > .page > .bar, .phone-conn),
+    html[data-pull="settling"] .pull {
+      transition:
+        transform var(--dur-slow) var(--ease-out),
+        height var(--dur-slow) var(--ease-out);
+    }
   }
 }
 
@@ -59,7 +61,7 @@ html[data-pull="refreshing"] .pull {
 html[data-pull="settling"] .pull {
   transition: opacity var(--dur-slow) var(--ease-in);
 }
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   .pull {
     display: none;
   }

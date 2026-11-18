@@ -25,10 +25,10 @@ import {
   useId,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import { deviceWords } from "../control/signer";
 import { useAppState, useConnection, useStore } from "../data/hooks";
+import { usePhoneLayout } from "../lib/device";
 import { tablistKey } from "../lib/focus";
 import { bytes } from "../lib/format";
 import { reducedMotion, tokenMs } from "../lib/motion";
@@ -160,15 +160,6 @@ function useAskedSection(): Section | null {
   return null;
 }
 
-const PHONE = "(max-width: 839px)";
-const subscribePhone = (l: () => void) => {
-  const mq = matchMedia(PHONE);
-  mq.addEventListener("change", l);
-  return () => mq.removeEventListener("change", l);
-};
-const isPhone = () => typeof matchMedia === "function" && matchMedia(PHONE).matches;
-const usePhone = () => useSyncExternalStore(subscribePhone, isPhone, () => false);
-
 /** A choice pushed as its own page on a phone (iOS Settings): the options as rows with
  *  the current one checked; the bar's back goes to the section. */
 interface Picker {
@@ -197,7 +188,7 @@ export function Choice<T extends string | number>({
   note?: ReactNode;
   disabled?: boolean;
 }) {
-  const phone = usePhone();
+  const phone = usePhoneLayout();
   const push = useContext(PickerCtx);
   if (!phone)
     return <Segmented<T> value={value} options={options} onChange={onChange} label={label} disabled={disabled} />;
@@ -218,7 +209,7 @@ export function Choice<T extends string | number>({
 export function Settings() {
   const asked = useAskedSection();
   const section = asked ?? "general";
-  const phone = usePhone();
+  const phone = usePhoneLayout();
   // The phone's stack: no section asked for is the list; a section is pushed over it.
   const view = phone && !asked ? "list" : "pane";
   const ref = useRef<HTMLDivElement>(null);

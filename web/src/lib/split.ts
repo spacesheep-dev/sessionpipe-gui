@@ -249,6 +249,12 @@ export function closeSplit(): void {
   commit({ tabs: [], active: 0 });
 }
 
+/** Closes the panel within the history entry that is open: for a move to another page
+ *  that takes the panel away (it covered the page, Shell.tsx), so Back is still one step. */
+export function leaveSplit(): void {
+  commit({ tabs: [], active: 0 }, { replace: true });
+}
+
 /** The rectangle the last `openSplit` asked to animate from, once. */
 export function takeFrom(): Rect | null {
   const r = pendingFrom;

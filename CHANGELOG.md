@@ -274,6 +274,21 @@ pairing link that carries the board's key only for a pairing the sink token star
   were meant to and did not. On a phone the row has one moment where it had two. A changed
   file reads "Changed src/webhooks/send.ts", as an edit reads "Edit …", where it read
   "files.changed Changed …", in the results and in a history transcript.
+- **A window with a mouse keeps the desktop's layout down to 720 px wide.** A Mac window
+  tiled to half a 13- or 14-inch screen (720 to 756 px) turned into the iPhone's app: a tab
+  bar along the bottom, a large title, buttons a finger's size, and a row's right-click as
+  a sheet from the bottom edge, with Open beside and every shortcut left out. It now keeps
+  the compact sidebar with the traffic lights in it, the title in the bar, Deny and Allow at
+  a pointer's size and menus at the pointer; so do the Windows and Linux apps, and a
+  desktop browser's window. A touch screen under 840 px (a phone, a tablet held upright)
+  keeps the phone's layout, and a view's window can no longer be made narrower than the
+  main one (720 by 480).
+- **In a window that narrow, a session opened beside a page covers the page.** There is no
+  room for both, so it runs from the sidebar to the window's edge: its tabs, its close
+  button and Esc are as before, and a wider window has it beside the page again at the
+  width it had. While it covers the page the keys are the session's (none moves a cursor
+  or opens a row under it), another page chosen in the sidebar leaves it behind, and the
+  page's own entry there brings the page back.
 
 ### Fixed
 
@@ -434,6 +449,10 @@ pairing link that carries the board's key only for a pairing the sink token star
   and a session found only by its branch or its model shows that after the repo
   ("lab-mac · acme/billing · demo/webhook-backoff") with the match bold; a long branch
   shows the end that matched ("…retry-backoff").
+- **In the Mac app the head of a session open beside a page drags the window,** as the
+  page's bar does.
+- **The Files drawer no longer lies over the sidebar in a window with a mouse under
+  1000 px wide,** nor over the Mac app's traffic lights: it starts where the sidebar ends.
 
 ## [0.8.4] - 2026-11-17
 

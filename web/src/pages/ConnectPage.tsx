@@ -14,6 +14,7 @@ import { PageBar } from "../components/PageBar";
 import { Select } from "../components/Select";
 import { resetInfoCache } from "../control/api";
 import { useAppState, useStore } from "../data/hooks";
+import { phoneLayout } from "../lib/device";
 import { bytes } from "../lib/format";
 import { copyText } from "../lib/menus";
 import { Link } from "../lib/router";
@@ -38,7 +39,7 @@ function useCopyMenu(text: string | null | undefined, title: string, extra?: () 
         ? [
             { label: "Copy", run: () => copyText(text) },
             /^https?:\/\//.test(text) && {
-              label: matchMedia("(max-width: 839px)").matches ? "Open" : "Open in new window",
+              label: phoneLayout() ? "Open" : "Open in new window",
               run: () => void window.open(text, "_blank", "noopener"),
             },
             ...(extra?.() ?? []),

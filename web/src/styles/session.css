@@ -11,7 +11,7 @@
 .main > .session {
   min-height: 100dvh;
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .main:has(> .session) {
     padding-bottom: calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom)));
   }
@@ -65,7 +65,7 @@ html:has(.main > .session) {
 .sess-bar .bar-lead {
   flex: 1 1 0;
 }
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   .sess-bar .bar-title {
     flex: 0 0 auto;
     max-width: 60%;
@@ -223,7 +223,7 @@ html:has(.main > .session) {
   min-width: 28px;
   padding: 0 8px;
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .sess-lens .lens-hint {
     flex: 1 1 auto;
   }
@@ -709,7 +709,7 @@ html:has(.main > .session) {
 .sess-new:active {
   background: color-mix(in oklch, var(--bg-2), var(--fg) 10%);
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   /* Over the tab bar, or on the keyboard when it is up: --kb is its height
      (lib/keyboardInset.ts, from visualViewport; absent, so 0, without one), and the tab bar
      stays where it is, under the keyboard, as iOS's does. The larger of the two, not their
@@ -822,7 +822,7 @@ html:has(.main > .session) {
   }
 }
 /* A phone has no "beside": the block itself is the way in, and the chevron stays. */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .agent-beside.icon-btn {
     display: none;
   }

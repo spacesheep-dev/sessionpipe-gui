@@ -7,7 +7,7 @@
 // a Mac and ctrl elsewhere. A person's overrides live in localStorage under
 // `sessionpipe-gui.shortcuts` as { [actionId]: string[] | null } (null = unbound); a view
 // plugin registers its own keys through ThemeApi.shortcuts and they join the same table.
-import { type RefObject, useEffect, useRef, useSyncExternalStore } from "react";
+import { createContext, type RefObject, useContext, useEffect, useRef, useSyncExternalStore } from "react";
 
 export const SEQUENCE_MS = 1200;
 export const STORAGE_KEY = "sessionpipe-gui.shortcuts";
@@ -985,6 +985,12 @@ export function registerHandler(id: string, run: Handler["run"], opts: HandlerOp
   };
 }
 
+/** Off for the part of the page it wraps: no handler attached inside it (`useShortcut`) is
+ *  live. The shell turns it on around a page the panel covers (a window too narrow for a
+ *  session beside it, components/Shell.tsx), so no key acts on a list that is not on
+ *  screen: its cursor, its Enter, an Allow under it. */
+export const KeysOff = createContext(false);
+
 /** The React form: the latest `run` always runs, the registration stays put. */
 export function useShortcut(
   id: string,
@@ -993,8 +999,9 @@ export function useShortcut(
 ): void {
   const runRef = useRef(run);
   runRef.current = run;
-  const enabledRef = useRef(opts.enabled ?? true);
-  enabledRef.current = opts.enabled ?? true;
+  const on = !useContext(KeysOff) && (opts.enabled ?? true);
+  const enabledRef = useRef(on);
+  enabledRef.current = on;
   const withinRef = useRef(opts.within);
   withinRef.current = opts.within;
   const priority = opts.priority ?? 0;
@@ -1132,7 +1139,8 @@ export function matches(
  *  host's mod chords, its navigation sequences and Esc work everywhere. */
 function viewOwns(e: KeyboardEvent, chord: Chord): boolean {
   const host = document.querySelector<HTMLElement>("[data-theme-id]:not([hidden])");
-  if (!host) return false;
+  // Nor a view whose page is covered (inert under the panel): nobody is in it.
+  if (!host || host.closest("[inert]")) return false;
   if (chord.mod || chord.ctrl || chord.alt || chord.meta || chord.key === "esc") return false;
   // Inside the view, or on one of its ancestors (the body, <main> after a click in it).
   const t = e.target as Node | null;

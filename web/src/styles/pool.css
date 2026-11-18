@@ -416,7 +416,7 @@
 
 /* ----- the phone ----- */
 
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .pool-section > .usage-head {
     padding: 0 16px 6px;
   }

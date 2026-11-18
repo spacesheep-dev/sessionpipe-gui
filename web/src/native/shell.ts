@@ -226,12 +226,13 @@ export function markFirstSnapshot(store: Store): void {
   });
 }
 
-/** The window's drag regions: the page bar's ground, the top band of the rail and the
- *  welcome's bar. Tauri drags from an element marked `data-tauri-drag-region`;
- *  "deep" lets a title or an empty stretch inside it drag too, while its own check keeps
- *  every control a control. The mark goes on just before its listener reads it, so the
- *  page's markup stays the browser's. */
-export const DRAG_REGIONS = ".bar, .rail-head, .welcome-bar";
+/** The window's drag regions: the page bar's ground, the top band of the rail, the panel's
+ *  head (all there is of the band past the rail where the panel covers the page,
+ *  styles/split.css) and the welcome's bar. Tauri drags from an element marked
+ *  `data-tauri-drag-region`; "deep" lets a title or an empty stretch inside it drag too,
+ *  while its own check keeps every control a control. The mark goes on just before its
+ *  listener reads it, so the page's markup stays the browser's. */
+export const DRAG_REGIONS = ".bar, .rail-head, .panel-head, .welcome-bar";
 export function dragRegion(t: EventTarget | null): HTMLElement | null {
   const el = t as HTMLElement | null;
   return el?.closest ? el.closest<HTMLElement>(DRAG_REGIONS) : null;

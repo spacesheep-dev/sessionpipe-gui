@@ -40,6 +40,7 @@ import {
 } from "../data/hooks";
 import { openDrawer, toggleDrawer } from "../files/state";
 import { agentLabel, agentMatches, openAgent } from "../lib/agents";
+import { phoneLayout } from "../lib/device";
 import {
   attentionMessage,
   isPlanReview,
@@ -381,7 +382,7 @@ function startSuggestion(
 /** The fixed rows a list ends on, so a long list shows whole rows at its fold. */
 function snapToRows(list: HTMLElement): void {
   list.style.maxHeight = "";
-  if (matchMedia("(max-width: 839px)").matches) return;
+  if (phoneLayout()) return;
   const cap = list.clientHeight;
   if (list.scrollHeight <= cap + 1) return;
   let bottom = 0;

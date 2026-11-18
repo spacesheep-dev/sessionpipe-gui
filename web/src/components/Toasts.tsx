@@ -19,6 +19,7 @@ import type { ControlActivity, SessionKey, SessionSummary, StoredEvent } from "@
 import { splitKey } from "@shared/api";
 import { useEffect, useRef, useState } from "react";
 import { type OpenAttention, openAttentions, useAppState, useStore } from "../data/hooks";
+import { phoneLayout, usePhoneLayout } from "../lib/device";
 import { ATTENTION_LABEL, attentionMessage, isQuestion, oneLine, sessionTitle, toolLabel } from "../lib/format";
 import { lazyModule, whenIdle } from "../lib/lazy";
 import { toastAllowed } from "../lib/marks";
@@ -40,7 +41,6 @@ import {
   useToasts,
 } from "../lib/toasts";
 import { answerable } from "./ControlStrip";
-import { PHONE_QUERY, useMedia } from "./Shell";
 import type { ToastCard as ToastCardType } from "./ToastCard";
 
 const attKey = (r: OpenAttention): string => `${r.session.key}|${r.attention.attentionId}`;
@@ -254,8 +254,7 @@ function phoneList(list: readonly Toast[], path: string): Toast[] {
  *  the first snapshot, so it is in long before the first one is drawn. */
 const banner = lazyModule(() => import("./Banner"));
 const card = lazyModule(() => import("./ToastCard"));
-if (typeof window !== "undefined")
-  whenIdle(() => void (window.matchMedia?.(PHONE_QUERY).matches ? banner : card).preload().catch(() => {}));
+if (typeof window !== "undefined") whenIdle(() => void (phoneLayout() ? banner : card).preload().catch(() => {}));
 
 /** The banner once its module is in (a few ms after the first ask, if not warmed yet). */
 function PhoneBanner(p: { toast: Toast; closing: boolean }) {
@@ -274,7 +273,7 @@ export function Toasts() {
   const list = useToasts();
   const { sessions, machines } = useAppState();
   const sounds = useSounds();
-  const phone = useMedia(PHONE_QUERY);
+  const phone = usePhoneLayout();
   // A session opened by any path takes its banner away.
   const path = usePath();
   useEffect(() => {

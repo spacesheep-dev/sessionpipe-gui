@@ -39,6 +39,7 @@ import { canSign, isCancel, setupLabel, signerKind, signHint, tapWords } from ".
 import { startGate } from "../../control/startGate";
 import { notSentWords, PERMISSION_LABEL } from "../../control/words";
 import { useListedSessions, useMachinesMap, useSession, useStore, useStreamDown } from "../../data/hooks";
+import { usePhoneLayout } from "../../lib/device";
 import { useFocusTrap } from "../../lib/focus";
 import { harnessMark, STATE_LABEL, sessionTitle } from "../../lib/format";
 import { useSheetDrag } from "../../lib/motion";
@@ -68,22 +69,10 @@ import {
 import "../../control/newSessionSheet.css";
 import "./handoff.css";
 
-const PHONE = "(max-width: 839px)";
 const TEXT_MAX = 20_000;
 const COUNTER_AT = 18_000;
 /** The default on an `inherit` machine, as New session's Permission pop-up names it. */
 const INHERIT_DEFAULT = "As your own sessions on this machine";
-
-function usePhone(): boolean {
-  const [on, setOn] = useState(() => typeof matchMedia === "function" && matchMedia(PHONE).matches);
-  useEffect(() => {
-    const mq = matchMedia(PHONE);
-    const up = () => setOn(mq.matches);
-    mq.addEventListener("change", up);
-    return () => mq.removeEventListener("change", up);
-  }, []);
-  return on;
-}
 
 /** What an ask was when it was pressed: all its "asked" needs after a confirm. */
 interface AskSent extends HeldMeta {
@@ -92,7 +81,7 @@ interface AskSent extends HeldMeta {
 }
 
 export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean }) {
-  const phone = usePhone();
+  const phone = usePhoneLayout();
   const session = useSession(open.session);
   const machines = useMachinesMap();
   // The agents to ask and the recent folders: the sessions the board lists.

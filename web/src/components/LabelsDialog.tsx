@@ -8,6 +8,7 @@
 import { LABEL_COLORS, LABEL_DEFAULT_NAMES, LABEL_NAME_MAX, type LabelColor } from "@shared/api";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useLabels, useStore } from "../data/hooks";
+import { phoneLayout } from "../lib/device";
 import { useFocusTrap } from "../lib/focus";
 import { onLabelRename, renameLabel } from "../lib/labels";
 
@@ -29,7 +30,7 @@ export function LabelsDialog() {
 function Dialog({ focus, onClose }: { focus?: LabelColor; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   // Read once, at open: a sheet on a phone, a dialog elsewhere.
-  const [phone] = useState(() => window.matchMedia?.("(max-width: 839px)").matches ?? false);
+  const [phone] = useState(phoneLayout);
   useFocusTrap(ref, true, { onClose, initial: focus ? `[data-label="${focus}"] input` : "input" });
   const rows = (
     <ul className="labels-rows">

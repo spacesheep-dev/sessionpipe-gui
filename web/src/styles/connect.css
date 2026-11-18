@@ -188,7 +188,7 @@
     align-self: center;
   }
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .url-label {
     min-width: 0;
   }
@@ -316,7 +316,7 @@
   font-size: var(--text-sm);
 }
 
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   /* On a phone an address is host:port; the scheme and the key ride along in Copy. */
   .url-scheme,
   .url-row .url-key {

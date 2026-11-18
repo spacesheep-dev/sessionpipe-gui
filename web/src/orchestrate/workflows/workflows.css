@@ -602,7 +602,7 @@ button.wf-row:active {
 
 /* ----- the phone: grouped cells, 44 px rows ----- */
 
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .wf-head {
     padding: 0 16px 6px;
     border-bottom: none;

@@ -20,6 +20,7 @@ import { useControlActivity, useGrant, useRpId } from "../../control/hooks";
 import { canSign, unlock, useOwnKeys } from "../../control/signer";
 import { harnessCommand, promptFailureWords, sentLine, startFailureWords } from "../../control/words";
 import { useAppState, useMachines } from "../../data/hooks";
+import { usePhoneLayout, wideLayout } from "../../lib/device";
 import { harnessMark, sessionTitle } from "../../lib/format";
 import { useListNav } from "../../lib/keys";
 import { copyText } from "../../lib/menus";
@@ -32,8 +33,6 @@ import { markMine, useMine } from "./mine";
 import { unsignable } from "./runner";
 import { useWorkflowsState } from "./state";
 import { machineNameOf, runLive, runMetaWords, stepHarness, stepName, stepRowWords } from "./words";
-
-const PHONE = "(max-width: 839px)";
 
 export function RunView({ id }: { id: string }) {
   const { runs, workflows, loaded } = useWorkflowsState();
@@ -68,7 +67,7 @@ function RunBody({ run, hasWorkflow }: { run: WorkflowRun; hasWorkflow: boolean 
   const machines = useMachines();
   const { sessions } = useAppState();
   const machineName = useMemo(() => machineNameOf(machines), [machines]);
-  const phone = typeof matchMedia === "function" && matchMedia(PHONE).matches;
+  const phone = usePhoneLayout();
   const live = runLive(run);
 
   // This page's own signing: whether the signer line can offer Unlock now, or Sign here
@@ -294,7 +293,7 @@ function StepRow({
       action: "list.open",
       run: () => navigate(sessionPath(splitKey(key).harness, splitKey(key).id)),
     },
-    key && !phoneNow() && { label: "Open beside", action: "list.beside", run: () => openSplit(key) },
+    key && wideLayout() && { label: "Open beside", action: "list.beside", run: () => openSplit(key) },
     s.status === "done" && s.reply && { label: "Copy the reply", run: () => copyText(s.reply!) },
     s.text && { label: "Copy the prompt", run: () => copyText(s.text!) },
     { sep: true },
@@ -393,5 +392,3 @@ function StepRow({
     </li>
   );
 }
-
-const phoneNow = (): boolean => typeof matchMedia === "function" && matchMedia(PHONE).matches;

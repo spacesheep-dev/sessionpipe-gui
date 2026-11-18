@@ -19,6 +19,7 @@ import { LensChip, LensNote } from "../components/LensChip";
 import { PageBar } from "../components/PageBar";
 import { BesideButton, Inline, lensMenu, useBackgroundMenu, useStickyTop } from "../components/SessionCard";
 import { useAppState, useLabels, useStore } from "../data/hooks";
+import { wideLayout } from "../lib/device";
 import { eventSummary, harnessMark, isQuestion, oneLine, sessionTitle, storedKey, toolLabel } from "../lib/format";
 import { useListNav } from "../lib/keys";
 import { type LabelFilter, labelPasses, labelQuery } from "../lib/labels";
@@ -194,7 +195,6 @@ const agentOf = (e: StoredEvent): string | undefined =>
   typeof e.data.agent_id === "string" ? e.data.agent_id : undefined;
 
 const sentence = (s: string) => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
-const desktop = () => typeof matchMedia === "function" && matchMedia("(min-width: 840px)").matches;
 
 /** What a row's menu needs from the page, read when the menu opens. */
 interface FeedMenuContext {
@@ -727,7 +727,7 @@ const FeedRow = memo(function FeedRow({
   const menu = useContextMenu(
     (): MenuList => {
       const c = ctx.current;
-      const wide = desktop();
+      const wide = wideLayout();
       const openPage = { label: "Open as page", action: beside ? undefined : "list.open", run: () => navigate(path) };
       const openBeside = {
         label: wide ? "Open beside" : "Preview",

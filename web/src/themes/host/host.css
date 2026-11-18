@@ -14,7 +14,7 @@
   /* The tab bar is fixed at the bottom on phones; the rail is a column on wide screens. */
   height: calc(100dvh - var(--tabbar) - var(--safe-bottom, env(safe-area-inset-bottom)));
 }
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   .theme-page {
     height: 100dvh;
   }
@@ -202,7 +202,7 @@
 .extras-log.is-err {
   color: var(--err);
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .themes-row {
     flex-wrap: wrap;
   }

@@ -682,7 +682,7 @@ textarea.field {
     display: none;
   }
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .search {
     flex: 1 1 100%;
     max-width: none;
@@ -769,7 +769,7 @@ fieldset.seg {
    itself, so the control would be a floating white pill and loose labels: there it is one
    step into the ink from that ground, --bg-4's tier in light, and in dark still a step
    under the raised segment (which is --bg-4 there, so --bg-4 itself would swallow it). */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .qs--tabbar .seg,
   .page--grouped .seg {
     background: color-mix(in oklch, var(--grouped-ground), var(--fg) 5%);
@@ -921,7 +921,7 @@ fieldset.seg {
    a link in running text (in the text cut: a link is words). A desktop keeps ink for all
    of them. The tab bar and the back chevron are in shell.css, the sheet's bar buttons in
    control/newSessionSheet.css; a view never reads the tint. */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .toggle-on {
     background: var(--tint);
   }
@@ -1181,7 +1181,7 @@ fieldset.seg {
 /* On the phone a command longer than the well runs under a fade at its end, which says it
    goes on (there is no scrollbar to); the end pad keeps the command's last token clear of
    the fade once scrolled to it. */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .cmdwell-text {
     padding-right: 20px;
     -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
@@ -1229,7 +1229,7 @@ fieldset.seg {
   gap: 4px;
 }
 /* On the phone the notice's plain action ("How to allow") is the tint, as a row's action is. */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .notice-action .btn--ghost {
     color: var(--tint-fg);
   }
@@ -1277,7 +1277,7 @@ fieldset.seg {
 }
 /* The phone's lists (Board, Inbox) keep a section heading stuck under the folded bar
    whenever they are scrolled, and the heading draws the hairline. */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .page:has(.group-head) > .bar[data-collapsed] {
     border-bottom-color: transparent;
   }

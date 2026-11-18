@@ -11,7 +11,7 @@ import { KeyRefused } from "./components/KeyRefused";
 import { PageBar } from "./components/PageBar";
 import { Palette } from "./components/Palette";
 import { Settings } from "./components/Settings";
-import { Shell } from "./components/Shell";
+import { OverPage, Shell } from "./components/Shell";
 import { Toasts } from "./components/Toasts";
 import { AddDevicePage } from "./control/AddDevice";
 import { resetInfoCache } from "./control/api";
@@ -168,8 +168,10 @@ export function App() {
     return (
       <Shell route={route}>
         <NoReceiver />
-        <Palette />
-        <Toasts />
+        <OverPage>
+          <Palette />
+          <Toasts />
+        </OverPage>
       </Shell>
     );
   return (
@@ -205,8 +207,10 @@ export function App() {
         (account ? <ApprovePhonePage /> : <AddDevicePage />)}
       {route.name === "phone" && <PhonePage />}
       {route.name === "missing" && <Missing path={route.path} />}
-      <Palette />
-      <Toasts />
+      <OverPage>
+        <Palette />
+        <Toasts />
+      </OverPage>
     </Shell>
   );
 }

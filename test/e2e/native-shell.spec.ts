@@ -8,7 +8,7 @@
 // the flag never loads a byte of the native code.
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { dropStream, EVENTS, INFO, openPrompt, sessionUrl, tapStream, tier1Batch, ulid } from "./helpers.js";
+import { dropStream, EVENTS, holdBoard, INFO, openPrompt, sessionUrl, tapStream, tier1Batch, ulid } from "./helpers.js";
 import { openInPhone } from "./phone-shell.js";
 
 interface FakeOptions {
@@ -335,15 +335,120 @@ test.describe("inside the native shell", () => {
     expect((await corner()).filter(Boolean)).toEqual([]);
     const compact = await page.locator(".rail-compose").boundingBox();
     expect(compact!.y).toBeGreaterThanOrEqual(48);
-    // A narrow window: the page bar's title starts after the lights.
+    // A narrow window (half a 13-inch screen) keeps the compact rail: the lights are the
+    // rail's, so the page bar is padded by the gutter alone, as in the wider window.
+    const bar = page.locator(".main .bar").first();
+    const padOf = () => bar.evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingLeft));
+    const wide = await padOf();
+    for (const width of [760, 720]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect(page.locator(".rail")).toBeVisible();
+      await expect(page.locator(".tabbar")).toBeHidden();
+      expect((await corner()).filter(Boolean)).toEqual([]);
+      expect((await page.locator(".rail").boundingBox())!.width).toBe(80);
+      expect((await page.locator(".rail-compose").boundingBox())!.y).toBeGreaterThanOrEqual(48);
+      expect(await padOf()).toBe(wide);
+      expect(wide).toBeLessThan(84);
+    }
+    // Narrower than the app's window goes, the phone's layout: no rail, so the page bar's
+    // title starts after the lights.
+    await page.setViewportSize({ width: 700, height: 800 });
+    await expect(page.locator(".rail")).toBeHidden();
+    await expect(page.locator(".tabbar")).toBeVisible();
+    expect(await padOf()).toBeGreaterThanOrEqual(84);
+  });
+
+  test("a window half a 13-inch screen wide is still the Mac app, not the phone's", async ({ page, request }) => {
     await page.setViewportSize({ width: 760, height: 800 });
-    const title = await page.locator(".main .bar").first().boundingBox();
-    const pad = await page
-      .locator(".main .bar")
+    await openInShell(page, "/");
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    await expect(page.locator("section.group").first()).toBeVisible();
+    // The desktop's chrome: the rail and no tab bar, the 48 px bar with its title inline.
+    await expect(page.locator(".rail")).toBeVisible();
+    await expect(page.locator(".tabbar")).toBeHidden();
+    const bar = page.locator(".main > .page > .bar");
+    await expect(bar).toHaveClass(/bar--inline/);
+    expect((await bar.locator(".bar-row, .bar-lead").first().boundingBox())!.height).toBeLessThanOrEqual(48);
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bar").trim())).toBe(
+      "48px",
+    );
+
+    // A row's right-click is a menu at the pointer, not a sheet from the bottom edge, and
+    // it keeps what a mouse and a keyboard have: Open beside, with the keys.
+    await holdBoard(page);
+    const row = page.locator("article.card a.card-link").first();
+    const at = (await row.boundingBox())!;
+    await row.click({ button: "right", position: { x: 40, y: at.height / 2 } });
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible();
+    await expect(page.locator(".menu-grab")).toHaveCount(0);
+    await expect(page.locator(".menu-sheet")).toHaveCount(0);
+    const box = (await menu.boundingBox())!;
+    expect(Math.abs(box.x - (at.x + 40))).toBeLessThan(24);
+    expect(box.width).toBeLessThan(400);
+    const beside = menu.getByRole("menuitem", { name: /^Open beside/ });
+    await expect(beside).toBeVisible();
+    await expect(beside.locator(".menu-keys")).not.toHaveText("");
+    await expect(menu.getByRole("menuitem", { name: /^Open in new window/ })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+
+    // A prompt: Allow and Deny at a pointer's size on the question's line, and Back as
+    // the chevron alone.
+    const prompt = await openPrompt(request, { machine: "e2e-box", title: "A narrow Mac" });
+    try {
+      await page.goto(sessionUrl(prompt.harness, prompt.sessionId));
+      const strip = page.locator(".sess-ctl");
+      await expect(strip).toContainText("npm run deploy", { timeout: 15_000 });
+      const [allow, deny] = await Promise.all([
+        strip.getByRole("button", { name: /^Allow/ }).boundingBox(),
+        strip.getByRole("button", { name: /^Deny/ }).boundingBox(),
+      ]);
+      expect(allow!.height).toBeLessThanOrEqual(32);
+      expect(deny!.height).toBeLessThanOrEqual(32);
+      expect(Math.round(allow!.y)).toBe(Math.round(deny!.y));
+      expect(allow!.width).toBeLessThan(200);
+      await expect(page.locator(".bar-back")).toBeVisible();
+      await expect(page.locator(".bar-back-label")).toHaveCount(0);
+      await expect(page.locator(".tabbar")).toBeHidden();
+    } finally {
+      // Cleared, so no other spec finds it open.
+      await prompt.clear();
+    }
+  });
+
+  test("in that window a session beside the page covers it, and the window still drags by its band", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 760, height: 800 });
+    await openInShell(page, "/");
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    await holdBoard(page);
+    await page
+      .locator("article.card a.card-link")
       .first()
-      .evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingLeft));
-    expect(title).not.toBeNull();
-    expect(pad).toBeGreaterThanOrEqual(84);
+      .click({ modifiers: ["Shift"] });
+    const panel = page.locator("aside.panel");
+    await expect(panel).toHaveClass(/panel--open/);
+    await expect(panel).not.toHaveClass(/panel--sheet/);
+    // From the rail (80 px, the lights in it) to the window's edge, once it has slid in.
+    await expect.poll(async () => Math.round((await panel.boundingBox())!.x)).toBe(80);
+    expect(Math.round((await panel.boundingBox())!.width)).toBe(680);
+    await expect(page.locator(".rail")).toBeVisible();
+    // All there is of the title band past the rail is the panel's head: it drags the window.
+    const head = panel.locator(".panel-head");
+    const title = (await head.locator(".panel-title").boundingBox())!;
+    await page.mouse.move(title.x + title.width + 40, title.y + title.height / 2);
+    await page.mouse.down();
+    await expect(head).toHaveAttribute("data-tauri-drag-region", "deep");
+    await page.mouse.up();
+    // The sidebar toggled off (⌃⌘S): the panel has the window, its head after the lights.
+    await emit(page, "menu", { action: "toggle-sidebar" });
+    await expect(page.locator(".rail")).toBeHidden();
+    await expect.poll(async () => Math.round((await panel.boundingBox())!.x)).toBe(0);
+    expect(await head.evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingLeft))).toBeGreaterThanOrEqual(84);
+    await emit(page, "menu", { action: "toggle-sidebar" });
+    await expect(page.locator(".rail")).toBeVisible();
   });
 
   test("menu and navigate events drive the page; menu keys fire once", async ({ page }) => {
@@ -1400,6 +1505,25 @@ test.describe("notifications in the Mac app", () => {
       await s.done();
     }
   });
+});
+
+// A touch screen as wide as a narrow Mac window (an iPad held upright, or beside another
+// app) is not one: the width alone gives it the phone's layout, as before.
+test.describe("a touch screen 760 px wide", () => {
+  test.use({ viewport: { width: 760, height: 800 }, hasTouch: true });
+
+  for (const where of ["the phone app", "a browser"] as const)
+    test(`keeps the tab bar in ${where}`, async ({ page }) => {
+      if (where === "a browser") await page.goto("/");
+      else await openInPhone(page, "/", { receiver: true });
+      await expect(page.locator("section.group").first()).toBeVisible({ timeout: 15_000 });
+      await expect(page.locator("nav.tabbar")).toBeVisible();
+      await expect(page.locator("nav.rail")).toBeHidden();
+      await expect(page.locator(".main > .page > .bar")).toHaveClass(/bar--large/);
+      expect(
+        await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bar").trim()),
+      ).toBe("44px");
+    });
 });
 
 // The phone app (phone-shell.ts) at a phone's width: its bars are solid, so a list that runs

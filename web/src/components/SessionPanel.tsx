@@ -29,6 +29,7 @@ import { useStartTitles } from "../control/Starting";
 import { useAppState, useSeen, useStore } from "../data/hooks";
 import { FilesButton } from "../files/FilesButton";
 import { agentLabel, parseTab } from "../lib/agents";
+import { panelCovers, usePanelCovers } from "../lib/device";
 import { focusTab, tablistKey } from "../lib/focus";
 import { repoShort, sessionTitle } from "../lib/format";
 import { historyTitle, useHistoryTitles } from "../lib/historyTitle";
@@ -192,18 +193,20 @@ export function SessionPanel({ phone }: { phone: boolean }) {
   const here = usePanelHere();
   const wasOpen = useRef(tabs.length > 0 && here);
   const open = tabs.length > 0 && here;
+  // Covering the page (a narrow window, split.css) it is where the person is: it can take
+  // the focus the page under it gave up (Shell.tsx).
+  const covers = usePanelCovers() && open;
   // The active tab is on screen beside the page: it is seen as the page would be. On a
   // page the panel steps aside for, its tabs stay in the URL but nothing is on screen.
   useSeen(open && activeKey ? parseTab(activeKey).session : null);
   const started = useStartTitles();
 
-  const panelRect = useCallback(
-    (): Rect =>
-      phone
-        ? { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }
-        : { x: window.innerWidth - width, y: 0, width, height: window.innerHeight },
-    [phone, width],
-  );
+  const panelRect = useCallback((): Rect => {
+    if (phone) return { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
+    // Covering the page (a narrow window, split.css), it is as wide as the stylesheet drew it.
+    const w = panelCovers() ? (panelRef.current?.offsetWidth ?? width) : width;
+    return { x: window.innerWidth - w, y: 0, width: w, height: window.innerHeight };
+  }, [phone, width]);
 
   // Open and close: the morph in and out, and the body kept until the slide-out ends.
   useEffect(() => {
@@ -474,6 +477,7 @@ export function SessionPanel({ phone }: { phone: boolean }) {
       className={`panel ${open ? "panel--open" : ""} ${phone ? "panel--sheet" : ""}`}
       aria-label="Session panel"
       aria-hidden={!open}
+      tabIndex={covers ? -1 : undefined}
       data-split={activeKey ?? undefined}
     >
       {!phone && (
