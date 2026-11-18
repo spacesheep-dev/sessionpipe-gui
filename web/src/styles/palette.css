@@ -301,19 +301,34 @@
    to that much only, and past it the part does. `width` is only that bound (a flex item's
    automatic minimum is the smaller of its width and its least content); what the detail
    takes is the room the title leaves. */
-.pal-detail:has(> .pal-machine ~ .pal-why) {
+.pal-detail:has(> .pal-tail) {
   flex: 1 1 0;
   width: 60%;
 }
-/* The repo counts for nothing in that least (`width: 0`): it has the room the machine and
-   the part leave, up to its own text, and gives way before the title does, down to
-   nothing, its " · " with it. With less room than its "…" takes it would be a stray dot:
-   under 1.5em it is not drawn (the inset is all of it, or none). */
-.pal-detail:has(> .pal-machine ~ .pal-why) > .pal-repo:not(.pal-why) {
+/* The repo and the part, in the room the machine leaves. The repo is shown with at least
+   " · " and a few of its letters, or not at all: it is the tail's last item to place (the
+   row runs from the right, the parts first), so with less room it wraps to a second line,
+   which is cut off, and no gap or stray "…" is left where it was. */
+.pal-tail {
+  display: flex;
   flex: 1 1 0;
+  flex-flow: row-reverse wrap;
+  justify-content: flex-end;
+  min-width: 0;
+  height: calc(var(--lh) * 1em);
+  overflow: hidden;
+}
+.pal-whys {
+  order: -1;
+  display: flex;
+  min-width: 0;
+}
+/* It counts for nothing in the detail's least (`width: 0`), and has the room left, up to its
+   own text. */
+.pal-tail > .pal-repo {
+  flex: 1 0 4em;
   width: 0;
   max-width: max-content;
-  clip-path: inset(0 clamp(0px, (1.5em - 100%) * 9999, 100%) 0 0);
 }
 .pal-age {
   min-width: var(--meta-col);
@@ -456,18 +471,21 @@
   }
   /* A row here stays "machine · repo", laid out as it was: a third part would leave the
      title no room. */
-  .pal-why {
+  .pal-why,
+  .pal-whys {
     display: none;
   }
-  .pal-detail:has(> .pal-machine ~ .pal-why) {
+  .pal-detail:has(> .pal-tail) {
     flex: 0 10 auto;
     width: auto;
   }
-  .pal-detail:has(> .pal-machine ~ .pal-why) > .pal-repo:not(.pal-why) {
+  .pal-tail {
+    display: contents;
+  }
+  .pal-tail > .pal-repo {
     flex: 0 1 auto;
     width: auto;
     max-width: none;
-    clip-path: none;
   }
   .pal-section {
     padding: 14px 18px 6px;

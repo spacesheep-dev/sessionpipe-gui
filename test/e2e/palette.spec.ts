@@ -228,7 +228,7 @@ test.describe("command palette", () => {
       .toEqual([]);
   });
 
-  test("a row found by its branch keeps room for its title: the repo gives way first, and nothing reaches the age", async ({
+  test("a row found by its branch keeps room for its title: the repo gives way first, whole, and nothing reaches the age", async ({
     page,
     request,
   }) => {
@@ -241,10 +241,12 @@ test.describe("command palette", () => {
     };
     const long = `Tidy the retry queue ahead of the Friday demo ${t}`;
     const short = `Fix ${t}`;
-    await postSession(request, long, names);
-    await postSession(request, short, names);
+    // Titles between the two, so that some row has only a little room left for its repo.
+    const middle = [`Fix the queue ${t}`, `Fix the queues ${t}`, `Fix the old queue ${t}`, `Tidy the retry queue ${t}`];
+    for (const title of [long, short, ...middle]) await postSession(request, title, names);
     /** A row's widths: its title, its row, each part of its detail (cut or whole), and how far
-     *  the detail's ink stops short of the age. */
+     *  the detail's ink stops short of the age. The repo is the width it is drawn at: 0 where
+     *  it has wrapped out of its one line. */
     const measure = (title: string) =>
       row(page, title).evaluate((el) => {
         const box = (sel: string) => el.querySelector(sel)!.getBoundingClientRect();
@@ -252,7 +254,12 @@ test.describe("command palette", () => {
           const e = el.querySelector(sel)!;
           return e.scrollWidth > e.clientWidth;
         };
-        const parts = Array.from(el.querySelectorAll(".pal-detail > span"), (e) => e.getBoundingClientRect());
+        const tail = box(".pal-tail");
+        const drawn = (e: Element) => e.getBoundingClientRect().top < tail.bottom - 0.5;
+        const repo = el.querySelector(".pal-tail > .pal-repo")!;
+        const parts = Array.from(el.querySelectorAll(".pal-machine, .pal-repo"))
+          .filter(drawn)
+          .map((e) => e.getBoundingClientRect());
         const why = box(".pal-why");
         const bold = box(".pal-why u");
         return {
@@ -260,7 +267,11 @@ test.describe("command palette", () => {
           main: box(".pal-main").width,
           titleCut: cut(".pal-label"),
           machineCut: cut(".pal-machine"),
-          repo: box(".pal-repo").width,
+          repo: drawn(repo) ? repo.getBoundingClientRect().width : 0,
+          // " · " and two letters and its "…".
+          repoLeast: Number.parseFloat(getComputedStyle(repo).fontSize) * 3.5,
+          // Each part starts where the one before it ends: no hole where a repo was.
+          holes: parts.slice(1).some((r, i) => Math.abs(r.left - parts[i]!.right) > 0.5),
           whyCut: cut(".pal-why"),
           boldShown: bold.left >= why.left && bold.right <= why.right + 0.5,
           toAge: box(".pal-age").left - Math.max(...parts.map((r) => r.right)),
@@ -278,13 +289,35 @@ test.describe("command palette", () => {
     // the repo is the part that is gone.
     let m = await measure(long);
     expect(m.title).toBeGreaterThan(m.main * 0.38);
-    expect(m).toMatchObject({ titleCut: true, machineCut: false, repo: 0, whyCut: false, boldShown: true });
+    expect(m).toMatchObject({
+      titleCut: true,
+      machineCut: false,
+      repo: 0,
+      whyCut: false,
+      boldShown: true,
+      holes: false,
+    });
     expect(m.toAge).toBeGreaterThan(0);
     // A short title is whole, and the repo has the room it leaves.
     m = await measure(short);
-    expect(m).toMatchObject({ titleCut: false, machineCut: false, whyCut: false, boldShown: true });
-    expect(m.repo).toBeGreaterThan(0);
+    expect(m).toMatchObject({ titleCut: false, machineCut: false, whyCut: false, boldShown: true, holes: false });
+    expect(m.repo).toBeGreaterThan(m.repoLeast);
     expect(m.toAge).toBeGreaterThan(0);
+    // In a half-screen window, and in this one, every row's repo is gone whole or shows a few
+    // of its letters: never a stray " · …".
+    for (const size of [
+      { width: 1100, height: 800 },
+      { width: 1280, height: 800 },
+      { width: 1440, height: 900 },
+    ]) {
+      await page.setViewportSize(size);
+      for (const title of [long, short, ...middle]) {
+        m = await measure(title);
+        expect(m.repo === 0 || m.repo >= m.repoLeast, `${title} at ${size.width}: repo ${m.repo}`).toBe(true);
+        expect(m, `${title} at ${size.width}`).toMatchObject({ machineCut: false, boldShown: true, holes: false });
+        expect(m.toAge).toBeGreaterThan(0);
+      }
+    }
     // A match in the branch's start: the branch is cut at its end, at 20ch, and the title
     // still has its room.
     await page.keyboard.press("ControlOrMeta+a");

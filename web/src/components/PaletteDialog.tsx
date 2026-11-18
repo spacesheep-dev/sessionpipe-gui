@@ -280,7 +280,7 @@ function sessionDetail(s: SessionSummary, m: FieldsMatch | null): ReactNode {
   const why = [3, hit(5) ? 5 : 4].filter(hit);
   const shown = [1, 2, ...why].filter((f) => fields[f]);
   if (shown.length === 0) return undefined;
-  return shown.map((f, i) => {
+  const spans = shown.map((f, i) => {
     const part = { text: fields[f] as string, at: m?.positions[f] };
     const { text, at } = part.at && why.includes(f) ? whyText(part.text, part.at) : part;
     return (
@@ -290,6 +290,17 @@ function sessionDetail(s: SessionSummary, m: FieldsMatch | null): ReactNode {
       </span>
     );
   });
+  // With a machine and a part after the repo, the repo and the parts are one "tail", which
+  // the stylesheet lets drop the repo whole where it has no room for a few of its letters.
+  const whys = spans.filter((_, i) => why.includes(shown[i] as number));
+  if (shown[0] !== 1 || whys.length === 0) return spans;
+  return [
+    spans[0],
+    <span key="tail" className="pal-tail">
+      {shown[1] === 2 ? spans[1] : null}
+      <span className="pal-whys">{whys}</span>
+    </span>,
+  ];
 }
 
 const Glyph = ({ children }: { children: string }) => (

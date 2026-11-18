@@ -432,11 +432,8 @@ pairing link that carries the board's key only for a pairing the sink token star
   with the word in their title with nothing bold: the match was marked on the branch,
   which a row does not show. The word is bold in the title wherever the title holds it,
   and a session found only by its branch or its model shows that after the repo
-  ("lab-mac · acme/billing · demo/webhook-backoff") with the match bold. Such a row keeps
-  room for its title: the repo gives way first, and a branch too long for the row keeps
-  the end that matched ("…retry-backoff"). An Allow or Deny row marks a match in "Allow"
-  and in the tool as well, and a subagent listed by `is:subagent` one in its session's
-  title.
+  ("lab-mac · acme/billing · demo/webhook-backoff") with the match bold; a long branch
+  shows the end that matched ("…retry-backoff").
 
 ## [0.8.4] - 2026-11-17
 
