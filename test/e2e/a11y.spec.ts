@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
-import { EVENTS, INFO, openBoard, openPage, sessionUrl, tier1Batch, ulid } from "./helpers.js";
+import { dropStream, EVENTS, INFO, openBoard, openPage, sessionUrl, tapStream, tier1Batch, ulid } from "./helpers.js";
 
 const SHORTCUTS_KEY = "sessionpipe-gui.shortcuts";
 
@@ -317,5 +317,49 @@ test.describe("accessibility", () => {
     await page.keyboard.press("Escape");
     await expect(pop).toHaveCount(0);
     await expect(trigger).toBeFocused();
+  });
+
+  test("a dropped stream is spoken once, never as a countdown, and Retry's focus goes to the page when it is back", async ({
+    page,
+  }) => {
+    await tapStream(page);
+    await openBoard(page);
+    // A first connect says nothing.
+    const spoken = page.locator("[data-conn-announcer]");
+    await expect(spoken).toHaveAttribute("role", "status");
+    await expect(spoken).toHaveText("");
+
+    const back = await dropStream(page);
+    await expect(spoken).toHaveText("Reconnecting.");
+    // The words a person reads are in the bar, with the one Retry, and are no live region.
+    const bar = page.locator(".bar-conn");
+    await expect(bar).toContainText("Reconnecting…");
+    await expect(bar.locator("xpath=ancestor-or-self::*[@aria-live or @role='status']")).toHaveCount(0);
+    await axe(page, "board, reconnecting");
+    // No live region says the stream's state with a number in it: every retry that fails
+    // leaves what is spoken as it was, and nothing in the bar or the sidebar's foot counts down.
+    const counting = async () =>
+      (
+        await page
+          .locator("[aria-live], [role=status], [role=alert]")
+          .evaluateAll((els) => els.map((el) => el.textContent ?? ""))
+      ).filter((t) => /Reconnecting|Offline/.test(t) && /\d/.test(t));
+    expect(await counting()).toEqual([]);
+    await page.waitForTimeout(2500);
+    await expect(spoken).toHaveText("Reconnecting.");
+    expect(await counting()).toEqual([]);
+    await expect(page.locator(".bar, .rail-foot").getByText(/\d s$/)).toHaveCount(0);
+
+    // Back: said once, and the focus Retry held is the page's, not nowhere. (The transport's
+    // own backoff may get there before the key does; the button is gone then, and the
+    // focus has gone to the page the same way.)
+    const retry = bar.getByRole("button", { name: "Retry", exact: true });
+    await retry.focus();
+    await expect(retry).toBeFocused();
+    await back();
+    await page.keyboard.press("Enter");
+    await expect(spoken).toHaveText("Reconnected.");
+    await expect(bar).toHaveCount(0);
+    await expect(page.locator("main#main")).toBeFocused();
   });
 });

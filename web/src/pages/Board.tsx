@@ -501,6 +501,10 @@ export function Board() {
       <PageBar
         title="Board"
         meta={catchingUp ? <BarStatus>{N.catchingUp}</BarStatus> : undefined}
+        connSaid={
+          // Before the first snapshot the state below says it, with its own Retry.
+          firstLoad === "down"
+        }
         tools={
           // Not before the first snapshot: the filters it decides would push the search
           // over as they arrive (the layout shift the board had on every load).
@@ -567,7 +571,7 @@ export function Board() {
           title={firstLoad === "slow" ? "Still connecting to the receiver…" : "No connection to the receiver"}
           actions={
             <button type="button" className="btn btn--sm" onClick={() => store.reconnect()}>
-              Retry now
+              Retry
             </button>
           }
         >

@@ -38,14 +38,14 @@ import { fixedLine, fixedPermission, permissionChoices, permissionToSend } from 
 import { canSign, isCancel, setupLabel, signerKind, signHint, tapWords } from "../../control/signer";
 import { startGate } from "../../control/startGate";
 import { notSentWords, PERMISSION_LABEL } from "../../control/words";
-import { useListedSessions, useMachinesMap, useSession, useStore } from "../../data/hooks";
+import { useListedSessions, useMachinesMap, useSession, useStore, useStreamDown } from "../../data/hooks";
 import { useFocusTrap } from "../../lib/focus";
 import { harnessMark, STATE_LABEL, sessionTitle } from "../../lib/format";
 import { useSheetDrag } from "../../lib/motion";
 import { navigate } from "../../lib/router";
 import { hintFor, matches, useShortcut } from "../../lib/shortcuts";
 import { ago, useNow } from "../../lib/time";
-import { START, ThisPhone } from "../../native/accountWords";
+import { NEW_WORDS, START, ThisPhone } from "../../native/accountWords";
 import {
   askableSessions,
   defaultTarget,
@@ -104,6 +104,8 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   const wrong = wrongOriginHere();
   const sendTo = useSendStates(rp);
   const now = useNow("coarse");
+  // The app's stream is down (as the page bar says it): an ask waits for it, as a message does.
+  const down = useStreamDown() !== null;
   const ref = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
 
@@ -286,6 +288,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
     !!text.trim() &&
     text.length <= TEXT_MAX &&
     modelOk &&
+    !down &&
     !busy;
 
   // Sent: the sheet closes and the asking session's page says the rest (its row). What it
@@ -381,6 +384,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
     if (busy) return { text: `Sending to ${name}…` };
     if (!c) return { text: `Pair ${name} to ask from here.` };
     if (gate?.kind === "machine") return { text: gate.long, approve: gate.approve };
+    if (down) return { text: NEW_WORDS.streamAsk };
     if (nobody) return { text: `${name} hasn't said which agents it runs.` };
     if (target?.kind === "new" && folderCheck && !folderCheck.ok)
       return {

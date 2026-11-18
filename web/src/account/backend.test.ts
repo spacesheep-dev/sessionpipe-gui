@@ -867,7 +867,7 @@ describe("a page's own backend on a spacesheep account", () => {
     await tick(30_000);
     expect(b.view().relay.state).toBe("offline");
     expect(told.at(-1)).toBe("down");
-    // "Retry now" closes the stream and opens it again: the rows as they were, still down,
+    // "Retry" closes the stream and opens it again: the rows as they were, still down,
     // and the relay asked at once rather than at the end of the reader's pause.
     off();
     told.length = 0;

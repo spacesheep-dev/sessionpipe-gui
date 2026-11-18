@@ -8,7 +8,7 @@
 // the flag never loads a byte of the native code.
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { EVENTS, INFO, openPrompt, sessionUrl, tier1Batch, ulid } from "./helpers.js";
+import { dropStream, EVENTS, INFO, openPrompt, sessionUrl, tapStream, tier1Batch, ulid } from "./helpers.js";
 import { openInPhone } from "./phone-shell.js";
 
 interface FakeOptions {
@@ -610,22 +610,66 @@ test.describe("inside the native shell", () => {
     await expect(page.getByRole("heading", { name: "Welcome to sessionpipe" })).toBeVisible({ timeout: 12_000 });
   });
 
-  test("a first snapshot that doesn't come is said, with Retry now", async ({ page }) => {
+  test("a first snapshot that doesn't come is said, with Retry", async ({ page }) => {
     await openInShell(page, "/", { stream: "silent" });
     await expect(page.locator(".board-skeleton")).toBeVisible();
     const slow = page.getByRole("heading", { name: "Still connecting to the receiver…" });
     await expect(slow).toBeVisible({ timeout: 10_000 });
-    await page.getByRole("button", { name: "Retry now" }).first().click();
+    await page.getByRole("button", { name: "Retry", exact: true }).first().click();
     await expect.poll(async () => (await calls(page)).filter((c) => c === "rx_stream").length).toBe(2);
   });
 
-  test("a stream that fails says so on the board, with Retry now", async ({ page }) => {
+  test("a stream that fails says so on the board, with Retry, and the bar does not say it a second time", async ({
+    page,
+  }) => {
     await openInShell(page, "/", { stream: "down" });
     await expect(page.getByRole("heading", { name: "No connection to the receiver" })).toBeVisible({
       timeout: 10_000,
     });
     await expect(page.locator(".board-skeleton")).toHaveCount(0);
-    await expect(page.locator("main").getByRole("button", { name: "Retry now" })).toBeVisible();
+    // Before the first snapshot the board's own state is the one statement, with the one Retry.
+    await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(1);
+    await expect(page.locator("main .state").getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+    await expect(page.locator(".bar-conn")).toHaveCount(0);
+    // The sidebar's foot is its dot, named by its tooltip: no words, no button.
+    const dot = page.locator(".rail .conn");
+    await expect(dot).toHaveAttribute("data-tip", "Reconnecting…");
+    await expect(dot).toHaveText("");
+    await expect(dot.locator("button")).toHaveCount(0);
+  });
+
+  test("with the sidebar hidden, a dropped stream is said in the page bar, with Retry", async ({ page }) => {
+    await tapStream(page);
+    await openInShell(page, "/");
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    await expect(page.locator("section.group").first()).toBeVisible();
+    await emit(page, "menu", { action: "toggle-sidebar" });
+    await expect(page.locator("html")).toHaveAttribute("data-rail-hidden", "");
+    await expect(page.locator("nav.rail")).toBeHidden();
+
+    const back = await dropStream(page);
+    // The rows are dimmed, and the bar over them says why: its words, and the one Retry.
+    await expect(page.locator(".page.board")).toHaveClass(/board--down/);
+    const bar = page.locator(".page.board .bar .bar-conn");
+    await expect(bar).toBeVisible();
+    await expect(bar).toContainText("Reconnecting…");
+    await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(1);
+    // Spoken too, though the sidebar and its dot are not drawn.
+    await expect(page.locator("[data-conn-announcer]")).toHaveText("Reconnecting.");
+
+    // Retry asks at once (the receiver is still away, so the bar goes on saying so)…
+    const asked = (await calls(page)).filter((c) => c === "rx_stream").length;
+    await bar.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect
+      .poll(async () => (await calls(page)).filter((c) => c === "rx_stream").length, { timeout: 700 })
+      .toBeGreaterThan(asked);
+    await expect(bar).toBeVisible();
+    // …and once it answers, the bar is the board's own again.
+    await back();
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>(".bar-conn button")?.click());
+    await expect(page.locator(".bar-conn")).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.locator(".page.board")).not.toHaveClass(/board--down/);
+    await expect(page.locator("[data-conn-announcer]")).toHaveText("Reconnected.");
   });
 
   test("a refused key: Receivers… opens Settings › App over the screen, and every other page is the screen", async ({

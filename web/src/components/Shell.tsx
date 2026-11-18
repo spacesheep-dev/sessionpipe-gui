@@ -28,7 +28,7 @@ import { hintFor, isTyping, useShortcut, useShortcutMap } from "../lib/shortcuts
 import { getSkins, isPlain } from "../lib/skins";
 import { restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
 import { getDisplaySettings as getDisplay, setSkin, setTheme, useSettings } from "../lib/theme";
-import { useNow } from "../lib/time";
+import { NEW_WORDS } from "../native/accountWords";
 import { WORKFLOWS_ICON_PATHS } from "../orchestrate/workflows/glyphs";
 import { RunnerHost } from "../orchestrate/workflows/useRunner";
 import { useSetupStatus } from "../setup/api";
@@ -629,6 +629,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       <div className="sr-only" aria-live="polite" aria-atomic="true" data-announcer>
         {announce}
       </div>
+      <ConnAnnouncer />
       <nav className="rail" aria-label="Pages" {...railMenuProps}>
         <div className="rail-head">
           <Link to="/" className="rail-brand" title="sessionpipe gui">
@@ -729,67 +730,76 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   );
 }
 
-/** How long a drop must last before it is shown: a blip never flickers the footer. */
+/** How long a drop must last before it is shown: a blip is never drawn, nor said. */
 const RECONNECT_GRACE_MS = 400;
 
-/** The stream's state as the footer says it: what to draw ("live" inside the grace) and
- *  its words. "Reconnecting · 4 s" once a drop has lasted 400 ms, "Offline" when the
- *  device is. */
 /** The stream's state in words, after a short grace (a reconnect that lands within it is
- *  never shown). The phone's bar reads it too (PageBar.tsx PhoneSub). */
+ *  never shown): what to draw ("live" inside the grace) and its words, "Reconnecting…" or
+ *  "Offline" when the device is. No seconds: the words change only when the state does.
+ *  One reading for the sidebar's dot, the page bar (PageBar.tsx ConnStatus), the phone's
+ *  pill and what is spoken. A reader that mounts while the stream is already down (a page
+ *  opened during a drop) says so at once: the grace is for a drop it watched begin. */
 export function useConnection(): { as: string; label: string; down: boolean } {
-  const { connection, retryAt } = useAppState();
+  const { connection } = useAppState();
   const down = connection === "reconnecting" || connection === "offline";
-  const [shown, setShown] = useState(!down);
+  const [shown, setShown] = useState(down);
   useEffect(() => {
     if (!down) {
-      setShown(true);
+      setShown(false);
       return;
     }
-    setShown(false);
     const t = window.setTimeout(() => setShown(true), RECONNECT_GRACE_MS);
     return () => window.clearTimeout(t);
   }, [down]);
-  // The countdown ticks only while there is one.
-  const now = useNow(retryAt && shown ? "fine" : "off");
-  const wait = retryAt ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
-  // Inside the grace, the footer still reads as it did.
-  const as = down && !shown ? "live" : connection;
+  // Inside the grace, every reader still reads as it did: live, or still connecting.
+  const was = useRef(connection);
+  if (!down) was.current = connection;
+  const as = down && !shown ? was.current : connection;
   const label =
-    as === "live"
-      ? "live"
-      : as === "connecting"
-        ? "Connecting…"
-        : as === "offline"
-          ? "Offline"
-          : wait > 0
-            ? `Reconnecting · ${wait} s`
-            : "Reconnecting…";
+    as === "live" ? "live" : as === "connecting" ? "Connecting…" : as === "offline" ? "Offline" : "Reconnecting…";
   return { as, label, down: as === "reconnecting" || as === "offline" };
 }
 
-/** The stream, honestly: nothing to read while live (a quiet dot; the word stays for
- *  assistive tech), its words and Retry now once it drops. The board keeps its rows
- *  through a drop. */
+/** The stream in the sidebar's foot: a dot in every state (solid while live, a ring while
+ *  connecting or reconnecting, red when offline), named by its tooltip. The word "live"
+ *  stays for assistive tech; a drop's words and its Retry are the page bar's
+ *  (PageBar.tsx ConnStatus), so they are said once, and the foot never grows a line. */
 export function ConnectionPill() {
-  const { as, label, down } = useConnection();
-  const store = useStore();
+  const { as, label } = useConnection();
   return (
     <span
       className={`conn conn--${as}`}
-      role="status"
-      aria-live="polite"
       data-tip={as === "live" ? "Live: updates arrive as they happen" : label}
       data-tip-side="top"
     >
       <span className="conn-dot" aria-hidden="true" />
-      <span className="conn-label">{label}</span>
-      {down ? (
-        <button type="button" className="conn-retry" onClick={() => store.reconnect()}>
-          Retry now
-        </button>
-      ) : null}
+      {as === "live" ? <span className="conn-label">{label}</span> : null}
     </span>
+  );
+}
+
+/** What a screen reader hears of the stream, once per change: "Reconnecting." or
+ *  "Offline." when a drop has outlasted the grace, and "Reconnected." when a drop it
+ *  spoke of is over. A first connect says nothing. Always mounted, beside the route
+ *  announcer, so it speaks with the sidebar hidden and on a page with no bar; it is the
+ *  only live region the stream has (the bar's words and the dot are not). */
+function ConnAnnouncer() {
+  const { as } = useConnection();
+  const [said, setSaid] = useState("");
+  const spoke = useRef(false);
+  useEffect(() => {
+    if (as === "reconnecting" || as === "offline") {
+      spoke.current = true;
+      setSaid(as === "offline" ? NEW_WORDS.streamOfflineSpoken : NEW_WORDS.streamReconnectingSpoken);
+    } else if (as === "live" && spoke.current) {
+      spoke.current = false;
+      setSaid(NEW_WORDS.streamBackSpoken);
+    }
+  }, [as]);
+  return (
+    <div className="sr-only" role="status" aria-atomic="true" data-conn-announcer>
+      {said}
+    </div>
   );
 }
 
@@ -809,7 +819,7 @@ function PhoneConn() {
       type="button"
       className={`phone-conn phone-conn--${as}`}
       onClick={() => store.reconnect()}
-      aria-label={`${label}. Retry now`}
+      aria-label={`${as === "offline" ? NEW_WORDS.streamOfflineSpoken : NEW_WORDS.streamReconnectingSpoken} Retry`}
     >
       <span className="conn-dot" aria-hidden="true" />
       <span className="phone-conn-label">{label}</span>

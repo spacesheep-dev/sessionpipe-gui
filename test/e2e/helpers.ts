@@ -53,6 +53,40 @@ export async function holdBoard(page: Page): Promise<void> {
   await expect(page.locator(".page.board")).toHaveAttribute("data-held", "");
 }
 
+/** Puts the page's event streams under the test's hand; call it before the page loads.
+ *  Chromium's offline mode leaves an open EventSource open and a route only meets the next
+ *  request, so `dropStream` ends the open ones the way a dead socket does. */
+export async function tapStream(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const Real = window.EventSource;
+    const open = new Set<EventSource>();
+    window.EventSource = class extends Real {
+      constructor(url: string | URL, init?: EventSourceInit) {
+        super(url, init);
+        open.add(this);
+      }
+      close() {
+        open.delete(this);
+        super.close();
+      }
+    };
+    (window as unknown as { __dropStream: () => void }).__dropStream = () => {
+      for (const es of [...open]) {
+        es.close();
+        es.onerror?.(new Event("error"));
+      }
+    };
+  });
+}
+
+/** The receiver stops answering the stream and the open one dies (`tapStream` first): the
+ *  page is reconnecting until the returned function lets the stream through again. */
+export async function dropStream(page: Page): Promise<() => Promise<void>> {
+  await page.route("**/api/ui/stream", (route) => route.abort("connectionrefused"));
+  await page.evaluate(() => (window as unknown as { __dropStream: () => void }).__dropStream());
+  return () => page.unroute("**/api/ui/stream");
+}
+
 /** The widths, 100 to 400 px, at which a line of `el` starts with a mark that belongs to
  *  the word before it (a full stop, a "·", a no-break space). `el` is set to each width in
  *  turn and given back as it was. */

@@ -130,9 +130,11 @@ export interface ControlStripProps {
   /** On an account, history is still being read: with no `control`, the machine is not known
    *  yet, not unpaired, and nothing says to pair it (the page bar says "Catching up…"). */
   catching?: boolean;
-  /** The app's stream to the receiver is down ("reconnecting" or "offline"): the strip
-   *  waits for it, with Retry now. */
-  stream?: { state: "reconnecting" | "offline"; retry: () => void };
+  /** The app's stream to the receiver is down (after the grace: data/hooks.ts
+   *  useStreamDown): nothing can be sent or answered until it is back. The page bar says
+   *  which state it is and holds Retry; the strip says only what follows from it here,
+   *  once: on an open prompt's card, else under the field. */
+  stream?: boolean;
   /** The next send asks for the passkey (no day grant yet): the line offers Unlock now. A
    *  browser's only: the app's first send brings up its own prompt, which says what it is. */
   unlock?: () => void;
@@ -618,19 +620,8 @@ export function ControlStrip({
     if (!onSend) return null;
     if (review && tooLong) return { kind: "too-long", text: "Keep it under 2,000 characters", tone: "err" };
     if (noted) return { kind: "plan-note", text: NOTED };
-    if (stream)
-      return {
-        kind: "stream",
-        text:
-          stream.state === "offline"
-            ? "Offline. Sending waits for the connection."
-            : "Reconnecting. Sending waits for the connection.",
-        action: (
-          <button type="button" className="ctl-link" onClick={stream.retry}>
-            Retry now
-          </button>
-        ),
-      };
+    // The stream is down: beside a prompt to answer its card says so, and this line does not.
+    if (stream) return asks ? null : { kind: "stream", text: NEW_WORDS.streamSend };
     if (control && !control.online)
       return {
         kind: "offline",
@@ -702,7 +693,7 @@ export function ControlStrip({
   ) : approve ? (
     `${NEW_WORDS.answerNotYet(ThisPhone())}.`
   ) : stream ? (
-    "waiting for the connection"
+    NEW_WORDS.streamAnswer
   ) : notAdded ? (
     withWay(
       notAdded,

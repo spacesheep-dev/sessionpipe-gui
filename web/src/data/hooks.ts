@@ -50,7 +50,7 @@ export function useConnection() {
 }
 
 /** How long a page shows its skeleton while the first snapshot is on its way; past this
- *  it says it is still connecting, with Retry now. A receiver answers in well under a
+ *  it says it is still connecting, with Retry. A receiver answers in well under a
  *  second, so this is a wait worth saying out loud, not a failure: the stream stays open. */
 export const SLOW_FIRST_LOAD_MS = 6000;
 
@@ -80,21 +80,23 @@ export function useFirstLoad(): "loading" | "slow" | "down" | null {
 /** How long a drop has to last before the lists say so: a blip is never drawn. */
 const DOWN_GRACE_MS = 400;
 
-/** The instant the stream went down, once it has been down DOWN_GRACE_MS (the shell's
- *  footer says "Reconnecting" at the same moment); null while live, connecting for the
- *  first time, or within the grace. The board keeps its rows and stops their clocks at
- *  this instant (POLISH-PLAN.md §6 #17). */
+/** The instant the stream went down, once it has been down DOWN_GRACE_MS (the page bar
+ *  says "Reconnecting…" at the same moment); null while live, connecting for the first
+ *  time, or within the grace. The board keeps its rows and stops their clocks at this
+ *  instant (POLISH-PLAN.md §6 #17), and a session's composer waits from it. A reader that
+ *  mounts while the stream is already down (a page opened during a drop) is down at once,
+ *  as the bar is: the grace is for a drop it watched begin. */
 export function useStreamDown(): number | null {
   const { connection, snapshotAt } = useAppState();
   const down = !!snapshotAt && (connection === "reconnecting" || connection === "offline");
-  const [at, setAt] = useState<number | null>(null);
+  const [at, setAt] = useState<number | null>(() => (down ? Date.now() : null));
   useEffect(() => {
     if (!down) {
       setAt(null);
       return;
     }
     const began = Date.now();
-    const t = window.setTimeout(() => setAt(began), DOWN_GRACE_MS);
+    const t = window.setTimeout(() => setAt((was) => was ?? began), DOWN_GRACE_MS);
     return () => window.clearTimeout(t);
   }, [down]);
   return down ? at : null;

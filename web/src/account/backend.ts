@@ -888,7 +888,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
         if (!unreachable || gone) return;
         // The rows are what was last read, and spacesheep cannot be reached: said, not "live".
         h.onError(0);
-        // A stream opened while it cannot be reached is somebody asking again ("Retry now",
+        // A stream opened while it cannot be reached is somebody asking again ("Retry",
         // the app back in front): the relay is read now, not at the end of the reader's own
         // growing pause. The reader is started anew from what was kept (its cursor, its read
         // times), so there is never a second read beside one already out.

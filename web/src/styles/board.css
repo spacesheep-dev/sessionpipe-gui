@@ -674,9 +674,21 @@
 }
 
 /* The stream is down: the rows stay where they are, one quiet tier, their times stopped
-   (the shell's footer says why). */
+   (the page bar says why), and so does the line over them for a machine that was offline
+   (OfflineLine): the last thing known, like the rows, and it keeps its place. */
 .board--down
-  :is(.card-link, .card-title, .card-tool, .card-kind, .card-attn, .inline-code, .kid, .agent-type, .agent-desc) {
+  :is(
+    .card-link,
+    .card-title,
+    .card-tool,
+    .card-kind,
+    .card-attn,
+    .inline-code,
+    .kid,
+    .agent-type,
+    .agent-desc,
+    .offline-line-text
+  ) {
   color: var(--fg-3);
 }
 /* What it is doing is not known while nothing arrives: the rings stop where they are. */

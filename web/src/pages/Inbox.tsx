@@ -254,6 +254,10 @@ export function Inbox() {
         title="Inbox"
         className="inbox-head"
         meta={catchingUp ? <BarStatus>{NEW_WORDS.catchingUp}</BarStatus> : meta || undefined}
+        connSaid={
+          // Before the first snapshot the state below says it, with its own Retry.
+          firstLoad === "down"
+        }
         tools={<LabelChip value={label} onChange={setLabelFilter} />}
         actions={
           <>
@@ -313,7 +317,7 @@ export function Inbox() {
           title={firstLoad === "slow" ? "Still connecting to the receiver…" : "No connection to the receiver"}
           actions={
             <button type="button" className="btn btn--sm" onClick={() => store.reconnect()}>
-              Retry now
+              Retry
             </button>
           }
         >

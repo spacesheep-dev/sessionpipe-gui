@@ -248,6 +248,23 @@ pairing link that carries the board's key only for a pairing the sink token star
   at the foot of Settings › App. "Check for Updates…" opens Settings › About, where the
   check shows as it runs, with a window open or not.
 - **Setup's title is "Setup"**, as its sidebar entry reads. It was "Set up sessionpipe gui".
+- **A dropped connection is said once, in the page's bar, with one Retry.** The only
+  words were "Reconnecting · 4 s  Retry now" in the sidebar's foot, so with the sidebar
+  hidden a frozen board said nothing at all, while a session said it three times, with
+  two Retry now buttons. The bar now reads "Reconnecting…" or "Offline" beside the page's
+  title, with Retry, in the place of the page's own line there (a session's computer and
+  repo come back with the connection); the sidebar keeps its dot, named by its tooltip,
+  and its foot no longer grows a line. A session says only what follows from it: "You can
+  answer once the connection is back." on an open prompt's card, or "You can send once
+  the connection is back." under the message field, in place of "Sending waits for the
+  connection", which promised a send the button refused. "Ask another agent…" is not
+  offered meanwhile, and its sheet, if open, waits and says so. A drop that is over
+  within 400 ms changes nothing (it turned the message field off for an instant), and
+  before the first sessions have loaded the Board and the Inbox say "No connection to the
+  receiver" alone. The board's line for an offline computer dims with the rows it stands
+  over. Nothing counts seconds any more, on the phone either, and a screen reader hears
+  "Reconnecting." or "Offline." once and "Reconnected." once, where it read the countdown
+  out every second. "Retry now" is "Retry" everywhere.
 
 ### Fixed
 
