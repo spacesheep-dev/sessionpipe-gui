@@ -408,6 +408,12 @@ pairing link that carries the board's key only for a pairing the sink token star
 - **No box around a file's versions.** In the Files drawer, "‹ 2 of 5 ›" over an opened
   file sat in the browser's own grooved rectangle, which read as a focus ring that never
   left. It is gone, and the bar is only as tall as the Changes | Text switch beside it.
+- **A segmented control's labels stay inside their segments.** "Best match" ran out of its
+  pill on Search, and "Advanced" touched its edge in Settings › General. Every segment is
+  now as wide as the widest label, with the same room on both sides of it. A control that
+  spans its row (System | Light | Dark in Quick settings, the two ways on the phone page),
+  the Files drawer's switches on a phone and a view's own bar (Canvas's presets) are as
+  they were.
 
 ## [0.8.4] - 2026-11-17
 

@@ -721,6 +721,14 @@ textarea.field {
   border-radius: var(--radius);
   background: var(--bg-3);
 }
+/* The app's own control (bits.tsx Segmented) is a fieldset: every segment is as wide as
+   the widest label, a shrink-to-fit grid of 1fr columns. A bare .seg (Review's tabs, a
+   view's own markup) keeps the flex row it was written against. */
+fieldset.seg {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+}
 .seg-opt {
   flex: 1 1 0;
   display: inline-grid;

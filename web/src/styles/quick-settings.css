@@ -60,8 +60,7 @@
   line-height: var(--lh-tight);
 }
 .qs-sect .seg {
-  display: flex;
-  width: 100%;
+  display: grid;
 }
 .qs-note {
   color: var(--fg-3);

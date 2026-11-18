@@ -194,8 +194,7 @@
 }
 @media (max-width: 839px) {
   .ph-lanes .seg {
-    display: flex;
-    width: 100%;
+    display: grid;
   }
   .ph-address .url-value {
     text-align: left;

@@ -17,8 +17,9 @@ const readResult = (filePath: string, lines: string[]) => ({
 
 /** One tier-3 Claude Code session: a Read of a file (the result object Claude Code returns
  *  it), an Edit to it, a Write of a new file and a Bash that failed; with `reread`, then a
- *  second Read of the first file (a later version). */
-async function postSession(request: APIRequestContext, { reread = false } = {}) {
+ *  second Read of the first file (a later version); with `crowd`, twelve more new files and
+ *  eleven more failed commands, so both of the drawer's counts have two digits. */
+async function postSession(request: APIRequestContext, { reread = false, crowd = false } = {}) {
   const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
   const harness = "claude-code";
   const sessionId = randomUUID();
@@ -86,13 +87,26 @@ async function postSession(request: APIRequestContext, { reread = false } = {}) 
           ]),
         )
       : []),
+    ...(crowd
+      ? Array.from({ length: 12 }, (_, i) => [
+          ...tool("Write", { file_path: `${cwd}/src/more-${i}.ts`, content: "export {};\n" }, "ok"),
+          ...(i ? tool("Bash", { command: `npm test -- more-${i}` }, `FAIL src/more-${i}.ts`, false) : []),
+        ]).flat()
+      : []),
     ev("turn.ended", { turn_id: "t1", reason: "stop", ms: 5000 }),
   ];
-  const res = await request.post(EVENTS, {
-    headers: { "content-type": "application/json", authorization: `Bearer ${sinkToken}`, "sessionpipe-protocol": "1" },
-    data: { events },
-  });
-  expect(res.status()).toBe(202);
+  // A batch holds 50 events at most.
+  for (let i = 0; i < events.length; i += 50) {
+    const res = await request.post(EVENTS, {
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${sinkToken}`,
+        "sessionpipe-protocol": "1",
+      },
+      data: { events: events.slice(i, i + 50) },
+    });
+    expect(res.status()).toBe(202);
+  }
   return { harness, sessionId, title };
 }
 
@@ -162,6 +176,30 @@ test.describe("files drawer", () => {
     await earlier.click();
     await expect(stepper.locator(".num")).toHaveText("1 of 2");
     await expect(earlier).toBeDisabled();
+  });
+
+  test("on a 320 px phone at the largest text size, the head holds both counts and Done", async ({ page, request }) => {
+    const s = await postSession(request, { crowd: true });
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.textSize", "1.25"));
+    await openPage(page, `${sessionUrl(s.harness, s.sessionId)}?file=src%2Foutbox.ts`);
+    await expect(page.locator("html")).toHaveCSS("font-size", "20px");
+    await drawer(page).getByRole("button", { name: "Back to the files" }).click();
+    const head = drawer(page).locator(".files-head");
+    const options = head.locator("label.seg-opt");
+    await expect(options).toHaveText(["Files · 14", "Problems · 12"]);
+    const [bar, track, actions, files, problems] = await Promise.all([
+      head.boundingBox(),
+      head.locator(".seg").boundingBox(),
+      head.locator(".files-actions").boundingBox(),
+      options.first().boundingBox(),
+      options.last().boundingBox(),
+    ]);
+    expect(actions!.x + actions!.width, "Done ends inside the head").toBeLessThanOrEqual(bar!.x + bar!.width);
+    expect(track!.x + track!.width, "the switch ends before Done").toBeLessThanOrEqual(actions!.x);
+    // What makes the room: on a phone each option is as wide as its own label, not as
+    // the longer one.
+    expect(files!.width, '"Files · 14" is narrower than "Problems · 12"').toBeLessThan(problems!.width - 10);
   });
 
   test("a comment on a range of lines becomes a review message in the composer", async ({ page, request }) => {
