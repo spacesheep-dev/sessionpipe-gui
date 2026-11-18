@@ -127,6 +127,10 @@
   background: var(--press);
   transition: none;
 }
+/* The side panel's gutter is 16 px, like the phone's: the glyph sits on the reply's edge. */
+:where(.panel) .chat-tools-sum {
+  margin-left: -4px;
+}
 .chat-tools-err {
   display: inline-flex;
   align-items: center;

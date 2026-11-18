@@ -135,11 +135,12 @@
 }
 
 /* Inside the panel the view scrolls its own element: the gutters are the panel's, the
-   docked bar sits at the panel's bottom, and the view fills it so the bar does too. */
+   docked bar sits at the panel's bottom, and the view fills it so the bar does too. The
+   first turn starts 8 px under the tabs, as it does under the full page's bar. */
 .panel .session {
   --gutter: 16px;
   min-height: 100%;
-  padding: 0 var(--gutter);
+  padding: 8px var(--gutter) 0;
 }
 .panel .session .sess-ctl {
   bottom: 0;

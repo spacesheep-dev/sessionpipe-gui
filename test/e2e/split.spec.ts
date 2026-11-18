@@ -9,7 +9,7 @@
 // launch lands on the page Settings › General › Open on names with the tabs put back.
 import { type APIRequestContext, expect, type Locator, type Page, test } from "@playwright/test";
 import { SETTINGS_KEY } from "../../playwright.config.js";
-import { EVENTS, holdBoard, INFO, openBoard, tier1Batch } from "./helpers.js";
+import { EVENTS, holdBoard, INFO, openBoard, sessionUrl, tier1Batch, ulid } from "./helpers.js";
 
 const panel = (page: Page) => page.locator("aside.panel");
 const mainWidth = (page: Page) => page.locator("main.main").evaluate((el) => el.getBoundingClientRect().width);
@@ -105,6 +105,68 @@ async function postLongSession(request: APIRequestContext): Promise<string> {
   expect(res.status()).toBe(202);
   return `${b.harness}:${b.sessionId}`;
 }
+
+/** The prompts this file's tests left open, each as the events that end it. An open prompt
+ *  counts in every page's title ("(1) Feed · …") and stands in the Inbox, which other specs
+ *  read off this same server, so each ends with the test that raised it. */
+const openPrompts: (() => Promise<void>)[] = [];
+test.afterEach(async () => {
+  for (const end of openPrompts.splice(0)) await end();
+});
+
+/** One tier-3 session whose Bash call waits on the person's Allow, under the message that
+ *  asked for it: in Simple mode its tools line is the needs-you dot and "Asking to run Bash". */
+async function postAskingSession(request: APIRequestContext): Promise<{ key: string; url: string }> {
+  const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+  const send = async (batch: Record<string, unknown>[]) => {
+    const res = await request.post(EVENTS, {
+      headers: { authorization: `Bearer ${sinkToken}` },
+      data: { events: batch },
+    });
+    expect(res.status()).toBe(202);
+  };
+  const b = tier1Batch({ title: "A prompt in the narrow gutter" });
+  // The session's start and its turn; the tool that follows gets no end.
+  const events = b.events.slice(0, 2);
+  for (const e of events) e.tier = 3;
+  const turnId = (events[1]!.data as Record<string, unknown>).turn_id;
+  const next = (type: string, hook: string, data: Record<string, unknown>) => {
+    const last = events[events.length - 1]!;
+    const time = Date.parse(last.time as string) + 1000;
+    events.push({
+      ...last,
+      id: ulid(time),
+      type,
+      time: new Date(time).toISOString(),
+      harness: { ...(last.harness as Record<string, unknown>), event: hook },
+      session: { ...(last.session as Record<string, unknown>), seq: events.length },
+      data,
+    });
+  };
+  const call = { tool: "Bash", call_id: "toolu_deploy", turn_id: turnId };
+  const attention = `att_${b.sessionId.slice(0, 8)}`;
+  next("turn.progress", "UserPromptSubmit", { turn: 0, user: "Run the tests, then deploy.", assistant: "" });
+  next("tool.started", "PreToolUse", { ...call, input: { command: "npm run deploy" } });
+  next("attention.needed", "PermissionRequest", {
+    attention_id: attention,
+    kind: "permission",
+    tool: "Bash",
+    message: "npm run deploy",
+  });
+  await send(events);
+  // Its end, sent after the test: the prompt answered, the call run, the turn over.
+  const asked = events.length;
+  next("attention.cleared", "PreToolUse", { attention_id: attention, how: "answered" });
+  next("tool.ended", "PostToolUse", { ...call, ok: true, ms: 900 });
+  next("turn.ended", "Stop", { turn_id: turnId, reason: "stop", ms: 3000 });
+  openPrompts.push(() => send(events.slice(asked)));
+  return { key: `${b.harness}:${b.sessionId}`, url: sessionUrl(b.harness, b.sessionId) };
+}
+
+/** Simple mode for the page's next load (the suite starts every device in Advanced): the
+ *  session as a chat, whose tools are one line under the agent's name. */
+const simpleMode = (page: Page) =>
+  page.addInitScript(() => localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ mode: "simple" })));
 
 test.describe("split panel", () => {
   test.describe("desktop", () => {
@@ -259,6 +321,66 @@ test.describe("split panel", () => {
       // The theme's own container made room (after the 240 ms slide).
       const viewport = page.viewportSize()!.width;
       await expect.poll(() => mainWidth(page)).toBeLessThan(viewport - 400);
+    });
+
+    // The panel's gutter is 16 px, the page's 24: the tools line's glyph hangs in the page's
+    // and has no room to in the panel's, whose edge would cut it.
+    for (const size of [
+      { width: 1440, height: 900 },
+      { width: 1280, height: 800 },
+    ]) {
+      test(`at ${size.width} wide the tools line's dot is whole, on the reply's edge, and the first turn starts 8 px under the tabs`, async ({
+        page,
+        request,
+      }) => {
+        await page.setViewportSize(size);
+        await simpleMode(page);
+        const asking = await postAskingSession(request);
+        const other = await postLongSession(request);
+        await page.goto(`/?s=${encodeURIComponent(`${asking.key},${other}`)}&t=0`);
+        await live(page);
+        const body = panel(page).locator(".panel-body:not(.panel-body--off)");
+        const line = body.locator(".chat-tools-sum");
+        await expect(line).toHaveText("Asking to run Bash");
+        const [edge, dot, mark] = await Promise.all([
+          panel(page).boundingBox(),
+          line.locator(".dot--needs_you").boundingBox(),
+          body.locator(".chat-meta").boundingBox(),
+        ]);
+        expect(dot!.x, "the dot is inside the panel, a gutter from its edge").toBeGreaterThanOrEqual(edge!.x + 16);
+        expect(Math.abs(dot!.x - mark!.x), "the dot is level with the agent's mark").toBeLessThanOrEqual(1);
+        // Under the tab strip, the room the full page leaves under its bar.
+        const under = async (bar: string) => {
+          const [above, turn] = await Promise.all([
+            panel(page).locator(bar).boundingBox(),
+            body.locator(".turn").first().boundingBox(),
+          ]);
+          return turn!.y - (above!.y + above!.height);
+        };
+        expect(Math.abs((await under("[role='tablist']")) - 8), "8 px under the tabs").toBeLessThanOrEqual(1);
+        // One tab: the strip folds into the head, and the turn keeps the same room under it.
+        await page.goto(`/?s=${encodeURIComponent(asking.key)}`);
+        await live(page);
+        await expect(line).toHaveText("Asking to run Bash");
+        await expect(panel(page).locator("[role='tablist']")).toBeHidden();
+        expect(Math.abs((await under(".panel-head")) - 8), "8 px under the head").toBeLessThanOrEqual(1);
+      });
+    }
+
+    test("the session's own page keeps the glyph hung in its wider gutter", async ({ page, request }) => {
+      await simpleMode(page);
+      const asking = await postAskingSession(request);
+      await page.goto(asking.url);
+      await live(page);
+      const view = page.locator(".page.session");
+      const line = view.locator(".chat-tools-sum");
+      await expect(line).toHaveText("Asking to run Bash");
+      await expect(line).toHaveCSS("margin-left", "-22px");
+      const [dot, mark] = await Promise.all([
+        line.locator(".dot--needs_you").boundingBox(),
+        view.locator(".chat-meta").boundingBox(),
+      ]);
+      expect(Math.abs(dot!.x - (mark!.x - 18)), "the dot hangs 18 px left of the reply").toBeLessThanOrEqual(1);
     });
   });
 
@@ -554,6 +676,16 @@ test.describe("split panel", () => {
       await page.locator(".bar .bar-back").click();
       await expect(page).toHaveURL(/\/$/);
       await expect(page.locator("section.group").first()).toBeVisible();
+    });
+
+    test("the tools line's glyph sits on the reply's edge, as it did", async ({ page, request }) => {
+      await simpleMode(page);
+      const asking = await postAskingSession(request);
+      await page.goto(asking.url);
+      await live(page);
+      const line = page.locator(".page.session .chat-tools-sum");
+      await expect(line).toHaveText("Asking to run Bash");
+      await expect(line).toHaveCSS("margin-left", "-4px");
     });
   });
 

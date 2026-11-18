@@ -399,6 +399,12 @@ pairing link that carries the board's key only for a pairing the sink token star
   first section of Settings while the check ran in another; with none it said nothing
   until the download had ended, then asked in a dialog that pointed at a menu bar item
   that may be switched off.
+- **The side panel draws a session's needs-you dot whole.** With a session open beside the
+  Board or the Inbox, the chat's tools line ("Asking to run Bash", "Ran 4 tools") hung its
+  dot, spinner or chevron into a gutter the panel doesn't have, and the panel's edge cut
+  the orange dot in half. In the panel the glyph now sits on the reply's edge, as it does
+  on a phone, and the first message starts 8 px under the tabs instead of touching them. A
+  session's own page is as it was.
 
 ## [0.8.4] - 2026-11-17
 
