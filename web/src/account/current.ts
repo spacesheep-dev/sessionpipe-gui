@@ -51,6 +51,33 @@ export function useCatching(): boolean {
  *  two is over before it, and never flashes "Catching up…". */
 export const BEHIND_SAID_AFTER_MS = 1000;
 
+/** The page's clock and its timers, or a test's. */
+export interface WakeClock {
+  now(): number;
+  setTimeout(f: () => void, ms: number): unknown;
+  clearTimeout(t: unknown): void;
+}
+const pageClock: WakeClock = {
+  now: () => performance.now(),
+  setTimeout: (f, ms) => window.setTimeout(f, ms),
+  clearTimeout: (t) => window.clearTimeout(t as number),
+};
+
+/** Calls `wake` once the clock reads `due` or later, and returns what cancels it. A timer's
+ *  delay is whole milliseconds, and one that wakes on time (Chromium's on Linux) wakes up
+ *  to a millisecond before a clock read in fractions of one says the moment is here: such
+ *  a wake sets the timer again for what is left, so `wake` never finds it still to come. */
+export function wakeAt(due: number, wake: () => void, clock: WakeClock = pageClock): () => void {
+  let t: unknown;
+  const check = (): void => {
+    const left = due - clock.now();
+    if (left > 0) t = clock.setTimeout(check, Math.ceil(left));
+    else wake();
+  };
+  check();
+  return () => clock.clearTimeout(t);
+}
+
 /** Behind for BEHIND_SAID_AFTER_MS, and the history coming: read, or held by spacesheep's
  *  limit, after which it is read on by itself. Not while spacesheep cannot be reached: the
  *  page says that instead. The page bar then says "Catching up…". The wait is counted from
@@ -64,10 +91,10 @@ export function useCatchingUp(): boolean {
   const since = useSyncExternalStore(b ? b.subscribe : unheld, read, read);
   const [, wake] = useReducer((n: number) => n + 1, 0);
   const said = since !== null && performance.now() - since >= BEHIND_SAID_AFTER_MS;
+  // Woken a moment early, the render would find it unsaid with nothing left to wake it.
   useEffect(() => {
     if (since === null || said) return;
-    const t = window.setTimeout(wake, since + BEHIND_SAID_AFTER_MS - performance.now());
-    return () => window.clearTimeout(t);
+    return wakeAt(since + BEHIND_SAID_AFTER_MS, wake);
   }, [since, said]);
   return said;
 }
