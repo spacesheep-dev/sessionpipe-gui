@@ -7,6 +7,8 @@
 // signed `start` the fake daemon takes with `reply_to` naming the asking session, `from`
 // and `replyTo` on the activity, and the row the asking session shows at once.
 // An older machine's session gets the disabled item with its reason and no strip button.
+// The open sheet has the whole window, as New session's has: its scrim over the sidebar and
+// the page bar at each desktop size, and on a phone the sheet over the tab bar.
 // Against the second e2e instance (test door on, rp id localhost) through fake daemons.
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
@@ -146,6 +148,110 @@ test("the strip's Ask another agent…: the sheet, its rows, and a start the mac
   expect(row.replyTo).toBe(`${s.harness}:${s.id}`);
   // The asking session shows the row at once, from the activity.
   await expect(page.locator(".ask").first()).toContainText("You asked Codex");
+});
+
+/** What is under a point of the window: the sheet's scrim, the sheet, or the page. */
+const under = (page: Page, at: { x: number; y: number }) =>
+  page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y);
+    return el?.closest(".ns-scrim") ? "scrim" : el?.closest("[data-handoff]") ? "sheet" : "page";
+  }, at);
+const centre = async (page: Page, selector: string) => {
+  const box = (await page.locator(selector).first().boundingBox())!;
+  return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) };
+};
+
+test("the sheet dims the whole window, as New session's does: a click on the sidebar closes it and goes nowhere", async ({
+  page,
+}) => {
+  const name = `ho-dim-${tag()}`;
+  const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+  daemons.push(m);
+  const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Ledger ${name}` });
+  await postTurn(sink, { ...s, machine: name }, "The ledger balances to the cent.");
+  await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+  await expect(page.locator(".conn").first()).toHaveText("live");
+  const url = page.url();
+
+  for (const size of [
+    { width: 1280, height: 800 },
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+  ]) {
+    await page.setViewportSize(size);
+    await page.locator("[data-ctl-ask]").click();
+    await expect(sheet(page)).toBeVisible();
+    // Out of the docked bar: neither its measure nor its layer under the sidebar holds it.
+    expect(await sheet(page).evaluate((el) => el.closest(".sess-ctl") === null)).toBe(true);
+    expect(await page.locator(".ns-scrim").boundingBox()).toEqual({ x: 0, y: 0, ...size });
+    // The sheet keeps its place: its own width, centred, dropped from under the title band.
+    const band = await page.evaluate(() =>
+      Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bar")),
+    );
+    await expect.poll(async () => (await sheet(page).boundingBox())?.y).toBe(band);
+    const box = (await sheet(page).boundingBox())!;
+    expect(box.width).toBe(640);
+    expect(box.x).toBe((size.width - 640) / 2);
+    // Everything around it is under the scrim: the sidebar, a link in it, the bar's back
+    // and ⋯ at either end of the window, and the composer.
+    const board = await centre(page, ".rail [data-nav=board]");
+    const points = [
+      { x: 100, y: 400 },
+      board,
+      await centre(page, ".main .bar-back"),
+      await centre(page, ".main .bar [aria-label='More actions']"),
+      await centre(page, ".ctl textarea"),
+    ];
+    for (const at of points) expect(await under(page, at), `${at.x},${at.y} at ${size.width}`).toBe("scrim");
+
+    // A click on the sidebar's Board is the scrim's: the sheet closes, the page stays.
+    await page.mouse.click(board.x, board.y);
+    await expect(sheet(page)).toHaveCount(0);
+    expect(page.url()).toBe(url);
+    await expect(page.locator(".ns-scrim")).toHaveCount(0);
+  }
+
+  // Esc closes it too, and the focus is back on the button that opened it. (The sheet
+  // takes the focus once more 120 ms after it opens, for a menu that gives its own back
+  // late: a timer set after that one runs after it, so Esc is pressed once it has.)
+  const ask = page.locator("[data-ctl-ask]");
+  await ask.click();
+  await expect(sheet(page).locator("[data-hs-text]")).toBeFocused();
+  await page.evaluate(() => new Promise((done) => setTimeout(done, 150)));
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(ask).toBeFocused();
+  expect(page.url()).toBe(url);
+});
+
+test("a phone's sheet covers the tab bar, and a tablet's fills the width", async ({ page }) => {
+  const name = `ho-full-${tag()}`;
+  const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+  daemons.push(m);
+  const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Totals ${name}` });
+  await postTurn(sink, { ...s, machine: name }, "The totals are summed once.");
+
+  for (const size of [
+    { width: 390, height: 844 },
+    { width: 834, height: 1194 },
+  ]) {
+    await page.setViewportSize(size);
+    await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+    await expect(page.locator(".ctl textarea")).toBeVisible();
+    const tabbar = await centre(page, ".tabbar");
+    expect(await under(page, tabbar)).toBe("page");
+    await page.locator("[data-ctl-ask]").click();
+    await expect(sheet(page)).toBeVisible();
+    expect(await sheet(page).evaluate((el) => el.closest(".sess-ctl") === null)).toBe(true);
+    // The whole screen is the sheet's, edge to edge: nothing of the page beside it (the
+    // bar's ⋯, the composer), and the tab bar under it.
+    await expect.poll(async () => (await sheet(page).boundingBox())?.y).toBe(0);
+    expect(await sheet(page).boundingBox()).toEqual({ x: 0, y: 0, ...size });
+    for (const at of [tabbar, { x: size.width - 4, y: 24 }, { x: size.width - 4, y: size.height - 120 }])
+      expect(await under(page, at), `${at.x},${at.y} at ${size.width}`).toBe("sheet");
+    await sheet(page).locator("[data-hs-cancel]").click();
+    await expect(sheet(page)).toHaveCount(0);
+  }
 });
 
 test("a reply's menu asks about that turn; ⌘K has the verb; Esc keeps the draft", async ({ page }) => {

@@ -317,6 +317,13 @@ pairing link that carries the board's key only for a pairing the sink token star
 - **The sounds are named as the notifications are.** "Needs you", "Question", "Error" and
   "Done" are "Permission requests", "Questions", "Errors" and "Delivered"; the sound
   chosen for each is kept.
+- **Ask another agent dims the whole window, as New session does.** The sheet's backdrop
+  covered only a band in the middle of the window, so the sidebar, Back, Files and ⋯ stayed
+  bright around it and took clicks: one on the sidebar opened another page under the open
+  sheet. The whole window dims now, and a click anywhere outside the sheet closes it and
+  goes nowhere; what was typed is kept for that session. On a phone the sheet covers the
+  tab bar, which was drawn over its foot, and on an iPad held upright it fills the width,
+  where the page showed beside it.
 
 ## [0.8.4] - 2026-11-17
 
