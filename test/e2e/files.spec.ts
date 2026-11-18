@@ -16,9 +16,9 @@ const readResult = (filePath: string, lines: string[]) => ({
 });
 
 /** One tier-3 Claude Code session: a Read of a file (the result object Claude Code returns
- *  it), two Edits to it, a Write of a new file, a Bash that failed, then a second Read of
- *  the first file (a later version). */
-async function postSession(request: APIRequestContext) {
+ *  it), an Edit to it, a Write of a new file and a Bash that failed; with `reread`, then a
+ *  second Read of the first file (a later version). */
+async function postSession(request: APIRequestContext, { reread = false } = {}) {
   const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
   const harness = "claude-code";
   const sessionId = randomUUID();
@@ -74,6 +74,18 @@ async function postSession(request: APIRequestContext) {
     ),
     ...tool("Write", { file_path: `${cwd}/src/new.test.ts`, content: "test('x', () => {});\n" }, "ok"),
     ...tool("Bash", { command: "npm test" }, "FAIL src/new.test.ts\n  expected 1, got 2", false),
+    ...(reread
+      ? tool(
+          "Read",
+          { file_path: file },
+          readResult(file, [
+            banner,
+            "import { open } from 'node:fs';",
+            "const limit = MAX_BATCH;",
+            "export { limit };",
+          ]),
+        )
+      : []),
     ev("turn.ended", { turn_id: "t1", reason: "stop", ms: 5000 }),
   ];
   const res = await request.post(EVENTS, {
@@ -123,6 +135,33 @@ test.describe("files drawer", () => {
     await drawer(page).getByRole("button", { name: "Back to the files" }).click();
     await expect(rows).toHaveCount(2);
     await expect(page).not.toHaveURL(/file=/);
+  });
+
+  test("a file read twice steps through its versions: two arrows and a count, with no box of the browser's around them", async ({
+    page,
+    request,
+  }) => {
+    const s = await postSession(request, { reread: true });
+    await openPage(page, `${sessionUrl(s.harness, s.sessionId)}?file=src%2Foutbox.ts`);
+    const stepper = drawer(page).locator("fieldset.fv-versions");
+    await expect(stepper.locator(".num")).toHaveText("2 of 2");
+    // The group is there for a screen reader: no groove, no padding, so it is no taller
+    // than the switch it shares the bar with.
+    for (const side of ["top", "right", "bottom", "left"]) {
+      await expect(stepper).toHaveCSS(`border-${side}-width`, "0px");
+      await expect(stepper).toHaveCSS(`padding-${side}`, "0px");
+    }
+    const [group, track] = await Promise.all([
+      stepper.boundingBox(),
+      drawer(page).locator(".fv-bar .seg").boundingBox(),
+    ]);
+    expect(group!.height).toBeLessThanOrEqual(track!.height);
+    const earlier = stepper.getByRole("button", { name: "Earlier version" });
+    const later = stepper.getByRole("button", { name: "Later version" });
+    await expect(later).toBeDisabled();
+    await earlier.click();
+    await expect(stepper.locator(".num")).toHaveText("1 of 2");
+    await expect(earlier).toBeDisabled();
   });
 
   test("a comment on a range of lines becomes a review message in the composer", async ({ page, request }) => {

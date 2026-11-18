@@ -405,6 +405,9 @@ pairing link that carries the board's key only for a pairing the sink token star
   the orange dot in half. In the panel the glyph now sits on the reply's edge, as it does
   on a phone, and the first message starts 8 px under the tabs instead of touching them. A
   session's own page is as it was.
+- **No box around a file's versions.** In the Files drawer, "‹ 2 of 5 ›" over an opened
+  file sat in the browser's own grooved rectangle, which read as a focus ring that never
+  left. It is gone, and the bar is only as tall as the Changes | Text switch beside it.
 
 ## [0.8.4] - 2026-11-17
 

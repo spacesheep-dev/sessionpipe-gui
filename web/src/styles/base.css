@@ -111,6 +111,17 @@ p {
   font-weight: inherit;
 }
 
+/* A fieldset groups controls for a screen reader; it draws nothing. */
+fieldset {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+legend {
+  padding: 0;
+}
+
 a {
   color: inherit;
   text-decoration: none;

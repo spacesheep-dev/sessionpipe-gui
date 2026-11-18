@@ -17,9 +17,6 @@
   display: grid;
   gap: 4px;
   min-width: 0;
-  border: 0;
-  padding: 0;
-  margin: 0;
 }
 .plug-field--check {
   grid-template-columns: auto 1fr;

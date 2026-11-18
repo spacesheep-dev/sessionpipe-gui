@@ -717,9 +717,7 @@ textarea.field {
 .seg {
   display: inline-flex;
   min-width: 0;
-  margin: 0;
   padding: 2px;
-  border: 0;
   border-radius: var(--radius);
   background: var(--bg-3);
 }

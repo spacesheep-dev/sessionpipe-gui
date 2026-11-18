@@ -353,16 +353,12 @@
   gap: 16px;
 }
 .step-folders {
-  margin: 0;
-  padding: 0;
-  border: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
   max-width: 560px;
 }
 .step-folders legend {
-  padding: 0;
   margin-bottom: 4px;
   color: var(--fg-3);
   font-size: var(--text-sm);
