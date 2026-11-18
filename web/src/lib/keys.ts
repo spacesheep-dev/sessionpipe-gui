@@ -374,6 +374,16 @@ const openDismiss = (): boolean => [...document.querySelectorAll<HTMLElement>("[
  *  e and ⇧E) leave the row under the cursor alone, since the person is working there. */
 export const inPanel = (): boolean => !!document.activeElement?.closest?.("aside.panel");
 
+/** `a` (`allow`) or `d` passed on to the panel would answer this prompt there: the key
+ *  clicks the active tab's first Allow or Deny that is on (SessionBody's session.allow),
+ *  and that one is this prompt's. With two prompts open in one session it may be the
+ *  other's, and a question, or a prompt whose answer is out, has none. */
+export const panelAnswers = (attentionId: string, allow: boolean): boolean =>
+  document
+    .querySelector("aside.panel .panel-body:not(.panel-body--off)")
+    ?.querySelector(`.ctl .btn--${allow ? "allow" : "deny"}:not(:disabled)`)
+    ?.closest<HTMLElement>("[data-attention]")?.dataset.attention === attentionId;
+
 /** Holding ⌘ (ctrl elsewhere) for 600 ms in the installed app marks the document
  *  `data-jump-hints`, so the first nine rows show their number (board.css); letting go
  *  takes them away. */

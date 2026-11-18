@@ -50,7 +50,7 @@ import {
   toolLabel,
 } from "../lib/format";
 import { hide, unhide } from "../lib/hidden";
-import { inPanel } from "../lib/keys";
+import { inPanel, panelAnswers } from "../lib/keys";
 import { labelItems } from "../lib/labels";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { reducedMotion, tokenMs, useFlip, useHeldOrder, useListHold } from "../lib/motion";
@@ -252,15 +252,16 @@ export const SessionCard = memo(function SessionCard({
   }, [onRow]);
   // `a` and `d` on the row under the cursor (lib/shortcuts.ts tries board.* before
   // session.*): they answer the prompt the row shows whole. A row that cannot (a cut
-  // command, a plan, a question, an answer already out) passes them to the panel where it
-  // is open beside, which shows the prompt whole; on any other row they are taken and
-  // dropped, so they never answer another session open beside the board.
+  // command, a plan) passes them to the panel where it is open beside and the panel's key
+  // would answer this same prompt, shown whole there; otherwise (a question, an answer
+  // already out, another prompt of the session first in the panel) they are taken and
+  // dropped, so they never answer anything but the prompt under the cursor.
   const answerKey = (allow: boolean) => () => {
     if (inPanel()) return false;
     const [yes, no] = gone || cut() ? [] : answer.current;
     if (yes && no && !yes.disabled && !no.disabled) return void (allow ? yes : no).run();
-    if (open) return false;
-    if (yes?.disabled && attention) setAsked(attention.attentionId);
+    if (open && attention && !said?.receipt && panelAnswers(attention.attentionId, allow)) return false;
+    if (said?.off && attention) setAsked(attention.attentionId);
   };
   useShortcut("board.allow", answerKey(true), { enabled: onRow, priority: 2 });
   useShortcut("board.deny", answerKey(false), { enabled: onRow, priority: 2 });
@@ -659,8 +660,10 @@ function CardAnswer({
           BOARD_KEYS,
         )
       : [];
+  // Not paired is no moment's state: the menu leaves the pair out, as it does Ask another
+  // agent…, and the row says why once `a` or `d` is pressed.
   useLayoutEffect(() => {
-    into.current = items;
+    into.current = st?.tag === "unpaired" ? [] : items;
   });
   const receipt = st?.receipt?.text;
   const held = !!receipt && control?.online === false;

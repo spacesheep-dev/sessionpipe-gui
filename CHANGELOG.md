@@ -291,21 +291,13 @@ pairing link that carries the board's key only for a pairing the sink token star
   page's own entry there brings the page back.
 - **On the Board, a and d answer the prompt under the cursor.** On a Needs you row they
   did nothing, and with a session open beside the board they answered that session,
-  whichever row the cursor was on. They now answer the row under the cursor, where it
-  shows its request whole, as in the Inbox, and never another session open beside the
-  board. A row that is answered where it is shown whole (a cut command, a plan, a
-  question) takes the keys and does nothing, unless it is the one open beside: then the
-  panel answers, so Space, then a still works for a long command. With no row under the
-  cursor they answer nothing unless the focus is in the panel. The Inbox passes a and d
-  to the panel the same way. The row says what became of the answer in the request's
-  place: "Allowed · waiting for studio-mac" with the working ring while it is out (a
-  hollow ring and "to come back" while that computer is offline), "Not sent: …" when it
-  did not go, and why, where Allow is off. An answer from the row's menu says the same;
-  one that failed there said nothing.
-- **A row's menu leads with Allow and Deny, and shows their keys.** On a Board row, a
-  panel's tab and a view's session menu the pair came after Open, New session here and
-  Ask another agent…. It comes first now, as in the Inbox and a session's "⋯", with A and
-  D beside it on the Board and in the Inbox.
+  whichever row the cursor was on. They now answer the row under the cursor, as in the
+  Inbox, and never another prompt. The row then says what became of the answer, in the
+  request's place: "Allowed · waiting for studio-mac", "Not sent: …", or why it cannot go.
+- **A Board row's menu leads with Allow and Deny, and shows their keys.** The pair came
+  after Open, New session here and Ask another agent…; it comes first now, as in the
+  Inbox, and both show A and D beside it. On a machine that is not paired a Board row's
+  menu leaves the pair out.
 
 ### Fixed
 

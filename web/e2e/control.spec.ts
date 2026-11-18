@@ -787,6 +787,13 @@ async function board(query = ""): Promise<void> {
   await page.addStyleTag({ content: ".toasts { display: none !important; }" });
 }
 
+/** No tab left beside the page: a session opened as a page keeps the panel's tabs, so the
+ *  tests after this one would carry them. */
+async function closePanel(): Promise<void> {
+  await page.evaluate(() => localStorage.removeItem("sessionpipe-gui.splitTabs"));
+  await page.goto("/inbox");
+}
+
 /** j and k until the board's cursor is on the row. */
 async function cursorTo(p: { key: string }): Promise<void> {
   await expect(card(p)).toBeVisible();
@@ -894,6 +901,93 @@ test("on the Board, a and d never answer a session open beside it; a row that is
   // The answer went from the panel; the board's row says so too.
   await expect(card(long).locator(".card-attn")).toHaveText(`Allowed · waiting for ${MACHINE}`);
   for (const p of [beside, question, long]) await p.clear();
+  await closePanel();
+});
+
+test("with two prompts open in one session beside the page, a and d on the one the panel's keys do not answer send nothing, on the Board and in the Inbox", async () => {
+  // This receiver keeps one prompt open a session (the next hook event closes it); another
+  // may hold two, as parallel subagents ask at once. The stream's frames give this session
+  // a question ahead of its command while the command is open: the panel's first Allow is
+  // the command's, and the board's row shows the question.
+  await page.addInitScript(() => {
+    const two = sessionStorage.getItem("e2e-two-prompts");
+    if (!two) return;
+    const { key, id } = JSON.parse(two) as { key: string; id: string };
+    type Row = { key: string; openAttentions: { attentionId: string; at: string }[] };
+    const ask = (r: Row | undefined) => {
+      const first = r?.key === key ? r.openAttentions[0] : undefined;
+      if (!r || !first || first.attentionId === id) return;
+      r.openAttentions = [
+        {
+          attentionId: id,
+          kind: "permission",
+          tool: "AskUserQuestion",
+          message: "AskUserQuestion",
+          at: first.at,
+          answerable: true,
+        },
+        ...r.openAttentions,
+      ] as Row["openAttentions"];
+    };
+    const Real = window.EventSource;
+    window.EventSource = class extends Real {
+      addEventListener(kind: string, fn: EventListenerOrEventListenerObject, o?: boolean | AddEventListenerOptions) {
+        if (typeof fn !== "function") return super.addEventListener(kind, fn, o);
+        return super.addEventListener(
+          kind,
+          (e: Event) => {
+            const m = JSON.parse((e as MessageEvent).data);
+            for (const r of m.snapshot?.sessions ?? []) ask(r);
+            ask(m.session);
+            fn(new MessageEvent(e.type, { data: JSON.stringify(m), lastEventId: (e as MessageEvent).lastEventId }));
+          },
+          o,
+        );
+      }
+    } as typeof EventSource;
+  });
+  const bash = await prompted({ title: "Two prompts", message: "make deploy" });
+  const question = `${bash.id}-q`;
+  await page.evaluate(
+    ([key, id]) => sessionStorage.setItem("e2e-two-prompts", JSON.stringify({ key, id })),
+    [bash.key, question],
+  );
+  try {
+    // The Board: the row shows the question; its session is open beside it.
+    await board(`?s=${bash.key}`);
+    const shown = page.locator("aside.panel .panel-body:not(.panel-body--off)");
+    await expect(shown.locator(`.ctl-answer[data-attention="${question}"]`)).toHaveAttribute("data-answer", "question");
+    const allow = shown.locator(`.ctl-answer[data-attention="${bash.id}"] .btn--allow`);
+    await expect(allow).toBeEnabled({ timeout: 15_000 });
+    await cursorTo(bash);
+    await expect(card(bash).locator(".card-tool")).toHaveText("Question");
+    expect(await page.evaluate(() => !!document.activeElement?.closest("aside.panel"))).toBe(false);
+    await page.keyboard.press("a");
+    await page.keyboard.press("d");
+    expect(await daemon.poll(1)).toEqual([]);
+    await expect(allow).toBeEnabled();
+
+    // The Inbox: on the question's row, nothing; on the command's, its own answer.
+    await page.goto(`/inbox?s=${bash.key}`);
+    await page.addStyleTag({ content: ".toasts { display: none !important; }" });
+    const row = (id: string) => page.locator(`.inbox-row[data-attention="${id}"]`);
+    await expect(allow).toBeEnabled({ timeout: 15_000 });
+    await row(question).locator(".inbox-main").focus();
+    await expect(row(question)).toHaveAttribute("aria-current", "true");
+    await page.keyboard.press("a");
+    await page.keyboard.press("d");
+    expect(await daemon.poll(1)).toEqual([]);
+    await row(bash.id).locator(".inbox-main").focus();
+    await expect(row(bash.id)).toHaveAttribute("aria-current", "true");
+    await page.keyboard.press("d");
+    const msg = await daemon.next();
+    expect(msg.cmd).toMatchObject({ kind: "permission.answer", session: bash.key, for: bash.id, decision: "deny" });
+    await daemon.ack(msg.id, "delivered", { mode: "waiter" });
+  } finally {
+    await page.evaluate(() => sessionStorage.removeItem("e2e-two-prompts"));
+    await bash.clear();
+    await closePanel();
+  }
 });
 
 test("on the Board, a on a machine that is not paired sends nothing, and the row says why until the cursor leaves it", async () => {

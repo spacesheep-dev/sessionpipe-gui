@@ -61,7 +61,7 @@ import {
   toolLabel,
 } from "../lib/format";
 import { attentionKey, hide, isHidden, useHidden } from "../lib/hidden";
-import { inPanel, useListNav } from "../lib/keys";
+import { inPanel, panelAnswers, useListNav } from "../lib/keys";
 import { type LabelFilter, labelItems, labelPasses } from "../lib/labels";
 import { copyItem, sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
@@ -358,13 +358,15 @@ export function Inbox() {
 /** `a` and `d` while the list cursor is on a row: they are that row's, answered by `answer`
  *  or, where it is null, taken and dropped, so they never fall through to the keys of
  *  another session open beside the page (lib/shortcuts.ts tries inbox.* before session.*).
- *  A row that is not answered here and is the one open beside (`open`) passes them to the
- *  panel, which shows its prompt whole. With focus inside the panel they are the panel's. */
-function useRowKeys(focused: boolean, answer: ((allow: boolean) => void) | null, open = false): void {
+ *  A row that is not answered here passes them to the panel only where the panel's key
+ *  would answer this row's own prompt (`open`, its id, with its session open beside),
+ *  shown whole there; never another prompt of that session. With focus inside the panel
+ *  they are the panel's. */
+function useRowKeys(focused: boolean, answer: ((allow: boolean) => void) | null, open: string | null = null): void {
   const run = (allow: boolean) => () => {
     if (inPanel()) return false;
     if (answer) return void answer(allow);
-    if (open) return false;
+    if (open && panelAnswers(open, allow)) return false;
   };
   useShortcut("inbox.allow", run(true), { enabled: focused, priority: 2 });
   useShortcut("inbox.deny", run(false), { enabled: focused, priority: 2 });
@@ -421,8 +423,8 @@ function InboxRow({
   // any other, a plan or a long command, offers Open, to the session that shows it whole.
   const whole = askFitsRow(a, s.harness);
   // A prompt in a terminal is answered there: `a` and `d` on its row do nothing here (Answer
-  // has the answerable rows' keys).
-  useRowKeys(cursor !== undefined && !row.answerable, null, beside);
+  // has the answerable rows' keys), and the panel has no Allow for it to pass them to.
+  useRowKeys(cursor !== undefined && !row.answerable, null);
   const titleId = useId();
   // With an answer out the orange glyph is the working ring, or a still hollow one while
   // the computer is offline (Answer says which).
@@ -544,7 +546,8 @@ function Answer({
   control?: MachineControl;
   /** The row under the list cursor: it takes `a` and `d` (useRowKeys). */
   focused?: boolean;
-  /** Its session is open beside the page: what the row does not answer, the panel does. */
+  /** Its session is open beside the page: what the row does not answer, the panel does,
+   *  where its key would answer this prompt (useRowKeys). */
   beside?: boolean;
   into: MutableRefObject<MenuList>;
   report: (id: string, off: Off | null) => void;
@@ -590,7 +593,11 @@ function Answer({
   useEffect(() => onOut(lead), [lead, onOut]);
   useEffect(() => () => onOut(null), [onOut]);
   // The row's own answer on its way is nobody else's to send again.
-  useRowKeys(focused, whole && !off && chosen === null ? answer : null, beside && chosen === null);
+  useRowKeys(
+    focused,
+    whole && !off && chosen === null ? answer : null,
+    beside && chosen === null ? a.attentionId : null,
+  );
   // Off for a standing reason (not paired, no passkeys here, not approved): the page says
   // it once, for the rows that show Allow and Deny. A moment's state (sent, a passkey
   // prompt, closed) stays on the row. Not approved, an Open row has no Open either, and
