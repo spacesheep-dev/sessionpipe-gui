@@ -72,6 +72,17 @@ export interface GuardRequest {
 
 const one = (v: string | string[] | undefined): string | undefined => (Array.isArray(v) ? v[0] : v);
 
+const HOST_MAX = 512;
+
+/** `raw` without an address's zone id (`[fe80::1%en0]` → `[fe80::1]`): from the first "%"
+ *  to the "]" after it, read once from left to right. */
+function withoutZone(raw: string): string {
+  const zone = raw.indexOf("%");
+  if (zone < 0) return raw;
+  const close = raw.indexOf("]", zone);
+  return close < 0 ? raw : raw.slice(0, zone) + raw.slice(close);
+}
+
 /** The host of a `Host` header as a URL would have it, without its port: lowercased, an
  *  address in its one canonical spelling (`127.1` → `127.0.0.1`, `[0:0:0:0:0:0:0:1]` →
  *  `::1`), a zone id and a trailing dot dropped. `Studio.local:7373` → `studio.local`.
@@ -80,8 +91,11 @@ const one = (v: string | string[] | undefined): string | undefined => (Array.isA
 export function hostName(header: string | undefined): string {
   const raw = (header ?? "").trim().toLowerCase();
   if (!raw) return "";
+  // A name is at most 253 characters, and a port, brackets and a zone id add little: what
+  // is longer is no host, and is not worth reading.
+  if (raw.length > HOST_MAX) return raw;
   try {
-    const u = new URL(`http://${raw.replace(/%[^\]]*\]/, "]")}`);
+    const u = new URL(`http://${withoutZone(raw)}`);
     if (u.username || u.password || u.pathname !== "/" || u.search || u.hash || raw.includes("@")) return raw;
     return u.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "");
   } catch {

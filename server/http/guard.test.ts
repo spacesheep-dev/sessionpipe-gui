@@ -46,6 +46,14 @@ describe("the guard's readings", () => {
     expect(hostName("[::1]other.example")).toBe("[::1]other.example");
     expect(hostName("localhost@other.example")).toBe("localhost@other.example");
     expect(hostName("localhost:7373/x")).toBe("localhost:7373/x");
+    // A zone id goes wherever its bracket closes, and one with no bracket after it stays.
+    expect(hostName("[fe80::1%en0]")).toBe("fe80::1");
+    expect(hostName("fe80::1%en0")).toBe("fe80::1%en0");
+    // What is too long to be a host is not read at all: it comes back as sent, at once.
+    const long = "%".repeat(200_000);
+    expect(hostName(long)).toBe(long);
+    expect(hostName(`[${"%".repeat(200_000)}]`)).toBe(`[${"%".repeat(200_000)}]`);
+    expect(hostName(`${"a".repeat(600)}.example`)).toBe(`${"a".repeat(600)}.example`);
   });
 
   it("knows this machine by localhost, an address and the names it was given, and by no other", () => {
