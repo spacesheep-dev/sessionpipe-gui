@@ -166,11 +166,12 @@ export interface ThemeApi {
       machineId: string,
       opts: { harness: string; cwd: string; text: string },
     ): Promise<ControlActivity & { session: SessionKey }>;
-    /** Upload an image (PNG, JPEG, GIF or WebP, ≤ 8 MB) to send beside a prompt. The
-     *  protocol carries text only: name the result in `text` the way
-     *  shared/attachments.ts `composePrompt` does (its `path` when the session runs on
-     *  the GUI's machine, its `url` otherwise), and the host draws it as a thumbnail.
-     *  Absent on older hosts. */
+    /** Upload an image (PNG, JPEG, GIF or WebP, ≤ 8 MB) to send beside a prompt to a
+     *  session on the machine the GUI runs on: name the result in `text` by its `path`,
+     *  the way shared/attachments.ts `composePrompt` does, and the host draws it as a
+     *  thumbnail. Its `url` is the host's own path to the image (`/attachments/<id>.<ext>`,
+     *  no origin and no key), for showing it in the view; it opens nothing from another
+     *  machine and does not belong in a prompt. Absent on older hosts. */
     attach?(file: Blob): Promise<Attachment>;
   };
 

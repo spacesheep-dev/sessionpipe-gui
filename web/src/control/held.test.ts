@@ -204,6 +204,25 @@ describe("what the notice says will be sent", () => {
     ].join("\n");
     expect(heldWordsAndImages(text, [])).toEqual({ text, names: [] });
   });
+  it("a message's pictures, sent as its files, in one line: how many, and each by name", () => {
+    const kiwi = { name: "kiwi.png", type: "image/png", size: 33_112, sha256: "k".repeat(43) };
+    const birch = { name: "birch.png", type: "image/png", size: 51_204, sha256: "b".repeat(43) };
+    const notes = { name: "notes.md", type: "text/markdown", size: 12, sha256: "n".repeat(43) };
+    const carrying = (text: string, files: (typeof kiwi)[]) =>
+      hold({ kind: "prompt", session: "claude-code:s1", text, files }, async () => "x").held;
+    expect(heldContent(carrying("What colour is the square?", [kiwi, birch]))).toEqual({
+      text: "What colour is the square?",
+      names: ["2 pictures: kiwi.png, birch.png"],
+    });
+    // A message of pictures alone is signed with the filler words, and they are shown.
+    expect(heldContent(carrying("Look at the attached picture.", [kiwi]))).toEqual({
+      text: "Look at the attached picture.",
+      names: ["1 picture: kiwi.png"],
+    });
+    // Anything that is not an image is a file.
+    expect(heldContent(carrying("Read", [kiwi, notes])).names).toEqual(["2 files: kiwi.png, notes.md"]);
+    expect(heldContent(carrying("Read", []))).toEqual({ text: "Read", names: [] });
+  });
   it("a start's words and its files by name", () => {
     const f = { ...start("codex"), files: [{ name: "spec.pdf", type: "application/pdf", size: 1, sha256: "x" }] };
     expect(heldContent(hold(f, async () => "x").held)).toEqual({ text: "Start held.", names: ["spec.pdf"] });

@@ -1642,6 +1642,105 @@ describe("a start's options, files and applied, through POST send", () => {
     expect(ok.status, JSON.stringify(ok.body)).toBe(201);
   });
 
+  /** The first bytes of a PNG, which is all the receiver reads of one: the signature and
+   *  the IHDR's width and height. */
+  const pngHead = (w: number, h: number): Uint8Array => {
+    const head = Buffer.alloc(33);
+    head.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    head.writeUInt32BE(13, 8);
+    head.write("IHDR", 12, "latin1");
+    head.writeUInt32BE(w, 16);
+    head.writeUInt32BE(h, 20);
+    return new Uint8Array(head);
+  };
+
+  it("a picture is held to its own bytes: the answer says its pixels, and a file that is not the picture its type says is refused", async () => {
+    const up = await upload(pngHead(640, 400), "image/png", "kiwi.png");
+    expect(up.status).toBe(201);
+    const entry = (await up.json()) as Record<string, unknown>;
+    expect(entry).toEqual({
+      name: "kiwi.png",
+      type: "image/png",
+      size: 33,
+      sha256: fileHash(pngHead(640, 400)),
+      width: 640,
+      height: 400,
+    });
+    // `machine` (the machine it is for) is taken, and changes nothing here.
+    const forOne = await fetch(`${b.url}${UI}/files?name=kiwi.png&machine=m_promptfiles000000002`, {
+      method: "POST",
+      headers: { "content-type": "image/png" },
+      body: pngHead(640, 400) as BodyInit,
+    });
+    expect(forOne.status).toBe(201);
+    expect(await forOne.json()).toEqual(entry);
+
+    // Words sent as a PNG, and a PNG sent as a JPEG: neither is the picture its type says.
+    for (const [bytes, type] of [
+      ["just words, not a picture", "image/png"],
+      [pngHead(640, 400), "image/jpeg"],
+      ["<svg xmlns='http://www.w3.org/2000/svg'/>", "image/webp"],
+      ["GIF8 almost", "image/gif"],
+    ] as const) {
+      const lying = await upload(bytes, type, "kiwi.png");
+      expect(lying.status, type).toBe(415);
+      expect(await lying.json()).toEqual({
+        reason: "not_an_image",
+        error: "This file isn't the picture its type says.",
+      });
+    }
+    // Nothing of a refused upload is held.
+    const m = await enrolled(b, pk, "m_promptfiles000000002");
+    const held = await fetch(
+      `${b.url}${CONTROL}/files/${fileHash(new TextEncoder().encode("just words, not a picture"))}`,
+      {
+        headers: { authorization: `Bearer ${m.token}` },
+      },
+    );
+    expect(held.status).toBe(404);
+    // Any other kind of file is taken as before, with no pixels in its answer.
+    const notes = await upload("# notes", "text/markdown", "notes.md");
+    expect(notes.status).toBe(201);
+    expect(Object.keys((await notes.json()) as object).sort()).toEqual(["name", "sha256", "size", "type"]);
+  });
+
+  it("a prompt's pictures: only their four fields are signed, the row names them, and their bytes are kept as long as the row", async () => {
+    const m = await enrolled(b, pk, "m_promptfiles000000003");
+    await hello(m, { files: true, prompt_files: true });
+    const up = (await (await upload(pngHead(800, 600), "image/png", "birch.png")).json()) as Record<string, unknown>;
+    const send = async (files: unknown[], expires_in_s?: number) =>
+      call(b.url, "POST", `${UI}/send`, {
+        body: {
+          machineId: m.machine,
+          ...(await signedPrompt(pk, day, m.machine, { text: "Look at the attached picture.", files })),
+          ...(expires_in_s ? { expires_in_s } : {}),
+        },
+      });
+    // The upload's answer as it is, pixels and all, is not a file a command may name.
+    expect((await send([up])).body.code).toBe("bad_fields");
+    const entry = { name: up.name, type: up.type, size: up.size, sha256: up.sha256 };
+    const before = Date.parse(
+      JSON.parse(readFileSync(path.join(b.stateDir, "control", "files", `${up.sha256}.json`), "utf8")).expiresAt,
+    );
+    const ok = await send([entry], 24 * 3600);
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    expect(ok.body).toMatchObject({ kind: "prompt", text: "Look at the attached picture.", files: [entry] });
+    expect(b.control.activity().find((a) => a.id === ok.body.id)?.files).toEqual([entry]);
+    // Uploaded a moment before the send, it would have gone a moment before the row does.
+    const after = Date.parse(
+      JSON.parse(readFileSync(path.join(b.stateDir, "control", "files", `${up.sha256}.json`), "utf8")).expiresAt,
+    );
+    expect(after).toBe(Date.parse(ok.body.expiresAt as string));
+    expect(after).toBeGreaterThanOrEqual(before);
+    // The machine fetches it with its own token, as a start's file.
+    const got = await fetch(`${b.url}${CONTROL}/files/${up.sha256}`, {
+      headers: { authorization: `Bearer ${m.token}` },
+    });
+    expect(got.status).toBe(200);
+    expect(got.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await got.arrayBuffer())).toEqual(pngHead(800, 600));
+  });
+
   it("the well-known says control.files and control.inherit", () => {
     expect(b.control.wellKnown().files).toBe(true);
     expect(b.control.wellKnown().inherit).toBe(true);

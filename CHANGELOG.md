@@ -6,6 +6,32 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **A picture sent from a session's message box reaches the agent as a file in the
+  session's own folder.** Until now the message named it: by a path in the GUI's own
+  folder, which a session at Safe could not read and one at Accept edits asked about, or,
+  for a session on another computer, by a link to this board, which often could not be
+  opened from there. A computer whose sessionpipe is 0.10 or later
+  now fetches each picture itself and saves it under `.sessionpipe/files` in the session's
+  folder, where the agent reads it at every permission level. The message holds your words
+  and nothing else. A picture may be 25 MB (it was 8), six to a
+  message and 50 MB together; two upload at a time and the rest wait; a pasted screenshot
+  goes under a plain name (`image.png`, `image-2.png`); and a picture with no words is sent
+  as "Look at the attached picture." A file that is not the picture its type says is
+  refused in words, and so is one that did not arrive whole. An older sessionpipe on the
+  computer the GUI runs on still gets the path.
+- **Where a picture cannot be sent, the message box says so.** For a computer whose
+  sessionpipe is older than 0.10 and that is not the one the GUI runs on, and for one
+  reached through spacesheep, there is no paperclip, and a picture pasted or dropped is
+  answered under the field ("Pictures can't be sent to studio-mac: its sessionpipe is older
+  than 0.10. Run `sessionpipe update` there.") where it used to vanish or go as a link.
+  A file dropped on the message box that is no picture stays out of the way: the browser
+  no longer opens it in the page's place.
+- **A view's `control.attach` answers the board's own path to the image.** `url` is
+  `/attachments/<id>.<ext>`, with no address: it shows the image on this board
+  and opens nothing from another computer. A view that sends an image names its `path`.
+
 ## [0.8.4] - 2026-11-17
 
 The iPhone app on a spacesheep account, refined: every screen agrees on whether the

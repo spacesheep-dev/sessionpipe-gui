@@ -473,7 +473,7 @@ export class ControlState {
   ): MessageRow {
     const now = Date.now();
     const row = messageRow(m, signed, cmd, { ...o, id: ulid(now), now });
-    // A start's files are held here until the row is over (files.ts).
+    // A start's files, and a prompt's, are held here until the row is over (files.ts).
     for (const f of row.files ?? []) this.files.keepUntil(f.sha256, row.expiresAt);
     this.queue(m.id).push(row);
     this.saveQueue(m.id);
