@@ -9,7 +9,8 @@
 // appearance, the skin); Esc or Backspace on an empty field steps back. Typing a paired
 // machine or a repo offers "New session on studio-mac in acme/billing" first. On a wide
 // window the session under the cursor is previewed beside the list. Messages and answers
-// leave the way the control strip sends them (web/src/control/command.ts).
+// leave the way the control strip sends them (web/src/control/command.ts), and are listed
+// only where they would be sent (control/useSend.ts answerState).
 import type { AgentRun, MachineSummary, SessionMatch, SessionSummary } from "@shared/api";
 import { isEmptySession, LABEL_COLORS, SNIPPET_CHARS, sessionKey, splitKey } from "@shared/api";
 import {
@@ -22,18 +23,26 @@ import {
   useRef,
   useState,
 } from "react";
+import { sendWords } from "../account/sendable";
 import { sendCommand } from "../control/command";
 import { useRpId } from "../control/hooks";
 import { type NewSessionTarget, openNewSession } from "../control/newSessionState";
-import { canSign, isCancel, signHint, tapWords } from "../control/signer";
+import { canSign, isCancel, machineTakes, setupWords, signHint, tapWords, updateWords } from "../control/signer";
+import { useAnswerOff, useSendGate } from "../control/useSend";
 import { notSentWords } from "../control/words";
-import { byStateThenRecent, useAppState, useLabels, useStore } from "../data/hooks";
+import {
+  byStateThenRecent,
+  type OpenAttention,
+  useAppState,
+  useLabels,
+  useOpenAttentions,
+  useStore,
+} from "../data/hooks";
 import { openDrawer, toggleDrawer } from "../files/state";
 import { agentLabel, agentMatches, openAgent } from "../lib/agents";
 import {
   attentionMessage,
   isPlanReview,
-  isQuestion,
   modelShort,
   repoShort,
   STATE_LABEL,
@@ -65,7 +74,6 @@ import { FileMark, type FileRow, looksLikePath, matchFiles, usePaletteFiles } fr
 import { useThemes } from "../themes/host/registry";
 import { AgentGlyph } from "./AgentRow";
 import { Ago, Kbd, Since, StateDot } from "./bits";
-import { answerable } from "./ControlStrip";
 import { LabelDot, LabelSwatch } from "./LabelDot";
 import { closePalette, takeEarlyQuery } from "./Palette";
 import { APPEARANCE, noContextMenu, SIZE_NAME, SkinSwatch, useListedSkins } from "./QuickSettings";
@@ -310,6 +318,35 @@ export function answerWords(a: { kind?: string; tool?: string }, allow: boolean)
   return { verb: allow ? "Allow" : "Deny", tool: a.tool ? toolLabel(a.tool) : "this" };
 }
 
+/** The prompts the palette offers Allow and Deny for: the ones an answer can reach (not a
+ *  question, not past its two minutes: data/hooks.ts) whose Inbox row would have working
+ *  buttons (`isOff`: control/useSend.ts answerState). A palette row is never shown
+ *  disabled, so a prompt the Inbox would turn off has no row here. */
+export function askableIds(rows: readonly OpenAttention[], isOff: (r: OpenAttention) => boolean): Set<string> {
+  const ids = new Set<string>();
+  for (const r of rows) if (r.answerable && !isOff(r)) ids.add(r.attention.attentionId);
+  return ids;
+}
+
+/** Where the cursor goes when the row it was on (at `was.at`, about `was.session`) has
+ *  left the list, as a prompt does when its two minutes run out or its answer goes from a
+ *  toast: to that session's row; where none is listed, to the row now in its place, or
+ *  the nearest one (the rows before it first), that is not another prompt's Allow or
+ *  Deny. -1: no such row. So an Enter already on its way opens the session, and never
+ *  answers a prompt the cursor was not on. */
+export function cursorAfter(
+  rows: readonly { id: string; section: string }[],
+  was: { at: number; session?: string },
+): number {
+  const home = was.session ? rows.findIndex((r) => r.id === `s:${was.session}`) : -1;
+  if (home >= 0) return home;
+  const at = Math.min(was.at, rows.length - 1);
+  const free = (i: number) => rows[i]?.section !== "Needs you";
+  for (let i = at; i >= 0; i--) if (free(i)) return i;
+  for (let i = at + 1; i < rows.length; i++) if (free(i)) return i;
+  return -1;
+}
+
 export function PaletteDialog({ closing = false }: { closing?: boolean }) {
   const store = useStore();
   const { sessions, machines } = useAppState();
@@ -322,13 +359,11 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
   const simple = useSimple();
   // Keys typed while this module was still loading are the query's start.
   const [q, setQ] = useState(takeEarlyQuery);
-  const [cursor, setCursorRaw] = useState(0);
+  /** The cursor is on a row, not at a place: the id of the row the keys or the pointer put
+   *  it on. null: nobody has moved it, and it is on the first row. */
+  const [cursor, setCursorRaw] = useState<string | null>(null);
   /** Who moved the cursor last: the keys scroll the list to it, the pointer never does. */
   const by = useRef<"key" | "pointer">("key");
-  const setCursor = useCallback((next: number | ((c: number) => number), source: "key" | "pointer" = "key") => {
-    by.current = source;
-    setCursorRaw(next);
-  }, []);
   /** Where the pointer last was: a row only takes the cursor when the pointer really
    *  moves, not when the list scrolls or reorders under a resting one. */
   const lastPointer = useRef<{ x: number; y: number } | null>(null);
@@ -364,16 +399,43 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     [route],
   );
 
-  /** Whether a command can leave for this session's machine from this page. */
+  const gate = useSendGate();
+  /** Whether a command can leave for this session's machine from this page. What turns its
+   *  own composer off turns it off here too (a sessionpipe too old for the app's key, the
+   *  hour a new device waits, a machine that does not trust this device yet), so nothing
+   *  is signed only to be refused. */
   const sendable = useCallback(
     (s: SessionSummary): { ok: true; machineId: string } | { ok: false; why: string } => {
       const control = s.machine ? machines.get(s.machine)?.control : undefined;
       if (!control) return { ok: false, why: `pair ${s.machine ?? "this machine"} to send from here` };
       if (!rp || !canSign(rp)) return { ok: false, why: signHint(rp) };
+      const name = s.machine ?? undefined;
+      if (!machineTakes(control)) return { ok: false, why: updateWords(name) };
+      const g = gate(control);
+      if (g.cooling) return { ok: false, why: g.cooling };
+      if (g.approval !== "ok")
+        return { ok: false, why: sendWords(g.sendable, name ?? "its computer")?.long ?? setupWords(name) };
       return { ok: true, machineId: control.machineId };
     },
-    [machines, rp],
+    [machines, rp, gate],
   );
+  // Allow and Deny are listed only where they would be sent: the gate the Inbox, the toasts
+  // and a row's menu read (control/useSend.ts answerState), with the prompts past their two
+  // minutes and the answers already out. The same set until a prompt joins or leaves it.
+  const open = useOpenAttentions();
+  const asks = useMemo(() => open.map((r) => r.attention), [open]);
+  const answerOff = useAnswerOff(asks);
+  const askKey = JSON.stringify([
+    ...askableIds(open, (r) =>
+      answerOff(
+        r.session,
+        r.attention,
+        r.session.machine ? machines.get(r.session.machine)?.control : undefined,
+        Date.now(),
+      ),
+    ),
+  ]);
+  const askable = useMemo(() => new Set(JSON.parse(askKey) as string[]), [askKey]);
 
   const act = useCallback(async (id: string, fn: () => Promise<void>) => {
     setBusy(id);
@@ -604,8 +666,9 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     if (want("Needs you")) {
       for (const s of sorted) {
         for (const a of s.openAttentions) {
-          // A question is answered on its computer: Allow cannot carry the option chosen.
-          if (a.kind !== "permission" || !answerable(a) || isQuestion(a) || answered.has(a.attentionId)) continue;
+          // Only a prompt this page can answer right now (`askable`): a question is answered
+          // on its computer, and an Allow that would only be refused is not offered.
+          if (a.kind !== "permission" || !askable.has(a.attentionId) || answered.has(a.attentionId)) continue;
           const title = sessionTitle(s);
           for (const allow of [true, false]) {
             const verb = allow ? "Allow" : "Deny";
@@ -683,17 +746,19 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
             ...more,
           });
         };
-        add(
-          "Send a message…",
-          () => {
-            setMode({ kind: "prompt", session: s });
-            setQ("");
-            setNote(null);
-            const can = sendable(s);
-            if (!can.ok) setNote({ text: can.why, err: true });
-          },
-          onItsPage(s) ? hintFor("session.prompt") : undefined,
-        );
+        // Only where a message can go: the session's page says why it cannot.
+        if (sendable(s).ok)
+          add(
+            "Send a message…",
+            () => {
+              setMode({ kind: "prompt", session: s });
+              setQ("");
+              setNote(null);
+              const can = sendable(s);
+              if (!can.ok) setNote({ text: can.why, err: true });
+            },
+            onItsPage(s) ? hintFor("session.prompt") : undefined,
+          );
         // The Handoff sheet (orchestrate/handoff): the row runs when its machine can take
         // an ask; else it says why, the way a message that cannot be sent does.
         add(
@@ -1169,6 +1234,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     ctxKey,
     splitActive,
     themes,
+    askable,
     answered,
     rp,
     sendable,
@@ -1181,16 +1247,40 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     fileList,
   ]);
 
-  // A new query (or a pushed list) starts at the top, in this same render; a shorter list
-  // pulls the cursor in.
+  // A new query (or a pushed list) starts at the top, in this same render.
   const listId = `${stack.length}:${q}`;
   const [seenList, setSeenList] = useState(listId);
   if (seenList !== listId) {
     setSeenList(listId);
     by.current = "key";
-    setCursorRaw(0);
+    setCursorRaw(null);
   }
-  const at = Math.min(cursor, Math.max(0, items.length - 1));
+  /** The row the cursor was last drawn on, in which list. */
+  const drawn = useRef<{ list: string; id: string; at: number; session?: string } | null>(null);
+  const where = (id: string) => items.findIndex((it) => it.id === id);
+  let at = cursor === null ? 0 : where(cursor);
+  // The row under the cursor left this list (a prompt past its two minutes, an answer that
+  // went from a toast): the cursor never slides onto the row that took its place, which may
+  // be another prompt's Allow. It goes to that row's session (cursorAfter) and stays there.
+  const was = drawn.current?.list === listId ? drawn.current : null;
+  if (was && where(was.id) < 0 && (cursor === null || at < 0)) {
+    at = cursorAfter(items, was);
+    // Still the first row of a list nobody moved in (or no row at all): the first row, as
+    // before. No row to go to but another prompt's answer: on none (""), until a key moves it.
+    const to = (cursor === null && at === 0) || !items.length ? null : (items[at]?.id ?? "");
+    if (to !== cursor) {
+      by.current = "key";
+      setCursorRaw(to);
+    }
+  }
+  useLayoutEffect(() => {
+    const it = items[at];
+    drawn.current = it ? { list: listId, id: it.id, at, session: it.session?.key } : null;
+  });
+  const setCursor = (to: number, source: "key" | "pointer" = "key") => {
+    by.current = source;
+    setCursorRaw(items[to]?.id ?? null);
+  };
   // The list scrolls only when the keys take the cursor past its edge: one row's worth,
   // and to the very top (its section's label too) for the first row. The pointer never
   // scrolls it.

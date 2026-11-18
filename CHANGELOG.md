@@ -247,6 +247,16 @@ pairing link that carries the board's key only for a pairing the sink token star
   service install`.** The GUI is not on npm under that name, so the command could only
   fail, or run whatever someone published there. Try again does what it was for; on the
   phone, step 1 is "Download it from sessionpipe.org/gui."
+- **⌘K offers Allow and Deny only where the answer would be sent.** The palette listed
+  them for every open prompt: on a machine that is not paired, on one that does not trust
+  this Mac yet, for a Claude Code prompt past its two minutes, and for one already answered
+  from a toast or the Inbox. Enter then signed an answer that was refused, or only said it
+  was not sent. Such a prompt has no Allow or Deny row now; its session keeps its row under
+  Sessions, and its page says why and what to do. "Send a message…" is listed the same
+  way, only for a session a message can go to. The cursor stays with its row: when a
+  prompt leaves the list while the palette is open, the cursor goes to that session's row
+  and never onto the row that took its place, so an Enter already on its way cannot answer
+  another prompt.
 
 ## [0.8.4] - 2026-11-17
 

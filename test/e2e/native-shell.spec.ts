@@ -8,7 +8,7 @@
 // the flag never loads a byte of the native code.
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { EVENTS, INFO, sessionUrl, ulid } from "./helpers.js";
+import { EVENTS, INFO, openPrompt, sessionUrl, ulid } from "./helpers.js";
 import { openInPhone } from "./phone-shell.js";
 
 interface FakeOptions {
@@ -196,6 +196,14 @@ function fakeShell() {
             return [{ id: "e2erx00001", name: "This Mac", origin: location.origin, local: true, connected: true }];
           case "app_open_view":
             return null;
+          case "plugin:identity|status":
+            // The app's device key, as Rust reads it off the keychain (asked only where the
+            // shell lists `signer`). No machine of the demo trusts it.
+            return {
+              available: true,
+              key: { id: "e2e-app-key", alg: -7, spki: "e2e", type: "device", store: "hardware", uv: "each-use" },
+              grantExp: null,
+            };
           default:
             throw new Error(`fake shell: no ${cmd}`);
         }
@@ -304,6 +312,37 @@ test.describe("inside the native shell", () => {
     await emit(page, "menu", { action: "toggle-sidebar" });
     await expect(page.locator("html")).toHaveAttribute("data-rail-hidden", "");
     await expect(page.locator(".rail")).toBeHidden();
+  });
+
+  test("a machine that doesn't trust the app's key: the palette lists no Allow for it, and its session says Approve this Mac", async ({
+    page,
+    request,
+  }) => {
+    // lab-mac is paired in the demo and takes device keys; the app's own is not among its keys.
+    const title = `Gate untrusted ${randomUUID().slice(0, 6)}`;
+    const s = await openPrompt(request, { machine: "lab-mac", title });
+    try {
+      await openInShell(page, "/", { features: ["tray", "notifications", "updater", "signer"] });
+      await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+      await expect(page.locator(`section.group--needs_you article.card[data-flip="${s.key}"]`)).toBeVisible();
+      await emit(page, "menu", { action: "palette" });
+      const palette = page.getByRole("dialog", { name: "Command palette" });
+      await expect(palette).toBeVisible();
+      await page.keyboard.type(title);
+      // The session leads, under Sessions: no Allow or Deny that the machine would refuse
+      // after Touch ID signed it.
+      await expect(palette.locator(".pal-row").first()).toHaveAttribute("data-section", "Sessions");
+      await expect(palette.locator(".pal-row[aria-selected='true']")).toContainText(title);
+      await expect(palette.getByRole("option", { name: new RegExp(`^(Allow|Deny) .* in ${title}`) })).toHaveCount(0);
+      // Enter opens the session, whose composer says the one reason and the way on.
+      await page.keyboard.press("Enter");
+      await expect(page).toHaveURL((u) => u.pathname === sessionUrl(s.harness, s.sessionId));
+      const foot = page.locator('[data-reason="untrusted"]');
+      await expect(foot).toContainText("lab-mac doesn't trust this Mac yet.");
+      await expect(foot.getByRole("link", { name: "Approve this Mac" })).toBeVisible();
+    } finally {
+      await s.clear();
+    }
   });
 
   test("the first-run sheet: once, nothing asked until a switch is on", async ({ page }) => {

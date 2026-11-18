@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Shared pieces for the end-to-end suite: page openers that wait for the live stream,
 // the session's message field, a check for a full stop that starts a line, a hand-rolled ULID
-// (so the specs need nothing but @playwright/test), and a tier-1 batch a sink would send, with
-// a fresh session id per call.
+// (so the specs need nothing but @playwright/test), a tier-1 batch a sink would send, with
+// a fresh session id per call, and a session posted with a permission prompt open.
 import { randomUUID } from "node:crypto";
-import { expect, type Locator, type Page } from "@playwright/test";
+import { type APIRequestContext, expect, type Locator, type Page } from "@playwright/test";
 
 export const INFO = "/api/ui/info";
 export const EVENTS = "/api/sessionpipe/v1/events";
@@ -156,6 +156,69 @@ export function tier1Batch(opts: { title?: string; machine?: string } = {}): Bat
     ev("turn.ended", { turn_id: turnId, reason: "stop", ms: 3000 }, "Stop"),
   ];
   return { harness, sessionId, title, events };
+}
+
+/** A Claude Code session on `machine` that asks to run `npm run deploy`, posted the way its
+ *  hooks send it (tier 1), a few seconds old; `clear()` closes the prompt again, so no other
+ *  spec finds it open. */
+export async function openPrompt(
+  request: APIRequestContext,
+  o: { machine: string; title: string },
+): Promise<{ harness: string; sessionId: string; key: string; attention: string; clear: () => Promise<void> }> {
+  const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+  const harness = "claude-code";
+  const sessionId = randomUUID();
+  const attention = `perm-${sessionId.slice(0, 8)}`;
+  let seq = 0;
+  let clock = Date.now() - 5_000;
+  const ev = (type: string, data: Record<string, unknown>, hook: string) => {
+    clock = type === "attention.cleared" ? Date.now() : clock + 500;
+    return {
+      protocol: 1,
+      id: ulid(clock),
+      type,
+      time: new Date(clock).toISOString(),
+      tier: 1,
+      harness: { name: harness, version: "2.1.296", event: hook },
+      session: {
+        id: sessionId,
+        seq: seq++,
+        machine: o.machine,
+        cwd: "~/code/e2e",
+        title: o.title,
+        title_source: "custom",
+      },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    };
+  };
+  const post = async (events: unknown[]) => {
+    const res = await request.post(EVENTS, {
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${sinkToken}`,
+        "sessionpipe-protocol": "1",
+      },
+      data: { events },
+    });
+    expect(res.status()).toBe(202);
+  };
+  await post([
+    ev("session.started", { source: "startup" }, "SessionStart"),
+    ev("turn.started", { turn_id: "t1", prompt_chars: 20 }, "UserPromptSubmit"),
+    ev(
+      "attention.needed",
+      { attention_id: attention, kind: "permission", tool: "Bash", message: "npm run deploy" },
+      "PermissionRequest",
+    ),
+  ]);
+  return {
+    harness,
+    sessionId,
+    key: `${harness}:${sessionId}`,
+    attention,
+    clear: () => post([ev("attention.cleared", { attention_id: attention, how: "answered" }, "PreToolUse")]),
+  };
 }
 
 /** Structural checks of a well-known document against schemas/v1/well-known.json:
