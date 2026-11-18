@@ -236,6 +236,13 @@ test.describe("subagents", () => {
     const first = pal.locator(".pal-row").first();
     await expect(first.locator(".pal-label")).toContainText("Explore · Check cache invalidation");
     await expect(first.locator(".pal-detail")).toHaveText(TITLE);
+    // An agent found by a word of its session's title shows the word there, bold.
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type("is:subagent bm25");
+    await expect(pal.locator(".pal-row", { hasText: TITLE }).first().locator(".pal-detail u")).toHaveText(["BM25"]);
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type("is:subagent invalidation");
+    await expect(first.locator(".pal-label")).toContainText("Explore · Check cache invalidation");
     await page.keyboard.press("Enter");
     await expect(pal).toBeHidden();
     await expect(page.locator("aside.panel [role=tab].tab--agent, aside.panel .panel-parent").first()).toBeVisible();

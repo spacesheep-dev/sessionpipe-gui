@@ -422,6 +422,19 @@ pairing link that carries the board's key only for a pairing the sink token star
   spans its row (System | Light | Dark in Quick settings, the two ways on the phone page),
   the Files drawer's switches on a phone and a view's own bar (Canvas's presets) are as
   they were.
+- **⌘K's preview shows what a session is waiting on.** With nothing typed the cursor
+  starts on a session that needs you, and the preview beside the list showed what you had
+  asked it ("Asked"), not the command it wants to run. It now shows the request as the
+  Board's row does: the tool ("Bash", "Question", "Plan") and under it the command, the
+  path or the question, up to five lines. "Asked" is left out while a session needs you,
+  and an Allow or Deny row previews the prompt it answers.
+- **⌘K's bold letters are in the words a row shows.** Typing "webhook" left most sessions
+  with the word in their title with nothing bold: the match was marked on the branch,
+  which a row does not show. The word is bold in the title wherever the title holds it,
+  and a session found only by its branch or its model shows that after the repo
+  ("lab-mac · acme/billing · demo/webhook-backoff") with the match bold. An Allow or Deny
+  row marks a match in "Allow" and in the tool as well, and a subagent listed by
+  `is:subagent` one in its session's title.
 
 ## [0.8.4] - 2026-11-17
 

@@ -292,6 +292,11 @@
   text-overflow: ellipsis;
   white-space: pre;
 }
+/* The branch or the model a word of the query matched, after the repo: a long one is
+   cut, so the row keeps room for its title. */
+.pal-why {
+  max-width: 20ch;
+}
 .pal-age {
   min-width: var(--meta-col);
   color: var(--fg-3);
@@ -431,6 +436,10 @@
   .pal-keys {
     display: none;
   }
+  /* A row here stays "machine · repo": a third part would leave the title no room. */
+  .pal-why {
+    display: none;
+  }
   .pal-section {
     padding: 14px 18px 6px;
     font-size: var(--text-sm);
@@ -502,8 +511,9 @@
 /* ----- the preview (a wide window): the row under the cursor, read beside the list -----
    The panel takes a fixed height while it is up, so typing never resizes it; the list
    keeps its whole-row fold inside. The preview is the sheet's own ground on a hairline,
-   one column of quiet text: the state and its timer, the title, where it runs, the last
-   ask and the latest reply, each clamped. It changes with the cursor and never animates. */
+   one column of quiet text: the state and its timer, the title, where it runs, what it
+   waits on or the last ask, and the latest reply, each clamped. It changes with the cursor
+   and never animates. */
 .pal[data-peek] {
   width: min(920px, calc(100vw - 64px));
   max-height: none;
@@ -574,6 +584,12 @@
 }
 .pal-peek-text--reply {
   -webkit-line-clamp: 7;
+}
+/* What a session waits on leads the preview: in the ink, and five lines of it, the most
+   of a command the palette shows before Allow. */
+.pal-peek-text--wait {
+  -webkit-line-clamp: 5;
+  color: var(--fg);
 }
 .pal-peek-text code {
   font-family: var(--font-mono);

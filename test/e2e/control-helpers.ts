@@ -307,8 +307,9 @@ export async function postSession(
 
 /** A Claude Code session on `machine` whose permission prompt was raised `agoMs` ago, as
  *  its hooks send one (`npm run deploy` for Bash, unless `tool` and `message` say
- *  otherwise); with `input`, at tier 3, the call's `tool.started` carries it. `clear()`
- *  closes the prompt again. */
+ *  otherwise); with `input`, at tier 3, the call's `tool.started` carries it; with `ask`,
+ *  at tier 2, the turn's progress carries what the person asked. `clear()` closes the
+ *  prompt again. */
 export async function postPrompt(
   token: string,
   o: {
@@ -319,6 +320,7 @@ export async function postPrompt(
     tool?: string;
     message?: string;
     input?: Record<string, unknown>;
+    ask?: string;
   },
 ): Promise<{ key: string; id: string; attention: string; clear: () => Promise<void> }> {
   const harness = o.harness ?? "claude-code";
@@ -327,7 +329,7 @@ export async function postPrompt(
   const attention = `perm-${id.slice(0, 8)}`;
   let seq = 0;
   // The events half a second apart, the prompt last.
-  let clock = Date.now() - o.agoMs - 1_500 - (o.input ? 500 : 0);
+  let clock = Date.now() - o.agoMs - 1_500 - (o.input ? 500 : 0) - (o.ask ? 500 : 0);
   const ev = (type: string, data: Record<string, unknown>, hook: string) => {
     clock = type === "attention.cleared" ? Date.now() : clock + 500;
     return {
@@ -335,7 +337,7 @@ export async function postPrompt(
       id: ulid(clock),
       type,
       time: new Date(clock).toISOString(),
-      tier: o.input ? 3 : 1,
+      tier: o.input ? 3 : o.ask ? 2 : 1,
       harness: { name: harness, version: "2.1.296", event: hook },
       session: { id, seq: seq++, machine: o.machine, cwd: "/Users/e2e/code", title: o.title, title_source: "custom" },
       privacy: { rulesets: ["secrets@1"], pii: false },
@@ -351,6 +353,7 @@ export async function postPrompt(
   await post([
     ev("session.started", { source: "startup" }, "SessionStart"),
     ev("turn.started", { turn_id: "t1", prompt_chars: 20 }, "UserPromptSubmit"),
+    ...(o.ask ? [ev("turn.progress", { turn: 1, user: o.ask, assistant: "On it." }, "UserPromptSubmit")] : []),
     ...(o.input ? [ev("tool.started", { tool, call_id: "toolu_1", turn_id: "t1", input: o.input }, "PreToolUse")] : []),
     ev(
       "attention.needed",

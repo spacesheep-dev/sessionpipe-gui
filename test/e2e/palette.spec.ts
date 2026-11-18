@@ -3,7 +3,8 @@
 // The command palette: ⌘K opens it on any page, a title fragment puts that session first
 // and Enter opens it, shift+Enter opens it beside, `>` keeps only actions, `#<view>` jumps
 // to an installed view, Esc closes it and gives focus back. Allow, Deny and "Send a message…"
-// are rows only where they would be sent, and the cursor stays with its row.
+// are rows only where they would be sent, and the cursor stays with its row. A row's bold
+// letters are in the text it draws, and the preview says what a session waits on.
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
 import { E2E_PORT } from "../../playwright.config.js";
@@ -33,7 +34,7 @@ import {
   seenSetupHere,
   sinkToken,
 } from "./control-helpers.js";
-import { openBoard, openPage, openPrompt, sessionUrl } from "./helpers.js";
+import { EVENTS, INFO, openBoard, openPage, openPrompt, sessionUrl, tier1Batch } from "./helpers.js";
 
 /** Every title a demo session can learn mid-run (the scripts', nested ones included) and
  *  the backfilled ones: a session not on the board yet may still be in the palette, so the
@@ -152,6 +153,71 @@ test.describe("command palette", () => {
     await expect(page.locator("h1.sess-title")).toHaveText(startsWith(title));
   });
 
+  test("the bold letters are in the title that holds the word; a word only the branch or the model holds brings that in, bold", async ({
+    page,
+    request,
+  }) => {
+    const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+    const t = randomUUID().slice(0, 6);
+    /** A settled session on e2e-box in e2e/fixture, on a branch that has "webhook" nearer
+     *  its start than any title does. */
+    const post = async (title: string, model: string) => {
+      const batch = tier1Batch({ title });
+      for (const e of batch.events) Object.assign(e.session as object, { branch: "demo/webhook-backoff", model });
+      const res = await request.post(EVENTS, {
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${sinkToken}`,
+          "sessionpipe-protocol": "1",
+        },
+        data: { events: batch.events },
+      });
+      expect(res.status()).toBe(202);
+    };
+    const inTitle = `Second opinion on the webhook retry ${t}`;
+    const inBranch = `Tidy the retry queue ${t}`;
+    await post(inTitle, "claude-fable-5-1");
+    await post(inBranch, "claude-opus-5-5");
+    const row = (title: string) => rows(page).filter({ hasText: title });
+    await openBoard(page);
+    await open(page);
+    await page.keyboard.type(`webhook ${t}`);
+    // The title holds the word: it is bold there, and the row stays "machine · repo".
+    await expect(row(inTitle).locator(".pal-label u")).toHaveText(["webhook", t]);
+    await expect(row(inTitle).locator(".pal-detail")).toHaveText("e2e-box · e2e/fixture");
+    // Only the branch holds it: the branch follows the repo, the word bold in it.
+    await expect(row(inBranch).locator(".pal-label u")).toHaveText([t]);
+    await expect(row(inBranch).locator(".pal-detail")).toHaveText("e2e-box · e2e/fixture · demo/webhook-backoff");
+    await expect(row(inBranch).locator(".pal-detail u")).toHaveText(["webhook"]);
+    // A model, as the app writes it and as it is named.
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type(`fable ${t}`);
+    await expect(row(inTitle).locator(".pal-detail")).toHaveText("e2e-box · e2e/fixture · fable 5.1");
+    await expect(row(inTitle).locator(".pal-detail u")).toHaveText(["fable"]);
+    await expect(row(inBranch)).toHaveCount(0);
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type(`claude-opus ${t}`);
+    await expect(row(inBranch).locator(".pal-detail")).toHaveText("e2e-box · e2e/fixture · claude-opus-5-5");
+    await expect(row(inBranch).locator(".pal-detail u")).toHaveText(["claude-opus"]);
+    await expect(row(inTitle)).toHaveCount(0);
+    // Any session listed with the word in its title shows it there.
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type("webhook");
+    await expect(rows(page).first()).toHaveAttribute("data-section", "Sessions");
+    await expect
+      .poll(() =>
+        dialog(page)
+          .locator(".pal-row[data-section='Sessions']:not([data-kid]) .pal-label")
+          .evaluateAll((labels) =>
+            labels
+              .filter((l) => /webhook/i.test(l.textContent ?? ""))
+              .filter((l) => !Array.from(l.querySelectorAll("u")).some((u) => /^webhook$/i.test(u.textContent ?? "")))
+              .map((l) => l.textContent),
+          ),
+      )
+      .toEqual([]);
+  });
+
   test("shift+Enter opens the session beside the page", async ({ page }) => {
     await openBoard(page);
     const { title, href, fragment } = await firstCard(page);
@@ -256,10 +322,12 @@ test.describe("command palette: an answer only where it would be sent", () => {
   const session = (page: Page, title: string) =>
     dialog(page).locator(".pal-row[data-section='Sessions']").filter({ hasText: title });
   const selected = (page: Page) => dialog(page).locator(".pal-row[aria-selected='true']");
-  /** The keys take the cursor down to `row`. */
+  /** The keys take the cursor to `row`, from the row it is on. */
   async function cursorTo(page: Page, row: ReturnType<typeof allow>) {
-    const i = Number(await row.getAttribute("data-i"));
-    for (let n = 0; n < i; n++) await page.keyboard.press("ArrowDown");
+    const from = Number(await selected(page).getAttribute("data-i"));
+    const to = Number(await row.getAttribute("data-i"));
+    for (let n = from; n < to; n++) await page.keyboard.press("ArrowDown");
+    for (let n = from; n > to; n--) await page.keyboard.press("ArrowUp");
     await expect(row).toHaveAttribute("aria-selected", "true");
   }
   /** A page with a passkey a fresh machine trusts, and that machine's daemon. */
@@ -442,6 +510,103 @@ test.describe("command palette: an answer only where it would be sent", () => {
     } finally {
       await aging.clear();
       await other.clear();
+      await d.stop();
+    }
+  });
+
+  test("an Allow row's bold letters are in its verb and its tool too, not only in the title", async ({ page }) => {
+    const { d, bearer } = await paired(page);
+    const t = tag();
+    const p = await postPrompt(bearer, { machine: d.name, title: `Bold ask ${t}`, agoMs: 5_000 });
+    try {
+      await page.goto(`${CONTROL_BASE}/`);
+      await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+      await open(page);
+      await page.keyboard.type(`allow bash ${t}`);
+      await expect(allow(page, `Bold ask ${t}`).locator(".pal-label u")).toHaveText(["Allow", "Bash", t]);
+    } finally {
+      await p.clear();
+      await d.stop();
+    }
+  });
+
+  test("the preview says what a session waits on, as its board row does, not what was asked; an Allow row previews its own prompt", async ({
+    page,
+  }) => {
+    const { d, bearer } = await paired(page);
+    const t = tag();
+    const peek = dialog(page).locator(".pal-peek");
+    const labels = peek.locator(".pal-peek-label");
+    const wait = peek.locator(".pal-peek-text--wait");
+    const posted: { clear: () => Promise<void> }[] = [];
+    try {
+      // The newest comes last, so its session leads the list: the row the cursor starts on.
+      posted.push(
+        await postPrompt(bearer, {
+          machine: d.name,
+          title: `Older wait ${t}`,
+          agoMs: 20_000,
+          message: "rm -rf node_modules && npm ci",
+        }),
+        await postPrompt(bearer, {
+          machine: d.name,
+          title: `Plan wait ${t}`,
+          agoMs: 15_000,
+          tool: "ExitPlanMode",
+          message: "ExitPlanMode",
+        }),
+        await postPrompt(bearer, {
+          machine: d.name,
+          title: `Question wait ${t}`,
+          agoMs: 10_000,
+          tool: "AskUserQuestion",
+          message: "AskUserQuestion",
+          input: { questions: [{ question: "Which queue should the retries use?", options: ["Main", "A new one"] }] },
+        }),
+      );
+      const newest = await postPrompt(bearer, {
+        machine: d.name,
+        title: `Newest wait ${t}`,
+        agoMs: 3_000,
+        message: "npm run deploy -- --target staging",
+        ask: "Ship the cache to staging.",
+      });
+      posted.push(newest);
+      await page.goto(`${CONTROL_BASE}/`);
+      await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+      await expect(page.locator(`article.card[data-flip="${newest.key}"]`)).toBeVisible();
+      // No query. The session's own row: the command, in mono under its tool, and no "Asked".
+      await open(page);
+      await cursorTo(page, session(page, `Newest wait ${t}`));
+      await expect(peek.locator(".pal-peek-title")).toHaveText(`Newest wait ${t}`);
+      await expect(labels).toHaveText(["Bash", "Replying"]);
+      await expect(wait).toHaveText("npm run deploy -- --target staging");
+      await expect(wait).toHaveClass(/(^| )mono( |$)/);
+      await expect(peek).not.toContainText("Ship the cache to staging.");
+      // A question is what its session waits on, in the words it was asked in.
+      await cursorTo(page, session(page, `Question wait ${t}`));
+      await expect(labels).toHaveText(["Question"]);
+      await expect(wait).toHaveText("Which queue should the retries use?");
+      await expect(wait).not.toHaveClass(/(^| )mono( |$)/);
+      // A plan review is its chip alone, as on the board.
+      await cursorTo(page, session(page, `Plan wait ${t}`));
+      await expect(labels).toHaveText(["Plan"]);
+      await expect(wait).toHaveCount(0);
+      // Another prompt's Allow row: that prompt, not the first one listed.
+      await cursorTo(page, allow(page, `Older wait ${t}`));
+      await expect(peek.locator(".pal-peek-title")).toHaveText(`Older wait ${t}`);
+      await expect(labels).toHaveText(["Bash"]);
+      await expect(wait).toHaveText("rm -rf node_modules && npm ci");
+      await expect(wait).toHaveClass(/(^| )mono( |$)/);
+      // Answered on its computer, the newest works again: its preview is back on the ask.
+      await newest.clear();
+      await expect(answers(page, `Newest wait ${t}`)).toHaveCount(0);
+      await cursorTo(page, session(page, `Newest wait ${t}`));
+      await expect(labels).toHaveText(["Asked", "Replying"]);
+      await expect(peek).toContainText("Ship the cache to staging.");
+      await expect(wait).toHaveCount(0);
+    } finally {
+      for (const p of posted) await p.clear();
       await d.stop();
     }
   });

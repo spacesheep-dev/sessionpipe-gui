@@ -11,7 +11,7 @@
 // window the session under the cursor is previewed beside the list. Messages and answers
 // leave the way the control strip sends them (web/src/control/command.ts), and are listed
 // only where they would be sent (control/useSend.ts answerState).
-import type { AgentRun, MachineSummary, SessionMatch, SessionSummary } from "@shared/api";
+import type { AgentRun, Attention, MachineSummary, SessionMatch, SessionSummary } from "@shared/api";
 import { isEmptySession, LABEL_COLORS, SNIPPET_CHARS, sessionKey, splitKey } from "@shared/api";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -43,6 +43,7 @@ import { agentLabel, agentMatches, openAgent } from "../lib/agents";
 import {
   attentionMessage,
   isPlanReview,
+  isQuestion,
   modelShort,
   repoShort,
   STATE_LABEL,
@@ -73,11 +74,11 @@ import {
 import { FileMark, type FileRow, looksLikePath, matchFiles, usePaletteFiles } from "../search/paletteFiles";
 import { useThemes } from "../themes/host/registry";
 import { AgentGlyph } from "./AgentRow";
-import { Ago, Kbd, Since, StateDot } from "./bits";
+import { Ago, Kbd, Redacted, Since, StateDot } from "./bits";
 import { LabelDot, LabelSwatch } from "./LabelDot";
 import { closePalette, takeEarlyQuery } from "./Palette";
 import { APPEARANCE, noContextMenu, SIZE_NAME, SkinSwatch, useListedSkins } from "./QuickSettings";
-import { Inline } from "./SessionCard";
+import { AskedLine, Inline, literalAsk } from "./SessionCard";
 import "../styles/palette.css";
 
 /** The quick settings: on the rail its own button, on a phone the row in the More sheet. */
@@ -110,6 +111,8 @@ interface Item {
   session?: SessionSummary;
   /** A subagent row's agent, for the preview. */
   agent?: AgentRun;
+  /** The prompt an Allow or Deny row answers, for the preview. */
+  attention?: Attention;
   /** The action's own key, as caps at the row's right ("C", "G B"). */
   keys?: string;
   /** It pushes a second list (a › at the right). */
@@ -219,6 +222,33 @@ function Hit({ text, at }: { text: string; at: number[] | undefined }) {
     }
   }
   return <>{out}</>;
+}
+
+/** What a session's row is matched on, the fields it always shows first (the title, the
+ *  machine, the repo), then the ones it shows only where a word landed: the branch, and
+ *  the model as it reads ("fable 5.1") and as it is named ("claude-fable-5-1"). */
+const sessionFields = (s: SessionSummary): string[] => [
+  sessionTitle(s),
+  s.machine ?? "",
+  repoShort(s.repo),
+  s.branch ?? "",
+  modelShort(s.model),
+  s.model ?? "",
+];
+
+/** A session row's detail, "lab-mac · acme/billing", and after it the branch or the model
+ *  when a word of the query matched there ("· demo/webhook-backoff"), so every row shows
+ *  why it is listed. */
+function sessionDetail(s: SessionSummary, m: FieldsMatch | null): ReactNode {
+  const fields = sessionFields(s);
+  const shown = [1, 2, 3, 4, 5].filter((f) => fields[f] && (f <= 2 || m?.positions[f]?.length));
+  if (shown.length === 0) return undefined;
+  return shown.map((f, i) => (
+    <span key={f} className={f === 1 ? "pal-machine" : f === 2 ? "pal-repo" : "pal-repo pal-why"}>
+      {i > 0 ? " · " : ""}
+      <Hit text={fields[f] as string} at={m?.positions[f]} />
+    </span>
+  ));
 }
 
 const Glyph = ({ children }: { children: string }) => (
@@ -523,7 +553,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
         </>
       ),
       // Under its session's row the guide says whose it is; alone, the title does.
-      detail: !tree && (agentsOnly || m) ? sessionTitle(s) : undefined,
+      detail: !tree && (agentsOnly || m) ? <Hit text={sessionTitle(s)} at={m?.positions[1]} /> : undefined,
       hit: !!m,
       at: a.endedAt ?? a.lastAt,
       session: s,
@@ -553,23 +583,10 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
           <Hit text={sessionTitle(s)} at={m?.positions[0]} />
         </>
       ),
-      // The machine never truncates (the repo, then the title, give way first).
-      detail:
-        s.machine || repoShort(s.repo) ? (
-          <>
-            {s.machine ? (
-              <span className="pal-machine">
-                <Hit text={s.machine} at={m?.positions[1]} />
-              </span>
-            ) : null}
-            {repoShort(s.repo) ? (
-              <span className="pal-repo">
-                {s.machine ? " · " : ""}
-                <Hit text={repoShort(s.repo)} at={m?.positions[2]} />
-              </span>
-            ) : null}
-          </>
-        ) : undefined,
+      // The machine never truncates (the repo, then the title, give way first). A word that
+      // fits only the branch or the model brings that one in after the repo, so the row
+      // shows why it is here.
+      detail: sessionDetail(s, m),
       at: s.lastAt,
       session: s,
       score: (m?.score ?? 0) + (ACTIVE.has(s.state) ? 1.5 : 0),
@@ -606,13 +623,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
       else {
         const rows: Item[][] = [];
         for (const s of sorted) {
-          const m = fuzzyFields(text, [
-            sessionTitle(s),
-            s.machine ?? "",
-            repoShort(s.repo),
-            s.branch ?? "",
-            `${modelShort(s.model)} ${s.model ?? ""}`,
-          ]);
+          const m = fuzzyFields(text, sessionFields(s));
           const kids = agentsOf(s, m, true).filter((r) => !m || r.score > 1 || r.hit);
           if (m || kids.length) rows.push(tree([sessionRow(s, m ?? { score: 0, positions: [] }), ...kids]));
         }
@@ -676,16 +687,22 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
             const label = words.tool ? `${words.verb} ${words.tool}` : words.verb;
             const m = text ? fuzzyFields(text, [label, title, s.machine ?? ""]) : null;
             if (text && !m) continue;
+            // The label's hits, on the verb and on the tool after it.
+            const cut = words.verb.length;
+            const onVerb = m?.positions[0]?.filter((i) => i < cut);
+            const onTool = m?.positions[0]?.filter((i) => i > cut).map((i) => i - cut - 1);
             out.push({
               id: `a:${a.attentionId}:${verb}`,
               section: "Needs you",
               mark: <StateDot state="needs_you" decorative />,
               label: (
                 <>
-                  {words.verb}{" "}
+                  <Hit text={words.verb} at={onVerb} />{" "}
                   {words.tool && (
                     <>
-                      <code>{words.tool}</code>{" "}
+                      <code>
+                        <Hit text={words.tool} at={onTool} />
+                      </code>{" "}
                     </>
                   )}
                   in <Hit text={title} at={m?.positions[1]} />
@@ -694,6 +711,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
               detail: attentionMessage(a),
               at: a.at,
               session: s,
+              attention: a,
               score: (m?.score ?? 0) + 2,
               run: () => {
                 const can = sendable(s);
@@ -1695,10 +1713,25 @@ function flat(t: string | undefined): string {
   return `${f.replace(/\s+\S*$/, "").replace(/[\s,;:–—-]+$/, "")}…`;
 }
 
+/** What a row's session waits on, for the preview: the prompt an Allow or Deny row answers
+ *  (its own, not the session's first), else the one the board's row shows for a session
+ *  that needs you. A question too: it is answered on its computer and read here. Nothing
+ *  for a subagent's row. */
+export function peekAttention(item: {
+  session?: Pick<SessionSummary, "state" | "openAttentions">;
+  agent?: unknown;
+  attention?: Attention;
+}): Attention | undefined {
+  const s = item.session;
+  if (!s || item.agent) return undefined;
+  return item.attention ?? (s.state === "needs_you" ? s.openAttentions[0] : undefined);
+}
+
 /** The row under the cursor, previewed beside the list: for a session (or its subagent,
- *  or a permission it waits on) its state and timer, its title, where it runs, the last
- *  ask and the latest reply; for anything else what the row does. Read only, so a screen
- *  reader keeps to the list; the row itself says the same in short. */
+ *  or a permission it waits on) its state and timer, its title, where it runs, then what
+ *  it waits on (a session that needs you) or the last ask, and the latest reply; for
+ *  anything else what the row does. Read only, so a screen reader keeps to the list; the
+ *  row itself says the same in short. */
 function Peek({ item }: { item: Item | undefined }) {
   if (!item) return <aside className="pal-peek" aria-hidden="true" />;
   const s = item.session;
@@ -1716,12 +1749,14 @@ function Peek({ item }: { item: Item | undefined }) {
     );
   const a = item.agent;
   const where = [s.machine, repoShort(s.repo) || undefined, s.branch].filter(Boolean).join(" · ");
-  // A turn the harness opened itself (a `<task-notification>`, a `<command-name>`) is not
-  // what the person asked: its markup is never shown as the ask.
-  const asked = item.section === "Needs you" ? undefined : flat(s.progress?.user ?? s.lastUser);
+  const waiting = peekAttention(item);
+  const said = waiting?.tool ? attentionMessage(waiting) : undefined;
+  // A session that needs you says that, not the old ask. A turn the harness opened itself
+  // (a `<task-notification>`, a `<command-name>`) is not what the person asked: its markup
+  // is never shown as the ask.
+  const asked = s.state === "needs_you" ? undefined : flat(s.progress?.user ?? s.lastUser);
   const ask = asked && !HARNESS_TURN.test(asked) ? asked : undefined;
   const reply = flat(s.progress?.assistant ?? s.lastAssistant);
-  const waiting = item.section === "Needs you" ? s.openAttentions[0] : undefined;
   return (
     <aside className="pal-peek" aria-hidden="true">
       <p className="pal-peek-state">
@@ -1748,10 +1783,20 @@ function Peek({ item }: { item: Item | undefined }) {
       <p className="pal-peek-title">{a ? agentLabel(a) : sessionTitle(s)}</p>
       <p className="pal-peek-where">{a ? sessionTitle(s) : where}</p>
       {!a && s.model ? <p className="pal-peek-where">{modelShort(s.model)}</p> : null}
-      {waiting ? (
-        <p className="pal-peek-text">{attentionMessage(waiting) ?? (waiting.tool ? toolLabel(waiting.tool) : null)}</p>
-      ) : a?.currentTool ? (
-        <p className="pal-peek-text">{toolLabel(a.currentTool.tool)}</p>
+      {a?.currentTool ? <p className="pal-peek-text">{toolLabel(a.currentTool.tool)}</p> : null}
+      {/* The board row's words: the tool as its chip says it, then the request (a command
+          or a path in mono, a question as it was asked); a plan review is its chip alone. */}
+      {waiting?.tool ? (
+        <div className="pal-peek-block">
+          <p className="pal-peek-label">{toolLabel(waiting.tool)}</p>
+          {isQuestion(waiting) ? (
+            <AskedLine s={s} a={waiting} className="pal-peek-text pal-peek-text--wait" />
+          ) : said ? (
+            <p className={`pal-peek-text pal-peek-text--wait${literalAsk(waiting.tool) ? " mono" : ""}`}>
+              <Redacted text={said} />
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {!a && ask ? (
         <div className="pal-peek-block">

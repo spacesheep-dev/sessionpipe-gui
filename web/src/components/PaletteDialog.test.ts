@@ -6,7 +6,7 @@ import { approvalOf, sendState } from "../account/sendable";
 import { answersOut } from "../control/answers";
 import { answerState } from "../control/useSend";
 import { markLate, openAttentions } from "../data/hooks";
-import { answerWords, askableIds, cursorAfter } from "./PaletteDialog";
+import { answerWords, askableIds, cursorAfter, peekAttention } from "./PaletteDialog";
 
 describe("answerWords", () => {
   it("names a plan review's own pair, with no tool to allow", () => {
@@ -139,5 +139,26 @@ describe("cursorAfter: where the cursor goes when its row leaves the list", () =
     expect(cursorAfter(list("a:p2:Allow", "a:p2:Deny", "g:Board"), { at: 0, session: "cc:one" })).toBe(2);
     expect(cursorAfter(list("a:p2:Allow", "a:p2:Deny"), { at: 0, session: "cc:one" })).toBe(-1);
     expect(cursorAfter([], { at: 0 })).toBe(-1);
+  });
+});
+
+describe("peekAttention: what the preview says a row's session waits on", () => {
+  const AT = "2026-11-18T10:00:00Z";
+  const question = { attentionId: "q1", kind: "permission" as const, tool: "AskUserQuestion", at: AT };
+  const bash = { attentionId: "p1", kind: "permission" as const, tool: "Bash", message: "npm ci", at: AT };
+  const waits = { state: "needs_you" as const, openAttentions: [question, bash] };
+
+  it("is the board row's prompt for a session that needs you, a question included", () => {
+    expect(peekAttention({ session: waits })).toBe(question);
+    expect(peekAttention({ session: { state: "needs_you", openAttentions: [bash] } })).toBe(bash);
+  });
+  it("is an Allow or Deny row's own prompt, not the session's first", () => {
+    expect(peekAttention({ session: waits, attention: bash })).toBe(bash);
+  });
+  it("is nothing for a session that waits on nothing, a subagent's row, or a row about no session", () => {
+    expect(peekAttention({ session: { state: "working", openAttentions: [] } })).toBeUndefined();
+    expect(peekAttention({ session: { state: "idle", openAttentions: [] } })).toBeUndefined();
+    expect(peekAttention({ session: waits, agent: { id: "a1" } })).toBeUndefined();
+    expect(peekAttention({})).toBeUndefined();
   });
 });
