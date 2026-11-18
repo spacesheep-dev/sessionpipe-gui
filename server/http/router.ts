@@ -125,14 +125,16 @@ export class Router {
       send(res, { status: 400, json: { reason: "bad_request" } });
       return;
     }
-    let ip = req.socket.remoteAddress ?? "";
-    let forwarded = false;
-    if (this.trustProxy() && FORWARDING.some((h) => req.headers[h] !== undefined) && isThisMachine(ip)) {
-      forwarded = true;
-      ip = proxyEntry(req.headers["x-forwarded-for"]) || ip;
-    }
-    const ctx = makeCtx(req, res, url, ip, forwarded);
     try {
+      // Inside the try, as everything a request can make fail is: reading this machine's
+      // addresses can throw, and that must answer a 500, never end the process.
+      let ip = req.socket.remoteAddress ?? "";
+      let forwarded = false;
+      if (this.trustProxy() && FORWARDING.some((h) => req.headers[h] !== undefined) && isThisMachine(ip)) {
+        forwarded = true;
+        ip = proxyEntry(req.headers["x-forwarded-for"]) || ip;
+      }
+      const ctx = makeCtx(req, res, url, ip, forwarded);
       // Inside the try: a path whose percent escape does not decode is the sender's
       // mistake (a 400), and an unauthenticated one; it must never reach the process.
       const m = this.match(req.method ?? "GET", url.pathname);

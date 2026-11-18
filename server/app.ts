@@ -249,11 +249,16 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   // What http/guard.ts asks of every request: the names this server goes by on this
   // machine besides localhost and its addresses (the `.local` name the setup page shows,
   // the TLS name, --rp-id, --allow-host), and the public url as an origin that is this
-  // server. The public url's host is not among the names: it is the proxy's, and a
-  // request under it is answered when the proxy forwarded it. Read on each request: the
+  // server. The public url's host is not among the names, also when --rp-id is that
+  // host: it is the proxy's, and a request under it is answered when the proxy forwarded it. Read on each request: the
   // setup page changes them.
   router.guard = {
-    hosts: () => [localHostname(opts.tlsHostname), tls?.hostname, opts.rpId, ...(opts.allowHosts ?? [])],
+    hosts: () => [
+      localHostname(opts.tlsHostname),
+      tls?.hostname,
+      opts.rpId && opts.rpId === publicHost() ? undefined : opts.rpId,
+      ...(opts.allowHosts ?? []),
+    ],
     origins: () => [publicUrl],
   };
   const uiKey = (): string => config.uiKey;

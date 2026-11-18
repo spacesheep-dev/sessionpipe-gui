@@ -35,7 +35,8 @@ neither authorizes a command. Details: the sessionpipe `CONTROL.md` spec and
 
 **Requests from a browser.** The receiver answers its own pages, and on its own machine
 under its own names. Before any route is reached, a request the browser marks as coming
-from another origin is refused (another site may link to a page, nothing more), and a
+from another origin is refused (another site may link to a page; it can neither read an
+answer nor change anything), and a
 request made on this machine must name the receiver by a name it hands out itself or was
 given (`localhost`, an address, the `.local` name, or one given with `--allow-host`); the
 public url's name is answered through the proxy only. Pages are sent with

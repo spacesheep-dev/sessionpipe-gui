@@ -127,6 +127,9 @@ function ownOrigin(origin: string, g: GuardRequest, deps: GuardDeps): boolean {
     return false;
   }
   if (o.protocol !== "http:" && o.protocol !== "https:") return false;
+  // An Origin is a scheme, a host and a port, written as a browser writes it: one that
+  // carries anything more (a user, a path) or reads differently once parsed is not one.
+  if (origin.toLowerCase() !== o.origin) return false;
   const h = g.req.headers;
   const asked = [one(h.host), g.forwarded ? lastOf(h["x-forwarded-host"]) : undefined];
   if (asked.some((a) => a !== undefined && a.trim().toLowerCase() === o.host)) return true;

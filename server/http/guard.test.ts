@@ -107,6 +107,13 @@ describe("the guard's readings", () => {
     expect(another({ origin: "null" })).toBe(true);
     expect(another({ origin: "not a url" })).toBe(true);
     expect(another({ origin: "file://" })).toBe(true);
+    // An Origin is read whole, as a browser writes it: a longer port or a longer name is
+    // another origin, and so is one that carries a user or a path.
+    expect(another({ origin: "http://localhost:73730" })).toBe(true);
+    expect(fromAnotherOrigin(fake({ host: "board.test", origin: "http://board.test.other.example" }))).toBe(true);
+    expect(fromAnotherOrigin(fake({ host: "board.test", origin: "http://board.test" }))).toBe(false);
+    expect(another({ origin: "http://x@localhost:7373" })).toBe(true);
+    expect(another({ origin: "http://localhost:7373/" })).toBe(true);
     // Neither header: not a browser.
     expect(another({})).toBe(false);
     // Through the trusted proxy the browser asked for the forwarded host, which the proxy
@@ -625,6 +632,21 @@ describe("every route, behind the guard", () => {
     expect((await fetch(`http://127.0.0.1:${port}${ROUTES.ui.info}`)).status).toBe(200);
   });
 
+  it("only reads on a GET: the process's numbers come either way, a full collection with a POST", async () => {
+    const read = await fetch(`http://127.0.0.1:${port}/api/ui/stats/process?gc=1`);
+    expect(read.status).toBe(200);
+    expect(typeof ((await read.json()) as { heapUsed: number }).heapUsed).toBe("number");
+    const collected = await fetch(`http://127.0.0.1:${port}/api/ui/stats/process`, { method: "POST" });
+    expect(collected.status).toBe(200);
+    // From another site neither is answered.
+    const a = await ask(port, {
+      method: "POST",
+      path: "/api/ui/stats/process",
+      headers: { "sec-fetch-site": "cross-site" },
+    });
+    expect(a.status).toBe(403);
+  });
+
   it("refuses, from this machine, a name that is not this machine's", async () => {
     // A page under such a name is same-origin to itself by the browser's word.
     const named = { host: `board.other.example:${port}`, "sec-fetch-site": "same-origin" };
@@ -714,6 +736,29 @@ describe("every route, behind the guard", () => {
       app.setPublicUrl(undefined);
     }
     expect((await at("studio.tail1234.ts.net")).reason).toBe("unknown_host");
+  });
+
+  it("does not take the public url's name from this machine when --rp-id is that name", async () => {
+    const dir = tempDir("spgui-guard-rp-");
+    const own = await createApp({
+      port: 0,
+      host: "127.0.0.1",
+      stateDir: path.join(dir.dir, "state"),
+      outbox: false,
+      quiet: true,
+      publicUrl: "https://studio.tail1234.ts.net",
+      rpId: "studio.tail1234.ts.net",
+    });
+    try {
+      const a = await ask(own.port, { path: ROUTES.ui.info, headers: { host: "studio.tail1234.ts.net" } });
+      expect(`${a.status} ${a.reason}`).toBe("403 unknown_host");
+      expect((await ask(own.port, { path: ROUTES.ui.info, headers: { host: `localhost:${own.port}` } })).status).toBe(
+        200,
+      );
+    } finally {
+      await own.close();
+      dir.cleanup();
+    }
   });
 
   it("asks no name of a request from another machine, or of one the proxy forwarded: what they need is the key", async () => {
