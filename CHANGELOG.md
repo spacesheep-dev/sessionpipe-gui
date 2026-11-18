@@ -257,6 +257,11 @@ pairing link that carries the board's key only for a pairing the sink token star
   prompt leaves the list while the palette is open, the cursor goes to that session's row
   and never onto the row that took its place, so an Enter already on its way cannot answer
   another prompt.
+- **The system's Increase contrast setting takes effect.** With it on (macOS:
+  Accessibility › Display; iOS: Accessibility › Display & Text Size), meta text, marks,
+  dividers and the edges of fields and buttons step up, in every skin and both schemes, as
+  soon as it is switched. Before, only the focus ring got thicker: a skin's own colours
+  outranked the rest.
 
 ## [0.8.4] - 2026-11-17
 

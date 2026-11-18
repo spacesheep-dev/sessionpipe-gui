@@ -332,14 +332,19 @@
   --brand-edge: oklch(1 0 0 / 0.2);
 }
 
-/* More contrast asked for: hairlines a step darker, the muted tiers a step up, so the
-   meta text and the dividers read on every background; a thicker ring. */
+/* Increase contrast: muted text a step up, dividers and control edges findable, a thicker
+   ring. !important so it holds over a skin's inline tokens; each value reads only --fg-2
+   and --bg. The mixes are set on the built-in skins: marks 4.5:1 on --bg-4, control edges
+   3:1 and dividers near 2.2:1 on --bg-2, so a divider stays quieter than an edge
+   (test/e2e/contrast.spec.ts). */
 @media (prefers-contrast: more) {
   :root {
-    --line: var(--fg-4);
-    --line-2: var(--fg-3);
-    --fg-3: var(--fg-2);
-    --fg-4: var(--fg-3);
+    /* biome-ignore-start lint/complexity/noImportantStyles: they must beat the tokens a skin writes inline on <html> */
+    --fg-3: var(--fg-2) !important;
+    --fg-4: color-mix(in oklab, var(--fg-2) 82%, var(--bg)) !important;
+    --line-2: color-mix(in oklab, var(--fg-2) 58%, var(--bg)) !important;
+    --line: color-mix(in oklab, var(--fg-2) 40%, var(--bg)) !important;
+    /* biome-ignore-end lint/complexity/noImportantStyles: the four above */
     --focus-width: 3px;
   }
 }
