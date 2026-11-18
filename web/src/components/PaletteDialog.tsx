@@ -236,19 +236,60 @@ const sessionFields = (s: SessionSummary): string[] => [
   s.model ?? "",
 ];
 
+/** A session against the query. A row shows its model once, so where words landed on both
+ *  forms of it ("claude fable") they are tried on its name alone, which holds both. */
+export function sessionMatch(query: string, s: SessionSummary): FieldsMatch | null {
+  const fields = sessionFields(s);
+  const m = fuzzyFields(query, fields);
+  if (!m?.positions[4]?.length || !m.positions[5]?.length) return m;
+  const named = fuzzyFields(
+    query,
+    fields.map((f, i) => (i === 4 ? "" : f)),
+  );
+  return named ? { score: m.score, positions: named.positions } : m;
+}
+
+/** The letters of a branch or a model a row has room for: palette.css cuts the part at
+ *  20ch. */
+const WHY_CH = 20;
+
+/** A branch or a model as a row shows it. One whose match starts past the cut is cut from
+ *  the front instead, at the start of a word where it can be ("…retry-backoff" of
+ *  "feature/webhook-retry-backoff"), so the bold letters are in what is drawn. */
+export function whyText(text: string, at: number[]): { text: string; at: number[] } {
+  const first = at[0] ?? 0;
+  if (first < WHY_CH) return { text, at };
+  // As late as the match, and no later than fills the part (the "…" is one of its letters).
+  let from = Math.min(first, text.length - (WHY_CH - 1));
+  for (let i = from; i <= first; i++)
+    if (!/[\p{L}\p{N}]/u.test(text[i - 1] as string)) {
+      from = i;
+      break;
+    }
+  return { text: `…${text.slice(from)}`, at: at.map((p) => p - from + 1) };
+}
+
 /** A session row's detail, "lab-mac · acme/billing", and after it the branch or the model
  *  when a word of the query matched there ("· demo/webhook-backoff"), so every row shows
- *  why it is listed. */
+ *  why it is listed. The model is there once: by its name where a word landed on that,
+ *  else as it reads. */
 function sessionDetail(s: SessionSummary, m: FieldsMatch | null): ReactNode {
   const fields = sessionFields(s);
-  const shown = [1, 2, 3, 4, 5].filter((f) => fields[f] && (f <= 2 || m?.positions[f]?.length));
+  const hit = (f: number) => !!m?.positions[f]?.length;
+  // The branch, then one form of the model.
+  const why = [3, hit(5) ? 5 : 4].filter(hit);
+  const shown = [1, 2, ...why].filter((f) => fields[f]);
   if (shown.length === 0) return undefined;
-  return shown.map((f, i) => (
-    <span key={f} className={f === 1 ? "pal-machine" : f === 2 ? "pal-repo" : "pal-repo pal-why"}>
-      {i > 0 ? " · " : ""}
-      <Hit text={fields[f] as string} at={m?.positions[f]} />
-    </span>
-  ));
+  return shown.map((f, i) => {
+    const part = { text: fields[f] as string, at: m?.positions[f] };
+    const { text, at } = part.at && why.includes(f) ? whyText(part.text, part.at) : part;
+    return (
+      <span key={f} className={f === 1 ? "pal-machine" : f === 2 ? "pal-repo" : "pal-repo pal-why"}>
+        {i > 0 ? " · " : ""}
+        <Hit text={text} at={at} />
+      </span>
+    );
+  });
 }
 
 const Glyph = ({ children }: { children: string }) => (
@@ -583,9 +624,9 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
           <Hit text={sessionTitle(s)} at={m?.positions[0]} />
         </>
       ),
-      // The machine never truncates (the repo, then the title, give way first). A word that
-      // fits only the branch or the model brings that one in after the repo, so the row
-      // shows why it is here.
+      // "machine · repo", whole: the title gives way to it. A word that fits only the branch
+      // or the model brings that one in after the repo, so the row shows why it is here;
+      // such a row leaves its title room, and its repo gives way first (palette.css).
       detail: sessionDetail(s, m),
       at: s.lastAt,
       session: s,
@@ -623,7 +664,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
       else {
         const rows: Item[][] = [];
         for (const s of sorted) {
-          const m = fuzzyFields(text, sessionFields(s));
+          const m = sessionMatch(text, s);
           const kids = agentsOf(s, m, true).filter((r) => !m || r.score > 1 || r.hit);
           if (m || kids.length) rows.push(tree([sessionRow(s, m ?? { score: 0, positions: [] }), ...kids]));
         }

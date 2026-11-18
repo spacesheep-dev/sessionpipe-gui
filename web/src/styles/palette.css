@@ -274,12 +274,11 @@
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
-/* A session's "machine · repo": the machine is never cut, so the detail is at least its
-   width and only the repo after it truncates. */
+/* A session's "machine · repo": the machine is never cut. Neither is the repo: a flex
+   box's automatic minimum is its parts' whole text, so the title gives way to both. */
 .pal-detail:has(> .pal-machine) {
   display: flex;
-  /* Visible, so its automatic minimum is the machine's width (a clipping box's is 0);
-     the repo inside clips itself. */
+  /* Visible, so it has that automatic minimum (a clipping box's is 0). */
   overflow: visible;
   min-width: auto;
 }
@@ -292,10 +291,29 @@
   text-overflow: ellipsis;
   white-space: pre;
 }
-/* The branch or the model a word of the query matched, after the repo: a long one is
-   cut, so the row keeps room for its title. */
+/* The branch or the model a word of the query matched, after the repo: a long one is cut
+   at 20ch (PaletteDialog's whyText starts it later when the match is past that). */
 .pal-why {
   max-width: 20ch;
+}
+/* A session's row with that third part leaves its title room. The least its detail takes
+   is the machine and the part, and never more than 60% of the row: the title gives way
+   to that much only, and past it the part does. `width` is only that bound (a flex item's
+   automatic minimum is the smaller of its width and its least content); what the detail
+   takes is the room the title leaves. */
+.pal-detail:has(> .pal-machine ~ .pal-why) {
+  flex: 1 1 0;
+  width: 60%;
+}
+/* The repo counts for nothing in that least (`width: 0`): it has the room the machine and
+   the part leave, up to its own text, and gives way before the title does, down to
+   nothing, its " · " with it. With less room than its "…" takes it would be a stray dot:
+   under 1.5em it is not drawn (the inset is all of it, or none). */
+.pal-detail:has(> .pal-machine ~ .pal-why) > .pal-repo:not(.pal-why) {
+  flex: 1 1 0;
+  width: 0;
+  max-width: max-content;
+  clip-path: inset(0 clamp(0px, (1.5em - 100%) * 9999, 100%) 0 0);
 }
 .pal-age {
   min-width: var(--meta-col);
@@ -436,9 +454,20 @@
   .pal-keys {
     display: none;
   }
-  /* A row here stays "machine · repo": a third part would leave the title no room. */
+  /* A row here stays "machine · repo", laid out as it was: a third part would leave the
+     title no room. */
   .pal-why {
     display: none;
+  }
+  .pal-detail:has(> .pal-machine ~ .pal-why) {
+    flex: 0 10 auto;
+    width: auto;
+  }
+  .pal-detail:has(> .pal-machine ~ .pal-why) > .pal-repo:not(.pal-why) {
+    flex: 0 1 auto;
+    width: auto;
+    max-width: none;
+    clip-path: none;
   }
   .pal-section {
     padding: 14px 18px 6px;

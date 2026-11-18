@@ -6,7 +6,7 @@ import { approvalOf, sendState } from "../account/sendable";
 import { answersOut } from "../control/answers";
 import { answerState } from "../control/useSend";
 import { markLate, openAttentions } from "../data/hooks";
-import { answerWords, askableIds, cursorAfter, peekAttention } from "./PaletteDialog";
+import { answerWords, askableIds, cursorAfter, peekAttention, sessionMatch, whyText } from "./PaletteDialog";
 
 describe("answerWords", () => {
   it("names a plan review's own pair, with no tool to allow", () => {
@@ -160,5 +160,66 @@ describe("peekAttention: what the preview says a row's session waits on", () => 
     expect(peekAttention({ session: { state: "idle", openAttentions: [] } })).toBeUndefined();
     expect(peekAttention({ session: waits, agent: { id: "a1" } })).toBeUndefined();
     expect(peekAttention({})).toBeUndefined();
+  });
+});
+
+describe("whyText: the branch or the model as a row has room for it", () => {
+  const BRANCH = "feature/webhook-retry-backoff";
+  const range = (from: number, n: number) => Array.from({ length: n }, (_, i) => from + i);
+
+  it("is whole where the match starts in its first 20 letters", () => {
+    expect(whyText(BRANCH, range(8, 7))).toEqual({ text: BRANCH, at: range(8, 7) });
+    expect(whyText("demo/webhook-backoff", range(13, 7))).toEqual({ text: "demo/webhook-backoff", at: range(13, 7) });
+  });
+  it("starts later, at a word, where the match is past that: the bold letters are in what is drawn", () => {
+    const { text, at } = whyText(BRANCH, range(22, 7));
+    expect(text).toBe("…retry-backoff");
+    expect(at.map((i) => text[i]).join("")).toBe("backoff");
+  });
+  it("keeps to 20 letters where no word starts in reach", () => {
+    const { text, at } = whyText("averyveryverylongbranchnamebackoff", range(27, 7));
+    expect(text).toBe("…ngbranchnamebackoff");
+    expect(at).toEqual(range(13, 7));
+  });
+  it("starts at the match where more than 20 letters follow it: the end is what is cut", () => {
+    const { text, at } = whyText("users/dev/experiments/backoff-for-the-webhook-retry-queue", range(22, 7));
+    expect(text).toBe("…backoff-for-the-webhook-retry-queue");
+    expect(at).toEqual(range(1, 7));
+  });
+  it("is whole where a first word is in its start, though another is past the cut", () => {
+    expect(whyText(BRANCH, [...range(0, 7), ...range(22, 7)]).text).toBe(BRANCH);
+  });
+});
+
+describe("sessionMatch: a row shows its model once", () => {
+  const s = {
+    title: "Tidy the retry queue",
+    machine: "lab-mac",
+    repo: "github.com/acme/billing",
+    branch: "main",
+    model: "claude-fable-5-1",
+  } as SessionSummary;
+  // The fields: title, machine, repo, branch, the model as it reads, the model as it is named.
+  const hits = (query: string) => sessionMatch(query, s)?.positions.map((p) => p.length);
+
+  it("puts a word of the model on the form it reads in", () => {
+    expect(hits("fable")).toEqual([0, 0, 0, 0, 5, 0]);
+    expect(hits("fable 5.1")).toEqual([0, 0, 0, 0, 8, 0]);
+  });
+  it("puts every word on the model's name where one of them is only there", () => {
+    expect(hits("claude")).toEqual([0, 0, 0, 0, 0, 6]);
+    expect(hits("claude fable")).toEqual([0, 0, 0, 0, 0, 11]);
+    expect(hits("tidy claude fable")).toEqual([4, 0, 0, 0, 0, 11]);
+  });
+  it("keeps the rank the words had on both forms", () => {
+    expect(sessionMatch("claude fable", s)?.score).toBe(
+      (sessionMatch("claude", s)?.score ?? 0) + (sessionMatch("fable", s)?.score ?? 0),
+    );
+  });
+  it("leaves both where a word fits only the form it reads in", () => {
+    expect(hits("claude 5.1")).toEqual([0, 0, 0, 0, 3, 6]);
+  });
+  it("is nothing where a word fits no field", () => {
+    expect(sessionMatch("claude zebra", s)).toBeNull();
   });
 });

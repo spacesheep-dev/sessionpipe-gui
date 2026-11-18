@@ -6,7 +6,7 @@
 // are rows only where they would be sent, and the cursor stays with its row. A row's bold
 // letters are in the text it draws, and the preview says what a session waits on.
 import { randomUUID } from "node:crypto";
-import { expect, type Page, test } from "@playwright/test";
+import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
 import { E2E_PORT } from "../../playwright.config.js";
 import {
   ANTIGRAVITY_TURNS,
@@ -18,6 +18,7 @@ import {
   CODEX_TURNS,
   CURSOR_TURNS,
   GEMINI_TURNS,
+  HANDOFF,
   HANDOFF_PARENT_TURN,
   PARALLEL_TURN,
   RESUME_TURN,
@@ -57,6 +58,7 @@ const DEMO_TITLES: string[] = [
       CODEX_ASKED_TURN,
       ASK_TURN,
       HANDOFF_PARENT_TURN,
+      HANDOFF,
     ]).matchAll(/"title":\{"text":"((?:[^"\\]|\\.)*)"/g),
   ].map((m) => JSON.parse(`"${m[1]}"`) as string),
 ];
@@ -153,53 +155,61 @@ test.describe("command palette", () => {
     await expect(page.locator("h1.sess-title")).toHaveText(startsWith(title));
   });
 
+  /** A settled session on e2e-box in e2e/fixture, or where `session` says. It stays on the
+   *  board, so its title must be one `firstCard` never picks: its longest word is under 7
+   *  letters, or other titles hold it too ("webhook"). */
+  async function postSession(request: APIRequestContext, title: string, session: Record<string, string>) {
+    const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+    const batch = tier1Batch({ title });
+    for (const e of batch.events) Object.assign(e.session as object, session);
+    const res = await request.post(EVENTS, {
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${sinkToken}`,
+        "sessionpipe-protocol": "1",
+      },
+      data: { events: batch.events },
+    });
+    expect(res.status()).toBe(202);
+  }
+  const row = (page: Page, title: string) => rows(page).filter({ hasText: title });
+
   test("the bold letters are in the title that holds the word; a word only the branch or the model holds brings that in, bold", async ({
     page,
     request,
   }) => {
-    const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
     const t = randomUUID().slice(0, 6);
-    /** A settled session on e2e-box in e2e/fixture, on a branch that has "webhook" nearer
-     *  its start than any title does. */
-    const post = async (title: string, model: string) => {
-      const batch = tier1Batch({ title });
-      for (const e of batch.events) Object.assign(e.session as object, { branch: "demo/webhook-backoff", model });
-      const res = await request.post(EVENTS, {
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${sinkToken}`,
-          "sessionpipe-protocol": "1",
-        },
-        data: { events: batch.events },
-      });
-      expect(res.status()).toBe(202);
-    };
-    const inTitle = `Second opinion on the webhook retry ${t}`;
+    // A branch that has "webhook" nearer its start than any title does.
+    const inTitle = `Notes on the webhook retry ${t}`;
     const inBranch = `Tidy the retry queue ${t}`;
-    await post(inTitle, "claude-fable-5-1");
-    await post(inBranch, "claude-opus-5-5");
-    const row = (title: string) => rows(page).filter({ hasText: title });
+    await postSession(request, inTitle, { branch: "demo/webhook-backoff", model: "claude-fable-5-1" });
+    await postSession(request, inBranch, { branch: "demo/webhook-backoff", model: "claude-opus-5-5" });
     await openBoard(page);
     await open(page);
     await page.keyboard.type(`webhook ${t}`);
     // The title holds the word: it is bold there, and the row stays "machine · repo".
-    await expect(row(inTitle).locator(".pal-label u")).toHaveText(["webhook", t]);
-    await expect(row(inTitle).locator(".pal-detail")).toHaveText("e2e-box · e2e/fixture");
+    await expect(row(page, inTitle).locator(".pal-label u")).toHaveText(["webhook", t]);
+    await expect(row(page, inTitle).locator(".pal-detail")).toHaveText("e2e-box · e2e/fixture");
     // Only the branch holds it: the branch follows the repo, the word bold in it.
-    await expect(row(inBranch).locator(".pal-label u")).toHaveText([t]);
-    await expect(row(inBranch).locator(".pal-detail")).toHaveText("e2e-box · e2e/fixture · demo/webhook-backoff");
-    await expect(row(inBranch).locator(".pal-detail u")).toHaveText(["webhook"]);
+    await expect(row(page, inBranch).locator(".pal-label u")).toHaveText([t]);
+    await expect(row(page, inBranch).locator(".pal-detail")).toHaveText("e2e-box · e2e/fixture · demo/webhook-backoff");
+    await expect(row(page, inBranch).locator(".pal-detail u")).toHaveText(["webhook"]);
     // A model, as the app writes it and as it is named.
     await page.keyboard.press("ControlOrMeta+a");
     await page.keyboard.type(`fable ${t}`);
-    await expect(row(inTitle).locator(".pal-detail")).toHaveText("e2e-box · e2e/fixture · fable 5.1");
-    await expect(row(inTitle).locator(".pal-detail u")).toHaveText(["fable"]);
-    await expect(row(inBranch)).toHaveCount(0);
+    await expect(row(page, inTitle).locator(".pal-detail")).toHaveText("e2e-box · e2e/fixture · fable 5.1");
+    await expect(row(page, inTitle).locator(".pal-detail u")).toHaveText(["fable"]);
+    await expect(row(page, inBranch)).toHaveCount(0);
     await page.keyboard.press("ControlOrMeta+a");
     await page.keyboard.type(`claude-opus ${t}`);
-    await expect(row(inBranch).locator(".pal-detail")).toHaveText("e2e-box · e2e/fixture · claude-opus-5-5");
-    await expect(row(inBranch).locator(".pal-detail u")).toHaveText(["claude-opus"]);
-    await expect(row(inTitle)).toHaveCount(0);
+    await expect(row(page, inBranch).locator(".pal-detail")).toHaveText("e2e-box · e2e/fixture · claude-opus-5-5");
+    await expect(row(page, inBranch).locator(".pal-detail u")).toHaveText(["claude-opus"]);
+    await expect(row(page, inTitle)).toHaveCount(0);
+    // Words on both forms of it: the model is there once, by its name, which holds both.
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type(`claude fable ${t}`);
+    await expect(row(page, inTitle).locator(".pal-detail")).toHaveText("e2e-box · e2e/fixture · claude-fable-5-1");
+    await expect(row(page, inTitle).locator(".pal-detail u")).toHaveText(["claude", "fable"]);
     // Any session listed with the word in its title shows it there.
     await page.keyboard.press("ControlOrMeta+a");
     await page.keyboard.type("webhook");
@@ -216,6 +226,74 @@ test.describe("command palette", () => {
           ),
       )
       .toEqual([]);
+  });
+
+  test("a row found by its branch keeps room for its title: the repo gives way first, and nothing reaches the age", async ({
+    page,
+    request,
+  }) => {
+    const t = randomUUID().slice(0, 6);
+    // Names as long as real ones: a machine, a repo and a branch that do not fit beside a title.
+    const names = {
+      machine: "e2e-box-with-a-long-name",
+      repo: "github.com/e2e-corp/payments-service-fixture",
+      branch: "feature/webhook-retry-backoff",
+    };
+    const long = `Tidy the retry queue ahead of the Friday demo ${t}`;
+    const short = `Fix ${t}`;
+    await postSession(request, long, names);
+    await postSession(request, short, names);
+    /** A row's widths: its title, its row, each part of its detail (cut or whole), and how far
+     *  the detail's ink stops short of the age. */
+    const measure = (title: string) =>
+      row(page, title).evaluate((el) => {
+        const box = (sel: string) => el.querySelector(sel)!.getBoundingClientRect();
+        const cut = (sel: string) => {
+          const e = el.querySelector(sel)!;
+          return e.scrollWidth > e.clientWidth;
+        };
+        const parts = Array.from(el.querySelectorAll(".pal-detail > span"), (e) => e.getBoundingClientRect());
+        const why = box(".pal-why");
+        const bold = box(".pal-why u");
+        return {
+          title: box(".pal-label").width,
+          main: box(".pal-main").width,
+          titleCut: cut(".pal-label"),
+          machineCut: cut(".pal-machine"),
+          repo: box(".pal-repo").width,
+          whyCut: cut(".pal-why"),
+          boldShown: bold.left >= why.left && bold.right <= why.right + 0.5,
+          toAge: box(".pal-age").left - Math.max(...parts.map((r) => r.right)),
+        };
+      });
+    await openBoard(page);
+    await open(page);
+    // The match is past the branch's first 20 letters: the branch starts later, at a word.
+    await page.keyboard.type(`backoff ${t}`);
+    await expect(row(page, long).locator(".pal-detail")).toHaveText(
+      "e2e-box-with-a-long-name · e2e-corp/payments-service-fixture · …retry-backoff",
+    );
+    await expect(row(page, long).locator(".pal-why u")).toHaveText(["backoff"]);
+    // A long title: it has 40% of the row or more, the machine and the branch are whole, and
+    // the repo is the part that is gone.
+    let m = await measure(long);
+    expect(m.title).toBeGreaterThan(m.main * 0.38);
+    expect(m).toMatchObject({ titleCut: true, machineCut: false, repo: 0, whyCut: false, boldShown: true });
+    expect(m.toAge).toBeGreaterThan(0);
+    // A short title is whole, and the repo has the room it leaves.
+    m = await measure(short);
+    expect(m).toMatchObject({ titleCut: false, machineCut: false, whyCut: false, boldShown: true });
+    expect(m.repo).toBeGreaterThan(0);
+    expect(m.toAge).toBeGreaterThan(0);
+    // A match in the branch's start: the branch is cut at its end, at 20ch, and the title
+    // still has its room.
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type(`feature ${t}`);
+    await expect(row(page, long).locator(".pal-why")).toHaveText(" · feature/webhook-retry-backoff");
+    m = await measure(long);
+    expect(m.title).toBeGreaterThan(m.main * 0.38);
+    expect(m).toMatchObject({ titleCut: true, machineCut: false, repo: 0, whyCut: true, boldShown: true });
+    expect(m.toAge).toBeGreaterThan(0);
   });
 
   test("shift+Enter opens the session beside the page", async ({ page }) => {
