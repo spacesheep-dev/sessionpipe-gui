@@ -19,6 +19,7 @@ import {
   agentPath,
   navigate,
   onLocation,
+  panelOnto,
   parseRoute,
   SPLIT_ACTIVE_PARAM,
   SPLIT_PARAM,
@@ -150,7 +151,9 @@ function commit(state: SplitState, opts: { replace?: boolean } = {}): void {
 
 /** At boot, with no `?s=` in the URL: the tabs of the last visit, if any. Never on the
  *  phone, whose pages open clean; its mirror (a desktop visit's) stays for a desktop.
- *  From here on the mirror follows the URL. */
+ *  On a session's own page (the app opened by a notification) that session's tab is not
+ *  put back beside it, as when a move carries the panel there (panelOnto). From here on
+ *  the mirror follows the URL. */
 export function restoreSplit(): void {
   mirroring = true;
   if (phoneLayout()) return;
@@ -163,7 +166,9 @@ export function restoreSplit(): void {
       ? parsed.tabs.filter((k): k is string => typeof k === "string" && isKey(k))
       : [];
     if (tabs.length === 0) return;
-    commit({ tabs, active: typeof parsed.active === "number" ? parsed.active : 0 }, { replace: true });
+    const last = splitParams({ tabs, active: typeof parsed.active === "number" ? parsed.active : 0 });
+    const here = panelOnto(`${location.pathname}${location.search}`, last.s ?? "", last.t);
+    if (here) commit(parseSplit(here.s, here.t), { replace: true });
   } catch {
     // ignore a bad mirror
   }

@@ -2,7 +2,8 @@
 // The side panel across page changes. It goes along to every page; a session's own page
 // takes its tab out of the strip, as one history entry that Back undoes; an address (a
 // link's, a copied one) never carries the tabs onto a session; the phone layout carries
-// none; and the mirror for the next launch follows the URL, from the boot on.
+// none; and the mirror for the next launch follows the URL, from the boot on, which puts
+// the tabs back by the same rule.
 import "../native/test-env";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PHONE_QUERY } from "./device";
@@ -216,6 +217,34 @@ describe("the mirror", () => {
     expect(mirror()).toEqual({ tabs: [A, B], active: 1 });
     fresh.split.restoreSplit();
     expect(where()).toBe(`/machines?s=${A},${B}&t=1`);
+  });
+});
+
+describe("the boot, on a session's page", () => {
+  it("puts the last visit's tabs back beside it, without that session's own", () => {
+    localStorage.setItem(KEY_TABS, JSON.stringify({ tabs: [A, B, C], active: 1 }));
+    at(sessionPath("claude-code", "b"));
+    restoreSplit();
+    expect(where()).toBe(`/s/claude-code/b?s=${A},${C}&t=1`);
+    expect(stack).toHaveLength(1);
+    // What is on screen is what the next launch puts back.
+    expect(mirror()).toEqual({ tabs: [A, C], active: 1 });
+    // Another session's page: every tab.
+    at(sessionPath("claude-code", "z"));
+    restoreSplit();
+    expect(where()).toBe(`/s/claude-code/z?s=${A},${C}&t=1`);
+    // The page on an agent: only that agent's tab stays out.
+    localStorage.setItem(KEY_TABS, JSON.stringify({ tabs: [A, AG, B], active: 2 }));
+    at(agentPath("claude-code", "a", "g"));
+    restoreSplit();
+    expect(where()).toBe(`/s/claude-code/a?agent=g&s=${A},${B}&t=1`);
+  });
+
+  it("puts nothing back when its own tab was the only one", () => {
+    localStorage.setItem(KEY_TABS, JSON.stringify({ tabs: [A], active: 0 }));
+    at(sessionPath("claude-code", "a"));
+    restoreSplit();
+    expect(where()).toBe("/s/claude-code/a");
   });
 });
 

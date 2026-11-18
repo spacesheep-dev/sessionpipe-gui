@@ -7,19 +7,39 @@
 // back, tabs and all, on the board. It stays until it is closed: a session opened as a
 // page has the other tabs beside it and takes only its own out of the strip, and the next
 // launch lands on the page Settings › General › Open on names with the tabs put back.
-import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
+import { type APIRequestContext, expect, type Locator, type Page, test } from "@playwright/test";
 import { SETTINGS_KEY } from "../../playwright.config.js";
 import { EVENTS, holdBoard, INFO, openBoard, tier1Batch } from "./helpers.js";
 
 const panel = (page: Page) => page.locator("aside.panel");
 const mainWidth = (page: Page) => page.locator("main.main").evaluate((el) => el.getBoundingClientRect().width);
 const live = (page: Page) => expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
-const rx = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-/** What the panel's title must read for a card: the card shortens a long title with "…",
- *  the panel shows it whole, so a shortened one is matched as a prefix. */
-const titleOf = (card: string): string | RegExp =>
-  card.endsWith("…") ? new RegExp(`^${rx(card.slice(0, -1))}`) : card;
+const tabs = (page: Page) => panel(page).locator("[role='tablist'] [role='tab']");
+/** The tab a session's address opens as: `/s/<harness>/<id>` is `<harness>:<id>`. */
+const keyOf = (href: string): string => {
+  const [, h, id] = /^\/s\/([^/]+)\/(.+)$/.exec(href)!.map(decodeURIComponent) as [string, string, string];
+  return `${h}:${id}`;
+};
+type Modifier = "Shift" | "Alt" | "Meta" | "Control";
+/** A modified click on a card's link, dispatched on the element: what these tests check
+ *  is the tabs and the URL, and a live card's height changes (its counts) and the panel's
+ *  reflow can keep a pointer click chasing it, or put it under the sticky bar. */
+const clickOn = (link: Locator, modifiers: Modifier[]) =>
+  link.dispatchEvent("click", {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    shiftKey: modifiers.includes("Shift"),
+    altKey: modifiers.includes("Alt"),
+    metaKey: modifiers.includes("Meta"),
+    ctrlKey: modifiers.includes("Control"),
+  });
+const click = (page: Page, href: string, modifiers: Modifier[]) =>
+  clickOn(page.locator(`a.card-link[href="${href}"]`), modifiers);
+/** A card on the board now that is none of `hrefs`, by exclusion and not by its place:
+ *  cards re-sort live, and one read ahead may be Done, off the board, when its click comes. */
+const another = (page: Page, hrefs: string[]) =>
+  page.locator(`article.card a.card-link${hrefs.map((h) => `:not([href="${h}"])`).join("")}`).first();
 
 /** Shift-clicks the first board card; returns the title the panel shows for it. The
  *  panel is the source of truth: a demo session may learn a better title mid-turn, so the
@@ -167,16 +187,24 @@ test.describe("split panel", () => {
     test("another session swaps the content; the header opens the session as a page", async ({ page }) => {
       await openBeside(page);
       const first = (await panel(page).getAttribute("data-split"))!;
-      // Cards re-sort live, so alt-click the one whose href was read, not "the second".
-      const href2 = (await page.locator("article.card").nth(1).locator("a.card-link").getAttribute("href"))!;
-      const link2 = page.locator(`a.card-link[href="${href2}"]`);
-      const title2 = (await link2.locator(".card-title").textContent())!;
-      await link2.click({ modifiers: ["Alt"] });
-      await expect(panel(page).locator(".panel-title")).toHaveText(titleOf(title2));
-      await expect(page).toHaveURL(/[?&]s=/);
-      // The link's address is the session's alone, whatever is open beside.
       const open = panel(page).getByRole("link", { name: "Open as page" });
-      expect(await open.getAttribute("href")).toBe(href2);
+      const href1 = (await open.getAttribute("href"))!;
+      expect(keyOf(href1)).toBe(first);
+      // Any card but the one open beside, not "the second": the second may by now be that
+      // one, whose click would add no tab. Clicked where it is found, with no address read
+      // ahead: a card can leave the board (its session done) between a read and a click.
+      await clickOn(another(page, [href1]), ["Alt"]);
+      await expect(tabs(page)).toHaveCount(2);
+      const second = (await tabs(page).nth(1).getAttribute("data-tab-key"))!;
+      expect(second).not.toBe(first);
+      // By its key, not its words: a demo session may learn a better title mid-turn.
+      await expect(panel(page)).toHaveAttribute("data-split", second);
+      await expect(panel(page).locator(".panel-title")).not.toHaveText("");
+      expect(new URL(page.url()).searchParams.get("s")).toBe(`${first},${second}`);
+      // The link's address is the session's alone, whatever is open beside.
+      const href2 = (await open.getAttribute("href"))!;
+      expect(href2).not.toContain("?");
+      expect(keyOf(href2)).toBe(second);
       await open.click();
       await expect(page).toHaveURL((u) => u.pathname === href2);
       await expect(page.locator("h1.sess-title")).toBeVisible();
@@ -185,9 +213,9 @@ test.describe("split panel", () => {
       await expect(panel(page)).toHaveAttribute("data-split", first);
       expect(new URL(page.url()).searchParams.get("s")).toBe(first);
       // The last tab opened as a page closes the panel.
-      const last = (await open.getAttribute("href"))!;
+      await expect(open).toHaveAttribute("href", href1);
       await open.click();
-      await expect(page).toHaveURL((u) => u.pathname + u.search === last);
+      await expect(page).toHaveURL((u) => u.pathname + u.search === href1);
       await expect(page.locator("h1.sess-title")).toBeVisible();
       await expect(panel(page)).not.toHaveClass(/panel--open/);
     });
@@ -237,7 +265,6 @@ test.describe("split panel", () => {
   test.describe("tabs (desktop)", () => {
     test.skip(({ isMobile }) => !!isMobile, "desktop project only");
 
-    const tabs = (page: Page) => panel(page).locator("[role='tablist'] [role='tab']");
     const tabKeys = (page: Page) => tabs(page).evaluateAll((els) => els.map((el) => el.getAttribute("data-tab-key")));
     const activeKey = (page: Page) => panel(page).getAttribute("data-split");
     const splitParams = (page: Page) => {
@@ -254,23 +281,28 @@ test.describe("split panel", () => {
       const out: { href: string; key: string }[] = [];
       for (let i = 0; i < n; i++) {
         const href = (await links.nth(i).getAttribute("href"))!;
-        const [, h, id] = /^\/s\/([^/]+)\/(.+)$/.exec(href)!.map(decodeURIComponent) as [string, string, string];
-        out.push({ href, key: `${h}:${id}` });
+        out.push({ href, key: keyOf(href) });
       }
       return out;
     };
-    /** A modified click on the card's link, dispatched on the element: what these tests check
-     *  is the tabs and the URL, and a live card's height changes (its counts) and the panel's
-     *  reflow can keep a pointer click chasing it, or put it under the sticky bar. */
-    const click = (page: Page, href: string, modifiers: ("Shift" | "Meta" | "Control")[]) =>
-      page.locator(`a.card-link[href="${href}"]`).dispatchEvent("click", {
-        bubbles: true,
-        cancelable: true,
-        button: 0,
-        shiftKey: modifiers.includes("Shift"),
-        metaKey: modifiers.includes("Meta"),
-        ctrlKey: modifiers.includes("Control"),
-      });
+    /** Opens n sessions as tabs beside the Board, a shift-click each, and gives them in
+     *  the strip's order. Each click goes to a card on the board at that moment. */
+    const beside = async (page: Page, n: number) => {
+      await openBoard(page);
+      await holdBoard(page);
+      const open = panel(page).getByRole("link", { name: "Open as page" });
+      const out: { href: string; key: string }[] = [];
+      for (let i = 0; i < n; i++) {
+        const opened = out.map((t) => t.href);
+        await clickOn(another(page, opened), ["Shift"]);
+        await expect(tabs(page)).toHaveCount(i + 1);
+        // The new tab is the active one: the head's link is its address.
+        const href = (await open.getAttribute("href"))!;
+        out.push({ href, key: keyOf(href) });
+      }
+      expect(await tabKeys(page)).toEqual(out.map((t) => t.key));
+      return out;
+    };
     /** The tabs this device keeps for its next launch. */
     const mirror = (page: Page) =>
       page.evaluate(() => JSON.parse(localStorage.getItem("sessionpipe-gui.splitTabs") ?? "null") as unknown);
@@ -377,16 +409,16 @@ test.describe("split panel", () => {
     });
 
     test("a session opened as a page keeps the tabs beside it, and the Board still has them", async ({ page }) => {
-      const [a, b, c, d] = await cards(page, 4);
-      await click(page, a!.href, ["Shift"]);
-      await click(page, b!.href, ["Shift"]);
-      await click(page, c!.href, ["Shift"]);
-      await expect(tabs(page)).toHaveCount(3);
+      const [a, b, c] = await beside(page, 3);
       const strip = `${a!.key},${b!.key},${c!.key}`;
-      // A plain click opens the fourth as a page (Open sessions: As a page, the default).
-      await click(page, d!.href, []);
+      // A plain click opens a fourth as a page (Open sessions: As a page, the default).
+      const three = [a!.href, b!.href, c!.href];
+      await clickOn(another(page, three), []);
       await expect(page.locator("h1.sess-title")).toBeVisible();
-      expect(where(page)).toEqual({ path: d!.href, s: strip, t: "2" });
+      const d = new URL(page.url()).pathname;
+      expect(d).toMatch(/^\/s\//);
+      expect(three).not.toContain(d);
+      expect(splitParams(page)).toEqual({ s: strip, t: "2" });
       await expect(tabs(page)).toHaveCount(3);
       expect(await tabKeys(page)).toEqual([a!.key, b!.key, c!.key]);
       expect(await activeKey(page)).toBe(c!.key);
@@ -399,12 +431,23 @@ test.describe("split panel", () => {
       expect(await activeKey(page)).toBe(c!.key);
     });
 
+    test("the app opened on a session's own address has the last visit's other tab beside it", async ({ page }) => {
+      const [a, b] = await beside(page, 2);
+      // A notification clicked with the window closed opens the app on the session's page:
+      // the other tab beside it, and that session once.
+      await page.goto(b!.href);
+      await live(page);
+      await expect(page.locator("h1.sess-title")).toBeVisible();
+      await expect(panel(page)).toHaveClass(/panel--open/);
+      await expect(tabs(page)).toHaveCount(1);
+      expect(await activeKey(page)).toBe(a!.key);
+      expect(where(page)).toEqual({ path: b!.href, s: a!.key, t: null });
+      // What is on screen is what the launch after this one puts back.
+      expect(await mirror(page)).toEqual({ tabs: [a!.key], active: 0 });
+    });
+
     test("Open as page moves that one tab out, in one step that Back undoes", async ({ page }) => {
-      const [a, b, c] = await cards(page, 3);
-      await click(page, a!.href, ["Shift"]);
-      await click(page, b!.href, ["Shift"]);
-      await click(page, c!.href, ["Shift"]);
-      await expect(tabs(page)).toHaveCount(3);
+      const [a, b, c] = await beside(page, 3);
       const strip = `${a!.key},${b!.key},${c!.key}`;
       await page.keyboard.press(process.platform === "darwin" ? "Meta+2" : "Control+2");
       await expect.poll(() => where(page)).toEqual({ path: "/", s: strip, t: "1" });
@@ -439,8 +482,7 @@ test.describe("split panel", () => {
     test("a plain / lands on Open on with the last visit's tabs; an address that was asked for stays", async ({
       page,
     }) => {
-      const [a] = await cards(page, 1);
-      await click(page, a!.href, ["Shift"]);
+      const [a] = await beside(page, 1);
       await expect(panel(page)).toHaveClass(/panel--open/);
       // This device opens on the Inbox (Settings › General › Open on).
       await page.evaluate(
@@ -454,6 +496,11 @@ test.describe("split panel", () => {
       await expect(panel(page)).toHaveClass(/panel--open/);
       expect(where(page)).toEqual({ path: "/inbox", s: a!.key, t: null });
       expect(await activeKey(page)).toBe(a!.key);
+      // The installed app's "New session" shortcut names a sheet, not a page: the Inbox
+      // again, the tab beside it, the sheet over both.
+      await page.goto("/?new=1");
+      await expect(page.locator("[data-new-session]")).toBeVisible();
+      await expect.poll(() => where(page)).toEqual({ path: "/inbox", s: a!.key, t: null });
       // An address that names its tabs (a reload, a bookmark of the Board) keeps the Board.
       await page.goto(`/?s=${encodeURIComponent(a!.key)}`);
       await live(page);
@@ -508,5 +555,18 @@ test.describe("split panel", () => {
       await expect(page).toHaveURL(/\/$/);
       await expect(page.locator("section.group").first()).toBeVisible();
     });
+  });
+
+  // Both projects: the installed app's "New session" shortcut (manifest.webmanifest) is
+  // `/?new=1` on a phone and on a computer.
+  test("the New session shortcut lands on Open on, its sheet over that page", async ({ page }) => {
+    await page.addInitScript(
+      (key) => localStorage.setItem(key, JSON.stringify({ mode: "advanced", defaultPage: "/inbox" })),
+      SETTINGS_KEY,
+    );
+    await page.goto("/?new=1");
+    await expect(page.locator("[data-new-session]")).toBeVisible();
+    // The sheet's parameters ask for no page, and leave the address.
+    await expect(page).toHaveURL((u) => u.pathname === "/inbox" && u.search === "");
   });
 });

@@ -24,7 +24,20 @@ describe("landingFor", () => {
     expect(landingFor({ at: "/?s=claude-code%3Ak", asked: false }, "/inbox")).toBeNull();
   });
 
+  it("lands from the New session shortcut: its parameters name a sheet, not a page", () => {
+    expect(landingFor({ at: "/?new=1", asked: false }, "/inbox")).toBe("/inbox");
+    expect(landingFor({ at: "/?new=1&machine=m&harness=h&cwd=%2Fx", asked: false }, "/inbox")).toBe("/inbox");
+    // Anything else beside them is still someone asking.
+    expect(landingFor({ at: "/?new=1&mock=1", asked: false }, "/inbox")).toBeNull();
+    expect(landingFor({ at: "/?new=1&s=claude-code%3Ak", asked: false }, "/inbox")).toBeNull();
+    expect(landingFor({ at: "/feed?new=1", asked: false }, "/inbox")).toBeNull();
+    // Without new=1 the sheet does not open and the three stay in the address.
+    expect(landingFor({ at: "/?machine=m", asked: false }, "/inbox")).toBeNull();
+    expect(landingFor({ at: "/?new=0", asked: false }, "/inbox")).toBeNull();
+  });
+
   it("stays when the page was asked for: Go › Board with the window closed", () => {
     expect(landingFor({ at: "/", asked: true }, "/inbox")).toBeNull();
+    expect(landingFor({ at: "/?new=1", asked: true }, "/inbox")).toBeNull();
   });
 });

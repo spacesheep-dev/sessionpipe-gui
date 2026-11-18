@@ -99,7 +99,7 @@ pub fn contract<R: Runtime>(app: &AppHandle<R>) -> ShellContract {
 /// window opened on a page (`initial_path`: a menu's Go item, a notification) says in the
 /// history entry's state that the page was asked for, so the page does not leave it for
 /// the one Settings › General › Open on names: Go › Board with the window closed opens
-/// the Board (web/src/app.tsx, landingFor).
+/// the Board (web/src/lib/landing.ts, landingFor).
 pub fn init_script(c: &ShellContract, initial_path: Option<&str>) -> String {
     let json = serde_json::to_string(c).expect("json");
     let path = initial_path

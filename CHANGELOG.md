@@ -342,8 +342,10 @@ pairing link that carries the board's key only for a pairing the sink token star
   the next launch did. The panel now stays until you close it. The tabs go along beside the
   session's page and are still there on the Board; "Open as page" moves that one tab out,
   its neighbour taking over, in one step that Back undoes; and the next launch puts back
-  the tabs last on screen. A session's link, and "Copy link", still name the session alone.
-  A phone, where a session's page is the whole screen, is unchanged.
+  the tabs last on screen. A notification that opens the app on a session no longer shows
+  that session a second time, in a tab beside its own page. A session's link, and "Copy
+  link", still name the session alone. A phone, where a session's page is the whole
+  screen, is unchanged.
 - **"Open on" is where the app opens, also when tabs were left open beside a page.** With
   a tab left in the panel, the next launch stayed on the Board whatever Settings › General
   said: the tabs it put back counted as an address someone had asked for. It now lands on
