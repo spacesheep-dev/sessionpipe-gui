@@ -311,6 +311,8 @@ const SNAKE_TOOLS: Record<string, string> = {
   exit_plan_mode: "Plan",
   // Claude Code's question to the person, asked as a permission (isQuestion).
   AskUserQuestion: NEW_WORDS.questionChip,
+  // Not a tool: the event naming the files a write changed, as Search lists it.
+  "files.changed": "Changed",
 };
 
 /** A plan review: Claude Code asks to leave plan mode as an ordinary permission, so

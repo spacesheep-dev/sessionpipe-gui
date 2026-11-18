@@ -37,8 +37,8 @@ export function resultHref(m: SessionMatch, hit: SessionSearchHit | undefined, q
   return `${path}${query}${hitHash(m, hit)}`;
 }
 
-/** The best hit: the first of the shown ones the engine ranked highest is not known
- *  here, so the first in transcript order stands in, as the row's first snippet. */
+/** The best hit: Search and ⌘K ask for one, the one the engine ranked highest (under
+ *  Newest, the newest), and it is the row's moment. */
 export const bestHit = (m: SessionMatch): SessionSearchHit | undefined => m.hits[0];
 
 export function openResult(

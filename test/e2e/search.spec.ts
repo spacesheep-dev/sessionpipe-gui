@@ -304,10 +304,43 @@ test.describe("search", () => {
     await expect(field(page)).toHaveValue("zzqqxxnothing");
   });
 
+  test("a row is its best moment: one line, the count of the rest at its right under the time, no event names", async ({
+    page,
+  }) => {
+    await openPage(page, "/search?q=webhook");
+    await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
+    // One moment per row, never a second.
+    const counts = await rows(page).evaluateAll((els) => els.map((el) => el.querySelectorAll(".sx-hit").length));
+    expect(counts.every((n) => n <= 1)).toBe(true);
+    expect(counts.filter((n) => n === 1).length).toBeGreaterThan(0);
+    // "N more matches" is plain text on the moment's line, in the right-hand column under
+    // the time: its right edge is the time's, its line the moment's.
+    const row = rows(page)
+      .filter({ has: page.locator(".sx-more") })
+      .first();
+    await expect(row.locator(".sx-more")).toHaveText(/^(1 more match|[\d,]+ more matches)$/);
+    const [more, when, hit] = await Promise.all(
+      [".sx-more", ".sx-when", ".sx-hit"].map(async (s) => (await row.locator(s).boundingBox())!),
+    );
+    expect(Math.abs(more!.x + more!.width - (when!.x + when!.width))).toBeLessThan(1);
+    expect(more!.y).toBeGreaterThan(when!.y + when!.height - 1);
+    expect(Math.abs(more!.y + more!.height / 2 - (hit!.y + hit!.height / 2))).toBeLessThan(4);
+    expect(await row.locator(".sx-more").evaluate((el) => getComputedStyle(el).cursor)).not.toBe("pointer");
+    // Three lines a row: about eleven fit in a 1440 × 900 window.
+    const tall = (await rows(page).first().boundingBox())!.height;
+    expect(tall).toBeLessThan(80);
+    // A files.changed line is drawn as the Edit line is: its verb, then the paths.
+    await typeQuery(page, "changed in:tool");
+    await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".sx-list .sx-verb", { hasText: /^Changed$/ }).first()).toBeVisible();
+    await expect(page.locator(".sx-list")).not.toContainText("files.changed");
+    await expect(page.locator(".sx-list .sx-snip").first()).not.toHaveText(/^…?Changed /);
+  });
+
   test("the row's right-click menu offers open, copy and narrow", async ({ page }) => {
     await openPage(page, "/search?q=webhook");
     await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
-    // On its title: the middle of a row with two or more moments is a moment, with a menu of its own.
+    // On its title: the row's moment has a menu of its own.
     await rows(page).first().locator(".sx-title").click({ button: "right" });
     const menu = page.getByRole("menu");
     await expect(menu.getByRole("menuitem", { name: "Open beside" })).toBeVisible();
@@ -407,6 +440,17 @@ test.describe("search: the history transcript (mock)", () => {
     await find.getByRole("button", { name: "Done" }).click();
     await expect(find).toHaveCount(0);
   });
+
+  test("⏎ opens the transcript at the moment the row shows", async ({ page }) => {
+    await page.goto("/search?mock=1&q=webhook%20409");
+    await expect(rows(page).first()).toBeVisible({ timeout: 15_000 });
+    const shown = (await rows(page).first().locator(".sx-snip").innerText()).replace(/^…|…$/g, "").trim();
+    expect(shown).not.toBe("");
+    await field(page).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("search", { name: "Find in this session" })).toBeVisible();
+    await expect(page.locator(".hx-msg[data-current]")).toContainText(shown.slice(0, 40));
+  });
 });
 
 test.describe("search: the phone", () => {
@@ -428,12 +472,12 @@ test.describe("search: the phone", () => {
       innerWidth: window.innerWidth,
     }));
     expect(scrollWidth).toBeLessThanOrEqual(innerWidth);
-    // At most two moments per row on a phone.
+    // One moment per row.
     const shown = await rows(page)
       .first()
       .locator(".sx-hit")
       .evaluateAll((els) => els.filter((el) => getComputedStyle(el).display !== "none").length);
-    expect(shown).toBeLessThanOrEqual(2);
+    expect(shown).toBe(1);
     // Tapping a history row pushes its transcript (a live session's row opens its live page,
     // and the mock's live sessions now mention webhooks too). The row says "this Mac's
     // history" on a Mac and "this machine's history" elsewhere (words.ts macWord), so the

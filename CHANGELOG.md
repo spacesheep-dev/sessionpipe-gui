@@ -266,6 +266,14 @@ pairing link that carries the board's key only for a pairing the sink token star
   phone either, and a screen reader hears "Reconnecting." or "Offline." once and
   "Reconnected." once, where it read the countdown out every second. "Retry now" is
   "Retry" everywhere.
+- **A Search result is three lines: its title, where it ran, and its best moment.** A row
+  showed up to three moments, the earliest of its best three, so about five sessions fit
+  in a window; it shows the one that matched best now (under Newest, the newest), with
+  "N more matches" at its right under the time, and about eleven fit at 1440 × 900.
+  Clicking the row, ⏎, Space and "Find in this session…" open at that moment, which they
+  were meant to and did not. On a phone the row has one moment where it had two. A changed
+  file reads "Changed src/webhooks/send.ts", as an edit reads "Edit …", where it read
+  "files.changed Changed …", in the results and in a history transcript.
 
 ### Fixed
 

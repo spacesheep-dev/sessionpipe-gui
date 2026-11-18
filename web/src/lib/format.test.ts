@@ -37,6 +37,9 @@ describe("toolLabel", () => {
   it("names Claude Code's question to the person Question", () => {
     expect(toolLabel("AskUserQuestion")).toBe("Question");
   });
+  it("names the files a write changed Changed, never by the event's own name", () => {
+    expect(toolLabel("files.changed")).toBe("Changed");
+  });
 });
 
 describe("isQuestion", () => {

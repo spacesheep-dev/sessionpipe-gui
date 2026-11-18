@@ -13,8 +13,7 @@ import { navigate } from "../lib/router";
 import { searchClient } from "./client";
 import { Marked } from "./Marked";
 import { openResult } from "./open";
-import { toolText } from "./Row";
-import { metaFacts } from "./words";
+import { metaFacts, toolText } from "./words";
 import "../styles/search.css";
 
 export const PALETTE_MIN = 2;
