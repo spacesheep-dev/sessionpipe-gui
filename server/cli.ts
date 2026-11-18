@@ -63,6 +63,10 @@ usage: sessionpipe-gui [options]
                     https://<name>.<tailnet>.ts.net); remembered until --no-public-url.
                     Passkeys are made for its host; the proxy's X-Forwarded-* are trusted
   --no-public-url   forget the public url (remembered)
+  --allow-host NAME another name this machine is opened by from itself (its hostname, an
+                    /etc/hosts alias, a name your network's DNS gives it); may be
+                    repeated. localhost, any address and the <name>.local name of --tls
+                    are known already
   --test-door       loopback-only test door for the conformance runner
   --themes-dir DIR  where views (themes) are installed (default <state>/themes)
   --plugins-dir DIR where plugins are installed (default <state>/plugins)
@@ -186,6 +190,8 @@ interface Args {
   /** `--public-url URL` a string; `--no-public-url` null; neither undefined (the remembered one). */
   publicUrl?: string | null;
   testDoor: boolean;
+  /** `--allow-host NAME`, each one. */
+  allowHosts?: string[];
   open: boolean;
   quiet: boolean;
   themesDir?: string;
@@ -276,6 +282,9 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
         break;
       case "--rp-id":
         a.rpId = next();
+        break;
+      case "--allow-host":
+        a.allowHosts = [...(a.allowHosts ?? []), next()];
         break;
       case "--tls":
         a.tls = true;
@@ -750,6 +759,7 @@ async function main(): Promise<void> {
       rpId: parsed.rpId,
       publicUrl: parsed.publicUrl,
       testDoor: parsed.testDoor,
+      allowHosts: parsed.allowHosts,
       quiet: parsed.quiet,
       themesDir: parsed.themesDir,
       pluginsDir: parsed.pluginsDir,

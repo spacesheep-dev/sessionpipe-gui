@@ -93,8 +93,10 @@ describe("the write guard", () => {
     expect((await call(app.url, "PUT", `${WF}/two`, { body: doc("Hi"), headers: cross })).status).toBe(403);
     expect((await call(app.url, "DELETE", `${WF}/one`, { headers: cross })).status).toBe(403);
     expect((await call(app.url, "PATCH", `${WF}/runs/x`, { body: {}, headers: { origin: "null" } })).status).toBe(403);
+    // A read marked cross-site is refused too, by the router's guard (http/guard.ts), before
+    // this route is reached.
+    expect((await call(app.url, "GET", WF, { headers: cross })).status).toBe(403);
     // The page's own requests say same-origin, a native shell or a curl say nothing: both go on.
-    expect((await call(app.url, "GET", WF, { headers: cross })).status).toBe(200);
     expect((await call(app.url, "DELETE", `${WF}/nope`, { headers: { "sec-fetch-site": "same-origin" } })).status).toBe(
       404,
     );

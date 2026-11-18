@@ -1672,6 +1672,32 @@ describe("a start's options, files and applied, through POST send", () => {
     expect((await get("not-a-hash", m.token)).status).toBe(404);
   });
 
+  it("files: an upload is taken from the board's own page, and one from another origin is not held", async () => {
+    const m = await enrolled(b, pk, "m_startfiles0000000002");
+    const bytes = new TextEncoder().encode("notes from elsewhere\n");
+    const sha = fileHash(bytes);
+    const held = () => fetch(`${b.url}${CONTROL}/files/${sha}`, { headers: { authorization: `Bearer ${m.token}` } });
+    const send = (headers: Record<string, string>) =>
+      fetch(`${b.url}${UI}/files?name=notes.txt`, {
+        method: "POST",
+        headers: { "content-type": "text/plain;charset=UTF-8", ...headers },
+        body: bytes,
+      });
+    const others: Record<string, string>[] = [
+      { origin: "https://other.example", "sec-fetch-site": "cross-site" },
+      { origin: "https://other.example" },
+      { origin: "null" },
+    ];
+    for (const headers of others) {
+      const r = await send(headers);
+      expect(r.status).toBe(403);
+      expect(await r.json()).toMatchObject({ reason: "cross_site" });
+      expect((await held()).status).toBe(404);
+    }
+    expect((await send({ origin: b.url, "sec-fetch-site": "same-origin" })).status).toBe(201);
+    expect((await held()).status).toBe(200);
+  });
+
   it("an upload over 25 MiB, without a type, empty, or with a bad name is refused", async () => {
     // The router answers 413 and drops the connection mid-body, so the client may only see the drop.
     const big = await upload(new Uint8Array(26_214_401), "application/octet-stream", "big.bin").then(

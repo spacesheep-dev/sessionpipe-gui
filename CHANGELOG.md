@@ -47,6 +47,20 @@ All notable changes to `sessionpipe-gui`. The format follows
   and the search index's are done at `http://localhost:7373`, not at the proxy's address,
   and a browser there that a proxy reported as loopback is asked for the key once (the
   banner's "anywhere" link carries it).
+- **The receiver answers a browser on its own pages, and on its own machine under its own
+  names.** Before any route is reached, a request the browser marks as coming from another
+  origin is refused (403 `cross_site`); a link from another site to a page of the board
+  still opens, and pages are sent with `frame-ancestors 'self'`, so the board is not shown
+  inside another site's frame (an editor's built-in preview is one). A request made on the
+  machine that runs the GUI must name it by a name the GUI hands out or was given (403
+  `unknown_host`, with a page that says where to go): `localhost`, any address and the
+  `<name>.local` secure address are known, and `--allow-host NAME` adds another, such as
+  the machine's hostname or an `/etc/hosts` alias; `http://0.0.0.0:7373` is not one, open
+  `http://localhost:7373`. The public url is answered through its proxy. This covers every
+  route, uploads and deletes among them. Sinks, the daemon, the desktop and phone apps and
+  the CLI send none of what is refused and work as before. A reverse proxy on this machine
+  is answered once `--public-url` names its address and it sends `X-Forwarded-For`; one
+  over plain http must pass on the `Host` it was asked for.
 
 ## [0.8.4] - 2026-11-17
 

@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // A small router over node:http. No framework: the receiver is a handful of routes and
 // the UI API a handful more. Handlers return a Reply, or write the response themselves
-// (SSE, static files) and return nothing.
+// (SSE, static files) and return nothing. Before any handler, the static files' included,
+// every request passes guard.ts: the receiver answers its own pages, and on this machine
+// under its own names. A route a sink or a daemon calls says so where it is registered
+// (`router.wire`).
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { gzipSync } from "node:zlib";
+import { checkRequest, type GuardDeps, type GuardRefusal, NO_FRAMING, type RouteOptions } from "./guard.js";
 import { isLoopback, isThisMachine } from "./net.js";
+
+export type { RouteOptions } from "./guard.js";
 
 export interface Ctx {
   req: IncomingMessage;
@@ -48,6 +54,7 @@ interface Route {
   method: string;
   parts: string[];
   handler: Handler;
+  options: RouteOptions;
 }
 
 export class Router {
@@ -55,8 +62,9 @@ export class Router {
   /** Called when no route matched; the static file server hooks in here. */
   fallback: Handler = () => ({ status: 404, json: { reason: "not_found" } });
 
-  add(method: string, pattern: string, handler: Handler): this {
-    this.routes.push({ method: method.toUpperCase(), parts: pattern.split("/").filter(Boolean), handler });
+  /** `options` names what of guard.ts is not for this route; none, and all of it is. */
+  add(method: string, pattern: string, handler: Handler, options: RouteOptions = {}): this {
+    this.routes.push({ method: method.toUpperCase(), parts: pattern.split("/").filter(Boolean), handler, options });
     return this;
   }
   get(p: string, h: Handler): this {
@@ -65,8 +73,22 @@ export class Router {
   post(p: string, h: Handler): this {
     return this.add("POST", p, h);
   }
+  /** Registration for a sink's or a daemon's route, which answers to its caller's own
+   *  bearer token and never to the address (guard.ts `wire`): `router.wire.post(…)`. */
+  readonly wire = {
+    get: (p: string, h: Handler): void => void this.add("GET", p, h, { wire: true }),
+    post: (p: string, h: Handler): void => void this.add("POST", p, h, { wire: true }),
+  };
 
-  match(method: string, pathname: string): { handler: Handler; params: Record<string, string> } | null {
+  /** Every route as it was registered: the tests hold the guard's exceptions to a list. */
+  list(): { method: string; pattern: string; options: RouteOptions }[] {
+    return this.routes.map((r) => ({ method: r.method, pattern: `/${r.parts.join("/")}`, options: r.options }));
+  }
+
+  match(
+    method: string,
+    pathname: string,
+  ): { handler: Handler; params: Record<string, string>; options?: RouteOptions } | null {
     const parts = pathname.split("/").filter(Boolean);
     let methodMismatch = false;
     for (const r of this.routes) {
@@ -76,7 +98,7 @@ export class Router {
         methodMismatch = true;
         continue;
       }
-      return { handler: r.handler, params };
+      return { handler: r.handler, params, options: r.options };
     }
     if (methodMismatch) return { handler: () => ({ status: 405, json: { reason: "method_not_allowed" } }), params: {} };
     return null;
@@ -92,8 +114,17 @@ export class Router {
    *  with no trusted proxy, is ignored. */
   trustProxy: () => boolean = () => false;
 
+  /** What guard.ts needs to know of this server: the names it answers to beyond the
+   *  machine's own, and the origins that are this server through a proxy. app.ts fills
+   *  it; empty, the guard still stands with the machine's own names. */
+  guard: GuardDeps = {};
+
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const url = new URL(req.url ?? "/", "http://local");
+    const url = targetUrl(req.url);
+    if (!url) {
+      send(res, { status: 400, json: { reason: "bad_request" } });
+      return;
+    }
     let ip = req.socket.remoteAddress ?? "";
     let forwarded = false;
     if (this.trustProxy() && FORWARDING.some((h) => req.headers[h] !== undefined) && isThisMachine(ip)) {
@@ -105,6 +136,14 @@ export class Router {
       // Inside the try: a path whose percent escape does not decode is the sender's
       // mistake (a 400), and an unauthenticated one; it must never reach the process.
       const m = this.match(req.method ?? "GET", url.pathname);
+      // The guard reads the path as `match` does, empty segments dropped: `//api/ui/info`
+      // is the route /api/ui/info to both.
+      const pathname = `/${url.pathname.split("/").filter(Boolean).join("/")}`;
+      const refused = checkRequest({ req, pathname, forwarded, route: m?.options ?? {} }, this.guard);
+      if (refused) {
+        send(res, refusal(refused, req), req);
+        return;
+      }
       const reply = m ? await m.handler({ ...ctx, params: m.params }) : await this.fallback(ctx);
       if (reply) send(res, reply, req);
       else if (!res.writableEnded && !res.headersSent) send(res, { status: 404, json: { reason: "not_found" } });
@@ -119,6 +158,17 @@ export class Router {
         else res.end();
       }
     }
+  }
+}
+
+/** The request target as a URL, or null when it is none. A target that starts with a
+ *  slash is a path, whatever follows: `//x` has an empty segment, it names no other host. */
+function targetUrl(target: string | undefined): URL | null {
+  const t = target || "/";
+  try {
+    return new URL(t.startsWith("/") ? `http://local${t}` : t, "http://local");
+  } catch {
+    return null;
   }
 }
 
@@ -160,6 +210,25 @@ function matchParts(pattern: string[], parts: string[]): Record<string, string> 
   return params;
 }
 
+/** The guard's refusal as a reply: JSON for the API and for scripts, a few words of HTML
+ *  when a person's browser asked for a page under a name this machine does not go by. */
+function refusal(r: GuardRefusal, req: IncomingMessage): Reply {
+  const headers = { "cache-control": "no-store" };
+  const page =
+    r.reason === "unknown_host" && req.method === "GET" && /\btext\/html\b/.test(String(req.headers.accept ?? ""));
+  if (!page) return { status: r.status, json: { reason: r.reason, error: r.error }, headers };
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return {
+    status: r.status,
+    headers,
+    html: `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>sessionpipe-gui · not this name</title><meta name="color-scheme" content="light dark">
+<body style="font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:4em auto;padding:0 1.5em">
+<h1 style="font-size:22px">Not under this name</h1><p>${esc(r.error)}</p>
+`,
+  };
+}
+
 /** A path segment decoded, or a 400 when its escape is not UTF-8 (`%E0%A4%A`, `%zz`). */
 function decodePart(v: string): string {
   try {
@@ -191,6 +260,7 @@ export function send(res: ServerResponse, r: Reply, req?: IncomingMessage): void
     body = Buffer.from(JSON.stringify(r.json));
   } else if (r.html !== undefined) {
     headers["content-type"] ??= "text/html; charset=utf-8";
+    for (const [k, v] of Object.entries(NO_FRAMING)) headers[k] ??= v;
     body = Buffer.from(r.html);
   } else {
     headers["content-type"] ??= "text/plain; charset=utf-8";

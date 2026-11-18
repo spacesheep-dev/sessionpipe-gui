@@ -81,8 +81,13 @@ export function wireMessage(m: MessageRow): Record<string, unknown> {
   };
 }
 
-export function registerMachineRoutes(router: Router, d: MachineRouteDeps): void {
+export function registerMachineRoutes(to: Router, d: MachineRouteDeps): void {
   const { state, base } = d;
+  // Every route here is a machine's: a daemon or a terminal calls it with the sink token,
+  // its own token or a pairing's poll key, never a page with this machine's standing. So
+  // it answers a daemon under whatever name it reached the receiver by (guard.ts `wire`);
+  // a request a browser marks as another origin's is still refused.
+  const router = to.wire;
 
   // CONTROL.md §2 step 1 (and renewal, step 3; and open pairing).
   router.post(`${base}/pair`, async (ctx): Promise<Reply> => {

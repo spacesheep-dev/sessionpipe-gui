@@ -18,6 +18,40 @@ describe("Router", () => {
 import { createServer } from "node:http";
 import { gunzipSync, gzipSync } from "node:zlib";
 
+describe("the request target", () => {
+  it("is read as a path whatever it starts with, and one that is none is a 400", async () => {
+    const r = new Router();
+    r.get("/api/x", (ctx) => ({ status: 200, json: { path: ctx.url.pathname } }));
+    const server = createServer((req, res) => void r.handle(req, res));
+    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+    const port = (server.address() as { port: number }).port;
+    const get = (path: string) =>
+      new Promise<number>((ok, no) => {
+        import("node:http").then((http) =>
+          http
+            .get({ host: "127.0.0.1", port, path, agent: false }, (res) => {
+              res.resume();
+              res.on("end", () => ok(res.statusCode ?? 0));
+            })
+            .on("error", no),
+        );
+      });
+    try {
+      // Two slashes first: a path with an empty segment, not another host's address.
+      for (const path of ["//", "///", "//other.example/api/x", "//other.example:1/", "/\\other.example/"])
+        expect(`${path} ${await get(path)}`).toBe(`${path} 404`);
+      expect(await get("//api/x")).toBe(200);
+      expect(await get("/api//x")).toBe(200);
+      expect(await get("http://[")).toBe(400);
+      // And the server is still there.
+      expect(await get("/api/x")).toBe(200);
+    } finally {
+      server.closeAllConnections?.();
+      await new Promise<void>((ok) => server.close(() => ok()));
+    }
+  });
+});
+
 describe("gzip", () => {
   it("compresses large JSON when the client accepts it, and not otherwise", async () => {
     const r = new Router();

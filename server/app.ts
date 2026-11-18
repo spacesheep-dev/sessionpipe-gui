@@ -45,7 +45,7 @@ import { type SpacesheepSource, startSpacesheepSource } from "./sources/spaceshe
 import { staticFiles, webDir } from "./static.js";
 import { Store } from "./store/store.js";
 import { registerThemes, ThemeRegistry } from "./themes/index.js";
-import { ensureCerts, type TlsMaterial } from "./tls/certs.js";
+import { ensureCerts, localHostname, type TlsMaterial } from "./tls/certs.js";
 import { createDualListener, type DualListener, listen } from "./tls/listen.js";
 import { registerTrust } from "./tls/trust.js";
 import { AttachmentStore } from "./ui/attachments.js";
@@ -86,6 +86,10 @@ export interface AppOptions {
   tlsHostname?: string;
   /** Loopback-only test door for the conformance runner. */
   testDoor?: boolean;
+  /** More names this machine is reached by from itself (`--allow-host`): its hostname, an
+   *  alias in /etc/hosts, a name only this network's DNS knows. localhost, its addresses,
+   *  the `.local` name, the TLS name and `--rp-id` need no telling (http/guard.ts rule 2). */
+  allowHosts?: string[];
   /** Where the built web app is; default: dist/web beside the bundle. */
   webDir?: string;
   /** Stop the console banner (tests). */
@@ -242,6 +246,16 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     return out;
   };
   router.trustProxy = () => publicUrl !== undefined;
+  // What http/guard.ts asks of every request: the names this server goes by on this
+  // machine besides localhost and its addresses (the `.local` name the setup page shows,
+  // the TLS name, --rp-id, --allow-host), and the public url as an origin that is this
+  // server. The public url's host is not among the names: it is the proxy's, and a
+  // request under it is answered when the proxy forwarded it. Read on each request: the
+  // setup page changes them.
+  router.guard = {
+    hosts: () => [localHostname(opts.tlsHostname), tls?.hostname, opts.rpId, ...(opts.allowHosts ?? [])],
+    origins: () => [publicUrl],
+  };
   const uiKey = (): string => config.uiKey;
   const uiAuth = uiAuthFor(uiKey);
 

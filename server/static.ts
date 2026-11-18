@@ -6,6 +6,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { UI_KEY_COOKIE, UI_KEY_PARAM } from "../shared/api.js";
+import { NO_FRAMING } from "./http/guard.js";
 import type { Ctx, Handler, Reply } from "./http/router.js";
 import { WORDMARK_CSS, wordmarkHtml } from "./ui/brand.js";
 
@@ -58,7 +59,8 @@ export function staticFiles(dir: string, opts: StaticOptions): Handler {
         status: 302,
         text: "",
         headers: {
-          location: `${pathname}${qs ? `?${qs}` : ""}`,
+          // Back to the same path on this server: `//x` would read as another host.
+          location: `${pathname.replace(/^\/{2,}/, "/")}${qs ? `?${qs}` : ""}`,
           "set-cookie": `${UI_KEY_COOKIE}=${encodeURIComponent(k)}; Path=/; Max-Age=31536000; SameSite=Lax`,
           "cache-control": "no-store",
         },
@@ -81,6 +83,8 @@ export function staticFiles(dir: string, opts: StaticOptions): Handler {
       "content-type": TYPES[ext] ?? "application/octet-stream",
       "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
       etag,
+      // The page is this server's alone to show: never inside another site's frame.
+      ...(ext === ".html" ? NO_FRAMING : {}),
     };
     if (!immutable && ctx.req.headers["if-none-match"] === etag) {
       ctx.res.writeHead(304, headers);
