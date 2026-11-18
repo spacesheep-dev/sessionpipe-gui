@@ -336,6 +336,19 @@ pairing link that carries the board's key only for a pairing the sink token star
   with Tab first, and with no results Tab goes on to the next control. On a row, Esc goes
   back to the field with its text selected, as "/" does (Esc did nothing there), and j
   pressed from Sort lands on the top result, not the second.
+- **A session opened as a page keeps the other tabs beside it.** With sessions open as
+  tabs beside the Board, a click on a card, a search result, a notification or "Open as
+  page" closed every one of them: Back brought them back, the sidebar's Board did not, and
+  the next launch did. The panel now stays until you close it. The tabs go along beside the
+  session's page and are still there on the Board; "Open as page" moves that one tab out,
+  its neighbour taking over, in one step that Back undoes; and the next launch puts back
+  the tabs last on screen. A session's link, and "Copy link", still name the session alone.
+  A phone, where a session's page is the whole screen, is unchanged.
+- **"Open on" is where the app opens, also when tabs were left open beside a page.** With
+  a tab left in the panel, the next launch stayed on the Board whatever Settings › General
+  said: the tabs it put back counted as an address someone had asked for. It now lands on
+  the chosen page, with the tabs beside it. In the desktop app, Go › Board with the window
+  closed opens the Board, not the page "Open on" names.
 
 ## [0.8.4] - 2026-11-17
 

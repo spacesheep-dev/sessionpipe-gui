@@ -12,6 +12,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { flushSync } from "react-dom";
+import { agentTabKey, dropTab, parseSplit, splitParams } from "./splitState";
 import { type NavDirection, type NavKind, navDirection } from "./transitions";
 
 export type Route =
@@ -107,6 +108,9 @@ const subscribe = (l: () => void) => {
     listeners.delete(l);
   };
 };
+/** Calls the listener after each move of the address (a navigation, a parameter set or
+ *  removed, Back and Forward), for code outside React; returns the way to stop. */
+export const onLocation = subscribe;
 
 export function parseRoute(pathWithSearch: string): Route {
   const path = pathWithSearch.split("?")[0] ?? "/";
@@ -154,25 +158,49 @@ export function usePath(): string {
 export const SPLIT_PARAM = "s";
 export const SPLIT_ACTIVE_PARAM = "t";
 
+/** The side panel as it goes along to `to`: its tabs and the active one, as `s` and `t`
+ *  are written. A session's own page takes that session's tab out of the strip
+ *  (`<harness>:<id>`, or the agent's `<harness>:<id>#<agent>` under `?agent=`; its other
+ *  tabs stay), and the active index moves as when a tab is closed. Null when no tab is
+ *  left. Pure. */
+export function panelOnto(to: string, s: string, t: string | null): { s: string; t: string | null } | null {
+  const [path = "", query = ""] = (to.split("#")[0] ?? "").split("?");
+  const page = parseRoute(path);
+  if (page.name !== "session") return { s, t };
+  const session = `${page.harness}:${page.id}`;
+  const agent = new URLSearchParams(query).get(AGENT_PARAM);
+  const state = parseSplit(s, t);
+  const own = state.tabs.indexOf(agent ? agentTabKey(session, agent) : session);
+  if (own < 0) return { s, t };
+  const left = splitParams(dropTab(state, own));
+  return left.s === null ? null : { s: left.s, t: left.t };
+}
+
 /** Keep `?mock=1` across navigations so a mock session survives a reload on any page, and
- *  the side panel (`?s=`) across page changes, except onto a session page of its own. */
-function keepParams(to: string): string {
+ *  the side panel (`?s=`) across every page change; a session's own page takes its tab out
+ *  of the strip (panelOnto). Only a move carries the panel onto a session's page
+ *  (`panelOntoSession`): the address of one, on a link or copied, leaves the tabs out, so
+ *  it reads the same whatever is open beside. */
+function keepParams(to: string, opts: { panelOntoSession?: boolean } = {}): string {
   const q = new URLSearchParams(location.search);
   const extra = new URLSearchParams();
   if (q.get("mock") === "1" && !to.includes("mock=1")) extra.set("mock", "1");
   const split = q.get(SPLIT_PARAM);
-  if (split && !to.startsWith("/s/") && !/[?&]s=/.test(to)) {
-    extra.set(SPLIT_PARAM, split);
-    const active = q.get(SPLIT_ACTIVE_PARAM);
-    if (active) extra.set(SPLIT_ACTIVE_PARAM, active);
+  if (split && (opts.panelOntoSession || !to.startsWith("/s/")) && !/[?&]s=/.test(to)) {
+    const panel = panelOnto(to, split, q.get(SPLIT_ACTIVE_PARAM));
+    if (panel) {
+      extra.set(SPLIT_PARAM, panel.s);
+      if (panel.t) extra.set(SPLIT_ACTIVE_PARAM, panel.t);
+    }
   }
   const qs = extra.toString();
   if (!qs) return to;
   return `${to}${to.includes("?") ? "&" : "?"}${qs}`;
 }
-const keepMock = keepParams;
-/** The href a link to `to` carries (the mock flag and the side panel kept). */
-export const hrefFor = keepParams;
+const keepMock = (to: string): string => keepParams(to);
+/** The href a link to `to` carries (the mock flag and the side panel kept; a session's
+ *  page without the panel). */
+export const hrefFor = keepMock;
 
 /** Pages this app pushed since it loaded; 0 means the page was opened by its URL, so there
  *  is nothing of ours behind it (a dialog closing then goes to its fallback, not away). */
@@ -180,11 +208,14 @@ let pushed = 0;
 export const hasInAppHistory = (): boolean => pushed > 0;
 
 export function navigate(to: string, opts: { replace?: boolean; back?: boolean } = {}) {
-  const target = keepParams(to);
+  const env = navEnv();
+  // Where there is a beside, the panel goes along onto a session's page too; on the phone
+  // layout that page is the whole screen.
+  const target = keepParams(to, { panelOntoSession: !env.phone });
   if (target === current()) return;
   const from = current();
   const kind: NavKind = opts.replace ? "replace" : opts.back ? "back" : "navigate";
-  const dir = navDirection(parseRoute(from).name, parseRoute(target).name, kind, navEnv());
+  const dir = navDirection(parseRoute(from).name, parseRoute(target).name, kind, env);
   if (opts.replace) history.replaceState(null, "", target);
   else {
     history.pushState(null, "", target);

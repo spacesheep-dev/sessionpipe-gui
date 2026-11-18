@@ -48,7 +48,11 @@ describe("parseSplit", () => {
 });
 
 describe("on a desktop", () => {
-  beforeEach(() => phone(false));
+  beforeEach(() => {
+    phone(false);
+    // The shell's boot: from here on the mirror follows the URL.
+    restoreSplit();
+  });
 
   it("openSplit puts the tab in the URL and the mirror; restoreSplit brings it back", () => {
     openSplit("claude-code:abc");

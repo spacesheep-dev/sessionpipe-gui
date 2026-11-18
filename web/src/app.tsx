@@ -19,6 +19,7 @@ import { PairPage } from "./control/Pair";
 import { useStartTitles } from "./control/Starting";
 import { useAnswerableCount, useAppState } from "./data/hooks";
 import { markRestoring } from "./lib/keys";
+import { landingFor, type Opened } from "./lib/landing";
 import { accountMode } from "./lib/net";
 import { titlePrefix, useAttentionEffects } from "./lib/notify";
 import { Link, navigate, parseRoute, usePath, useRoute } from "./lib/router";
@@ -67,15 +68,23 @@ const TITLES: Record<string, string> = {
   missing: "Not found",
 };
 
-/** Once per page load: the app opened at its root lands on the page the device chose
- *  (Settings › General), unless the URL carries anything (a key, the mock, a split). */
+/** The address the app was opened at, read as the page loads: before the side panel puts
+ *  the last visit's tabs back into it (Shell's boot effect runs before App's). */
+const opened: Opened = {
+  at: location.pathname + location.search,
+  asked: !!(history.state as { asked?: unknown } | null)?.asked,
+};
+
+/** Once per page load: the app lands on the page the device chose (Settings › General ›
+ *  Open on), where the rule says so (lib/landing.ts). The tabs put back come along
+ *  (navigate keeps `?s=` and `&t=`), and a page the app has moved to since it opened (a
+ *  first run's Setup) is left alone. */
 let landed = false;
 function landOnDefaultPage(): void {
   if (landed) return;
   landed = true;
-  const page = getSettings().defaultPage;
-  if (page === "/" || location.pathname !== "/" || location.search) return;
-  navigate(page, { replace: true });
+  const page = landingFor(opened, getSettings().defaultPage);
+  if (page && location.pathname === "/") navigate(page, { replace: true });
 }
 
 export function App() {

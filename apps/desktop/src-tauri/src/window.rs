@@ -95,7 +95,11 @@ pub fn contract<R: Runtime>(app: &AppHandle<R>) -> ShellContract {
     }
 }
 
-/// The initialization script: runs before any page script, in the main frame only.
+/// The initialization script: runs before any page script, in the main frame only. A
+/// window opened on a page (`initial_path`: a menu's Go item, a notification) says in the
+/// history entry's state that the page was asked for, so the page does not leave it for
+/// the one Settings › General › Open on names: Go › Board with the window closed opens
+/// the Board (web/src/app.tsx, landingFor).
 pub fn init_script(c: &ShellContract, initial_path: Option<&str>) -> String {
     let json = serde_json::to_string(c).expect("json");
     let path = initial_path
@@ -108,7 +112,7 @@ pub fn init_script(c: &ShellContract, initial_path: Option<&str>) -> String {
   Object.defineProperty(window, "sessionpipeShell", {{ value: Object.freeze(s), configurable: false, writable: false }});
   document.documentElement.dataset.shell = s.platform;
   var p = {path};
-  if (p && (location.pathname === "/" || location.pathname === "/index.html")) {{ try {{ history.replaceState(null, "", p); }} catch (e) {{}} }}
+  if (p && (location.pathname === "/" || location.pathname === "/index.html")) {{ try {{ history.replaceState({{ asked: 1 }}, "", p); }} catch (e) {{}} }}
   try {{
     new PerformanceObserver(function (l) {{
       l.getEntries().forEach(function (e) {{
@@ -400,6 +404,8 @@ mod tests {
         assert!(s.contains(r#""appVersion":"0.2.0""#));
         assert!(s.contains("dataset.shell = s.platform"));
         assert!(s.contains(r#"var p = "/inbox";"#));
+        // The page it opens on is marked as asked for: Open on does not move it.
+        assert!(s.contains(r#"history.replaceState({ asked: 1 }, "", p);"#));
         assert!(init_script(&c, None).contains("var p = null;"));
         // A path can't break out of the string.
         assert!(init_script(&c, Some("\"</script>")).contains(r#""\"</script>""#));
