@@ -6,6 +6,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-11-17
+
+The iPhone app on a spacesheep account, refined: every screen agrees on whether the
+phone can send, a prompt can be answered for as long as it waits, and an answer shows as
+sent everywhere; long messages open whole, the board holds still while an account
+catches up, and connecting says what happened in one line.
+
 ### Changed
 
 - **A list row offers Allow and Deny only beside a request it shows whole.** The Inbox
@@ -1369,7 +1376,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.4...HEAD
+[0.8.4]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.0...v0.8.1
