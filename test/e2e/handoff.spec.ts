@@ -8,7 +8,9 @@
 // and `replyTo` on the activity, and the row the asking session shows at once.
 // An older machine's session gets the disabled item with its reason and no strip button.
 // The open sheet has the whole window, as New session's has: its scrim over the sidebar and
-// the page bar at each desktop size, and on a phone the sheet over the tab bar.
+// the page bar at each desktop size, and on a phone the sheet over the tab bar. A
+// right-click on the dimmed window opens no menu, and a phone's sheet dragged down takes
+// its drag's mark with it, so the next sheet has its dim.
 // Against the second e2e instance (test door on, rp id localhost) through fake daemons.
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
@@ -203,6 +205,11 @@ test("the sheet dims the whole window, as New session's does: a click on the sid
       await centre(page, ".ctl textarea"),
     ];
     for (const at of points) expect(await under(page, at), `${at.x},${at.y} at ${size.width}`).toBe("scrim");
+    // A right-click there is the sheet's as well, and the sheet has no menu: the bar's
+    // own (Send a message…) does not open over the dimmed window.
+    await page.mouse.click(100, 400, { button: "right" });
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(sheet(page)).toBeVisible();
 
     // A click on the sidebar's Board is the scrim's: the sheet closes, the page stays.
     await page.mouse.click(board.x, board.y);
@@ -252,6 +259,42 @@ test("a phone's sheet covers the tab bar, and a tablet's fills the width", async
     await sheet(page).locator("[data-hs-cancel]").click();
     await expect(sheet(page)).toHaveCount(0);
   }
+});
+
+test("a phone's sheet dragged down takes its mark with it: the next sheet has its dim", async ({ page }) => {
+  const name = `ho-drag-${tag()}`;
+  const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+  daemons.push(m);
+  const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Sums ${name}` });
+  await postTurn(sink, { ...s, machine: name }, "The sums carry over.");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+  await expect(page.locator(".ctl textarea")).toBeVisible();
+  /** Every element that carries the drag's mark (lib/motion.ts useSheetDrag), by class. */
+  const marked = () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("*"))
+        .filter((el) => el.style.getPropertyValue("--sheet-drag") !== "")
+        .map((el) => el.className || el.localName),
+    );
+
+  await page.locator("[data-ctl-ask]").click();
+  await expect.poll(async () => (await sheet(page).boundingBox())?.y).toBe(0);
+  // By its title, past the two fifths of its height that let it go. While it is held the
+  // mark is on the sheet's own element in the body, never on the body.
+  const from = await centre(page, "[data-handoff] .ns-bar-title");
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 13; i++) await page.mouse.move(from.x, from.y + 40 * i);
+  expect(await marked()).toEqual(["hs-host"]);
+  await page.mouse.up();
+  await expect(sheet(page)).toHaveCount(0);
+  expect(await marked()).toEqual([]);
+
+  // The page's ⋯ sheet reads the mark from wherever it is set above it: its dim is whole.
+  await page.locator(".main .bar [aria-label='More actions']").click();
+  await expect(page.locator(".menu-sheet")).toBeVisible();
+  await expect(page.locator(".menu-sheet-host .menu-scrim")).toHaveCSS("opacity", "1");
 });
 
 test("a reply's menu asks about that turn; ⌘K has the verb; Esc keeps the draft", async ({ page }) => {

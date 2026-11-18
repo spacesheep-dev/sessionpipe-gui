@@ -323,7 +323,8 @@ pairing link that carries the board's key only for a pairing the sink token star
   sheet. The whole window dims now, and a click anywhere outside the sheet closes it and
   goes nowhere; what was typed is kept for that session. On a phone the sheet covers the
   tab bar, which was drawn over its foot, and on an iPad held upright it fills the width,
-  where the page showed beside it.
+  where the page showed beside it. A right-click on the sheet, or a finger held on it on a
+  phone, opened the message bar's menu over it; it opens none now.
 
 ## [0.8.4] - 2026-11-17
 
