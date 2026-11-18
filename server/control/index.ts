@@ -55,7 +55,7 @@ export interface ControlDeps {
   tilde?: boolean;
   /** The browser origins passkeys work on (routes.ts pairUrlFor): the pairing link names one. */
   origins?: () => string[];
-  /** The UI key (routes.ts pairUrlFor): the pairing link carries it. */
+  /** The UI key (routes.ts pairUrlFor): the link of a pairing the sink token started carries it. */
   uiKey?: () => string;
   /** A send for a machine paired on spacesheep (ui.ts forwardSend, docs/rfcs/08). */
   remoteSend?: UiRouteDeps["remoteSend"];

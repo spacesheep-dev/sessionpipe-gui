@@ -459,6 +459,7 @@ Other sessionpipe receivers: [spacesheep.dev](https://spacesheep.dev) (hosted, t
 | `--tls`, `--no-tls` | off | https on the same port from the GUI's own local CA, for passkeys from a phone; remembered |
 | `--public-url URL`, `--no-public-url` | none | the https origin a proxy on this machine serves (Tailscale); remembered |
 | `--rp-id HOST` | `localhost` | the passkeys' rp id; set by `--tls` and `--public-url` |
+| `--allow-host NAME` | none | another name this machine is opened by from itself (its hostname, an `/etc/hosts` alias, a name your network's DNS gives it); `localhost`, any address and the `<name>.local` name of `--tls` are known already. May be repeated |
 | `--demo`, `--replay FILE`, `--speed N` | | synthetic sessions, or a sessionpipe JSONL file replayed |
 | `--open`, `--quiet` | | open the browser; no banner |
 | `--themes-dir`, `--skins-dir`, `--plugins-dir`, `--bundled-dir` | under the state dir | where extensions live |

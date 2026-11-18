@@ -205,6 +205,49 @@ describe("attachments API", () => {
     expect(app.info().storage.attachments).toBe(0);
   });
 
+  it("takes an upload and a delete from its own page; one from another origin stores and removes nothing", async () => {
+    const other = { origin: "https://other.example", "sec-fetch-site": "cross-site" };
+    const dir = path.join(tmp.dir, "attachments");
+    const held = () => (existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".png")).length : 0);
+    const before = held();
+    // An image by itself, and as the one part of a form.
+    const direct = await fetch(`${app.url}${ROUTES.ui.attachments}`, {
+      method: "POST",
+      headers: { "content-type": "image/png", ...other },
+      body: bytes(png(8, 8)),
+    });
+    expect(direct.status).toBe(403);
+    expect(await direct.json()).toMatchObject({ reason: "cross_site" });
+    const form = new FormData();
+    form.append("file", new Blob([bytes(png(8, 8))], { type: "image/png" }), "a.png");
+    const multipart = await fetch(`${app.url}${ROUTES.ui.attachments}`, { method: "POST", headers: other, body: form });
+    expect(multipart.status).toBe(403);
+    expect(held()).toBe(before);
+
+    const a = (await (await upload(png(8, 8))).json()) as Attachment;
+    expect(existsSync(a.path)).toBe(true);
+    for (const headers of [other, { origin: "https://other.example" }, { origin: "null" }]) {
+      const del = await fetch(`${app.url}/attachments/${a.id}.png`, { method: "DELETE", headers });
+      expect(del.status).toBe(403);
+      expect(existsSync(a.path)).toBe(true);
+    }
+    // The page's own requests: the browser says same-origin, or names this server in Origin.
+    const again = new FormData();
+    again.append("file", new Blob([bytes(png(8, 8))], { type: "image/png" }), "a.png");
+    const own = await fetch(`${app.url}${ROUTES.ui.attachments}`, {
+      method: "POST",
+      headers: { origin: app.url, "sec-fetch-site": "same-origin" },
+      body: again,
+    });
+    expect(own.status).toBe(201);
+    const b = (await own.json()) as Attachment;
+    const del = (id: string, headers: Record<string, string>) =>
+      fetch(`${app.url}/attachments/${id}.png`, { method: "DELETE", headers });
+    expect((await del(a.id, { "sec-fetch-site": "same-origin" })).status).toBe(204);
+    expect((await del(b.id, { origin: app.url })).status).toBe(204);
+    expect(held()).toBe(before);
+  });
+
   it("reads the size of every format and stores each under its own extension", async () => {
     for (const [buf, type, ext, w, h] of [
       [gif(320, 200), "image/gif", "gif", 320, 200],

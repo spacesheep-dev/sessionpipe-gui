@@ -31,6 +31,36 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **A view's `control.attach` answers the board's own path to the image.** `url` is
   `/attachments/<id>.<ext>`, with no address: it shows the image on this board
   and opens nothing from another computer. A view that sends an image names its `path`.
+- **A pairing link carries the board's key only when the sink token started the pairing.**
+  A pairing started with no token (`sessionpipe connect`, or `sessionpipe control pair` on
+  a machine that has no sink for this GUI) gets a link with its code alone: open it in a
+  browser where the board is already open, or approve it on the Machines page, which lists
+  every pairing that waits. A pairing the sink token started (Setup's "Pair this machine",
+  a machine that has a sink for this GUI, `--token`) gets the link it always did.
+- **Through the proxy of `--public-url`, every request is a visitor's.** The visitor's
+  address is the last one in `X-Forwarded-For`, the one the proxy itself wrote; what
+  stands before it is not read. A request that came through the proxy needs the UI key
+  and is not this machine, whatever address the proxy names for it, and whether the proxy
+  reaches the port on `localhost` or on one of the machine's own addresses. A request
+  marked with `Forwarded`, `X-Real-IP`, `X-Forwarded-Host` or `-Proto` and no
+  `X-Forwarded-For` counts as one too. On the machine that runs the GUI, Setup's actions
+  and the search index's are done at `http://localhost:7373`, not at the proxy's address,
+  and a browser there that a proxy reported as loopback is asked for the key once (the
+  banner's "anywhere" link carries it).
+- **The receiver answers a browser on its own pages, and on its own machine under its own
+  names.** Before any route is reached, a request the browser marks as coming from another
+  origin is refused (403 `cross_site`); a link from another site to a page of the board
+  still opens, and pages are sent with `frame-ancestors 'self'`, so the board is not shown
+  inside another site's frame (an editor's built-in preview is one). A request made on the
+  machine that runs the GUI must name it by a name the GUI hands out or was given (403
+  `unknown_host`, with a page that says where to go): `localhost`, any address and the
+  `<name>.local` secure address are known, and `--allow-host NAME` adds another, such as
+  the machine's hostname or an `/etc/hosts` alias; `http://0.0.0.0:7373` is not one, open
+  `http://localhost:7373`. The public url is answered through its proxy. This covers every
+  route, uploads and deletes among them. Sinks, the daemon, the desktop and phone apps and
+  the CLI send none of what is refused and work as before. A reverse proxy on this machine
+  is answered once `--public-url` names its address and it sends `X-Forwarded-For`; one
+  over plain http must pass on the `Host` it was asked for.
 
 ## [0.8.4] - 2026-11-17
 

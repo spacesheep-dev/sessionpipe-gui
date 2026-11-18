@@ -47,7 +47,15 @@ interface Booted {
 }
 
 async function boot(
-  o: { stateDir?: string; rpId?: string; testDoor?: boolean; uiAuth?: boolean; deviceKeys?: boolean } = {},
+  o: {
+    stateDir?: string;
+    rpId?: string;
+    testDoor?: boolean;
+    uiAuth?: boolean;
+    deviceKeys?: boolean;
+    /** The board's key and the origins a pairing link may name, as app.ts passes them. */
+    uiKey?: string;
+  } = {},
 ): Promise<Booted> {
   const stateDir = o.stateDir ?? mkdtempSync(path.join(os.tmpdir(), "spgui-control-"));
   const control = createControl({
@@ -57,6 +65,7 @@ async function boot(
     testDoor: o.testDoor ?? true,
     uiAuth: (ctx) => (o.uiAuth ?? true) && ctx.remote.loopback,
     ...(o.deviceKeys !== undefined ? { deviceKeys: o.deviceKeys } : {}),
+    ...(o.uiKey !== undefined ? { uiKey: () => o.uiKey as string, origins: () => ["http://localhost:7373"] } : {}),
   });
   const router = new Router();
   control.register(router);
@@ -262,6 +271,111 @@ describe("open pairing", () => {
       expect(paired.body).toMatchObject({ status: "paired", key: pk.key, sink_token: SINK, account: "misha" });
       expect(paired.body.token).toMatch(/^mt_/);
       expect((await call(b.url, "GET", `${CONTROL}/pair?code=${code}`, { bearer: pollKey })).status).toBe(404);
+    } finally {
+      await b.close();
+    }
+  });
+});
+
+describe("the pairing link and the board's key", () => {
+  const KEY = "uik_test_board_key";
+
+  it("carries the key for a pairing the sink token started, and the code alone for an open one", async () => {
+    const b = await boot({ uiKey: KEY });
+    tmpDirs.push(b.stateDir);
+    try {
+      const keyed = await call(b.url, "POST", `${CONTROL}/pair`, { bearer: SINK, body: facts });
+      expect(keyed.status).toBe(201);
+      expect(keyed.body.url).toBe(`http://localhost:7373/pair?code=${keyed.body.code}&k=${KEY}`);
+      // No token, and a poll key of the caller's own making.
+      const pollKey = "p".repeat(32);
+      const open = await call(b.url, "POST", `${CONTROL}/pair`, { body: { ...facts, poll_key: pollKey } });
+      expect(open.status).toBe(201);
+      expect(open.body.url).toBe(`http://localhost:7373/pair?code=${open.body.code}`);
+      expect(JSON.stringify(open.body)).not.toContain(KEY);
+      // Its status says no more while it waits, and a renewal under the same poll key gets the same link.
+      const waiting = await call(b.url, "GET", `${CONTROL}/pair?code=${open.body.code}`, { bearer: pollKey });
+      expect(waiting.body).toEqual({ status: "pending" });
+      const renewed = await call(b.url, "POST", `${CONTROL}/pair`, {
+        body: { ...facts, poll_key: pollKey, machine: open.body.machine },
+      });
+      expect(renewed.status).toBe(201);
+      expect(JSON.stringify(renewed.body)).not.toContain(KEY);
+      // A bearer that is not the sink token starts nothing, with or without a poll key.
+      const wrong = await call(b.url, "POST", `${CONTROL}/pair`, {
+        bearer: "nope",
+        body: { ...facts, poll_key: pollKey },
+      });
+      expect(wrong.status).toBe(401);
+      expect(JSON.stringify(wrong.body)).not.toContain(KEY);
+    } finally {
+      await b.close();
+    }
+  });
+
+  it("an open pairing is approved on its code by a browser the board already lets in", async () => {
+    const b = await boot({ uiKey: KEY });
+    tmpDirs.push(b.stateDir);
+    try {
+      const pollKey = "p".repeat(32);
+      const open = await call(b.url, "POST", `${CONTROL}/pair`, { body: { ...facts, poll_key: pollKey } });
+      const code = open.body.code as string;
+      const machine = open.body.machine as string;
+      // The page the link opens reads the pairing by its code, and the board lists it.
+      const view = await call(b.url, "GET", `${UI}/pair/${code}`);
+      expect(view).toMatchObject({ status: 200, body: { code, open: true, check: open.body.check } });
+      const list = await call(b.url, "GET", `${UI}/pairings`);
+      expect((list.body.pairings as { code: string }[]).map((p) => p.code)).toContain(code);
+      const pk = await TestPasskey.create();
+      const ok = await call(b.url, "POST", `${UI}/pair/${code}/approve`, {
+        body: { key: pk.key, proof: await pk.enroll(machine, code) },
+      });
+      expect(ok.status).toBe(200);
+      // The daemon's next poll is the paired answer: the key, its proof, the machine's own
+      // token and the sink token, and still no key of the board's.
+      const paired = await call(b.url, "GET", `${CONTROL}/pair?code=${code}`, { bearer: pollKey });
+      expect(paired.body).toMatchObject({ status: "paired", key: pk.key, sink_token: SINK });
+      expect(paired.body.token).toMatch(/^mt_/);
+      expect(JSON.stringify(paired.body)).not.toContain(KEY);
+    } finally {
+      await b.close();
+    }
+  });
+
+  it("the pairing page and its approval need the board's own sign-in", async () => {
+    const b = await boot({ uiKey: KEY, uiAuth: false });
+    tmpDirs.push(b.stateDir);
+    try {
+      const pollKey = "p".repeat(32);
+      const open = await call(b.url, "POST", `${CONTROL}/pair`, { body: { ...facts, poll_key: pollKey } });
+      expect(open.status).toBe(201);
+      const code = open.body.code as string;
+      const pk = await TestPasskey.create();
+      expect((await call(b.url, "GET", `${UI}/pair/${code}`)).status).toBe(401);
+      expect((await call(b.url, "GET", `${UI}/challenge`)).status).toBe(401);
+      const approve = await call(b.url, "POST", `${UI}/pair/${code}/approve`, {
+        body: { key: pk.key, proof: await pk.enroll(open.body.machine as string, code) },
+      });
+      expect(approve.status).toBe(401);
+      expect((await call(b.url, "GET", `${CONTROL}/pair?code=${code}`, { bearer: pollKey })).body).toEqual({
+        status: "pending",
+      });
+    } finally {
+      await b.close();
+    }
+  });
+});
+
+describe("the origin a request came in on", () => {
+  it("is read from the forwarding headers only through a trusted proxy", async () => {
+    const b = await boot();
+    tmpDirs.push(b.stateDir);
+    try {
+      // No proxy is trusted here: what a caller says of its own origin is not read.
+      const r = await fetch(`${b.url}${UI}/challenge`, {
+        headers: { "x-forwarded-proto": "https", "x-forwarded-host": "board.example" },
+      });
+      expect(((await r.json()) as { origin: string }).origin).toBe(b.url);
     } finally {
       await b.close();
     }
@@ -1556,6 +1670,32 @@ describe("a start's options, files and applied, through POST send", () => {
     expect((await get(entry.sha256, SINK)).status).toBe(401);
     expect((await get(missing.sha256, m.token)).status).toBe(404);
     expect((await get("not-a-hash", m.token)).status).toBe(404);
+  });
+
+  it("files: an upload is taken from the board's own page, and one from another origin is not held", async () => {
+    const m = await enrolled(b, pk, "m_startfiles0000000002");
+    const bytes = new TextEncoder().encode("notes from elsewhere\n");
+    const sha = fileHash(bytes);
+    const held = () => fetch(`${b.url}${CONTROL}/files/${sha}`, { headers: { authorization: `Bearer ${m.token}` } });
+    const send = (headers: Record<string, string>) =>
+      fetch(`${b.url}${UI}/files?name=notes.txt`, {
+        method: "POST",
+        headers: { "content-type": "text/plain;charset=UTF-8", ...headers },
+        body: bytes,
+      });
+    const others: Record<string, string>[] = [
+      { origin: "https://other.example", "sec-fetch-site": "cross-site" },
+      { origin: "https://other.example" },
+      { origin: "null" },
+    ];
+    for (const headers of others) {
+      const r = await send(headers);
+      expect(r.status).toBe(403);
+      expect(await r.json()).toMatchObject({ reason: "cross_site" });
+      expect((await held()).status).toBe(404);
+    }
+    expect((await send({ origin: b.url, "sec-fetch-site": "same-origin" })).status).toBe(201);
+    expect((await held()).status).toBe(200);
   });
 
   it("an upload over 25 MiB, without a type, empty, or with a bad name is refused", async () => {

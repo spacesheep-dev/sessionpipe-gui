@@ -13,7 +13,10 @@ otherwise `401 {"reason":"unauthorized"}`. All bodies and answers are JSON. Erro
 A terminal ran `sessionpipe control pair <this receiver>`. It printed a link
 (`/pair?code=…`) and six digits; the page shows the same digits, and the person confirms
 with a passkey. Open pairing is on: a daemon with no sink token can pair too (it sent a
-`poll_key`; the paired answer then also carries our sink token).
+`poll_key`; the paired answer then also carries our sink token). The link of a pairing
+the sink token started carries the board's key (`&k=…`), so any browser that opens it is
+let in. An open pairing's link is the code alone: open it in a browser where the board is
+already open, or approve it from the board, which lists every pairing that waits.
 
 | Route | Body → answer |
 |---|---|
