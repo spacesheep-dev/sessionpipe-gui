@@ -140,7 +140,9 @@ export interface ControlStripProps {
   unlock?: () => void;
   /** Opens the Ask another agent sheet (orchestrate/handoff), at the right end of the line
    *  under the field; absent, no button (hidden, never disabled: the line's own reason
-   *  already says why sending is off). */
+   *  already says why sending is off). Not offered while `stream`: it would only be
+   *  refused. In a mouse window the line then keeps the button's height, so the field
+   *  holds still across the drop. */
   ask?: () => void;
   /** Per attention id: "sent" while an answer is out (no second one goes; the card says
    *  which, in place of the pair), "closed" once the machine said the prompt is no longer
@@ -443,6 +445,8 @@ export function ControlStrip({
   const enabled = paired && !!onSend && !blocked && !stream && approval === "ok";
   // Not approved: the way to approve it stands where Allow and Deny would.
   const approve = paired && !blocked && approval === "unapproved";
+  // Ask another agent… while the stream is down would only be refused: not offered.
+  const offer = stream ? undefined : ask;
   // Images beside the message (control/Attachments.tsx): paperclip, paste, drop, the phone's
   // picker. How they go is the machine's: as the command's files where its sessionpipe takes
   // them, as paths for an older one on this machine, and not at all anywhere else. There a
@@ -972,8 +976,8 @@ export function ControlStrip({
           </div>
         </div>
       )}
-      {(reason || ask) && !folded && (
-        <p className="ctl-foot" data-reason={reason?.kind}>
+      {(reason || offer) && !folded && (
+        <p className="ctl-foot" data-reason={reason?.kind} data-ask-held={ask && stream && !phone ? "" : undefined}>
           {reason && (
             <span
               id={reasonId}
@@ -986,8 +990,8 @@ export function ControlStrip({
             </span>
           )}
           {reason?.action}
-          {ask && (
-            <button type="button" className="btn btn--ghost btn--sm ctl-ask-agent" onClick={ask} data-ctl-ask>
+          {offer && (
+            <button type="button" className="btn btn--ghost btn--sm ctl-ask-agent" onClick={offer} data-ctl-ask>
               Ask another agent…
             </button>
           )}

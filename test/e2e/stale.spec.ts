@@ -515,6 +515,101 @@ test.describe("a session page across a dropped stream", () => {
     expect(asked.n).toBe(2);
   });
 
+  test("in a column too narrow for its title and the bar's words, the title gives way: nothing is drawn over the bar's buttons, nothing is shown in part, and the bar keeps its height", async ({
+    context,
+    page,
+  }) => {
+    await tapStreams(context);
+    const token = await demoToken();
+    const s = new Feed(
+      BASE,
+      token,
+      "lab-mac",
+      "Make the webhook sender retry with backoff and say which attempt failed",
+    );
+    const beside = new Feed(BASE, token, "lab-mac", "Short one");
+    for (const f of [s, beside])
+      await f.post(f.ev("session.started", { source: "startup" }, "SessionStart"), ...f.turn(0, "Check it", "Done."));
+    // A session beside the page, in a window half a laptop's screen wide.
+    await page.setViewportSize({ width: 1000, height: 800 });
+    await page.goto(`${s.url}?s=${encodeURIComponent(`claude-code:${beside.id}`)}`);
+    await live(page);
+    await expect(page.locator(".panel")).toBeVisible();
+    const bar = page.locator(".main .sess-bar");
+    const title = bar.locator(".bar-title");
+    const conn = bar.locator(".bar-conn");
+    const words = conn.locator(".bar-conn-label");
+    const actions = bar.locator(".bar-actions");
+    const edges = (el: Locator) =>
+      el.evaluate((e) => {
+        const b = e.getBoundingClientRect();
+        return { left: b.left, right: b.right, wide: Math.round(b.width), tall: Math.round(b.height) };
+      });
+    /** Whether the element's text is cut (an ellipsis stands in for some of it). */
+    const cut = (el: Locator) => el.evaluate((e) => e.scrollWidth > e.clientWidth);
+    /** The status ends before the bar's own buttons begin, and the bar is one row. */
+    const clear = async () => {
+      expect((await edges(conn)).right).toBeLessThanOrEqual((await edges(actions)).left);
+      expect((await edges(bar)).tall, "the bar is as tall as it was").toBe(before.bar.tall);
+    };
+    await expect(bar.locator(".bar-meta")).toBeVisible();
+    const before = { bar: await edges(bar), title: await edges(title) };
+    const cutStream = async () => {
+      await page.route("**/api/ui/stream", (route) => route.abort("connectionrefused"));
+      await page.evaluate(() => window.__streams.cut());
+      await down(page);
+      await expect(conn).toBeVisible();
+    };
+    const back = async () => {
+      await page.unroute("**/api/ui/stream");
+      await page.evaluate(() => document.querySelector<HTMLButtonElement>(".bar-conn button")?.click());
+      await up(page);
+      await expect(conn).toHaveCount(0);
+    };
+
+    await cutStream();
+    // The words and Retry are whole and end before the bar's own buttons; the title made the room.
+    await expect(words).toHaveText("Reconnecting…");
+    expect(await cut(words), "the words are whole").toBe(false);
+    await expect(retry(page)).toBeVisible();
+    expect((await edges(conn.getByRole("button"))).right).toBeLessThanOrEqual((await edges(actions)).left);
+    await clear();
+    const narrowed = (await edges(title)).wide;
+    expect(narrowed).toBeLessThan(before.title.wide);
+    expect(narrowed).toBeGreaterThan(40);
+
+    // The narrowest window a mouse has: what is left for the title is less than its glyph
+    // and a letter, so it steps aside whole. The words and Retry are still whole.
+    await page.setViewportSize({ width: 845, height: 800 });
+    await expect.poll(async () => (await edges(title)).wide).toBe(0);
+    expect(await cut(words)).toBe(false);
+    await expect(retry(page)).toBeVisible();
+    await clear();
+    await page.setViewportSize({ width: 1000, height: 800 });
+    await back();
+    await expect(bar.locator(".bar-meta")).toBeVisible();
+    expect((await edges(title)).wide).toBe(before.title.wide);
+
+    // The Files drawer open too, in a laptop's window: the column has no room for Retry,
+    // nor for a syllable of the words. The dot stands alone, and nothing lands on the buttons.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await bar.getByRole("button", { name: "Files" }).click();
+    await expect(page.locator(".page.session > .files")).toBeVisible();
+    await expect.poll(async () => (await edges(bar)).wide).toBeLessThan(200);
+    await cutStream();
+    await expect(conn.locator(".conn-dot")).toBeVisible();
+    await expect(conn.getByRole("button")).toHaveCount(0);
+    await expect(words).toBeHidden();
+    await clear();
+    // Room again: the words and Retry are back while it is still down.
+    await bar.getByRole("button", { name: "Files" }).click();
+    await expect(retry(page)).toBeVisible();
+    await expect(words).toBeVisible();
+    expect(await cut(words)).toBe(false);
+    await clear();
+    await back();
+  });
+
   test("a stream open in name only: out of the back/forward cache, awake again, shown after a long time, the page asks", async ({
     context,
     page,
@@ -753,6 +848,54 @@ test.describe("a prompt across a dropped stream", () => {
     await up(page);
     await expect(start).toBeEnabled();
     await expect(sheet.locator(".ns-status")).toHaveText(`${d.name} is listening.`);
+    await d.stop();
+  });
+
+  test("with no prompt open, the sentence stands where Ask another agent… stood, and the field holds still", async ({
+    context,
+    page,
+  }) => {
+    await seenSetupHere(context);
+    await tapStreams(context);
+    const key = await passkeyPage(context, page);
+    const d = await fakeDaemon(key, {
+      name: `ask-${randomUUID().slice(0, 6)}`,
+      harnesses: ["claude-code", "codex"],
+      ask: true,
+      handoff: true,
+    });
+    const s = new Feed(CONTROL_BASE, await sinkToken(), d.name, "Check the refund rounding");
+    await s.post(
+      s.ev("session.started", { source: "startup" }, "SessionStart"),
+      ...s.turn(0, "Check the rounding", "It floors."),
+    );
+    await page.goto(`${CONTROL_BASE}${s.url}`);
+    await live(page);
+    const ask = page.locator("[data-ctl-ask]");
+    const foot = page.locator(".ctl-foot");
+    await expect(ask).toBeVisible();
+    await expect(box(page)).toBeEnabled();
+    const at = async () => {
+      const field = (await box(page).boundingBox())!;
+      const line = (await foot.boundingBox())!;
+      return { field: Math.round(field.y), line: Math.round(line.height) };
+    };
+    const before = await at();
+
+    await page.route("**/api/ui/stream", (route) => route.abort("connectionrefused"));
+    await page.evaluate(() => window.__streams.cut());
+    await down(page);
+    await expect(foot.locator(".ctl-hint")).toHaveText("You can send once the connection is back.");
+    await expect(ask).toHaveCount(0);
+    await expect(foot.locator("button, a")).toHaveCount(0);
+    expect(await at()).toEqual(before);
+
+    await page.unroute("**/api/ui/stream");
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>(".bar-conn button")?.click());
+    await up(page);
+    await expect(ask).toBeVisible();
+    await expect(page.locator(".ctl-foot[data-reason=stream]")).toHaveCount(0);
+    expect(await at()).toEqual(before);
     await d.stop();
   });
 });

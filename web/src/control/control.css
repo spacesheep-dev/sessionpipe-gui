@@ -320,6 +320,12 @@
   line-height: var(--lh);
   animation: fade-in var(--dur-fast) var(--ease-out);
 }
+/* The stream is down and Ask another agent… is not offered (ControlStrip.tsx): the line
+   keeps the button's height in a mouse window, so the field over it holds still. */
+.ctl-foot[data-ask-held] {
+  align-content: center;
+  min-height: var(--control-sm);
+}
 .ctl-context strong {
   color: var(--fg-2);
   font-weight: 500;

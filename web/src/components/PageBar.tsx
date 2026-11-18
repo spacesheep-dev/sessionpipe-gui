@@ -61,7 +61,7 @@ function BarMeta({ meta, connSaid }: { meta?: ReactNode; connSaid?: boolean }) {
  *  line: the same words, each in its own look. Not a live region: what is spoken is the
  *  shell's (Shell.tsx ConnAnnouncer), once per change. When the stream comes back while
  *  Retry holds the focus, the focus goes to the page rather than to nowhere. */
-export function ConnStatus({ phone = false }: { phone?: boolean }) {
+function ConnStatus({ phone = false }: { phone?: boolean }) {
   const { as, label } = useConnection();
   const store = useStore();
   const retry = useRef<HTMLButtonElement>(null);
@@ -75,7 +75,7 @@ export function ConnStatus({ phone = false }: { phone?: boolean }) {
   return (
     <div className={phone ? `bar-sub phone-conn-sub phone-conn-sub--${as}` : `bar-conn bar-conn--${as}`}>
       <span className="conn-dot" aria-hidden="true" />
-      <span className={phone ? "phone-conn-label" : undefined}>{label}</span>
+      <span className={phone ? "phone-conn-label" : "bar-conn-label"}>{label}</span>
       <button
         ref={retry}
         type="button"

@@ -143,7 +143,7 @@ export function SessionControl({
         catching={catching}
         stream={down}
         unlock={!device && control && secure && grant.exp === null ? () => void unlockNow() : undefined}
-        ask={askable && !down ? () => openHandoff({ session: session.key }) : undefined}
+        ask={askable ? () => openHandoff({ session: session.key }) : undefined}
         onDraft={setDraft}
       />
       <HeldNotice h={held} focusBack={composerBefore} />

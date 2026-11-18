@@ -804,13 +804,19 @@
 /* A dropped stream in the meta's place (PageBar.tsx ConnStatus), the one place a window
    says it: 12 px after the title, the dot (a ring while reconnecting, red when offline),
    its words in the meta's tone, and the one Retry, a ghost button at the chips' height.
-   It keeps its width; the title gives way first. */
+   In a column too narrow for all of it (a session beside, the Files drawer) the title
+   gives way first, down to nothing, then the words, with an ellipsis. What is left over
+   is cut off at the status's own edge, never drawn over the bar's buttons; the padding is
+   the room Retry's focus ring takes inside that edge. */
 .bar-conn {
-  flex: none;
+  flex: 0 1 auto;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: 4px;
+  min-width: 0;
+  margin: 0 -5px 0 4px;
+  padding: 5px 5px 5px 0;
+  overflow: hidden;
   color: var(--fg-3);
   font-size: var(--text-sm);
   white-space: nowrap;
@@ -822,6 +828,20 @@
 .bar-conn--offline .conn-dot {
   background: var(--err);
   box-shadow: none;
+}
+.bar-conn-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar-conn .btn {
+  flex: none;
+}
+/* The factor is the order: beside it the status's own 1 gives up no part of a pixel, so
+   its words stay whole until the title has gone. It outranks a bar that holds its title
+   (session.css `.sess-bar .bar-title`). */
+.bar-lead:has(> .bar-conn) .bar-title {
+  flex-shrink: 1000000;
 }
 .bar-tools {
   flex: 1 1 auto;

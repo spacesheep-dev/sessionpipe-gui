@@ -59,7 +59,9 @@ html:has(.main > .session) {
 /* ----- the title bar (PageBar) ----- */
 
 /* The title gives way last: the meta ellipsises first, then the title. The lead takes
-   what is left beside the tools and actions (a zero basis, so it never wraps them). */
+   what is left beside the tools and actions (a zero basis, so it never wraps them). While
+   the stream is down its status stands in the meta's place and keeps its words: there the
+   title gives way first (shell.css `.bar-conn`). */
 .sess-bar .bar-lead {
   flex: 1 1 0;
 }
@@ -79,6 +81,28 @@ html:has(.main > .session) {
   align-items: center;
   gap: 12px;
   margin-left: 4px;
+}
+/* The stream down, in a column with no room for the title beside the status (the Files
+   drawer and a session beside, both open): nothing is shown in part. Where the title would
+   be less than its glyph and a letter it steps aside whole. Narrower, the words would be
+   less than a syllable beside Retry: Retry goes and they have its room. Narrowest, the dot
+   stands alone. The widths are this bar's: the back button, the status at its longest
+   ("Reconnecting…") and the two buttons at its end. */
+@container bar (max-width: 318px) {
+  .sess-bar .bar-lead:has(> .bar-conn) .bar-title {
+    max-width: 0;
+    margin-right: -8px;
+  }
+}
+@container bar (max-width: 234px) {
+  .sess-bar .bar-conn .btn {
+    display: none;
+  }
+}
+@container bar (max-width: 150px) {
+  .sess-bar .bar-conn-label {
+    display: none;
+  }
 }
 /* Two facts: the state glyph before the title, then where it runs. The glyph sits on the
    title's cap height; the label dot (when set) follows it. */
