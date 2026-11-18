@@ -761,7 +761,9 @@ async fn a_poll_that_wakes_past_its_time_asks_once_more_and_believes_it() {
     // Nothing answered there yet: that one poll, and the connect ends with nothing made.
     let other = Fake::start("late-unanswered").await;
     let polls = || other.asked("/api/gui/connect/poll").len();
-    h.account_connect_start(Some(&other.origin())).await.unwrap();
+    h.account_connect_start(Some(&other.origin()))
+        .await
+        .unwrap();
     late(&h);
     until("expired", || {
         connect_state(&h) == Some(ConnectState::Expired)
