@@ -215,6 +215,17 @@
   gap: 8px;
 }
 
+/* ----- Settings › About: the app's update (AppSettings.tsx UpdateRow) ----- */
+
+/* The row's button, or nothing while a check or a download runs. The focus rests here
+   then, with no ring: there is nothing to press until the button is back. */
+.app-update-ctl {
+  display: flex;
+}
+.app-update-ctl:focus {
+  outline: none;
+}
+
 /* ----- the phone's first run (PhoneOnboarding.tsx) ----- */
 /* One idea per screen: the lockup, one line, the actions stacked and full width, the
    primary one the app's primary (the ink fill): the orange stays the tint's (Back and

@@ -211,7 +211,7 @@ export async function start(): Promise<boolean> {
     if (to) navigate(to);
   });
   void on("wake", () => resyncAll());
-  void import("./appState").then((m) => m.wire(on));
+  void import("./appState").then((m) => m.wire(on, info.features.includes("updater")));
   if (info.receiver) void import("./FirstRun").then((m) => m.maybeShowFirstRun());
   return false;
 }

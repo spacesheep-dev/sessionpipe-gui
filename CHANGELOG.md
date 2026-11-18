@@ -234,6 +234,20 @@ pairing link that carries the board's key only for a pairing the sink token star
 - **Off a Mac the command palette's rows move with the arrows alone.** Ctrl+N and Ctrl+P
   were listed too; there they are New Session and the browser's print. A Mac keeps ⌃N and
   ⌃P.
+- **The desktop app's updates are in Settings › About, under its version.** They were the
+  last group of Settings › App, while About read "This copy doesn't check for updates
+  itself; update it the way it was installed." The row is one sentence for each state:
+  "Not checked yet" until a check has run, then "Up to date" with "Checked 40 min ago.";
+  "Checking…" and "Downloading 0.8.5… 42%", with no button to press; "0.8.5 is ready",
+  with a link to what's new in it and Install and relaunch; "Couldn't check for updates"
+  or "Couldn't update to 0.8.5", with the reason and Try again. "Check for updates
+  automatically" is the row under it.
+- **A downloaded update shows in the app's menu and on the sidebar.** While one waits,
+  "Check for Updates…" reads "Install 0.8.5 and Relaunch" and does that, and the sidebar's
+  Settings button has a small dot and opens About. It showed only in the menu bar menu and
+  at the foot of Settings › App. "Check for Updates…" opens Settings › About, where the
+  check shows as it runs, with a window open or not.
+- **Setup's title is "Setup"**, as its sidebar entry reads. It was "Set up sessionpipe gui".
 
 ### Fixed
 
@@ -351,6 +365,22 @@ pairing link that carries the board's key only for a pairing the sink token star
   said: the tabs it put back counted as an address someone had asked for. It now lands on
   the chosen page, with the tabs beside it. In the desktop app, Go › Board with the window
   closed opens the Board, not the page "Open on" names.
+- **About says the app's own version.** In the desktop and phone apps it showed the
+  receiver's, which can be an older background service or another computer's. That one is
+  a line under it now, only when it differs: "This Mac's background service runs 0.8.3.",
+  or "studio-mac runs 0.8.3." The line under the name is "Every coding agent you run, on
+  one board." and the foot is "Apache-2.0", everywhere: "no account" and "nothing here
+  calls anywhere but its own origin" were not true of an app that checks for its updates
+  and can use a spacesheep account. In a browser and the phone app the Updates row is
+  gone; it could only say that the copy doesn't update itself.
+- **The desktop app no longer says "up to date" before it has checked.** For the first
+  seconds of a launch, and with the automatic check off, the row read "sessionpipe 0.8.4
+  is up to date". An install or a download that failed was titled "Couldn't check for
+  updates"; it now names the version, and the caption is the reason alone.
+- **"Check for Updates…" no longer opens General.** With the window open it showed the
+  first section of Settings while the check ran in another; with none it said nothing
+  until the download had ended, then asked in a dialog that pointed at a menu bar item
+  that may be switched off.
 
 ## [0.8.4] - 2026-11-17
 

@@ -4,7 +4,7 @@
 //! have neither: Settings and Exit are File's there, updates and About are Help's.
 
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 
 /// The pages' chord: ⌃⌘ on a Mac. Elsewhere Ctrl and Cmd are one key, so it would collapse
 /// to Ctrl+1 (the list's own key): Ctrl+Shift there, as in web/src/native/menu.ts. Not
@@ -228,12 +228,38 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The update item's title, in whichever menu holds it (the app's own on a Mac, Help
+/// elsewhere): updater.rs calls this as an update becomes ready or stops being.
+pub fn retitle_update<R: Runtime>(app: &AppHandle<R>, title: &str) {
+    let Some(menu) = app.menu() else { return };
+    let item = menu
+        .items()
+        .unwrap_or_default()
+        .iter()
+        .find_map(|m| m.as_submenu()?.get("check-updates"));
+    if let Some(item) = item.as_ref().and_then(|i| i.as_menuitem()) {
+        let _ = item.set_text(title);
+    }
+}
+
 pub fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
     match id {
         "help:github" => {
             crate::actions::open_external("https://github.com/spacesheep-dev/sessionpipe-gui")
         }
-        "check-updates" => crate::updater::check_from_menu(app.clone()),
+        // The item reads "Install 0.8.5 and Relaunch" while an update is ready, and does it.
+        "check-updates" => {
+            let ready = app
+                .state::<crate::Shell>()
+                .update
+                .lock()
+                .unwrap()
+                .ready_version();
+            match ready {
+                Some(_) => crate::updater::restart(app.clone()),
+                None => crate::updater::check_from_menu(app.clone()),
+            }
+        }
         "new-session" => crate::actions::new_session(app, None),
         a if action_ids().contains(&a) => crate::actions::menu_action(app, a),
         // Tray items share the global menu-event stream on some platforms.

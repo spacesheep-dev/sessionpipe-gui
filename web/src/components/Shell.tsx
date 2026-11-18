@@ -22,6 +22,7 @@ import { linkItems } from "../lib/menus";
 import { reducedMotion, usePresence } from "../lib/motion";
 import { accountMode } from "../lib/net";
 import { Link, navigate, type Route, usePath } from "../lib/router";
+import { useReadyUpdate } from "../lib/selfUpdate";
 import { getSettings as getAppSettings, setMode, useSimple } from "../lib/settings";
 import { hintFor, isTyping, useShortcut, useShortcutMap } from "../lib/shortcuts";
 import { getSkins, isPlain } from "../lib/skins";
@@ -607,6 +608,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   const firstView = nav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
   // The tab bar keeps its four; Workflows is a page for the More sheet on a phone.
   const tabs = nav.filter((n) => n.key !== "workflows").slice(0, TABS);
+  // The app's update, downloaded and waiting ("0.8.5 is ready"): the foot's Settings button marks it.
+  const update = useReadyUpdate();
   return (
     <div
       className={`shell ${splitOpen && !phone ? "shell--split" : ""} ${side && !phone ? "shell--side" : ""}`}
@@ -690,16 +693,18 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
             </Link>
           )}
           <QuickSettings placement="rail" />
+          {/* An update that is downloaded and waits: the quiet dot, and the way to its row. */}
           <Link
-            to="/settings"
+            to={update ? "/settings?section=about" : "/settings"}
             className={`theme-btn ${route.name === "settings" ? "nav-link--on" : ""}`}
-            data-tip="Settings"
+            data-tip={update ? `Settings · ${update}` : "Settings"}
             data-tip-side="top"
-            aria-label="Settings"
+            aria-label={update ? `Settings, ${update}` : "Settings"}
             aria-current={route.name === "settings" ? "page" : undefined}
             data-nav="settings"
           >
             <SlidersIcon />
+            {update ? <span className="nav-dot" aria-hidden="true" /> : null}
           </Link>
         </div>
       </nav>

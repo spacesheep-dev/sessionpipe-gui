@@ -34,6 +34,7 @@ import { bytes } from "../lib/format";
 import { reducedMotion, tokenMs } from "../lib/motion";
 import { accountMode, apiFetch } from "../lib/net";
 import { back, hasInAppHistory, Link, navigate, useSearchParam } from "../lib/router";
+import { selfUpdating } from "../lib/selfUpdate";
 import { isRouteNotFound, olderReceiver } from "../lib/serverAge";
 import {
   DEFAULT_PAGES,
@@ -47,11 +48,10 @@ import { allActions, applyPreset, getPreset, PRESETS, useShortcutMap } from "../
 import { DEFAULT_SKIN, type InstalledSkin } from "../lib/skins";
 import { resolvedScheme, setSkin, setTextSize, setTheme, type Theme, useSettings } from "../lib/theme";
 import { TIER_HINT, TIER_LABEL } from "../lib/tier";
-import { ago } from "../lib/time";
 import { SearchDataGroup } from "../search/SettingsRows";
 import { useThemes } from "../themes/host/registry";
 import { AppIcon } from "./AppIcon";
-import { ActionButton, CommandWell, CopyIconButton, Segmented, Toggle } from "./bits";
+import { CopyIconButton, Segmented, Toggle } from "./bits";
 import { LensPicker } from "./LensChip";
 import { NotificationsSettings } from "./NotificationsSettings";
 import { type LocalUpdateState, OlderReceiverNotice } from "./OlderReceiverNotice";
@@ -117,6 +117,21 @@ const GLYPH: Record<Section, ReactNode> = {
 /** Inside the native app (NATIVE-SPEC §2.5): Settings › App, its own lazy section. */
 const inShell = "sessionpipeShell" in window;
 const AppSection = inShell ? lazy(() => import("../native/AppSettings")) : null;
+/** About's updates, in an app that updates itself: the same module, fetched only there. */
+const UpdatesGroup = selfUpdating()
+  ? lazy(() => import("../native/AppSettings").then((m) => ({ default: m.UpdatesGroup })))
+  : null;
+/** The app around the page, as its flag says it (the shell's own module is never loaded
+ *  here): the computer it runs on, its version, and the receiver this window shows. */
+const shellApp = (
+  window as {
+    sessionpipeShell?: {
+      platform?: string;
+      appVersion?: string;
+      receiver?: { name?: string; local?: boolean } | null;
+    };
+  }
+).sessionpipeShell;
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "general", label: "General" },
@@ -1159,57 +1174,31 @@ function LinkRow({ href, to, children }: { href?: string; to?: string; children:
   );
 }
 
-/** What `/api/ui/update` answers (the installer's release notice; absent before it). */
-interface UpdateStatus {
-  current: string;
-  latest?: string;
-  checkedAt?: string;
-  available: boolean;
-  command: string;
-  notesUrl?: string;
-  error?: string;
-}
-const UPDATE = "/api/ui/update";
-
+/** About: what this is and which version, as a macOS About window says it. In the app the
+ *  version is the app's own, and the receiver's is said under it only when it differs (an
+ *  older background service, another computer's); in a browser the page is the receiver's. */
 function About() {
   const store = useStore();
   const [info, setInfo] = useState<Info | null>(null);
-  /** undefined: not asked yet; null: this receiver has no updater. */
-  const [update, setUpdate] = useState<UpdateStatus | null | undefined>(undefined);
-  const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     store.transport
       .info()
       .then(setInfo)
       .catch(() => {});
-    // The app updates as the phone's apps do; there is no receiver with an updater to ask.
-    if (accountMode()) return setUpdate(null);
-    apiFetch(UPDATE, { headers: { accept: "application/json" } })
-      .then((r) => (r.ok ? (r.json() as Promise<UpdateStatus>) : null))
-      .then(setUpdate)
-      .catch(() => setUpdate(null));
   }, [store]);
-  // Nothing asks github.com until this is pressed; the receiver does the asking.
-  const check = async () => {
-    setErr(null);
-    try {
-      const r = await apiFetch(`${UPDATE}/check`, { method: "POST", headers: { accept: "application/json" } });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setUpdate((await r.json()) as UpdateStatus);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    }
-  };
-  const version = info?.version ?? update?.current;
-  const status = !update
-    ? undefined
-    : update.error
-      ? `The last check failed: ${update.error}`
-      : update.available && update.latest
-        ? `${update.latest} is out.`
-        : update.checkedAt
-          ? `Up to date · checked ${ago(update.checkedAt, Date.now())}`
-          : "Not checked yet.";
+  const appVersion = shellApp?.appVersion || "";
+  const version = appVersion || info?.version;
+  // The receiver's own version, said only where it is not the app's. (An account has no
+  // receiver behind it: its version is the app's.)
+  const rx = shellApp?.receiver;
+  const theirs = appVersion && rx && !accountMode() && info?.version !== appVersion ? info?.version : undefined;
+  const runs = !theirs
+    ? null
+    : rx?.local
+      ? `${shellApp?.platform === "macos" ? "This Mac" : "This computer"}'s background service runs ${theirs}.`
+      : rx?.name
+        ? `${rx.name} runs ${theirs}.`
+        : null;
   return (
     <>
       <div className="about-head">
@@ -1218,41 +1207,14 @@ function About() {
         </span>
         <h3 className="about-name">sessionpipe gui</h3>
         <p className="about-version num">{version ? `Version ${version}` : "–"}</p>
-        <p className="about-lede">A sessionpipe receiver with a face: one process, no database, no account.</p>
+        {runs && <p className="about-version num">{runs}</p>}
+        <p className="about-lede">Every coding agent you run, on one board.</p>
       </div>
-      <Group>
-        <Row
-          label="Updates"
-          hint={
-            err
-              ? `Couldn't check: ${err}`
-              : update === null
-                ? "This copy doesn't check for updates itself; update it the way it was installed."
-                : status
-          }
-        >
-          {update ? (
-            <ActionButton className="btn btn--sm" pendingLabel="Checking…" onClick={check}>
-              Check for updates
-            </ActionButton>
-          ) : null}
-        </Row>
-        {update?.available && update.command ? (
-          <div className="settings-row settings-row--stack">
-            <div className="settings-row-text">
-              <span className="settings-label">Update on the receiver machine</span>
-              {update.notesUrl ? (
-                <a className="settings-hint" href={update.notesUrl} target="_blank" rel="noreferrer noopener">
-                  What's new in {update.latest} ↗
-                </a>
-              ) : null}
-            </div>
-            <div className="settings-well">
-              <CommandWell command={update.command} label="Copy the update command" />
-            </div>
-          </div>
-        ) : null}
-      </Group>
+      {UpdatesGroup && (
+        <Suspense fallback={null}>
+          <UpdatesGroup appVersion="" />
+        </Suspense>
+      )}
       <Group>
         <LinkRow href="https://github.com/spacesheep-dev/sessionpipe-gui">sessionpipe gui on GitHub</LinkRow>
         <LinkRow href="https://github.com/spacesheep-dev/sessionpipe-gui/releases">Release notes</LinkRow>
@@ -1262,7 +1224,7 @@ function About() {
         </LinkRow>
         <LinkRow href="https://github.com/spacesheep-dev/sessionpipe-gui/issues">Report an issue</LinkRow>
       </Group>
-      <p className="about-foot">Apache-2.0 · nothing here calls anywhere but its own origin.</p>
+      <p className="about-foot">Apache-2.0</p>
     </>
   );
 }

@@ -231,7 +231,7 @@ export function hotkeyLabel(h: string | null, platform: string | null = "macos")
 /** A rejection the person caused (Cancel in the shell's own sheet): not an error to show. */
 export const isCancel = (e: unknown): boolean => (e instanceof Error ? e.message : String(e)) === "cancelled";
 
-// ----- Settings › App: updates -----
+// ----- Settings › About: the app's own update -----
 
 export interface UpdateWords {
   state: string;
@@ -241,10 +241,13 @@ export interface UpdateWords {
   progress?: number;
 }
 
+/** The update row's one sentence. `appVersion` is said only where nothing beside the row
+ *  says it (About's head does, and passes ""). A failure that kept its version was a
+ *  download or an install; a check that failed has none. */
 export function updateLine(appVersion: string, u: UpdateWords): string {
   switch (u.state) {
     case "checking":
-      return "Checking for updates…";
+      return "Checking…";
     case "downloading": {
       const pct = typeof u.progress === "number" ? ` ${Math.round(u.progress)}%` : "";
       return u.version ? `Downloading ${u.version}…${pct}` : `Downloading the update…${pct}`;
@@ -252,32 +255,63 @@ export function updateLine(appVersion: string, u: UpdateWords): string {
     case "ready":
       return u.version ? `${u.version} is ready` : "An update is ready";
     case "error":
-      return "Couldn't check for updates";
+      return u.version ? `Couldn't update to ${u.version}` : "Couldn't check for updates";
     default:
-      return appVersion ? `sessionpipe ${appVersion} is up to date` : "sessionpipe is up to date";
+      // Nothing has looked yet (the first seconds of a launch, or the automatic check off).
+      if (!u.lastChecked) return "Not checked yet";
+      return appVersion ? `Up to date · ${appVersion}` : "Up to date";
   }
 }
 
-/** "Last checked just now" … "Last checked 3 days ago", or "" before the first check. */
+/** "Checked just now" … "Checked 3 days ago", or "" before the first check. */
 export function lastCheckedLine(iso: string | undefined, now = Date.now()): string {
   const t = iso ? Date.parse(iso) : Number.NaN;
   if (Number.isNaN(t)) return "";
   const m = Math.max(0, Math.floor((now - t) / 60_000));
-  if (m < 1) return "Last checked just now";
-  if (m < 60) return `Last checked ${m} min ago`;
+  if (m < 1) return "Checked just now";
+  if (m < 60) return `Checked ${m} min ago`;
   const h = Math.floor(m / 60);
-  if (h < 24) return `Last checked ${h} ${h === 1 ? "hour" : "hours"} ago`;
+  if (h < 24) return `Checked ${h} ${h === 1 ? "hour" : "hours"} ago`;
   const d = Math.floor(h / 24);
-  return `Last checked ${d === 1 ? "yesterday" : `${d} days ago`}`;
+  return `Checked ${d === 1 ? "yesterday" : `${d} days ago`}`;
 }
 
-/** The caption under the update row: the reason it failed, the version you have while
- *  another is on its way, and when it last looked. */
-export function updateHint(appVersion: string, u: UpdateWords, now = Date.now()): string {
-  const parts: string[] = [];
-  if (u.state === "error" && u.error) parts.push(u.error);
-  if (appVersion && (u.state === "ready" || u.state === "downloading")) parts.push(`You have ${appVersion}.`);
-  const last = lastCheckedLine(u.lastChecked, now);
-  if (last) parts.push(`${last}.`);
-  return parts.join(" ");
+/** The caption under the update row: when it last looked, what the downloaded version
+ *  brings (the words of a link, `updateNotes`), or why it failed. None while it works. */
+export function updateHint(u: UpdateWords, now = Date.now()): string {
+  switch (u.state) {
+    case "checking":
+    case "downloading":
+      return "";
+    case "ready":
+      return u.version ? `What's new in ${u.version}` : "";
+    case "error":
+      return u.error ?? "";
+    default: {
+      const last = lastCheckedLine(u.lastChecked, now);
+      return last ? `${last}.` : "";
+    }
+  }
+}
+
+/** The downloaded version's release notes, which the ready row's caption links to. */
+export const updateNotes = (u: UpdateWords): string | null =>
+  u.state === "ready" && u.version
+    ? `https://github.com/spacesheep-dev/sessionpipe-gui/releases/tag/v${encodeURIComponent(u.version)}`
+    : null;
+
+/** The row's one button, or null while there is nothing to press: a check and a download
+ *  end by themselves. Try again checks again (a failed download left nothing to install). */
+export function updateButton(u: UpdateWords): "Check now" | "Try again" | "Install and relaunch" | null {
+  switch (u.state) {
+    case "checking":
+    case "downloading":
+      return null;
+    case "ready":
+      return "Install and relaunch";
+    case "error":
+      return "Try again";
+    default:
+      return "Check now";
+  }
 }

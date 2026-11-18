@@ -94,7 +94,7 @@ export function Setup() {
   return (
     <div className="page page--doc page--grouped setup">
       <PageBar
-        title="Set up sessionpipe gui"
+        title="Setup"
         meta={done ? `${doneCount} of ${REQUIRED_STEPS.length} done` : undefined}
         actions={
           s && !allDone ? (

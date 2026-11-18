@@ -35,7 +35,15 @@ interface FakeOptions {
   platform?: string;
   /** What the app's settings.json holds, over the defaults. */
   settings?: Record<string, boolean>;
+  /** Where the app's update is (app_update_status): checked a moment ago and up to date
+   *  unless said. */
+  update?: UpdateOut;
 }
+
+/** The shell's word on the app's update (updater.rs UpdateOut). */
+type UpdateOut = { state: string; version?: string; lastChecked?: string; error?: string; progress?: number };
+/** An update that is downloaded and waits to be installed. */
+const READY: UpdateOut = { state: "ready", version: "0.3.1", lastChecked: new Date().toISOString() };
 
 type StartOutcome = { kind: string; line: string; log?: string } | "hang";
 
@@ -49,10 +57,21 @@ type FakeArgs = [
   string,
   FakeOptions["settings"],
   StartOutcome[] | undefined,
+  UpdateOut | undefined,
 ];
 
 function fakeShell() {
-  return ([hasReceiver, firstRunDone, features, discover, stream = "real", platform, saved, start]: FakeArgs) => {
+  return ([
+    hasReceiver,
+    firstRunDone,
+    features,
+    discover,
+    stream = "real",
+    platform,
+    saved,
+    start,
+    update,
+  ]: FakeArgs) => {
     const KINDS = [
       "snapshot",
       "event",
@@ -98,7 +117,11 @@ function fakeShell() {
       ...saved,
     };
     const send = (id: number, raw: unknown) => callbacks.get(id)?.(raw);
+    // Where the app's update is: what app_update_status answers, and what each `update`
+    // event says, as the shell's own state is (updater.rs publish).
+    let updateNow: UpdateOut = update ?? { state: "idle", lastChecked: new Date().toISOString() };
     w.__emit = (event: string, payload: unknown) => {
+      if (event === "update") updateNow = payload as UpdateOut;
       for (const id of listeners.get(event) ?? []) send(id, { event, id: 0, payload });
     };
     w.__calls = calls;
@@ -174,7 +197,13 @@ function fakeShell() {
           case "app_notify_open_settings":
             return null;
           case "app_update_status":
-            return { state: "ready", version: "0.3.1", lastChecked: new Date().toISOString() };
+            return updateNow;
+          // A check begins and stays under way: the test says how it ends (an `update` event).
+          case "app_update_check":
+            updateNow = { state: "checking", lastChecked: updateNow.lastChecked };
+            return updateNow;
+          case "app_update_restart":
+            return null;
           case "rx_discover":
             if (!discover) throw new Error("fake shell: no rx_discover");
             if (discover === "none" || (discover === "later" && !calls.some((c) => c.cmd === "rx_start_local")))
@@ -237,6 +266,7 @@ async function openInShell(page: Page, path: string, opts: FakeOptions = {}) {
     opts.platform ?? "macos",
     opts.settings,
     opts.start,
+    opts.update,
   ];
   await page.addInitScript(fakeShell(), arg);
   const os = NAVIGATOR[opts.platform ?? ""];
@@ -465,20 +495,16 @@ test.describe("inside the native shell", () => {
   });
 
   test("Settings › App renders", async ({ page }) => {
-    await openInShell(page, "/settings?section=app");
+    await openInShell(page, "/settings?section=app", { update: READY });
     const pane = page.getByRole("tabpanel", { name: "App" });
     await expect(pane).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole("tab", { name: "App" })).toHaveAttribute("aria-selected", "true");
     await expect(pane.getByRole("switch", { name: "Open at login" })).toBeVisible();
     await expect(pane.getByText("This Mac", { exact: true })).toBeVisible();
-    await expect(pane.getByText("0.3.1 is ready")).toBeVisible();
-    await expect(pane.getByText(/^You have .*Last checked just now\.$/)).toBeVisible();
-    await expect(pane.getByRole("button", { name: "Install and relaunch" })).toBeVisible();
-    const auto = pane.getByRole("switch", { name: "Check for updates automatically" });
-    await expect(auto).toHaveAttribute("aria-checked", "true");
-    await auto.click();
-    await expect(auto).toHaveAttribute("aria-checked", "false");
-    expect(await calls(page)).toContain("app_settings_set");
+    // The app's update is About's: App says nothing of it, with one waiting too.
+    await expect(pane.getByText("0.3.1 is ready")).toHaveCount(0);
+    await expect(pane.getByRole("switch", { name: "Check for updates automatically" })).toHaveCount(0);
+    await expect(pane.getByRole("button", { name: /Check now|Install and relaunch/ })).toHaveCount(0);
     await pane.getByRole("button", { name: "Record shortcut" }).click();
     await page.keyboard.press("Control+Alt+KeyN");
     await expect(pane.getByRole("button", { name: /New session shortcut: ⌃⌥N/ })).toBeVisible();
@@ -793,6 +819,184 @@ test.describe("inside the native shell", () => {
     await expect(page.getByText("so this computer's sessions show up here")).toBeVisible();
     await expect(page.getByText("Nothing leaves this computer.")).toBeVisible();
     await expect(page.locator("main")).not.toContainText("Mac");
+  });
+});
+
+// The app's own update has one home, Settings › About, under the version it replaces: one
+// sentence a state, the menu's Check for Updates… lands there, and a downloaded update shows
+// as a dot on the sidebar's Settings button (NATIVE-SPEC §3.7).
+test.describe("the app's update", () => {
+  const about = (page: Page) => page.getByRole("tabpanel", { name: "About" });
+  /** The update's row: its sentence, its caption, and its button if it has one. */
+  const updateRow = (page: Page) => about(page).locator(".settings-row:has(.app-update-ctl)");
+  const settingsButton = (page: Page) => page.locator("nav.rail a[data-nav='settings']");
+
+  test("Settings › About in the app: the app's version, the background service's where it differs, and updates that work", async ({
+    page,
+  }) => {
+    const asked: string[] = [];
+    page.on("request", (r) => asked.push(new URL(r.url()).pathname));
+    await openInShell(page, "/settings?section=about");
+    const pane = about(page);
+    // The app is 0.3.0 (the fake shell's), whatever the receiver that serves the page runs.
+    await expect(pane.getByText("Version 0.3.0", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(pane.getByText(/^This Mac's background service runs \d+\.\d+\.\d+\S*\.$/)).toBeVisible();
+    await expect(pane.getByText("Every coding agent you run, on one board.")).toBeVisible();
+    await expect(pane.locator(".about-foot")).toHaveText("Apache-2.0");
+    // The row that works stands where the sentence that it can't was.
+    await expect(pane.getByText(/doesn't check for updates/)).toHaveCount(0);
+    const row = updateRow(page);
+    await expect(row.locator(".settings-label")).toHaveText("Up to date");
+    await expect(row.locator(".settings-hint")).toHaveText("Checked just now.");
+    await expect(row.getByRole("button")).toHaveText("Check now");
+    const auto = pane.getByRole("switch", { name: "Check for updates automatically" });
+    await expect(auto).toHaveAttribute("aria-checked", "true");
+    await auto.click();
+    await expect(auto).toHaveAttribute("aria-checked", "false");
+    expect(await settingsSent(page)).toMatchObject({ autoUpdate: false });
+    // No receiver has an update route: nothing asks for one.
+    expect(asked.filter((p) => p.startsWith("/api/ui/update"))).toEqual([]);
+  });
+
+  test("a downloaded update says what's new in it, and installs", async ({ page }) => {
+    await openInShell(page, "/settings?section=about", { update: READY });
+    const row = updateRow(page);
+    await expect(row.locator(".settings-label")).toHaveText("0.3.1 is ready", { timeout: 15_000 });
+    const notes = row.getByRole("link", { name: "What's new in 0.3.1 ↗" });
+    await expect(notes).toHaveAttribute(
+      "href",
+      "https://github.com/spacesheep-dev/sessionpipe-gui/releases/tag/v0.3.1",
+    );
+    await expect(notes).toHaveAttribute("target", "_blank");
+    await expect(about(page).getByText(/You have/)).toHaveCount(0);
+    const install = row.getByRole("button", { name: "Install and relaunch" });
+    await expect(install).toHaveClass(/btn--primary/);
+    await install.click();
+    await expect.poll(() => calls(page)).toContain("app_update_restart");
+  });
+
+  test("one sentence for each state, and a button only where there is something to press", async ({ page }) => {
+    // Nothing has checked yet (the first seconds of a launch, or the automatic check off).
+    await openInShell(page, "/settings?section=about", { update: { state: "idle" } });
+    const row = updateRow(page);
+    const says = async (label: string, hint: string | null, button: string | null) => {
+      await expect(row.locator(".settings-label")).toHaveText(label);
+      if (hint === null) await expect(row.locator(".settings-hint")).toHaveCount(0);
+      else await expect(row.locator(".settings-hint")).toHaveText(hint);
+      if (button === null) await expect(row.getByRole("button")).toHaveCount(0);
+      else await expect(row.getByRole("button")).toHaveText(button);
+    };
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await says("Not checked yet", null, "Check now");
+    await emit(page, "update", { state: "checking" });
+    await says("Checking…", null, null);
+    await emit(page, "update", { state: "downloading", version: "0.3.1", progress: 42 });
+    await says("Downloading 0.3.1… 42%", null, null);
+    const lastChecked = new Date().toISOString();
+    // A download or an install that failed names its version; a check that failed has none.
+    await emit(page, "update", {
+      state: "error",
+      version: "0.3.1",
+      error: "The download didn't finish.",
+      lastChecked,
+    });
+    await says("Couldn't update to 0.3.1", "The download didn't finish.", "Try again");
+    await emit(page, "update", {
+      state: "error",
+      error: "You're offline, or GitHub can't be reached.",
+      lastChecked,
+    });
+    await says("Couldn't check for updates", "You're offline, or GitHub can't be reached.", "Try again");
+    await row.getByRole("button", { name: "Try again" }).click();
+    await says("Checking…", null, null);
+    expect(await calls(page)).toContain("app_update_check");
+  });
+
+  test("Check now from the keyboard: the focus waits in the row, and is back on the button", async ({ page }) => {
+    await openInShell(page, "/settings?section=about");
+    const row = updateRow(page);
+    await row.getByRole("button", { name: "Check now" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(row.locator(".settings-label")).toHaveText("Checking…");
+    // No button to hold it: the focus stays in the row, so Tab goes on from here.
+    await expect(row.locator(".app-update-ctl")).toBeFocused();
+    await emit(page, "update", { state: "idle", lastChecked: new Date().toISOString() });
+    await expect(row.getByRole("button", { name: "Check now" })).toBeFocused();
+    // An update that came of it is not put under the finger: Tab reaches Install and relaunch.
+    await page.keyboard.press("Enter");
+    await expect(row.locator(".app-update-ctl")).toBeFocused();
+    await emit(page, "update", READY);
+    await expect(row.getByRole("button", { name: "Install and relaunch" })).toBeVisible();
+    await expect(row.locator(".app-update-ctl")).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(row.getByRole("button", { name: "Install and relaunch" })).toBeFocused();
+  });
+
+  test("a downloaded update puts a dot on the sidebar's Settings button, which opens About", async ({ page }) => {
+    await openInShell(page, "/");
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    const settings = settingsButton(page);
+    await expect(settings).toHaveAttribute("aria-label", "Settings");
+    await expect(settings).toHaveAttribute("href", "/settings");
+    await emit(page, "update", { state: "downloading", version: "0.3.1", progress: 10 });
+    await expect(settings.locator(".nav-dot")).toHaveCount(0);
+    await emit(page, "update", READY);
+    await expect(settings).toHaveAttribute("aria-label", "Settings, 0.3.1 is ready");
+    await expect(settings).toHaveAttribute("data-tip", "Settings · 0.3.1 is ready");
+    // The quiet 6 px dot at the button's top right, in the sidebar and in the compact rail.
+    const dot = settings.locator(".nav-dot");
+    for (const width of [1440, 1000]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(page.locator(".shell--side")).toHaveCount(width === 1440 ? 1 : 0);
+      await expect(dot).toBeVisible();
+      const b = (await settings.boundingBox())!;
+      const d = (await dot.boundingBox())!;
+      expect([d.width, d.height]).toEqual([6, 6]);
+      expect(d.x + d.width / 2).toBeGreaterThan(b.x + b.width / 2);
+      expect(d.x + d.width).toBeLessThanOrEqual(b.x + b.width);
+      expect(d.y + d.height / 2).toBeLessThan(b.y + b.height / 2);
+      expect(d.y).toBeGreaterThanOrEqual(b.y);
+    }
+    await settings.click();
+    await expect(page).toHaveURL(/\/settings\?section=about$/);
+    await expect(updateRow(page).locator(".settings-label")).toHaveText("0.3.1 is ready");
+    // Installed, or checked again: the dot goes with it.
+    await emit(page, "update", { state: "checking" });
+    await expect(dot).toHaveCount(0);
+    await expect(settings).toHaveAttribute("aria-label", "Settings");
+  });
+
+  test("a window opened after the download knows of it, with Settings never opened", async ({ page }) => {
+    await openInShell(page, "/", { update: READY });
+    await expect(settingsButton(page)).toHaveAttribute("aria-label", "Settings, 0.3.1 is ready", {
+      timeout: 15_000,
+    });
+    expect((await calls(page)).filter((c) => c === "app_update_status")).toHaveLength(1);
+  });
+
+  test("an app that doesn't update itself asks for no update and shows none", async ({ page }) => {
+    await openInShell(page, "/settings?section=about", { update: READY, features: ["tray", "notifications"] });
+    const pane = about(page);
+    await expect(pane.getByText("Version 0.3.0", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(pane.getByRole("switch", { name: "Check for updates automatically" })).toHaveCount(0);
+    await expect(pane.locator(".app-update-ctl")).toHaveCount(0);
+    await expect(settingsButton(page)).toHaveAttribute("aria-label", "Settings");
+    await expect(settingsButton(page).locator(".nav-dot")).toHaveCount(0);
+    expect(await calls(page)).not.toContain("app_update_status");
+  });
+
+  // The app menu's item (updater.rs check_from_menu) navigates here and runs the check.
+  test("Check for Updates… lands on Settings › About, where the check shows", async ({ page }) => {
+    await openInShell(page, "/");
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    await emit(page, "navigate", { to: "/settings?section=about" });
+    await expect(page.getByRole("tab", { name: "About" })).toHaveAttribute("aria-selected", "true");
+    const row = updateRow(page);
+    await expect(row.locator(".settings-label")).toHaveText("Up to date");
+    await emit(page, "update", { state: "checking" });
+    await expect(row.locator(".settings-label")).toHaveText("Checking…");
+    await emit(page, "update", READY);
+    await expect(row.getByRole("button", { name: "Install and relaunch" })).toBeVisible();
   });
 });
 
@@ -1253,6 +1457,20 @@ test.describe("inside the phone app", () => {
     const grouped = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
     await expect.poll(() => bar.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(grouped);
   });
+});
+
+// The phone app updates as the phone's apps do: About says its own version and the
+// computer's, and nothing of updates.
+test("in the phone app About says the app's version and the computer's, and nothing of updates", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openInPhone(page, "/settings?section=about", { receiver: true });
+  const pane = page.getByRole("tabpanel", { name: "About" });
+  await expect(pane.getByText("Version 0.6.2", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(pane.getByText(/^studio-mac runs \d+\.\d+\.\d+\S*\.$/)).toBeVisible();
+  await expect(pane.getByText("Every coding agent you run, on one board.")).toBeVisible();
+  await expect(pane.locator(".about-foot")).toHaveText("Apache-2.0");
+  await expect(pane.getByText(/update/i)).toHaveCount(0);
+  await expect(pane.getByRole("button")).toHaveCount(0);
 });
 
 // A phone or a tablet with a keyboard has no menu bar to answer a menu's key, so the page

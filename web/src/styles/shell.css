@@ -159,6 +159,19 @@
   border-radius: 50%;
   background: var(--fg-3);
 }
+/* The same dot on the sidebar foot's Settings button, at its top right: an update of the
+   app is downloaded and waits to be installed (Settings › About). Quiet for the same
+   reason: it can wait. */
+.rail-foot .theme-btn {
+  position: relative;
+}
+.rail .rail-foot .theme-btn > .nav-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  left: auto;
+  margin: 0;
+}
 
 /* The stream (Shell.tsx ConnectionPill): while live, only a small green dot; its word
    is kept for assistive tech and the tests, not drawn. A drop shows its words (and

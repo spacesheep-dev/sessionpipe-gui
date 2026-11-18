@@ -132,6 +132,30 @@ test.describe("settings dialog", () => {
     await expect(dialog(page).getByRole("tab", { selected: true })).toHaveText("Data");
   });
 
+  // In a browser the page is the receiver's: its version, what it is in one line, and
+  // nothing about updates, which only the desktop app does for itself.
+  test("About says the receiver's version and what this is, and nothing about updates", async ({ page, request }) => {
+    const { version } = (await (await request.get("/api/ui/info")).json()) as { version: string };
+    const asked: string[] = [];
+    page.on("request", (r) => asked.push(new URL(r.url()).pathname));
+    await openPage(page, "/settings?section=about");
+    const pane = dialog(page).getByRole("tabpanel", { name: "About" });
+    await expect(pane.getByRole("heading", { name: "sessionpipe gui" })).toBeVisible();
+    await expect(pane.getByText(`Version ${version}`, { exact: true })).toBeVisible();
+    await expect(pane.getByText("Every coding agent you run, on one board.")).toBeVisible();
+    await expect(pane.locator(".about-foot")).toHaveText("Apache-2.0");
+    await expect(pane.getByText(/update/i)).toHaveCount(0);
+    await expect(pane.getByText(/ runs /)).toHaveCount(0);
+    await expect(pane.getByRole("button")).toHaveCount(0);
+    await expect(pane.getByRole("switch")).toHaveCount(0);
+    await expect(pane.getByRole("link", { name: "Release notes" })).toBeVisible();
+    expect(asked.filter((p) => p.startsWith("/api/ui/update"))).toEqual([]);
+    // The sidebar's Settings button is plain: no update to mark.
+    const settings = page.locator("nav.rail a[data-nav='settings']");
+    await expect(settings).toHaveAttribute("aria-label", "Settings");
+    await expect(settings.locator(".nav-dot")).toHaveCount(0);
+  });
+
   test("Simple mode hides Feed and Review from the rail and the card footers, and persists", async ({ page }) => {
     // The counts are Advanced's "Show counts" (off by default): on, so Simple has some to hide.
     await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.board.counts", "1"));

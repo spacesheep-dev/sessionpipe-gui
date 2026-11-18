@@ -46,7 +46,7 @@ test.describe("setup on the demo server (TLS off)", () => {
     page,
   }) => {
     await openPage(page, "/setup");
-    await expect(page.getByRole("heading", { name: "Set up sessionpipe gui" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Setup", exact: true })).toBeVisible();
     const steps = page.locator("li.step");
     await expect(steps).toHaveCount(6);
     for (const [i, k] of ["sessions", "secure", "pair", "phone", "try", "remote"].entries())
@@ -172,7 +172,7 @@ test.describe("setup on the demo server (TLS off)", () => {
     test("a device that never saw setup is sent from / to /setup once; Skip setup remembers", async ({ page }) => {
       await page.goto("/");
       await expect(page).toHaveURL(/\/setup$/, { timeout: 15_000 });
-      await expect(page.getByRole("heading", { name: "Set up sessionpipe gui" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Setup", exact: true })).toBeVisible();
       expect(await page.evaluate((k) => localStorage.getItem(k), SETUP_SEEN_KEY)).toBe("1");
       // The second visit stays on the board.
       await page.goto("/");

@@ -2,10 +2,11 @@
 // Settings › App (NATIVE-SPEC §3.9): the section only the native app has, in the
 // Settings window's own grammar (inset groups, a label and one caption per row, the
 // control on the trailing edge). Backed by the shell's app_settings_*, the receivers, the
-// notification permission, the updater and identity's signing panel. The app's own
-// notifications (SystemNotifications) are the phone's group here; on a Mac they lead
-// Settings › Notifications instead (components/NotificationsSettings.tsx), above the sounds.
-import { type ComponentType, lazy, Suspense, useEffect, useState } from "react";
+// notification permission and identity's signing panel. The app's own notifications
+// (SystemNotifications) are the phone's group here; on a Mac they lead Settings ›
+// Notifications instead (components/NotificationsSettings.tsx), above the sounds. The
+// app's own update (UpdatesGroup) is Settings › About's, under the version it replaces.
+import { type ComponentType, lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ActionButton, Toggle } from "../components/bits";
 import { Select } from "../components/Select";
 import { Group, Row } from "../components/SettingsWindow";
@@ -33,8 +34,10 @@ import {
   notifyToggle,
   parseAddress,
   settingsApp,
+  updateButton,
   updateHint,
   updateLine,
+  updateNotes,
 } from "./logic";
 import { features, platform, shellInfo } from "./shell";
 import "./native.css";
@@ -71,7 +74,6 @@ export default function AppSettings() {
   useEffect(() => {
     void loadSettings();
     void loadReceivers();
-    void loadUpdate();
   }, []);
   const set = (p: Partial<Settings>) => void patchSettings(p).catch(() => {});
   return (
@@ -149,8 +151,6 @@ export default function AppSettings() {
           <Signing receiverId={info.receiver.id} />
         </Suspense>
       )}
-
-      {f.has("updater") && <UpdatesGroup appVersion={info?.appVersion ?? ""} s={s} set={set} />}
     </>
   );
 }
@@ -364,40 +364,75 @@ function ReceiversGroup({ current }: { current: string | null }) {
   );
 }
 
-function UpdatesGroup({
-  appVersion,
-  s,
-  set,
-}: {
-  appVersion: string;
-  s: Settings | null;
-  set: (p: Partial<Settings>) => void;
-}) {
+/** The app's own update, one sentence a state (logic.ts updateLine) with the one thing to
+ *  press, if any: Check now, Install and relaunch once it is downloaded, Try again after a
+ *  failure. It asks the shell where the update is as it mounts, so it is right wherever it
+ *  shows first. */
+export function UpdateRow({ appVersion }: { appVersion: string }) {
   const u = useCell(update);
+  useEffect(() => {
+    void loadUpdate();
+  }, []);
+  const hint = updateHint(u);
+  const notes = updateNotes(u);
+  const button = updateButton(u);
+  // The button goes while the app is at work and is back when that ends. A keyboard's place
+  // stays in the row meanwhile, so Tab goes on from here, and returns to the button; not to
+  // Install and relaunch, which nobody was about to press.
+  const ctl = useRef<HTMLSpanElement>(null);
+  const held = !!ctl.current?.contains(document.activeElement);
+  useLayoutEffect(() => {
+    const el = ctl.current;
+    if (!held || !el || el.querySelector(":focus")) return;
+    const next = u.state === "ready" ? null : el.querySelector("button");
+    (next ?? el).focus();
+  }, [held, u.state]);
   return (
-    <Group label="Updates">
+    <Row
+      label={updateLine(appVersion, u)}
+      hint={
+        notes ? (
+          <a href={notes} target="_blank" rel="noreferrer noopener">
+            {hint} ↗
+          </a>
+        ) : (
+          hint || undefined
+        )
+      }
+    >
+      <span className="app-update-ctl" ref={ctl} tabIndex={-1}>
+        {u.state === "ready" ? (
+          <ActionButton className="btn btn--sm btn--primary" onClick={() => invoke("app_update_restart")}>
+            {button}
+          </ActionButton>
+        ) : button ? (
+          <ActionButton className="btn btn--sm" onClick={async () => update.set(await invoke("app_update_check"))}>
+            {button}
+          </ActionButton>
+        ) : null}
+      </span>
+    </Row>
+  );
+}
+
+/** Settings › About's updates, in an app that updates itself (the page fetches this only
+ *  there): where the update is, then whether the app looks by itself. It stands on its own,
+ *  with the app's settings asked for here. */
+export function UpdatesGroup({ appVersion }: { appVersion: string }) {
+  const s = useCell(settings);
+  useEffect(() => {
+    void loadSettings();
+  }, []);
+  return (
+    <Group>
+      <UpdateRow appVersion={appVersion} />
       <Row label="Check for updates automatically" hint="On launch and every 6 hours.">
         <Toggle
           label="Check for updates automatically"
           on={s?.autoUpdate ?? true}
           disabled={!s}
-          onChange={(on) => set({ autoUpdate: on })}
+          onChange={(on) => void patchSettings({ autoUpdate: on }).catch(() => {})}
         />
-      </Row>
-      <Row label={updateLine(appVersion, u)} hint={updateHint(appVersion, u) || undefined}>
-        {u.state === "ready" ? (
-          <ActionButton className="btn btn--sm btn--primary" onClick={() => invoke("app_update_restart")}>
-            Install and relaunch
-          </ActionButton>
-        ) : (
-          <ActionButton
-            className="btn btn--sm"
-            disabled={u.state === "checking" || u.state === "downloading"}
-            onClick={async () => update.set(await invoke("app_update_check"))}
-          >
-            Check now
-          </ActionButton>
-        )}
       </Row>
     </Group>
   );
