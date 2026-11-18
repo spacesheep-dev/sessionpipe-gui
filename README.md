@@ -493,9 +493,9 @@ Everything is under `~/.local/state/sessionpipe-gui/` (or `--state DIR`):
 | `events/<harness>/<session>.jsonl` | One append-only file per session, the full events; the index is rebuilt at boot |
 | `search/` | The search index: what the receiver holds, and this machine's history unless it is off |
 | `config.json` | The sink token, the UI key, TLS and public url, which extensions are on or off |
-| `control/` | Paired machines (token hashes), their queues, and files a new session carries until the machine fetches them |
+| `control/` | Paired machines (token hashes), their queues, and the files a new session or a message carries (its pictures) until the machine fetches them |
 | `tls/` | The local CA and certificate (`--tls`) |
-| `attachments/` | Images sent from the composer |
+| `attachments/` | Images sent from the composer to a session whose sessionpipe is older than 0.10 |
 | `labels.json` | Your colour labels |
 | `themes/`, `skins/`, `plugins/` | Installed extensions, with their settings (mode 0600) beside them |
 

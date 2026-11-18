@@ -595,8 +595,9 @@ export const MODEL_MAX = 100;
 export const validModel = (m: unknown): m is string =>
   typeof m === "string" && m.length >= 1 && m.length <= MODEL_MAX && MODEL_RE.test(m);
 
-/** One file a `start` names (CONTROL.md §3.1 `files`): the receiver holds the bytes under
- *  `sha256` (base64url, 43 characters) and the machine fetches them with its token. */
+/** One file a `start` or a `prompt` names (CONTROL.md §3.1 `files`): the receiver holds the
+ *  bytes under `sha256` (base64url, 43 characters) and the machine fetches them with its
+ *  token. */
 export interface StartFile {
   name: string;
   type: string;
@@ -607,6 +608,13 @@ export interface StartFile {
 export const START_FILES_MAX = 10;
 export const START_FILE_MAX_BYTES = 26_214_400;
 export const START_FILES_TOTAL_BYTES = 52_428_800;
+/** What POST ROUTES.ui.control + "/files" answers: the entry a signed command names, and
+ *  for a picture (PNG, JPEG, GIF, WebP) its size in pixels, read from its own bytes. Only
+ *  the four fields of `StartFile` go into a command; an older receiver sends no pixels. */
+export interface UploadedFile extends StartFile {
+  width?: number;
+  height?: number;
+}
 
 export interface Stats {
   events: number;
@@ -1333,9 +1341,10 @@ export interface RemoteInfo {
 
 export type AttachmentType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
-/** An image uploaded from the composer (POST ROUTES.ui.attachments). The control
- *  protocol carries text only, so the prompt names it instead: by `path` when the
- *  session runs on this machine, by `url` otherwise (shared/attachments.ts). */
+/** An image uploaded from the composer (POST ROUTES.ui.attachments) for a session whose
+ *  daemon takes no files on a prompt and runs on this machine: the prompt's text names it
+ *  by `path` (shared/attachments.ts). Every other machine gets pictures as the command's
+ *  `files` (`UploadedFile`), and nothing of them is in the text. */
 export interface Attachment {
   /** A ULID; the file is `<id>.<ext>` under `<stateDir>/attachments`. */
   id: string;
@@ -1343,17 +1352,19 @@ export interface Attachment {
   ext: "png" | "jpg" | "gif" | "webp";
   /** Absolute path on the machine the GUI runs on. */
   path: string;
-  /** Absolute URL another machine can fetch: the https origin when TLS is on, else the
-   *  first LAN URL, with `?k=<ui key>` so no cookie is needed. */
+  /** Where this board's own pages show it from: `/attachments/<id>.<ext>`, a path with no
+   *  origin and no key in it (the page's cookie or loopback lets it in). Never written into
+   *  a prompt. */
   url: string;
   width: number;
   height: number;
   bytes: number;
 }
 
-/** One image at most; the composer refuses a bigger file before uploading. */
+/** One image at most where the prompt names it by path; the composer refuses a bigger file
+ *  before uploading. A picture that goes as a file may be START_FILE_MAX_BYTES. */
 export const ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
-/** Images per message. */
+/** Images per message, either way. */
 export const ATTACHMENTS_PER_MESSAGE = 6;
 export const ATTACHMENT_TYPES: Record<AttachmentType, Attachment["ext"]> = {
   "image/png": "png",
@@ -1598,7 +1609,7 @@ export interface ControlActivity {
   /** A start's level and model, as signed (what was asked, never what ran). */
   permission?: StartPermission;
   model?: string;
-  /** A start's files, as signed. */
+  /** A start's files, or a prompt's (the pictures sent beside a message), as signed. */
   files?: StartFile[];
   /** What the machine ran it with, from its `taken` / `delivered` ack (sessionpipe 0.10);
    *  `inherit` when it ran with no permission flag. */
@@ -1784,7 +1795,9 @@ export const ROUTES = {
     /** GET → image/svg+xml: the LAN URL with the UI key, for a phone camera. */
     qr: "/api/ui/qr.svg",
     /** Everything under it is the control channel's UI side (server/control/README.md),
-     *  POST /files among it: one file a start will carry, as the raw body → StartFile. */
+     *  POST /files?name=&machine= among it: one file a start or a prompt will carry, as the
+     *  raw body → UploadedFile. `machine` (the machine it is for) is taken and not read yet.
+     *  415 `not_an_image` for bytes that are not the picture their content-type says. */
     control: "/api/ui/control",
     /** GET → { viewers: Viewer[] } */
     viewers: "/api/ui/viewers",

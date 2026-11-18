@@ -244,7 +244,8 @@ export interface MessageRow {
   ackSession?: string;
   /** The final ack's `copy_of`: the session the command named, when a copy of it answered. */
   copyOf?: string;
-  /** A start's signed folder, options and files, for the starting page and a retry. */
+  /** A start's signed folder, options and files, for the starting page and a retry; a
+   *  prompt's signed files too. */
   cwd?: string;
   permission?: StartPermission;
   model?: string;
@@ -484,13 +485,18 @@ export function messageRow(
   if (cmd.kind === "start") {
     // The fields a start may carry beyond core 0.7's type (CONTROL.md §3.1); the caller's
     // pre-check (ui.ts) already held them to the machine's hello.
-    const c = cmd as ControlCommand & { files?: StartFile[]; permission?: StartPermission; model?: string };
+    const c = cmd as ControlCommand & { permission?: StartPermission; model?: string };
     if (typeof c.cwd === "string") row.cwd = c.cwd;
     if (c.permission) row.permission = c.permission;
     if (c.model) row.model = c.model;
-    if (Array.isArray(c.files) && c.files.length) {
-      row.files = c.files.map((f) => ({ name: f.name, type: f.type, size: f.size, sha256: f.sha256 }));
-    }
+  }
+  // A start's files, and a prompt's (the pictures sent beside a message): the row names
+  // them, so their bytes are kept as long as the row (state.ts enqueue) and the page can
+  // say what a message carried.
+  if (cmd.kind === "start" || cmd.kind === "prompt") {
+    const files = (cmd as ControlCommand & { files?: StartFile[] }).files;
+    if (Array.isArray(files) && files.length)
+      row.files = files.map((f) => ({ name: f.name, type: f.type, size: f.size, sha256: f.sha256 }));
   }
   return row;
 }

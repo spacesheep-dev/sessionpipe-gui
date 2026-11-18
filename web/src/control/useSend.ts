@@ -184,7 +184,8 @@ export interface SessionSend {
 }
 
 /** What was pressed for a send: the composer as it was (when it was typed there), the
- *  fields that were signed, and the attachment lines the page wrote into the message. */
+ *  fields that were signed (a message's pictures among them, where they go as files), and
+ *  the attachment lines the page wrote into the message where they go as paths. */
 interface Pressed {
   typed?: string;
   fields?: CommandFields;
@@ -292,10 +293,13 @@ export function useSessionSend(
       // spacesheep holds it for a confirm, and it is known that no job was made: the hold's
       // own notice, with its Confirm, as if the send's answer had been heard. One press.
       // (After a reload the page no longer has what was pressed; a message's fields are its
-      // row's own, so its notice comes all the same. An answer's are not, and it reads as
-      // the refusal.)
+      // row's own, its pictures among them, so its notice comes all the same. An answer's are
+      // not, and it reads as the refusal.)
       const again: CommandFields | undefined =
-        was.fields ?? (a.kind === "prompt" && a.text ? { kind: "prompt", session: key, text: a.text } : undefined);
+        was.fields ??
+        (a.kind === "prompt" && a.text
+          ? { kind: "prompt", session: key, text: a.text, ...(a.files?.length ? { files: a.files } : {}) }
+          : undefined);
       if (a.unheard?.state === "unsent" && a.code === "confirm_required" && notice && again && rp && machineId) {
         const fields = again;
         const refusal = new ControlError(a.unheard.status ?? 422, a.unheard.reason ?? "", a.code, a.detail);
@@ -320,7 +324,7 @@ export function useSessionSend(
       setError(null);
       if (a.kind === "prompt")
         confirmedNow.current?.(
-          { kind: "prompt", session: key, text: a.text ?? "" },
+          { kind: "prompt", session: key, text: a.text ?? "", ...(a.files?.length ? { files: a.files } : {}) },
           typed ?? JSON.stringify([a.text ?? "", []]),
         );
     }
@@ -336,7 +340,13 @@ export function useSessionSend(
       let fields: CommandFields;
       switch (action.kind) {
         case "prompt":
-          fields = { kind: "prompt", session: key, text: action.text };
+          // Its pictures, where they go as files: inside the signed bytes, never in the text.
+          fields = {
+            kind: "prompt",
+            session: key,
+            text: action.text,
+            ...(action.files?.length ? { files: action.files } : {}),
+          };
           break;
         case "permission.answer":
           fields = {

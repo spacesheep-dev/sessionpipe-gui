@@ -247,6 +247,30 @@ test("this phone's key is asked to be trusted through the hub; once the computer
   await expect(box).toHaveValue("");
 });
 
+test("a picture can't go to a computer reached through spacesheep yet: no paperclip, and a pasted one is answered under the field", async () => {
+  const box = composer();
+  await expect(box).toBeEnabled();
+  await expect(page.locator("input[data-attach-input]")).toHaveCount(0);
+  const line = page.locator(".ctl-foot[data-reason=pictures-off] .ctl-hint");
+  await expect(line).toHaveCount(0);
+  const prevented = await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "image.png", { type: "image/png" }));
+    const ev = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+    document.querySelector(".ctl-ask textarea")!.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  });
+  // Nothing is taken, so nothing is prevented, and the line says why the picture did not go.
+  expect(prevented).toBe(false);
+  await expect(line).toHaveText(`Pictures can't be sent to ${NAME} through spacesheep from here yet.`);
+  await expect(page.locator(".att-item")).toHaveCount(0);
+  // It answers the paste; once the person writes on, it goes. (Nothing was asked of the hub
+  // for it: the last test of this story reads every door that was.)
+  await box.fill("In words, then");
+  await expect(line).toHaveCount(0);
+  await box.fill("");
+});
+
 test("a message whose answer never comes back is not said to be not sent: it went once, and its reply arrives", async () => {
   // spacesheep takes the message and its answer is lost on the way back to the phone.
   hub.unheard = 1;

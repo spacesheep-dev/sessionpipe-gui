@@ -27,8 +27,10 @@ export const KEY_STORE_SESSION = "sessionpipe:keys";
 export type CommandFields =
   /** `replyTo` (CONTROL.md §3.1 `reply_to`, a handoff): the session on the same machine
    *  the daemon relays the answer into. Inside the signed bytes; only when the machine's
-   *  hello said `handoff` (orchestrate/handoff decides). */
-  | { kind: "prompt"; session: string; text: string; replyTo?: SessionKey }
+   *  hello said `handoff` (orchestrate/handoff decides). `files`: the pictures sent beside
+   *  the message, held by the receiver under their hashes; only when the hello said
+   *  `prompt_files` (Attachments.tsx `pictureMode` decides). */
+  | { kind: "prompt"; session: string; text: string; files?: StartFile[]; replyTo?: SessionKey }
   | { kind: "permission.answer"; session: string; for: string; decision: "allow" | "deny"; note?: string }
   | { kind: "cancel"; session: string; note?: string }
   /** `files`, `permission` and `model` only when the machine's hello advertised them
@@ -50,6 +52,11 @@ export type CommandFields =
    *  for order (every account id), `code` for login.complete (the pasted `code#state`). */
   | { kind: "pool"; action: PoolAction; account?: string; order?: string[]; code?: string };
 
+/** A command's `files` as CONTROL.md §3.1 writes each: its four fields and nothing else an
+ *  upload's answer may hold beside them (a picture's pixels, or anything a receiver adds). */
+const signedFiles = (files: readonly StartFile[]): StartFile[] =>
+  files.map((x) => ({ name: x.name, type: x.type, size: x.size, sha256: x.sha256 }));
+
 /** The command string, fields in the spec's order, no field a kind does not own. */
 export function commandString(machine: string, f: CommandFields): string {
   const session = f.kind === "key.add" ? KEY_STORE_SESSION : f.kind === "pool" ? POOL_SESSION : f.session;
@@ -57,6 +64,8 @@ export function commandString(machine: string, f: CommandFields): string {
   switch (f.kind) {
     case "prompt":
       o.text = f.text;
+      // Never an empty list: `files` absent is no files, an empty one is malformed.
+      if (f.files?.length) o.files = signedFiles(f.files);
       if (f.replyTo) o.reply_to = f.replyTo;
       break;
     case "permission.answer":
@@ -70,8 +79,7 @@ export function commandString(machine: string, f: CommandFields): string {
     case "start":
       o.text = f.text;
       o.cwd = f.cwd;
-      if (f.files?.length)
-        o.files = f.files.map((x) => ({ name: x.name, type: x.type, size: x.size, sha256: x.sha256 }));
+      if (f.files?.length) o.files = signedFiles(f.files);
       if (f.permission) o.permission = f.permission;
       if (f.model) o.model = f.model;
       if (f.replyTo) o.reply_to = f.replyTo;

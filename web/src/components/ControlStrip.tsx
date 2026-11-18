@@ -21,7 +21,7 @@
 // The draft is kept per session. Disabled with its reason until the machine paired and
 // `onSend` is wired (web/src/control/SessionControl.tsx signs and sends). Keep this
 // component self-contained: everything it needs comes through props.
-import type { Attention, MachineControl, SessionSummary, Suggestion } from "@shared/api";
+import type { Attention, MachineControl, SessionSummary, StartFile, Suggestion } from "@shared/api";
 import {
   type KeyboardEvent,
   lazy,
@@ -35,7 +35,14 @@ import {
   useState,
 } from "react";
 import { type Approval, type SendState, sendWords } from "../account/sendable";
-import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachments";
+import {
+  AttachButton,
+  AttachmentTray,
+  pictureMode,
+  picturesOffWords,
+  useAttachments,
+  useThisMachine,
+} from "../control/Attachments";
 import type { AnswerOut } from "../control/answers";
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
 
@@ -69,8 +76,11 @@ const PlanText = lazy(() => import("./PlanText").then((m) => ({ default: m.PlanT
 /** `composer`: what it signs was typed in the composer (a message, Keep planning's note),
  *  so a hold of it depends on the composer and goes when the composer changes. */
 export type ControlAction =
-  /** `attached`: the attachment lines this page wrote into `text` (Attachments compose). */
-  | { kind: "prompt"; text: string; composer?: boolean; attached?: string[] }
+  /** `files`: the pictures sent beside the message, as the command's signed `files`
+   *  (CONTROL.md §3.1); nothing of them is in `text`. `attached`: the attachment lines this
+   *  page wrote into `text` instead, for a machine that takes no files on a prompt
+   *  (Attachments compose). */
+  | { kind: "prompt"; text: string; composer?: boolean; files?: StartFile[]; attached?: string[] }
   | { kind: "permission.answer"; attentionId: string; allow: boolean; note?: string; composer?: boolean }
   | { kind: "cancel"; note?: string };
 
@@ -431,9 +441,20 @@ export function ControlStrip({
   const enabled = paired && !!onSend && !blocked && !stream && approval === "ok";
   // Not approved: the way to approve it stands where Allow and Deny would.
   const approve = paired && !blocked && approval === "unapproved";
-  // Images beside the message (control/Attachments.tsx): paperclip, paste, drop, the phone's picker.
-  // Not offered for a computer reached through spacesheep, unless it is this one (paths).
-  const att = useAttachments({ machine: session.machine, enabled, localOnly: !!control?.remote });
+  // Images beside the message (control/Attachments.tsx): paperclip, paste, drop, the phone's
+  // picker. How they go is the machine's: as the command's files where its sessionpipe takes
+  // them, as paths for an older one on this machine, and not at all anywhere else. There a
+  // picture pasted or dropped is answered by the line under the field, until the words change.
+  const mode = pictureMode(control, useThisMachine(session.machine));
+  const refusedKey = `${session.key}\n${text}`;
+  const [refusedAt, setRefusedAt] = useState<string | null>(null);
+  const picturesOff = mode === "off" && refusedAt === refusedKey;
+  const att = useAttachments({
+    machineId: control?.machineId,
+    enabled,
+    mode,
+    onRefused: () => setRefusedAt(refusedKey),
+  });
   // A held message confirmed from its notice (control/HeldNotice.tsx) went: the composer
   // is clear, as after Send. Until then its words stayed here.
   const clearAtt = att.clear;
@@ -485,6 +506,20 @@ export function ControlStrip({
   const reason = ((): Reason | null => {
     if (note)
       return { kind: noteKind === "err" ? "error" : "note", text: note, tone: noteKind === "err" ? "err" : undefined };
+    if (picturesOff) {
+      // The sentence, with the command it names set as one.
+      const [words, command, rest] = picturesOffWords(name, !!control?.remote).split("`");
+      return {
+        kind: "pictures-off",
+        text: (
+          <>
+            <WithName text={words ?? ""} name={session.machine} />
+            {command && <code>{command}</code>}
+            {rest}
+          </>
+        ),
+      };
+    }
     if (wrong)
       return {
         kind: "wrong-origin",
@@ -704,10 +739,18 @@ export function ControlStrip({
     if (review) return canSend ? keep("prompt", review.attentionId) : undefined;
     const t = text.trim();
     if (!t && att.items.length === 0) return;
-    // The signed text: the message, then the attachments block (or null while an upload runs).
+    // What is signed: the message and its pictures, as files or as the block of paths (null
+    // while an upload runs or one failed).
     const composed = att.compose(t);
     if (!composed) return;
-    run("prompt", { kind: "prompt", text: composed.text, composer: true, attached: composed.lines }, () => {
+    const action: ControlAction = {
+      kind: "prompt",
+      text: composed.text,
+      composer: true,
+      ...(composed.files?.length ? { files: composed.files } : {}),
+      attached: composed.lines,
+    };
+    run("prompt", action, () => {
       setText("");
       writeDraft(session.key, "");
       att.clear();
@@ -945,6 +988,8 @@ export function ControlStrip({
               id={reasonId}
               className={`ctl-hint ctl-context ${reason.tone === "err" ? "ctl-note--err" : ""}`}
               data-wrong-origin={reason.kind === "wrong-origin" ? "" : undefined}
+              // It answers something just done (a picture pasted or dropped), so it is said.
+              role={reason.kind === "pictures-off" ? "status" : undefined}
             >
               {reason.text}
             </span>

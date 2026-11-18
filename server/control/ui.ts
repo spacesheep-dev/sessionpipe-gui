@@ -17,9 +17,16 @@ import {
   verifyCommand,
   verifyEnrollment,
 } from "sessionpipe-core/control";
-import { type ControlActivity, START_FILE_MAX_BYTES, type StartFile, type TrustedKey } from "../../shared/api.js";
+import {
+  ATTACHMENT_TYPES,
+  type ControlActivity,
+  START_FILE_MAX_BYTES,
+  type TrustedKey,
+  type UploadedFile,
+} from "../../shared/api.js";
 import type { Ctx, Handler, Reply, Router } from "../http/router.js";
 import { HttpError } from "../http/router.js";
+import { sniffImage } from "../ui/attachments.js";
 import { MEDIA_TYPE_RE } from "./files.js";
 import { CODE_RE, MACHINE_RE, SESSION_REF } from "./parse.js";
 import { looksLikePool, verifyPoolCommand } from "./pool.js";
@@ -470,9 +477,13 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
     }),
   );
 
-  // One file a start will carry (CONTROL.md §3.1, HTTP.md §3): the raw bytes, the file's
-  // media type as content-type, its name in `?name=`. Held a day under its SHA-256 (files.ts);
-  // the answer is the entry the signed command names. Nothing about it is in the text.
+  // One file a start or a prompt will carry (CONTROL.md §3.1, HTTP.md §3): the raw bytes,
+  // the file's media type as content-type, its name in `?name=`. Held a day under its
+  // SHA-256 (files.ts); the answer is the entry the signed command names. Nothing about it
+  // is in the text. A file sent as one of the four picture types is held to its own bytes
+  // (the composer's pictures come this way): what the agent is told is a PNG is one, and
+  // the answer says how many pixels it has. `?machine=` (the machine it is for) is taken
+  // and not read: every file is held here, whichever machine fetches it.
   router.post(
     `${base}/files`,
     guarded(async (ctx): Promise<Reply> => {
@@ -487,13 +498,18 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
       if (!bytes.length) throw new HttpError(400, { reason: "empty", error: "The file is empty." });
       const bad = filesProblem([{ name, type, size: bytes.length, sha256: "A".repeat(43) }]);
       if (bad) throw new HttpError(400, { reason: "bad_name", error: bad });
+      const picture = type in ATTACHMENT_TYPES ? sniffImage(bytes) : null;
+      if (type in ATTACHMENT_TYPES && picture?.type !== type)
+        throw new HttpError(415, { reason: "not_an_image", error: "This file isn't the picture its type says." });
       let held: { sha256: string; size: number };
       try {
         held = state.files.put(bytes, type);
       } catch {
         throw new HttpError(507, { reason: "full", error: "Too many files are held here; try again tomorrow." });
       }
-      return { status: 201, json: { name, type, size: held.size, sha256: held.sha256 } satisfies StartFile };
+      const entry: UploadedFile = { name, type, size: held.size, sha256: held.sha256 };
+      if (picture) Object.assign(entry, { width: picture.width, height: picture.height });
+      return { status: 201, json: entry };
     }),
   );
 
