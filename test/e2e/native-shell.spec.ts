@@ -25,13 +25,23 @@ interface FakeOptions {
   stream?: "real" | "big" | "silent" | "down";
   /** The shell's platform; "macos" unless a test plays another computer. */
   platform?: string;
+  /** What the app's settings.json holds, over the defaults. */
+  settings?: Record<string, boolean>;
 }
 
 /** The fake shell, as an init script (runs before any page script, as the shell's does). */
-type FakeArgs = [boolean, boolean, string[] | undefined, FakeOptions["discover"], FakeOptions["stream"], string];
+type FakeArgs = [
+  boolean,
+  boolean,
+  string[] | undefined,
+  FakeOptions["discover"],
+  FakeOptions["stream"],
+  string,
+  FakeOptions["settings"],
+];
 
 function fakeShell() {
-  return ([hasReceiver, firstRunDone, features, discover, stream = "real", platform]: FakeArgs) => {
+  return ([hasReceiver, firstRunDone, features, discover, stream = "real", platform, saved]: FakeArgs) => {
     const KINDS = [
       "snapshot",
       "event",
@@ -73,6 +83,7 @@ function fakeShell() {
       notifications: { enabled: false, kinds: {}, pausedUntil: null },
       firstRunDone,
       autoUpdate: true,
+      ...saved,
     };
     const send = (id: number, raw: unknown) => callbacks.get(id)?.(raw);
     w.__emit = (event: string, payload: unknown) => {
@@ -180,6 +191,7 @@ async function openInShell(page: Page, path: string, opts: FakeOptions = {}) {
     opts.discover,
     opts.stream,
     opts.platform ?? "macos",
+    opts.settings,
   ];
   await page.addInitScript(fakeShell(), arg);
   await page.goto(path);
@@ -187,6 +199,13 @@ async function openInShell(page: Page, path: string, opts: FakeOptions = {}) {
 
 const calls = (page: Page) =>
   page.evaluate(() => (window as unknown as { __calls: { cmd: string; args: unknown }[] }).__calls.map((c) => c.cmd));
+/** The settings the page last sent to app_settings_set. */
+const settingsSent = (page: Page) =>
+  page.evaluate(() => {
+    const all = (window as unknown as { __calls: { cmd: string; args: { settings?: Record<string, unknown> } }[] })
+      .__calls;
+    return all.filter((c) => c.cmd === "app_settings_set").at(-1)?.args.settings ?? null;
+  });
 const emit = (page: Page, event: string, payload: unknown) =>
   page.evaluate(([e, p]) => (window as unknown as { __emit: (e: string, p: unknown) => void }).__emit(e, p), [
     event,
@@ -318,6 +337,65 @@ test.describe("inside the native shell", () => {
     await page.keyboard.press("Control+Alt+KeyN");
     await expect(pane.getByRole("button", { name: /New session shortcut: ⌃⌥N/ })).toBeVisible();
     expect(await calls(page)).toContain("app_shortcut_set");
+  });
+
+  // "Menu bar only" hides the Dock icon, so it needs the menu bar item: with neither, a
+  // running app shows nowhere. The shell guards the same pair (settings.rs, normalized).
+  test("Settings › App: Menu bar only sits under Show in menu bar and goes with it", async ({ page }) => {
+    await openInShell(page, "/settings?section=app");
+    const general = page.getByRole("tabpanel", { name: "App" }).getByRole("region", { name: "General" });
+    const rows = general.locator(".settings-label");
+    await expect(rows).toHaveText([
+      "Open at login",
+      "Show in menu bar",
+      "Menu bar only",
+      "Show count on the Dock icon",
+      "Keep running when the window is closed",
+    ]);
+    const only = general.getByRole("switch", { name: "Menu bar only" });
+    await expect(only).toBeEnabled();
+    await only.click();
+    await expect(only).toHaveAttribute("aria-checked", "true");
+    // No Dock icon, so no count on it to offer.
+    await expect(rows).toHaveText([
+      "Open at login",
+      "Show in menu bar",
+      "Menu bar only",
+      "Keep running when the window is closed",
+    ]);
+    await general.getByRole("switch", { name: "Show in menu bar" }).click();
+    await expect(rows).toHaveText([
+      "Open at login",
+      "Show in menu bar",
+      "Show count on the Dock icon",
+      "Keep running when the window is closed",
+    ]);
+    // One patch turns both off: the app is never asked for the pair that hides it.
+    expect(await settingsSent(page)).toMatchObject({ menuBar: false, menuBarOnly: false });
+    await expect(general.getByRole("switch", { name: "Show count on the Dock icon" })).toBeEnabled();
+    // Back on, it comes back off.
+    await general.getByRole("switch", { name: "Show in menu bar" }).click();
+    await expect(general.getByRole("switch", { name: "Menu bar only" })).toHaveAttribute("aria-checked", "false");
+  });
+
+  test("Settings › App: in Menu bar only there is no Dock count to switch", async ({ page }) => {
+    await openInShell(page, "/settings?section=app", { settings: { menuBarOnly: true } });
+    const general = page.getByRole("tabpanel", { name: "App" }).getByRole("region", { name: "General" });
+    await expect(general.getByRole("switch", { name: "Menu bar only" })).toHaveAttribute("aria-checked", "true");
+    await expect(general.getByText("Show count on the Dock icon")).toHaveCount(0);
+    await expect(general.getByRole("switch", { name: "Keep running when the window is closed" })).toBeVisible();
+  });
+
+  test("on Windows Settings › App has no Menu bar only", async ({ page }) => {
+    await openInShell(page, "/settings?section=app", { platform: "windows" });
+    const general = page.getByRole("tabpanel", { name: "App" }).getByRole("region", { name: "General" });
+    await expect(general.locator(".settings-label")).toHaveText([
+      "Open at login",
+      "Show in menu bar",
+      "Show count on the Dock icon",
+      "Keep running when the window is closed",
+    ]);
+    await expect(general.getByRole("switch", { name: "Show count on the Dock icon" })).toBeEnabled();
   });
 
   test("an installed view opens in its own window", async ({ page }) => {

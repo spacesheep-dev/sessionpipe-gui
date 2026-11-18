@@ -66,6 +66,15 @@ impl Default for AppSettings {
     }
 }
 
+impl AppSettings {
+    /// Menu bar only needs the menu bar item (and is a Mac idea): without the item nothing
+    /// would show the app is running, no Dock icon, no menu bar item and no app menu.
+    pub fn normalized(mut self) -> Self {
+        self.menu_bar_only &= self.menu_bar && cfg!(target_os = "macos");
+        self
+    }
+}
+
 pub fn path(home: &Path) -> PathBuf {
     home.join("settings.json")
 }
@@ -73,8 +82,9 @@ pub fn path(home: &Path) -> PathBuf {
 pub fn load(home: &Path) -> AppSettings {
     std::fs::read(path(home))
         .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
+        .and_then(|b| serde_json::from_slice::<AppSettings>(&b).ok())
         .unwrap_or_default()
+        .normalized()
 }
 
 pub fn save(home: &Path, s: &AppSettings) -> std::io::Result<()> {
@@ -131,7 +141,35 @@ mod tests {
         std::fs::write(path(&dir), br#"{"menuBar":false,"future":1}"#).unwrap();
         let l = load(&dir);
         assert!(!l.menu_bar && l.dock_badge && l.auto_update);
+        // A file saved before the two were tied: it can't start the app hidden.
+        std::fs::write(path(&dir), br#"{"menuBar":false,"menuBarOnly":true}"#).unwrap();
+        let l = load(&dir);
+        assert!(!l.menu_bar && !l.menu_bar_only);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn menu_bar_only_needs_the_menu_bar_item() {
+        let only = |menu_bar| {
+            AppSettings {
+                menu_bar,
+                menu_bar_only: true,
+                ..Default::default()
+            }
+            .normalized()
+            .menu_bar_only
+        };
+        assert!(!only(false));
+        // With the item it stays on a Mac; nowhere else is there a Dock icon to hide.
+        assert_eq!(only(true), cfg!(target_os = "macos"));
+        // Nothing else changes, and off stays off.
+        let s = AppSettings {
+            menu_bar: false,
+            keep_running: false,
+            ..Default::default()
+        };
+        assert_eq!(s.clone().normalized(), s);
+        assert_eq!(AppSettings::default().normalized(), AppSettings::default());
     }
 
     #[test]

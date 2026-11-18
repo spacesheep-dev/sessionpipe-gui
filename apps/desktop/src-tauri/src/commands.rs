@@ -258,6 +258,8 @@ pub fn apply_settings<R: Runtime>(
     // The shortcut goes through its own command (it can fail to register).
     next.hotkey = prev.hotkey.clone();
     next.first_run_done = next.first_run_done || prev.first_run_done;
+    // Before the menu bar and Dock below: the item going also brings the Dock icon back.
+    next = next.normalized();
     if next.launch_at_login != prev.launch_at_login {
         #[cfg(target_os = "macos")]
         crate::macos::login_item::set(next.launch_at_login)?;

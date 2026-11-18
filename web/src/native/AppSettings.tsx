@@ -88,15 +88,26 @@ export default function AppSettings() {
         )}
         {f.has("tray") && (
           <Row label="Show in menu bar" hint="How many sessions need you, with the window closed too.">
-            <Toggle label="Show in menu bar" on={!!s?.menuBar} disabled={!s} onChange={(on) => set({ menuBar: on })} />
+            <Toggle
+              label="Show in menu bar"
+              on={!!s?.menuBar}
+              disabled={!s}
+              // Menu bar only goes off with it: no item and no Dock icon is an app that shows nowhere.
+              onChange={(on) => set(on ? { menuBar: true } : { menuBar: false, menuBarOnly: false })}
+            />
           </Row>
         )}
-        {desktop && (
+        {f.has("tray") && platform() === "macos" && s?.menuBar && (
+          <Row label="Menu bar only" hint="Hides the Dock icon.">
+            <Toggle label="Menu bar only" on={s.menuBarOnly} onChange={(on) => set({ menuBarOnly: on })} />
+          </Row>
+        )}
+        {desktop && !s?.menuBarOnly && (
           <Row label="Show count on the Dock icon">
             <Toggle
               label="Show count on the Dock icon"
               on={!!s?.dockBadge}
-              disabled={!s || !!s.menuBarOnly}
+              disabled={!s}
               onChange={(on) => set({ dockBadge: on })}
             />
           </Row>
@@ -108,16 +119,6 @@ export default function AppSettings() {
               on={!!s?.keepRunning}
               disabled={!s}
               onChange={(on) => set({ keepRunning: on })}
-            />
-          </Row>
-        )}
-        {f.has("tray") && (
-          <Row label="Menu bar only" hint="Hides the Dock icon.">
-            <Toggle
-              label="Menu bar only"
-              on={!!s?.menuBarOnly}
-              disabled={!s}
-              onChange={(on) => set({ menuBarOnly: on })}
             />
           </Row>
         )}

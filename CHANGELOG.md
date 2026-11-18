@@ -224,6 +224,17 @@ pairing link that carries the board's key only for a pairing the sink token star
   is answered once `--public-url` names its address and it sends `X-Forwarded-For`; one
   over plain http must pass on the `Host` it was asked for.
 
+### Fixed
+
+- **"Menu bar only" can no longer hide the Mac app completely.** With "Show in menu bar"
+  off and "Menu bar only" on, the app ran with no Dock icon, no menu bar item and no app
+  menu. "Menu bar only" now sits under "Show in menu bar" and shows only while that is
+  on; turning the menu bar item off turns it off too and brings the Dock icon back, and an
+  app saved in that state opens with its Dock icon. While there is no Dock icon,
+  "Show count on the Dock icon" is not shown, where it was greyed without a reason. On
+  Windows and Linux "Menu bar only" is gone: all it did there was switch off the taskbar
+  count.
+
 ## [0.8.4] - 2026-11-17
 
 The iPhone app on a spacesheep account, refined: every screen agrees on whether the
