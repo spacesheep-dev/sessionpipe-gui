@@ -4,16 +4,18 @@
 // (SSE, static files) and return nothing.
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { gzipSync } from "node:zlib";
-import { isLoopback } from "./net.js";
+import { isLoopback, isThisMachine } from "./net.js";
 
 export interface Ctx {
   req: IncomingMessage;
   res: ServerResponse;
   url: URL;
   params: Record<string, string>;
-  /** Remote address, and whether it is this machine. `forwarded`: the address came from a
-   *  trusted proxy's X-Forwarded-For (Router.trustProxy), so the visitor is not this machine
-   *  even though the socket is loopback. */
+  /** Remote address, and whether it is this machine. `forwarded`: the request came through
+   *  the trusted proxy (Router.trustProxy), so `ip` is the address the proxy named in
+   *  X-Forwarded-For (the socket's own when it named none) and `loopback` is false,
+   *  whatever that address is: the visitor is never this machine, though the socket is.
+   *  A route that acts on this machine asks `forwarded` before it reads anything into `ip`. */
   remote: { ip: string; loopback: boolean; forwarded: boolean };
   /** The raw body, read once and cached. Rejects with { status: 413 } over `maxBytes`. */
   body: (maxBytes?: number) => Promise<Buffer>;
@@ -81,22 +83,22 @@ export class Router {
   }
 
   /** Whether a reverse proxy on this machine (Tailscale's `tailscale serve`, --public-url)
-   *  forwards to us: then a connection from loopback carrying X-Forwarded-For is the
-   *  visitor it names, never this machine. A header on a non-loopback socket is ignored,
-   *  and a forwarded loopback address stays loopback (the proxy's own machine). */
+   *  forwards to us: then a connection from this machine (loopback, or one of its own
+   *  addresses) that carries a forwarding header came through it, and is the visitor the
+   *  proxy names, never this machine. The proxy's own word is the last address in
+   *  X-Forwarded-For (`proxyEntry`). Whatever that address is, this machine's own
+   *  included, the request stays a visitor's: the proxy says who reached it, and that may
+   *  be another proxy in front of it. A header on a connection from another machine, or
+   *  with no trusted proxy, is ignored. */
   trustProxy: () => boolean = () => false;
 
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://local");
     let ip = req.socket.remoteAddress ?? "";
     let forwarded = false;
-    if (isLoopback(ip) && this.trustProxy()) {
-      const xff = req.headers["x-forwarded-for"];
-      const first = (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0]?.trim();
-      if (first && !isLoopback(first)) {
-        ip = first;
-        forwarded = true;
-      }
+    if (this.trustProxy() && FORWARDING.some((h) => req.headers[h] !== undefined) && isThisMachine(ip)) {
+      forwarded = true;
+      ip = proxyEntry(req.headers["x-forwarded-for"]) || ip;
     }
     const ctx = makeCtx(req, res, url, ip, forwarded);
     try {
@@ -118,6 +120,24 @@ export class Router {
       }
     }
   }
+}
+
+/** What a proxy puts on a request it forwards: any one of these says the request came
+ *  through one. X-Forwarded-For names the visitor; the others only say there was a proxy. */
+const FORWARDING = ["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "forwarded", "x-real-ip"] as const;
+
+/** What the proxy itself wrote in an X-Forwarded-* header: the last entry. A proxy appends
+ *  its own (for X-Forwarded-For, the address it took the connection from) to whatever the
+ *  header already held (nginx, Apache, HAProxy, Cloudflare), or writes its own alone
+ *  (Tailscale, Caddy), so the last entry is the proxy's word and every entry before it is
+ *  the sender's. A header sent on several lines reads the same. Undefined when the request
+ *  carries no such header, or one with nothing in it. */
+export function proxyEntry(header: string | string[] | undefined): string | undefined {
+  return (Array.isArray(header) ? header.join(",") : header)
+    ?.split(",")
+    .map((e) => e.trim())
+    .filter(Boolean)
+    .pop();
 }
 
 function matchParts(pattern: string[], parts: string[]): Record<string, string> | null {
@@ -218,7 +238,7 @@ function makeCtx(req: IncomingMessage, res: ServerResponse, url: URL, ip: string
     res,
     url,
     params: {},
-    remote: { ip, loopback: isLoopback(ip), forwarded },
+    remote: { ip, loopback: !forwarded && isLoopback(ip), forwarded },
     body,
     json: async <T>(maxBytes?: number) => {
       const b = await body(maxBytes);

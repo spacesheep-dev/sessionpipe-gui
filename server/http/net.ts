@@ -6,6 +6,24 @@ export function isLoopback(ip: string): boolean {
   return v === "127.0.0.1" || v === "::1" || v.startsWith("127.");
 }
 
+/** Every address of this machine's interfaces, IPv4 and IPv6, zone ids dropped. */
+export function ownAddresses(): string[] {
+  const out: string[] = [];
+  for (const addrs of Object.values(os.networkInterfaces()))
+    for (const a of addrs ?? []) out.push(a.address.replace(/%.*$/, ""));
+  return out;
+}
+
+const plainIp = (ip: string): string => ip.replace(/^::ffff:/i, "").replace(/%.*$/, "");
+
+/** A request from `ip` was made on this machine: loopback, or one of its own addresses
+ *  (the Mac's browser reaching https://<name>.local:7373 arrives from the LAN address). */
+export function isThisMachine(ip: string, addresses: string[] = ownAddresses()): boolean {
+  if (isLoopback(ip)) return true;
+  const p = plainIp(ip);
+  return addresses.some((a) => plainIp(a) === p);
+}
+
 /** A self-assigned address (169.254/16): no DHCP answered on that link, so nothing else
  *  on the network reaches it. */
 export const isLinkLocal = (ip: string): boolean => ip.startsWith("169.254.");

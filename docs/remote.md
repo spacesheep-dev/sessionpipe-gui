@@ -33,8 +33,10 @@ Tailscale running. The url's host becomes the passkeys' rp id, so use that one a
 the Wi-Fi too; passkeys made for another name are made again on first use.
 
 Behind the proxy the server trusts `X-Forwarded-For`, `-Proto` and `-Host` only on
-connections from loopback. A phone coming through it still needs the UI key, and Setup's
-actions still answer only on this machine.
+connections from this machine. The visitor's address is the last one in
+`X-Forwarded-For`, the one the proxy itself wrote. Whoever comes through the proxy needs
+the UI key, a browser on this machine too, and Setup's actions answer only at
+`http://localhost:7373/setup`.
 
 ## Sending, way 2: the same Wi-Fi, with the GUI's own certificate
 
@@ -92,6 +94,9 @@ browser where the board is already open, and the Machines page lists its request
 ## Other proxies and tunnels
 
 Any https reverse proxy on this machine that sets `X-Forwarded-For`, `-Proto` and `-Host`
-works the way Tailscale does. A public tunnel (Cloudflare, ngrok) works too, but then the UI
+works the way Tailscale does. It must write the address it took the connection from as the
+last entry of `X-Forwarded-For`; appending to the header and replacing it both do. A proxy
+that adds no such header (nginx does not by itself: `proxy_set_header X-Forwarded-For
+$proxy_add_x_forwarded_for;`) hands every visitor on as a program on this machine. A public tunnel (Cloudflare, ngrok) works too, but then the UI
 key and the sink token are all that stand between the internet and your sessions: put an
 access layer in front. Publishing the port itself to the internet is not supported.

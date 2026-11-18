@@ -5,7 +5,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
 import type { Ctx, Reply, Router } from "../http/router.js";
-import { HttpError } from "../http/router.js";
+import { HttpError, proxyEntry } from "../http/router.js";
 import { CODE_RE, MACHINE_RE, POLL_KEY_RE, parseAcks, parseHello } from "./parse.js";
 import { type ControlState, keyOf, type MachineRow, type MessageRow, WAIT_MAX_S } from "./state.js";
 
@@ -51,12 +51,13 @@ const notFound = () => new HttpError(404, { reason: "not_found" });
 
 /** The origin a machine reached us on, for the pairing url the terminal prints and the
  *  WebAuthn origin check. Through a trusted proxy (ctx.remote.forwarded) the proxy's
- *  X-Forwarded-Host and -Proto name the origin the browser saw. */
+ *  X-Forwarded-Host and -Proto name the origin the browser saw; from anyone else the two
+ *  headers are not read. */
 export function requestOrigin(ctx: Ctx): string {
   const h = ctx.req.headers;
-  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)?.split(",")[0]?.trim();
-  const host = (ctx.remote.forwarded ? one(h["x-forwarded-host"]) : undefined) ?? h.host;
-  const proto = one(h["x-forwarded-proto"]) === "https" ? "https" : "http";
+  const via = ctx.remote.forwarded;
+  const host = (via ? proxyEntry(h["x-forwarded-host"]) : undefined) ?? h.host;
+  const proto = via && proxyEntry(h["x-forwarded-proto"]) === "https" ? "https" : "http";
   return host ? `${proto}://${host}` : "http://localhost";
 }
 

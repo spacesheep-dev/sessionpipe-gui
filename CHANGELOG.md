@@ -37,6 +37,16 @@ All notable changes to `sessionpipe-gui`. The format follows
   browser where the board is already open, or approve it on the Machines page, which lists
   every pairing that waits. A pairing the sink token started (Setup's "Pair this machine",
   a machine that has a sink for this GUI, `--token`) gets the link it always did.
+- **Through the proxy of `--public-url`, every request is a visitor's.** The visitor's
+  address is the last one in `X-Forwarded-For`, the one the proxy itself wrote; what
+  stands before it is not read. A request that came through the proxy needs the UI key
+  and is not this machine, whatever address the proxy names for it, and whether the proxy
+  reaches the port on `localhost` or on one of the machine's own addresses. A request
+  marked with `Forwarded`, `X-Real-IP`, `X-Forwarded-Host` or `-Proto` and no
+  `X-Forwarded-For` counts as one too. On the machine that runs the GUI, Setup's actions
+  and the search index's are done at `http://localhost:7373`, not at the proxy's address,
+  and a browser there that a proxy reported as loopback is asked for the key once (the
+  banner's "anywhere" link carries it).
 
 ## [0.8.4] - 2026-11-17
 

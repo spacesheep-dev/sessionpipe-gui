@@ -366,6 +366,22 @@ describe("the pairing link and the board's key", () => {
   });
 });
 
+describe("the origin a request came in on", () => {
+  it("is read from the forwarding headers only through a trusted proxy", async () => {
+    const b = await boot();
+    tmpDirs.push(b.stateDir);
+    try {
+      // No proxy is trusted here: what a caller says of its own origin is not read.
+      const r = await fetch(`${b.url}${UI}/challenge`, {
+        headers: { "x-forwarded-proto": "https", "x-forwarded-host": "board.example" },
+      });
+      expect(((await r.json()) as { origin: string }).origin).toBe(b.url);
+    } finally {
+      await b.close();
+    }
+  });
+});
+
 describe("renewal and expiry", () => {
   it("a renewal keeps one row and kills the old code; an unapproved code expires", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
