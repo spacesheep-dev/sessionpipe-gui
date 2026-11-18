@@ -269,8 +269,13 @@ const ADVANCED_ONLY = new Set(["feed", "review"]);
  *  not offered where the window shows a spacesheep account, which has no receiver. */
 const RECEIVER_ONLY = new Set(["workflows", "connect"]);
 
-/** Builtins first (Setup among them while this machine is not set up), then installed
- *  themes, the experimental ones of both after a divider. `simple` drops Feed and Review. */
+/** The page is the demo: the mock transport runs (mock/index.ts sets the mark), which is
+ *  exactly when the yellow bar shows (mock/banner.ts). */
+const inDemo = (): boolean => !!(globalThis as { __sessionpipeMock?: unknown }).__sessionpipeMock;
+
+/** Builtins first (Setup among them while this machine is not set up, and never in the
+ *  demo, where nothing is a real machine), then installed themes, the experimental ones of
+ *  both after a divider. `simple` drops Feed and Review. */
 export function navItems(
   themes: readonly InstalledTheme[],
   o: { setup?: boolean; simple?: boolean; account?: boolean } = {},
@@ -279,7 +284,7 @@ export function navItems(
   const builtin = BUILTIN.filter(
     (n) => !(o.simple && ADVANCED_ONLY.has(n.key)) && !(o.account && RECEIVER_ONLY.has(n.key)),
   );
-  const all = [...builtin, ...(o.setup && !o.account ? [SETUP_ITEM] : []), ...plugins];
+  const all = [...builtin, ...(o.setup && !o.account && !inDemo() ? [SETUP_ITEM] : []), ...plugins];
   return [...all.filter((n) => !n.experimental), ...all.filter((n) => n.experimental)];
 }
 

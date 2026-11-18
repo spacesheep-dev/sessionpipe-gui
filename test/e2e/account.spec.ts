@@ -839,7 +839,7 @@ test.describe("an account with nothing on it yet, then a session from a computer
     ss3.limit = 240;
   });
 
-  test("the empty board says nothing of a terminal on this machine, a command to type, or sample sessions", async () => {
+  test("the empty board says nothing of a terminal on this machine, a command to type, or a demo", async () => {
     await page3.goto(server3.url);
     await expect(page3.getByText("Waiting for your first session")).toBeVisible();
     await expect(
@@ -847,7 +847,7 @@ test.describe("an account with nothing on it yet, then a session from a computer
     ).toBeVisible();
     // A session can be started on the paired computer: the one way on.
     await expect(page3.getByRole("button", { name: `Start a session on ${NAME}` })).toBeVisible();
-    for (const false_ of [/in any terminal/, /on this machine/, /^claude$/, /Listening/, /sample sessions/, /npx /])
+    for (const false_ of [/in any terminal/, /on this machine/, /^claude$/, /Listening/, /Try the demo/, /npx /])
       await expect(page3.getByText(false_)).toHaveCount(0);
     await expect(page3.getByRole("link", { name: /Pair another machine/ })).toHaveCount(0);
     expect(server3.strays).toEqual([]);

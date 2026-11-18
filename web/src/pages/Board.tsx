@@ -22,7 +22,6 @@ import {
   EmptyState,
   HarnessGlyph,
   Listening,
-  Notice,
   SearchInput,
   Since,
   StateDot,
@@ -47,7 +46,7 @@ import { useControlActivity } from "../control/hooks";
 import { ComposeButton } from "../control/NewSession";
 import { ALIAS_WINDOW_MS, aliasHidden, openNewSession, setBoardFilter } from "../control/newSessionState";
 import { useStartTitles } from "../control/Starting";
-import { isFinal } from "../control/words";
+import { cliCommand, isFinal } from "../control/words";
 import {
   byStateThenRecent,
   useAppState,
@@ -117,8 +116,11 @@ const matches = (s: SessionSummary, q: string) => {
 };
 
 /** The board's view options: the page's right-click menu, its "⋯" and (Show done) the
- *  Done header's. Built when a menu opens, from the state of the last render. */
+ *  Done header's. Built when a menu opens, from the state of the last render. An `empty`
+ *  board has no rows to find, fold, count, label or mark: its menu is how sessions open,
+ *  and the mode. */
 function viewItems(o: {
+  empty: boolean;
   filtered: boolean;
   clear: () => void;
   showDone: boolean;
@@ -131,13 +133,14 @@ function viewItems(o: {
   unread: SessionSummary[];
   markRead: () => void;
 }): MenuList {
+  const rows = !o.empty;
   return [
-    { label: "Find…", action: "search.focus", run: () => void focusSearch() },
-    o.filtered && { label: "Clear filters", run: o.clear },
-    { label: "Show done sessions", checked: o.showDone, run: () => o.setShowDone(!o.showDone) },
-    !o.simple && { label: "Show counts", checked: o.counts, run: () => setShowCounts(!o.counts) },
-    { label: "Edit labels…", run: () => requestLabelRename() },
-    { label: "Mark all as read", disabled: o.unread.length === 0 || undefined, run: o.markRead },
+    rows && { label: "Find…", action: "search.focus", run: () => void focusSearch() },
+    rows && o.filtered && { label: "Clear filters", run: o.clear },
+    rows && { label: "Show done sessions", checked: o.showDone, run: () => o.setShowDone(!o.showDone) },
+    rows && !o.simple && { label: "Show counts", checked: o.counts, run: () => setShowCounts(!o.counts) },
+    rows && { label: "Edit labels…", run: () => requestLabelRename() },
+    rows && { label: "Mark all as read", disabled: o.unread.length === 0 || undefined, run: o.markRead },
     { sep: true },
     {
       label: "Open sessions",
@@ -151,7 +154,7 @@ function viewItems(o: {
         },
       ],
     },
-    ...lensMenu(o.lens, o.simple),
+    ...(rows ? lensMenu(o.lens, o.simple) : []),
     { sep: true },
     {
       label: "Mode",
@@ -192,11 +195,6 @@ const markFirstRow = () => {
 };
 /** The empty state's exit before the first row comes in (POLISH-PLAN.md §3.3). */
 const EMPTY_EXIT_MS = 160;
-const isMock = () => !!(window as unknown as { __sessionpipeMock?: unknown }).__sessionpipeMock;
-
-/** "Claude Code, Codex, Gemini CLI or Antigravity". */
-const either = (names: string[]) =>
-  names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`;
 
 export function Board() {
   const store = useStore();
@@ -430,7 +428,7 @@ export function Board() {
   const view = () => {
     const unread = visible.filter((s) => isUnread(s, store.get().marks));
     const markRead = () => setUnread(store, unread, false);
-    return viewItems({ filtered, clear, showDone, setShowDone, beside, lens, simple, counts, unread, markRead });
+    return viewItems({ empty, filtered, clear, showDone, setShowDone, beside, lens, simple, counts, unread, markRead });
   };
   const pageMenu = useBackgroundMenu(view, { title: () => "Board" });
   const doneMenu = useContextMenu(() => [
@@ -549,17 +547,6 @@ export function Board() {
         }
       />
 
-      {isMock() && (
-        <Notice
-          action={
-            <a className="btn btn--sm" href="/">
-              Leave samples
-            </a>
-          }
-        >
-          These are sample sessions, made up in this page.
-        </Notice>
-      )}
       <LensNote lens={lens} hidden={hiddenByLens} />
 
       {firstLoad === "loading" || filling ? (
@@ -792,37 +779,44 @@ function NoMatch({
 }
 
 /** The first run, as a listening state at the content's optical centre: what to do (one
- *  line naming this machine and the agents whose hooks are on), the command, and the
- *  live wait itself. When nothing is hooked yet, the install command instead. */
+ *  line naming this machine and the first agent whose hooks are on), its command, and the
+ *  live wait itself, which names every hooked agent. An agent with no command to type (an
+ *  app) gets no command; with no hooked agent known, Claude Code stands in. When
+ *  sessionpipe is not installed, the install command instead. */
 function FirstRun({ paired }: { paired?: string }) {
   const setup = useSetupStatus();
   const st = setup.status;
-  const hooked = (st?.harnesses ?? []).filter((h) => h.installed && h.hooks === "on").map((h) => shortName(h.label));
+  const on = (st?.harnesses ?? []).filter((h) => h.installed && h.hooks === "on");
+  const lead = on.find((h) => cliCommand(h.name)) ?? on[0];
+  const name = lead ? shortName(lead.label) : "Claude Code";
+  const cmd = lead ? cliCommand(lead.name) : "claude";
   const here = st?.daemon.name ?? st?.tls.hostname?.replace(/\.local\.?$/, "");
   const sp = st?.sessionpipe.installed;
-  const names = hooked.length ? hooked : ["Claude Code", "Codex", "Gemini", "Antigravity"];
-  const samples = () => {
-    location.assign("/?mock=1");
-  };
+  const demo = (
+    <button type="button" className="btn btn--ghost" onClick={() => location.assign("/?mock=1")}>
+      Try the demo
+    </button>
+  );
   return (
     <EmptyState
       center
       title="Waiting for your first session"
       actions={
-        <>
-          {paired ? (
+        paired ? (
+          <>
             <button type="button" className="btn" onClick={() => openNewSession({ machine: paired })}>
               Start a session on {paired}
             </button>
-          ) : (
-            <Link to="/connect" className="btn">
+            {demo}
+          </>
+        ) : (
+          <>
+            {demo}
+            <Link to="/connect" className="btn btn--ghost">
               Pair another machine
             </Link>
-          )}
-          <button type="button" className="btn btn--ghost" onClick={samples}>
-            See it with sample sessions
-          </button>
-        </>
+          </>
+        )
       }
     >
       {st && sp === false ? (
@@ -833,13 +827,13 @@ function FirstRun({ paired }: { paired?: string }) {
       ) : (
         <>
           <p>
-            Start {either(names)} in any terminal on {here ? <strong>{here}</strong> : "this machine"} and it appears
-            here.
+            Start a new {name} session{cmd ? " in any terminal" : ""} on{" "}
+            {here ? <strong>{here}</strong> : "this machine"}.
           </p>
-          <CommandWell command="claude" />
+          {cmd && <CommandWell command={cmd} />}
         </>
       )}
-      <Listening>{(hooked.length ? hooked : names).join(", ")}</Listening>
+      <Listening>{on.map((h) => shortName(h.label)).join(", ")}</Listening>
     </EmptyState>
   );
 }

@@ -78,6 +78,33 @@ test.describe("setup on the demo server (TLS off)", () => {
     await expect(steps.nth(1).locator(".step-facts")).toContainText("off");
   });
 
+  test("the demo says it is one once, with one way out, and has no Setup entry for this machine", async ({ page }) => {
+    const hint = () => page.evaluate(() => localStorage.getItem("sessionpipe-gui.rail.setup"));
+    // This receiver has steps to go: the rail draws Setup, and remembers that it does.
+    await openPage(page, "/");
+    await expect(page.locator(".rail [data-nav=setup]")).toBeVisible();
+    await expect.poll(hint).toBe("1");
+
+    const status = page.waitForResponse((r) => new URL(r.url()).pathname === STATUS && r.ok());
+    await page.goto("/?mock=1");
+    await expect(page.locator("article.card").first()).toBeVisible({ timeout: 15_000 });
+    // The yellow bar is the one statement and the one way out: no second band on the board.
+    const bar = page.locator("[data-demo-banner]");
+    await expect(bar).toContainText("These sessions are made up.");
+    await expect(bar.getByRole("link", { name: "Leave the demo" })).toBeVisible();
+    await expect(page.getByText("Leave samples")).toHaveCount(0);
+    await expect(page.getByText(/sample sessions/)).toHaveCount(0);
+    await expect(page.locator(".page.board .notice")).toHaveCount(0);
+    // The receiver behind the demo said the same again, and the made-up board still offers
+    // no setup of it. Only the entry is held back: what the rail remembers is untouched.
+    await status;
+    await expect(page.locator(".rail")).toBeVisible();
+    await expect(page.locator("[data-nav=setup]")).toHaveCount(0);
+    expect(await hint()).toBe("1");
+    await bar.getByRole("link", { name: "Leave the demo" }).click();
+    await expect(page.locator(".rail [data-nav=setup]")).toBeVisible();
+  });
+
   test("the status is this machine's: a LAN address is refused on every setup route", async ({ request }) => {
     // The TLS instance runs with --test-door, whose header stands in for the remote address.
     const lan = await request.get(`${TLS_HTTP}${STATUS}`, { headers: { "x-spgui-test-remote": "192.168.1.9" } });

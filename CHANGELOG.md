@@ -262,6 +262,19 @@ pairing link that carries the board's key only for a pairing the sink token star
   dividers and the edges of fields and buttons step up, in every skin and both schemes, as
   soon as it is switched. Before, only the focus ring got thicker: a skin's own colours
   outranked the rest.
+- **A new board names the agent this machine has hooked, and the command that starts
+  it.** With only Codex hooked it read "Start Codex in any terminal…" over `$ claude`. The
+  line now reads "Start a new Codex session in any terminal on studio-mac." over `$ codex`
+  (`$ gemini` for Gemini; an agent that is an app, such as Antigravity, gets no command),
+  and says "new" because an agent already running doesn't show up. "Listening" names only
+  the agents whose hooks are on. "Try the demo" (it was "See it with sample sessions") and
+  "Pair another machine" are two quiet buttons under it. Until a session arrives, the
+  board's ⋯ and right-click menu offer only Open sessions and Mode: Find…, Show done
+  sessions, Mark all as read and the rest had nothing to act on.
+- **The demo says it is a demo once.** The board repeated the yellow bar in a second band
+  with its own way out, "Leave samples"; the bar and its "Leave the demo" are the only
+  ones now, and Needs you sits right under the page's bar. The sidebar has no Setup entry
+  in the demo: it led to the real machine's setup from a board of made-up sessions.
 
 ## [0.8.4] - 2026-11-17
 
