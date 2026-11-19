@@ -22,6 +22,26 @@ const STATUS = "/api/ui/setup/status";
 const CONTROL = "/api/sessionpipe/v1/control";
 
 test.describe("setup on the demo server (TLS off)", () => {
+  test("on Windows without openssl, Turn on waits and the note says where to get one, with no PATH change", async ({
+    page,
+  }) => {
+    await page.route(`**${STATUS}`, async (route) => {
+      const res = await route.fetch();
+      const status = await res.json();
+      status.platform = "win32";
+      status.tls.opensslPresent = false;
+      await route.fulfill({ response: res, json: status });
+    });
+    await openPage(page, "/setup");
+    const secure = page.locator("li.step[data-step=secure]");
+    await expect(secure.getByRole("button", { name: "Turn on" })).toBeDisabled({ timeout: 15_000 });
+    await expect(secure.locator(".step-action .step-note")).toHaveText(
+      "Needs the openssl command: install Git for Windows (it ships one), or run winget install ShiningLight.OpenSSL.Light (it asks for an administrator); then try again. Installed in its usual folder, either is found with no PATH change or restart.",
+    );
+    // The page asks for its status every two seconds: one in flight at the end is no failure.
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  });
+
   test("six steps: sessions green, secure needs you with Turn on, the rest wait, the sixth optional", async ({
     page,
   }) => {

@@ -25,6 +25,37 @@ pub fn receiver_id(origin: &str) -> String {
     s
 }
 
+/// A spacesheep account's id: the whole SHA-256 of its origin and email, in base32 (52
+/// characters). It names the account's key, its documents and whatever the page keeps
+/// for it, and the email in it is whatever the origin said, so it is not cut to a length
+/// at which an origin could search for an email that lands on another account's id. A
+/// receiver's id stays ten characters; the two are told apart by length alone.
+pub fn account_id(origin: &str, email: &str) -> String {
+    base32_lower(&Sha256::digest(
+        format!(
+            "spacesheep-account\n{origin}\n{}",
+            email.trim().to_ascii_lowercase()
+        )
+        .as_bytes(),
+    ))
+}
+
+fn is_base32(s: &str, len: usize) -> bool {
+    s.len() == len
+        && s.bytes()
+            .all(|c| c.is_ascii_lowercase() || (b'2'..=b'7').contains(&c))
+}
+
+/// The shape `receiver_id` writes: ten base32 characters.
+pub fn is_receiver_id(s: &str) -> bool {
+    is_base32(s, 10)
+}
+
+/// The shape `account_id` writes: fifty-two base32 characters.
+pub fn is_account_id(s: &str) -> bool {
+    is_base32(s, 52)
+}
+
 /// RFC 4648 base32, lowercase, no padding.
 pub fn base32_lower(bytes: &[u8]) -> String {
     const A: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
@@ -108,6 +139,38 @@ mod tests {
         assert_eq!(
             receiver_id("http://127.0.0.1:7373"),
             receiver_id(&canonical_origin("http://127.0.0.1:7373/").unwrap())
+        );
+    }
+
+    #[test]
+    fn an_account_id_is_the_whole_digest_and_no_receivers() {
+        let a = account_id("https://spacesheep.dev", "Misha@Example.com");
+        assert_eq!(a.len(), 52);
+        assert!(is_account_id(&a) && !is_receiver_id(&a));
+        assert_eq!(
+            a,
+            account_id("https://spacesheep.dev", " misha@example.com ")
+        );
+        assert_ne!(a, account_id("https://spacesheep.dev", "masha@example.com"));
+        assert_ne!(a, account_id("https://stagesheep.dev", "misha@example.com"));
+        let r = receiver_id("https://spacesheep.dev");
+        assert!(is_receiver_id(&r) && !is_account_id(&r));
+        assert!(!a.starts_with(&r), "another preimage");
+        for bad in [
+            "",
+            "abc",
+            "remote1234",
+            "ABCDEFGHIJ",
+            "acct:abcde",
+            "acct-conne",
+            "abcdefghi/",
+        ] {
+            assert!(!is_receiver_id(bad), "{bad}");
+        }
+        // ASCII only is lowered: no two addresses become one by a Unicode rule.
+        assert_ne!(
+            account_id("https://spacesheep.dev", "İ@example.com"),
+            account_id("https://spacesheep.dev", "i̇@example.com")
         );
     }
 

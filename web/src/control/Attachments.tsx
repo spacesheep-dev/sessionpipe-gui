@@ -1,18 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
-// Images beside a prompt, self-contained so any composer can place it: a hook that
-// holds the uploads (paperclip, paste, drop, the phone's picker or camera), the tray
-// of thumbnails above the input, the paperclip button, and the thumbnails a sent
-// prompt shows wherever its text is drawn. The control protocol carries text only, so
-// `compose()` appends the one block the agent can act on (shared/attachments.ts):
-// absolute paths when the session runs on the machine the GUI runs on, URLs with the
-// UI key otherwise.
+// Pictures beside a prompt, self-contained so any composer can place it: a hook that holds
+// the uploads (paperclip, paste, drop, the phone's picker or camera), the tray of
+// thumbnails above the input, the paperclip button, and the thumbnails a sent prompt shows
+// wherever its text is drawn. How a picture goes is decided per session, from its machine
+// (`pictureMode`):
+//  - "files": as CONTROL.md `files` on the prompt, for a daemon that takes them (sessionpipe
+//    0.10). The page uploads the bytes to the receiver, holds the receiver's hash against
+//    its own, and signs each picture's name, type, size and hash; the machine fetches them
+//    with its own token and saves them in the session's folder. Nothing is added to the text.
+//  - "path": the text block of absolute paths (shared/attachments.ts), for an older daemon
+//    on the machine the GUI runs on.
+//  - "off": no way to send one (an older daemon on another machine, a computer reached
+//    through spacesheep): no paperclip, and a picture pasted or dropped is answered in words.
+// No address of this board and no key to it is ever in what is signed.
 import {
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_TYPES,
   ATTACHMENTS_PER_MESSAGE,
   type Attachment,
+  type AttachmentType,
   type Info,
+  type MachineControl,
   ROUTES,
+  START_FILE_MAX_BYTES,
+  START_FILES_TOTAL_BYTES,
+  type StartFile,
+  type UploadedFile,
 } from "@shared/api";
 import {
   type AttachmentRef,
@@ -35,10 +48,89 @@ import {
 import { Redacted } from "../components/bits";
 import { useContextMenu } from "../components/ContextMenu";
 import { copyItem } from "../lib/menus";
-import { apiUrl } from "../lib/net";
+import { accountMode, apiFetch, apiUrl } from "../lib/net";
+import { ControlError, controlApi } from "./api";
+import { b64url, sha256 } from "./bytes";
 import "./attachments.css";
 
-// ---------- the upload itself (also the theme api's control.attach) ----------
+// ---------- how a picture goes ----------
+
+export type PictureMode = "files" | "path" | "off";
+
+/** How the composer sends a picture to a session on this machine's control row, or
+ *  undefined while that is not known (no row yet, or `thisMachine` not read yet where it
+ *  decides). `thisMachine`: the session runs on the machine the GUI runs on. */
+export function pictureMode(
+  control: Pick<MachineControl, "promptFiles" | "remote"> | undefined,
+  thisMachine: boolean | null,
+): PictureMode | undefined {
+  if (!control) return undefined;
+  // A file a send names would have to be held by spacesheep: there is no way to carry one yet.
+  if (control.remote) return "off";
+  if (control.promptFiles) return "files";
+  if (thisMachine === null) return undefined;
+  return thisMachine ? "path" : "off";
+}
+
+/** Why no picture can go to `machine`, as the line under the field says it when one is
+ *  pasted or dropped. What is between backticks is a command to type. */
+export function picturesOffWords(machine: string, relayed: boolean): string {
+  return relayed
+    ? `Pictures can't be sent to ${machine} through spacesheep from here yet.`
+    : `Pictures can't be sent to ${machine}: its sessionpipe is older than 0.10. Run \`sessionpipe update\` there.`;
+}
+
+/** The pictures of one message are over the protocol's total (CONTROL.md §3.1). */
+export const TOGETHER_WORDS = "These pictures are over 50 MB together. Remove one.";
+/** The receiver's hash or size of an upload is not the page's own. */
+export const NOT_WHOLE_WORDS = "The picture didn't arrive whole. Try again.";
+/** This many upload at once; the rest wait their turn in the tray. */
+const UPLOADS_AT_ONCE = 2;
+/** CONTROL.md §3.1: a file's name is at most this long. */
+const NAME_MAX = 200;
+const PICTURE_EXT_RE = /\.(png|jpe?g|gif|webp)$/i;
+
+/** A picture's name as the signed command gives it, which is the name the machine saves it
+ *  under: NFC; every kind of space a plain one (a macOS screenshot's name has a narrow
+ *  no-break space before "PM"); no control or format character (one that turns the reading
+ *  direction, or has no width), slash or backslash; no leading dot;
+ *  "image" when nothing is left; the extension the type's own; at most 200 characters (the
+ *  name is cut, never the extension); and not a name already `taken` in this message,
+ *  whatever its case: image.png, image-2.png, … */
+export function pictureName(name: string, type: string, taken: Iterable<string> = []): string {
+  const own = ATTACHMENT_TYPES[type as AttachmentType];
+  const ext = own ? `.${own}` : "";
+  let base = name
+    .normalize("NFC")
+    .replace(/[\p{Zs}\p{Zl}\p{Zp}]/gu, " ")
+    .replace(/[\p{Cc}\p{Cf}/\\]/gu, "");
+  if (ext) base = base.replace(PICTURE_EXT_RE, "");
+  base = base.replace(/^[. ]+/, "").replace(/[. ]+$/, "") || "image";
+  const used = new Set(Array.from(taken, (n) => n.normalize("NFC").toLowerCase()));
+  for (let n = 1; ; n++) {
+    const end = (n === 1 ? "" : `-${n}`) + ext;
+    const candidate = cutTo(base, NAME_MAX - end.length) + end;
+    if (!used.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+/** The first characters of `s` that fit `max` UTF-16 units, never half of a pair. */
+function cutTo(s: string, max: number): string {
+  if (s.length <= max) return s;
+  let out = "";
+  for (const ch of s) {
+    if (out.length + ch.length > max) break;
+    out += ch;
+  }
+  return out;
+}
+
+/** The words a message of pictures alone is signed with: CONTROL.md wants 1 to 20 000
+ *  characters that are not all whitespace, and every daemon refuses an empty text. */
+export const fillerText = (pictures: number): string =>
+  pictures === 1 ? "Look at the attached picture." : `Look at the ${pictures} attached pictures.`;
+
+// ---------- the upload itself ----------
 
 const ACCEPT = Object.keys(ATTACHMENT_TYPES);
 
@@ -49,19 +141,71 @@ const mb = (n: number): string => {
   return `${m >= 10 ? Math.round(m) : Math.round(m * 10) / 10} MB`;
 };
 
-/** Why a file cannot be attached, in words; null when it can. Checked before any upload. */
-export function refuseFile(file: Blob): string | null {
+/** Why a file cannot be attached, in words; null when it can. Checked before any upload.
+ *  One picture is at most what a command's file may be (25 MiB) where it goes as one, and
+ *  ATTACHMENT_MAX_BYTES where the prompt names it by path. */
+export function refuseFile(file: Blob, mode: "files" | "path" = "path"): string | null {
   if (!ACCEPT.includes(file.type))
     return `not an image we can send (${file.type || "unknown type"}); PNG, JPEG, GIF or WebP`;
-  if (file.size > ATTACHMENT_MAX_BYTES) return `too large: ${mb(file.size)}, limit ${mb(ATTACHMENT_MAX_BYTES)}`;
+  const limit = mode === "files" ? START_FILE_MAX_BYTES : ATTACHMENT_MAX_BYTES;
+  if (file.size > limit) return `too large: ${mb(file.size)}, limit ${mb(limit)}`;
   return null;
 }
 
-/** POST the image as the raw body; the server validates the bytes and reads the size. */
+/** A picture as a signed command's file names it, with its pixels where the receiver read them. */
+export type PictureEntry = UploadedFile;
+
+/** Upload one picture as a file a prompt will carry, under `name`, and check it arrived
+ *  whole: the page hashes the very bytes it sent, and an answer with another hash or size
+ *  is refused, so what is signed is the page's own word on the bytes. Throws the words. */
+export async function uploadPicture(file: Blob, name: string, machineId?: string): Promise<PictureEntry> {
+  const why = refuseFile(file, "files");
+  if (why) throw new Error(why);
+  const buf = await file.arrayBuffer();
+  let held: UploadedFile;
+  let hash: string;
+  try {
+    [hash, held] = await Promise.all([
+      sha256(new Uint8Array(buf)).then(b64url),
+      controlApi.uploadFile(new File([buf], name, { type: file.type }), machineId),
+    ]);
+  } catch (e) {
+    if (!(e instanceof ControlError)) throw new Error("upload failed");
+    if (e.status === 413) throw new Error(`too large: ${mb(file.size)}, limit ${mb(START_FILE_MAX_BYTES)}`);
+    if (e.status === 401) throw new Error("this board needs its key before it takes uploads");
+    // The receiver's own sentence where it has one ("This file isn't the picture its type says.").
+    throw new Error(e.detail ?? `upload failed (${e.reason})`);
+  }
+  if (held.sha256 !== hash || held.size !== buf.byteLength) throw new Error(NOT_WHOLE_WORDS);
+  const entry: PictureEntry = { name, type: file.type, size: buf.byteLength, sha256: hash };
+  if (typeof held.width === "number" && typeof held.height === "number") {
+    entry.width = held.width;
+    entry.height = held.height;
+  }
+  return entry;
+}
+
+/** What a message with these pictures signs where they go as files: its words as written,
+ *  or the filler when there are none; the pictures in the tray's order, each by its four
+ *  signed fields. Nothing about a picture is in the text. */
+export function composeFiles(
+  message: string,
+  entries: readonly PictureEntry[],
+): { text: string; files: StartFile[]; names: string[] } {
+  const files = entries.map((e) => ({ name: e.name, type: e.type, size: e.size, sha256: e.sha256 }));
+  return {
+    text: message.trim() || (files.length > 0 ? fillerText(files.length) : ""),
+    files,
+    names: files.map((f) => f.name),
+  };
+}
+
+/** POST the image as the raw body, for a prompt that names it by path (also the theme
+ *  api's control.attach); the server validates the bytes and reads the size. */
 export async function uploadAttachment(file: Blob): Promise<Attachment> {
   const why = refuseFile(file);
   if (why) throw new Error(why);
-  const res = await fetch(apiUrl(ROUTES.ui.attachments), {
+  const res = await apiFetch(ROUTES.ui.attachments, {
     method: "POST",
     headers: { "content-type": file.type, accept: "application/json" },
     body: file,
@@ -84,7 +228,7 @@ export async function uploadAttachment(file: Blob): Promise<Attachment> {
 
 /** Take back an upload that was not sent. Best effort: the daily prune catches strays. */
 export function deleteAttachment(a: Pick<Attachment, "id" | "ext">): Promise<void> {
-  return fetch(apiUrl(`${ROUTES.attachments}/${a.id}.${a.ext}`), { method: "DELETE" })
+  return apiFetch(`${ROUTES.attachments}/${a.id}.${a.ext}`, { method: "DELETE" })
     .then(() => undefined)
     .catch(() => undefined);
 }
@@ -93,7 +237,7 @@ let infoPromise: Promise<Info> | null = null;
 /** Info, read once per page: `hostname` says which machine the paths mean something on. */
 function hostInfo(): Promise<Info> {
   if (!infoPromise)
-    infoPromise = fetch(apiUrl(ROUTES.ui.info), { headers: { accept: "application/json" } })
+    infoPromise = apiFetch(ROUTES.ui.info, { headers: { accept: "application/json" } })
       .then((r) => r.json() as Promise<Info>)
       .catch((e) => {
         infoPromise = null;
@@ -114,6 +258,21 @@ export function isThisMachine(machine: string | undefined, hostname: string | un
   return norm(machine) === norm(hostname);
 }
 
+/** `isThisMachine` for a session's machine, from the page's Info: null until it arrived. */
+export function useThisMachine(machine: string | undefined): boolean | null {
+  const [hostname, setHostname] = useState<string | undefined | null>(null);
+  useEffect(() => {
+    let on = true;
+    hostInfo()
+      .then((i) => on && setHostname(i.hostname))
+      .catch(() => on && setHostname(undefined));
+    return () => {
+      on = false;
+    };
+  }, []);
+  return hostname === null ? null : isThisMachine(machine, hostname);
+}
+
 /** Image files out of a paste or a drop (a pasted screenshot comes as one file item). */
 export function imageFiles(dt: DataTransfer | null): File[] {
   if (!dt) return [];
@@ -131,44 +290,70 @@ export function imageFiles(dt: DataTransfer | null): File[] {
   return out;
 }
 
+/** A drag or a drop carries files (of any kind): the browser would open one the page lets fall. */
+const carriesFiles = (dt: DataTransfer | null): boolean => Array.from(dt?.types ?? []).includes("Files");
+
 // ---------- the composer's state ----------
 
 export interface PendingItem {
-  /** Local key while uploading; the attachment id once uploaded. */
+  /** Local key, for as long as it is in the tray. */
   key: string;
   file: Blob;
   /** For the thumbnail (an object URL, revoked on remove). */
   preview: string;
   bytes: number;
+  /** The way it goes, as the session's machine took pictures when it was added. */
+  via: "files" | "path";
+  /** The name it goes under: a file's signed name (`pictureName`), else the file's own. */
+  name: string;
+  /** Its upload has not begun: two run at a time. */
+  waiting?: boolean;
+  /** Uploaded, where the prompt names it by path. */
   attachment?: Attachment;
+  /** Uploaded and checked, where it goes as a file: what the command signs of it. */
+  entry?: PictureEntry;
   error?: string;
 }
 
+/** CONTROL.md §3.1: a command's files are at most 50 MiB together. A refused one is not sent. */
+const overTogether = (list: readonly PendingItem[]): boolean =>
+  list.reduce((n, it) => n + (it.error ? 0 : it.bytes), 0) > START_FILES_TOTAL_BYTES;
+
+/** Where an item is on its way into the message. */
+export const itemState = (it: PendingItem): "error" | "ready" | "waiting" | "uploading" =>
+  it.error ? "error" : it.attachment || it.entry ? "ready" : it.waiting ? "waiting" : "uploading";
+
 export interface ComposeResult {
+  /** The text to sign. */
   text: string;
-  /** The block's lines as written into `text` (attachmentLines): what this page attached. */
+  /** The pictures as the command's `files`, in the tray's order; absent where none goes so. */
+  files?: StartFile[];
+  /** The pictures' names, in the tray's order. */
+  names: string[];
+  /** The block's lines as written into `text` (attachmentLines), where the prompt names its
+   *  pictures by path: what this page attached. Empty otherwise. */
   lines: string[];
-  /** Which form the block took, for a note. */
-  local: boolean;
 }
 
 export interface AttachmentsHandle {
   items: readonly PendingItem[];
-  /** An upload is in flight: the composer should hold Send. */
+  /** An upload is in flight or waits its turn: the composer should hold Send. */
   uploading: boolean;
-  /** A file was refused or an upload failed, or the text would be over the cap. */
+  /** A file was refused or an upload failed, the pictures are too much together, or the
+   *  text would be over the cap. */
   error: string | null;
-  /** A file is being dragged over the drop zone. */
+  /** A file is being dragged over the drop zone, and would be taken. */
   dragging: boolean;
-  /** The session runs on this machine (null until Info arrived). */
-  local: boolean | null;
-  /** Images may be attached here at all (`localOnly` and not this machine: no). */
+  /** How pictures go to this session's machine; undefined while not known. */
+  mode: PictureMode | undefined;
+  /** The paperclip has a place here: every mode but "off". */
   offered: boolean;
   add(files: Iterable<Blob>): void;
   remove(key: string): void;
   clear(): void;
-  /** The text to sign: `message` plus the block. Null (and `error` set) when nothing
-   *  can go: an upload is still running or failed, or the text is over the cap. */
+  /** What to sign: `message` and the pictures, the way this machine takes them. Null (and
+   *  `error` set) when nothing can go: an upload is still running or failed, the pictures
+   *  are too much together, or the text is over the cap. */
   compose(message: string): ComposeResult | null;
   /** Spread onto the drop zone element (the form) and the textarea. */
   handlers: {
@@ -179,30 +364,31 @@ export interface AttachmentsHandle {
   };
 }
 
-/** `localOnly`: the images are offered only when the session runs on this machine, where
- *  the block names files on this disk; a computer reached through spacesheep could be
- *  sent no URL it can open (control/ControlStrip). */
-export function useAttachments(o: { machine?: string; enabled?: boolean; localOnly?: boolean }): AttachmentsHandle {
+/** `mode`: how this session's machine takes pictures (`pictureMode`); `machineId`: the
+ *  machine an upload is for. `onRefused`: a picture was pasted or dropped where none can be
+ *  sent ("off"), so the composer says why (`picturesOffWords`); nothing is swallowed. */
+export function useAttachments(o: {
+  machineId?: string;
+  enabled?: boolean;
+  mode?: PictureMode;
+  onRefused?: () => void;
+}): AttachmentsHandle {
   const [items, setItems] = useState<PendingItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [hostname, setHostname] = useState<string | undefined | null>(null);
   const seq = useRef(0);
-  const local = hostname === null ? null : isThisMachine(o.machine, hostname);
-  const offered = !o.localOnly || local === true;
-  const enabled = o.enabled !== false && offered;
+  /** The items whose upload began (its key), so none begins twice. */
+  const started = useRef(new Set<string>());
+  const { mode, machineId } = o;
+  const takes = mode === "files" || mode === "path" ? mode : null;
+  /** The composer is on; `enabled`: and its machine takes pictures. */
+  const active = o.enabled !== false;
+  const enabled = active && !!takes;
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  const onRefused = useRef(o.onRefused);
+  onRefused.current = o.onRefused;
 
-  useEffect(() => {
-    let on = true;
-    hostInfo()
-      .then((i) => on && setHostname(i.hostname))
-      .catch(() => on && setHostname(undefined));
-    return () => {
-      on = false;
-    };
-  }, []);
   // Object URLs of what was never sent are let go with the composer.
   useEffect(
     () => () => {
@@ -211,9 +397,33 @@ export function useAttachments(o: { machine?: string; enabled?: boolean; localOn
     [],
   );
 
+  const set = useCallback((key: string, patch: Partial<PendingItem>) => {
+    setItems((prev) => prev.map((p) => (p.key === key ? { ...p, ...patch } : p)));
+  }, []);
+
+  // Two uploads at a time, in the tray's order; the rest wait.
+  useEffect(() => {
+    let busy = items.filter((it) => started.current.has(it.key) && itemState(it) !== "ready" && !it.error).length;
+    for (const it of items) {
+      if (busy >= UPLOADS_AT_ONCE) break;
+      if (!it.waiting || it.error || started.current.has(it.key)) continue;
+      started.current.add(it.key);
+      busy++;
+      set(it.key, { waiting: false });
+      const going: Promise<Partial<PendingItem>> =
+        it.via === "files"
+          ? uploadPicture(it.file, it.name, machineId).then((entry) => ({ entry }))
+          : uploadAttachment(it.file).then((attachment) => ({ attachment }));
+      going.then(
+        (done) => set(it.key, done),
+        (e: Error) => set(it.key, { error: e.message }),
+      );
+    }
+  }, [items, machineId, set]);
+
   const add = useCallback(
     (files: Iterable<Blob>) => {
-      if (!enabled) return;
+      if (!enabled || !takes) return;
       setError(null);
       const list = Array.from(files);
       const room = ATTACHMENTS_PER_MESSAGE - itemsRef.current.length;
@@ -221,23 +431,22 @@ export function useAttachments(o: { machine?: string; enabled?: boolean; localOn
         setError(`${ATTACHMENTS_PER_MESSAGE} images per message at most`);
         list.length = Math.max(0, room);
       }
-      for (const file of list) {
-        const why = refuseFile(file);
-        const key = `p${++seq.current}`;
-        const item: PendingItem = { key, file, preview: URL.createObjectURL(file), bytes: file.size };
-        if (why) {
-          item.error = why;
-          setItems((prev) => [...prev, item]);
-          continue;
-        }
-        setItems((prev) => [...prev, item]);
-        uploadAttachment(file).then(
-          (a) => setItems((prev) => prev.map((p) => (p.key === key ? { ...p, attachment: a } : p))),
-          (e: Error) => setItems((prev) => prev.map((p) => (p.key === key ? { ...p, error: e.message } : p))),
-        );
-      }
+      // The names this message's files already have: a file's name is its own in the message.
+      const taken = itemsRef.current.filter((it) => it.via === "files" && !it.error).map((it) => it.name);
+      const added = list.map((file): PendingItem => {
+        const why = refuseFile(file, takes);
+        const own = file instanceof File ? file.name : "";
+        const signed = takes === "files" && !why;
+        const name = signed ? pictureName(own, file.type, taken) : own;
+        if (signed) taken.push(name);
+        const item = { key: `p${++seq.current}`, file, preview: URL.createObjectURL(file), bytes: file.size, name };
+        return why ? { ...item, via: takes, error: why } : { ...item, via: takes, waiting: true };
+      });
+      // Now, not at the next render: a second add in the same tick sees these names and this count.
+      itemsRef.current = [...itemsRef.current, ...added];
+      setItems((prev) => [...prev, ...added]);
     },
-    [enabled],
+    [enabled, takes],
   );
 
   const remove = useCallback((key: string) => {
@@ -260,58 +469,72 @@ export function useAttachments(o: { machine?: string; enabled?: boolean; localOn
     setError(null);
   }, []);
 
-  const uploading = items.some((it) => !it.attachment && !it.error);
+  const uploading = items.some((it) => itemState(it) === "waiting" || itemState(it) === "uploading");
+  // Too much together: said as soon as it is so, and until one is removed.
+  const over = takes === "files" && overTogether(items);
 
   const compose = useCallback(
     (message: string): ComposeResult | null => {
       const cur = itemsRef.current;
-      if (cur.some((it) => it.error)) {
+      // One that failed, or one uploaded the way this machine no longer takes pictures.
+      if (cur.some((it) => it.error || it.via !== takes)) {
         setError("remove the image that could not be attached, or try it again");
         return null;
       }
-      if (cur.some((it) => !it.attachment)) {
+      if (cur.some((it) => itemState(it) !== "ready")) {
         setError("still uploading…");
         return null;
       }
-      const isLocal = local === true;
-      const text = composePrompt(
-        message,
-        cur.map((it) => it.attachment!),
-        isLocal,
-      );
-      if (text.length > PROMPT_MAX_CHARS) {
+      if (takes === "files" && overTogether(cur)) return null;
+      let out: ComposeResult;
+      if (takes === "files" && cur.length > 0) {
+        const entries = cur.map((it) => it.entry!);
+        out = { ...composeFiles(message, entries), lines: [] };
+      } else {
+        const sent = cur.map((it) => it.attachment!);
+        out = {
+          text: composePrompt(message, sent),
+          names: sent.map((a) => `${a.id}.${a.ext}`),
+          lines: attachmentLines(sent),
+        };
+      }
+      if (out.text.length > PROMPT_MAX_CHARS) {
         setError(
-          `too long: ${text.length.toLocaleString()} chars with the image lines, the limit is ${PROMPT_MAX_CHARS.toLocaleString()}`,
+          `too long: ${out.text.length.toLocaleString()} chars${out.lines.length ? " with the image lines" : ""}, the limit is ${PROMPT_MAX_CHARS.toLocaleString()}`,
         );
         return null;
       }
-      if (!text) return null;
+      if (!out.text) return null;
       setError(null);
-      return {
-        text,
-        local: isLocal,
-        lines: attachmentLines(
-          cur.map((it) => it.attachment!),
-          isLocal,
-        ),
-      };
+      return out;
     },
-    [local],
+    [takes],
   );
 
   const handlers = useMemo<AttachmentsHandle["handlers"]>(
     () => ({
       onPaste(e) {
         const files = imageFiles(e.clipboardData);
-        if (files.length === 0) return;
+        // A paste of text is the field's own, untouched.
+        if (files.length === 0 || !active) return;
+        if (mode === "off") {
+          // Nothing is taken, so nothing is prevented (words copied beside a picture still
+          // land in the field), and the composer says why the picture did not.
+          onRefused.current?.();
+          return;
+        }
+        if (!takes) return;
         e.preventDefault();
         add(files);
       },
       onDragOver(e) {
-        if (!enabled || !Array.from(e.dataTransfer?.types ?? []).includes("Files")) return;
+        if (!carriesFiles(e.dataTransfer)) return;
+        // Always: a file the page lets fall is opened by the browser in the page's place.
         e.preventDefault();
-        e.dataTransfer.dropEffect = "copy";
-        setDragging(true);
+        // Where no picture can go the drop is still taken, to say why; a composer that is
+        // off takes none.
+        e.dataTransfer.dropEffect = active && (takes || mode === "off") ? "copy" : "none";
+        if (enabled) setDragging(true);
       },
       onDragLeave(e) {
         // Leaving for a child element still counts as inside.
@@ -320,16 +543,31 @@ export function useAttachments(o: { machine?: string; enabled?: boolean; localOn
       },
       onDrop(e) {
         setDragging(false);
+        if (!carriesFiles(e.dataTransfer)) return;
+        e.preventDefault();
+        if (!active) return;
         const files = imageFiles(e.dataTransfer);
         if (files.length === 0) return;
-        e.preventDefault();
-        add(files);
+        if (mode === "off") onRefused.current?.();
+        else add(files);
       },
     }),
-    [add, enabled],
+    [add, enabled, active, mode, takes],
   );
 
-  return { items, uploading, error, dragging, local, offered, add, remove, clear, compose, handlers };
+  return {
+    items,
+    uploading,
+    error: over ? TOGETHER_WORDS : error,
+    dragging,
+    mode,
+    offered: mode !== "off",
+    add,
+    remove,
+    clear,
+    compose,
+    handlers,
+  };
 }
 
 // ---------- the pieces a composer places ----------
@@ -351,14 +589,16 @@ export function AttachButton({
     e.target.value = "";
   };
   const full = att.items.length >= ATTACHMENTS_PER_MESSAGE;
+  // Until it is known how this machine takes pictures, none is picked.
+  const off = disabled || full || (att.mode !== "files" && att.mode !== "path");
   return (
-    <label className="att-btn" title={title} data-tip={title} aria-disabled={disabled || full ? "true" : undefined}>
+    <label className="att-btn" title={title} data-tip={title} aria-disabled={off ? "true" : undefined}>
       <input
         ref={input}
         type="file"
         accept="image/*"
         multiple
-        disabled={disabled || full}
+        disabled={off}
         onChange={onChange}
         aria-label={title}
         data-attach-input
@@ -378,8 +618,9 @@ export function AttachButton({
   );
 }
 
-/** The thumbnails at the top of the field: each with a spinner while uploading, the
- *  error under it when refused, and × to take it back. Nothing when there is none. */
+/** The thumbnails at the top of the field: each with a spinner while uploading (two at a
+ *  time; the rest wait, dimmed), the error under it when refused, and × to take it back.
+ *  Nothing when there is none. */
 export function AttachmentTray({ att }: { att: AttachmentsHandle }) {
   if (att.items.length === 0 && !att.error) return null;
   return (
@@ -401,31 +642,31 @@ export function AttachmentTray({ att }: { att: AttachmentsHandle }) {
 }
 
 /** One image waiting to go: the thumbnail, its name and size the tooltip (a refusal is
- *  written under it); its menu copies its name or takes it back. */
+ *  written under it); its menu copies its name or takes it back. Dimmed until it is
+ *  uploaded, with the spinner while its own upload runs. */
 function TrayItem({ it, onRemove }: { it: PendingItem; onRemove: () => void }) {
-  const name =
-    it.file instanceof File && it.file.name
-      ? it.file.name
-      : it.attachment
-        ? `${it.attachment.id}.${it.attachment.ext}`
-        : "";
-  const size = it.attachment ? `${it.attachment.width}×${it.attachment.height}` : "uploading";
+  const state = itemState(it);
+  const name = it.name || (it.attachment ? `${it.attachment.id}.${it.attachment.ext}` : "");
+  const px = it.attachment ?? it.entry;
+  const size = state !== "ready" ? state : px?.width && px.height ? `${px.width}×${px.height}` : "";
   const menu = useContextMenu(() => [
     copyItem("Copy name", name),
     { sep: true },
     { label: "Remove", danger: true, run: onRemove },
   ]);
+  const busy = state === "waiting" || state === "uploading";
   return (
     <li
-      className={`att-item ${it.error ? "att-item--err" : ""} ${!it.attachment && !it.error ? "att-item--busy" : ""}`}
-      data-attachment={it.attachment?.id ?? ""}
-      data-state={it.error ? "error" : it.attachment ? "ready" : "uploading"}
+      className={`att-item ${state === "error" ? "att-item--err" : ""} ${busy ? "att-item--busy" : ""}`}
+      data-attachment={it.attachment?.id ?? it.entry?.sha256 ?? ""}
+      data-state={state}
+      data-name={name}
       title={it.error ? undefined : [name, size, mb(it.bytes)].filter(Boolean).join(" · ")}
       {...menu}
     >
       <span className="att-frame">
         <img className="att-thumb" src={it.preview} alt="" />
-        {!it.attachment && !it.error && <span className="spinner att-busy" aria-hidden="true" />}
+        {state === "uploading" && <span className="spinner att-busy" aria-hidden="true" />}
       </span>
       {it.error && (
         <span className="att-meta" title={it.error}>
@@ -445,7 +686,9 @@ function TrayItem({ it, onRemove }: { it: PendingItem; onRemove: () => void }) {
 
 /** Thumbnails for the images a prompt text names; each opens the full image in a new tab. */
 export function AttachmentThumbs({ items, small }: { items: readonly AttachmentRef[]; small?: boolean }) {
-  if (items.length === 0) return null;
+  // The images a receiver holds are not on a spacesheep account's relay: nothing to show,
+  // and nothing to ask for that would come back broken.
+  if (items.length === 0 || accountMode()) return null;
   return (
     <span className={`att-thumbs ${small ? "att-thumbs--sm" : ""}`} data-attachment-thumbs={items.length}>
       {items.map((it) => (

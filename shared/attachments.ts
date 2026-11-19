@@ -1,36 +1,47 @@
 // SPDX-License-Identifier: Apache-2.0
-// Images beside a control prompt. CONTROL.md §3.1 carries text only (the daemon frames
-// `text` into the session as plain text and we cannot change it), so an uploaded image
-// is named in the text instead, in one block the agent can act on: by absolute path
-// when the session runs on the machine the GUI runs on, by URL (with the UI key) when
-// it runs elsewhere. Both sides read the block back with `splitAttachments` to draw
-// thumbnails, and the server's retention scan looks for the same reference.
+// A picture named in a prompt's text: the composer's way for a daemon that takes no files
+// on a prompt (older than sessionpipe 0.10), and only where it runs on the machine the GUI
+// runs on, so the block can name each picture by its absolute path. Every other machine
+// gets pictures as CONTROL.md `files` (web/src/control/Attachments.tsx) and nothing of them
+// is in the text. No URL is ever written: a prompt's text goes to the model and to every
+// sink that takes prompts, and an address another machine could fetch from would have to
+// carry the board's key. The heading of the URL block older versions wrote stays, so their
+// messages still read back as thumbnails (`splitAttachments`); the server's retention scan
+// looks for the same reference.
 import type { Attachment } from "./api.js";
 
 /** CONTROL.md §3.1: a prompt's `text` is at most this many characters. */
 export const PROMPT_MAX_CHARS = 20_000;
 
 export const LOCAL_HEADING = "Attached images (open them with your file-reading tool):";
+/** Read only: the heading of the block of URLs older versions wrote. Nothing writes it now. */
 export const REMOTE_HEADING = "Attached images (fetch them; they are on the board you were messaged from):";
 
 /** One attachment reference as it appears in text: `/attachments/<ulid>.<ext>`, bare or
- *  inside an absolute URL, with an optional `?k=` and an optional ` (W×H)` after it. */
+ *  inside an absolute URL, with an optional `?k=` (older messages) and an optional ` (W×H)`
+ *  after it. */
 export const ATTACHMENT_REF_RE =
-  /(?:https?:\/\/[^\s/]+)?\/attachments\/([0-9A-HJKMNP-TV-Z]{26})\.(png|jpe?g|gif|webp)(?:\?k=[A-Za-z0-9_-]+)?(?: \((\d+)×(\d+)\))?/g;
+  /(?:https?:\/\/[^\s/]+)?[/\\]{1,4}attachments[/\\]{1,4}([0-9A-HJKMNP-TV-Z]{26})\.(png|jpe?g|gif|webp)(?:\?k=[A-Za-z0-9_-]+)?(?: \((\d+)×(\d+)\))?/g;
 
-/** The text that goes into the signed command: the message, a blank line, the block. A
- *  message with nothing but images is just the block. */
-export function composePrompt(message: string, items: readonly Attachment[], local: boolean): string {
+/** One line of the block: `- <where the picture is> (W×H)`, where the place ends in
+ *  `attachments/<ulid>.<ext>` with either slash (a Windows path may hold spaces). A line
+ *  that names no picture is a person's own words, and stays in the message. */
+const BLOCK_LINE_RE =
+  /^- .*[/\\]attachments[/\\][0-9A-HJKMNP-TV-Z]{26}\.(?:png|jpe?g|gif|webp)(?:\?k=[A-Za-z0-9_-]+)? \(\d+×\d+\)$/;
+
+/** The text that goes into the signed command for a session on this machine: the message,
+ *  a blank line, the block of paths. A message with nothing but images is just the block. */
+export function composePrompt(message: string, items: readonly Attachment[]): string {
   const m = message.trim();
   if (items.length === 0) return m;
-  const lines = attachmentLines(items, local);
-  const block = `${local ? LOCAL_HEADING : REMOTE_HEADING}\n${lines.join("\n")}`;
+  const block = `${LOCAL_HEADING}\n${attachmentLines(items).join("\n")}`;
   return m ? `${m}\n\n${block}` : block;
 }
 
-/** The block's lines for `items`, each exactly as composePrompt writes it. */
-export function attachmentLines(items: readonly Attachment[], local: boolean): string[] {
-  return items.map((a) => `- ${local ? a.path : a.url} (${a.width}×${a.height})`);
+/** The block's lines for `items`, each exactly as composePrompt writes it: the path on this
+ *  machine, never `url`. */
+export function attachmentLines(items: readonly Attachment[]): string[] {
+  return items.map((a) => `- ${a.path} (${a.width}×${a.height})`);
 }
 
 export interface AttachmentRef {
@@ -55,7 +66,7 @@ export function splitAttachments(text: string): { body: string; items: Attachmen
     const block = text.slice(from);
     // Only a block made of our lines counts; anything else after the heading stays text.
     const rest = block.split("\n").slice(startsWithHeading ? 1 : 2);
-    if (rest.length > 0 && rest.every((l) => /^- \S+ \(\d+×\d+\)$/.test(l) || l === "")) body = text.slice(0, from);
+    if (rest.length > 0 && rest.every((l) => BLOCK_LINE_RE.test(l) || l === "")) body = text.slice(0, from);
   }
   for (const m of text.matchAll(ATTACHMENT_REF_RE)) {
     const id = m[1]!;
@@ -69,7 +80,7 @@ export function splitAttachments(text: string): { body: string; items: Attachmen
     }
     items.push(ref);
   }
-  return { body: body.replace(/\s+$/, ""), items };
+  return { body: body.trimEnd(), items };
 }
 
 /** Every attachment id a text refers to (the server's retention scan). */

@@ -52,7 +52,7 @@ describe("splitShellCommand", () => {
 });
 
 describe("shellLines", () => {
-  it("is a block for a long chain or any line break, and inline otherwise", () => {
+  it("is one step a line for a long chain or any line break, and nothing for one line", () => {
     expect(shellLines("npm run build && npm test -- bm25 && npm run deploy -- --target staging")).toHaveLength(3);
     expect(shellLines("ls -la")).toBeNull();
     expect(shellLines("cd web && npm test")).toBeNull();

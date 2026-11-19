@@ -3,9 +3,10 @@
 // grant's expiry, and the activity (AppState.control: the stream's frames over a read of
 // GET /activity, so a reload still shows this morning's messages, and a page that
 // dropped reads what it missed; data/store.ts `loadControl`).
-import type { ControlActivity } from "@shared/api";
+import type { Attention, ControlActivity } from "@shared/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppState, useStore } from "../data/hooks";
+import { type AnswerOut, answersOut } from "./answers";
 import { rpId } from "./api";
 import { GRANT_EVENT, grantExpiry } from "./signer";
 
@@ -62,4 +63,13 @@ export function useControlActivity(filter?: (a: ControlActivity) => boolean): Co
 export function useMessage(id: string | null): ControlActivity | undefined {
   const live = useAppState().control;
   return useMemo(() => (id ? live.find((a) => a.id === id) : undefined), [live, id]);
+}
+
+/** Per prompt of `open` with an answer out (or closed by its computer), what became of it,
+ *  as the page's activity says (answers.ts): the same on every surface, and after a reload. */
+export function useAnswersOut(open: readonly Attention[]): Readonly<Record<string, AnswerOut>> {
+  const store = useStore();
+  const known = useAppState().control;
+  useEffect(() => store.loadControl(), [store]);
+  return useMemo(() => answersOut(known, open), [known, open]);
 }

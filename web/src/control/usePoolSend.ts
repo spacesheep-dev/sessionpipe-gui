@@ -12,6 +12,7 @@ import { type CommandNote, commandNote } from "../lib/pool";
 import { rpId } from "./api";
 import { type CommandFields, sendCommand } from "./command";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
+import { remoteHostFor } from "./remoteRp";
 import { canSign, machineTakes, signHint, updateWords } from "./signer";
 import { isFinal, refusalWords, sendErrorWords } from "./words";
 
@@ -64,6 +65,8 @@ export function usePoolSend(m: MachineSummary): PoolSend {
 
   // When a final outcome was first seen here: the note counts its 8 s from then, not from
   // the machine's clock.
+  // Where the account that carries this machine's commands lives, for a note that names it.
+  const host = control ? remoteHostFor(control.machineId) : undefined;
   const seen = useRef(new Map<string, number>());
   const [, bump] = useState(0);
   const now = Date.now();
@@ -71,7 +74,7 @@ export function usePoolSend(m: MachineSummary): PoolSend {
   const inflight = newest && onItsWay(newest, now) ? newest : null;
   let note: CommandNote | null = null;
   if (newest) {
-    if (inflight) note = commandNote(newest, m.name, online, refusalWords);
+    if (inflight) note = commandNote(newest, m.name, online, refusalWords, host);
     else if (isFinal(newest)) {
       const key = `${newest.id}:${newest.outcome}`;
       let at = seen.current.get(key);
@@ -79,7 +82,7 @@ export function usePoolSend(m: MachineSummary): PoolSend {
         at = now;
         seen.current.set(key, at);
       }
-      const n = commandNote(newest, m.name, online, refusalWords);
+      const n = commandNote(newest, m.name, online, refusalWords, host);
       if (n && now - at < (n.sticky ? UNSUPPORTED_MS : NOTE_MS)) note = n;
     }
   }

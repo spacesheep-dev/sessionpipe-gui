@@ -44,6 +44,17 @@ function PhoneSub({ meta }: { meta?: ReactNode }) {
   );
 }
 
+/** A state of the page's in the meta's place, with nothing to do about it ("Catching up…"):
+ *  the subtitle's quiet dot and its words, said once as it comes. */
+export function BarStatus({ children }: { children: string }) {
+  return (
+    <span className="bar-status" role="status" aria-live="polite">
+      <span className="conn-dot" aria-hidden="true" />
+      {children}
+    </span>
+  );
+}
+
 /** The tools as a flat list (fragments opened), so the phone can lift the search out. */
 function flat(node: ReactNode): ReactNode[] {
   return Children.toArray(node).flatMap((c) =>

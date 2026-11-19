@@ -86,7 +86,7 @@ settings, review, plugins); the changes below add under 1 KB.
 - `server/store/slim.ts`: `trimPreview` (shared with `server/ui/preview.ts`) and interning
   of the short strings every event repeats (type, harness, machine, cwd, repo, model…).
 - `server/ui/process.ts`: `GET /api/ui/stats/process`, loopback only — `process.memoryUsage`,
-  uptime, store counts; `?gc=1` runs a full GC first. For a `watch curl` while it runs.
+  uptime, store counts; a POST runs a full GC first. For a `watch curl` while it runs.
 - `web/src/lib/time.ts`: `useNow("fine" | "coarse" | "off")`, `tickFor`, `useToday`.
 - `web/src/components/bits.tsx`, `Shell.tsx`, `SessionView.tsx`, `pages/Feed.tsx`: tickers
   pick their tick by age; idle turn blocks and the connection pill stop ticking; the Feed

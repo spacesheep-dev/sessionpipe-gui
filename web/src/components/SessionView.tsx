@@ -73,10 +73,13 @@ export function SessionLoading({ mode, rootRef }: { mode: "page" | "panel"; root
 /** Allow / Deny for an open permission as menu items that press the strip's own buttons,
  *  so a menu answers through the one signed send (and its one-answer memory) the strip
  *  uses; disabled with the strip's reason when it cannot. `root` is the view (or the
- *  panel's active body); the first open prompt unless `attentionId` names one. */
+ *  panel's active body); the first open prompt that still has its pair (one with an
+ *  answer out has none) unless `attentionId` names one. */
 export function answerItems(root: HTMLElement | null, s: SessionSummary, attentionId?: string): MenuList {
   const rows = [...(root?.querySelectorAll<HTMLElement>(".ctl-answer[data-attention]") ?? [])];
-  const row = attentionId ? rows.find((r) => r.dataset.attention === attentionId) : rows[0];
+  const row = attentionId
+    ? rows.find((r) => r.dataset.attention === attentionId)
+    : rows.find((r) => r.querySelector(".btn--allow"));
   const allow = row?.querySelector<HTMLButtonElement>(".btn--allow");
   const deny = row?.querySelector<HTMLButtonElement>(".btn--deny");
   if (!row || !allow || !deny) return [];
@@ -86,14 +89,22 @@ export function answerItems(root: HTMLElement | null, s: SessionSummary, attenti
   const plan = isPlanReview({ kind: "permission", tool });
   // Either button can be off on its own (Approve plan while the composer holds a note, Keep
   // planning with one over 2,000 characters): its item says so rather than pressing a
-  // button that cannot go.
-  const own = allow.getAttribute("aria-description");
+  // button that cannot go. That reason is what the button is described by beside the
+  // card's line.
+  const note = row.querySelector(".ctl-answer-note");
+  const ownWhy = (b: HTMLElement): string | null => {
+    for (const id of b.getAttribute("aria-describedby")?.split(/\s+/) ?? []) {
+      if (!id || id === note?.id) continue;
+      const words = b.ownerDocument.getElementById(id)?.textContent?.trim();
+      if (words) return words;
+    }
+    return null;
+  };
+  const own = ownWhy(allow);
   const why =
-    allow.disabled && !own
-      ? row.querySelector(".ctl-answer-note")?.textContent?.trim() || "This prompt cannot be answered from here"
-      : undefined;
+    allow.disabled && !own ? note?.textContent?.trim() || "This prompt cannot be answered from here" : undefined;
   const allowWhy = why ?? (allow.disabled ? own || true : undefined);
-  const denyWhy = why ?? (deny.disabled ? deny.getAttribute("aria-description") || true : undefined);
+  const denyWhy = why ?? (deny.disabled ? ownWhy(deny) || true : undefined);
   return [
     {
       label: plan ? "Approve plan" : `Allow${name}`,

@@ -146,16 +146,28 @@ function endsOf(s: string, side: "head" | "tail"): string {
 
 /** What a send carries, for the notice: the words (a message's or a start's text, or the
  *  note of an answer typed in the composer) without the attachments block this page wrote
- *  (`attached`), and the names of its images or a start's files, which are listed whole. */
+ *  (`attached`), and the names of its images or a start's files, which are listed whole.
+ *  A message's own files (its pictures, as the command signs them) are named in one entry:
+ *  "2 pictures: kiwi.png, birch.png". */
 export function heldContent(
   h: HeldForConfirm<unknown>,
   attached: readonly string[] = [],
 ): { text: string | null; names: string[] } {
   const f = h.fields;
-  if (f.kind === "prompt") return heldWordsAndImages(f.text, attached);
+  if (f.kind === "prompt") {
+    const said = heldWordsAndImages(f.text, attached);
+    return f.files?.length ? { text: said.text, names: [...said.names, filesLine(f.files)] } : said;
+  }
   if (f.kind === "start") return { text: f.text, names: (f.files ?? []).map((x) => x.name) };
   if (f.kind === "permission.answer") return { text: f.note ?? null, names: [] };
   return { text: null, names: [] };
+}
+
+/** A message's files in a line: how many, what they are (pictures, when every one is an
+ *  image), and each by the name the machine will save it under. */
+function filesLine(files: readonly { name: string; type: string }[]): string {
+  const what = files.every((x) => x.type.startsWith("image/")) ? "picture" : "file";
+  return `${files.length} ${what}${files.length === 1 ? "" : "s"}: ${files.map((x) => x.name).join(", ")}`;
 }
 
 /** A message's text for the notice. Only an attachments block this page wrote is taken

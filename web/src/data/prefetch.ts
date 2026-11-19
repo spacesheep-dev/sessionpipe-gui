@@ -18,7 +18,7 @@ const KEEP_MS = 8000;
 /** The newest page a session opens on (SessionView's cold open), slim: the full event
  *  is fetched only when a row is expanded. */
 export const TAIL = 100;
-/** Characters of each tool input/output or transcript kept in a list page. */
+/** Characters of each tool input/output kept in a list page. */
 export const LIST_PREVIEW = 400;
 const COLD: DetailQuery = { tail: true, limit: TAIL, slim: true, preview: LIST_PREVIEW };
 

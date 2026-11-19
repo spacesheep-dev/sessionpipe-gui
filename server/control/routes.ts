@@ -5,7 +5,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
 import type { Ctx, Reply, Router } from "../http/router.js";
-import { HttpError } from "../http/router.js";
+import { HttpError, proxyEntry } from "../http/router.js";
 import { CODE_RE, MACHINE_RE, POLL_KEY_RE, parseAcks, parseHello } from "./parse.js";
 import { type ControlState, keyOf, type MachineRow, type MessageRow, WAIT_MAX_S } from "./state.js";
 
@@ -17,8 +17,9 @@ export interface MachineRouteDeps {
   /** The browser origins passkeys work on (app.ts `origins`): the pairing link the
    *  terminal prints names one of these, never a bare LAN or tailnet address. */
   origins?: () => string[];
-  /** The UI key (config.ts): the pairing link carries it, so any browser that opens the
-   *  link is let in. The machine already holds the sink token, a secret of the same rank. */
+  /** The UI key (config.ts): the link of a pairing the sink token started carries it, so
+   *  any browser that opens that link is let in; the machine showed the sink token, a
+   *  secret of the same rank. An open pairing showed nothing, so its link carries none. */
   uiKey?: () => string;
 }
 
@@ -32,8 +33,9 @@ export interface MachineRouteDeps {
 export function pairUrlFor(requestOrigin: string, origins: readonly string[], code: string, uiKey?: string): string {
   const same = origins.find((o) => o.replace(/\/+$/, "") === requestOrigin.replace(/\/+$/, ""));
   const base = (same ?? origins[0] ?? requestOrigin).replace(/\/+$/, "");
-  // The key rides along (UI_KEY_PARAM): a phone or a laptop that never saw this board
-  // opens the link and is let in, instead of "This board needs its key".
+  // The key rides along (UI_KEY_PARAM) where the caller passes one: a phone or a laptop
+  // that never saw this board opens the link and is let in, instead of "This board needs
+  // its key". Which pairings get it is the route's to say (POST pair, below).
   return `${base}/pair?code=${encodeURIComponent(code)}${uiKey ? `&k=${encodeURIComponent(uiKey)}` : ""}`;
 }
 
@@ -49,12 +51,13 @@ const notFound = () => new HttpError(404, { reason: "not_found" });
 
 /** The origin a machine reached us on, for the pairing url the terminal prints and the
  *  WebAuthn origin check. Through a trusted proxy (ctx.remote.forwarded) the proxy's
- *  X-Forwarded-Host and -Proto name the origin the browser saw. */
+ *  X-Forwarded-Host and -Proto name the origin the browser saw; from anyone else the two
+ *  headers are not read. */
 export function requestOrigin(ctx: Ctx): string {
   const h = ctx.req.headers;
-  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)?.split(",")[0]?.trim();
-  const host = (ctx.remote.forwarded ? one(h["x-forwarded-host"]) : undefined) ?? h.host;
-  const proto = one(h["x-forwarded-proto"]) === "https" ? "https" : "http";
+  const via = ctx.remote.forwarded;
+  const host = (via ? proxyEntry(h["x-forwarded-host"]) : undefined) ?? h.host;
+  const proto = via && proxyEntry(h["x-forwarded-proto"]) === "https" ? "https" : "http";
   return host ? `${proto}://${host}` : "http://localhost";
 }
 
@@ -78,8 +81,13 @@ export function wireMessage(m: MessageRow): Record<string, unknown> {
   };
 }
 
-export function registerMachineRoutes(router: Router, d: MachineRouteDeps): void {
+export function registerMachineRoutes(to: Router, d: MachineRouteDeps): void {
   const { state, base } = d;
+  // Every route here is a machine's: a daemon or a terminal calls it with the sink token,
+  // its own token or a pairing's poll key, never a page with this machine's standing. So
+  // it answers a daemon under whatever name it reached the receiver by (guard.ts `wire`);
+  // a request a browser marks as another origin's is still refused.
+  const router = to.wire;
 
   // CONTROL.md §2 step 1 (and renewal, step 3; and open pairing).
   router.post(`${base}/pair`, async (ctx): Promise<Reply> => {
@@ -117,7 +125,10 @@ export function registerMachineRoutes(router: Router, d: MachineRouteDeps): void
       json: {
         machine: m.id,
         code: p.code,
-        url: pairUrlFor(requestOrigin(ctx), d.origins?.() ?? [], p.code, d.uiKey?.()),
+        // The board's key goes only with a pairing the sink token started. An open pairing
+        // showed no token, so its link is the code alone: it is opened where the board is
+        // already open, and the board lists it among the pairings that wait.
+        url: pairUrlFor(requestOrigin(ctx), d.origins?.() ?? [], p.code, pollKey ? undefined : d.uiKey?.()),
         check: p.check,
         expires_at: p.expiresAt,
       },

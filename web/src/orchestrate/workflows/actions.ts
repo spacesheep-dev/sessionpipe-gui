@@ -131,8 +131,9 @@ export async function deleteWorkflow(w: Workflow, o: { leave?: boolean } = {}): 
   }
 }
 
-export const copyWorkflowLink = (id: string): Promise<void> => copyText(absoluteUrl(workflowPath(id)));
-export const copyRunLink = (id: string): Promise<void> => copyText(absoluteUrl(runPath(id)));
+// (Workflows are a receiver's: their pages always have an address.)
+export const copyWorkflowLink = (id: string): Promise<void> => copyText(absoluteUrl(workflowPath(id)) ?? "");
+export const copyRunLink = (id: string): Promise<void> => copyText(absoluteUrl(runPath(id)) ?? "");
 
 /** The steps a cancel could also stop: sent, with a session, on a machine paired here. */
 export function stoppableSteps(

@@ -72,9 +72,9 @@ export function splitShellCommand(cmd: string): string[] {
   return out.length ? out : [cmd];
 }
 
-/** The lines of the strip's command block, or null where the command reads best inline
- *  as today ("Allow Bash to run `ls -la`?"): a block for a chain of two or more steps
- *  longer than 60 characters, or for any command with a line break. */
+/** The steps of the strip's command block, one a line: for a chain of two or more steps
+ *  longer than 60 characters, or for any command with a line break. Null where the command
+ *  reads best as one line ("ls -la", "cd web && npm test"), which the block holds whole. */
 export function shellLines(cmd: string): string[] | null {
   const lines = splitShellCommand(cmd);
   return (lines.length >= 2 && cmd.length > 60) || cmd.includes("\n") ? lines : null;

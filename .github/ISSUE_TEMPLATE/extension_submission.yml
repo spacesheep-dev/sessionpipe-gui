@@ -37,6 +37,6 @@ body:
       label: House rules
       options:
         - label: Apache-2.0 (or a compatible license), SPDX headers, DCO sign-off on the commits.
-        - label: Loads nothing from the network at runtime; a plugin's secrets go through `type: "secret"` settings, never into the code or the manifest.
+        - label: "Loads nothing from the network at runtime; a plugin's secrets go through `type: \"secret\"` settings, never into the code or the manifest."
         - label: Uses the host's tokens by name; amber only for *needs you*; `prefers-reduced-motion` honoured.
         - label: Has a dev harness or tests, and `dist/index.js` well under 150 KB for a view.

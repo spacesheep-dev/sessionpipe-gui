@@ -17,6 +17,7 @@ import type {
 import { useSyncExternalStore } from "react";
 import { accountFor, agentWords } from "../lib/limits";
 import { poolPickerWords } from "../lib/pool";
+import { START } from "../native/accountWords.new";
 import { expandHome, machineHome, typedFolder } from "./folders";
 
 /** What an entry point knows: "here" is a session's machine, agent and folder. */
@@ -159,15 +160,20 @@ export interface ContextInput {
   sessions: readonly { machine?: string; harness?: string; lastAt: string }[];
   /** The machines a start can go to (paired here), in the sheet's order. */
   machines: readonly string[];
+  /** Of those, the ones that can take a start from this page now (control/startGate.ts). */
+  ready?: readonly string[];
 }
 
 /** The sheet's machine and agent when it opens: an explicit target, then a board filter
  *  of one value, then this device's last start, then the machine with the most recent
- *  session, then the first machine. A name that is not a paired machine is passed over. */
+ *  session, then the first machine. A name that is not a paired machine is passed over;
+ *  after the explicit target, while some machine can take a start, so is one that cannot. */
 export function pickContext(o: ContextInput): { machine?: string; harness?: string } {
-  const ok = (m: string | undefined): m is string => !!m && o.machines.includes(m);
+  const paired = (m: string | undefined): m is string => !!m && o.machines.includes(m);
   const t = o.target ?? {};
-  if (ok(t.machine)) return { machine: t.machine, ...(t.harness ? { harness: t.harness } : {}) };
+  if (paired(t.machine)) return { machine: t.machine, ...(t.harness ? { harness: t.harness } : {}) };
+  const some = o.ready?.some(paired) ? o.ready.filter(paired) : o.machines;
+  const ok = (m: string | undefined): m is string => !!m && some.includes(m);
   const harness = t.harness ?? o.filter?.harness;
   const withHarness = (machine: string, fallback?: string) => ({
     machine,
@@ -179,7 +185,7 @@ export function pickContext(o: ContextInput): { machine?: string; harness?: stri
   for (const s of o.sessions)
     if (ok(s.machine) && (!best || s.lastAt > best.at)) best = { machine: s.machine, at: s.lastAt };
   if (best) return withHarness(best.machine);
-  return o.machines[0] ? withHarness(o.machines[0]) : harness ? { harness } : {};
+  return some[0] ? withHarness(some[0]) : harness ? { harness } : {};
 }
 
 /** A remembered choice, less anything the machine no longer advertises: a harness not in
@@ -271,24 +277,28 @@ export function machineFacts(
   return { ...(hint ? { hint } : {}), ...(detail ? { detail } : {}) };
 }
 
-/** The Permission row when the machine shows no pop-up for it: the one level a start
- *  gets there, or that it is set at the machine (and its mode, when the hello said), so
- *  the row keeps its place on every machine. Null when a pop-up is shown. */
+/** The Permission row when the machine shows no pop-up for it: the one level a start gets
+ *  there, or the machine's mode in the pop-up's words ("Safe", "Auto"), or that it is set on
+ *  the machine, so the row keeps its place on every machine; `note` a fact of its own that
+ *  goes under it. Null when a pop-up is shown. */
 export function fixedPermission(
   c: MachineControl | undefined,
   harness: string | undefined,
   label: Record<string, string>,
-): string | null {
+): { value: string; note?: string } | null {
   const choices = permissionChoices(harness ? c?.start?.[harness] : undefined);
   if (choices.length >= 2) return null;
-  if (choices.length === 1) return label[choices[0]!] ?? choices[0]!;
-  if (c?.mode === "safe") return "Safe mode, set at the machine";
-  if (c?.mode === "auto") return "Auto mode, set at the machine";
+  if (choices.length === 1) return { value: label[choices[0]!] ?? choices[0]! };
+  if (c?.mode === "safe" || c?.mode === "auto") return { value: label[c.mode] ?? c.mode };
   // An agent with no start options on an inherit machine is driven over ACP, whose asks
   // the machine refuses as in safe (CONTROL.md §6); its own settings decide the rest.
-  if (c?.mode === "inherit") return "Its own settings; what it asks is refused";
-  return "Set at the machine";
+  if (c?.mode === "inherit") return { value: START.ownSettings, note: START.ownSettingsRefused };
+  return { value: START.setOnMachine };
 }
+
+/** That value in one run, note and all ("Its own settings. Anything it asks permission for
+ *  is refused."), where nothing goes under it: a desktop's options line, a workflow step. */
+export const fixedLine = (f: { value: string; note?: string }): string => (f.note ? `${f.value}. ${f.note}` : f.value);
 
 /** What an agent's account has left on a machine, for its row in the Agent menu: on a
  *  machine whose hello pools that harness with the switch on and an account enabled, the
@@ -300,7 +310,7 @@ export function agentLeft(
   c: MachineControl | undefined,
   limits: readonly LimitsEntry[],
   now: number,
-): { hint?: string; detail?: string; out?: boolean } {
+): { hint?: string; detail?: string; out?: boolean; aside?: string } {
   const pool = c?.pool;
   if (pool?.on && pool.harness === harness && pool.accounts.some((a) => a.enabled))
     return poolPickerWords(pool, (id) => limits.find((e) => e.harness === harness && e.accountId === id), now);

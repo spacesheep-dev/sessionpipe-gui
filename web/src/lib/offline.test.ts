@@ -1,8 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
-// The board's offline line: which paired machines it names, and hiding it until it changes.
+// The board's offline line: which paired machines it names, and hiding it until it changes;
+// and the one rule for online that Machines reads too.
 import type { MachineSummary, SessionSummary } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { ackKey, acknowledge, heldLine, offlineMachines, offlineWords, pruneAcks, unacknowledged } from "./offline";
+import {
+  ackKey,
+  acknowledge,
+  heldLine,
+  lastHeard,
+  machineOnline,
+  offlineMachines,
+  offlineWords,
+  pruneAcks,
+  unacknowledged,
+} from "./offline";
 
 const POLL = "2026-10-28T14:02:00.000Z";
 
@@ -20,6 +31,31 @@ const machine = (name: string, control?: Partial<NonNullable<MachineSummary["con
 
 const session = (machine: string, state: SessionSummary["state"]) =>
   ({ key: `claude-code/${machine}-${state}`, machine, state }) as SessionSummary;
+
+describe("machineOnline", () => {
+  const at = Date.parse(POLL);
+  it("a paired machine is online by its heartbeat alone, however fresh its last event", () => {
+    // Its daemon is down while a session there keeps sending (the board calls it offline).
+    expect(machineOnline(machine("laptop", { online: false }), at + 9_000)).toBe(false);
+    // Its daemon polls while nothing has happened there for a while.
+    expect(machineOnline(machine("laptop", { online: true }), at + 4 * 60_000)).toBe(true);
+  });
+
+  it("an event-only machine, with no heartbeat, by an event in the last minute", () => {
+    expect(machineOnline(machine("studio"), at + 59_000)).toBe(true);
+    expect(machineOnline(machine("studio"), at + 60_000)).toBe(false);
+    expect(machineOnline({ ...machine("studio"), lastAt: "" }, at)).toBe(false);
+  });
+});
+
+describe("lastHeard", () => {
+  it("is the last poll here, else the last hello (spacesheep's last_seen on an account)", () => {
+    const hello = "2026-10-28T13:58:00.000Z";
+    expect(lastHeard({ lastPollAt: POLL, lastHelloAt: hello })).toBe(POLL);
+    expect(lastHeard({ lastHelloAt: hello })).toBe(hello);
+    expect(lastHeard({})).toBeUndefined();
+  });
+});
 
 describe("offlineMachines", () => {
   it("leaves out event-only machines, online ones, and offline ones with nothing waiting or running", () => {

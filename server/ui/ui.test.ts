@@ -18,6 +18,7 @@ import { type App, createApp } from "../app.js";
 import { lanAddresses } from "../http/net.js";
 import type { Ctx } from "../http/router.js";
 import { uiAuth } from "./auth.js";
+import { readColorThemes } from "./colorThemes.js";
 import { describeViewer } from "./viewers.js";
 
 let app: App;
@@ -108,6 +109,14 @@ describe("UI API", () => {
     await reader.cancel();
   });
 
+  it("reads a color theme saved with a byte-order mark, as Notepad and PowerShell 5 write one", () => {
+    const dir = path.join(tmp.dir, "color-themes-bom");
+    mkdirSync(dir, { recursive: true });
+    const theme = { id: "marked", name: "Marked", scheme: "dark", tokens: { "--bg": "#000", "--fg": "#fff" } };
+    writeFileSync(path.join(dir, "marked.json"), `\uFEFF${JSON.stringify(theme)}`);
+    expect(readColorThemes(dir)).toEqual({ themes: [theme], errors: [] });
+  });
+
   it("serves the color themes dropped into <state>/color-themes, reporting bad files", async () => {
     const dir = path.join(tmp.dir, "color-themes");
     mkdirSync(dir, { recursive: true });
@@ -161,17 +170,26 @@ describe("UI API", () => {
     ).json()) as SessionDetail;
     expect(tail.events.map((e) => e.session.seq)).toEqual([1]);
     expect(tail).toMatchObject({ firstSeq: 1, hasOlder: true, total: 2 });
-    // A list page may ask for a shorter preview than the index's 2 KB.
+    // A list page may ask for a shorter preview than the index's 2 KB of tool input and
+    // output; the turn's own words come as the index holds them, whole up to 2 KB.
     const long = new Session("long");
     app.store.ingest(
-      [long.ev("session.started"), long.ev("tool.ended", { tool: "Bash", ok: true, output: "z".repeat(5000) })],
+      [
+        long.ev("session.started"),
+        long.ev("tool.ended", { tool: "Bash", ok: true, output: "z".repeat(5000) }),
+        long.ev("turn.transcript", { turn: 1, user: "u".repeat(1500), assistant: "a".repeat(5000) }),
+      ],
       "http",
     );
     const cut = (await (
-      await fetch(`${app.url}${ROUTES.ui.session}/claude-code/long?tail=1&limit=1&slim=1&preview=300`)
+      await fetch(`${app.url}${ROUTES.ui.session}/claude-code/long?tail=1&limit=2&slim=1&preview=300`)
     ).json()) as SessionDetail;
-    expect((cut.events[0]!.data.output as string).length).toBe(300);
-    expect(cut.events[0]!.preview).toEqual({ output: 5000 });
+    const [tool, turn] = cut.events;
+    expect((tool!.data.output as string).length).toBe(300);
+    expect(tool!.preview).toEqual({ output: 5000 });
+    expect(turn!.data.user).toBe("u".repeat(1500));
+    expect((turn!.data.assistant as string).length).toBe(2048);
+    expect(turn!.preview).toEqual({ assistant: 5000 });
     const full = (await (
       await fetch(`${app.url}${ROUTES.ui.session}/claude-code/long?after=0&limit=1`)
     ).json()) as SessionDetail;
@@ -375,6 +393,11 @@ describe("static", () => {
     const page = await fetch(`${base}/`);
     expect(page.status).toBe(401);
     expect(await page.text()).toContain("needs its key");
+    // A pairing link opened where the board never was: the page says what to do next.
+    const pair = await fetch(`${base}/pair?code=abc`);
+    expect(pair.status).toBe(401);
+    expect(await pair.text()).toContain("This is a pairing link");
+    expect(await (await fetch(`${base}/machines`)).text()).not.toContain("pairing link");
     expect((await fetch(`${base}${ROUTES.ui.snapshot}`)).status).toBe(401);
     expect((await fetch(`${base}${ROUTES.ui.rotateToken}`, { method: "POST" })).status).toBe(401);
     const key = app.config().uiKey;

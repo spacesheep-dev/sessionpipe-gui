@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { type Info, ROUTES } from "../shared/api.js";
 import { tempDir } from "../test/events.js";
 import { type App, createApp, normalizePublicUrl } from "./app.js";
+import { lanAddresses } from "./http/net.js";
 
 const PUBLIC = "https://laptop.tail1234.ts.net";
 let app: App | null = null;
@@ -93,6 +94,102 @@ describe("--public-url", () => {
     // A LAN-only route (the setup actions) refuses a forwarded visitor too.
     const setup = await fetch(`${a.url}${ROUTES.ui.setup}/remote/off`, { method: "POST", headers: forwarded });
     expect(setup.status).toBe(403);
+  });
+
+  it("takes the proxy's own entry as the visitor: what the sender wrote before it counts for nothing", async () => {
+    const a = await boot(PUBLIC);
+    const key = a.config().uiKey;
+    const via = (xff: string) => ({
+      "x-forwarded-for": xff,
+      "x-forwarded-proto": "https",
+      "x-forwarded-host": "laptop.tail1234.ts.net",
+    });
+    // A proxy that appends leaves the sender's own entries in front of the address it saw.
+    for (const sent of ["127.0.0.1", "::1", "localhost", "127.0.0.1, ::1"]) {
+      const headers = via(`${sent}, 203.0.113.9`);
+      const r = await fetch(`${a.url}${ROUTES.ui.info}`, { headers });
+      expect(`${sent} ${r.status}`).toBe(`${sent} 401`);
+      expect(await r.text()).not.toContain(key);
+      expect((await fetch(`${a.url}${ROUTES.ui.snapshot}`, { headers })).status).toBe(401);
+      expect((await fetch(`${a.url}/`, { headers })).status).toBe(401);
+      // With the key it is a visitor like any other: let in, and still not this machine.
+      expect((await fetch(`${a.url}${ROUTES.ui.info}?k=${key}`, { headers })).status).toBe(200);
+      const rotate = await fetch(`${a.url}${ROUTES.ui.rotateToken}?k=${key}`, { method: "POST", headers });
+      expect(rotate.status).toBe(403);
+      const setup = await fetch(`${a.url}${ROUTES.ui.setup}/remote/off?k=${key}`, { method: "POST", headers });
+      expect(setup.status).toBe(403);
+    }
+    expect(a.publicUrl).toBe(PUBLIC);
+  });
+
+  it("a request the proxy forwarded is never this machine, whatever address the proxy names for it", async () => {
+    const a = await boot(PUBLIC);
+    const key = a.config().uiKey;
+    const token = a.config().sinkToken;
+    // The proxy took the connection from loopback or from one of this machine's own
+    // addresses: from a browser here, or from another proxy in front of it.
+    for (const named of ["127.0.0.1", "::1", "::ffff:127.0.0.1", ...lanAddresses().slice(0, 1)]) {
+      const headers = { "x-forwarded-for": named, "x-forwarded-proto": "https" };
+      const r = await fetch(`${a.url}${ROUTES.ui.info}`, { headers });
+      expect(`${named} ${r.status}`).toBe(`${named} 401`);
+      expect((await fetch(`${a.url}${ROUTES.ui.info}?k=${key}`, { headers })).status).toBe(200);
+      // The routes that act on this machine, and the ones only loopback may call.
+      const status = await fetch(`${a.url}${ROUTES.ui.setup}/status?k=${key}`, { headers });
+      expect(`${named} ${status.status}`).toBe(`${named} 403`);
+      expect(((await status.json()) as { reason: string }).reason).toBe("local_only");
+      const off = await fetch(`${a.url}${ROUTES.ui.setup}/remote/off?k=${key}`, { method: "POST", headers });
+      expect(off.status).toBe(403);
+      const rotate = await fetch(`${a.url}${ROUTES.ui.rotateToken}?k=${key}`, { method: "POST", headers });
+      expect(rotate.status).toBe(403);
+      const reindex = await fetch(`${a.url}${ROUTES.ui.searchReindex}?k=${key}`, {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(reindex.status).toBe(403);
+    }
+    expect(a.publicUrl).toBe(PUBLIC);
+    expect(a.config().sinkToken).toBe(token);
+    // No header: the connection is this machine's own, as before.
+    expect((await fetch(`${a.url}${ROUTES.ui.info}`)).status).toBe(200);
+    const rotated = await fetch(`${a.url}${ROUTES.ui.rotateToken}`, { method: "POST" });
+    expect(rotated.status).toBe(200);
+  });
+
+  const lan = lanAddresses()[0];
+  it.skipIf(!lan)("a proxy that reaches the server by the machine's own address is a proxy too", async () => {
+    const a = await boot(PUBLIC);
+    const key = a.config().uiKey;
+    const base = `http://${lan}:${a.port}`;
+    const headers = { "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https" };
+    // The routes that act on this machine take this machine's own addresses for it; a
+    // visitor the proxy forwarded from one of them is not it.
+    const status = await fetch(`${base}${ROUTES.ui.setup}/status`, { headers });
+    expect(status.status).toBe(403);
+    expect(await status.text()).not.toContain(key);
+    const off = await fetch(`${base}${ROUTES.ui.setup}/remote/off?k=${key}`, { method: "POST", headers });
+    expect(off.status).toBe(403);
+    expect(a.publicUrl).toBe(PUBLIC);
+    // It is a visitor like any other: in with the key, and what it names is not read as its own.
+    expect((await fetch(`${base}${ROUTES.ui.info}`, { headers })).status).toBe(401);
+    expect((await fetch(`${base}${ROUTES.ui.info}?k=${key}`, { headers })).status).toBe(200);
+  });
+
+  it("a request that carries any other mark of a proxy, and no X-Forwarded-For, is a visitor too", async () => {
+    const a = await boot(PUBLIC);
+    const key = a.config().uiKey;
+    for (const headers of [
+      { forwarded: "for=203.0.113.9;proto=https;host=laptop.tail1234.ts.net" },
+      { "x-real-ip": "203.0.113.9" },
+      { "x-forwarded-host": "laptop.tail1234.ts.net", "x-forwarded-proto": "https" },
+    ] as Record<string, string>[]) {
+      const r = await fetch(`${a.url}${ROUTES.ui.info}`, { headers });
+      expect(`${Object.keys(headers)[0]} ${r.status}`).toBe(`${Object.keys(headers)[0]} 401`);
+      expect((await fetch(`${a.url}${ROUTES.ui.info}?k=${key}`, { headers })).status).toBe(200);
+      const off = await fetch(`${a.url}${ROUTES.ui.setup}/remote/off?k=${key}`, { method: "POST", headers });
+      expect(off.status).toBe(403);
+    }
+    expect(a.publicUrl).toBe(PUBLIC);
   });
 
   it("without --public-url the same header is ignored", async () => {

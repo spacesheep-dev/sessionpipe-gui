@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// The files a `start` carries (CONTROL.md §3.1 `files`, HTTP.md §3): the command names
-// each file by its SHA-256 and the receiver holds the bytes until the machine fetches
-// them with its own token. Here that is one folder, <stateDir>/control/files/, with the
-// bytes under the base64url hash and a small JSON beside them (type and expiry):
+// The files a `start` or a `prompt` carries (CONTROL.md §3.1 `files`, HTTP.md §3): the
+// command names each file by its SHA-256 and the receiver holds the bytes until the machine
+// fetches them with its own token. Here that is one folder, <stateDir>/control/files/, with
+// the bytes under the base64url hash and a small JSON beside them (type and expiry):
 //
 //   control/files/<sha256>       the bytes, 0600
 //   control/files/<sha256>.json  { type, size, expiresAt }
 //
-// An upload lives a day; queuing a start that names it stretches that to the message's
+// An upload lives a day; queuing a command that names it stretches that to the message's
 // own expiry, so a file is never gone before the command that needs it (HTTP.md §3).
 // One account per GUI, so any machine paired here may fetch any file held here.
 import { createHash } from "node:crypto";

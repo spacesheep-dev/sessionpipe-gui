@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const g = globalThis as Record<string, unknown>;
 
+const realFetch = g.fetch;
 afterEach(() => {
   delete g.sessionpipeShell;
   delete g.EventSource;
+  g.fetch = realFetch;
   vi.resetModules();
 });
 
@@ -54,5 +56,64 @@ describe("net in the shell", () => {
     g.sessionpipeShell = { v: 1, platform: "macos", rxBase: null };
     const net = await import("./net");
     expect(net.apiUrl("/api/ui/info")).toBe("/api/ui/info");
+  });
+});
+
+describe("apiFetch", () => {
+  const answering = () => {
+    const asked: [string, RequestInit | undefined][] = [];
+    g.fetch = (async (url: string, init?: RequestInit) => {
+      asked.push([url, init]);
+      return new Response("{}");
+    }) as unknown;
+    return asked;
+  };
+
+  it("in a browser is fetch of the path as it is, with the same init", async () => {
+    const asked = answering();
+    const net = await import("./net");
+    const init = { method: "POST", body: "{}" };
+    await net.apiFetch("/api/ui/info", init);
+    expect(asked).toEqual([["/api/ui/info", init]]);
+    expect(net.accountMode()).toBe(false);
+  });
+
+  it("in the shell on a receiver is fetch of the rx: address", async () => {
+    g.sessionpipeShell = {
+      v: 1,
+      platform: "ios",
+      rxBase: "rx://localhost/abc123",
+      receiver: { id: "abc123", origin: "http://127.0.0.1:7815" },
+    };
+    const asked = answering();
+    const net = await import("./net");
+    await net.apiFetch("/api/ui/info");
+    expect(asked).toEqual([["rx://localhost/abc123/api/ui/info", undefined]]);
+    expect(net.accountMode()).toBe(false);
+  });
+
+  it("on a spacesheep account never reaches the network: it waits for the page's own backend", async () => {
+    g.sessionpipeShell = {
+      v: 1,
+      platform: "ios",
+      rxBase: "rx://localhost/acct",
+      receiver: { id: "acct", origin: "https://spacesheep.dev", kind: "spacesheep", email: "me@example.com" },
+    };
+    const asked = answering();
+    const net = await import("./net");
+    expect(net.accountMode()).toBe(true);
+    // Asked before the backend is in place: held, not sent to rxBase.
+    const early = net.apiFetch("/api/ui/setup/status");
+    await new Promise((r) => setTimeout(r, 5));
+    expect(asked).toEqual([]);
+    const seen: string[] = [];
+    net.setApiBackend(async (path) => {
+      seen.push(path);
+      return new Response("{}", { status: 404 });
+    });
+    expect((await early).status).toBe(404);
+    await net.apiFetch("/api/ui/info");
+    expect(seen).toEqual(["/api/ui/setup/status", "/api/ui/info"]);
+    expect(asked).toEqual([]);
   });
 });
