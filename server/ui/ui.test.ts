@@ -18,6 +18,7 @@ import { type App, createApp } from "../app.js";
 import { lanAddresses } from "../http/net.js";
 import type { Ctx } from "../http/router.js";
 import { uiAuth } from "./auth.js";
+import { readColorThemes } from "./colorThemes.js";
 import { describeViewer } from "./viewers.js";
 
 let app: App;
@@ -106,6 +107,14 @@ describe("UI API", () => {
     await until(() => text.includes("event: event\n"));
     expect(text).toContain('"kind":"event"');
     await reader.cancel();
+  });
+
+  it("reads a color theme saved with a byte-order mark, as Notepad and PowerShell 5 write one", () => {
+    const dir = path.join(tmp.dir, "color-themes-bom");
+    mkdirSync(dir, { recursive: true });
+    const theme = { id: "marked", name: "Marked", scheme: "dark", tokens: { "--bg": "#000", "--fg": "#fff" } };
+    writeFileSync(path.join(dir, "marked.json"), `\uFEFF${JSON.stringify(theme)}`);
+    expect(readColorThemes(dir)).toEqual({ themes: [theme], errors: [] });
   });
 
   it("serves the color themes dropped into <state>/color-themes, reporting bad files", async () => {

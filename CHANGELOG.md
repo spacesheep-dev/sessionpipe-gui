@@ -41,6 +41,30 @@ All notable changes to `sessionpipe-gui`. The format follows
   the board, even once there was room again; the same failure during the first read at
   start left the outbox off until a restart. The batch is now read again on the next tick,
   said once, and the other sessions carry on meanwhile.
+- **A color theme, skin, view or plugin saved by Notepad or PowerShell 5 loads.** Those
+  editors start a UTF-8 file with a byte-order mark, and the receiver refused it: a theme
+  in `color-themes/` was listed as "not JSON: Unexpected token", and a `skin.json`,
+  `theme.json` or `plugin.json` as "not valid JSON". It now reads past the mark, as it
+  already did for `config.json`.
+- **A `control/machines.json` that does not read no longer unpairs every machine.** One
+  saved with a UTF-8 byte-order mark (PowerShell 5's `-Encoding UTF8`, older Windows
+  editors) is now read past it. One left empty, cut short, unreadable or without a list of
+  machines was read as "no machines": the receiver deleted every machine's queued sends at
+  start, and the next pairing or hello wrote the file over, so every machine had to pair
+  again. The receiver now stops at start with a message naming the file and what to do, as
+  it does for `config.json`, and leaves the file as it was.
+- **Search's status line says when history search is off but its index could not be
+  deleted.** It read "The index needs rebuilding" instead. It now says the history index
+  could not be deleted, and that Rebuild (on this computer) or restarting the app tries
+  again; `sessionpipe-gui index --status` against a running GUI says so too, with the error
+  code when there is one, and points at `index --rebuild`. The status carries a new
+  `historyLeft` field for it.
+- **Search names a filter value it could not read.** `since:2026-2-1`, `until:3days`,
+  `in:everything` or `source:mars` was left out of the search but reported as "“since:”
+  isn't a filter, so it was searched as text", though `since:` is a filter and nothing was
+  searched as text. The page and `sessionpipe-gui search` now say "“since:2026-2-1” isn't a
+  date, so it was left out", with the forms that read (an unknown `in:` or `source:` value
+  lists the fields or indexes), and keep the old words for a key that is not a filter.
 
 ## [0.8.5] - 2026-11-18
 
