@@ -41,6 +41,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   the board, even once there was room again; the same failure during the first read at
   start left the outbox off until a restart. The batch is now read again on the next tick,
   said once, and the other sessions carry on meanwhile.
+- **A color theme, skin, view or plugin saved by Notepad or PowerShell 5 loads.** Those
+  editors start a UTF-8 file with a byte-order mark, and the receiver refused it: a theme
+  in `color-themes/` was listed as "not JSON: Unexpected token", and a `skin.json`,
+  `theme.json` or `plugin.json` as "not valid JSON". It now reads past the mark, as it
+  already did for `config.json`.
 
 ## [0.8.5] - 2026-11-18
 
