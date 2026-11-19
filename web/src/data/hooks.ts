@@ -21,9 +21,12 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { useBehind } from "../account/current";
 // The one reading of `answerable` the strip and the inbox share (an older server leaves the field unset).
 import { answerable } from "../components/ControlStrip";
-import { sessionTitle } from "../lib/format";
+import { answersOut } from "../control/answers";
+import { answerLate, useAnswerClock } from "../lib/answerWindow";
+import { isQuestion, sessionTitle } from "../lib/format";
 import { canMark, isUnread, markSeen, SEEN_AFTER_MS, setUnread } from "../lib/marks";
 import { useShortcut } from "../lib/shortcuts";
 import type { AppState, Store } from "./store";
@@ -53,10 +56,14 @@ export const SLOW_FIRST_LOAD_MS = 6000;
 
 /** A page before its first snapshot: "loading" (the skeleton), "slow" (still connecting
  *  after SLOW_FIRST_LOAD_MS), "down" (the stream failed; the transport retries); null
- *  once loaded. No page sits on a skeleton without saying why. */
+ *  once loaded. No page sits on a skeleton without saying why: an account with history
+ *  still to come (account/current.ts useBehind) is not slow, even at spacesheep's limit
+ *  (it reads on by itself), and its page bar says "Catching up…". */
 export function useFirstLoad(): "loading" | "slow" | "down" | null {
   const { connection, snapshotAt } = useAppState();
-  const waiting = !snapshotAt && (connection === "live" || connection === "connecting");
+  const behind = useBehind();
+  const up = connection === "live" || connection === "connecting";
+  const waiting = !snapshotAt && !behind && up;
   const [slow, setSlow] = useState(false);
   useEffect(() => {
     setSlow(false);
@@ -65,7 +72,8 @@ export function useFirstLoad(): "loading" | "slow" | "down" | null {
     return () => window.clearTimeout(t);
   }, [waiting]);
   if (snapshotAt) return null;
-  if (!waiting) return "down";
+  if (!up) return "down";
+  if (behind) return "loading";
   return slow ? "slow" : "loading";
 }
 
@@ -321,8 +329,12 @@ export function useMachines(): MachineSummary[] {
 export interface OpenAttention {
   session: SessionSummary;
   attention: Attention;
-  /** A control `permission.answer` can reach it (shared/api.ts `Attention.answerable`). */
+  /** A control `permission.answer` can reach it (shared/api.ts `Attention.answerable`), and
+   *  can carry its answer: a question's is the option chosen, given on its computer. */
   answerable: boolean;
+  /** Its hook stopped waiting for an answer (lib/answerWindow.ts): no longer answerable,
+   *  it waits in its terminal. Marked by `markLate`. */
+  late?: boolean;
 }
 
 /** Every open attention across every session, newest first. */
@@ -330,16 +342,56 @@ export function openAttentions(sessions: ReadonlyMap<SessionKey, SessionSummary>
   const out: OpenAttention[] = [];
   for (const session of sessions.values())
     for (const attention of session.openAttentions)
-      out.push({ session, attention, answerable: attention.kind === "permission" && answerable(attention) });
+      out.push({
+        session,
+        attention,
+        answerable: attention.kind === "permission" && answerable(attention) && !isQuestion(attention),
+      });
   return out.sort((a, b) => b.attention.at.localeCompare(a.attention.at));
 }
 
-export function useOpenAttentions(): OpenAttention[] {
-  const { sessions } = useAppState();
-  return useMemo(() => openAttentions(sessions), [sessions]);
+/** `rows` with each answerable prompt past its window as of `now` marked late, and no
+ *  longer answerable; the same list when none is. */
+export function markLate(
+  rows: OpenAttention[],
+  machines: ReadonlyMap<string, MachineSummary>,
+  now: number,
+): OpenAttention[] {
+  const late = (r: OpenAttention) =>
+    r.answerable &&
+    answerLate(
+      r.attention,
+      r.session.machine ? machines.get(r.session.machine)?.control : undefined,
+      r.session.harness,
+      now,
+    );
+  return rows.some(late) ? rows.map((r) => (late(r) ? { ...r, answerable: false, late: true } : r)) : rows;
 }
 
-/** Open attentions a person can answer from here: the inbox badge and the title's "(n)". */
+/** Every open attention, newest first; a prompt turns late (`markLate`) as its window
+ *  runs out. */
+export function useOpenAttentions(): OpenAttention[] {
+  const { sessions, machines } = useAppState();
+  const all = useMemo(() => openAttentions(sessions), [sessions]);
+  const now = useAnswerClock(all.filter((r) => r.answerable).map((r) => r.attention));
+  return markLate(all, machines, now);
+}
+
+/** Open attentions a person can answer from here: the inbox badge, the title's "(n)" and
+ *  the app's badge. One with an answer out, or that its computer closed (control/answers.ts),
+ *  no longer counts, from the moment the answer went. */
 export function useAnswerableCount(): number {
-  return useOpenAttentions().filter((r) => r.answerable).length;
+  const store = useStore();
+  const { control } = useAppState();
+  const rows = useOpenAttentions().filter((r) => r.answerable);
+  // Which prompts have an answer out is the activity's word: read it while one is open.
+  const asks = rows.length > 0;
+  useEffect(() => {
+    if (asks) store.loadControl();
+  }, [store, asks]);
+  const out = answersOut(
+    control,
+    rows.map((r) => r.attention),
+  );
+  return rows.filter((r) => !out[r.attention.attentionId]).length;
 }

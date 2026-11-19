@@ -1,10 +1,13 @@
 //! Local notifications for needs-you (arch-mobile §6, NATIVE-SPEC §6), no cloud: while the
 //! app is in the background (the ~30 s iOS grants after leaving, see
-//! `uikit::watch_background`), each new attention a receiver reports becomes one
-//! notification, removed again when it is answered anywhere. In front, the page shows it
-//! and nothing is posted. A permission carries Allow and Deny (neither destructive, so
-//! neither is red); both open the app on the session, because this build can't sign.
+//! `uikit::watch_background`), each new attention a receiver reports, or an account's
+//! page hands over (`acct_needs`), becomes one notification, removed again when it is
+//! answered anywhere. In front, the page shows it and nothing is posted. A permission
+//! carries Allow and Deny (neither destructive, so neither is red); both open the app on
+//! the session, where the answer is given and signed: answering from the notification
+//! itself, with the app behind, is not built.
 
+use sp_receivers::needs::shown;
 use sp_receivers::{HubEvent, NeedsYouItem};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -66,8 +69,13 @@ pub fn tool_name(tool: &str) -> String {
     }
 }
 
+/// A notification's words. Every text in them came from outside (a session's title, a
+/// tool's name and message, a machine's name: a receiver's stream, or an account's page
+/// that read them off the relay), and each is shown as one plain line
+/// (`sp_receivers::needs::shown`): no control character, nothing invisible, nothing that
+/// reorders what follows it. The one line break in the body is this function's own.
 fn post_for(item: &NeedsYouItem, a: &sp_receivers::AttentionInfo) -> Post {
-    let title = item.display_title();
+    let title = shown(&item.display_title(), 200);
     let asks = match a.kind.as_str() {
         "permission" => {
             let tool = a
@@ -97,7 +105,8 @@ fn post_for(item: &NeedsYouItem, a: &sp_receivers::AttentionInfo) -> Post {
             .map(str::to_string)
             .unwrap_or_else(|| "Waiting for you.".into()),
     };
-    let body = match item.machine.as_deref() {
+    let asks = shown(&asks, 240);
+    let body = match item.machine.as_deref().map(|m| shown(m, 100)) {
         Some(m) if !m.is_empty() => format!("{asks}\n{m}"),
         _ => asks,
     };
@@ -125,29 +134,12 @@ impl Notifier {
     pub fn on_event(&mut self, e: &HubEvent, background: bool) -> Plan {
         let mut plan = Plan::default();
         match e {
-            HubEvent::NeedsYou { id, items } => {
-                let before = self.open.remove(id).unwrap_or_default();
-                let mut now = BTreeSet::new();
-                for item in items {
-                    for a in &item.attentions {
-                        now.insert(a.attention_id.clone());
-                        // New since the last report, and nobody is looking: one notification.
-                        // Seen in front: never posted later (the person saw it).
-                        if background && !before.contains(&a.attention_id) {
-                            let p = post_for(item, a);
-                            self.posted
-                                .insert((id.clone(), a.attention_id.clone()), p.id);
-                            plan.post.push(p);
-                        }
-                    }
-                }
-                for gone in before.difference(&now) {
-                    if let Some(n) = self.posted.remove(&(id.clone(), gone.clone())) {
-                        plan.remove.push(n);
-                    }
-                }
-                self.open.insert(id.clone(), now);
-            }
+            HubEvent::NeedsYou { id, items } => self.listed(id, items, background, &mut plan),
+            // A list that only seeds (an account's first after a window opened) is the
+            // board as its page found it: all of it was there before anyone could have
+            // been told, so it is taken as seen and nothing is posted for it, behind or
+            // not. What a later list adds to it is news.
+            HubEvent::NeedsYouSeed { id, items } => self.listed(id, items, false, &mut plan),
             HubEvent::AttentionClosed { id, attention_id } => {
                 if let Some(set) = self.open.get_mut(id) {
                     set.remove(attention_id);
@@ -159,6 +151,34 @@ impl Notifier {
             _ => {}
         }
         plan
+    }
+
+    /// One receiver's list as it stands now. `post`: nobody is looking, so what is new
+    /// in it since the last one becomes a notification each. Either way it is what the
+    /// next list is compared with, and what is no longer in it has its notification
+    /// removed.
+    fn listed(&mut self, id: &str, items: &[NeedsYouItem], post: bool, plan: &mut Plan) {
+        let before = self.open.remove(id).unwrap_or_default();
+        let mut now = BTreeSet::new();
+        for item in items {
+            for a in &item.attentions {
+                now.insert(a.attention_id.clone());
+                // New since the last report, and nobody is looking: one notification.
+                // Seen in front: never posted later (the person saw it).
+                if post && !before.contains(&a.attention_id) {
+                    let p = post_for(item, a);
+                    self.posted
+                        .insert((id.to_string(), a.attention_id.clone()), p.id);
+                    plan.post.push(p);
+                }
+            }
+        }
+        for gone in before.difference(&now) {
+            if let Some(n) = self.posted.remove(&(id.to_string(), gone.clone())) {
+                plan.remove.push(n);
+            }
+        }
+        self.open.insert(id.to_string(), now);
     }
 
     /// Back in front: what was posted stays in Notification Center until answered.
@@ -247,6 +267,90 @@ mod tests {
             )
             .post
             .is_empty());
+    }
+
+    /// An account's first list after a window opened is the board as it was found: with
+    /// the app behind too, nothing is posted for it, and it is what later lists are
+    /// compared with.
+    #[test]
+    fn a_list_that_only_seeds_posts_nothing_even_behind() {
+        let seed = |items: Vec<NeedsYouItem>| HubEvent::NeedsYouSeed {
+            id: "rx1".into(),
+            items,
+        };
+        let mut n = Notifier::default();
+        let found = vec![item(&[
+            ("a1", "permission", true),
+            ("a2", "question", false),
+        ])];
+        assert_eq!(n.on_event(&seed(found.clone()), true), Plan::default());
+        assert_eq!(n.posted(), 0);
+        // The same list said again as news is not news.
+        assert!(n.on_event(&needs(found), true).post.is_empty());
+        // One more opens: that one is posted, alone.
+        let p = n.on_event(
+            &needs(vec![item(&[
+                ("a1", "permission", true),
+                ("a2", "question", false),
+                ("a3", "permission", true),
+            ])]),
+            true,
+        );
+        assert_eq!(p.post.len(), 1);
+        assert_eq!(p.post[0].id, notification_id("rx1", "a3"));
+        // The next window's seed no longer holds it (answered meanwhile): its
+        // notification goes, and what the seed does hold is still not posted.
+        let p = n.on_event(&seed(vec![item(&[("a9", "permission", true)])]), true);
+        assert!(p.post.is_empty());
+        assert_eq!(p.remove, vec![notification_id("rx1", "a3")]);
+        // Two hundred found at once, behind: none posted.
+        let many: Vec<NeedsYouItem> = (0..200)
+            .map(|i| {
+                let mut it = item(&[("x", "permission", true)]);
+                it.session = format!("claude:{i}");
+                it.attentions[0].attention_id = format!("m{i}");
+                it
+            })
+            .collect();
+        let mut fresh = Notifier::default();
+        assert!(fresh.on_event(&seed(many), true).post.is_empty());
+    }
+
+    /// What a notification shows is one plain line each for the title, the ask and the
+    /// machine, whatever the session, the tool or the machine put in their texts.
+    #[test]
+    fn a_notifications_words_carry_nothing_invisible() {
+        let nasty =
+            "Apple ID\u{202E}gnp.exe\u{2028}Your password is needed\u{200B}\u{2066}x\u{2069}";
+        let mut it = item(&[("a1", "permission", true)]);
+        it.title = Some(nasty.into());
+        it.machine = Some(nasty.into());
+        it.attentions[0].tool = Some("Bash".into());
+        it.attentions[0].message = Some(format!("Bash {nasty}"));
+        let mut n = Notifier::default();
+        n.on_event(&needs(vec![]), true);
+        let p = n.on_event(&needs(vec![it.clone()]), true);
+        let clean = "Apple IDgnp.exe Your password is neededx";
+        assert_eq!(p.post[0].title, clean);
+        assert_eq!(
+            p.post[0].body,
+            format!("Shell wants to run: {clean}\n{clean}")
+        );
+        // A question's own words, the same.
+        it.attentions[0].kind = "question".into();
+        it.attentions[0].attention_id = "a2".into();
+        it.attentions[0].message = Some(nasty.into());
+        let p = n.on_event(&needs(vec![it]), true);
+        assert_eq!(p.post[0].body, format!("{clean}\n{clean}"));
+        for post in &p.post {
+            for c in post.title.chars().chain(post.body.chars()) {
+                assert!(
+                    c == '\n' || (!c.is_control() && !sp_receivers::needs::is_invisible(c)),
+                    "{c:?}"
+                );
+            }
+            assert_eq!(post.body.matches('\n').count(), 1, "the one break is ours");
+        }
     }
 
     #[test]

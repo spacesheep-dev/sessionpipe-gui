@@ -7,7 +7,7 @@
 //! SP_LIVE_URL=http://127.0.0.1:7811 cargo test -p sp-receivers --test live -- --ignored
 //! ```
 
-use sp_receivers::{proxy, Hub, HubConfig, HubEvent, KeyStore, StatusFile};
+use sp_receivers::{Hub, HubConfig, HubEvent, KeyStore, StatusFile};
 use std::time::{Duration, Instant};
 
 fn live_url() -> String {
@@ -19,12 +19,10 @@ fn hub(tag: &str, status: Option<std::path::PathBuf>) -> (Hub, std::path::PathBu
     let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(&home).unwrap();
     let h = Hub::new(HubConfig {
-        home: home.clone(),
-        keys: KeyStore::memory(),
         env_receiver_url: Some(live_url()),
-        allowed_origins: proxy::default_allowed_origins(None),
         status: StatusFile::new(status, "live"),
         user_agent: "sp-live-test".into(),
+        ..HubConfig::new(home.clone(), KeyStore::memory())
     });
     (h, home)
 }

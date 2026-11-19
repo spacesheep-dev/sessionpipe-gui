@@ -21,9 +21,9 @@ import type {
   SessionSummary,
   StoredEvent,
 } from "../../shared/api.js";
+import type { Rec } from "./core.js";
 import { changedPaths } from "./paths.js";
 import { idleNotice, newRecord } from "./readings.js";
-import type { Rec } from "./store.js";
 
 /** What the store lends these readings. */
 export interface ReviewIndex {

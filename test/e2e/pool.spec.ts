@@ -483,6 +483,51 @@ test.describe("signed pool commands", () => {
     }
   });
 
+  // The phone's sheet draws Start over as an action, in the tint. While Done waits a tap on
+  // it does nothing, so it is the grey of the words: its ink is read the moment it goes off.
+  test("on a phone, the Add account sheet's Start over is grey while Done waits", async ({ context, page }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const name = `lab-${tag()}`;
+    const m = await poolDaemon(key, name);
+    try {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`${CONTROL_BASE}/usage`);
+      await section(page, name).locator("[data-pool-add]").click();
+      const sheet = page.locator(".ns-sheet--phone[data-pool-sheet]");
+      await sheet.locator("[data-pool-signin]").click();
+      const restart = sheet.locator("[data-pool-restart]");
+      await expect(restart).toBeEnabled();
+      await restart.evaluate((el) => {
+        const w = window as unknown as { __offInk?: string };
+        new MutationObserver(() => {
+          if ((el as HTMLButtonElement).disabled) w.__offInk ??= getComputedStyle(el).color;
+        }).observe(el, { attributes: true, attributeFilter: ["disabled"] });
+      });
+      await sheet.locator("[data-pool-code]").fill("expired#x");
+      await sheet.locator("[data-pool-done]").click();
+      await expect(sheet.locator("[data-pool-error]")).toHaveText(
+        "The sign-in took too long. Start over to get a new link.",
+      );
+      await expect(restart).toBeEnabled();
+      const ink = await restart.evaluate((el) => {
+        const of = (v: string) => {
+          const probe = el.parentElement!.appendChild(document.createElement("span"));
+          probe.style.color = `var(${v})`;
+          const c = getComputedStyle(probe).color;
+          probe.remove();
+          return c;
+        };
+        const off = (window as unknown as { __offInk?: string }).__offInk;
+        return { off, on: getComputedStyle(el).color, grey: of("--fg-3"), tint: of("--tint-fg") };
+      });
+      expect(ink.off, "off while Done waits").toBe(ink.grey);
+      expect(ink.on, "on again").toBe(ink.tint);
+    } finally {
+      await m.stop();
+    }
+  });
+
   test("the Add account sheet turns a pool that is off on before the sign-in, never refused", async ({
     context,
     page,

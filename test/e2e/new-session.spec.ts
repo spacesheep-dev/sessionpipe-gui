@@ -146,8 +146,10 @@ test("the advertised rows on a 0.10 machine; one line, and no rows, on an old on
   await expect(sheet(page).locator("[data-ns-row=permission]")).toHaveCount(0);
   await expect(sheet(page).locator("[data-ns-row=model]")).toHaveCount(0);
   await expect(sheet(page).getByRole("button", { name: "Add files" })).toHaveCount(0);
-  // The row stays, so the sheet keeps its height: the machine sets the level.
-  await expect(sheet(page).locator("[data-ns-row=options]")).toHaveText(/Permission\s*Safe mode, set at the machine/);
+  // The row stays, so the sheet keeps its height: the machine sets the level, in the
+  // pop-up's word, and says so to a pointer.
+  await expect(sheet(page).locator("[data-ns-row=options]")).toHaveText(/^Permission\s*Safe$/);
+  await expect(sheet(page).locator("[data-ns-row=options] .ns-fixed")).toHaveAttribute("title", `Set on ${b.name}`);
   await sheet(page).locator("[data-ns-text]").fill("Look around.");
   // The status line is for what is happening; the passkey is Start's own note.
   await expect(status(page)).toHaveText(`${b.name} is listening.`);

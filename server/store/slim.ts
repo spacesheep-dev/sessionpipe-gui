@@ -7,9 +7,21 @@ import type { StoredEvent } from "../../shared/api.js";
 /** Characters kept in memory of each big `data` string. */
 export const PREVIEW_CHARS = 2048;
 
+/** Node's Buffer where there is one: the store's core runs in a page too (store/core.ts). */
+const NodeBuffer = (globalThis as { Buffer?: { from(s: string, enc: "utf8"): { toString(enc: "utf8"): string } } })
+  .Buffer;
+const encoder = /* @__PURE__ */ new TextEncoder();
+// ignoreBOM: a decoder drops a leading U+FEFF by default, and Buffer keeps it.
+const decoder = /* @__PURE__ */ new TextDecoder("utf-8", { ignoreBOM: true });
+
 /** A flat copy of a string. V8 keeps a `slice` as a view on its parent, so a 2 KB
- *  preview would pin the 64 KB it was cut from; copying through a Buffer does not. */
-export const detach = (s: string): string => Buffer.from(s, "utf8").toString("utf8");
+ *  preview would pin the 64 KB it was cut from; copying through bytes does not. Through
+ *  a Buffer on the server, as it always was; through TextEncoder and TextDecoder where
+ *  there is no Buffer, which give the same string back as Buffer does: a lone surrogate
+ *  becomes U+FFFD in both, and a leading U+FEFF stays (store/browser.test.ts). */
+export const detach: (s: string) => string = NodeBuffer
+  ? (s) => NodeBuffer.from(s, "utf8").toString("utf8")
+  : (s) => decoder.decode(encoder.encode(s));
 
 /** `data` keys that can be large: tool input/output (≤ 64 KB each), turn text (≤ 20 000)
  *  and a delegation's reply (≤ 20 000, tier 2). */
@@ -92,20 +104,22 @@ function slimData(ev: StoredEvent): SlimEvent {
   return { ...ev, data, preview: preview! };
 }
 
-/** The same slim copy with each big `data` string cut to at most `chars` (a list page's
- *  shorter preview, or an old event's). `preview` keeps the original lengths. */
-export function trimPreview(ev: SlimEvent, chars: number): SlimEvent {
+/** The same slim copy with each big `data` string of `keys` cut to at most `chars` (a list
+ *  page's shorter preview of tool input/output, or an old event's of all of them). A
+ *  running assistant text keeps its end, as in the index. `preview` keeps the original
+ *  lengths. */
+export function trimPreview(ev: SlimEvent, chars: number, keys: readonly string[] = BIG_KEYS): SlimEvent {
   const had = ev.preview ?? {};
   let data: Record<string, unknown> | null = null;
   let preview: Record<string, number> | null = null;
-  for (const k of BIG_KEYS) {
+  for (const k of keys) {
     const v = ev.data[k];
     if (v === undefined || v === null) continue;
     const text = typeof v === "string" ? v : JSON.stringify(v);
     if (text.length <= chars) continue;
     data ??= { ...ev.data };
     preview ??= { ...had };
-    data[k] = detach(text.slice(0, chars));
+    data[k] = detach(ev.type === "turn.progress" && k === "assistant" ? text.slice(-chars) : text.slice(0, chars));
     preview[k] = had[k] ?? text.length;
   }
   return data ? { ...ev, data, preview: preview! } : ev;

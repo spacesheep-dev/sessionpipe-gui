@@ -8,6 +8,8 @@ const COMMANDS: &[&str] = &[
     "rx_select",
     "rx_discover",
     "rx_start_local",
+    "rx_local_update",
+    "rx_update_local",
     "rx_stream",
     "rx_stream_close",
     "app_settings_get",

@@ -349,7 +349,7 @@ function useHttpsProbe(url: string, enabled: boolean): { ok: boolean | null; aga
 /** Where the openssl command comes from on this machine, when TLS mode can't find it. */
 function opensslHint(platform: string): string {
   if (platform === "win32")
-    return "Needs the openssl command: Git for Windows ships one (its usr\\bin folder, on the PATH), or winget install ShiningLight.OpenSSL.Light; then try again.";
+    return "Needs the openssl command: install Git for Windows (it ships one), or run winget install ShiningLight.OpenSSL.Light (it asks for an administrator); then try again. Installed in its usual folder, either is found with no PATH change or restart.";
   if (platform === "darwin") return "Needs the openssl command (brew install openssl), then try again.";
   return "Needs the openssl command (apt install openssl, or dnf), then try again.";
 }

@@ -45,7 +45,7 @@ import { type SpacesheepSource, startSpacesheepSource } from "./sources/spaceshe
 import { staticFiles, webDir } from "./static.js";
 import { Store } from "./store/store.js";
 import { registerThemes, ThemeRegistry } from "./themes/index.js";
-import { ensureCerts, type TlsMaterial } from "./tls/certs.js";
+import { ensureCerts, localHostname, type TlsMaterial } from "./tls/certs.js";
 import { createDualListener, type DualListener, listen } from "./tls/listen.js";
 import { registerTrust } from "./tls/trust.js";
 import { AttachmentStore } from "./ui/attachments.js";
@@ -86,6 +86,10 @@ export interface AppOptions {
   tlsHostname?: string;
   /** Loopback-only test door for the conformance runner. */
   testDoor?: boolean;
+  /** More names this machine is reached by from itself (`--allow-host`): its hostname, an
+   *  alias in /etc/hosts, a name only this network's DNS knows. localhost, its addresses,
+   *  the `.local` name, the TLS name and `--rp-id` need no telling (http/guard.ts rule 2). */
+  allowHosts?: string[];
   /** Where the built web app is; default: dist/web beside the bundle. */
   webDir?: string;
   /** Stop the console banner (tests). */
@@ -242,6 +246,21 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     return out;
   };
   router.trustProxy = () => publicUrl !== undefined;
+  // What http/guard.ts asks of every request: the names this server goes by on this
+  // machine besides localhost and its addresses (the `.local` name the setup page shows,
+  // the TLS name, --rp-id, --allow-host), and the public url as an origin that is this
+  // server. The public url's host is not among the names, also when --rp-id is that
+  // host: it is the proxy's, and a request under it is answered when the proxy forwarded it. Read on each request: the
+  // setup page changes them.
+  router.guard = {
+    hosts: () => [
+      localHostname(opts.tlsHostname),
+      tls?.hostname,
+      opts.rpId && opts.rpId === publicHost() ? undefined : opts.rpId,
+      ...(opts.allowHosts ?? []),
+    ],
+    origins: () => [publicUrl],
+  };
   const uiKey = (): string => config.uiKey;
   const uiAuth = uiAuthFor(uiKey);
 
@@ -270,6 +289,8 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
         body: JSON.stringify(body),
       });
       const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      // The key revoked there: the source says so now, not at its next poll (ui.ts forwardSend).
+      if (res.status === 401 && json.code !== "unlock") spacesheep?.unauthorized();
       return { status: res.status, json };
     },
   });
@@ -285,20 +306,28 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   let spacesheep: SpacesheepSource | null = null;
   const startSpacesheep = (link: SpacesheepLink): void => {
     spacesheep?.stop();
+    // The sends this account carried are followed from now; another account's can't be.
+    control.remote.account({ origin: link.origin, email: link.email });
     try {
       spacesheep = startSpacesheepSource(store, {
         ...link,
         // The machines paired there become rows here (control.remote), their sends settled
         // by the relay's word on spacesheep's jobs.
         onMachines: (list, origin, rpId) => control.remote.upsert(list as never, { via: "spacesheep", origin, rpId }),
-        pendingJobsFrom: () => control.remote.pendingFrom(),
-        onJobs: (jobs) => control.remote.applyJobs(jobs),
+        pendingJobs: () => control.remote.pending(),
+        jobsCadence: () => control.remote.cadence(),
+        onEvents: (keys) => control.remote.eventsSeen(keys),
+        onUnauthorized: () => control.remote.revoked(true),
+        onJobs: (jobs, through, serverNow) => control.remote.applyJobs(jobs, through, serverNow),
       });
     } catch (e) {
       if (!opts.quiet) process.stderr.write(`[sessionpipe-gui] spacesheep: ${(e as Error).message}\n`);
     }
   };
+  control.remote.onKick(() => spacesheep?.kickJobs());
   if (config.spacesheep) startSpacesheep(config.spacesheep);
+  // No link: what spacesheep carried before can't be followed (kept from before a restart).
+  else control.remote.account(null);
 
   let outbox: OutboxSource | null = null;
   if (opts.outbox !== false) {
@@ -489,6 +518,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
         spacesheep = null;
         config = setSpacesheep(stateDir, live(), undefined);
         control.remote.drop("spacesheep");
+        control.remote.account(null);
       },
       deviceName: () => `${os.hostname().replace(/\.(local|lan|home)$/i, "")}`,
       version: () => packageVersion(),

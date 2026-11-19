@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Images sent beside a control prompt (shared/attachments.ts). The composer uploads one
-// here (POST /api/ui/attachments), the prompt text names it by path or URL, and the
-// file is served back (GET /attachments/<id>.<ext>) to this board's browsers and to the
-// agent on another machine. Files live under <stateDir>/attachments (dir 0700, files
-// 0600), are validated by their magic bytes (never by the declared type alone), and
-// are pruned after ATTACHMENT_RETENTION_DAYS unless a stored event still names them.
+// Images named in a control prompt's text (shared/attachments.ts): the composer's way for
+// a daemon on this machine that takes no files on a prompt. It uploads one here (POST
+// /api/ui/attachments), the prompt names it by its path on this disk, and the file is
+// served back (GET /attachments/<id>.<ext>) to this board's own pages, which draw the
+// thumbnails. The answer names no origin and carries no key: nothing a prompt could hold
+// opens the board. Files live under <stateDir>/attachments (dir 0700, files 0600), are
+// validated by their magic bytes (never by the declared type alone), and are pruned after
+// ATTACHMENT_RETENTION_DAYS unless a stored event still names them. `sniffImage` is also
+// the check on a picture uploaded as a command's file (server/control/ui.ts).
 import {
   closeSync,
   createReadStream,
@@ -26,7 +29,6 @@ import {
   type AttachmentType,
   type Info,
   ROUTES,
-  UI_KEY_PARAM,
 } from "../../shared/api.js";
 import { attachmentIdsIn } from "../../shared/attachments.js";
 import type { Handler, Reply, Router } from "../http/router.js";
@@ -136,8 +138,9 @@ export class AttachmentStore {
     if (!existsSync(this.dir)) mkdirSync(this.dir, { recursive: true, mode: 0o700 });
   }
 
-  /** Validate and write one image; the reference the client puts into the prompt. */
-  save(buf: Buffer, info: Info): Attachment {
+  /** Validate and write one image. Of the answer only `path` is ever put into a prompt;
+   *  `url` is this board's own path to it, with no origin and no key. */
+  save(buf: Buffer): Attachment {
     if (buf.length > ATTACHMENT_MAX_BYTES)
       throw new UploadError(413, { reason: "too_large", bytes: buf.length, limit: ATTACHMENT_MAX_BYTES });
     const img = sniffImage(buf);
@@ -158,7 +161,7 @@ export class AttachmentStore {
       type: img.type,
       ext: img.ext,
       path: file,
-      url: `${publicBase(info)}${ROUTES.attachments}/${name}?${UI_KEY_PARAM}=${encodeURIComponent(info.uiKey)}`,
+      url: `${ROUTES.attachments}/${name}`,
       width: img.width,
       height: img.height,
       bytes: buf.length,
@@ -272,11 +275,6 @@ function referencedIds(eventsDir: string): Set<string> {
   return ids;
 }
 
-/** Where another machine fetches from: the https origin with TLS on, else the LAN URL. */
-function publicBase(info: Info): string {
-  return info.urls.https ?? info.urls.lan[0] ?? info.urls.local;
-}
-
 /** The file parts of a multipart/form-data body, by boundary; names and field names
  *  are ignored, every part with a body counts. */
 export function multipartFiles(body: Buffer, contentType: string): Buffer[] {
@@ -335,13 +333,12 @@ export function registerAttachments(router: Router, deps: AttachmentDeps, guard:
         throw e;
       }
       try {
-        const info = deps.info();
-        if (!multipart) return { status: 201, json: store().save(body, info) };
+        if (!multipart) return { status: 201, json: store().save(body) };
         const parts = multipartFiles(body, String(ctx.req.headers["content-type"]));
         if (parts.length === 0) return { status: 400, json: { reason: "malformed", detail: "no file part" } };
         if (parts.length > ATTACHMENTS_PER_MESSAGE)
           return { status: 400, json: { reason: "too_many", limit: ATTACHMENTS_PER_MESSAGE } };
-        const saved = parts.map((p) => store().save(p, info));
+        const saved = parts.map((p) => store().save(p));
         return { status: 201, json: saved.length === 1 ? saved[0] : { attachments: saved } };
       } catch (e) {
         if (e instanceof UploadError) return { status: e.status, json: e.body };

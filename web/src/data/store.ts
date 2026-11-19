@@ -78,7 +78,14 @@ export const CONTROL_RETRY_MS = 1500;
  *  snapshot before the page says it is reconnecting. */
 export const RESYNC_QUIET_MS = 1500;
 
-const FINAL = new Set<ControlActivity["outcome"]>(["delivered", "expired", "unsupported", "failed", "refused"]);
+const FINAL = new Set<ControlActivity["outcome"]>([
+  "delivered",
+  "expired",
+  "unsupported",
+  "failed",
+  "refused",
+  "unconfirmed",
+]);
 
 /** Of two copies of one control message, the one further along its way (server/control/
  *  README.md: queued, then `taken` and the reply so far by `replySeq`, then one final
@@ -182,6 +189,8 @@ export class Store {
       // it lands the rows are the ones from before, and a page that dropped stays dropped.
       onOpen: () =>
         this.set({ connection: this.state.snapshotAt ? this.state.connection : "connecting", retryAt: null }),
+      // Not being added to, with nothing to retry: neither live nor dropped.
+      onWait: () => this.set({ connection: "connecting", retryAt: null }),
       onError: (retryIn) => {
         this.hush();
         const offline = typeof navigator !== "undefined" && navigator.onLine === false;

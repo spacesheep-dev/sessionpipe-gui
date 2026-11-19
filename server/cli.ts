@@ -63,6 +63,10 @@ usage: sessionpipe-gui [options]
                     https://<name>.<tailnet>.ts.net); remembered until --no-public-url.
                     Passkeys are made for its host; the proxy's X-Forwarded-* are trusted
   --no-public-url   forget the public url (remembered)
+  --allow-host NAME another name this machine is opened by from itself (its hostname, an
+                    /etc/hosts alias, a name your network's DNS gives it); may be
+                    repeated. localhost, any address and the <name>.local name of --tls
+                    are known already
   --test-door       loopback-only test door for the conformance runner
   --themes-dir DIR  where views (themes) are installed (default <state>/themes)
   --plugins-dir DIR where plugins are installed (default <state>/plugins)
@@ -139,8 +143,18 @@ service (the receiver in the background: started at login; on macOS and Linux al
                                              receiver options after -- passed on. A service
                                              of ours already there is upgraded in place (its
                                              options kept unless flags say otherwise, then
-                                             restarted); one that runs something else, or
-                                             another program on the port, is refused
+                                             restarted), and so is one still running another
+                                             version of this same install; one that runs
+                                             something else, a receiver on the port that
+                                             isn't the service's, or another program there,
+                                             is refused. A newer one that runs from elsewhere,
+                                             or a developer's checkout, is kept (a newer one
+                                             unless --downgrade); --if-installed never
+                                             installs one and never moves one back. Exit 4:
+                                             it stopped the old receiver and the new one
+                                             isn't running; exit 5 (--if-installed): it
+                                             did nothing. One install or uninstall at a
+                                             time (a lock in the default state folder)
   sessionpipe-gui service uninstall          stop it and remove it
   sessionpipe-gui service status             the label, pid, running version, port and url
                                              (exit 3: not running)
@@ -176,6 +190,8 @@ interface Args {
   /** `--public-url URL` a string; `--no-public-url` null; neither undefined (the remembered one). */
   publicUrl?: string | null;
   testDoor: boolean;
+  /** `--allow-host NAME`, each one. */
+  allowHosts?: string[];
   open: boolean;
   quiet: boolean;
   themesDir?: string;
@@ -195,12 +211,25 @@ interface Args {
   /** `service install|uninstall|status`: a subcommand instead of the server. */
   service?: Verb;
   dryRun: boolean;
+  /** `service install --downgrade`: an older CLI may replace a newer service. */
+  downgrade: boolean;
+  /** `service install --if-installed`: upgrade a service of ours, install none. */
+  ifInstalled: boolean;
   /** After `--` (service install only): passed on to the service's receiver. */
   extra?: string[];
 }
 
 function parseArgs(argv: string[]): Args | "help" | "version" {
-  const a: Args = { outbox: true, demo: false, testDoor: false, open: false, quiet: false, dryRun: false };
+  const a: Args = {
+    outbox: true,
+    demo: false,
+    testDoor: false,
+    open: false,
+    quiet: false,
+    dryRun: false,
+    downgrade: false,
+    ifInstalled: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const f = argv[i]!;
     const next = (): string => {
@@ -254,6 +283,9 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
       case "--rp-id":
         a.rpId = next();
         break;
+      case "--allow-host":
+        a.allowHosts = [...(a.allowHosts ?? []), next()];
+        break;
       case "--tls":
         a.tls = true;
         break;
@@ -305,6 +337,12 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
       }
       case "--dry-run":
         a.dryRun = true;
+        break;
+      case "--downgrade":
+        a.downgrade = true;
+        break;
+      case "--if-installed":
+        a.ifInstalled = true;
         break;
       case "--":
         if (a.service !== "install") fail("-- is only for `service install` (receiver options for the service)");
@@ -680,6 +718,8 @@ async function main(): Promise<void> {
   if (parsed.ext) return extensionCommand(parsed);
   if (parsed.extras) return extrasCommand(parsed);
   if (parsed.tlsCommand !== undefined) return tlsCommand(parsed);
+  if ((parsed.downgrade || parsed.ifInstalled) && parsed.service !== "install")
+    fail(`${parsed.downgrade ? "--downgrade" : "--if-installed"} is only for \`service install\``);
   if (parsed.service) {
     process.exitCode = await runService(
       {
@@ -689,6 +729,8 @@ async function main(): Promise<void> {
         state: parsed.state,
         extra: parsed.extra,
         dryRun: parsed.dryRun,
+        downgrade: parsed.downgrade,
+        ifInstalled: parsed.ifInstalled,
       },
       processEnv(defaultStateDir()),
     );
@@ -717,6 +759,7 @@ async function main(): Promise<void> {
       rpId: parsed.rpId,
       publicUrl: parsed.publicUrl,
       testDoor: parsed.testDoor,
+      allowHosts: parsed.allowHosts,
       quiet: parsed.quiet,
       themesDir: parsed.themesDir,
       pluginsDir: parsed.pluginsDir,

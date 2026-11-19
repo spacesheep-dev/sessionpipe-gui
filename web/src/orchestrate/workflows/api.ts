@@ -9,7 +9,7 @@
 // goes through lib/net.ts.
 import { ROUTES, type RunBody, type Workflow, type WorkflowRun } from "@shared/api";
 import type { SendBody } from "../../control/api";
-import { apiUrl } from "../../lib/net";
+import { apiFetch } from "../../lib/net";
 
 const BASE = ROUTES.ui.workflows;
 
@@ -30,7 +30,7 @@ export class WorkflowsError extends Error {
 }
 
 async function call<T>(method: string, url: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
-  const res = await fetch(apiUrl(url), {
+  const res = await apiFetch(url, {
     method,
     headers: {
       accept: "application/json",

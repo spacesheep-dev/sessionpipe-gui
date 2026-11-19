@@ -5,8 +5,9 @@
 // answer can reach it (control/useSend.ts). A click opens the session beside the page, a
 // right-click has the rest.
 import type { MachineControl, SessionSummary } from "@shared/api";
-import { type MutableRefObject, useEffect, useLayoutEffect, useRef } from "react";
+import { type MutableRefObject, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { answerState, useSessionSend } from "../control/useSend";
+import { useAnswerClock } from "../lib/answerWindow";
 import { copyItem } from "../lib/menus";
 import { openSplit } from "../lib/split";
 import { dismissToast, type Toast } from "../lib/toasts";
@@ -46,7 +47,8 @@ export function ToastCard({
     ],
     { title: () => t.title, subtitle: () => t.machine ?? "" },
   );
-  const verb = t.tool ? (SHELL.test(t.tool) ? " wants to run " : " wants to use ") : "";
+  // With nothing after it (a question, a plan), the tool's name stands alone.
+  const verb = t.tool && t.body ? (SHELL.test(t.tool) ? " wants to run " : " wants to use ") : "";
   const marked = t.kind === "needs-you" || t.kind === "error";
   return (
     <div
@@ -129,16 +131,24 @@ function ToastAnswer({
   control?: MachineControl;
   into: MutableRefObject<MenuList>;
 }) {
-  const send = useSessionSend(s, control, s.openAttentions);
-  const st = answerState(s, a, control, send);
+  // This banner's prompt only: another prompt's refused answer is not this one's to say.
+  const send = useSessionSend(
+    s,
+    control,
+    useMemo(() => [a], [a]),
+  );
+  const st = answerState(s, a, control, send, useAnswerClock([a]));
   const { reason, off, status, tag } = st;
+  // An answer out (from anywhere), closed, its hook stopped waiting, or this device not
+  // approved: nothing to press, and the note says why (the receipt, while an answer is out).
+  const shut = !!status || tag === "late" || tag === "unapproved";
   const answer = (allow: boolean) =>
     void send
       .onSend({ kind: "permission.answer", attentionId: a.attentionId, allow })
       .then(() => dismissToast(toast.id))
       .catch(() => {});
   useLayoutEffect(() => {
-    into.current = status === "closed" ? [] : answerItems(a.tool, st, answer);
+    into.current = answerItems(a.tool, st, answer);
   });
   useEffect(
     () => () => {
@@ -148,7 +158,7 @@ function ToastAnswer({
   );
   return (
     <span className="toast-actions" data-answer={tag}>
-      {status !== "closed" && (
+      {!shut && (
         <>
           <button type="button" className="btn btn--sm btn--deny" disabled={off} onClick={() => answer(false)}>
             Deny

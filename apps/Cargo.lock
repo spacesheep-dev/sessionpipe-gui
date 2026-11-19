@@ -3537,7 +3537,7 @@ dependencies = [
 
 [[package]]
 name = "sessionpipe-desktop"
-version = "0.8.0"
+version = "0.8.5"
 dependencies = [
  "block2",
  "log",
@@ -3705,6 +3705,7 @@ dependencies = [
 name = "sp-receivers"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "futures-util",
  "http",
  "log",

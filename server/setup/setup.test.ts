@@ -12,13 +12,22 @@ import { ROUTES, type SetupStatus } from "../../shared/api.js";
 import { Session, tempDir } from "../../test/events.js";
 import { type App, createApp } from "../app.js";
 import { createControl } from "../control/index.js";
-import { Router } from "../http/router.js";
+import { type Ctx, Router } from "../http/router.js";
 import { Store } from "../store/store.js";
 import { ensureCerts, opensslAvailable } from "../tls/certs.js";
 import { ViewerRegistry } from "../ui/viewers.js";
 import { realHarnessFs } from "./harnesses.js";
 import { INSTALL_COMMAND, registerSetup, SETUP_ROUTES, type SetupDeps } from "./index.js";
-import { cliCommand, cmdShimTarget, type ExecResult, findCli, isThisMachine, sameMachine } from "./local.js";
+import {
+  cliCommand,
+  cmdShimTarget,
+  type ExecResult,
+  findCli,
+  isThisMachine,
+  ownAddresses,
+  sameMachine,
+  thisMachineOnly,
+} from "./local.js";
 import { lookupWithTimeout } from "./status.js";
 
 const HAVE_OPENSSL = opensslAvailable();
@@ -155,6 +164,20 @@ describe("this machine", () => {
     expect(isThisMachine("::ffff:10.0.0.2", ["10.0.0.2"])).toBe(true);
     expect(isThisMachine("fe80::1", ["fe80::1%en0"])).toBe(true);
     expect(isThisMachine("192.168.1.9", ["10.0.0.2"])).toBe(false);
+  });
+  it("is never a request the proxy forwarded, whatever address it carries", async () => {
+    const reached: string[] = [];
+    const guarded = thisMachineOnly({ testDoor: false, port: () => 7373 })((ctx) => {
+      reached.push(ctx.remote.ip);
+      return { status: 200, json: {} };
+    });
+    const ask = (remote: Ctx["remote"]) => guarded({ remote, req: { headers: {} } } as unknown as Ctx);
+    expect(await ask({ ip: "127.0.0.1", loopback: true, forwarded: false })).toMatchObject({ status: 200 });
+    for (const ip of ["127.0.0.1", "::1", ...ownAddresses().slice(0, 2)]) {
+      const r = await ask({ ip, loopback: false, forwarded: true });
+      expect(r).toMatchObject({ status: 403, json: { reason: "local_only" } });
+    }
+    expect(reached).toEqual(["127.0.0.1"]);
   });
   it("matches a machine name with or without .local, any case", () => {
     expect(sameMachine("Build-Box", "Build-Box.local")).toBe(true);

@@ -31,7 +31,10 @@ export function wellKnown(control: Control): Record<string, unknown> {
   };
 }
 
-export function registerReceiver(router: Router, deps: ReceiverDeps): void {
+export function registerReceiver(to: Router, deps: ReceiverDeps): void {
+  // Both are a sink's (guard.ts `wire`): the well-known file is public and the events
+  // endpoint takes the sink token, so neither leans on where the request came from.
+  const router = to.wire;
   router.get(ROUTES.wellKnown, () => ({
     status: 200,
     json: wellKnown(deps.control),

@@ -307,9 +307,19 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.phone-conn-sub .conn-dot {
+.phone-conn-sub .conn-dot,
+.bar-status .conn-dot {
   background: transparent;
   box-shadow: inset 0 0 0 1.5px var(--fg-3);
+}
+/* A state in the meta's place with nothing to do about it (PageBar BarStatus): the same
+   ring and words as the line above, in the meta's tone. */
+.bar-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
 }
 .phone-conn-sub--offline .conn-dot {
   background: var(--err);

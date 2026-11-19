@@ -8,6 +8,7 @@ import type { Attention, SessionSummary, StoredEvent } from "@shared/api";
 import { useEffect, useState } from "react";
 import { answerable } from "../components/ControlStrip";
 import { useStore } from "../data/hooks";
+import { isQuestion } from "./format";
 
 type Input = Record<string, unknown>;
 
@@ -37,11 +38,14 @@ export function pickAskedInput(events: readonly StoredEvent[], tool: string, cal
   return newest && isInput(newest.data.input) ? newest.data.input : undefined;
 }
 
-/** The input an open, answerable permission asks about, once read. */
+/** The input an open, answerable permission asks about, or an open question's (its
+ *  options, read here and answered on its computer), once read. */
 export function useAskedInput(session: SessionSummary, attention: Attention | undefined): { input?: Input } {
   const store = useStore();
   const id =
-    attention?.kind === "permission" && attention.tool && answerable(attention) ? attention.attentionId : undefined;
+    attention?.kind === "permission" && attention.tool && (answerable(attention) || isQuestion(attention))
+      ? attention.attentionId
+      : undefined;
   const tool = attention?.tool;
   const [, setRead] = useState(0);
   useEffect(() => {

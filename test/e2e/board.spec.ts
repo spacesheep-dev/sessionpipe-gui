@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
-// The board as a person sees it: groups by state, a working card's current tool, an
-// attention banner when the demo asks for a permission, the collapsed done group,
+// The board as a person sees it: groups by state, a working card's current tool, its
+// reply's newest words ahead of a flag on a phone, an attention banner when the demo
+// asks for a permission, the collapsed done group,
 // live counts without a reload (with Advanced → Show counts), a list that holds still
 // under the pointer, the search that finds nothing, the keyboard (e with Hidden open
 // too), and the Hidden header's own menu.
+import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import { EVENTS, holdBoard, INFO, openBoard, sessionUrl, tier1Batch } from "./helpers.js";
+import { EVENTS, holdBoard, INFO, openBoard, sessionUrl, tier1Batch, ulid } from "./helpers.js";
 
 test.describe("board", () => {
   test("groups demo sessions by state and collapses done with a count", async ({ page }) => {
@@ -77,6 +79,94 @@ test.describe("board", () => {
     await expect(status.first().locator("code")).toHaveText(/^\S+$/);
     await expect(status.first().locator(".card-state")).toContainText("working");
     await expect(status.first().locator(".num").last()).toHaveText(/\d/);
+  });
+
+  test("on a phone a working row's words keep the line: a flag gives way, a gap is not said", async ({ page }) => {
+    test.setTimeout(90_000);
+    const { sinkToken } = (await (await page.request.get(INFO)).json()) as { sinkToken: string };
+    const id = randomUUID();
+    let seq = 0;
+    let clock = Date.now() - 60_000;
+    const ev = (type: string, data: Record<string, unknown>) => {
+      clock += 1000;
+      return {
+        protocol: 1,
+        id: ulid(clock),
+        type,
+        time: new Date(clock).toISOString(),
+        tier: 3,
+        harness: { name: "claude-code", version: "2.1.296", event: "Hook" },
+        session: {
+          id,
+          seq: seq++,
+          machine: "e2e-box",
+          cwd: "~/code/e2e",
+          title: "E2E long reply",
+          title_source: "custom",
+        },
+        privacy: { rulesets: ["secrets@1"], pii: false },
+        data: { turn_id: "t1", ...data },
+      };
+    };
+    const input = { file_path: "src/relay/reader.ts" };
+    const events = [ev("session.started", { source: "startup" }), ev("turn.started", {})];
+    // The same Read three times is a loop; two compactions within half an hour are compacting.
+    for (const n of [1, 2, 3])
+      events.push(
+        ev("tool.started", { tool: "Read", call_id: `r${n}`, input }),
+        ev("tool.ended", { tool: "Read", call_id: `r${n}`, input, ok: true, ms: 20 }),
+      );
+    events.push(ev("context.compacted", { trigger: "auto" }), ev("context.compacted", { trigger: "auto" }));
+    events.push(
+      ev("turn.progress", {
+        turn: 1,
+        assistant:
+          "I traced the doubling through the relay's reader and the page's store, from the first page to the " +
+          "last. Each reply arrives twice when the page reconnects, because the cursor is written after the " +
+          "page it names. Next I'll write the cursor in the same write as the page, and add a test for it.",
+      }),
+    );
+    // A hole a sink left: the two seqs before the last event never come.
+    seq += 2;
+    events.push(ev("tool.started", { tool: "Bash", call_id: "b1", input: { command: "npm test" } }));
+    const res = await page.request.post(EVENTS, {
+      headers: { authorization: `Bearer ${sinkToken}` },
+      data: { events },
+    });
+    expect(res.status()).toBe(202);
+    try {
+      const card = page.locator(`article.card:has(a.card-link[href^="${sessionUrl("claude-code", id)}"])`);
+      for (const [width, height] of [
+        [320, 568],
+        [393, 852],
+      ] as const) {
+        await page.setViewportSize({ width, height });
+        await openBoard(page);
+        // Only what says a session is stuck: the loop, not the compactions.
+        await expect(card.locator(".card-flags")).toHaveText("Read ×3 on the same input");
+        await expect(card.locator(".card-text")).toHaveText(/^Next I'll write the cursor/);
+        const [text, flag, line] = await Promise.all(
+          [".card-text", ".card-flags", ".card-line"].map((c) => card.locator(c).evaluate((e) => e.clientWidth)),
+        );
+        expect(text, `${width}: the words take at least 40% of the line`).toBeGreaterThanOrEqual(0.4 * line!);
+        // Cut, not crushed: the flag keeps enough of its words to be read.
+        expect(flag, `${width}: the flag keeps 30% of the line`).toBeGreaterThanOrEqual(0.3 * line!);
+      }
+      // Past GAP_AFTER_MS the store reads the sink's hole as a gap; the row does not say it.
+      await expect
+        .poll(
+          async () => {
+            const d = await (await page.request.get(`/api/ui/sessions/claude-code/${id}?limit=1`)).json();
+            return (d as { session: { flags: { kind: string }[] } }).session.flags.map((f) => f.kind);
+          },
+          { timeout: 60_000, intervals: [2_000] },
+        )
+        .toContain("gap");
+      await expect(card.locator(".card-flags")).toHaveText("Read ×3 on the same input");
+      expect(await page.locator(".board-list").innerText()).not.toMatch(/waiting for \d+ events?/);
+    } finally {
+      await page.request.post(`/api/ui/sessions/claude-code/${id}/forget`);
+    }
   });
 
   test("a needs-you card appears with its attention banner", async ({ page }) => {

@@ -168,6 +168,41 @@ async fn rx_start_local<R: Runtime>(
     out(&shell.hub, &r.id).ok_or_else(|| "gone".into())
 }
 
+/// What the launch check found about this computer's receiver: its origin, the version it
+/// ran, the app's, and whether bringing it current waits for a click (a download).
+#[tauri::command]
+fn rx_local_update<R: Runtime>(
+    window: WebviewWindow<R>,
+) -> Result<Option<crate::lifecycle::supervisor::LocalUpdate>, String> {
+    main_only(&window)?;
+    Ok(crate::lifecycle::local_update())
+}
+
+/// The page's "Update sessionpipe" (Settings › Data): runs what "Start sessionpipe" runs,
+/// with its progress lines, and says what the receiver runs after.
+#[tauri::command]
+async fn rx_update_local<R: Runtime>(
+    window: WebviewWindow<R>,
+    on_progress: Channel<Progress>,
+) -> Result<
+    Option<crate::lifecycle::supervisor::LocalUpdate>,
+    crate::lifecycle::supervisor::UpdateFailure,
+> {
+    main_only(&window).map_err(|line| crate::lifecycle::supervisor::UpdateFailure {
+        kind: "failed",
+        line,
+        log: None,
+    })?;
+    crate::lifecycle::update_local_receiver(|step, message| {
+        let _ = on_progress.send(Progress {
+            step: step.into(),
+            message: message.into(),
+        });
+    })
+    .await
+    .map_err(|e| (&e).into())
+}
+
 #[tauri::command]
 fn rx_stream<R: Runtime>(
     window: WebviewWindow<R>,
@@ -440,6 +475,8 @@ pub fn handler<R: Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + 
         rx_select,
         rx_discover,
         rx_start_local,
+        rx_local_update,
+        rx_update_local,
         rx_stream,
         rx_stream_close,
         app_settings_get,
