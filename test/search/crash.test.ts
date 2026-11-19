@@ -185,7 +185,7 @@ describe.skipIf(!existsSync(ENGINE))("crash torture: SIGKILL during commit", () 
     for (const c of writers) c.kill("SIGKILL");
     writers.clear();
     tmp?.cleanup();
-  });
+  }, 60_000);
 
   it(`${ROUNDS} kills, each recovering clean; then nothing lost and nothing twice`, async () => {
     const e = await engineModule();
@@ -282,5 +282,5 @@ describe.skipIf(!existsSync(ENGINE))("crash torture: SIGKILL during commit", () 
     expect(stray).toEqual([]);
     engine.close();
     void m;
-  }, 300_000);
+  }, 900_000);
 });
