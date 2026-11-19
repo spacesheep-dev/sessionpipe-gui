@@ -139,6 +139,20 @@ describe("sessionpipe-gui search", () => {
     expect(page.sessions[0]!.thisMachine).toBe(true);
   });
 
+  it("a filter value that does not read is named and left out, not called an unknown filter", async () => {
+    const r = await run(runSearchCli, ["webhook since:2026-2-1"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(
+      "“since:2026-2-1” isn't a date, so it was left out. Dates: 7d, 12h, today, yesterday, 2026-10, 2026-10-01",
+    );
+    expect(r.out).not.toContain("isn't a filter");
+    const bad = await run(runSearchCli, ["webhook in:everything"]);
+    expect(bad.out).toContain("“in:everything” isn't a field, so it was left out. in: prompt reply tool title");
+    const none = await run(runSearchCli, ["zzzz since:3days"]);
+    expect(none.code).toBe(1);
+    expect(none.out).toContain("“since:3days” isn't a date, so it was left out.");
+  });
+
   it("exit 1 with nothing, with the hint that applies", async () => {
     const r = await run(runSearchCli, ["webhook", "--agent", "codex"]);
     expect(r.code).toBe(1);

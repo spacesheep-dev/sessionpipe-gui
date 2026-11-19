@@ -59,6 +59,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   again; `sessionpipe-gui index --status` against a running GUI says so too, with the error
   code when there is one, and points at `index --rebuild`. The status carries a new
   `historyLeft` field for it.
+- **Search names a filter value it could not read.** `since:2026-2-1`, `until:3days`,
+  `in:everything` or `source:mars` was left out of the search but reported as "“since:”
+  isn't a filter, so it was searched as text", though `since:` is a filter and nothing was
+  searched as text. The page and `sessionpipe-gui search` now say "“since:2026-2-1” isn't a
+  date, so it was left out", with the forms that read (an unknown `in:` or `source:` value
+  lists the fields or indexes), and keep the old words for a key that is not a filter.
 - **Search finds Gemini CLI history when `GEMINI_CLI_HOME` is set.** Gemini CLI keeps
   its `.gemini` folder inside that path, but search took `$GEMINI_CLI_HOME` to be the
   `.gemini` folder itself, so it found none of those sessions. It now reads
