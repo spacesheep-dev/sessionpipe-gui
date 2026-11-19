@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { Attention, SessionSummary } from "@shared/api";
 import { describe, expect, it } from "vitest";
 import {
   askCut,
@@ -9,6 +10,7 @@ import {
   isPlanReview,
   isQuestion,
   ROW_ASK_MAX,
+  rowTime,
   saidCommand,
   toolLabel,
 } from "./format";
@@ -178,5 +180,66 @@ describe("harnessMark", () => {
     expect(harnessMark("devin").label).toBe("Devin");
     expect(harnessMark("claude-code").glyph).toBe("Cl");
     expect(harnessMark("brand-new").label).toBe("brand-new");
+  });
+});
+
+describe("rowTime", () => {
+  // Noon on a fixed day, so "today" and "before today" are the same whatever the clock.
+  const now = new Date(2026, 10, 18, 12, 0, 0).getTime();
+  const iso = (minsAgo: number) => new Date(now - minsAgo * 60_000).toISOString();
+  const hm = (at: string) => new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const row = (o: Partial<SessionSummary>): SessionSummary =>
+    ({ state: "idle", stateSince: iso(5), lastAt: iso(5), openAttentions: [], ...o }) as SessionSummary;
+
+  it("needs you: since the prompt", () => {
+    const at = iso(2);
+    const s = row({
+      state: "needs_you",
+      stateSince: iso(1),
+      openAttentions: [{ attentionId: "a1", kind: "permission", at } as Attention],
+    });
+    expect(rowTime(s, now)).toEqual({ iso: at, tip: `Needs you since ${hm(at)}` });
+    expect(rowTime(row({ state: "needs_you", stateSince: iso(3) }), now).iso).toBe(iso(3));
+  });
+
+  it("working: the server's since, with or without a tool, never the tool's or the turn's", () => {
+    const since = iso(40);
+    const s = row({
+      state: "working",
+      stateSince: since,
+      lastAt: iso(0),
+      currentTurn: { turnId: "t1", since: iso(30) } as SessionSummary["currentTurn"],
+    });
+    expect(rowTime(s, now)).toEqual({ iso: since, tip: `Working since ${hm(since)}` });
+    const withTool = { ...s, currentTool: { tool: "Bash", callId: "c1", since: iso(0) } } as SessionSummary;
+    expect(rowTime(withTool, now).iso).toBe(since);
+  });
+
+  it("stale: since the last word, not ten minutes after it", () => {
+    const last = iso(49);
+    const s = row({ state: "stale", lastAt: last, stateSince: iso(39) });
+    expect(rowTime(s, now)).toEqual({ iso: last, tip: `No word since ${hm(last)}` });
+  });
+
+  it("idle: since the last word", () => {
+    const last = iso(20);
+    expect(rowTime(row({ state: "idle", lastAt: last, stateSince: iso(20) }), now)).toEqual({
+      iso: last,
+      tip: `Idle since ${hm(last)}`,
+    });
+  });
+
+  it("done: when it ended, else the last word, not a day after it", () => {
+    const ended = iso(90);
+    expect(rowTime(row({ state: "done", endedAt: ended, lastAt: iso(95) }), now)).toEqual({
+      iso: ended,
+      tip: `Ended ${hm(ended)}`,
+    });
+    const last = iso(30 * 60);
+    const silent = row({ state: "done", lastAt: last, stateSince: iso(6 * 60) });
+    expect(rowTime(silent, now).iso).toBe(last);
+    // Thirty hours back is yesterday: the day goes before the clock.
+    const day = new Date(last).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    expect(rowTime(silent, now).tip).toBe(`Last heard ${day} ${hm(last)}`);
   });
 });

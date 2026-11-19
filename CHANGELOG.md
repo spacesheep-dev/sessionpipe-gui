@@ -308,6 +308,17 @@ pairing link that carries the board's key only for a pairing the sink token star
   shows its first eight lines and Show all. Right-click it for Copy plan. A session that
   sends no plan (tier 2) still has the prompt's own words in the dock, and so does one
   read at a tier lens under 3. On a phone the plan stays on the prompt's card.
+- **A Board row's time says how long it has been in its group.** A working row counted
+  from its current tool, so a 40-minute run read "0 s" each time a tool started; it now
+  counts from when it began working and holds as tools come and go. A stale row counts
+  from its last word, so it reads "49 m" where it read "39 m" beside "Bash · 49 m", and
+  names its tool ("Bash") with no second clock; a done row counts from when it ended or
+  last spoke. A tool that has run over 3 minutes shows its age after its name, "Bash ·
+  12 m". The time has one tooltip, which says what it counts: "Working since 9:31 AM",
+  "No word since 9:13 AM", "Needs you since 10:02 AM".
+- **A row whose last tool failed has its ✕ just before the time,** "✕ 3 s", as a
+  subagent's row has it. It sat somewhere in the row's empty middle on a wide window, and
+  under the time on a phone. With Show counts on it stays in the errors column.
 
 ### Fixed
 

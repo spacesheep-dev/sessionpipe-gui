@@ -45,6 +45,7 @@ import {
   isQuestion,
   oneLine,
   repoShort,
+  rowTime,
   STATE_LABEL,
   sessionTitle,
   toolLabel,
@@ -204,7 +205,6 @@ export const SessionCard = memo(function SessionCard({
       (quiet && "unattended"));
   const attention = s.openAttentions[0];
   const unread = useUnread(s);
-  const live = s.state === "working" || s.state === "needs_you";
   const showText = lens === null || lens >= 2;
   const showTools = lens === null || lens >= 1;
   // The prompt as the preview, unless the title already is it (lib/format.ts uncutTitle):
@@ -215,7 +215,10 @@ export const SessionCard = memo(function SessionCard({
     ? s.progress?.assistant?.trim() || s.lastAssistant?.trim() || (askRest ? `“${askRest}”` : "")
     : "";
   const isLiveText = !!s.progress?.assistant?.trim();
-  const tool = showTools && s.currentTool && s.state === "working" ? s.currentTool : undefined;
+  // A stale row names its tool too, with no age: the time already says how long it is quiet.
+  const tool = showTools && s.currentTool && (s.state === "working" || s.state === "stale") ? s.currentTool : undefined;
+  // A working row's tool shows its age once the store calls it slow ("Bash · 12 m").
+  const slow = !!tool && s.state === "working" && !!s.flags?.some((f) => f.kind === "slow_tool");
   const attnTool = attention?.tool && showTools ? attention.tool : undefined;
   const ref = useRef<HTMLElement>(null);
   const beside = (o: { background: boolean } = { background: false }) =>
@@ -289,7 +292,7 @@ export const SessionCard = memo(function SessionCard({
     { title: () => sessionMenuTitle(s), subtitle: () => sessionMenuSubtitle(s) },
   );
   const repo = repoShort(s.repo);
-  const time = attention ? attention.at : tool ? tool.since : s.stateSince;
+  const { iso: time, tip: timeTip } = rowTime(s);
   const failed = showTools && lastFailed(s);
   // The counts the row no longer prints are its tooltip: "2 turns · 5 tools · 1 error".
   const tip = [title, countsLine(s, showTools)].filter(Boolean).join("\n");
@@ -382,17 +385,22 @@ export const SessionCard = memo(function SessionCard({
               </span>
             )}
             {attnTool && <code className="card-tool">{toolLabel(attnTool)}</code>}
-            {!attention && tool && <code className="card-tool">{toolLabel(tool.tool)}</code>}
-            <span
-              className="card-time meta-col"
-              title={
-                live
-                  ? `Started ${new Date(s.startedAt).toLocaleString()}`
-                  : `Last event ${new Date(s.lastAt).toLocaleString()}`
-              }
-            >
+            {!attention && tool && (
+              <code className="card-tool">
+                {toolLabel(tool.tool)}
+                {slow && (
+                  <>
+                    {" · "}
+                    {frozenAt ? <Frozen iso={tool.since} at={frozenAt} /> : <Since iso={tool.since} title={false} />}
+                  </>
+                )}
+              </code>
+            )}
+            {/* One tooltip, on the whole cell: what the number measures. */}
+            <span className="card-time meta-col" title={timeTip}>
               <NotifyOff s={s} />
-              {frozenAt ? <Frozen iso={time} at={frozenAt} /> : <Since iso={time} coarse />}
+              {failed && !(counts && !simple) && <ErrorMark s={s} />}
+              {frozenAt ? <Frozen iso={time} at={frozenAt} /> : <Since iso={time} coarse title={false} />}
             </span>
           </span>
 
@@ -439,7 +447,7 @@ export const SessionCard = memo(function SessionCard({
             </span>
           </span>
 
-          {!simple && counts ? (
+          {!simple && counts && (
             <span className="card-foot num">
               {/* A zero says nothing: its column stays, empty, so the columns still align. */}
               {s.counts.turns > 0 ? <span>{plural(s.counts.turns, "turn")}</span> : <span aria-hidden="true" />}
@@ -448,11 +456,7 @@ export const SessionCard = memo(function SessionCard({
               {/* An error is the glyph, never red words; its column keeps its width. */}
               {showTools && (failed || s.counts.toolErrors > 0 ? <ErrorMark s={s} /> : <span aria-hidden="true" />)}
             </span>
-          ) : failed ? (
-            <span className="card-foot card-foot--mark">
-              <ErrorMark s={s} />
-            </span>
-          ) : null}
+          )}
         </Link>
         <BesideButton onClick={() => beside()} />
       </div>
@@ -755,7 +759,7 @@ export function useStickyTop(page: RefObject<HTMLElement | null>): void {
 
 /** The store's flags that say a session is stuck, folded into the end of line 2 in the
  *  muted tier: a slow tool and a loop. A slow tool the row already names is not said
- *  again ("Read  Read · 3 m"); an error streak is the ✕ at the row's end; compacting and
+ *  again ("Read  Read · 3 m"); an error streak is the ✕ before the time; compacting and
  *  a gap are the session page's. */
 function Flags({ flags, tool }: { flags: SessionFlag[] | undefined; tool?: string }) {
   const shown = (flags ?? []).filter((f) => f.kind === "loop" || (f.kind === "slow_tool" && !tool));
@@ -801,7 +805,7 @@ function ErrorMark({ s }: { s: SessionSummary }) {
 function Frozen({ iso, at }: { iso: string | undefined; at: number }) {
   if (!iso) return null;
   return (
-    <time dateTime={iso} className="num" title="Paused while the stream is down">
+    <time dateTime={iso} className="num">
       {durCoarse(at - ms(iso))}
     </time>
   );

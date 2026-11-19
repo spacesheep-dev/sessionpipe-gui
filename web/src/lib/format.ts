@@ -2,7 +2,7 @@
 // Readings of the wire shapes for display: titles, monograms, one-line event summaries.
 import type { ProtocolEvent, SessionState, SessionSummary, StoredEvent } from "@shared/api";
 import { NEW_WORDS } from "../native/accountWords.new";
-import { durShort } from "./time";
+import { durShort, heard } from "./time";
 
 export const STATE_LABEL: Record<SessionState, string> = {
   needs_you: "needs you",
@@ -29,6 +29,27 @@ export const STATE_HINT: Record<SessionState, string> = {
   idle: "The last turn ended; the session is open and waiting for a prompt.",
   done: "Ended, or silent for a day, or only known from backfill.",
 };
+
+/** A row's one time and what it measures: how long the row has been in the group it sits
+ *  in. Needs you counts from the prompt; working from the server's own since (the turn, an
+ *  agent, background work or an ask, whichever began first), never a tool's, so the number
+ *  holds as tools come and go; stale, idle and done from the last word, since stale's own
+ *  since is ten minutes after it and done's by silence a day after it. */
+export function rowTime(
+  s: Pick<SessionSummary, "state" | "stateSince" | "lastAt" | "endedAt" | "openAttentions">,
+  now = Date.now(),
+): { iso: string; tip: string } {
+  const a = s.openAttentions[0];
+  if (a || s.state === "needs_you") {
+    const iso = a?.at ?? s.stateSince;
+    return { iso, tip: `Needs you since ${heard(iso, now)}` };
+  }
+  if (s.state === "working") return { iso: s.stateSince, tip: `Working since ${heard(s.stateSince, now)}` };
+  if (s.state === "stale") return { iso: s.lastAt, tip: `No word since ${heard(s.lastAt, now)}` };
+  if (s.state === "idle") return { iso: s.lastAt, tip: `Idle since ${heard(s.lastAt, now)}` };
+  const iso = s.endedAt ?? s.lastAt;
+  return { iso, tip: `${s.endedAt ? "Ended" : "Last heard"} ${heard(iso, now)}` };
+}
 
 /** A title cut upstream ("Why does the staging deploy take 14 minutes?...") keeps its
  *  honest mark of a cut, as the one ellipsis glyph after the last whole word; CSS cuts

@@ -98,7 +98,7 @@ test.describe("a device that has not chosen", () => {
     await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.setup.seen", "1"));
     await openBoard(page);
     await expect(page.locator("nav.rail a[data-nav='feed']")).toHaveCount(0);
-    await expect(page.locator("article.card .card-foot:not(.card-foot--mark)")).toHaveCount(0);
+    await expect(page.locator("article.card .card-foot")).toHaveCount(0);
     await openPage(page, "/settings");
     await expect(dialog(page).locator(".settings-row").first()).toContainText("Simple mode");
     await expect(dialog(page).locator(".settings-row").first()).toContainText("Switch to Advanced");
@@ -161,20 +161,20 @@ test.describe("settings dialog", () => {
     await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.board.counts", "1"));
     await openBoard(page);
     await expect(page.locator("nav.rail a[data-nav='feed']")).toBeVisible();
-    await expect(page.locator("article.card .card-foot:not(.card-foot--mark)").first()).toBeVisible();
+    await expect(page.locator("article.card .card-foot").first()).toBeVisible();
     await openPage(page, "/settings");
     await mode(page, "Simple").click();
     await expect(page.locator("nav.rail a[data-nav='feed']")).toHaveCount(0);
     await expect(page.locator("nav.rail a[data-nav='review']")).toHaveCount(0);
     await expect(page.locator("nav.rail a[data-nav='inbox']")).toBeVisible();
-    await expect(page.locator("article.card .card-foot:not(.card-foot--mark)")).toHaveCount(0);
+    await expect(page.locator("article.card .card-foot")).toHaveCount(0);
     // The lens chip is gone with it.
     await expect(page.locator(".lens-chip")).toHaveCount(0);
 
     await page.reload();
     await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
     await expect(page.locator("nav.rail a[data-nav='feed']")).toHaveCount(0);
-    await expect(page.locator("article.card .card-foot:not(.card-foot--mark)")).toHaveCount(0);
+    await expect(page.locator("article.card .card-foot")).toHaveCount(0);
     // Feed is still a page (⌘K and the URL reach it).
     await openPage(page, "/feed");
     await expect(page.locator(".page.feed")).toBeVisible();

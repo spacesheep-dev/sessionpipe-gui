@@ -241,13 +241,115 @@ test.describe("board", () => {
 
   test("by default a row says two facts; Show counts in the view menu adds the columns", async ({ page }) => {
     await openBoard(page);
-    await expect(page.locator("article.card .card-foot:not(.card-foot--mark)")).toHaveCount(0);
+    await expect(page.locator("article.card .card-foot")).toHaveCount(0);
     // The counts are the row's tooltip instead.
     await expect(page.locator("article.card a.card-link").first()).toHaveAttribute("title", /\d+ (turn|tool)/);
     await page.getByRole("button", { name: "View options" }).click();
     await page.getByRole("menuitemcheckbox", { name: "Show counts" }).click();
-    await expect(page.locator("article.card .card-foot:not(.card-foot--mark)").first()).toBeVisible();
+    await expect(page.locator("article.card .card-foot").first()).toBeVisible();
     expect(await page.evaluate(() => localStorage.getItem("sessionpipe-gui.board.counts"))).toBe("1");
+  });
+
+  test("a row's one time is how long it has been in its group, with one tooltip, and the ✕ beside it", async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const { sinkToken } = (await (await page.request.get(INFO)).json()) as { sinkToken: string };
+    const now = Date.now();
+    const ago = (m: number) => now - m * 60_000;
+    const ids: string[] = [];
+    /** A session of its own, its events dated as given. */
+    const session = (title: string, cwd = "~/code/e2e") => {
+      const id = randomUUID();
+      ids.push(id);
+      let seq = 0;
+      const ev = (type: string, at: number, data: Record<string, unknown> = {}) => ({
+        protocol: 1,
+        id: ulid(at),
+        type,
+        time: new Date(at).toISOString(),
+        tier: 3,
+        harness: { name: "claude-code", version: "2.1.296", event: "Hook" },
+        session: { id, seq: seq++, machine: "e2e-box", cwd, title, title_source: "custom" },
+        privacy: { rulesets: ["secrets@1"], pii: false },
+        data: { turn_id: "t1", ...data },
+      });
+      const card = page.locator(`article.card:has(a.card-link[href^="${sessionUrl("claude-code", id)}"])`);
+      return { ev, card };
+    };
+    const post = async (events: unknown[]) => {
+      const res = await page.request.post(EVENTS, {
+        headers: { authorization: `Bearer ${sinkToken}` },
+        data: { events },
+      });
+      expect(res.status()).toBe(202);
+    };
+    const bash = (call: string) => ({ tool: "Bash", call_id: call, input: { command: "npm ci" } });
+    // A turn 30 m old, its tool fresh; one 5 m tool, slow; a Bash 49 m quiet, stale; a Bash that failed.
+    const old = session("E2E row time: old turn, fresh tool");
+    const slow = session("E2E row time: slow tool");
+    const stale = session("E2E row time: quiet Bash");
+    const failed = session("E2E row time: failed Bash", "~/code/a-rather-long-repository-name-for-the-where-line");
+    await post([
+      old.ev("session.started", ago(31), { source: "startup" }),
+      old.ev("turn.started", ago(30)),
+      old.ev("tool.started", now, { tool: "Read", call_id: "r1", input: { file_path: "a.ts" } }),
+      slow.ev("session.started", ago(7), { source: "startup" }),
+      slow.ev("turn.started", ago(6)),
+      slow.ev("tool.started", ago(5), bash("b1")),
+      stale.ev("session.started", ago(51), { source: "startup" }),
+      stale.ev("turn.started", ago(50)),
+      stale.ev("tool.started", ago(49), bash("b1")),
+      failed.ev("session.started", ago(2), { source: "startup" }),
+      failed.ev("turn.started", ago(1.5)),
+      failed.ev("tool.started", ago(1), bash("b1")),
+      failed.ev("tool.ended", ago(0.9), { ...bash("b1"), ok: false, ms: 900 }),
+    ]);
+    try {
+      await openBoard(page);
+      // Working: the turn's 30 m, not the fresh tool's seconds, and still after a second tool.
+      await expect(old.card.locator(".card-tool")).toHaveText("Read");
+      await expect(old.card.locator(".card-time")).toHaveText("30 m");
+      await post([
+        old.ev("tool.ended", Date.now(), { tool: "Read", call_id: "r1", ok: true, ms: 40 }),
+        old.ev("tool.started", Date.now(), bash("b2")),
+      ]);
+      await expect(old.card.locator(".card-tool")).toHaveText("Bash");
+      await expect(old.card.locator(".card-time")).toHaveText("30 m");
+      // One tooltip, on the cell: what the number measures.
+      await expect(old.card.locator(".card-time")).toHaveAttribute("title", /^Working since \S/);
+      await expect(old.card.locator(".card-time time")).not.toHaveAttribute("title");
+      // A slow tool says its own age once, after its name.
+      await expect(slow.card.locator(".card-tool")).toHaveText("Bash · 5 m");
+      await expect(slow.card.locator(".card-flags")).toHaveCount(0);
+      // Stale: since the last word, the tool named without a second clock.
+      await expect(stale.card.locator(".card-time")).toHaveText("49 m");
+      await expect(stale.card.locator(".card-time")).toHaveAttribute("title", /^No word since \S/);
+      await expect(stale.card.locator(".card-tool")).toHaveText("Bash");
+      await expect(stale.card.locator(".card-flags")).toHaveCount(0);
+      // The last tool failed: the ✕ just before the time, at every width, and no foot.
+      for (const [width, height] of [
+        [1440, 900],
+        [393, 852],
+      ] as const) {
+        await page.setViewportSize({ width, height });
+        const mark = failed.card.locator(".card-time .card-err");
+        await expect(mark).toBeVisible();
+        await expect(failed.card.locator(".card-foot")).toHaveCount(0);
+        const [x, t] = await Promise.all([mark.boundingBox(), failed.card.locator(".card-time time").boundingBox()]);
+        const gap = t!.x - (x!.x + x!.width);
+        expect(gap, `${width}: the ✕ sits just before the time`).toBeGreaterThanOrEqual(0);
+        expect(gap, `${width}: the ✕ sits just before the time`).toBeLessThanOrEqual(8);
+      }
+      // With Show counts on, the ✕ is in the errors column, and only there.
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.evaluate(() => localStorage.setItem("sessionpipe-gui.board.counts", "1"));
+      await openBoard(page);
+      await expect(failed.card.locator(".card-foot .card-err")).toBeVisible();
+      await expect(failed.card.locator(".card-err")).toHaveCount(1);
+    } finally {
+      for (const id of ids) await page.request.post(`/api/ui/sessions/claude-code/${id}/forget`);
+    }
   });
 
   test("the list holds still under the pointer: no row moves while it rests on one", async ({ page }) => {

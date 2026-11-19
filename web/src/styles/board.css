@@ -354,20 +354,20 @@
 .sess-counts .is-err {
   color: var(--err);
 }
-/* With the counts off, the foot is only the error mark's slot, beside the time. */
-.card-foot--mark {
-  margin-left: 12px;
-}
-.card-foot--mark > span {
-  min-width: 0;
-}
-/* The one red mark a row has: a small ✕ where its counts would be. */
+/* The one red mark a row has: a small ✕ before the time, or in the errors column when
+   counts show. */
 .card-err {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
   height: 1lh;
   color: var(--err);
+}
+/* The last tool failed: a ✕ before the time, as a subagent row draws it ("✕ 14 s"). */
+.card-time > .card-err {
+  height: auto;
+  margin-right: 6px;
+  vertical-align: -1px;
 }
 /* The store's flags on the session page (SessionView): one muted line. */
 .sess-flags {
@@ -767,7 +767,7 @@
   .card-foot > span {
     min-width: 0;
   }
-  /* Under the time, its right edge on the time's: the ✕ never floats mid-row. */
+  /* Under the time, its right edge on the time's. */
   .card-foot {
     justify-content: flex-end;
   }
