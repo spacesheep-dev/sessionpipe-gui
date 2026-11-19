@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   DONE_AFTER_MS,
   GAP_AFTER_MS,
@@ -641,11 +641,16 @@ describe("seq bound", () => {
 describe("tier upgrade", () => {
   it("keeps the richer copy when the same seq arrives again at a higher tier, and after a reboot", async () => {
     const { Store } = await import("./store.js");
-    const { mkdtempSync } = await import("node:fs");
-    const os = await import("node:os");
-    const path = await import("node:path");
-    const dir = mkdtempSync(path.join(os.tmpdir(), "spgui-upgrade-"));
+    const own = tempDir("spgui-upgrade-");
+    const dir = own.dir;
+    // Close whichever store is open before removing the folder, also when an assertion throws.
+    let open: Store | undefined;
+    onTestFinished(async () => {
+      await open?.close();
+      own.cleanup();
+    });
     const store = new Store(dir, { tickMs: 3600_000, statsMs: 3600_000 });
+    open = store;
     const base = {
       protocol: 1 as const,
       // A fresh timestamp: a session silent for a day is read as done and its prompts closed.
@@ -686,6 +691,7 @@ describe("tier upgrade", () => {
     expect(detail.events.find((e) => e.session.seq === 1)?.tier).toBe(3);
     await store.close();
     const again = new Store(dir, { tickMs: 3600_000, statsMs: 3600_000 });
+    open = again;
     const s2 = again.session("claude-code:up-1")!;
     expect(s2.maxTier).toBe(3);
     expect(s2.counts.events).toBe(2);
@@ -701,13 +707,15 @@ describe("permission twins", () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.parse("2026-10-14T23:18:00.000Z"));
     const { Store } = await import("./store.js");
-    const { mkdtempSync } = await import("node:fs");
-    const os = await import("node:os");
-    const path = await import("node:path");
-    const store = new Store(mkdtempSync(path.join(os.tmpdir(), "spgui-twin-")), {
-      tickMs: 3600_000,
-      statsMs: 3600_000,
+    const own = tempDir("spgui-twin-");
+    // Close the store before removing the folder, also when an assertion throws.
+    let open: Store | undefined;
+    onTestFinished(async () => {
+      await open?.close();
+      own.cleanup();
     });
+    const store = new Store(own.dir, { tickMs: 3600_000, statsMs: 3600_000 });
+    open = store;
     const base = { protocol: 1 as const, tier: 3 as const, privacy: { rulesets: ["secrets@1"], pii: false } };
     const sess = (seq: number) => ({ id: "tw-1", seq, machine: "m1" });
     store.ingest(

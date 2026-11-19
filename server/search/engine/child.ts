@@ -33,12 +33,20 @@ export function parseChildArgs(argv: string[]): ChildArgs {
   return { stateDir: path.resolve(stateDir), home, history, hostname };
 }
 
+/** A message the server can no longer get is dropped. */
+const dropSendError = (): void => {};
+
+/** One message to the server. When the server has exited (say after "port in use") before this
+ *  process has seen the disconnect, process.connected is still true and the write fails with
+ *  EPIPE. process.send does not throw for that: it hands the error to its callback on the next
+ *  tick, or, with no callback, emits it as 'error' on process, which nothing here handles. */
+export function sendToParent(m: FromIndexer): void {
+  try {
+    if (process.connected) process.send?.(m, undefined, undefined, dropSendError);
+  } catch {}
+}
+
 export async function indexerChildMain(argv: string[]): Promise<void> {
-  const send = (m: FromIndexer): void => {
-    try {
-      if (process.connected) process.send?.(m);
-    } catch {}
-  };
   let ix: Indexer | null = null;
   try {
     const a = parseChildArgs(argv);
@@ -54,8 +62,8 @@ export async function indexerChildMain(argv: string[]): Promise<void> {
         adapters: [...historyAdapters(), eventsAdapter()],
         history: a.history,
         mode: "watch",
-        onStatus: (status) => send({ t: "status", status }),
-        onCommit: (source, gen) => send({ t: "committed", source, gen }),
+        onStatus: (status) => sendToParent({ t: "status", status }),
+        onCommit: (source, gen) => sendToParent({ t: "committed", source, gen }),
       },
       { inProcess: false },
     );
@@ -67,7 +75,7 @@ export async function indexerChildMain(argv: string[]): Promise<void> {
   } catch (e) {
     const msg =
       e instanceof LockedError ? `the index is being written by another process (${e.pid})` : (e as Error).message;
-    send({ t: "error", message: msg });
+    sendToParent({ t: "error", message: msg });
     process.exitCode = e instanceof LockedError ? 0 : 1;
   } finally {
     // let the last messages flush, then go

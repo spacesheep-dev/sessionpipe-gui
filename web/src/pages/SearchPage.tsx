@@ -8,7 +8,14 @@
 // ⏎ opens, ⇧⏎ beside, ⌘⏎ beside keeping focus here, Space peeks, `.` the menu, ⌘C the
 // resume line, `/` the field, Esc steps back.
 import type { SearchFilterKey, SearchSort, SessionMatch } from "@shared/api";
-import { filterValue, isEmptySearch, parseSearch, setFilter, withoutFilters } from "@shared/searchQuery";
+import {
+  filterValue,
+  isEmptySearch,
+  parseSearch,
+  searchQueryNote,
+  setFilter,
+  withoutFilters,
+} from "@shared/searchQuery";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChipSelect, HarnessGlyph, Segmented } from "../components/bits";
 import { LabelSwatch } from "../components/LabelDot";
@@ -454,7 +461,7 @@ export function Search() {
   const idle = empty;
   const nothing =
     idle && status && status.sessions === 0 && status.state !== "first-run" && status.state !== "updating";
-  const unknown = page?.parsed.unknown ?? [];
+  const queryNote = page ? searchQueryNote(page.parsed) : undefined;
   let lastDay = "";
   const byDay = sort === "newest" || (page?.sort === "newest" && !page.parsed.clauses.some((c) => !c.not));
 
@@ -521,12 +528,7 @@ export function Search() {
           </span>
         )}
       </div>
-      {unknown.length > 0 && !idle && (
-        <p className="sx-note">
-          “{unknown[0]}:” isn't a filter, so it was searched as text. Filters: agent machine repo label since until in
-          source
-        </p>
-      )}
+      {queryNote && !idle && <p className="sx-note">{queryNote}</p>}
       {res.error && !idle && (
         <p className="sx-note sx-note--fail">
           Search didn't answer.{" "}

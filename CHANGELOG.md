@@ -53,6 +53,30 @@ All notable changes to `sessionpipe-gui`. The format follows
   start, and the next pairing or hello wrote the file over, so every machine had to pair
   again. The receiver now stops at start with a message naming the file and what to do, as
   it does for `config.json`, and leaves the file as it was.
+- **Search's status line says when history search is off but its index could not be
+  deleted.** It read "The index needs rebuilding" instead. It now says the history index
+  could not be deleted, and that Rebuild (on this computer) or restarting the app tries
+  again; `sessionpipe-gui index --status` against a running GUI says so too, with the error
+  code when there is one, and points at `index --rebuild`. The status carries a new
+  `historyLeft` field for it.
+- **Search names a filter value it could not read.** `since:2026-2-1`, `until:3days`,
+  `in:everything` or `source:mars` was left out of the search but reported as "“since:”
+  isn't a filter, so it was searched as text", though `since:` is a filter and nothing was
+  searched as text. The page and `sessionpipe-gui search` now say "“since:2026-2-1” isn't a
+  date, so it was left out", with the forms that read (an unknown `in:` or `source:` value
+  lists the fields or indexes), and keep the old words for a key that is not a filter.
+- **Search finds Gemini CLI history when `GEMINI_CLI_HOME` is set.** Gemini CLI keeps
+  its `.gemini` folder inside that path, but search took `$GEMINI_CLI_HOME` to be the
+  `.gemini` folder itself, so it found none of those sessions. It now reads
+  `$GEMINI_CLI_HOME/.gemini`; with the variable unset nothing changes (`~/.gemini`).
+- **Labels, read marks and usage limits saved with a byte-order mark are kept.** A
+  `labels.json`, `marks.json` or `limits.json` saved by Notepad or PowerShell 5 (which
+  start a UTF-8 file with a byte-order mark) was taken for a broken file: it was set aside
+  as `<file>.bad-<time>` and the board started without its label names and colours, read
+  marks and notification levels. It is now read past the mark, as `config.json` is.
+- **A GUI that stops at "port N is in use" ends there.** The search indexer it had already
+  started then printed a Node crash (`Error: write EPIPE`) on the same terminal. It now
+  stops quietly once the GUI has gone, as it does when a GUI is stopped while indexing.
 
 ## [0.8.5] - 2026-11-18
 
