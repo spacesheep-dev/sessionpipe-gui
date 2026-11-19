@@ -32,6 +32,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   the picture was missing from it, and the daily clean-up did not see it in the stored
   events, so a picture a session still named was removed once it was 30 days old. Both now
   read either slash.
+- A session's "missing events" flag waits 30 s from when each hole opened. When an older
+  hole filled while a newer one was still open, the newer one kept the older one's time,
+  so it was flagged at once, with a "since" from before it opened.
 - **An event the store can't write is read from the outbox again, not lost.** When the
   store failed to take a batch from this machine's outbox (a full disk, a store file the
   GUI may not write), the reader had already moved past it, so those events never reached
