@@ -2152,19 +2152,21 @@ async fn the_files_door_waits_as_long_as_the_bytes_take() {
     let fake = Fake::start("files-time").await;
     let h = hub_in(t.path());
     let id = connected(&h, &fake).await;
-    let late = SECOND * (account::REQUEST_TIMEOUT_S as u32 + 10);
+    // A small body is cut at 16 test seconds and the answer comes at 75; three MiB may
+    // take 111, so it waits the answer out. The gaps hold on a busy machine.
+    let late = SECOND * (account::REQUEST_TIMEOUT_S as u32 + 60);
     fake.hook(move |s| {
         (s.target() == "/api/machines/files").then(|| Reply::json(200, r#"{"size":1}"#).after(late))
     });
     let png: Option<&[u8]> = Some(b"image/png");
-    let megabyte = vec![1u8; 1024 * 1024];
+    let three_megabytes = vec![1u8; 3 * 1024 * 1024];
     let res = h
         .proxy(file_request(
             &id,
             "/api/machines/files",
             png,
             None,
-            megabyte,
+            three_megabytes,
         ))
         .await;
     assert_eq!(said(&res), (200, None), "{}", dump(&res));
