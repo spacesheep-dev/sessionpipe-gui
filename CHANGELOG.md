@@ -8,6 +8,24 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **Turn on (the secure address) finds openssl on Windows.** The receiver looked for
+  `openssl` on the PATH only, and neither Git for Windows (its `usr\bin`; only `Git\cmd` is
+  on the PATH) nor `winget install ShiningLight.OpenSSL.Light` (`Program Files\OpenSSL-Win64`,
+  `-ARM` on arm64) puts it there, so Setup kept saying "Needs the openssl command" with
+  either installed. It now also looks in those folders, so an install shows without a PATH
+  change or a restart, and the note says so.
+- **A saved workflow run whose plan does not read no longer stops the server.** A run in
+  `workflow-runs.json` with a plan step that is not an object, has no entry in `steps`, or
+  has an `after` that is not a list of step ids threw from the orchestrator's tick, and the
+  server exited about a second after every start. Such a run, and one whose plan step has
+  text that is not a string, an id that is not an id or is used twice, or an `after` naming
+  a step that is not before it, is now left out when the file is read, as a workflow that
+  no longer reads already is; so is a run whose input or a step's reply is not text, and
+  one with an entry in `steps` that no plan step names (it kept the run from ever ending).
+  The other runs are kept, and the file as it was is set aside as
+  `workflow-runs.json.bad-<time>`; until it can be, the runs left out are written back with
+  the others. A run started from now on with a step called `__proto__` keeps that step's
+  entry in its `steps`, so it is read back like any other.
 - **A picture sent from Windows to an older sessionpipe shows in the message, and is
   kept.** For a session on the same computer whose sessionpipe is older than 0.10, a GUI
   on Windows names a picture by its path, with `\`. The message did not read that back, so
