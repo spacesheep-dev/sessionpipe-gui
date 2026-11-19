@@ -1881,6 +1881,46 @@ describe("a start's options, files and applied, through POST send", () => {
     expect(new Uint8Array(await got.arrayBuffer())).toEqual(pngHead(800, 600));
   });
 
+  it("a prompt's pictures are kept 30 days for the page to draw, its other files only as long as the row; the row says the command's nonce", async () => {
+    const m = await enrolled(b, pk, "m_promptfiles000000004");
+    await hello(m, { files: true, prompt_files: true });
+    const four = (u: Record<string, unknown>) => ({ name: u.name, type: u.type, size: u.size, sha256: u.sha256 });
+    const pic = four(
+      (await (await upload(pngHead(320, 200), "image/png", "kiwi.png")).json()) as Record<string, unknown>,
+    );
+    const doc = four(
+      (await (await upload("# what to check", "text/markdown", "notes.md")).json()) as Record<string, unknown>,
+    );
+    const signed = await signedPrompt(pk, day, m.machine, { text: "Look at these.", files: [pic, doc] });
+    const ok = await call(b.url, "POST", `${UI}/send`, { body: { machineId: m.machine, ...signed } });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    const nonce = (JSON.parse(signed.cmd) as { nonce: string }).nonce;
+    expect(ok.body.nonce).toBe(nonce);
+    expect(b.control.activity().find((a) => a.id === ok.body.id)?.nonce).toBe(nonce);
+    const meta = (sha: unknown) =>
+      JSON.parse(readFileSync(path.join(b.stateDir, "control", "files", `${sha}.json`), "utf8")) as {
+        expiresAt: string;
+        displayUntil?: string;
+      };
+    const shown = Date.parse(meta(pic.sha256).displayUntil ?? "");
+    expect(shown).toBeGreaterThan(Date.now() + 29 * 24 * 3600_000);
+    expect(shown).toBeLessThanOrEqual(Date.now() + 30 * 24 * 3600_000);
+    expect(meta(doc.sha256).displayUntil).toBeUndefined();
+    // The page draws the picture; the notes are no picture to draw.
+    const got = await fetch(`${b.url}${UI}/files/${pic.sha256}`);
+    expect(got.status).toBe(200);
+    expect(new Uint8Array(await got.arrayBuffer())).toEqual(pngHead(320, 200));
+    const notes = await fetch(`${b.url}${UI}/files/${doc.sha256}`);
+    expect(notes.status).toBe(404);
+    expect(await notes.json()).toEqual({ reason: "not_a_picture" });
+    // A row with no files says no nonce.
+    const plain = await call(b.url, "POST", `${UI}/send`, {
+      body: { machineId: m.machine, ...(await signedPrompt(pk, day, m.machine, { text: "and words alone" })) },
+    });
+    expect(plain.status).toBe(201);
+    expect(plain.body.nonce).toBeUndefined();
+  });
+
   it("the well-known says control.files and control.inherit", () => {
     expect(b.control.wellKnown().files).toBe(true);
     expect(b.control.wellKnown().inherit).toBe(true);

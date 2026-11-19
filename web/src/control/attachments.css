@@ -2,8 +2,9 @@
 /* Images beside a prompt (control/Attachments.tsx): the paperclip inside the field, the
    tray of 56 px thumbnails at the field's top (each one's size is its tooltip; only a
    refusal is written under it), the drop highlight, and the thumbnails a sent
-   prompt shows in the activity list and the Session view. Fills and hairlines, no
-   badges; the shared spinner while one uploads. */
+   prompt shows in the activity list and the Session view, with a chip for a file that is
+   no picture or is kept no more. Fills and hairlines, no badges; the shared spinner while
+   one uploads. */
 
 /* The paperclip: an icon button in the field (a label around the hidden picker). */
 .att-btn {
@@ -168,4 +169,43 @@
 }
 .att-thumbs--sm {
   margin-top: 4px;
+}
+
+/* A file a sent message carried, drawn as words: a file's glyph when it is no picture,
+   its name (cut to fit), then its type and size in the meta tier. */
+.att-thumbs {
+  align-items: center;
+}
+.att-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-inner);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+.att-chip svg {
+  flex: none;
+  color: var(--fg-3);
+}
+.att-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.att-chip-meta {
+  flex: none;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.att-thumbs--sm .att-chip {
+  min-height: 24px;
+  padding: 0 6px;
+  font-size: var(--text-xs);
 }

@@ -6,6 +6,7 @@
 // trusts signs a `key.add` for it, CONTROL.md §2). Every route needs the UI's own auth (loopback, or the UI key cookie).
 // Documented route by route in README.md beside this file.
 import { randomBytes } from "node:crypto";
+import { createReadStream } from "node:fs";
 import {
   type Assertion,
   b64url,
@@ -510,6 +511,28 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
       const entry: UploadedFile = { name, type, size: held.size, sha256: held.sha256 };
       if (picture) Object.assign(entry, { width: picture.width, height: picture.height });
       return { status: 201, json: entry };
+    }),
+  );
+
+  // A picture a message sent from here carried, for the page to draw: while a machine may
+  // still fetch it, or the page keeps it (30 days, files.ts). Only the four picture types,
+  // drawn as nothing else (a page of its own is a sandbox with nothing to run); the
+  // machines' own GET {control}/files/:sha is routes.ts's.
+  router.get(
+    `${base}/files/:sha`,
+    guarded((ctx): Reply | undefined => {
+      const f = state.files.picture(ctx.params.sha ?? "");
+      if (typeof f === "string") throw new HttpError(404, { reason: f });
+      ctx.res.writeHead(200, {
+        "content-type": f.type,
+        "content-length": String(f.size),
+        "cache-control": "private, max-age=31536000, immutable",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "default-src 'none'; sandbox",
+        "cross-origin-resource-policy": "same-origin",
+      });
+      createReadStream(f.path).pipe(ctx.res);
+      return undefined;
     }),
   );
 

@@ -7,7 +7,9 @@
 // and acks the way sessionpipe's does. Nothing here runs an agent; a "start" is answered
 // with acks and a few hook events, which is all the receiver ever sees of one. A command
 // that names files has each fetched first, with the machine's own token, and held to the
-// size and hash that were signed, as a daemon does before it delivers anything.
+// size and hash that were signed, as a daemon does before it delivers anything. With
+// `saves`, it also writes the turn each start or prompt became, as sessionpipe hands it to
+// the agent: framed, with the list of files it saved in the session's folder.
 import { createHash, randomUUID } from "node:crypto";
 import type { BrowserContext, Page } from "@playwright/test";
 import { ulid } from "./helpers.js";
@@ -127,7 +129,7 @@ export interface FakeDaemon {
 export async function fakeDaemon(
   key: PageKey,
   hello: Hello,
-  o: { offline?: boolean; script?: StartScript; sinkToken?: string } = {},
+  o: { offline?: boolean; script?: StartScript; sinkToken?: string; saves?: boolean } = {},
 ): Promise<FakeDaemon> {
   const id = `m_e2e${randomUUID().replace(/-/g, "").slice(0, 20)}`;
   const enr = (await (
@@ -178,6 +180,8 @@ export async function fakeDaemon(
     return whole;
   };
   let stopped = false;
+  /** Per session, the next event's seq and the next turn's number. */
+  const sessions = new Map<string, { seq: number; turn: number }>();
   const ack = (acks: Ack[]) =>
     fetch(`${CONTROL}/ack`, {
       method: "POST",
@@ -203,10 +207,12 @@ export async function fakeDaemon(
           const { messages } = (await r.json()) as { messages: { id: string; cmd: string }[] };
           for (const m of messages) {
             const c = JSON.parse(m.cmd) as Record<string, unknown>;
+            // Its files fetched first, so a test that sees the command sees them too.
+            const whole = c.files === undefined || (await fetchFiles(c.files));
             seen.push(c);
             cmds.push(m.cmd);
             // A file that fails is acked `failed` with code `file`, and nothing is delivered.
-            if (c.files !== undefined && !(await fetchFiles(c.files))) {
+            if (!whole) {
               await ack([{ id: m.id, outcome: "failed", code: "file", detail: "a file did not arrive whole" }]);
               continue;
             }
@@ -214,8 +220,12 @@ export async function fakeDaemon(
             for (const [i, a] of s.acks.entries()) {
               await new Promise((res) => setTimeout(res, s.pauseMs ?? 300));
               const final = i === s.acks.length - 1;
-              // Only a start brings a session's first hook events (a key.add or a prompt has none).
-              if (final && s.events && o.sinkToken && c.kind === "start") await startEvents(hello.name, c, o.sinkToken);
+              // Only a start brings a session's first hook events (a key.add or a prompt has none),
+              // unless it writes the turns it hands over (`saves`).
+              if (final && s.events && o.sinkToken && o.saves && (c.kind === "start" || c.kind === "prompt"))
+                await savedTurn(hello.name, c, o.sinkToken, sessions);
+              else if (final && s.events && o.sinkToken && c.kind === "start")
+                await startEvents(hello.name, c, o.sinkToken);
               await ack([{ id: m.id, ...a }]);
             }
           }
@@ -266,6 +276,68 @@ async function startEvents(machine: string, c: Record<string, unknown>, sinkToke
         ev("turn.started", { turn_id: turn, prompt_chars: String(c.text).length, prompt: c.text }, "UserPromptSubmit"),
       ],
     }),
+  });
+}
+
+/** 183402 → "179 KB", 1258291 → "1.2 MB", as sessionpipe's list says a size. */
+const humanSize = (n: number): string =>
+  n < 1024 ? `${n} B` : n < 1_048_576 ? `${Math.round(n / 1024)} KB` : `${(n / 1_048_576).toFixed(1)} MB`;
+
+/** The turn a start or a prompt became, as sessionpipe 0.10 and later hand it over
+ *  (CONTROL.md §6): the words, then the list of the files saved in the session's folder (a
+ *  prompt's in a folder named by its nonce), framed with where it came from; at tier 2,
+ *  with the turn's transcript. A start's session begins with it. */
+async function savedTurn(
+  machine: string,
+  c: Record<string, unknown>,
+  sinkToken: string,
+  sessions: Map<string, { seq: number; turn: number }>,
+): Promise<void> {
+  const session = String(c.session);
+  const harness = session.slice(0, session.indexOf(":"));
+  const sid = session.slice(session.indexOf(":") + 1);
+  const start = c.kind === "start";
+  // A prompt goes to a session the test posted (its first event is seq 0).
+  const at = sessions.get(session) ?? { seq: start ? 0 : 1, turn: 1 };
+  sessions.set(session, at);
+  const files = (Array.isArray(c.files) ? c.files : []) as { name: string; type: string; size: number }[];
+  const folder = start ? sid : `${sid}/${String(c.nonce)}`;
+  const list = files.length
+    ? `\n\nAttached files (saved in this folder):\n${files
+        .map((f) => `- .sessionpipe/files/${folder}/${f.name} (${f.type}, ${humanSize(f.size)})`)
+        .join("\n")}`
+    : "";
+  const words = `${String(c.text)}${list}`;
+  const via = `localhost:${CONTROL_PORT}`;
+  const user = start
+    ? `${words}\n\n(Sent via ${via} with sessionpipe control, signed on the sender's device.)`
+    : `Message via ${via} (sessionpipe control, signed on the sender's device):\n\n${words}`;
+  let clock = Date.now() - 1000;
+  const turn = at.turn++;
+  const ev = (type: string, data: Record<string, unknown>, hook: string) => {
+    clock += 100;
+    return {
+      protocol: 1,
+      id: ulid(clock),
+      type,
+      time: new Date(clock).toISOString(),
+      tier: 2,
+      harness: { name: harness, version: "2.1.296", event: hook },
+      session: { id: sid, seq: at.seq++, machine, cwd: String(c.cwd ?? "/Users/e2e/code") },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    };
+  };
+  const events = [
+    ...(start ? [ev("session.started", { source: "startup" }, "SessionStart")] : []),
+    ev("turn.started", { turn_id: `t${turn}`, prompt_chars: user.length }, "UserPromptSubmit"),
+    ev("turn.transcript", { turn, turn_id: `t${turn}`, user, assistant: "I see them." }, "Stop"),
+    ev("turn.ended", { turn_id: `t${turn}`, reason: "stop", ms: 200 }, "Stop"),
+  ];
+  await fetch(`${CONTROL_BASE}/api/sessionpipe/v1/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${sinkToken}`, "sessionpipe-protocol": "1" },
+    body: JSON.stringify({ events }),
   });
 }
 

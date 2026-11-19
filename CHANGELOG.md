@@ -195,6 +195,14 @@ could not read.
   the agent can't look at it. A JPEG that says where it was taken is always redrawn, which
   leaves the location behind. The thumbnail's tooltip says the size it goes at and the
   size it was.
+- **A sent message shows the pictures it carried.** In the session's view, and in the row
+  of a message that went to a copy of the session, each picture is a thumbnail that opens
+  it whole: while the message is on its way, once the session's turn arrives and after a
+  reload, for a message and for a new session's first one alike. The list of saved files
+  the computer adds to the message is no longer shown as text. Any other file, and a
+  picture the receiver no longer keeps, is a chip with its name, type and size
+  (`kiwi.png · PNG · 32 KB`). The receiver keeps a picture you sent for 30 days to show it,
+  and makes room among those, oldest first, before it refuses an upload for space.
 
 ## [0.8.5] - 2026-11-18
 

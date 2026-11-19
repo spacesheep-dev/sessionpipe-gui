@@ -20,7 +20,7 @@ import { ulid } from "sessionpipe-core";
 import type { ControlCommand, SignedCommand } from "sessionpipe-core/control";
 import type { Applied, ControlActivity, ControlOutcome, MachineControl, TrustedKey } from "../../shared/api.js";
 import { ConfigError, withoutBom } from "../config.js";
-import { FileStore } from "./files.js";
+import { DISPLAY_KEEP_MS, FileStore, PICTURE_TYPES } from "./files.js";
 import { type AckIn, type Hello, isFinal, MACHINE_RE } from "./parse.js";
 import { type RemoteJobWord, RemoteSlice } from "./remote.js";
 import {
@@ -511,8 +511,13 @@ export class ControlState {
   ): MessageRow {
     const now = Date.now();
     const row = messageRow(m, signed, cmd, { ...o, id: ulid(now), now });
-    // A start's files, and a prompt's, are held here until the row is over (files.ts).
-    for (const f of row.files ?? []) this.files.keepUntil(f.sha256, row.expiresAt);
+    // A start's files, and a prompt's, are held here until the row is over, and its
+    // pictures 30 days for the page to draw (files.ts).
+    const shownUntil = new Date(now + DISPLAY_KEEP_MS).toISOString();
+    for (const f of row.files ?? []) {
+      this.files.keepUntil(f.sha256, row.expiresAt);
+      if (PICTURE_TYPES.has(f.type)) this.files.showUntil(f.sha256, shownUntil);
+    }
     this.queue(m.id).push(row);
     this.saveQueue(m.id);
     if (cmd.kind === "key.add" && cmd.key) this.deviceSent(cmd.key.id, m.id, row.id);

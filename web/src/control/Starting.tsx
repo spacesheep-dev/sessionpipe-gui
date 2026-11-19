@@ -11,7 +11,7 @@ import { type ControlActivity, type MachineControl, type SessionKey, sessionKey,
 import { useCallback, useMemo, useState } from "react";
 import { ActionButton, CommandWell, Since } from "../components/bits";
 import { useMachines } from "../data/hooks";
-import { bytes, harnessMark, rememberStartTitles } from "../lib/format";
+import { harnessMark, rememberStartTitles } from "../lib/format";
 import { navigate, sessionPath } from "../lib/router";
 import { rpId } from "./api";
 import { uuid } from "./bytes";
@@ -114,21 +114,6 @@ async function startAtSafe(a: ControlActivity, control: MachineControl): Promise
     ...(a.files?.length ? { files: a.files } : {}),
   });
   navigate(sessionPath(harness, sid), { replace: true });
-}
-
-/** The files a start carried, as quiet chips under its message. */
-export function SentFiles({ files }: { files: ControlActivity["files"] }) {
-  if (!files?.length) return null;
-  return (
-    <ul className="starting-files" aria-label="Files">
-      {files.map((f) => (
-        <li key={f.sha256} className="starting-file">
-          <span className="ellipsis">{f.name}</span>
-          <span className="num">{bytes(f.size)}</span>
-        </li>
-      ))}
-    </ul>
-  );
 }
 
 /** The one status row of a message on its way, or of a turn running: a neutral glyph, the

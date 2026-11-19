@@ -2,20 +2,29 @@
 // The composer's pictures (Attachments.tsx): how they go to a session's machine, the name
 // each is signed under, the words a message of pictures alone is signed with, the check
 // that an upload arrived whole, and the pin that nothing of the board (its key, an address
-// of it, a link to a file it holds) is in what is signed.
+// of it, a link to a file it holds) is in what is signed. And a sent message's files: the
+// list of them the machine adds to its words read back, each found by its hash, and drawn
+// as a thumbnail or a chip.
 import "../native/test-env";
-import type { Attachment, MachineControl } from "@shared/api";
-import { composePrompt } from "@shared/attachments";
+import type { Attachment, ControlActivity, MachineControl } from "@shared/api";
+import { composePrompt, humanSize, splitAttachments } from "@shared/attachments";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   composeFiles,
+  fileWords,
   fillerText,
   NOT_WHOLE_WORDS,
   type PictureEntry,
+  PromptBody,
   pictureMode,
   pictureName,
   picturesOffWords,
   refuseFile,
+  SentFilesRows,
+  savedFileSha,
+  shownFiles,
   TOGETHER_WORDS,
   uploadPicture,
 } from "./Attachments";
@@ -304,5 +313,156 @@ describe("nothing of the board in what is signed", () => {
       expect(JSON.parse(raw).files).toEqual(files);
       expect(JSON.parse(cmd).text).toBe(message.trim() || "Look at the 2 attached pictures.");
     }
+  });
+});
+
+// ---------- a sent message's files ----------
+
+const HEADING = "Attached files (saved in this folder):";
+const START_SID = "8c132906-8c3f-4814-870a-afc3d05e1d2e";
+const NONCE = "Qk1dXyT0aZ3mR8vL2pN6sWc4";
+
+describe("the machine's list of saved files, read back", () => {
+  it("a start's list: the words, and each file by its session, name, type and size", () => {
+    const text = `Fix the invoice rounding.\n\n${HEADING}\n- .sessionpipe/files/${START_SID}/kiwi.png (image/png, 32 KB)\n- .sessionpipe/files/${START_SID}/notes.pdf (application/pdf, 1.2 MB)`;
+    expect(splitAttachments(text)).toEqual({
+      body: "Fix the invoice rounding.",
+      items: [
+        { kind: "file", session: START_SID, name: "kiwi.png", type: "image/png", size: "32 KB" },
+        { kind: "file", session: START_SID, name: "notes.pdf", type: "application/pdf", size: "1.2 MB" },
+      ],
+    });
+  });
+
+  it("a prompt's list: each file in the folder named by the command's nonce", () => {
+    const text = `Message via studio-mac.local:7373 (sessionpipe control, signed on the sender's device):\n\nLook at the attached picture.\n\n${HEADING}\n- .sessionpipe/files/${START_SID}/${NONCE}/image.png (image/png, 512 B)`;
+    const { body, items } = splitAttachments(text);
+    expect(body).toBe(
+      "Message via studio-mac.local:7373 (sessionpipe control, signed on the sender's device):\n\nLook at the attached picture.",
+    );
+    expect(items).toEqual([
+      { kind: "file", session: START_SID, nonce: NONCE, name: "image.png", type: "image/png", size: "512 B" },
+    ]);
+  });
+
+  it("a name with spaces and brackets is the name", () => {
+    const text = `Two of them\n\n${HEADING}\n- .sessionpipe/files/s1/${NONCE}/a (1).png (image/png, 3 KB)\n- .sessionpipe/files/s1/${NONCE}/Screenshot 2026-11-17 at 10.41.07 PM.png (image/png, 1.5 MB)`;
+    expect(splitAttachments(text).items.map((it) => (it.kind === "file" ? [it.name, it.size] : null))).toEqual([
+      ["a (1).png", "3 KB"],
+      ["Screenshot 2026-11-17 at 10.41.07 PM.png", "1.5 MB"],
+    ]);
+  });
+
+  it("ends at the blank line: what follows it (a start's source note) stays", () => {
+    const note = "(Sent via localhost:7461 with sessionpipe control, signed on the sender's device.)";
+    const text = `What is in this picture?\n\n${HEADING}\n- .sessionpipe/files/${START_SID}/kiwi.png (image/png, 32 KB)\n\n${note}`;
+    const { body, items } = splitAttachments(text);
+    expect(body).toBe(`What is in this picture?\n\n${note}`);
+    expect(items).toHaveLength(1);
+  });
+
+  it("a stray line keeps the whole of it as words, and so does a heading the person wrote mid-paragraph", () => {
+    const stray = `Look\n\n${HEADING}\n- .sessionpipe/files/s1/kiwi.png (image/png, 32 KB)\nand this one too`;
+    expect(splitAttachments(stray)).toEqual({ body: stray, items: [] });
+    const notOurs = `Look\n\n${HEADING}\n- kiwi.png (image/png, 32 KB)`;
+    expect(splitAttachments(notOurs)).toEqual({ body: notOurs, items: [] });
+    const inline = `I wrote:\n${HEADING}\n- .sessionpipe/files/s1/kiwi.png (image/png, 32 KB)`;
+    expect(splitAttachments(inline)).toEqual({ body: inline, items: [] });
+    // No list at all: the words as they are.
+    expect(splitAttachments(HEADING)).toEqual({ body: HEADING, items: [] });
+  });
+
+  it("says a size as the machine does", () => {
+    expect([512, 1024, 32_768, 183_402, 1_258_291].map(humanSize)).toEqual([
+      "512 B",
+      "1 KB",
+      "32 KB",
+      "179 KB",
+      "1.2 MB",
+    ]);
+  });
+});
+
+describe("a sent message's files, found and drawn", () => {
+  const SHA = { kiwi: "k".repeat(43), notes: "n".repeat(43), birch: "b".repeat(43) };
+  const rows = [
+    {
+      id: "01PROMPT",
+      machineId: M,
+      kind: "prompt",
+      session: `claude-code:${START_SID}`,
+      at: "2026-11-18T10:00:00Z",
+      expiresAt: "2026-11-18T11:00:00Z",
+      nonce: NONCE,
+      files: [{ name: "image.png", type: "image/png", size: 512, sha256: SHA.kiwi }],
+    },
+    {
+      id: "01START",
+      machineId: M,
+      kind: "start",
+      session: `claude-code:${START_SID}`,
+      at: "2026-11-18T09:00:00Z",
+      expiresAt: "2026-11-18T10:00:00Z",
+      nonce: "another-nonce-0000000",
+      files: [
+        { name: "birch.png", type: "image/png", size: 2048, sha256: SHA.birch },
+        { name: "notes.pdf", type: "application/pdf", size: 1_258_291, sha256: SHA.notes },
+      ],
+    },
+  ] as ControlActivity[];
+  const list = (lines: string[]) => `Look\n\n${HEADING}\n${lines.join("\n")}`;
+
+  it("a prompt's file by its nonce and name; a start's by its session; one not sent from here has none", () => {
+    const items = splitAttachments(
+      list([
+        `- .sessionpipe/files/${START_SID}/${NONCE}/image.png (image/png, 512 B)`,
+        `- .sessionpipe/files/${START_SID}/birch.png (image/png, 2 KB)`,
+        `- .sessionpipe/files/${START_SID}/notes.pdf (application/pdf, 1.2 MB)`,
+        `- .sessionpipe/files/${START_SID}/${NONCE}/other.png (image/png, 1 KB)`,
+        `- .sessionpipe/files/another-session/birch.png (image/png, 2 KB)`,
+      ]),
+    ).items;
+    expect(items.map((it) => (it.kind === "file" ? savedFileSha(it, rows) : "legacy"))).toEqual([
+      SHA.kiwi,
+      SHA.birch,
+      SHA.notes,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("the row's own files while the words have no list, the list's once they do", () => {
+    expect(shownFiles([], rows[1]!.files, [])).toEqual([
+      { name: "birch.png", type: "image/png", size: "2 KB", sha256: SHA.birch },
+      { name: "notes.pdf", type: "application/pdf", size: "1.2 MB", sha256: SHA.notes },
+    ]);
+    const items = splitAttachments(list([`- .sessionpipe/files/s/${NONCE}/image.png (image/png, 512 B)`])).items;
+    expect(shownFiles(items, rows[1]!.files, rows)).toEqual([
+      { name: "image.png", type: "image/png", size: "512 B", sha256: SHA.kiwi },
+    ]);
+    expect(fileWords({ name: "kiwi.png", type: "image/png", size: "32 KB" })).toBe("kiwi.png · PNG · 32 KB");
+    expect(fileWords({ name: "notes.pdf", type: "application/pdf", size: "1.2 MB" })).toBe("notes.pdf · 1.2 MB");
+  });
+
+  it("draws a thumbnail for a picture it has the bytes of, a chip for the rest, and never the path", () => {
+    const text = list([
+      `- .sessionpipe/files/${START_SID}/${NONCE}/image.png (image/png, 512 B)`,
+      `- .sessionpipe/files/${START_SID}/notes.pdf (application/pdf, 1.2 MB)`,
+      `- .sessionpipe/files/${START_SID}/${NONCE}/gone.png (image/png, 1 KB)`,
+    ]);
+    const html = renderToStaticMarkup(
+      createElement(SentFilesRows.Provider, { value: rows }, createElement(PromptBody, { text })),
+    );
+    expect(html).not.toContain(".sessionpipe");
+    expect(html).not.toContain(HEADING);
+    expect(html).toContain("Look");
+    expect(html.match(/<img /g)).toHaveLength(1);
+    expect(html).toContain(`src="/api/ui/control/files/${SHA.kiwi}"`);
+    expect(html).toContain('title="notes.pdf · 1.2 MB"');
+    expect(html).toContain('title="gone.png · PNG · 1 KB"');
+    // Before the session's record: the words as sent, the files the row signed.
+    const before = renderToStaticMarkup(createElement(PromptBody, { text: "Look", files: rows[1]!.files }));
+    expect(before).toContain(`src="/api/ui/control/files/${SHA.birch}"`);
+    expect(before).toContain('data-sent-file="notes.pdf"');
   });
 });

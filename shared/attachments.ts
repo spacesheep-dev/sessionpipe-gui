@@ -7,7 +7,9 @@
 // sink that takes prompts, and an address another machine could fetch from would have to
 // carry the board's key. The heading of the URL block older versions wrote stays, so their
 // messages still read back as thumbnails (`splitAttachments`); the server's retention scan
-// looks for the same reference.
+// looks for the same reference. The block a machine writes after the words of a message
+// with files (sessionpipe's "Attached files", CONTROL.md §6) is read back here too: each
+// line a file saved in the session's folder, which the page draws as a thumbnail or a chip.
 import type { Attachment } from "./api.js";
 
 /** CONTROL.md §3.1: a prompt's `text` is at most this many characters. */
@@ -45,6 +47,7 @@ export function attachmentLines(items: readonly Attachment[]): string[] {
 }
 
 export interface AttachmentRef {
+  kind?: never;
   id: string;
   ext: "png" | "jpg" | "gif" | "webp";
   /** Same-origin URL the browser can show it from (the cookie or loopback lets it in). */
@@ -53,10 +56,65 @@ export interface AttachmentRef {
   height?: number;
 }
 
+/** CONTROL.md §6: the heading of the list of files a machine saved for a message, which it
+ *  puts after the message's words (sessionpipe's files.ts `withFiles`). */
+export const FILES_HEADING = "Attached files (saved in this folder):";
+/** One line of that list: the path relative to the session's folder (a prompt's files in a
+ *  folder of their own, named by the command's nonce), the type, and the size the machine
+ *  wrote (`humanSize`). */
+const FILE_LINE_RE =
+  /^- \.sessionpipe\/files\/([^/]+)\/(?:([A-Za-z0-9_-]{16,64})\/)?(.+) \(([^,()]+), (\d+(?:\.\d)? (?:B|KB|MB))\)$/;
+
+/** A file the machine saved for a message, as its list names it. `nonce`: the prompt's
+ *  (a start's files have none); `size` as the machine wrote it ("32 KB"). */
+export interface SavedFileRef {
+  kind: "file";
+  session: string;
+  nonce?: string;
+  name: string;
+  type: string;
+  size: string;
+}
+
+export type PromptItem = AttachmentRef | SavedFileRef;
+
+/** 183402 → "179 KB", 1258291 → "1.2 MB": units of 1024, the way the machine's list says a
+ *  size (sessionpipe's files.ts `humanSize`), so a file reads the same before and after. */
+export function humanSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1_048_576) return `${Math.round(n / 1024)} KB`;
+  return `${(n / 1_048_576).toFixed(1)} MB`;
+}
+
+/** The machine's list of saved files taken out of `text`: the last heading, at the start or
+ *  after a blank line, whose lines up to the next blank line (or the end) are all file
+ *  lines. Anything else after the heading keeps the whole of it as words. */
+function splitSavedFiles(text: string): { body: string; files: SavedFileRef[] } {
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i] !== FILES_HEADING || (i > 0 && lines[i - 1] !== "")) continue;
+    let end = i + 1;
+    while (end < lines.length && lines[end] !== "") end++;
+    const listed = lines.slice(i + 1, end).map((l) => FILE_LINE_RE.exec(l));
+    if (listed.length === 0 || listed.some((m) => !m)) continue;
+    const files = listed.map((m): SavedFileRef => {
+      const [, session, nonce, name, type, size] = m!;
+      return { kind: "file", session: session!, ...(nonce ? { nonce } : {}), name: name!, type: type!, size: size! };
+    });
+    const before = lines.slice(0, i).join("\n").replace(/\s+$/, "");
+    const after = lines.slice(end).join("\n").replace(/^\s+/, "");
+    return { body: before && after ? `${before}\n\n${after}` : before || after, files };
+  }
+  return { body: text, files: [] };
+}
+
 /** A prompt text taken apart: `body` is the message without the attachments block (and
- *  without bare references), `items` the images it named, in order, each once. */
-export function splitAttachments(text: string): { body: string; items: AttachmentRef[] } {
-  const items: AttachmentRef[] = [];
+ *  without bare references) and without the machine's list of saved files, `items` the
+ *  images it named, in order, each once, then the files the list names. */
+export function splitAttachments(prompt: string): { body: string; items: PromptItem[] } {
+  const saved = splitSavedFiles(prompt);
+  const text = saved.body;
+  const items: PromptItem[] = [];
   const seen = new Set<string>();
   let body = text;
   const headingAt = Math.max(text.lastIndexOf(`\n${LOCAL_HEADING}\n`), text.lastIndexOf(`\n${REMOTE_HEADING}\n`));
@@ -80,6 +138,7 @@ export function splitAttachments(text: string): { body: string; items: Attachmen
     }
     items.push(ref);
   }
+  items.push(...saved.files);
   return { body: body.trimEnd(), items };
 }
 

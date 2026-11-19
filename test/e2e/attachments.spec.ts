@@ -11,6 +11,9 @@
 // is account.spec.ts's: it has the account.) Every picture is made smaller before it goes
 // (web/src/control/shrink.ts): a big photo or screenshot goes as a WebP 2560 px on its long
 // edge, and a HEIC as a JPEG where the engine can draw one (WebKit), with words where not.
+// A sent message shows what it carried as thumbnails: before the session's turn arrives,
+// after (from the list of saved files the machine adds to the words, which is never drawn
+// as text), and after a reload.
 // With ATT_SHOTS=<dir> it also writes the review screenshots, 1440, 834 and 390 wide.
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
@@ -24,6 +27,7 @@ import {
   HEIC,
   passkeyPage,
   postSession,
+  type StartScript,
   seenSetupHere,
   sinkToken,
 } from "./control-helpers.js";
@@ -184,17 +188,21 @@ test.afterAll(async () => {
 async function open(
   context: BrowserContext,
   page: Page,
-  o: { takes: boolean; title: string },
+  o: { takes: boolean; title: string; saves?: boolean; script?: StartScript },
 ): Promise<{ d: FakeDaemon; uiKey: string; asked: string[] }> {
   await seenSetupHere(context);
   const key = await passkeyPage(context, page);
-  const d = await fakeDaemon(key, {
-    name: `pictures-${tag()}`,
-    harnesses: ["claude-code"],
-    folders: [CWD],
-    mode: "auto",
-    ...(o.takes ? { files: true, prompt_files: true, version: "0.17.0" } : { version: "0.9.4" }),
-  });
+  const d = await fakeDaemon(
+    key,
+    {
+      name: `pictures-${tag()}`,
+      harnesses: ["claude-code"],
+      folders: [CWD],
+      mode: "auto",
+      ...(o.takes ? { files: true, prompt_files: true, version: "0.17.0" } : { version: "0.9.4" }),
+    },
+    { ...(o.saves ? { saves: true, sinkToken: await sinkToken() } : {}), ...(o.script ? { script: o.script } : {}) },
+  );
   daemons.push(d);
   const s = await postSession(await sinkToken(), { machine: d.name, cwd: CWD, title: o.title });
   const info = (await (await fetch(`${CONTROL_BASE}/api/ui/info`)).json()) as { uiKey: string };
@@ -300,10 +308,10 @@ test("the picker, a paste and a drop each add a picture; they go as the message'
   const uploads = asked.filter((a) => a.startsWith("POST /api/ui/control/files"));
   expect(uploads).toHaveLength(3);
   for (const u of uploads) expect(u).toContain(`&machine=${d.id}`);
-  // Until the session's own record of the turn is drawn, the message names what it carried.
-  const sent = page.locator(".starting-files").last();
-  await expect(sent.locator(".starting-file")).toHaveCount(3);
-  await expect(sent).toContainText("kiwi.png");
+  // Until the session's own record of the turn is drawn, the message shows what it carried.
+  const sent = page.locator(".page.session [data-sent-files]").last();
+  await expect(sent.locator("[data-sent-picture]")).toHaveCount(3);
+  await expect(sent.locator("[data-sent-picture]").first()).toHaveAttribute("data-sent-picture", "kiwi.png");
   await shots(page, "2-sent-with-three-pictures");
 });
 
@@ -383,7 +391,10 @@ test("a picture alone is signed with 'Look at the attached picture.', and the se
   expect(d.fetched).toMatchObject([{ name: "image.png", ok: true }]);
   // What the agent got is what the person reads: the words that were signed, and the file.
   await expect(page.locator(".page.session blockquote").last()).toContainText("Look at the attached picture.");
-  await expect(page.locator(".starting-files .starting-file").last()).toContainText("image.png");
+  await expect(page.locator(".page.session [data-sent-picture]").last()).toHaveAttribute(
+    "data-sent-picture",
+    "image.png",
+  );
 });
 
 test("an upload that did not arrive whole, and a file that is not the picture its type says, are refused in words", async ({
@@ -520,7 +531,7 @@ test("a 13.5 MB photo is made smaller before it goes: a WebP of at most 3 MB, 25
     expect.objectContaining({ name: "IMG_0412.webp", type: "image/webp", size: uploads[0]!.bytes }),
   ]);
   nothingOfTheBoard(d.cmds[0]!, uiKey);
-  // The fake daemon notes a command before it fetches the command's files.
+  // The fake daemon notes a command once it has fetched the command's files.
   await expect.poll(() => d.fetched.length).toBe(1);
   expect(d.fetched).toMatchObject([{ name: "IMG_0412.webp", ok: true, contentType: "image/webp" }]);
 });
@@ -536,7 +547,7 @@ test("a 30 MB screenshot, over a file's 25 MB, is made smaller and sent", async 
   await composer(page).fill("What does this screen say?");
   await send(page).click();
   await expect.poll(() => prompts(d).length, { timeout: 20_000 }).toBe(1);
-  // The fake daemon notes a command before it fetches the command's files.
+  // The fake daemon notes a command once it has fetched the command's files.
   await expect.poll(() => d.fetched.length).toBe(1);
   expect(d.fetched).toMatchObject([{ name: "image.webp", ok: true, bytes: uploads[0]!.bytes }]);
 });
@@ -579,4 +590,179 @@ test("in WebKit a HEIC is drawn and goes as a JPEG", async ({ context, page }, i
     await wk.close();
   }
   expect(prompts(d)).toHaveLength(0);
+});
+
+// ---------- what a sent message carried, shown ----------
+
+/** The thumbnails in `scope`, each drawn from its bytes (an image that loaded). */
+async function drawn(scope: ReturnType<Page["locator"]>): Promise<number[]> {
+  return scope
+    .locator("[data-sent-picture] img")
+    .evaluateAll((imgs) => (imgs as HTMLImageElement[]).map((i) => (i.complete ? i.naturalWidth : 0)));
+}
+
+/** Nothing of the machine's list of saved files is drawn as words. */
+async function noPathsDrawn(page: Page): Promise<void> {
+  const html = await page.content();
+  expect(html).not.toContain(".sessionpipe/files");
+  expect(html).not.toContain("Attached files (saved in this folder)");
+}
+
+/** Acks that take a while, so the message is seen on its way before its turn arrives. */
+const slowly: StartScript = (c) => ({
+  pauseMs: 3000,
+  events: true,
+  acks: [
+    { outcome: "taken", mode: "sdk" },
+    { outcome: "delivered", mode: "sdk", session: c.session },
+  ],
+});
+
+test("a message's pictures are thumbnails before its turn arrives, after, and after a reload; the saved paths are never words", async ({
+  context,
+  page,
+}) => {
+  const { d } = await open(context, page, {
+    takes: true,
+    title: "Pictures, then the turn",
+    saves: true,
+    script: slowly,
+  });
+  await picker(page).setInputFiles([
+    { name: "kiwi.png", mimeType: "image/png", buffer: KIWI },
+    { name: "birch.png", mimeType: "image/png", buffer: BIRCH },
+    { name: "onyx.png", mimeType: "image/png", buffer: ONYX },
+  ]);
+  await expect(page.locator(".att-item[data-state=ready]")).toHaveCount(3);
+  await composer(page).fill("Which of these is the darkest?");
+  await send(page).click();
+
+  // On its way: the message as signed, its pictures from the files it signed.
+  const bubble = page.locator(".page.session blockquote", { hasText: "Which of these is the darkest?" }).last();
+  await expect(bubble.locator("[data-sent-picture]")).toHaveCount(3);
+  await expect(bubble.locator(".prompt-via")).toHaveCount(0);
+  await expect.poll(() => drawn(bubble)).toEqual([64, 80, 96]);
+  await shots(page, "8-sent-pictures-on-their-way");
+
+  // The turn arrived: the words as the machine handed them over (framed, so "Sent from"),
+  // the same three pictures, found again from its list of saved files.
+  await expect(bubble.locator(".prompt-via")).toContainText("Sent from", { timeout: 20_000 });
+  expect(prompts(d)).toHaveLength(1);
+  await expect(bubble.locator("[data-sent-picture]")).toHaveCount(3);
+  await expect.poll(() => drawn(bubble)).toEqual([64, 80, 96]);
+  await expect(bubble.locator("[data-sent-picture]").nth(2)).toHaveAttribute("data-sent-picture", "onyx.png");
+  await expect(page.locator(".page.session [data-sent-picture]")).toHaveCount(3);
+  await noPathsDrawn(page);
+  await shots(page, "9-sent-pictures-in-the-turn");
+
+  await page.reload();
+  const again = page.locator(".page.session blockquote", { hasText: "Which of these is the darkest?" }).last();
+  await expect(again.locator(".prompt-via")).toContainText("Sent from");
+  await expect(again.locator("[data-sent-picture]")).toHaveCount(3);
+  await expect.poll(() => drawn(again)).toEqual([64, 80, 96]);
+  await noPathsDrawn(page);
+});
+
+test("a picture no longer kept here is a chip with its name, type and size", async ({ context, page }) => {
+  await open(context, page, { takes: true, title: "Kept no more", saves: true });
+  // The receiver answers every picture as gone.
+  await page.route("**/api/ui/control/files/*", (route: Route) =>
+    route.fulfill({ status: 404, contentType: "application/json", body: '{"reason":"gone"}' }),
+  );
+  await picker(page).setInputFiles({ name: "kiwi.png", mimeType: "image/png", buffer: KIWI });
+  await expect(tray(page)).toHaveAttribute("data-state", "ready");
+  await composer(page).fill("Is this still here?");
+  await send(page).click();
+  const bubble = page.locator(".page.session blockquote", { hasText: "Is this still here?" }).last();
+  await expect(bubble.locator(".prompt-via")).toContainText("Sent from", { timeout: 20_000 });
+  const chip = bubble.locator("[data-sent-file]");
+  await expect(chip).toHaveCount(1);
+  await expect(chip).toHaveAttribute("title", `kiwi.png · PNG · ${KIWI.length} B`);
+  await expect(chip).toHaveText(`kiwi.pngPNG · ${KIWI.length} B`);
+  await noPathsDrawn(page);
+  await shots(page, "10-a-picture-kept-no-more");
+});
+
+test("a start with two pictures shows them before its first turn arrives and after", async ({
+  context,
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "the phone's sheet is mobile.spec.ts's");
+  await seenSetupHere(context);
+  const key = await passkeyPage(context, page);
+  const d = await fakeDaemon(
+    key,
+    {
+      name: `start-pictures-${tag()}`,
+      harnesses: ["claude-code"],
+      folders: [CWD],
+      mode: "auto",
+      files: true,
+      prompt_files: true,
+      version: "0.17.0",
+      start: { "claude-code": { permissions: ["safe", "auto"], permission: "auto", any_model: true } },
+    },
+    { sinkToken: await sinkToken(), saves: true, script: slowly },
+  );
+  daemons.push(d);
+  await page.goto(`${CONTROL_BASE}/?new=1&machine=${d.name}`);
+  await page.locator("[data-new-session] [data-ns-text]").fill("Make the header match these two.");
+  await page.locator("input[data-ns-files]").setInputFiles([
+    { name: "kiwi.png", mimeType: "image/png", buffer: KIWI },
+    { name: "birch.png", mimeType: "image/png", buffer: BIRCH },
+  ]);
+  await expect(page.locator(".ns-file[data-file-state=held]")).toHaveCount(2);
+  await page.locator("[data-new-session] [data-ns-start]").click();
+  await expect(page).toHaveURL(/\/s\/claude-code\/[0-9a-f-]{36}$/, { timeout: 20_000 });
+
+  const bubble = page.locator(".page.session blockquote", { hasText: "Make the header match these two." }).last();
+  await expect(page.locator(".page.session.starting")).toBeVisible();
+  await expect(bubble.locator("[data-sent-picture]")).toHaveCount(2);
+  await expect.poll(() => drawn(bubble)).toEqual([64, 80]);
+
+  await expect(page.locator(".page.session:not(.starting)")).toBeVisible({ timeout: 20_000 });
+  await expect(bubble.locator(".prompt-via")).toContainText("Sent from", { timeout: 20_000 });
+  await expect(bubble.locator("[data-sent-picture]")).toHaveCount(2);
+  await expect.poll(() => drawn(bubble)).toEqual([64, 80]);
+  await noPathsDrawn(page);
+
+  await page.reload();
+  const again = page.locator(".page.session blockquote", { hasText: "Make the header match these two." }).last();
+  await expect(again.locator(".prompt-via")).toContainText("Sent from");
+  await expect.poll(() => drawn(again)).toEqual([64, 80]);
+  await noPathsDrawn(page);
+});
+
+test("the row of a message that went to a copy of the session shows its pictures, also after a reload", async ({
+  context,
+  page,
+}) => {
+  const copy = `claude-code:${randomUUID()}`;
+  await open(context, page, {
+    takes: true,
+    title: "Sent to a copy",
+    script: () => ({
+      pauseMs: 300,
+      events: false,
+      acks: [
+        { outcome: "taken", mode: "fork" },
+        { outcome: "delivered", mode: "fork", session: copy, detail: "the session was busy" },
+      ],
+    }),
+  });
+  await picker(page).setInputFiles({ name: "kiwi.png", mimeType: "image/png", buffer: KIWI });
+  await expect(tray(page)).toHaveAttribute("data-state", "ready");
+  await composer(page).fill("And this one?");
+  await send(page).click();
+  const row = page.locator(".ctl-act", { hasText: "And this one?" });
+  await expect(row.locator(".ctl-act-copy")).toBeVisible({ timeout: 20_000 });
+  await expect(row.locator("[data-sent-picture]")).toHaveCount(1);
+  // Under the composer, which on a phone may be below the fold: a thumbnail loads in view.
+  await row.scrollIntoViewIfNeeded();
+  await expect.poll(() => drawn(row)).toEqual([64]);
+  await page.reload();
+  await expect(row.locator("[data-sent-picture]")).toHaveCount(1);
+  await row.scrollIntoViewIfNeeded();
+  await expect.poll(() => drawn(row)).toEqual([64]);
 });

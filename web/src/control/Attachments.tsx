@@ -13,33 +13,44 @@
 //  - "off": no way to send one (an older daemon on another machine, a computer reached
 //    through spacesheep): no paperclip, and a picture pasted or dropped is answered in words.
 // No address of this board and no key to it is ever in what is signed.
+// A sent message shows what it carried under its words: a thumbnail of each picture the
+// receiver still keeps (GET …/control/files/:sha), else a chip with its name, type and size.
+// Before the session's record of the turn arrives that is the sent row's `files`; after, the
+// list of saved files the machine added to the message, each found again by its nonce.
 import {
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_TYPES,
   ATTACHMENTS_PER_MESSAGE,
   type Attachment,
   type AttachmentType,
+  type ControlActivity,
   type Info,
   type MachineControl,
   ROUTES,
   START_FILE_MAX_BYTES,
   START_FILES_TOTAL_BYTES,
   type StartFile,
+  splitKey,
   type UploadedFile,
 } from "@shared/api";
 import {
   type AttachmentRef,
   attachmentLines,
   composePrompt,
+  humanSize,
   PROMPT_MAX_CHARS,
+  type PromptItem,
+  type SavedFileRef,
   splitAttachments,
 } from "@shared/attachments";
 import {
   type ChangeEvent,
   type ClipboardEvent,
+  createContext,
   type DragEvent,
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -763,6 +774,104 @@ function TrayItem({ it, onRemove }: { it: PendingItem; onRemove: () => void }) {
 
 // ---------- a sent prompt's thumbnails ----------
 
+/** A file a sent message carried, as it is drawn: `sha256` when the page knows its bytes
+ *  (a picture with one is a thumbnail), `size` in the machine's words ("32 KB"). */
+export interface ShownFile {
+  name: string;
+  type: string;
+  size: string;
+  sha256?: string;
+}
+
+/** The sent rows that carried files (ControlActivity `files`, `nonce`), where the machine's
+ *  list in a turn's words is found again. A page that provides none draws chips. */
+export const SentFilesRows = createContext<readonly ControlActivity[]>([]);
+
+/** The hash of a file the machine's list names: a prompt's by its nonce and name, a
+ *  start's (no nonce) by the start of that session and the name. */
+export function savedFileSha(f: SavedFileRef, rows: readonly ControlActivity[]): string | undefined {
+  for (const a of rows) {
+    if (!a.files) continue;
+    const mine = f.nonce
+      ? a.nonce === f.nonce
+      : a.kind === "start" && !!a.session && splitKey(a.session).id === f.session;
+    const hit = mine ? a.files.find((x) => x.name === f.name && x.type === f.type) : undefined;
+    if (hit) return hit.sha256;
+  }
+  return undefined;
+}
+
+/** What a sent message shows it carried: the files the machine's list in its words names,
+ *  else the files the row signed (`signed`, before the session's record has the list). */
+export function shownFiles(
+  items: readonly PromptItem[],
+  signed: readonly StartFile[] | undefined,
+  rows: readonly ControlActivity[],
+): ShownFile[] {
+  const saved = items.filter((it): it is SavedFileRef => it.kind === "file");
+  if (saved.length)
+    return saved.map((f) => {
+      const sha256 = savedFileSha(f, rows);
+      return { name: f.name, type: f.type, size: f.size, ...(sha256 ? { sha256 } : {}) };
+    });
+  return (signed ?? []).map((f) => ({ name: f.name, type: f.type, size: humanSize(f.size), sha256: f.sha256 }));
+}
+
+const TYPE_WORD: Record<AttachmentType, string> = {
+  "image/png": "PNG",
+  "image/jpeg": "JPEG",
+  "image/gif": "GIF",
+  "image/webp": "WebP",
+};
+
+/** What a chip says after the name: "PNG · 32 KB" for a picture, "1.2 MB" for any other file. */
+const fileFacts = (f: Pick<ShownFile, "type" | "size">): string =>
+  [TYPE_WORD[f.type as AttachmentType], f.size].filter(Boolean).join(" · ");
+
+/** A chip's words: "kiwi.png · PNG · 32 KB" for a picture, "notes.pdf · 1.2 MB" for any other file. */
+export const fileWords = (f: Pick<ShownFile, "name" | "type" | "size">): string => `${f.name} · ${fileFacts(f)}`;
+
+/** The files a sent message carried, under its words: a thumbnail for each picture this
+ *  receiver keeps, which opens it whole in a new tab; a chip for the rest, and for one
+ *  that does not load (kept no more). On a spacesheep account the receiver holds none of
+ *  them: chips only. Nothing when there is none. */
+export function SentPictures({ files, small }: { files: readonly ShownFile[]; small?: boolean }) {
+  if (files.length === 0) return null;
+  const draw = !accountMode();
+  return (
+    <span className={`att-thumbs ${small ? "att-thumbs--sm" : ""}`} data-sent-files={files.length}>
+      {files.map((f, i) => (
+        <SentFile key={`${i}:${f.name}`} f={f} draw={draw} />
+      ))}
+    </span>
+  );
+}
+
+function SentFile({ f, draw }: { f: ShownFile; draw: boolean }) {
+  const [broken, setBroken] = useState(false);
+  const words = fileWords(f);
+  const picture = f.type in ATTACHMENT_TYPES;
+  if (picture && f.sha256 && draw && !broken) {
+    const src = apiUrl(`${ROUTES.ui.control}/files/${f.sha256}`);
+    return (
+      <a href={src} target="_blank" rel="noreferrer noopener" title={words} data-sent-picture={f.name}>
+        <img src={src} alt={f.name} loading="lazy" onError={() => setBroken(true)} />
+      </a>
+    );
+  }
+  return (
+    <span className="att-chip" title={words} data-sent-file={f.name}>
+      {!picture && (
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor">
+          <path d="M4 1.5h5.5L12.5 4.5v10h-8.5zM9.5 1.5v3h3" strokeWidth="1.25" strokeLinejoin="round" />
+        </svg>
+      )}
+      <span className="att-chip-name">{f.name}</span>
+      <span className="att-chip-meta num">{fileFacts(f)}</span>
+    </span>
+  );
+}
+
 /** Thumbnails for the images a prompt text names; each opens the full image in a new tab. */
 export function AttachmentThumbs({ items, small }: { items: readonly AttachmentRef[]; small?: boolean }) {
   // The images a receiver holds are not on a spacesheep account's relay: nothing to show,
@@ -789,28 +898,41 @@ export function AttachmentThumbs({ items, small }: { items: readonly AttachmentR
   );
 }
 
-/** A prompt's text with the attachments block turned into thumbnails. `render` draws the
- *  remaining text (Redacted by default), so a composer with markdown can pass its own. */
+/** A prompt's text with the attachments block, or the machine's list of saved files,
+ *  turned into thumbnails; `files`: what the message signed, drawn when its words have no
+ *  list (they are the message as sent). `render` draws the remaining text (Redacted by
+ *  default), so a composer with markdown can pass its own. A message of pictures alone is
+ *  its pictures. */
 export function PromptBody({
   text,
   small,
+  files,
   render = (body) => <Redacted text={body} />,
 }: {
   text: string;
   small?: boolean;
+  files?: readonly StartFile[];
   render?: (body: string) => ReactNode;
 }) {
+  const rows = useContext(SentFilesRows);
   const { body, items } = useMemo(() => splitAttachments(text), [text]);
-  if (items.length === 0) return <>{render(text)}</>;
+  const shown = useMemo(() => shownFiles(items, files, rows), [items, files, rows]);
+  const legacy = attachmentRefs(items);
+  if (legacy.length === 0 && shown.length === 0) return <>{render(text)}</>;
   return (
     <>
       {body ? render(body) : null}
-      <AttachmentThumbs items={items} small={small} />
+      <AttachmentThumbs items={legacy} small={small} />
+      <SentPictures files={shown} small={small} />
     </>
   );
 }
 
-/** For list rows: the prompt's first line without the block, and its images. */
-export function promptParts(text: string): { body: string; items: AttachmentRef[] } {
+/** The pictures a prompt's text names in the composer's own block (shared/attachments.ts). */
+export const attachmentRefs = (items: readonly PromptItem[]): AttachmentRef[] =>
+  items.filter((it): it is AttachmentRef => it.kind !== "file");
+
+/** For list rows: the prompt's first line without the block, and what it carried. */
+export function promptParts(text: string): { body: string; items: PromptItem[] } {
   return splitAttachments(text);
 }

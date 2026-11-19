@@ -1640,6 +1640,9 @@ export interface ControlActivity {
   model?: string;
   /** A start's files, or a prompt's (the pictures sent beside a message), as signed. */
   files?: StartFile[];
+  /** The signed command's nonce, on a row with files: the machine saves a prompt's files in
+   *  a folder of that name, so the list it adds to the message names it (shared/attachments.ts). */
+  nonce?: string;
   /** What the machine ran it with, from its `taken` / `delivered` ack (sessionpipe 0.10);
    *  `inherit` when it ran with no permission flag. */
   applied?: Applied;
@@ -1829,7 +1832,9 @@ export const ROUTES = {
     /** Everything under it is the control channel's UI side (server/control/README.md),
      *  POST /files?name=&machine= among it: one file a start or a prompt will carry, as the
      *  raw body → UploadedFile. `machine` (the machine it is for) is taken and not read yet.
-     *  415 `not_an_image` for bytes that are not the picture their content-type says. */
+     *  415 `not_an_image` for bytes that are not the picture their content-type says.
+     *  GET /files/:sha256 → a picture sent from here (PNG, JPEG, GIF or WebP), kept 30 days
+     *  for the page to draw; 404 `gone` once it is not kept, 404 `not_a_picture` for other types. */
     control: "/api/ui/control",
     /** GET → { viewers: Viewer[] } */
     viewers: "/api/ui/viewers",
