@@ -32,6 +32,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   the picture was missing from it, and the daily clean-up did not see it in the stored
   events, so a picture a session still named was removed once it was 30 days old. Both now
   read either slash.
+- **An event the store can't write is read from the outbox again, not lost.** When the
+  store failed to take a batch from this machine's outbox (a full disk, a store file the
+  GUI may not write), the reader had already moved past it, so those events never reached
+  the board, even once there was room again; the same failure during the first read at
+  start left the outbox off until a restart. The batch is now read again on the next tick,
+  said once, and the other sessions carry on meanwhile.
 
 ## [0.8.5] - 2026-11-18
 
