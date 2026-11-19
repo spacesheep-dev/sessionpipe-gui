@@ -537,10 +537,17 @@ test("long turns read whole from what the phone holds: the newest reply at once,
   await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
 });
 
-test("New session offers only the folders spacesheep takes: a session's `~/…` folder is not among them, and Start sends a full path", async () => {
-  // The computer takes starts (its hello has `start`). spacesheep checks a start's folder
-  // against the computer's folders, which are full paths, and refuses a `~/…` one.
-  Object.assign(ss.machines[0]!, { start: { "claude-code": { permissions: ["read", "safe"], permission: "safe" } } });
+test("New session offers only the folders spacesheep takes: a session's `~/…` folder is not among them, and Start sends a full path; so do New session here and Ask another agent from that session", async () => {
+  // The computer takes starts of two agents, and its agents can ask each other. spacesheep
+  // checks a start's folder against the computer's folders, which are full paths, and
+  // refuses a `~/…` one.
+  const start = { permissions: ["read", "safe"], permission: "safe" };
+  Object.assign(ss.machines[0]!, {
+    agents: ["claude-code", "codex"],
+    ask: true,
+    handoff: true,
+    start: { "claude-code": start, codex: start },
+  });
   // The account's newest session, in `~/notes`.
   const s = new Session("s-notes", "claude-code", Date.now() - 5000);
   const notes = { ...on, session: { machine: NAME, cwd: "~/notes", title: "Sort the notes" } };
@@ -570,7 +577,7 @@ test("New session offers only the folders spacesheep takes: a session's `~/…` 
     await expect(page.locator(".sel-sheet").getByText("~/notes")).toHaveCount(0);
     await opts.first().click();
     await expect(page.locator(".sel-sheet")).toHaveCount(0);
-    const before = ran.length;
+    let before = ran.length;
     await sheet.locator("[data-ns-text]").fill("Add a test for the rounding.");
     await sheet.locator(".ns-bar [data-ns-start]").click();
     await expect(page).toHaveURL(/\/s\/claude-code\//);
@@ -582,8 +589,39 @@ test("New session offers only the folders spacesheep takes: a session's `~/…` 
         text: "Add a test for the rounding.",
       });
     expect(ss.jobs.filter((j) => j.action === "start" && j.status === "done")).toHaveLength(1);
+
+    // Ask another agent from the session in `~/notes`, which is inside `/Users/me` though this
+    // page can't tell: the folder is one of the computer's own, and nothing says the
+    // session's is not allowed.
+    await page.goto(`${server.url}/s/claude-code/s-notes`);
+    await expect(page.getByText("Sorted.").first()).toBeVisible();
+    await page.locator("[data-ctl-ask]").click();
+    const ask = page.locator("[data-handoff]");
+    await expect(ask.locator("[data-hs-row=agent] button.sel")).toContainText("Codex · new session");
+    await expect(ask.locator("[data-hs-row=folder] button.sel")).toHaveAttribute("data-value", "/Users/me");
+    await expect(ask.getByText(/isn't allowed|needs the full path/)).toHaveCount(0);
+    before = ran.length;
+    await ask.locator("[data-hs-text]").fill("Check the notes for dates.");
+    await ask.locator("[data-hs-ask]").click();
+    await expect(ask).toHaveCount(0);
+    await expect
+      .poll(() => ran.slice(before).find((c) => c.kind === "start"))
+      .toMatchObject({ kind: "start", cwd: "/Users/me", text: "Check the notes for dates." });
+    expect(String(ran.slice(before).find((c) => c.kind === "start")!.session)).toMatch(/^codex:/);
+
+    // New session here: the session's agent, and a folder that can start, not `~/notes`.
+    await page.getByRole("button", { name: "More actions" }).first().click();
+    await page.getByRole("menuitem", { name: "New session here" }).click();
+    await expect(sheet.locator("[data-ns-row=permission]")).toBeVisible();
+    await expect(folder).toHaveAttribute("data-value", "/Users/me/billing");
+    await expect(sheet.getByText(/needs the full path/)).toHaveCount(0);
+    await sheet.locator("[data-ns-text]").fill("Date the notes.");
+    await expect(sheet.locator(".ns-bar [data-ns-start]")).toBeEnabled();
+    await sheet.locator("[data-ns-cancel]").click();
+    await expect(sheet).toHaveCount(0);
   } finally {
-    delete ss.machines[0]!.start;
+    for (const k of ["ask", "handoff", "start"]) delete ss.machines[0]![k];
+    ss.machines[0]!.agents = ["claude-code"];
   }
   await page.goto(server.url);
   await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
@@ -658,6 +696,8 @@ test("what only a receiver has is not offered, and no page asks for it", async (
     "/s/claude-code/s-invoice",
   ]) {
     await page.goto(server.url + route);
+    // The backend is up (it leaves its hook), then what the page asks as it loads has landed.
+    await page.waitForFunction(() => "__sessionpipeAccount" in window);
     await page.waitForTimeout(400);
     const asked = await page.evaluate(() => [
       ...(window as unknown as { __sessionpipeAccount: { asked: Map<string, number> } }).__sessionpipeAccount.asked,

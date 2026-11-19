@@ -215,7 +215,8 @@ could not read.
 - **New session on a computer reached through spacesheep offers only folders spacesheep
   takes.** It used to offer a recent session's `~/…` folder, which spacesheep refused
   ("only lets the agent work in"); now it offers the computer's own folders and recent
-  ones under them, as full paths, and Start sends the full path.
+  ones under them, as full paths, and Start sends the full path. New session here and Ask
+  another agent, from a session in a `~/…` folder, start from those too.
 
 ## [0.8.5] - 2026-11-18
 

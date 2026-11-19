@@ -54,7 +54,7 @@ import { pictureName } from "./Attachments";
 import { controlApi, wrongOriginHere } from "./api";
 import { uuid } from "./bytes";
 import { type CommandFields, sendCommand } from "./command";
-import { folderChoices, machineHome, tildify, typedFolder } from "./folders";
+import { folderChoices, machineHome, tildify, typedFolder, unnamedHere } from "./folders";
 import { HeldNotice, useHeld } from "./HeldNotice";
 import type { HeldMeta } from "./held";
 import { HELD_WORDS } from "./heldWords";
@@ -205,8 +205,10 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
         folders: cc.folders,
         home: machineHome(cc),
       });
+      // A session's `~/…` folder this page can't name ("New session here" on a computer
+      // reached through spacesheep) is not kept: the machine's own folders are offered.
       let folder = "";
-      if (prefer.cwd) {
+      if (prefer.cwd && !unnamedHere(prefer.cwd, machineHome(cc))) {
         const t = typedFolder(prefer.cwd, { folders: cc.folders, home: machineHome(cc), machine: mm.name });
         folder = t.ok ? t.path : prefer.cwd;
       } else folder = r.cwd ?? choices.recent[0]?.path ?? choices.allowed[0]?.path ?? "";

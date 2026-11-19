@@ -182,8 +182,8 @@ would fail a resume until `claude auth login` is run there, absent is unknown. N
 the machine expands: set when this receiver's sessionpipe-core takes one and the hello has
 `start` (CONTROL.md §3.1: "a machine that sends `start` also takes a `~` folder"; `tilde.ts`),
 and never for a machine reached through spacesheep, whose jobs door checks a start's folder
-against the computer's full-path folders and refuses a `~/…` one. Each hello says them again: one without them takes them
-away. The well-known's `control.inherit: true` tells a daemon this receiver shows an
+against the computer's full-path folders and refuses a `~/…` one. Each hello says them
+again: one without them takes them away. The well-known's `control.inherit: true` tells a daemon this receiver shows an
 inherit machine as that, so it may pair or switch to inherit with it (CONTROL.md §2).
 Demo mode puts its machines here through `demo` (ids `m_demo-…`, server/demo/machine.ts).
 

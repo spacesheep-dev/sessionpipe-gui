@@ -2,7 +2,16 @@
 // The new-session sheet's folder list (folders.ts): `~` from the hello's home, the
 // daemon's segment rule for "under", the order and the dedupe of recent folders.
 import { describe, expect, it } from "vitest";
-import { expandHome, folderChoices, machineHome, normalizePath, tildify, typedFolder, under } from "./folders";
+import {
+  expandHome,
+  folderChoices,
+  machineHome,
+  normalizePath,
+  tildify,
+  typedFolder,
+  under,
+  unnamedHere,
+} from "./folders";
 
 const HOME = "/Users/demo";
 
@@ -129,5 +138,16 @@ describe("a machine that expands ~/… itself (sessionpipe 0.10: no home folder 
       ok: false,
       reason: "studio-mac needs the full path; type it starting with /",
     });
+  });
+  it("without it a ~/ folder can't be named here, which says nothing of the machine's folders", () => {
+    // A session's own folder on a computer reached through spacesheep: the sheets start from
+    // the machine's folders instead, and don't call it not allowed.
+    expect(unnamedHere("~/notes", undefined)).toBe(true);
+    expect(unnamedHere(" ~ ", null)).toBe(true);
+    expect(unnamedHere("~/notes", home)).toBe(false);
+    expect(unnamedHere("~/notes", HOME)).toBe(false);
+    expect(unnamedHere("/Users/me/notes", undefined)).toBe(false);
+    expect(unnamedHere("notes", undefined)).toBe(false);
+    expect(unnamedHere("~notes", undefined)).toBe(false);
   });
 });

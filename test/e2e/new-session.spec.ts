@@ -110,12 +110,15 @@ test("right-click a session: New session here, prefilled; a machine's menu: New 
   await expect(rowValue(page, "machine")).toHaveAttribute("data-value", name);
   await expect(rowValue(page, "agent")).toHaveAttribute("data-value", "codex");
   // sessionpipe 0.10's hello names no home folder: the session's own `~/…` folder is what
-  // the sheet carries (CONTROL.md §3.1), and it can be sent where both this receiver's core
-  // and the machine take one (`MachineControl.tilde`); elsewhere it asks for the full path.
-  await expect(rowValue(page, "folder")).toHaveAttribute("data-value", "~/code/billing");
-  await expect(rowValue(page, "folder")).toContainText("~/code/billing");
-  if (!(await tildeOn(name)))
-    await expect(status(page)).toHaveText(`${name} needs the full path; type it starting with /`);
+  // the sheet carries (CONTROL.md §3.1) where both this receiver's core and the machine take
+  // one (`MachineControl.tilde`); elsewhere it starts from the machine's own folders.
+  if (await tildeOn(name)) {
+    await expect(rowValue(page, "folder")).toHaveAttribute("data-value", "~/code/billing");
+    await expect(rowValue(page, "folder")).toContainText("~/code/billing");
+  } else {
+    await expect(rowValue(page, "folder")).toHaveAttribute("data-value", "/Users/e2e/code");
+    await expect(status(page)).not.toHaveText(/needs the full path/);
+  }
   await page.keyboard.press("Escape");
 
   await page.goto(`${CONTROL_BASE}/machines`);
