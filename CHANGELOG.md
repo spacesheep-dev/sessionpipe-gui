@@ -46,6 +46,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   in `color-themes/` was listed as "not JSON: Unexpected token", and a `skin.json`,
   `theme.json` or `plugin.json` as "not valid JSON". It now reads past the mark, as it
   already did for `config.json`.
+- **A `control/machines.json` that does not read no longer unpairs every machine.** One
+  saved with a UTF-8 byte-order mark (PowerShell 5's `-Encoding UTF8`, older Windows
+  editors) is now read past it. One left empty, cut short, unreadable or without a list of
+  machines was read as "no machines": the receiver deleted every machine's queued sends at
+  start, and the next pairing or hello wrote the file over, so every machine had to pair
+  again. The receiver now stops at start with a message naming the file and what to do, as
+  it does for `config.json`, and leaves the file as it was.
 
 ## [0.8.5] - 2026-11-18
 
