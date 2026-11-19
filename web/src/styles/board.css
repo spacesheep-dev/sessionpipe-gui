@@ -686,6 +686,78 @@
 .board-nomatch .state-title {
   overflow-wrap: anywhere;
 }
+/* The end of a list the field narrows: the way on to Search, at the Done band's metrics
+   and in its quiet ink (orange is for what needs you). Only the words searched are cut,
+   so the closing quote stays; the key cap is the field's "/" cap's, a finger's is the
+   chevron. */
+.board-more {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 8px);
+  min-height: 28px;
+  margin: 16px 4px 0;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .board-more:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+}
+.board-more:active {
+  background: var(--press);
+  transition: none;
+}
+.board-more:focus-visible {
+  outline-offset: -2px;
+}
+.board-more-glyph {
+  flex: none;
+  color: var(--fg-3);
+}
+.board-more-text {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+.board-more-q {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.board-more-key {
+  flex: none;
+  margin-left: auto;
+  color: var(--fg-4);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+}
+.board-more-go {
+  flex: none;
+  margin-left: auto;
+  color: var(--fg-4);
+}
+.board-more-key + .board-more-go {
+  display: none;
+}
+@media (pointer: coarse) {
+  .board-more {
+    min-height: 44px;
+  }
+  .board-more-key {
+    display: none;
+  }
+  .board-more-key + .board-more-go {
+    display: block;
+  }
+}
 /* Loading: the rows' own height, so the list does not move when they land. */
 .board-skeleton .skeleton-row {
   height: calc(var(--row-sm) * 2 - 12px);

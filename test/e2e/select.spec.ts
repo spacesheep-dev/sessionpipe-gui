@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
-// The custom select (web/src/components/Select.tsx) on the board's harness filter: the
-// trigger is a combobox and opens a listbox; arrows and Enter pick "Codex" and the board
-// filters to it; typing jumps to a row; Esc closes and gives focus back; axe finds nothing
-// new with the list open. On the phone project the same list is a bottom sheet.
+// The custom select (web/src/components/Select.tsx) on an Agent filter: Search's on a
+// computer (the board's is in its Filter menu there), the board's on a phone. The trigger
+// is a combobox and opens a listbox; arrows and Enter pick "Codex" and the page filters to
+// it; typing jumps to a row; Esc closes and gives focus back; axe finds nothing new with
+// the list open. On the phone project the same list is a bottom sheet.
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
-import { openBoard } from "./helpers.js";
+import { openBoard, openPage } from "./helpers.js";
 
-const trigger = (page: Page) => page.getByRole("combobox", { name: "Harness" });
-const list = (page: Page) => page.getByRole("listbox", { name: "Harness" });
+const trigger = (page: Page) => page.getByRole("combobox", { name: "Agent" });
+const list = (page: Page) => page.getByRole("listbox", { name: "Agent" });
 const active = (page: Page) => page.locator("[role=option].sel-opt--active");
 
 /** The harnesses of the cards on view, by the glyph's title; empty while none is on view. */
@@ -24,12 +25,13 @@ const onlyCards = async (page: Page, name: string) => {
 };
 
 test.describe("select", () => {
-  test.beforeEach(async ({ page }) => {
-    await openBoard(page);
+  test.beforeEach(async ({ page, isMobile }) => {
+    if (isMobile) await openBoard(page);
+    else await openPage(page, "/search");
     await expect(trigger(page)).toBeVisible();
   });
 
-  test("the harness filter is a combobox over a listbox; arrows and Enter pick Codex and the board follows", async ({
+  test("the agent filter is a combobox over a listbox; arrows and Enter pick Codex and the page follows", async ({
     page,
     isMobile,
   }) => {
@@ -43,7 +45,7 @@ test.describe("select", () => {
     await expect(t).toHaveAttribute("aria-expanded", "true");
     const l = list(page);
     await expect(l).toBeVisible();
-    await expect(l.locator("[aria-selected=true]")).toHaveText("All harnesses");
+    await expect(l.locator("[aria-selected=true]")).toHaveText("All agents");
     // The list sits under the trigger and is a hairline popover, not a sheet.
     const tb = (await t.boundingBox())!;
     const lb = (await l.boundingBox())!;
@@ -65,7 +67,7 @@ test.describe("select", () => {
     await expect(t).toHaveAttribute("data-value", "codex");
     await expect(t).toContainText("Codex");
     await expect(t).toBeFocused();
-    await onlyCards(page, "Codex");
+    await expect(page.locator("input[data-search]")).toHaveValue(/agent:codex/);
 
     // Open again: the current option carries the check, and Home/End reach the edges.
     await page.keyboard.press(" ");
@@ -85,7 +87,7 @@ test.describe("select", () => {
     test.skip(!!isMobile, "desktop project only");
     const t = trigger(page);
     await t.click();
-    const names = (await list(page).getByRole("option").allInnerTexts()).slice(1); // past "All harnesses"
+    const names = (await list(page).getByRole("option").allInnerTexts()).slice(1); // past "All agents"
     // A prefix that names exactly one row.
     let target = "";
     let prefix = "";
@@ -133,6 +135,8 @@ test.describe("select", () => {
     const before = new Set(await scan());
     await trigger(page).click();
     await expect(list(page)).toBeVisible();
+    // Placed: the list is drawn where it opens (it waits one frame, hidden, to measure).
+    await expect(list(page).getByRole("option").first()).toBeVisible();
     const after = await scan();
     const fresh = after.filter((v) => !before.has(v) && !/\.card/.test(v));
     expect(fresh, "axe findings that appear only with the select open").toEqual([]);

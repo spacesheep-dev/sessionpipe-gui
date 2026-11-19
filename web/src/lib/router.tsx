@@ -283,6 +283,11 @@ export function navigate(to: string, opts: { replace?: boolean; back?: boolean }
   transition(dir, from, emit);
 }
 
+/** Search, with these words: every session, what was sent included. */
+export function searchAll(q: string): void {
+  navigate(`/search?q=${encodeURIComponent(q.trim())}`);
+}
+
 /** Sets or removes one query parameter on the current URL (a history entry each time, so
  *  back and forward walk through it). */
 export function setSearchParam(name: string, value: string | null, opts: { replace?: boolean } = {}) {

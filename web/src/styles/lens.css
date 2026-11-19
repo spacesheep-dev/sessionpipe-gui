@@ -1,12 +1,11 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* ---------- the tier lens chip (shell) ---------- */
 
-/* A plain toolbar button in the page bar's tools, beside the filters; absent on view
-   routes and in Simple mode. An active lens takes the selection fill: no orange. */
+/* A plain toolbar button in the page bar, after the filters and where it is drawn in the
+   bar's order (Tab follows it); absent on view routes and in Simple mode. An active lens takes the selection fill: no orange. */
 .lens-chip {
   position: relative;
   flex: none;
-  order: 2;
 }
 .lens-chip-btn {
   display: inline-flex;
@@ -40,9 +39,6 @@
 .lens-chip-btn[aria-expanded="true"] {
   background: var(--sel);
   color: var(--fg);
-}
-.toolbar > .filters {
-  order: 3;
 }
 /* Every label in one grid cell: the widest one sets the width; only the current shows. */
 .lens-chip-text {

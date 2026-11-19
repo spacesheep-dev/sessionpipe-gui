@@ -970,15 +970,15 @@ test.describe("the board across a dropped stream", () => {
     page,
   }) => {
     await tapStreams(context);
-    // Half a 1800 px screen: the compact rail, and a bar whose search and filters fill its row.
-    await page.setViewportSize({ width: 900, height: 800 });
+    // A window near its narrowest: the compact rail, and a bar whose search and filters fill its row.
+    await page.setViewportSize({ width: 760, height: 800 });
     await page.goto(`${BASE}/`);
     await live(page);
     await expect(page.locator("section.group").first()).toBeVisible();
     const bar = page.locator(".page.board > .bar");
     const search = bar.locator(".bar-tools > .search");
     await expect(bar.locator(".bar-tools .lens-chip")).toBeVisible();
-    await expect(bar.locator(".bar-tools .chipsel").first()).toBeVisible();
+    await expect(bar.locator(".bar-tools .filter-btn")).toBeVisible();
     const tall = async () => Math.round((await bar.boundingBox())!.height);
     const wide = async () => Math.round((await search.boundingBox())!.width);
     const before = { tall: await tall(), wide: await wide() };

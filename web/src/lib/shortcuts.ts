@@ -339,7 +339,7 @@ export const ACTIONS: readonly Action[] = [
     keys: ["c"],
     hint: "the compose sheet, for the board's machine; ⌘N too in the installed app, once it reaches the page",
   },
-  { id: "search.focus", label: "Search this page", group: "Everywhere", scope: "global", keys: ["/"] },
+  { id: "search.focus", label: "Find on this page", group: "Everywhere", scope: "global", keys: ["/"] },
   {
     id: "search.global",
     label: "Search all sessions",

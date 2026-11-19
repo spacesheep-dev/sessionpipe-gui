@@ -810,6 +810,46 @@ fieldset.seg {
   color: var(--fg-3);
 }
 
+/* The one Filter pop-up in a page bar (components/FilterMenu.tsx): the chip's look; while
+   it narrows the page it says to what, on the selection fill, cut at 200 px. */
+.filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control);
+  max-width: 200px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.filter-btn svg {
+  flex: none;
+  color: var(--fg-3);
+}
+.filter-btn-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (hover: hover) {
+  .filter-btn:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+}
+.filter-btn:active {
+  background: var(--press);
+  transition: none;
+}
+.filter-btn--on,
+.filter-btn[aria-expanded="true"] {
+  background: var(--sel);
+  color: var(--fg);
+}
 /* ----- the switch ----- */
 
 .toggle {

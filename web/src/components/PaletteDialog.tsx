@@ -55,7 +55,7 @@ import {
 import { type FieldsMatch, fuzzyFields } from "../lib/fuzzy";
 import { labelName, labelQuery, setLabel } from "../lib/labels";
 import { accountMode } from "../lib/net";
-import { navigate, openSettings, parseRoute, sessionPath, useRoute } from "../lib/router";
+import { navigate, openSettings, parseRoute, searchAll, sessionPath, useRoute } from "../lib/router";
 import { useSimple } from "../lib/settings";
 import { hintFor, IS_MAC, matches, useShortcutMap } from "../lib/shortcuts";
 import { openSplit, useSplitKey } from "../lib/split";
@@ -65,7 +65,6 @@ import { openHandoffFor } from "../orchestrate/handoff/handoffState";
 import {
   openTranscriptRow,
   PALETTE_MIN,
-  searchAll,
   TxDetail,
   TxMark,
   TxPeek,
@@ -711,7 +710,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
         id: "t:all",
         section: "In transcripts",
         mark: <TxSearchMark />,
-        label: `Search all sessions for “${q.trim()}”`,
+        label: `Search every session for “${q.trim()}”`,
         keys: IS_MAC ? "⌘↵" : "Ctrl ↵",
         score: -2,
         run: () => {

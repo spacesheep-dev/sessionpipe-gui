@@ -292,7 +292,7 @@ function SessionsStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark 
       }
     >
       {installed.length > 0 && (
-        <ul className="form-list step-harnesses" aria-label="Harnesses on this machine">
+        <ul className="form-list step-harnesses" aria-label="Agents on this machine">
           {installed.map((h) => (
             <HarnessRow key={h.name} h={h} />
           ))}

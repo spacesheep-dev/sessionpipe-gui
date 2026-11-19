@@ -24,9 +24,10 @@ export function LabelDot({ session }: { session: SessionKey }) {
   return label ? <LabelSwatch color={label.color} name={label.name} /> : null;
 }
 
-/** "All labels", the seven (each its dot and name), "No label": a toolbar pop-up that
- *  stays away until some session has a label (or while it filters). Set, it shows the dot
- *  and the name on the selected fill, as the other chips do. */
+/** "All labels", the seven (each its dot and name), "No label": the phone's toolbar pop-up
+ *  (a computer has it in the Filter menu, components/FilterMenu.tsx), which stays away
+ *  until some session has a label (or while it filters). Set, it shows the dot and the
+ *  name on the selected fill, as the other chips do. */
 export function LabelChip({ value, onChange }: { value: LabelFilter; onChange: (v: LabelFilter) => void }) {
   const labels = useLabels();
   if (!value && !anyLabel(labels)) return null;

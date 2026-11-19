@@ -346,6 +346,21 @@ pairing link that carries the board's key only for a pairing the sink token star
   four-line note is one sentence, "Also shows the sessions your computers send to
   spacesheep, which keeps them.", with a Privacy policy link. On an account, Storage says
   what it holds where it showed an empty line.
+- **On a computer the Board filters with one Filter button.** "All machines", "All
+  harnesses", "All labels" and Clear become one Filter pop-up: Machine and Agent (each
+  where there are two or more), Label ›, and Clear filters while one is on, which leaves
+  the field's words. Filtered, the button says what it narrows to ("lab-mac · Codex"); with
+  nothing to narrow there is no button. The field is called Filter and sits at the bar's
+  right end, so it no longer moves when a filter is set, and beside a session the bar
+  stays one row. The Inbox's label filter and the Feed's are the same button, the Feed's
+  with Label › in it; Tab follows the bar from left to right. A phone keeps its chips,
+  under the field now called Filter, and its agent chip reads "All agents".
+- **A filtered Board ends with "Search every session for “webhook”",** which opens Search
+  with the words, and ⇧⌘F in the field does the same. When nothing matches, the title says
+  so with no paragraph under it, then "Search every session for …" and Clear filter. The
+  palette says the same words, and `/` is "Find on this page" in Shortcuts.
+- **"Agent" where the app said "harness":** the Feed's filter, Setup's list and Search's
+  `agent:` hint.
 
 ### Fixed
 

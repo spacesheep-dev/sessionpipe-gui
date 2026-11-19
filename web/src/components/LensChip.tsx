@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// The tier lens, app-wide: a toolbar pop-up at the top right of the page ("All tiers",
-// "Tier 1") that opens a menu like the machine and harness filters beside it, each tier
-// with what it keeps; `l` steps through them from anywhere. It holds one width whatever
-// it says, so the search beside it never moves. Hidden in Simple mode, where the lens is
+// The tier lens, app-wide: a toolbar pop-up in the page bar, last among its filters ("All
+// tiers", "Tier 1"), that opens a menu like the Filter button's, each tier with what it
+// keeps; `l` steps through them from anywhere. It holds one width whatever it says, so
+// what comes after it never moves. Hidden in Simple mode, where the lens is
 // always "all". Each page says what the lens took away in plain words ("Showing presence
 // only · 16 hidden · Show all") through <LensNote>.
 import type { Tier } from "@shared/api";

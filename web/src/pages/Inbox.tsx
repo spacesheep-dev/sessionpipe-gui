@@ -29,6 +29,7 @@ import {
 import { useBehind, useCatchingUp } from "../account/current";
 import { ActionButton, Ago, EmptyState, HarnessGlyph, Notice, Redacted, StateDot, WithName } from "../components/bits";
 import { type MenuList, openMenu, useContextMenu } from "../components/ContextMenu";
+import { FilterMenu, labelFilterItems, labelFilterName } from "../components/FilterMenu";
 import { LabelChip, LabelDot, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
 import { NoConnection } from "../components/NoConnection";
@@ -63,7 +64,7 @@ import {
 } from "../lib/format";
 import { attentionKey, hide, isHidden, useHidden } from "../lib/hidden";
 import { inPanel, panelAnswers, useListNav } from "../lib/keys";
-import { type LabelFilter, labelItems, labelPasses } from "../lib/labels";
+import { anyLabel, type LabelFilter, labelItems, labelPasses } from "../lib/labels";
 import { copyItem, sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { setNotifyPref, useNotifyPref } from "../lib/notify";
@@ -264,12 +265,33 @@ export function Inbox() {
           // (its loading rows, or the state below with its own Retry).
           firstLoad !== null
         }
-        tools={<LabelChip value={label} onChange={setLabelFilter} />}
+        tools={
+          phone ? (
+            <LabelChip value={label} onChange={setLabelFilter} />
+          ) : (
+            (label || anyLabel(labels)) && (
+              <FilterMenu
+                on={!!label}
+                summary={labelFilterName(labels, label)}
+                hint="Filter by label"
+                build={() => [
+                  { heading: "Label" },
+                  ...labelFilterItems(labels, label, setLabelFilter),
+                  !!label && { sep: true },
+                  !!label && { label: "Clear filters", run: () => setLabelFilter("") },
+                ]}
+              />
+            )
+          )
+        }
         actions={
+          // In the order drawn: on a computer the lens beside the filter, then the bell;
+          // the phone keeps its lens at the bar's trailing edge.
           <>
-            <LensChip />
+            {!phone && <LensChip />}
             <NotifyMenu />
             <ComposeButton className="compose-btn--phone" />
+            {phone && <LensChip />}
           </>
         }
       />

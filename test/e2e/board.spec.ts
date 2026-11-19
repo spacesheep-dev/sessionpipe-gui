@@ -402,7 +402,7 @@ test.describe("board", () => {
       // fill() types without moving the pointer, so the list is still held when the filter
       // changes: the rows it took away leave now, not when the pointer does. The session's
       // id is the one thing no other row has.
-      await page.getByRole("searchbox", { name: "Search sessions" }).fill(b.sessionId);
+      await page.getByRole("searchbox", { name: "Filter sessions" }).fill(b.sessionId);
       await expect(page.locator("article.card")).toHaveCount(1);
       await expect(card).toBeVisible();
     } finally {
@@ -411,20 +411,60 @@ test.describe("board", () => {
     }
   });
 
-  test("a search that finds nothing says so, with Clear search", async ({ page }) => {
+  test("a filter that finds nothing says so in one line, with Clear filter", async ({ page }) => {
     await openBoard(page);
-    await page.getByRole("searchbox", { name: "Search sessions" }).fill("zzzz-nothing");
+    await page.getByRole("searchbox", { name: "Filter sessions" }).fill("zzzz-nothing");
     await expect(page.locator(".board-nomatch .state-title")).toHaveText("No sessions match “zzzz-nothing”");
-    await page.getByRole("button", { name: "Clear search" }).click();
+    // The title says it: no paragraph explains the field, and no way on below the list.
+    await expect(page.locator(".board-nomatch .state-text")).toHaveCount(0);
+    await expect(page.locator(".board-more")).toHaveCount(0);
+    await page.getByRole("button", { name: "Clear filter" }).click();
     await expect(page.locator("section.group").first()).toBeVisible();
-    await expect(page.getByRole("searchbox", { name: "Search sessions" })).toHaveValue("");
+    await expect(page.getByRole("searchbox", { name: "Filter sessions" })).toHaveValue("");
   });
 
   test("a filter that finds nothing hands the words to Search, which reads every session", async ({ page }) => {
     await openBoard(page);
-    await page.getByRole("searchbox", { name: "Search sessions" }).fill("zzzz nothing");
+    await page.getByRole("searchbox", { name: "Filter sessions" }).fill("zzzz nothing");
     await page.getByRole("button", { name: "Search every session for “zzzz nothing”" }).click();
     await expect(page).toHaveURL((u) => u.pathname === "/search" && u.searchParams.get("q") === "zzzz nothing");
+  });
+
+  test("a list the field narrows ends with the way on to Search, with the words", async ({ page }) => {
+    await openBoard(page);
+    // A word of the first row's title, which the board keeps.
+    const title = (await page.locator("article.card .card-title").first().innerText()).trim();
+    const word = title.split(/\s+/).find((w) => /^[a-z]{4,}$/i.test(w)) ?? title.split(/\s+/)[0]!;
+    const field = page.getByRole("searchbox", { name: "Filter sessions" });
+    await field.fill(word);
+    await expect(page.locator("article.card").first()).toBeVisible();
+    const more = page.locator(".board-list > :last-child");
+    await expect(more).toHaveClass(/board-more/);
+    await expect(more).toHaveAccessibleName(`Search every session for “${word}”`);
+    // Only words get it: a label: token alone, or an empty field, does not.
+    await field.fill("label:red");
+    await expect(page.locator(".board-more")).toHaveCount(0);
+    await field.fill("");
+    await expect(page.locator(".board-more")).toHaveCount(0);
+    await field.fill(word);
+    await page.locator(".board-more").click();
+    await expect(page).toHaveURL((u) => u.pathname === "/search" && u.searchParams.get("q") === word);
+  });
+
+  test("⇧⌘F takes the field's words to Search; with none it is Search as anywhere", async ({ page, isMobile }) => {
+    test.skip(!!isMobile, "desktop project only");
+    await openBoard(page);
+    const field = page.getByRole("searchbox", { name: "Filter sessions" });
+    await field.fill("webhook");
+    await page.keyboard.press("ControlOrMeta+Shift+F");
+    await expect(page).toHaveURL((u) => u.pathname === "/search" && u.searchParams.get("q") === "webhook");
+    await expect(page.locator("input[data-search]")).toHaveValue("webhook");
+    await expect(page.locator("input[data-search]")).toBeFocused();
+
+    await openBoard(page);
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("ControlOrMeta+Shift+F");
+    await expect(page).toHaveURL((u) => u.pathname === "/search" && !u.searchParams.get("q"));
   });
 
   test("keyboard: / focuses search, j/k move the cursor, Enter opens the session", async ({ page }) => {
@@ -508,7 +548,7 @@ test.describe("board", () => {
 
   test("Esc clears the search first, then the cursor", async ({ page }) => {
     await openBoard(page);
-    const search = page.getByRole("searchbox", { name: "Search sessions" });
+    const search = page.getByRole("searchbox", { name: "Filter sessions" });
     await search.fill("a");
     await page.locator("body").click({ position: { x: 5, y: 5 } });
     await page.keyboard.press("j");
@@ -725,4 +765,108 @@ test.describe("board: the offline line", () => {
       await d.stop();
     }
   });
+});
+
+test.describe("the board's bar on a computer", () => {
+  test.skip(({ isMobile }) => !!isMobile, "desktop project only");
+
+  test("one Filter button narrows to a machine, says so, and the field holds still", async ({ page }) => {
+    await openBoard(page);
+    const bar = page.locator(".page.board > .bar");
+    // No row of "All …" pop-ups and no Clear: one button, then the lens, then the field.
+    await expect(bar.locator(".chipsel")).toHaveCount(0);
+    const filter = bar.getByRole("button", { name: "Filter", exact: true });
+    await expect(filter).toHaveText("Filter");
+    await expect(filter).toHaveAttribute("title", "Filter by machine, agent or label");
+    const field = bar.getByRole("searchbox", { name: "Filter sessions" });
+    const x = (await field.boundingBox())!.x;
+
+    await filter.click();
+    const menu = page.getByRole("menu");
+    await expect(menu.getByText("Machine", { exact: true })).toBeVisible();
+    await expect(menu.getByText("Agent", { exact: true })).toBeVisible();
+    await expect(menu.getByRole("menuitemradio", { name: "All machines" })).toHaveAttribute("aria-checked", "true");
+    await expect(menu.getByRole("menuitemradio", { name: "All agents" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Clear filters" })).toHaveCount(0);
+    const radios = await menu.getByRole("menuitemradio").allInnerTexts();
+    const machine = radios[radios.indexOf("All machines") + 1]!.trim();
+    await menu.getByRole("menuitemradio", { name: machine, exact: true }).click();
+
+    const named = bar.getByRole("button", { name: `Filter: ${machine}` });
+    await expect(named).toHaveText(machine);
+    await expect(named).toHaveClass(/filter-btn--on/);
+    const machines = await page
+      .locator("article.card:visible > .card-row .card-meta")
+      .evaluateAll((els) => els.map((el) => el.textContent ?? ""));
+    for (const m of machines) expect(m).toContain(machine);
+    expect((await field.boundingBox())!.x, "the field did not move").toBe(x);
+    await expect(bar.getByRole("button", { name: "Clear", exact: true })).toHaveCount(0);
+
+    // Clear filters is in the menu only while filtered, and leaves the field's words.
+    await field.fill("a");
+    await named.click();
+    await page.getByRole("menu").getByRole("menuitem", { name: "Clear filters" }).click();
+    await expect(bar.getByRole("button", { name: "Filter", exact: true })).toBeVisible();
+    await expect(field).toHaveValue("a");
+  });
+
+  test("the Shortcuts page names / for what it does on every page: Find on this page", async ({ page }) => {
+    await page.goto("/shortcuts");
+    const row = page.locator(".sc-row[data-action='search.focus']");
+    await expect(row.locator(".sc-row-label")).toHaveText("Find on this page");
+    await expect(row.locator(".sc-key").first()).toHaveText("/");
+  });
+
+  test("Tab goes along the bar in the order it is drawn on the Board, the Inbox and the Feed", async ({ page }) => {
+    for (const path of ["/", "/inbox", "/feed"]) {
+      await page.goto(path);
+      await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+      const bar = page.locator(".page > .bar").first();
+      await expect(bar.locator(".bar-actions")).toBeVisible();
+      if (path === "/") await expect(bar.getByRole("searchbox")).toBeVisible();
+      const xs = await bar.locator("button, input, a[href], [tabindex]:not([tabindex='-1'])").evaluateAll((els) =>
+        els
+          .filter((el) => (el as HTMLElement).offsetParent !== null && el.getAttribute("tabindex") !== "-1")
+          .map((el) => ({
+            name: el.getAttribute("aria-label") ?? el.textContent ?? "",
+            x: el.getBoundingClientRect().x,
+          })),
+      );
+      expect(xs.length, `${path}: the bar's controls`).toBeGreaterThan(1);
+      for (let i = 1; i < xs.length; i++)
+        expect(xs[i]!.x, `${path}: ${xs[i]!.name} comes after ${xs[i - 1]!.name}`).toBeGreaterThan(xs[i - 1]!.x);
+    }
+  });
+
+  for (const size of [
+    { width: 1440, height: 900 },
+    { width: 1280, height: 800 },
+  ])
+    test(`beside a session the bar stays one 48 px row at ${size.width}, on the Board and the Inbox`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await openBoard(page);
+      const board = page.locator(".page.board > .bar");
+      await expect(board.locator(".search")).toBeVisible();
+      // The bar's one row at full width: --bar (48) and its hairline.
+      const row = Math.round((await board.boundingBox())!.height);
+      expect(row).toBeLessThanOrEqual(49);
+      // Three sessions beside the board, as tabs (⇧-click opens one beside).
+      for (const i of [0, 1, 2]) {
+        await page
+          .locator("article.card a.card-link")
+          .nth(i)
+          .click({ modifiers: ["Shift"] });
+        await expect(page.locator("aside.panel")).toBeVisible();
+      }
+      await expect(board.locator(".search")).toBeVisible();
+      expect(Math.round((await board.boundingBox())!.height)).toBe(row);
+      // The Inbox with the panel still beside it.
+      await page.locator("nav.rail a[data-nav='inbox']").click();
+      await expect(page).toHaveURL(/\/inbox\?/);
+      await expect(page.locator("aside.panel")).toBeVisible();
+      await expect(page.locator(".page.inbox > .bar .bar-title")).toBeVisible();
+      expect(Math.round((await page.locator(".page.inbox > .bar").boundingBox())!.height)).toBe(row);
+    });
 });

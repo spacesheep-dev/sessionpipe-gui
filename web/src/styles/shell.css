@@ -766,7 +766,7 @@
 
 /* The page's title band: sticky, opaque, a hairline below that lines up with the
    sidebar's and the panel's. Title and meta at the left, the tools and actions at the
-   right; in a narrow column (the split open) the tools take a second row of their own. */
+   right; in a very narrow column the tools take a second row of their own. */
 .bar {
   position: sticky;
   top: 0;
@@ -803,8 +803,12 @@
   font-weight: 600;
   line-height: var(--lh-tight);
 }
+/* Cut before the title is ("2 need an answer · 1 waiting in a terminal" beside a panel). */
 .bar-meta {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--fg-3);
   font-size: var(--text-sm);
   white-space: nowrap;
@@ -851,8 +855,10 @@
 .bar-lead:has(> .bar-conn) .bar-title {
   flex-shrink: 1000000;
 }
+/* The tools take what the title leaves and shrink before they wrap: the search to its
+   140 px floor, a filter's words to an ellipsis. */
 .bar-tools {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -877,7 +883,7 @@
    glyph and its key), so the bar stays as tall as it was and the rows under it hold still.
    Its width of 0 is what the bar counts when it decides whether the tools fit; it grows
    from there into the room there is, up to the 240 px it has otherwise. */
-@container bar (min-width: 721px) {
+@container bar (min-width: 481px) {
   .bar:has(.bar-conn) .bar-tools > .search {
     flex: 1 1 54px;
     width: 0;
@@ -888,7 +894,7 @@
     text-overflow: ellipsis;
   }
 }
-@container bar (max-width: 720px) {
+@container bar (max-width: 480px) {
   .bar-tools {
     order: 3;
     flex: 1 0 100%;

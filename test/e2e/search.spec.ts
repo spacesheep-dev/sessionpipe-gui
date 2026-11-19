@@ -355,7 +355,7 @@ test.describe("search", () => {
     await expect(pal).toBeVisible();
     await page.keyboard.type("webhook");
     await expect(pal.locator(".pal-section", { hasText: "In transcripts" })).toBeVisible({ timeout: 15_000 });
-    await expect(pal.getByRole("option", { name: "Search all sessions for “webhook”" })).toBeVisible();
+    await expect(pal.getByRole("option", { name: "Search every session for “webhook”" })).toBeVisible();
     await page.keyboard.press("ControlOrMeta+Enter");
     await expect(page).toHaveURL(/\/search\?q=webhook$/);
     await expect(field(page)).toHaveValue("webhook");

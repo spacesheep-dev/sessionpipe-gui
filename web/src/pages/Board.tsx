@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The board: every session in one grouped list, needs_you first, under sticky section
-// headers. Filters by machine, harness and text in the page bar; done sessions folded
+// headers. Filters by machine, agent, label and text in the page bar; done sessions folded
 // behind a disclosure with a count, and after them, folded the same way, the ones this
 // device hid (lib/hidden.ts). A session started from here shows at once, as a
 // "starting" row from its signed start, until its first event makes it an ordinary row
@@ -27,6 +27,7 @@ import {
   StateDot,
 } from "../components/bits";
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
+import { type BoardFilter, boardFilterItems, boardFilterSummary, FilterMenu } from "../components/FilterMenu";
 import { LabelChip, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
 import { NoConnection } from "../components/NoConnection";
@@ -62,6 +63,7 @@ import {
 } from "../data/hooks";
 import { agentFound } from "../lib/agents";
 import { foldsAway, nestDelegated } from "../lib/delegated";
+import { usePhoneLayout } from "../lib/device";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import {
   canHideUntilNeeded,
@@ -79,9 +81,9 @@ import { type LabelFilter, labelName, labelPasses, labelQuery, requestLabelRenam
 import { isUnread, setUnread } from "../lib/marks";
 import { type Held, useFlip, useHeldOrder, useListHold, usePresence } from "../lib/motion";
 import { accountMode, apiFetch } from "../lib/net";
-import { Link, navigate, sessionPath } from "../lib/router";
+import { Link, navigate, searchAll, sessionPath } from "../lib/router";
 import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
-import { useShortcut } from "../lib/shortcuts";
+import { hintFor, useBindingVersion, useShortcut } from "../lib/shortcuts";
 import { openSplit, useSplitKey } from "../lib/split";
 import { useNow } from "../lib/time";
 import { NEW_WORDS as N } from "../native/accountWords";
@@ -440,6 +442,16 @@ export function Board() {
     () => follow(inItsPlace(hrefs, cursor)),
   );
   const hiddenByLens = useMemo(() => ordered.reduce((n, h) => n + cardHides(h.item, lens), 0), [ordered, lens]);
+  // ⇧⌘F with words in the field takes them to Search; with none it is Search as anywhere.
+  useShortcut(
+    "search.global",
+    () => {
+      if (!lq.rest.trim()) return false;
+      searchAll(q);
+      requestAnimationFrame(() => focusSearch());
+    },
+    { priority: 1 },
+  );
 
   const view = () => {
     const unread = visible.filter((s) => isUnread(s, store.get().marks));
@@ -507,6 +519,24 @@ export function Board() {
   const noMatch =
     ready && !empty && visible.length === 0 && hiddenList.length === 0 && pending.length === 0 && all.length > 0;
 
+  const phone = usePhoneLayout();
+  const filterState: BoardFilter = {
+    machines,
+    machine,
+    setMachine,
+    harnesses,
+    harness,
+    setHarness,
+    labels,
+    label,
+    setLabel: setLabelFilter,
+  };
+  // The field narrows what the board holds; the way on to every session, what was sent
+  // included, is Search, which the end of a filtered list and ⇧⌘F take its words to.
+  const search = <SearchInput value={q} onChange={setQ} placeholder="Filter" label="Filter sessions" />;
+  const words = lq.rest.trim();
+  const moreShown = ready && !!words && !noMatch && !emptyShown.mounted;
+
   return (
     <div
       className={`page board${downAt ? " board--down" : ""}`}
@@ -525,10 +555,9 @@ export function Board() {
         tools={
           // Not before the first snapshot: the filters it decides would push the search
           // over as they arrive (the layout shift the board had on every load).
-          !loaded || emptyShown.mounted ? null : (
+          !loaded || emptyShown.mounted ? null : phone ? (
             <>
-              <SearchInput value={q} onChange={setQ} placeholder="Search" label="Search sessions" />
-              <LensChip />
+              {search}
               {machines.length > 1 && (
                 <ChipSelect
                   value={machine}
@@ -543,20 +572,35 @@ export function Board() {
                   value={harness}
                   options={harnesses}
                   onChange={setHarness}
-                  all="All harnesses"
-                  label="Harness"
+                  all="All agents"
+                  label="Agent"
                   optionLabel={(h) => harnessMark(h).label}
                   icon={(h) => <HarnessGlyph name={h} size="sm" />}
                 />
               )}
               <LabelChip value={label} onChange={setLabelFilter} />
-              {/* For the chips: a search has its own way out (Esc, the field's ✕, the
-                  no-match state's Clear search), and the bar does not shift as one types. */}
               {(machine || harness || label) && (
                 <button type="button" className="btn btn--ghost btn--sm" onClick={clear}>
                   Clear
                 </button>
               )}
+              <LensChip />
+            </>
+          ) : (
+            // A computer's bar, in the order it is drawn: Filter, the lens, and the
+            // field at the trailing edge, so a filter that grows its button never
+            // moves the field.
+            <>
+              {boardFilterItems(filterState).length > 0 && (
+                <FilterMenu
+                  on={!!(machine || harness || label)}
+                  summary={boardFilterSummary(filterState)}
+                  hint="Filter by machine, agent or label"
+                  build={() => boardFilterItems(filterState)}
+                />
+              )}
+              <LensChip />
+              {search}
             </>
           )
         }
@@ -705,6 +749,8 @@ export function Board() {
             {showHidden && <div className="grid grid--hidden">{hiddenHeld.map((h) => row(h, index++, true))}</div>}
           </section>
         )}
+
+        {moreShown && <SearchMore q={q.trim()} />}
       </div>
     </div>
   );
@@ -733,6 +779,47 @@ function useHideKeys(row: () => SessionSummary | undefined, leave: () => void): 
 
 const keyOf = (s: SessionSummary) => s.key;
 const stateOf = (s: SessionSummary) => s.state;
+
+/** The end of a list the field narrows: the way on to Search, for every session with
+ *  these words, what was sent included. Its key (⇧⌘F, or what it is bound to) with a
+ *  pointer; a chevron for a finger, or with no key. */
+function SearchMore({ q }: { q: string }) {
+  useBindingVersion();
+  const key = hintFor("search.global");
+  return (
+    <button
+      type="button"
+      className="board-more"
+      aria-label={`Search every session for “${q}”`}
+      onClick={() => searchAll(q)}
+    >
+      <svg className="board-more-glyph" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+        <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M10.5 10.5 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+      <span className="board-more-text">
+        Search every session for “<span className="board-more-q">{q}</span>”
+      </span>
+      {key && <kbd className="board-more-key">{key}</kbd>}
+      <svg
+        className={`board-more-go${key ? "" : " board-more-go--always"}`}
+        viewBox="0 0 16 16"
+        width="12"
+        height="12"
+        aria-hidden="true"
+      >
+        <path
+          d="M6 4l4 4-4 4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+}
 
 /** Nothing passes the filter: say what was asked, and the one way back. */
 function NoMatch({
@@ -767,16 +854,11 @@ function NoMatch({
       actions={
         only ? (
           <>
-            {/* The board filters what it holds; Search reads every session, prompts included. */}
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={() => navigate(`/search?q=${encodeURIComponent(q.trim())}`)}
-            >
+            <button type="button" className="btn btn--primary" onClick={() => searchAll(q)}>
               Search every session for “{q.trim()}”
             </button>
             <button type="button" className="btn" onClick={clearSearch}>
-              Clear search
+              Clear filter
             </button>
           </>
         ) : (
@@ -786,9 +868,7 @@ function NoMatch({
         )
       }
     >
-      {only
-        ? "This box filters the board by title, folder, machine and the latest reply. Search reads every session, what you sent included."
-        : "Other sessions are hidden by the filter."}
+      {only ? null : "Other sessions are hidden by the filter."}
     </EmptyState>
   );
 }

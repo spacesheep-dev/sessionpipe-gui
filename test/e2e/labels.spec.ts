@@ -129,9 +129,10 @@ test.describe("colour labels", () => {
     expect(doc.sessions[key]).toBe("blue");
     await other.close();
 
-    // The chip appears once a label exists, and filters to it.
-    const chip = page.getByRole("combobox", { name: "Label" });
-    await expect(chip).toBeVisible();
+    // The Filter menu has a Label submenu once a label exists.
+    await page.locator(".page.board > .bar").getByRole("button", { name: "Filter", exact: true }).click();
+    await expect(page.getByRole("menu").getByRole("menuitem", { name: "Label", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
 
     // The split tab and the panel head.
     await card.locator("a.card-link").click({ modifiers: ["Shift"] });
@@ -270,15 +271,22 @@ test.describe("colour labels", () => {
     await page.keyboard.press("Escape");
     await expect(card.locator(".label-dot--red")).toHaveAttribute("aria-label", "Label: Urgent");
 
-    // The chip lists it by its name and filters to it.
-    await page.getByRole("combobox", { name: "Label" }).click();
-    await page.getByRole("option", { name: "Urgent" }).click();
+    // The Filter menu's Label › lists it by its name and filters to it; the button and the
+    // submenu then say it.
+    const bar = page.locator(".page.board > .bar");
+    await bar.getByRole("button", { name: "Filter", exact: true }).click();
+    await page.getByRole("menu").getByRole("menuitem", { name: "Label", exact: true }).click();
+    await page.getByRole("menuitemradio", { name: /^Urgent/ }).click();
     await expect(page.locator("article.card")).toHaveCount(1);
-    await expect(page.getByRole("combobox", { name: "Label" })).toContainText("Urgent");
-    await page.getByRole("button", { name: "Clear", exact: true }).click();
+    const filter = bar.getByRole("button", { name: "Filter: Urgent" });
+    await expect(filter).toHaveText("Urgent");
+    await filter.click();
+    await expect(page.getByRole("menu").getByRole("menuitem", { name: "Label: Urgent" })).toBeVisible();
+    await page.getByRole("menu").getByRole("menuitem", { name: "Clear filters" }).click();
+    await expect(bar.getByRole("button", { name: "Filter", exact: true })).toBeVisible();
 
     // So does the search: label:urgent keeps that one row, -label:urgent leaves it out.
-    const search = page.getByRole("searchbox", { name: "Search sessions" });
+    const search = page.getByRole("searchbox", { name: "Filter sessions" });
     await search.fill("label:urgent");
     await expect(page.locator("article.card")).toHaveCount(1);
     await expect(page.locator("article.card a.card-link").first()).toHaveAttribute("href", new RegExp(`^${href}`));

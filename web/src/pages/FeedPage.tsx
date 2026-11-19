@@ -8,18 +8,19 @@
 // the pointer is on the list, the keyboard cursor is in it, a row's menu is up, or the
 // list is scrolled away from its newest rows, they wait behind an "n new" pill and land
 // in one step when the hold lets go. Pause holds them until Resume. One Filter menu
-// narrows by harness, machine, kind and session. A row's right-click opens its session,
+// narrows by machine, agent, kind, session and, on a computer, label. A row's right-click opens its session,
 // narrows the feed to it, or copies it.
 import type { FeedQuery, StoredEvent } from "@shared/api";
 import { memo, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EmptyState, HarnessGlyph, SearchInput } from "../components/bits";
-import { type MenuItem, type MenuList, openMenu, useContextMenu, useMenuOpen } from "../components/ContextMenu";
+import { type MenuList, useContextMenu } from "../components/ContextMenu";
+import { FilterMenu, labelFilterName, labelFilterSub, pick } from "../components/FilterMenu";
 import { LabelChip, LabelDot, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
 import { PageBar } from "../components/PageBar";
 import { BesideButton, Inline, lensMenu, useBackgroundMenu, useStickyTop } from "../components/SessionCard";
 import { useAppState, useLabels, useStore } from "../data/hooks";
-import { wideLayout } from "../lib/device";
+import { usePhoneLayout, wideLayout } from "../lib/device";
 import {
   eventSummary,
   harnessMark,
@@ -417,6 +418,11 @@ export function Feed() {
     { title: () => "Feed" },
   );
 
+  // On a computer the field sits at the bar's trailing edge, after the filters, so a
+  // filter that grows its button never moves it; the phone lifts it out on its own line.
+  const phone = usePhoneLayout();
+  const search = <SearchInput value={q} onChange={setQ} placeholder="Search" label="Search events" />;
+
   let lastDay = "";
   return (
     <div className="page feed" ref={page} {...bgMenu}>
@@ -424,23 +430,27 @@ export function Feed() {
         title="Feed"
         tools={
           <>
-            <SearchInput value={q} onChange={setQ} placeholder="Search" label="Search events" />
+            {phone && search}
             <FilterMenu
-              on={narrowed}
+              on={narrowed || (!phone && !!label)}
               summary={[
-                harness && harnessMark(harness).label,
                 machine,
+                harness && harnessMark(harness).label,
                 type && TYPE_WORDS[type],
                 session && sessionLabel(session),
+                !phone && labelFilterName(labels, label),
               ]
                 .filter(Boolean)
                 .join(" · ")}
+              hint={
+                phone ? "Filter by machine, agent, kind or session" : "Filter by machine, agent, kind, session or label"
+              }
               build={() => [
-                { heading: "Harness" },
-                ...pick("All harnesses", harness, harnesses, setHarness, (h) => harnessMark(h).label),
-                { sep: true },
                 { heading: "Machine" },
                 ...pick("All machines", machine, machines, setMachine),
+                { sep: true },
+                { heading: "Agent" },
+                ...pick("All agents", harness, harnesses, setHarness, (h) => harnessMark(h).label),
                 { sep: true },
                 { heading: "What happened" },
                 ...pick("Everything", type, TYPES, setType, (t) => TYPE_WORDS[t] ?? t),
@@ -449,20 +459,24 @@ export function Feed() {
                   label: session ? `Session: ${sessionLabel(session)}` : "Session",
                   items: pick("All sessions", session, sessionOptions, setSession, sessionLabel),
                 },
-                narrowed && { sep: true },
-                narrowed && {
+                !phone && labelFilterSub(labels, label, setLabelFilter),
+                (narrowed || (!phone && label)) && { sep: true },
+                (narrowed || (!phone && label)) && {
                   label: "Clear filters",
                   run: () => {
                     setHarness("");
                     setMachine("");
                     setType("");
                     setSession("");
+                    if (!phone) setLabelFilter("");
                   },
                 },
               ]}
             />
-            <LabelChip value={label} onChange={setLabelFilter} />
+            {/* The phone keeps its label chip in the filter row beside the button. */}
+            {phone && <LabelChip value={label} onChange={setLabelFilter} />}
             <LensChip />
+            {!phone && search}
           </>
         }
         actions={
@@ -564,58 +578,6 @@ export function Feed() {
       )}
       {rows.length >= CAP && <p className="page-note">Showing the newest {CAP}; narrow the filter for more.</p>}
     </div>
-  );
-}
-
-/** Radio items for one filter: "All …", then each option, the current one checked. */
-function pick(
-  all: string,
-  value: string,
-  options: string[],
-  set: (v: string) => void,
-  name: (o: string) => string = (o) => o,
-): MenuItem[] {
-  return [
-    { label: all, radio: true, checked: !value, run: () => set("") },
-    ...options.map((o) => ({ label: name(o), radio: true, checked: value === o, run: () => set(o) })),
-  ];
-}
-
-/** One Filter pop-up in place of five: a menu with a section per filter. While any is
- *  set it reads what it narrows to and takes the selected fill, like the chips do. */
-function FilterMenu({ on, summary, build }: { on: boolean; summary: string; build: () => MenuList }) {
-  const btn = useRef<HTMLButtonElement>(null);
-  const [open, setOpen] = useState(false);
-  const up = useMenuOpen();
-  useEffect(() => {
-    if (!up) setOpen(false);
-  }, [up]);
-  const show = (keyboard: boolean) => {
-    if (!btn.current) return;
-    openMenu(build(), btn.current, { source: keyboard ? "keyboard" : "mouse", invoker: btn.current, title: "Filter" });
-    setOpen(true);
-  };
-  return (
-    <button
-      ref={btn}
-      type="button"
-      className={`feed-filter ${on ? "feed-filter--on" : ""}`}
-      aria-haspopup="menu"
-      aria-expanded={open}
-      aria-label={on ? `Filter: ${summary}` : "Filter"}
-      title={on ? summary : "Filter by harness, machine, kind or session"}
-      onClick={(e) => show(e.detail === 0)}
-      onKeyDown={(e) => {
-        if (e.key !== "ArrowDown") return;
-        e.preventDefault();
-        show(true);
-      }}
-    >
-      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-        <path d="M2.5 4h11M4.5 8h7M6.5 12h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      </svg>
-      <span className="feed-filter-text">{on ? summary : "Filter"}</span>
-    </button>
   );
 }
 

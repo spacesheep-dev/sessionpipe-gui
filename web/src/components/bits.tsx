@@ -302,7 +302,7 @@ export function SearchInput({
         autoComplete="off"
         enterKeyHint="search"
       />
-      <kbd title="Press / to search">/</kbd>
+      <kbd title="Press / to find">/</kbd>
     </label>
   );
 }

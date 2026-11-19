@@ -112,7 +112,7 @@ export function outcomeWords(a: ControlActivity, o: { machine?: string; online?:
     case "expired":
       return `expired · ${a.detail ?? "nobody took it in time"}`;
     case "unsupported":
-      return `unsupported · ${who} has no way to ${KIND_LABEL[a.kind]} on this harness${a.detail ? `: ${a.detail}` : ""}`;
+      return `unsupported · ${who} has no way to ${KIND_LABEL[a.kind]} with this agent${a.detail ? `: ${a.detail}` : ""}`;
     case "failed":
       // A send through spacesheep this app can no longer follow (server/control/state.ts).
       if (a.code === "untracked") return "not followed · sent through an account that's no longer connected";
