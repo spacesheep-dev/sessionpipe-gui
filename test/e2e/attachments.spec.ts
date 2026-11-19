@@ -1082,11 +1082,11 @@ test("a picture still uploading when another session opens lands in its own sess
 });
 
 test("on a slow link (2 Mbit/s) the tray says how far the upload is", async ({ context, page }) => {
-  // 1.4 MB at 2 Mbit/s is six seconds by itself.
+  // Noise is made smaller to a WebP of about 1 MB, which at 2 Mbit/s is some seconds by itself.
   test.slow();
   const { d } = await open(context, page, { takes: true, title: "A slow link" });
-  const big = noisePng(700, 680);
-  expect(big.length).toBeGreaterThan(1_300_000);
+  const big = noisePng(1240, 1200);
+  expect(big.length).toBeGreaterThan(4_000_000);
   const cdp = await context.newCDPSession(page);
   await cdp.send("Network.enable");
   await cdp.send("Network.emulateNetworkConditions", {
@@ -1097,8 +1097,11 @@ test("on a slow link (2 Mbit/s) the tray says how far the upload is", async ({ c
   });
   await picker(page).setInputFiles({ name: "noise.png", mimeType: "image/png", buffer: big });
   const going = page.locator("[data-upload-line]");
-  await expect(going).toHaveText(/^Uploading \d\.\d of 1\.\d MB…$/);
+  // How far, in the size that goes (the WebP, not the 4 MB the page was given).
+  await expect(going).toHaveText(/^Uploading [\d.]+ of [\d.]+ (KB|MB)…$/, { timeout: 30_000 });
   const first = await going.textContent();
+  const [, n, unit] = /of ([\d.]+) (KB|MB)/.exec(first ?? "")!;
+  expect(Number(n) * (unit === "MB" ? 1024 * 1024 : 1024)).toBeLessThan(big.length / 2);
   await shots(page, "10-upload-progress");
   await expect.poll(async () => (await going.textContent()) ?? "", { timeout: 15_000 }).not.toBe(first);
   await expect(tray(page)).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
