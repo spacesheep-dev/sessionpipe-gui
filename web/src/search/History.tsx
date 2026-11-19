@@ -44,7 +44,7 @@ export function HistorySession({
   harness: string;
   id: string;
   mode: "page" | "panel";
-  rootRef?: RefObject<HTMLDivElement>;
+  rootRef?: RefObject<HTMLDivElement | null>;
   /** What shows when the index does not know the session either. */
   fallback: ReactNode;
 }) {
@@ -391,7 +391,7 @@ function FindBar({
   step,
   close,
 }: {
-  inputRef: RefObject<HTMLInputElement>;
+  inputRef: RefObject<HTMLInputElement | null>;
   value: string;
   onChange: (v: string) => void;
   current: number;

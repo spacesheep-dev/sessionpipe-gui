@@ -56,7 +56,13 @@ export function SessionView(props: SessionViewProps) {
 
 /** A session whose events are on their way: the page's bar (back, and the title said to
  *  a screen reader), nothing under it; the panel shows nothing of its own. */
-export function SessionLoading({ mode, rootRef }: { mode: "page" | "panel"; rootRef?: RefObject<HTMLDivElement> }) {
+export function SessionLoading({
+  mode,
+  rootRef,
+}: {
+  mode: "page" | "panel";
+  rootRef?: RefObject<HTMLDivElement | null>;
+}) {
   return (
     <div className={`page session ${mode === "panel" ? "session--panel" : ""}`} ref={rootRef}>
       {mode === "page" && (

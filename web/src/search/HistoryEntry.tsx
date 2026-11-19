@@ -12,7 +12,7 @@ export function HistoryOrMissing(props: {
   harness: string;
   id: string;
   mode: "page" | "panel";
-  rootRef?: RefObject<HTMLDivElement>;
+  rootRef?: RefObject<HTMLDivElement | null>;
   fallback: ReactNode;
 }) {
   const m = history.use();
