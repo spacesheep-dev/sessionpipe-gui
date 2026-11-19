@@ -433,7 +433,7 @@ test.describe("board", () => {
   test("a list the field narrows ends with the way on to Search, with the words", async ({ page }) => {
     await openBoard(page);
     // A word of the first row's title, which the board keeps.
-    const title = (await page.locator("article.card .card-title").first().innerText()).trim();
+    const title = ((await page.locator("article.card .card-title").first().textContent()) ?? "").trim();
     const word = title.split(/\s+/).find((w) => /^[a-z]{4,}$/i.test(w)) ?? title.split(/\s+/)[0]!;
     const field = page.getByRole("searchbox", { name: "Filter sessions" });
     await field.fill(word);
