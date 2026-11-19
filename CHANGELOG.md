@@ -298,6 +298,16 @@ pairing link that carries the board's key only for a pairing the sink token star
   after Open, New session here and Ask another agent…; it comes first now, as in the
   Inbox, and both show A and D beside it. On a machine that is not paired a Board row's
   menu leaves the pair out.
+- **On a computer, a plan the agent asks to start on is read in the conversation, whole.**
+  It sat in the dock at the bottom, beside Keep planning and Approve plan, eight lines
+  until "Show the whole plan" and then a box of its own that scrolled, while the
+  conversation above it stood empty. It is now a panel right under the call that asks
+  ("Asking about the plan"), at the conversation's width, and the page opens on its
+  first line; the dock asks "Ready to start on this plan?" in one row, as for any other
+  prompt. A plan approved while the page is open stays as it was; one answered before
+  shows its first eight lines and Show all. Right-click it for Copy plan. A session that
+  sends no plan (tier 2) still has the prompt's own words in the dock, and so does one
+  read at a tier lens under 3. On a phone the plan stays on the prompt's card.
 
 ### Fixed
 

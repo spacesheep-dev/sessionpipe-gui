@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// A plan review's plan under its question on the permission strip (ControlStrip.tsx).
-// Its own chunk: the strip is in the first paint, and the Markdown it reads with is not.
+// A plan review's plan under its question on the permission strip (ControlStrip.tsx), on
+// a phone only: on a computer the plan is read in the conversation (SessionBody's
+// PlanPanel, which folds an answered one with foldPlan), so control.css's .ctl-plan rules
+// match only here. Its own chunk: the strip is in the first paint, and the Markdown it
+// reads with is not.
 import { useLayoutEffect, useRef, useState } from "react";
 import { Markdown } from "./Markdown";
 
@@ -64,9 +67,9 @@ export function peekPlan(el: HTMLElement): void {
 }
 
 /** The plan a plan review asks to start on (its call's `input.plan`, tier 3), as the
- *  timeline reads Markdown, in the question's column: eight lines (six on a phone) until
- *  "Show the whole plan", then up to half the view, scrolling inside, a line cut in half
- *  at its foot. */
+ *  timeline reads Markdown, in the question's column: six lines until "Show the whole
+ *  plan", then up to half the view, scrolling inside, a line cut in half at its foot. The
+ *  phone's card only (ControlStrip's Question). */
 export function PlanText({ text }: { text: string }) {
   const box = useRef<HTMLDivElement>(null);
   const [whole, setWhole] = useState(false);

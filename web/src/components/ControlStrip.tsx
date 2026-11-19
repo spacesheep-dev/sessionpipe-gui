@@ -64,6 +64,7 @@ import {
 } from "../lib/format";
 
 import { Link } from "../lib/router";
+import { useLens } from "../lib/settings";
 import { askedCommand, shellLines } from "../lib/shellCommand";
 import { hintFor } from "../lib/shortcuts";
 import { NEW_WORDS, ThisPhone } from "../native/accountWords";
@@ -71,6 +72,8 @@ import { ActionButton, Spinner, StateDot, WithName } from "./bits";
 import "../control/control.css";
 
 // The plan reads as Markdown, whose renderer stays out of the first paint (PlanText.tsx).
+// The phone's only: on a computer the plan is read in the conversation (SessionBody's
+// PlanPanel).
 const PlanText = lazy(() => import("./PlanText").then((m) => ({ default: m.PlanText })));
 
 /** `composer`: what it signs was typed in the composer (a message, Keep planning's note),
@@ -247,13 +250,17 @@ const CMD_LINES = 4;
  *  its message after it. A long chained command reads one step per line, four steps until
  *  "Show more"; the whole command comes from the call's own input when the session sent it
  *  (lib/askedInput.ts), else from the message, cut at 200 characters. A plan review asks
- *  about the plan, from the same input, and shows it under the question. A question from
+ *  about the plan, from the same input: on a phone it shows the plan under the question,
+ *  on a computer the conversation does (SessionBody's PlanPanel, at a lens of 3) and the
+ *  card is the question alone. A question from
  *  the agent is its own words, with the labels of its options under it to read (they are
  *  answered on its computer), or one sentence where its input was not sent. Its glyph is
  *  the orange one while it asks; with an answer out, the working ring, or a still hollow
  *  one while the computer is offline (`out`). */
 function Question({ a, session, out }: { a: Attention; session: SessionSummary; out?: "going" | "held" }) {
   const { input } = useAskedInput(session, a);
+  const phone = usePhoneLayout();
+  const lens = useLens() ?? 3;
   // The prompt whose steps are all shown: another prompt starts folded.
   const [unfolded, setUnfolded] = useState<string | null>(null);
   const blockId = useId();
@@ -269,9 +276,12 @@ function Question({ a, session, out }: { a: Attention; session: SessionSummary; 
   );
   if (isPlanReview(a)) {
     // Below tier 3 there is no plan: the prompt's own message, when it says more than the
-    // tool's name.
-    const plan = typeof input?.plan === "string" && input.plan.trim() ? input.plan : null;
+    // tool's name. On a computer the plan is the conversation's, shown there at a lens of
+    // 3 (SessionBody's PlanPanel); under it, it is nowhere, and the message stands for it.
+    const asked = typeof input?.plan === "string" && input.plan.trim() ? input.plan : null;
+    const plan = phone || lens >= 3 ? asked : null;
     const said = plan ? undefined : attentionMessage(a);
+    if (!phone && plan) return line(<>Ready to start on this plan?</>);
     return (
       <>
         {line(<>Ready to start on this plan?</>)}

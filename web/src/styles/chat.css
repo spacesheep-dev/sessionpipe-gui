@@ -165,6 +165,36 @@
   color: var(--fg-2);
   font-size: var(--text-sm);
 }
+/* A plan review's plan, on a computer read in the conversation under its call
+   (SessionBody PlanPanel): one quiet panel at the column's width, no head (its own
+   heading leads) and no accent (the dot on the tools line and in the dock says it waits).
+   One answered before the page opened shows eight lines until "Show all". */
+.turn-plan {
+  align-self: stretch;
+  margin: 0;
+  padding: 12px 16px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-pop);
+  background: var(--bg-2);
+  list-style: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.turn-plan > :first-child {
+  margin-top: 0;
+}
+.timeline:not(.timeline--chat) .turn-plan {
+  margin: 4px 0 8px var(--tl-lead);
+}
+.turn-plan-text.is-clamped {
+  max-height: calc(8 * 1lh);
+  overflow: hidden;
+}
+.turn-plan-wait {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
 @media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .chat-bubble {
     max-width: 85%;
