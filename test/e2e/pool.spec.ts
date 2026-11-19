@@ -16,6 +16,11 @@ import { openPage } from "./helpers.js";
 import { poolDaemon } from "./pool-helpers.js";
 
 const tag = () => randomUUID().slice(0, 6);
+// The demo's Spacesheep account has room again 2 h 10 m after the demo started (sim.ts,
+// DEMO_POOL_UNTIL_MS), and one server serves the whole run: these cases can come ten
+// minutes or more in, when the line reads "2 h" on the hour, then "1 h 59 m" and down.
+const RESETS = /^resets in (?:2 h(?: \d{2} m)?|1 h \d{2} m)$/;
+const RESETS_FIRST = new RegExp(RESETS.source.slice(0, -1));
 const section = (page: Page, machine: string) => page.locator(`section[data-pool="${machine}"]`);
 const row = (page: Page, machine: string, name: string) =>
   section(page, machine).locator("li.pool-acct", { has: page.locator(".pool-title", { hasText: name }) });
@@ -43,7 +48,7 @@ test.describe("the pooled section, from the demo", () => {
     await expect(lab.locator("li.pool-acct .pool-title")).toHaveText(["Misha", "Fiction", "Spacesheep"]);
     await expect(lab.locator("li.pool-acct .pool-word")).toHaveText(["In use", "Has room", "Used up"]);
     const sheep = row(page, "lab-mac", "Spacesheep");
-    await expect(sheep.locator(".pool-status-after")).toHaveText(/^resets in 2 h \d{2} m$/);
+    await expect(sheep.locator(".pool-status-after")).toHaveText(RESETS);
     await expect(sheep.locator('[data-window="five_hour"] .usage-value')).toHaveText("<1% left");
     // Fiction has no numbers yet: no rows, and no "No numbers yet" either.
     await expect(row(page, "lab-mac", "Fiction").locator(".usage-win")).toHaveCount(0);
@@ -160,7 +165,7 @@ test.describe("the pooled section, from the demo", () => {
       const email = await box(sheep.locator(".pool-email"));
       const after = await box(sheep.locator(".pool-status-after"));
       expect(after.y).toBeGreaterThanOrEqual(email.y + email.height - 1);
-      await expect(sheep.locator(".pool-status-sub")).toHaveText(/^resets in 2 h \d{2} m/);
+      await expect(sheep.locator(".pool-status-sub")).toHaveText(RESETS_FIRST);
       if (await sheep.locator(".pool-age").count()) {
         const age = await box(sheep.locator(".pool-age"));
         expect(Math.abs(after.y - age.y)).toBeLessThan(1);
