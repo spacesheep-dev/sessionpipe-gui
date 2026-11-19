@@ -1741,11 +1741,11 @@ pub async fn update_local_click(
             "a debug build doesn't update this computer's receiver".into(),
         ));
     }
-    let r = LOCAL
+    let (r, before) = LOCAL
         .lock()
         .unwrap()
         .as_ref()
-        .map(|(r, _)| r.clone())
+        .map(|(r, u)| (r.clone(), u.running.clone()))
         .ok_or_else(|| StartError::Failed("this computer's receiver wasn't checked yet".into()))?;
     let state =
         local_state_dir().ok_or_else(|| StartError::Failed("no state folder here".into()))?;
@@ -1801,15 +1801,10 @@ pub async fn update_local_click(
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
     }
-    let state_now = match (&res, now.as_deref()) {
-        (Err(_), _) => UpdateState::Failed,
-        (Ok(_), Some(v)) if version_cmp(v, app).is_lt() => UpdateState::Click,
-        (Ok(_), Some(_)) => UpdateState::Current,
-        (Ok(_), None) => UpdateState::Updated,
-    };
+    let (state_now, running) = after_click(res.is_ok(), now, &before, app);
     let u = LocalUpdate {
         origin: r.origin.clone(),
-        running: now.unwrap_or_default(),
+        running,
         app: app.into(),
         state: state_now,
         why: res.as_ref().err().map(|e| e.to_string()),
@@ -1820,6 +1815,25 @@ pub async fn update_local_click(
     res?;
     say("done", "sessionpipe is up to date");
     Ok(Some(u))
+}
+
+/// What a click's run leaves: its state and the version the service runs. `ok`: the
+/// installer's result; `now`: the version read after it (read only when it worked);
+/// `before`: the one known before the run. A failed run keeps that one, so the row still
+/// says which version is behind; one that worked and whose new receiver didn't say its
+/// version yet is Updated, with none.
+pub fn after_click(
+    ok: bool,
+    now: Option<String>,
+    before: &str,
+    app: &str,
+) -> (UpdateState, String) {
+    match now {
+        _ if !ok => (UpdateState::Failed, now.unwrap_or_else(|| before.into())),
+        Some(v) if version_cmp(&v, app).is_lt() => (UpdateState::Click, v),
+        Some(v) => (UpdateState::Current, v),
+        None => (UpdateState::Updated, String::new()),
+    }
 }
 
 /// What "Update sessionpipe" may run: the CLI on PATH only when its version is known and at
@@ -2646,6 +2660,22 @@ mod tests {
                 Plan::Click("0.7.2".into())
             );
         }
+    }
+
+    #[test]
+    fn a_failed_click_keeps_the_version_it_was_behind_at() {
+        let after =
+            |ok, now: Option<&str>| after_click(ok, now.map(String::from), "0.8.3", "0.8.4");
+        assert_eq!(after(false, None), (UpdateState::Failed, "0.8.3".into()));
+        assert_eq!(
+            after(true, Some("0.8.4")),
+            (UpdateState::Current, "0.8.4".into())
+        );
+        assert_eq!(
+            after(true, Some("0.8.3")),
+            (UpdateState::Click, "0.8.3".into())
+        );
+        assert_eq!(after(true, None), (UpdateState::Updated, String::new()));
     }
 
     #[test]

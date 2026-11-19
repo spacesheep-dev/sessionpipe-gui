@@ -421,7 +421,7 @@ export function UpdateRow({ appVersion }: { appVersion: string }) {
  *  works, its progress; after a failure, the sentence and the failure line and the command
  *  folded away in Details; once current, its new version alone. */
 function ServiceUpdateRow({ row, update, command }: ServiceUpdate) {
-  const label = `The background service runs ${row.running}`;
+  const label = row.running ? `The background service runs ${row.running}` : "The background service";
   if (row.kind === "done")
     return (
       <div className="settings-row service-row">

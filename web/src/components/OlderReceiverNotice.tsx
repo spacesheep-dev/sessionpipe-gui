@@ -39,7 +39,17 @@ export function OlderReceiverNotice({
       </div>
       {older.here && inShell ? (
         <div>
-          <button type="button" className="btn btn--sm btn--primary" disabled={busy} onClick={() => void run()}>
+          {/* At work it can't be pressed and is dimmed, and it keeps the focus, as
+              Settings › About's Update does (native/AppSettings.tsx ServiceUpdateRow). */}
+          <button
+            type="button"
+            className="btn btn--sm btn--primary"
+            aria-disabled={busy || undefined}
+            aria-busy={busy || undefined}
+            onClick={() => {
+              if (!busy) void run();
+            }}
+          >
             {busy ? "Updating…" : "Update"}
           </button>
         </div>

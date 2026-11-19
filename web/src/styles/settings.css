@@ -1083,13 +1083,14 @@ a.settings-row:focus-visible {
   margin-top: 6px;
 }
 /* The background service's row: its button stays level with the label while Details is
-   open under the hint; at work the button is dimmed as a disabled one is. */
+   open under the hint. At work its Update, and the older-receiver notice's, is dimmed as a
+   disabled one is (aria-disabled keeps the focus a disabled button would drop). */
 .service-row:has(.settings-details[open]) {
   align-items: flex-start;
 }
 .service-row-text {
   flex: 1 1 auto;
 }
-.service-row .btn[aria-disabled="true"] {
+.settings-row .btn[aria-disabled="true"] {
   opacity: 0.45;
 }

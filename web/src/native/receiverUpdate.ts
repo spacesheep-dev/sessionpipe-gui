@@ -149,16 +149,18 @@ export type ServiceRow =
  *    service updated from a terminal since launch is no longer behind);
  *  - `shown`: the row was shown in this window, so a service brought current says so,
  *    in place, until the window closes. "unchanged" (no service of ours, where Update would
- *    install one) and a service that was never behind say nothing. */
+ *    install one) and a service that was never behind say nothing;
+ *  - `seen`: the version the row last said, for a check that knows none (a run that
+ *    failed before its new service answered), after `live`. */
 export function serviceRow(
   local: LocalUpdate | null,
   run: Pick<UpdateRun, "busy" | "progress" | "failed">,
-  o: { live?: string; shown?: boolean } = {},
+  o: { live?: string; shown?: boolean; seen?: string } = {},
 ): ServiceRow | null {
   if (!local) return null;
   const caughtUp = !!o.live && compareVersions(o.live, local.app) >= 0;
   const behind = (local.state === "click" || local.state === "failed") && !caughtUp;
-  const running = local.running;
+  const running = local.running || o.live || o.seen || "";
   if (behind || o.shown) {
     if (run.busy) return { kind: "working", running, progress: run.progress || "Updating the background service…" };
     if (run.failed) return { kind: "failed", running, ...failureWords(run.failed) };
@@ -168,5 +170,5 @@ export function serviceRow(
       ? { kind: "failed", running, ...failureWords({ kind: "failed", line: local.why ?? "" }) }
       : { kind: "behind", running, app: local.app };
   if (!o.shown || local.state === "unchanged") return null;
-  return { kind: "done", running: caughtUp ? (o.live as string) : running || local.app };
+  return { kind: "done", running: caughtUp ? (o.live as string) : local.running || local.app };
 }

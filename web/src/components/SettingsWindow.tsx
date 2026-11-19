@@ -227,6 +227,9 @@ export function Settings() {
   const ref = useRef<HTMLDivElement>(null);
   const strip = useRef<HTMLDivElement>(null);
   const [picker, setPicker] = useState<Picker | null>(null);
+  // About's background service row, once shown in this window: kept here, so it stays
+  // through a visit to another section, and is gone the next time Settings opens.
+  const [service, setService] = useState<ServiceSeen>({ shown: false, running: "" });
   // A picker belongs to its section.
   useEffect(() => setPicker(null), [section, view]);
   // Back to the page under the dialog, as it was (the split panel stays), after the
@@ -410,7 +413,7 @@ export function Settings() {
                   {/* No machine's own agent history is on a spacesheep account to switch on. */}
                   {section === "data" && !accountMode() && <SearchDataGroup Group={Group} Row={Row} />}
                   {section === "data" && <Data />}
-                  {section === "about" && <About />}
+                  {section === "about" && <About seen={service} onSeen={setService} />}
                 </>
               )}
             </div>
@@ -1207,13 +1210,20 @@ function LinkRow({ href, to, children }: { href?: string; to?: string; children:
   );
 }
 
+/** About's background service row, once shown in this Settings window, and the version it
+ *  last said. */
+interface ServiceSeen {
+  shown: boolean;
+  running: string;
+}
+
 /** About: what this is and which version, as a macOS About window says it. In the app the
  *  version is the app's own, and the receiver's is said under it only when it differs (an
  *  older background service, another computer's); in a browser the page is the receiver's.
  *  When this computer's background service is behind the app, the update group says so in
  *  a row of its own, with Update (native/receiverUpdate.ts serviceRow), in place of that
  *  line. */
-function About() {
+function About({ seen, onSeen }: { seen: ServiceSeen; onSeen: (s: ServiceSeen) => void }) {
   const store = useStore();
   const [info, setInfo] = useState<Info | null>(null);
   // Whether the receiver has answered once (or failed to): until then the row waits, so
@@ -1241,10 +1251,14 @@ function About() {
   // The version this window's receiver answers, when it is the one the launch check found.
   const mine = !!local && local.origin === shellApp?.receiver?.origin;
   const live = mine ? info?.version : undefined;
-  // Once shown, the row stays until the window closes, saying the version the update brought.
-  const shown = useRef(false);
-  const row = checks && (asked || !mine) ? serviceRow(local, run, { live, shown: shown.current }) : null;
-  if (row) shown.current = true;
+  // Once shown, the row stays until the window closes, saying the version the update
+  // brought; the last version it said stands in when a failed run knows none.
+  const row =
+    checks && (asked || !mine) ? serviceRow(local, run, { live, shown: seen.shown, seen: seen.running }) : null;
+  const said = row ? row.running || seen.running : null;
+  useEffect(() => {
+    if (said !== null && (!seen.shown || said !== seen.running)) onSeen({ shown: true, running: said });
+  }, [said, seen, onSeen]);
   const appVersion = shellApp?.appVersion || "";
   const version = appVersion || info?.version;
   // The receiver's own version, said only where it is not the app's. (An account has no

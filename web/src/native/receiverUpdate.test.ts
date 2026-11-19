@@ -48,6 +48,25 @@ describe("serviceRow", () => {
     ).toMatchObject({ kind: "failed", sentence: expect.stringContaining("isn't running"), detail: "~/service.log" });
   });
 
+  it("a failed run that knows no version: the receiver's own, else the one the row last said", () => {
+    const failed = local({ state: "failed", running: "", why: "not running" });
+    const ran = { ...idle, failed: { kind: "download", line: "couldn't download" } } as const;
+    expect(serviceRow(failed, ran, { live: "0.8.3", shown: true })).toMatchObject({ kind: "failed", running: "0.8.3" });
+    expect(serviceRow(failed, ran, { seen: "0.8.3", shown: true })).toMatchObject({ kind: "failed", running: "0.8.3" });
+    expect(serviceRow(failed, idle, { seen: "0.8.3" })).toMatchObject({ kind: "failed", running: "0.8.3" });
+    expect(serviceRow(failed, { ...idle, busy: true }, { seen: "0.8.3" })).toMatchObject({
+      kind: "working",
+      running: "0.8.3",
+    });
+    // Nothing known at all: no version, never an empty one.
+    expect(serviceRow(failed, idle)).toMatchObject({ kind: "failed", running: "" });
+    // Brought current, its version not read yet: the app's, never the one it was behind at.
+    expect(serviceRow(local({ state: "updated", running: "" }), idle, { shown: true, seen: "0.8.3" })).toEqual({
+      kind: "done",
+      running: "0.8.4",
+    });
+  });
+
   it("says nothing where there is nothing to do", () => {
     expect(serviceRow(null, idle)).toBeNull();
     for (const state of ["current", "updated", "unchanged"] as const)

@@ -132,7 +132,8 @@ async function open(page: Page, fake: Fake, receiver: Receiver) {
               say(`Updating sessionpipe ${running} → ${app}…`);
               await new Promise((r) => setTimeout(r, 600));
               if (mode === "notRunning") {
-                found = { running, state: "failed", why: "not running" };
+                // As the shell does: a run that failed read no version after it.
+                found = { running: "", state: "failed", why: "not running" };
                 throw {
                   kind: "notRunning",
                   line: `${app} isn't running on :7373 after 90 s, and the old receiver was stopped for the update: see ~/.local/state/sessionpipe-gui/service.log`,
@@ -140,7 +141,7 @@ async function open(page: Page, fake: Fake, receiver: Receiver) {
                 };
               }
               if (mode === "failed") {
-                found = { running, state: "failed", why: "couldn't download" };
+                found = { running: "", state: "failed", why: "couldn't download" };
                 throw {
                   kind: "download",
                   line: "couldn't download sessionpipe (npm error network request failed); nothing was changed",
@@ -197,7 +198,9 @@ test.describe("an option the receiver is too old for, in the app", () => {
       "sessionpipe-gui-0.8.1.tgz -- sessionpipe-gui service install",
     );
     await update(page).click();
+    // Dimmed and inert while it works, and the focus stays on it.
     await expect(page.getByRole("button", { name: "Updating…" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Updating…" })).toBeFocused();
     await expect(page.getByText("Updating sessionpipe 0.7.2 → 0.8.1…")).toBeVisible();
     // Done: the version is read again, the notice goes, Connect is back.
     await expect(page.getByText("this option needs")).toHaveCount(0);
@@ -313,10 +316,15 @@ test.describe("this Mac's background service behind the app, in Settings › Abo
     const row = serviceRow(page);
     await row.getByRole("button", { name: "Update", exact: true }).click();
     await expect(row.getByRole("button", { name: "Updating…" })).toBeDisabled();
+    await expect(row.getByRole("button", { name: "Updating…" })).toBeFocused();
     await expect(row.getByRole("status")).toHaveText("Updating sessionpipe 0.8.3 → 0.8.4…");
     await expect(row).toHaveText("The background service runs 0.8.4");
     await expect(row.getByRole("button")).toHaveCount(0);
     await expect(pane(page).getByText("background service runs 0.8.3")).toHaveCount(0);
+    // A visit to another section and back: still there.
+    await page.getByRole("tab", { name: "General" }).click();
+    await page.getByRole("tab", { name: "About" }).click();
+    await expect(serviceRow(page)).toHaveText("The background service runs 0.8.4");
     // The next time Settings opens, there is nothing to say.
     await page.goto("/");
     await page.goto("/settings?section=about");
@@ -333,6 +341,8 @@ test.describe("this Mac's background service behind the app, in Settings › Abo
     await expect(row.getByRole("alert")).toHaveText(
       "The update didn't finish and the service isn't running. Press Update again.",
     );
+    // The check read no version after the run: the row still says the one it was behind at.
+    await expect(row.locator(".settings-label")).toHaveText("The background service runs 0.8.3");
     await expect(row.getByRole("button", { name: "Update", exact: true })).toBeEnabled();
     const details = row.locator("details");
     await expect(details).not.toHaveAttribute("open", "");
@@ -348,6 +358,15 @@ test.describe("this Mac's background service behind the app, in Settings › Abo
     await open(page, ...about({ mode: "failed" }));
     const row = serviceRow(page);
     await row.getByRole("button", { name: "Update", exact: true }).click();
+    await expect(row.getByRole("alert")).toHaveText("Couldn't update it. Press Update again.");
+    await expect(row.locator(".settings-label")).toHaveText("The background service runs 0.8.3");
+    // Again, after a visit to another section, and while it runs again.
+    await page.getByRole("tab", { name: "General" }).click();
+    await page.getByRole("tab", { name: "About" }).click();
+    await expect(row.locator(".settings-label")).toHaveText("The background service runs 0.8.3");
+    await row.getByRole("button", { name: "Update", exact: true }).click();
+    await expect(row.getByRole("button", { name: "Updating…" })).toBeVisible();
+    await expect(row.locator(".settings-label")).toHaveText("The background service runs 0.8.3");
     await expect(row.getByRole("alert")).toHaveText("Couldn't update it. Press Update again.");
     await row.getByText("Details").click();
     await expect(row.locator(".settings-details-line")).toHaveText(
