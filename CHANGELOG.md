@@ -69,6 +69,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   its `.gemini` folder inside that path, but search took `$GEMINI_CLI_HOME` to be the
   `.gemini` folder itself, so it found none of those sessions. It now reads
   `$GEMINI_CLI_HOME/.gemini`; with the variable unset nothing changes (`~/.gemini`).
+- **Labels, read marks and usage limits saved with a byte-order mark are kept.** A
+  `labels.json`, `marks.json` or `limits.json` saved by Notepad or PowerShell 5 (which
+  start a UTF-8 file with a byte-order mark) was taken for a broken file: it was set aside
+  as `<file>.bad-<time>` and the board started without its label names and colours, read
+  marks and notification levels. It is now read past the mark, as `config.json` is.
 
 ## [0.8.5] - 2026-11-18
 
