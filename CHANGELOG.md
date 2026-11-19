@@ -77,6 +77,11 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **A GUI that stops at "port N is in use" ends there.** The search indexer it had already
   started then printed a Node crash (`Error: write EPIPE`) on the same terminal. It now
   stops quietly once the GUI has gone, as it does when a GUI is stopped while indexing.
+- **A `--host` or `--port` the receiver cannot listen on is named.** A `--host` that is
+  not an address of this machine (say, after a network change) or a name that does not
+  look up, and a `--port` this user may not open, stopped with Node's own message
+  (`listen EADDRNOTAVAIL: …`, `getaddrinfo ENOTFOUND …`, `listen EACCES: …`). It now says
+  which flag to change, as it already did for a port in use, and still exits 2.
 
 ## [0.8.5] - 2026-11-18
 

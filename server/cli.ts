@@ -23,6 +23,7 @@ import { extraInstalled, installExtra } from "./extensions/extras.js";
 import { InstallError } from "./extensions/install.js";
 import { bundledDirs } from "./extensions/kind.js";
 import { lanAddresses } from "./http/net.js";
+import { DEFAULT_HOST, listenErrorMessage } from "./listen-error.js";
 import { addPlugin, formatPluginList, linkPlugin, listPlugins, removePlugin } from "./plugins/index.js";
 import { removeRunFile, writeRunFile } from "./runfile.js";
 import { processEnv, runService, type Verb } from "./service/index.js";
@@ -776,7 +777,8 @@ async function main(): Promise<void> {
     });
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
-    if (err.code === "EADDRINUSE") fail(`port ${parsed.port ?? DEFAULT_PORT} is in use (try --port)`);
+    const listenError = listenErrorMessage(err, parsed.host ?? DEFAULT_HOST, parsed.port ?? DEFAULT_PORT);
+    if (listenError) fail(listenError);
     if (err instanceof TlsError) fail(`${err.message}\n(--no-tls starts without TLS mode)`);
     fail(err.message);
   }
