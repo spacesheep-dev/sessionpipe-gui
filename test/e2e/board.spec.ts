@@ -10,6 +10,7 @@
 // you's own count agree.
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import { SETTINGS_KEY } from "../../playwright.config.js";
 import { CONTROL_BASE, fakeDaemon, passkeyPage, postPrompt, seenSetupHere, sinkToken } from "./control-helpers.js";
 import { EVENTS, holdBoard, INFO, openBoard, sessionUrl, tier1Batch, ulid } from "./helpers.js";
 
@@ -427,6 +428,11 @@ test.describe("board", () => {
   });
 
   test("keyboard: / focuses search, j/k move the cursor, Enter opens the session", async ({ page }) => {
+    // Open sessions: As a page, so Enter opens the session's page and Back returns here.
+    await page.addInitScript(
+      (key) => localStorage.setItem(key, JSON.stringify({ mode: "advanced", openSessions: "page" })),
+      SETTINGS_KEY,
+    );
     await openBoard(page);
     await page.locator("body").click({ position: { x: 5, y: 5 } });
     await page.keyboard.press("/");

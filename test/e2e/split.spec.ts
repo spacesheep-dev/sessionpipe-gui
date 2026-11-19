@@ -9,7 +9,7 @@
 // launch lands on the page Settings › General › Open on names with the tabs put back.
 import { type APIRequestContext, expect, type Locator, type Page, test } from "@playwright/test";
 import { SETTINGS_KEY } from "../../playwright.config.js";
-import { EVENTS, holdBoard, INFO, openBoard, openPage, sessionUrl, tier1Batch, ulid } from "./helpers.js";
+import { EVENTS, holdBoard, INFO, openBoard, openPage, openPrompt, sessionUrl, tier1Batch, ulid } from "./helpers.js";
 
 const panel = (page: Page) => page.locator("aside.panel");
 const mainWidth = (page: Page) => page.locator("main.main").evaluate((el) => el.getBoundingClientRect().width);
@@ -800,6 +800,81 @@ test.describe("split panel", () => {
       await live(page);
       await expect(panel(page)).toHaveClass(/panel--open/);
       expect(where(page)).toEqual({ path: "/", s: a!.key, t: null });
+    });
+
+    test.describe("with Open sessions: Beside", () => {
+      test.beforeEach(async ({ page }) => {
+        await page.addInitScript(
+          (key) => localStorage.setItem(key, JSON.stringify({ mode: "advanced", openSessions: "beside" })),
+          SETTINGS_KEY,
+        );
+      });
+      /** Opens the menu of the row under the cursor with `.`: its first Open item is
+       *  "Open beside ↵" and the next "Open as page ⇧↵"; then ↵ on that row opens it beside
+       *  `path`, and the panel's tab is the row's session. */
+      const enterFollowsTheMenu = async (page: Page, path: string, href: string) => {
+        await page.keyboard.press(".");
+        const menu = page.getByRole("menu");
+        await expect(menu).toBeVisible();
+        const opens = menu.getByRole("menuitem", { name: /^Open (beside|as page)/ });
+        await expect(opens.nth(0)).toHaveAccessibleName("Open beside");
+        await expect(opens.nth(0).locator(".menu-keys")).toHaveText(/^(↵|Enter)$/);
+        await expect(opens.nth(1)).toHaveAccessibleName("Open as page");
+        await expect(opens.nth(1).locator(".menu-keys")).toHaveText(/^(⇧↵|Shift\+?\s?Enter)$/);
+        await page.keyboard.press("Escape");
+        await expect(menu).toHaveCount(0);
+        await page.keyboard.press("Enter");
+        await expect(panel(page)).toHaveClass(/panel--open/);
+        expect(where(page)).toEqual({ path, s: keyOf(href), t: null });
+      };
+
+      test("on the Board the menu leads with Open beside ↵, and ↵ opens the row beside", async ({ page }) => {
+        await openBoard(page);
+        await holdBoard(page);
+        const link = page.locator("article.card a.card-link").first();
+        const href = (await link.getAttribute("href"))!;
+        await link.focus();
+        await expect(page.locator("article.card[aria-current='true'] a.card-link")).toHaveAttribute("href", href);
+        await enterFollowsTheMenu(page, "/", href);
+      });
+
+      test("on the Inbox the menu leads with Open beside ↵, and ↵ opens the row beside", async ({ page, request }) => {
+        const p = await openPrompt(request, { machine: "e2e-enter-box", title: "E2E enter follows the menu" });
+        try {
+          await openPage(page, "/inbox");
+          const row = page.locator(`.inbox-row[data-session="${p.key}"]`);
+          await row.locator(".inbox-main").focus();
+          await expect(row).toHaveAttribute("aria-current", "true");
+          await enterFollowsTheMenu(page, "/inbox", sessionUrl(p.harness, p.sessionId));
+        } finally {
+          await p.clear();
+        }
+      });
+
+      test("on the Feed the menu leads with Open beside ↵, and ↵ opens the row beside", async ({ page }) => {
+        await openPage(page, "/feed");
+        await expect(page.locator("ol.rows")).toHaveAttribute("aria-busy", "false");
+        await expect(page.locator("li.ev a.ev-session").first()).toBeVisible({ timeout: 20_000 });
+        await page.keyboard.press("j");
+        // The row the cursor is on, read after it is there: new events land above it.
+        const href = (await page.locator("li.ev[aria-current='true'] a.ev-session").getAttribute("href"))!;
+        await enterFollowsTheMenu(page, "/feed", href);
+      });
+
+      test("a plain click opens beside, ⇧-click the other way (the page), ⌘-click a background tab", async ({
+        page,
+      }) => {
+        const [a, b, c] = await cards(page, 3);
+        await click(page, a!.href, []);
+        await expect(tabs(page)).toHaveCount(1);
+        expect(where(page)).toEqual({ path: "/", s: a!.key, t: null });
+        await click(page, c!.href, [process.platform === "darwin" ? "Meta" : "Control"]);
+        await expect(tabs(page)).toHaveCount(2);
+        expect(await activeKey(page)).toBe(a!.key);
+        await click(page, b!.href, ["Shift"]);
+        await expect(page).toHaveURL((u) => u.pathname === b!.href);
+        await expect(page.locator("h1.sess-title")).toBeVisible();
+      });
     });
 
     test("a theme opens a background tab through api.openSession({ split, background })", async ({ page }) => {

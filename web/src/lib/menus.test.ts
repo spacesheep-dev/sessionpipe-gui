@@ -8,6 +8,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import type { MenuItem } from "../components/ContextMenu";
 import type { Store } from "../data/store";
 import { askItem, type SessionMenuContext, sessionItems } from "./menus";
+import { setSettings } from "./settings";
 
 // A wide window with a mouse, as every part of the page asks for it.
 beforeAll(() => {
@@ -116,6 +117,31 @@ describe("sessionItems", () => {
     // A panel's tab and its head lead with the answer too.
     for (const surface of ["tab", "panel", "page"] as const)
       expect(labels(menu(asking, { surface, answer })).slice(0, 3)).toEqual(["Allow Bash", "Deny Bash", "─"]);
+  });
+
+  it("on a row puts ↵'s way first with ↵, and the other way with ⇧↵, under either setting", () => {
+    const opens = (items: MenuItem[]) =>
+      items
+        .filter((i) => "label" in i && i.label.startsWith("Open"))
+        .map((i) => ("label" in i ? [i.label, "action" in i ? i.action : undefined] : []));
+    try {
+      setSettings({ openSessions: "beside" });
+      expect(opens(menu(asking))).toEqual([
+        ["Open beside", "list.open"],
+        ["Open as page", "list.beside"],
+        ["Open in background tab", "list.background"],
+        ["Open in new window", undefined],
+      ]);
+      setSettings({ openSessions: "page" });
+      expect(opens(menu(asking))).toEqual([
+        ["Open as page", "list.open"],
+        ["Open beside", "list.beside"],
+        ["Open in background tab", "list.background"],
+        ["Open in new window", undefined],
+      ]);
+    } finally {
+      setSettings({ openSessions: "page" });
+    }
   });
 
   it("on a row shows no key beside New session here or Ask another agent…", () => {

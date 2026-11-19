@@ -260,7 +260,7 @@ function PathRow({ p, repo, now }: { p: FilesPage["repos"][number]["paths"][numb
             key={s.key}
             type="button"
             className="rv-sess"
-            title={`Open ${titleOf(s.title)} beside`}
+            title={`Open ${titleOf(s.title)}`}
             onClick={() => openAt(s.key, undefined)}
           >
             <LabelDot session={s.key} />
@@ -454,12 +454,7 @@ function DayRow({ s }: { s: Digest["sessions"][number] }) {
         <span className="rv-cell">
           <HarnessGlyph name={s.harness} size="sm" />
           <LabelDot session={s.key} />
-          <button
-            type="button"
-            className="rv-link"
-            title={`Open ${title} beside`}
-            onClick={() => openAt(s.key, undefined)}
-          >
+          <button type="button" className="rv-link" title={`Open ${title}`} onClick={() => openAt(s.key, undefined)}>
             {title}
           </button>
           <span className="rv-span num">

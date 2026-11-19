@@ -382,7 +382,7 @@ export const ACTIONS: readonly Action[] = [
   { id: "list.down", label: "Next item", group: "Lists", scope: "lists", keys: ["j", "down"] },
   { id: "list.up", label: "Previous item", group: "Lists", scope: "lists", keys: ["k", "up"] },
   { id: "list.open", label: "Open the item", group: "Lists", scope: "lists", keys: ["enter"] },
-  { id: "list.beside", label: "Open beside the page", group: "Lists", scope: "lists", keys: ["shift+enter"] },
+  { id: "list.beside", label: "Open the other way", group: "Lists", scope: "lists", keys: ["shift+enter"] },
   {
     id: "list.background",
     label: "Open beside, as a background tab",
@@ -512,7 +512,7 @@ export const ACTIONS: readonly Action[] = [
   },
   {
     id: "palette.beside",
-    label: "Open the session beside",
+    label: "Open the other way",
     group: "Command palette",
     scope: "palette",
     keys: ["shift+enter"],

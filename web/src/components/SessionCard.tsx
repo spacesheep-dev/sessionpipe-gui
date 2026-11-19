@@ -60,11 +60,11 @@ import { inPanel, panelAnswers } from "../lib/keys";
 import { labelItems } from "../lib/labels";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { reducedMotion, tokenMs, useFlip, useHeldOrder, useListHold } from "../lib/motion";
-import { Link, sessionPath } from "../lib/router";
+import { Link, navigate, sessionPath } from "../lib/router";
 import { backgroundFact, quietRun, submittedLabel } from "../lib/runs";
 import { LENSES, type Lens, setTierLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
-import { openSplit } from "../lib/split";
+import { openSplit, openWay } from "../lib/split";
 import { durCoarse, ms } from "../lib/time";
 import { AgentRow, useAgentsOpen } from "./AgentRow";
 import { HarnessGlyph, Redacted, Since, StateDot } from "./bits";
@@ -225,6 +225,12 @@ export const SessionCard = memo(function SessionCard({
   const ref = useRef<HTMLElement>(null);
   const beside = (o: { background: boolean } = { background: false }) =>
     openSplit(s.key, { from: ref.current?.getBoundingClientRect(), background: o.background });
+  // ⇧-click goes the other way from a plain click, ⌘-click to a background tab (lib/split.ts).
+  const modClick = (o: { background: boolean }) => {
+    const way = openWay(o.background ? "background" : "other");
+    if (way === "page") navigate(sessionPath(s.harness, s.id));
+    else beside({ background: way === "background" });
+  };
   // Allow / Deny in the menu, through the same signed send as the inbox, while a
   // permission is open (CardAnswer keeps them current) and the row's one line shows it
   // whole, which on a phone a command often is not. The line is read as the menu opens, so
@@ -347,7 +353,7 @@ export const SessionCard = memo(function SessionCard({
           to={sessionPath(s.harness, s.id)}
           className="card-link"
           title={tip}
-          modClick={beside}
+          modClick={modClick}
           plainClick={openBeside ? () => beside() : undefined}
           data-nav-item=""
           onKeyDown={

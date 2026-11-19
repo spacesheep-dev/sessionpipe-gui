@@ -37,7 +37,7 @@ import { reducedMotion, tokenMs, useListHold } from "../lib/motion";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
-import { openSplit } from "../lib/split";
+import { openSplit, openWay } from "../lib/split";
 import { atTier } from "../lib/tier";
 import { clock, dayLabel, durShort, useToday } from "../lib/time";
 import { eventWords as turnWords } from "../lib/turns";
@@ -737,15 +737,21 @@ const FeedRow = memo(function FeedRow({
     (): MenuList => {
       const c = ctx.current;
       const wide = wideLayout();
-      const openPage = { label: "Open as page", action: beside ? undefined : "list.open", run: () => navigate(path) };
+      // ↵'s way first, with ↵; the other way with ⇧↵ (lib/split.ts openWay).
+      const besideFirst = openWay("primary") === "beside";
+      const openPage = {
+        label: "Open as page",
+        action: besideFirst ? "list.beside" : "list.open",
+        run: () => navigate(path),
+      };
       const openBeside = {
         label: wide ? "Open beside" : "Preview",
-        action: beside ? "list.open" : "list.beside",
+        action: besideFirst ? "list.open" : "list.beside",
         run: () => openSplit(key, { from: rect() }),
       };
       // The phone has no beside: a session opened "beside" is its page (lib/split.ts).
       return [
-        ...(wide ? (beside ? [openBeside, openPage] : [openPage, openBeside]) : [openPage]),
+        ...(wide ? (besideFirst ? [openBeside, openPage] : [openPage, openBeside]) : [openPage]),
         wide && {
           label: "Open in background tab",
           action: "list.background",
@@ -797,7 +803,11 @@ const FeedRow = memo(function FeedRow({
           data-nav-item=""
           title={`${title} · ${e.session.id}`}
           plainClick={beside ? () => openSplit(key, { from: rect() }) : undefined}
-          modClick={(o) => openSplit(key, { from: rect(), background: o.background })}
+          modClick={(o) => {
+            const way = openWay(o.background ? "background" : "other");
+            if (way === "page") navigate(path);
+            else openSplit(key, { from: rect(), background: way === "background" });
+          }}
         >
           <LabelDot session={key} />
           <span className="ev-title ellipsis">{title}</span>

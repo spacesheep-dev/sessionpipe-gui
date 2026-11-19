@@ -15,7 +15,7 @@ import { back, navigate, parseRoute, usePath } from "./router";
 import { cycleLens } from "./settings";
 import { installDispatcher, isTyping, registerHandler, useShortcut } from "./shortcuts";
 import { isPlain, useSkins } from "./skins";
-import { openSplit } from "./split";
+import { openSplit, openWay } from "./split";
 import { setSkin, setTheme, useSettings } from "./theme";
 import { rememberToastReturn, returnFromToasts } from "./toasts";
 
@@ -172,10 +172,11 @@ export interface ListNavOptions {
   open?: (index: number) => boolean;
 }
 
-/** A cursor over a list of hrefs, moved by the list actions; Enter opens the one under it,
- *  shift+Enter opens it beside the page when `keys` (session keys, same order) are given,
- *  mod+Enter beside as a background tab. The list's items carry `data-nav-item` (one tab
- *  stop; the arrows walk them) and the cursor item `data-cursor`. */
+/** A cursor over a list of hrefs, moved by the list actions; Enter opens the one under it
+ *  the way Settings says, shift+Enter the other way, mod+Enter as a background tab (beside
+ *  needs `keys`, session keys in the same order; without them it is the page). The list's
+ *  items carry `data-nav-item` (one tab stop; the arrows walk them) and the cursor item
+ *  `data-cursor`. */
 export function useListNav(hrefs: string[], enabled = true, keys?: string[], opts: ListNavOptions = {}) {
   const path = usePath().split("?")[0] ?? "/";
   const [cursor, setCursor] = useState(() => {
@@ -233,22 +234,24 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
   };
   useShortcut("list.down", () => (hrefs.length ? move(1) : false), { enabled });
   useShortcut("list.up", () => (hrefs.length ? move(-1) : false), { enabled });
-  const open = (mode: "page" | "beside" | "background") => {
-    const href = hrefs[cursor];
+  const open = (mode: "page" | "beside" | "background", at = cursor) => {
+    const href = hrefs[at];
     if (!href) return false;
-    if (opts.open) return opts.open(cursor);
-    const key = keys?.[cursor];
+    if (opts.open) return opts.open(at);
+    const key = keys?.[at];
     if (mode !== "page" && key) {
       openSplit(key, {
-        from: document.querySelector(`[data-cursor="${cursor}"]`)?.getBoundingClientRect(),
+        from: document.querySelector(`[data-cursor="${at}"]`)?.getBoundingClientRect(),
         background: mode === "background",
       });
     } else navigate(href);
     return true;
   };
-  useShortcut("list.open", () => open("page"), { enabled });
-  useShortcut("list.beside", () => open("beside"), { enabled });
-  useShortcut("list.background", () => open("background"), { enabled });
+  // ↵ opens the way Settings says, ⇧↵ the other way, ⌘↵ in a background tab (lib/split.ts
+  // openWay), so each does what the row's menu shows beside it.
+  useShortcut("list.open", () => open(openWay("primary")), { enabled });
+  useShortcut("list.beside", () => open(openWay("other")), { enabled });
+  useShortcut("list.background", () => open(openWay("background")), { enabled });
   // Space: the row beside the page, the focus staying on the list (Quick Look).
   useShortcut(opts.peek ?? "board.peek", () => (opts.peek && keys?.[cursor] ? open("beside") : false), {
     enabled: enabled && !!opts.peek,
@@ -289,8 +292,7 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
   // ⌘1–9, the installed app only: the nth row of the list as it stands.
   const jump = (i: number) => () => {
     if (!installedApp() || inPanel() || !hrefs[i]) return false;
-    if (opts.open) return opts.open(i);
-    navigate(hrefs[i]!);
+    return open(openWay("primary"), i);
   };
   useShortcut("list.jump1", jump(0), { enabled });
   useShortcut("list.jump2", jump(1), { enabled });

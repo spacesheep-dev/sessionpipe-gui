@@ -24,7 +24,7 @@ import { canMark, isUnread, notifyMenu, setUnread } from "./marks";
 import { accountMode, accountSessionUrl, receiverOrigin } from "./net";
 import { hrefFor, navigate, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath } from "./router";
 import { getSettings } from "./settings";
-import { closeTab, openSplit, parseSplit } from "./split";
+import { closeTab, openSplit, openWay, parseSplit } from "./split";
 
 export { copyText };
 
@@ -95,19 +95,23 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
   // e and ⇧E are the board's (useHideKeys); another list shows Hide without them.
   const onBoard = location.pathname === "/";
   const phone = phoneLayout();
-  const beside = getSettings().openSessions === "beside";
+  // On a list ↵ and ⇧↵ go the two ways (lib/split.ts openWay): the item ↵ does comes first
+  // and carries ↵, the other ⇧↵. The phone keeps the order Settings says.
+  const keyFor = (way: "page" | "beside") =>
+    !list ? undefined : openWay("primary") === way ? "list.open" : openWay("other") === way ? "list.beside" : undefined;
+  const besideFirst = phone ? getSettings().openSessions === "beside" : openWay("primary") === "beside";
   const openPage: MenuItem | null = onItsPage
     ? null
-    : { label: "Open as page", action: list && !beside ? "list.open" : undefined, run: () => navigate(path) };
+    : { label: "Open as page", action: keyFor("page"), run: () => navigate(path) };
   const openBeside: MenuItem | null =
     isActiveTab || onItsPage
       ? null
       : {
           label: phone ? "Preview" : "Open beside",
-          action: list ? (beside ? "list.open" : "list.beside") : undefined,
+          action: keyFor("beside"),
           run: () => openSplit(s.key),
         };
-  const open: MenuList = beside ? [openBeside, openPage] : [openPage, openBeside];
+  const open: MenuList = besideFirst ? [openBeside, openPage] : [openPage, openBeside];
   const kids = ctx.children ?? [];
   const repo = repoBranch(s);
   const forget = async () => {

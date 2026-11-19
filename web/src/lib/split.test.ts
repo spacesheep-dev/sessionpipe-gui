@@ -4,7 +4,8 @@
 import "../native/test-env";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PHONE_QUERY } from "./device";
-import { agentTabKey, openSplit, parseSplit, restoreSplit, tabPath } from "./split";
+import { setSettings } from "./settings";
+import { agentTabKey, type OpenHow, openSplit, openWay, parseSplit, restoreSplit, tabPath } from "./split";
 
 const g = globalThis as Record<string, unknown>;
 const KEY_TABS = "sessionpipe-gui.splitTabs";
@@ -86,5 +87,45 @@ describe("on the phone", () => {
     expect(where()).toBe("/machines");
     // The mirror is still there for the desktop that made it.
     expect(localStorage.getItem(KEY_TABS)).not.toBeNull();
+  });
+});
+
+describe("openWay: ↵ (primary), ⇧↵ (other) and ⌘↵ (background) through one rule", () => {
+  const HOWS: OpenHow[] = ["primary", "other", "background"];
+  const ways = () => HOWS.map(openWay);
+  afterEach(() => setSettings({ openSessions: "page" }));
+
+  it("on the phone every way is the page, under either setting", () => {
+    phone(true);
+    for (const openSessions of ["page", "beside"] as const) {
+      setSettings({ openSessions });
+      at("/");
+      expect(ways()).toEqual(["page", "page", "page"]);
+    }
+  });
+
+  it("where the panel does not show (Usage, Workflows) every way is the page: no tab out of sight", () => {
+    phone(false);
+    setSettings({ openSessions: "beside" });
+    for (const path of ["/usage", "/workflows"]) {
+      at(path);
+      expect(ways()).toEqual(["page", "page", "page"]);
+    }
+  });
+
+  it("with Beside set ↵ opens beside, ⇧↵ as a page, ⌘↵ in the background", () => {
+    phone(false);
+    setSettings({ openSessions: "beside" });
+    for (const path of ["/", "/inbox", "/feed"]) {
+      at(path);
+      expect(ways()).toEqual(["beside", "page", "background"]);
+    }
+  });
+
+  it("with As a page set ↵ opens the page, ⇧↵ beside, ⌘↵ in the background", () => {
+    phone(false);
+    setSettings({ openSessions: "page" });
+    at("/");
+    expect(ways()).toEqual(["page", "beside", "background"]);
   });
 });

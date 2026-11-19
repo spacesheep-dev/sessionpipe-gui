@@ -293,7 +293,8 @@ function StepRow({
       action: "list.open",
       run: () => navigate(sessionPath(splitKey(key).harness, splitKey(key).id)),
     },
-    key && wideLayout() && { label: "Open beside", action: "list.beside", run: () => openSplit(key) },
+    // No ⇧↵ here: the panel does not show on a run's page, so ⇧↵ opens the page (lib/split.ts openWay).
+    key && wideLayout() && { label: "Open beside", run: () => openSplit(key) },
     s.status === "done" && s.reply && { label: "Copy the reply", run: () => copyText(s.reply!) },
     s.text && { label: "Copy the prompt", run: () => copyText(s.text!) },
     { sep: true },

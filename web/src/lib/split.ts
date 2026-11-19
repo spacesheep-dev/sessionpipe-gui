@@ -28,6 +28,7 @@ import {
   usePath,
   useSearchParam,
 } from "./router";
+import { getSettings } from "./settings";
 import { AGENT_TAB_SEP, dropTab, isKey, parseSplit, type SplitState, splitParams } from "./splitState";
 
 export { AGENT_TAB_SEP, agentTabKey, parseSplit, type SplitState } from "./splitState";
@@ -277,6 +278,22 @@ export function useSplit(): SplitState {
  *  session beside it reads as broken. */
 const BESIDE = new Set(["board", "inbox", "search", "feed", "review", "machines", "session", "theme"]);
 export const panelBeside = (path: string): boolean => BESIDE.has(parseRoute(path).name);
+
+/** How an open was asked for: "primary" is a plain click or ↵, "other" holds ⇧ (⇧↵), and
+ *  "background" holds ⌘ (⌘↵). */
+export type OpenHow = "primary" | "other" | "background";
+
+/** The one rule for where a session opens: "primary" goes the way Settings › Open sessions
+ *  says, "other" the other way, and "background" is a tab that does not take the panel.
+ *  Where the panel cannot show (the phone, Usage, Workflows, Shortcuts…) every way is the
+ *  page, so no tab opens out of sight. Callers keep their own extras (where it animates
+ *  from, a #seq, a file) and only ask which way. */
+export function openWay(how: OpenHow): "page" | "beside" | "background" {
+  if (phoneLayout() || !panelBeside(location.pathname)) return "page";
+  if (how === "background") return "background";
+  const beside = getSettings().openSessions === "beside";
+  return (how === "primary") === beside ? "beside" : "page";
+}
 
 /** Whether the panel shows on the current page (its tabs stay in the URL either way). */
 export function usePanelHere(): boolean {

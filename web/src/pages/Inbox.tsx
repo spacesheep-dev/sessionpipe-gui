@@ -50,7 +50,7 @@ import { setupLabel } from "../control/signer";
 import { answerState, useSessionSend } from "../control/useSend";
 import { type OpenAttention, useAppState, useFirstLoad, useLabels, useOpenAttentions, useStore } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
-import { phoneLayout, usePhoneLayout } from "../lib/device";
+import { usePhoneLayout } from "../lib/device";
 import {
   ATTENTION_LABEL,
   askFitsRow,
@@ -445,7 +445,7 @@ function InboxRow({
         className="inbox-main"
         data-nav-item=""
         onClick={(e) => open(e.metaKey || e.ctrlKey)}
-        title={phoneLayout() ? "Open the session" : "Open the session beside this page"}
+        title="Open the session"
         {...prefetchProps(store, s)}
       >
         <span className="inbox-lead">
