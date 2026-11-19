@@ -209,9 +209,6 @@ could not read.
   to ten minutes), and an answer that keeps coming, such as a large picture on a slow
   downlink, is read for as long as it does. An answer that stops for 15 seconds is still
   cut off.
-
-### Fixed
-
 - **New session on a computer reached through spacesheep offers only folders spacesheep
   takes.** It used to offer a recent session's `~/…` folder, which spacesheep refused
   ("only lets the agent work in"); now it offers the computer's own folders and recent
