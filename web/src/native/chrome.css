@@ -16,6 +16,10 @@ html[data-shell="macos"] {
 
 /* The Mac conventions the web already keeps (base.css: the arrow on every control, no
    ring after a click, chrome not selectable) hold here unchanged; the window adds: */
+/* Focus stays the ink here too, not the system accent: the shell's WKWebView resolves
+   -apple-system-control-accent and AccentColor to a fixed blue whatever Appearance › Accent
+   says (only the private _useSystemAppearance view setting lets one follow, and it misses
+   live changes), so a rule here would paint every Mac blue, the person's choice or not. */
 /* No rubber-band of the whole window past the page's ends: the page scrolls, the window
    holds still, as an AppKit scroll view under a fixed title bar does. */
 html[data-shell="macos"],
