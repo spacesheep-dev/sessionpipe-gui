@@ -6,7 +6,7 @@
 // under them. When none is left the reset takes the bar's place; a report older than 15
 // minutes says how old there instead. The line's tooltip has every window; a click opens
 // the account on /usage. Drawn in the wide sidebar only, while there are numbers and this
-// device has not hidden it (Settings › General). A machine that switches between pooled
+// device has not hidden it (Settings › General); wherever it is not, Usage is a sidebar row. A machine that switches between pooled
 // accounts takes one line, its current account's, and those accounts take none of their own
 // (lib/glance.ts). The accounts as both surfaces list them, and their menu, live here too.
 import type { LimitsEntry, MachineSummary } from "@shared/api";
@@ -122,16 +122,29 @@ function useLines(): number {
   return tall ? 4 : short ? 0 : 2;
 }
 
-export function UsageGlance({ here }: { here: boolean }) {
+/** The block's lines and whether it is drawn: there are numbers, this device has not
+ *  hidden it, and the window has the height. */
+function useGlance() {
   const on = useAppSettings().usageInSidebar;
   const { accounts, short } = useReported();
   const machines = useMachines();
   const limits = useLimits();
   const all = useMemo(() => glanceLines(accounts, machines, limits), [accounts, machines, limits]);
+  const lines = useLines();
+  return { shown: on && all.length > 0 && lines > 0, all, short, machines, lines };
+}
+
+/** Whether the block would draw (in the wide sidebar): where it does not, the sidebar
+ *  has a Usage row instead (Shell.tsx). */
+export function useGlanceShown(): boolean {
+  return useGlance().shown;
+}
+
+export function UsageGlance({ here }: { here: boolean }) {
+  const { shown, all, short, machines, lines } = useGlance();
   // Resets count down and passed ones turn to "Reset" without a new report.
   const now = useNow("coarse");
-  const lines = useLines();
-  if (!on || all.length === 0 || lines === 0) return null;
+  if (!shown) return null;
   const more = all.length - lines;
   return (
     <section className="glance" aria-label="Usage">

@@ -102,7 +102,6 @@ test.describe("phone", () => {
       inbox: ".inbox",
       feed: "ol.rows",
       machines: "section.machine",
-      connect: ".sect--phone",
     };
     const bar = page.locator("nav.tabbar");
     const onBar = (
@@ -117,7 +116,7 @@ test.describe("phone", () => {
       await expect(bar.locator("a[aria-current='page']")).toHaveAttribute("data-nav", key);
     }
     // The pages past the fourth sit behind More, which then carries the current mark.
-    const behindMore = ["inbox", "feed", "review", "machines", "connect"].filter((k) => !onBar.includes(k));
+    const behindMore = ["inbox", "feed", "review", "machines"].filter((k) => !onBar.includes(k));
     for (const key of behindMore) {
       await bar.getByRole("button", { name: "More" }).click();
       await page.getByRole("dialog", { name: "More" }).locator(`a[data-nav='${key}']`).click();

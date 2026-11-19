@@ -88,16 +88,6 @@
   cursor: pointer;
 }
 
-/* The divider on the rail above the first experimental view: a hairline, nothing else
-   (the word is in the tooltip; a label here ate the narrow rail). */
-.rail-group {
-  display: block;
-  height: 0;
-  margin: 12px 12px;
-  border: 0;
-  border-top: var(--hairline) solid var(--line);
-}
-
 /* A theme's own icon on the rail: the manifest's inline SVG, sized like ours. */
 .nav-glyph--svg {
   display: block;

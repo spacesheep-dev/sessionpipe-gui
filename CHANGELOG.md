@@ -319,6 +319,17 @@ pairing link that carries the board's key only for a pairing the sink token star
 - **A row whose last tool failed has its ✕ just before the time,** "✕ 3 s", as a
   subagent's row has it. It sat somewhere in the row's empty middle on a wide window, and
   under the time on a phone. With Show counts on it stays in the errors column.
+- **The sidebar's groups are set off by hairlines, and Simple keeps to the daily places.**
+  Board, Inbox and Search, then (in Advanced) Feed and Review, then Workflows and Machines,
+  then the views. Simple leaves the experimental views (Canvas, Office) to Advanced, ⌘K
+  and the Views page; their `g 1` … `g 9` keys stay the same in both modes. Connect is no
+  longer a row, here or in the phone's More: it is Machines' Connect…, ⌘K and `g c`.
+  Setup is "Finish setup", at the foot of the list while steps remain.
+- **Usage is always in the sidebar.** Where its lines are not drawn (the icon-only
+  sidebar, Usage in the sidebar turned off, no numbers yet, a short window) it is a Usage
+  row after Machines.
+- **The sidebar and the Settings list are set as a Mac's are: 13 px regular.** The fill
+  marks the selected row, so its label keeps the others' weight, and the icons are 16 px.
 
 ### Fixed
 

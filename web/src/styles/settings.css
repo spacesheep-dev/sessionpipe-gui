@@ -287,8 +287,8 @@
   border-radius: var(--radius);
   text-align: left;
   color: var(--fg);
-  font-size: var(--text-md);
-  font-weight: 500;
+  font-size: var(--text-sm);
+  font-weight: 400;
   white-space: nowrap;
   transition: background-color var(--dur-fast) var(--ease-out);
 }

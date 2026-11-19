@@ -95,9 +95,19 @@ test("the sidebar says what each account has left, in the wide sidebar only", as
   await expect(studio.locator(".glance-out")).toHaveText("None left");
   await expect(studio.locator(".glance-sub")).toHaveText(/^resets in /);
   await expect(block).not.toContainText("used");
+  // The lines are the way in, so there is no Usage row beside them.
+  await expect(page.locator(".rail-nav [data-nav=usage]")).toHaveCount(0);
 
+  // The icon rail has no room for the lines: Usage is a row there, after Machines.
   await page.setViewportSize({ width: 1000, height: 800 });
   await expect(page.locator(".glance")).toHaveCount(0);
+  const row = page.locator(".rail-nav > a[data-nav=usage]");
+  await expect(row).toBeVisible();
+  await expect(page.locator(".rail-nav > a[data-nav=machines] + a")).toHaveAttribute("data-nav", "usage");
+  await expect(row).toHaveAttribute("data-tip", /^Usage {3}G U$/i);
+  await row.click();
+  await expect(page).toHaveURL(/\/usage$/);
+  await expect(row).toHaveAttribute("aria-current", "page");
 });
 
 test("with no numbers there is no sidebar block, and the page says how to get them", async ({ context, page }) => {
@@ -260,9 +270,13 @@ test("the sidebar line's menu, its tooltip, and hiding it until Settings brings 
   ]);
   await menu.getByRole("menuitem", { name: "Hide usage in the sidebar" }).click();
   await expect(page.locator(".glance")).toHaveCount(0);
+  // The page is not lost with its lines: Usage is a row of the sidebar's instead.
+  const row = page.locator(".rail-nav > a[data-nav=usage]");
+  await expect(row).toHaveText("Usage");
   await page.reload();
   await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
   await expect(page.locator(".glance")).toHaveCount(0);
+  await expect(row).toBeVisible();
 
   await page.goto("/settings");
   const toggle = page.getByRole("switch", { name: "Usage in the sidebar" });
@@ -270,6 +284,7 @@ test("the sidebar line's menu, its tooltip, and hiding it until Settings brings 
   await toggle.click();
   await page.keyboard.press("Escape");
   await expect(page.locator(".glance")).toBeVisible();
+  await expect(row).toHaveCount(0);
   await dev.click();
   await expect(page).toHaveURL(/\/usage#pool%3Alab-mac$/);
 });

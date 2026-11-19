@@ -184,6 +184,54 @@ test.describe("settings dialog", () => {
     await expect(page.locator("nav.rail a[data-nav='feed']")).toBeVisible();
   });
 
+  test("the sidebar's groups are set off by hairlines, and its rows are 13 px regular, selected too", async ({
+    page,
+  }) => {
+    // The rows and the hairlines, in order, the views' own aside.
+    const order = () =>
+      page
+        .locator("nav.rail .rail-nav > :is(a, hr)")
+        .evaluateAll((els) =>
+          els
+            .map((el) => (el.tagName === "HR" ? "hr" : el.getAttribute("data-nav")))
+            .filter((k) => !k?.startsWith("t:")),
+        );
+    await openBoard(page);
+    expect((await order()).slice(0, 10)).toEqual([
+      "board",
+      "inbox",
+      "search",
+      "hr",
+      "feed",
+      "review",
+      "hr",
+      "workflows",
+      "machines",
+      "hr",
+    ]);
+    await expect(page.locator("nav.rail a[data-nav='connect']")).toHaveCount(0);
+    // Simple is Advanced less its middle group: no row stands alone between two lines.
+    await page.evaluate(() => localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ mode: "simple" })));
+    await openBoard(page);
+    expect((await order()).slice(0, 7)).toEqual(["board", "inbox", "search", "hr", "workflows", "machines", "hr"]);
+    // Finder's sidebar type: 13 px, regular weight, the selected row too; 16 px glyphs.
+    const type = await page.locator("nav.rail .rail-nav > a.nav-link").evaluateAll((els) =>
+      els.map((el) => {
+        const glyph = el.querySelector(".nav-glyph")!.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        return `${s.fontSize} ${s.fontWeight} ${glyph.width}x${glyph.height}`;
+      }),
+    );
+    expect(new Set(type)).toEqual(new Set(["13px 400 16x16"]));
+    await expect(page.locator("nav.rail a[data-nav='board']")).toHaveAttribute("aria-current", "page");
+    // So is the Settings window's section list.
+    await openPage(page, "/settings");
+    const tabs = await dialog(page)
+      .getByRole("tab")
+      .evaluateAll((els) => els.map((el) => `${getComputedStyle(el).fontSize} ${getComputedStyle(el).fontWeight}`));
+    expect(new Set(tabs)).toEqual(new Set(["13px 400"]));
+  });
+
   test("the lens chip picks from a menu; at lens 1 the board hides snippets and says so", async ({ page }) => {
     await openBoard(page);
     const chip = page.locator(".lens-chip-btn");

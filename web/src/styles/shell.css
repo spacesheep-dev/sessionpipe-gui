@@ -351,9 +351,6 @@
   display: none;
 }
 @media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
-  .boot .rail-nav > :is([data-boot="feed"], [data-boot="machines"]) {
-    margin-top: 12px;
-  }
   .boot .bar-below {
     display: none;
   }
@@ -435,10 +432,9 @@
     gap: 2px;
     padding: 8px 6px;
   }
-  /* Groups are spacing, not lines: Board and Inbox, Feed and Review, then the rest. */
-  .rail-nav > [data-nav="feed"],
-  .rail-nav > [data-nav="machines"] {
-    margin-top: 12px;
+  /* Finish setup sits at the foot of the list, so the rows above never move for it. */
+  .rail-nav > .nav-link--pinned {
+    margin-top: auto;
   }
   /* The rail's links and the sidebar's rows show their fill at once under a press and
      let it go over --dur-release. */
@@ -481,7 +477,7 @@
     top: 8px;
     left: calc(50% + 7px);
   }
-  /* The views: a hairline in the rail; in the sidebar a section label instead. */
+  /* A hairline between groups; in the sidebar the views' groups carry a label under it. */
   .rail-group {
     width: 32px;
     margin: 10px auto;
@@ -544,13 +540,17 @@
     gap: 8px;
     min-height: var(--side-row);
     padding: 0 8px;
-    font-size: var(--text-md);
-    font-weight: 500;
+    font-size: var(--text-sm);
+    font-weight: 400;
   }
   .shell--side .rail .nav-glyph {
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
     color: var(--fg-3);
+  }
+  .shell--side .rail .nav-glyph--svg svg {
+    width: 16px;
+    height: 16px;
   }
   .shell--side .rail .nav-link--on .nav-glyph {
     color: var(--fg);
@@ -563,12 +563,18 @@
     position: static;
     margin-left: auto;
   }
-  .shell--side .rail-group {
+  /* "Finish setup" says it: the dot is the icon rail's. */
+  .shell--side .rail [data-nav="setup"] .nav-dot {
     display: none;
+  }
+  .shell--side .rail-group {
+    display: block;
+    width: auto;
+    margin: 6px 8px;
   }
   .shell--side .rail-section {
     display: block;
-    margin: 16px 0 4px;
+    margin: 2px 0 4px;
     padding: 0 8px;
     color: var(--fg-3);
     font-size: var(--text-xs);

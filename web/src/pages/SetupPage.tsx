@@ -162,7 +162,7 @@ export function Setup() {
       )}
       {s && done && (
         <p className="caption setup-extras" data-setup-extras>
-          Canvas and Office are already in; the ping-a-human plugin is one click on the{" "}
+          Canvas, Office and more are on the{" "}
           <Link to="/themes" className="setup-extras-link">
             Views page
           </Link>

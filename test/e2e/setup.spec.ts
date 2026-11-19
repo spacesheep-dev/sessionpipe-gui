@@ -69,9 +69,16 @@ test.describe("setup on the demo server (TLS off)", () => {
     await expect(steps.nth(5).locator(".step-needs")).toHaveCount(0);
     await expect(page.locator("[data-setup-done]")).toHaveCount(0);
     await expect(page.locator("[data-setup-skip]")).toBeVisible();
-    // The rail shows the entry with its dot while steps remain.
-    await expect(page.locator(".rail [data-nav=setup]")).toBeVisible();
-    await expect(page.locator(".rail [data-nav=setup] .nav-dot")).toBeVisible();
+    // The sidebar ends with "Finish setup" while steps remain, the words and no dot; the
+    // icon rail has room for no words, so it keeps the dot.
+    const entry = page.locator(".rail [data-nav=setup]");
+    await expect(entry).toHaveText("Finish setup");
+    await expect(page.locator(".rail-nav > [data-nav]").last()).toHaveAttribute("data-nav", "setup");
+    await expect(entry.locator(".nav-dot")).toBeHidden();
+    await page.setViewportSize({ width: 1100, height: 800 });
+    await expect(entry.locator(".nav-dot")).toBeVisible();
+    await expect(entry).toHaveAttribute("data-tip", /^Finish setup {3}G S$/i);
+    await page.setViewportSize({ width: 1440, height: 900 });
     // "Why isn't this done?" folds open to the facts.
     await steps.nth(1).locator("summary").click();
     await expect(steps.nth(1).locator(".step-facts")).toContainText("TLS mode");

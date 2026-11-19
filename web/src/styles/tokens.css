@@ -31,8 +31,9 @@
     "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
 
   /* The scale, in rem so the text-size setting multiplies it: 12 for tab labels and
-     badges, 13 for meta and toolbars, 14 for everything a person reads, 15 for the page
-     title, 18 only for the phone's large title (×1.55) and the pairing digits. Three
+     badges, 13 for meta, toolbars and sidebar rows (a list item, regular weight; the fill
+     marks the selection), 14 for everything a person reads, 15 for the page title, 18
+     only for the phone's large title (×1.55) and the pairing digits. Three
      weights: 400 to read, 500 for a control's label, 600 for a title. Mono sets 0.925 of
      the text around it (base.css): Geist Mono shares Geist's x-height, and a step down
      keeps its wider letters from reading louder than the line they sit in. */

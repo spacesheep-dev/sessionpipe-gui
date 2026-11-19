@@ -9,8 +9,8 @@
 // it also keeps the status bar on the page's ground (theme-color), scrolls a page to its
 // top when its tab is tapped again, mounts pull to refresh on the list pages
 // (PullRefresh), and shows a dropped stream as a pill under the bar, which that same
-// pull retries. The wide sidebar ends with what each account has left (UsageGlance.tsx),
-// which the phone reaches as More › Usage.
+// pull retries. The wide sidebar ends with what each account has left (UsageGlance.tsx);
+// where those lines are not drawn Usage is a row, and the phone reaches it as More › Usage.
 import type { InstalledTheme } from "@shared/theme-api";
 import { type CSSProperties, Fragment, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
@@ -44,7 +44,7 @@ import { QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { TipHost } from "./Tip";
-import { UsageGlance } from "./UsageGlance";
+import { UsageGlance, useGlanceShown } from "./UsageGlance";
 
 /** Whether Setup had steps to go at the last visit: the rail draws its entry from this
  *  until the status answers, so nothing below it moves ~100 ms after the first paint. A
@@ -151,13 +151,6 @@ const ICON: Record<string, ReactNode> = {
       <path d="M7 17h6" />
     </>
   ),
-  connect: (
-    <>
-      <path d="M8.5 11.5l3-3" />
-      <path d="M7 13l-1.5 1.5a2.5 2.5 0 0 1-3.5-3.5L4 9" />
-      <path d="M13 7l1.5-1.5a2.5 2.5 0 0 1 3.5 3.5L16 11" />
-    </>
-  ),
   /* A gauge: how much is left (Usage, a More row on a phone). */
   usage: (
     <>
@@ -227,17 +220,21 @@ interface NavItem {
   /** …the theme's own inline SVG from its manifest. */
   svg?: string;
   experimental?: boolean;
+  /** Its group in the sidebar, which a hairline sets off from the one before: the lists
+   *  (0), Feed and Review (1), Workflows and Machines (2), the views (3), the experimental
+   *  views (4). None: the entry sits at the foot of the list, apart from the groups. */
+  group?: number;
 }
 
+/* Connect is no entry: it is Machines' "Connect…", ⌘K's and `g c`. */
 const BUILTIN: NavItem[] = [
-  { to: "/", key: "board", label: "Board", glyph: ICON.board },
-  { to: "/inbox", key: "inbox", label: "Inbox", glyph: ICON.inbox },
-  { to: "/search", key: "search", label: "Search", glyph: ICON.search },
-  { to: "/feed", key: "feed", label: "Feed", glyph: ICON.feed },
-  { to: "/review", key: "review", label: "Review", glyph: ICON.review },
-  { to: "/workflows", key: "workflows", label: "Workflows", glyph: ICON.workflows },
-  { to: "/machines", key: "machines", label: "Machines", glyph: ICON.machines },
-  { to: "/connect", key: "connect", label: "Connect", glyph: ICON.connect },
+  { to: "/", key: "board", label: "Board", glyph: ICON.board, group: 0 },
+  { to: "/inbox", key: "inbox", label: "Inbox", glyph: ICON.inbox, group: 0 },
+  { to: "/search", key: "search", label: "Search", glyph: ICON.search, group: 0 },
+  { to: "/feed", key: "feed", label: "Feed", glyph: ICON.feed, group: 1 },
+  { to: "/review", key: "review", label: "Review", glyph: ICON.review, group: 1 },
+  { to: "/workflows", key: "workflows", label: "Workflows", glyph: ICON.workflows, group: 2 },
+  { to: "/machines", key: "machines", label: "Machines", glyph: ICON.machines, group: 2 },
 ];
 
 /** A manifest icon is inline SVG the theme author wrote; it is code of the same trust
@@ -258,42 +255,53 @@ export const themeNavItem = (t: InstalledTheme): NavItem => {
     glyph: PLUG_ICON,
     svg: svg ?? undefined,
     experimental: t.experimental,
+    group: t.experimental ? 4 : 3,
   };
 };
 
-const SETUP_ITEM: NavItem = { to: "/setup", key: "setup", label: "Setup", glyph: ICON.setup };
+/** The words say what is left to do, so the sidebar shows no dot beside them. */
+const SETUP_ITEM: NavItem = { to: "/setup", key: "setup", label: "Finish setup", glyph: ICON.setup };
 
-/** Usage is no rail item (the sidebar's Usage lines lead there): on a phone it is a More
- *  row, after Machines. */
-const USAGE_ITEM: NavItem = { to: "/usage", key: "usage", label: "Usage", glyph: ICON.usage };
+/** Usage is a sidebar row only where its lines are not drawn (the compact rail, the
+ *  setting off, nothing reported yet, a short window), so it is there exactly once; on a
+ *  phone it is a More row. After Machines, else before Finish setup, else last. */
+const USAGE_ITEM: NavItem = { to: "/usage", key: "usage", label: "Usage", glyph: ICON.usage, group: 2 };
 const withUsage = (pages: NavItem[]): NavItem[] => {
-  const at = pages.findIndex((n) => n.key === "connect");
+  const m = pages.findIndex((n) => n.key === "machines");
+  const at = m >= 0 ? m + 1 : pages.findIndex((n) => n.key === "setup");
   return at < 0 ? [...pages, USAGE_ITEM] : [...pages.slice(0, at), USAGE_ITEM, ...pages.slice(at)];
 };
 
 /** The pages Simple mode keeps off the rail (still there through ⌘K and /settings). */
 const ADVANCED_ONLY = new Set(["feed", "review"]);
-/** The pages that are a receiver's own doing (its workflows; its address, token and QR):
- *  not offered where the window shows a spacesheep account, which has no receiver. */
-const RECEIVER_ONLY = new Set(["workflows", "connect"]);
+/** The pages that are a receiver's own doing (its workflows): not offered where the
+ *  window shows a spacesheep account, which has no receiver. */
+const RECEIVER_ONLY = new Set(["workflows"]);
 
 /** The page is the demo: the mock transport runs (mock/index.ts sets the mark), which is
  *  exactly when the yellow bar shows (mock/banner.ts). */
 const inDemo = (): boolean => !!(globalThis as { __sessionpipeMock?: unknown }).__sessionpipeMock;
 
-/** Builtins first (Setup among them while this machine is not set up, and never in the
- *  demo, where nothing is a real machine), then installed themes, the experimental ones of
- *  both after a divider. `simple` drops Feed and Review. */
+/** Builtins first, then installed themes, the experimental ones after a divider, then
+ *  Finish setup while this machine is not set up (never in the demo, where nothing is a
+ *  real machine). `simple` drops Feed, Review and the experimental views. */
 export function navItems(
   themes: readonly InstalledTheme[],
   o: { setup?: boolean; simple?: boolean; account?: boolean } = {},
 ): NavItem[] {
-  const plugins = themes.filter((t) => !t.error && !t.disabled).map(themeNavItem);
+  const plugins = themes
+    .filter((t) => !t.error && !t.disabled)
+    .map(themeNavItem)
+    .filter((n) => !(o.simple && n.experimental));
   const builtin = BUILTIN.filter(
     (n) => !(o.simple && ADVANCED_ONLY.has(n.key)) && !(o.account && RECEIVER_ONLY.has(n.key)),
   );
-  const all = [...builtin, ...(o.setup && !o.account && !inDemo() ? [SETUP_ITEM] : []), ...plugins];
-  return [...all.filter((n) => !n.experimental), ...all.filter((n) => n.experimental)];
+  return [
+    ...builtin,
+    ...plugins.filter((n) => !n.experimental),
+    ...plugins.filter((n) => n.experimental),
+    ...(o.setup && !o.account && !inDemo() ? [SETUP_ITEM] : []),
+  ];
 }
 
 /** A nav item's icon: the theme's own SVG when its manifest has one, else our line icon. */
@@ -415,7 +423,7 @@ function NavEntry({
     <Link
       to={n.to}
       plainClick={here ? (covered ? closeSplit : toTop) : undefined}
-      className={`nav-link ${active ? "nav-link--on" : ""}`}
+      className={`nav-link ${active ? "nav-link--on" : ""} ${n.group === undefined ? "nav-link--pinned" : ""}`}
       aria-current={active ? "page" : undefined}
       data-nav={n.key}
       data-tip={tip ? (keys ? `${n.label}   ${keys}` : n.label) : undefined}
@@ -550,7 +558,11 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   }, [known, showSetup]);
   const simple = useSimple();
   const account = accountMode();
-  const nav = navItems(useThemes().themes, { setup: showSetup, simple, account });
+  const themes = useThemes().themes;
+  const nav = navItems(themes, { setup: showSetup, simple, account });
+  // Every installed view, whichever the mode: `g 1` … `g 9` number them, and the phone's
+  // More lists them.
+  const views = navItems(themes, { setup: showSetup, account }).filter((n) => n.key.startsWith("t:"));
   const phone = usePhoneLayout();
   useResize();
   useThemeColor();
@@ -593,8 +605,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   });
   useNewFromUrl(usePath());
   useStandaloneNewKey();
-  // `g 1` … `g 9`: the n-th installed view, in rail order.
-  const views = nav.filter((n) => n.key.startsWith("t:"));
+  // `g 1` … `g 9`: the n-th installed view, in Advanced's rail order.
   for (let i = 1; i <= 9; i++) {
     useShortcut(`nav.view${i}`, () => {
       const v = views[i - 1];
@@ -658,9 +669,14 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       covered={covers}
     />
   );
-  const firstView = nav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
-  // The tab bar keeps its four; Workflows is a page for the More sheet on a phone.
+  // Usage is in the sidebar once: its lines where they are drawn, a row otherwise.
+  const glance = useGlanceShown() && side && !phone;
+  const railNav = glance ? nav : withUsage(nav);
+  const firstView = railNav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
+  // The tab bar keeps its four; Workflows is a page for the More sheet on a phone. More
+  // lists every view: a phone has no ⌘K or `g` keys to reach the ones Simple leaves off.
   const tabs = nav.filter((n) => n.key !== "workflows").slice(0, TABS);
+  const more = [...nav.filter((n) => !tabs.includes(n) && !n.key.startsWith("t:")), ...views];
   // The app's update, downloaded and waiting ("0.8.5 is ready"): the foot's Settings button marks it.
   const update = useReadyUpdate();
   return (
@@ -693,32 +709,42 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           <ComposeButton className="rail-compose" />
         </div>
         <div className="rail-nav">
-          {nav.map((n, i) => (
-            <Fragment key={n.key}>
-              {i === firstView ? (
-                <div className="rail-section" aria-hidden="true">
-                  Views
-                </div>
-              ) : null}
-              {n.experimental && !nav[i - 1]?.experimental ? (
-                <>
-                  {/* A hairline in the rail; in the sidebar the label below. data-nav keeps the divider's name for the tests. */}
-                  <hr
-                    className="rail-group"
-                    data-nav="experimental"
-                    title="Experimental views"
-                    aria-label="Experimental views"
-                  />
+          {railNav.map((n, i) => {
+            // A hairline where the group changes; Finish setup sits apart, at the foot.
+            const prev = railNav[i - 1];
+            const split = !!prev && n.group !== undefined && n.group !== prev.group;
+            const experimental = n.group === 4 && prev?.group !== 4;
+            return (
+              <Fragment key={n.key}>
+                {split ? (
+                  experimental ? (
+                    /* Named for the rail, where the label below is not shown; data-nav keeps the divider's name for the tests. */
+                    <hr
+                      className="rail-group"
+                      data-nav="experimental"
+                      title="Experimental views"
+                      aria-label="Experimental views"
+                    />
+                  ) : (
+                    <hr className="rail-group" />
+                  )
+                ) : null}
+                {i === firstView ? (
+                  <div className="rail-section" aria-hidden="true">
+                    Views
+                  </div>
+                ) : null}
+                {experimental ? (
                   <div className="rail-section" aria-hidden="true">
                     Experimental
                   </div>
-                </>
-              ) : null}
-              {entry(n, !side)}
-            </Fragment>
-          ))}
+                ) : null}
+                {entry(n, !side)}
+              </Fragment>
+            );
+          })}
         </div>
-        {side && !phone && <UsageGlance here={route.name === "usage"} />}
+        {glance && <UsageGlance here={route.name === "usage"} />}
         <div className="rail-foot">
           <ConnectionPill />
           {!account && (
@@ -767,7 +793,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       </main>
       <nav className="tabbar" aria-label="Pages">
         {tabs.map((n) => entry(n, false))}
-        <MoreTab items={nav.filter((n) => !tabs.includes(n))} active={active} views={views} />
+        <MoreTab items={more} active={active} views={views} />
       </nav>
       {phone && <PhoneConn />}
       {phone && PULL_PAGES.has(route.name) && <PullRefresh main={mainRef} />}
