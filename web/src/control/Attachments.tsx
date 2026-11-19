@@ -211,9 +211,14 @@ export class UploadFailed extends Error {
  *  The board is named as its Info says, once that is in. */
 async function failed(e: unknown): Promise<Error> {
   if (e instanceof UploadFailed || (e instanceof DOMException && e.name === "AbortError")) return e;
-  await hostInfo().catch(() => undefined);
-  const f = uploadWords(e, boardName(hostSeen));
+  const f = uploadWords(e, await boardNow());
   return new UploadFailed(f.words, f.retry);
+}
+
+/** The board an upload's words name, once its Info is in (or as well as it is known). */
+export async function boardNow(): Promise<string> {
+  await hostInfo().catch(() => undefined);
+  return boardName(hostSeen);
 }
 
 /** How one upload is stopped, and hears how far it got. */

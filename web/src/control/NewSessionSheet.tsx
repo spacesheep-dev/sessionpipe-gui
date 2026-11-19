@@ -50,8 +50,8 @@ import { navigate, sessionPath } from "../lib/router";
 import { hintFor, matches, useShortcut } from "../lib/shortcuts";
 import { useNow } from "../lib/time";
 import { START, ThisPhone } from "../native/accountWords";
-import { pictureName, progressWords } from "./Attachments";
-import { controlApi, lastInfo, wrongOriginHere } from "./api";
+import { boardNow, pictureName, progressWords } from "./Attachments";
+import { controlApi, wrongOriginHere } from "./api";
 import { uuid } from "./bytes";
 import { type CommandFields, sendCommand } from "./command";
 import { folderChoices, machineHome, tildify, typedFolder, unnamedHere } from "./folders";
@@ -81,7 +81,7 @@ import {
 import { HEIC_FILE_NOTE, pictureType, ShrinkRefused, type Shrunk, shrinkImage } from "./shrink";
 import { canSign, isCancel, setupLabel, signerKind, signHint, tapWords } from "./signer";
 import { machineBlocked, startGate } from "./startGate";
-import { boardName, nounFor, uploadWords } from "./uploadWords";
+import { nounFor, uploadWords } from "./uploadWords";
 import { notSentWords, PERMISSION_LABEL } from "./words";
 import "./newSessionSheet.css";
 
@@ -479,12 +479,11 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       })
       .then(
         (entry) => patchFile(key, { entry, at: Date.now() }),
-        (e) => {
+        async (e) => {
+          // The board is named as its Info says, which a page opened on ?new=1 may not have read yet.
+          const board = await boardNow();
           if (stop.signal.aborted) return;
-          patchFile(key, {
-            error: "didn't upload",
-            failed: uploadWords(e, boardName(lastInfo()?.hostname), nounFor(f.type)),
-          });
+          patchFile(key, { error: "didn't upload", failed: uploadWords(e, board, nounFor(f.type)) });
         },
       )
       .finally(() => {
