@@ -10,7 +10,8 @@
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  /* The grouped ground, as every document page's: its choices are one inset panel. */
+  background: var(--grouped-ground);
 }
 /* The title bar's band: the lights and the window's drag, nothing else. */
 .welcome-bar {

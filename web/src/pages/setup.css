@@ -3,8 +3,9 @@
    status glyph in the lead (a check that draws itself in once done, a ring in the ink on
    the step to do now, a quiet hollow ring for later ones), the title at 600 as the
    disclosure, one caption that says where the step stands, and only the open step's body
-   under it, indented to the text. Hairlines between steps, inset to the text; on a phone
-   the list is one inset group. No orange anywhere: orange means a prompt needs you. */
+   under it, indented to the text. The list is one inset panel, hairlines between steps
+   inset to the text; on a phone the panel has no edge and 16 px insets. No orange
+   anywhere: orange means a prompt needs you. */
 
 .setup-skip-btn {
   font-weight: 500;
@@ -17,9 +18,11 @@
 .steps {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 12px;
   display: flex;
   flex-direction: column;
+  border-radius: var(--radius-pop);
+  background: var(--bg-2);
 }
 .step {
   position: relative;
@@ -39,9 +42,8 @@
   grid-template-columns: 20px minmax(0, 1fr) 12px;
   column-gap: 12px;
   align-items: start;
-  margin: 0 -8px;
-  padding: 14px 12px 14px 8px;
-  border-radius: var(--radius);
+  margin: 0 -12px;
+  padding: 14px 12px;
   -webkit-user-select: none;
   user-select: none;
   transition: background-color var(--dur-fast) var(--ease-out);
@@ -153,6 +155,15 @@
 }
 .step-body[hidden] {
   display: none;
+}
+/* A list in an open step is plain rows in the panel. */
+.step-body .form-list {
+  padding-left: 0;
+  border-radius: 0;
+  background: none;
+}
+.step-body .form-row {
+  padding-right: 0;
 }
 
 /* ----- the pieces of a step's body ----- */
@@ -432,15 +443,14 @@
   padding: 0;
 }
 
-/* All done: one line and the one button, a hairline above. */
+/* All done: one line and the one button, under the panel. */
 .setup-done {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding-top: 16px;
-  border-top: var(--hairline) solid var(--line);
+  padding: 0 12px;
 }
 .setup-done-text {
   display: flex;
@@ -453,45 +463,37 @@
 .setup-extras code {
   font-family: var(--font-mono);
 }
-/* The steps left can wait: the way to the board, at the end, a hairline above. */
+/* The steps left can wait: the way to the board, at the end, under the panel. */
 .setup-end {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding-top: 16px;
-  border-top: var(--hairline) solid var(--line);
+  padding: 0 12px;
+}
+.setup-extras {
+  padding: 0 12px;
+}
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+  .steps {
+    padding: 0 calc(12px - var(--hairline));
+    border: var(--hairline) solid var(--line);
+  }
+  .step-head {
+    margin: 0 calc(var(--hairline) - 12px);
+    padding: 14px calc(12px - var(--hairline));
+  }
 }
 
-/* ----- the phone: the steps as one inset group ----- */
+/* ----- the phone: the steps touch-sized, the way on under a hairline ----- */
 @media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .steps {
     padding: 0 16px;
-    border-radius: var(--radius-pop);
-    background: var(--bg-2);
-  }
-  .step + .step::before {
-    left: 32px;
   }
   .step-head {
     margin: 0 -16px;
     padding: 14px 16px;
-    border-radius: 0;
-  }
-  .steps > .step:first-child .step-head {
-    border-radius: var(--radius-pop) var(--radius-pop) 0 0;
-  }
-  .steps > .step:last-child:not([data-open]) .step-head {
-    border-radius: 0 0 var(--radius-pop) var(--radius-pop);
-  }
-  .step-body .form-list {
-    padding-left: 0;
-    border-radius: 0;
-    background: none;
-  }
-  .step-body .form-row {
-    padding-right: 0;
   }
   .step-facts > div {
     grid-template-columns: 1fr;
@@ -506,6 +508,11 @@
     padding-left: 16px;
     padding-right: 16px;
   }
+  .setup-done,
+  .setup-end {
+    padding-top: 16px;
+    border-top: var(--hairline) solid var(--line);
+  }
 }
 
 /* A step with nothing to open: a plain row, no hover, no chevron. */
@@ -519,4 +526,12 @@
 }
 .step--flat .step-head:active {
   background: none;
+}
+
+/* The press lights the step to the panel's edge, and its corners at the ends. */
+.steps > .step:first-child .step-head {
+  border-radius: var(--radius-pop) var(--radius-pop) 0 0;
+}
+.steps > .step:last-child:not([data-open]) .step-head {
+  border-radius: 0 0 var(--radius-pop) var(--radius-pop);
 }

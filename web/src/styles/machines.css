@@ -2,24 +2,23 @@
 /* ---------- machines ---------- */
 /* One grouped section per machine (the grouped form, settings.css), in a reading column
    centred in the window as the session page's is: a header row with the name at 600 and
-   "online · last event 1 m" in the meta tier, then Get Info rows. No box; on a phone each
-   section is an inset group. */
+   "online · last event 1 m" in the meta tier, then Get Info rows in an inset panel; on a
+   phone the panel has no edge and 16 px insets. */
 
-.machines {
-  gap: 32px;
-}
 .machines > :not(.bar):not(.bar-below):not(.sr-only) {
   margin-inline: auto;
 }
 /* One machine only: a quiet line after it, the way on in the text. */
 .machines-more {
-  margin-top: -16px;
+  margin-top: -8px;
+  padding: 0 12px;
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
 /* Why nothing can be signed on this address: one line above the machines, said once. */
 .machines-note {
-  margin-bottom: -16px;
+  margin-bottom: -8px;
+  padding: 0 12px;
   color: var(--fg-2);
   font-size: var(--text-sm);
   text-wrap: pretty;
@@ -29,7 +28,7 @@
   align-items: center;
   gap: 10px;
   min-height: 32px;
-  padding-bottom: 4px;
+  padding: 0 12px 6px;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -102,12 +101,21 @@
   min-width: 0;
 }
 @media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+  .machines {
+    gap: 32px;
+  }
   .machine-head {
     padding: 0 16px 6px;
   }
   .machines-more,
   .machines-note {
     padding: 0 16px;
+  }
+  .machines-more {
+    margin-top: -16px;
+  }
+  .machines-note {
+    margin-bottom: -16px;
   }
   .machine-last {
     font-size: var(--text-xs);
@@ -207,6 +215,16 @@
 .machine-line-link:active,
 .machine-more summary:active {
   background: var(--press);
+}
+/* A pressed row is lit to the panel's edge, under the inset its text keeps. */
+.machines .machine-line-link,
+.machine-more summary {
+  margin-left: -12px;
+  padding-left: 12px;
+}
+.machine-line-link:focus-visible,
+.machine-more summary:focus-visible {
+  outline-offset: -2px;
 }
 .machines-chev {
   flex: none;

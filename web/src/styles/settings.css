@@ -3,8 +3,8 @@
 /* The one form grammar of the document pages (Connect, Machines, Setup, Your phone,
    Views, pairing) and the Settings window: a quiet section label, then rows; each row is
    a label (with at most one caption line under it) at the left and its value or control
-   on one trailing edge, hairlines between the rows. A desktop page draws no box; on a
-   phone the rows sit in an inset group on the grouped ground, as iOS Settings does. */
+   on one trailing edge, hairlines between the rows. Each group is an inset panel on the
+   grouped ground at every width; a phone makes the rows touch-sized and the insets 16 px. */
 
 .form-group {
   display: flex;
@@ -160,15 +160,66 @@
   user-select: text;
 }
 
+/* A document page is a grouped form, as the Settings window's pane is: the page and its
+   bar on the grouped ground, each group's rows one inset panel under its head, the
+   group's one caption under the panel. No panel inside a panel: a list in a panel, in a
+   step or beside the Connect QR is plain rows. The page's own stylesheet wins over these
+   (:where), and so does the phone's block below. */
+body:has(.page--grouped),
+.page--grouped > .bar {
+  background: var(--grouped-ground);
+}
+:where(.page--grouped) .form-list {
+  padding-left: 12px;
+  border-radius: var(--radius-pop);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+:where(.page--grouped) :is(.form-list, .steps) .form-list {
+  padding-left: 0;
+  border-radius: 0;
+  background: none;
+}
+/* A well straight on the grouped ground reads as a cell. */
+:where(.page--grouped > .form-group) > .well-row {
+  background: var(--bg-2);
+}
+/* On a desktop the panel has an edge, as a macOS grouped form's does, and its text sits
+   12 px in from it, on the head's and the note's line. */
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+  :where(.page--grouped) .form-list {
+    padding-left: calc(12px - var(--hairline));
+    border: var(--hairline) solid var(--line);
+  }
+  :where(.page--grouped) .form-list:empty {
+    display: none;
+  }
+  :where(.page--grouped) .form-row {
+    padding-right: calc(12px - var(--hairline));
+  }
+  :where(.page--grouped) :is(.form-list, .steps, .connect-phone) .form-list {
+    padding-left: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+  }
+  :where(.page--grouped) :is(.form-list, .steps, .connect-phone) .form-list .form-row {
+    padding-right: 0;
+  }
+  :where(.page--grouped) .form-head {
+    padding: 0 12px 6px;
+  }
+  :where(.page--grouped) .form-group > :is(.caption, .page-note) {
+    padding-inline: 12px;
+  }
+  :where(.page--grouped > .form-group) > .well-row {
+    box-shadow: inset 0 0 0 var(--hairline) var(--line);
+  }
+}
+
 @media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   /* The document pages read as iOS grouped lists: the page on the grouped ground, each
      group an inset of cells, separators inset to the text. */
-  body:has(.page--grouped) {
-    background: var(--grouped-ground);
-  }
-  .page--grouped > .bar {
-    background: var(--grouped-ground);
-  }
   /* A text button in a navigation bar, as iOS draws one: the words in the tint, no bezel. */
   .page--grouped > .bar .bar-actions .btn {
     border-color: transparent;
@@ -204,10 +255,6 @@
   }
   .form-row--stack .well-row {
     background: var(--bg-3);
-  }
-  /* A well straight on the grouped ground reads as a cell. */
-  .page--grouped > .form-group > .well-row {
-    background: var(--bg-2);
   }
 }
 

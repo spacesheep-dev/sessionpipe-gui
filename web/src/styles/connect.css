@@ -3,12 +3,10 @@
 /* The grouped form (settings.css), in a reading column centred in the window: the QR at
    160 px beside its addresses, each row a name, the address in mono and a copy icon; the
    sink line in a one-line well with its tier menu beside it; the rest folded to one-line
-   summaries that open in place. The QR stays on its own light ground so a camera reads
-   it in both schemes. */
+   summaries that open in place. On a desktop the QR and its addresses are one inset panel,
+   its caption under it, and each fold a one-row panel. The QR stays on its own light
+   ground so a camera reads it in both schemes. */
 
-.connect {
-  gap: 32px;
-}
 .connect > :not(.bar):not(.bar-below):not(.sr-only) {
   margin-inline: auto;
 }
@@ -192,10 +190,11 @@
   .url-label {
     min-width: 0;
   }
-  .connect-remote .cmdwell,
-  .sect--machine .cmdwell {
-    background: var(--bg-2);
-  }
+}
+/* A well straight on the grouped ground reads as a cell. */
+.connect-remote .cmdwell,
+.sect--machine .cmdwell {
+  background: var(--bg-2);
 }
 
 /* The key is the address's tail: quiet, and the first to give way. */
@@ -217,16 +216,15 @@
 }
 
 /* A group folded to one line (Connect.tsx Fold): the name, its state in the meta tier, a
-   chevron that turns as it opens. The row is the button: on a desktop a plain row on a
-   hairline, as a Finder disclosure is; on a phone an inset group row. The folds sit
-   close, one list of four. */
+   chevron that turns as it opens. The row is the button and a one-row inset panel; an
+   opened group's rows hang under it in the same panel. The folds sit close, 8 px apart. */
 .fold {
   gap: 0;
 }
 .connect > .fold + .fold,
 .connect-fold > .fold:first-child,
 .connect-fold > .fold + .fold {
-  margin-top: -32px;
+  margin-top: -16px;
 }
 .connect-advanced + .connect-fold > .fold:first-child {
   margin-top: 0;
@@ -242,13 +240,7 @@
   width: 100%;
   min-height: 44px;
   padding: 0;
-  box-shadow: 0 var(--hairline) 0 var(--line);
   text-align: left;
-}
-.sect--passkeys .fold-head {
-  box-shadow:
-    0 calc(-1 * var(--hairline)) 0 var(--line),
-    0 var(--hairline) 0 var(--line);
 }
 @media (hover: hover) {
   .fold-head:hover .fold-sum {
@@ -316,7 +308,47 @@
   font-size: var(--text-sm);
 }
 
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+  .connect-phone {
+    padding: calc(12px - var(--hairline));
+    border: var(--hairline) solid var(--line);
+    border-radius: var(--radius-pop);
+    background: var(--bg-2);
+  }
+  .connect-remote .cmdwell,
+  .sect--machine .cmdwell {
+    box-shadow: inset 0 0 0 var(--hairline) var(--line);
+  }
+  .fold-head {
+    padding: 0 calc(12px - var(--hairline));
+    border: var(--hairline) solid var(--line);
+    border-radius: var(--radius-pop);
+    background: var(--bg-2);
+  }
+  /* Opened, the group's rows hang from the head in its panel, on a separator inset to
+     the text. */
+  .fold[data-open] .fold-head {
+    border-bottom-width: 0;
+    border-radius: var(--radius-pop) var(--radius-pop) 0 0;
+  }
+  .fold[data-open] .fold-body {
+    padding-top: 0;
+  }
+  .fold-body > .form-list {
+    border-top-width: 0;
+  }
+  .fold-body > .form-list > :first-child {
+    border-top: var(--hairline) solid var(--line);
+  }
+  .fold-body > .caption {
+    padding: 0 12px;
+  }
+}
+
 @media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+  .connect {
+    gap: 32px;
+  }
   /* On a phone an address is host:port; the scheme and the key ride along in Copy. */
   .url-scheme,
   .url-row .url-key {
@@ -329,13 +361,11 @@
   .connect-sink > .connect-tier {
     align-self: flex-end;
   }
-  .fold-head,
-  .sect--passkeys .fold-head {
+  .fold-head {
     width: 100%;
     margin: 0;
     padding: 0 16px;
     border-radius: var(--radius-pop);
-    box-shadow: none;
     background: var(--bg-2);
   }
   .fold-head:active {

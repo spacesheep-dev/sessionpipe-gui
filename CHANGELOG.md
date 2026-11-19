@@ -330,6 +330,13 @@ pairing link that carries the board's key only for a pairing the sink token star
   row after Machines.
 - **The sidebar and the Settings list are set as a Mac's are: 13 px regular.** The fill
   marks the selected row, so its label keeps the others' weight, and the icons are 16 px.
+- **On a computer, each group on Machines, Usage, Connect, Setup, Your phone, Views,
+  Workflows, the pairing pages and the Welcome is a panel of its own**, as in Settings and
+  on the phone: its name above, its rows in a box on the page's grey ground (dark stays
+  dark), its one note under it. One machine's rows no longer run into the next one's, a
+  pool's accounts and their windows are one box, and on Connect the QR and its addresses
+  are one, each folded group one row that opens in its box. Rows keep their height, and
+  the phone looks as it did.
 
 ### Fixed
 

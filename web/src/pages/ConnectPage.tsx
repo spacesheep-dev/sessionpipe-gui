@@ -14,7 +14,7 @@ import { PageBar } from "../components/PageBar";
 import { Select } from "../components/Select";
 import { resetInfoCache } from "../control/api";
 import { useAppState, useStore } from "../data/hooks";
-import { phoneLayout } from "../lib/device";
+import { phoneLayout, usePhoneLayout } from "../lib/device";
 import { bytes } from "../lib/format";
 import { copyText } from "../lib/menus";
 import { Link } from "../lib/router";
@@ -161,6 +161,8 @@ export function Connect() {
   const [qrBroken, setQrBroken] = useState(false);
   const [tier, setTier] = useState<Tier | null>(null);
   const themes = useThemes().themes;
+  // The QR's caption: under its panel on a desktop; on a phone, under the addresses.
+  const phone = usePhoneLayout();
   const setup = useSetupStatus();
   const done = setup.status ? stepsDone(setup.status, false) : null;
   const setupDone = !!done && REQUIRED_STEPS.every((k) => done[k]);
@@ -307,6 +309,12 @@ export function Connect() {
     { title: () => "Sink token" },
   );
 
+  const qrCaption = (
+    <p className="caption">
+      Scan, or open an address on the phone. Copy takes the key with it, which signs the phone in.
+    </p>
+  );
+
   // Until the receiver's info and the setup status are in, only the bar: the groups arrive
   // whole in one frame (~70 ms later), never a half page that grows under the reader.
   if ((!info && !error) || !settled)
@@ -363,11 +371,10 @@ export function Connect() {
               ))}
               {info && <UrlRow label="This machine" url={info.urls.local} className="urls-local" />}
             </ul>
-            <p className="caption">
-              Scan, or open an address on the phone. Copy takes the key with it, which signs the phone in.
-            </p>
+            {phone && qrCaption}
           </div>
         </div>
+        {!phone && qrCaption}
         {info?.remote && (
           <div className="connect-remote" data-connect-remote>
             <div className="form-head">

@@ -229,6 +229,23 @@
 .pending--bar {
   margin-bottom: 12px;
 }
+/* On a desktop the requests are an inset panel like the rest of the page. */
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+  .pending > .section-label {
+    padding: 0 12px;
+  }
+  .pending-list {
+    padding: 0 calc(12px - var(--hairline));
+    border: var(--hairline) solid var(--line);
+    border-radius: var(--radius-pop);
+    background: var(--bg-2);
+  }
+  .step-body .pending-list {
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+}
 @media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   /* On a phone the requests are an inset group like the rest of the page. */
   .pending > .section-label {
