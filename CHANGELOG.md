@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Turn on (the secure address) finds openssl on Windows.** The receiver looked for
+  `openssl` on the PATH only, and neither Git for Windows (its `usr\bin`; only `Git\cmd` is
+  on the PATH) nor `winget install ShiningLight.OpenSSL.Light` (`Program Files\OpenSSL-Win64`,
+  `-ARM` on arm64) puts it there, so Setup kept saying "Needs the openssl command" with
+  either installed. It now also looks in those folders, so an install shows without a PATH
+  change or a restart, and the note says so.
+
 ## [0.8.5] - 2026-11-18
 
 Pictures from a session's message box reach the agent as files in the session's own
