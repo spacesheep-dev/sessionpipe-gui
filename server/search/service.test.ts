@@ -314,6 +314,18 @@ describe("search: shaping", () => {
     const page = svc.search({ q: "webhook since:someday foo:bar" }, local);
     expect(page.parsed.unknown).toEqual(["foo", "since"]);
   });
+
+  it("names each filter value that does not read, and searches without that filter", () => {
+    const page = svc.search({ q: "webhook since:2026-2-1 -until:3days in:everything" }, local);
+    expect(page.parsed.bad).toEqual([
+      { key: "since", value: "2026-2-1" },
+      { key: "until", value: "3days" },
+      { key: "in", value: "everything" },
+    ]);
+    expect(page.parsed.unknown).toEqual(["since", "until", "in"]);
+    expect(page.sessions.map((s) => s.key)).toEqual(svc.search({ q: "webhook" }, local).sessions.map((s) => s.key));
+    expect(svc.search({ q: "webhook since:7d" }, local).parsed.bad).toBeUndefined();
+  });
 });
 
 describe("search: filters and hints", () => {

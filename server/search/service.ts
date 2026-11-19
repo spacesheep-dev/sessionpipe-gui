@@ -316,7 +316,11 @@ export function runSessionSearch(
     available: ctx.available(),
   });
   if (f.bad.length)
-    page.parsed = { ...parsed, unknown: [...parsed.unknown, ...f.bad.filter((k) => !parsed.unknown.includes(k))] };
+    page.parsed = {
+      ...parsed,
+      unknown: [...parsed.unknown, ...f.bad.filter((k) => !parsed.unknown.includes(k))],
+      bad: f.badValues,
+    };
   const engineQuery = {
     parsed,
     sources: f.sources,

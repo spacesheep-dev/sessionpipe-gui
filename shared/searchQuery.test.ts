@@ -7,6 +7,7 @@ import {
   lexSearch,
   parseSearch,
   resolveSearchDate,
+  searchQueryNote,
   setFilter,
   withoutExclusion,
   withoutFilters,
@@ -130,5 +131,37 @@ describe("resolveSearchDate", () => {
   it("refuses what is not a date", () => {
     expect(resolveSearchDate("soon", "start", now, tz)).toBeUndefined();
     expect(resolveSearchDate("2026-13-01", "start", now, tz)).toBeUndefined();
+  });
+});
+
+describe("searchQueryNote", () => {
+  it("names a filter value that does not read, then a key that is not a filter", () => {
+    expect(searchQueryNote({ unknown: ["since"], bad: [{ key: "since", value: "2026-2-1" }] })).toBe(
+      "“since:2026-2-1” isn't a date, so it was left out. Dates: 7d, 12h, today, yesterday, 2026-10, 2026-10-01",
+    );
+    expect(searchQueryNote({ unknown: ["foo", "since"], bad: [{ key: "since", value: "2026-2-1" }] })).toBe(
+      "“since:2026-2-1” isn't a date, so it was left out. Dates: 7d, 12h, today, yesterday, 2026-10, 2026-10-01 " +
+        "“foo:” isn't a filter, so it was searched as text. Filters: agent machine repo label since until in source",
+    );
+    expect(searchQueryNote({ unknown: ["until"], bad: [{ key: "until", value: "3days" }] })).toMatch(
+      /^“until:3days” isn't a date, so it was left out\./,
+    );
+    expect(searchQueryNote({ unknown: ["in"], bad: [{ key: "in", value: "everything" }] })).toBe(
+      "“in:everything” isn't a field, so it was left out. in: prompt reply tool title",
+    );
+    expect(searchQueryNote({ unknown: ["source"], bad: [{ key: "source", value: "mars" }] })).toBe(
+      "“source:mars” isn't an index, so it was left out. source: history sessionpipe",
+    );
+  });
+
+  it("calls only a real unknown key an unknown filter, and says nothing when there is neither", () => {
+    expect(searchQueryNote({ unknown: ["foo"] })).toBe(
+      "“foo:” isn't a filter, so it was searched as text. Filters: agent machine repo label since until in source",
+    );
+    expect(searchQueryNote({ unknown: [] })).toBeUndefined();
+    expect(searchQueryNote({ unknown: [], bad: [] })).toBeUndefined();
+    expect(searchQueryNote({ unknown: ["label"], bad: [{ key: "label", value: "x" }] })).toBe(
+      "“label:x” didn't read, so it was left out",
+    );
   });
 });

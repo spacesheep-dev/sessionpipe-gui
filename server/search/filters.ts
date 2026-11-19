@@ -10,6 +10,7 @@ import {
   type LabelColor,
   type Labels,
   type ParsedSearch,
+  type SearchBadFilter,
   type SearchDocField,
   type SearchFilterKey,
   type SearchSource,
@@ -34,6 +35,8 @@ export interface CompiledFilters {
   sources: SearchSource[];
   /** Filter keys with a value that did not read (`since:someday`). */
   bad: SearchFilterKey[];
+  /** Those values, each with its key, in the order the keys are checked. */
+  badValues: SearchBadFilter[];
 }
 
 /** Lowercase, without a `.local` / `.lan` / `.home` suffix: how machine names compare. */
@@ -83,10 +86,12 @@ function labelColors(v: string, labels: Labels): Set<LabelColor> {
 
 export function compileFilters(p: ParsedSearch, ctx: FilterContext): CompiledFilters {
   const bad: SearchFilterKey[] = [];
+  const badValues: SearchBadFilter[] = [];
   const tests: Test[] = [];
   const host = machineKey(ctx.hostname);
-  const flag = (k: SearchFilterKey) => {
-    if (!bad.includes(k)) bad.push(k);
+  const flag = (key: SearchFilterKey, value: string) => {
+    if (!bad.includes(key)) bad.push(key);
+    if (!badValues.some((b) => b.key === key && b.value === value)) badValues.push({ key, value });
   };
 
   const testFor = (key: SearchFilterKey, v: string): Test | undefined => {
@@ -127,7 +132,8 @@ export function compileFilters(p: ParsedSearch, ctx: FilterContext): CompiledFil
     const neg = p.notFilters[key] ?? [];
     const posTests = pos.map((v) => testFor(key, v));
     const negTests = neg.map((v) => testFor(key, v));
-    if (posTests.some((t) => !t) || negTests.some((t) => !t)) flag(key);
+    for (const [i, v] of pos.entries()) if (!posTests[i]) flag(key, v);
+    for (const [i, v] of neg.entries()) if (!negTests[i]) flag(key, v);
     const okPos = posTests.filter((t): t is Test => t !== undefined);
     const okNeg = negTests.filter((t): t is Test => t !== undefined);
     // Dates narrow (every one must hold); the others name alternatives (any one).
@@ -143,7 +149,7 @@ export function compileFilters(p: ParsedSearch, ctx: FilterContext): CompiledFil
   let fields: (SearchDocField | "title")[] | undefined;
   const inPos = p.filters.in ?? [];
   const inNeg = p.notFilters.in ?? [];
-  for (const v of [...inPos, ...inNeg]) if (!(FIELDS as readonly string[]).includes(v)) flag("in");
+  for (const v of [...inPos, ...inNeg]) if (!(FIELDS as readonly string[]).includes(v)) flag("in", v);
   const posF = FIELDS.filter((f) => inPos.includes(f));
   const negF = FIELDS.filter((f) => inNeg.includes(f));
   if (posF.length || negF.length) {
@@ -155,7 +161,7 @@ export function compileFilters(p: ParsedSearch, ctx: FilterContext): CompiledFil
   // source: → which indexes (and only those that can be read).
   const srcPos = p.filters.source ?? [];
   const srcNeg = p.notFilters.source ?? [];
-  for (const v of [...srcPos, ...srcNeg]) if (!(SOURCES as readonly string[]).includes(v)) flag("source");
+  for (const v of [...srcPos, ...srcNeg]) if (!(SOURCES as readonly string[]).includes(v)) flag("source", v);
   let sources = ctx.available.filter((s) =>
     srcPos.some((v) => SOURCES.includes(v as SearchSource)) ? srcPos.includes(s) : true,
   );
@@ -163,7 +169,7 @@ export function compileFilters(p: ParsedSearch, ctx: FilterContext): CompiledFil
 
   const allow: Test | undefined =
     tests.length === 0 ? undefined : tests.length === 1 ? tests[0] : (s) => tests.every((t) => t(s));
-  return { allow, fields, sources, bad };
+  return { allow, fields, sources, bad, badValues };
 }
 
 /** True when the query sets any filter that narrows the sessions (the "filters" hint). */
