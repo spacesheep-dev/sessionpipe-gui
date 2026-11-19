@@ -699,3 +699,30 @@ describe("what the tray's line says while pictures upload", () => {
     expect(waitingWords(3)).toBe("Waiting for 3 pictures to finish uploading.");
   });
 });
+
+describe("heldPictureUrl", () => {
+  const g = globalThis as Record<string, unknown>;
+  afterEach(() => {
+    delete g.sessionpipeShell;
+    vi.resetModules();
+  });
+  const SHA = "A".repeat(43);
+
+  it("is the receiver's copy of a draft's picture", async () => {
+    vi.resetModules();
+    const { heldPictureUrl } = await import("./Attachments");
+    expect(heldPictureUrl(SHA)).toBe(`/api/ui/control/files/${SHA}`);
+  });
+
+  it("on an account is nothing to load: the tray draws the frame alone", async () => {
+    g.sessionpipeShell = {
+      v: 1,
+      platform: "ios",
+      rxBase: "rx://localhost/acct",
+      receiver: { id: "acct", origin: "https://spacesheep.dev", kind: "spacesheep", email: "you@example.com" },
+    };
+    vi.resetModules();
+    const { heldPictureUrl } = await import("./Attachments");
+    expect(heldPictureUrl(SHA)).toBe("");
+  });
+});

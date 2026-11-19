@@ -85,7 +85,8 @@ export function editAgain(a: ControlActivity, machine: string | undefined): void
     text: a.text ?? "",
     ...(a.permission ? { permission: a.permission } : {}),
     ...(a.model ? { model: a.model } : {}),
-    ...(a.files ? { files: a.files } : {}),
+    // Uploaded before the start was signed: held a day from then at most.
+    ...(a.files ? { files: a.files, filesAt: Date.parse(a.at) || Date.now() } : {}),
   });
 }
 

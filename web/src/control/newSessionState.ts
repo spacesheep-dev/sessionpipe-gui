@@ -30,6 +30,8 @@ export interface NewSessionTarget {
   permission?: RunLevel;
   model?: string;
   files?: StartFile[];
+  /** When `files` were uploaded (ms), where it is known: they are held a day from then. */
+  filesAt?: number;
 }
 
 interface OpenState {

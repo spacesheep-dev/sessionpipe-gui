@@ -33,11 +33,13 @@ export function boardName(hostname?: string): string {
 /** "picture" for one of the four picture types, else "file" (New session takes any file). */
 export const nounFor = (type: string): "picture" | "file" => (type in ATTACHMENT_TYPES ? "picture" : "file");
 
-/** The minutes a Retry-After of `s` seconds says, as words: "a minute", "5 minutes". */
+/** When a Retry-After of `s` seconds says to try again, as words: "in a minute", "in 5
+ *  minutes", and past an hour just "later". */
 const minutes = (s: number | undefined): string => {
-  if (s === undefined || !Number.isFinite(s)) return "a few minutes";
+  if (s === undefined || !Number.isFinite(s)) return "in a few minutes";
   const n = Math.max(1, Math.ceil(s / 60));
-  return n === 1 ? "a minute" : `${n} minutes`;
+  if (n > 60) return "later";
+  return n === 1 ? "in a minute" : `in ${n} minutes`;
 };
 
 /** The app's hub gave up on the receiver's answer: its plain-text sentence (sp-receivers
@@ -70,7 +72,7 @@ export function uploadWords(e: unknown, board: string, noun: "picture" | "file" 
   if (status === 401) return { words: KEY_LOST_SENTENCE, retry: false };
   if (status === 429)
     return {
-      words: `That's a lot of ${noun}s in a short time. Try again in ${minutes(typeof r.retryAfterS === "number" ? r.retryAfterS : undefined)}.`,
+      words: `That's a lot of ${noun}s in a short time. Try again ${minutes(typeof r.retryAfterS === "number" ? r.retryAfterS : undefined)}.`,
       retry: true,
     };
   if (status >= 500 || !status) return { words: `${board} couldn't save the ${noun}. Try again.`, retry: true };

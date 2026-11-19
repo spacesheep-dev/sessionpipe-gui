@@ -107,6 +107,8 @@ export const NOT_WHOLE_WORDS = "The picture didn't arrive whole. Try again.";
 export const FAILED_WORDS = "Remove or retry the picture that didn't upload.";
 /** The same, where trying again can't help (Retry isn't offered). */
 export const REMOVE_WORDS = "Remove the picture that didn't upload.";
+/** A picture uploaded the way this session's machine no longer takes pictures. */
+export const ELSEWHERE_WORDS = "This picture can't go to this machine now. Remove it.";
 /** A file dropped on the session page that is no picture. */
 export const ONLY_PICTURES_WORDS = "Only pictures can be dropped here.";
 /** Send was pressed while pictures still upload: nothing goes until they are in. */
@@ -382,6 +384,8 @@ export interface PendingItem {
   shrinking?: boolean;
   /** The way it goes, as the session's machine took pictures when it was added. */
   via: "files" | "path";
+  /** The machine it was added for, which fetches it. */
+  machine?: string;
   /** The name it goes under: a file's signed name (`pictureName`), else the file's own. */
   name: string;
   /** Its upload has not begun: two run at a time. */
@@ -424,8 +428,11 @@ export const itemState = (it: PendingItem): "error" | "ready" | "shrinking" | "w
           ? "waiting"
           : "uploading";
 
-/** The receiver's copy of a picture it holds (the thumbnail of one brought back from a draft). */
-export const heldPictureUrl = (sha: string): string => apiUrl(`${ROUTES.ui.control}/files/${sha}`);
+/** The receiver's copy of a picture it holds (the thumbnail of one brought back from a
+ *  draft). None on an account: the hub serves no file the receiver holds, so the tray
+ *  draws the frame alone. */
+export const heldPictureUrl = (sha: string): string =>
+  accountMode() ? "" : apiUrl(`${ROUTES.ui.control}/files/${sha}`);
 
 /** The tray's pictures a draft keeps: each one uploaded as a file and checked. */
 export const keptPictures = (items: readonly PendingItem[]): KeptPicture[] =>
@@ -450,8 +457,9 @@ export interface AttachmentsHandle {
   /** A picture is being made smaller, or its upload is in flight or waits its turn: the
    *  composer should hold Send. */
   uploading: boolean;
-  /** A picture in the tray failed: Send is off until it is removed or retried, and says
-   *  so in these words (`FAILED_WORDS`, or `REMOVE_WORDS` where none can be retried). */
+  /** A picture in the tray failed, or can't go to this machine now: Send is off until it
+   *  is removed or retried, and says so in these words (`FAILED_WORDS`, `REMOVE_WORDS`
+   *  where none can be retried, `ELSEWHERE_WORDS`). */
   failed: string | null;
   /** A file was refused or an upload failed, the pictures are too much together, or the
    *  text would be over the cap. */
@@ -470,8 +478,12 @@ export interface AttachmentsHandle {
   /** Upload a failed one again, from the bytes it kept. */
   retry(key: string): void;
   clear(): void;
-  /** Put these pictures in the tray in place of what is there (a session's draft). */
-  restore(kept: readonly KeptPicture[]): void;
+  /** Put these pictures in the tray in place of what is there (a session's draft).
+   *  `land`: where a picture still uploading as a file goes once it is in (the draft it
+   *  was added to); without it, its upload stops. */
+  restore(kept: readonly KeptPicture[], land?: (p: KeptPicture) => void): void;
+  /** Add one picture already uploaded (one of this draft's that finished elsewhere). */
+  adopt(p: KeptPicture): void;
   /** What to sign: `message` and the pictures, the way this machine takes them. Null (and
    *  the line set) when nothing can go: an upload is still running (the line says Send
    *  waits for it) or failed, the pictures are too much together, or the text is over the cap. */
@@ -494,13 +506,15 @@ export interface AttachmentsHandle {
 /** `mode`: how this session's machine takes pictures (`pictureMode`); `machineId`: the
  *  machine an upload is for. `onRefused`: a picture was pasted or dropped where none can be
  *  sent ("off"), so the composer says why (`picturesOffWords`); nothing is swallowed.
- *  `initial`: the pictures the tray opens with (a session's draft). */
+ *  `initial`: the pictures the tray opens with (a session's draft); `land`: where a picture
+ *  still uploading as a file when the composer closes goes once it is in (that draft). */
 export function useAttachments(o: {
   machineId?: string;
   enabled?: boolean;
   mode?: PictureMode;
   onRefused?: () => void;
   initial?: () => readonly KeptPicture[];
+  land?: (p: KeptPicture) => void;
 }): AttachmentsHandle {
   const seq = useRef(0);
   const fromKept = useCallback(
@@ -541,28 +555,22 @@ export function useAttachments(o: {
   itemsRef.current = items;
   const onRefused = useRef(o.onRefused);
   onRefused.current = o.onRefused;
-
-  // Object URLs of what was never sent are let go with the composer, and its uploads stop.
-  useEffect(
-    () => () => {
-      for (const it of itemsRef.current) if (!it.restored) URL.revokeObjectURL(it.preview);
-      for (const stop of stops.current.values()) stop.abort();
-    },
-    [],
-  );
+  const landing = useRef(o.land);
+  landing.current = o.land;
 
   const set = useCallback((key: string, patch: Partial<PendingItem>) => {
     setItems((prev) => prev.map((p) => (p.key === key ? { ...p, ...patch } : p)));
   }, []);
 
-  // Two uploads at a time, in the tray's order; the rest wait.
-  useEffect(() => {
-    let busy = items.filter((it) => started.current.has(it.key) && itemState(it) === "uploading").length;
-    for (const it of items) {
-      if (busy >= UPLOADS_AT_ONCE) break;
-      if (!it.waiting || it.error || started.current.has(it.key)) continue;
+  /** Pictures let go of while they uploaded (another draft restored, or the composer
+   *  closed), by item key: where each goes once it is in. */
+  const away = useRef(new Map<string, (p: KeptPicture) => void>());
+  /** Of those, the ones let go of while they were being made smaller, by item key. */
+  const parked = useRef(new Map<string, PendingItem>());
+
+  const begin = useCallback(
+    (it: PendingItem) => {
       started.current.add(it.key);
-      busy++;
       set(it.key, { waiting: false, sent: 0 });
       const stop = new AbortController();
       stops.current.set(it.key, stop);
@@ -572,21 +580,68 @@ export function useAttachments(o: {
       };
       const going: Promise<Partial<PendingItem>> =
         it.via === "files"
-          ? uploadPicture(it.file, it.name, machineId, opts).then((entry) => ({ entry, at: Date.now() }))
+          ? uploadPicture(it.file, it.name, it.machine, opts).then((entry) => ({ entry, at: Date.now() }))
           : uploadAttachment(it.file, opts).then((attachment) => ({ attachment }));
       going.then(
-        (done) => set(it.key, done),
+        (done) => {
+          const land = away.current.get(it.key);
+          away.current.delete(it.key);
+          if (!land) set(it.key, done);
+          else if (done.entry) land({ ...done.entry, at: done.at ?? Date.now() });
+        },
         (e: Error) => {
-          // Removed while it went: nothing is left to say it to.
-          if (stop.signal.aborted) return;
+          // Removed while it went, or gone with another draft: nothing is left to say it to.
+          if (away.current.delete(it.key) || stop.signal.aborted) return;
           set(it.key, { error: e.message, retry: e instanceof UploadFailed && e.retry });
         },
       );
       void going.finally(() => {
         if (stops.current.get(it.key) === stop) stops.current.delete(it.key);
       });
+    },
+    [set],
+  );
+
+  /** Lets the tray's items go, but a picture still on its way as a file finishes, into
+   *  `land` (the draft it was added to); without `land` its upload stops too. */
+  const leave = useCallback(
+    (land: ((p: KeptPicture) => void) | undefined, letGo: (it: PendingItem) => void) => {
+      for (const it of itemsRef.current) {
+        if (!land || it.via !== "files" || it.error || it.entry) {
+          letGo(it);
+          continue;
+        }
+        away.current.set(it.key, land);
+        URL.revokeObjectURL(it.preview);
+        // One still being made smaller uploads once it is (`shrunk`).
+        if (it.shrinking) parked.current.set(it.key, it);
+        else if (!started.current.has(it.key)) begin(it);
+      }
+    },
+    [begin],
+  );
+
+  // Object URLs of what was never sent are let go with the composer, and its uploads stop
+  // (but a picture's, which lands in its draft).
+  useEffect(
+    () => () =>
+      leave(landing.current, (it) => {
+        stops.current.get(it.key)?.abort();
+        if (!it.restored) URL.revokeObjectURL(it.preview);
+      }),
+    [leave],
+  );
+
+  // Two uploads at a time, in the tray's order; the rest wait.
+  useEffect(() => {
+    let busy = items.filter((it) => started.current.has(it.key) && itemState(it) === "uploading").length;
+    for (const it of items) {
+      if (busy >= UPLOADS_AT_ONCE) break;
+      if (!it.waiting || it.error || started.current.has(it.key)) continue;
+      busy++;
+      begin(it);
     }
-  }, [items, machineId, set]);
+  }, [items, begin]);
 
   /** `patch` the item now (so the next one shrunk sees its name) and at the next render. */
   const patchNow = useCallback(
@@ -601,11 +656,19 @@ export function useAttachments(o: {
    *  for one picture, named, and queued for its upload. */
   const shrunk = useCallback(
     (key: string, small: { blob: Blob } | null) => {
-      const it = itemsRef.current.find((p) => p.key === key);
+      const gone = parked.current.get(key);
+      parked.current.delete(key);
+      const it = gone ?? itemsRef.current.find((p) => p.key === key);
       // Taken back while it was being made smaller.
       if (!it) return;
       const file = small?.blob ?? it.file;
       const limit = it.via === "files" ? START_FILE_MAX_BYTES : ATTACHMENT_MAX_BYTES;
+      if (gone) {
+        // Its composer closed meanwhile: it uploads into its draft, or, too big, is dropped.
+        if (file.size > limit) away.current.delete(key);
+        else begin({ ...it, shrinking: false, file, bytes: file.size, name: pictureName(it.name, file.type, []) });
+        return;
+      }
       const patch: Partial<PendingItem> = { shrinking: false, file, bytes: file.size };
       if (small) {
         patch.was = it.file.size;
@@ -625,7 +688,7 @@ export function useAttachments(o: {
       }
       patchNow(key, { ...patch, waiting: true });
     },
-    [patchNow],
+    [patchNow, begin],
   );
 
   const add = useCallback(
@@ -647,6 +710,7 @@ export function useAttachments(o: {
           preview: URL.createObjectURL(file),
           bytes: file.size,
           name: own,
+          ...(machineId ? { machine: machineId } : {}),
         };
         return why ? { ...item, via: takes, error: why } : { ...item, via: takes, shrinking: true };
       });
@@ -660,11 +724,15 @@ export function useAttachments(o: {
         const own = it.file instanceof File ? it.file.name : "";
         shrinkImage(it.file, { name: own }).then(
           (small) => shrunk(it.key, small),
-          (e: Error) => patchNow(it.key, { shrinking: false, error: e.message }),
+          (e: Error) => {
+            // Let go of meanwhile: nothing is left to say it to.
+            if (parked.current.delete(it.key)) away.current.delete(it.key);
+            else patchNow(it.key, { shrinking: false, error: e.message });
+          },
         );
       }
     },
-    [enabled, takes, shrunk, patchNow],
+    [enabled, takes, machineId, shrunk, patchNow],
   );
 
   /** Lets an item go: its upload stops, its thumbnail's URL is revoked, a path upload is taken back. */
@@ -711,14 +779,25 @@ export function useAttachments(o: {
   }, []);
 
   const restore = useCallback(
-    (kept: readonly KeptPicture[]) => {
-      for (const it of itemsRef.current) letGo(it);
+    (kept: readonly KeptPicture[], land?: (p: KeptPicture) => void) => {
+      leave(land, letGo);
       const next = fromKept(kept);
       itemsRef.current = next;
       setItems(next);
       setError(null);
     },
-    [fromKept, letGo],
+    [fromKept, leave, letGo],
+  );
+
+  const adopt = useCallback(
+    (p: KeptPicture) => {
+      const cur = itemsRef.current;
+      if (cur.length >= ATTACHMENTS_PER_MESSAGE || cur.some((it) => it.entry?.sha256 === p.sha256)) return;
+      const next = [...cur, ...fromKept([p])];
+      itemsRef.current = next;
+      setItems(next);
+    },
+    [fromKept],
   );
 
   const uploading = items.some((it) => {
@@ -726,15 +805,19 @@ export function useAttachments(o: {
     return s === "shrinking" || s === "waiting" || s === "uploading";
   });
   const failedOne = items.find((it) => it.error);
+  // Uploaded the way this machine no longer takes pictures (a draft's, brought back).
+  const misfit = mode !== undefined && items.some((it) => !it.error && it.via !== takes);
   // Too much together: said as soon as it is so, and until one is removed.
   const over = takes === "files" && overTogether(items);
 
   // The line that Send waits goes once the last upload settled; progress is said once the
   // uploads have run a moment (a quick one is never more than its spinner).
+  // A drop's "only pictures" goes too, once the pictures it brought are in.
   useEffect(() => {
     if (!uploading) {
       setHeld(false);
       setSlow(false);
+      setError((e) => (e === ONLY_PICTURES_WORDS ? null : e));
       return;
     }
     const t = window.setTimeout(() => setSlow(true), 400);
@@ -744,9 +827,13 @@ export function useAttachments(o: {
   const compose = useCallback(
     (message: string): ComposeResult | null => {
       const cur = itemsRef.current;
-      // One that failed, or one uploaded the way this machine no longer takes pictures.
-      if (cur.some((it) => it.error || it.via !== takes)) {
+      if (cur.some((it) => it.error)) {
         setError(cur.some((it) => it.error && it.retry) ? FAILED_WORDS : REMOVE_WORDS);
+        return null;
+      }
+      // One uploaded the way this machine no longer takes pictures (or not known yet).
+      if (cur.some((it) => it.via !== takes)) {
+        setError(mode === undefined ? null : ELSEWHERE_WORDS);
         return null;
       }
       if (cur.some((it) => itemState(it) !== "ready")) {
@@ -777,7 +864,7 @@ export function useAttachments(o: {
       setError(null);
       return out;
     },
-    [takes],
+    [mode, takes],
   );
 
   /** A drop of files, wherever it lands: pictures go to the tray (or are answered where none
@@ -861,7 +948,7 @@ export function useAttachments(o: {
   // The tray's one line: what is wrong first, then what the uploads are doing.
   // One still being made smaller is waited for too, and counted in the uploads' size once it is.
   const busyOnes = items.filter((it) => itemState(it) === "waiting" || itemState(it) === "uploading");
-  const wrong = error ?? failedOne?.error ?? (over ? TOGETHER_WORDS : null);
+  const wrong = error ?? failedOne?.error ?? (misfit ? ELSEWHERE_WORDS : over ? TOGETHER_WORDS : null);
   const doing = !uploading
     ? null
     : held
@@ -877,7 +964,13 @@ export function useAttachments(o: {
   return {
     items,
     uploading,
-    failed: failedOne ? (items.some((it) => it.error && it.retry) ? FAILED_WORDS : REMOVE_WORDS) : null,
+    failed: failedOne
+      ? items.some((it) => it.error && it.retry)
+        ? FAILED_WORDS
+        : REMOVE_WORDS
+      : misfit
+        ? ELSEWHERE_WORDS
+        : null,
     error: over ? TOGETHER_WORDS : error,
     note,
     dragging,
@@ -888,6 +981,7 @@ export function useAttachments(o: {
     retry,
     clear,
     restore,
+    adopt,
     compose,
     handlers,
     page,
@@ -1036,6 +1130,10 @@ function TrayItem({ it, onRemove, onRetry }: { it: PendingItem; onRemove: () => 
     { label: "Remove", danger: true, run: onRemove },
   ]);
   const busy = state === "shrinking" || state === "waiting" || state === "uploading";
+  // One that can't be drawn (no picture, or a held copy this page can't load) keeps its
+  // frame; a picture made smaller is drawn again from its new preview.
+  const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
+  const broken = !it.preview || brokenSrc === it.preview;
   return (
     <li
       className={`att-item ${state === "error" ? "att-item--err" : ""} ${busy ? "att-item--busy" : ""}`}
@@ -1047,12 +1145,20 @@ function TrayItem({ it, onRemove, onRetry }: { it: PendingItem; onRemove: () => 
       {...menu}
     >
       <span className="att-frame">
-        <img
-          className="att-thumb"
-          src={it.preview}
-          alt=""
-          onError={(e) => e.currentTarget.setAttribute("data-broken", "")}
-        />
+        {it.preview && (
+          <img
+            className="att-thumb"
+            src={it.preview}
+            alt=""
+            data-broken={broken ? "" : undefined}
+            onError={() => setBrokenSrc(it.preview)}
+          />
+        )}
+        {broken && (
+          <span className="att-thumb att-thumb--none" aria-hidden="true">
+            <PictureGlyph />
+          </span>
+        )}
         {(state === "shrinking" || state === "uploading") && <span className="spinner att-busy" aria-hidden="true" />}
       </span>
       {again && (
@@ -1074,6 +1180,25 @@ function TrayItem({ it, onRemove, onRetry }: { it: PendingItem; onRemove: () => 
         </svg>
       </button>
     </li>
+  );
+}
+
+/** A picture's outline: what the tray draws where the picture itself can't be. */
+function PictureGlyph() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="18"
+      height="18"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+    >
+      <rect x="2" y="3" width="12" height="10" rx="1.5" />
+      <circle cx="6" cy="6.5" r="1.2" />
+      <path d="m2.5 12 3.8-3.8 2.7 2.7 1.8-1.8 2.7 2.7" strokeLinejoin="round" />
+    </svg>
   );
 }
 

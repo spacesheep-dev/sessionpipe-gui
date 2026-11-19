@@ -97,9 +97,16 @@
   opacity: 0.6;
   outline-color: var(--err);
 }
-/* A picture brought back from a draft whose copy is no longer held: the frame alone. */
+/* A picture that can't be drawn here (not a picture, or a draft's copy this page can't
+   load): its frame, with a picture glyph in it. */
 .att-thumb[data-broken] {
-  visibility: hidden;
+  display: none;
+}
+.att-thumb--none {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-3);
 }
 .att-busy {
   position: absolute;

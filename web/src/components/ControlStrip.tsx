@@ -40,7 +40,6 @@ import {
   AttachmentTray,
   type KeptPicture,
   keptPictures,
-  type PendingItem,
   pictureMode,
   picturesOffWords,
   useAttachments,
@@ -210,14 +209,22 @@ function readPictures(key: string, now = Date.now()): KeptPicture[] {
     return [];
   }
 }
-function writePictures(key: string, items: readonly PendingItem[]): void {
-  const kept = keptPictures(items);
+function writePictures(key: string, kept: readonly KeptPicture[]): void {
   try {
     if (kept.length) localStorage.setItem(DRAFT_PICTURES_KEY(key), JSON.stringify(kept));
     else localStorage.removeItem(DRAFT_PICTURES_KEY(key));
   } catch {
     // this page only
   }
+}
+
+/** The strips open now, by session: a picture that finishes uploading after its strip moved
+ *  on or closed goes to the strip open on its session, else into that session's draft. */
+const openStrips = new Map<string, (p: KeptPicture) => void>();
+function landPicture(key: string, p: KeptPicture): void {
+  const open = openStrips.get(key);
+  if (open) open(p);
+  else writePictures(key, [...readPictures(key).filter((q) => q.sha256 !== p.sha256), p]);
 }
 
 function SendIcon() {
@@ -493,20 +500,32 @@ export function ControlStrip({
     mode,
     onRefused: () => setRefusedAt(refusedKey),
     initial: () => readPictures(session.key),
+    land: (p) => landPicture(session.key, p),
   });
   // The pictures uploaded and checked are kept with the draft, as the words are, and come
   // back with it; another session's strip takes that session's own. (Kept first: the items
   // are written only under the session they belong to.)
   const picturesOf = useRef(session.key);
-  const { restore } = att;
+  const { restore, adopt } = att;
+  // Written when what is kept changes, not at every tick of an upload's progress.
+  const kept = JSON.stringify(keptPictures(att.items));
   useEffect(() => {
-    if (picturesOf.current === session.key) writePictures(session.key, att.items);
-  }, [att.items, session.key]);
+    if (picturesOf.current === session.key) writePictures(session.key, JSON.parse(kept) as KeptPicture[]);
+  }, [kept, session.key]);
   useEffect(() => {
     if (picturesOf.current === session.key) return;
+    const was = picturesOf.current;
     picturesOf.current = session.key;
-    restore(readPictures(session.key));
+    // A picture still uploading for the session left finishes into that session's draft.
+    restore(readPictures(session.key), (p) => landPicture(was, p));
   }, [session.key, restore]);
+  useEffect(() => {
+    const key = session.key;
+    openStrips.set(key, adopt);
+    return () => {
+      if (openStrips.get(key) === adopt) openStrips.delete(key);
+    };
+  }, [session.key, adopt]);
   // A file dragged or dropped anywhere on the session's page comes to this composer.
   const formRef = useRef<HTMLFormElement>(null);
   usePageDrop(att, formRef);

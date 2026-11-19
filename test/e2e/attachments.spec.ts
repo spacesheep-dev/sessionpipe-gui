@@ -19,7 +19,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
-import { type BrowserContext, expect, type Page, type Route, test, webkit } from "@playwright/test";
+import { type BrowserContext, expect, type Locator, type Page, type Route, test, webkit } from "@playwright/test";
 import {
   CONTROL_BASE,
   type FakeDaemon,
@@ -211,7 +211,7 @@ async function open(
   context: BrowserContext,
   page: Page,
   o: { takes: boolean; title: string; saves?: boolean; script?: StartScript },
-): Promise<{ d: FakeDaemon; uiKey: string; asked: string[]; board: string }> {
+): Promise<{ d: FakeDaemon; uiKey: string; asked: string[]; board: string; s: { harness: string; id: string } }> {
   await seenSetupHere(context);
   const key = await passkeyPage(context, page);
   const d = await fakeDaemon(
@@ -237,10 +237,28 @@ async function open(
   await page.goto(`${CONTROL_BASE}${sessionUrl(s.harness, s.id)}`);
   await expect(composer(page)).toBeEnabled();
   // The board an upload's words name: the receiver's machine, as its Info says it.
-  return { d, uiKey: info.uiKey, asked, board: info.hostname };
+  return { d, uiKey: info.uiKey, asked, board: info.hostname, s };
 }
 
 const tray = (page: Page) => page.locator(".att-item");
+
+/** A tray item whose picture can't be drawn still shows its frame: 56 px, visible, on its
+ *  own background, with the picture glyph in it. */
+async function framed(item: Locator): Promise<void> {
+  const frame = item.locator(".att-thumb--none");
+  await expect(frame).toBeVisible();
+  const box = await frame.boundingBox();
+  expect(box && Math.round(box.width)).toBe(56);
+  expect(box && Math.round(box.height)).toBe(56);
+  const look = await frame.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { visibility: cs.visibility, opacity: Number(cs.opacity), background: cs.backgroundColor };
+  });
+  expect(look.visibility).toBe("visible");
+  expect(look.opacity).toBeGreaterThan(0.3);
+  expect(look.background).not.toBe("rgba(0, 0, 0, 0)");
+  await expect(frame.locator("svg")).toBeVisible();
+}
 const picker = (page: Page) => page.locator("input[data-attach-input]");
 const send = (page: Page) => page.locator(".ctl-send");
 const prompts = (d: FakeDaemon) => d.seen.filter((c) => c.kind === "prompt");
@@ -318,12 +336,14 @@ test("the picker, a paste and a drop each add a picture; they go as the message'
     entry("Screenshot 2026-11-17 at 10.41.07 PM.png", ONYX),
   ]);
   nothingOfTheBoard(d.cmds[0]!, uiKey);
-  // The machine got every one of them whole, with its own token.
-  expect(d.fetched.map((f) => [f.name, f.ok, f.status, f.contentType, f.bytes])).toEqual([
-    ["kiwi.png", true, 200, "image/png", KIWI.length],
-    ["image.png", true, 200, "image/png", BIRCH.length],
-    ["Screenshot 2026-11-17 at 10.41.07 PM.png", true, 200, "image/png", ONYX.length],
-  ]);
+  // The machine got every one of them whole, with its own token (after it took the command).
+  await expect
+    .poll(() => d.fetched.map((f) => [f.name, f.ok, f.status, f.contentType, f.bytes]))
+    .toEqual([
+      ["kiwi.png", true, 200, "image/png", KIWI.length],
+      ["image.png", true, 200, "image/png", BIRCH.length],
+      ["Screenshot 2026-11-17 at 10.41.07 PM.png", true, 200, "image/png", ONYX.length],
+    ]);
   // The composer is clear, and the older way was never used: no upload under /attachments.
   await expect(tray(page)).toHaveCount(0);
   await expect(composer(page)).toHaveValue("");
@@ -391,7 +411,7 @@ test("three at once, then seven: six are kept and the cap is said; two upload at
   // One name each in the message: image.png, image-2.png, …
   expect(six.files).toEqual(SEVEN.slice(0, 6).map((b, i) => entry(i === 0 ? "image.png" : `image-${i + 1}.png`, b)));
   for (const cmd of d.cmds) nothingOfTheBoard(cmd, uiKey);
-  expect(d.fetched).toHaveLength(9);
+  await expect.poll(() => d.fetched.length).toBe(9);
   expect(d.fetched.every((f) => f.ok)).toBe(true);
 });
 
@@ -410,7 +430,7 @@ test("a picture alone is signed with 'Look at the attached picture.', and the se
   expect(cmd.files).toEqual([entry("image.png", KIWI)]);
   expect(Object.keys((cmd.files as object[])[0]!)).toEqual(["name", "type", "size", "sha256"]);
   nothingOfTheBoard(d.cmds[0]!, uiKey);
-  expect(d.fetched).toMatchObject([{ name: "image.png", ok: true }]);
+  await expect.poll(() => d.fetched.map((f) => [f.name, f.ok])).toEqual([["image.png", true]]);
   // What the agent got is what the person reads: the words that were signed, and the file.
   await expect(page.locator(".page.session blockquote").last()).toContainText("Look at the attached picture.");
   await expect(page.locator(".page.session [data-sent-picture]").last()).toHaveAttribute(
@@ -452,6 +472,8 @@ test("an upload that did not arrive whole, and a file that is not the picture it
   });
   await expect(tray(page)).toHaveAttribute("data-state", "error");
   await expect(page.locator(".att-note")).toHaveText("That file isn't a picture.");
+  // It can't be drawn, so its frame is.
+  await framed(tray(page));
   // Trying the same bytes again would only be refused again: no Retry.
   await expect(tray(page).getByRole("button", { name: "Try again" })).toHaveCount(0);
   await shots(page, "4-a-picture-refused");
@@ -946,6 +968,17 @@ test("a file dropped anywhere on the session's page comes to the composer; one t
   await expect(tray(page)).toHaveCount(1);
   expect(page.url()).toBe(here);
   await shots(page, "8-only-pictures-dropped");
+  // A picture and a text file at once: the picture comes, the line says the other didn't,
+  // and goes once the picture is in.
+  await tray(page).getByRole("button", { name: "Remove picture" }).click();
+  await page.route("**/api/ui/control/files?*", async (route: Route) => {
+    await new Promise((r) => setTimeout(r, 600));
+    await route.fulfill({ response: await route.fetch() });
+  });
+  expect(await onPage([given("birch.png", BIRCH), notes])).toEqual({ over: true, dropped: true, highlighted: true });
+  await expect(line(page)).toHaveText("Only pictures can be dropped here.");
+  await expect(tray(page)).toHaveAttribute("data-state", "ready");
+  await expect(line(page)).toHaveCount(0);
   expect(prompts(d)).toHaveLength(0);
 });
 
@@ -971,6 +1004,8 @@ test("a reload keeps the pictures of the draft with its words, and they still go
       }),
     )
     .toEqual({ words: ["Which one is lighter?"], pictures: [2] });
+  // A receiver that can't show its copy of one (an older one, say) still draws its frame.
+  await page.route(`**/api/ui/control/files/${sha(BIRCH)}`, (route) => route.fulfill({ status: 404 }));
   await page.reload();
   await expect(composer(page)).toBeEnabled();
   await expect(composer(page)).toHaveValue("Which one is lighter?");
@@ -983,6 +1018,8 @@ test("a reload keeps the pictures of the draft with its words, and they still go
   await expect(tray(page).nth(1)).toHaveAttribute("data-name", "image-2.png");
   // Each thumbnail is the receiver's copy, by its hash.
   await expect(tray(page).nth(0).locator("img")).toHaveAttribute("src", `/api/ui/control/files/${sha(KIWI)}`);
+  await expect(tray(page).nth(1).locator("img")).toHaveAttribute("data-broken", "");
+  await framed(tray(page).nth(1));
   await shots(page, "9-draft-kept-after-reload");
   await send(page).click();
   await expect.poll(() => prompts(d).length, { timeout: 20_000 }).toBe(1);
@@ -996,6 +1033,52 @@ test("a reload keeps the pictures of the draft with its words, and they still go
   await page.reload();
   await expect(composer(page)).toBeEnabled();
   await expect(tray(page)).toHaveCount(0);
+});
+
+test("a picture still uploading when another session opens lands in its own session's draft", async ({
+  context,
+  page,
+}) => {
+  test.slow();
+  const { d, s } = await open(context, page, { takes: true, title: "Left while uploading" });
+  const other = await postSession(await sinkToken(), { machine: d.name, cwd: CWD, title: "The other session" });
+  const go = (to: { harness: string; id: string }) =>
+    page.evaluate(
+      (url) => {
+        history.pushState(null, "", url);
+        dispatchEvent(new PopStateEvent("popstate"));
+      },
+      sessionUrl(to.harness, to.id),
+    );
+  const keptHere = () =>
+    page.evaluate((id) => {
+      const k = Object.keys(localStorage).find(
+        (k) => k.startsWith("sessionpipe-gui.draft-pictures:") && k.includes(id),
+      );
+      return k ? (JSON.parse(localStorage.getItem(k) ?? "[]") as { name: string }[]).map((p) => p.name) : [];
+    }, s.id);
+  // Each upload takes its time: the first is in while the other session is open, the
+  // second only once this one is open again.
+  const waits = [800, 3500];
+  await page.route("**/api/ui/control/files?*", async (route: Route) => {
+    await new Promise((r) => setTimeout(r, waits.shift() ?? 0));
+    await route.fulfill({ response: await route.fetch() });
+  });
+  await paste(page, [given("image.png", KIWI), given("image.png", BIRCH)]);
+  await expect(page.locator(".att-item[data-state=uploading]")).toHaveCount(2);
+  await go(other);
+  await expect(page.locator(".page.session")).toContainText("The other session");
+  await expect(tray(page)).toHaveCount(0);
+  await expect.poll(keptHere, { timeout: 10_000 }).toEqual(["image.png"]);
+  await go(s);
+  await expect(page.locator(".page.session")).toContainText("Left while uploading");
+  await expect(tray(page)).toHaveCount(1);
+  await expect(tray(page)).toHaveCount(2, { timeout: 15_000 });
+  for (const i of [0, 1]) await expect(tray(page).nth(i)).toHaveAttribute("data-state", "ready");
+  await expect.poll(keptHere).toEqual(["image.png", "image-2.png"]);
+  await send(page).click();
+  await expect.poll(() => prompts(d).length, { timeout: 20_000 }).toBe(1);
+  expect(prompts(d)[0]!.files).toEqual([entry("image.png", KIWI), entry("image-2.png", BIRCH)]);
 });
 
 test("on a slow link (2 Mbit/s) the tray says how far the upload is", async ({ context, page }) => {

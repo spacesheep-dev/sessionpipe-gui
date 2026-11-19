@@ -258,7 +258,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       name: f.name,
       size: f.size,
       entry: f,
-      at: (!target.files && initial.draft?.filesAt) || Date.now(),
+      at: (target.files ? target.filesAt : initial.draft?.filesAt) || Date.now(),
     })),
   );
   /** How each running upload is stopped, by file key. */

@@ -36,6 +36,8 @@ describe("uploadWords", () => {
       [refused(429, { retryAfterS: 300 }), "That's a lot of pictures in a short time. Try again in 5 minutes.", true],
       [refused(429, { retryAfterS: 20 }), "That's a lot of pictures in a short time. Try again in a minute.", true],
       [refused(429), "That's a lot of pictures in a short time. Try again in a few minutes.", true],
+      [refused(429, { retryAfterS: 3600 }), "That's a lot of pictures in a short time. Try again in 60 minutes.", true],
+      [refused(429, { retryAfterS: 86_400 }), "That's a lot of pictures in a short time. Try again later.", true],
       [refused(500), "studio-mac couldn't save the picture. Try again.", true],
       [refused(503), "studio-mac couldn't save the picture. Try again.", true],
       [new Error("anything else"), "studio-mac couldn't save the picture. Try again.", true],

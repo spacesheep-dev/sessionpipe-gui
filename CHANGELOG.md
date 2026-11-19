@@ -222,16 +222,9 @@ could not read.
   (`picture · 1200×900 · kept on the board it was sent from`), and one of pictures alone is
   its chips instead of an empty bubble.
 - **A picture that doesn't upload says why, and keeps its place.** The message box and
-  New session say what went wrong in a sentence ("The picture didn't upload: studio-mac
-  can't be reached. Try again.", "…the connection is slow…", "…has no room for more files
-  today.") in place of a code, and offer ↻ beside × where trying again can help; Send stays
-  off, and says so, until the picture is removed or tried again. While pictures upload a
-  browser shows how far they are ("Uploading 1.2 of 2.1 MB…") and the apps their size;
-  Send pressed meanwhile says it waits for them, and removing one stops its upload. A
-  picture dropped anywhere on a session's page goes to its message box, and a file that is
-  no picture is answered ("Only pictures can be dropped here.") instead of opening in the
-  page's place. The pictures of an unsent message come back with its words after a reload,
-  for the day the board keeps them.
+  New session say what went wrong in one sentence, offer ↻ where trying again can help,
+  and show how far an upload is. A picture dropped anywhere on a session's page goes to its
+  message box, and an unsent message's pictures come back with its words after a reload.
 
 ## [0.8.5] - 2026-11-18
 
