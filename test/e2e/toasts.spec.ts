@@ -15,6 +15,8 @@ import { EVENTS, INFO, openPage, ulid } from "./helpers.js";
 declare global {
   interface Window {
     __audio: { started: number; types: string[]; buffers: number; allow: boolean };
+    /** keepOurs: the sessions and machines whose cards stay, and how many others it took. */
+    __keep: { keys: string[]; swept: number };
   }
 }
 
@@ -330,9 +332,64 @@ test.describe("toasts", () => {
   });
 });
 
+// The test-door instance, which runs no demo: no card but this spec's (and the odd prompt
+// another spec raises there) comes and goes while a card is measured. The tests here that
+// post to it share a lock, so none of them pushes another's card out.
+const CONTROL_EVENTS = `${CONTROL_BASE}/api/sessionpipe/v1/events`;
+const TEST_DOOR = { lock: "toasts-test-door" };
+const tag = () => randomUUID().slice(0, 6);
+
+/** Keep only this test's cards on the page: every page on the test-door instance gets a
+ *  card for each prompt another spec raises there, which would take the three places (a
+ *  passing card goes first) or move the card measured. Those are dismissed as they come,
+ *  by their ×. `keys`: session keys or machine names, more added later by `keep`. */
+async function keepOurs(page: Page, keys: string[]) {
+  await page.evaluate((keys) => {
+    window.__keep = { keys, swept: 0 };
+    const ours = (el: HTMLElement) =>
+      window.__keep.keys.includes(el.dataset.session ?? "") ||
+      window.__keep.keys.includes(el.querySelector(".toast-machine")?.textContent ?? "");
+    const sweep = () => {
+      for (const el of Array.from(
+        document.querySelectorAll<HTMLElement>(".toast-slot:not([data-closing]) .toast[data-session]"),
+      ))
+        if (!ours(el)) {
+          const x = Array.from(el.querySelectorAll<HTMLButtonElement>("button")).find(
+            (b) => (b.getAttribute("aria-label") ?? b.textContent) === "Dismiss",
+          );
+          if (!x) continue;
+          window.__keep.swept++;
+          x.click();
+        }
+    };
+    sweep();
+    new MutationObserver(sweep).observe(document.body, { childList: true, subtree: true });
+  }, keys);
+}
+const keep = (page: Page, ...keys: string[]) =>
+  page.evaluate((keys) => {
+    window.__keep.keys.push(...keys);
+  }, keys);
+
+/** The test-door page, live, keeping only this test's cards. */
+async function openOurs(page: Page, url: string, keys: string[]) {
+  await openPage(page, url);
+  await keepOurs(page, keys);
+}
+
+/** Every card's entrance (and exit) played out. */
+const settled = (page: Page) =>
+  page.evaluate(() =>
+    Promise.all(
+      Array.from(document.querySelectorAll(".toasts"))
+        .flatMap((el) => el.getAnimations({ subtree: true }))
+        .map((a) => a.finished.catch(() => null)),
+    ).then(() => null),
+  );
+
 // A paired machine (the test-door instance, control-helpers.ts): Claude Code's hook waits
 // 125 s for an answer, so past 120 s a banner offers nothing to press, and says why.
-test.describe("toasts: a prompt's answer window", () => {
+test.describe("toasts: a prompt's answer window", TEST_DOOR, () => {
   test("a prompt its hook stopped waiting on has no Allow / Deny, and a fresh one loses them as its window runs out", async ({
     context,
     page,
@@ -346,6 +403,9 @@ test.describe("toasts: a prompt's answer window", () => {
     try {
       await page.goto(`${CONTROL_BASE}/feed`);
       await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+      // Another spec's prompt on this instance would take the fresh card's place (three at
+      // most, the oldest prompt first) before its window runs out.
+      await keepOurs(page, [d.name]);
       const words = `too late to answer from here; answer it on ${d.name}`;
       const late = await postPrompt(bearer, { machine: d.name, title: "Asked 130 s ago", agoMs: 130_000 });
       posted.push(late);
@@ -371,53 +431,57 @@ test.describe("toasts: a prompt's answer window", () => {
   });
 });
 
-// The test-door instance, which runs no demo: no card but this spec's (and the odd prompt
-// another spec raises there) comes and goes while a card is measured.
-const CONTROL_EVENTS = `${CONTROL_BASE}/api/sessionpipe/v1/events`;
-const tag = () => randomUUID().slice(0, 6);
-
-/** The test-door page, live, keeping only this test's cards: every page there gets a card
- *  for each prompt another spec raises, which would take the three places (a passing card
- *  goes first) or move the card measured. Those are dismissed as they come, by their ×. */
-async function openOurs(page: Page, url: string, keys: string[]) {
-  await openPage(page, url);
-  await page.evaluate((keys) => {
-    const sweep = () => {
-      for (const el of Array.from(
-        document.querySelectorAll<HTMLElement>(".toast-slot:not([data-closing]) .toast[data-session]"),
-      ))
-        if (!keys.includes(el.dataset.session ?? ""))
-          Array.from(el.querySelectorAll<HTMLButtonElement>("button"))
-            .find((b) => (b.getAttribute("aria-label") ?? b.textContent) === "Dismiss")
-            ?.click();
-    };
-    sweep();
-    new MutationObserver(sweep).observe(document.body, { childList: true, subtree: true });
-  }, keys);
-}
-
-/** Every card's entrance (and exit) played out. */
-const settled = (page: Page) =>
-  page.evaluate(() =>
-    Promise.all(
-      Array.from(document.querySelectorAll(".toasts"))
-        .flatMap((el) => el.getAnimations({ subtree: true }))
-        .map((a) => a.finished.catch(() => null)),
-    ).then(() => null),
-  );
-
-test.describe("toasts: the stack holds still", () => {
+test.describe("toasts: the stack holds still", TEST_DOOR, () => {
+  /** This test's sessions, their prompts cleared once it ends, passed or not. */
+  let sinks: ReturnType<typeof sink>[] = [];
+  const ours = (request: APIRequestContext, bearer: string, title: string) => {
+    const s = sink(request, bearer, `${title} ${tag()}`, CONTROL_EVENTS);
+    sinks.push(s);
+    return s;
+  };
   test.beforeEach(async ({ context }) => {
+    sinks = [];
     await seenSetupHere(context);
   });
+  test.afterEach(async () => {
+    for (const s of sinks) await s.done();
+  });
+
+  /** Where each card stands, read at once once nothing moves: its top and bottom, its
+   *  place in the list and the cards before it (drawn above it). */
+  const where = async (page: Page, keys: string[]) => {
+    let at: Record<string, { top: number; bottom: number; index: number; above: string }> = {};
+    await expect(async () => {
+      await settled(page);
+      const m = await page.evaluate((keys) => {
+        const slots = Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast-slot"));
+        if (slots.some((s) => s.hasAttribute("data-closing"))) return null;
+        const out: Record<string, { top: number; bottom: number; index: number; above: string }> = {};
+        for (const k of keys) {
+          const index = slots.findIndex((s) => s.querySelector(`.toast[data-session="${k}"]`));
+          if (index < 0) return null;
+          const r = slots[index]!.querySelector(".toast")!.getBoundingClientRect();
+          const above = slots
+            .slice(0, index)
+            .map((s) => s.dataset.toastId)
+            .join();
+          out[k] = { top: r.top, bottom: r.bottom, index, above };
+        }
+        return out;
+      }, keys);
+      expect(m).not.toBeNull();
+      at = m!;
+    }).toPass({ timeout: 10_000 });
+    return at;
+  };
 
   test("a passing card sits under the prompt, which keeps its place, and a short command is whole beside Allow", async ({
     page,
     request,
   }) => {
     const bearer = await sinkToken();
-    const asks = sink(request, bearer, `Hold ask ${tag()}`, CONTROL_EVENTS);
-    const fails = sink(request, bearer, `Hold fail ${tag()}`, CONTROL_EVENTS);
+    const asks = ours(request, bearer, "Hold ask");
+    const fails = ours(request, bearer, "Hold fail");
     await openOurs(page, `${CONTROL_BASE}/feed`, [asks.key, fails.key]);
     await asks.start();
     await fails.start();
@@ -431,36 +495,42 @@ test.describe("toasts: the stack holds still", () => {
     expect(await msg.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
     expect(await msg.evaluate((el) => getComputedStyle(el).webkitLineClamp)).toBe("none");
     await expect(prompt.getByRole("button", { name: "Allow" })).toHaveCount(1);
-    await settled(page);
-    // The cards drawn above this one (and any on its way out): prompts newer than it. Another spec's prompt may land
-    // here meanwhile (every page gets one for each), and only that may move it.
-    const above = () =>
-      prompt.evaluate((el) => {
-        const ids: string[] = [];
-        for (let n = el.closest(".toast-slot")?.nextElementSibling; n; n = n.nextElementSibling)
-          ids.push(`${n.getAttribute("data-toast-id")}${n.hasAttribute("data-closing") ? " (going)" : ""}`);
-        return ids;
-      });
-    const before = { box: (await prompt.boundingBox())!, above: await above() };
+    const before = (await where(page, [asks.key]))[asks.key]!;
 
     await fails.failed("api_overloaded");
-    const error = page.locator(`.toast[data-session="${fails.key}"]`);
-    await expect(error).toBeVisible();
-    await settled(page);
-    const after = { box: (await prompt.boundingBox())!, above: await above() };
-    // The error is drawn under the prompt, and comes before it in the list.
-    expect((await error.boundingBox())!.y).toBeGreaterThanOrEqual(after.box.y + after.box.height - 1);
-    const errorId = await error.evaluate((el) => el.closest(".toast-slot")?.getAttribute("data-toast-id"));
-    expect(after.above.some((id) => id.startsWith(`${errorId}`))).toBe(false);
-    if (after.above.join() === before.above.join()) expect(Math.abs(after.box.y - before.box.y)).toBeLessThanOrEqual(1);
-    await asks.done();
+    await expect(page.locator(`.toast[data-session="${fails.key}"]`)).toBeVisible();
+    const after = await where(page, [asks.key, fails.key]);
+    const p = after[asks.key]!;
+    const e = after[fails.key]!;
+    // The error is drawn under the prompt, and comes after it in the list (as it is drawn).
+    expect(e.index).toBeGreaterThan(p.index);
+    expect(e.top).toBeGreaterThanOrEqual(p.bottom - 1);
+    // Only a newer prompt (another spec's, on its way out) may have moved it.
+    if (p.above === before.above) expect(Math.abs(p.top - before.top)).toBeLessThanOrEqual(1);
+  });
+
+  test("a request shown whole beside Allow is never cut, whatever the tool", async ({ page, request }) => {
+    const s = ours(request, await sinkToken(), "Hold write");
+    await openOurs(page, `${CONTROL_BASE}/feed`, [s.key]);
+    await s.start();
+    const path = "/Users/e2e/code/sessionpipe-gui/web/src/components/settings/ReleaseChannelPicker.tsx";
+    expect(path.length).toBeGreaterThanOrEqual(80);
+    expect(path.length).toBeLessThanOrEqual(100);
+    await s.permission("Write", path);
+    const card = page.locator(`.toast[data-session="${s.key}"]`);
+    await expect(card).toBeVisible();
+    await expect(card).toHaveClass(/toast--whole/);
+    await expect(card.getByRole("button", { name: "Allow" })).toHaveCount(1);
+    await expect(card.locator(".toast-msg")).toHaveText(path);
+    const body = card.locator(".toast-body");
+    expect(await body.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
   });
 
   test("a command too long to show whole offers Open, and no Allow, on the card or in its menu", async ({
     page,
     request,
   }) => {
-    const s = sink(request, await sinkToken(), `Hold long ${tag()}`, CONTROL_EVENTS);
+    const s = ours(request, await sinkToken(), "Hold long");
     await openOurs(page, `${CONTROL_BASE}/feed`, [s.key]);
     await s.start();
     const command = `rsync -av --delete ./build/ deploy@staging.example.com:/srv/app/releases/2026-11-18/ --exclude node_modules ${"x".repeat(20)}`;
@@ -484,13 +554,12 @@ test.describe("toasts: the stack holds still", () => {
     // Open opens the session beside the page.
     await card.getByRole("button", { name: "Open", exact: true }).click();
     await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
-    await s.done();
   });
 
   test("a card that comes while the pointer is on the stack waits until it leaves", async ({ page, request }) => {
     const bearer = await sinkToken();
-    const first = sink(request, bearer, `Hold first ${tag()}`, CONTROL_EVENTS);
-    const next = sink(request, bearer, `Hold next ${tag()}`, CONTROL_EVENTS);
+    const first = ours(request, bearer, "Hold first");
+    const next = ours(request, bearer, "Hold next");
     await openOurs(page, `${CONTROL_BASE}/feed`, [first.key, next.key]);
     await first.start();
     await next.start();
@@ -504,8 +573,6 @@ test.describe("toasts: the stack holds still", () => {
     await expect(late).toHaveCount(0);
     await away(page);
     await expect(late).toBeVisible({ timeout: 1_000 });
-    await first.done();
-    await next.done();
   });
 
   test("a card dismissed under the pointer keeps its room until the pointer leaves, so the one beside it holds still", async ({
@@ -513,9 +580,9 @@ test.describe("toasts: the stack holds still", () => {
     request,
   }) => {
     const bearer = await sinkToken();
-    const asks = sink(request, bearer, `Hold room ${tag()}`, CONTROL_EVENTS);
-    const fails = sink(request, bearer, `Hold gone ${tag()}`, CONTROL_EVENTS);
-    const later = sink(request, bearer, `Hold later ${tag()}`, CONTROL_EVENTS);
+    const asks = ours(request, bearer, "Hold room");
+    const fails = ours(request, bearer, "Hold gone");
+    const later = ours(request, bearer, "Hold later");
     await openOurs(page, `${CONTROL_BASE}/feed`, [asks.key, fails.key, later.key]);
     await asks.start();
     await fails.start();
@@ -526,12 +593,10 @@ test.describe("toasts: the stack holds still", () => {
     await fails.failed("api_overloaded");
     const error = page.locator(`.toast[data-session="${fails.key}"]`);
     await expect(error).toBeVisible();
-    await settled(page);
     const slot = page.locator(".toast-slot", { has: error });
     // × with the pointer, which stays where the card was.
     await error.locator(".toast-title").hover();
-    await settled(page);
-    const top = (await prompt.boundingBox())!.y;
+    const top = (await where(page, [asks.key]))[asks.key]!.top;
     const tall = (await slot.boundingBox())!.height;
     await error.getByRole("button", { name: "Dismiss" }).click();
     await later.permission("Bash", "git push");
@@ -544,8 +609,6 @@ test.describe("toasts: the stack holds still", () => {
     await away(page);
     await expect(slot).toHaveCount(0);
     await expect(page.locator(`.toast[data-session="${later.key}"]`)).toBeVisible();
-    await asks.done();
-    await later.done();
   });
 
   test("an error under the pointer stays past its time, and goes with the time it had left once the pointer leaves", async ({
@@ -553,7 +616,7 @@ test.describe("toasts: the stack holds still", () => {
     request,
   }) => {
     test.setTimeout(60_000);
-    const s = sink(request, await sinkToken(), `Hold error ${tag()}`, CONTROL_EVENTS);
+    const s = ours(request, await sinkToken(), "Hold error");
     await openOurs(page, `${CONTROL_BASE}/feed`, [s.key]);
     await s.start();
     await s.failed("api_overloaded");
@@ -566,22 +629,22 @@ test.describe("toasts: the stack holds still", () => {
     await expect(card).toHaveCount(0, { timeout: 10_000 });
   });
 
-  test("⌘⇧T, then × with the keyboard: focus goes to the next card, and from the last back to the row", async ({
+  test("⌘⇧T, then × with the keyboard: focus starts at the newest card and goes down to the next, and from the last back to the row", async ({
     page,
     request,
   }) => {
     const bearer = await sinkToken();
-    const one = sink(request, bearer, `Hold keys one ${tag()}`, CONTROL_EVENTS);
-    const two = sink(request, bearer, `Hold keys two ${tag()}`, CONTROL_EVENTS);
+    const one = ours(request, bearer, "Hold keys one");
+    const two = ours(request, bearer, "Hold keys two");
     await openOurs(page, `${CONTROL_BASE}/`, [one.key, two.key]);
     await one.start();
     await two.start();
     const link = page.locator(`article.card[data-flip="${one.key}"] a.card-link`);
     await expect(link).toBeVisible();
     await one.failed("api_overloaded");
+    await expect(page.locator(`.toast[data-session="${one.key}"]`)).toBeVisible();
     await two.failed("rate_limit");
     await expect(page.locator(`.toast[data-session="${two.key}"]`)).toBeVisible();
-    await expect(page.locator(`.toast[data-session="${one.key}"]`)).toBeVisible();
     await link.focus();
     await page.keyboard.press("ControlOrMeta+Shift+t");
     const inStack = () =>
@@ -590,7 +653,8 @@ test.describe("toasts: the stack holds still", () => {
         return a?.closest(".toast-slot:not([data-closing])")?.getAttribute("data-toast-id") ?? null;
       });
     let at = await inStack();
-    expect(at).not.toBeNull();
+    // The newest, nearest the corner.
+    expect(at).toContain(two.key);
     for (let i = 0; i < 6 && at; i++) {
       await page.keyboard.press("Tab");
       await expect(page.locator(".toasts .toast-x:focus")).toHaveCount(1);
@@ -598,17 +662,17 @@ test.describe("toasts: the stack holds still", () => {
       const now = await inStack();
       // The next card, never the one that went.
       if (now) expect(now).not.toBe(at);
+      // Both cards are this test's, so the first × always has a next card: the one under it.
+      if (i === 0) expect(now).toContain(one.key);
       at = now;
-      // Both cards are this test's, so the first × always has a next card.
-      if (i === 0) expect(now).not.toBeNull();
     }
     await expect(link).toBeFocused();
   });
 
   test("Esc in the notifications goes back to the page and leaves the panel open", async ({ page, request }) => {
     const bearer = await sinkToken();
-    const side = sink(request, bearer, `Hold side ${tag()}`, CONTROL_EVENTS);
-    const fails = sink(request, bearer, `Hold esc ${tag()}`, CONTROL_EVENTS);
+    const side = ours(request, bearer, "Hold side");
+    const fails = ours(request, bearer, "Hold esc");
     await side.start();
     await openOurs(page, `${CONTROL_BASE}/feed?s=${encodeURIComponent(side.key)}`, [side.key, fails.key]);
     await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
@@ -625,18 +689,33 @@ test.describe("toasts: the stack holds still", () => {
   });
 
   test("on a phone a banner held by a finger stays past its time", async ({ page, request }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(90_000);
     await page.setViewportSize({ width: 390, height: 844 });
-    const s = sink(request, await sinkToken(), `Hold finger ${tag()}`, CONTROL_EVENTS);
-    await openOurs(page, `${CONTROL_BASE}/feed`, [s.key]);
-    await s.start();
-    await s.failed("api_overloaded");
-    const banner = page.locator(`.toast[data-session="${s.key}"]`);
-    await expect(banner).toHaveClass(/toast--banner/);
-    await banner.dispatchEvent("pointerdown", { pointerType: "touch", isPrimary: true, button: 0, pointerId: 7 });
-    await page.waitForTimeout(9_000);
-    await expect(banner).toBeVisible();
-    await banner.dispatchEvent("pointerup", { pointerType: "touch", isPrimary: true, button: 0, pointerId: 7 });
-    await expect(banner).toHaveCount(0, { timeout: 4_000 });
+    const bearer = await sinkToken();
+    await openOurs(page, `${CONTROL_BASE}/feed`, []);
+    // A phone shows one banner: another spec's prompt on this instance replaces this one
+    // (keepOurs then dismisses it). A try that saw one is not this test's; it tries again.
+    for (let attempt = 0; ; attempt++) {
+      const s = ours(request, bearer, "Hold finger");
+      await keep(page, s.key);
+      await page.evaluate(() => {
+        window.__keep.swept = 0;
+      });
+      await s.start();
+      await s.failed("api_overloaded");
+      const banner = page.locator(`.toast[data-session="${s.key}"]`);
+      await expect(banner).toHaveClass(/toast--banner/);
+      await banner.dispatchEvent("pointerdown", { pointerType: "touch", isPrimary: true, button: 0, pointerId: 7 });
+      await page.waitForTimeout(9_000);
+      const replaced = await page.evaluate(() => window.__keep.swept > 0);
+      if ((await banner.count()) === 0 && replaced && attempt < 2) {
+        await page.evaluate(() => window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 7 })));
+        continue;
+      }
+      await expect(banner).toBeVisible();
+      await banner.dispatchEvent("pointerup", { pointerType: "touch", isPrimary: true, button: 0, pointerId: 7 });
+      await expect(banner).toHaveCount(0, { timeout: 4_000 });
+      break;
+    }
   });
 });

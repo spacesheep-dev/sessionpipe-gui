@@ -3,8 +3,8 @@
 
 /* Notification banners, the OS's shape: top-right on a desktop under the title band and
    left of an open panel, prompts nearest the corner, newest first, passing cards under
-   them (the last in the list is drawn on top); a compact banner under the status bar on
-   a phone. The raised surface every floating thing has, no stripe: the orange dot is the
+   them, in the list's order (Tab and a screen reader meet them as drawn); a compact
+   banner under the status bar on a phone. The raised surface every floating thing has, no stripe: the orange dot is the
    one signal that a prompt needs a person, and only a banner that carries a mark keeps
    the 16 px column for it. Each sits in a slot that keeps the 8 px between banners, so
    when one leaves (pop-out, then its slot closes) the rest close up without a jump; while
@@ -15,8 +15,7 @@
   top: calc(var(--bar) + 4px);
   right: calc(var(--split-width, 0px) + 16px);
   display: flex;
-  flex-direction: column-reverse;
-  justify-content: flex-end;
+  flex-direction: column;
   width: min(360px, calc(100vw - 32px));
   pointer-events: none;
 }
@@ -153,8 +152,10 @@
 .toast-msg {
   color: var(--fg-3);
 }
-/* A command on its own line under "Bash wants to run:", from its first character. Beside
-   Allow it is whole (ToastCard's `whole`); anywhere else two lines and an ellipsis. */
+/* Beside Allow the request is whole (ToastCard's `whole`): no clamp. A command stands on
+   its own line under "Bash wants to run:", from its first character; anywhere but beside
+   Allow, two lines and an ellipsis. */
+.toast--whole .toast-body,
 .toast-body:has(> .toast-msg.mono) {
   display: block;
 }

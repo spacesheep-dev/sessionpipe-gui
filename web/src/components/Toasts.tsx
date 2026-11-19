@@ -273,13 +273,27 @@ function useStackHold(stack: RefObject<HTMLElement | null>, on: boolean, shown: 
   const release = useRef<number | undefined>(undefined);
   /** The card keyboard focus is on. */
   const focused = useRef<string | null>(null);
+  /** The last input was a key, not a pointer: the focus it moves is the keyboard's. Kept
+   *  here rather than read from `:focus-visible`, whose match after a script's focus (⌘⇧T)
+   *  differs from engine to engine. */
+  const viaKeys = useRef(false);
   useEffect(() => {
     if (!on) return;
     const vis = () => holdToasts("hidden", document.visibilityState === "hidden");
+    const key = () => {
+      viaKeys.current = true;
+    };
+    const point = () => {
+      viaKeys.current = false;
+    };
     vis();
     document.addEventListener("visibilitychange", vis);
+    document.addEventListener("keydown", key, true);
+    document.addEventListener("pointerdown", point, true);
     return () => {
       document.removeEventListener("visibilitychange", vis);
+      document.removeEventListener("keydown", key, true);
+      document.removeEventListener("pointerdown", point, true);
       window.clearTimeout(release.current);
       holdToasts("hidden", false);
       holdToasts("pointer", false);
@@ -314,7 +328,8 @@ function useStackHold(stack: RefObject<HTMLElement | null>, on: boolean, shown: 
       holdToasts("focus", false);
       return;
     }
-    // The card now in its place: the next one down the list, else the one before it.
+    // The card now in its place: the next one down (the list is in the order drawn), which
+    // moves up into the room once the hold ends; else the one above it.
     const slots = el ? [...el.querySelectorAll<HTMLElement>(".toast-slot")] : [];
     const at = slots.findIndex((s) => s.dataset.toastId === id);
     const alive = (s: HTMLElement) => !s.hasAttribute("data-closing");
@@ -340,7 +355,7 @@ function useStackHold(stack: RefObject<HTMLElement | null>, on: boolean, shown: 
     },
     onFocus: (e: FocusEvent) => {
       // The keyboard's focus only: a click that focuses a button (Chromium) is the pointer's.
-      const keys = (e.target as HTMLElement).matches?.(":focus-visible") ?? false;
+      const keys = viaKeys.current;
       focused.current = keys
         ? ((e.target as HTMLElement).closest<HTMLElement>("[data-toast-id]")?.dataset.toastId ?? null)
         : null;
@@ -411,17 +426,26 @@ export function Toasts() {
   useShortcut("undo", () => (undoLatest() ? undefined : false));
   const held = useToastsHeld() && !phone;
   const leaving = useLeaving(visible, held);
-  // The phone's undo sits at the bottom, after the banner. On a desktop the prompts come
-  // last, which the stack (column-reverse) draws nearest the corner, the passing cards
-  // under them: a card that passes never moves a prompt's Allow.
+  // The phone's undo sits at the bottom, after the banner. On a desktop the list is in the
+  // order drawn, from the corner down (so Tab and ⌘⇧T meet the newest prompt first): the
+  // prompts, newest first, then the passing cards under them, so a card that passes never
+  // moves a prompt's Allow.
+  const newest = [...leaving].reverse();
   const shown = phone
     ? [...leaving.filter((e) => e.toast.kind !== "undo"), ...leaving.filter((e) => e.toast.kind === "undo")]
-    : [...leaving.filter((e) => !e.toast.sticky), ...leaving.filter((e) => e.toast.sticky)];
+    : [...newest.filter((e) => e.toast.sticky), ...newest.filter((e) => !e.toast.sticky)];
   const stackRef = useRef<HTMLElement>(null);
   const hold = useStackHold(stackRef, !phone, shown);
   if (shown.length === 0) return null;
+  // Above the cards on a desktop; the phone's sits over the tab bar.
+  const unlock = sounds.on && sounds.wanted && !sounds.unlocked && (
+    <p className="toast-unlock">
+      {phone ? "Tap anywhere once to turn sound on" : "click anywhere once to enable sound"}
+    </p>
+  );
   return (
     <section ref={stackRef} className={`toasts${phone ? " toasts--phone" : ""}`} aria-label="Notifications" {...hold}>
+      {unlock}
       {shown.map(({ toast: t, closing }) => (
         <div
           key={t.id}
@@ -443,11 +467,6 @@ export function Toasts() {
           )}
         </div>
       ))}
-      {sounds.on && sounds.wanted && !sounds.unlocked && (
-        <p className="toast-unlock">
-          {phone ? "Tap anywhere once to turn sound on" : "click anywhere once to enable sound"}
-        </p>
-      )}
     </section>
   );
 }
