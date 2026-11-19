@@ -29,10 +29,13 @@ export function listenErrorMessage(
       return `port ${port} is in use (try --port)`;
     case "EACCES":
       // Windows: a port in a range the system keeps (netsh int ipv4 show excludedportrange),
-      // or one another program holds for itself. Elsewhere: a port below 1024.
-      return platform === "win32"
-        ? `port ${port} is reserved by Windows or held by another program (try another --port)`
-        : `port ${port} is not open to this user (try another --port${port < 1024 ? "; ports below 1024 are kept for root" : ""})`;
+      // or one another program holds for itself. macOS opens a port below 1024 to any user
+      // on every address, not on one. Elsewhere: a port below 1024.
+      if (platform === "win32")
+        return `port ${port} is reserved by Windows or held by another program (try another --port)`;
+      if (platform === "darwin" && port < 1024)
+        return `port ${port} is open to this user only on every address (try another --port, or --host ${DEFAULT_HOST})`;
+      return `port ${port} is not open to this user (try another --port${port < 1024 ? "; ports below 1024 are kept for root" : ""})`;
     case "EADDRNOTAVAIL": {
       // A name that looked up to an address this machine lacks says which one it got.
       const got = e?.address && e.address !== host ? `, it looks up to ${e.address}` : "";

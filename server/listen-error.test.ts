@@ -65,6 +65,10 @@ describe("listenErrorMessage", () => {
     expect(listenErrorMessage(eacces(7373), "127.0.0.1", 7373, "darwin")).toBe(
       "port 7373 is not open to this user (try another --port)",
     );
+    // macOS opens a low port to any user on every address, and refuses it on one.
+    expect(listenErrorMessage(eacces(80), "127.0.0.1", 80, "darwin")).toBe(
+      "port 80 is open to this user only on every address (try another --port, or --host 0.0.0.0)",
+    );
     // An excluded port range, or a port another program holds exclusively.
     expect(listenErrorMessage(eacces(7373), "127.0.0.1", 7373, "win32")).toBe(
       "port 7373 is reserved by Windows or held by another program (try another --port)",
