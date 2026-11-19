@@ -20,7 +20,7 @@ import {
   type SessionMatch,
   type SessionSearchPage,
 } from "../../shared/api.js";
-import { isEmptySearch, parseSearch } from "../../shared/searchQuery.js";
+import { isEmptySearch, parseSearch, searchQueryNote } from "../../shared/searchQuery.js";
 import { ConfigError, readConfigFile } from "../config.js";
 import { HARNESS_LABELS } from "./facets.js";
 import { homePath } from "./resume.js";
@@ -282,6 +282,11 @@ function statusLine(s: SearchIndexStatus): string {
     case "off":
       return `${n} sessions from sessionpipe · history search is off`;
     case "error":
+      if (s.historyLeft) {
+        // The error code (EPERM, ENOTEMPTY…) the server put in its sentence, when it has one.
+        const code = /\((E[A-Z]+)\)/.exec(s.error ?? "")?.[1];
+        return `History search is off, but its index could not be deleted${code ? ` (${code})` : ""}. sessionpipe-gui index --rebuild tries again`;
+      }
       return `The index needs rebuilding (${s.error ?? "error"}). sessionpipe-gui index --rebuild`;
     default:
       return `${n} sessions · up to date`;
@@ -393,8 +398,10 @@ export async function runSearchCli(argv: string[], io: CliIo): Promise<number> {
     }
     const port = server?.port ?? DEFAULT_PORT;
     const url = `http://localhost:${port}/search?q=${encodeURIComponent(args.q)}${args.newest ? "&sort=newest" : ""}`;
+    const note = searchQueryNote(page.parsed);
     if (!page.sessions.length) {
       out(`No sessions match “${args.q}”.`);
+      if (note) out(note);
       const h = hintLine(page);
       if (h) out(h);
       out("");
@@ -408,10 +415,7 @@ export async function runSearchCli(argv: string[], io: CliIo): Promise<number> {
       for (const l of formatSession(s, opened.home)) out(l);
       out("");
     }
-    if (page.parsed.unknown.length)
-      out(
-        `“${page.parsed.unknown[0]}:” isn't a filter, so it was searched as text. Filters: agent machine repo label since until in source`,
-      );
+    if (note) out(note);
     out(url);
     return 0;
   } finally {

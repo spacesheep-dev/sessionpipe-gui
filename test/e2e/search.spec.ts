@@ -47,6 +47,41 @@ test.describe("search", () => {
     await expect(field(page)).toHaveValue("webhook");
   });
 
+  test("history off with its index still on disk says so, not that the index needs rebuilding", async ({ page }) => {
+    // The demo's own index moves while the test runs: its `searchIndex` frames are dropped,
+    // so the stubbed status below is the one the page shows.
+    await page.addInitScript(() => {
+      const add = EventSource.prototype.addEventListener;
+      EventSource.prototype.addEventListener = function (this: EventSource, type: string, ...rest: unknown[]) {
+        if (type === "searchIndex") return;
+        return (add as (...a: unknown[]) => void).call(this, type, ...rest);
+      } as typeof add;
+    });
+    await page.route("**/api/ui/search/status", (route) =>
+      route.fulfill({
+        json: {
+          state: "error",
+          sessions: 3,
+          messages: 9,
+          bytes: 0,
+          history: false,
+          sources: [],
+          error:
+            "History search is off, but its index is still on disk: it could not be deleted (EPERM). It is tried again each time the indexer starts, and on Rebuild.",
+          historyLeft: true,
+          local: true,
+        },
+      }),
+    );
+    await openPage(page, "/search");
+    const line = page.locator(".sx-status").first();
+    await expect(line).toContainText(
+      "History search is off, but its index could not be deleted. Rebuild, or restarting the app, tries again.",
+    );
+    await expect(line).not.toContainText("needs rebuilding");
+    await expect(line.getByRole("button", { name: "Rebuild", exact: true })).toBeVisible();
+  });
+
   test("a word nothing has gives the no-result state, and Clear search goes back to idle", async ({ page }) => {
     await openPage(page, "/search?q=zzqqxxnothing");
     await expect(page.getByRole("heading", { name: "No sessions match “zzqqxxnothing”" })).toBeVisible({

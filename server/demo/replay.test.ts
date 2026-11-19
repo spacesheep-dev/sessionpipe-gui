@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { ulid } from "sessionpipe-core";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import type { EventSource, ProtocolEvent } from "../../shared/api.js";
+import { tempDir } from "../../test/events.js";
 import type { Store } from "../store/store.js";
 import { startReplay } from "./index.js";
 import { planReplay } from "./replay.js";
@@ -39,9 +39,12 @@ const event = (
   data,
 });
 
+const tmp = tempDir("spgui-replay-");
+afterAll(() => tmp.cleanup());
+
+let files = 0;
 function fileOf(lines: unknown[]): string {
-  const dir = mkdtempSync(path.join(tmpdir(), "spgui-replay-"));
-  const file = path.join(dir, "events.jsonl");
+  const file = path.join(tmp.dir, `events-${++files}.jsonl`);
   writeFileSync(file, `${lines.map((l) => (typeof l === "string" ? l : JSON.stringify(l))).join("\n")}\n`);
   return file;
 }
