@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: search sources.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TITLE_RANK } from "../types.js";
@@ -128,5 +128,30 @@ describe("gemini cli", () => {
     expect(sink.folded(GM).resume).toBeUndefined();
     const whole = [...r.entries()].find(([p]) => p.endsWith(".json"));
     expect(whole?.[1].offset).toBe(2);
+  });
+
+  it("GEMINI_CLI_HOME is the home that holds .gemini, as Gemini CLI reads it", async () => {
+    // Gemini CLI writes to $GEMINI_CLI_HOME/.gemini/tmp; nothing lives at $GEMINI_CLI_HOME/tmp.
+    const job = path.join(fx.home, "..", "job");
+    cpSync(path.join(fx.home, ".gemini/tmp"), path.join(job, ".gemini/tmp"), { recursive: true });
+    cpSync(path.join(fx.home, ".gemini/tmp/acme-cli"), path.join(job, "tmp/stray"), { recursive: true });
+    const env = testEnv(path.join(fx.home, "..", "empty-home"), fx.state, { GEMINI_CLI_HOME: job });
+    const files = await geminiAdapter().discover(env);
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.every((f) => f.path.startsWith(path.join(job, ".gemini", "tmp") + path.sep))).toBe(true);
+    expect(geminiAdapter().roots(env)).toEqual([path.join(job, ".gemini", "tmp")]);
+    const sink = new Collect();
+    await readAll(geminiAdapter(), env, sink);
+    expect(sink.keys()).toContain(GM);
+  });
+
+  it("GEMINI_CLI_HOME does not move Antigravity's lookup (whether Antigravity reads it is unverified)", async () => {
+    const job = path.join(fx.home, "..", "job");
+    cpSync(path.join(fx.home, ".gemini/antigravity"), path.join(job, "antigravity"), { recursive: true });
+    const env = testEnv(path.join(fx.home, "..", "empty-home"), fx.state, { GEMINI_CLI_HOME: job });
+    expect(antigravityAdapter().roots(env)).toEqual([path.join(job, "antigravity", "brain")]);
+    const sink = new Collect();
+    await readAll(antigravityAdapter(), env, sink);
+    expect(sink.keys()).toContain(G1);
   });
 });

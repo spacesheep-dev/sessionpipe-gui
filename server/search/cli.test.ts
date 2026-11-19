@@ -139,6 +139,22 @@ describe("sessionpipe-gui search", () => {
     expect(page.sessions[0]!.thisMachine).toBe(true);
   });
 
+  it("a filter value that does not read is named and left out, not called an unknown filter", async () => {
+    const r = await run(runSearchCli, ["webhook since:2026-2-1"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(
+      "“since:2026-2-1” isn't a date, so it was left out. Dates: 7d, 12h, today, yesterday, 2026-10, 2026-10-01",
+    );
+    expect(r.out).not.toContain("isn't a filter");
+    const bad = await run(runSearchCli, ["webhook in:everything"]);
+    expect(bad.out).toContain("“in:everything” isn't a field, so it was left out. in: prompt reply tool title");
+    const both = await run(runSearchCli, ["webhook in:everything foo:bar"]);
+    expect(both.out).toContain("in: prompt reply tool title. “foo:” isn't a filter, so it was searched as text.");
+    const none = await run(runSearchCli, ["zzzz since:3days"]);
+    expect(none.code).toBe(1);
+    expect(none.out).toContain("“since:3days” isn't a date, so it was left out.");
+  });
+
   it("exit 1 with nothing, with the hint that applies", async () => {
     const r = await run(runSearchCli, ["webhook", "--agent", "codex"]);
     expect(r.code).toBe(1);
@@ -253,6 +269,36 @@ describe("sessionpipe-gui index", () => {
     expect(ran).toHaveLength(0);
     expect(seen[0]).toBe(`POST http://127.0.0.1:7999${ROUTES.ui.searchReindex} {"rebuild":true}`);
     expect(r.out).toContain("9 sessions · up to date");
+  });
+
+  it("--status from a running GUI with history off and its index left on disk says so", async () => {
+    mkdirSync(path.join(tmp.dir, "search"), { recursive: true });
+    writeFileSync(path.join(tmp.dir, "search", "server.json"), JSON.stringify({ pid: process.ppid, port: 7999 }));
+    const status = {
+      state: "error",
+      sessions: 9,
+      messages: 1,
+      bytes: 1,
+      history: false,
+      sources: [],
+      error: "History search is off, but its index is still on disk: it could not be deleted (EPERM).",
+      historyLeft: true,
+    };
+    const fake = (async () => new Response(JSON.stringify(status))) as unknown as typeof fetch;
+    const r = await run(runIndexCli, ["--status"], { fetch: fake });
+    expect(r.out).toContain(
+      "History search is off, but its index could not be deleted (EPERM). sessionpipe-gui index --rebuild tries again",
+    );
+    expect(r.out).not.toContain("needs rebuilding");
+    // after a restart the server's sentence has no code: none is shown
+    const noCode = {
+      ...status,
+      error: "History search is off, but its index is still on disk: it could not be deleted.",
+    };
+    const r2 = await run(runIndexCli, ["--status"], {
+      fetch: (async () => new Response(JSON.stringify(noCode))) as unknown as typeof fetch,
+    });
+    expect(r2.out).toContain("its index could not be deleted. sessionpipe-gui index --rebuild tries again");
   });
 
   it("--status reads the index; unknown options are a usage error", async () => {

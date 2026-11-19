@@ -101,6 +101,11 @@ describe("compileFilters", () => {
     });
     expect(f.allow).toBeUndefined();
     expect(f.bad).toEqual(["since", "in", "source"]);
+    expect(f.badValues).toEqual([
+      { key: "since", value: "someday" },
+      { key: "in", value: "everything" },
+      { key: "source", value: "mars" },
+    ]);
     expect(f.fields).toBeUndefined();
     expect(f.sources).toEqual(["history", "sessionpipe"]);
   });
