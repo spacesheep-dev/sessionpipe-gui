@@ -53,6 +53,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   start, and the next pairing or hello wrote the file over, so every machine had to pair
   again. The receiver now stops at start with a message naming the file and what to do, as
   it does for `config.json`, and leaves the file as it was.
+- **Search's status line says when history search is off but its index could not be
+  deleted.** It read "The index needs rebuilding" instead. It now says the history index
+  could not be deleted, and that Rebuild (on this computer) or restarting the app tries
+  again; `sessionpipe-gui index --status` against a running GUI says so too, with the error
+  code when there is one, and points at `index --rebuild`. The status carries a new
+  `historyLeft` field for it.
 
 ## [0.8.5] - 2026-11-18
 
