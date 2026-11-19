@@ -392,6 +392,13 @@ pairing link that carries the board's key only for a pairing the sink token star
   answer has gone, or that you hid, counts no more, and the Board's Needs you drops it
   from its number at once, its row in its place. VoiceOver reads "Inbox, 3 need you".
   Notifications are as they were: only a prompt you can answer here raises one.
+- **Settings › Data's spacesheep account is a quiet option.** Its Connect… was the one
+  solid button in Settings; it is now a small one like Rebuild…, Forget… and Download
+  JSON, and Disconnect is the same size. "Open the confirm page" stays solid while a
+  connect waits on it. The group is "spacesheep" over "Use a spacesheep account", and its
+  four-line note is one sentence, "Also shows the sessions your computers send to
+  spacesheep, which keeps them.", with a Privacy policy link. On an account, Storage says
+  what it holds where it showed an empty line.
 
 ### Fixed
 

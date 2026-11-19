@@ -503,7 +503,8 @@ body:has(.page--grouped),
   line-height: var(--lh);
   overflow-wrap: anywhere;
 }
-.settings-hint a {
+.settings-hint a,
+.settings-group-note a {
   color: var(--fg-2);
   text-decoration: underline;
   text-decoration-color: var(--line-2);

@@ -854,6 +854,10 @@ const AGES: { days: number; label: string }[] = [
   { days: 90, label: "three months" },
 ];
 
+/** Where the receiver connects when no origin is named (native/accountConnect.ts
+ *  DEFAULT_ORIGIN, which this window does not import: it brings the phone's shell code). */
+const SPACESHEEP_ORIGIN = "https://spacesheep.dev";
+
 /** "Use a spacesheep account": the relay option (docs/rfcs/08). Off by default; the copy
  *  names the trade. Connect opens spacesheep's confirm page with four digits; the server
  *  polls and connects; the group follows through the info it re-reads. */
@@ -989,18 +993,31 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
     limited: "this app is reading too often for spacesheep; it catches up by itself",
     gap: "reading (an older gap the relay no longer holds)",
   };
+  // The privacy policy is the account's spacesheep's: the one connected, the one a confirm
+  // is pending on, else the default.
+  let origin = SPACESHEEP_ORIGIN;
+  try {
+    origin = link?.origin || (p ? new URL(p.url).origin : origin);
+  } catch {}
   return (
     <G
-      label="A spacesheep account"
+      label="spacesheep"
       note={
-        link
-          ? `Connected as ${link.email} since ${new Date(link.connectedAt).toLocaleDateString()}. ${link.events} events so far · ${stateWords[link.state] ?? link.state}${link.lastError && link.state !== "ok" ? ` · ${link.lastError}` : ""}${link.machines.length ? ` · machines there: ${link.machines.join(", ")}` : ""}. ${
-              account
-                ? // What Disconnect removes (account/backend.ts `drop`, account/local.ts), and what it does not.
-                  `Disconnect removes the account from ${deviceWords().this}: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep: Settings → API keys.`
-                : "The key is under Settings → API keys on spacesheep; revoking it there disconnects this app."
-            }`
-          : "An option, not the default: read the sessions and machines paired on a spacesheep account through spacesheep, with nothing to host here. spacesheep then holds what those machines send, at the tier they send, under its privacy policy; a self-hosted board keeps everything on this disk. You can run both."
+        link ? (
+          `Connected as ${link.email} since ${new Date(link.connectedAt).toLocaleDateString()}. ${link.events} events so far · ${stateWords[link.state] ?? link.state}${link.lastError && link.state !== "ok" ? ` · ${link.lastError}` : ""}${link.machines.length ? ` · machines there: ${link.machines.join(", ")}` : ""}. ${
+            account
+              ? // What Disconnect removes (account/backend.ts `drop`, account/local.ts), and what it does not.
+                `Disconnect removes the account from ${deviceWords().this}: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep: Settings → API keys.`
+              : "The key is under Settings → API keys on spacesheep; revoking it there disconnects this app."
+          }`
+        ) : (
+          <>
+            Also shows the sessions your computers send to spacesheep, which keeps them.{" "}
+            <a href={`${origin}/privacy`} target="_blank" rel="noreferrer noopener">
+              Privacy policy
+            </a>
+          </>
+        )
       }
     >
       <R
@@ -1016,15 +1033,15 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
         }
       >
         {link ? (
-          <button type="button" className="btn" disabled={busy} onClick={() => void disconnect()}>
+          <button type="button" className="btn btn--sm" disabled={busy} onClick={() => void disconnect()}>
             Disconnect
           </button>
         ) : p && p.state === "pending" ? (
-          <a className="btn btn--primary" href={p.url} target="_blank" rel="noreferrer">
+          <a className="btn btn--sm btn--primary" href={p.url} target="_blank" rel="noreferrer">
             Open the confirm page
           </a>
         ) : (
-          <button type="button" className="btn btn--primary" disabled={busy || !!older} onClick={() => void connect()}>
+          <button type="button" className="btn btn--sm" disabled={busy || !!older} onClick={() => void connect()}>
             Connect…
           </button>
         )}
@@ -1100,7 +1117,8 @@ function Data() {
       <Row
         label="Storage"
         hint={
-          info ? (
+          // On an account there is no folder (dir ""): the sentence says what it is instead.
+          info?.storage.dir ? (
             <span className="settings-path">{info.storage.dir}</span>
           ) : (
             "The events this receiver holds, one file per session."

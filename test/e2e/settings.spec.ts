@@ -133,6 +133,26 @@ test.describe("settings dialog", () => {
     await expect(dialog(page).getByRole("tab", { selected: true })).toHaveText("Data");
   });
 
+  // The spacesheep account is an option, so its Connect… is a row button like the others,
+  // under a one-word heading and one sentence that says what it keeps, with its policy.
+  test("Data: the spacesheep account is a quiet option, said in one sentence with its privacy policy", async ({
+    page,
+  }) => {
+    await openPage(page, "/?settings=data");
+    const d = dialog(page);
+    const group = d.getByRole("region", { name: "spacesheep", exact: true });
+    await expect(group.getByRole("heading", { name: "spacesheep", exact: true })).toBeVisible();
+    await expect(group.getByText("Use a spacesheep account")).toBeVisible();
+    await expect(group.getByText("which keeps them")).toBeVisible();
+    await expect(d.getByText("not the default")).toHaveCount(0);
+    await expect(group.getByRole("link", { name: "Privacy policy" })).toHaveAttribute(
+      "href",
+      "https://spacesheep.dev/privacy",
+    );
+    await expect(group.getByRole("button", { name: "Connect…" })).toBeVisible();
+    await expect(d.locator(".btn--primary")).toHaveCount(0);
+  });
+
   // In a browser the page is the receiver's: its version, what it is in one line, and
   // nothing about updates, which only the desktop app does for itself.
   test("About says the receiver's version and what this is, and nothing about updates", async ({ page, request }) => {

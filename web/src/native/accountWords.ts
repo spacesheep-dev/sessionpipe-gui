@@ -15,7 +15,7 @@ export { MACHINES, NEW_WORDS, SEND, START };
 export const REUSED = {
   /** Settings → Data on the desktop: the row's label. */
   use: "Use a spacesheep account",
-  /** Settings → Data on the desktop: the group's label. */
+  /** Settings → Data on the desktop: the group's label, until that became "spacesheep". */
   group: "A spacesheep account",
   /** The first run: "Connecting to studio-mac…". */
   connecting: WORDS.connecting,

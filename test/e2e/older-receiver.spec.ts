@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Settings › Data › "A spacesheep account" in the app against a receiver older than the
+// Settings › Data › "spacesheep" in the app against a receiver older than the
 // option (web/src/lib/serverAge.ts, components/OlderReceiverNotice.tsx): a fake shell (as
 // native-shell.spec.ts has one) and the receiver's info and spacesheep route stubbed, so
 // the page's half is pinned: the sentence, Connect off, "Update sessionpipe" with its
@@ -151,6 +151,9 @@ test.describe("an option the receiver is too old for, in the app", () => {
       page.getByText("sessionpipe on this computer is 0.7.2, which is older than this option."),
     ).toBeVisible();
     await expect(connect(page)).toBeDisabled();
+    // The update is the one next step: the only primary button.
+    await expect(page.getByRole("tabpanel").locator(".btn--primary")).toHaveCount(1);
+    await expect(page.getByRole("tabpanel").locator(".btn--primary")).toHaveText("Update sessionpipe");
     await expect(page.getByText("Or run this in a terminal:")).toBeVisible();
     await expect(page.locator(".cmdwell-text")).toContainText(
       "sessionpipe-gui-0.8.1.tgz -- sessionpipe-gui service install",

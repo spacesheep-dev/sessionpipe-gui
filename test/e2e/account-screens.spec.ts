@@ -638,6 +638,13 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await shot(page, "settings");
     await page.goto(`${b.server.url}/settings?section=data`);
     await expect(page.getByText(/Connected as/)).toHaveCount(0);
+    // An account keeps no folder: Storage says what it holds instead of an empty line.
+    await expect(
+      page
+        .locator(".settings-row")
+        .filter({ has: page.locator(".settings-label", { hasText: /^Storage$/ }) })
+        .locator(".settings-hint"),
+    ).toHaveText("The events this receiver holds, one file per session.");
   });
 
   test("Approve this iPhone: the ask, then the number and the two things to do on spacesheep", async () => {
