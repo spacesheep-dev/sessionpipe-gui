@@ -676,7 +676,7 @@
 /* The stream is down: the rows stay where they are, one quiet tier, their times stopped
    (the shell's footer says why). */
 .board--down
-:is(.card-link, .card-title, .card-tool, .card-kind, .card-attn, .inline-code, .kid, .agent-type, .agent-desc) {
+  :is(.card-link, .card-title, .card-tool, .card-kind, .card-attn, .inline-code, .kid, .agent-type, .agent-desc) {
   color: var(--fg-3);
 }
 /* What it is doing is not known while nothing arrives: the rings stop where they are. */
