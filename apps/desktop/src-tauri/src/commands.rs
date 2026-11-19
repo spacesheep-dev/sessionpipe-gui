@@ -189,7 +189,7 @@ fn rx_local_update<R: Runtime>(
     Ok(crate::lifecycle::local_update())
 }
 
-/// The page's "Update sessionpipe" (Settings › Data): runs what "Start sessionpipe" runs,
+/// The page's Update (Settings › About, Settings › Data): runs what "Start sessionpipe" runs,
 /// with its progress lines, and says what the receiver runs after.
 #[tauri::command]
 async fn rx_update_local<R: Runtime>(
@@ -200,14 +200,16 @@ async fn rx_update_local<R: Runtime>(
     crate::lifecycle::supervisor::UpdateFailure,
 > {
     main_only(&window).map_err(failed)?;
-    crate::lifecycle::update_local_receiver(|step, message| {
+    let r = crate::lifecycle::update_local_receiver(|step, message| {
         let _ = on_progress.send(Progress {
             step: step.into(),
             message: message.into(),
         });
     })
-    .await
-    .map_err(|e| (&e).into())
+    .await;
+    // The menu bar item offers the update only while it is still to do.
+    crate::tray::refresh(window.app_handle());
+    r.map_err(|e| (&e).into())
 }
 
 #[tauri::command]

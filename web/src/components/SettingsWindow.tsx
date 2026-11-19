@@ -43,7 +43,7 @@ import {
   useSearchParam,
 } from "../lib/router";
 import { selfUpdating } from "../lib/selfUpdate";
-import { isRouteNotFound, olderReceiver } from "../lib/serverAge";
+import { isRouteNotFound, olderReceiver, updateCommand } from "../lib/serverAge";
 import {
   DEFAULT_PAGES,
   type DefaultPage,
@@ -56,13 +56,14 @@ import { allActions, applyPreset, getPreset, IS_MAC, PRESETS, useShortcutMap } f
 import { DEFAULT_SKIN, type InstalledSkin } from "../lib/skins";
 import { resolvedScheme, setSkin, setTextSize, setTheme, type Theme, useSettings } from "../lib/theme";
 import { TIER_HINT, TIER_LABEL } from "../lib/tier";
+import { serviceRow, useLocalUpdate, useUpdateRun } from "../native/receiverUpdate";
 import { SearchDataGroup } from "../search/SettingsRows";
 import { useThemes } from "../themes/host/registry";
 import { AppIcon } from "./AppIcon";
 import { CopyIconButton, Segmented, Toggle } from "./bits";
 import { LensPicker } from "./LensChip";
 import { NotificationsSettings } from "./NotificationsSettings";
-import { type LocalUpdateState, OlderReceiverNotice } from "./OlderReceiverNotice";
+import { OlderReceiverNotice } from "./OlderReceiverNotice";
 import { APPEARANCE, noContextMenu, SKIN_ADD_LINE, TextSizeSlider, useListedSkins } from "./QuickSettings";
 import { Select } from "./Select";
 import { Keys } from "./ShortcutHelp";
@@ -136,7 +137,7 @@ const shellApp = (
     sessionpipeShell?: {
       platform?: string;
       appVersion?: string;
-      receiver?: { name?: string; local?: boolean } | null;
+      receiver?: { name?: string; origin?: string; local?: boolean } | null;
     };
   }
 ).sessionpipeShell;
@@ -871,7 +872,7 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
   const [err, setErr] = useState<string | null>(null);
   // In the app the receiver can be older than this page (lib/serverAge.ts): it says so. Its
   // version is read again when the stream comes back (a receiver restarted by an update),
-  // when the window comes forward, and after "Update sessionpipe".
+  // when the window comes forward, and after an update (this window's or another's) ends.
   const store = useStore();
   const { connection } = useConnection();
   const [version, setVersion] = useState<string | undefined>(undefined);
@@ -879,8 +880,8 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
   // The process that 404'd, by its info's startedAt: the notice stays until another answers.
   const notFoundAt = useRef<string | null>(null);
   const startedAt = useRef<string | null>(null);
-  const [local, setLocal] = useState<LocalUpdateState | null>(null);
-  const refresh = useCallback(() => {
+  const { local, reload } = useLocalUpdate();
+  const readInfo = useCallback(() => {
     store.transport
       .info()
       .then((i) => {
@@ -893,19 +894,24 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
         }
       })
       .catch(() => {});
-    if (inShell) void import("../native/receiverUpdate").then((m) => m.localUpdate()).then(setLocal);
   }, [store]);
+  const refresh = useCallback(() => {
+    readInfo();
+    reload();
+  }, [readInfo, reload]);
+  // Read on opening, when an update stops running, and when the stream comes back: a
+  // receiver an update restarted.
+  const updating = !!local?.busy;
   useEffect(() => {
-    refresh();
-  }, [refresh]);
-  // Read again when the stream comes back: a receiver an update restarted.
+    if (!updating) readInfo();
+  }, [readInfo, updating]);
   useEffect(() => {
-    if (connection === "live") refresh();
-  }, [refresh, connection]);
+    if (connection === "live") readInfo();
+  }, [readInfo, connection]);
   useEffect(() => {
-    window.addEventListener("focus", refresh);
-    return () => window.removeEventListener("focus", refresh);
-  }, [refresh]);
+    window.addEventListener("focus", readInfo);
+    return () => window.removeEventListener("focus", readInfo);
+  }, [readInfo]);
   const localOrigin = local?.origin ?? null;
   const older = olderReceiver("spacesheep", version, { notFound, localOrigin });
   const read = async () => {
@@ -1203,29 +1209,56 @@ function LinkRow({ href, to, children }: { href?: string; to?: string; children:
 
 /** About: what this is and which version, as a macOS About window says it. In the app the
  *  version is the app's own, and the receiver's is said under it only when it differs (an
- *  older background service, another computer's); in a browser the page is the receiver's. */
+ *  older background service, another computer's); in a browser the page is the receiver's.
+ *  When this computer's background service is behind the app, the update group says so in
+ *  a row of its own, with Update (native/receiverUpdate.ts serviceRow), in place of that
+ *  line. */
 function About() {
   const store = useStore();
   const [info, setInfo] = useState<Info | null>(null);
-  useEffect(() => {
+  // Whether the receiver has answered once (or failed to): until then the row waits, so
+  // a service updated from a terminal never shows as behind for a moment.
+  const [asked, setAsked] = useState(false);
+  const read = useCallback(() => {
     store.transport
       .info()
       .then(setInfo)
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setAsked(true));
   }, [store]);
+  useEffect(() => {
+    read();
+    window.addEventListener("focus", read);
+    return () => window.removeEventListener("focus", read);
+  }, [read]);
+  // Only an app that updates itself (the desktop app) checks its background service.
+  const checks = !!UpdatesGroup && !accountMode();
+  const { local, reload } = useLocalUpdate(checks);
+  const run = useUpdateRun(local, () => {
+    reload();
+    read();
+  });
+  // The version this window's receiver answers, when it is the one the launch check found.
+  const mine = !!local && local.origin === shellApp?.receiver?.origin;
+  const live = mine ? info?.version : undefined;
+  // Once shown, the row stays until the window closes, saying the version the update brought.
+  const shown = useRef(false);
+  const row = checks && (asked || !mine) ? serviceRow(local, run, { live, shown: shown.current }) : null;
+  if (row) shown.current = true;
   const appVersion = shellApp?.appVersion || "";
   const version = appVersion || info?.version;
   // The receiver's own version, said only where it is not the app's. (An account has no
   // receiver behind it: its version is the app's.)
   const rx = shellApp?.receiver;
   const theirs = appVersion && rx && !accountMode() && info?.version !== appVersion ? info?.version : undefined;
-  const runs = !theirs
-    ? null
-    : rx?.local
-      ? `${shellApp?.platform === "macos" ? "This Mac" : "This computer"}'s background service runs ${theirs}.`
-      : rx?.name
-        ? `${rx.name} runs ${theirs}.`
-        : null;
+  const runs =
+    !theirs || row
+      ? null
+      : rx?.local
+        ? `${shellApp?.platform === "macos" ? "This Mac" : "This computer"}'s background service runs ${theirs}.`
+        : rx?.name
+          ? `${rx.name} runs ${theirs}.`
+          : null;
   return (
     <>
       <div className="about-head">
@@ -1239,7 +1272,10 @@ function About() {
       </div>
       {UpdatesGroup && (
         <Suspense fallback={null}>
-          <UpdatesGroup appVersion="" />
+          <UpdatesGroup
+            appVersion=""
+            service={row ? { row, update: run.run, command: updateCommand(appVersion || local?.app || "") } : undefined}
+          />
         </Suspense>
       )}
       <Group>

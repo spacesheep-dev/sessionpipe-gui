@@ -1171,8 +1171,9 @@ async fn follow<R: Runtime>(app: AppHandle<R>, hub: Hub, state: PathBuf, r: Rece
 //   install --if-installed` in the background (the service upgraded in place, with its
 //   port and state dir; none installed where there was none). Nothing is downloaded.
 // - otherwise bringing it current needs the app's release through npx, a download, which
-//   needs a click: nothing runs, the log says so, and the page (rx_local_update) offers
-//   "Update sessionpipe", which runs the click path (update_local_click).
+//   needs a click: nothing runs, the log says so, and Settings › About (rx_local_update)
+//   offers Update, which runs the click path (update_local_click); the menu bar item
+//   offers "Update Background Service…", which opens it.
 // It is logged either way. A failure before the old receiver was stopped leaves it running;
 // one after (`service install` exits 4: the new one never came up) is logged as such, and
 // the page offers the click. Debug builds never do any of it (they keep away from :7373
@@ -1534,6 +1535,16 @@ fn installed_service(t: &Tools, state: Option<&Path>) -> InstalledService {
 static CHECKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static LOCAL: Mutex<Option<(ReceiverRef, LocalUpdate)>> = Mutex::new(None);
 
+/// Whether this computer's background service is behind the app and the app can bring it
+/// current with a click: what the menu bar item offers to do (Settings › About's row).
+pub fn local_behind() -> bool {
+    LOCAL
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|(_, u)| matches!(u.state, UpdateState::Click | UpdateState::Failed))
+}
+
 /// What the check last found, for the page, with whether an install runs now.
 pub fn local_update() -> Option<LocalUpdate> {
     LOCAL.lock().unwrap().as_ref().map(|(_, u)| LocalUpdate {
@@ -1583,9 +1594,10 @@ fn update_with_cli(t: &Tools, app: &str) -> Result<Updated, StartError> {
     ran.into_result().map(|_| Updated::Done)
 }
 
-/// Once per launch: the first local receiver that connects is checked (see above).
+/// Once per launch: the first local receiver that connects is checked (see above), and
+/// `checked` runs once what it found is kept (the menu bar item reads it).
 /// Called once from setup.
-pub fn keep_current(hub: Hub, app_version: String) {
+pub fn keep_current(hub: Hub, app_version: String, checked: impl FnOnce() + Send + 'static) {
     if cfg!(debug_assertions) {
         return;
     }
@@ -1611,6 +1623,7 @@ pub fn keep_current(hub: Hub, app_version: String) {
             check_local(&hub, &r, &state, &app_version, tools_here, update_with_cli).await
         {
             *LOCAL.lock().unwrap() = Some((r, u));
+            checked();
         }
     });
 }
@@ -1684,7 +1697,7 @@ pub async fn check_local(
             Some(done(&v, UpdateState::Current, None))
         }
         Plan::Click(v) => {
-            log::info!(target: "sessionpipe::lifecycle", "update: the local receiver runs {v}, older than this app ({app}); bringing it to {app} needs the app's release through npx (a download), so it waits for \"Update sessionpipe\" in Settings › Data (the CLI on PATH: {})", cli_v.as_deref().unwrap_or("none"));
+            log::info!(target: "sessionpipe::lifecycle", "update: the local receiver runs {v}, older than this app ({app}); bringing it to {app} needs the app's release through npx (a download), so it waits for Update in Settings › About (the CLI on PATH: {})", cli_v.as_deref().unwrap_or("none"));
             Some(done(&v, UpdateState::Click, None))
         }
         Plan::Auto(v) => {
@@ -1713,8 +1726,8 @@ pub async fn check_local(
     }
 }
 
-/// The page's "Update sessionpipe" (Settings › Data): the app's release through npx, with
-/// its progress lines. Never the CLI on PATH instead: when npx can't download it, nothing is
+/// The page's Update (Settings › About, Settings › Data): the app's release through npx,
+/// with its progress lines. Never the CLI on PATH instead: when npx can't download it, nothing is
 /// changed and it says so (StartError::Download), since an older CLI there (one without
 /// this version's gates) would put its own version in place of the service's. Then the
 /// receiver's version is read again, waiting (up to 30 s) for the new one's run.json.

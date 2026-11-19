@@ -7,7 +7,7 @@
 // Notifications instead (components/NotificationsSettings.tsx), above the sounds. The
 // app's own update (UpdatesGroup) is Settings › About's, under the version it replaces.
 import { type ComponentType, lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ActionButton, Toggle } from "../components/bits";
+import { ActionButton, CommandWell, Toggle } from "../components/bits";
 import { Select } from "../components/Select";
 import { Group, Row } from "../components/SettingsWindow";
 import { accountMode } from "../lib/net";
@@ -39,6 +39,7 @@ import {
   updateLine,
   updateNotes,
 } from "./logic";
+import type { ServiceRow } from "./receiverUpdate";
 import { features, platform, shellInfo } from "./shell";
 import "./native.css";
 
@@ -415,10 +416,74 @@ export function UpdateRow({ appVersion }: { appVersion: string }) {
   );
 }
 
+/** This computer's background service when it is behind the app, under the app's own
+ *  update (receiverUpdate.ts serviceRow): its version, what to do, and Update; while it
+ *  works, its progress; after a failure, the sentence and the failure line and the command
+ *  folded away in Details; once current, its new version alone. */
+function ServiceUpdateRow({ row, update, command }: ServiceUpdate) {
+  const label = `The background service runs ${row.running}`;
+  if (row.kind === "done")
+    return (
+      <div className="settings-row service-row">
+        <div className="settings-row-text">
+          <span className="settings-label">{label}</span>
+        </div>
+      </div>
+    );
+  const working = row.kind === "working";
+  const hint =
+    row.kind === "behind" ? (
+      `Update it to ${row.app} to match the app.`
+    ) : row.kind === "working" ? (
+      <span role="status">{row.progress}</span>
+    ) : (
+      <span role="alert">{row.sentence}</span>
+    );
+  return (
+    <div className="settings-row service-row">
+      <div className="settings-row-text service-row-text">
+        <span className="settings-label">{label}</span>
+        <span className="settings-hint">{hint}</span>
+        {row.kind === "failed" && (
+          <details className="settings-details">
+            <summary>Details</summary>
+            {row.detail && <p className="settings-details-line">{row.detail}</p>}
+            <p className="settings-details-say">Or run this in a terminal:</p>
+            <CommandWell command={command} label="Copy the update command" />
+          </details>
+        )}
+      </div>
+      <div className="settings-row-ctl">
+        {/* At work it can't be pressed and is dimmed, and it keeps the focus, which a
+            disabled button would drop (as StartHere.tsx's). */}
+        <button
+          type="button"
+          className="btn btn--sm btn--primary"
+          aria-disabled={working || undefined}
+          aria-busy={working || undefined}
+          onClick={() => {
+            if (!working) void update();
+          }}
+        >
+          {working ? "Updating…" : "Update"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** What Settings › About passes for the service's row: the row, the click, the command. */
+export interface ServiceUpdate {
+  row: ServiceRow;
+  update: () => Promise<void>;
+  command: string;
+}
+
 /** Settings › About's updates, in an app that updates itself (the page fetches this only
- *  there): where the update is, then whether the app looks by itself. It stands on its own,
- *  with the app's settings asked for here. */
-export function UpdatesGroup({ appVersion }: { appVersion: string }) {
+ *  there): where the update is, this computer's background service when it is behind the
+ *  app, then whether the app looks by itself. It stands on its own, with the app's settings
+ *  asked for here. */
+export function UpdatesGroup({ appVersion, service }: { appVersion: string; service?: ServiceUpdate }) {
   const s = useCell(settings);
   useEffect(() => {
     void loadSettings();
@@ -426,6 +491,7 @@ export function UpdatesGroup({ appVersion }: { appVersion: string }) {
   return (
     <Group>
       <UpdateRow appVersion={appVersion} />
+      {service && <ServiceUpdateRow {...service} />}
       <Row label="Check for updates automatically" hint="On launch and every 6 hours.">
         <Toggle
           label="Check for updates automatically"

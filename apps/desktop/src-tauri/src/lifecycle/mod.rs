@@ -34,8 +34,12 @@ pub fn setup<R: Runtime>(app: &tauri::App<R>, hub: sp_receivers::Hub) -> tauri::
     let _ = HUB.set((hub.clone(), app.package_info().version.to_string()));
     power::observe(app.handle().clone());
     supervisor::watch(app.handle().clone(), hub.clone());
-    // A receiver older than the app (an app that updated itself): brought up to it, once.
-    supervisor::keep_current(hub, app.package_info().version.to_string());
+    // A receiver older than the app (an app that updated itself): brought up to it, once;
+    // the menu bar item then says when it waits for a click.
+    let h = app.handle().clone();
+    supervisor::keep_current(hub, app.package_info().version.to_string(), move || {
+        crate::tray::refresh(&h)
+    });
     Ok(())
 }
 
@@ -52,12 +56,12 @@ pub async fn start_local_receiver(
 }
 
 /// What the launch check found about this computer's receiver (None: not checked, or
-/// not this computer's), for the page's notice in Settings › Data.
+/// not this computer's), for Settings › About's row and Settings › Data's notice.
 pub fn local_update() -> Option<supervisor::LocalUpdate> {
     supervisor::local_update()
 }
 
-/// The page's "Update sessionpipe": the click path, then the version read again.
+/// The page's Update: the click path, then the version read again.
 pub async fn update_local_receiver(
     progress: impl Fn(&str, &str),
 ) -> Result<Option<supervisor::LocalUpdate>, StartError> {

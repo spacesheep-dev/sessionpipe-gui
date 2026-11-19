@@ -214,6 +214,20 @@ pairing link that carries the board's key only for a pairing the sink token star
   Settings button has a small dot and opens About. It showed only in the menu bar menu and
   at the foot of Settings › App. "Check for Updates…" opens Settings › About, where the
   check shows as it runs, with a window open or not.
+- **When this Mac's background service is behind the app, Settings › About says so.**
+  After an app update whose service update waits for a click or failed, a row under the
+  app's own reads "The background service runs 0.8.4" with "Update it to 0.8.5 to match
+  the app." and Update; while it works, its progress; after a failure, "Couldn't update
+  it. Press Update again." (or "The update didn't finish and the service isn't running.
+  Press Update again.") with the failure line and the command in a closed Details; once
+  done, "The background service runs 0.8.5" until the window closes. The menu bar menu
+  offers "Update Background Service…", which opens About, where "Install 0.8.5 and
+  Relaunch" would be. Nothing said so before, unless an option was too old for it.
+- **An option this Mac's background service is too old for says it in fewer words.**
+  "This Mac's background service is 0.7.4; this option needs 0.7.5." (or "… is too old
+  for this option."), with Update; another machine's is "sessionpipe on studio-mac is
+  0.7.4; this option needs 0.7.5. Update it there." The command to copy, and a failure's
+  line, are in a closed "Run it yourself" instead of always shown.
 - **Setup's title is "Setup"**, as its sidebar entry reads. It was "Set up sessionpipe gui".
 - **A dropped connection is said once, in the page's bar, with one Retry.** The only words
   were "Reconnecting · 4 s  Retry now" in the sidebar's foot, so with the sidebar hidden a
