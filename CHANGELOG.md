@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A picture sent from Windows to an older sessionpipe shows in the message, and is
+  kept.** For a session on the same computer whose sessionpipe is older than 0.10, a GUI
+  on Windows names a picture by its path, with `\`. The message did not read that back, so
+  the picture was missing from it, and the daily clean-up did not see it in the stored
+  events, so a picture a session still named was removed once it was 30 days old. Both now
+  read either slash.
+
 ## [0.8.5] - 2026-11-18
 
 Pictures from a session's message box reach the agent as files in the session's own
